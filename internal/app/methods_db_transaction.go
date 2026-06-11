@@ -29,28 +29,12 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		return a.DBQueryMulti(config, dbName, query, queryID)
 	}
 
-	beginSQL, commitSQL, rollbackSQL, ok := sqlFileBatchTransactionSQL(runConfig.Type)
-	if !ok {
-		return connection.QueryResult{
-			Success: false,
-			Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", runConfig.Type),
-			QueryID: queryID,
-		}
-	}
+	beginSQL, commitSQL, rollbackSQL, hasTextTransaction := sqlFileBatchTransactionSQL(runConfig.Type)
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
 		logger.Error(err, "DBQueryMultiTransactional 获取连接失败：%s", formatConnSummary(runConfig))
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
-	}
-
-	provider, ok := dbInst.(db.SessionExecerProvider)
-	if !ok {
-		return connection.QueryResult{
-			Success: false,
-			Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", runConfig.Type),
-			QueryID: queryID,
-		}
 	}
 
 	ctx, cancel := newQueryExecutionContext(runConfig)
@@ -68,10 +52,41 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		a.queryMu.Unlock()
 	}()
 
-	sessionExecer, err := provider.OpenSessionExecer(ctx)
-	if err != nil {
-		logger.Error(err, "DBQueryMultiTransactional 打开事务会话失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
-		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+	var (
+		sessionExecer        db.StatementExecer
+		transactor           db.TransactionExecer
+		startTextTransaction bool
+	)
+	if provider, ok := dbInst.(db.TransactionExecerProvider); ok {
+		transactionExecer, err := provider.OpenTransactionExecer(ctx)
+		if err != nil {
+			logger.Error(err, "DBQueryMultiTransactional 打开驱动事务失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+		}
+		sessionExecer = transactionExecer
+		transactor = transactionExecer
+	} else {
+		if !hasTextTransaction {
+			return connection.QueryResult{
+				Success: false,
+				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", runConfig.Type),
+				QueryID: queryID,
+			}
+		}
+		provider, ok := dbInst.(db.SessionExecerProvider)
+		if !ok {
+			return connection.QueryResult{
+				Success: false,
+				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", runConfig.Type),
+				QueryID: queryID,
+			}
+		}
+		sessionExecer, err = provider.OpenSessionExecer(ctx)
+		if err != nil {
+			logger.Error(err, "DBQueryMultiTransactional 打开事务会话失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+		}
+		startTextTransaction = true
 	}
 
 	closeSession := true
@@ -83,15 +98,23 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		}
 	}()
 
-	if _, err := sessionExecer.ExecContext(ctx, beginSQL); err != nil {
-		logger.Error(err, "DBQueryMultiTransactional 开启事务失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
-		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+	if startTextTransaction {
+		if _, err := sessionExecer.ExecContext(ctx, beginSQL); err != nil {
+			logger.Error(err, "DBQueryMultiTransactional 开启事务失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+		}
 	}
 
 	statements := splitSQLStatements(query)
 	resultSets, err := executeManagedSQLTransactionStatements(ctx, sessionExecer, runConfig, statements)
 	if err != nil {
-		if _, rollbackErr := sessionExecer.ExecContext(context.Background(), rollbackSQL); rollbackErr != nil {
+		var rollbackErr error
+		if transactor != nil {
+			rollbackErr = transactor.Rollback()
+		} else if strings.TrimSpace(rollbackSQL) != "" {
+			_, rollbackErr = sessionExecer.ExecContext(context.Background(), rollbackSQL)
+		}
+		if rollbackErr != nil {
 			logger.Error(rollbackErr, "DBQueryMultiTransactional 执行失败后回滚失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 			err = fmt.Errorf("%v；回滚失败: %w", err, rollbackErr)
 		}
@@ -107,6 +130,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	a.sqlTransactions[transactionID] = &managedSQLTransaction{
 		id:          transactionID,
 		execer:      sessionExecer,
+		transactor:  transactor,
 		dbType:      runConfig.Type,
 		commitSQL:   commitSQL,
 		rollbackSQL: rollbackSQL,
@@ -287,7 +311,13 @@ func (a *App) finishManagedSQLTransaction(transactionID string, commit bool) con
 	defer cancel()
 
 	var execErr error
-	if strings.TrimSpace(sqlText) != "" {
+	if tx.transactor != nil {
+		if commit {
+			execErr = tx.transactor.Commit()
+		} else {
+			execErr = tx.transactor.Rollback()
+		}
+	} else if strings.TrimSpace(sqlText) != "" {
 		_, execErr = tx.execer.ExecContext(ctx, sqlText)
 	}
 	closeErr := tx.execer.Close()
@@ -319,7 +349,11 @@ func (a *App) rollbackPendingSQLTransactionsOnShutdown() {
 
 	for _, tx := range pending {
 		ctx, cancel := context.WithTimeout(context.Background(), sqlEditorTransactionFinishTimeout)
-		if strings.TrimSpace(tx.rollbackSQL) != "" && tx.execer != nil {
+		if tx.transactor != nil {
+			if err := tx.transactor.Rollback(); err != nil {
+				logger.Warnf("关闭应用时回滚 SQL 编辑器事务失败：id=%s dbType=%s err=%v", tx.id, tx.dbType, err)
+			}
+		} else if strings.TrimSpace(tx.rollbackSQL) != "" && tx.execer != nil {
 			if _, err := tx.execer.ExecContext(ctx, tx.rollbackSQL); err != nil {
 				logger.Warnf("关闭应用时回滚 SQL 编辑器事务失败：id=%s dbType=%s err=%v", tx.id, tx.dbType, err)
 			}

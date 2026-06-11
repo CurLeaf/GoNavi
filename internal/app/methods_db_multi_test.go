@@ -219,6 +219,34 @@ func (s *fakeBatchWriteSession) Close() error {
 	return nil
 }
 
+type fakeTransactionalDB struct {
+	fakeBatchWriteDB
+	txSession *fakeTransactionSession
+}
+
+func (f *fakeTransactionalDB) OpenTransactionExecer(ctx context.Context) (db.TransactionExecer, error) {
+	f.txSession = &fakeTransactionSession{
+		fakeBatchWriteSession: fakeBatchWriteSession{parent: &f.fakeBatchWriteDB},
+	}
+	return f.txSession, nil
+}
+
+type fakeTransactionSession struct {
+	fakeBatchWriteSession
+	commitCalls   int
+	rollbackCalls int
+}
+
+func (s *fakeTransactionSession) Commit() error {
+	s.commitCalls++
+	return nil
+}
+
+func (s *fakeTransactionSession) Rollback() error {
+	s.rollbackCalls++
+	return nil
+}
+
 func cloneResultSets(input []connection.ResultSetData) []connection.ResultSetData {
 	if len(input) == 0 {
 		return nil
@@ -581,6 +609,111 @@ func TestDBQueryMultiTransactionalKeepsDMLTransactionOpenUntilCommit(t *testing.
 	}
 	if got := fakeDB.execQueries[len(fakeDB.execQueries)-1]; got != "COMMIT" {
 		t.Fatalf("expected final exec to be COMMIT, got %q", got)
+	}
+}
+
+func TestDBQueryMultiTransactionalUsesDriverTransactionForOracle(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	firstStmt := "UPDATE users SET name = 'new' WHERE id = 1"
+	secondStmt := "DELETE FROM audit_logs WHERE user_id = 1"
+	fakeDB := &fakeTransactionalDB{
+		fakeBatchWriteDB: fakeBatchWriteDB{
+			execAffected: map[string]int64{
+				firstStmt:  1,
+				secondStmt: 3,
+			},
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "oracle", Host: "127.0.0.1", Port: 1521, User: "app"}
+
+	result := app.DBQueryMultiTransactional(config, "ORCLPDB1", firstStmt+";\n"+secondStmt+";", "oracle-tx-query")
+	if !result.Success {
+		t.Fatalf("expected Oracle transactional query success, got failure: %s", result.Message)
+	}
+	if result.TransactionID == "" || !result.TransactionPending {
+		t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+	}
+	if fakeDB.txSession == nil {
+		t.Fatal("expected Oracle transactional query to open a driver transaction")
+	}
+	if fakeDB.txSession.closed {
+		t.Fatal("expected Oracle transaction session to stay open before commit")
+	}
+	wantExecs := []string{firstStmt, secondStmt}
+	if len(fakeDB.execQueries) != len(wantExecs) {
+		t.Fatalf("expected driver transaction exec queries %#v, got %#v", wantExecs, fakeDB.execQueries)
+	}
+	for i, want := range wantExecs {
+		if fakeDB.execQueries[i] != want {
+			t.Fatalf("expected exec query %d = %q, got %q", i, want, fakeDB.execQueries[i])
+		}
+	}
+
+	commitResult := app.DBCommitTransaction(result.TransactionID)
+	if !commitResult.Success {
+		t.Fatalf("expected Oracle commit success, got failure: %s", commitResult.Message)
+	}
+	if fakeDB.txSession.commitCalls != 1 || fakeDB.txSession.rollbackCalls != 0 {
+		t.Fatalf("expected driver commit only, got commits=%d rollbacks=%d", fakeDB.txSession.commitCalls, fakeDB.txSession.rollbackCalls)
+	}
+	if !fakeDB.txSession.closed {
+		t.Fatal("expected Oracle transaction session to close after commit")
+	}
+	if len(fakeDB.execQueries) != len(wantExecs) {
+		t.Fatalf("expected no textual BEGIN/COMMIT for Oracle, got %#v", fakeDB.execQueries)
+	}
+}
+
+func TestDBQueryMultiTransactionalRollsBackOracleDriverTransactionOnDMLFailure(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	firstStmt := "UPDATE users SET name = 'new' WHERE id = 1"
+	secondStmt := "DELETE FROM audit_logs WHERE user_id = 1"
+	fakeDB := &fakeTransactionalDB{
+		fakeBatchWriteDB: fakeBatchWriteDB{
+			execErr: map[string]error{
+				secondStmt: errors.New("delete failed"),
+			},
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "oracle", Host: "127.0.0.1", Port: 1521, User: "app"}
+
+	result := app.DBQueryMultiTransactional(config, "ORCLPDB1", firstStmt+";\n"+secondStmt+";", "oracle-tx-failure")
+	if result.Success {
+		t.Fatal("expected Oracle transactional query failure")
+	}
+	if result.TransactionID != "" || result.TransactionPending {
+		t.Fatalf("expected failed transaction not to be exposed, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+	}
+	if fakeDB.txSession == nil {
+		t.Fatal("expected Oracle transactional query to open a driver transaction")
+	}
+	if fakeDB.txSession.commitCalls != 0 || fakeDB.txSession.rollbackCalls != 1 {
+		t.Fatalf("expected driver rollback only, got commits=%d rollbacks=%d", fakeDB.txSession.commitCalls, fakeDB.txSession.rollbackCalls)
+	}
+	if !fakeDB.txSession.closed {
+		t.Fatal("expected failed Oracle transaction session to close")
+	}
+	wantExecs := []string{firstStmt, secondStmt}
+	if len(fakeDB.execQueries) != len(wantExecs) {
+		t.Fatalf("expected no textual BEGIN/ROLLBACK for Oracle, got %#v", fakeDB.execQueries)
 	}
 }
 

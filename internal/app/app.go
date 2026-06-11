@@ -58,6 +58,7 @@ type queryContext struct {
 type managedSQLTransaction struct {
 	id          string
 	execer      db.StatementExecer
+	transactor  db.TransactionExecer
 	dbType      string
 	commitSQL   string
 	rollbackSQL string

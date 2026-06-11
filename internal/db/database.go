@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // Database 定义了统一的数据源访问接口。
@@ -118,6 +119,21 @@ type SessionExecerProvider interface {
 	OpenSessionExecer(ctx context.Context) (StatementExecer, error)
 }
 
+// TransactionExecer is a single transaction handle backed by the database
+// driver. It is required for dialects where textual BEGIN/COMMIT is not a
+// valid transaction-control statement, such as Oracle.
+type TransactionExecer interface {
+	StatementExecer
+	Commit() error
+	Rollback() error
+}
+
+// TransactionExecerProvider is implemented by drivers that can expose a real
+// database/sql transaction for long-running SQL editor managed transactions.
+type TransactionExecerProvider interface {
+	OpenTransactionExecer(ctx context.Context) (TransactionExecer, error)
+}
+
 type sqlConnStatementExecer struct {
 	conn *sql.Conn
 }
@@ -182,6 +198,109 @@ func (e *sqlConnStatementExecer) Close() error {
 		return nil
 	}
 	return e.conn.Close()
+}
+
+type sqlTxStatementExecer struct {
+	mu   sync.Mutex
+	tx   *sql.Tx
+	done bool
+}
+
+func NewSQLTxStatementExecer(tx *sql.Tx) TransactionExecer {
+	return &sqlTxStatementExecer{tx: tx}
+}
+
+func (e *sqlTxStatementExecer) activeTx() (*sql.Tx, error) {
+	if e == nil || e.tx == nil {
+		return nil, fmt.Errorf("事务未打开")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.done {
+		return nil, fmt.Errorf("事务已结束")
+	}
+	return e.tx, nil
+}
+
+func (e *sqlTxStatementExecer) ExecContext(ctx context.Context, query string) (int64, error) {
+	tx, err := e.activeTx()
+	if err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *sqlTxStatementExecer) Exec(query string) (int64, error) {
+	return e.ExecContext(context.Background(), query)
+}
+
+func (e *sqlTxStatementExecer) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	tx, err := e.activeTx()
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+func (e *sqlTxStatementExecer) Query(query string) ([]map[string]interface{}, []string, error) {
+	return e.QueryContext(context.Background(), query)
+}
+
+func (e *sqlTxStatementExecer) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	tx, err := e.activeTx()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMultiRows(rows)
+}
+
+func (e *sqlTxStatementExecer) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	return e.QueryMultiContext(context.Background(), query)
+}
+
+func (e *sqlTxStatementExecer) finish(action func(*sql.Tx) error) error {
+	if e == nil || e.tx == nil {
+		return nil
+	}
+	e.mu.Lock()
+	if e.done {
+		e.mu.Unlock()
+		return nil
+	}
+	tx := e.tx
+	e.done = true
+	e.mu.Unlock()
+	return action(tx)
+}
+
+func (e *sqlTxStatementExecer) Commit() error {
+	return e.finish(func(tx *sql.Tx) error {
+		return tx.Commit()
+	})
+}
+
+func (e *sqlTxStatementExecer) Rollback() error {
+	return e.finish(func(tx *sql.Tx) error {
+		return tx.Rollback()
+	})
+}
+
+func (e *sqlTxStatementExecer) Close() error {
+	return e.Rollback()
 }
 
 // BatchApplier 定义了批量变更提交接口。
