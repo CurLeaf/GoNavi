@@ -9,8 +9,11 @@ export interface AIBuiltinToolFlow {
 export interface AIBuiltinToolParameterHint {
   name: string;
   required: boolean;
+  typeLabel: string;
   description: string;
   enumValues: string[];
+  defaultValue: string;
+  exampleValue: string;
 }
 
 export const BUILTIN_TOOL_FLOWS: AIBuiltinToolFlow[] = [
@@ -231,6 +234,44 @@ export const BUILTIN_TOOL_FLOWS: AIBuiltinToolFlow[] = [
   },
 ];
 
+const stringifyHintValue = (value: unknown): string => {
+  if (value === undefined) return '';
+  if (value === null) return 'null';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const readTypeLabel = (schema: Record<string, any>): string => {
+  if (Array.isArray(schema.type)) {
+    return schema.type.map((item) => String(item)).filter(Boolean).join(' | ') || 'any';
+  }
+  if (typeof schema.type === 'string' && schema.type.trim()) {
+    return schema.type.trim();
+  }
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) {
+    return 'enum';
+  }
+  return 'any';
+};
+
+const readDefaultValue = (schema: Record<string, any>, description: string): string => {
+  if (Object.prototype.hasOwnProperty.call(schema, 'default')) {
+    return stringifyHintValue(schema.default);
+  }
+  const match = description.match(/默认\s*([^\s，,；;。)）]+)/u);
+  return match?.[1]?.trim() || '';
+};
+
+const readExampleValue = (description: string): string => {
+  const match = description.match(/(?:例如|示例值?[:：])\s*([^。；;\n]+)/u);
+  return match?.[1]?.trim() || '';
+};
+
 export const describeBuiltinToolParameters = (tool: AIBuiltinToolInfo): AIBuiltinToolParameterHint[] => {
   const schema = tool.tool.function.parameters;
   const properties = schema && typeof schema === 'object' && typeof schema.properties === 'object'
@@ -242,11 +283,57 @@ export const describeBuiltinToolParameters = (tool: AIBuiltinToolInfo): AIBuilti
 
   return Object.entries(properties).map(([name, config]) => {
     const normalized = config && typeof config === 'object' ? config as Record<string, any> : {};
+    const description = typeof normalized.description === 'string' ? normalized.description : '';
     return {
       name,
       required: required.has(name),
-      description: typeof normalized.description === 'string' ? normalized.description : '',
+      typeLabel: readTypeLabel(normalized),
+      description,
       enumValues: Array.isArray(normalized.enum) ? normalized.enum.map((item) => String(item)) : [],
+      defaultValue: readDefaultValue(normalized, description),
+      exampleValue: readExampleValue(description),
     };
+  });
+};
+
+export const normalizeBuiltinToolCatalogSearch = (value: string): string =>
+  value.trim().toLowerCase();
+
+const matchesCatalogSearch = (keyword: string, values: unknown[]): boolean =>
+  !keyword || values.some((value) => String(value || '').toLowerCase().includes(keyword));
+
+export const filterBuiltinToolFlows = (
+  flows: AIBuiltinToolFlow[],
+  searchText: string,
+): AIBuiltinToolFlow[] => {
+  const keyword = normalizeBuiltinToolCatalogSearch(searchText);
+  return flows.filter((flow) => matchesCatalogSearch(keyword, [
+    flow.title,
+    flow.steps,
+    flow.description,
+  ]));
+};
+
+export const filterBuiltinTools = (
+  tools: AIBuiltinToolInfo[],
+  searchText: string,
+): AIBuiltinToolInfo[] => {
+  const keyword = normalizeBuiltinToolCatalogSearch(searchText);
+  return tools.filter((tool) => {
+    const parameterDetails = describeBuiltinToolParameters(tool);
+    return matchesCatalogSearch(keyword, [
+      tool.name,
+      tool.desc,
+      tool.detail,
+      tool.params,
+      ...parameterDetails.flatMap((item) => [
+        item.name,
+        item.typeLabel,
+        item.description,
+        item.defaultValue,
+        item.exampleValue,
+        item.enumValues.join(' '),
+      ]),
+    ]);
   });
 };

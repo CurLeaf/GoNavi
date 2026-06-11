@@ -5,16 +5,18 @@ import { describe, expect, it } from 'vitest';
 import AIBuiltinToolsCatalog from './AIBuiltinToolsCatalog';
 import { buildOverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
+const renderCatalog = () => (
+  <AIBuiltinToolsCatalog
+    darkMode={false}
+    overlayTheme={buildOverlayWorkbenchTheme(false)}
+    cardBg="#fff"
+    cardBorder="rgba(0,0,0,0.08)"
+  />
+);
+
 describe('AIBuiltinToolsCatalog', () => {
   it('renders the workspace flows, snapshot tools, and local saved-sql discovery tools', () => {
-    const markup = renderToStaticMarkup(
-      <AIBuiltinToolsCatalog
-        darkMode={false}
-        overlayTheme={buildOverlayWorkbenchTheme(false)}
-        cardBg="#fff"
-        cardBorder="rgba(0,0,0,0.08)"
-      />,
-    );
+    const markup = renderToStaticMarkup(renderCatalog());
 
     expect(markup).toContain('字段反查表');
     expect(markup).toContain('get_all_columns');
@@ -111,6 +113,11 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('理解样例数据');
     expect(markup).toContain('preview_table_rows');
     expect(markup).toContain('参数提示');
+    expect(markup).toContain('搜索工具、流程或参数');
+    expect(markup).toContain('当前显示');
+    expect(markup).toContain('类型：string');
+    expect(markup).toContain('默认：160');
+    expect(markup).toContain('示例：');
     expect(markup).toContain('filePath');
     expect(markup).toContain('正文预览最多返回多少字符');
   });
