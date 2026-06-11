@@ -92,4 +92,35 @@ describe('AIMCPArgumentHints', () => {
       'API_KEY=secret',
     ]);
   });
+
+  it('renders business argument hints without leaking sensitive values', async () => {
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(
+        <AIMCPArgumentHints
+          command="uvx"
+          args={[
+            'mcp-server-demo',
+            '--stdio',
+            '--api-key=sk-real-secret',
+            '--directory',
+            'D:\\Work',
+          ]}
+          cardBorder="rgba(0,0,0,0.08)"
+          darkMode={false}
+          overlayTheme={buildOverlayWorkbenchTheme(false)}
+        />,
+      );
+    });
+
+    const text = flattenRendererText(renderer.toJSON());
+    expect(text).toContain('已识别业务参数');
+    expect(text).toContain('--api-key');
+    expect(text).toContain('API Key');
+    expect(text).toContain('不要截图真实值');
+    expect(text).toContain('--directory');
+    expect(text).toContain('授权目录');
+    expect(text).not.toContain('sk-real-secret');
+  });
 });

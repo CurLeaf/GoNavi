@@ -38,6 +38,26 @@ const mergeArgs = (left: string[], right: string[]): string[] => {
   return result;
 };
 
+const businessHintCategoryLabel = {
+  secret: '敏感',
+  path: '路径',
+  endpoint: '地址',
+  network: '网络',
+  mode: '模式',
+  runtime: '运行时',
+  generic: '业务',
+};
+
+const businessHintCategoryColor = {
+  secret: '#b45309',
+  path: '#7c3aed',
+  endpoint: '#2563eb',
+  network: '#0f766e',
+  mode: '#475569',
+  runtime: '#64748b',
+  generic: '#64748b',
+};
+
 const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
   command,
   args,
@@ -99,6 +119,53 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
           </span>
         ))}
       </div>
+      {profile.businessHints.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>
+            已识别业务参数
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+            {profile.businessHints.map((hint) => (
+              <div
+                key={hint.key}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: `1px solid ${cardBorder}`,
+                  background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.82)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 5,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <code style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12, color: overlayTheme.titleText }}>
+                    {hint.argument}
+                  </code>
+                  <span
+                    style={{
+                      padding: '1px 7px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: businessHintCategoryColor[hint.category],
+                      background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)',
+                    }}
+                  >
+                    {businessHintCategoryLabel[hint.category]}
+                  </span>
+                  {hint.sensitive ? <span style={buildMCPHintStyle('#b45309')}>不要截图真实值</span> : null}
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{hint.label}</div>
+                <div style={buildMCPHintStyle(overlayTheme.mutedText)}>{hint.detail}</div>
+                <div style={buildMCPHintStyle(hint.sensitive ? '#b45309' : overlayTheme.mutedText)}>
+                  应填：{hint.valueHint}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {profile.nextActions.length > 0 ? (
         <div style={buildMCPHintStyle('#b45309')}>
           下一步：{profile.nextActions.join('；')}

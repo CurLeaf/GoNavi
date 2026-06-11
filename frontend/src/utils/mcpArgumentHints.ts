@@ -9,6 +9,18 @@ export interface MCPArgumentHintStep {
   satisfied: boolean;
 }
 
+export type MCPBusinessArgumentHintCategory = 'secret' | 'path' | 'endpoint' | 'network' | 'mode' | 'runtime' | 'generic';
+
+export interface MCPBusinessArgumentHint {
+  key: string;
+  argument: string;
+  category: MCPBusinessArgumentHintCategory;
+  label: string;
+  detail: string;
+  valueHint: string;
+  sensitive: boolean;
+}
+
 export interface MCPArgumentHintProfile {
   commandName: string;
   normalizedCommand: string;
@@ -18,6 +30,7 @@ export interface MCPArgumentHintProfile {
   summary: string;
   orderHint: string;
   steps: MCPArgumentHintStep[];
+  businessHints: MCPBusinessArgumentHint[];
   nextActions: string[];
 }
 
@@ -130,6 +143,272 @@ const buildNextActions = (steps: MCPArgumentHintStep[]): string[] =>
     .filter((step) => step.required && !step.satisfied)
     .map((step) => `补充 ${step.label}，示例：${step.example}`);
 
+type BusinessArgumentHintTemplate = Omit<MCPBusinessArgumentHint, 'key' | 'argument'>;
+
+const BUSINESS_ARGUMENT_HINTS: Record<string, BusinessArgumentHintTemplate> = {
+  'api-key': {
+    category: 'secret',
+    label: 'API Key',
+    detail: '用于把外部 API 密钥传给 MCP 服务。除非 README 明确要求命令参数，否则更建议放到环境变量里。',
+    valueHint: '填真实 key；不要截图或粘贴到聊天里。',
+    sensitive: true,
+  },
+  token: {
+    category: 'secret',
+    label: 'Token',
+    detail: '用于鉴权外部平台或远程 MCP 服务。命令行参数可能被进程列表或日志看到。',
+    valueHint: '优先改用环境变量，例如 GITHUB_TOKEN、API_TOKEN。',
+    sensitive: true,
+  },
+  'access-token': {
+    category: 'secret',
+    label: 'Access Token',
+    detail: '用于访问第三方 API 或私有资源。',
+    valueHint: '按最小权限创建 token，并优先放环境变量。',
+    sensitive: true,
+  },
+  password: {
+    category: 'secret',
+    label: '密码',
+    detail: '密码类参数会进入启动参数列表，风险高于环境变量。',
+    valueHint: '确认 MCP README 没有环境变量替代方案后再使用。',
+    sensitive: true,
+  },
+  secret: {
+    category: 'secret',
+    label: '密钥',
+    detail: '密钥类参数用于鉴权或签名。',
+    valueHint: '优先使用环境变量或配置文件，避免明文出现在启动参数里。',
+    sensitive: true,
+  },
+  config: {
+    category: 'path',
+    label: '配置文件',
+    detail: '指向 MCP 服务自己的配置文件。',
+    valueHint: '填写本机 MCP 进程能访问的绝对路径。',
+    sensitive: false,
+  },
+  'config-file': {
+    category: 'path',
+    label: '配置文件',
+    detail: '指向 MCP 服务自己的配置文件。',
+    valueHint: 'Windows 建议填写带盘符的绝对路径。',
+    sensitive: false,
+  },
+  c: {
+    category: 'path',
+    label: '配置文件',
+    detail: '短参数通常表示 config；以 README 为准。',
+    valueHint: '填写配置文件路径，或按 README 确认 -c 的含义。',
+    sensitive: false,
+  },
+  directory: {
+    category: 'path',
+    label: '授权目录',
+    detail: '限制文件系统类 MCP 可访问的目录范围。',
+    valueHint: '填写要授权给 MCP 的工作目录，不要直接授权整个磁盘。',
+    sensitive: false,
+  },
+  dir: {
+    category: 'path',
+    label: '目录',
+    detail: '通常表示文件或项目根目录。',
+    valueHint: '填写本机绝对路径，确认该 MCP 进程有读取权限。',
+    sensitive: false,
+  },
+  root: {
+    category: 'path',
+    label: '根目录',
+    detail: '通常表示 MCP 服务允许访问或扫描的根目录。',
+    valueHint: '选择最小必要目录，避免范围过大。',
+    sensitive: false,
+  },
+  workspace: {
+    category: 'path',
+    label: '工作区目录',
+    detail: '通常表示项目或文件系统服务的工作区。',
+    valueHint: '填写项目目录或业务数据目录。',
+    sensitive: false,
+  },
+  path: {
+    category: 'path',
+    label: '路径',
+    detail: '通常表示文件、目录或可执行程序路径。',
+    valueHint: '填写本机 MCP 进程可访问的路径。',
+    sensitive: false,
+  },
+  url: {
+    category: 'endpoint',
+    label: '服务 URL',
+    detail: 'MCP 服务要访问的 HTTP/HTTPS 地址。',
+    valueHint: '填写完整 URL，例如 https://api.example.com。',
+    sensitive: false,
+  },
+  endpoint: {
+    category: 'endpoint',
+    label: 'Endpoint',
+    detail: '远程服务或 API 的访问入口。',
+    valueHint: '按 README 填写 endpoint，不要混入 token。',
+    sensitive: false,
+  },
+  'base-url': {
+    category: 'endpoint',
+    label: 'Base URL',
+    detail: '第三方 API 或自建服务的基础地址。',
+    valueHint: '填写协议、域名和可选端口，不要附带密钥。',
+    sensitive: false,
+  },
+  host: {
+    category: 'network',
+    label: '主机地址',
+    detail: '目标服务主机或本地监听地址。',
+    valueHint: '本机服务常用 127.0.0.1；远程服务填写域名或 IP。',
+    sensitive: false,
+  },
+  port: {
+    category: 'network',
+    label: '端口',
+    detail: '目标服务端口或 MCP 服务监听端口。',
+    valueHint: '填写 1-65535 的端口号。',
+    sensitive: false,
+  },
+  transport: {
+    category: 'mode',
+    label: '传输模式',
+    detail: '控制 MCP 服务使用 stdio、sse 或 http 等通信方式。',
+    valueHint: 'GoNavi 当前本机 MCP 配置使用 stdio；除非 README 特别要求，否则填 stdio。',
+    sensitive: false,
+  },
+  mode: {
+    category: 'mode',
+    label: '运行模式',
+    detail: '控制 MCP 服务的业务模式或兼容模式。',
+    valueHint: '按 README 的枚举值填写。',
+    sensitive: false,
+  },
+  profile: {
+    category: 'mode',
+    label: '配置档',
+    detail: '选择 MCP 服务使用哪套配置或账号档案。',
+    valueHint: '填写 README 或本机配置中定义的 profile 名称。',
+    sensitive: false,
+  },
+  'read-only': {
+    category: 'mode',
+    label: '只读模式',
+    detail: '限制 MCP 服务只读访问，降低误写风险。',
+    valueHint: '通常是开关参数，不需要额外值。',
+    sensitive: false,
+  },
+  readonly: {
+    category: 'mode',
+    label: '只读模式',
+    detail: '限制 MCP 服务只读访问，降低误写风险。',
+    valueHint: '通常是开关参数，不需要额外值。',
+    sensitive: false,
+  },
+  headless: {
+    category: 'runtime',
+    label: '无头模式',
+    detail: '浏览器类 MCP 是否使用无界面浏览器。',
+    valueHint: '需要真实窗口调试时关闭；自动化运行通常开启。',
+    sensitive: false,
+  },
+  'executable-path': {
+    category: 'path',
+    label: '浏览器或程序路径',
+    detail: '指定 MCP 服务要启动的浏览器或外部程序。',
+    valueHint: '填写本机绝对路径。',
+    sensitive: false,
+  },
+  repo: {
+    category: 'path',
+    label: '仓库路径',
+    detail: '限制 Git/GitHub 相关 MCP 操作的本地仓库。',
+    valueHint: '填写目标仓库目录。',
+    sensitive: false,
+  },
+};
+
+const normalizeFlagName = (arg: string): string => {
+  const text = toTrimmedString(arg);
+  if (!text.startsWith('-') || text === '-' || text === '--') {
+    return '';
+  }
+  const withoutValue = text.split('=')[0];
+  return withoutValue.replace(/^-+/u, '').trim().toLowerCase();
+};
+
+const sanitizeFlagForDisplay = (arg: string): string => {
+  const text = toTrimmedString(arg);
+  const withoutValue = text.split('=')[0];
+  return withoutValue || text;
+};
+
+const inferBusinessArgumentHint = (flag: string): BusinessArgumentHintTemplate | null => {
+  if (!flag) return null;
+  if (/(token|api-?key|secret|password|pass|credential)/iu.test(flag)) {
+    return BUSINESS_ARGUMENT_HINTS.token;
+  }
+  if (/(config|file|path|dir|root|workspace|repo|repository)/iu.test(flag)) {
+    return {
+      category: 'path',
+      label: '路径 / 配置',
+      detail: '参数名看起来像路径、目录或配置文件。',
+      valueHint: '填写 MCP 进程能访问的本机路径，并尽量限制到最小范围。',
+      sensitive: false,
+    };
+  }
+  if (/(url|uri|endpoint|base-url|host|addr|address)/iu.test(flag)) {
+    return {
+      category: 'endpoint',
+      label: '地址 / Endpoint',
+      detail: '参数名看起来像远程服务地址或监听地址。',
+      valueHint: '填写完整地址或 host，密钥不要拼进 URL。',
+      sensitive: false,
+    };
+  }
+  if (/(port|listen)/iu.test(flag)) {
+    return BUSINESS_ARGUMENT_HINTS.port;
+  }
+  if (/(mode|profile|transport|readonly|read-only|headless)/iu.test(flag)) {
+    return {
+      category: 'mode',
+      label: '模式参数',
+      detail: '参数名看起来像运行模式、传输模式或开关。',
+      valueHint: '按 README 的枚举值或开关语义填写。',
+      sensitive: false,
+    };
+  }
+  return null;
+};
+
+const buildBusinessArgumentHints = (args: string[]): MCPBusinessArgumentHint[] => {
+  const result: MCPBusinessArgumentHint[] = [];
+  const seen = new Set<string>();
+  for (const arg of args) {
+    const flag = normalizeFlagName(arg);
+    if (!flag || flag === 'stdio') {
+      continue;
+    }
+    const template = BUSINESS_ARGUMENT_HINTS[flag] || inferBusinessArgumentHint(flag);
+    if (!template) {
+      continue;
+    }
+    const key = flag;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push({
+      key,
+      argument: sanitizeFlagForDisplay(arg),
+      ...template,
+    });
+  }
+  return result;
+};
+
 export const buildMCPArgumentHintProfile = (
   command: string,
   args?: string[],
@@ -159,6 +438,7 @@ export const buildMCPArgumentHintProfile = (
       summary: 'npm 生态 MCP 通常要把安装确认、包名和 --stdio 拆成独立参数标签。',
       orderHint: '推荐顺序：-y -> 包名 -> --stdio -> 服务自己的业务参数',
       steps,
+      businessHints: buildBusinessArgumentHints(normalizedArgs),
       nextActions: buildNextActions(steps),
     };
   }
@@ -178,6 +458,7 @@ export const buildMCPArgumentHintProfile = (
       summary: 'Node 类启动器的命令只填 node/bun/deno，脚本路径和 --stdio 放到参数里。',
       orderHint: '推荐顺序：脚本路径 -> --stdio -> 服务自己的业务参数',
       steps,
+      businessHints: buildBusinessArgumentHints(normalizedArgs),
       nextActions: buildNextActions(steps),
     };
   }
@@ -197,6 +478,7 @@ export const buildMCPArgumentHintProfile = (
       summary: 'Python MCP 常见形式是 python -m 模块名，-m 和模块名都要作为独立参数。',
       orderHint: '推荐顺序：-m -> 模块名 -> --stdio',
       steps,
+      businessHints: buildBusinessArgumentHints(normalizedArgs),
       nextActions: buildNextActions(steps),
     };
   }
@@ -216,6 +498,7 @@ export const buildMCPArgumentHintProfile = (
       summary: 'uvx 类 MCP 通常把包名作为第一个参数，再按 README 补 stdio 或配置参数。',
       orderHint: '推荐顺序：包名 -> --stdio -> 服务自己的业务参数',
       steps,
+      businessHints: buildBusinessArgumentHints(normalizedArgs),
       nextActions: buildNextActions(steps),
     };
   }
@@ -237,6 +520,7 @@ export const buildMCPArgumentHintProfile = (
       summary: 'Docker 场景 command 只填 docker，run、-i、--rm、镜像名和容器参数都放到 args 里。',
       orderHint: '推荐顺序：run -> --rm -> -i -> -e KEY=VALUE -> 镜像名 -> 服务自己的业务参数',
       steps,
+      businessHints: buildBusinessArgumentHints(normalizedArgs),
       nextActions: buildNextActions(steps),
     };
   }
@@ -254,6 +538,7 @@ export const buildMCPArgumentHintProfile = (
     summary: '自研或已编译 MCP Server 的参数以 README 为准；GoNavi 会原样按标签顺序传入。',
     orderHint: '常见顺序：stdio/--stdio -> 配置文件或业务参数',
     steps,
+    businessHints: buildBusinessArgumentHints(normalizedArgs),
     nextActions: buildNextActions(steps),
   };
 };

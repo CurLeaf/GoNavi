@@ -54,4 +54,58 @@ describe('mcpArgumentHints', () => {
     expect(profile?.title).toContain('本机可执行文件');
     expect(profile?.summary).toContain('GoNavi 会原样按标签顺序传入');
   });
+
+  it('explains common business arguments beyond startup order', () => {
+    const profile = buildMCPArgumentHintProfile('npx', [
+      '-y',
+      '@modelcontextprotocol/server-filesystem',
+      '--stdio',
+      '--directory',
+      'D:\\Work',
+      '--transport',
+      'stdio',
+      '--port=8080',
+    ]);
+
+    expect(profile?.businessHints).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'directory',
+        label: '授权目录',
+        category: 'path',
+      }),
+      expect.objectContaining({
+        key: 'transport',
+        label: '传输模式',
+        category: 'mode',
+      }),
+      expect.objectContaining({
+        key: 'port',
+        label: '端口',
+        category: 'network',
+      }),
+    ]));
+  });
+
+  it('sanitizes sensitive inline argument values in hints', () => {
+    const profile = buildMCPArgumentHintProfile('uvx', [
+      'mcp-server-demo',
+      '--api-key=sk-real-secret',
+      '--endpoint',
+      'https://api.example.com',
+    ]);
+
+    expect(profile?.businessHints).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        key: 'api-key',
+        argument: '--api-key',
+        category: 'secret',
+        sensitive: true,
+      }),
+      expect.objectContaining({
+        key: 'endpoint',
+        category: 'endpoint',
+      }),
+    ]));
+    expect(JSON.stringify(profile?.businessHints)).not.toContain('sk-real-secret');
+  });
 });
