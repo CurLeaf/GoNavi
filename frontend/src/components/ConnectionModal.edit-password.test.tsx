@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 const connectionModalSource = readFileSync(new URL('./ConnectionModal.tsx', import.meta.url), 'utf8');
 const redisSectionsSource = readFileSync(new URL('./ConnectionModalRedisSections.tsx', import.meta.url), 'utf8');
 const mongoSectionsSource = readFileSync(new URL('./ConnectionModalMongoSections.tsx', import.meta.url), 'utf8');
-const source = `${connectionModalSource}\n${redisSectionsSource}\n${mongoSectionsSource}`;
+const connectionTypeCatalogSource = readFileSync(new URL('../utils/connectionTypeCatalog.ts', import.meta.url), 'utf8');
+const source = `${connectionModalSource}\n${redisSectionsSource}\n${mongoSectionsSource}\n${connectionTypeCatalogSource}`;
 
 describe('ConnectionModal edit password behavior', () => {
   it('keeps the prefilled primary password masked by default', () => {
@@ -22,14 +23,14 @@ describe('ConnectionModal edit password behavior', () => {
 
 describe('ConnectionModal data source registry', () => {
   it('exposes Elasticsearch in the create-connection picker with HTTP defaults', () => {
-    expect(source).toContain('case "elasticsearch":');
+    expect(source).toContain("case 'elasticsearch':");
     expect(source).toContain('return 9200;');
     expect(source).toContain('elasticsearch: ["http", "https"]');
-    expect(source).toContain('key: "elasticsearch"');
-    expect(source).toContain('name: "Elasticsearch"');
-    expect(source).toContain('getDbIcon("elasticsearch", undefined, 36)');
+    expect(source).toContain("key: 'elasticsearch'");
+    expect(source).toContain("name: 'Elasticsearch'");
+    expect(source).toContain('icon: getDbIcon(item.key, undefined, 36)');
     expect(source).toContain('type === "elasticsearch"');
-    expect(source).toContain('return "支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询";');
+    expect(source).toContain("return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';");
     expect(source).toContain(
       'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch") ? "" : "root";',
     );

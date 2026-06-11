@@ -63,6 +63,12 @@ import { resolveConnectionSecretDraft } from "../utils/connectionSecretDraft";
 import { getCustomConnectionDsnValidationMessage } from "../utils/customConnectionDsn";
 import { mergeParsedUriValuesForForm } from "../utils/connectionUriMerge";
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
+import {
+  CONNECTION_TYPE_GROUPS,
+  getAllConnectionTypeCatalogItems,
+  getConnectionTypeDefaultPort as getDefaultPortByType,
+  getConnectionTypeHint,
+} from "../utils/connectionTypeCatalog";
 import { CUSTOM_CONNECTION_DRIVER_HELP } from "../utils/driverImportGuidance";
 import {
   describeUnsupportedOceanBaseProtocol,
@@ -227,58 +233,6 @@ const resolveInitialSecretFieldValue = (
       return String(config.dsn || "");
     default:
       return "";
-  }
-};
-
-const getDefaultPortByType = (type: string) => {
-  switch (type) {
-    case "jvm":
-      return 9010;
-    case "mysql":
-      return 3306;
-    case "oceanbase":
-      return 2881;
-    case "doris":
-    case "diros":
-    case "starrocks":
-      return 9030;
-    case "sphinx":
-      return 9306;
-    case "clickhouse":
-      return 9000;
-    case "postgres":
-    case "opengauss":
-      return 5432;
-    case "redis":
-      return 6379;
-    case "tdengine":
-      return 6041;
-    case "oracle":
-      return 1521;
-    case "dameng":
-      return 5236;
-    case "kingbase":
-      return 54321;
-    case "sqlserver":
-      return 1433;
-    case "iris":
-      return 1972;
-    case "mongodb":
-      return 27017;
-    case "elasticsearch":
-      return 9200;
-    case "highgo":
-      return 5866;
-    case "mariadb":
-      return 3306;
-    case "vastbase":
-      return 5432;
-    case "sqlite":
-      return 0;
-    case "duckdb":
-      return 0;
-    default:
-      return 3306;
   }
 };
 
@@ -4018,176 +3972,19 @@ const ConnectionModal: React.FC<{
   const driverStatusChecking =
     hasCurrentDriverType && !driverStatusLoaded && step === 2;
 
-  const dbTypeGroups = [
-    {
-      label: "关系型数据库",
-      items: [
-        {
-          key: "mysql",
-          name: "MySQL",
-          icon: getDbIcon("mysql", undefined, 36),
-        },
-        {
-          key: "mariadb",
-          name: "MariaDB",
-          icon: getDbIcon("mariadb", undefined, 36),
-        },
-        {
-          key: "diros",
-          name: "Doris",
-          icon: getDbIcon("diros", undefined, 36),
-        },
-        {
-          key: "starrocks",
-          name: "StarRocks",
-          icon: getDbIcon("starrocks", undefined, 36),
-        },
-        {
-          key: "sphinx",
-          name: "Sphinx",
-          icon: getDbIcon("sphinx", undefined, 36),
-        },
-        {
-          key: "clickhouse",
-          name: "ClickHouse",
-          icon: getDbIcon("clickhouse", undefined, 36),
-        },
-        {
-          key: "postgres",
-          name: "PostgreSQL",
-          icon: getDbIcon("postgres", undefined, 36),
-        },
-        {
-          key: "sqlserver",
-          name: "SQL Server",
-          icon: getDbIcon("sqlserver", undefined, 36),
-        },
-        {
-          key: "iris",
-          name: "InterSystems IRIS",
-          icon: getDbIcon("iris", undefined, 36),
-        },
-        {
-          key: "sqlite",
-          name: "SQLite",
-          icon: getDbIcon("sqlite", undefined, 36),
-        },
-        {
-          key: "duckdb",
-          name: "DuckDB",
-          icon: getDbIcon("duckdb", undefined, 36),
-        },
-        {
-          key: "oracle",
-          name: "Oracle",
-          icon: getDbIcon("oracle", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: "国产数据库",
-      items: [
-        {
-          key: "oceanbase",
-          name: "OceanBase",
-          icon: getDbIcon("oceanbase", undefined, 36),
-        },
-        {
-          key: "dameng",
-          name: "Dameng (达梦)",
-          icon: getDbIcon("dameng", undefined, 36),
-        },
-        {
-          key: "kingbase",
-          name: "Kingbase (人大金仓)",
-          icon: getDbIcon("kingbase", undefined, 36),
-        },
-        {
-          key: "highgo",
-          name: "HighGo (瀚高)",
-          icon: getDbIcon("highgo", undefined, 36),
-        },
-        {
-          key: "vastbase",
-          name: "Vastbase (海量)",
-          icon: getDbIcon("vastbase", undefined, 36),
-        },
-        {
-          key: "opengauss",
-          name: "OpenGauss",
-          icon: getDbIcon("opengauss", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: "NoSQL",
-      items: [
-        {
-          key: "mongodb",
-          name: "MongoDB",
-          icon: getDbIcon("mongodb", undefined, 36),
-        },
-        {
-          key: "redis",
-          name: "Redis",
-          icon: getDbIcon("redis", undefined, 36),
-        },
-        {
-          key: "elasticsearch",
-          name: "Elasticsearch",
-          icon: getDbIcon("elasticsearch", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: "时序数据库",
-      items: [
-        {
-          key: "tdengine",
-          name: "TDengine",
-          icon: getDbIcon("tdengine", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: "其他",
-      items: [
-        {
-          key: "jvm",
-          name: "JVM Runtime",
-          icon: getDbIcon("jvm", undefined, 36),
-        },
-        {
-          key: "custom",
-          name: "Custom (自定义)",
-          icon: getDbIcon("custom", undefined, 36),
-        },
-      ],
-    },
-  ];
+  const dbTypeGroups = useMemo(
+    () =>
+      CONNECTION_TYPE_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.map((item) => ({
+          ...item,
+          icon: getDbIcon(item.key, undefined, 36),
+        })),
+      })),
+    [],
+  );
 
-  const dbTypes = dbTypeGroups.flatMap((g) => g.items);
-  const getDbTypeHint = (type: string) => {
-    switch (type) {
-      case "jvm":
-        return "JMX / Endpoint / Agent";
-      case "custom":
-        return "自定义驱动与 DSN";
-      case "redis":
-        return "单机 / 集群";
-      case "mongodb":
-        return "单机 / 副本集";
-      case "elasticsearch":
-        return "支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询";
-      case "oceanbase":
-        return "MySQL / Oracle 租户";
-      case "sqlite":
-      case "duckdb":
-        return "本地文件连接";
-      default:
-        return "标准连接配置";
-    }
-  };
+  const dbTypes = getAllConnectionTypeCatalogItems();
 
   const renderStep1 = () => (
     <div
@@ -4344,7 +4141,7 @@ const ConnectionModal: React.FC<{
                       {item.name}
                     </Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      {getDbTypeHint(item.key)}
+                      {getConnectionTypeHint(item.key)}
                     </Text>
                   </div>
                 </Card>
