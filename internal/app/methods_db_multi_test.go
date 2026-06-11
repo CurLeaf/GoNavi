@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -227,22 +228,30 @@ type fakeTransactionalDB struct {
 func (f *fakeTransactionalDB) OpenTransactionExecer(ctx context.Context) (db.TransactionExecer, error) {
 	f.txSession = &fakeTransactionSession{
 		fakeBatchWriteSession: fakeBatchWriteSession{parent: &f.fakeBatchWriteDB},
+		beginCtx:              ctx,
 	}
 	return f.txSession, nil
 }
 
 type fakeTransactionSession struct {
 	fakeBatchWriteSession
+	beginCtx      context.Context
 	commitCalls   int
 	rollbackCalls int
 }
 
 func (s *fakeTransactionSession) Commit() error {
+	if s.beginCtx != nil && s.beginCtx.Err() != nil {
+		return sql.ErrTxDone
+	}
 	s.commitCalls++
 	return nil
 }
 
 func (s *fakeTransactionSession) Rollback() error {
+	if s.beginCtx != nil && s.beginCtx.Err() != nil {
+		return sql.ErrTxDone
+	}
 	s.rollbackCalls++
 	return nil
 }

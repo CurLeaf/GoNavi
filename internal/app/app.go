@@ -59,6 +59,7 @@ type managedSQLTransaction struct {
 	id          string
 	execer      db.StatementExecer
 	transactor  db.TransactionExecer
+	cancel      context.CancelFunc
 	dbType      string
 	commitSQL   string
 	rollbackSQL string
