@@ -12,7 +12,10 @@ describe('aiSlashCommands', () => {
 
     expect(commands.length).toBeGreaterThan(8);
     expect(commands.some((command) => command.cmd === '/health')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/tools')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/budget')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcp')).toBe(true);
+    expect(commands.some((command) => command.cmd === '/mcpfail')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcpadd')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcpdraft')).toBe(true);
     expect(commands.some((command) => command.cmd === '/mcptool')).toBe(true);
@@ -28,6 +31,18 @@ describe('aiSlashCommands', () => {
 
     expect(commands.map((command) => command.cmd)).toContain('/health');
     expect(commands.map((command) => command.cmd)).not.toContain('/mcpadd');
+  });
+
+  it('supports filtering builtin tool catalog diagnostics by keyword and command prefix', () => {
+    expect(filterAISlashCommands('工具目录').map((command) => command.cmd)).toContain('/tools');
+    expect(filterAISlashCommands('参数提示').map((command) => command.cmd)).toContain('/tools');
+    expect(filterAISlashCommands('/too').map((command) => command.cmd)).toContain('/tools');
+  });
+
+  it('supports filtering context budget diagnostics by keyword and command prefix', () => {
+    expect(filterAISlashCommands('上下文').map((command) => command.cmd)).toContain('/budget');
+    expect(filterAISlashCommands('变慢').map((command) => command.cmd)).toContain('/budget');
+    expect(filterAISlashCommands('/bud').map((command) => command.cmd)).toContain('/budget');
   });
 
   it('supports filtering shortcut diagnostics by chinese keyword and command prefix', () => {
@@ -62,6 +77,13 @@ describe('aiSlashCommands', () => {
     expect(filterAISlashCommands('/mcpt').map((command) => command.cmd)).toContain('/mcptool');
   });
 
+  it('supports filtering mcp runtime failure diagnostics by keyword and command prefix', () => {
+    expect(filterAISlashCommands('运行期失败').map((command) => command.cmd)).toContain('/mcpfail');
+    expect(filterAISlashCommands('工具发现0个').map((command) => command.cmd)).toContain('/mcpfail');
+    expect(filterAISlashCommands('stdio').map((command) => command.cmd)).toContain('/mcpfail');
+    expect(filterAISlashCommands('/mcpf').map((command) => command.cmd)).toContain('/mcpfail');
+  });
+
   it('supports filtering mcp draft validation diagnostics by keyword and command prefix', () => {
     expect(filterAISlashCommands('MCP草稿').map((command) => command.cmd)).toContain('/mcpdraft');
     expect(filterAISlashCommands('启动命令').map((command) => command.cmd)).toContain('/mcpdraft');
@@ -85,6 +107,9 @@ describe('aiSlashCommands', () => {
     expect(featured).toContain('/mcpadd');
     expect(featured).toContain('/connfail');
     expect(featured).toContain('/tx');
+    expect(featured).not.toContain('/tools');
+    expect(featured).not.toContain('/budget');
+    expect(featured).not.toContain('/mcpfail');
     expect(featured).not.toContain('/shortcuts');
   });
 });
