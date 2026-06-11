@@ -402,8 +402,10 @@ func (p *OpenAIProvider) doRequest(ctx context.Context, body interface{}) (io.Re
 	}
 
 	url := ResolveOpenAICompatibleEndpoint(p.baseURL, "chat/completions")
+	requestLog := logAIUpstreamRequestStart(p.Name(), http.MethodPost, url, body)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
+		logAIUpstreamRequestFinish(requestLog, 0, err)
 		return nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
 	}
 
@@ -424,15 +426,19 @@ func (p *OpenAIProvider) doRequest(ctx context.Context, body interface{}) (io.Re
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
+		logAIUpstreamRequestFinish(requestLog, 0, err)
 		return nil, fmt.Errorf("发送请求到 %s 失败: %w", url, err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("OpenAI API 返回错误 (HTTP %d): %s", resp.StatusCode, string(bodyBytes))
+		statusErr := fmt.Errorf("OpenAI API 返回错误 (HTTP %d): %s", resp.StatusCode, string(bodyBytes))
+		logAIUpstreamRequestFinish(requestLog, resp.StatusCode, statusErr)
+		return nil, statusErr
 	}
 
+	logAIUpstreamRequestFinish(requestLog, resp.StatusCode, nil)
 	return resp.Body, nil
 }
 

@@ -893,13 +893,29 @@ func (s *Service) AISetContextLevel(level string) {
 func (s *Service) AIChatSend(messages []ai.Message, tools []ai.Tool) map[string]interface{} {
 	p, err := s.getActiveProvider()
 	if err != nil {
+		logger.Error(err, "AIChatSend 获取 Provider 失败：messages=%d tools=%d", len(messages), len(tools))
 		return map[string]interface{}{"success": false, "error": err.Error()}
 	}
 
+	started := time.Now()
+	providerName := p.Name()
+	logger.Infof("AIChatSend 开始：provider=%s messages=%d tools=%d", providerName, len(messages), len(tools))
 	resp, err := p.Chat(context.Background(), ai.ChatRequest{Messages: messages, Tools: tools})
 	if err != nil {
+		logger.Warnf("AIChatSend 失败：provider=%s messages=%d tools=%d duration=%s err=%s", providerName, len(messages), len(tools), time.Since(started).Round(time.Millisecond), provider.RedactAIUpstreamLogText(err.Error()))
 		return map[string]interface{}{"success": false, "error": err.Error()}
 	}
+	logger.Infof(
+		"AIChatSend 完成：provider=%s messages=%d tools=%d toolCalls=%d promptTokens=%d completionTokens=%d totalTokens=%d duration=%s",
+		providerName,
+		len(messages),
+		len(tools),
+		len(resp.ToolCalls),
+		resp.TokensUsed.PromptTokens,
+		resp.TokensUsed.CompletionTokens,
+		resp.TokensUsed.TotalTokens,
+		time.Since(started).Round(time.Millisecond),
+	)
 
 	return map[string]interface{}{
 		"success":           true,
@@ -931,6 +947,7 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 
 		p, err := s.getActiveProvider()
 		if err != nil {
+			logger.Error(err, "AIChatStream 获取 Provider 失败：sessionID=%s messages=%d tools=%d", sessionID, len(messages), len(tools))
 			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
 				"error": err.Error(),
 				"done":  true,
@@ -938,7 +955,26 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 			return
 		}
 
+		started := time.Now()
+		providerName := p.Name()
+		contentChunks := 0
+		thinkingChunks := 0
+		toolCallChunks := 0
+		errorChunks := 0
+		logger.Infof("AIChatStream 开始：sessionID=%s provider=%s messages=%d tools=%d", sessionID, providerName, len(messages), len(tools))
 		err = p.ChatStream(streamCtx, ai.ChatRequest{Messages: messages, Tools: tools}, func(chunk ai.StreamChunk) {
+			if chunk.Content != "" {
+				contentChunks++
+			}
+			if chunk.Thinking != "" || chunk.ReasoningContent != "" {
+				thinkingChunks++
+			}
+			if len(chunk.ToolCalls) > 0 {
+				toolCallChunks++
+			}
+			if chunk.Error != "" {
+				errorChunks++
+			}
 			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
 				"content":           chunk.Content,
 				"thinking":          chunk.Thinking,
@@ -951,11 +987,29 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 
 		// 当 context 被主动 cancel 的时候，不把这个视为向外抛的 error
 		if err != nil && err != context.Canceled {
+			logger.Warnf("AIChatStream 失败：sessionID=%s provider=%s messages=%d tools=%d duration=%s err=%s", sessionID, providerName, len(messages), len(tools), time.Since(started).Round(time.Millisecond), provider.RedactAIUpstreamLogText(err.Error()))
 			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
 				"error": err.Error(),
 				"done":  true,
 			})
+			return
 		}
+		if err == context.Canceled {
+			logger.Infof("AIChatStream 已取消：sessionID=%s provider=%s duration=%s", sessionID, providerName, time.Since(started).Round(time.Millisecond))
+			return
+		}
+		logger.Infof(
+			"AIChatStream 完成：sessionID=%s provider=%s messages=%d tools=%d contentChunks=%d thinkingChunks=%d toolCallChunks=%d errorChunks=%d duration=%s",
+			sessionID,
+			providerName,
+			len(messages),
+			len(tools),
+			contentChunks,
+			thinkingChunks,
+			toolCallChunks,
+			errorChunks,
+			time.Since(started).Round(time.Millisecond),
+		)
 	}()
 }
 
