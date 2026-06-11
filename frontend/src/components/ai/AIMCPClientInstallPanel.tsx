@@ -292,7 +292,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
               lineHeight: 1.7,
             }}
           >
-            远程接入边界：数据库连接信息和密码仍保存在 Windows GoNavi；云端 Agent 只通过 MCP 工具读取连接摘要、库表和 DDL。跨机器接入请使用 GoNavi Streamable HTTP 模式，并配合 token、隧道或反向代理。
+            远程接入边界：数据库连接信息和密码仍保存在 Windows GoNavi；云端 Agent 默认通过 schema-only MCP 工具读取连接摘要、库表和 DDL，不注册 execute_sql。跨机器接入请使用 GoNavi Streamable HTTP 模式，并配合 token、隧道或反向代理。
           </div>
         )}
         {remoteQuickStart && (
@@ -311,7 +311,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
               {remoteQuickStart.displayName} 远程 MCP 快速配置
             </div>
             <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-              下面分别给云端 Agent、无 GUI/CLI 场景和 Windows GoNavi 使用。云端只保存 MCP URL 和 Bearer Token，不保存数据库账号密码。
+              下面分别给云端 Agent、无 GUI/CLI 场景和 Windows GoNavi 使用。云端只保存 MCP URL 和 Bearer Token，不保存数据库账号密码；默认 schema-only 只暴露结构工具。
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
               {REMOTE_MCP_PARAMETER_GUIDES.map((item) => (

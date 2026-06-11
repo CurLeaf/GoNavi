@@ -10,9 +10,11 @@ import SnippetSettingsModal from './components/SnippetSettingsModal';
 import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
 import DataSyncModal from './components/DataSyncModal';
 import DriverManagerModal from './components/DriverManagerModal';
+import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';
 import LogPanel from './components/LogPanel';
 import AISettingsModal from './components/AISettingsModal';
 import AIChatPanel from './components/AIChatPanel';
+import AIPanelErrorBoundary from './components/ai/AIPanelErrorBoundary';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
 import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
 import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModal';
@@ -200,43 +202,6 @@ const createClosedConnectionPackageDialogState = (): ConnectionPackageDialogStat
   error: '',
   confirmLoading: false,
 });
-
-interface AIPanelErrorBoundaryProps {
-  children: React.ReactNode;
-  fallback: (error: Error | null) => React.ReactNode;
-  onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
-}
-
-interface AIPanelErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-class AIPanelErrorBoundary extends React.Component<
-  AIPanelErrorBoundaryProps,
-  AIPanelErrorBoundaryState
-> {
-  constructor(props: AIPanelErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: Error): AIPanelErrorBoundaryState {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    this.props.onError?.(error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return this.props.fallback(this.state.error);
-    }
-
-    return this.props.children;
-  }
-}
 
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -3416,51 +3381,15 @@ function App() {
           </div>
 
           {showLinuxCJKFontBanner && (
-              <div
-                data-gonavi-linux-cjk-font-banner="true"
-                style={{
-                    flexShrink: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '8px 14px',
-                    borderBottom: darkMode ? '1px solid rgba(250,204,21,0.20)' : '1px solid rgba(217,119,6,0.18)',
-                    background: darkMode ? 'rgba(250,204,21,0.10)' : 'rgba(255,247,237,0.92)',
-                    color: darkMode ? 'rgba(254,249,195,0.96)' : '#7c2d12',
-                    fontSize: 12,
-                    lineHeight: 1.55,
-                }}
-              >
-                  <InfoCircleOutlined style={{ flexShrink: 0, color: darkMode ? '#facc15' : '#d97706' }} />
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontWeight: 700 }}>
-                          Linux CJK fonts missing / Ubuntu 中文字体缺失
-                      </div>
-                      <div>
-                          Chinese text may render as □□□. Install fonts, then restart GoNavi:
-                          <code style={{ marginLeft: 6, fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all' }}>
-                              {linuxCJKFontInstallHint}
-                          </code>
-                      </div>
-                  </div>
-                  <Button
-                    size="small"
-                    onClick={() => {
+              <LinuxCJKFontBanner
+                darkMode={darkMode}
+                installHint={linuxCJKFontInstallHint || ''}
+                onOpenFontSettings={() => {
                         setThemeModalSection('appearance');
                         setIsThemeModalOpen(true);
-                    }}
-                  >
-                      Font Settings
-                  </Button>
-                  <Button
-                    size="small"
-                    type="text"
-                    onClick={() => setIsLinuxCJKFontBannerDismissed(true)}
-                    style={{ color: 'inherit' }}
-                  >
-                      Close
-                  </Button>
-              </div>
+                }}
+                onDismiss={() => setIsLinuxCJKFontBannerDismissed(true)}
+              />
           )}
 
           <Layout style={{ flex: 1, minHeight: 0, minWidth: 0 }}>

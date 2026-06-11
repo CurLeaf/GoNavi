@@ -32,7 +32,7 @@ func run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		log.Printf("GoNavi MCP Streamable HTTP Server 启动：addr=%s path=%s", options.Addr, options.Path)
+		log.Printf("GoNavi MCP Streamable HTTP Server 启动：addr=%s path=%s schemaOnly=%v", options.Addr, options.Path, options.SchemaOnly)
 		return mcpserver.RunAppStreamableHTTPServer(ctx, options)
 	case "remote-config", "--remote-config":
 		return mcpserver.WriteRemoteMCPClientConfig(os.Stdout, args[1:])

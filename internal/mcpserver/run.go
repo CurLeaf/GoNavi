@@ -26,6 +26,7 @@ type HTTPServerOptions struct {
 	Path         string
 	Token        string
 	JSONResponse bool
+	SchemaOnly   bool
 }
 
 // RunAppStdioServer 启动基于真实 GoNavi App 的 stdio MCP server。
@@ -73,7 +74,7 @@ func RunStreamableHTTPServer(ctx context.Context, backend Backend, options HTTPS
 		return err
 	}
 
-	server := NewServer(backend)
+	server := NewServerWithOptions(backend, ServerOptions{SchemaOnly: normalized.SchemaOnly})
 	streamableHandler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return server
 	}, &mcp.StreamableHTTPOptions{
@@ -131,6 +132,7 @@ func ParseHTTPServerOptions(args []string) (HTTPServerOptions, error) {
 		Path:         defaultPath,
 		Token:        strings.TrimSpace(os.Getenv("GONAVI_MCP_HTTP_TOKEN")),
 		JSONResponse: true,
+		SchemaOnly:   parseBoolEnvDefault("GONAVI_MCP_SCHEMA_ONLY", false),
 	}
 	fs := flag.NewFlagSet("gonavi-mcp-server http", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -138,6 +140,7 @@ func ParseHTTPServerOptions(args []string) (HTTPServerOptions, error) {
 	fs.StringVar(&options.Path, "path", options.Path, "HTTP MCP path")
 	fs.StringVar(&options.Token, "token", options.Token, "bearer token required by remote MCP clients")
 	fs.BoolVar(&options.JSONResponse, "json-response", options.JSONResponse, "return application/json streamable responses when possible")
+	fs.BoolVar(&options.SchemaOnly, "schema-only", options.SchemaOnly, "only expose schema inspection tools and omit execute_sql")
 	if err := fs.Parse(args); err != nil {
 		return HTTPServerOptions{}, err
 	}
@@ -145,6 +148,17 @@ func ParseHTTPServerOptions(args []string) (HTTPServerOptions, error) {
 		return HTTPServerOptions{}, fmt.Errorf("未知 http 参数: %s", strings.Join(fs.Args(), " "))
 	}
 	return options, nil
+}
+
+func parseBoolEnvDefault(name string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func normalizeHTTPServerOptions(options HTTPServerOptions) (HTTPServerOptions, error) {

@@ -26,6 +26,7 @@ type RemoteMCPClientConfigOptions struct {
 	Path              string
 	GoNaviCommand     string
 	StandaloneCommand string
+	SchemaOnly        bool
 }
 
 // ParseRemoteMCPClientConfigOptions 解析 remote-config 模式参数。
@@ -39,6 +40,7 @@ func ParseRemoteMCPClientConfigOptions(args []string) (RemoteMCPClientConfigOpti
 		Path:              strings.TrimSpace(os.Getenv("GONAVI_MCP_HTTP_PATH")),
 		GoNaviCommand:     "GoNavi.exe",
 		StandaloneCommand: "gonavi-mcp-server",
+		SchemaOnly:        parseBoolEnvDefault("GONAVI_MCP_SCHEMA_ONLY", true),
 	}
 	if options.URL == "" {
 		options.URL = defaultRemoteMCPPublicURL
@@ -63,6 +65,7 @@ func ParseRemoteMCPClientConfigOptions(args []string) (RemoteMCPClientConfigOpti
 	fs.StringVar(&options.Path, "path", options.Path, "local and public MCP path")
 	fs.StringVar(&options.GoNaviCommand, "gonavi-command", options.GoNaviCommand, "GoNavi application command on Windows")
 	fs.StringVar(&options.StandaloneCommand, "standalone-command", options.StandaloneCommand, "standalone gonavi-mcp-server command")
+	fs.BoolVar(&options.SchemaOnly, "schema-only", options.SchemaOnly, "generate a schema-only remote MCP launch command without execute_sql")
 	if err := fs.Parse(args); err != nil {
 		return RemoteMCPClientConfigOptions{}, err
 	}
@@ -145,8 +148,8 @@ func RenderRemoteMCPClientConfig(options RemoteMCPClientConfigOptions) (string, 
 		return "", fmt.Errorf("生成远程 MCP 配置失败: %w", err)
 	}
 
-	launch := remoteMCPHTTPLaunchCommand(normalized.GoNaviCommand, true, normalized.LocalAddr, normalized.Path, normalized.Token)
-	standalone := remoteMCPHTTPLaunchCommand(normalized.StandaloneCommand, false, normalized.LocalAddr, normalized.Path, normalized.Token)
+	launch := remoteMCPHTTPLaunchCommand(normalized.GoNaviCommand, true, normalized.LocalAddr, normalized.Path, normalized.Token, normalized.SchemaOnly)
+	standalone := remoteMCPHTTPLaunchCommand(normalized.StandaloneCommand, false, normalized.LocalAddr, normalized.Path, normalized.Token, normalized.SchemaOnly)
 	lines := []string{
 		fmt.Sprintf("GoNavi MCP 远程接入配置 - %s", normalized.DisplayName),
 		"",
@@ -167,7 +170,8 @@ func RenderRemoteMCPClientConfig(options RemoteMCPClientConfigOptions) (string, 
 		"安全边界：",
 		"- 数据库连接、账号和密码继续保存在 Windows GoNavi。",
 		"- 云端 Agent 只保存 MCP URL 和 Bearer Token。",
-		"- execute_sql 仍受 GoNavi AI 安全控制约束；写操作必须显式传 allowMutating=true。",
+		"- 默认 schema-only 模式不会注册 execute_sql，适合只给 OpenClaw/Hermans 读取库表结构。",
+		"- 如明确去掉 --schema-only 开放 execute_sql，它仍受 GoNavi AI 安全控制约束，写操作必须显式传 allowMutating=true。",
 	}
 	return strings.Join(lines, "\n") + "\n", nil
 }
@@ -189,7 +193,7 @@ func WriteRemoteMCPClientConfig(w io.Writer, args []string) error {
 	return err
 }
 
-func remoteMCPHTTPLaunchCommand(command string, appSubcommand bool, addr string, path string, token string) string {
+func remoteMCPHTTPLaunchCommand(command string, appSubcommand bool, addr string, path string, token string, schemaOnly bool) string {
 	parts := []string{
 		command,
 	}
@@ -197,6 +201,9 @@ func remoteMCPHTTPLaunchCommand(command string, appSubcommand bool, addr string,
 		parts = append(parts, "mcp-server")
 	}
 	parts = append(parts, "http", "--addr", addr, "--path", path, "--token", token)
+	if schemaOnly {
+		parts = append(parts, "--schema-only")
+	}
 	for index, part := range parts {
 		parts[index] = quoteCommandPart(part)
 	}

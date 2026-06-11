@@ -32,6 +32,9 @@ func TestParseRemoteMCPClientConfigOptionsUsesEnvAndFlags(t *testing.T) {
 	if options.Path != "/mcp" {
 		t.Fatalf("expected normalized path, got %q", options.Path)
 	}
+	if !options.SchemaOnly {
+		t.Fatal("expected remote config to default to schema-only")
+	}
 }
 
 func TestRenderRemoteMCPClientConfigShowsCloudAndWindowsCommands(t *testing.T) {
@@ -43,6 +46,7 @@ func TestRenderRemoteMCPClientConfigShowsCloudAndWindowsCommands(t *testing.T) {
 		Path:              "/mcp",
 		GoNaviCommand:     `C:\Program Files\GoNavi\GoNavi.exe`,
 		StandaloneCommand: "gonavi-mcp-server",
+		SchemaOnly:        true,
 	})
 	if err != nil {
 		t.Fatalf("RenderRemoteMCPClientConfig returned error: %v", err)
@@ -53,9 +57,10 @@ func TestRenderRemoteMCPClientConfigShowsCloudAndWindowsCommands(t *testing.T) {
 		`"type": "streamable-http"`,
 		`"url": "https://openclaw.example.com/mcp"`,
 		`"Authorization": "Bearer secret-token"`,
-		`"C:\Program Files\GoNavi\GoNavi.exe" mcp-server http --addr 127.0.0.1:8765 --path /mcp --token secret-token`,
-		`gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp --token secret-token`,
+		`"C:\Program Files\GoNavi\GoNavi.exe" mcp-server http --addr 127.0.0.1:8765 --path /mcp --token secret-token --schema-only`,
+		`gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp --token secret-token --schema-only`,
 		"数据库连接、账号和密码继续保存在 Windows GoNavi",
+		"默认 schema-only 模式不会注册 execute_sql",
 		"allowMutating=true",
 	} {
 		if !strings.Contains(text, want) {
@@ -64,6 +69,21 @@ func TestRenderRemoteMCPClientConfigShowsCloudAndWindowsCommands(t *testing.T) {
 	}
 	if strings.Contains(text, "gonavi-mcp-server mcp-server http") {
 		t.Fatalf("standalone command must not include app-only mcp-server subcommand, got:\n%s", text)
+	}
+}
+
+func TestRenderRemoteMCPClientConfigCanExposeSQLWhenExplicitlyRequested(t *testing.T) {
+	text, err := RenderRemoteMCPClientConfig(RemoteMCPClientConfigOptions{
+		Client:     "openclaw",
+		URL:        "https://openclaw.example.com/mcp",
+		Token:      "secret-token",
+		SchemaOnly: false,
+	})
+	if err != nil {
+		t.Fatalf("RenderRemoteMCPClientConfig returned error: %v", err)
+	}
+	if strings.Contains(text, "http --addr 127.0.0.1:8765 --path /mcp --token secret-token --schema-only") {
+		t.Fatalf("expected launch commands to omit schema-only when disabled, got:\n%s", text)
 	}
 }
 

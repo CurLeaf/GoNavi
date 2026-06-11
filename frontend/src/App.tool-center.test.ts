@@ -6,6 +6,10 @@ const appSource = readFileSync(
   fileURLToPath(new globalThis.URL('./App.tsx', import.meta.url)),
   'utf8',
 );
+const linuxCJKFontBannerSource = readFileSync(
+  fileURLToPath(new globalThis.URL('./components/LinuxCJKFontBanner.tsx', import.meta.url)),
+  'utf8',
+);
 
 const getGlobalShortcutCaseBlock = (action: string) => {
   const caseToken = `case '${action}':`;
@@ -250,8 +254,10 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies)');
     expect(appSource).toContain('ListInstalledFontFamilies()');
     expect(appSource).toContain('const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);');
-    expect(appSource).toContain('data-gonavi-linux-cjk-font-banner="true"');
-    expect(appSource).toContain('Linux CJK fonts missing / Ubuntu 中文字体缺失');
+    expect(appSource).toContain("import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';");
+    expect(appSource).toContain('<LinuxCJKFontBanner');
+    expect(linuxCJKFontBannerSource).toContain('data-gonavi-linux-cjk-font-banner="true"');
+    expect(linuxCJKFontBannerSource).toContain('Linux CJK fonts missing / Ubuntu 中文字体缺失');
     expect(appSource).toContain('setIsLinuxCJKFontBannerDismissed(true)');
     expect(appSource).toContain('matchFontFamilyOption');
     expect(appSource).toContain('showSearch');

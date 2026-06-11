@@ -20,6 +20,8 @@
   - 如果 SQL 包含 DDL/DML，必须显式传 `allowMutating=true`
   - `maxRowsPerResult` 用来限制单个结果集返回的行数，默认 `200`
 
+远程 Agent 只需要库表结构时，启动 HTTP 模式请加 `--schema-only`。该模式不注册 `execute_sql`，只保留连接摘要、库表、字段、索引、外键、触发器和 DDL 工具。
+
 ## 运行方式
 
 开发态直接运行：
@@ -44,13 +46,13 @@ go build -o .\bin\gonavi-mcp-server.exe .\cmd\gonavi-mcp-server
 
 ```powershell
 $env:GONAVI_MCP_HTTP_TOKEN = "<随机token>"
-go run ./cmd/gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp
+go run ./cmd/gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp --schema-only
 ```
 
 安装包主程序也支持同样模式：
 
 ```powershell
-& "C:\Program Files\GoNavi\GoNavi.exe" mcp-server http --addr 127.0.0.1:8765 --path /mcp --token "<随机token>"
+& "C:\Program Files\GoNavi\GoNavi.exe" mcp-server http --addr 127.0.0.1:8765 --path /mcp --token "<随机token>" --schema-only
 ```
 
 默认建议只监听 `127.0.0.1`，再通过 SSH 隧道、反向代理或内网网关暴露给云端 Agent。不要在没有 TLS、防火墙和鉴权的情况下直接监听公网地址。
@@ -58,13 +60,13 @@ go run ./cmd/gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp
 无图形界面或需要把配置交给云端 Agent 时，可直接生成 OpenClaw / Hermans 等远程 MCP 配置：
 
 ```powershell
-& "C:\Program Files\GoNavi\GoNavi.exe" mcp-server remote-config --client openclaw --url "https://<你的域名或隧道地址>/mcp" --token "<随机token>"
+& "C:\Program Files\GoNavi\GoNavi.exe" mcp-server remote-config --client openclaw --url "https://<你的域名或隧道地址>/mcp" --token "<随机token>" --schema-only
 ```
 
 独立 server 开发态也支持同样能力：
 
 ```powershell
-go run ./cmd/gonavi-mcp-server remote-config --client hermans --url "https://<你的域名或隧道地址>/mcp" --token "<随机token>"
+go run ./cmd/gonavi-mcp-server remote-config --client hermans --url "https://<你的域名或隧道地址>/mcp" --token "<随机token>" --schema-only
 ```
 
 ## Claude Code / Codex / OpenClaw / Hermans
@@ -116,7 +118,7 @@ OpenClaw、Hermans 这类部署在云端或远端 Linux 的 Agent，不能直接
 推荐接入形态：
 
 1. Windows 本机运行 GoNavi，并保持能访问已保存的数据库连接。
-2. 在 Windows 本机启动 `GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token>`。
+2. 在 Windows 本机启动 `GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token> --schema-only`。
 3. 通过 SSH 隧道、反向代理或内网网关把 `http://127.0.0.1:8765/mcp` 暴露为云端 Agent 可访问的 HTTPS 地址。
 4. 在 OpenClaw / Hermans 中添加远程 MCP Server，transport 选择 Streamable HTTP，URL 指向 `/mcp` 地址，并设置请求头 `Authorization: Bearer <随机token>`。
 5. 先调用 `get_connections` 获取 `connectionId`，再调用 `get_databases`、`get_tables`、`get_columns`、`get_table_ddl` 等工具读取结构。
@@ -137,7 +139,7 @@ OpenClaw、Hermans 这类部署在云端或远端 Linux 的 Agent，不能直接
 }
 ```
 
-不要把数据库 `host/user/password` 写入云端 Agent 的配置文件。`execute_sql` 写操作仍受 GoNavi AI 安全设置控制，且必须显式传 `allowMutating=true`。
+不要把数据库 `host/user/password` 写入云端 Agent 的配置文件。默认 `--schema-only` 不暴露 `execute_sql`；如果你明确需要远程执行 SQL，可以去掉该参数，此时 `execute_sql` 仍受 GoNavi AI 安全设置控制，写操作必须显式传 `allowMutating=true`。
 
 ## MCP 客户端配置示例
 

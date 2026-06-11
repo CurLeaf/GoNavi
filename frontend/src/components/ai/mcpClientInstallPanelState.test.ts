@@ -78,6 +78,7 @@ describe('mcpClientInstallPanelState', () => {
 
     expect(getMCPClientStatusTone(status, false).label).toBe('远程桥接');
     expect(getMCPClientInstallStateLabel(status)).toBe('外部工具接入状态：需配置远程 MCP 桥接');
+    expect(getMCPClientOptionSummary(status)).toContain('默认 schema-only');
     expect(getMCPClientOptionSummary(status)).toContain('不复制数据库密码');
     expect(getMCPClientDetectionSummary(status)).toContain('本机无需检测 openclaw 命令');
     expect(getSelectedMCPClientStateLine(status)).toContain('数据库密码仍留在 GoNavi 本机');

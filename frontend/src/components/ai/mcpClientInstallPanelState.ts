@@ -101,7 +101,7 @@ export const getMCPClientOptionSummary = (status: AIMCPClientInstallStatus | und
     return '接入状态读取异常，建议先刷新再处理。';
   }
   if (isRemoteMCPClientStatus(status)) {
-    return '适合云端 Agent：通过远程 MCP 桥接读取 GoNavi 表结构，不复制数据库密码。';
+    return '适合云端 Agent：默认 schema-only 读取 GoNavi 表结构，不复制数据库密码，不暴露 SQL 执行。';
   }
   return '尚未把当前 GoNavi MCP 接入到这里。';
 };

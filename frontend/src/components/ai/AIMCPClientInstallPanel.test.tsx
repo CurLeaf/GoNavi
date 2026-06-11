@@ -191,7 +191,8 @@ describe('AIMCPClientInstallPanel', () => {
     expect(markup).toContain('远程桥接');
     expect(markup).toContain('当前已选中，将复制远程接入说明');
     expect(markup).toContain('远程接入边界');
-    expect(markup).toContain('云端 Agent 只通过 MCP 工具读取连接摘要、库表和 DDL');
+    expect(markup).toContain('云端 Agent 默认通过 schema-only MCP 工具读取连接摘要、库表和 DDL');
+    expect(markup).toContain('不注册 execute_sql');
     expect(markup).toContain('OpenClaw 远程 MCP 快速配置');
     expect(markup).toContain('公网/隧道 URL');
     expect(markup).toContain('云端 Agent 能访问到的 Streamable HTTP MCP 地址');
@@ -206,13 +207,14 @@ describe('AIMCPClientInstallPanel', () => {
     expect(markup).toContain('&quot;type&quot;: &quot;streamable-http&quot;');
     expect(markup).toContain('&quot;url&quot;: &quot;https://&lt;你的域名或隧道地址&gt;/mcp&quot;');
     expect(markup).toContain('&quot;Authorization&quot;: &quot;Bearer &lt;随机token&gt;&quot;');
-    expect(markup).toContain('GoNavi.exe mcp-server remote-config --client openclaw --url https://&lt;你的域名或隧道地址&gt;/mcp --token &lt;随机token&gt;');
+    expect(markup).toContain('GoNavi.exe mcp-server remote-config --client openclaw --url https://&lt;你的域名或隧道地址&gt;/mcp --token &lt;随机token&gt; --schema-only');
     expect(markup).toContain('Windows 启动 GoNavi MCP HTTP');
-    expect(markup).toContain('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token &lt;随机token&gt;');
-    expect(markup).toContain('独立二进制：gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp --token &lt;随机token&gt;');
+    expect(markup).toContain('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token &lt;随机token&gt; --schema-only');
+    expect(markup).toContain('独立二进制：gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp --token &lt;随机token&gt; --schema-only');
     expect(markup).toContain('验证顺序');
     expect(markup).toContain('安全边界');
     expect(markup).toContain('数据库账号和密码仍保存在 Windows GoNavi');
+    expect(markup).toContain('默认 --schema-only 不注册 execute_sql');
     expect(markup).toContain('CLI 检测：远程 Agent 不需要检测本机 openclaw 命令');
     expect(markup).toContain('复制 OpenClaw 远程接入说明');
   });

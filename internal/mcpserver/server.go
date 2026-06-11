@@ -7,7 +7,17 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// ServerOptions 控制 MCP server 对外暴露的工具范围。
+type ServerOptions struct {
+	// SchemaOnly 仅暴露连接、库表、字段、索引、外键、触发器和 DDL 工具，不注册 execute_sql。
+	SchemaOnly bool
+}
+
 func NewServer(backend Backend) *mcp.Server {
+	return NewServerWithOptions(backend, ServerOptions{})
+}
+
+func NewServerWithOptions(backend Backend, options ServerOptions) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "gonavi-ai",
 		Version: implementationVersion(),
@@ -60,10 +70,12 @@ func NewServer(backend Backend) *mcp.Server {
 		Description: "根据 connectionId、可选 dbName、tableName 获取建表或建视图语句。",
 	}, service.GetTableDDL)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "execute_sql",
-		Description: "执行 SQL，支持多语句结果集。执行范围受 GoNavi AI 设置中的安全控制约束；命中允许范围内的 DML/DDL 等非只读语句时，仍必须显式传 allowMutating=true。",
-	}, service.ExecuteSQL)
+	if !options.SchemaOnly {
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "execute_sql",
+			Description: "执行 SQL，支持多语句结果集。执行范围受 GoNavi AI 设置中的安全控制约束；命中允许范围内的 DML/DDL 等非只读语句时，仍必须显式传 allowMutating=true。",
+		}, service.ExecuteSQL)
+	}
 
 	return server
 }

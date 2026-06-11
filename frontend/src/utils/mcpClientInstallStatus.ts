@@ -232,7 +232,7 @@ export const buildRemoteMCPClientGuide = (
     '目标：',
     '- 数据库连接、账号和密码继续保存在 Windows 上的 GoNavi。云端 Agent 不需要保存数据库密码。',
     '- 云端 Agent 只通过 MCP tools 读取 get_connections/get_databases/get_tables/get_columns/get_table_ddl 等结果。',
-    '- execute_sql 仍受 GoNavi AI 安全控制约束；写操作必须显式传 allowMutating=true。',
+    '- 远程接入默认使用 schema-only 模式，不注册 execute_sql，适合只给 OpenClaw/Hermans 读取库表结构。',
     '',
     '当前边界：',
     '- GoNavi 内置 MCP 本机入口是 stdio，适合 Claude Code / Codex 这类和 GoNavi 在同一台机器上的客户端。',
@@ -253,6 +253,7 @@ export const buildRemoteMCPClientGuide = (
     'CLI / 服务启动命令：',
     quickStart.launchCommand,
     `或设置环境变量：GONAVI_MCP_HTTP_TOKEN=<随机token> 后运行 ${quickStart.standaloneCommand.replace(' --token <随机token>', '')}`,
+    '如果明确需要远程执行 SQL，可去掉 --schema-only；此时 execute_sql 仍受 GoNavi AI 安全控制约束，写操作必须显式传 allowMutating=true。',
     '',
     status?.message ? `当前提示：${status.message}` : '',
   ].filter((line, index, lines) => line || index < lines.length - 1).join('\n');
@@ -263,9 +264,9 @@ export const buildRemoteMCPClientQuickStart = (
 ): RemoteMCPClientQuickStart => {
   const displayName = String(status?.displayName || '远程 Agent').trim();
   const client = isMCPClientKey(String(status?.client || '')) ? String(status?.client || '').trim() : 'openclaw';
-  const launchCommand = `GoNavi.exe mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <随机token>`;
-  const standaloneCommand = `gonavi-mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <随机token>`;
-  const configCommand = `GoNavi.exe mcp-server remote-config --client ${client} --url ${DEFAULT_REMOTE_MCP_PUBLIC_URL} --token <随机token>`;
+  const launchCommand = `GoNavi.exe mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <随机token> --schema-only`;
+  const standaloneCommand = `gonavi-mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <随机token> --schema-only`;
+  const configCommand = `GoNavi.exe mcp-server remote-config --client ${client} --url ${DEFAULT_REMOTE_MCP_PUBLIC_URL} --token <随机token> --schema-only`;
   const configJson = JSON.stringify({
     mcpServers: {
       gonavi: {
@@ -291,8 +292,9 @@ export const buildRemoteMCPClientQuickStart = (
     ],
     securityNotes: [
       '数据库账号和密码仍保存在 Windows GoNavi，本段配置不要写数据库密码。',
+      '默认 --schema-only 不注册 execute_sql，远程 Agent 只能走库表结构类工具。',
       'HTTP MCP 必须使用随机 Bearer Token，并放在 HTTPS、私有网络或受控隧道后面。',
-      'execute_sql 仍受 GoNavi AI 安全控制约束，写操作仍必须显式传 allowMutating=true。',
+      '如去掉 --schema-only 开放 execute_sql，仍受 GoNavi AI 安全控制约束，写操作仍必须显式传 allowMutating=true。',
     ],
   };
 };

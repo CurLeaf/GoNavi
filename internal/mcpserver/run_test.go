@@ -16,6 +16,7 @@ func TestParseHTTPServerOptionsSupportsFlagsAndEnvFallback(t *testing.T) {
 		"--addr", "0.0.0.0:8765",
 		"--path", "mcp",
 		"--token", "flag-token",
+		"--schema-only",
 		"--json-response=false",
 	})
 	if err != nil {
@@ -37,6 +38,9 @@ func TestParseHTTPServerOptionsSupportsFlagsAndEnvFallback(t *testing.T) {
 	}
 	if normalized.JSONResponse {
 		t.Fatal("expected json response flag to be false")
+	}
+	if !normalized.SchemaOnly {
+		t.Fatal("expected schema-only flag to be true")
 	}
 }
 
