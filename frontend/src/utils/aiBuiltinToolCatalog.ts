@@ -86,8 +86,8 @@ export const BUILTIN_TOOL_FLOWS: AIBuiltinToolFlow[] = [
   },
   {
     title: '排查 MCP 接入状态',
-    steps: 'inspect_mcp_setup -> inspect_ai_runtime',
-    description: '适合先确认当前配置了哪些 MCP 服务、哪些已启用、外部客户端有没有写入当前 GoNavi 路径，再结合运行时工具列表判断为什么某个工具没暴露出来。',
+    steps: 'inspect_mcp_setup -> inspect_mcp_runtime_failures -> inspect_ai_runtime',
+    description: '适合先确认当前配置了哪些 MCP 服务、哪些已启用、外部客户端有没有写入当前 GoNavi 路径，再结合 MCP 运行期失败日志判断为什么某个工具没暴露出来。',
   },
   {
     title: '远程 Agent 接入 GoNavi MCP',
@@ -101,8 +101,8 @@ export const BUILTIN_TOOL_FLOWS: AIBuiltinToolFlow[] = [
   },
   {
     title: '排查 Docker MCP 启动',
-    steps: 'inspect_mcp_docker_setup -> inspect_mcp_draft -> inspect_mcp_setup',
-    description: '适合用户按 Docker README 新增 MCP 后发现 0 个工具、容器一启动就退出，或不确定 docker run 参数是否拆对时，先检查 run、-i、镜像名和超时设置。',
+    steps: 'inspect_mcp_runtime_failures -> inspect_mcp_docker_setup -> inspect_mcp_draft',
+    description: '适合用户按 Docker README 新增 MCP 后发现 0 个工具、容器一启动就退出，或不确定 docker run 参数是否拆对时，先看运行期失败原因，再检查 run、-i、镜像名和超时设置。',
   },
   {
     title: '查看 MCP 工具参数',

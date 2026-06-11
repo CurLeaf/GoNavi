@@ -49,6 +49,31 @@ export const BUILTIN_AI_INSPECTION_MCP_TOOL_INFO: AIBuiltinToolInfo[] = [
     },
   },
   {
+    name: "inspect_mcp_runtime_failures",
+    icon: "🧯",
+    desc: "诊断 MCP 启动与调用失败",
+    detail:
+      "读取 gonavi.log 中最近的 MCP 启动、工具发现、工具调用和 HTTP MCP 子进程异常，结合当前已保存 MCP 服务与已发现工具，返回失败类型、疑似原因、涉及服务和下一步修复动作。适合用户反馈“新增 MCP 测试失败”“工具发现 0 个”“MCP 工具调用失败”“HTTP MCP 启动失败”时先调用。",
+    params: "serverName?, keyword?, lineLimit?(默认 160), includeLines?(默认 false)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_mcp_runtime_failures",
+        description:
+          "读取 GoNavi 应用日志中的 MCP 运行期失败信号，归类 MCP 服务启动失败、工具发现失败、工具调用失败和 HTTP MCP 子进程异常，并结合当前 MCP 服务配置与已发现工具数量返回疑似原因和 nextActions。适用于用户提到新增 MCP 测试失败、工具发现 0 个、MCP 工具调用失败、stdio 断开、命令找不到、Docker MCP 退出或 HTTP MCP 启动失败时，先读取该工具，不要只凭弹窗文案猜测。",
+        parameters: {
+          type: "object",
+          properties: {
+            serverName: { type: "string", description: "可选，只看某个 MCP 服务名或日志中的 server= 名称，例如 GitHub、Browser、DockerFetch" },
+            keyword: { type: "string", description: "可选，在 MCP 相关日志里继续按关键词过滤，例如 timeout、stdio、permission、401、docker" },
+            lineLimit: { type: "number", description: "可选，最多读取多少行日志尾部，默认 160，最大 200" },
+            includeLines: { type: "boolean", description: "可选，是否附带脱敏后的 MCP 日志原文行，默认 false；需要引用原文时再开启" },
+          },
+        },
+      },
+    },
+  },
+  {
     name: "inspect_mcp_authoring_guide",
     icon: "🧭",
     desc: "查看新增 MCP 的填写指引",

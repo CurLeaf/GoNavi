@@ -107,6 +107,12 @@ export const appendDatabaseInspectionGuidanceMessages = (
   appendGuidanceIfToolAvailable(
     messages,
     availableToolNames,
+    'inspect_mcp_runtime_failures',
+    '如果用户提到“新增 MCP 测试失败”“工具发现 0 个”“MCP 工具调用失败”“stdio 断开”“Docker MCP 退出”或“HTTP MCP 启动失败”，优先调用 inspect_mcp_runtime_failures 读取真实 MCP 运行期失败日志和当前服务发现状态，再决定是否下钻 inspect_mcp_draft、inspect_mcp_docker_setup 或 inspect_mcp_setup。',
+  );
+  appendGuidanceIfToolAvailable(
+    messages,
+    availableToolNames,
     'inspect_mcp_authoring_guide',
     '如果用户提到“新增 MCP 不知道 command/args/env/timeout 怎么填”“给我一个 node / uvx / python 模板”“为什么启动命令不能直接填整行”，优先调用 inspect_mcp_authoring_guide 读取真实新增指引和模板；如果用户已经贴出命令或草稿，再调用 inspect_mcp_draft 用真实校验器试算，不要凭记忆口述。',
   );

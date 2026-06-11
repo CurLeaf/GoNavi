@@ -47,6 +47,14 @@ describe('aiToolRegistry', () => {
     expect(info?.tool.function.parameters?.properties?.exposeStrategy?.enum).toContain('cloudflare_tunnel');
   });
 
+  it('registers the mcp-runtime-failure inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_runtime_failures');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('启动与调用失败');
+    expect(info?.tool.function.description).toContain('工具发现失败');
+    expect(info?.tool.function.parameters?.properties?.serverName?.description).toContain('MCP 服务名');
+  });
+
   it('registers the mcp-authoring-guide inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_authoring_guide');
     expect(info).toBeTruthy();
@@ -256,6 +264,7 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_ai_tool_catalog')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_setup')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_remote_access')).toBe(true);
+    expect(tools.some((item) => item.function.name === 'inspect_mcp_runtime_failures')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_authoring_guide')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_draft')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_mcp_tool_schema')).toBe(true);

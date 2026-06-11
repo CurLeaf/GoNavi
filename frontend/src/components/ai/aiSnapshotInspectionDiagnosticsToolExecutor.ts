@@ -29,6 +29,7 @@ import { buildSqlEditorTransactionSnapshot } from './aiSqlEditorTransactionInsig
 import { buildShortcutSnapshot } from './aiShortcutInsights';
 import { buildAILastRenderErrorSnapshot } from './aiLastRenderErrorInsights';
 import { buildRecentConnectionFailureSnapshot } from './aiConnectionFailureInsights';
+import { buildMCPRuntimeFailureSnapshot } from './aiMCPRuntimeFailureInsights';
 import type {
   AISnapshotInspectionRuntime,
   SnapshotInspectionResult,
@@ -211,6 +212,33 @@ export async function executeDiagnosticsSnapshotToolCall({
           readResult,
           keyword: args.keyword,
           lineLimit: args.lineLimit,
+        })),
+        success: true,
+      };
+    }
+    case 'inspect_mcp_runtime_failures': {
+      const keyword = String(args.serverName || args.keyword || 'MCP').trim();
+      const readResult = typeof runtime?.readAppLogTail === 'function'
+        ? await runtime.readAppLogTail(Number(args.lineLimit) || 160, keyword)
+        : { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
+      if (!readResult?.success) {
+        return {
+          content: `读取 MCP 运行期失败日志失败: ${readResult?.message || '未知错误'}`,
+          success: false,
+        };
+      }
+      const mcpServers = typeof runtime?.getMCPServers === 'function'
+        ? await runtime.getMCPServers().catch(() => undefined)
+        : undefined;
+      return {
+        content: JSON.stringify(buildMCPRuntimeFailureSnapshot({
+          readResult,
+          mcpServers: Array.isArray(mcpServers) ? mcpServers : [],
+          mcpTools,
+          keyword: args.keyword,
+          serverName: args.serverName,
+          lineLimit: args.lineLimit,
+          includeLines: args.includeLines === true,
         })),
         success: true,
       };

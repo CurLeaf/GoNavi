@@ -176,6 +176,7 @@ export async function executeSnapshotInspectionToolCall(
       inspect_app_logs: '读取 GoNavi 应用日志失败',
       inspect_ai_upstream_logs: '读取 AI 上游请求日志失败',
       inspect_recent_connection_failures: '汇总最近连接失败记录失败',
+      inspect_mcp_runtime_failures: '读取 MCP 运行期失败诊断失败',
       inspect_ai_last_render_error: '读取最近一次 AI 渲染异常失败',
       inspect_ai_message_flow: '读取 AI 消息流诊断失败',
       inspect_ai_context_budget: '读取 AI 上下文体量诊断失败',

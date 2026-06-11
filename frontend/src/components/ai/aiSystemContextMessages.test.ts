@@ -68,7 +68,7 @@ describe('buildAISystemContextMessages', () => {
       connections: [connections[0]],
       tabs: [],
       activeTabId: null,
-      availableToolNames: ['inspect_workspace_tabs', 'inspect_app_health', 'inspect_ai_support_bundle', 'inspect_ai_setup_health', 'inspect_ai_runtime', 'inspect_ai_safety', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_ai_upstream_logs', 'inspect_ai_tool_catalog', 'inspect_mcp_setup', 'inspect_mcp_authoring_guide', 'inspect_mcp_draft', 'inspect_mcp_tool_schema', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_connection_capabilities', 'inspect_saved_connections', 'inspect_external_sql_directories', 'inspect_external_sql_file', 'inspect_recent_sql_activity', 'inspect_sql_editor_transaction', 'inspect_sql_risk', 'inspect_recent_connection_failures', 'inspect_app_logs', 'inspect_ai_last_render_error', 'inspect_ai_message_flow', 'inspect_ai_context_budget', 'inspect_saved_queries', 'inspect_ai_sessions', 'inspect_sql_snippets', 'inspect_shortcuts', 'get_columns'],
+      availableToolNames: ['inspect_workspace_tabs', 'inspect_app_health', 'inspect_ai_support_bundle', 'inspect_ai_setup_health', 'inspect_ai_runtime', 'inspect_ai_safety', 'inspect_ai_providers', 'inspect_ai_chat_readiness', 'inspect_ai_upstream_logs', 'inspect_ai_tool_catalog', 'inspect_mcp_setup', 'inspect_mcp_runtime_failures', 'inspect_mcp_authoring_guide', 'inspect_mcp_draft', 'inspect_mcp_tool_schema', 'inspect_ai_guidance', 'inspect_ai_context', 'inspect_current_connection', 'inspect_connection_capabilities', 'inspect_saved_connections', 'inspect_external_sql_directories', 'inspect_external_sql_file', 'inspect_recent_sql_activity', 'inspect_sql_editor_transaction', 'inspect_sql_risk', 'inspect_recent_connection_failures', 'inspect_app_logs', 'inspect_ai_last_render_error', 'inspect_ai_message_flow', 'inspect_ai_context_budget', 'inspect_saved_queries', 'inspect_ai_sessions', 'inspect_sql_snippets', 'inspect_shortcuts', 'get_columns'],
       skills,
       userPromptSettings,
     });
@@ -85,6 +85,7 @@ describe('buildAISystemContextMessages', () => {
     expect(joined).toContain('inspect_ai_upstream_logs 读取脱敏后的真实请求日志');
     expect(joined).toContain('inspect_ai_tool_catalog 按关键词读取真实工具目录');
     expect(joined).toContain('inspect_mcp_setup 读取真实 MCP 配置');
+    expect(joined).toContain('inspect_mcp_runtime_failures 读取真实 MCP 运行期失败日志');
     expect(joined).toContain('inspect_mcp_authoring_guide 读取真实新增指引和模板');
     expect(joined).toContain('inspect_mcp_draft 返回自动拆分、启动预览、suggestedServerSeed、配置错误/告警和 nextActions');
     expect(joined).toContain('inspect_mcp_tool_schema 读取真实 inputSchema');
