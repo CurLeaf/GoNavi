@@ -191,6 +191,7 @@ export async function executeDiagnosticsSnapshotToolCall({
           includeBody: args.includeBody !== false,
           includeLines: args.includeLines === true,
           bodyPreviewLimit: args.bodyPreviewLimit,
+          includePayloadSummary: args.includePayloadSummary !== false,
         })),
         success: true,
       };

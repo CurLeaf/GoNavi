@@ -58,7 +58,57 @@ describe('aiLocalToolExecutor inspect_ai_upstream_logs', () => {
     expect(result.content).toContain('"status":200');
     expect(result.content).toContain('"bodyPreview"');
     expect(result.content).toContain('gpt-5.5');
+    expect(result.content).toContain('"bodySummary"');
+    expect(result.content).toContain('"messageCount":1');
+    expect(result.content).toContain('"toolCount":0');
     expect(result.content).not.toContain('abcdefghijklmnopqrstuvwxyz');
+  });
+
+  it('summarizes payload shape without exposing prompt content when body preview is disabled', async () => {
+    const readAppLogTail = vi.fn().mockResolvedValue({
+      success: true,
+      data: {
+        logPath: 'C:/Users/demo/.GoNavi/Logs/gonavi.log',
+        keyword: 'AI 上游请求',
+        requestedLineLimit: 160,
+        lines: [
+          '2026/06/11 13:20:00.000000 [INFO] AI 上游请求开始：requestId=openai-tools-123 provider=openai method=POST endpoint=https://api.example.com/v1/chat/completions body={"model":"gpt-5.5","stream":true,"messages":[{"role":"system","content":"system secret password=abc123"},{"role":"user","content":"user private text"}],"tools":[{"type":"function","function":{"name":"inspect_app_health","description":"inspect app","parameters":{"type":"object","properties":{}}}}],"tool_choice":"auto","response_format":{"type":"json_object"},"api_key":"sk-should-not-leak"}',
+          '2026/06/11 13:20:01.000000 [INFO] AI 上游请求完成：requestId=openai-tools-123 provider=openai endpoint=https://api.example.com/v1/chat/completions status=200 duration=981ms',
+        ],
+      },
+    });
+
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_upstream_logs', {
+        includeBody: false,
+      }),
+      connections: [],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        readAppLogTail,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(readAppLogTail).toHaveBeenCalledWith(160, 'AI 上游请求');
+    expect(result.content).toContain('"payloadSummaryEnabled":true');
+    expect(result.content).not.toContain('"bodyPreview"');
+    expect(result.content).not.toContain('password=abc123');
+    expect(result.content).not.toContain('user private text');
+    expect(result.content).not.toContain('sk-should-not-leak');
+    expect(result.content).toContain('"bodySummary"');
+    expect(result.content).toContain('"model":"gpt-5.5"');
+    expect(result.content).toContain('"messageCount":2');
+    expect(result.content).toContain('"system":1');
+    expect(result.content).toContain('"user":1');
+    expect(result.content).toContain('"toolCount":1');
+    expect(result.content).toContain('"toolNames":["inspect_app_health"]');
+    expect(result.content).toContain('"hasStream":true');
+    expect(result.content).toContain('"hasToolChoice":true');
+    expect(result.content).toContain('"hasResponseFormat":true');
   });
 
   it('returns an actionable empty-state message when no upstream request log is available', async () => {

@@ -23,8 +23,25 @@ interface AIUpstreamLogEvent {
   status?: number;
   duration?: string;
   bodyPreview?: string;
+  bodySummary?: AIUpstreamPayloadSummary;
   error?: string;
   line: string;
+}
+
+interface AIUpstreamPayloadSummary {
+  parseable: boolean;
+  parseError?: string;
+  topLevelKeys?: string[];
+  model?: string;
+  messageCount?: number;
+  messageRoleCounts?: Record<string, number>;
+  toolCount?: number;
+  toolNames?: string[];
+  hasStream?: boolean;
+  hasToolChoice?: boolean;
+  hasResponseFormat?: boolean;
+  inputTextCharCount?: number;
+  warnings?: string[];
 }
 
 interface AIUpstreamRequestSummary {
@@ -36,6 +53,7 @@ interface AIUpstreamRequestSummary {
   status?: number;
   duration?: string;
   bodyPreview?: string;
+  bodySummary?: AIUpstreamPayloadSummary;
   error?: string;
   eventCount: number;
   hasBody: boolean;
@@ -68,6 +86,146 @@ const truncateText = (value: string, limit: number): string => {
   return `${value.slice(0, limit)}...[truncated ${value.length - limit} chars]`;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+const asRecordArray = (value: unknown): Record<string, unknown>[] =>
+  Array.isArray(value) ? value.filter(isRecord) : [];
+
+const stringValue = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() ? value.trim() : undefined;
+
+const addName = (names: Set<string>, value: unknown) => {
+  const normalized = stringValue(value);
+  if (normalized) {
+    names.add(normalized);
+  }
+};
+
+const extractToolNames = (body: Record<string, unknown>): string[] => {
+  const names = new Set<string>();
+  asRecordArray(body.tools).forEach((tool) => {
+    addName(names, tool.name);
+    if (isRecord(tool.function)) {
+      addName(names, tool.function.name);
+    }
+    asRecordArray(tool.functionDeclarations).forEach((declaration) => addName(names, declaration.name));
+    asRecordArray(tool.function_declarations).forEach((declaration) => addName(names, declaration.name));
+  });
+  asRecordArray(body.functions).forEach((fn) => addName(names, fn.name));
+  return Array.from(names).slice(0, 30);
+};
+
+const countToolDefinitions = (body: Record<string, unknown>, toolNames: string[]): number => {
+  const tools = asRecordArray(body.tools);
+  const functionDeclarationCount = tools.reduce((total, tool) => {
+    const camelDeclarations = asRecordArray(tool.functionDeclarations).length;
+    const snakeDeclarations = asRecordArray(tool.function_declarations).length;
+    return total + camelDeclarations + snakeDeclarations;
+  }, 0);
+  const genericToolCount = tools.length;
+  const legacyFunctionCount = asRecordArray(body.functions).length;
+  return functionDeclarationCount || legacyFunctionCount || genericToolCount || toolNames.length;
+};
+
+const normalizeMessageRole = (message: Record<string, unknown>): string => {
+  const role = stringValue(message.role);
+  if (role) return role;
+  if (isRecord(message.author)) {
+    return stringValue(message.author.role) || 'unknown';
+  }
+  return 'unknown';
+};
+
+const getMessageLikeItems = (body: Record<string, unknown>): Record<string, unknown>[] => {
+  const messages = asRecordArray(body.messages);
+  if (messages.length > 0) return messages;
+  const contents = asRecordArray(body.contents);
+  if (contents.length > 0) return contents;
+  return [];
+};
+
+const addTextLength = (value: unknown): number => {
+  if (typeof value === 'string') return value.length;
+  if (Array.isArray(value)) return value.reduce((total, item) => total + addTextLength(item), 0);
+  if (!isRecord(value)) return 0;
+  return ['content', 'text', 'prompt', 'system', 'input'].reduce(
+    (total, key) => total + addTextLength(value[key]),
+    0,
+  );
+};
+
+const estimateInputTextChars = (body: Record<string, unknown>): number => {
+  const messageItems = getMessageLikeItems(body);
+  const messageChars = messageItems.reduce((total, item) => total + addTextLength(item), 0);
+  return messageChars
+    + addTextLength(body.system)
+    + addTextLength(body.prompt)
+    + addTextLength(body.input);
+};
+
+const summarizeAIUpstreamPayload = (bodyText: string): AIUpstreamPayloadSummary => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch (error: any) {
+    return {
+      parseable: false,
+      parseError: String(error?.message || error || 'invalid JSON'),
+      warnings: ['请求 body 不是完整 JSON，可能已被日志截断，无法生成结构化摘要'],
+    };
+  }
+
+  if (!isRecord(parsed)) {
+    return {
+      parseable: false,
+      parseError: 'request body is not a JSON object',
+      warnings: ['请求 body 不是 JSON object，无法识别模型、消息和工具字段'],
+    };
+  }
+
+  const topLevelKeys = Object.keys(parsed).slice(0, 30);
+  const messages = getMessageLikeItems(parsed);
+  const messageRoleCounts = messages.reduce<Record<string, number>>((acc, message) => {
+    const role = normalizeMessageRole(message);
+    acc[role] = (acc[role] || 0) + 1;
+    return acc;
+  }, {});
+  if (parsed.system !== undefined) {
+    messageRoleCounts.system = (messageRoleCounts.system || 0) + 1;
+  }
+  const toolNames = extractToolNames(parsed);
+  const toolCount = countToolDefinitions(parsed, toolNames);
+  const messageCount = messages.length + (parsed.system !== undefined ? 1 : 0) + (parsed.prompt !== undefined ? 1 : 0);
+  const inputTextCharCount = estimateInputTextChars(parsed);
+  const warnings: string[] = [];
+
+  if (messageCount === 0) {
+    warnings.push('未识别到 messages、contents、system 或 prompt 字段，请确认上游协议是否符合预期');
+  }
+  if (toolCount === 0) {
+    warnings.push('payload 未携带 tools/functions，模型无法发起工具调用');
+  }
+  if (inputTextCharCount > 60000) {
+    warnings.push('输入文本体量较大，必要时先收窄上下文或减少日志/DDL 内容');
+  }
+
+  return {
+    parseable: true,
+    topLevelKeys,
+    model: stringValue(parsed.model) || stringValue(parsed.modelName),
+    messageCount,
+    messageRoleCounts,
+    toolCount,
+    toolNames,
+    hasStream: parsed.stream === true || isRecord(parsed.stream_options),
+    hasToolChoice: parsed.tool_choice !== undefined || parsed.toolChoice !== undefined || parsed.toolConfig !== undefined,
+    hasResponseFormat: parsed.response_format !== undefined || parsed.responseFormat !== undefined || parsed.generationConfig !== undefined,
+    inputTextCharCount,
+    warnings: warnings.length > 0 ? warnings : undefined,
+  };
+};
+
 const extractField = (line: string, field: string): string => {
   const match = line.match(new RegExp(`(?:^|[\\s：])${field}=([^\\s]+)`));
   return match?.[1] || '';
@@ -92,6 +250,7 @@ const resolveEventType = (line: string): AIUpstreamLogEventType => {
 const parseAIUpstreamLogEvent = (
   line: string,
   bodyPreviewLimit: number,
+  includePayloadSummary: boolean,
 ): AIUpstreamLogEvent | null => {
   if (!line.includes('AI 上游请求')) {
     return null;
@@ -116,6 +275,7 @@ const parseAIUpstreamLogEvent = (
     status: statusText ? Number(statusText) : undefined,
     duration,
     bodyPreview: bodyText ? truncateText(redactAIUpstreamLogPreview(bodyText), bodyPreviewLimit) : undefined,
+    bodySummary: bodyText && includePayloadSummary ? summarizeAIUpstreamPayload(bodyText) : undefined,
     error: errorText ? truncateText(redactAIUpstreamLogPreview(errorText), 2000) : undefined,
     line: truncateText(redactAIUpstreamLogPreview(line), 4000),
   };
@@ -178,6 +338,7 @@ const summarizeAIUpstreamRequests = (
       existing.hasBody = true;
       if (includeBody) existing.bodyPreview = event.bodyPreview;
     }
+    if (event.bodySummary) existing.bodySummary = event.bodySummary;
     if (event.error) existing.error = event.error;
     requestMap.set(requestKey, existing);
   });
@@ -194,6 +355,7 @@ export const buildAIUpstreamLogSnapshot = (params: {
   includeBody?: unknown;
   includeLines?: unknown;
   bodyPreviewLimit?: unknown;
+  includePayloadSummary?: unknown;
 }) => {
   const data = params.readResult?.data && typeof params.readResult.data === 'object'
     ? params.readResult.data as Record<string, unknown>
@@ -203,9 +365,10 @@ export const buildAIUpstreamLogSnapshot = (params: {
   const bodyPreviewLimit = clampNumber(params.bodyPreviewLimit, DEFAULT_AI_UPSTREAM_BODY_LIMIT, 200, MAX_AI_UPSTREAM_BODY_LIMIT);
   const includeBody = params.includeBody !== false;
   const includeLines = params.includeLines === true;
+  const includePayloadSummary = params.includePayloadSummary !== false;
   const lines = normalizeLogLines(data.lines);
   const parsedEvents = lines
-    .map((line) => parseAIUpstreamLogEvent(line, bodyPreviewLimit))
+    .map((line) => parseAIUpstreamLogEvent(line, bodyPreviewLimit, includePayloadSummary))
     .filter((event): event is AIUpstreamLogEvent => Boolean(event))
     .filter((event) => matchesFilter(event, params));
   const eventBreakdown = {
@@ -227,6 +390,7 @@ export const buildAIUpstreamLogSnapshot = (params: {
     returnedLineCount: lines.length,
     upstreamEventCount: parsedEvents.length,
     requestCount: requests.length,
+    payloadSummaryEnabled: includePayloadSummary,
     eventBreakdown,
     providers,
     requestIds,

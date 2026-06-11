@@ -99,6 +99,7 @@ describe('aiToolRegistry', () => {
     expect(info?.desc).toContain('上游请求入参');
     expect(info?.tool.function.description).toContain('请求 body 预览');
     expect(info?.tool.function.parameters?.properties?.requestId?.description).toContain('requestId');
+    expect(info?.tool.function.parameters?.properties?.includePayloadSummary?.description).toContain('工具数量');
   });
 
   it('registers the ai-tool-catalog inspector as a builtin tool', () => {

@@ -90,7 +90,7 @@ export const appendDatabaseInspectionGuidanceMessages = (
     messages,
     availableToolNames,
     'inspect_ai_upstream_logs',
-    '如果用户提到“AI 上游请求”“请求入参/请求体”“requestId”“发给模型的 payload”“上游接口报错具体传了什么”，优先调用 inspect_ai_upstream_logs 读取脱敏后的真实请求日志，再结合 inspect_ai_providers 或 inspect_ai_message_flow 继续定位。',
+    '如果用户提到“AI 上游请求”“请求入参/请求体”“requestId”“发给模型的 payload”“工具调用没触发”“上游接口报错具体传了什么”，优先调用 inspect_ai_upstream_logs 读取脱敏后的真实请求日志和 payload 结构摘要，再结合 inspect_ai_providers 或 inspect_ai_message_flow 继续定位。',
   );
   appendGuidanceIfToolAvailable(
     messages,
