@@ -302,7 +302,10 @@ export interface ConnectionConfig {
   clickHouseProtocol?: "auto" | "http" | "native"; // ClickHouse connection protocol override
   oceanBaseProtocol?: "mysql" | "oracle"; // OceanBase tenant compatibility protocol
   hosts?: string[]; // Multi-host addresses: host:port
-  topology?: "single" | "replica" | "cluster";
+  topology?: "single" | "replica" | "cluster" | "sentinel";
+  redisSentinelMaster?: string;
+  redisSentinelUser?: string;
+  redisSentinelPassword?: string;
   mysqlReplicaUser?: string;
   mysqlReplicaPassword?: string;
   replicaSet?: string;
@@ -335,6 +338,7 @@ export interface SavedConnection {
   hasHttpTunnelPassword?: boolean;
   hasMySQLReplicaPassword?: boolean;
   hasMongoReplicaPassword?: boolean;
+  hasRedisSentinelPassword?: boolean;
   hasOpaqueURI?: boolean;
   hasOpaqueDSN?: boolean;
   includeDatabases?: string[];

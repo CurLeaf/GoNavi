@@ -1,11 +1,13 @@
 package redis
 
 import (
+	"GoNavi-Wails/internal/connection"
 	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -221,6 +223,55 @@ func TestSanitizeRedisPassword(t *testing.T) {
 				t.Errorf("sanitizeRedisPassword(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestRedisSentinelRequiresMasterNameBeforeDial(t *testing.T) {
+	client := NewRedisClient()
+	err := client.Connect(connection.ConnectionConfig{
+		Type:     "redis",
+		Host:     "127.0.0.1",
+		Port:     26379,
+		Topology: "sentinel",
+	})
+	if err == nil || !strings.Contains(err.Error(), "master 名称") {
+		t.Fatalf("expected missing Sentinel master validation error, got %v", err)
+	}
+}
+
+func TestRedisSentinelWithMultipleAddrsDoesNotUseClusterBranch(t *testing.T) {
+	client := NewRedisClient()
+	err := client.Connect(connection.ConnectionConfig{
+		Type:                "redis",
+		Host:                "127.0.0.1",
+		Port:                26379,
+		Hosts:               []string{"127.0.0.2:26379"},
+		Topology:            "sentinel",
+		RedisSentinelMaster: "mymaster",
+		UseSSH:              true,
+	})
+	if err == nil {
+		t.Fatal("expected Sentinel SSH validation error")
+	}
+	if !strings.Contains(err.Error(), "Sentinel模式暂不支持 SSH 隧道") {
+		t.Fatalf("expected Sentinel-specific SSH error, got %v", err)
+	}
+}
+
+func TestRedisClusterKeepsSSHValidation(t *testing.T) {
+	client := NewRedisClient()
+	err := client.Connect(connection.ConnectionConfig{
+		Type:     "redis",
+		Host:     "127.0.0.1",
+		Port:     6379,
+		Topology: "cluster",
+		UseSSH:   true,
+	})
+	if err == nil {
+		t.Fatal("expected cluster SSH validation error")
+	}
+	if !strings.Contains(err.Error(), "集群模式暂不支持 SSH 隧道") {
+		t.Fatalf("expected cluster SSH error, got %v", err)
 	}
 }
 

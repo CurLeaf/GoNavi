@@ -176,6 +176,7 @@ type ConnectionSecretKey =
   | "httpTunnelPassword"
   | "mysqlReplicaPassword"
   | "mongoReplicaPassword"
+  | "redisSentinelPassword"
   | "opaqueURI"
   | "opaqueDSN";
 
@@ -189,6 +190,7 @@ const createEmptyConnectionSecretClearState =
     httpTunnelPassword: false,
     mysqlReplicaPassword: false,
     mongoReplicaPassword: false,
+    redisSentinelPassword: false,
     opaqueURI: false,
     opaqueDSN: false,
   });
@@ -215,6 +217,8 @@ const resolveInitialSecretFieldValue = (
       return String(config.mysqlReplicaPassword || "");
     case "mongoReplicaPassword":
       return String(config.mongoReplicaPassword || "");
+    case "redisSentinelPassword":
+      return String(config.redisSentinelPassword || "");
     case "uri":
       return String(config.uri || "");
     case "dsn":
@@ -915,6 +919,19 @@ const ConnectionModal: React.FC<{
       setMongoMembers([]);
     }
     if (fieldName === "redisTopology") {
+      const nextRedisTopology = String(value || "single").toLowerCase();
+      const currentRedisPort = Number(form.getFieldValue("port") || 0);
+      if (
+        nextRedisTopology === "sentinel" &&
+        (!currentRedisPort || currentRedisPort === 6379)
+      ) {
+        form.setFieldValue("port", 26379);
+      } else if (
+        nextRedisTopology !== "sentinel" &&
+        currentRedisPort === 26379
+      ) {
+        form.setFieldValue("port", 6379);
+      }
       const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
       setRedisDbList(supportedDbs);
       const selectedDbsRaw = form.getFieldValue("includeRedisDatabases");
@@ -1688,14 +1705,19 @@ const ConnectionModal: React.FC<{
       if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
         return null;
       }
-      const hostList = normalizeAddressList(parsed.hosts, 6379);
-      if (!hostList.length) {
-        return null;
-      }
-      const primary = parseHostPort(hostList[0] || "localhost:6379", 6379);
       const topologyParam = String(
         parsed.params.get("topology") || "",
       ).toLowerCase();
+      const isSentinelTopology = topologyParam === "sentinel";
+      const redisNodeDefaultPort = isSentinelTopology ? 26379 : 6379;
+      const hostList = normalizeAddressList(parsed.hosts, redisNodeDefaultPort);
+      if (!hostList.length) {
+        return null;
+      }
+      const primary = parseHostPort(
+        hostList[0] || `localhost:${redisNodeDefaultPort}`,
+        redisNodeDefaultPort,
+      );
       const dbText = String(parsed.database || "")
         .trim()
         .replace(/^\//, "");
@@ -1711,7 +1733,7 @@ const ConnectionModal: React.FC<{
         skipVerifyText === "on";
       return {
         host: primary?.host || "localhost",
-        port: primary?.port || 6379,
+        port: primary?.port || redisNodeDefaultPort,
         user: parsed.username || "",
         password: parsed.password || "",
         useSSL: isRediss,
@@ -1721,11 +1743,30 @@ const ConnectionModal: React.FC<{
             : "required"
           : "disable",
         ...extractSSLPathValuesFromParams(parsed.params, type),
-        redisTopology:
-          hostList.length > 1 || topologyParam === "cluster"
+        redisTopology: isSentinelTopology
+          ? "sentinel"
+          : hostList.length > 1 || topologyParam === "cluster"
             ? "cluster"
             : "single",
         redisHosts: hostList.slice(1),
+        redisSentinelMaster: isSentinelTopology
+          ? String(
+              parsed.params.get("master") ||
+                parsed.params.get("master_name") ||
+                parsed.params.get("sentinel_master") ||
+                "",
+            ).trim()
+          : "",
+        redisSentinelUser: isSentinelTopology
+          ? String(
+              parsed.params.get("sentinel_user") ||
+                parsed.params.get("sentinel_username") ||
+                "",
+            ).trim()
+          : "",
+        redisSentinelPassword: isSentinelTopology
+          ? String(parsed.params.get("sentinel_password") || "")
+          : "",
         redisDB:
           Number.isFinite(dbIndex) && dbIndex >= 0 && dbIndex <= 15
             ? Math.trunc(dbIndex)
@@ -2037,7 +2078,7 @@ const ConnectionModal: React.FC<{
       return "clickhouse://default:pass@127.0.0.1:9000/default";
     }
     if (dbType === "redis") {
-      return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster";
+      return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster 或 redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster";
     }
     if (dbType === "oracle") {
       return "oracle://user:pass@127.0.0.1:1521/ORCLPDB1";
@@ -2144,14 +2185,33 @@ const ConnectionModal: React.FC<{
     }
 
     if (type === "redis") {
-      const primary = toAddress(host, port, 6379);
-      const clusterHosts =
-        values.redisTopology === "cluster"
-          ? normalizeAddressList(values.redisHosts, 6379)
+      const redisTopology = String(values.redisTopology || "single");
+      const redisNodeDefaultPort = redisTopology === "sentinel" ? 26379 : 6379;
+      const primary = toAddress(host, port, redisNodeDefaultPort);
+      const extraRedisHosts =
+        redisTopology === "cluster" || redisTopology === "sentinel"
+          ? normalizeAddressList(values.redisHosts, redisNodeDefaultPort)
           : [];
-      const hosts = normalizeAddressList([primary, ...clusterHosts], 6379);
+      const hosts = normalizeAddressList(
+        [primary, ...extraRedisHosts],
+        redisNodeDefaultPort,
+      );
       const params = new URLSearchParams();
-      if (hosts.length > 1 || values.redisTopology === "cluster") {
+      if (redisTopology === "sentinel") {
+        params.set("topology", "sentinel");
+        const sentinelMaster = String(values.redisSentinelMaster || "").trim();
+        if (sentinelMaster) {
+          params.set("master", sentinelMaster);
+        }
+        const sentinelUser = String(values.redisSentinelUser || "").trim();
+        if (sentinelUser) {
+          params.set("sentinel_user", sentinelUser);
+        }
+        const sentinelPassword = String(values.redisSentinelPassword || "");
+        if (sentinelPassword) {
+          params.set("sentinel_password", sentinelPassword);
+        }
+      } else if (hosts.length > 1 || redisTopology === "cluster") {
         params.set("topology", "cluster");
       }
       const redisUser = String(values.user || "").trim();
@@ -2540,9 +2600,11 @@ const ConnectionModal: React.FC<{
           String(config.topology || "").toLowerCase() === "replica" ||
           mongoHosts.length > 0 ||
           !!config.replicaSet;
+        const redisTopologyValue = String(config.topology || "").toLowerCase();
+        const redisIsSentinel = redisTopologyValue === "sentinel";
         const redisIsCluster =
-          String(config.topology || "").toLowerCase() === "cluster" ||
-          redisHosts.length > 0;
+          !redisIsSentinel &&
+          (redisTopologyValue === "cluster" || redisHosts.length > 0);
         const {
           allowedModes: resolvedJvmAllowedModes,
           preferredMode: resolvedJvmPreferredMode,
@@ -2610,8 +2672,15 @@ const ConnectionModal: React.FC<{
           mysqlReplicaPassword: config.mysqlReplicaPassword || "",
           mongoTopology: mongoIsReplica ? "replica" : "single",
           mongoHosts: mongoHosts,
-          redisTopology: redisIsCluster ? "cluster" : "single",
+          redisTopology: redisIsSentinel
+            ? "sentinel"
+            : redisIsCluster
+              ? "cluster"
+              : "single",
           redisHosts: redisHosts,
+          redisSentinelMaster: config.redisSentinelMaster || "",
+          redisSentinelUser: config.redisSentinelUser || "",
+          redisSentinelPassword: config.redisSentinelPassword || "",
           mongoSrv: !!config.mongoSrv,
           mongoReplicaSet: config.replicaSet || "",
           mongoAuthSource: config.authSource || "",
@@ -2808,6 +2877,16 @@ const ConnectionModal: React.FC<{
       clearSecret: clearSecrets.mongoReplicaPassword,
       forceClear: !mongoReplicaEnabled,
     });
+    const redisSentinelEnabled =
+      config.type === "redis" &&
+      config.topology === "sentinel" &&
+      values.savePassword !== false;
+    const redisSentinelDraft = resolveConnectionSecretDraft({
+      hasSecret: initialValues?.hasRedisSentinelPassword,
+      valueInput: config.redisSentinelPassword,
+      clearSecret: clearSecrets.redisSentinelPassword,
+      forceClear: !redisSentinelEnabled,
+    });
     const opaqueUriDraft = resolveConnectionSecretDraft({
       hasSecret: initialValues?.hasOpaqueURI,
       valueInput: config.uri,
@@ -2876,6 +2955,7 @@ const ConnectionModal: React.FC<{
         dsn: opaqueDsnDraft.value,
         mysqlReplicaPassword: mysqlReplicaDraft.value,
         mongoReplicaPassword: mongoReplicaDraft.value,
+        redisSentinelPassword: redisSentinelDraft.value,
       },
       includeDatabases: values.includeDatabases,
       includeRedisDatabases: isRedisType
@@ -2889,6 +2969,7 @@ const ConnectionModal: React.FC<{
       clearHttpTunnelPassword: httpTunnelDraft.clearStoredSecret,
       clearMySQLReplicaPassword: mysqlReplicaDraft.clearStoredSecret,
       clearMongoReplicaPassword: mongoReplicaDraft.clearStoredSecret,
+      clearRedisSentinelPassword: redisSentinelDraft.clearStoredSecret,
       clearOpaqueURI: opaqueUriDraft.clearStoredSecret,
       clearOpaqueDSN: opaqueDsnDraft.clearStoredSecret,
     };
@@ -3034,6 +3115,14 @@ const ConnectionModal: React.FC<{
       String(values.mongoReplicaPassword ?? "") === ""
     ) {
       return "测试连接前请填写新的副本集密码，或取消清除已保存副本集密码";
+    }
+    if (
+      clearSecrets.redisSentinelPassword &&
+      values.type === "redis" &&
+      values.redisTopology === "sentinel" &&
+      String(values.redisSentinelPassword ?? "") === ""
+    ) {
+      return "测试连接前请填写新的 Sentinel 密码，或取消清除已保存 Sentinel 密码";
     }
     if (
       values.type === "mongodb" &&
@@ -3472,7 +3561,7 @@ const ConnectionModal: React.FC<{
     }
 
     let hosts: string[] = [];
-    let topology: "single" | "replica" | "cluster" | undefined;
+    let topology: "single" | "replica" | "cluster" | "sentinel" | undefined;
     let replicaSet = "";
     let authSource = "";
     let readPreference = "";
@@ -3482,6 +3571,9 @@ const ConnectionModal: React.FC<{
     let mongoAuthMechanism = "";
     let mongoReplicaUser = "";
     let mongoReplicaPassword = "";
+    let redisSentinelMaster = "";
+    let redisSentinelUser = "";
+    let redisSentinelPassword = "";
     const savePassword =
       type === "mongodb" ? mergedValues.savePassword !== false : true;
 
@@ -3543,15 +3635,29 @@ const ConnectionModal: React.FC<{
     }
 
     if (type === "redis") {
-      const clusterNodes =
-        mergedValues.redisTopology === "cluster"
-          ? normalizeAddressList(mergedValues.redisHosts, defaultPort)
+      const redisTopology = String(mergedValues.redisTopology || "single");
+      const redisNodeDefaultPort = redisTopology === "sentinel" ? 26379 : defaultPort;
+      if (
+        redisTopology === "sentinel" &&
+        (!Number(mergedValues.port) || Number(mergedValues.port) === defaultPort)
+      ) {
+        primaryPort = redisNodeDefaultPort;
+      }
+      const extraRedisNodes =
+        redisTopology === "cluster" || redisTopology === "sentinel"
+          ? normalizeAddressList(mergedValues.redisHosts, redisNodeDefaultPort)
           : [];
       const allHosts = normalizeAddressList(
-        [`${primaryHost}:${primaryPort}`, ...clusterNodes],
-        defaultPort,
+        [`${primaryHost}:${primaryPort}`, ...extraRedisNodes],
+        redisNodeDefaultPort,
       );
-      if (mergedValues.redisTopology === "cluster" || allHosts.length > 1) {
+      if (redisTopology === "sentinel") {
+        hosts = allHosts;
+        topology = "sentinel";
+        redisSentinelMaster = String(mergedValues.redisSentinelMaster || "").trim();
+        redisSentinelUser = String(mergedValues.redisSentinelUser || "").trim();
+        redisSentinelPassword = String(mergedValues.redisSentinelPassword || "");
+      } else if (redisTopology === "cluster" || allHosts.length > 1) {
         hosts = allHosts;
         topology = "cluster";
       } else {
@@ -3661,6 +3767,9 @@ const ConnectionModal: React.FC<{
       redisDB: Number.isFinite(Number(mergedValues.redisDB))
         ? Math.max(0, Math.min(15, Math.trunc(Number(mergedValues.redisDB))))
         : 0,
+      redisSentinelMaster: redisSentinelMaster,
+      redisSentinelUser: redisSentinelUser,
+      redisSentinelPassword: keepPassword ? redisSentinelPassword : "",
       uri: String(mergedValues.uri || "").trim(),
       clickHouseProtocol:
         type === "clickhouse"
@@ -3751,6 +3860,9 @@ const ConnectionModal: React.FC<{
         savePassword: true,
         mysqlReplicaHosts: [],
         redisHosts: [],
+        redisSentinelMaster: "",
+        redisSentinelUser: "",
+        redisSentinelPassword: "",
         mongoHosts: [],
         mysqlReplicaUser: "",
         mysqlReplicaPassword: "",
@@ -3810,6 +3922,9 @@ const ConnectionModal: React.FC<{
         savePassword: true,
         mysqlReplicaHosts: [],
         redisHosts: [],
+        redisSentinelMaster: "",
+        redisSentinelUser: "",
+        redisSentinelPassword: "",
         mongoHosts: [],
         mysqlReplicaUser: "",
         mysqlReplicaPassword: "",
@@ -3849,6 +3964,9 @@ const ConnectionModal: React.FC<{
         savePassword: true,
         mysqlReplicaHosts: [],
         redisHosts: [],
+        redisSentinelMaster: "",
+        redisSentinelUser: "",
+        redisSentinelPassword: "",
         mongoHosts: [],
         mysqlReplicaUser: "",
         mysqlReplicaPassword: "",
@@ -5539,21 +5657,59 @@ const ConnectionModal: React.FC<{
                             label: "集群模式",
                             description: "Redis Cluster，配置多个种子节点。",
                           },
+                          {
+                            value: "sentinel",
+                            label: "哨兵模式",
+                            description: "通过 Sentinel 发现主节点，适合主从高可用。",
+                          },
                         ],
                       })}
-                      {redisTopology === "cluster" && (
-                        <Form.Item
-                          name="redisHosts"
-                          label="集群附加节点地址"
-                          help="主节点使用上方主机地址；这里填写其他种子节点，格式：host:port"
-                          style={{ marginTop: 16, marginBottom: 0 }}
-                        >
-                          <Select
-                            mode="tags"
-                            placeholder="例如：10.10.0.12:6379、10.10.0.13:6379"
-                            tokenSeparators={[",", ";", " "]}
-                          />
-                        </Form.Item>
+                      {(redisTopology === "cluster" ||
+                        redisTopology === "sentinel") && (
+                        <>
+                          <Form.Item
+                            name="redisHosts"
+                            label={
+                              redisTopology === "sentinel"
+                                ? "Sentinel 附加节点地址"
+                                : "集群附加节点地址"
+                            }
+                            help={
+                              redisTopology === "sentinel"
+                                ? "上方主机地址作为第一个 Sentinel；这里填写其他 Sentinel 节点，格式：host:port"
+                                : "主节点使用上方主机地址；这里填写其他种子节点，格式：host:port"
+                            }
+                            style={{ marginTop: 16, marginBottom: 0 }}
+                          >
+                            <Select
+                              mode="tags"
+                              placeholder={
+                                redisTopology === "sentinel"
+                                  ? "例如：10.10.0.12:26379、10.10.0.13:26379"
+                                  : "例如：10.10.0.12:6379、10.10.0.13:6379"
+                              }
+                              tokenSeparators={[",", ";", " "]}
+                            />
+                          </Form.Item>
+                          {redisTopology === "sentinel" && (
+                            <Form.Item
+                              name="redisSentinelMaster"
+                              label="Sentinel master 名称"
+                              help="填写 Sentinel 配置中的 monitor 名称，例如 mymaster。"
+                              rules={[
+                                createUriAwareRequiredRule(
+                                  "请输入 Sentinel master 名称",
+                                ),
+                              ]}
+                              style={{ marginTop: 16, marginBottom: 0 }}
+                            >
+                              <Input
+                                {...noAutoCapInputProps}
+                                placeholder="例如：mymaster"
+                              />
+                            </Form.Item>
+                          )}
+                        </>
                       )}
                     </>
                   ),
@@ -5580,6 +5736,54 @@ const ConnectionModal: React.FC<{
                           })}
                         />
                       </Form.Item>
+                      {redisTopology === "sentinel" && (
+                        <>
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns:
+                                "repeat(2, minmax(0, 1fr))",
+                              gap: 16,
+                            }}
+                          >
+                            <Form.Item
+                              name="redisSentinelUser"
+                              label="Sentinel 用户名（可选）"
+                              style={{ marginBottom: 0 }}
+                            >
+                              <Input
+                                {...noAutoCapInputProps}
+                                placeholder="留空表示 Sentinel 不使用 ACL 用户名"
+                              />
+                            </Form.Item>
+                            <Form.Item
+                              name="redisSentinelPassword"
+                              label="Sentinel 密码（可选）"
+                              style={{ marginBottom: 0 }}
+                            >
+                              <Input.Password
+                                {...noAutoCapInputProps}
+                                placeholder={getStoredSecretPlaceholder({
+                                  hasStoredSecret:
+                                    initialValues?.hasRedisSentinelPassword,
+                                  emptyPlaceholder:
+                                    "Sentinel 自身认证密码，留空则不发送",
+                                  retainedLabel: "已保存 Sentinel 密码",
+                                })}
+                              />
+                            </Form.Item>
+                          </div>
+                          {renderStoredSecretControls({
+                            fieldName: "redisSentinelPassword",
+                            clearKey: "redisSentinelPassword",
+                            hasStoredSecret:
+                              initialValues?.hasRedisSentinelPassword,
+                            clearLabel: "清除已保存 Sentinel 密码",
+                            description:
+                              "当前已保存 Sentinel 密码。留空表示继续沿用，输入新值表示替换。",
+                          })}
+                        </>
+                      )}
                     </>
                   ),
                 })}
@@ -6566,6 +6770,9 @@ const ConnectionModal: React.FC<{
           savePassword: true,
           mysqlReplicaHosts: [],
           redisHosts: [],
+          redisSentinelMaster: "",
+          redisSentinelUser: "",
+          redisSentinelPassword: "",
           mongoHosts: [],
           mysqlReplicaUser: "",
           mysqlReplicaPassword: "",
@@ -6685,6 +6892,21 @@ const ConnectionModal: React.FC<{
             );
           }
           if (changed.redisTopology !== undefined) {
+            const nextRedisTopology = String(
+              changed.redisTopology || "single",
+            ).toLowerCase();
+            const currentRedisPort = Number(form.getFieldValue("port") || 0);
+            if (
+              nextRedisTopology === "sentinel" &&
+              (!currentRedisPort || currentRedisPort === 6379)
+            ) {
+              form.setFieldValue("port", 26379);
+            } else if (
+              nextRedisTopology !== "sentinel" &&
+              currentRedisPort === 26379
+            ) {
+              form.setFieldValue("port", 6379);
+            }
             const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
             setRedisDbList(supportedDbs);
             const selectedDbsRaw = form.getFieldValue("includeRedisDatabases");

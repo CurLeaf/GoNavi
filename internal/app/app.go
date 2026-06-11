@@ -253,6 +253,9 @@ func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.Conn
 		normalized.ConnectionParams = ""
 		normalized.Hosts = nil
 		normalized.Topology = ""
+		normalized.RedisSentinelMaster = ""
+		normalized.RedisSentinelUser = ""
+		normalized.RedisSentinelPassword = ""
 		normalized.MySQLReplicaUser = ""
 		normalized.MySQLReplicaPassword = ""
 		normalized.ReplicaSet = ""

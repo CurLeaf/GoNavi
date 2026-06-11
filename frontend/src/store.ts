@@ -756,6 +756,8 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
         ? "replica"
         : raw.topology === "cluster"
           ? "cluster"
+          : raw.topology === "sentinel"
+            ? "sentinel"
           : "single",
     mysqlReplicaUser: toTrimmedString(raw.mysqlReplicaUser),
     mysqlReplicaPassword: savePassword
@@ -780,6 +782,11 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
 
   if (type === "redis") {
     safeConfig.redisDB = normalizeIntegerInRange(raw.redisDB, 0, 0, 15);
+    safeConfig.redisSentinelMaster = toTrimmedString(raw.redisSentinelMaster);
+    safeConfig.redisSentinelUser = toTrimmedString(raw.redisSentinelUser);
+    safeConfig.redisSentinelPassword = savePassword
+      ? toTrimmedString(raw.redisSentinelPassword)
+      : "";
   }
 
   if (type === "clickhouse") {
@@ -864,6 +871,7 @@ const sanitizeSavedConnection = (
     hasHttpTunnelPassword: raw.hasHttpTunnelPassword === true,
     hasMySQLReplicaPassword: raw.hasMySQLReplicaPassword === true,
     hasMongoReplicaPassword: raw.hasMongoReplicaPassword === true,
+    hasRedisSentinelPassword: raw.hasRedisSentinelPassword === true,
     hasOpaqueURI: raw.hasOpaqueURI === true,
     hasOpaqueDSN: raw.hasOpaqueDSN === true,
     includeDatabases:
@@ -1596,6 +1604,7 @@ const hasLegacyConnectionSecrets = (
       toTrimmedString(httpTunnel.password) !== "" ||
       toTrimmedString(config.mysqlReplicaPassword) !== "" ||
       toTrimmedString(config.mongoReplicaPassword) !== "" ||
+      toTrimmedString(config.redisSentinelPassword) !== "" ||
       toTrimmedString(config.uri) !== "" ||
       toTrimmedString(config.dsn) !== ""
     );

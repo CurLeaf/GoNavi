@@ -36,3 +36,16 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('label="显示数据库 (留空显示全部)"');
   });
 });
+
+describe('ConnectionModal Redis Sentinel configuration', () => {
+  it('exposes Sentinel topology fields and safe defaults', () => {
+    expect(source).toContain('label: "哨兵模式"');
+    expect(source).toContain('name="redisSentinelMaster"');
+    expect(source).toContain('Sentinel master 名称');
+    expect(source).toContain('name="redisSentinelPassword"');
+    expect(source).toContain('hasRedisSentinelPassword');
+    expect(source).toContain('clearKey: "redisSentinelPassword"');
+    expect(source).toContain('form.setFieldValue("port", 26379)');
+    expect(source).toContain('form.setFieldValue("port", 6379)');
+  });
+});

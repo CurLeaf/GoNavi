@@ -908,6 +908,9 @@ export namespace connection {
 	    connectionParams?: string;
 	    timeout?: number;
 	    redisDB?: number;
+	    redisSentinelMaster?: string;
+	    redisSentinelUser?: string;
+	    redisSentinelPassword?: string;
 	    uri?: string;
 	    clickHouseProtocol?: string;
 	    oceanBaseProtocol?: string;
@@ -954,6 +957,9 @@ export namespace connection {
 	        this.connectionParams = source["connectionParams"];
 	        this.timeout = source["timeout"];
 	        this.redisDB = source["redisDB"];
+	        this.redisSentinelMaster = source["redisSentinelMaster"];
+	        this.redisSentinelUser = source["redisSentinelUser"];
+	        this.redisSentinelPassword = source["redisSentinelPassword"];
 	        this.uri = source["uri"];
 	        this.clickHouseProtocol = source["clickHouseProtocol"];
 	        this.oceanBaseProtocol = source["oceanBaseProtocol"];
@@ -1085,6 +1091,7 @@ export namespace connection {
 	    clearHttpTunnelPassword?: boolean;
 	    clearMySQLReplicaPassword?: boolean;
 	    clearMongoReplicaPassword?: boolean;
+	    clearRedisSentinelPassword?: boolean;
 	    clearOpaqueURI?: boolean;
 	    clearOpaqueDSN?: boolean;
 	
@@ -1107,6 +1114,7 @@ export namespace connection {
 	        this.clearHttpTunnelPassword = source["clearHttpTunnelPassword"];
 	        this.clearMySQLReplicaPassword = source["clearMySQLReplicaPassword"];
 	        this.clearMongoReplicaPassword = source["clearMongoReplicaPassword"];
+	        this.clearRedisSentinelPassword = source["clearRedisSentinelPassword"];
 	        this.clearOpaqueURI = source["clearOpaqueURI"];
 	        this.clearOpaqueDSN = source["clearOpaqueDSN"];
 	    }
@@ -1144,6 +1152,7 @@ export namespace connection {
 	    hasHttpTunnelPassword?: boolean;
 	    hasMySQLReplicaPassword?: boolean;
 	    hasMongoReplicaPassword?: boolean;
+	    hasRedisSentinelPassword?: boolean;
 	    hasOpaqueURI?: boolean;
 	    hasOpaqueDSN?: boolean;
 	
@@ -1167,6 +1176,7 @@ export namespace connection {
 	        this.hasHttpTunnelPassword = source["hasHttpTunnelPassword"];
 	        this.hasMySQLReplicaPassword = source["hasMySQLReplicaPassword"];
 	        this.hasMongoReplicaPassword = source["hasMongoReplicaPassword"];
+	        this.hasRedisSentinelPassword = source["hasRedisSentinelPassword"];
 	        this.hasOpaqueURI = source["hasOpaqueURI"];
 	        this.hasOpaqueDSN = source["hasOpaqueDSN"];
 	    }

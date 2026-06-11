@@ -122,6 +122,17 @@ func buildRedisSeedAddrs(config connection.ConnectionConfig) ([]string, error) {
 	return addrs, nil
 }
 
+func redisTopologyDisplayName(topology string) string {
+	switch strings.ToLower(strings.TrimSpace(topology)) {
+	case "sentinel":
+		return "Sentinel"
+	case "cluster":
+		return "集群"
+	default:
+		return "多节点"
+	}
+}
+
 func (r *RedisClientImpl) redisNamespacePrefixForDB(index int) string {
 	if !r.isCluster || index <= 0 {
 		return ""
@@ -246,6 +257,7 @@ func sanitizeRedisPassword(password string) string {
 // Connect establishes a connection to Redis
 func (r *RedisClientImpl) Connect(config connection.ConnectionConfig) error {
 	config.Password = sanitizeRedisPassword(config.Password)
+	config.RedisSentinelPassword = sanitizeRedisPassword(config.RedisSentinelPassword)
 	r.config = config
 	if r.config.RedisDB < 0 || r.config.RedisDB > 15 {
 		r.config.RedisDB = 0
@@ -264,13 +276,70 @@ func (r *RedisClientImpl) Connect(config connection.ConnectionConfig) error {
 	r.seedAddrs = append([]string(nil), seedAddrs...)
 
 	topology := strings.ToLower(strings.TrimSpace(config.Topology))
-	r.isCluster = topology == "cluster" || len(seedAddrs) > 1
+	isSentinel := topology == "sentinel"
+	r.isCluster = !isSentinel && (topology == "cluster" || len(seedAddrs) > 1)
 
-	if r.isCluster && config.UseSSH {
-		return fmt.Errorf("Redis 集群模式暂不支持 SSH 隧道，请关闭 SSH 后重试")
+	if (r.isCluster || isSentinel) && config.UseSSH {
+		return fmt.Errorf("Redis %s模式暂不支持 SSH 隧道，请关闭 SSH 后重试", redisTopologyDisplayName(topology))
 	}
 
 	timeout := normalizeRedisTimeout(config.Timeout)
+	if isSentinel {
+		masterName := strings.TrimSpace(config.RedisSentinelMaster)
+		if masterName == "" {
+			return fmt.Errorf("Redis Sentinel 模式需要填写 master 名称")
+		}
+		attempts := []connection.ConnectionConfig{config}
+		if shouldTryRedisSSLPreferredFallback(config) {
+			attempts = append(attempts, withRedisSSLDisabled(config))
+		}
+
+		var failures []string
+		for idx, attempt := range attempts {
+			var tlsConfig *tls.Config
+			if cfg, err := resolveRedisTLSConfig(attempt); err != nil {
+				failures = append(failures, fmt.Sprintf("第%d次 TLS 配置失败: %v", idx+1, err))
+				continue
+			} else if cfg != nil {
+				if host, _, err := net.SplitHostPort(seedAddrs[0]); err == nil && host != "" {
+					cfg.ServerName = host
+				}
+				tlsConfig = cfg
+			}
+			opts := &redis.FailoverOptions{
+				MasterName:       masterName,
+				SentinelAddrs:    seedAddrs,
+				Username:         strings.TrimSpace(attempt.User),
+				Password:         attempt.Password,
+				SentinelUsername: strings.TrimSpace(attempt.RedisSentinelUser),
+				SentinelPassword: attempt.RedisSentinelPassword,
+				DB:               r.currentDB,
+				DialTimeout:      timeout,
+				ReadTimeout:      timeout,
+				WriteTimeout:     timeout,
+				TLSConfig:        tlsConfig,
+			}
+			sentinelClient := redis.NewFailoverClient(opts)
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			pingErr := sentinelClient.Ping(ctx).Err()
+			cancel()
+			if pingErr != nil {
+				sentinelClient.Close()
+				failures = append(failures, fmt.Sprintf("第%d次连接失败: %v", idx+1, pingErr))
+				continue
+			}
+			r.client = sentinelClient
+			r.singleClient = sentinelClient
+			r.config = attempt
+			if idx > 0 {
+				logger.Warnf("Redis Sentinel SSL 优先连接失败，已回退至明文连接")
+			}
+			logger.Infof("Redis Sentinel 连接成功: sentinels=%s master=%s DB=%d", strings.Join(seedAddrs, ","), masterName, r.currentDB)
+			return nil
+		}
+		return fmt.Errorf("Redis Sentinel 连接失败: %s", strings.Join(failures, "；"))
+	}
+
 	if r.isCluster {
 		attempts := []connection.ConnectionConfig{config}
 		if shouldTryRedisSSLPreferredFallback(config) {

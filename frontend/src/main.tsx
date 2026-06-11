@@ -106,6 +106,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
             httpTunnelPassword: String(httpTunnel.password ?? existingSecrets.httpTunnelPassword ?? ''),
             mysqlReplicaPassword: String(config.mysqlReplicaPassword ?? existingSecrets.mysqlReplicaPassword ?? ''),
             mongoReplicaPassword: String(config.mongoReplicaPassword ?? existingSecrets.mongoReplicaPassword ?? ''),
+            redisSentinelPassword: String(config.redisSentinelPassword ?? existingSecrets.redisSentinelPassword ?? ''),
             uri: String(config.uri ?? existingSecrets.uri ?? ''),
             dsn: String(config.dsn ?? existingSecrets.dsn ?? ''),
         };
@@ -115,6 +116,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
         if (input?.clearHttpTunnelPassword) nextSecrets.httpTunnelPassword = '';
         if (input?.clearMySQLReplicaPassword) nextSecrets.mysqlReplicaPassword = '';
         if (input?.clearMongoReplicaPassword) nextSecrets.mongoReplicaPassword = '';
+        if (input?.clearRedisSentinelPassword) nextSecrets.redisSentinelPassword = '';
         if (input?.clearOpaqueURI) nextSecrets.uri = '';
         if (input?.clearOpaqueDSN) nextSecrets.dsn = '';
         mockConnectionSecrets.set(nextId, nextSecrets);
@@ -132,6 +134,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                 dsn: '',
                 mysqlReplicaPassword: '',
                 mongoReplicaPassword: '',
+                redisSentinelPassword: '',
             },
             includeDatabases: Array.isArray(input?.includeDatabases) ? [...input.includeDatabases] : existing?.includeDatabases,
             includeRedisDatabases: Array.isArray(input?.includeRedisDatabases) ? [...input.includeRedisDatabases] : existing?.includeRedisDatabases,
@@ -143,6 +146,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
             hasHttpTunnelPassword: resolveBrowserMockSecretFlag(httpTunnel.password, !!input?.clearHttpTunnelPassword, existing?.hasHttpTunnelPassword),
             hasMySQLReplicaPassword: resolveBrowserMockSecretFlag(config.mysqlReplicaPassword, !!input?.clearMySQLReplicaPassword, existing?.hasMySQLReplicaPassword),
             hasMongoReplicaPassword: resolveBrowserMockSecretFlag(config.mongoReplicaPassword, !!input?.clearMongoReplicaPassword, existing?.hasMongoReplicaPassword),
+            hasRedisSentinelPassword: resolveBrowserMockSecretFlag(config.redisSentinelPassword, !!input?.clearRedisSentinelPassword, existing?.hasRedisSentinelPassword),
             hasOpaqueURI: resolveBrowserMockSecretFlag(config.uri, !!input?.clearOpaqueURI, existing?.hasOpaqueURI),
             hasOpaqueDSN: resolveBrowserMockSecretFlag(config.dsn, !!input?.clearOpaqueDSN, existing?.hasOpaqueDSN),
         };
@@ -213,6 +217,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                             httpTunnel: { ...(existing.config?.httpTunnel || {}), password: secrets.httpTunnelPassword || '' },
                             mysqlReplicaPassword: secrets.mysqlReplicaPassword || '',
                             mongoReplicaPassword: secrets.mongoReplicaPassword || '',
+                            redisSentinelPassword: secrets.redisSentinelPassword || '',
                             uri: secrets.uri || '',
                             dsn: secrets.dsn || '',
                         },

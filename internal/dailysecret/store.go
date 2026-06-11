@@ -13,14 +13,15 @@ const (
 )
 
 type ConnectionBundle struct {
-	Password             string `json:"password,omitempty"`
-	SSHPassword          string `json:"sshPassword,omitempty"`
-	ProxyPassword        string `json:"proxyPassword,omitempty"`
-	HTTPTunnelPassword   string `json:"httpTunnelPassword,omitempty"`
-	MySQLReplicaPassword string `json:"mysqlReplicaPassword,omitempty"`
-	MongoReplicaPassword string `json:"mongoReplicaPassword,omitempty"`
-	OpaqueURI            string `json:"opaqueURI,omitempty"`
-	OpaqueDSN            string `json:"opaqueDSN,omitempty"`
+	Password              string `json:"password,omitempty"`
+	SSHPassword           string `json:"sshPassword,omitempty"`
+	ProxyPassword         string `json:"proxyPassword,omitempty"`
+	HTTPTunnelPassword    string `json:"httpTunnelPassword,omitempty"`
+	MySQLReplicaPassword  string `json:"mysqlReplicaPassword,omitempty"`
+	MongoReplicaPassword  string `json:"mongoReplicaPassword,omitempty"`
+	RedisSentinelPassword string `json:"redisSentinelPassword,omitempty"`
+	OpaqueURI             string `json:"opaqueURI,omitempty"`
+	OpaqueDSN             string `json:"opaqueDSN,omitempty"`
 }
 
 func (b ConnectionBundle) HasAny() bool {
@@ -30,6 +31,7 @@ func (b ConnectionBundle) HasAny() bool {
 		strings.TrimSpace(b.HTTPTunnelPassword) != "" ||
 		strings.TrimSpace(b.MySQLReplicaPassword) != "" ||
 		strings.TrimSpace(b.MongoReplicaPassword) != "" ||
+		strings.TrimSpace(b.RedisSentinelPassword) != "" ||
 		strings.TrimSpace(b.OpaqueURI) != "" ||
 		strings.TrimSpace(b.OpaqueDSN) != ""
 }

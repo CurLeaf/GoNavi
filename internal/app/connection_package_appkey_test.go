@@ -89,14 +89,15 @@ func TestDecryptSecretFieldRejectsAADMismatch(t *testing.T) {
 func TestEncryptSecretBundleRoundTripAndAADBinding(t *testing.T) {
 	appKey := []byte("0123456789abcdef0123456789abcdef")
 	plain := connectionSecretBundle{
-		Password:             "primary-secret",
-		SSHPassword:          "ssh-secret",
-		ProxyPassword:        "proxy-secret",
-		HTTPTunnelPassword:   "http-secret",
-		MySQLReplicaPassword: "mysql-secret",
-		MongoReplicaPassword: "mongo-secret",
-		OpaqueURI:            "postgres://user:pass@db.local/app",
-		OpaqueDSN:            "server=db.local;password=secret",
+		Password:              "primary-secret",
+		SSHPassword:           "ssh-secret",
+		ProxyPassword:         "proxy-secret",
+		HTTPTunnelPassword:    "http-secret",
+		MySQLReplicaPassword:  "mysql-secret",
+		MongoReplicaPassword:  "mongo-secret",
+		RedisSentinelPassword: "sentinel-secret",
+		OpaqueURI:             "postgres://user:pass@db.local/app",
+		OpaqueDSN:             "server=db.local;password=secret",
 	}
 
 	encrypted, err := encryptSecretBundle(appKey, plain, "conn-1")
@@ -105,14 +106,15 @@ func TestEncryptSecretBundleRoundTripAndAADBinding(t *testing.T) {
 	}
 
 	for name, value := range map[string]string{
-		"password":             encrypted.Password,
-		"sshPassword":          encrypted.SSHPassword,
-		"proxyPassword":        encrypted.ProxyPassword,
-		"httpTunnelPassword":   encrypted.HTTPTunnelPassword,
-		"mysqlReplicaPassword": encrypted.MySQLReplicaPassword,
-		"mongoReplicaPassword": encrypted.MongoReplicaPassword,
-		"opaqueURI":            encrypted.OpaqueURI,
-		"opaqueDSN":            encrypted.OpaqueDSN,
+		"password":              encrypted.Password,
+		"sshPassword":           encrypted.SSHPassword,
+		"proxyPassword":         encrypted.ProxyPassword,
+		"httpTunnelPassword":    encrypted.HTTPTunnelPassword,
+		"mysqlReplicaPassword":  encrypted.MySQLReplicaPassword,
+		"mongoReplicaPassword":  encrypted.MongoReplicaPassword,
+		"redisSentinelPassword": encrypted.RedisSentinelPassword,
+		"opaqueURI":             encrypted.OpaqueURI,
+		"opaqueDSN":             encrypted.OpaqueDSN,
 	} {
 		if value == "" {
 			t.Fatalf("expected encrypted %s field to be populated", name)
@@ -122,6 +124,7 @@ func TestEncryptSecretBundleRoundTripAndAADBinding(t *testing.T) {
 		}
 		if value == plain.Password || value == plain.SSHPassword || value == plain.ProxyPassword ||
 			value == plain.HTTPTunnelPassword || value == plain.MySQLReplicaPassword || value == plain.MongoReplicaPassword ||
+			value == plain.RedisSentinelPassword ||
 			value == plain.OpaqueURI || value == plain.OpaqueDSN {
 			t.Fatalf("expected encrypted %s field to differ from plaintext", name)
 		}

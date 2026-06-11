@@ -95,6 +95,7 @@ func newSavedConnectionInputFromPackageItem(item connectionPackageItem) connecti
 	config.HTTPTunnel.Password = secrets.HTTPTunnelPassword
 	config.MySQLReplicaPassword = secrets.MySQLReplicaPassword
 	config.MongoReplicaPassword = secrets.MongoReplicaPassword
+	config.RedisSentinelPassword = secrets.RedisSentinelPassword
 	config.URI = secrets.OpaqueURI
 	config.DSN = secrets.OpaqueDSN
 
@@ -107,14 +108,15 @@ func newSavedConnectionInputFromPackageItem(item connectionPackageItem) connecti
 		IconType:              item.IconType,
 		IconColor:             item.IconColor,
 		// 连接恢复包以最新导入文件为准；载荷中缺失的密文字段需要显式清空旧值。
-		ClearPrimaryPassword:      strings.TrimSpace(secrets.Password) == "",
-		ClearSSHPassword:          strings.TrimSpace(secrets.SSHPassword) == "",
-		ClearProxyPassword:        strings.TrimSpace(secrets.ProxyPassword) == "",
-		ClearHTTPTunnelPassword:   strings.TrimSpace(secrets.HTTPTunnelPassword) == "",
-		ClearMySQLReplicaPassword: strings.TrimSpace(secrets.MySQLReplicaPassword) == "",
-		ClearMongoReplicaPassword: strings.TrimSpace(secrets.MongoReplicaPassword) == "",
-		ClearOpaqueURI:            strings.TrimSpace(secrets.OpaqueURI) == "",
-		ClearOpaqueDSN:            strings.TrimSpace(secrets.OpaqueDSN) == "",
+		ClearPrimaryPassword:       strings.TrimSpace(secrets.Password) == "",
+		ClearSSHPassword:           strings.TrimSpace(secrets.SSHPassword) == "",
+		ClearProxyPassword:         strings.TrimSpace(secrets.ProxyPassword) == "",
+		ClearHTTPTunnelPassword:    strings.TrimSpace(secrets.HTTPTunnelPassword) == "",
+		ClearMySQLReplicaPassword:  strings.TrimSpace(secrets.MySQLReplicaPassword) == "",
+		ClearMongoReplicaPassword:  strings.TrimSpace(secrets.MongoReplicaPassword) == "",
+		ClearRedisSentinelPassword: strings.TrimSpace(secrets.RedisSentinelPassword) == "",
+		ClearOpaqueURI:             strings.TrimSpace(secrets.OpaqueURI) == "",
+		ClearOpaqueDSN:             strings.TrimSpace(secrets.OpaqueDSN) == "",
 	}
 }
 
