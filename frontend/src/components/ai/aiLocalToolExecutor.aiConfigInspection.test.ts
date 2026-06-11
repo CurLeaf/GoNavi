@@ -396,6 +396,33 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.content).toContain('"canSave":true');
   });
 
+  it('returns MCP argument hints and redacts sensitive inline argument values', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_mcp_draft', {
+        fullCommand: 'uvx mcp-server-demo --stdio --api-key=sk-real-secret --directory D:\\Work',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"argumentHints"');
+    expect(result.content).toContain('"businessHints"');
+    expect(result.content).toContain('"argument":"--api-key"');
+    expect(result.content).toContain('"label":"API Key"');
+    expect(result.content).toContain('"sensitive":true');
+    expect(result.content).toContain('"argument":"--directory"');
+    expect(result.content).toContain('"label":"授权目录"');
+    expect(result.content).toContain('"argsRedacted":true');
+    expect(result.content).toContain('"--api-key=***"');
+    expect(result.content).not.toContain('sk-real-secret');
+  });
+
   it('returns mcp tool input schemas so the model can build arguments from discovered tool metadata', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_mcp_tool_schema', {

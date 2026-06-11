@@ -1,4 +1,5 @@
 import type { AIMCPServerConfig } from '../../types';
+import { buildMCPArgumentHintProfile } from '../../utils/mcpArgumentHints';
 import { parseMCPCommandDraft, type ParseMCPCommandDraftResult } from '../../utils/mcpCommandDraft';
 import { buildMCPEnvHintProfile } from '../../utils/mcpEnvHints';
 import { parseMCPEnvDraft } from '../../utils/mcpEnvDraft';
@@ -31,6 +32,40 @@ const normalizeTimeoutSeconds = (value: unknown, fallback: number): number => {
 const redactEnvValues = (env: Record<string, string>): Record<string, string> =>
   Object.fromEntries(Object.keys(env).sort().map((key) => [key, env[key] ? '***' : '']));
 
+const isSensitiveArgFlag = (arg: string): boolean => {
+  const flag = toTrimmedString(arg).split('=')[0].replace(/^-+/u, '').toLowerCase();
+  return /(token|api-?key|secret|password|pass|credential)/iu.test(flag);
+};
+
+const redactSensitiveArgValues = (args: string[]): string[] => {
+  const result: string[] = [];
+  let redactNext = false;
+  for (const arg of args) {
+    const text = toTrimmedString(arg);
+    if (!text) {
+      continue;
+    }
+    if (redactNext && !text.startsWith('-')) {
+      result.push('***');
+      redactNext = false;
+      continue;
+    }
+    redactNext = false;
+    if (isSensitiveArgFlag(text)) {
+      const equalsIndex = text.indexOf('=');
+      if (equalsIndex >= 0) {
+        result.push(`${text.slice(0, equalsIndex)}=***`);
+      } else {
+        result.push(text);
+        redactNext = true;
+      }
+      continue;
+    }
+    result.push(text);
+  }
+  return result;
+};
+
 const buildRedactedFullCommand = (
   fullCommand: string,
   parsedCommand: ParseMCPCommandDraftResult | null,
@@ -43,7 +78,7 @@ const buildRedactedFullCommand = (
   }
   return [
     ...Object.keys(parsedCommand.draft.env || {}).sort().map((key) => `${key}=***`),
-    buildMCPLaunchPreview(parsedCommand.draft.command, parsedCommand.draft.args),
+    buildMCPLaunchPreview(parsedCommand.draft.command, redactSensitiveArgValues(parsedCommand.draft.args)),
   ].filter(Boolean).join(' ');
 };
 
@@ -172,6 +207,8 @@ export const buildMCPDraftInspectionSnapshot = (args: Record<string, unknown> = 
   const validation = validateMCPServerDraft(server, parsedEnvDraft);
   const issueKeys = new Set(validation.issues.map((issue) => issue.key));
   const recommendedTemplate = resolveRecommendedTemplate(command, commandArgs);
+  const argumentHintProfile = buildMCPArgumentHintProfile(command, commandArgs);
+  const redactedCommandArgs = redactSensitiveArgValues(commandArgs);
   const envHintProfile = buildMCPEnvHintProfile(command, commandArgs, env);
   const suggestedServerSeed = buildMCPServerDraftSeed({
     name: toTrimmedString(args.name ?? args.serverName) || undefined,
@@ -192,7 +229,8 @@ export const buildMCPDraftInspectionSnapshot = (args: Record<string, unknown> = 
           ok: parsedCommand.ok,
           error: parsedCommand.error || '',
           command: parsedCommand.draft?.command || '',
-          args: parsedCommand.draft?.args || [],
+          args: redactSensitiveArgValues(parsedCommand.draft?.args || []),
+          argsRedacted: JSON.stringify(redactSensitiveArgValues(parsedCommand.draft?.args || [])) !== JSON.stringify(parsedCommand.draft?.args || []),
           envKeys: Object.keys(parsedCommand.draft?.env || {}).sort(),
         }
       : {
@@ -206,9 +244,19 @@ export const buildMCPDraftInspectionSnapshot = (args: Record<string, unknown> = 
       name: server.name,
       transport: server.transport,
       command,
-      args: commandArgs,
+      args: redactedCommandArgs,
+      argsRedacted: JSON.stringify(redactedCommandArgs) !== JSON.stringify(commandArgs),
       envKeys: Object.keys(env).sort(),
       envVarCount: Object.keys(env).length,
+      argumentHints: argumentHintProfile ? {
+        commandName: argumentHintProfile.commandName,
+        title: argumentHintProfile.title,
+        summary: argumentHintProfile.summary,
+        orderHint: argumentHintProfile.orderHint,
+        steps: argumentHintProfile.steps,
+        businessHints: argumentHintProfile.businessHints,
+        nextActions: argumentHintProfile.nextActions,
+      } : null,
       envHints: envHintProfile ? {
         envVarCount: envHintProfile.envVarCount,
         secretLikeCount: envHintProfile.secretLikeCount,
@@ -229,12 +277,14 @@ export const buildMCPDraftInspectionSnapshot = (args: Record<string, unknown> = 
       } : null,
       invalidEnvLines: parsedEnvDraft?.invalidLines || [],
       timeoutSeconds: server.timeoutSeconds,
-      launchCommandPreview: buildMCPLaunchPreview(command, commandArgs),
+      launchCommandPreview: buildMCPLaunchPreview(command, redactedCommandArgs),
       recommendedTemplate,
       suggestedServerSeed: {
         ...suggestedServerSeed,
+        args: redactSensitiveArgValues(suggestedServerSeed.args || []),
         env: redactEnvValues(env),
         envRedacted: Object.keys(env).length > 0,
+        argsRedacted: JSON.stringify(redactSensitiveArgValues(suggestedServerSeed.args || [])) !== JSON.stringify(suggestedServerSeed.args || []),
       },
     },
     validation: {
