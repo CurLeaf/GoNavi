@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 
 const connectionModalSource = readFileSync(new URL('./ConnectionModal.tsx', import.meta.url), 'utf8');
 const redisSectionsSource = readFileSync(new URL('./ConnectionModalRedisSections.tsx', import.meta.url), 'utf8');
-const source = `${connectionModalSource}\n${redisSectionsSource}`;
+const mongoSectionsSource = readFileSync(new URL('./ConnectionModalMongoSections.tsx', import.meta.url), 'utf8');
+const source = `${connectionModalSource}\n${redisSectionsSource}\n${mongoSectionsSource}`;
 
 describe('ConnectionModal edit password behavior', () => {
   it('keeps the prefilled primary password masked by default', () => {
@@ -49,5 +50,17 @@ describe('ConnectionModal Redis Sentinel configuration', () => {
     expect(source).toContain('clearKey: "redisSentinelPassword"');
     expect(source).toContain('form.setFieldValue("port", 26379)');
     expect(source).toContain('form.setFieldValue("port", 6379)');
+  });
+});
+
+describe('ConnectionModal MongoDB configuration', () => {
+  it('keeps replica, SRV, and read preference fields in the split Mongo sections', () => {
+    expect(source).toContain('ConnectionModalMongoSections');
+    expect(source).toContain('name="mongoSrv"');
+    expect(source).toContain('SRV 与 SSH 隧道同时启用');
+    expect(source).toContain('name="mongoReplicaPassword"');
+    expect(source).toContain('clearKey: "mongoReplicaPassword"');
+    expect(source).toContain('自动发现成员');
+    expect(source).toContain('fieldName: "mongoReadPreference"');
   });
 });
