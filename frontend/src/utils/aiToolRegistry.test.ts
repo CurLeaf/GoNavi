@@ -60,6 +60,15 @@ describe('aiToolRegistry', () => {
     expect(info?.desc).toContain('MCP 新增草稿');
     expect(info?.tool.function.description).toContain('真实校验器试算');
     expect(info?.tool.function.parameters?.properties?.fullCommand?.description).toContain('一整行 MCP 启动命令');
+    expect(info?.tool.function.parameters?.properties?.templateKey?.enum).toContain('docker');
+  });
+
+  it('registers the mcp-docker-setup inspector as a builtin tool', () => {
+    const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_docker_setup');
+    expect(info).toBeTruthy();
+    expect(info?.desc).toContain('Docker MCP');
+    expect(info?.tool.function.description).toContain('docker run');
+    expect(info?.tool.function.parameters?.properties?.includeDisabled?.description).toContain('默认 true');
   });
 
   it('registers the mcp-tool-schema inspector as a builtin tool', () => {

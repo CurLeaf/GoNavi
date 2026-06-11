@@ -609,6 +609,18 @@ export interface AIMCPClientInstallStatus {
   args?: string[];
 }
 
+export interface AIMCPHTTPServerStatus {
+  running: boolean;
+  addr: string;
+  path: string;
+  url: string;
+  schemaOnly: boolean;
+  token?: string;
+  authorizationHeader?: string;
+  startedAt?: number;
+  message: string;
+}
+
 export type AISkillScope = "global" | "database" | "jvm" | "jvmDiagnostic";
 
 export interface AISkillConfig {

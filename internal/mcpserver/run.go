@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -27,6 +29,59 @@ type HTTPServerOptions struct {
 	Token        string
 	JSONResponse bool
 	SchemaOnly   bool
+}
+
+// StreamableHTTPServerHandle 表示一个已启动的 Streamable HTTP MCP server。
+type StreamableHTTPServerHandle struct {
+	Addr       string
+	Path       string
+	SchemaOnly bool
+
+	cancel context.CancelFunc
+	done   chan struct{}
+	mu     sync.Mutex
+	err    error
+}
+
+// Stop 关闭 HTTP MCP server，并等待底层 http.Server 完成退出。
+func (h *StreamableHTTPServerHandle) Stop(ctx context.Context) error {
+	if h == nil {
+		return nil
+	}
+	if h.cancel != nil {
+		h.cancel()
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-h.done:
+		return h.waitErr()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Wait 阻塞直到 HTTP MCP server 退出。
+func (h *StreamableHTTPServerHandle) Wait() error {
+	if h == nil {
+		return nil
+	}
+	<-h.done
+	return h.waitErr()
+}
+
+func (h *StreamableHTTPServerHandle) complete(err error) {
+	h.mu.Lock()
+	h.err = err
+	h.mu.Unlock()
+	close(h.done)
+}
+
+func (h *StreamableHTTPServerHandle) waitErr() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.err
 }
 
 // RunAppStdioServer 启动基于真实 GoNavi App 的 stdio MCP server。
@@ -51,27 +106,57 @@ func RunStdioServer(ctx context.Context, backend Backend) error {
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
 
+// StartAppStreamableHTTPServer 启动基于真实 GoNavi App 的 Streamable HTTP MCP server，并立即返回可停止句柄。
+func StartAppStreamableHTTPServer(ctx context.Context, options HTTPServerOptions) (*StreamableHTTPServerHandle, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	backend := NewAppBackend(ctx)
+	handle, err := StartStreamableHTTPServer(ctx, backend, options)
+	if err != nil {
+		_ = backend.Close(context.Background())
+		return nil, err
+	}
+
+	go func() {
+		_ = handle.Wait()
+		_ = backend.Close(context.Background())
+	}()
+	return handle, nil
+}
+
 // RunAppStreamableHTTPServer 启动基于真实 GoNavi App 的 Streamable HTTP MCP server。
 func RunAppStreamableHTTPServer(ctx context.Context, options HTTPServerOptions) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	backend := NewAppBackend(ctx)
-	defer backend.Close(ctx)
-
-	return RunStreamableHTTPServer(ctx, backend, options)
+	handle, err := StartAppStreamableHTTPServer(ctx, options)
+	if err != nil {
+		return err
+	}
+	return handle.Wait()
 }
 
 // RunStreamableHTTPServer 使用指定 backend 启动带 bearer token 的 Streamable HTTP MCP server。
 func RunStreamableHTTPServer(ctx context.Context, backend Backend, options HTTPServerOptions) error {
+	handle, err := StartStreamableHTTPServer(ctx, backend, options)
+	if err != nil {
+		return err
+	}
+	return handle.Wait()
+}
+
+// StartStreamableHTTPServer 使用指定 backend 启动带 bearer token 的 Streamable HTTP MCP server，并返回可停止句柄。
+func StartStreamableHTTPServer(ctx context.Context, backend Backend, options HTTPServerOptions) (*StreamableHTTPServerHandle, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
 	normalized, err := normalizeHTTPServerOptions(options)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	server := NewServerWithOptions(backend, ServerOptions{SchemaOnly: normalized.SchemaOnly})
@@ -95,25 +180,52 @@ func RunStreamableHTTPServer(ctx context.Context, backend Backend, options HTTPS
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	listener, err := net.Listen("tcp", normalized.Addr)
+	if err != nil {
+		return nil, err
+	}
+
+	serverCtx, cancel := context.WithCancel(ctx)
+	handle := &StreamableHTTPServerHandle{
+		Addr:       listener.Addr().String(),
+		Path:       normalized.Path,
+		SchemaOnly: normalized.SchemaOnly,
+		cancel:     cancel,
+		done:       make(chan struct{}),
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- httpServer.ListenAndServe()
+		errCh <- httpServer.Serve(listener)
 	}()
 
-	select {
-	case err := <-errCh:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+	go func() {
+		select {
+		case err := <-errCh:
+			cancel()
+			if errors.Is(err, http.ErrServerClosed) {
+				handle.complete(nil)
+				return
+			}
+			handle.complete(err)
+		case <-serverCtx.Done():
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer shutdownCancel()
+			shutdownErr := httpServer.Shutdown(shutdownCtx)
+			serveErr := <-errCh
+			if shutdownErr != nil && !errors.Is(shutdownErr, http.ErrServerClosed) {
+				handle.complete(shutdownErr)
+				return
+			}
+			if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+				handle.complete(serveErr)
+				return
+			}
+			handle.complete(nil)
 		}
-		return err
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := httpServer.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
-		}
-		return nil
-	}
+	}()
+
+	return handle, nil
 }
 
 // ParseHTTPServerOptions 解析 http 模式参数，并支持环境变量兜底。

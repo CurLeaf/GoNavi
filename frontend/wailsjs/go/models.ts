@@ -1,5 +1,5 @@
 export namespace ai {
-	
+
 	export class MCPClientInstallResult {
 	    success: boolean;
 	    client?: string;
@@ -7,11 +7,11 @@ export namespace ai {
 	    configPath?: string;
 	    command?: string;
 	    args?: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MCPClientInstallResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
@@ -35,7 +35,7 @@ export namespace ai {
 	    configPath?: string;
 	    command?: string;
 	    args?: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MCPClientInstallStatus(source);
 	    }
@@ -54,6 +54,52 @@ export namespace ai {
 	        this.configPath = source["configPath"];
 	        this.command = source["command"];
 	        this.args = source["args"];
+	    }
+	}
+	export class MCPHTTPServerOptions {
+	    addr?: string;
+	    path?: string;
+	    token?: string;
+	    schemaOnly: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new MCPHTTPServerOptions(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.addr = source["addr"];
+	        this.path = source["path"];
+	        this.token = source["token"];
+	        this.schemaOnly = source["schemaOnly"];
+	    }
+	}
+	export class MCPHTTPServerStatus {
+	    running: boolean;
+	    addr: string;
+	    path: string;
+	    url: string;
+	    schemaOnly: boolean;
+	    token?: string;
+	    authorizationHeader?: string;
+	    startedAt?: number;
+	    message: string;
+
+	    static createFrom(source: any = {}) {
+	        return new MCPHTTPServerStatus(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.running = source["running"];
+	        this.addr = source["addr"];
+	        this.path = source["path"];
+	        this.url = source["url"];
+	        this.schemaOnly = source["schemaOnly"];
+	        this.token = source["token"];
+	        this.authorizationHeader = source["authorizationHeader"];
+	        this.startedAt = source["startedAt"];
+	        this.message = source["message"];
 	    }
 	}
 	export class MCPServerConfig {

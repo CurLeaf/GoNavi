@@ -47,4 +47,22 @@ describe('aiMCPDraftInspectionInsights', () => {
     expect(snapshot.nextActions.join('\n')).toContain('把整行命令放到完整命令框自动拆分');
     expect(snapshot.nextActions.join('\n')).toContain('环境变量改成每行 KEY=VALUE');
   });
+
+  it('applies the docker template and explains docker-specific missing args', () => {
+    const snapshot = buildMCPDraftInspectionSnapshot({
+      templateKey: 'docker',
+      args: ['run', '--rm'],
+      timeoutSeconds: 10,
+    });
+
+    expect(snapshot.draft.command).toBe('docker');
+    expect(snapshot.draft.recommendedTemplate).toMatchObject({
+      key: 'docker',
+      title: 'Docker 镜像',
+    });
+    expect(snapshot.validation.issues.map((issue) => issue.key)).toContain('docker-interactive-missing');
+    expect(snapshot.validation.issues.map((issue) => issue.key)).toContain('docker-image-missing');
+    expect(snapshot.nextActions.join('\n')).toContain('Docker MCP 的 args 里补 -i');
+    expect(snapshot.nextActions.join('\n')).toContain('Docker MCP 的 args 里补 README 提供的镜像名');
+  });
 });

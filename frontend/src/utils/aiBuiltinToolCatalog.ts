@@ -100,6 +100,11 @@ export const BUILTIN_TOOL_FLOWS: AIBuiltinToolFlow[] = [
     description: '适合先读真实字段说明、模板样例和整行命令拆分规则，再把用户贴出的命令或草稿交给真实校验器试算，最后结合当前 MCP 配置现状判断应该新增哪种启动方式。',
   },
   {
+    title: '排查 Docker MCP 启动',
+    steps: 'inspect_mcp_docker_setup -> inspect_mcp_draft -> inspect_mcp_setup',
+    description: '适合用户按 Docker README 新增 MCP 后发现 0 个工具、容器一启动就退出，或不确定 docker run 参数是否拆对时，先检查 run、-i、镜像名和超时设置。',
+  },
+  {
     title: '查看 MCP 工具参数',
     steps: 'inspect_mcp_setup -> inspect_mcp_tool_schema',
     description: '适合先找到当前真实发现到的 MCP 工具 alias，再读取对应 inputSchema、必填字段、枚举和嵌套参数路径，避免调用外部 MCP 工具时乱填 arguments。',

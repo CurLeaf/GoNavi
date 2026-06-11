@@ -40,6 +40,9 @@ type Service struct {
 	configDir          string // 配置存储目录
 	secretStore        secretstore.SecretStore
 	cancelFuncs        map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
+	mcpHTTPMu          sync.Mutex
+	mcpHTTP            *mcpHTTPServerRuntime
+	mcpHTTPLast        ai.MCPHTTPServerStatus
 }
 
 var miniMaxAnthropicModels = []string{

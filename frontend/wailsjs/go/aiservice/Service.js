@@ -58,6 +58,10 @@ export function AIGetMCPClientInstallStatuses() {
   return window['go']['aiservice']['Service']['AIGetMCPClientInstallStatuses']();
 }
 
+export function AIGetMCPHTTPServerStatus() {
+  return window['go']['aiservice']['Service']['AIGetMCPHTTPServerStatus']();
+}
+
 export function AIGetMCPServers() {
   return window['go']['aiservice']['Service']['AIGetMCPServers']();
 }
@@ -132,6 +136,14 @@ export function AISetContextLevel(arg1) {
 
 export function AISetSafetyLevel(arg1) {
   return window['go']['aiservice']['Service']['AISetSafetyLevel'](arg1);
+}
+
+export function AIStartMCPHTTPServer(arg1) {
+  return window['go']['aiservice']['Service']['AIStartMCPHTTPServer'](arg1);
+}
+
+export function AIStopMCPHTTPServer() {
+  return window['go']['aiservice']['Service']['AIStopMCPHTTPServer']();
 }
 
 export function AITestMCPServer(arg1) {

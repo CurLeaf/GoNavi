@@ -94,7 +94,24 @@ const hasDockerImageArg = (args: string[]): boolean => {
     const arg = candidates[index];
     if (!arg || arg.startsWith('-')) {
       const lower = arg.toLowerCase();
-      if (['-e', '--env', '--name', '--network', '-v', '--volume'].includes(lower)) {
+      if ([
+        '-e',
+        '--env',
+        '--name',
+        '--network',
+        '-v',
+        '--volume',
+        '-p',
+        '--publish',
+        '--entrypoint',
+        '-w',
+        '--workdir',
+        '-u',
+        '--user',
+        '--platform',
+        '-h',
+        '--hostname',
+      ].includes(lower)) {
         index += 1;
       }
       continue;

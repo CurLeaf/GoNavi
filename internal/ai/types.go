@@ -162,6 +162,27 @@ type MCPClientInstallStatus struct {
 	Args           []string `json:"args,omitempty"`
 }
 
+// MCPHTTPServerOptions 表示从客户端启动 GoNavi Streamable HTTP MCP 的参数。
+type MCPHTTPServerOptions struct {
+	Addr       string `json:"addr,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Token      string `json:"token,omitempty"`
+	SchemaOnly bool   `json:"schemaOnly"`
+}
+
+// MCPHTTPServerStatus 表示客户端内置 HTTP MCP 服务运行状态。
+type MCPHTTPServerStatus struct {
+	Running             bool   `json:"running"`
+	Addr                string `json:"addr"`
+	Path                string `json:"path"`
+	URL                 string `json:"url"`
+	SchemaOnly          bool   `json:"schemaOnly"`
+	Token               string `json:"token,omitempty"`
+	AuthorizationHeader string `json:"authorizationHeader,omitempty"`
+	StartedAt           int64  `json:"startedAt,omitempty"`
+	Message             string `json:"message"`
+}
+
 // ClaudeCodeMCPInstallResult 兼容旧命名，便于平滑迁移到通用结果类型。
 type ClaudeCodeMCPInstallResult = MCPClientInstallResult
 

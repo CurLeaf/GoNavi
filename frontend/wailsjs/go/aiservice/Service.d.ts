@@ -30,6 +30,8 @@ export function AIGetEditableProvider(arg1:string):Promise<ai.ProviderConfig>;
 
 export function AIGetMCPClientInstallStatuses():Promise<Array<ai.MCPClientInstallStatus>>;
 
+export function AIGetMCPHTTPServerStatus():Promise<ai.MCPHTTPServerStatus>;
+
 export function AIGetMCPServers():Promise<Array<ai.MCPServerConfig>>;
 
 export function AIGetProviders():Promise<Array<ai.ProviderConfig>>;
@@ -67,6 +69,10 @@ export function AISetActiveProvider(arg1:string):Promise<void>;
 export function AISetContextLevel(arg1:string):Promise<void>;
 
 export function AISetSafetyLevel(arg1:string):Promise<void>;
+
+export function AIStartMCPHTTPServer(arg1:ai.MCPHTTPServerOptions):Promise<ai.MCPHTTPServerStatus>;
+
+export function AIStopMCPHTTPServer():Promise<ai.MCPHTTPServerStatus>;
 
 export function AITestMCPServer(arg1:ai.MCPServerConfig):Promise<Record<string, any>>;
 

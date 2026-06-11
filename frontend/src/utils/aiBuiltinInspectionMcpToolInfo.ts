@@ -53,15 +53,38 @@ export const BUILTIN_AI_INSPECTION_MCP_TOOL_INFO: AIBuiltinToolInfo[] = [
     icon: "🧭",
     desc: "查看新增 MCP 的填写指引",
     detail:
-      "返回新增 MCP 表单里各字段的作用、推荐填写顺序、完整命令自动拆分规则，以及 npx / Node / uvx / Python / EXE 模板样例。适合用户问“command/args/env 到底怎么填”“给我一个 npx / node / uvx / python 示例”“为什么启动命令不能整行填”时，先读这份真实接入指引。",
+      "返回新增 MCP 表单里各字段的作用、推荐填写顺序、完整命令自动拆分规则，以及 npx / Node / uvx / Python / Docker / EXE 模板样例。适合用户问“command/args/env 到底怎么填”“给我一个 npx / node / uvx / python / docker 示例”“为什么启动命令不能整行填”时，先读这份真实接入指引。",
     params: "无参数",
     tool: {
       type: "function",
       function: {
         name: "inspect_mcp_authoring_guide",
         description:
-          "读取 GoNavi 当前内置的 MCP 新增指引，包括推荐填写顺序、字段作用、常见命令示例、完整命令自动拆分规则，以及 npx / Node / uvx / Python / EXE 模板样例。适用于用户提到新增 MCP 不知道 command、args、env、timeout 怎么填，或想要一个最接近的模板时，先读取这份真实前端接入指南，不要凭记忆口述。",
+          "读取 GoNavi 当前内置的 MCP 新增指引，包括推荐填写顺序、字段作用、常见命令示例、完整命令自动拆分规则，以及 npx / Node / uvx / Python / Docker / EXE 模板样例。适用于用户提到新增 MCP 不知道 command、args、env、timeout 怎么填，或想要一个最接近的模板时，先读取这份真实前端接入指南，不要凭记忆口述。",
         parameters: { type: "object", properties: {} },
+      },
+    },
+  },
+  {
+    name: "inspect_mcp_docker_setup",
+    icon: "🐳",
+    desc: "检查 Docker MCP 启动配置",
+    detail:
+      "读取当前已保存的 Docker MCP 服务，检查 command/args 是否正确拆成 docker、run、--rm、-i、镜像名和容器参数，并返回缺失参数、已发现工具数、超时建议和下一步修复动作。适合用户按 Docker README 新增 MCP 后工具发现失败、容器一启动就退出、或不确定 docker run 参数该怎么填时调用。",
+    params: "serverId?, includeDisabled?(默认 true)",
+    tool: {
+      type: "function",
+      function: {
+        name: "inspect_mcp_docker_setup",
+        description:
+          "检查当前已保存 Docker MCP 服务的启动参数，返回 Docker MCP 服务列表、docker run/-i/镜像名/--rm/env/timeout 状态、工具发现数量、配置告警和 nextActions。适用于用户提到 Docker MCP、docker run、容器化 MCP、工具发现 0 个、容器 stdio 断开、或 AI 准备指导用户修复 Docker MCP 配置时，先读取真实配置快照。",
+        parameters: {
+          type: "object",
+          properties: {
+            serverId: { type: "string", description: "可选，只检查某个 MCP serverId；不传则检查全部 Docker MCP" },
+            includeDisabled: { type: "boolean", description: "可选，是否包含已禁用 Docker MCP，默认 true" },
+          },
+        },
       },
     },
   },
@@ -92,7 +115,7 @@ export const BUILTIN_AI_INSPECTION_MCP_TOOL_INFO: AIBuiltinToolInfo[] = [
             },
             envText: { type: "string", description: "可选，环境变量草稿，每行 KEY=VALUE；不要传 export、set 或 $env: 前缀" },
             timeoutSeconds: { type: "number", description: "可选，单次工具发现或调用超时秒数；推荐 20，慢启动服务可用 45 或 60" },
-            templateKey: { type: "string", enum: ["npx", "uvx", "node", "python", "exe"], description: "可选，先套用一个内置模板再覆盖用户传入字段" },
+            templateKey: { type: "string", enum: ["npx", "uvx", "node", "python", "docker", "exe"], description: "可选，先套用一个内置模板再覆盖用户传入字段" },
             name: { type: "string", description: "可选，MCP 服务名称，例如 GitHub、Filesystem、Browser" },
           },
         },

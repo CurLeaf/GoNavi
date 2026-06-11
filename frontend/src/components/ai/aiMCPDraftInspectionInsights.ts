@@ -79,7 +79,16 @@ const buildNextActions = (params: {
     actions.push('把整行命令放到完整命令框自动拆分；command 只保留可执行程序，脚本名、包名和 --stdio 放到 args。');
   }
   if (issueKeys.has('args-missing-for-launcher')) {
-    actions.push('给启动器补齐参数：npx 通常需要 -y 和包名，node 需要 server.js，python 需要 -m 模块名，uvx 需要包名。');
+    actions.push('给启动器补齐参数：npx 通常需要 -y 和包名，node 需要 server.js，python 需要 -m 模块名，uvx 需要包名，docker 需要 run、-i 和镜像名。');
+  }
+  if (issueKeys.has('docker-run-missing')) {
+    actions.push('Docker MCP 的 command 填 docker，args 里单独补 run。');
+  }
+  if (issueKeys.has('docker-interactive-missing')) {
+    actions.push('Docker MCP 的 args 里补 -i 或 --interactive，避免 stdio 连接立即断开。');
+  }
+  if (issueKeys.has('docker-image-missing')) {
+    actions.push('Docker MCP 的 args 里补 README 提供的镜像名，例如 mcp/server-fetch:latest。');
   }
   if (issueKeys.has('args-contain-env-or-shell-glue') || issueKeys.has('env-invalid-lines')) {
     actions.push('环境变量改成每行 KEY=VALUE；不要把 export、set、env、&& 或 $env:KEY=VALUE; 放进 args。');

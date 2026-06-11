@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Modal, Form, message as antdMessage } from 'antd';
 import { RobotOutlined } from '@ant-design/icons';
-import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AIMCPClientInstallStatus, AISkillConfig } from '../types';
+import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AIMCPClientInstallStatus, AIMCPHTTPServerStatus, AISkillConfig } from '../types';
 import {
     resolvePresetBaseURL,
     resolvePresetModelSelection,
@@ -39,6 +39,15 @@ interface AISettingsModalProps {
     focusProviderId?: string;
 }
 
+const DEFAULT_MCP_HTTP_SERVER_STATUS: AIMCPHTTPServerStatus = {
+    running: false,
+    addr: '127.0.0.1:8765',
+    path: '/mcp',
+    url: 'http://127.0.0.1:8765/mcp',
+    schemaOnly: true,
+    message: 'GoNavi MCP HTTP 服务未启动',
+};
+
 const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId }) => {
     const [providers, setProviders] = useState<AIProviderConfig[]>([]);
     const [activeProviderId, setActiveProviderId] = useState<string>('');
@@ -46,6 +55,8 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const [contextLevel, setContextLevel] = useState<AIContextLevel>('schema_only');
     const [mcpServers, setMCPServers] = useState<AIMCPServerConfig[]>([]);
     const [mcpTools, setMCPTools] = useState<AIMCPToolDescriptor[]>([]);
+    const [mcpHTTPServerStatus, setMCPHTTPServerStatus] = useState<AIMCPHTTPServerStatus>(DEFAULT_MCP_HTTP_SERVER_STATUS);
+    const [mcpHTTPServerLoading, setMCPHTTPServerLoading] = useState(false);
     const [skills, setSkills] = useState<AISkillConfig[]>([]);
     const [editingProvider, setEditingProvider] = useState<AIProviderConfig | null>(null);
     const [isEditing, setIsEditing] = useState(false);
@@ -142,7 +153,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                     return fallback;
                 }
             };
-            const [provRes, safeRes, ctxRes, promptsRes, userPromptsRes, mcpServersRes, mcpToolsRes, skillsRes, mcpClientStatusesRes] = await Promise.all([
+            const [provRes, safeRes, ctxRes, promptsRes, userPromptsRes, mcpServersRes, mcpToolsRes, mcpHTTPServerStatusRes, skillsRes, mcpClientStatusesRes] = await Promise.all([
                 callOrFallback(() => Service.AIGetProviders?.(), []),
                 callOrFallback<AISafetyLevel>(() => Service.AIGetSafetyLevel?.(), 'readonly'),
                 callOrFallback<AIContextLevel>(() => Service.AIGetContextLevel?.(), 'schema_only'),
@@ -150,6 +161,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 callOrFallback(() => Service.AIGetUserPromptSettings?.(), EMPTY_AI_USER_PROMPT_SETTINGS),
                 callOrFallback(() => Service.AIGetMCPServers?.(), []),
                 callOrFallback(() => Service.AIListMCPTools?.(), []),
+                callOrFallback<AIMCPHTTPServerStatus>(() => Service.AIGetMCPHTTPServerStatus?.(), DEFAULT_MCP_HTTP_SERVER_STATUS),
                 callOrFallback(() => Service.AIGetSkills?.(), []),
                 callOrFallback<AIMCPClientInstallStatus[]>(() => Service.AIGetMCPClientInstallStatuses?.(), EMPTY_MCP_CLIENT_STATUSES),
             ]);
@@ -169,6 +181,12 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             }
             if (Array.isArray(mcpServersRes)) setMCPServers(mcpServersRes);
             if (Array.isArray(mcpToolsRes)) setMCPTools(mcpToolsRes);
+            if (mcpHTTPServerStatusRes) {
+                setMCPHTTPServerStatus({
+                    ...DEFAULT_MCP_HTTP_SERVER_STATUS,
+                    ...mcpHTTPServerStatusRes,
+                });
+            }
             if (Array.isArray(skillsRes)) setSkills(skillsRes);
             if (Array.isArray(mcpClientStatusesRes)) {
                 syncMCPClientStatuses(mcpClientStatusesRes);
@@ -447,6 +465,58 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         }
     };
 
+    const handleToggleMCPHTTPServer = async (checked: boolean) => {
+        try {
+            setMCPHTTPServerLoading(true);
+            const Service = await resolveAIService();
+            if (!Service) {
+                throw new Error('当前运行时暂不支持 MCP HTTP 服务控制');
+            }
+            if (checked && typeof Service.AIStartMCPHTTPServer !== 'function') {
+                throw new Error('当前版本暂不支持启动 MCP HTTP 服务');
+            }
+            if (!checked && typeof Service.AIStopMCPHTTPServer !== 'function') {
+                throw new Error('当前版本暂不支持停止 MCP HTTP 服务');
+            }
+            const nextStatus = checked
+                ? await Service.AIStartMCPHTTPServer({
+                    addr: mcpHTTPServerStatus.addr || DEFAULT_MCP_HTTP_SERVER_STATUS.addr,
+                    path: mcpHTTPServerStatus.path || DEFAULT_MCP_HTTP_SERVER_STATUS.path,
+                    schemaOnly: true,
+                })
+                : await Service.AIStopMCPHTTPServer();
+            if (nextStatus) {
+                setMCPHTTPServerStatus({
+                    ...DEFAULT_MCP_HTTP_SERVER_STATUS,
+                    ...nextStatus,
+                });
+            }
+            void messageApi.success(checked ? 'GoNavi MCP HTTP 服务已启动' : 'GoNavi MCP HTTP 服务已停止');
+        } catch (e: any) {
+            void messageApi.error(e?.message || '切换 GoNavi MCP HTTP 服务失败');
+        } finally {
+            setMCPHTTPServerLoading(false);
+        }
+    };
+
+    const handleCopyMCPHTTPServerURL = async () => {
+        const url = String(mcpHTTPServerStatus.url || '').trim();
+        if (!url) {
+            void messageApi.error('当前没有可复制的 MCP HTTP URL');
+            return;
+        }
+        await copyTextToClipboard(url, 'MCP HTTP URL 已复制');
+    };
+
+    const handleCopyMCPHTTPServerAuthorization = async () => {
+        const authorizationHeader = String(mcpHTTPServerStatus.authorizationHeader || '').trim();
+        if (!authorizationHeader) {
+            void messageApi.error('请先启动 MCP HTTP 服务生成 Authorization Header');
+            return;
+        }
+        await copyTextToClipboard(`Authorization: ${authorizationHeader}`, 'Authorization Header 已复制');
+    };
+
     const updateSkillDraft = (id: string, patch: Partial<AISkillConfig>) => {
         setSkills((prev) => prev.map((item) => item.id === id ? { ...item, ...patch } : item));
     };
@@ -653,6 +723,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                               selectedMCPClient={selectedMCPClient}
                               selectedMCPClientStatus={selectedMCPClientStatus}
                               selectedMCPClientCommandText={selectedMCPClientCommandText}
+                              mcpHTTPServerStatus={mcpHTTPServerStatus}
                               mcpServers={mcpServers}
                               mcpTools={mcpTools}
                               darkMode={darkMode}
@@ -662,6 +733,10 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                               inputBg={inputBg}
                               loading={loading}
                               mcpClientStatusLoading={mcpClientStatusLoading}
+                              mcpHTTPServerLoading={mcpHTTPServerLoading}
+                              onToggleHTTPServer={handleToggleMCPHTTPServer}
+                              onCopyHTTPServerURL={() => void handleCopyMCPHTTPServerURL()}
+                              onCopyHTTPServerAuthorization={() => void handleCopyMCPHTTPServerAuthorization()}
                               onSelectClient={handleSelectMCPClient}
                               onRefreshStatus={() => void loadMCPClientStatuses()}
                               onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}

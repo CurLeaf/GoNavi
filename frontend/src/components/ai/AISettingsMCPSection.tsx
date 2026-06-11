@@ -2,13 +2,14 @@ import React from 'react';
 import { Button } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 
-import type { AIMCPClientInstallStatus, AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
+import type { AIMCPClientInstallStatus, AIMCPHTTPServerStatus, AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import type { MCPClientKey } from '../../utils/mcpClientInstallStatus';
 import { MCP_FIELD_GUIDES } from '../../utils/mcpServerGuidance';
 import { MCP_SERVER_DRAFT_TEMPLATES } from '../../utils/mcpServerTemplates';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import AIMCPClientInstallPanel from './AIMCPClientInstallPanel';
 import AIMCPFieldGuideCard from './AIMCPFieldGuideCard';
+import AIMCPHTTPServerPanel from './AIMCPHTTPServerPanel';
 import AIMCPServerCard from './AIMCPServerCard';
 
 export type { MCPClientKey } from '../../utils/mcpClientInstallStatus';
@@ -18,6 +19,7 @@ export interface AISettingsMCPSectionProps {
   selectedMCPClient: MCPClientKey;
   selectedMCPClientStatus?: AIMCPClientInstallStatus;
   selectedMCPClientCommandText: string;
+  mcpHTTPServerStatus: AIMCPHTTPServerStatus;
   mcpServers: AIMCPServerConfig[];
   mcpTools: AIMCPToolDescriptor[];
   darkMode: boolean;
@@ -27,6 +29,10 @@ export interface AISettingsMCPSectionProps {
   inputBg: string;
   loading: boolean;
   mcpClientStatusLoading: boolean;
+  mcpHTTPServerLoading: boolean;
+  onToggleHTTPServer: (checked: boolean) => void;
+  onCopyHTTPServerURL: () => void;
+  onCopyHTTPServerAuthorization: () => void;
   onSelectClient: (client: MCPClientKey) => void;
   onRefreshStatus: () => void;
   onCopyConfigPath: () => void;
@@ -44,6 +50,7 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
   selectedMCPClient,
   selectedMCPClientStatus,
   selectedMCPClientCommandText,
+  mcpHTTPServerStatus,
   mcpServers,
   mcpTools,
   darkMode,
@@ -53,6 +60,10 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
   inputBg,
   loading,
   mcpClientStatusLoading,
+  mcpHTTPServerLoading,
+  onToggleHTTPServer,
+  onCopyHTTPServerURL,
+  onCopyHTTPServerAuthorization,
   onSelectClient,
   onRefreshStatus,
   onCopyConfigPath,
@@ -65,6 +76,17 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
   onDeleteServer,
 }) => (
   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <AIMCPHTTPServerPanel
+      status={mcpHTTPServerStatus}
+      loading={mcpHTTPServerLoading}
+      cardBg={cardBg}
+      cardBorder={cardBorder}
+      darkMode={darkMode}
+      overlayTheme={overlayTheme}
+      onToggle={onToggleHTTPServer}
+      onCopyURL={onCopyHTTPServerURL}
+      onCopyAuthorization={onCopyHTTPServerAuthorization}
+    />
     <AIMCPClientInstallPanel
       statuses={mcpClientStatuses}
       selectedClient={selectedMCPClient}

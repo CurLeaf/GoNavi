@@ -71,6 +71,14 @@ const buildMCPSectionProps = (patch: Partial<AISettingsMCPSectionProps> = {}): A
     message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
   },
   selectedMCPClientCommandText: '',
+  mcpHTTPServerStatus: {
+    running: false,
+    addr: '127.0.0.1:8765',
+    path: '/mcp',
+    url: 'http://127.0.0.1:8765/mcp',
+    schemaOnly: true,
+    message: 'GoNavi MCP HTTP 服务未启动',
+  },
   mcpServers: [],
   mcpTools: [],
   darkMode: false,
@@ -80,6 +88,10 @@ const buildMCPSectionProps = (patch: Partial<AISettingsMCPSectionProps> = {}): A
   inputBg: '#fff',
   loading: false,
   mcpClientStatusLoading: false,
+  mcpHTTPServerLoading: false,
+  onToggleHTTPServer: () => {},
+  onCopyHTTPServerURL: () => {},
+  onCopyHTTPServerAuthorization: () => {},
   onSelectClient: () => {},
   onRefreshStatus: () => {},
   onCopyConfigPath: () => {},
@@ -99,6 +111,10 @@ describe('AISettingsMCPSection', () => {
       <AISettingsMCPSection {...buildMCPSectionProps()} />,
     );
 
+    expect(markup).toContain('GoNavi MCP HTTP 服务');
+    expect(markup).toContain('不用再手动执行 GoNavi.exe mcp-server http 命令');
+    expect(markup).toContain('http://127.0.0.1:8765/mcp');
+    expect(markup).toContain('复制 Authorization');
     expect(markup).toContain('接入外部客户端');
     expect(markup).toContain('尚未把当前 GoNavi MCP 接入到这里');
     expect(markup).toContain('新增 MCP 参数速查');
@@ -228,5 +244,21 @@ describe('AISettingsMCPSection', () => {
       args: ['run', '--rm', '-i', 'mcp/server-fetch:latest'],
       timeoutSeconds: 45,
     }));
+  });
+
+  it('toggles the in-app MCP HTTP service from the switch panel', () => {
+    const onToggleHTTPServer = vi.fn();
+    const tree = AISettingsMCPSection(buildMCPSectionProps({
+      onToggleHTTPServer,
+    }));
+
+    const httpPanel = findElement(
+      tree,
+      (node) => node.props?.onToggle === onToggleHTTPServer,
+    );
+    expect(httpPanel).toBeTruthy();
+    httpPanel.props.onToggle(true);
+
+    expect(onToggleHTTPServer).toHaveBeenCalledWith(true);
   });
 });

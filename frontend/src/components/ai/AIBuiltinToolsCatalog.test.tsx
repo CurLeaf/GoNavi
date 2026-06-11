@@ -53,6 +53,9 @@ describe('AIBuiltinToolsCatalog', () => {
     expect(markup).toContain('inspect_mcp_authoring_guide');
     expect(markup).toContain('inspect_mcp_draft');
     expect(markup).toContain('真实校验器试算');
+    expect(markup).toContain('排查 Docker MCP 启动');
+    expect(markup).toContain('inspect_mcp_docker_setup');
+    expect(markup).toContain('docker run 参数是否拆对');
     expect(markup).toContain('查看 MCP 工具参数');
     expect(markup).toContain('inspect_mcp_tool_schema');
     expect(markup).toContain('inputSchema');

@@ -50,7 +50,10 @@ func main() {
 			app.InitializeLifecycle(application, ctx)
 			aiservice.InitializeLifecycle(aiService, ctx)
 		},
-		OnShutdown: application.Shutdown,
+		OnShutdown: func(ctx context.Context) {
+			aiService.Shutdown(ctx)
+			application.Shutdown(ctx)
+		},
 		Bind: []interface{}{
 			application,
 			aiService,

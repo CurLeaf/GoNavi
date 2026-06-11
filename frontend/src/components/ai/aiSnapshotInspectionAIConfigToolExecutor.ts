@@ -15,6 +15,7 @@ import { buildAISafetySnapshot } from './aiSafetyInsights';
 import { buildAIToolCatalogSnapshot } from './aiToolCatalogInsights';
 import { buildMCPAuthoringGuideSnapshot } from './aiMCPAuthoringGuideInsights';
 import { buildMCPDraftInspectionSnapshot } from './aiMCPDraftInspectionInsights';
+import { buildMCPDockerSetupSnapshot } from './aiMCPDockerInsights';
 import { buildAISetupHealthSnapshot } from './aiSetupHealthInsights';
 import { buildMCPSetupSnapshot } from './aiMCPInsights';
 import { buildMCPRemoteAccessSnapshot } from './aiMCPRemoteAccessInsights';
@@ -56,6 +57,11 @@ const loadMCPSetupState = async (runtime: AISnapshotInspectionRuntime | undefine
       ? runtime.getMCPClientInstallStatuses()
       : Promise.resolve(undefined),
   ]);
+
+const loadMCPServers = async (runtime: AISnapshotInspectionRuntime | undefined) =>
+  typeof runtime?.getMCPServers === 'function'
+    ? runtime.getMCPServers()
+    : undefined;
 
 const loadMCPClientInstallStatuses = async (runtime: AISnapshotInspectionRuntime | undefined) =>
   typeof runtime?.getMCPClientInstallStatuses === 'function'
@@ -210,6 +216,18 @@ export async function executeAIConfigSnapshotToolCall(
           content: JSON.stringify(buildMCPDraftInspectionSnapshot(args)),
           success: true,
         };
+      case 'inspect_mcp_docker_setup': {
+        const mcpServers = await loadMCPServers(runtime);
+        return {
+          content: JSON.stringify(buildMCPDockerSetupSnapshot({
+            mcpServers: Array.isArray(mcpServers) ? mcpServers : [],
+            mcpTools,
+            serverId: args.serverId,
+            includeDisabled: args.includeDisabled !== false,
+          })),
+          success: true,
+        };
+      }
       case 'inspect_mcp_tool_schema':
         return {
           content: JSON.stringify(buildMCPToolSchemaSnapshot({
@@ -245,6 +263,7 @@ export async function executeAIConfigSnapshotToolCall(
       inspect_mcp_remote_access: '读取 MCP 远程接入指引失败',
       inspect_mcp_authoring_guide: '读取 MCP 新增填写指引失败',
       inspect_mcp_draft: '校验 MCP 新增草稿失败',
+      inspect_mcp_docker_setup: '检查 Docker MCP 配置失败',
       inspect_mcp_tool_schema: '读取 MCP 工具参数 schema 失败',
       inspect_ai_guidance: '读取当前 AI 提示与技能配置失败',
     }[toolName] || '读取 AI 配置探针失败';
