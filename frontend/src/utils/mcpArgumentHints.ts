@@ -34,7 +34,7 @@ export interface MCPArgumentHintProfile {
   nextActions: string[];
 }
 
-const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
+export const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
 
 const parseCommandField = (command: string): { normalizedCommand: string; commandName: string; inlineArgs: string[] } => {
   const { tokens } = splitShellLikeCommand(command);
@@ -65,7 +65,7 @@ const hasArg = (args: string[], expected: string): boolean =>
 const hasStdioArg = (args: string[]): boolean =>
   hasArg(args, '--stdio') || hasArg(args, 'stdio');
 
-const hasPackageLikeArg = (args: string[]): boolean =>
+export const hasPackageLikeArg = (args: string[]): boolean =>
   args.some((arg) => {
     const text = arg.trim();
     if (!text || text.startsWith('-')) return false;
@@ -86,7 +86,7 @@ const hasDockerRunArg = (args: string[]): boolean =>
 const hasDockerInteractiveArg = (args: string[]): boolean =>
   hasArg(args, '-i') || hasArg(args, '--interactive');
 
-const hasDockerImageArg = (args: string[]): boolean => {
+export const hasDockerImageArg = (args: string[]): boolean => {
   const runIndex = args.findIndex((arg) => arg.toLowerCase() === 'run');
   const candidates = runIndex >= 0 ? args.slice(runIndex + 1) : args;
   for (let index = 0; index < candidates.length; index += 1) {
@@ -143,7 +143,7 @@ const buildNextActions = (steps: MCPArgumentHintStep[]): string[] =>
     .filter((step) => step.required && !step.satisfied)
     .map((step) => `补充 ${step.label}，示例：${step.example}`);
 
-type BusinessArgumentHintTemplate = Omit<MCPBusinessArgumentHint, 'key' | 'argument'>;
+export type BusinessArgumentHintTemplate = Omit<MCPBusinessArgumentHint, 'key' | 'argument'>;
 
 const BUSINESS_ARGUMENT_HINTS: Record<string, BusinessArgumentHintTemplate> = {
   'api-key': {
@@ -330,7 +330,7 @@ const BUSINESS_ARGUMENT_HINTS: Record<string, BusinessArgumentHintTemplate> = {
   },
 };
 
-const normalizeFlagName = (arg: string): string => {
+export const normalizeFlagName = (arg: string): string => {
   const text = toTrimmedString(arg);
   if (!text.startsWith('-') || text === '-' || text === '--') {
     return '';
@@ -339,7 +339,7 @@ const normalizeFlagName = (arg: string): string => {
   return withoutValue.replace(/^-+/u, '').trim().toLowerCase();
 };
 
-const sanitizeFlagForDisplay = (arg: string): string => {
+export const sanitizeFlagForDisplay = (arg: string): string => {
   const text = toTrimmedString(arg);
   const withoutValue = text.split('=')[0];
   return withoutValue || text;
@@ -383,6 +383,17 @@ const inferBusinessArgumentHint = (flag: string): BusinessArgumentHintTemplate |
   return null;
 };
 
+const buildGenericArgumentHint = (flag: string): BusinessArgumentHintTemplate => ({
+  category: 'generic',
+  label: '未识别参数',
+  detail: `GoNavi 不能从参数名 --${flag} 准确判断业务含义，但会按当前顺序原样传给 MCP 进程。`,
+  valueHint: '请对照 MCP README 确认这个参数是否需要值；需要值时把值作为下一个参数标签，或使用 --name=value。',
+  sensitive: false,
+});
+
+export const resolveBusinessArgumentHintTemplate = (flag: string, fallbackGeneric = false): BusinessArgumentHintTemplate | null =>
+  BUSINESS_ARGUMENT_HINTS[flag] || inferBusinessArgumentHint(flag) || (fallbackGeneric && flag ? buildGenericArgumentHint(flag) : null);
+
 const buildBusinessArgumentHints = (args: string[]): MCPBusinessArgumentHint[] => {
   const result: MCPBusinessArgumentHint[] = [];
   const seen = new Set<string>();
@@ -391,7 +402,7 @@ const buildBusinessArgumentHints = (args: string[]): MCPBusinessArgumentHint[] =
     if (!flag || flag === 'stdio') {
       continue;
     }
-    const template = BUSINESS_ARGUMENT_HINTS[flag] || inferBusinessArgumentHint(flag);
+    const template = resolveBusinessArgumentHintTemplate(flag);
     if (!template) {
       continue;
     }

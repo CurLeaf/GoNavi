@@ -1,4 +1,5 @@
 import type { AIMCPServerConfig } from '../../types';
+import { buildMCPArgumentDetailHints } from '../../utils/mcpArgumentDetailHints';
 import { buildMCPArgumentHintProfile } from '../../utils/mcpArgumentHints';
 import { parseMCPCommandDraft, type ParseMCPCommandDraftResult } from '../../utils/mcpCommandDraft';
 import { buildMCPEnvHintProfile } from '../../utils/mcpEnvHints';
@@ -254,6 +255,7 @@ export const buildMCPDraftInspectionSnapshot = (args: Record<string, unknown> = 
         summary: argumentHintProfile.summary,
         orderHint: argumentHintProfile.orderHint,
         steps: argumentHintProfile.steps,
+        argumentDetailHints: buildMCPArgumentDetailHints(argumentHintProfile.commandName, commandArgs),
         businessHints: argumentHintProfile.businessHints,
         nextActions: argumentHintProfile.nextActions,
       } : null,

@@ -115,12 +115,40 @@ describe('AIMCPArgumentHints', () => {
     });
 
     const text = flattenRendererText(renderer.toJSON());
+    expect(text).toContain('参数逐项说明');
     expect(text).toContain('已识别业务参数');
     expect(text).toContain('--api-key');
     expect(text).toContain('API Key');
     expect(text).toContain('不要截图真实值');
     expect(text).toContain('--directory');
     expect(text).toContain('授权目录');
+    expect(text).toContain('值已脱敏');
     expect(text).not.toContain('sk-real-secret');
+  });
+
+  it('renders fallback explanations for unknown MCP args', async () => {
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(
+        <AIMCPArgumentHints
+          command="acme-mcp-server"
+          args={['--tenant', 'prod', 'target-a']}
+          cardBorder="rgba(0,0,0,0.08)"
+          darkMode={false}
+          overlayTheme={buildOverlayWorkbenchTheme(false)}
+        />,
+      );
+    });
+
+    const text = flattenRendererText(renderer.toJSON());
+    expect(text).toContain('参数逐项说明');
+    expect(text).toContain('--tenant');
+    expect(text).toContain('未识别参数');
+    expect(text).toContain('GoNavi 不能从参数名 --tenant 准确判断业务含义');
+    expect(text).toContain('prod');
+    expect(text).toContain('未识别参数的值');
+    expect(text).toContain('target-a');
+    expect(text).toContain('位置参数');
   });
 });

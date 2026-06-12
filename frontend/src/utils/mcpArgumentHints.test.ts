@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { buildMCPArgumentDetailHints } from './mcpArgumentDetailHints';
 import { buildMCPArgumentHintProfile } from './mcpArgumentHints';
 
 describe('mcpArgumentHints', () => {
@@ -86,13 +87,54 @@ describe('mcpArgumentHints', () => {
     ]));
   });
 
+  it('builds per-argument explanations for unknown flags and positional values', () => {
+    const hints = buildMCPArgumentDetailHints('acme-mcp-server', [
+      '--tenant',
+      'prod',
+      '--workspace',
+      'D:\\Work',
+      'extra-target',
+    ]);
+
+    expect(hints).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        argument: '--tenant',
+        label: '未识别参数',
+        category: 'generic',
+      }),
+      expect.objectContaining({
+        argument: 'prod',
+        label: '未识别参数的值',
+      }),
+      expect.objectContaining({
+        argument: '--workspace',
+        label: '工作区目录',
+        category: 'path',
+      }),
+      expect.objectContaining({
+        argument: 'D:\\Work',
+        label: '工作区目录的值',
+      }),
+      expect.objectContaining({
+        argument: 'extra-target',
+        label: '位置参数',
+      }),
+    ]));
+  });
+
   it('sanitizes sensitive inline argument values in hints', () => {
-    const profile = buildMCPArgumentHintProfile('uvx', [
+    const args = [
       'mcp-server-demo',
       '--api-key=sk-real-secret',
+      '--token',
+      'ghp_real-secret-token',
       '--endpoint',
       'https://api.example.com',
+    ];
+    const profile = buildMCPArgumentHintProfile('uvx', [
+      ...args,
     ]);
+    const argumentHints = buildMCPArgumentDetailHints('uvx', args);
 
     expect(profile?.businessHints).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -107,5 +149,18 @@ describe('mcpArgumentHints', () => {
       }),
     ]));
     expect(JSON.stringify(profile?.businessHints)).not.toContain('sk-real-secret');
+    expect(argumentHints).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        argument: '--api-key',
+        sensitive: true,
+      }),
+      expect.objectContaining({
+        argument: '<已隐藏>',
+        label: 'Token的值',
+        sensitive: true,
+      }),
+    ]));
+    expect(JSON.stringify(argumentHints)).not.toContain('sk-real-secret');
+    expect(JSON.stringify(argumentHints)).not.toContain('ghp_real-secret-token');
   });
 });

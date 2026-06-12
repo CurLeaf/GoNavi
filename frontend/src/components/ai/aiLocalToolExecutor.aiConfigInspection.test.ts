@@ -412,12 +412,14 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
 
     expect(result.success).toBe(true);
     expect(result.content).toContain('"argumentHints"');
+    expect(result.content).toContain('"argumentDetailHints"');
     expect(result.content).toContain('"businessHints"');
     expect(result.content).toContain('"argument":"--api-key"');
     expect(result.content).toContain('"label":"API Key"');
     expect(result.content).toContain('"sensitive":true');
     expect(result.content).toContain('"argument":"--directory"');
     expect(result.content).toContain('"label":"授权目录"');
+    expect(result.content).toContain('"label":"授权目录的值"');
     expect(result.content).toContain('"argsRedacted":true');
     expect(result.content).toContain('"--api-key=***"');
     expect(result.content).not.toContain('sk-real-secret');

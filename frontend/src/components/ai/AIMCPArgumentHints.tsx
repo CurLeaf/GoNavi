@@ -1,6 +1,7 @@
 import React from 'react';
 
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
+import { buildMCPArgumentDetailHints } from '../../utils/mcpArgumentDetailHints';
 import { buildMCPArgumentHintProfile } from '../../utils/mcpArgumentHints';
 import { splitShellLikeCommand } from '../../utils/mcpCommandDraft';
 import { buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
@@ -72,6 +73,10 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
     return null;
   }
   const missingRequiredArgs = buildMissingRequiredArgs(profile);
+  const argumentHints = buildMCPArgumentDetailHints(profile.commandName, [
+    ...profile.inlineArgs,
+    ...(args || []),
+  ]);
   const canApplyMissingArgs = Boolean(onArgsChange && missingRequiredArgs.length > 0 && profile.inlineArgs.length === 0);
   const canSplitInlineArgs = Boolean(onCommandArgsChange && profile.inlineArgs.length > 0);
 
@@ -119,6 +124,53 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
           </span>
         ))}
       </div>
+      {argumentHints.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>
+            参数逐项说明
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+            {argumentHints.map((hint) => (
+              <div
+                key={hint.key}
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: `1px solid ${cardBorder}`,
+                  background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.82)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 5,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <code style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12, color: overlayTheme.titleText }}>
+                    {hint.argument}
+                  </code>
+                  <span
+                    style={{
+                      padding: '1px 7px',
+                      borderRadius: 999,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: businessHintCategoryColor[hint.category],
+                      background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)',
+                    }}
+                  >
+                    {businessHintCategoryLabel[hint.category]}
+                  </span>
+                  {hint.sensitive ? <span style={buildMCPHintStyle('#b45309')}>值已脱敏</span> : null}
+                </div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{hint.label}</div>
+                <div style={buildMCPHintStyle(overlayTheme.mutedText)}>{hint.detail}</div>
+                <div style={buildMCPHintStyle(hint.sensitive ? '#b45309' : overlayTheme.mutedText)}>
+                  应填：{hint.valueHint}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {profile.businessHints.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>
