@@ -963,7 +963,7 @@ func TestEnsureOptionalDriverAgentBinaryFallsBackAfterStaleDownloadRevision(t *t
 		goScript += ".bat"
 	}
 	if runtime.GOOS == "windows" {
-		if err := os.WriteFile(goScript, []byte("@echo off\r\nset out=\r\n:loop\r\nif \"%1\"==\"\" goto done\r\nif \"%1\"==\"-o\" (set out=%2& shift& shift& goto loop)\r\nshift\r\ngoto loop\r\n:done\r\ncopy /Y \"%GONAVI_TEST_BUILT_AGENT%\" \"%out%\" >nul\r\n"), 0o755); err != nil {
+		if err := os.WriteFile(goScript, []byte("@echo off\r\nsetlocal\r\nset \"out=\"\r\n:loop\r\nif \"%~1\"==\"\" goto done\r\nif \"%~1\"==\"-o\" goto capture\r\nshift\r\ngoto loop\r\n:capture\r\nset \"out=%~2\"\r\nshift\r\nshift\r\ngoto loop\r\n:done\r\nif \"%out%\"==\"\" exit /b 1\r\ncopy /Y \"%GONAVI_TEST_BUILT_AGENT%\" \"%out%\" >nul\r\n"), 0o755); err != nil {
 			t.Fatalf("write fake go script failed: %v", err)
 		}
 	} else {
