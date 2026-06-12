@@ -4840,8 +4840,8 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-max-rows-select {
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-mode-select {
-  width: 154px !important;
-  flex: 0 0 154px !important;
+  width: 118px !important;
+  flex: 0 0 118px !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-delay-select {
@@ -4885,6 +4885,21 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group > .an
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group > .ant-btn::before {
   display: none !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button .gn-v2-toolbar-kbd {
+  margin-left: 0;
+  min-width: 18px;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.22);
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-icon-action.ant-btn,

@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
+SCRIPT_DIR_WINDOWS="$(pwd -W 2>/dev/null || true)"
+SCRIPT_DIR_WINDOWS="${SCRIPT_DIR_WINDOWS//\\//}"
 
 DEFAULT_DRIVERS=(mariadb oceanbase diros starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss iris mongodb tdengine clickhouse elasticsearch)
 OUTPUT_FILE="internal/db/driver_agent_revisions_gen.go"
@@ -145,6 +147,11 @@ elasticsearch:internal/db/elasticsearch_helpers.go)
 should_include_source_file() {
   local driver="$1"
   local identity="$2"
+  case "$identity" in
+    internal/appdata/*|internal/connection/*|internal/logger/*)
+      return 1
+      ;;
+  esac
   if [[ "$identity" == internal/db/* ]]; then
     should_include_internal_db_file "$driver" "$identity"
     return
@@ -193,6 +200,7 @@ fi
 goos="${target_platform%%/*}"
 goarch="${target_platform##*/}"
 gomodcache="$(go env GOMODCACHE)"
+gomodcache="${gomodcache//\\//}"
 
 declare -a drivers=()
 if [[ -n "$driver_csv" ]]; then
@@ -277,18 +285,23 @@ fingerprint_driver() {
   } >"$tmp"
 
   while IFS= read -r file; do
+    file="${file//\\//}"
     [[ -n "$file" && -f "$file" ]] || continue
-    case "$file" in
-      "$SCRIPT_DIR"/*)
-        identity="${file#$SCRIPT_DIR/}"
-        ;;
-      "$gomodcache"/*)
-        identity="gomod/${file#$gomodcache/}"
-        ;;
-      *)
-        identity="$file"
-        ;;
-    esac
+    if [[ -n "$SCRIPT_DIR_WINDOWS" && "$file" == "$SCRIPT_DIR_WINDOWS"/* ]]; then
+      identity="${file#$SCRIPT_DIR_WINDOWS/}"
+    else
+      case "$file" in
+        "$SCRIPT_DIR"/*)
+          identity="${file#$SCRIPT_DIR/}"
+          ;;
+        "$gomodcache"/*)
+          identity="gomod/${file#$gomodcache/}"
+          ;;
+        *)
+          identity="$file"
+          ;;
+      esac
+    fi
     if [[ "$identity" == "$OUTPUT_FILE" ]]; then
       continue
     fi

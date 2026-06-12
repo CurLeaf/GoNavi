@@ -11,9 +11,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gonavi-detect-driver-revisions.XXXXXX")"
+tmpdir_connection=""
 tmpdir_script=""
 cleanup() {
   rm -rf "$tmpdir"
+  if [[ -n "$tmpdir_connection" ]]; then
+    rm -rf "$tmpdir_connection"
+  fi
   if [[ -n "$tmpdir_script" ]]; then
     rm -rf "$tmpdir_script"
   fi
@@ -46,6 +50,33 @@ GOEOF
   actual="$(bash ./tools/detect-changed-driver-agents.sh --base "$base" --head HEAD)"
   if [[ "$actual" != "clickhouse" ]]; then
     echo "expected clickhouse revision-only change to trigger clickhouse build, got: ${actual:-<empty>}" >&2
+    exit 1
+  fi
+)
+
+tmpdir_connection="$(mktemp -d "${TMPDIR:-/tmp}/gonavi-detect-connection-change.XXXXXX")"
+git init -q "$tmpdir_connection"
+mkdir -p "$tmpdir_connection/tools" "$tmpdir_connection/internal/connection"
+cp tools/detect-changed-driver-agents.sh "$tmpdir_connection/tools/detect-changed-driver-agents.sh"
+cat >"$tmpdir_connection/internal/connection/types.go" <<'GOEOF'
+package connection
+
+type ConnectionConfig struct {
+	Type string `json:"type"`
+}
+GOEOF
+
+(
+  cd "$tmpdir_connection"
+  git add .
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m initial
+  base="$(git rev-parse HEAD)"
+  perl -0pi -e 's/Type string/RedisSentinelLabel string `json:"redisSentinelLabel,omitempty"`\n\tType string/' internal/connection/types.go
+  git add internal/connection/types.go
+  git -c user.name=GoNavi -c user.email=gonavi@example.test commit -q -m 'add redis-only connection field'
+  actual="$(bash ./tools/detect-changed-driver-agents.sh --base "$base" --head HEAD)"
+  if [[ -n "$actual" ]]; then
+    echo "expected connection-only field change to keep driver-agent detection empty, got: ${actual}" >&2
     exit 1
   fi
 )

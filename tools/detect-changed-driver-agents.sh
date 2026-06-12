@@ -346,7 +346,7 @@ revision_file_changed_drivers() {
 
 is_ignored_driver_agent_source_file() {
   case "$1" in
-    *_test.go|frontend/*|internal/app/*)
+    *_test.go|frontend/*|internal/app/*|internal/appdata/*|internal/connection/*|internal/logger/*)
       return 0
       ;;
   esac
@@ -489,6 +489,22 @@ if [[ ${#changed_file_set[@]} -eq 0 ]]; then
   exit 0
 fi
 
+has_revision_file_change=false
+only_workflow_changes=true
+for file in "${!changed_file_set[@]}"; do
+  case "$file" in
+    internal/db/driver_agent_revisions_gen.go)
+      has_revision_file_change=true
+      only_workflow_changes=false
+      ;;
+    .github/workflows/dev-build.yml|.github/workflows/release.yml)
+      ;;
+    *)
+      only_workflow_changes=false
+      ;;
+  esac
+done
+
 declare -a forced_changed_drivers=()
 forced_driver_seen="|"
 for file in "${!changed_file_set[@]}"; do
@@ -527,6 +543,12 @@ for file in "${!changed_file_set[@]}"; do
       exit 0
       ;;
     .github/workflows/dev-build.yml|.github/workflows/release.yml)
+      if [[ "$has_revision_file_change" == "true" ]]; then
+        continue
+      fi
+      if [[ "$only_workflow_changes" == "true" && -f internal/db/driver_agent_revisions_gen.go ]]; then
+        continue
+      fi
       echo "检测到 driver-agent 构建/发布工作流变更；保守构建全部 driver-agent：$file" >&2
       all_drivers_csv
       exit 0

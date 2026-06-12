@@ -30,14 +30,20 @@ const QueryEditorTransactionToolbar: React.FC<QueryEditorTransactionToolbarProps
   }
 
   const statementCount = Math.max(0, Math.floor(Number(transaction.statementCount) || 0));
-  const pendingCountText = statementCount > 0
-    ? `，未提交 ${statementCount} 条变更语句`
-    : '';
+  const pendingCount = statementCount > 0 ? statementCount : 1;
   const statusText = transaction.commitMode === 'auto'
     ? autoCommitRemainingSeconds !== null && autoCommitRemainingSeconds > 0
-      ? `事务待提交${pendingCountText}，${autoCommitRemainingSeconds}s 后自动提交`
-      : `事务执行成功${pendingCountText}，正在自动提交`
-    : `事务待提交${pendingCountText}`;
+      ? `${autoCommitRemainingSeconds}s 后自动提交`
+      : '自动提交中'
+    : '未提交';
+  const commitLabel = isV2Ui
+    ? (
+      <>
+        <span>提交</span>
+        <span className="gn-v2-toolbar-kbd">{pendingCount}</span>
+      </>
+    )
+    : `提交 (${pendingCount})`;
 
   return (
     <div
@@ -54,11 +60,12 @@ const QueryEditorTransactionToolbar: React.FC<QueryEditorTransactionToolbarProps
         {statusText}
       </span>
       <Button
+        className={isV2Ui ? 'gn-v2-query-transaction-commit-button' : undefined}
         size="small"
         type="primary"
         onClick={() => onFinish('commit')}
       >
-        提交
+        {commitLabel}
       </Button>
       <Button
         size="small"

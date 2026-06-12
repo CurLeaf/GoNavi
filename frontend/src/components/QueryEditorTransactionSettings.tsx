@@ -30,7 +30,7 @@ const QueryEditorTransactionSettings: React.FC<QueryEditorTransactionSettingsPro
     <Tooltip title="参考 DBeaver：SQL 编辑器执行 INSERT/UPDATE/DELETE/MERGE/REPLACE 等 DML 时先进入 GoNavi 托管事务；手动提交需要手动提交/回滚，自动提交会在执行成功后自动 COMMIT。">
       <Select
         className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-transaction-mode-select' : undefined}
-        style={isV2Ui ? undefined : { width: 160 }}
+        style={isV2Ui ? undefined : { width: 118 }}
         value={commitMode}
         onChange={(mode) => onCommitModeChange(mode === 'auto' ? 'auto' : 'manual')}
         options={[

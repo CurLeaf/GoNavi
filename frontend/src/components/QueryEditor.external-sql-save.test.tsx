@@ -2181,11 +2181,11 @@ describe('QueryEditor external SQL save', () => {
       'query-1',
     );
     expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
-    expect(textContent(renderer!.root)).toContain('事务待提交');
+    expect(textContent(renderer!.root)).toContain('未提交');
     expect(textContent(renderer!.root)).toContain('影响行数：2');
 
     await act(async () => {
-      await findExactButton(renderer!, '提交').props.onClick();
+      await findButton(renderer!, '提交').props.onClick();
     });
     await act(async () => {
       await Promise.resolve();
@@ -2193,7 +2193,7 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-1');
-    expect(textContent(renderer!.root)).not.toContain('事务待提交');
+    expect(textContent(renderer!.root)).not.toContain('未提交');
   });
 
   it('runs SQL editor WITH DML through a pending managed transaction', async () => {
@@ -2227,10 +2227,10 @@ describe('QueryEditor external SQL save', () => {
       'query-1',
     );
     expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
-    expect(textContent(renderer!.root)).toContain('事务待提交');
+    expect(textContent(renderer!.root)).toContain('未提交');
 
     await act(async () => {
-      await findExactButton(renderer!, '提交').props.onClick();
+      await findButton(renderer!, '提交').props.onClick();
     });
     await act(async () => {
       await Promise.resolve();
@@ -2277,7 +2277,8 @@ describe('QueryEditor external SQL save', () => {
       expect.stringContaining('DELETE FROM users'),
       'query-1',
     );
-    expect(textContent(renderer!.root)).toContain('事务待提交，未提交 2 条变更语句');
+    expect(textContent(renderer!.root)).toContain('未提交');
+    expect(textContent(renderer!.root)).toContain('提交 (2)');
     expect(storeState.sqlEditorPendingTransactions['tab-1']).toMatchObject({
       id: 'tx-multi-dml',
       statementCount: 2,
@@ -2405,7 +2406,7 @@ describe('QueryEditor external SQL save', () => {
       'query-1',
     );
     expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
-    expect(textContent(renderer!.root)).toContain('事务待提交');
+    expect(textContent(renderer!.root)).toContain('未提交');
   });
 
   it('auto commits SQL editor DML transactions after the configured delay', async () => {
@@ -2437,7 +2438,7 @@ describe('QueryEditor external SQL save', () => {
         await Promise.resolve();
       });
 
-      expect(textContent(renderer!.root)).toContain('事务待提交');
+      expect(textContent(renderer!.root)).toContain('3s 后自动提交');
       expect(backendApp.DBCommitTransaction).not.toHaveBeenCalled();
 
       await act(async () => {
@@ -2484,7 +2485,8 @@ describe('QueryEditor external SQL save', () => {
 
       expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalled();
       expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
-      expect(textContent(renderer!.root)).toContain('事务执行成功，未提交 1 条变更语句，正在自动提交');
+      expect(textContent(renderer!.root)).toContain('自动提交中');
+      expect(textContent(renderer!.root)).toContain('提交 (1)');
       expect(backendApp.DBCommitTransaction).not.toHaveBeenCalled();
 
       await act(async () => {
@@ -2494,7 +2496,7 @@ describe('QueryEditor external SQL save', () => {
       });
 
       expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-auto-now');
-      expect(textContent(renderer!.root)).not.toContain('事务执行成功，未提交 1 条变更语句，正在自动提交');
+      expect(textContent(renderer!.root)).not.toContain('自动提交中');
     } finally {
       vi.useRealTimers();
     }
@@ -3730,12 +3732,13 @@ describe('QueryEditor external SQL save', () => {
     expect(transactionSettingsSource).toContain("label: '立即'");
     expect(source).toContain('QueryEditorTransactionToolbar');
     expect(transactionToolbarSource).toContain("className={isV2Ui ? 'gn-v2-query-transaction-toolbar' : undefined}");
-    expect(transactionToolbarSource).toContain('事务待提交');
-    expect(transactionToolbarSource).toContain('未提交 ${statementCount} 条变更语句');
-    expect(transactionToolbarSource).toContain('事务执行成功${pendingCountText}，正在自动提交');
+    expect(transactionToolbarSource).toContain("'未提交'");
+    expect(transactionToolbarSource).toContain('gn-v2-query-transaction-commit-button');
+    expect(transactionToolbarSource).toContain('gn-v2-toolbar-kbd');
+    expect(transactionToolbarSource).toContain("'自动提交中'");
     expect(transactionToolbarSource).toContain('onFinish');
     expect(toolbarSource).toContain('gn-v2-query-toolbar-action-group');
-    expect(transactionSettingsSource).toContain('style={isV2Ui ? undefined : { width: 160 }}');
+    expect(transactionSettingsSource).toContain('style={isV2Ui ? undefined : { width: 118 }}');
     expect(toolbarSource).toContain('style={isV2Ui ? undefined : { width: 200 }}');
     expect(toolbarSource).toContain('style={isV2Ui ? undefined : { width: 170 }}');
 
@@ -3752,7 +3755,7 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('width: 140px !important;');
     expect(css).toContain('width: 166px !important;');
     expect(css).toContain('width: 132px !important;');
-    expect(css).toContain('width: 154px !important;');
+    expect(css).toContain('width: 118px !important;');
     expect(css).toContain('width: 82px !important;');
     expect(css).toContain('width: 34px !important;');
     expect(css).toContain('@media (max-width: 900px)');
