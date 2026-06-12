@@ -538,6 +538,13 @@ func TestDownloadOptionalDriverAgentBinaryInstallsDuckDBDedicatedZip(t *testing.
 		http.ServeFile(w, r, zipPath)
 	}))
 	defer server.Close()
+	proxySnapshot := currentGlobalProxyConfig()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy)
+	})
 
 	target := filepath.Join(tmpDir, "install", "duckdb-driver-agent.exe")
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
@@ -916,12 +923,10 @@ func TestDownloadOptionalDriverAgentFromBundleSharesConcurrentDownload(t *testin
 	}
 }
 
-func TestEnsureOptionalDriverAgentBinaryFallsBackAfterStaleDownloadRevision(t *testing.T) {
+func TestInstallOptionalDriverAgentPackageAcceptsStaleDownloadRevision(t *testing.T) {
 	originalProbe := optionalDriverAgentMetadataProbe
-	originalGoBinaryLookPath := goBinaryLookPath
 	t.Cleanup(func() {
 		optionalDriverAgentMetadataProbe = originalProbe
-		goBinaryLookPath = originalGoBinaryLookPath
 	})
 
 	tmpDir := t.TempDir()
@@ -935,73 +940,46 @@ func TestEnsureOptionalDriverAgentBinaryFallsBackAfterStaleDownloadRevision(t *t
 		http.ServeFile(w, r, staleAgent)
 	}))
 	defer staleServer.Close()
-
-	projectRoot := filepath.Join(tmpDir, "project")
-	if err := os.MkdirAll(filepath.Join(projectRoot, "cmd", "optional-driver-agent"), 0o755); err != nil {
-		t.Fatalf("create project root failed: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "go.mod"), []byte("module GoNavi-Wails\n"), 0o644); err != nil {
-		t.Fatalf("write go.mod failed: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "cmd", "optional-driver-agent", "main.go"), []byte("package main\n"), 0o644); err != nil {
-		t.Fatalf("write optional agent main failed: %v", err)
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd failed: %v", err)
-	}
-	if err := os.Chdir(projectRoot); err != nil {
-		t.Fatalf("chdir project root failed: %v", err)
+	proxySnapshot := currentGlobalProxyConfig()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
 	}
 	t.Cleanup(func() {
-		if err := os.Chdir(wd); err != nil {
-			t.Fatalf("restore cwd failed: %v", err)
-		}
+		_, _ = setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy)
 	})
-	goScript := filepath.Join(tmpDir, "fake-go")
-	if runtime.GOOS == "windows" {
-		goScript += ".bat"
-	}
-	if runtime.GOOS == "windows" {
-		if err := os.WriteFile(goScript, []byte("@echo off\r\nsetlocal\r\nset \"out=\"\r\n:loop\r\nif \"%~1\"==\"\" goto done\r\nif \"%~1\"==\"-o\" goto capture\r\nshift\r\ngoto loop\r\n:capture\r\nset \"out=%~2\"\r\nshift\r\nshift\r\ngoto loop\r\n:done\r\nif \"%out%\"==\"\" exit /b 1\r\ncopy /Y \"%GONAVI_TEST_BUILT_AGENT%\" \"%out%\" >nul\r\n"), 0o755); err != nil {
-			t.Fatalf("write fake go script failed: %v", err)
-		}
-	} else {
-		if err := os.WriteFile(goScript, []byte("#!/usr/bin/env sh\nout=\"\"\nwhile [ \"$#\" -gt 0 ]; do\n  if [ \"$1\" = \"-o\" ]; then out=\"$2\"; shift 2; continue; fi\n  shift\ndone\ncp \"$GONAVI_TEST_BUILT_AGENT\" \"$out\"\n"), 0o755); err != nil {
-			t.Fatalf("write fake go script failed: %v", err)
-		}
-	}
-	goBinaryLookPath = func(file string) (string, error) {
-		return goScript, nil
-	}
-	t.Setenv("GONAVI_TEST_BUILT_AGENT", staleAgent)
 
-	probeCount := 0
 	optionalDriverAgentMetadataProbe = func(driverType string, executablePath string) (db.OptionalDriverAgentMetadata, error) {
-		probeCount++
-		revision := "src-stale-agent"
-		if probeCount > 1 {
-			revision = db.OptionalDriverAgentRevision(driverType)
-		}
 		return db.OptionalDriverAgentMetadata{
 			DriverType:    driverType,
-			AgentRevision: revision,
+			AgentRevision: "src-stale-agent",
 		}, nil
 	}
 
-	targetPath := filepath.Join(tmpDir, optionalDriverExecutableBaseName("sqlserver"))
-	source, _, err := ensureOptionalDriverAgentBinary(
+	meta, err := installOptionalDriverAgentPackage(
 		nil,
 		driverDefinition{Type: "sqlserver", Name: "SQL Server"},
-		targetPath,
-		staleServer.URL,
 		"1.9.6",
+		filepath.Join(tmpDir, "drivers"),
+		staleServer.URL,
 	)
 	if err != nil {
-		t.Fatalf("expected stale direct download to fall back to source build, got %v", err)
+		t.Fatalf("expected stale direct download to be installed with an update hint, got %v", err)
 	}
-	if source != "local://go-build/sqlserver-driver-agent" {
-		t.Fatalf("expected source build fallback, got %q", source)
+	if meta.DownloadURL != staleServer.URL {
+		t.Fatalf("expected direct download source to be preserved, got %q", meta.DownloadURL)
+	}
+	if meta.AgentRevision != "src-stale-agent" {
+		t.Fatalf("expected stale agent revision to be recorded, got %q", meta.AgentRevision)
+	}
+	if _, err := os.Stat(meta.ExecutablePath); err != nil {
+		t.Fatalf("expected runtime executable to stay installed, got %v", err)
+	}
+	needsUpdate, reason, expectedRevision := optionalDriverAgentRevisionStatus("sqlserver", meta, true)
+	if !needsUpdate {
+		t.Fatalf("expected stale installed revision to be surfaced as needsUpdate; expected=%q", expectedRevision)
+	}
+	if !strings.Contains(reason, "强烈建议重装") {
+		t.Fatalf("expected advisory reinstall reason, got %q", reason)
 	}
 }
 

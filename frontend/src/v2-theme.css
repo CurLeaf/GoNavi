@@ -4840,13 +4840,13 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-max-rows-select {
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-mode-select {
-  width: 118px !important;
-  flex: 0 0 118px !important;
+  width: 74px !important;
+  flex: 0 0 74px !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-delay-select {
-  width: 82px !important;
-  flex: 0 0 82px !important;
+  width: 62px !important;
+  flex: 0 0 62px !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-select-selector {
@@ -4891,15 +4891,19 @@ body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button {
   display: inline-flex !important;
   align-items: center;
   gap: 6px;
+  border-color: transparent !important;
+  background: var(--gn-accent-soft) !important;
+  color: var(--gn-accent-2) !important;
+  font-weight: 750 !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button .gn-v2-toolbar-kbd {
   margin-left: 0;
   min-width: 18px;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.22);
+  border: none;
+  background: rgba(22, 163, 74, 0.18);
+  color: var(--gn-accent-2);
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-icon-action.ant-btn,

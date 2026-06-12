@@ -3727,9 +3727,12 @@ describe('QueryEditor external SQL save', () => {
     expect(transactionSettingsSource).toContain('gn-v2-query-toolbar-transaction-mode-select');
     expect(transactionSettingsSource).toContain('gn-v2-query-toolbar-transaction-delay-select');
     expect(transactionSettingsSource).toContain('参考 DBeaver');
-    expect(transactionSettingsSource).toContain("label: '手动提交'");
-    expect(transactionSettingsSource).toContain("label: '自动提交'");
+    expect(transactionSettingsSource).toContain("label: '手动'");
+    expect(transactionSettingsSource).toContain("label: '自动'");
+    expect(transactionSettingsSource).not.toContain("label: '手动提交'");
+    expect(transactionSettingsSource).not.toContain("label: '自动提交'");
     expect(transactionSettingsSource).toContain("label: '立即'");
+    expect(transactionSettingsSource).toContain("label: '3s'");
     expect(source).toContain('QueryEditorTransactionToolbar');
     expect(transactionToolbarSource).toContain("className={isV2Ui ? 'gn-v2-query-transaction-toolbar' : undefined}");
     expect(transactionToolbarSource).toContain("'未提交'");
@@ -3738,12 +3741,15 @@ describe('QueryEditor external SQL save', () => {
     expect(transactionToolbarSource).toContain("'自动提交中'");
     expect(transactionToolbarSource).toContain('onFinish');
     expect(toolbarSource).toContain('gn-v2-query-toolbar-action-group');
-    expect(transactionSettingsSource).toContain('style={isV2Ui ? undefined : { width: 118 }}');
+    expect(transactionSettingsSource).toContain('style={isV2Ui ? undefined : { width: 78 }}');
+    expect(transactionSettingsSource).toContain('style={isV2Ui ? undefined : { width: 68 }}');
     expect(toolbarSource).toContain('style={isV2Ui ? undefined : { width: 200 }}');
     expect(toolbarSource).toContain('style={isV2Ui ? undefined : { width: 170 }}');
 
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-selects');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-actions');
+    expect(css).toContain('width: 74px !important;');
+    expect(css).toContain('width: 62px !important;');
     expect(css).toContain('flex: 0 1 auto !important;');
     expect(css).toContain('justify-content: flex-start;');
     expect(css).toContain('height: 32px !important;');
@@ -3755,8 +3761,6 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('width: 140px !important;');
     expect(css).toContain('width: 166px !important;');
     expect(css).toContain('width: 132px !important;');
-    expect(css).toContain('width: 118px !important;');
-    expect(css).toContain('width: 82px !important;');
     expect(css).toContain('width: 34px !important;');
     expect(css).toContain('@media (max-width: 900px)');
 
