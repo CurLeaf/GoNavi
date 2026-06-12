@@ -18,9 +18,11 @@ describe('windowStateUi', () => {
     expect(shouldApplyWindowsScaleFix('ratio-change', true)).toBe(true);
   });
 
-  it('applies the Windows scale fix when a minimized taskbar window is restored with viewport drift', () => {
+  it('applies the Windows scale fix whenever a minimized taskbar window is restored', () => {
     expect(shouldApplyWindowsScaleFix('restore', true)).toBe(true);
-    expect(shouldApplyWindowsScaleFix('restore', false)).toBe(false);
+    // 外接显示器恢复后的 WebView2/DWM backing surface 可能被旧 DPI 缩放，
+    // 但不一定表现为 viewport ratio drift；restore 仍要触发 1px 轻量重绘。
+    expect(shouldApplyWindowsScaleFix('restore', false)).toBe(true);
     // 关键：restore 场景刻意不再触发 maximised 窗口的 toggle —— Unmaximise → Maximise 在
     // 任务栏恢复的真实交互里会被用户肉眼看见为"重复最大化"动画，比偶发字体变大更糟。
     // 这是 9848b8b2 已有的取舍，禁止再次被"修复"成 true。
