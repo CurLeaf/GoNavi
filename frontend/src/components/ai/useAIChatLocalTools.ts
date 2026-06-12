@@ -217,8 +217,10 @@ export const useAIChatLocalTools = ({
         messages: allMessages,
         tools: chainTools,
         addAIChatMessage: (sessionId, message) => useStore.getState().addAIChatMessage(sessionId, message),
+        updateAIChatMessage,
         setSending,
         nextMessageId,
+        pendingAssistantMessageId: chainConnectingMsg.id,
         jvmPlanContext: inheritedJVMPlanContext,
         jvmDiagnosticPlanContext: inheritedJVMDiagnosticPlanContext,
       });

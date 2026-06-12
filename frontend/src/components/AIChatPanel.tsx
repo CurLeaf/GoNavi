@@ -301,8 +301,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     messages: allMessages,
                     tools: availableTools,
                     addAIChatMessage,
+                    updateAIChatMessage,
                     setSending,
                     nextMessageId: genId,
+                    pendingAssistantMessageId: connectingMsg.id,
                     jvmPlanContext: retryJVMPlanContext,
                     jvmDiagnosticPlanContext: retryJVMDiagnosticPlanContext,
                 });
@@ -319,6 +321,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         getCurrentJVMPlanContext,
         getCurrentJVMDiagnosticPlanContext,
         resetToolCallState,
+        updateAIChatMessage,
     ]);
 
     useAIChatStreamSubscription({
@@ -433,8 +436,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             messages: allMessages,
             tools: availableTools,
             addAIChatMessage,
+            updateAIChatMessage,
             setSending,
             nextMessageId: genId,
+            pendingAssistantMessageId: connectingMsg.id,
             jvmPlanContext: currentJVMPlanContext,
             jvmDiagnosticPlanContext: currentJVMDiagnosticPlanContext,
             unavailableContent: '❌ AI Service 未就绪',
@@ -459,6 +464,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         getCurrentJVMPlanContext,
         getCurrentJVMDiagnosticPlanContext,
         loadingModels,
+        updateAIChatMessage,
     ]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
