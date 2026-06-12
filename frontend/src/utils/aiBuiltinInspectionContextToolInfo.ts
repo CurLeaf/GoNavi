@@ -109,14 +109,14 @@ export const BUILTIN_AI_INSPECTION_CONTEXT_TOOL_INFO: AIBuiltinToolInfo[] = [
     icon: "🧰",
     desc: "诊断 Redis 单机/哨兵/集群配置",
     detail:
-      "读取本地 Redis 连接拓扑摘要，返回单机、Sentinel、Cluster 的节点、master、认证状态、DB 范围和风险提示。适合用户问 Redis 哨兵/集群怎么配、为什么切库后失败、Cluster 多 DB 怎么处理时先读真实配置。",
+      "读取本地 Redis 连接拓扑摘要，返回单机、Sentinel、Cluster 的节点、master、认证状态、DB 范围、脱敏 URI 示例、状态分级和下一步动作。适合用户问 Redis 哨兵/集群怎么配、为什么切库后失败、Cluster 多 DB 怎么处理时先读真实配置。",
     params: "connectionId?, keyword?, limit?, includeRecommendations?(默认 true)",
     tool: {
       type: "function",
       function: {
         name: "inspect_redis_topology",
         description:
-          "读取本地 Redis 连接的单机、Sentinel、Cluster 拓扑配置摘要，返回节点列表、Sentinel master、认证状态、DB 选择、TLS/SSH/代理状态、潜在配置风险和建议。适用于用户提到 Redis 哨兵、Redis Cluster、切换数据库失败、多节点地址、Sentinel master、Cluster 逻辑库或跨网络访问 Redis 时，先读取真实连接配置再回答；结果不会回显 Redis 密码或 Sentinel 密码。",
+          "读取本地 Redis 连接的单机、Sentinel、Cluster 拓扑配置摘要，返回节点列表、Sentinel master、认证状态、DB 选择、TLS/SSH/代理状态、后端适配器、脱敏 URI 示例、状态分级、阻断原因、潜在配置风险和建议。适用于用户提到 Redis 哨兵、Redis Cluster、切换数据库失败、多节点地址、Sentinel master、Cluster 逻辑库或跨网络访问 Redis 时，先读取真实连接配置再回答；结果不会回显 Redis 密码或 Sentinel 密码。",
         parameters: {
           type: "object",
           properties: {

@@ -138,6 +138,11 @@ export const BUILTIN_TOOL_FLOWS: AIBuiltinToolFlow[] = [
     description: '适合先按关键词或类型筛出本地保存的数据源，再挑目标连接继续看当前状态或库表结构。',
   },
   {
+    title: '诊断 Redis 拓扑',
+    steps: 'inspect_redis_topology -> inspect_current_connection / inspect_app_logs',
+    description: '适合用户问 Redis 哨兵、Cluster、多节点、切库失败或 SSH 隧道不可用时，先拿到状态分级、脱敏 URI、后端适配器、DB 语义和下一步动作。',
+  },
+  {
     title: '盘点外部 SQL 目录',
     steps: 'inspect_external_sql_directories -> inspect_workspace_tabs / inspect_active_tab',
     description: '适合先确认本地配置了哪些外部 SQL 目录、目录绑定到哪个连接/库，以及当前打开的 SQL 文件来自哪里，再继续分析脚本内容。',

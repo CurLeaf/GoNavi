@@ -118,7 +118,7 @@ export const getConnectionTypeHint = (type: string): string => {
     case 'custom':
       return '自定义驱动与 DSN';
     case 'redis':
-      return '单机 / 集群';
+      return '单机 / 哨兵 / 集群';
     case 'mongodb':
       return '单机 / 副本集';
     case 'elasticsearch':

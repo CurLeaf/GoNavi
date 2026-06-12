@@ -43,7 +43,7 @@ describe('connectionTypeCatalog', () => {
   });
 
   it('keeps concise localized hints for special connection types', () => {
-    expect(getConnectionTypeHint('redis')).toBe('单机 / 集群');
+    expect(getConnectionTypeHint('redis')).toBe('单机 / 哨兵 / 集群');
     expect(getConnectionTypeHint('mongodb')).toBe('单机 / 副本集');
     expect(getConnectionTypeHint('elasticsearch')).toContain('Mapping');
     expect(getConnectionTypeHint('oceanbase')).toBe('MySQL / Oracle 租户');
