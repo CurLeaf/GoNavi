@@ -646,6 +646,20 @@ export interface AIToolCall {
   };
 }
 
+export type AIChatAttachmentKind = "image" | "markdown" | "text" | "pdf" | "word" | "excel" | "document";
+
+export interface AIChatAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  kind: AIChatAttachmentKind;
+  dataUrl?: string;
+  text?: string;
+  textTruncated?: boolean;
+  extractWarning?: string;
+}
+
 export type ChatPhase =
   | "idle"
   | "connecting"
@@ -663,6 +677,7 @@ export interface AIChatMessage {
   timestamp: number;
   loading?: boolean;
   images?: string[]; // base64 encoded images with data URI prefix
+  attachments?: AIChatAttachment[];
   tool_calls?: AIToolCall[];
   tool_call_id?: string;
   tool_name?: string; // used for UI display

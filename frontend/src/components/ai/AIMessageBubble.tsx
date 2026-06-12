@@ -5,7 +5,9 @@ import {
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
+  FileTextOutlined,
   ReloadOutlined,
+  WarningOutlined,
   RobotOutlined,
   UserOutlined,
 } from '@ant-design/icons';
@@ -20,6 +22,7 @@ import {
 } from '../../utils/jvmDiagnosticPlan';
 import { AIMessageMarkdown } from './messageBubble/AIMessageMarkdown';
 import { AIThinkingBlock, AIToolCallingBlock } from './messageBubble/AIMessageStatusBlocks';
+import { formatAIChatAttachmentSize } from './aiChatAttachments';
 
 interface AIMessageBubbleProps {
   msg: AIChatMessage;
@@ -46,6 +49,43 @@ interface AIMessageActionBarProps {
   onDelete: (id: string) => void;
   onCopy: () => void;
 }
+
+const AIMessageAttachmentSummary: React.FC<{
+  msg: AIChatMessage;
+  overlayTheme: OverlayWorkbenchTheme;
+}> = ({ msg, overlayTheme }) => {
+  const fileAttachments = (msg.attachments || []).filter((attachment) => attachment.kind !== 'image');
+  if (fileAttachments.length === 0) {
+    return null;
+  }
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+      {fileAttachments.map((attachment) => (
+        <div
+          key={attachment.id}
+          title={attachment.extractWarning || attachment.name}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            maxWidth: 260,
+            padding: '4px 8px',
+            borderRadius: 8,
+            border: overlayTheme.shellBorder,
+            color: overlayTheme.titleText,
+            background: 'rgba(0,0,0,0.03)',
+            fontSize: 12,
+          }}
+        >
+          <FileTextOutlined />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{attachment.name}</span>
+          <span style={{ color: overlayTheme.mutedText, flexShrink: 0 }}>{formatAIChatAttachmentSize(attachment.size)}</span>
+          {attachment.extractWarning ? <WarningOutlined style={{ color: '#faad14', flexShrink: 0 }} /> : null}
+        </div>
+      ))}
+    </div>
+  );
+};
 
 const AIMessageActionBar: React.FC<AIMessageActionBarProps> = ({
   msg,
@@ -286,6 +326,7 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
               ))}
             </div>
           )}
+          <AIMessageAttachmentSummary msg={msg} overlayTheme={overlayTheme} />
 
           {!isUser && parsedThinking && (
             <AIThinkingBlock

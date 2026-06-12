@@ -233,6 +233,10 @@ describe('Sidebar locate toolbar', () => {
       dataRef: { tableName: 'public.users' },
     })).toBe('public.users');
     expect(resolveSidebarTableNameForCopy({
+      title: 'v_users',
+      dataRef: { viewName: 'reporting.v_users' },
+    })).toBe('reporting.v_users');
+    expect(resolveSidebarTableNameForCopy({
       title: 'users',
       dataRef: {},
     })).toBe('users');

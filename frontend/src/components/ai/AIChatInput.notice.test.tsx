@@ -37,8 +37,8 @@ const renderAIChatInput = (overrides: Partial<React.ComponentProps<typeof AIChat
   <AIChatInput
     input=""
     setInput={() => {}}
-    draftImages={[]}
-    setDraftImages={() => {}}
+    draftAttachments={[]}
+    setDraftAttachments={() => {}}
     sending={false}
     onSend={() => {}}
     onStop={() => {}}
@@ -69,8 +69,8 @@ describe('AIChatInput notice layout', () => {
       <AIChatInput
         input=""
         setInput={() => {}}
-        draftImages={[]}
-        setDraftImages={() => {}}
+        draftAttachments={[]}
+        setDraftAttachments={() => {}}
         sending={false}
         onSend={() => {}}
         onStop={() => {}}
@@ -115,8 +115,8 @@ describe('AIChatInput notice layout', () => {
       <AIChatInput
         input=""
         setInput={() => {}}
-        draftImages={[]}
-        setDraftImages={() => {}}
+        draftAttachments={[]}
+        setDraftAttachments={() => {}}
         sending={false}
         onSend={() => {}}
         onStop={() => {}}
@@ -149,8 +149,8 @@ describe('AIChatInput notice layout', () => {
       <AIChatInput
         input=""
         setInput={() => {}}
-        draftImages={[]}
-        setDraftImages={() => {}}
+        draftAttachments={[]}
+        setDraftAttachments={() => {}}
         sending={false}
         onSend={() => {}}
         onStop={() => {}}

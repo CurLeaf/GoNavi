@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useStore } from '../store';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import type {
+    AIChatAttachment,
     AIChatMessage,
     JVMAIPlanContext,
     JVMDiagnosticPlanContext,
@@ -61,7 +62,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     width = 380, darkMode, bgColor, onClose, onOpenSettings, onWidthChange, overlayTheme 
 }) => {
     const [input, setInput] = useState('');
-    const [draftImages, setDraftImages] = useState<string[]>([]);
+    const [draftAttachments, setDraftAttachments] = useState<AIChatAttachment[]>([]);
     const [sending, setSending] = useState(false);
     const [showScrollBottom, setShowScrollBottom] = useState(false);
     const [historyOpen, setHistoryOpen] = useState(false);
@@ -209,6 +210,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         truncateAIChatMessages(sid, msg.id);
         deleteAIChatMessage(sid, msg.id);
         setInput(msg.content);
+        setDraftAttachments(msg.attachments || []);
         setTimeout(() => textareaRef.current?.focus(), 50);
     }, [sid, truncateAIChatMessages, deleteAIChatMessage]);
 
@@ -342,7 +344,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
     const handleSend = useCallback(async () => {
         const text = input.trim();
-        if ((!text && draftImages.length === 0) || sending) return;
+        if ((!text && draftAttachments.length === 0) || sending) return;
 
         const connectionKey = activeContext?.connectionId ? `${activeContext.connectionId}:${activeContext.dbName || ''}` : 'default';
         const readiness = buildAIChatReadinessSnapshot({
@@ -375,9 +377,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         pendingJVMPlanContextRef.current = currentJVMPlanContext;
         pendingJVMDiagnosticPlanContextRef.current = currentJVMDiagnosticPlanContext;
 
-        const currentImages = [...draftImages];
+        const currentAttachments = [...draftAttachments];
+        const currentImages = currentAttachments
+            .filter((attachment) => attachment.kind === 'image' && attachment.dataUrl)
+            .map((attachment) => attachment.dataUrl as string);
+        const currentFileAttachments = currentAttachments.filter((attachment) => attachment.kind !== 'image');
         setInput('');
-        setDraftImages([]);
+        setDraftAttachments([]);
         setSending(true);
 
         if (textareaRef.current) {
@@ -387,6 +393,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         const userMsg: AIChatMessage = {
             id: genId(), role: 'user', content: text, timestamp: Date.now(),
             images: currentImages.length > 0 ? currentImages : undefined,
+            attachments: currentFileAttachments.length > 0 ? currentFileAttachments : undefined,
         };
         addAIChatMessage(sid, userMsg);
         
@@ -419,7 +426,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             useStore.getState().replaceAIChatHistory(sid, [compressedMsg, userMsg, connectingMsg]);
             finalMessagesPayload = [
                 { role: 'assistant', content: compressedMsg.content },
-                { role: 'user', content: userMsg.content, images: userMsg.images }
+                toAIRequestMessage(userMsg),
             ];
         }
 
@@ -449,7 +456,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         });
     }, [
         input,
-        draftImages,
+        draftAttachments,
         sending,
         messages,
         addAIChatMessage,
@@ -642,8 +649,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             <AIChatInput
                 input={input}
                 setInput={setInput}
-                draftImages={draftImages}
-                setDraftImages={setDraftImages}
+                draftAttachments={draftAttachments}
+                setDraftAttachments={setDraftAttachments}
                 sending={sending}
                 onSend={handleSend}
                 onStop={handleStop}

@@ -1,4 +1,5 @@
 import type { AIChatMessage, AIToolCall } from '../types';
+import { appendAIChatAttachmentsToContent } from '../components/ai/aiChatAttachments';
 
 export interface AIRequestMessage {
   role: AIChatMessage['role'];
@@ -12,7 +13,7 @@ export interface AIRequestMessage {
 export const toAIRequestMessage = (message: AIChatMessage): AIRequestMessage => {
   const payload: AIRequestMessage = {
     role: message.role,
-    content: message.content,
+    content: appendAIChatAttachmentsToContent(message.content, message.attachments),
   };
 
   if (message.images && message.images.length > 0) {

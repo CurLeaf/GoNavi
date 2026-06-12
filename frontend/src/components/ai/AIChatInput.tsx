@@ -17,14 +17,15 @@ import AIChatContextPreview from './AIChatContextPreview';
 import AIChatProviderModelSelect from './AIChatProviderModelSelect';
 import { buildAIChatReadinessSnapshot } from './aiChatReadiness';
 import { useAIChatContextBinding } from './useAIChatContextBinding';
-import { useAIChatDraftImages } from './useAIChatDraftImages';
+import { useAIChatDraftAttachments } from './useAIChatDraftAttachments';
 import { useAISlashCommandMenu } from './useAISlashCommandMenu';
+import type { AIChatAttachment } from '../../types';
 
 interface AIChatInputProps {
     input: string;
     setInput: (val: string) => void;
-    draftImages: string[];
-    setDraftImages: React.Dispatch<React.SetStateAction<string[]>>;
+    draftAttachments: AIChatAttachment[];
+    setDraftAttachments: React.Dispatch<React.SetStateAction<AIChatAttachment[]>>;
     sending: boolean;
     onSend: () => void;
     onStop: () => void;
@@ -51,7 +52,7 @@ interface AIChatInputProps {
 }
 
 export const AIChatInput: React.FC<AIChatInputProps> = ({
-    input, setInput, draftImages, setDraftImages, sending, onSend, onStop, handleKeyDown,
+    input, setInput, draftAttachments, setDraftAttachments, sending, onSend, onStop, handleKeyDown,
     activeConnName, activeContext, activeProvider, dynamicModels, loadingModels,
     sendShortcutBinding, shortcutPlatform = 'windows', composerNotice, onComposerAction,
     onModelChange, onFetchModels, textareaRef, darkMode, textColor, mutedColor, overlayTheme,
@@ -98,11 +99,11 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
 
     const {
         fileInputRef,
-        handleImageUpload,
+        handleAttachmentUpload,
         handlePasteImages,
-        handleRemoveDraftImage,
-    } = useAIChatDraftImages({
-        setDraftImages,
+        handleRemoveDraftAttachment,
+    } = useAIChatDraftAttachments({
+        setDraftAttachments,
     });
 
     const {
@@ -151,9 +152,9 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                         />
                         <AIChatAttachmentStrip
                             variant="legacy"
-                            draftImages={draftImages}
+                            attachments={draftAttachments}
                             overlayTheme={overlayTheme}
-                            onRemove={handleRemoveDraftImage}
+                            onRemove={handleRemoveDraftAttachment}
                         />
                     </div>
                     <AIChatComposerNotice
@@ -245,14 +246,14 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                         <AIChatComposerActions
                             variant="legacy"
                             input={input}
-                            draftImageCount={draftImages.length}
+                            draftAttachmentCount={draftAttachments.length}
                             sending={sending}
                             darkMode={darkMode}
                             textColor={textColor}
                             mutedColor={mutedColor}
                             overlayTheme={overlayTheme}
                             fileInputRef={fileInputRef}
-                            onImageUpload={handleImageUpload}
+                            onAttachmentUpload={handleAttachmentUpload}
                             onOpenContext={handleOpenContext}
                             onSend={onSend}
                             onStop={onStop}
@@ -305,9 +306,9 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 />
                 <AIChatAttachmentStrip
                     variant="v2"
-                    draftImages={draftImages}
+                    attachments={draftAttachments}
                     overlayTheme={overlayTheme}
-                    onRemove={handleRemoveDraftImage}
+                    onRemove={handleRemoveDraftAttachment}
                 />
                 <AIChatComposerNotice
                     composerNotice={composerNotice}
@@ -353,14 +354,14 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                         <AIChatComposerActions
                             variant="v2"
                             input={input}
-                            draftImageCount={draftImages.length}
+                            draftAttachmentCount={draftAttachments.length}
                             sending={sending}
                             darkMode={darkMode}
                             textColor={textColor}
                             mutedColor={mutedColor}
                             overlayTheme={overlayTheme}
                             fileInputRef={fileInputRef}
-                            onImageUpload={handleImageUpload}
+                            onAttachmentUpload={handleAttachmentUpload}
                             onOpenContext={handleOpenContext}
                             onOpenSlashMenu={handleOpenSlashMenu}
                             onSend={onSend}

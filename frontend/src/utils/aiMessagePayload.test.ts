@@ -75,4 +75,24 @@ describe('toAIRequestMessage', () => {
       images: ['data:image/png;base64,abc'],
     });
   });
+
+  it('appends extracted file attachment content to the user request payload', () => {
+    const payload = toAIRequestMessage(message({
+      role: 'user',
+      content: '帮我看附件',
+      attachments: [{
+        id: 'att-1',
+        name: 'report.md',
+        mimeType: 'text/markdown',
+        size: 24,
+        kind: 'markdown',
+        text: '# 周报\n收入下降',
+      }],
+    }));
+
+    expect(payload.content).toContain('帮我看附件');
+    expect(payload.content).toContain('<用户上传附件>');
+    expect(payload.content).toContain('report.md');
+    expect(payload.content).toContain('收入下降');
+  });
 });

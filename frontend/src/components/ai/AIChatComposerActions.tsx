@@ -3,18 +3,19 @@ import { Button, Tooltip } from 'antd';
 import { CodeOutlined, PictureOutlined, SendOutlined, StopOutlined, TableOutlined } from '@ant-design/icons';
 
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
+import { AI_CHAT_ATTACHMENT_ACCEPT } from './aiChatAttachments';
 
 interface AIChatComposerActionsProps {
   variant: 'legacy' | 'v2';
   input: string;
-  draftImageCount: number;
+  draftAttachmentCount: number;
   sending: boolean;
   darkMode: boolean;
   textColor: string;
   mutedColor: string;
   overlayTheme: OverlayWorkbenchTheme;
   fileInputRef: React.RefObject<HTMLInputElement>;
-  onImageUpload: React.ChangeEventHandler<HTMLInputElement>;
+  onAttachmentUpload: React.ChangeEventHandler<HTMLInputElement>;
   onOpenContext: () => void;
   onOpenSlashMenu?: () => void;
   onSend: () => void;
@@ -26,20 +27,20 @@ const buttonIconStyle = { fontSize: 16 };
 const AIChatComposerActions: React.FC<AIChatComposerActionsProps> = ({
   variant,
   input,
-  draftImageCount,
+  draftAttachmentCount,
   sending,
   darkMode,
   textColor,
   mutedColor,
   overlayTheme,
   fileInputRef,
-  onImageUpload,
+  onAttachmentUpload,
   onOpenContext,
   onOpenSlashMenu,
   onSend,
   onStop,
 }) => {
-  const canSend = input.trim().length > 0 || draftImageCount > 0;
+  const canSend = input.trim().length > 0 || draftAttachmentCount > 0;
   const isV2 = variant === 'v2';
   const legacyIconButtonStyle: React.CSSProperties = {
     color: overlayTheme.mutedText,
@@ -61,13 +62,13 @@ const AIChatComposerActions: React.FC<AIChatComposerActionsProps> = ({
     >
       <input
         type="file"
-        accept="image/*"
+        accept={AI_CHAT_ATTACHMENT_ACCEPT}
         multiple
         ref={fileInputRef}
         style={{ display: 'none' }}
-        onChange={onImageUpload}
+        onChange={onAttachmentUpload}
       />
-      <Tooltip title="上传图片/截图">
+      <Tooltip title="上传附件（图片、Markdown、Word、Excel、PDF、文本）">
         <Button
           type="text"
           icon={<PictureOutlined style={isV2 ? undefined : buttonIconStyle} />}

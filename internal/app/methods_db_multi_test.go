@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -26,6 +27,44 @@ type fakeBatchWriteDB struct {
 	execErr      map[string]error
 	execAffected map[string]int64
 	session      *fakeBatchWriteSession
+}
+
+type fakeNativeMultiResultDB struct {
+	*fakeBatchWriteDB
+	multiCalls int
+}
+
+func (f *fakeNativeMultiResultDB) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	results, _, err := f.QueryMultiWithMessages(query)
+	return results, err
+}
+
+func (f *fakeNativeMultiResultDB) QueryMultiWithMessages(query string) ([]connection.ResultSetData, []string, error) {
+	return f.QueryMultiContextWithMessages(context.Background(), query)
+}
+
+func (f *fakeNativeMultiResultDB) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	results, _, err := f.QueryMultiContextWithMessages(ctx, query)
+	return results, err
+}
+
+func (f *fakeNativeMultiResultDB) QueryMultiContextWithMessages(ctx context.Context, query string) ([]connection.ResultSetData, []string, error) {
+	f.multiCalls++
+	if err := f.queryErr[query]; err != nil {
+		return nil, nil, err
+	}
+	if multi := f.multiResult[query]; len(multi) > 0 {
+		return cloneResultSets(multi), append([]string(nil), f.messageMap[query]...), nil
+	}
+	rows, columns, messages, err := f.QueryContextWithMessages(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	return []connection.ResultSetData{{
+		Rows:     rows,
+		Columns:  columns,
+		Messages: append([]string(nil), messages...),
+	}}, append([]string(nil), messages...), nil
 }
 
 func (f *fakeBatchWriteDB) Connect(config connection.ConnectionConfig) error {
@@ -1224,6 +1263,72 @@ func TestDBQueryMultiDoesNotBatchExecStoredProcedureAsWriteStatement(t *testing.
 	}
 	if got := resultSets[0].Rows[0]["SPID"]; got != 88 {
 		t.Fatalf("expected SPID=88, got %#v", got)
+	}
+}
+
+func TestDBQueryMultiRunsSQLServerStatisticsBatchNatively(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "SET STATISTICS IO, TIME ON;\nSELECT 1 AS value;"
+	baseDB := &fakeBatchWriteDB{
+		multiResult: map[string][]connection.ResultSetData{
+			query: {
+				{
+					Rows:     []map[string]interface{}{},
+					Columns:  []string{},
+					Messages: []string{"SQL Server parse and compile time: CPU time = 0 ms."},
+				},
+				{
+					Rows:     []map[string]interface{}{{"value": 1}},
+					Columns:  []string{"value"},
+					Messages: []string{"Table 'users'. Scan count 1, logical reads 3."},
+				},
+			},
+		},
+		messageMap: map[string][]string{
+			query: {"Table 'users'. Scan count 1, logical reads 3."},
+		},
+		queryErr: map[string]error{},
+	}
+	fakeDB := &fakeNativeMultiResultDB{fakeBatchWriteDB: baseDB}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "sqlserver", Host: "127.0.0.1", Port: 1433, User: "sa"}
+
+	result := app.DBQueryMulti(config, "master", query, "sqlserver-statistics-native-batch-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if strings.Contains(result.Message, "不支持原生多语句执行") {
+		t.Fatalf("expected SQL Server statistics batch to avoid sequential fallback warning, got %q", result.Message)
+	}
+	if fakeDB.multiCalls != 1 {
+		t.Fatalf("expected one native multi-result batch call, got %d", fakeDB.multiCalls)
+	}
+	if baseDB.session != nil {
+		t.Fatal("expected native SQL Server batch to avoid sequential session fallback")
+	}
+	if baseDB.queryCalls != 0 || baseDB.execCalls != 0 {
+		t.Fatalf("expected native batch to avoid per-statement query/exec calls, queryCalls=%d execCalls=%d", baseDB.queryCalls, baseDB.execCalls)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 2 {
+		t.Fatalf("expected two native result sets, got %#v", resultSets)
+	}
+	if got := resultSets[1].Rows[0]["value"]; got != 1 {
+		t.Fatalf("expected SELECT result value=1, got %#v", got)
+	}
+	if len(result.Messages) != 1 || !strings.Contains(result.Messages[0], "logical reads") {
+		t.Fatalf("expected SQL Server statistics message to be returned, got %#v", result.Messages)
 	}
 }
 

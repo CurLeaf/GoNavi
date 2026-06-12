@@ -733,16 +733,18 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	// 注意：原生 conn.Query() 执行写操作（UPDATE/INSERT/DELETE）时，
 	// sql.Rows 不暴露 RowsAffected，导致影响行数丢失。
 	// 因此仅在全部语句皆为读操作时才使用原生路径。
+	statements := splitSQLStatements(query)
 	allReadOnly := true
-	for _, stmt := range splitSQLStatements(query) {
+	for _, stmt := range statements {
 		if strings.TrimSpace(stmt) != "" && !isReadOnlySQLQuery(runConfig.Type, stmt) {
 			allReadOnly = false
 			break
 		}
 	}
+	useNativeMultiResult := shouldUseNativeMultiResultBatch(runConfig.Type, statements, allReadOnly)
 
 	runMultiQuery := func(inst db.Database) ([]connection.ResultSetData, []string, error) {
-		if !allReadOnly {
+		if !useNativeMultiResult {
 			return nil, nil, nil // 包含写操作，走逐条执行路径
 		}
 		if q, ok := inst.(db.MultiResultQueryMessageExecer); ok {
@@ -781,7 +783,6 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	}
 
 	// 驱动不支持多结果集，回退到逐条执行
-	statements := splitSQLStatements(query)
 	if len(statements) == 0 {
 		return connection.QueryResult{
 			Success: true,
@@ -1003,6 +1004,26 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		fallbackMsg = fmt.Sprintf("当前数据源（%s）不支持原生多语句执行，已自动拆分为 %d 条语句逐条执行。", runConfig.Type, len(statements))
 	}
 	return connection.QueryResult{Success: true, Data: resultSets, QueryID: queryID, Message: fallbackMsg}
+}
+
+func shouldUseNativeMultiResultBatch(dbType string, statements []string, allReadOnly bool) bool {
+	if allReadOnly {
+		return true
+	}
+	if !strings.EqualFold(strings.TrimSpace(dbType), "sqlserver") {
+		return false
+	}
+	for _, stmt := range statements {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if isReadOnlySQLQuery(dbType, stmt) || shouldTryQueryResultFirst(dbType, stmt) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func shouldTryQueryResultFirst(dbType string, query string) bool {

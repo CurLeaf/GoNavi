@@ -66,7 +66,7 @@ export const shouldLoadSidebarNodeOnExpand = (
 export const resolveSidebarTableNameForCopy = (
   node: Pick<SidebarTreeNode, 'title' | 'dataRef'> | null | undefined,
 ): string => {
-  return String(node?.dataRef?.tableName || node?.title || '').trim();
+  return String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || node?.title || '').trim();
 };
 
 type SidebarTableSortPreference = 'name' | 'frequency';

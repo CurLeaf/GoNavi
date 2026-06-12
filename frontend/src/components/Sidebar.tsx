@@ -2803,17 +2803,25 @@ const Sidebar: React.FC<{
       }
   };
 
+  const resolveCopyObjectNameLabel = (node: any): string => {
+      if (node?.type === 'view') return '视图名称';
+      if (node?.type === 'materialized-view') return '物化视图名称';
+      if (node?.type === 'db-event') return '事件名称';
+      return '表名';
+  };
+
   const handleCopyTableName = async (node: any) => {
-      const tableName = resolveSidebarTableNameForCopy(node);
-      if (!tableName) {
-          message.warning('表名为空，无法复制');
+      const objectName = resolveSidebarTableNameForCopy(node);
+      const label = resolveCopyObjectNameLabel(node);
+      if (!objectName) {
+          message.warning(`${label}为空，无法复制`);
           return;
       }
       try {
-          await navigator.clipboard.writeText(tableName);
-          message.success('表名已复制到剪贴板');
+          await navigator.clipboard.writeText(objectName);
+          message.success(`${label}已复制到剪贴板`);
       } catch (e: any) {
-          message.error('复制表名失败: ' + (e?.message || String(e)));
+          message.error(`复制${label}失败: ` + (e?.message || String(e)));
       }
   };
 
@@ -6938,6 +6946,12 @@ const Sidebar: React.FC<{
                 icon: <CodeOutlined />,
                 onClick: () => openViewDefinition(node)
             },
+            {
+                key: 'copy-view-name',
+                label: '复制名称',
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyTableName(node)
+            },
             { type: 'divider' },
             {
                 key: 'edit-view',
@@ -6999,6 +7013,12 @@ const Sidebar: React.FC<{
                 label: '查看物化视图定义',
                 icon: <CodeOutlined />,
                 onClick: () => openViewDefinition(node)
+            },
+            {
+                key: 'copy-materialized-view-name',
+                label: '复制名称',
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyTableName(node)
             },
             {
                 key: 'new-query',
