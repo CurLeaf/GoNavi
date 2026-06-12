@@ -685,7 +685,6 @@ jobs:
           PY
                 echo "📦 已生成 DuckDB Windows 专属驱动包: ${DUCKDB_ZIP_PATH}"
               fi
-            fi
             done
           done
 
