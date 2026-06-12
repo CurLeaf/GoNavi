@@ -20,6 +20,7 @@ import {
     getColumnDefinitionExtra,
     normalizeColumnDefinition,
 } from '../utils/columnDefinition';
+import { buildEditableTriggerSql } from '../utils/triggerEditSql';
 import {
     isMysqlFamilyDialect as isMysqlFamilySqlDialect,
     isOracleLikeDialect as isOracleLikeSqlDialect,
@@ -451,6 +452,8 @@ const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, em
   const [inlineCommentEditingKey, setInlineCommentEditingKey] = useState('');
   
   const connections = useStore(state => state.connections);
+  const addTab = useStore(state => state.addTab);
+  const setActiveContext = useStore(state => state.setActiveContext);
   const theme = useStore(state => state.theme);
   const appearance = useStore(state => state.appearance);
   const darkMode = theme === 'dark';
@@ -1058,8 +1061,6 @@ END;`;
 
   const handleEditTrigger = () => {
     if (!selectedTrigger) return;
-    setTriggerEditMode('edit');
-    // 构建完整的 CREATE TRIGGER 语句
     const dbType = getDbType();
     const tblName = tab.tableName || '';
     let createSql = '';
@@ -1073,8 +1074,19 @@ ${selectedTrigger.statement}`;
       createSql = selectedTrigger.statement || '-- 无法获取完整的触发器定义';
     }
 
-    setTriggerEditSql(createSql);
-    setIsTriggerEditModalOpen(true);
+    const dbName = String(tab.dbName || '').trim();
+    setActiveContext({ connectionId: tab.connectionId, dbName });
+    addTab({
+      id: `query-edit-trigger-${tab.connectionId}-${dbName}-${tab.tableName || ''}-${selectedTrigger.name}-${Date.now()}`,
+      title: `修改触发器: ${selectedTrigger.name}`,
+      type: 'query',
+      connectionId: tab.connectionId,
+      dbName,
+      query: buildEditableTriggerSql(selectedTrigger.name, createSql, {
+        dropSql: buildDropTriggerSql(selectedTrigger.name),
+      }),
+      queryMode: 'object-edit',
+    });
   };
 
   const handleDeleteTrigger = () => {

@@ -8,16 +8,11 @@ import { DBQuery } from '../../wailsjs/go/app/App';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
+import { buildEditableTriggerSql } from '../utils/triggerEditSql';
 
 interface TriggerViewerProps {
     tab: TabData;
 }
-
-const ensureSqlStatementTerminator = (sql: string): string => {
-    const normalized = String(sql || '').trim();
-    if (!normalized) return '';
-    return /;\s*$/.test(normalized) ? normalized : `${normalized};`;
-};
 
 const getCaseInsensitiveRawValue = (row: Record<string, any>, keys: string[]): any => {
     const normalizedKeyMap = new Map<string, string>();
@@ -103,25 +98,6 @@ const buildOracleLikeTriggerDDLFromMetadata = (
         return `CREATE OR REPLACE TRIGGER ${qualifiedTriggerName}\n${timing} ${triggeringEvent} ON ${qualifiedTableName}${forEachRowClause}${normalizedWhenClause}\n${triggerBody}`;
     }
     return `CREATE OR REPLACE TRIGGER ${qualifiedTriggerName}\n${triggerType} ${triggeringEvent} ON ${qualifiedTableName}${normalizedWhenClause}\n${triggerBody}`;
-};
-
-const buildEditableTriggerSql = (triggerName: string, triggerDefinition: string): string => {
-    const normalizedName = String(triggerName || '').trim();
-    const normalizedDefinition = String(triggerDefinition || '').trim();
-    const header = `-- 修改触发器: ${normalizedName}\n-- 请确认语法兼容当前数据库后执行\n`;
-    if (!normalizedDefinition) {
-        return `${header}-- 当前触发器定义为空，请补全 CREATE TRIGGER 语句后执行\n`;
-    }
-    if (/^\s*create\s+(?:or\s+replace\s+)?trigger\b/i.test(normalizedDefinition)) {
-        return `${header}${ensureSqlStatementTerminator(normalizedDefinition)}`;
-    }
-    if (/^\s*trigger\b/i.test(normalizedDefinition)) {
-        return `${header}${ensureSqlStatementTerminator(normalizedDefinition.replace(/^\s*trigger\b/i, 'CREATE OR REPLACE TRIGGER'))}`;
-    }
-    if (/^\s*(?:before|after|instead\s+of)\b/i.test(normalizedDefinition)) {
-        return `${header}${ensureSqlStatementTerminator(`CREATE OR REPLACE TRIGGER ${normalizedName}\n${normalizedDefinition}`)}`;
-    }
-    return `${header}-- 当前数据源仅返回触发器定义片段，请补全 CREATE TRIGGER 语句后执行\n${ensureSqlStatementTerminator(normalizedDefinition)}`;
 };
 
 const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
