@@ -59,7 +59,11 @@ goos="${platform%%/*}"
 goarch="${platform##*/}"
 
 case "$goos/$goarch" in
-  linux/amd64|linux/arm64|windows/amd64)
+  windows/amd64)
+    echo "ℹ️  Windows amd64 驱动产物不执行 UPX 压缩：$label"
+    exit 0
+    ;;
+  linux/amd64|linux/arm64)
     ;;
   *)
     echo "ℹ️  UPX 跳过不支持的平台：$label ($platform)"

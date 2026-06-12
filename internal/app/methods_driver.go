@@ -2812,7 +2812,7 @@ func readInstalledDriverPackage(downloadDir string, driverType string) (installe
 
 func optionalDriverAgentRevisionStatus(driverType string, pkg installedDriverPackage, packageMetaExists bool) (bool, string, string) {
 	expected := db.OptionalDriverAgentRevision(driverType)
-	if strings.TrimSpace(expected) == "" || !packageMetaExists || !db.IsOptionalGoDriver(driverType) {
+	if strings.TrimSpace(expected) == "" || !packageMetaExists || !db.IsOptionalGoDriver(driverType) || !shouldVerifyOptionalDriverAgentRevision(driverType, pkg.Version) {
 		return false, "", expected
 	}
 	actual := strings.TrimSpace(pkg.AgentRevision)
@@ -4139,7 +4139,7 @@ func withEnvValue(env []string, key string, value string) []string {
 }
 
 func duckDBWindowsDynamicLibraryCGOLDFlags(libDir string) string {
-	normalizedDir := filepath.ToSlash(strings.TrimSpace(libDir))
+	normalizedDir := strings.ReplaceAll(filepath.ToSlash(strings.TrimSpace(libDir)), `\`, `/`)
 	parts := []string{
 		// cgo 会把每个 CGO_LDFLAGS 片段转成 //go:cgo_ldflag，带引号的 -L 在 windows/amd64 上会被当成非法参数。
 		fmt.Sprintf("-L%s", normalizedDir),
@@ -4391,10 +4391,9 @@ func optionalDriverNameStemCandidates(driverType string, selectedVersion string)
 		switch resolveMongoDriverMajorFromVersion(selectedVersion) {
 		case 1:
 			appendStem(base + "-v1")
-			appendStem(base)
 		case 2:
-			appendStem(base)
 			appendStem(base + "-v2")
+			appendStem(base)
 		default:
 			appendStem(base)
 		}

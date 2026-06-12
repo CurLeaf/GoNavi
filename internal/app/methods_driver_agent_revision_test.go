@@ -52,6 +52,22 @@ func TestOptionalDriverPackageUpdateStatusDetectsMongoV2WhenLegacyDefault(t *tes
 	}
 }
 
+func TestOptionalDriverPackageUpdateStatusAcceptsMongoV1WithoutRevision(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+	meta := installedDriverPackage{
+		Version:       "1.17.9",
+		AgentRevision: "",
+	}
+
+	needsUpdate, reason, _ := optionalDriverPackageUpdateStatus(definition, meta, true)
+	if needsUpdate {
+		t.Fatalf("expected MongoDB v1 driver to skip revision mismatch prompts, reason=%q", reason)
+	}
+}
+
 func TestOptionalDriverAgentRevisionCurrentRejectsStaleMetadata(t *testing.T) {
 	originalProbe := optionalDriverAgentMetadataProbe
 	t.Cleanup(func() {

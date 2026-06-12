@@ -24,7 +24,7 @@ def expected_revision(revision_file: Path, driver: str):
 
 
 class GenerateDriverReleaseManifestTest(unittest.TestCase):
-    def _generate_revision_file(self, platform: str):
+    def _generate_revision_file(self, platform: str, drivers: str = "clickhouse"):
         worktree = Path(tempfile.mkdtemp(prefix="gonavi-release-manifest-worktree-"))
         subprocess.run(
             ["git", "worktree", "add", "--detach", str(worktree), "HEAD"],
@@ -43,7 +43,7 @@ class GenerateDriverReleaseManifestTest(unittest.TestCase):
             )
         )
         subprocess.run(
-            ["bash", "./tools/generate-driver-agent-revisions.sh", "--platform", platform, "--drivers", "clickhouse"],
+            ["bash", "./tools/generate-driver-agent-revisions.sh", "--platform", platform, "--drivers", drivers],
             cwd=worktree,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -63,6 +63,8 @@ class GenerateDriverReleaseManifestTest(unittest.TestCase):
                 assets_dir / "MacOS" / "clickhouse-driver-agent-darwin-arm64": b"darwin-binary",
                 assets_dir / "Linux" / "clickhouse-driver-agent-linux-amd64": b"linux-binary",
                 assets_dir / "Windows" / "clickhouse-driver-agent-windows-amd64.exe": b"MZfake-binary",
+                assets_dir / "Windows" / "mongodb-driver-agent-v1-windows-amd64.exe": b"MZfake-mongodb-v1",
+                assets_dir / "Windows" / "mongodb-driver-agent-v2-windows-amd64.exe": b"MZfake-mongodb-v2",
             }
             for path, content in fixtures.items():
                 path.write_bytes(content)
@@ -78,12 +80,12 @@ class GenerateDriverReleaseManifestTest(unittest.TestCase):
                 check=True,
             )
 
-            self.assertIn("asset count: 3", proc.stdout)
+            self.assertIn("asset count: 5", proc.stdout)
             manifest = json.loads(output.read_text(encoding="utf-8"))
             assets = manifest["assets"]
             darwin_revision_file = self._generate_revision_file("darwin/arm64")
             linux_revision_file = self._generate_revision_file("linux/amd64")
-            windows_revision_file = self._generate_revision_file("windows/amd64")
+            windows_revision_file = self._generate_revision_file("windows/amd64", "clickhouse,mongodb")
             self.assertEqual(
                 assets["clickhouse-driver-agent-darwin-arm64"]["revision"],
                 expected_revision(darwin_revision_file, "clickhouse"),
@@ -95,6 +97,22 @@ class GenerateDriverReleaseManifestTest(unittest.TestCase):
             self.assertEqual(
                 assets["clickhouse-driver-agent-windows-amd64.exe"]["revision"],
                 expected_revision(windows_revision_file, "clickhouse"),
+            )
+            self.assertEqual(
+                assets["mongodb-driver-agent-v1-windows-amd64.exe"]["driver"],
+                "mongodb",
+            )
+            self.assertEqual(
+                assets["mongodb-driver-agent-v1-windows-amd64.exe"]["platform"],
+                "windows/amd64",
+            )
+            self.assertEqual(
+                assets["mongodb-driver-agent-v1-windows-amd64.exe"]["revision"],
+                expected_revision(windows_revision_file, "mongodb"),
+            )
+            self.assertEqual(
+                assets["mongodb-driver-agent-v2-windows-amd64.exe"]["driver"],
+                "mongodb",
             )
 
 

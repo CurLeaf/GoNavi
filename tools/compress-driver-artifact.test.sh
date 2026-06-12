@@ -2,22 +2,36 @@
 
 set -euo pipefail
 
-host_platform="$(go env GOOS)/$(go env GOARCH)"
-case "$host_platform" in
-  linux/amd64|linux/arm64|windows/amd64)
-    ;;
-  *)
-    echo "skip compress-driver-artifact smoke test on unsupported host platform: $host_platform"
-    exit 0
-    ;;
-esac
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/gonavi-compress-driver-artifact.XXXXXX")"
 cleanup() {
   rm -rf "$tmpdir"
 }
 trap cleanup EXIT
+
+windows_amd64_bin="$tmpdir/windows-driver-agent-windows-amd64.exe"
+printf 'fake windows amd64 driver' >"$windows_amd64_bin"
+windows_amd64_before="$(cat "$windows_amd64_bin")"
+windows_skip_output="$(bash "$repo_root/tools/compress-driver-artifact.sh" "$windows_amd64_bin" "windows/amd64" "windows-amd64-driver" 2>&1)"
+if [[ "$windows_skip_output" != *"Windows amd64 驱动产物不执行 UPX 压缩"* ]]; then
+  echo "expected Windows amd64 driver artifact UPX compression to be skipped" >&2
+  echo "$windows_skip_output" >&2
+  exit 1
+fi
+if [[ "$(cat "$windows_amd64_bin")" != "$windows_amd64_before" ]]; then
+  echo "expected Windows amd64 driver artifact to remain unchanged when UPX is skipped" >&2
+  exit 1
+fi
+
+host_platform="$(go env GOOS)/$(go env GOARCH)"
+case "$host_platform" in
+  linux/amd64|linux/arm64)
+    ;;
+  *)
+    echo "skip compress-driver-artifact smoke test on unsupported host platform: $host_platform"
+    exit 0
+    ;;
+esac
 
 suffix=""
 if [[ "$host_platform" == windows/* ]]; then

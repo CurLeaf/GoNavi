@@ -266,6 +266,58 @@ func TestResolveOptionalDriverAgentDownloadURLsUsesMongoV1AssetForCompatibleDefa
 	t.Fatalf("expected MongoDB v1 release asset %q in candidates, got %v", want, urls)
 }
 
+func TestResolveOptionalDriverAgentDownloadURLsDoesNotUseMongoV2BaseForCompatibleDefault(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+
+	originalVersion := AppVersion
+	AppVersion = "0.7.9"
+	t.Cleanup(func() {
+		AppVersion = originalVersion
+	})
+
+	baseAssetName := optionalDriverReleaseAssetNameForType("mongodb", runtime.GOOS, runtime.GOARCH)
+	seedReleaseAssetSizeCache(t, "tag:v0.7.9", map[string]int64{
+		baseAssetName: 24 << 20,
+	})
+	seedReleaseAssetSizeCache(t, "latest", map[string]int64{
+		baseAssetName: 24 << 20,
+	})
+
+	urls := resolveOptionalDriverAgentDownloadURLs(
+		definition,
+		"builtin://activate/mongodb",
+		"1.17.9",
+	)
+	for _, got := range urls {
+		if strings.Contains(got, baseAssetName) {
+			t.Fatalf("expected MongoDB v1 install not to use ambiguous base asset %q, got %v", baseAssetName, urls)
+		}
+	}
+}
+
+func TestMongoDBVersionedAssetNamesDoNotFallbackToBaseForV1(t *testing.T) {
+	v1AssetName := mongoVersionedReleaseAssetName(1)
+	baseAssetName := optionalDriverReleaseAssetNameForType("mongodb", runtime.GOOS, runtime.GOARCH)
+
+	v1Names := optionalDriverReleaseAssetNamesForVersion("mongodb", "1.17.9")
+	if len(v1Names) != 1 || v1Names[0] != v1AssetName {
+		t.Fatalf("expected MongoDB v1 to use only %q, got %v", v1AssetName, v1Names)
+	}
+	for _, name := range v1Names {
+		if name == baseAssetName {
+			t.Fatalf("MongoDB v1 must not fallback to ambiguous base asset %q", baseAssetName)
+		}
+	}
+
+	v2Names := optionalDriverReleaseAssetNamesForVersion("mongodb", "2.5.0")
+	if len(v2Names) < 2 || v2Names[0] != mongoVersionedReleaseAssetName(2) || v2Names[1] != baseAssetName {
+		t.Fatalf("expected MongoDB v2 to prefer versioned asset then base compatibility asset, got %v", v2Names)
+	}
+}
+
 func TestResolveOptionalDriverAgentDownloadURLsSkipsBundleOnlyDamengAsset(t *testing.T) {
 	definition, ok := resolveDriverDefinition("dameng")
 	if !ok {

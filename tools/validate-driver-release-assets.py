@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import shutil
 import stat
 import subprocess
@@ -61,6 +62,16 @@ def asset_map(release: dict):
     return result
 
 
+def asset_sha256_digest(asset: dict):
+    digest = str(asset.get("digest") or "").strip().lower()
+    prefix = "sha256:"
+    if digest.startswith(prefix):
+        value = digest[len(prefix) :].strip()
+        if value:
+            return value
+    return ""
+
+
 def infer_asset_path(name: str):
     trimmed = str(name or "").strip()
     if not trimmed:
@@ -69,13 +80,56 @@ def infer_asset_path(name: str):
         return "Windows/duckdb.dll"
     if trimmed == "duckdb-driver.zip":
         return None
-    if trimmed.endswith("-driver-agent-windows-amd64.exe") or trimmed.endswith("-driver-agent-windows-arm64.exe"):
+    if (
+        trimmed.endswith("-driver-agent-windows-amd64.exe")
+        or trimmed.endswith("-driver-agent-windows-arm64.exe")
+        or trimmed.endswith("-driver-agent-v1-windows-amd64.exe")
+        or trimmed.endswith("-driver-agent-v1-windows-arm64.exe")
+        or trimmed.endswith("-driver-agent-v2-windows-amd64.exe")
+        or trimmed.endswith("-driver-agent-v2-windows-arm64.exe")
+    ):
         return f"Windows/{trimmed}"
-    if trimmed.endswith("-driver-agent-darwin-amd64") or trimmed.endswith("-driver-agent-darwin-arm64"):
+    if (
+        trimmed.endswith("-driver-agent-darwin-amd64")
+        or trimmed.endswith("-driver-agent-darwin-arm64")
+        or trimmed.endswith("-driver-agent-v1-darwin-amd64")
+        or trimmed.endswith("-driver-agent-v1-darwin-arm64")
+        or trimmed.endswith("-driver-agent-v2-darwin-amd64")
+        or trimmed.endswith("-driver-agent-v2-darwin-arm64")
+    ):
         return f"MacOS/{trimmed}"
-    if trimmed.endswith("-driver-agent-linux-amd64"):
+    if (
+        trimmed.endswith("-driver-agent-linux-amd64")
+        or trimmed.endswith("-driver-agent-v1-linux-amd64")
+        or trimmed.endswith("-driver-agent-v2-linux-amd64")
+    ):
         return f"Linux/{trimmed}"
     return None
+
+
+def normalize_machine(value: str):
+    machine = str(value or "").strip().lower()
+    if machine in {"x86_64", "amd64"}:
+        return "amd64"
+    if machine in {"aarch64", "arm64"}:
+        return "arm64"
+    return machine
+
+
+def current_runtime_platform():
+    system = platform.system().lower()
+    if system == "darwin":
+        goos = "darwin"
+    elif system == "windows":
+        goos = "windows"
+    elif system == "linux":
+        goos = "linux"
+    else:
+        return ""
+    goarch = normalize_machine(platform.machine())
+    if not goarch:
+        return ""
+    return f"{goos}/{goarch}"
 
 
 def sha256_file(path: Path):
@@ -104,11 +158,15 @@ def probe_metadata_revision(path: Path):
     return str(((payload.get("data") or {}).get("agentRevision") or "")).strip()
 
 
-def validate_release_assets(release: dict, manifest: dict):
+def validate_release_assets(release: dict, manifest: dict, runtime_platform=None):
     assets = asset_map(release)
     manifest_assets = manifest.get("assets") or {}
     if not isinstance(manifest_assets, dict) or not manifest_assets:
         raise RuntimeError("manifest assets is empty")
+
+    if runtime_platform is None:
+        runtime_platform = current_runtime_platform()
+    runtime_platform = str(runtime_platform or "").strip().lower()
 
     mismatches = []
     skipped = []
@@ -124,20 +182,27 @@ def validate_release_assets(release: dict, manifest: dict):
 
             expected_sha = str(meta.get("sha256") or "").strip().lower()
             expected_revision = str(meta.get("revision") or "").strip()
+            asset_platform = str(meta.get("platform") or "").strip().lower()
+
+            local_path = None
+            actual_sha = asset_sha256_digest(asset)
+            if expected_sha and not actual_sha:
+                local_path = tmp_root / name
+                download_url(str(asset.get("browser_download_url") or "").strip(), local_path)
+                actual_sha = sha256_file(local_path).lower()
+            if expected_sha and actual_sha != expected_sha:
+                mismatches.append((name, "sha256", actual_sha, expected_sha))
+                continue
+
             path_hint = infer_asset_path(name)
             if path_hint is None:
                 skipped.append(name)
                 continue
 
-            local_path = tmp_root / name
-            download_url(str(asset.get("browser_download_url") or "").strip(), local_path)
-
-            actual_sha = sha256_file(local_path).lower()
-            if expected_sha and actual_sha != expected_sha:
-                mismatches.append((name, "sha256", actual_sha, expected_sha))
-                continue
-
-            if expected_revision:
+            if expected_revision and asset_platform == runtime_platform:
+                if local_path is None:
+                    local_path = tmp_root / name
+                    download_url(str(asset.get("browser_download_url") or "").strip(), local_path)
                 actual_revision = probe_metadata_revision(local_path)
                 if actual_revision != expected_revision:
                     mismatches.append((name, "revision", actual_revision, expected_revision))

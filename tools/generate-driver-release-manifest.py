@@ -19,19 +19,25 @@ def parse_args():
 
 def infer_driver_and_platform(file_name: str):
     suffixes = [
-        "-driver-agent-darwin-amd64",
-        "-driver-agent-darwin-arm64",
-        "-driver-agent-linux-amd64",
-        "-driver-agent-windows-amd64.exe",
-        "-driver-agent-windows-arm64.exe",
+        ("-driver-agent-v1-darwin-amd64", "darwin/amd64"),
+        ("-driver-agent-v1-darwin-arm64", "darwin/arm64"),
+        ("-driver-agent-v1-linux-amd64", "linux/amd64"),
+        ("-driver-agent-v1-windows-amd64.exe", "windows/amd64"),
+        ("-driver-agent-v1-windows-arm64.exe", "windows/arm64"),
+        ("-driver-agent-v2-darwin-amd64", "darwin/amd64"),
+        ("-driver-agent-v2-darwin-arm64", "darwin/arm64"),
+        ("-driver-agent-v2-linux-amd64", "linux/amd64"),
+        ("-driver-agent-v2-windows-amd64.exe", "windows/amd64"),
+        ("-driver-agent-v2-windows-arm64.exe", "windows/arm64"),
+        ("-driver-agent-darwin-amd64", "darwin/amd64"),
+        ("-driver-agent-darwin-arm64", "darwin/arm64"),
+        ("-driver-agent-linux-amd64", "linux/amd64"),
+        ("-driver-agent-windows-amd64.exe", "windows/amd64"),
+        ("-driver-agent-windows-arm64.exe", "windows/arm64"),
     ]
-    for suffix in suffixes:
+    for suffix, platform in suffixes:
         if file_name.endswith(suffix):
             driver = file_name[: -len(suffix)]
-            platform_name = suffix.replace("-driver-agent-", "")
-            if platform_name.endswith(".exe"):
-                platform_name = platform_name.removesuffix(".exe")
-            platform = platform_name.replace("-", "/", 1)
             return driver, platform
     return None, None
 

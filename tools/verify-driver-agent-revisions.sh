@@ -101,7 +101,11 @@ expected_revision_for() {
 
 build_tags_for_driver() {
   local driver="$1"
+  local variant="${2:-}"
   local tags="gonavi_${driver}_driver"
+  if [[ "$driver" == "mongodb" && "$variant" == "v1" ]]; then
+    tags="gonavi_mongodb_driver_v1"
+  fi
   if [[ "$driver" == "duckdb" && "$host_goos" == "windows" && "$host_goarch" == "amd64" ]]; then
     tags="${tags} duckdb_use_lib"
   fi
@@ -110,13 +114,27 @@ build_tags_for_driver() {
 
 agent_path_for() {
   local driver="$1"
+  local variant="${2:-}"
   local public_name asset
   public_name="$(public_driver_name "$driver")"
-  asset="${public_name}-driver-agent-${goos}-${goarch}"
+  if [[ "$driver" == "mongodb" && -n "$variant" ]]; then
+    asset="${public_name}-driver-agent-${variant}-${goos}-${goarch}"
+  else
+    asset="${public_name}-driver-agent-${goos}-${goarch}"
+  fi
   if [[ "$goos" == "windows" ]]; then
     asset="${asset}.exe"
   fi
   printf '%s\n' "${assets_dir%/}/${platform_dir}/${asset}"
+}
+
+agent_variants_for() {
+  local driver="$1"
+  if [[ "$driver" == "mongodb" ]]; then
+    printf '%s\n' "v1" "v2" ""
+    return
+  fi
+  printf '%s\n' ""
 }
 
 probe_agent_revision() {
@@ -136,8 +154,9 @@ print(data.get("agentRevision", ""))
 
 probe_host_agent_revision() {
   local driver="$1"
+  local variant="${2:-}"
   local build_tags probe_dir probe_path revision
-  build_tags="$(build_tags_for_driver "$driver")"
+  build_tags="$(build_tags_for_driver "$driver" "$variant")"
   probe_dir="$(mktemp -d)"
   probe_path="${probe_dir}/probe-agent"
   if [[ "$host_goos" == "windows" ]]; then
@@ -241,36 +260,42 @@ for raw_driver in "${raw_drivers[@]}"; do
     continue
   fi
 
-  agent_path="$(agent_path_for "$driver")"
-  if [[ ! -f "$agent_path" ]]; then
-    echo "❌ $driver 缺少 driver-agent 资产：$agent_path"
-    failed=1
-    continue
-  fi
-  chmod +x "$agent_path" 2>/dev/null || true
-
-  if [[ "$goos" == "windows" ]]; then
-    if ! validate_windows_pe_machine "$agent_path" "$goarch"; then
-      echo "❌ $driver Windows driver-agent 架构校验失败：asset=$agent_path target=$target_platform"
+  while IFS= read -r variant; do
+    agent_path="$(agent_path_for "$driver" "$variant")"
+    variant_label="$driver"
+    if [[ -n "$variant" ]]; then
+      variant_label="${driver}-${variant}"
+    fi
+    if [[ ! -f "$agent_path" ]]; then
+      echo "❌ $variant_label 缺少 driver-agent 资产：$agent_path"
       failed=1
       continue
     fi
-  fi
+    chmod +x "$agent_path" 2>/dev/null || true
 
-  actual=""
-  if can_execute_target_binary; then
-    actual="$(probe_agent_revision "$agent_path" || true)"
-  else
-    echo "ℹ️  runner 平台 ${host_platform} 无法直接执行目标二进制 ${target_platform}，已先完成目标资产架构校验，再用 host-native probe 校验相同 build tags 的 revision"
-    actual="$(probe_host_agent_revision "$driver" || true)"
-  fi
+    if [[ "$goos" == "windows" ]]; then
+      if ! validate_windows_pe_machine "$agent_path" "$goarch"; then
+        echo "❌ $variant_label Windows driver-agent 架构校验失败：asset=$agent_path target=$target_platform"
+        failed=1
+        continue
+      fi
+    fi
 
-  if [[ "$actual" != "$expected" ]]; then
-    echo "❌ $driver driver-agent revision 不匹配：asset=$agent_path actual=${actual:-空} expected=$expected"
-    failed=1
-    continue
-  fi
-  echo "✅ $driver driver-agent revision 校验通过：$actual"
+    actual=""
+    if can_execute_target_binary; then
+      actual="$(probe_agent_revision "$agent_path" || true)"
+    else
+      echo "ℹ️  runner 平台 ${host_platform} 无法直接执行目标二进制 ${target_platform}，已先完成目标资产架构校验，再用 host-native probe 校验相同 build tags 的 revision"
+      actual="$(probe_host_agent_revision "$driver" "$variant" || true)"
+    fi
+
+    if [[ "$actual" != "$expected" ]]; then
+      echo "❌ $variant_label driver-agent revision 不匹配：asset=$agent_path actual=${actual:-空} expected=$expected"
+      failed=1
+      continue
+    fi
+    echo "✅ $variant_label driver-agent revision 校验通过：$actual"
+  done < <(agent_variants_for "$driver")
 done
 
 exit "$failed"
