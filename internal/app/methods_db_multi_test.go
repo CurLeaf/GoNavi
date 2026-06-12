@@ -683,6 +683,89 @@ func TestDBQueryMultiTransactionalUsesImplicitSessionTransactionForOracle(t *tes
 	}
 }
 
+func TestDBQueryMultiTransactionalOraclePrefersTransactionProviderForFinish(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	for _, tt := range []struct {
+		name              string
+		finish            func(*App, string) connection.QueryResult
+		wantCommitCalls   int
+		wantRollbackCalls int
+	}{
+		{
+			name: "commit",
+			finish: func(app *App, transactionID string) connection.QueryResult {
+				return app.DBCommitTransaction(transactionID)
+			},
+			wantCommitCalls: 1,
+		},
+		{
+			name: "rollback",
+			finish: func(app *App, transactionID string) connection.QueryResult {
+				return app.DBRollbackTransaction(transactionID)
+			},
+			wantRollbackCalls: 1,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			stmt := "UPDATE users SET name = 'new' WHERE id = 1"
+			fakeDB := &fakeTransactionalDB{
+				fakeBatchWriteDB: fakeBatchWriteDB{
+					execAffected: map[string]int64{
+						stmt: 1,
+					},
+					execErr: map[string]error{
+						"COMMIT":   errors.New("oracle commit rows affected unavailable"),
+						"ROLLBACK": errors.New("oracle rollback rows affected unavailable"),
+					},
+				},
+			}
+			newDatabaseFunc = func(dbType string) (db.Database, error) {
+				return fakeDB, nil
+			}
+
+			app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+			config := connection.ConnectionConfig{Type: "oracle", Host: "127.0.0.1", Port: 1521, User: "app"}
+
+			result := app.DBQueryMultiTransactional(config, "ORCLPDB1", stmt, "oracle-provider-finish-"+tt.name)
+			if !result.Success {
+				t.Fatalf("expected Oracle transactional query success, got failure: %s", result.Message)
+			}
+			if result.TransactionID == "" || !result.TransactionPending {
+				t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+			}
+			if fakeDB.session != nil {
+				t.Fatal("expected Oracle to use transaction provider instead of plain session provider")
+			}
+			if fakeDB.txSession == nil {
+				t.Fatal("expected Oracle to open a transaction provider session")
+			}
+
+			finishResult := tt.finish(app, result.TransactionID)
+			if !finishResult.Success {
+				t.Fatalf("expected Oracle transaction %s success through transaction provider, got failure: %s", tt.name, finishResult.Message)
+			}
+			if fakeDB.txSession.commitCalls != tt.wantCommitCalls {
+				t.Fatalf("expected commitCalls=%d, got %d", tt.wantCommitCalls, fakeDB.txSession.commitCalls)
+			}
+			if fakeDB.txSession.rollbackCalls != tt.wantRollbackCalls {
+				t.Fatalf("expected rollbackCalls=%d, got %d", tt.wantRollbackCalls, fakeDB.txSession.rollbackCalls)
+			}
+			if !fakeDB.txSession.closed {
+				t.Fatal("expected transaction provider session to close after finish")
+			}
+			for _, query := range fakeDB.execQueries {
+				if query == "COMMIT" || query == "ROLLBACK" {
+					t.Fatalf("expected finish to avoid plain ExecContext(%q), got exec queries %#v", query, fakeDB.execQueries)
+				}
+			}
+		})
+	}
+}
+
 func TestDBQueryMultiTransactionalUsesOracleImplicitSessionForOceanBaseOracleProtocol(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	originalVerifyDriverAgentRevisionFunc := verifyDriverAgentRevisionFunc

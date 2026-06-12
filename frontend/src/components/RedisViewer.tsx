@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom';
 import { Table, Input, Button, Space, Tag, Tree, Spin, message, Modal, Form, InputNumber, Popconfirm, Tooltip, Radio } from 'antd';
 import type { RadioChangeEvent } from 'antd';
-import { ReloadOutlined, DeleteOutlined, PlusOutlined, EditOutlined, SearchOutlined, ClockCircleOutlined, CopyOutlined, FolderOpenOutlined, KeyOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
+import { ReloadOutlined, DeleteOutlined, PlusOutlined, EditOutlined, ClockCircleOutlined, CopyOutlined, FolderOpenOutlined, KeyOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { RedisKeyInfo, RedisValue, StreamEntry } from '../types';
 import Editor from './MonacoEditor';
@@ -30,8 +30,7 @@ import { buildRedisWorkbenchTheme } from './redisViewerWorkbenchTheme';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { normalizeRedisSearchDraftChange, normalizeRedisSearchInput, type RedisSearchMode } from '../utils/redisSearchPattern';
 import { decodeRedisUtf8Value, formatRedisStringValue, toHexDisplay } from '../utils/redisValueDisplay';
-
-const { Search } = Input;
+import RedisViewerKeyToolbar from './RedisViewerKeyToolbar';
 
 const REDIS_TREE_KEY_TYPE_WIDTH = 92;
 const REDIS_TREE_KEY_TYPE_WIDTH_NARROW = 84;
@@ -1849,51 +1848,29 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             {/* Left: Key List */}
             <div ref={leftPanelRef} className={isV2Ui ? 'gn-v2-redis-sidebar' : undefined} style={{ width: leftPanelWidth, minWidth: 300, display: 'flex', flexDirection: 'column', flexShrink: 0, gap: 12 }}>
                 <div className={isV2Ui ? 'gn-v2-redis-header' : undefined} style={{ ...workbenchCardStyle, padding: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
-                        <div>
-                            <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.08em', color: workbenchTheme.textMuted, fontWeight: 600 }}>Key Explorer</div>
-                            <div style={{ fontSize: 24, fontWeight: 700, color: workbenchTheme.textPrimary, marginTop: 4 }}>db{redisDB}</div>
-                        </div>
-                        <Tag style={mutedPillTagStyle}>{keys.length} Keys</Tag>
-                    </div>
-                    <Space.Compact style={{ width: '100%' }}>
-                        <Radio.Group
-                            value={searchMode}
-                            onChange={handleSearchModeChange}
-                            buttonStyle="solid"
-                            style={{ flexShrink: 0 }}
-                        >
-                            <Radio.Button value="fuzzy">模糊</Radio.Button>
-                            <Radio.Button value="exact">精确</Radio.Button>
-                        </Radio.Group>
-                        <Search
-                            {...noAutoCapInputProps}
-                            style={{ flex: 1 }}
-                            placeholder={searchMode === 'exact' ? '输入完整 Key / 命名空间精确搜索' : '搜索 Key（模糊匹配）'}
-                            value={searchInput}
-                            onChange={handleSearchInputChange}
-                            onSearch={handleSearch}
-                            allowClear
-                            enterButton={<SearchOutlined />}
-                        />
-                    </Space.Compact>
-                    <div className={isV2Ui ? 'gn-v2-redis-toolbar' : undefined} style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                        <Space wrap size={8}>
-                            <Button size="small" style={actionButtonStyle} icon={<ReloadOutlined />} onClick={handleRefresh}>刷新</Button>
-                            <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => setNewKeyModalOpen(true)}>新建</Button>
-                            <Button size="small" style={primaryActionButtonStyle} onClick={handleSelectAllLoadedKeys} disabled={keys.length === 0}>全选全部</Button>
-                            <Button size="small" style={actionButtonStyle} onClick={handleClearAllSelectedKeys} disabled={selectedKeys.length === 0}>取消全选</Button>
-                        </Space>
-                        <Popconfirm
-                            title={`确定删除选中的 ${selectedKeys.length} 个 Key？`}
-                            onConfirm={() => handleDeleteKeys(selectedKeys)}
-                            disabled={selectedKeys.length === 0}
-                        >
-                            <Button size="small" style={dangerActionButtonStyle} icon={<DeleteOutlined />} disabled={selectedKeys.length === 0}>
-                                删除选中({selectedKeys.length})
-                            </Button>
-                        </Popconfirm>
-                    </div>
+                    <RedisViewerKeyToolbar
+                        isV2Ui={isV2Ui}
+                        redisDB={redisDB}
+                        connection={connection}
+                        keyCount={keys.length}
+                        selectedKeyCount={selectedKeys.length}
+                        searchMode={searchMode}
+                        searchInput={searchInput}
+                        mutedPillTagStyle={mutedPillTagStyle}
+                        actionButtonStyle={actionButtonStyle}
+                        primaryActionButtonStyle={primaryActionButtonStyle}
+                        dangerActionButtonStyle={dangerActionButtonStyle}
+                        textMutedColor={workbenchTheme.textMuted}
+                        textPrimaryColor={workbenchTheme.textPrimary}
+                        onSearchModeChange={handleSearchModeChange}
+                        onSearchInputChange={handleSearchInputChange}
+                        onSearch={handleSearch}
+                        onRefresh={handleRefresh}
+                        onCreateKey={() => setNewKeyModalOpen(true)}
+                        onSelectAllLoadedKeys={handleSelectAllLoadedKeys}
+                        onClearAllSelectedKeys={handleClearAllSelectedKeys}
+                        onDeleteSelectedKeys={() => handleDeleteKeys(selectedKeys)}
+                    />
                 </div>
                 <div className={isV2Ui ? 'gn-v2-redis-tree-card' : undefined} style={{ ...workbenchCardStyle, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 10 }}>
                     {isLargeKeyspace && (

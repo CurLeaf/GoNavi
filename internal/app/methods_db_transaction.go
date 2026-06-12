@@ -68,21 +68,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		transactionCancel    context.CancelFunc
 		startTextTransaction bool
 	)
-	if implicitTextTransaction {
-		provider, ok := dbInst.(db.SessionExecerProvider)
-		if !ok {
-			return connection.QueryResult{
-				Success: false,
-				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", transactionDBType),
-				QueryID: queryID,
-			}
-		}
-		sessionExecer, err = provider.OpenSessionExecer(ctx)
-		if err != nil {
-			logger.Error(err, "DBQueryMultiTransactional 打开隐式事务会话失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
-			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
-		}
-	} else if provider, ok := dbInst.(db.TransactionExecerProvider); ok {
+	if provider, ok := dbInst.(db.TransactionExecerProvider); ok {
 		// database/sql rolls back a BeginTx transaction when its context is cancelled.
 		// SQL editor transactions must outlive the execution RPC and be ended only by
 		// explicit commit, rollback, or shutdown cleanup.
@@ -96,6 +82,20 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		}
 		sessionExecer = transactionExecer
 		transactor = transactionExecer
+	} else if implicitTextTransaction {
+		provider, ok := dbInst.(db.SessionExecerProvider)
+		if !ok {
+			return connection.QueryResult{
+				Success: false,
+				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", transactionDBType),
+				QueryID: queryID,
+			}
+		}
+		sessionExecer, err = provider.OpenSessionExecer(ctx)
+		if err != nil {
+			logger.Error(err, "DBQueryMultiTransactional 打开隐式事务会话失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+		}
 	} else {
 		if !hasTextTransaction {
 			return connection.QueryResult{
