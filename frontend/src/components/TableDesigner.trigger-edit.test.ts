@@ -1,10 +1,9 @@
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 const tableDesignerSource = readFileSync(
-  path.resolve(__dirname, './TableDesigner.tsx'),
+  new URL('./TableDesigner.tsx', import.meta.url),
   'utf8',
 );
 
