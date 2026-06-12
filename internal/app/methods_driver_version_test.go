@@ -44,6 +44,20 @@ func TestResolveVersionedDriverOptionUsesPublishedMongoV1Release(t *testing.T) {
 	}
 }
 
+func TestMongoDBDefaultDriverVersionUsesLegacyCompatibleLine(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+
+	if definition.PinnedVersion != "1.17.9" {
+		t.Fatalf("expected MongoDB default driver version 1.17.9, got %q", definition.PinnedVersion)
+	}
+	if got := resolveDriverInstallVersion("", definition.DefaultDownloadURL, definition); got != "1.17.9" {
+		t.Fatalf("expected builtin MongoDB install to resolve version 1.17.9, got %q", got)
+	}
+}
+
 func TestCurrentDriverReleaseTagUsesDevLatestForDevBuild(t *testing.T) {
 	originalVersion := AppVersion
 	AppVersion = "dev-abc1234"
@@ -218,6 +232,38 @@ func TestResolveOptionalDriverAgentDownloadURLsDoesNotFallbackForHistoricalVersi
 	if urls[0] != explicitURL {
 		t.Fatalf("unexpected historical URL candidate: %v", urls)
 	}
+}
+
+func TestResolveOptionalDriverAgentDownloadURLsUsesMongoV1AssetForCompatibleDefault(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+
+	originalVersion := AppVersion
+	AppVersion = "0.7.9"
+	t.Cleanup(func() {
+		AppVersion = originalVersion
+	})
+
+	assetName := mongoVersionedReleaseAssetName(1)
+	seedReleaseAssetSizeCache(t, "tag:v0.7.9", map[string]int64{
+		assetName: 24 << 20,
+	})
+	seedReleaseAssetSizeCache(t, "latest", map[string]int64{})
+
+	urls := resolveOptionalDriverAgentDownloadURLs(
+		definition,
+		"builtin://activate/mongodb",
+		"1.17.9",
+	)
+	want := driverReleaseDownloadURL("v0.7.9", assetName)
+	for _, got := range urls {
+		if got == want {
+			return
+		}
+	}
+	t.Fatalf("expected MongoDB v1 release asset %q in candidates, got %v", want, urls)
 }
 
 func TestResolveOptionalDriverAgentDownloadURLsSkipsBundleOnlyDamengAsset(t *testing.T) {
@@ -662,8 +708,8 @@ func TestResolveRecentDriverVersionMetasFallsBackToHistoricalTDengineMatrix(t *t
 }
 
 func TestShouldForceSourceBuildForResolvedDownload(t *testing.T) {
-	if !shouldForceSourceBuildForResolvedDownload("mongodb", "1.17.4", "builtin://activate/mongodb?channel=history&version=1.17.4") {
-		t.Fatal("expected mongodb v1 builtin install to keep source build mode")
+	if shouldForceSourceBuildForResolvedDownload("mongodb", "1.17.4", "builtin://activate/mongodb?channel=history&version=1.17.4") {
+		t.Fatal("expected mongodb v1 builtin install to try published assets before source build")
 	}
 
 	explicitURL := driverReleaseDownloadURL("v1.17.4", mongoVersionedReleaseAssetName(1))

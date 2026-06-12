@@ -33,6 +33,25 @@ func TestOptionalDriverAgentRevisionStatusDetectsStaleClickHouseAgent(t *testing
 	}
 }
 
+func TestOptionalDriverPackageUpdateStatusDetectsMongoV2WhenLegacyDefault(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+	meta := installedDriverPackage{
+		Version:       "2.5.0",
+		AgentRevision: db.OptionalDriverAgentRevision("mongodb"),
+	}
+
+	needsUpdate, reason, _ := optionalDriverPackageUpdateStatus(definition, meta, true)
+	if !needsUpdate {
+		t.Fatal("expected installed MongoDB v2 driver to require reinstall when v1 is the compatibility default")
+	}
+	if !strings.Contains(reason, "MongoDB 4.0") || !strings.Contains(reason, "wire version 7") {
+		t.Fatalf("expected reason to explain MongoDB 4.0 compatibility, got %q", reason)
+	}
+}
+
 func TestOptionalDriverAgentRevisionCurrentRejectsStaleMetadata(t *testing.T) {
 	originalProbe := optionalDriverAgentMetadataProbe
 	t.Cleanup(func() {

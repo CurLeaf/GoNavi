@@ -525,6 +525,8 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           return prev;
         }
         const preferred =
+          (row.needsUpdate ? options.find((option) => option.version === row.pinnedVersion) : undefined) ||
+          (row.needsUpdate ? options.find((option) => option.recommended) : undefined) ||
           options.find((option) => option.version === row.installedVersion) ||
           options.find((option) => option.version === row.pinnedVersion) ||
           options.find((option) => option.recommended) ||
@@ -712,6 +714,8 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       }
       const selectedKey = selectedVersionMap[row.type];
       const selectedOption =
+        (row.needsUpdate ? versionOptions.find((item) => item.version === row.pinnedVersion) : undefined) ||
+        (row.needsUpdate ? versionOptions.find((item) => item.recommended) : undefined) ||
         versionOptions.find((item) => buildVersionOptionKey(item) === selectedKey) ||
         versionOptions.find((item) => item.recommended) ||
         versionOptions[0];
@@ -1033,7 +1037,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     const selectedKey = selectedVersionMap[row.type];
     const selectOptions = buildVersionSelectOptions(options);
     const mongoHint = row.type === 'mongodb'
-      ? '当前仅支持 MongoDB 1.17.x 和 2.x；更老 1.x 暂不提供安装。'
+      ? 'MongoDB 4.0 请使用 1.17.x 兼容驱动；2.x 驱动要求 MongoDB 4.2+。'
       : '';
     return (
       <div className="driver-manager-version-control">

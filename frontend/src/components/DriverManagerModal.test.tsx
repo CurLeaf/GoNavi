@@ -230,4 +230,62 @@ describe('DriverManagerModal toolbar actions', () => {
       vi.useRealTimers();
     }
   });
+
+  it('reinstalls stale MongoDB v2 drivers with the v1 compatibility default', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.setSystemTime(new Date(Date.now() + 2 * 60 * 1000));
+      backendApp.GetDriverStatusList.mockResolvedValue({
+        success: true,
+        data: {
+          downloadDir: 'D:/drivers',
+          drivers: [
+            {
+              type: 'mongodb',
+              name: 'MongoDB',
+              builtIn: false,
+              pinnedVersion: '1.17.9',
+              installedVersion: '2.5.0',
+              runtimeAvailable: true,
+              packageInstalled: true,
+              connectable: true,
+              needsUpdate: true,
+              defaultDownloadUrl: 'builtin://activate/mongodb',
+              message: '建议重装',
+            },
+          ],
+        },
+      });
+      backendApp.GetDriverVersionList.mockResolvedValue({
+        success: true,
+        data: {
+          versions: [
+            { version: '2.5.0', downloadUrl: 'builtin://activate/mongodb?version=2.5.0' },
+            { version: '1.17.9', downloadUrl: 'builtin://activate/mongodb', recommended: true },
+          ],
+        },
+      });
+      backendApp.DownloadDriverPackage.mockResolvedValue({ success: true });
+
+      let renderer: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<DriverManagerModal open onClose={vi.fn()} />);
+      });
+      await flushPromises();
+
+      const reinstallButton = findButton(renderer!, '重装驱动');
+      await act(async () => {
+        await reinstallButton.props.onClick();
+      });
+
+      expect(backendApp.DownloadDriverPackage).toHaveBeenCalledWith(
+        'mongodb',
+        '1.17.9',
+        'builtin://activate/mongodb',
+        'D:/drivers',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -352,7 +352,7 @@ const builtinDriverManifestJSON = `{
     "vastbase":  { "engine": "go", "version": "1.11.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/vastbase" },
     "opengauss": { "engine": "go", "version": "1.11.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/opengauss" },
     "iris":      { "engine": "go", "version": "0.2.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/iris" },
-    "mongodb":   { "engine": "go", "version": "2.5.0", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mongodb" },
+    "mongodb":   { "engine": "go", "version": "1.17.9", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mongodb" },
     "tdengine":  { "engine": "go", "version": "3.7.8", "checksumPolicy": "off", "downloadUrl": "builtin://activate/tdengine" },
     "clickhouse": { "engine": "go", "version": "2.43.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/clickhouse" },
     "elasticsearch": { "engine": "go", "version": "8.19.6", "checksumPolicy": "off", "downloadUrl": "builtin://activate/elasticsearch" }
@@ -821,7 +821,7 @@ func (a *App) GetDriverStatusList(downloadDir string, manifestURL string) connec
 		engine := effectiveDriverEngine(definition)
 		runtimeAvailable, runtimeReason := db.DriverRuntimeSupportStatus(definition.Type)
 		pkg, packageMetaExists := readInstalledDriverPackage(resolvedDir, definition.Type)
-		needsUpdate, updateReason, expectedRevision := optionalDriverAgentRevisionStatus(definition.Type, pkg, packageMetaExists)
+		needsUpdate, updateReason, expectedRevision := optionalDriverPackageUpdateStatus(definition, pkg, packageMetaExists)
 		packageInstalled := definition.BuiltIn || packageMetaExists
 		if runtimeAvailable && db.IsOptionalGoDriver(definition.Type) {
 			packageInstalled = true
@@ -2828,6 +2828,31 @@ func optionalDriverAgentRevisionStatus(driverType string, pkg installedDriverPac
 	return true, fmt.Sprintf("原因：%s。影响：%s（已安装标记：%s，当前需要：%s）", updateReason, impact, actual, expected), expected
 }
 
+func optionalDriverPackageUpdateStatus(definition driverDefinition, pkg installedDriverPackage, packageMetaExists bool) (bool, string, string) {
+	needsUpdate, reason, expected := optionalDriverAgentRevisionStatus(definition.Type, pkg, packageMetaExists)
+	if needsUpdate {
+		return true, reason, expected
+	}
+	if mongoDriverNeedsLegacyCompatibilityUpdate(definition, pkg, packageMetaExists) {
+		pinned := strings.TrimSpace(definition.PinnedVersion)
+		installed := strings.TrimSpace(pkg.Version)
+		return true, fmt.Sprintf("原因：当前推荐 MongoDB 兼容驱动版本为 %s，已安装版本为 %s。影响：MongoDB 2.x driver-agent 使用官方 v2 驱动，要求服务端 MongoDB 4.2+；连接 MongoDB 4.0 会出现 wire version 7 不兼容。强烈建议重装对应驱动代理", pinned, installed), expected
+	}
+	return false, "", expected
+}
+
+func mongoDriverNeedsLegacyCompatibilityUpdate(definition driverDefinition, pkg installedDriverPackage, packageMetaExists bool) bool {
+	if normalizeDriverType(definition.Type) != "mongodb" || !packageMetaExists {
+		return false
+	}
+	pinned := normalizeVersion(strings.TrimSpace(definition.PinnedVersion))
+	installed := normalizeVersion(strings.TrimSpace(pkg.Version))
+	if pinned == "" || installed == "" {
+		return false
+	}
+	return resolveMongoDriverMajorFromVersion(installed) == 2 && resolveMongoDriverMajorFromVersion(pinned) == 1
+}
+
 func optionalDriverAgentRevisionCurrent(driverType string, executablePath string) (string, bool, error) {
 	expected := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType))
 	if expected == "" {
@@ -3967,28 +3992,8 @@ func resolveMongoDriverMajorFromVersion(version string) int {
 	return 2
 }
 
-func shouldForceSourceBuildForVersion(driverType string, selectedVersion string) bool {
-	if normalizeDriverType(driverType) != "mongodb" {
-		return false
-	}
-	return resolveMongoDriverMajorFromVersion(selectedVersion) == 1
-}
-
-func shouldForceSourceBuildForResolvedDownload(driverType string, selectedVersion string, downloadURL string) bool {
-	if !shouldForceSourceBuildForVersion(driverType, selectedVersion) {
-		return false
-	}
-
-	parsed, err := url.Parse(strings.TrimSpace(downloadURL))
-	if err != nil || parsed == nil {
-		return true
-	}
-	switch strings.ToLower(strings.TrimSpace(parsed.Scheme)) {
-	case "http", "https":
-		return false
-	default:
-		return true
-	}
+func shouldForceSourceBuildForResolvedDownload(_ string, _ string, _ string) bool {
+	return false
 }
 
 func shouldPreferSourceBuildBeforeDownload(driverType string, selectedVersion string) bool {
@@ -4878,7 +4883,7 @@ func resolveOptionalDriverAgentDownloadURLs(definition driverDefinition, rawURL 
 				appendURL(publishedURL)
 			}
 		}
-		if publishedURL, ok := resolveLatestPublishedDriverDownloadURL(definition); ok {
+		if publishedURL, ok := resolveLatestPublishedDriverDownloadURLForVersion(definition, selectedVersion); ok {
 			appendURL(publishedURL)
 		}
 	}
@@ -5510,6 +5515,10 @@ func fetchLatestReleaseForDriverAssets() (*githubRelease, error) {
 }
 
 func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (string, bool) {
+	return resolveLatestPublishedDriverDownloadURLForVersion(definition, "")
+}
+
+func resolveLatestPublishedDriverDownloadURLForVersion(definition driverDefinition, selectedVersion string) (string, bool) {
 	driverType := normalizeDriverType(definition.Type)
 	if driverType == "" {
 		return "", false
@@ -5542,7 +5551,7 @@ func resolveLatestPublishedDriverDownloadURL(definition driverDefinition) (strin
 		return "", false
 	}
 
-	assetNames := optionalDriverReleaseAssetNames(driverType)
+	assetNames := optionalDriverReleaseAssetNamesForVersion(driverType, selectedVersion)
 	if len(assetNames) == 0 {
 		return "", false
 	}
