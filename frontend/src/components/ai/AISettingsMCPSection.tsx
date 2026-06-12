@@ -9,6 +9,7 @@ import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import AIMCPClientInstallPanel from './AIMCPClientInstallPanel';
 import AIMCPFieldGuideCard from './AIMCPFieldGuideCard';
 import AIMCPHTTPServerPanel from './AIMCPHTTPServerPanel';
+import type { AIMCPHTTPServerDraft } from './AIMCPHTTPServerPanel';
 import AIMCPQuickAddServerPanel from './AIMCPQuickAddServerPanel';
 import AIMCPServerCard from './AIMCPServerCard';
 
@@ -20,6 +21,7 @@ export interface AISettingsMCPSectionProps {
   selectedMCPClientStatus?: AIMCPClientInstallStatus;
   selectedMCPClientCommandText: string;
   mcpHTTPServerStatus: AIMCPHTTPServerStatus;
+  mcpHTTPServerDraft: AIMCPHTTPServerDraft;
   mcpServers: AIMCPServerConfig[];
   mcpTools: AIMCPToolDescriptor[];
   darkMode: boolean;
@@ -30,6 +32,7 @@ export interface AISettingsMCPSectionProps {
   loading: boolean;
   mcpClientStatusLoading: boolean;
   mcpHTTPServerLoading: boolean;
+  onUpdateHTTPServerDraft: (patch: Partial<AIMCPHTTPServerDraft>) => void;
   onToggleHTTPServer: (checked: boolean) => void;
   onCopyHTTPServerURL: () => void;
   onCopyHTTPServerAuthorization: () => void;
@@ -51,6 +54,7 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
   selectedMCPClientStatus,
   selectedMCPClientCommandText,
   mcpHTTPServerStatus,
+  mcpHTTPServerDraft,
   mcpServers,
   mcpTools,
   darkMode,
@@ -61,6 +65,7 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
   loading,
   mcpClientStatusLoading,
   mcpHTTPServerLoading,
+  onUpdateHTTPServerDraft,
   onToggleHTTPServer,
   onCopyHTTPServerURL,
   onCopyHTTPServerAuthorization,
@@ -78,11 +83,13 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
   <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
     <AIMCPHTTPServerPanel
       status={mcpHTTPServerStatus}
+      draft={mcpHTTPServerDraft}
       loading={mcpHTTPServerLoading}
       cardBg={cardBg}
       cardBorder={cardBorder}
       darkMode={darkMode}
       overlayTheme={overlayTheme}
+      onDraftChange={onUpdateHTTPServerDraft}
       onToggle={onToggleHTTPServer}
       onCopyURL={onCopyHTTPServerURL}
       onCopyAuthorization={onCopyHTTPServerAuthorization}

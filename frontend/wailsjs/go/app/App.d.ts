@@ -5,6 +5,7 @@ import {sync} from '../models';
 import {app} from '../models';
 import {jvm} from '../models';
 import {redis} from '../models';
+import {context} from '../models';
 
 export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:connection.ChangeSet):Promise<connection.QueryResult>;
 
@@ -34,6 +35,8 @@ export function CreateSQLFile(arg1:string,arg2:string):Promise<connection.QueryR
 
 export function CreateSchema(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
+export function DBCommitTransaction(arg1:string):Promise<connection.QueryResult>;
+
 export function DBConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
 export function DBGetAllColumns(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
@@ -52,8 +55,6 @@ export function DBGetTriggers(arg1:connection.ConnectionConfig,arg2:string,arg3:
 
 export function DBQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
-export function DBCommitTransaction(arg1:string):Promise<connection.QueryResult>;
-
 export function DBQueryIsolated(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DBQueryMulti(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
@@ -62,9 +63,9 @@ export function DBQueryMultiTransactional(arg1:connection.ConnectionConfig,arg2:
 
 export function DBQueryWithCancel(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
-export function DBShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
-
 export function DBRollbackTransaction(arg1:string):Promise<connection.QueryResult>;
+
+export function DBShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DataSync(arg1:sync.SyncConfig):Promise<sync.SyncResult>;
 
@@ -206,9 +207,9 @@ export function PreviewChanges(arg1:connection.ConnectionConfig,arg2:string,arg3
 
 export function PreviewImportFile(arg1:string):Promise<connection.QueryResult>;
 
-export function ReadSQLFile(arg1:string):Promise<connection.QueryResult>;
-
 export function ReadAppLogTail(arg1:number,arg2:string):Promise<connection.QueryResult>;
+
+export function ReadSQLFile(arg1:string):Promise<connection.QueryResult>;
 
 export function RedisConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
@@ -305,6 +306,8 @@ export function SelectSSHKeyFile(arg1:string):Promise<connection.QueryResult>;
 export function SetMacNativeWindowControls(arg1:boolean):Promise<void>;
 
 export function SetWindowTranslucency(arg1:number,arg2:number):Promise<void>;
+
+export function Shutdown(arg1:context.Context):Promise<void>;
 
 export function StartSecurityUpdate(arg1:app.StartSecurityUpdateRequest):Promise<app.SecurityUpdateStatus>;
 

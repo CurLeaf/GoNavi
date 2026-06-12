@@ -1,8 +1,7 @@
 import React from 'react';
 import { Button, Tooltip } from 'antd';
-import { HistoryOutlined, RobotOutlined, ClearOutlined, SettingOutlined, CloseOutlined, ExportOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { HistoryOutlined, RobotOutlined, ClearOutlined, SettingOutlined, CloseOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
-import type { AIChatMessage } from '../../types';
 
 interface AIChatHeaderProps {
     darkMode: boolean;
@@ -14,39 +13,16 @@ interface AIChatHeaderProps {
     onClear: () => void;
     onSettingsClick: () => void;
     onClose: () => void;
-    messages?: AIChatMessage[];
     sessionTitle?: string;
     activeMode?: 'chat' | 'insights' | 'history';
     onModeChange?: (mode: 'chat' | 'insights' | 'history') => void;
 }
 
-const exportToMarkdown = (messages: AIChatMessage[], title: string) => {
-    const lines: string[] = [`# ${title}`, '', `> 导出时间：${new Date().toLocaleString()}`, ''];
-    messages.forEach(msg => {
-        const role = msg.role === 'user' ? '👤 You' : '🤖 GoNavi AI';
-        lines.push(`## ${role}`);
-        lines.push('');
-        lines.push(msg.content);
-        lines.push('');
-        lines.push('---');
-        lines.push('');
-    });
-    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${title.replace(/[/\\?%*:|"<>]/g, '-')}.md`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-};
-
 export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
     darkMode, mutedColor, textColor, overlayTheme,
     isV2Ui = false,
     onHistoryClick, onClear, onSettingsClick, onClose,
-    messages = [], sessionTitle = '新对话',
+    sessionTitle = '新对话',
     activeMode = 'chat',
     onModeChange,
 }) => {
@@ -63,11 +39,6 @@ export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
                     <span className="ai-title" style={{ color: textColor, fontSize: 13, fontWeight: 600 }}>GoNavi AI</span>
                 </div>
                 <div className="ai-chat-header-right">
-                    {messages.length > 0 && (
-                        <Tooltip title="导出为 Markdown">
-                            <Button type="text" size="small" icon={<ExportOutlined />} onClick={() => exportToMarkdown(messages, sessionTitle)} style={{ color: mutedColor }} />
-                        </Tooltip>
-                    )}
                     <Tooltip title="新对话 (清空当前)">
                         <Button type="text" size="small" icon={<ClearOutlined />} onClick={onClear} style={{ color: mutedColor }} />
                     </Tooltip>
@@ -137,15 +108,6 @@ export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
                     <span>历史</span>
                 </button>
             </div>
-
-            {messages.length > 0 && (
-                <div className="gn-v2-ai-session-row">
-                    <button type="button" className="gn-v2-ai-export-button" onClick={() => exportToMarkdown(messages, sessionTitle)}>
-                        <ExportOutlined />
-                        <span>导出</span>
-                    </button>
-                </div>
-            )}
         </div>
     );
 };

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from 'antd';
 import {
+  CloseOutlined,
   CheckCircleFilled,
   ExclamationCircleFilled,
   LoadingOutlined,
@@ -15,6 +16,7 @@ interface AIChatComposerStatusProps {
   darkMode: boolean;
   overlayTheme: OverlayWorkbenchTheme;
   onAction?: (actionKey: AIComposerNoticeAction) => void;
+  onDismiss?: () => void;
 }
 
 const resolvePalette = (
@@ -96,6 +98,7 @@ const AIChatComposerStatus: React.FC<AIChatComposerStatusProps> = ({
   darkMode,
   overlayTheme,
   onAction,
+  onDismiss,
 }) => {
   const palette = resolvePalette(snapshot.severity, darkMode);
   const handleAction = () => {
@@ -103,6 +106,7 @@ const AIChatComposerStatus: React.FC<AIChatComposerStatusProps> = ({
       onAction(snapshot.action.key);
     }
   };
+  const canDismiss = typeof onDismiss === 'function';
 
   return (
     <div
@@ -153,16 +157,31 @@ const AIChatComposerStatus: React.FC<AIChatComposerStatusProps> = ({
           </div>
         </div>
       </div>
-      {snapshot.action && typeof onAction === 'function' && (
-        <Button
-          size="small"
-          type="default"
-          onClick={handleAction}
-          style={{ borderRadius: 8, flexShrink: 0 }}
-        >
-          {snapshot.action.label}
-        </Button>
-      )}
+      {(snapshot.action && typeof onAction === 'function') || canDismiss ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {snapshot.action && typeof onAction === 'function' && (
+            <Button
+              size="small"
+              type="default"
+              onClick={handleAction}
+              style={{ borderRadius: 8 }}
+            >
+              {snapshot.action.label}
+            </Button>
+          )}
+          {canDismiss && (
+            <Button
+              aria-label="关闭 AI 状态提示"
+              title="关闭"
+              size="small"
+              type="text"
+              icon={<CloseOutlined />}
+              onClick={onDismiss}
+              style={{ borderRadius: 8 }}
+            />
+          )}
+        </div>
+      ) : null}
     </div>
   );
 };

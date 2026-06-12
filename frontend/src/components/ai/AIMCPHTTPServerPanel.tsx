@@ -1,17 +1,25 @@
 import React from 'react';
-import { Button, Switch, Tag } from 'antd';
+import { Button, Input, Switch, Tag } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 
 import type { AIMCPHTTPServerStatus } from '../../types';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
+export interface AIMCPHTTPServerDraft {
+  addr: string;
+  path: string;
+  authorizationHeader: string;
+}
+
 export interface AIMCPHTTPServerPanelProps {
   status: AIMCPHTTPServerStatus;
+  draft: AIMCPHTTPServerDraft;
   loading: boolean;
   cardBg: string;
   cardBorder: string;
   darkMode: boolean;
   overlayTheme: OverlayWorkbenchTheme;
+  onDraftChange: (patch: Partial<AIMCPHTTPServerDraft>) => void;
   onToggle: (checked: boolean) => void;
   onCopyURL: () => void;
   onCopyAuthorization: () => void;
@@ -19,11 +27,13 @@ export interface AIMCPHTTPServerPanelProps {
 
 const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
   status,
+  draft,
   loading,
   cardBg,
   cardBorder,
   darkMode,
   overlayTheme,
+  onDraftChange,
   onToggle,
   onCopyURL,
   onCopyAuthorization,
@@ -31,6 +41,10 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
   const running = status?.running === true;
   const url = String(status?.url || '').trim();
   const authorizationHeader = String(status?.authorizationHeader || '').trim();
+  const inputStyle: React.CSSProperties = {
+    borderRadius: 10,
+    background: darkMode ? 'rgba(15,23,42,0.82)' : '#fff',
+  };
 
   return (
     <div
@@ -56,7 +70,7 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
             </Tag>
           </div>
           <div style={{ marginTop: 6, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-            给 OpenClaw、Hermans 等远程 Agent 使用。打开后默认监听本机地址，自动生成 Bearer Token，只开放连接、库表、字段和 DDL 等结构读取工具。
+            给 OpenClaw、Hermans 等远程 Agent 使用。打开后监听本机地址，只开放连接、库表、字段和 DDL 等结构读取工具。
           </div>
         </div>
         <Switch
@@ -78,10 +92,36 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
           gap: 8,
         }}
       >
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: overlayTheme.mutedText }}>监听地址 / 端口</span>
+            <Input
+              size="small"
+              value={draft.addr}
+              disabled={running || loading}
+              placeholder="127.0.0.1:8765"
+              onChange={(event) => onDraftChange({ addr: event.target.value })}
+              style={inputStyle}
+            />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: overlayTheme.mutedText }}>Authorization</span>
+            <Input.Password
+              size="small"
+              value={draft.authorizationHeader}
+              disabled={loading}
+              readOnly={running || loading}
+              placeholder="Bearer gnv_xxx（留空自动生成）"
+              autoComplete="off"
+              onChange={(event) => onDraftChange({ authorizationHeader: event.target.value })}
+              style={inputStyle}
+            />
+          </div>
+        </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
           {running
             ? status.message || '服务运行中，可把 URL 和 Authorization Header 配置到远程 MCP 客户端。'
-            : '不用再手动执行 GoNavi.exe mcp-server http 命令；在这里打开开关即可启动本机 HTTP MCP。'}
+            : '可自定义本机监听端口和 Bearer Token；留空 Authorization 时启动会自动生成随机 Token。'}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <code

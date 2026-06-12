@@ -14,6 +14,7 @@ import { BUILTIN_AI_TOOL_INFO } from '../utils/aiToolRegistry';
 import { EMPTY_MCP_CLIENT_STATUSES } from '../utils/mcpClientInstallStatus';
 import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';
 import AISettingsMCPSection from './ai/AISettingsMCPSection';
+import type { AIMCPHTTPServerDraft } from './ai/AIMCPHTTPServerPanel';
 import AISettingsSidebar, { type AISettingsSectionKey } from './ai/AISettingsSidebar';
 import AISettingsSafetySection from './ai/AISettingsSafetySection';
 import AISettingsContextSection from './ai/AISettingsContextSection';
@@ -48,6 +49,33 @@ const DEFAULT_MCP_HTTP_SERVER_STATUS: AIMCPHTTPServerStatus = {
     message: 'GoNavi MCP HTTP 服务未启动',
 };
 
+const DEFAULT_MCP_HTTP_SERVER_DRAFT: AIMCPHTTPServerDraft = {
+    addr: DEFAULT_MCP_HTTP_SERVER_STATUS.addr,
+    path: DEFAULT_MCP_HTTP_SERVER_STATUS.path,
+    authorizationHeader: '',
+};
+
+const buildMCPHTTPServerDraftFromStatus = (
+    status: AIMCPHTTPServerStatus,
+    fallback: AIMCPHTTPServerDraft = DEFAULT_MCP_HTTP_SERVER_DRAFT,
+): AIMCPHTTPServerDraft => ({
+    addr: String(status.addr || fallback.addr || DEFAULT_MCP_HTTP_SERVER_STATUS.addr).trim(),
+    path: String(status.path || fallback.path || DEFAULT_MCP_HTTP_SERVER_STATUS.path).trim(),
+    authorizationHeader: String(
+        status.authorizationHeader ||
+        (status.token ? `Bearer ${status.token}` : '') ||
+        fallback.authorizationHeader ||
+        '',
+    ).trim(),
+});
+
+const normalizeMCPHTTPAuthorizationToken = (value: string): string => {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return '';
+    const withoutHeaderName = trimmed.replace(/^Authorization\s*:\s*/i, '').trim();
+    return withoutHeaderName.replace(/^Bearer\s+/i, '').trim();
+};
+
 const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId }) => {
     const [providers, setProviders] = useState<AIProviderConfig[]>([]);
     const [activeProviderId, setActiveProviderId] = useState<string>('');
@@ -56,6 +84,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const [mcpServers, setMCPServers] = useState<AIMCPServerConfig[]>([]);
     const [mcpTools, setMCPTools] = useState<AIMCPToolDescriptor[]>([]);
     const [mcpHTTPServerStatus, setMCPHTTPServerStatus] = useState<AIMCPHTTPServerStatus>(DEFAULT_MCP_HTTP_SERVER_STATUS);
+    const [mcpHTTPServerDraft, setMCPHTTPServerDraft] = useState<AIMCPHTTPServerDraft>(DEFAULT_MCP_HTTP_SERVER_DRAFT);
     const [mcpHTTPServerLoading, setMCPHTTPServerLoading] = useState(false);
     const [skills, setSkills] = useState<AISkillConfig[]>([]);
     const [editingProvider, setEditingProvider] = useState<AIProviderConfig | null>(null);
@@ -182,10 +211,12 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             if (Array.isArray(mcpServersRes)) setMCPServers(mcpServersRes);
             if (Array.isArray(mcpToolsRes)) setMCPTools(mcpToolsRes);
             if (mcpHTTPServerStatusRes) {
-                setMCPHTTPServerStatus({
+                const nextStatus = {
                     ...DEFAULT_MCP_HTTP_SERVER_STATUS,
                     ...mcpHTTPServerStatusRes,
-                });
+                };
+                setMCPHTTPServerStatus(nextStatus);
+                setMCPHTTPServerDraft((prev) => buildMCPHTTPServerDraftFromStatus(nextStatus, prev));
             }
             if (Array.isArray(skillsRes)) setSkills(skillsRes);
             if (Array.isArray(mcpClientStatusesRes)) {
@@ -480,16 +511,19 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             }
             const nextStatus = checked
                 ? await Service.AIStartMCPHTTPServer({
-                    addr: mcpHTTPServerStatus.addr || DEFAULT_MCP_HTTP_SERVER_STATUS.addr,
-                    path: mcpHTTPServerStatus.path || DEFAULT_MCP_HTTP_SERVER_STATUS.path,
+                    addr: mcpHTTPServerDraft.addr || DEFAULT_MCP_HTTP_SERVER_STATUS.addr,
+                    path: mcpHTTPServerDraft.path || DEFAULT_MCP_HTTP_SERVER_STATUS.path,
+                    token: normalizeMCPHTTPAuthorizationToken(mcpHTTPServerDraft.authorizationHeader),
                     schemaOnly: true,
                 })
                 : await Service.AIStopMCPHTTPServer();
             if (nextStatus) {
-                setMCPHTTPServerStatus({
+                const normalizedStatus = {
                     ...DEFAULT_MCP_HTTP_SERVER_STATUS,
                     ...nextStatus,
-                });
+                };
+                setMCPHTTPServerStatus(normalizedStatus);
+                setMCPHTTPServerDraft((prev) => buildMCPHTTPServerDraftFromStatus(normalizedStatus, prev));
             }
             void messageApi.success(checked ? 'GoNavi MCP HTTP 服务已启动' : 'GoNavi MCP HTTP 服务已停止');
         } catch (e: any) {
@@ -497,6 +531,13 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         } finally {
             setMCPHTTPServerLoading(false);
         }
+    };
+
+    const handleUpdateMCPHTTPServerDraft = (patch: Partial<AIMCPHTTPServerDraft>) => {
+        setMCPHTTPServerDraft((prev) => ({
+            ...prev,
+            ...patch,
+        }));
     };
 
     const handleCopyMCPHTTPServerURL = async () => {
@@ -724,6 +765,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                               selectedMCPClientStatus={selectedMCPClientStatus}
                               selectedMCPClientCommandText={selectedMCPClientCommandText}
                               mcpHTTPServerStatus={mcpHTTPServerStatus}
+                              mcpHTTPServerDraft={mcpHTTPServerDraft}
                               mcpServers={mcpServers}
                               mcpTools={mcpTools}
                               darkMode={darkMode}
@@ -734,6 +776,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                               loading={loading}
                               mcpClientStatusLoading={mcpClientStatusLoading}
                               mcpHTTPServerLoading={mcpHTTPServerLoading}
+                              onUpdateHTTPServerDraft={handleUpdateMCPHTTPServerDraft}
                               onToggleHTTPServer={handleToggleMCPHTTPServer}
                               onCopyHTTPServerURL={() => void handleCopyMCPHTTPServerURL()}
                               onCopyHTTPServerAuthorization={() => void handleCopyMCPHTTPServerAuthorization()}
@@ -796,6 +839,3 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
 };
 
 export default AISettingsModal;
-
-
-

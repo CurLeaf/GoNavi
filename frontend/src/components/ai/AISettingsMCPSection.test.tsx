@@ -66,6 +66,11 @@ const buildMCPSectionProps = (patch: Partial<AISettingsMCPSectionProps> = {}): A
     schemaOnly: true,
     message: 'GoNavi MCP HTTP 服务未启动',
   },
+  mcpHTTPServerDraft: {
+    addr: '127.0.0.1:8765',
+    path: '/mcp',
+    authorizationHeader: 'Bearer gnv_test',
+  },
   mcpServers: [],
   mcpTools: [],
   darkMode: false,
@@ -76,6 +81,7 @@ const buildMCPSectionProps = (patch: Partial<AISettingsMCPSectionProps> = {}): A
   loading: false,
   mcpClientStatusLoading: false,
   mcpHTTPServerLoading: false,
+  onUpdateHTTPServerDraft: () => {},
   onToggleHTTPServer: () => {},
   onCopyHTTPServerURL: () => {},
   onCopyHTTPServerAuthorization: () => {},
@@ -99,7 +105,7 @@ describe('AISettingsMCPSection', () => {
     );
 
     expect(markup).toContain('GoNavi MCP HTTP 服务');
-    expect(markup).toContain('不用再手动执行 GoNavi.exe mcp-server http 命令');
+    expect(markup).toContain('可自定义本机监听端口和 Bearer Token');
     expect(markup).toContain('http://127.0.0.1:8765/mcp');
     expect(markup).toContain('复制 Authorization');
     expect(markup).toContain('接入外部客户端');
@@ -207,5 +213,21 @@ describe('AISettingsMCPSection', () => {
     httpPanel.props.onToggle(true);
 
     expect(onToggleHTTPServer).toHaveBeenCalledWith(true);
+  });
+
+  it('passes MCP HTTP draft updates through the switch panel', () => {
+    const onUpdateHTTPServerDraft = vi.fn();
+    const tree = AISettingsMCPSection(buildMCPSectionProps({
+      onUpdateHTTPServerDraft,
+    }));
+
+    const httpPanel = findElement(
+      tree,
+      (node) => node.props?.onDraftChange === onUpdateHTTPServerDraft,
+    );
+    expect(httpPanel).toBeTruthy();
+    httpPanel.props.onDraftChange({ addr: '127.0.0.1:9123' });
+
+    expect(onUpdateHTTPServerDraft).toHaveBeenCalledWith({ addr: '127.0.0.1:9123' });
   });
 });

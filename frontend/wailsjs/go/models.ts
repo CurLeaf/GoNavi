@@ -1,5 +1,5 @@
 export namespace ai {
-
+	
 	export class MCPClientInstallResult {
 	    success: boolean;
 	    client?: string;
@@ -7,11 +7,11 @@ export namespace ai {
 	    configPath?: string;
 	    command?: string;
 	    args?: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new MCPClientInstallResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
@@ -35,7 +35,7 @@ export namespace ai {
 	    configPath?: string;
 	    command?: string;
 	    args?: string[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new MCPClientInstallStatus(source);
 	    }
@@ -61,11 +61,11 @@ export namespace ai {
 	    path?: string;
 	    token?: string;
 	    schemaOnly: boolean;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new MCPHTTPServerOptions(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.addr = source["addr"];
@@ -84,11 +84,11 @@ export namespace ai {
 	    authorizationHeader?: string;
 	    startedAt?: number;
 	    message: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new MCPHTTPServerStatus(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.running = source["running"];
@@ -1392,3 +1392,4 @@ export namespace sync {
 	}
 
 }
+

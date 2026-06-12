@@ -2,9 +2,12 @@ package aiservice
 
 import (
 	"context"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"GoNavi-Wails/internal/ai"
 	"GoNavi-Wails/internal/secretstore"
@@ -95,7 +98,83 @@ func TestMCPHTTPServerLifecycleFromAIService(t *testing.T) {
 	if stopped.Running {
 		t.Fatalf("expected stopped status, got %#v", stopped)
 	}
-	if stopped.Token != "" || stopped.AuthorizationHeader != "" {
-		t.Fatalf("expected stopped status to clear token fields, got token=%q header=%q", stopped.Token, stopped.AuthorizationHeader)
+	if stopped.Token != started.Token || stopped.AuthorizationHeader != "Bearer "+started.Token {
+		t.Fatalf("expected stopped status to keep token fields, got token=%q header=%q", stopped.Token, stopped.AuthorizationHeader)
 	}
+}
+
+func TestMCPHTTPServerStartUsesCustomAddrAndToken(t *testing.T) {
+	originalStarter := startMCPHTTPProcess
+	originalHealth := waitMCPHTTPHealth
+	t.Cleanup(func() {
+		startMCPHTTPProcess = originalStarter
+		waitMCPHTTPHealth = originalHealth
+	})
+
+	var capturedOptions mcpHTTPProcessStartOptions
+	startMCPHTTPProcess = func(_ context.Context, options mcpHTTPProcessStartOptions) (mcpHTTPProcess, error) {
+		capturedOptions = options
+		return newFakeMCPHTTPProcess(), nil
+	}
+	waitMCPHTTPHealth = func(_ context.Context, _ string) error {
+		return nil
+	}
+
+	service := NewServiceWithSecretStore(secretstore.NewUnavailableStore("test"))
+	InitializeLifecycle(service, context.Background())
+	t.Cleanup(func() {
+		service.Shutdown(context.Background())
+	})
+
+	started, err := service.AIStartMCPHTTPServer(ai.MCPHTTPServerOptions{
+		Addr:  "127.0.0.1:9123",
+		Path:  "mcp",
+		Token: "gnv_custom_token",
+	})
+	if err != nil {
+		t.Fatalf("AIStartMCPHTTPServer returned error: %v", err)
+	}
+
+	if capturedOptions.Addr != "127.0.0.1:9123" || capturedOptions.Token != "gnv_custom_token" {
+		t.Fatalf("expected custom addr/token, got %#v", capturedOptions)
+	}
+	if started.URL != "http://127.0.0.1:9123/mcp" {
+		t.Fatalf("expected custom MCP URL, got %q", started.URL)
+	}
+	if started.Token != "gnv_custom_token" || started.AuthorizationHeader != "Bearer gnv_custom_token" {
+		t.Fatalf("expected custom bearer token in status, got token=%q header=%q", started.Token, started.AuthorizationHeader)
+	}
+	if !started.SchemaOnly || !capturedOptions.SchemaOnly {
+		t.Fatal("expected custom in-app MCP HTTP server to remain schema-only")
+	}
+}
+
+func TestMCPHTTPCommandProcessStopTreatsRequestedCancelAsSuccess(t *testing.T) {
+	cmdCtx, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(cmdCtx, os.Args[0], "-test.run=TestMCPHTTPCommandProcessStopHelper")
+	cmd.Env = append(os.Environ(), "GONAVI_MCP_HTTP_STOP_HELPER=1")
+	if err := cmd.Start(); err != nil {
+		cancel()
+		t.Fatalf("start helper process: %v", err)
+	}
+
+	process := &mcpHTTPCommandProcess{
+		cancel: cancel,
+		cmd:    cmd,
+		done:   make(chan struct{}),
+	}
+	go process.wait()
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer stopCancel()
+	if err := process.Stop(stopCtx); err != nil {
+		t.Fatalf("expected requested stop to ignore process kill error, got %v", err)
+	}
+}
+
+func TestMCPHTTPCommandProcessStopHelper(t *testing.T) {
+	if os.Getenv("GONAVI_MCP_HTTP_STOP_HELPER") != "1" {
+		return
+	}
+	select {}
 }

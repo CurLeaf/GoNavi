@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AIChatInput } from './AIChatInput';
+import AIChatComposerStatus from './AIChatComposerStatus';
+import { buildAIChatReadinessSnapshot } from './aiChatReadiness';
 import { buildOverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
 vi.mock('../../store', () => ({
@@ -33,7 +35,7 @@ const baseProvider = {
   temperature: 0.2,
 };
 
-const renderAIChatInput = (overrides: Partial<React.ComponentProps<typeof AIChatInput>> = {}) => renderToStaticMarkup(
+const buildAIChatInput = (overrides: Partial<React.ComponentProps<typeof AIChatInput>> = {}) => (
   <AIChatInput
     input=""
     setInput={() => {}}
@@ -62,6 +64,9 @@ const renderAIChatInput = (overrides: Partial<React.ComponentProps<typeof AIChat
     {...overrides}
   />
 );
+
+const renderAIChatInput = (overrides: Partial<React.ComponentProps<typeof AIChatInput>> = {}) =>
+  renderToStaticMarkup(buildAIChatInput(overrides));
 
 describe('AIChatInput notice layout', () => {
   it('renders the composer notice above the input editor', () => {
@@ -250,5 +255,27 @@ describe('AIChatInput notice layout', () => {
 
     expect(markup).toContain('自建代理 还缺少 密钥、接口地址');
     expect(markup).toContain('修复供应商配置');
+  });
+
+  it('renders a dismiss affordance for the non-blocking ready composer status', () => {
+    const snapshot = buildAIChatReadinessSnapshot({
+      activeProvider: {
+        ...baseProvider,
+        model: 'MiniMax-M2.7-highspeed',
+        models: ['MiniMax-M2.7-highspeed'],
+      },
+    });
+    const markup = renderToStaticMarkup(
+      <AIChatComposerStatus
+        snapshot={snapshot}
+        darkMode={false}
+        overlayTheme={buildOverlayWorkbenchTheme(false)}
+        onDismiss={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('data-ai-chat-composer-status="true"');
+    expect(markup).toContain('aria-label="关闭 AI 状态提示"');
+    expect(markup).toContain('title="关闭"');
   });
 });

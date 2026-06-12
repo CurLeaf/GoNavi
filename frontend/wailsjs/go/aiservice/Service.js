@@ -153,3 +153,7 @@ export function AITestMCPServer(arg1) {
 export function AITestProvider(arg1) {
   return window['go']['aiservice']['Service']['AITestProvider'](arg1);
 }
+
+export function Shutdown(arg1) {
+  return window['go']['aiservice']['Service']['Shutdown'](arg1);
+}

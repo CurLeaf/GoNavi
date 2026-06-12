@@ -595,7 +595,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 }}
                 onSettingsClick={handleOpenSettingsFromPanel}
                 onClose={onClose}
-                messages={messages}
                 sessionTitle={currentSessionTitle}
                 activeMode={effectivePanelMode}
                 onModeChange={(mode) => {

@@ -83,9 +83,10 @@ describe('AISettingsModal edit password behavior', () => {
 
   it('keeps long ai settings toast errors wrapped within the modal body', () => {
     expect(aiChatPanelCss).toContain('.ai-settings-body .ant-message {');
-    expect(aiChatPanelCss).toContain('width: min(100%, 720px);');
-    expect(aiChatPanelCss).toContain('max-width: calc(100% - 32px);');
+    expect(aiChatPanelCss).toContain('width: fit-content;');
+    expect(aiChatPanelCss).toContain('max-width: min(520px, calc(100% - 32px));');
     expect(aiChatPanelCss).toContain('.ai-settings-body .ant-message .ant-message-notice-content {');
+    expect(aiChatPanelCss).toContain('max-width: 100%;');
     expect(aiChatPanelCss).toContain('white-space: normal;');
     expect(aiChatPanelCss).toContain('overflow-wrap: anywhere;');
   });

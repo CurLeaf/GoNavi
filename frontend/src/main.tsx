@@ -382,14 +382,15 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                 AIStartMCPHTTPServer: async (input: any) => {
                     const addr = String(input?.addr || '127.0.0.1:8765');
                     const path = String(input?.path || '/mcp').startsWith('/') ? String(input?.path || '/mcp') : `/${String(input?.path || '/mcp')}`;
+                    const token = String(input?.token || 'gnv_browser_mock_token').trim() || 'gnv_browser_mock_token';
                     mockMCPHTTPServerStatus = {
                         running: true,
                         addr,
                         path,
                         url: `http://${addr}${path}`,
                         schemaOnly: true,
-                        token: 'gnv_browser_mock_token',
-                        authorizationHeader: 'Bearer gnv_browser_mock_token',
+                        token,
+                        authorizationHeader: `Bearer ${token}`,
                         startedAt: Date.now(),
                         message: 'GoNavi MCP HTTP 服务已启动',
                     };
@@ -399,8 +400,6 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                     mockMCPHTTPServerStatus = {
                         ...mockMCPHTTPServerStatus,
                         running: false,
-                        token: '',
-                        authorizationHeader: '',
                         message: 'GoNavi MCP HTTP 服务已停止',
                     };
                     return cloneBrowserMockValue(mockMCPHTTPServerStatus);

@@ -129,8 +129,9 @@ func (s *Service) stopMCPHTTPServer(ctx context.Context, message string) (ai.MCP
 			status = defaultMCPHTTPServerStatus()
 		}
 		status.Running = false
-		status.Token = ""
-		status.AuthorizationHeader = ""
+		if strings.TrimSpace(status.Token) != "" {
+			status.AuthorizationHeader = "Bearer " + strings.TrimSpace(status.Token)
+		}
 		status.Message = "GoNavi MCP HTTP 服务未启动"
 		s.mcpHTTPLast = status
 		s.mcpHTTPMu.Unlock()
@@ -260,6 +261,11 @@ func (p *mcpHTTPCommandProcess) Stop(ctx context.Context) error {
 	if p == nil {
 		return nil
 	}
+	select {
+	case <-p.done:
+		return p.waitErr()
+	default:
+	}
 	if p.cancel != nil {
 		p.cancel()
 	}
@@ -268,7 +274,7 @@ func (p *mcpHTTPCommandProcess) Stop(ctx context.Context) error {
 	}
 	select {
 	case <-p.done:
-		return p.waitErr()
+		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -383,8 +389,9 @@ func defaultMCPHTTPServerStatus() ai.MCPHTTPServerStatus {
 
 func stoppedMCPHTTPStatus(status ai.MCPHTTPServerStatus, message string) ai.MCPHTTPServerStatus {
 	status.Running = false
-	status.Token = ""
-	status.AuthorizationHeader = ""
+	if strings.TrimSpace(status.Token) != "" {
+		status.AuthorizationHeader = "Bearer " + strings.TrimSpace(status.Token)
+	}
 	status.Message = message
 	return status
 }
