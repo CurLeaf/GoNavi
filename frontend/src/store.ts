@@ -122,6 +122,7 @@ const MAX_PERSISTED_SQL_LOG_LENGTH = 100 * 1024;
 const MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH = 2 * 1024;
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
+const MAX_REDIS_DATABASE_INDEX = Number.MAX_SAFE_INTEGER;
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   enabled: false,
   type: "socks5",
@@ -781,7 +782,12 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
   };
 
   if (type === "redis") {
-    safeConfig.redisDB = normalizeIntegerInRange(raw.redisDB, 0, 0, 15);
+    safeConfig.redisDB = normalizeIntegerInRange(
+      raw.redisDB,
+      0,
+      0,
+      MAX_REDIS_DATABASE_INDEX,
+    );
     safeConfig.redisSentinelMaster = toTrimmedString(raw.redisSentinelMaster);
     safeConfig.redisSentinelUser = toTrimmedString(raw.redisSentinelUser);
     safeConfig.redisSentinelPassword = savePassword
@@ -857,7 +863,7 @@ const sanitizeSavedConnection = (
   const includeRedisDatabases = sanitizeNumberArray(
     raw.includeRedisDatabases,
     0,
-    15,
+    MAX_REDIS_DATABASE_INDEX,
   );
 
   return {

@@ -297,7 +297,7 @@ export interface ConnectionConfig {
   dsn?: string;
   connectionParams?: string;
   timeout?: number;
-  redisDB?: number; // Redis database index (0-15)
+  redisDB?: number; // Redis database index
   uri?: string; // Connection URI for copy/paste
   clickHouseProtocol?: "auto" | "http" | "native"; // ClickHouse connection protocol override
   oceanBaseProtocol?: "mysql" | "oracle"; // OceanBase tenant compatibility protocol
@@ -342,7 +342,7 @@ export interface SavedConnection {
   hasOpaqueURI?: boolean;
   hasOpaqueDSN?: boolean;
   includeDatabases?: string[];
-  includeRedisDatabases?: number[]; // Redis databases to show (0-15)
+  includeRedisDatabases?: number[]; // Redis databases to show
   iconType?: string; // 自定义图标类型（如 'mysql','postgres'），不填则取 config.type
   iconColor?: string; // 自定义图标颜色（十六进制），不填则取类型默认色
 }

@@ -37,6 +37,8 @@ type RedisClientImpl struct {
 }
 
 const (
+	redisDefaultDatabaseCount         = 16
+	redisClusterLogicalDBCount        = 16
 	redisScanDefaultTargetCount int64 = 2000
 	redisScanMaxTargetCount     int64 = 10000
 	redisScanMinStepCount       int64 = 200
@@ -263,10 +265,9 @@ func (r *RedisClientImpl) Connect(config connection.ConnectionConfig) error {
 	config.Password = sanitizeRedisPassword(config.Password)
 	config.RedisSentinelPassword = sanitizeRedisPassword(config.RedisSentinelPassword)
 	r.config = config
-	if r.config.RedisDB < 0 || r.config.RedisDB > 15 {
+	if r.config.RedisDB < 0 {
 		r.config.RedisDB = 0
 	}
-	r.currentDB = r.config.RedisDB
 	r.forwarder = nil
 	r.client = nil
 	r.singleClient = nil
@@ -282,6 +283,10 @@ func (r *RedisClientImpl) Connect(config connection.ConnectionConfig) error {
 	topology := strings.ToLower(strings.TrimSpace(config.Topology))
 	isSentinel := topology == "sentinel"
 	r.isCluster = !isSentinel && (topology == "cluster" || len(seedAddrs) > 1)
+	if r.isCluster && r.config.RedisDB >= redisClusterLogicalDBCount {
+		r.config.RedisDB = 0
+	}
+	r.currentDB = r.config.RedisDB
 
 	if (r.isCluster || isSentinel) && config.UseSSH {
 		return fmt.Errorf("Redis %s模式暂不支持 SSH 隧道，请关闭 SSH 后重试", redisTopologyDisplayName(topology))
@@ -1349,8 +1354,8 @@ func (r *RedisClientImpl) ExecuteCommand(args []string) (interface{}, error) {
 			if err != nil {
 				return nil, fmt.Errorf("无效数据库索引: %s", args[1])
 			}
-			if index < 0 || index > 15 {
-				return nil, fmt.Errorf("数据库索引必须在 0-15 之间")
+			if index < 0 || index >= redisClusterLogicalDBCount {
+				return nil, fmt.Errorf("数据库索引必须在 0-%d 之间", redisClusterLogicalDBCount-1)
 			}
 			r.currentDB = index
 			r.config.RedisDB = index
@@ -1496,6 +1501,67 @@ func (r *RedisClientImpl) GetServerInfo() (map[string]string, error) {
 	return result, nil
 }
 
+func parseRedisKeyspaceDatabaseKeys(info string) map[int]int64 {
+	dbMap := make(map[int]int64)
+	lines := strings.Split(info, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "db") {
+			// Format: db0:keys=123,expires=0,avg_ttl=0
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			dbIndex, err := strconv.Atoi(strings.TrimPrefix(parts[0], "db"))
+			if err != nil {
+				continue
+			}
+			kvPairs := strings.Split(parts[1], ",")
+			for _, kv := range kvPairs {
+				if strings.HasPrefix(kv, "keys=") {
+					keys, _ := strconv.ParseInt(strings.TrimPrefix(kv, "keys="), 10, 64)
+					dbMap[dbIndex] = keys
+					break
+				}
+			}
+		}
+	}
+	return dbMap
+}
+
+func parseRedisConfiguredDatabaseCount(config map[string]string) (int, bool) {
+	for key, value := range config {
+		if !strings.EqualFold(strings.TrimSpace(key), "databases") {
+			continue
+		}
+		count, err := strconv.Atoi(strings.TrimSpace(value))
+		if err == nil && count > 0 {
+			return count, true
+		}
+	}
+	return 0, false
+}
+
+func (r *RedisClientImpl) resolveRedisDatabaseCount(ctx context.Context, dbMap map[int]int64) int {
+	count := redisDefaultDatabaseCount
+	if r.currentDB >= count {
+		count = r.currentDB + 1
+	}
+	for index := range dbMap {
+		if index >= count {
+			count = index + 1
+		}
+	}
+	config, err := r.client.ConfigGet(ctx, "databases").Result()
+	if err != nil {
+		return count
+	}
+	if configured, ok := parseRedisConfiguredDatabaseCount(config); ok && configured > count {
+		count = configured
+	}
+	return count
+}
+
 // GetDatabases returns information about all databases
 func (r *RedisClientImpl) GetDatabases() ([]RedisDBInfo, error) {
 	if r.client == nil {
@@ -1521,8 +1587,8 @@ func (r *RedisClientImpl) GetDatabases() ([]RedisDBInfo, error) {
 			logger.Warnf("Redis 集群获取 key 数量失败，回退为 0: %v", err)
 			totalKeys = 0
 		}
-		result := make([]RedisDBInfo, 16)
-		for i := 0; i < 16; i++ {
+		result := make([]RedisDBInfo, redisClusterLogicalDBCount)
+		for i := 0; i < redisClusterLogicalDBCount; i++ {
 			result[i] = RedisDBInfo{Index: i, Keys: 0}
 		}
 		result[0].Keys = totalKeys
@@ -1535,36 +1601,10 @@ func (r *RedisClientImpl) GetDatabases() ([]RedisDBInfo, error) {
 		return nil, err
 	}
 
-	// Parse keyspace info
-	dbMap := make(map[int]int64)
-	lines := strings.Split(info, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "db") {
-			// Format: db0:keys=123,expires=0,avg_ttl=0
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			dbIndex, err := strconv.Atoi(strings.TrimPrefix(parts[0], "db"))
-			if err != nil {
-				continue
-			}
-			// Parse keys count
-			kvPairs := strings.Split(parts[1], ",")
-			for _, kv := range kvPairs {
-				if strings.HasPrefix(kv, "keys=") {
-					keys, _ := strconv.ParseInt(strings.TrimPrefix(kv, "keys="), 10, 64)
-					dbMap[dbIndex] = keys
-					break
-				}
-			}
-		}
-	}
-
-	// Return all 16 databases (0-15)
-	result := make([]RedisDBInfo, 16)
-	for i := 0; i < 16; i++ {
+	dbMap := parseRedisKeyspaceDatabaseKeys(info)
+	databaseCount := r.resolveRedisDatabaseCount(ctx, dbMap)
+	result := make([]RedisDBInfo, databaseCount)
+	for i := 0; i < databaseCount; i++ {
 		result[i] = RedisDBInfo{
 			Index: i,
 			Keys:  dbMap[i], // Will be 0 if not in map
@@ -1581,16 +1621,16 @@ func (r *RedisClientImpl) SelectDB(index int) error {
 	}
 
 	if r.isCluster {
-		if index < 0 || index > 15 {
-			return fmt.Errorf("数据库索引必须在 0-15 之间")
+		if index < 0 || index >= redisClusterLogicalDBCount {
+			return fmt.Errorf("数据库索引必须在 0-%d 之间", redisClusterLogicalDBCount-1)
 		}
 		r.currentDB = index
 		r.config.RedisDB = index
 		return nil
 	}
 
-	if index < 0 || index > 15 {
-		return fmt.Errorf("数据库索引必须在 0-15 之间")
+	if index < 0 {
+		return fmt.Errorf("数据库索引必须大于等于 0")
 	}
 
 	nextConfig := r.config

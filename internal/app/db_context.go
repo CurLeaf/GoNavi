@@ -28,7 +28,7 @@ func normalizeRunConfig(config connection.ConnectionConfig, dbName string) conne
 		runConfig.Database = name
 	case "redis":
 		runConfig.Database = name
-		if idx, err := strconv.Atoi(name); err == nil && idx >= 0 && idx <= 15 {
+		if idx, err := strconv.Atoi(name); err == nil && idx >= 0 {
 			runConfig.RedisDB = idx
 		}
 	default:

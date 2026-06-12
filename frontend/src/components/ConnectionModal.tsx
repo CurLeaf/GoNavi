@@ -117,6 +117,7 @@ import {
   MongoDiscoverMembers,
   TestConnection,
   RedisConnect,
+  RedisGetDatabases,
   SelectDatabaseFile,
   SelectCertificateFile,
   SelectSSHKeyFile,
@@ -141,6 +142,7 @@ const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
 const CONNECTION_MODAL_WIDTH = 960;
 const CONNECTION_MODAL_BODY_HEIGHT = 620;
+const REDIS_DEFAULT_DATABASE_COUNT = 16;
 const STEP1_SIDEBAR_DIVIDER_DARK = "rgba(255, 255, 255, 0.16)";
 const STEP1_SIDEBAR_DIVIDER_LIGHT = "rgba(0, 0, 0, 0.08)";
 const CLICKHOUSE_PROTOCOL_OPTIONS: Array<{
@@ -158,6 +160,62 @@ const OCEANBASE_PROTOCOL_OPTIONS: Array<{
   { value: "mysql", label: "MySQL" },
   { value: "oracle", label: "Oracle" },
 ];
+
+const normalizeRedisDatabaseIndex = (value: unknown): number | null => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return Math.trunc(parsed);
+};
+
+const buildRedisDatabaseList = (...values: unknown[]): number[] => {
+  const indexes = new Set<number>();
+  for (let i = 0; i < REDIS_DEFAULT_DATABASE_COUNT; i += 1) {
+    indexes.add(i);
+  }
+  const collect = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(collect);
+      return;
+    }
+    const index = normalizeRedisDatabaseIndex(value);
+    if (index !== null) {
+      indexes.add(index);
+    }
+  };
+  values.forEach(collect);
+  return Array.from(indexes).sort((a, b) => a - b);
+};
+
+const extractRedisDatabaseList = (value: unknown): number[] => {
+  if (!Array.isArray(value)) return [];
+  const indexes = new Set<number>();
+  value.forEach((row: any) => {
+    const index = normalizeRedisDatabaseIndex(row?.index ?? row?.Index);
+    if (index !== null) {
+      indexes.add(index);
+    }
+  });
+  const result = Array.from(indexes).sort((a, b) => a - b);
+  return result.length > 0 ? result : buildRedisDatabaseList();
+};
+
+const normalizeRedisDatabaseSelection = (
+  value: unknown,
+  supportedDbs: number[],
+): number[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const supported = new Set(supportedDbs);
+  const selected = Array.from(
+    new Set(
+      value
+        .map(normalizeRedisDatabaseIndex)
+        .filter((index): index is number => index !== null)
+        .filter((index) => supported.size === 0 || supported.has(index)),
+    ),
+  ).sort((a, b) => a - b);
+  return selected.length > 0 ? selected : undefined;
+};
+
 const normalizeClickHouseProtocolValue = (
   value: unknown,
 ): ClickHouseProtocolChoice => {
@@ -290,7 +348,7 @@ const ConnectionModal: React.FC<{
   } | null>(null);
   const [testErrorLogOpen, setTestErrorLogOpen] = useState(false);
   const [dbList, setDbList] = useState<string[]>([]);
-  const [redisDbList, setRedisDbList] = useState<number[]>([]); // Redis databases 0-15
+  const [redisDbList, setRedisDbList] = useState<number[]>([]);
   const [mongoMembers, setMongoMembers] = useState<MongoMemberInfo[]>([]);
   const [discoveringMembers, setDiscoveringMembers] = useState(false);
   const [uriFeedback, setUriFeedback] = useState<{
@@ -728,19 +786,17 @@ const ConnectionModal: React.FC<{
       ) {
         form.setFieldValue("port", 6379);
       }
-      const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
+      const supportedDbs = buildRedisDatabaseList(
+        form.getFieldValue("redisDB"),
+        form.getFieldValue("includeRedisDatabases"),
+      );
       setRedisDbList(supportedDbs);
-      const selectedDbsRaw = form.getFieldValue("includeRedisDatabases");
-      const selectedDbs = Array.isArray(selectedDbsRaw)
-        ? selectedDbsRaw.map((entry: any) => Number(entry))
-        : [];
-      const validDbs = selectedDbs
-        .filter((entry: number) => Number.isFinite(entry))
-        .map((entry: number) => Math.trunc(entry))
-        .filter((entry: number) => supportedDbs.includes(entry));
       form.setFieldValue(
         "includeRedisDatabases",
-        validDbs.length > 0 ? validDbs : undefined,
+        normalizeRedisDatabaseSelection(
+          form.getFieldValue("includeRedisDatabases"),
+          supportedDbs,
+        ),
       );
     }
     if (fieldName === "proxyType") {
@@ -2472,7 +2528,12 @@ const ConnectionModal: React.FC<{
         }
         // 如果是 Redis 编辑模式，设置已保存的 Redis 数据库列表
         if (configType === "redis") {
-          setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
+          setRedisDbList(
+            buildRedisDatabaseList(
+              config.redisDB,
+              initialValues.includeRedisDatabases,
+            ),
+          );
         }
       } else {
         // Create mode: Start at step 1
@@ -2878,7 +2939,32 @@ const ConnectionModal: React.FC<{
         void message.destroy("connection-test-failure");
         setTestResult({ type: "success", message: res.message });
         if (isRedisType) {
-          setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
+          const dbRes = await withClientTimeout(
+            RedisGetDatabases(config as any),
+            rpcTimeoutMs,
+            `连接成功但拉取 Redis 数据库列表超时（>${timeoutSeconds} 秒）`,
+          );
+          if (dbRes.success) {
+            const supportedDbs = extractRedisDatabaseList(dbRes.data);
+            setRedisDbList(supportedDbs);
+            form.setFieldValue(
+              "includeRedisDatabases",
+              normalizeRedisDatabaseSelection(
+                form.getFieldValue("includeRedisDatabases"),
+                supportedDbs,
+              ),
+            );
+          } else {
+            setRedisDbList(
+              buildRedisDatabaseList(
+                config.redisDB,
+                form.getFieldValue("includeRedisDatabases"),
+              ),
+            );
+            message.warning(
+              `连接成功，但获取 Redis 数据库列表失败：${normalizeConnectionSecretErrorMessage(dbRes.message, "未知错误")}`,
+            );
+          }
         } else if (!isJVMType) {
           // Other databases: fetch database list
           const dbRes = await withClientTimeout(
@@ -3419,7 +3505,7 @@ const ConnectionModal: React.FC<{
       connectionParams: normalizedConnectionParams,
       timeout: Number(mergedValues.timeout || 30),
       redisDB: Number.isFinite(Number(mergedValues.redisDB))
-        ? Math.max(0, Math.min(15, Math.trunc(Number(mergedValues.redisDB))))
+        ? Math.max(0, Math.trunc(Number(mergedValues.redisDB)))
         : 0,
       redisSentinelMaster: redisSentinelMaster,
       redisSentinelUser: redisSentinelUser,
@@ -5957,19 +6043,17 @@ const ConnectionModal: React.FC<{
             ) {
               form.setFieldValue("port", 6379);
             }
-            const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
+            const supportedDbs = buildRedisDatabaseList(
+              form.getFieldValue("redisDB"),
+              form.getFieldValue("includeRedisDatabases"),
+            );
             setRedisDbList(supportedDbs);
-            const selectedDbsRaw = form.getFieldValue("includeRedisDatabases");
-            const selectedDbs = Array.isArray(selectedDbsRaw)
-              ? selectedDbsRaw.map((entry: any) => Number(entry))
-              : [];
-            const validDbs = selectedDbs
-              .filter((entry: number) => Number.isFinite(entry))
-              .map((entry: number) => Math.trunc(entry))
-              .filter((entry: number) => supportedDbs.includes(entry));
             form.setFieldValue(
               "includeRedisDatabases",
-              validDbs.length > 0 ? validDbs : undefined,
+              normalizeRedisDatabaseSelection(
+                form.getFieldValue("includeRedisDatabases"),
+                supportedDbs,
+              ),
             );
           }
           if (

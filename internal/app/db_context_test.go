@@ -229,6 +229,19 @@ func TestNormalizeRunConfig_IRISUsesNamespaceFromTree(t *testing.T) {
 	}
 }
 
+func TestNormalizeRunConfig_RedisAllowsDatabaseIndexAboveDefault(t *testing.T) {
+	t.Parallel()
+
+	runConfig := normalizeRunConfig(connection.ConnectionConfig{
+		Type:    "redis",
+		RedisDB: 0,
+	}, "31")
+
+	if runConfig.Database != "31" || runConfig.RedisDB != 31 {
+		t.Fatalf("expected Redis db31 from tree, got database=%q redisDB=%d", runConfig.Database, runConfig.RedisDB)
+	}
+}
+
 func TestNormalizeSchemaAndTable_IRISDoesNotTreatNamespaceAsSchema(t *testing.T) {
 	t.Parallel()
 

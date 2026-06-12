@@ -79,7 +79,7 @@ describe('redisConnectionUri', () => {
       redisSentinelMaster: 'mymaster',
       redisSentinelUser: 'ops',
       redisSentinelPassword: 'sentinel-pass',
-      redisDB: 0,
+      redisDB: 99,
     });
   });
 });

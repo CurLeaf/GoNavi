@@ -224,7 +224,7 @@ const ConnectionModalRedisSections: React.FC<ConnectionModalRedisSectionsProps> 
         >
           <Select
             mode="multiple"
-            placeholder="选择显示的数据库 (0-15)"
+            placeholder="选择显示的数据库"
             allowClear
           >
             {redisDbList.map((db) => (

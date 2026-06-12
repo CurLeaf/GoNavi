@@ -250,9 +250,8 @@ const appendRedisSSLPathParamsForUri = (
 
 const normalizeRedisDB = (value: unknown): number => {
   const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 15
-    ? Math.trunc(parsed)
-    : 0;
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.trunc(parsed);
 };
 
 const normalizeRedisTopology = (value: unknown): RedisTopology => {
