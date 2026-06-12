@@ -71,6 +71,7 @@ const storeState = vi.hoisted(() => ({
   activeTabId: 'tab-1',
   aiPanelVisible: false,
   setAIPanelVisible: vi.fn(),
+  sqlSnippets: [] as any[],
 }));
 
 const backendApp = vi.hoisted(() => ({
@@ -825,6 +826,73 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer.toJSON())).toContain('等待执行 SQL');
 
     renderer.unmount();
+  });
+
+  it('registers all SQL completion providers in the disposable singleton state', async () => {
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    const completionState = (globalThis as any).__gonaviSqlCompletionState;
+
+    expect(editorState.hoverProviders).toHaveLength(1);
+    expect(editorState.providers).toHaveLength(3);
+    expect(completionState.disposables).toHaveLength(4);
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('keeps plain typing out of SQL completion trigger characters', async () => {
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    const sqlProvider = editorState.providers.find((provider) => Array.isArray(provider.triggerCharacters) && provider.triggerCharacters.includes('.'));
+
+    expect(sqlProvider).toBeTruthy();
+    expect(sqlProvider.triggerCharacters).toEqual(['.']);
+    expect(sqlProvider.triggerCharacters).not.toContain('s');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('drops cancelled SQL completion requests while the user keeps typing', async () => {
+    let renderer!: ReactTestRenderer;
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [{ Table: 'session_log' }],
+    });
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '', dbName: 'main' })} />);
+    });
+
+    const sqlProvider = editorState.providers.find((provider) => Array.isArray(provider.triggerCharacters) && provider.triggerCharacters.includes('.'));
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.value = 'SELECT * FROM ss';
+    editorState.position = { lineNumber: 1, column: editorState.value.length + 1 };
+    editorState.latestOnChange?.(editorState.value);
+
+    const result = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      editorState.position,
+      undefined,
+      { isCancellationRequested: true },
+    );
+
+    expect(result.suggestions).toEqual([]);
+    expect(backendApp.DBGetTables).not.toHaveBeenCalled();
+
+    await act(async () => {
+      renderer.unmount();
+    });
   });
 
   it('keeps table name completion available after typing in a fresh query tab', async () => {

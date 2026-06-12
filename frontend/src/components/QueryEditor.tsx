@@ -47,7 +47,7 @@ import { useSqlEditorTransactionController } from './useSqlEditorTransactionCont
 
 // HMR 重载时释放旧注册避免补全和 hover 内容重复
 const _g = globalThis as any;
-const SQL_COMPLETION_PROVIDER_VERSION = '20260603-hover-singleton-v1';
+const SQL_COMPLETION_PROVIDER_VERSION = '20260612-cursor-stable-completion-v1';
 if (!_g.__gonaviSqlCompletionState) {
     _g.__gonaviSqlCompletionState = { registered: false, version: '', disposables: [] as any[] };
 }
@@ -77,6 +77,9 @@ let sharedRoutinesData: CompletionRoutineMeta[] = [];
 let sharedColumnsCacheData: Record<string, any[]> = {};
 const sharedLazyTablesCache: Record<string, CompletionTableMeta[] | undefined> = {};
 const sharedLazyTablesInFlight: Record<string, Promise<CompletionTableMeta[]> | undefined> = {};
+const createEmptySqlCompletionResult = () => ({ suggestions: [] as any[] });
+const isSqlCompletionRequestCancelled = (token?: { isCancellationRequested?: boolean } | null) =>
+    Boolean(token?.isCancellationRequested);
 
 const QUERY_LOCATOR_ALIAS_PREFIX = '__gonavi_locator_';
 
@@ -3077,8 +3080,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           },
       }));
       sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
-          triggerCharacters: ['.', '_', ...'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('')],
-          provideCompletionItems: async (model: any, position: any) => {
+          triggerCharacters: ['.'],
+          provideCompletionItems: async (model: any, position: any, _context?: any, token?: { isCancellationRequested?: boolean }) => {
+              if (isSqlCompletionRequestCancelled(token)) {
+                  return createEmptySqlCompletionResult();
+              }
               const word = model.getWordUntilPosition(position);
               const range = {
                   startLineNumber: position.lineNumber,
@@ -3320,6 +3326,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                               .map(c => ({ name: c.name, type: c.type, tableName: c.tableName, dbName: c.dbName, comment: c.comment }));
                       } else {
                           const dbCols = await getColumnsByDB(tableInfo.tableName);
+                          if (isSqlCompletionRequestCancelled(token)) {
+                              return createEmptySqlCompletionResult();
+                          }
                           cols = dbCols.map(c => ({ name: c.name, type: c.type, tableName: tableInfo.tableName, comment: c.comment }));
                       }
 
@@ -3383,6 +3392,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   && !sharedTablesData.some((t) => (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase())
               ) {
                   const lazyTables = await getLazyTablesByDB(currentDatabase);
+                  if (isSqlCompletionRequestCancelled(token)) {
+                      return createEmptySqlCompletionResult();
+                  }
                   if (lazyTables.length > 0) {
                       const seenTableKeys = new Set<string>();
                       completionTables = [...sharedTablesData, ...lazyTables].filter((table) => {
@@ -3572,11 +3584,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
 
       // SQL snippet completion provider
-      monaco.languages.registerCompletionItemProvider('sql', {
+      sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
           provideCompletionItems: (model: any, position: any) => {
               const word = model.getWordUntilPosition(position);
               const prefix = word.word.toLowerCase();
-              if (!prefix) return { suggestions: [] };
+              if (!prefix) return createEmptySqlCompletionResult();
 
               const range = {
                   startLineNumber: position.lineNumber,
@@ -3585,7 +3597,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   endColumn: word.endColumn,
               };
 
-              const allSnippets = useStore.getState().sqlSnippets;
+              const allSnippets = useStore.getState().sqlSnippets || [];
               const matched = allSnippets.filter(s =>
                   s.prefix.toLowerCase().startsWith(prefix) ||
                   s.name.toLowerCase().includes(prefix)
@@ -3604,7 +3616,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   })),
               };
           },
-      });
+      }));
 
       } // end sqlCompletionRegistered guard
 
