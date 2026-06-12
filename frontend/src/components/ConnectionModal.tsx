@@ -64,6 +64,11 @@ import { getCustomConnectionDsnValidationMessage } from "../utils/customConnecti
 import { mergeParsedUriValuesForForm } from "../utils/connectionUriMerge";
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
 import {
+  buildRedisUriFromValues,
+  parseRedisUriToFormValues,
+  resolveRedisConfigDraft,
+} from "../utils/redisConnectionUri";
+import {
   CONNECTION_TYPE_GROUPS,
   getAllConnectionTypeCatalogItems,
   getConnectionTypeDefaultPort as getDefaultPortByType,
@@ -1484,85 +1489,7 @@ const ConnectionModal: React.FC<{
     }
 
     if (type === "redis") {
-      const parsed =
-        parseMultiHostUri(trimmedUri, "redis") ||
-        parseMultiHostUri(trimmedUri, "rediss");
-      if (!parsed) {
-        return null;
-      }
-      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
-        return null;
-      }
-      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
-        return null;
-      }
-      const topologyParam = String(
-        parsed.params.get("topology") || "",
-      ).toLowerCase();
-      const isSentinelTopology = topologyParam === "sentinel";
-      const redisNodeDefaultPort = isSentinelTopology ? 26379 : 6379;
-      const hostList = normalizeAddressList(parsed.hosts, redisNodeDefaultPort);
-      if (!hostList.length) {
-        return null;
-      }
-      const primary = parseHostPort(
-        hostList[0] || `localhost:${redisNodeDefaultPort}`,
-        redisNodeDefaultPort,
-      );
-      const dbText = String(parsed.database || "")
-        .trim()
-        .replace(/^\//, "");
-      const dbIndex = Number(dbText);
-      const isRediss = trimmedUri.toLowerCase().startsWith("rediss://");
-      const skipVerifyText = String(parsed.params.get("skip_verify") || "")
-        .trim()
-        .toLowerCase();
-      const skipVerify =
-        skipVerifyText === "1" ||
-        skipVerifyText === "true" ||
-        skipVerifyText === "yes" ||
-        skipVerifyText === "on";
-      return {
-        host: primary?.host || "localhost",
-        port: primary?.port || redisNodeDefaultPort,
-        user: parsed.username || "",
-        password: parsed.password || "",
-        useSSL: isRediss,
-        sslMode: isRediss
-          ? skipVerify
-            ? "skip-verify"
-            : "required"
-          : "disable",
-        ...extractSSLPathValuesFromParams(parsed.params, type),
-        redisTopology: isSentinelTopology
-          ? "sentinel"
-          : hostList.length > 1 || topologyParam === "cluster"
-            ? "cluster"
-            : "single",
-        redisHosts: hostList.slice(1),
-        redisSentinelMaster: isSentinelTopology
-          ? String(
-              parsed.params.get("master") ||
-                parsed.params.get("master_name") ||
-                parsed.params.get("sentinel_master") ||
-                "",
-            ).trim()
-          : "",
-        redisSentinelUser: isSentinelTopology
-          ? String(
-              parsed.params.get("sentinel_user") ||
-                parsed.params.get("sentinel_username") ||
-                "",
-            ).trim()
-          : "",
-        redisSentinelPassword: isSentinelTopology
-          ? String(parsed.params.get("sentinel_password") || "")
-          : "",
-        redisDB:
-          Number.isFinite(dbIndex) && dbIndex >= 0 && dbIndex <= 15
-            ? Math.trunc(dbIndex)
-            : 0,
-      };
+      return parseRedisUriToFormValues(trimmedUri);
     }
 
     if (type === "mongodb") {
@@ -1976,62 +1903,7 @@ const ConnectionModal: React.FC<{
     }
 
     if (type === "redis") {
-      const redisTopology = String(values.redisTopology || "single");
-      const redisNodeDefaultPort = redisTopology === "sentinel" ? 26379 : 6379;
-      const primary = toAddress(host, port, redisNodeDefaultPort);
-      const extraRedisHosts =
-        redisTopology === "cluster" || redisTopology === "sentinel"
-          ? normalizeAddressList(values.redisHosts, redisNodeDefaultPort)
-          : [];
-      const hosts = normalizeAddressList(
-        [primary, ...extraRedisHosts],
-        redisNodeDefaultPort,
-      );
-      const params = new URLSearchParams();
-      if (redisTopology === "sentinel") {
-        params.set("topology", "sentinel");
-        const sentinelMaster = String(values.redisSentinelMaster || "").trim();
-        if (sentinelMaster) {
-          params.set("master", sentinelMaster);
-        }
-        const sentinelUser = String(values.redisSentinelUser || "").trim();
-        if (sentinelUser) {
-          params.set("sentinel_user", sentinelUser);
-        }
-        const sentinelPassword = String(values.redisSentinelPassword || "");
-        if (sentinelPassword) {
-          params.set("sentinel_password", sentinelPassword);
-        }
-      } else if (hosts.length > 1 || redisTopology === "cluster") {
-        params.set("topology", "cluster");
-      }
-      const redisUser = String(values.user || "").trim();
-      const redisPassword = String(values.password || "");
-      let redisAuth = "";
-      if (redisUser || redisPassword) {
-        const encodedPassword = redisPassword
-          ? encodeURIComponent(redisPassword)
-          : "";
-        redisAuth = redisUser
-          ? `${encodeURIComponent(redisUser)}${redisPassword ? `:${encodedPassword}` : ""}@`
-          : `:${encodedPassword}@`;
-      }
-      const redisDB = Number.isFinite(Number(values.redisDB))
-        ? Math.max(0, Math.min(15, Math.trunc(Number(values.redisDB))))
-        : 0;
-      const dbPath = `/${redisDB}`;
-      if (values.useSSL) {
-        const mode = String(values.sslMode || "preferred")
-          .trim()
-          .toLowerCase();
-        if (mode === "skip-verify" || mode === "preferred") {
-          params.set("skip_verify", "true");
-        }
-      }
-      appendSSLPathParamsForUri(params, type, values);
-      const query = params.toString();
-      const scheme = values.useSSL ? "rediss" : "redis";
-      return `${scheme}://${redisAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
+      return buildRedisUriFromValues(values);
     }
 
     if (isFileDatabaseType(type)) {
@@ -3426,37 +3298,19 @@ const ConnectionModal: React.FC<{
     }
 
     if (type === "redis") {
-      const redisTopology = String(mergedValues.redisTopology || "single");
-      const redisNodeDefaultPort = redisTopology === "sentinel" ? 26379 : defaultPort;
-      if (
-        redisTopology === "sentinel" &&
-        (!Number(mergedValues.port) || Number(mergedValues.port) === defaultPort)
-      ) {
-        primaryPort = redisNodeDefaultPort;
-      }
-      const extraRedisNodes =
-        redisTopology === "cluster" || redisTopology === "sentinel"
-          ? normalizeAddressList(mergedValues.redisHosts, redisNodeDefaultPort)
-          : [];
-      const allHosts = normalizeAddressList(
-        [`${primaryHost}:${primaryPort}`, ...extraRedisNodes],
-        redisNodeDefaultPort,
+      const redisDraft = resolveRedisConfigDraft(
+        mergedValues,
+        primaryHost,
+        primaryPort,
+        defaultPort,
       );
-      if (redisTopology === "sentinel") {
-        hosts = allHosts;
-        topology = "sentinel";
-        redisSentinelMaster = String(mergedValues.redisSentinelMaster || "").trim();
-        redisSentinelUser = String(mergedValues.redisSentinelUser || "").trim();
-        redisSentinelPassword = String(mergedValues.redisSentinelPassword || "");
-      } else if (redisTopology === "cluster" || allHosts.length > 1) {
-        hosts = allHosts;
-        topology = "cluster";
-      } else {
-        topology = "single";
-      }
-      mergedValues.redisDB = Number.isFinite(Number(mergedValues.redisDB))
-        ? Math.max(0, Math.min(15, Math.trunc(Number(mergedValues.redisDB))))
-        : 0;
+      primaryPort = redisDraft.primaryPort;
+      hosts = redisDraft.hosts;
+      topology = redisDraft.topology;
+      redisSentinelMaster = redisDraft.redisSentinelMaster;
+      redisSentinelUser = redisDraft.redisSentinelUser;
+      redisSentinelPassword = redisDraft.redisSentinelPassword;
+      mergedValues.redisDB = redisDraft.redisDB;
     }
 
     const sshConfig = mergedValues.useSSH
