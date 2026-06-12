@@ -2223,18 +2223,27 @@ const ConnectionModal: React.FC<{
         const defaultPort = getDefaultPortByType(configType);
         const isFileDbConfigType = isFileDatabaseType(configType);
         const jvmDefaultValues = buildDefaultJVMConnectionValues();
+        const savedPrimaryAddress = isFileDbConfigType
+          ? ""
+          : toAddress(
+              config.host || "localhost",
+              Number(config.port || defaultPort),
+              defaultPort,
+            );
         const normalizedHosts = isFileDbConfigType
           ? []
-          : normalizeAddressList(config.hosts, defaultPort);
+          : normalizeAddressList(
+              [
+                savedPrimaryAddress,
+                ...(Array.isArray(config.hosts) ? config.hosts : []),
+              ],
+              defaultPort,
+            );
         const primaryAddress = isFileDbConfigType
           ? null
           : parseHostPort(
               normalizedHosts[0] ||
-                toAddress(
-                  config.host || "localhost",
-                  Number(config.port || defaultPort),
-                  defaultPort,
-                ),
+                savedPrimaryAddress,
               defaultPort,
             );
         const primaryHost = isFileDbConfigType

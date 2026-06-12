@@ -53,6 +53,14 @@ describe('ConnectionModal Redis Sentinel configuration', () => {
     expect(source).toContain('form.setFieldValue("port", 26379)');
     expect(source).toContain('form.setFieldValue("port", 6379)');
   });
+
+  it('keeps the saved host as the primary Redis node when editing multi-node configs', () => {
+    expect(source).toContain('const savedPrimaryAddress = isFileDbConfigType');
+    expect(source).toContain('savedPrimaryAddress,');
+    expect(source).toContain('...(Array.isArray(config.hosts) ? config.hosts : [])');
+    expect(source).toContain('const redisHosts =');
+    expect(source).toContain('configType === "redis" ? normalizedHosts.slice(1) : [];');
+  });
 });
 
 describe('ConnectionModal MongoDB configuration', () => {
