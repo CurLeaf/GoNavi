@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('./AISettingsModal.tsx', import.meta.url), 'utf8');
 const aiChatPanelCss = readFileSync(new URL('./AIChatPanel.css', import.meta.url), 'utf8');
+const providersSectionSource = readFileSync(new URL('./ai/AISettingsProvidersSection.tsx', import.meta.url), 'utf8');
 
 describe('AISettingsModal edit password behavior', () => {
   it('loads editable provider details before opening the edit modal', () => {
@@ -10,9 +11,63 @@ describe('AISettingsModal edit password behavior', () => {
     expect(source).toContain('await Service.AIGetEditableProvider(p.id)');
   });
 
+  it('loads and saves user-level custom prompts through the AI service', () => {
+    expect(source).toContain("callOrFallback(() => Service.AIGetUserPromptSettings?.(), EMPTY_AI_USER_PROMPT_SETTINGS)");
+    expect(source).toContain('await Service?.AISaveUserPromptSettings?.(payload);');
+    expect(source).toContain("window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'))");
+    expect(source).toContain("import AISettingsPromptsSection from './ai/AISettingsPromptsSection';");
+    expect(source).toContain('<AISettingsPromptsSection');
+  });
+
+  it('loads MCP servers and skills through the AI service', () => {
+    expect(source).toContain('Service.AIGetMCPClientInstallStatuses?.()');
+    expect(source).toContain('Service.AIGetMCPServers?.()');
+    expect(source).toContain('Service.AIListMCPTools?.()');
+    expect(source).toContain('Service.AIGetSkills?.()');
+    expect(source).toContain("import AISettingsSkillsSection from './ai/AISettingsSkillsSection';");
+    expect(source).toContain('<AISettingsSkillsSection');
+  });
+
+  it('delegates bulky MCP and built-in tool sections to dedicated ai components', () => {
+    expect(source).toContain("import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';");
+    expect(source).toContain("import AISettingsProvidersSection from './ai/AISettingsProvidersSection';");
+    expect(source).toContain("import AISettingsSidebar, { type AISettingsSectionKey } from './ai/AISettingsSidebar';");
+    expect(source).toContain("import AISettingsSafetySection from './ai/AISettingsSafetySection';");
+    expect(source).toContain("import AISettingsContextSection from './ai/AISettingsContextSection';");
+    expect(source).toContain('<AISettingsProvidersSection');
+    expect(source).toContain("import AISettingsMCPSection from './ai/AISettingsMCPSection';");
+    expect(source).toContain('<AISettingsSidebar');
+    expect(source).toContain('<AISettingsSafetySection');
+    expect(source).toContain('<AISettingsContextSection');
+    expect(source).toContain('<AISettingsMCPSection');
+    expect(source).toContain('<AIBuiltinToolsCatalog');
+  });
+
+  it('wires the external MCP client install panel actions back to the modal handlers', () => {
+    expect(source).toContain('mcpClientStatuses={mcpClientStatuses}');
+    expect(source).toContain('selectedMCPClient={selectedMCPClient}');
+    expect(source).toContain("import { useAIMCPClientInstaller } from './ai/useAIMCPClientInstaller';");
+    expect(source).toContain('} = useAIMCPClientInstaller({');
+    expect(source).toContain('handleSelectMCPClient,');
+    expect(source).toContain('loadMCPClientStatuses,');
+    expect(source).toContain('selectedMCPClientStatus,');
+    expect(source).toContain('onSelectClient={handleSelectMCPClient}');
+    expect(source).toContain('onRefreshStatus={() => void loadMCPClientStatuses()}');
+    expect(source).toContain('onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}');
+    expect(source).toContain('onCopyLaunchCommand={() => void handleCopySelectedMCPLaunchCommand()}');
+    expect(source).toContain('onInstallSelectedClient={handleInstallSelectedMCPClient}');
+  });
+
+  it('waits briefly for the AI service bridge before warning and removes noisy provider debug logs', () => {
+    expect(source).toContain('const resolveAIService = useCallback(async () => {');
+    expect(source).toContain('const service = await waitForAIService();');
+    expect(source).not.toContain("console.log('[AI] AIGetProviders result:'");
+    expect(source).not.toContain("console.log('[AI] AIGetActiveProvider result:'");
+  });
+
   it('keeps the prefilled api key masked by default', () => {
     expect(source).toContain('const [primaryPasswordVisible, setPrimaryPasswordVisible] = useState(false);');
-    expect(source).toContain('visible: primaryPasswordVisible,');
+    expect(providersSectionSource).toContain('visible: primaryPasswordVisible,');
   });
 
   it('does not render the clear helper block anymore', () => {
@@ -28,9 +83,10 @@ describe('AISettingsModal edit password behavior', () => {
 
   it('keeps long ai settings toast errors wrapped within the modal body', () => {
     expect(aiChatPanelCss).toContain('.ai-settings-body .ant-message {');
-    expect(aiChatPanelCss).toContain('width: min(100%, 720px);');
-    expect(aiChatPanelCss).toContain('max-width: calc(100% - 32px);');
+    expect(aiChatPanelCss).toContain('width: fit-content;');
+    expect(aiChatPanelCss).toContain('max-width: min(520px, calc(100% - 32px));');
     expect(aiChatPanelCss).toContain('.ai-settings-body .ant-message .ant-message-notice-content {');
+    expect(aiChatPanelCss).toContain('max-width: 100%;');
     expect(aiChatPanelCss).toContain('white-space: normal;');
     expect(aiChatPanelCss).toContain('overflow-wrap: anywhere;');
   });

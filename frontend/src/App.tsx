@@ -10,9 +10,11 @@ import SnippetSettingsModal from './components/SnippetSettingsModal';
 import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
 import DataSyncModal from './components/DataSyncModal';
 import DriverManagerModal from './components/DriverManagerModal';
+import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';
 import LogPanel from './components/LogPanel';
 import AISettingsModal from './components/AISettingsModal';
 import AIChatPanel from './components/AIChatPanel';
+import AIPanelErrorBoundary from './components/ai/AIPanelErrorBoundary';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
 import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
 import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModal';
@@ -20,7 +22,7 @@ import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModa
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
-import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
+import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, getLinuxCJKFontInstallHint, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
 import {
   DENSITY_OPTIONS,
   sanitizeDataTableDensity,
@@ -201,43 +203,6 @@ const createClosedConnectionPackageDialogState = (): ConnectionPackageDialogStat
   confirmLoading: false,
 });
 
-interface AIPanelErrorBoundaryProps {
-  children: React.ReactNode;
-  fallback: (error: Error | null) => React.ReactNode;
-  onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
-}
-
-interface AIPanelErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-class AIPanelErrorBoundary extends React.Component<
-  AIPanelErrorBoundaryProps,
-  AIPanelErrorBoundaryState
-> {
-  constructor(props: AIPanelErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: Error): AIPanelErrorBoundaryState {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    this.props.onError?.(error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return this.props.fallback(this.state.error);
-    }
-
-    return this.props.children;
-  }
-}
-
 function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);
@@ -393,6 +358,7 @@ function App() {
       () => buildFontFamilyOptions(runtimePlatform, 'mono', installedFontFamilies),
       [installedFontFamilies, runtimePlatform],
   );
+  const linuxCJKFontInstallHint = getLinuxCJKFontInstallHint(runtimePlatform, installedFontFamilies);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
   const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth || 1280));
@@ -790,9 +756,15 @@ function App() {
   // 定时保存窗口状态、尺寸与位置
   useEffect(() => {
       const SAVE_INTERVAL_MS = 2000;
+      let cancelled = false;
+      let hydrated = useStore.persist.hasHydrated();
+      let eventSaveTimer: number | null = null;
       let lastSaved = '';
 
       const saveWindowState = async () => {
+          if (cancelled || !hydrated) {
+              return;
+          }
           try {
               const [isFs, isMax] = await Promise.all([
                   safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
@@ -836,8 +808,67 @@ function App() {
             }
       };
 
-      const timer = window.setInterval(saveWindowState, SAVE_INTERVAL_MS);
-      return () => window.clearInterval(timer);
+      const scheduleWindowStateSave = (delayMs = 120) => {
+          if (cancelled || !hydrated) {
+              return;
+          }
+          if (eventSaveTimer !== null) {
+              window.clearTimeout(eventSaveTimer);
+          }
+          eventSaveTimer = window.setTimeout(() => {
+              eventSaveTimer = null;
+              void saveWindowState();
+          }, delayMs);
+      };
+
+      const handleWindowRuntimeChange = () => {
+          scheduleWindowStateSave();
+      };
+
+      const handleVisibilityChange = () => {
+          if (document.visibilityState === 'visible') {
+              scheduleWindowStateSave(120);
+          }
+      };
+
+      const handleWindowLifecycleFlush = () => {
+          void saveWindowState();
+      };
+
+      if (hydrated) {
+          scheduleWindowStateSave(320);
+      }
+      const unsubscribeHydration = useStore.persist.onFinishHydration(() => {
+          if (cancelled || hydrated) {
+              return;
+          }
+          hydrated = true;
+          scheduleWindowStateSave(320);
+      });
+
+      const timer = window.setInterval(() => {
+          void saveWindowState();
+      }, SAVE_INTERVAL_MS);
+      window.addEventListener('resize', handleWindowRuntimeChange);
+      window.addEventListener('focus', handleWindowRuntimeChange);
+      window.addEventListener('pageshow', handleWindowRuntimeChange);
+      window.addEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });
+      window.addEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      return () => {
+          cancelled = true;
+          if (eventSaveTimer !== null) {
+              window.clearTimeout(eventSaveTimer);
+          }
+          window.clearInterval(timer);
+          window.removeEventListener('resize', handleWindowRuntimeChange);
+          window.removeEventListener('focus', handleWindowRuntimeChange);
+          window.removeEventListener('pageshow', handleWindowRuntimeChange);
+          window.removeEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });
+          window.removeEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+          unsubscribeHydration();
+      };
   }, []);
 
   useEffect(() => {
@@ -1567,12 +1598,11 @@ function App() {
       if (!isStoreHydrated || !isMacRuntime) {
           return;
       }
-
-      try {
-          void SetMacNativeWindowControls(useNativeMacWindowControls).catch(() => undefined);
-      } catch (e) {
-          console.warn('Wails API: SetMacNativeWindowControls unavailable', e);
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.SetMacNativeWindowControls !== 'function') {
+          return;
       }
+      void safeWindowRuntimeCall(() => SetMacNativeWindowControls(useNativeMacWindowControls), undefined);
   }, [isMacRuntime, isStoreHydrated, useNativeMacWindowControls]);
 
   useEffect(() => {
@@ -2058,14 +2088,14 @@ function App() {
       const importKind = detectConnectionImportKind(raw);
 
       if (importKind === 'invalid') {
-          void message.error('文件格式错误：仅支持 GoNavi 恢复包、历史 JSON 连接数组或 MySQL Workbench XML');
+          void message.error('文件格式错误：仅支持 GoNavi 恢复包、历史 JSON 连接数组、MySQL Workbench XML 或 Navicat NCX');
           return;
       }
 
       try {
           setPendingConnectionImportPayload(null);
           const importedViews = await importConnectionsPayload(raw, '');
-          if (importKind === 'mysql-workbench-xml' && importedViews.some(v => !v.hasPrimaryPassword)) {
+          if ((importKind === 'mysql-workbench-xml' || importKind === 'navicat-ncx') && importedViews.some(v => !v.hasPrimaryPassword)) {
               void message.warning(`成功导入 ${importedViews.length} 个连接，部分连接未包含密码，请编辑对应连接并输入密码后保存`);
           } else {
               void message.success(`成功导入 ${importedViews.length} 个连接`);
@@ -2187,6 +2217,7 @@ function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [themeModalSection, setThemeModalSection] = useState<'theme' | 'appearance'>('theme');
+  const [isLinuxCJKFontBannerDismissed, setIsLinuxCJKFontBannerDismissed] = useState(false);
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
   const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
@@ -2194,7 +2225,9 @@ function App() {
   const tabDisplaySettingsPanelRef = useRef<HTMLDivElement | null>(null);
   const [tabDisplaySettingsFocusRequest, setTabDisplaySettingsFocusRequest] = useState(0);
   useEffect(() => {
-      if (!isThemeModalOpen || themeModalSection !== 'appearance') {
+      const shouldLoadInstalledFonts =
+          runtimePlatform === 'linux' || (isThemeModalOpen && themeModalSection === 'appearance');
+      if (!shouldLoadInstalledFonts) {
           return;
       }
       if (hasLoadedInstalledFontsRef.current || isFontFamiliesLoading) {
@@ -2242,7 +2275,7 @@ function App() {
       return () => {
           cancelled = true;
       };
-  }, [isThemeModalOpen, themeModalSection]);
+  }, [isThemeModalOpen, runtimePlatform, themeModalSection]);
 
   useEffect(() => {
       if (!isThemeModalOpen || themeModalSection !== 'appearance' || tabDisplaySettingsFocusRequest === 0) {
@@ -3267,6 +3300,13 @@ function App() {
           </span>
       </div>
   ), [darkMode]);
+  const showLinuxCJKFontBanner = Boolean(
+      linuxCJKFontInstallHint &&
+      hasLoadedInstalledFontsRef.current &&
+      !isFontFamiliesLoading &&
+      !fontFamiliesLoadError &&
+      !isLinuxCJKFontBannerDismissed,
+  );
 
   return (
     <ConfigProvider
@@ -3339,6 +3379,18 @@ function App() {
                   </div>
               )}
           </div>
+
+          {showLinuxCJKFontBanner && (
+              <LinuxCJKFontBanner
+                darkMode={darkMode}
+                installHint={linuxCJKFontInstallHint || ''}
+                onOpenFontSettings={() => {
+                        setThemeModalSection('appearance');
+                        setIsThemeModalOpen(true);
+                }}
+                onDismiss={() => setIsLinuxCJKFontBannerDismissed(true)}
+              />
+          )}
 
           <Layout style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
           <Sider 
@@ -4336,6 +4388,24 @@ function App() {
                                                       ? `已读取当前系统 ${installedFontFamilies.length} 个字体族，支持输入搜索匹配。清空后回退默认 UI 字体。`
                                                       : '按当前系统实时加载已安装字体，支持输入搜索匹配。清空后回退默认 UI 字体。')}
                                           </div>
+                                          {linuxCJKFontInstallHint && hasLoadedInstalledFontsRef.current && !isFontFamiliesLoading && !fontFamiliesLoadError && (
+                                              <div
+                                                  style={{
+                                                      marginTop: 8,
+                                                      padding: '9px 10px',
+                                                      borderRadius: 8,
+                                                      border: darkMode ? '1px solid rgba(250,204,21,0.28)' : '1px solid rgba(217,119,6,0.22)',
+                                                      background: darkMode ? 'rgba(250,204,21,0.08)' : 'rgba(251,191,36,0.12)',
+                                                      color: darkMode ? 'rgba(254,249,195,0.92)' : '#92400e',
+                                                      fontSize: 12,
+                                                      lineHeight: 1.7,
+                                                  }}
+                                              >
+                                                  Ubuntu/Linux 未检测到中文 CJK 字体，界面可能显示方框。请安装：
+                                                  <span style={{ fontFamily: 'var(--gn-font-mono)', marginLeft: 6 }}>{linuxCJKFontInstallHint}</span>
+                                                  ，然后重启 GoNavi。
+                                              </div>
+                                          )}
                                       </div>
                                       <div>
                                           <div style={{ marginBottom: 8, fontWeight: 500 }}>代码字体 (Mono Font Family)</div>

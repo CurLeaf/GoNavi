@@ -398,6 +398,30 @@ describe('store appearance persistence', () => {
     expect(config?.port).toBe(9030);
   });
 
+  it('preserves Redis database indexes above the default 16 databases', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'redis-32',
+        name: 'Redis 32 DBs',
+        includeRedisDatabases: [0, 15, 16, 31, -1, 31],
+        config: {
+          id: 'redis-32',
+          type: 'redis',
+          host: 'redis.local',
+          port: 6379,
+          user: '',
+          redisDB: 31,
+        },
+      },
+    ]);
+
+    const saved = useStore.getState().connections[0];
+    expect(saved?.config.redisDB).toBe(31);
+    expect(saved?.includeRedisDatabases).toEqual([0, 15, 16, 31]);
+  });
+
   it('keeps InterSystems IRIS saved connections as independent datasource type', async () => {
     const { useStore } = await importStore();
 
@@ -1060,6 +1084,19 @@ describe('store appearance persistence', () => {
       mac: { combo: 'Meta+Enter', enabled: true },
       windows: { combo: 'Enter', enabled: true },
     });
+  });
+
+  it('persists startup fullscreen immediately so next launch does not miss maximize preference', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setStartupFullscreen(true);
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.startupFullscreen).toBe(true);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().startupFullscreen).toBe(true);
   });
 
   it('falls back to Enter when persisted AI chat send shortcut is invalid', async () => {

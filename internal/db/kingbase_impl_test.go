@@ -199,6 +199,50 @@ func TestKingbaseGetDatabasesFallsBackToCurrentDatabase(t *testing.T) {
 	}
 }
 
+func TestKingbaseGetIndexesParsesStringUniqueAndVisibleRelation(t *testing.T) {
+	registerFakeKingbaseDriverOnce.Do(func() {
+		sql.Register(fakeKingbaseDriverName, fakeKingbaseDriver{})
+	})
+
+	db, err := sql.Open(fakeKingbaseDriverName, "")
+	if err != nil {
+		t.Fatalf("open fake kingbase db failed: %v", err)
+	}
+	defer db.Close()
+
+	fakeKingbaseStateMu.Lock()
+	fakeKingbaseState.queryErr = nil
+	fakeKingbaseState.queryResults = map[string]fakeKingbaseQueryResult{}
+	fakeKingbaseState.lastQuery = ""
+	fakeKingbaseState.queries = nil
+	fakeKingbaseStateMu.Unlock()
+
+	client := &KingbaseDB{conn: db}
+	indexes, err := client.GetIndexes("", "users")
+	if err != nil {
+		t.Fatalf("GetIndexes returned error: %v", err)
+	}
+	if len(indexes) != 2 {
+		t.Fatalf("expected two index rows, got %+v", indexes)
+	}
+	if indexes[0].Name != "users_email_key" || indexes[0].ColumnName != "tenant_id" || indexes[0].NonUnique != 0 || indexes[0].SeqInIndex != 1 {
+		t.Fatalf("unexpected first index row: %+v", indexes[0])
+	}
+	if indexes[1].Name != "users_email_key" || indexes[1].ColumnName != "email" || indexes[1].NonUnique != 0 || indexes[1].SeqInIndex != 2 {
+		t.Fatalf("unexpected second index row: %+v", indexes[1])
+	}
+
+	fakeKingbaseStateMu.Lock()
+	lastQuery := fakeKingbaseState.lastQuery
+	fakeKingbaseStateMu.Unlock()
+	if !strings.Contains(lastQuery, "pg_catalog.pg_table_is_visible(t.oid)") {
+		t.Fatalf("expected search_path visible relation metadata query, got %s", lastQuery)
+	}
+	if strings.Contains(lastQuery, "current_schema()") || strings.Contains(lastQuery, "n.nspname = 'public'") {
+		t.Fatalf("metadata query should not force current_schema/public, got %s", lastQuery)
+	}
+}
+
 type fakeKingbaseDriver struct{}
 
 func (fakeKingbaseDriver) Open(name string) (driver.Conn, error) {
@@ -229,6 +273,15 @@ func (fakeKingbaseConn) QueryContext(ctx context.Context, query string, args []d
 			return nil, result.err
 		}
 		return &fakeKingbaseRows{columns: result.columns, rows: result.rows}, nil
+	}
+	if strings.Contains(query, "FROM pg_class t") && strings.Contains(query, "JOIN pg_index ix") && strings.Contains(query, "t.relname = 'users'") {
+		return &fakeKingbaseRows{
+			columns: []string{"index_name", "column_name", "is_unique", "seq_in_index", "index_type"},
+			rows: [][]driver.Value{
+				{"users_email_key", "tenant_id", "t", "1", "btree"},
+				{"users_email_key", "email", "t", "2", "btree"},
+			},
+		}, nil
 	}
 	if fakeKingbaseState.queryErr != nil {
 		return nil, fakeKingbaseState.queryErr

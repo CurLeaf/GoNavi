@@ -1,3 +1,5 @@
+import { splitQualifiedNameSegments, stripIdentifierQuotes } from './qualifiedName';
+
 export type FilterCondition = {
   id?: number;
   enabled?: boolean;
@@ -8,17 +10,7 @@ export type FilterCondition = {
   value2?: string;
 };
 
-const normalizeIdentPart = (ident: string) => {
-  let raw = (ident || '').trim();
-  if (!raw) return raw;
-  const first = raw[0];
-  const last = raw[raw.length - 1];
-  if ((first === '"' && last === '"') || (first === '`' && last === '`')) {
-    raw = raw.slice(1, -1).trim();
-  }
-  raw = raw.replace(/["`]/g, '').trim();
-  return raw;
-};
+const normalizeIdentPart = (ident: string) => stripIdentifierQuotes(ident);
 
 // 检查标识符是否需要引号（包含特殊字符或是保留字）
 const needsQuote = (ident: string): boolean => {
@@ -62,9 +54,10 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
 export const quoteQualifiedIdent = (dbType: string, ident: string) => {
   const raw = (ident || '').trim();
   if (!raw) return raw;
-  const parts = raw.split('.').map(normalizeIdentPart).filter(Boolean);
-  if (parts.length <= 1) return quoteIdentPart(dbType, raw);
-  return parts.map(p => quoteIdentPart(dbType, p)).join('.');
+  const parts = splitQualifiedNameSegments(raw).filter(Boolean);
+  if (parts.length === 0) return quoteIdentPart(dbType, raw);
+  if (parts.length === 1 && parts[0] === normalizeIdentPart(raw)) return quoteIdentPart(dbType, raw);
+  return parts.map((part) => quoteIdentPart(dbType, part)).join('.');
 };
 
 export const escapeLiteral = (val: string) => (val || '').replace(/'/g, "''");

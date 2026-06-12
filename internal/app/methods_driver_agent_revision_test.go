@@ -33,6 +33,41 @@ func TestOptionalDriverAgentRevisionStatusDetectsStaleClickHouseAgent(t *testing
 	}
 }
 
+func TestOptionalDriverPackageUpdateStatusDetectsMongoV2WhenLegacyDefault(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+	meta := installedDriverPackage{
+		Version:       "2.5.0",
+		AgentRevision: db.OptionalDriverAgentRevision("mongodb"),
+	}
+
+	needsUpdate, reason, _ := optionalDriverPackageUpdateStatus(definition, meta, true)
+	if !needsUpdate {
+		t.Fatal("expected installed MongoDB v2 driver to require reinstall when v1 is the compatibility default")
+	}
+	if !strings.Contains(reason, "MongoDB 4.0") || !strings.Contains(reason, "wire version 7") {
+		t.Fatalf("expected reason to explain MongoDB 4.0 compatibility, got %q", reason)
+	}
+}
+
+func TestOptionalDriverPackageUpdateStatusAcceptsMongoV1WithoutRevision(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+	meta := installedDriverPackage{
+		Version:       "1.17.9",
+		AgentRevision: "",
+	}
+
+	needsUpdate, reason, _ := optionalDriverPackageUpdateStatus(definition, meta, true)
+	if needsUpdate {
+		t.Fatalf("expected MongoDB v1 driver to skip revision mismatch prompts, reason=%q", reason)
+	}
+}
+
 func TestOptionalDriverAgentRevisionCurrentRejectsStaleMetadata(t *testing.T) {
 	originalProbe := optionalDriverAgentMetadataProbe
 	t.Cleanup(func() {
@@ -79,7 +114,7 @@ func TestVerifyInstalledOptionalDriverAgentRevisionRejectsProbeFailure(t *testin
 	}
 }
 
-func TestVerifyRuntimeOptionalDriverAgentRevisionRejectsStaleOceanBaseAgent(t *testing.T) {
+func TestVerifyRuntimeOptionalDriverAgentRevisionAllowsStaleOceanBaseAgent(t *testing.T) {
 	originalProbe := optionalDriverAgentMetadataProbe
 	t.Cleanup(func() {
 		optionalDriverAgentMetadataProbe = originalProbe
@@ -92,11 +127,23 @@ func TestVerifyRuntimeOptionalDriverAgentRevisionRejectsStaleOceanBaseAgent(t *t
 	}
 
 	err := verifyRuntimeOptionalDriverAgentRevision(connection.ConnectionConfig{Type: "oceanbase"})
-	if err == nil {
-		t.Fatal("expected stale OceanBase agent revision to be rejected")
+	if err != nil {
+		t.Fatalf("runtime revision mismatch should warn and continue, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "revision 不匹配") {
-		t.Fatalf("expected revision mismatch error, got %v", err)
+}
+
+func TestVerifyRuntimeOptionalDriverAgentRevisionAllowsMetadataProbeFailure(t *testing.T) {
+	originalProbe := optionalDriverAgentMetadataProbe
+	t.Cleanup(func() {
+		optionalDriverAgentMetadataProbe = originalProbe
+	})
+	optionalDriverAgentMetadataProbe = func(driverType string, executablePath string) (db.OptionalDriverAgentMetadata, error) {
+		return db.OptionalDriverAgentMetadata{}, errOptionalDriverAgentMetadataUnavailable
+	}
+
+	err := verifyRuntimeOptionalDriverAgentRevision(connection.ConnectionConfig{Type: "sqlserver"})
+	if err != nil {
+		t.Fatalf("runtime metadata probe failure should warn and continue, got %v", err)
 	}
 }
 

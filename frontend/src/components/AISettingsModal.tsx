@@ -1,26 +1,37 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Modal, Button, Input, Select, Form, message as antdMessage, Tooltip, Tabs, Space, Popconfirm, Slider } from 'antd';
-import { PlusOutlined, DeleteOutlined, EditOutlined, CheckOutlined, ApiOutlined, SafetyCertificateOutlined, RobotOutlined, ThunderboltOutlined, CloudOutlined, ExperimentOutlined, KeyOutlined, LinkOutlined, AppstoreOutlined, ToolOutlined } from '@ant-design/icons';
-import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel } from '../types';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Modal, Form, message as antdMessage } from 'antd';
+import { RobotOutlined } from '@ant-design/icons';
+import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AIMCPClientInstallStatus, AIMCPHTTPServerStatus, AISkillConfig } from '../types';
 import {
-    QWEN_BAILIAN_ANTHROPIC_BASE_URL,
-    QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
-    QWEN_CODING_PLAN_MODELS,
-    resolveProviderPresetKey,
     resolvePresetBaseURL,
     resolvePresetModelSelection,
     resolvePresetTransport,
 } from '../utils/aiProviderPresets';
-import {
-    PROVIDER_PRESET_CARD_BASE_STYLE,
-    PROVIDER_PRESET_CARD_CONTENT_STYLE,
-    PROVIDER_PRESET_CARD_DESCRIPTION_STYLE,
-    PROVIDER_PRESET_GRID_STYLE,
-    PROVIDER_PRESET_CARD_TITLE_STYLE,
-} from '../utils/aiSettingsPresetLayout';
 import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
 import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import { BUILTIN_AI_TOOL_INFO } from '../utils/aiToolRegistry';
+import { EMPTY_MCP_CLIENT_STATUSES } from '../utils/mcpClientInstallStatus';
+import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';
+import AISettingsMCPSection from './ai/AISettingsMCPSection';
+import type { AIMCPHTTPServerDraft } from './ai/AIMCPHTTPServerPanel';
+import AISettingsSidebar, { type AISettingsSectionKey } from './ai/AISettingsSidebar';
+import AISettingsSafetySection from './ai/AISettingsSafetySection';
+import AISettingsContextSection from './ai/AISettingsContextSection';
+import AISettingsProvidersSection from './ai/AISettingsProvidersSection';
+import AISettingsPromptsSection from './ai/AISettingsPromptsSection';
+import AISettingsSkillsSection from './ai/AISettingsSkillsSection';
+import { useAIMCPClientInstaller } from './ai/useAIMCPClientInstaller';
+import {
+    EMPTY_AI_USER_PROMPT_SETTINGS,
+    EMPTY_MCP_SERVER,
+    EMPTY_SKILL,
+    PROVIDER_PRESETS,
+    findPreset,
+    matchProviderPreset,
+    type ProviderPreset,
+    waitForAIService,
+} from './ai/aiSettingsModalConfig';
 interface AISettingsModalProps {
     open: boolean;
     onClose: () => void;
@@ -29,69 +40,64 @@ interface AISettingsModalProps {
     focusProviderId?: string;
 }
 
-// 预设配置：每个预设映射到后端 type（openai/anthropic/gemini/custom）并附带默认 URL 和 Model
-interface ProviderPreset {
-    key: string;
-    label: string;
-    icon: React.ReactNode;
-    desc: string;
-    color: string;
-    backendType: AIProviderType;
-    fixedApiFormat?: string;
-    defaultBaseUrl: string;
-    defaultModel: string;
-    models: string[];
-}
-
-const PROVIDER_PRESETS: ProviderPreset[] = [
-    { key: 'openai', label: 'OpenAI', icon: <ApiOutlined />, desc: 'GPT-5.4 / 5.3 系列', color: '#10b981', backendType: 'openai', defaultBaseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o', models: [] },
-    { key: 'deepseek', label: 'DeepSeek', icon: <ThunderboltOutlined />, desc: 'DeepSeek-V4 / R1', color: '#3b82f6', backendType: 'openai', defaultBaseUrl: 'https://api.deepseek.com/v1', defaultModel: 'deepseek-chat', models: [] },
-    { key: 'qwen-bailian', label: '通义千问（百炼通用）', icon: <CloudOutlined />, desc: '百炼 Anthropic 兼容 / 模型从远端拉取', color: '#6366f1', backendType: 'anthropic', defaultBaseUrl: QWEN_BAILIAN_ANTHROPIC_BASE_URL, defaultModel: '', models: [] },
-    { key: 'qwen-coding-plan', label: '通义千问（Coding Plan）', icon: <CloudOutlined />, desc: 'Claude Code CLI 代理链路 / 使用官方支持模型清单', color: '#4f46e5', backendType: 'custom', fixedApiFormat: 'claude-cli', defaultBaseUrl: QWEN_CODING_PLAN_ANTHROPIC_BASE_URL, defaultModel: '', models: QWEN_CODING_PLAN_MODELS },
-    { key: 'zhipu', label: '智谱 GLM', icon: <ExperimentOutlined />, desc: 'GLM-5 / GLM-5-Turbo', color: '#0ea5e9', backendType: 'openai', defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4', models: [] },
-    { key: 'moonshot', label: 'Kimi', icon: <ExperimentOutlined />, desc: 'Kimi K2.5 (Anthropic 兼容)', color: '#0d9488', backendType: 'anthropic', defaultBaseUrl: 'https://api.moonshot.cn/anthropic', defaultModel: 'moonshot-v1-8k', models: [] },
-    { key: 'anthropic', label: 'Claude', icon: <ExperimentOutlined />, desc: 'Claude Opus/Sonnet', color: '#d97706', backendType: 'anthropic', defaultBaseUrl: 'https://api.anthropic.com', defaultModel: 'claude-3-5-sonnet-20241022', models: [] },
-    { key: 'gemini', label: 'Gemini', icon: <CloudOutlined />, desc: 'Gemini 3.1 / 2.5 系列', color: '#059669', backendType: 'gemini', defaultBaseUrl: 'https://generativelanguage.googleapis.com', defaultModel: 'gemini-2.5-flash', models: [] },
-    { key: 'volcengine-ark', label: '火山方舟', icon: <CloudOutlined />, desc: 'Ark 通用推理 / 豆包模型', color: '#0ea5e9', backendType: 'openai', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', defaultModel: '', models: [] },
-    { key: 'volcengine-coding', label: '火山 Coding Plan', icon: <CloudOutlined />, desc: 'Ark Code / Coding Plan', color: '#0284c7', backendType: 'openai', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/coding/v3', defaultModel: '', models: [] },
-    { key: 'minimax', label: 'MiniMax', icon: <ExperimentOutlined />, desc: 'M3 / M2.7 系列 (Anthropic 兼容)', color: '#e11d48', backendType: 'anthropic', defaultBaseUrl: 'https://api.minimaxi.com/anthropic', defaultModel: 'MiniMax-M3', models: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed'] },
-    { key: 'ollama', label: 'Ollama', icon: <AppstoreOutlined />, desc: '本地部署开源模型', color: '#78716c', backendType: 'openai', defaultBaseUrl: 'http://localhost:11434/v1', defaultModel: 'llama3', models: [] },
-    { key: 'custom', label: '自定义', icon: <AppstoreOutlined />, desc: '自定义 API 端点', color: '#64748b', backendType: 'custom', defaultBaseUrl: '', defaultModel: '', models: [] },
-];
-
-const findPreset = (key: string): ProviderPreset => PROVIDER_PRESETS.find(p => p.key === key) || PROVIDER_PRESETS[PROVIDER_PRESETS.length - 1];
-
-const matchProviderPreset = (provider: Pick<AIProviderConfig, 'type' | 'baseUrl' | 'apiFormat'>): ProviderPreset => {
-    const presetKey = resolveProviderPresetKey(provider, PROVIDER_PRESETS, 'custom');
-    return findPreset(presetKey);
+const DEFAULT_MCP_HTTP_SERVER_STATUS: AIMCPHTTPServerStatus = {
+    running: false,
+    addr: '127.0.0.1:8765',
+    path: '/mcp',
+    url: 'http://127.0.0.1:8765/mcp',
+    schemaOnly: true,
+    message: 'GoNavi MCP HTTP 服务未启动',
 };
 
-const SAFETY_OPTIONS: { label: string; value: AISafetyLevel; desc: string; color: string; icon: string }[] = [
-    { label: '只读模式', value: 'readonly', desc: 'AI 仅可执行 SELECT 等查询操作，最安全', color: '#22c55e', icon: '🔒' },
-    { label: '读写模式', value: 'readwrite', desc: 'AI 可执行 INSERT/UPDATE/DELETE，危险操作需二次确认', color: '#f59e0b', icon: '⚠️' },
-    { label: '完全模式', value: 'full', desc: 'AI 可执行所有操作（含 DDL），高危操作自动告警', color: '#ef4444', icon: '🔓' },
-];
+const DEFAULT_MCP_HTTP_SERVER_DRAFT: AIMCPHTTPServerDraft = {
+    addr: DEFAULT_MCP_HTTP_SERVER_STATUS.addr,
+    path: DEFAULT_MCP_HTTP_SERVER_STATUS.path,
+    authorizationHeader: '',
+};
 
-const CONTEXT_OPTIONS: { label: string; value: AIContextLevel; desc: string; icon: string }[] = [
-    { label: '仅 Schema', value: 'schema_only', desc: '只传递表/列结构信息给 AI', icon: '📋' },
-    { label: '含采样数据', value: 'with_samples', desc: '包含少量采样数据帮助 AI 理解数据特征', icon: '📊' },
-    { label: '含查询结果', value: 'with_results', desc: '传递最近的查询结果作为上下文', icon: '📑' },
-];
+const buildMCPHTTPServerDraftFromStatus = (
+    status: AIMCPHTTPServerStatus,
+    fallback: AIMCPHTTPServerDraft = DEFAULT_MCP_HTTP_SERVER_DRAFT,
+): AIMCPHTTPServerDraft => ({
+    addr: String(status.addr || fallback.addr || DEFAULT_MCP_HTTP_SERVER_STATUS.addr).trim(),
+    path: String(status.path || fallback.path || DEFAULT_MCP_HTTP_SERVER_STATUS.path).trim(),
+    authorizationHeader: String(
+        status.authorizationHeader ||
+        (status.token ? `Bearer ${status.token}` : '') ||
+        fallback.authorizationHeader ||
+        '',
+    ).trim(),
+});
+
+const normalizeMCPHTTPAuthorizationToken = (value: string): string => {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return '';
+    const withoutHeaderName = trimmed.replace(/^Authorization\s*:\s*/i, '').trim();
+    return withoutHeaderName.replace(/^Bearer\s+/i, '').trim();
+};
 
 const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId }) => {
     const [providers, setProviders] = useState<AIProviderConfig[]>([]);
     const [activeProviderId, setActiveProviderId] = useState<string>('');
     const [safetyLevel, setSafetyLevel] = useState<AISafetyLevel>('readonly');
     const [contextLevel, setContextLevel] = useState<AIContextLevel>('schema_only');
+    const [mcpServers, setMCPServers] = useState<AIMCPServerConfig[]>([]);
+    const [mcpTools, setMCPTools] = useState<AIMCPToolDescriptor[]>([]);
+    const [mcpHTTPServerStatus, setMCPHTTPServerStatus] = useState<AIMCPHTTPServerStatus>(DEFAULT_MCP_HTTP_SERVER_STATUS);
+    const [mcpHTTPServerDraft, setMCPHTTPServerDraft] = useState<AIMCPHTTPServerDraft>(DEFAULT_MCP_HTTP_SERVER_DRAFT);
+    const [mcpHTTPServerLoading, setMCPHTTPServerLoading] = useState(false);
+    const [skills, setSkills] = useState<AISkillConfig[]>([]);
     const [editingProvider, setEditingProvider] = useState<AIProviderConfig | null>(null);
     const [isEditing, setIsEditing] = useState(false);
     const [loading, setLoading] = useState(false);
     const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [builtinPrompts, setBuiltinPrompts] = useState<Record<string, string>>({});
-    const [activeSection, setActiveSection] = useState<'providers' | 'safety' | 'context' | 'prompts' | 'tools'>('providers');
+    const [userPromptSettings, setUserPromptSettings] = useState<AIUserPromptSettings>(EMPTY_AI_USER_PROMPT_SETTINGS);
+    const [activeSection, setActiveSection] = useState<AISettingsSectionKey>('providers');
     const [primaryPasswordVisible, setPrimaryPasswordVisible] = useState(false);
     const [form] = Form.useForm();
     const modalBodyRef = useRef<HTMLDivElement>(null);
+    const missingAIServiceWarnedRef = useRef(false);
 
     // Modal 内部 toast 通知
     const [messageApi, messageContextHolder] = antdMessage.useMessage({ getContainer: () => modalBodyRef.current || document.body });
@@ -100,38 +106,132 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const cardBg = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)';
     const cardBorder = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
     const cardHoverBg = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.03)';
-    const sectionLabelColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
     const inputBg = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)';
-
     // Hook 必须在组件顶层调用，不能在条件分支内
     const watchedType = Form.useWatch('type', form);
     const watchedPresetKey = Form.useWatch('presetKey', form);
     const watchedApiFormat = Form.useWatch('apiFormat', form) || 'openai';
+    const skillRequiredToolOptions = useMemo(() => ([
+        ...BUILTIN_AI_TOOL_INFO.map((tool) => ({
+            label: `${tool.name} · 内置工具`,
+            value: tool.name,
+        })),
+        ...mcpTools.map((tool) => ({
+            label: `${tool.alias} · ${tool.serverName}`,
+            value: tool.alias,
+        })),
+    ]), [mcpTools]);
+
+    const resolveAIService = useCallback(async () => {
+        const service = await waitForAIService();
+        if (service) {
+            missingAIServiceWarnedRef.current = false;
+            return service;
+        }
+        if (!missingAIServiceWarnedRef.current) {
+            console.warn('[AI] Service not found on window.go');
+            missingAIServiceWarnedRef.current = true;
+        }
+        return null;
+    }, []);
+
+    const copyTextToClipboard = useCallback(async (text: string, successMessage: string) => {
+        if (typeof navigator?.clipboard?.writeText !== 'function') {
+            throw new Error('当前环境不支持复制到剪贴板');
+        }
+        await navigator.clipboard.writeText(text);
+        void messageApi.success(successMessage);
+    }, [messageApi]);
+
+    const {
+        handleCopySelectedMCPConfigPath,
+        handleCopySelectedMCPLaunchCommand,
+        handleInstallSelectedMCPClient,
+        handleSelectMCPClient,
+        loadMCPClientStatuses,
+        mcpClientStatusLoading,
+        mcpClientStatuses,
+        resetMCPClientSelectionTouched,
+        selectedMCPClient,
+        selectedMCPClientCommandText,
+        selectedMCPClientStatus,
+        syncMCPClientStatuses,
+    } = useAIMCPClientInstaller({
+        resolveAIService,
+        messageApi,
+        copyTextToClipboard,
+        onBeforeInstall: () => setLoading(true),
+        onAfterInstall: () => setLoading(false),
+        onConfigChanged: () => window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed')),
+    });
 
     const loadConfig = useCallback(async () => {
         try {
-            const Service = (window as any).go?.aiservice?.Service;
-            if (!Service) { console.warn('[AI] Service not found on window.go'); return; }
-            const [provRes, safeRes, ctxRes, promptsRes] = await Promise.all([
-                Service.AIGetProviders?.() || [],
-                Service.AIGetSafetyLevel?.() || 'readonly',
-                Service.AIGetContextLevel?.() || 'schema_only',
-                Service.AIGetBuiltinPrompts?.() || {},
+            const Service = await resolveAIService();
+            if (!Service) {
+                return;
+            }
+            const callOrFallback = async <T,>(loader: (() => Promise<T>) | undefined, fallback: T): Promise<T> => {
+                if (typeof loader !== 'function') {
+                    return fallback;
+                }
+                try {
+                    return await loader();
+                } catch (error) {
+                    console.warn('[AI] settings load fallback', error);
+                    return fallback;
+                }
+            };
+            const [provRes, safeRes, ctxRes, promptsRes, userPromptsRes, mcpServersRes, mcpToolsRes, mcpHTTPServerStatusRes, skillsRes, mcpClientStatusesRes] = await Promise.all([
+                callOrFallback(() => Service.AIGetProviders?.(), []),
+                callOrFallback<AISafetyLevel>(() => Service.AIGetSafetyLevel?.(), 'readonly'),
+                callOrFallback<AIContextLevel>(() => Service.AIGetContextLevel?.(), 'schema_only'),
+                callOrFallback(() => Service.AIGetBuiltinPrompts?.(), {}),
+                callOrFallback(() => Service.AIGetUserPromptSettings?.(), EMPTY_AI_USER_PROMPT_SETTINGS),
+                callOrFallback(() => Service.AIGetMCPServers?.(), []),
+                callOrFallback(() => Service.AIListMCPTools?.(), []),
+                callOrFallback<AIMCPHTTPServerStatus>(() => Service.AIGetMCPHTTPServerStatus?.(), DEFAULT_MCP_HTTP_SERVER_STATUS),
+                callOrFallback(() => Service.AIGetSkills?.(), []),
+                callOrFallback<AIMCPClientInstallStatus[]>(() => Service.AIGetMCPClientInstallStatuses?.(), EMPTY_MCP_CLIENT_STATUSES),
             ]);
-            console.log('[AI] AIGetProviders result:', JSON.stringify(provRes), 'isArray:', Array.isArray(provRes));
             if (Array.isArray(provRes)) {
                 setProviders(provRes);
                 const activeRes = await Service.AIGetActiveProvider?.();
-                console.log('[AI] AIGetActiveProvider result:', activeRes);
                 if (activeRes) setActiveProviderId(activeRes);
             }
             if (safeRes) setSafetyLevel(safeRes);
             if (ctxRes) setContextLevel(ctxRes);
             if (promptsRes) setBuiltinPrompts(promptsRes);
+            if (userPromptsRes) {
+                setUserPromptSettings({
+                    ...EMPTY_AI_USER_PROMPT_SETTINGS,
+                    ...userPromptsRes,
+                });
+            }
+            if (Array.isArray(mcpServersRes)) setMCPServers(mcpServersRes);
+            if (Array.isArray(mcpToolsRes)) setMCPTools(mcpToolsRes);
+            if (mcpHTTPServerStatusRes) {
+                const nextStatus = {
+                    ...DEFAULT_MCP_HTTP_SERVER_STATUS,
+                    ...mcpHTTPServerStatusRes,
+                };
+                setMCPHTTPServerStatus(nextStatus);
+                setMCPHTTPServerDraft((prev) => buildMCPHTTPServerDraftFromStatus(nextStatus, prev));
+            }
+            if (Array.isArray(skillsRes)) setSkills(skillsRes);
+            if (Array.isArray(mcpClientStatusesRes)) {
+                syncMCPClientStatuses(mcpClientStatusesRes);
+            }
         } catch (e) { console.warn('Failed to load AI config', e); }
-    }, []);
+    }, [resolveAIService, syncMCPClientStatuses]);
 
     useEffect(() => { if (open) void loadConfig(); }, [open, loadConfig]);
+
+    useEffect(() => {
+        if (open) {
+            resetMCPClientSelectionTouched();
+        }
+    }, [open, resetMCPClientSelectionTouched]);
 
     useEffect(() => {
         if (!open || !focusProviderId) {
@@ -310,6 +410,196 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         } catch (e) { /* ignore */ }
     };
 
+    const handleSaveUserPromptSettings = async () => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            const payload = {
+                global: String(userPromptSettings.global || ''),
+                database: String(userPromptSettings.database || ''),
+                jvm: String(userPromptSettings.jvm || ''),
+                jvmDiagnostic: String(userPromptSettings.jvmDiagnostic || ''),
+            };
+            await Service?.AISaveUserPromptSettings?.(payload);
+            setUserPromptSettings(payload);
+            void messageApi.success('自定义提示词已保存');
+            window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
+        } catch (e: any) {
+            void messageApi.error(e?.message || '保存自定义提示词失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const updateMCPServerDraft = (id: string, patch: Partial<AIMCPServerConfig>) => {
+        setMCPServers((prev) => prev.map((item) => item.id === id ? { ...item, ...patch } : item));
+    };
+
+    const handleAddMCPServer = (seed?: Partial<AIMCPServerConfig>) => {
+        setMCPServers((prev) => [...prev, EMPTY_MCP_SERVER(seed)]);
+    };
+
+    const handleSaveMCPServer = async (server: AIMCPServerConfig) => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            await Service?.AISaveMCPServer?.(server);
+            await loadConfig();
+            void messageApi.success('MCP 服务已保存');
+            window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
+        } catch (e: any) {
+            void messageApi.error(e?.message || '保存 MCP 服务失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteMCPServer = async (id: string) => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            if (typeof Service?.AIDeleteMCPServer === 'function' && !String(id).startsWith('mcp-draft-')) {
+                await Service.AIDeleteMCPServer(id);
+                await loadConfig();
+                window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
+            } else {
+                setMCPServers((prev) => prev.filter((item) => item.id !== id));
+            }
+            void messageApi.success('MCP 服务已删除');
+        } catch (e: any) {
+            void messageApi.error(e?.message || '删除 MCP 服务失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleTestMCPServer = async (server: AIMCPServerConfig) => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            const res = await Service?.AITestMCPServer?.(server);
+            if (res?.success) {
+                void messageApi.success(res?.message || 'MCP 服务连接成功');
+                if (typeof Service?.AIListMCPTools === 'function') {
+                    const nextTools = await Service.AIListMCPTools();
+                    if (Array.isArray(nextTools)) setMCPTools(nextTools);
+                } else if (Array.isArray(res?.tools)) {
+                    setMCPTools(res.tools);
+                }
+            } else {
+                void messageApi.error(res?.message || 'MCP 服务测试失败');
+            }
+        } catch (e: any) {
+            void messageApi.error(e?.message || '测试 MCP 服务失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleToggleMCPHTTPServer = async (checked: boolean) => {
+        try {
+            setMCPHTTPServerLoading(true);
+            const Service = await resolveAIService();
+            if (!Service) {
+                throw new Error('当前运行时暂不支持 MCP HTTP 服务控制');
+            }
+            if (checked && typeof Service.AIStartMCPHTTPServer !== 'function') {
+                throw new Error('当前版本暂不支持启动 MCP HTTP 服务');
+            }
+            if (!checked && typeof Service.AIStopMCPHTTPServer !== 'function') {
+                throw new Error('当前版本暂不支持停止 MCP HTTP 服务');
+            }
+            const nextStatus = checked
+                ? await Service.AIStartMCPHTTPServer({
+                    addr: mcpHTTPServerDraft.addr || DEFAULT_MCP_HTTP_SERVER_STATUS.addr,
+                    path: mcpHTTPServerDraft.path || DEFAULT_MCP_HTTP_SERVER_STATUS.path,
+                    token: normalizeMCPHTTPAuthorizationToken(mcpHTTPServerDraft.authorizationHeader),
+                    schemaOnly: true,
+                })
+                : await Service.AIStopMCPHTTPServer();
+            if (nextStatus) {
+                const normalizedStatus = {
+                    ...DEFAULT_MCP_HTTP_SERVER_STATUS,
+                    ...nextStatus,
+                };
+                setMCPHTTPServerStatus(normalizedStatus);
+                setMCPHTTPServerDraft((prev) => buildMCPHTTPServerDraftFromStatus(normalizedStatus, prev));
+            }
+            void messageApi.success(checked ? 'GoNavi MCP HTTP 服务已启动' : 'GoNavi MCP HTTP 服务已停止');
+        } catch (e: any) {
+            void messageApi.error(e?.message || '切换 GoNavi MCP HTTP 服务失败');
+        } finally {
+            setMCPHTTPServerLoading(false);
+        }
+    };
+
+    const handleUpdateMCPHTTPServerDraft = (patch: Partial<AIMCPHTTPServerDraft>) => {
+        setMCPHTTPServerDraft((prev) => ({
+            ...prev,
+            ...patch,
+        }));
+    };
+
+    const handleCopyMCPHTTPServerURL = async () => {
+        const url = String(mcpHTTPServerStatus.url || '').trim();
+        if (!url) {
+            void messageApi.error('当前没有可复制的 MCP HTTP URL');
+            return;
+        }
+        await copyTextToClipboard(url, 'MCP HTTP URL 已复制');
+    };
+
+    const handleCopyMCPHTTPServerAuthorization = async () => {
+        const authorizationHeader = String(mcpHTTPServerStatus.authorizationHeader || '').trim();
+        if (!authorizationHeader) {
+            void messageApi.error('请先启动 MCP HTTP 服务生成 Authorization Header');
+            return;
+        }
+        await copyTextToClipboard(`Authorization: ${authorizationHeader}`, 'Authorization Header 已复制');
+    };
+
+    const updateSkillDraft = (id: string, patch: Partial<AISkillConfig>) => {
+        setSkills((prev) => prev.map((item) => item.id === id ? { ...item, ...patch } : item));
+    };
+
+    const handleAddSkill = () => {
+        setSkills((prev) => [...prev, EMPTY_SKILL()]);
+    };
+
+    const handleSaveSkill = async (skill: AISkillConfig) => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            await Service?.AISaveSkill?.(skill);
+            await loadConfig();
+            void messageApi.success('Skill 已保存');
+            window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
+        } catch (e: any) {
+            void messageApi.error(e?.message || '保存 Skill 失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleDeleteSkill = async (id: string) => {
+        try {
+            setLoading(true);
+            const Service = (window as any).go?.aiservice?.Service;
+            if (typeof Service?.AIDeleteSkill === 'function' && !String(id).startsWith('skill-draft-')) {
+                await Service.AIDeleteSkill(id);
+                await loadConfig();
+                window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
+            } else {
+                setSkills((prev) => prev.filter((item) => item.id !== id));
+            }
+            void messageApi.success('Skill 已删除');
+        } catch (e: any) {
+            void messageApi.error(e?.message || '删除 Skill 失败');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const handleTestProvider = async () => {
         try {
             const values = await form.validateFields();
@@ -375,365 +665,6 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         });
     };
 
-    // ---- 字段装饰器样式 ----
-    const fieldGroupStyle: React.CSSProperties = {
-        padding: '14px 16px', borderRadius: 12, border: `1px solid ${cardBorder}`,
-        background: cardBg, marginBottom: 12,
-    };
-    const fieldLabelStyle: React.CSSProperties = {
-        fontSize: 13, fontWeight: 700, textTransform: 'uppercase' as const, letterSpacing: '0.08em',
-        color: sectionLabelColor, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6,
-    };
-
-    // ===== Provider 列表 =====
-    const renderProviderList = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {providers.length === 0 && (
-                <div style={{
-                    textAlign: 'center', padding: '36px 20px', color: overlayTheme.mutedText, fontSize: 14,
-                    border: `1px dashed ${cardBorder}`, borderRadius: 14, background: cardBg,
-                }}>
-                    <RobotOutlined style={{ fontSize: 32, marginBottom: 12, opacity: 0.3, display: 'block' }} />
-                    暂未配置模型供应商<br />
-                    <span style={{ fontSize: 13, opacity: 0.6 }}>添加一个以开始使用 AI 助手</span>
-                </div>
-            )}
-            {providers.map(p => {
-                const matchedPreset = matchProviderPreset(p);
-                const isActive = p.id === activeProviderId;
-                return (
-                    <div key={p.id} onClick={() => handleSetActive(p.id)} style={{
-                        padding: '14px 16px', borderRadius: 14, cursor: 'pointer', transition: 'all 0.2s ease',
-                        border: `1.5px solid ${isActive ? overlayTheme.selectedText : cardBorder}`,
-                        background: isActive ? overlayTheme.selectedBg : cardBg,
-                        display: 'flex', alignItems: 'center', gap: 14,
-                    }}>
-                        <div style={{
-                            width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center',
-                            background: isActive ? overlayTheme.iconBg : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.02)'),
-                            color: isActive ? overlayTheme.iconColor : overlayTheme.mutedText, 
-                            fontSize: 18, flexShrink: 0, transition: 'all 0.2s ease',
-                        }}>
-                            {matchedPreset.icon || <ApiOutlined />}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {p.name || p.type}
-                                {isActive && <CheckOutlined style={{ color: overlayTheme.iconColor, fontSize: 13 }} />}
-                            </div>
-                            <div style={{ fontSize: 12, color: overlayTheme.mutedText, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <span>{matchedPreset.label}</span>
-                                <span style={{ opacity: 0.4 }}>·</span>
-                                <span style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12 }}>{p.model || '未选择模型'}</span>
-                            </div>
-                        </div>
-                        <Space size={2}>
-                            <Tooltip title="编辑">
-                                <Button type="text" size="small" icon={<EditOutlined />}
-                                    onClick={e => { e.stopPropagation(); handleEditProvider(p); }}
-                                    style={{ color: overlayTheme.mutedText }} />
-                            </Tooltip>
-                            <Popconfirm title="确认删除？" onConfirm={() => handleDeleteProvider(p.id)}
-                                okButtonProps={{ danger: true }} okText="删除" cancelText="取消">
-                                <Button type="text" size="small" icon={<DeleteOutlined />} danger
-                                    onClick={e => e.stopPropagation()} />
-                            </Popconfirm>
-                        </Space>
-                    </div>
-                );
-            })}
-            <Button type="dashed" icon={<PlusOutlined />} onClick={handleAddProvider}
-                style={{ borderRadius: 12, height: 42, borderColor: darkMode ? 'rgba(255,255,255,0.12)' : undefined }}>
-                添加模型供应商
-            </Button>
-        </div>
-    );
-
-    // ===== Provider 编辑表单 =====
-    const renderProviderForm = () => {
-        const presetKeyFromForm = watchedPresetKey || (editingProvider as any)?.presetKey || 'openai';
-        return (
-            <div>
-                {/* 顶部返回 */}
-                <div style={{ marginBottom: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <Button size="small" onClick={resetProviderEditorSession}
-                        style={{ borderRadius: 8 }}>← 返回</Button>
-                    <span style={{ fontWeight: 700, fontSize: 16, color: overlayTheme.titleText }}>
-                        {editingProvider?.id ? '编辑模型供应商' : '添加模型供应商'}
-                    </span>
-                </div>
-
-                <Form form={form} layout="vertical" size="small">
-                    {/* Provider 类型选择 - 卡片式 */}
-                    <div style={fieldGroupStyle}>
-                        <div style={fieldLabelStyle}>
-                            <AppstoreOutlined style={{ fontSize: 14 }} /> 服务类型
-                        </div>
-                        <Form.Item name="presetKey" noStyle>
-                            <div style={PROVIDER_PRESET_GRID_STYLE}>
-                                {PROVIDER_PRESETS.map(pt => (
-                                    <div key={pt.key} onClick={() => { form.setFieldValue('presetKey', pt.key); handlePresetChange(pt.key); }}
-                                        style={{
-                                            ...PROVIDER_PRESET_CARD_BASE_STYLE,
-                                            border: `1.5px solid ${presetKeyFromForm === pt.key ? overlayTheme.selectedText : 'transparent'}`,
-                                            background: presetKeyFromForm === pt.key ? overlayTheme.selectedBg : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
-                                            boxShadow: presetKeyFromForm === pt.key ? 'none' : (darkMode ? 'inset 0 0 0 1px rgba(255,255,255,0.028)' : 'inset 0 0 0 1px rgba(16,24,40,0.03)'),
-                                        }}>
-                                        <div style={{
-                                            color: presetKeyFromForm === pt.key ? overlayTheme.iconColor : overlayTheme.mutedText,
-                                            fontSize: 18, marginTop: 2, transition: 'all 0.2s ease', flexShrink: 0,
-                                        }}>
-                                            {pt.icon}
-                                        </div>
-                                        <div style={PROVIDER_PRESET_CARD_CONTENT_STYLE}>
-                                            <div style={{ ...PROVIDER_PRESET_CARD_TITLE_STYLE, fontSize: 13, fontWeight: 700, color: overlayTheme.titleText, lineHeight: 1.3 }}>{pt.label}</div>
-                                            <div style={{ ...PROVIDER_PRESET_CARD_DESCRIPTION_STYLE, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.4 }}>{pt.desc}</div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </Form.Item>
-                        <Form.Item name="type" hidden><Input /></Form.Item>
-                    </div>
-
-                    {/* 基本信息 - 仅自定义/Ollama 显示 */}
-                    {(presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama') && (
-                        <div style={{ ...fieldGroupStyle, marginTop: 16 }}>
-                            <div style={fieldLabelStyle}>
-                                <RobotOutlined style={{ fontSize: 14 }} /> 基本信息
-                            </div>
-                            
-                            <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>供应商名称</span>} name="name" rules={[{ required: true, message: '请输入名称' }]} style={{ marginBottom: 16 }}>
-                                <Input placeholder="例如：我的自建 OpenAI / 专属大模型"
-                                    size="middle"
-                                    style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }} />
-                            </Form.Item>
-                            
-                            {presetKeyFromForm === 'custom' && (
-                                <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API 格式</span>} name="apiFormat" style={{ marginBottom: 16 }}>
-                                    <div style={{ 
-                                        display: 'inline-flex', padding: 4, background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.04)', 
-                                        borderRadius: 8, gap: 4 
-                                    }}>
-                                        {[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }, { value: 'gemini', label: 'Gemini' }, { value: 'claude-cli', label: 'Claude CLI' }].map(fmt => (
-                                            <div
-                                                key={fmt.value}
-                                                onClick={() => form.setFieldsValue({ apiFormat: fmt.value })}
-                                                style={{
-                                                    padding: '6px 16px', borderRadius: 6, fontSize: 13, fontWeight: watchedApiFormat === fmt.value ? 600 : 500, cursor: 'pointer',
-                                                    background: watchedApiFormat === fmt.value ? (darkMode ? '#374151' : '#ffffff') : 'transparent',
-                                                    color: watchedApiFormat === fmt.value ? overlayTheme.titleText : overlayTheme.mutedText,
-                                                    boxShadow: watchedApiFormat === fmt.value ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                                                    transition: 'all 0.2s ease',
-                                                }}
-                                            >
-                                                {fmt.label}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </Form.Item>
-                            )}
-                            
-                            <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>可用模型列表（可选配置）</span>} name="models" style={{ marginBottom: 0 }}>
-                                <Select mode="tags" size="middle" placeholder="配置指定的模型ID，留空则默认去服务端拉取" style={{ width: '100%' }} />
-                            </Form.Item>
-                        </div>
-                    )}
-                    <Form.Item name="model" hidden><Input /></Form.Item>
-                    <Form.Item name="name" hidden><Input /></Form.Item>
-
-                    {/* 认证信息 */}
-                    <div style={{ ...fieldGroupStyle, marginTop: 16 }}>
-                        <div style={fieldLabelStyle}>
-                            <KeyOutlined style={{ fontSize: 14 }} /> 认证 & 连接
-                        </div>
-                        <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API Key</span>} name="apiKey" rules={[{ validator: (_, value) => { const apiKey = String(value || '').trim(); if (apiKey || editingProvider?.id) { return Promise.resolve(); } return Promise.reject(new Error('请输入 API Key')); } }]} style={{ marginBottom: 16 }}>
-                            <Input.Password placeholder="sk-... / 你的 API Key"
-                                size="middle"
-                                visibilityToggle={{
-                                    visible: primaryPasswordVisible,
-                                    onVisibleChange: setPrimaryPasswordVisible,
-                                }}
-                                style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }} />
-                        </Form.Item>
-
-                        {(presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama') && (
-                            <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API Endpoint (URL)</span>} name="baseUrl" rules={[{ required: true, message: '请输入有效的接口地址' }]} style={{ marginBottom: 0 }}>
-                                <Input placeholder={findPreset(presetKeyFromForm).defaultBaseUrl || 'https://...'}
-                                    size="middle"
-                                    suffix={<LinkOutlined style={{ color: overlayTheme.mutedText }} />}
-                                    style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }} />
-                            </Form.Item>
-                        )}
-                    </div>
-
-
-
-                    {/* 操作按钮 */}
-                    <div style={{
-                        display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12, paddingTop: 16,
-                        borderTop: `1px solid ${cardBorder}`, paddingBottom: 24,
-                    }}>
-                        <Button onClick={handleTestProvider} loading={loading} style={{ borderRadius: 10 }}
-                            icon={testStatus === 'success' ? <CheckOutlined style={{ color: '#22c55e' }} /> : undefined}>
-                            {testStatus === 'success' ? '连接正常' : testStatus === 'error' ? '重新测试' : '测试连接'}
-                        </Button>
-                        <Button type="primary" onClick={handleSaveProvider} loading={loading}
-                            style={{ borderRadius: 10, fontWeight: 600 }}>
-                            保存
-                        </Button>
-                    </div>
-                </Form>
-            </div>
-        );
-    };
-
-    // ===== 安全控制 =====
-    const renderSafetySettings = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 8 }}>
-                控制 AI 可执行的 SQL 操作类型，保护数据安全
-            </div>
-            {SAFETY_OPTIONS.map(opt => {
-                const active = safetyLevel === opt.value;
-                return (
-                    <div key={opt.value} onClick={() => handleSafetyChange(opt.value)} style={{
-                        padding: '14px 16px', borderRadius: 14, cursor: 'pointer', transition: 'all 0.2s ease',
-                        border: `1.5px solid ${active ? (opt.color === '#ef4444' ? opt.color : overlayTheme.selectedText) : cardBorder}`,
-                        background: active ? (opt.color === '#ef4444' ? `${opt.color}15` : overlayTheme.selectedBg) : cardBg,
-                        display: 'flex', alignItems: 'flex-start', gap: 14,
-                    }}>
-                        <div style={{
-                            width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', fontSize: 18, flexShrink: 0,
-                            background: active ? (opt.color === '#ef4444' ? `${opt.color}25` : overlayTheme.iconBg) : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'),
-                            color: active ? (opt.color === '#ef4444' ? opt.color : overlayTheme.iconColor) : overlayTheme.mutedText,
-                            transition: 'all 0.2s ease',
-                        }}>
-                            {opt.icon}
-                        </div>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {opt.label}
-                                {active && <CheckOutlined style={{ color: opt.color === '#ef4444' ? opt.color : overlayTheme.iconColor, fontSize: 14 }} />}
-                            </div>
-                            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginTop: 4, lineHeight: '1.5' }}>{opt.desc}</div>
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
-
-    // ===== 上下文级别 =====
-    const renderContextSettings = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 8 }}>
-                控制发送给 AI 的数据库上下文信息量
-            </div>
-            {CONTEXT_OPTIONS.map(opt => {
-                const active = contextLevel === opt.value;
-                return (
-                    <div key={opt.value} onClick={() => handleContextChange(opt.value)} style={{
-                        padding: '14px 16px', borderRadius: 14, cursor: 'pointer', transition: 'all 0.2s ease',
-                        border: `1.5px solid ${active ? overlayTheme.selectedText : cardBorder}`,
-                        background: active ? overlayTheme.selectedBg : cardBg,
-                        display: 'flex', alignItems: 'flex-start', gap: 14,
-                    }}>
-                        <div style={{
-                            width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', fontSize: 18, flexShrink: 0,
-                            background: active ? overlayTheme.iconBg : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'),
-                            color: active ? overlayTheme.iconColor : overlayTheme.mutedText,
-                            transition: 'all 0.2s ease',
-                        }}>
-                            {opt.icon}
-                        </div>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {opt.label}
-                                {active && <CheckOutlined style={{ color: overlayTheme.iconColor, fontSize: 14 }} />}
-                            </div>
-                            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginTop: 4, lineHeight: '1.5' }}>{opt.desc}</div>
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
-
-    const renderBuiltinPrompts = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4 }}>
-                以下为当前版本 GoNavi 预设的底层 AI 提示词（只读）。它们会被动态注入到对应场景的请求上下文中。
-            </div>
-            {Object.entries(builtinPrompts).map(([title, promptText]) => (
-                <div key={title} style={{
-                    padding: '12px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: cardBg,
-                }}>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <RobotOutlined style={{ color: overlayTheme.iconColor }} /> {title}
-                    </div>
-                    <div style={{
-                        background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.8)',
-                        padding: '10px 12px', borderRadius: 8, fontSize: 13, color: overlayTheme.mutedText,
-                        whiteSpace: 'pre-wrap', fontFamily: 'var(--gn-font-mono)', lineHeight: 1.5,
-                        userSelect: 'text', border: darkMode ? '1px solid rgba(255,255,255,0.03)' : '1px solid rgba(0,0,0,0.02)'
-                    }}>
-                        {promptText}
-                    </div>
-                </div>
-            ))}
-        </div>
-    );
-
-    const BUILTIN_TOOLS_INFO = [
-        { name: 'get_connections', icon: '🔗', desc: '获取所有可用的数据库连接', detail: '返回连接 ID、名称、类型 (MySQL/PostgreSQL 等) 和 Host 地址。AI 根据返回信息决定优先探索哪个连接。', params: '无参数' },
-        { name: 'get_databases', icon: '🗄️', desc: '获取指定连接下的所有数据库', detail: '传入 connectionId，返回该连接下的数据库/Schema 名称列表。', params: 'connectionId: 连接 ID' },
-        { name: 'get_tables', icon: '📋', desc: '获取指定数据库下的所有表名', detail: '传入 connectionId 和 dbName，返回表名列表。AI 用它来定位用户提到的目标表。', params: 'connectionId, dbName' },
-        { name: 'get_columns', icon: '🔍', desc: '获取指定表的字段结构', detail: '传入 connectionId、dbName 和 tableName，返回每个字段的名称、类型、是否可空、默认值和注释。AI 在生成 SQL 前必须调用此工具确认真实字段名。', params: 'connectionId, dbName, tableName' },
-        { name: 'get_table_ddl', icon: '📝', desc: '获取表的建表语句 (DDL)', detail: '传入 connectionId、dbName 和 tableName，返回完整的 CREATE TABLE 语句，包含字段定义、索引、约束等信息。', params: 'connectionId, dbName, tableName' },
-        { name: 'execute_sql', icon: '▶️', desc: '执行 SQL 查询并返回结果', detail: '传入 connectionId、dbName 和 sql，在目标数据库上执行 SQL 并返回结果（最多 50 行）。受安全级别控制，只读模式下仅允许 SELECT/SHOW/DESCRIBE。', params: 'connectionId, dbName, sql' },
-    ];
-
-    const renderBuiltinTools = () => (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4 }}>
-                AI 助手在处理数据库相关问题时，可以自动调用以下内置工具获取真实数据，全程无需人工干预。
-            </div>
-            <div style={{ fontSize: 12, color: overlayTheme.mutedText, opacity: 0.7, padding: '8px 12px', borderRadius: 8, background: cardBg, border: `1px solid ${cardBorder}` }}>
-                💡 工作流程：get_connections → get_databases → get_tables → get_columns → 生成 SQL
-            </div>
-            {BUILTIN_TOOLS_INFO.map(tool => (
-                <div key={tool.name} style={{
-                    padding: '14px 16px', borderRadius: 14, border: `1px solid ${cardBorder}`, background: cardBg,
-                    transition: 'all 0.2s ease',
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                        <span style={{ fontSize: 20 }}>{tool.icon}</span>
-                        <div>
-                            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, fontFamily: 'var(--gn-font-mono)' }}>
-                                {tool.name}
-                            </div>
-                            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginTop: 2 }}>{tool.desc}</div>
-                        </div>
-                    </div>
-                    <div style={{
-                        fontSize: 13, color: overlayTheme.mutedText, lineHeight: 1.6, padding: '8px 12px',
-                        background: darkMode ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.02)', borderRadius: 8,
-                    }}>
-                        {tool.detail}
-                    </div>
-                    <div style={{ marginTop: 8, fontSize: 12, color: overlayTheme.mutedText, opacity: 0.7, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <ToolOutlined style={{ fontSize: 12 }} />
-                        <span>参数：</span>
-                        <code style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12, padding: '1px 6px', borderRadius: 4, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}>
-                            {tool.params}
-                        </code>
-                    </div>
-                </div>
-            ))}
-        </div>
-    );
-
     const modalShellStyle = {
         background: overlayTheme.shellBg, border: overlayTheme.shellBorder,
         boxShadow: overlayTheme.shellShadow, backdropFilter: overlayTheme.shellBackdropFilter,
@@ -769,54 +700,138 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         >
               <div ref={modalBodyRef} className="ai-settings-body" style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch', position: 'relative' }}>
                   {messageContextHolder}
-                  <div style={{ padding: '0 12px', height: 'fit-content' }}>
-                      <div style={{ marginBottom: 12, fontWeight: 600, color: overlayTheme.titleText }}>设置导航</div>
-                      <div style={{ display: 'grid', gap: 10 }}>
-                          {[
-                              { key: 'providers', title: '模型供应商', description: '配置大模型接口与秘钥', icon: <ApiOutlined /> },
-                              { key: 'safety', title: '安全控制', description: '限制 AI 操作风险级别', icon: <SafetyCertificateOutlined /> },
-                              { key: 'context', title: '上下文', description: '配置携带的数据架构信息', icon: <RobotOutlined /> },
-                              { key: 'tools', title: '内置工具', description: '查看 AI 可调用的数据探针', icon: <ToolOutlined /> },
-                              { key: 'prompts', title: '内置提示词', description: '查看系统预设的底层要求', icon: <ExperimentOutlined /> },
-                          ].map((item) => {
-                              const active = activeSection === item.key;
-                              return (
-                                  <button
-                                      key={item.key}
-                                      type="button"
-                                      onClick={() => setActiveSection(item.key as typeof activeSection)}
-                                      style={{
-                                          textAlign: 'left',
-                                          padding: '12px 14px',
-                                          borderRadius: 12,
-                                          border: `1px solid ${active
-                                              ? (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)')
-                                              : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
-                                          background: active
-                                              ? (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)')
-                                              : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
-                                          color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
-                                          cursor: 'pointer',
-                                      }}
-                                  >
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                          <span style={{ fontSize: 16 }}>{item.icon}</span>
-                                          <span style={{ fontSize: 14, fontWeight: 700 }}>{item.title}</span>
-                                      </div>
-                                      <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : 'rgba(128,128,128,0.7)' }}>
-                                          {item.description}
-                                      </div>
-                                  </button>
-                              );
-                          })}
-                      </div>
-                  </div>
+                  <AISettingsSidebar
+                      activeSection={activeSection}
+                      darkMode={darkMode}
+                      overlayTheme={overlayTheme}
+                      onSelectSection={setActiveSection}
+                  />
                   <div style={{ minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', overflowX: 'hidden', paddingRight: 8, paddingBottom: 28 }}>
-                      {activeSection === 'providers' && (isEditing ? renderProviderForm() : renderProviderList())}
-                      {activeSection === 'safety' && renderSafetySettings()}
-                      {activeSection === 'context' && renderContextSettings()}
-                      {activeSection === 'tools' && renderBuiltinTools()}
-                      {activeSection === 'prompts' && renderBuiltinPrompts()}
+                      {activeSection === 'providers' && (
+                          <AISettingsProvidersSection
+                              providers={providers}
+                              activeProviderId={activeProviderId}
+                              editingProvider={editingProvider}
+                              isEditing={isEditing}
+                              form={form}
+                              providerPresets={PROVIDER_PRESETS}
+                              watchedPresetKey={watchedPresetKey}
+                              watchedApiFormat={watchedApiFormat}
+                              loading={loading}
+                              testStatus={testStatus}
+                              primaryPasswordVisible={primaryPasswordVisible}
+                              darkMode={darkMode}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                              inputBg={inputBg}
+                              onPrimaryPasswordVisibleChange={setPrimaryPasswordVisible}
+                              resolveProviderPreset={matchProviderPreset}
+                              resolvePresetByKey={findPreset}
+                              onAddProvider={handleAddProvider}
+                              onEditProvider={handleEditProvider}
+                              onDeleteProvider={handleDeleteProvider}
+                              onSetActiveProvider={handleSetActive}
+                              onCancelEdit={resetProviderEditorSession}
+                              onPresetChange={handlePresetChange}
+                              onTestProvider={handleTestProvider}
+                              onSaveProvider={handleSaveProvider}
+                          />
+                      )}
+                      {activeSection === 'safety' && (
+                          <AISettingsSafetySection
+                              safetyLevel={safetyLevel}
+                              darkMode={darkMode}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                              onChange={handleSafetyChange}
+                          />
+                      )}
+                      {activeSection === 'context' && (
+                          <AISettingsContextSection
+                              contextLevel={contextLevel}
+                              darkMode={darkMode}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                              onChange={handleContextChange}
+                          />
+                      )}
+                      {activeSection === 'mcp' && (
+                          <AISettingsMCPSection
+                              mcpClientStatuses={mcpClientStatuses}
+                              selectedMCPClient={selectedMCPClient}
+                              selectedMCPClientStatus={selectedMCPClientStatus}
+                              selectedMCPClientCommandText={selectedMCPClientCommandText}
+                              mcpHTTPServerStatus={mcpHTTPServerStatus}
+                              mcpHTTPServerDraft={mcpHTTPServerDraft}
+                              mcpServers={mcpServers}
+                              mcpTools={mcpTools}
+                              darkMode={darkMode}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                              inputBg={inputBg}
+                              loading={loading}
+                              mcpClientStatusLoading={mcpClientStatusLoading}
+                              mcpHTTPServerLoading={mcpHTTPServerLoading}
+                              onUpdateHTTPServerDraft={handleUpdateMCPHTTPServerDraft}
+                              onToggleHTTPServer={handleToggleMCPHTTPServer}
+                              onCopyHTTPServerURL={() => void handleCopyMCPHTTPServerURL()}
+                              onCopyHTTPServerAuthorization={() => void handleCopyMCPHTTPServerAuthorization()}
+                              onSelectClient={handleSelectMCPClient}
+                              onRefreshStatus={() => void loadMCPClientStatuses()}
+                              onCopyConfigPath={() => void handleCopySelectedMCPConfigPath()}
+                              onCopyLaunchCommand={() => void handleCopySelectedMCPLaunchCommand()}
+                              onInstallSelectedClient={handleInstallSelectedMCPClient}
+                              onAddServer={handleAddMCPServer}
+                              onUpdateServerDraft={updateMCPServerDraft}
+                              onTestServer={handleTestMCPServer}
+                              onSaveServer={handleSaveMCPServer}
+                              onDeleteServer={handleDeleteMCPServer}
+                          />
+                      )}
+                      {activeSection === 'skills' && (
+                          <AISettingsSkillsSection
+                              skills={skills}
+                              skillRequiredToolOptions={skillRequiredToolOptions}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                              inputBg={inputBg}
+                              loading={loading}
+                              onAddSkill={handleAddSkill}
+                              onUpdateSkillDraft={updateSkillDraft}
+                              onSaveSkill={handleSaveSkill}
+                              onDeleteSkill={handleDeleteSkill}
+                          />
+                      )}
+                      {activeSection === 'tools' && (
+                          <AIBuiltinToolsCatalog
+                              darkMode={darkMode}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                          />
+                      )}
+                      {activeSection === 'prompts' && (
+                          <AISettingsPromptsSection
+                              builtinPrompts={builtinPrompts}
+                              userPromptSettings={userPromptSettings}
+                              overlayTheme={overlayTheme}
+                              cardBg={cardBg}
+                              cardBorder={cardBorder}
+                              inputBg={inputBg}
+                              darkMode={darkMode}
+                              loading={loading}
+                              onChangeUserPrompt={(key, value) => setUserPromptSettings((prev) => ({
+                                  ...prev,
+                                  [key]: value,
+                              }))}
+                              onSave={handleSaveUserPromptSettings}
+                          />
+                      )}
                   </div>
               </div>
         </Modal>
@@ -824,6 +839,3 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
 };
 
 export default AISettingsModal;
-
-
-

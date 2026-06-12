@@ -38,6 +38,60 @@ func TestBuildClaudeCLIEnv_IncludesAnthropicProxyEnv(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeCLIRequestLogBodyRedactsSecretsAndKeepsRequestShape(t *testing.T) {
+	prompt := "请分析订单表。临时凭证 Bearer abcdefghijklmnopqrstuvwxyz，另一个 key 是 sk-live-abcdefghijklmnopqrstuvwxyz"
+	args := []string{"-p", prompt, "--output-format", "stream-json", "--model", "claude-sonnet"}
+	originalPromptArg := args[1]
+
+	body := buildClaudeCLIRequestLogBody("stream-json", args, prompt, ai.ProviderConfig{
+		BaseURL: "https://proxy.example.com/api/anthropic?key=proxy-secret&alt=sse",
+		APIKey:  "sk-config-secret-1234567890",
+		Model:   "claude-sonnet",
+	}, ai.ChatRequest{
+		Messages: []ai.Message{{Role: "user", Content: prompt}},
+		Tools: []ai.Tool{{
+			Type: "function",
+			Function: ai.ToolFunction{
+				Name:        "inspect_ai_upstream_logs",
+				Description: "读取 AI 上游请求日志",
+			},
+		}},
+	})
+
+	got := formatAIUpstreamRequestLogBody(body)
+
+	for _, want := range []string{
+		`"command":"claude"`,
+		`"output_format":"stream-json"`,
+		`"model":"claude-sonnet"`,
+		`"has_api_key":true`,
+		`"message_count":1`,
+		`"tool_count":1`,
+		`"[prompt logged separately]"`,
+		`inspect_ai_upstream_logs`,
+		`key=%5BREDACTED%5D`,
+		`[REDACTED]`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected Claude CLI request log body to contain %q, got %s", want, got)
+		}
+	}
+
+	for _, leaked := range []string{
+		"proxy-secret",
+		"sk-config-secret",
+		"Bearer abcdefghijklmnopqrstuvwxyz",
+		"sk-live-abcdefghijklmnopqrstuvwxyz",
+	} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("Claude CLI request log body leaked %q: %s", leaked, got)
+		}
+	}
+	if args[1] != originalPromptArg {
+		t.Fatalf("expected original args to remain unchanged, got %q", args[1])
+	}
+}
+
 func TestBuildClaudeCLIEnv_UsesDetectedGitBashOnWindows(t *testing.T) {
 	env, err := buildClaudeCLIEnv(ai.ProviderConfig{}, []string{"ProgramFiles=C:\\Program Files"}, "windows", func(name string) (string, error) {
 		switch name {

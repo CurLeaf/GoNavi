@@ -105,6 +105,36 @@ func TestMigrateDataRootContentsCopiesSecurityUpdateStateAndRewritesBackupPaths(
 	}
 }
 
+func TestMigrateDataRootContentsToleratesMissingSecurityUpdateArtifacts(t *testing.T) {
+	sourceRoot := t.TempDir()
+	targetRoot := filepath.Join(t.TempDir(), "gonavi-data")
+	sourceRepo := newSecurityUpdateStateRepository(sourceRoot)
+	started, err := sourceRepo.StartRound(StartSecurityUpdateRequest{SourceType: SecurityUpdateSourceTypeCurrentAppSavedConfig})
+	if err != nil {
+		t.Fatalf("start security update round failed: %v", err)
+	}
+	if err := os.Remove(sourceRepo.manifestPath(started.MigrationID)); err != nil {
+		t.Fatalf("remove source manifest failed: %v", err)
+	}
+	if err := os.Remove(sourceRepo.resultPath(started.MigrationID)); err != nil {
+		t.Fatalf("remove source result failed: %v", err)
+	}
+
+	if err := migrateDataRootContents(sourceRoot, targetRoot); err != nil {
+		t.Fatalf("migrateDataRootContents should tolerate missing security update artifacts, got: %v", err)
+	}
+
+	targetRepo := newSecurityUpdateStateRepository(targetRoot)
+	targetStatus, err := targetRepo.LoadMarker()
+	if err != nil {
+		t.Fatalf("load migrated marker failed: %v", err)
+	}
+	expectedBackupPath := filepath.Join(targetRoot, securityUpdateBackupRootDirName, started.MigrationID)
+	if targetStatus.BackupPath != expectedBackupPath {
+		t.Fatalf("expected migrated marker backupPath %q, got %q", expectedBackupPath, targetStatus.BackupPath)
+	}
+}
+
 func TestMigrateDataRootContentsCopiesDailySecretsForSavedConnections(t *testing.T) {
 	sourceRoot := t.TempDir()
 	targetRoot := filepath.Join(t.TempDir(), "gonavi-data")

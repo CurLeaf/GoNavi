@@ -21,6 +21,11 @@ const isOracleLikeDialect = (dialect: string): boolean => {
   return normalized === 'oracle' || normalized === 'dameng' || normalized === 'dm' || normalized === 'dm8';
 };
 
+const keepsQualifiedTableNameForMetadata = (dialect: string): boolean => {
+  const normalized = String(dialect || '').trim().toLowerCase();
+  return normalized === 'duckdb';
+};
+
 const isQuotedIdentifier = (part: string): boolean => {
   const text = String(part || '').trim();
   if (!text) return false;
@@ -73,13 +78,16 @@ export const extractQueryResultTableRef = (
 
   const owner = parts.length >= 2 ? parts[parts.length - 2] : '';
   const metadataDbName = owner || normalizeCurrentDbName(currentDb, dialect);
-  const tableName = isOracleLikeDialect(dialect) && owner
+  const tableName = (isOracleLikeDialect(dialect) || keepsQualifiedTableNameForMetadata(dialect)) && owner
+    ? `${owner}.${metadataTableName}`
+    : metadataTableName;
+  const resolvedMetadataTableName = keepsQualifiedTableNameForMetadata(dialect) && owner
     ? `${owner}.${metadataTableName}`
     : metadataTableName;
 
   return {
     tableName,
     metadataDbName,
-    metadataTableName,
+    metadataTableName: resolvedMetadataTableName,
   };
 };

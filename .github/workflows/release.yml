@@ -19,7 +19,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version-file: 'go.mod'
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -66,17 +66,94 @@ jobs:
       drivers: ${{ steps.detect.outputs.drivers }}
       has_changes: ${{ steps.detect.outputs.has_changes }}
       release_source: ${{ steps.detect.outputs.release_source }}
+      compare_base: ${{ steps.detect.outputs.compare_base }}
+      force_global_driver_builds: ${{ steps.detect.outputs.force_global_driver_builds }}
+      published_source_commit: ${{ steps.published_source.outputs.source_commit }}
+      has_manifest: ${{ steps.published_source.outputs.has_manifest }}
+      manifest_valid: ${{ steps.published_source.outputs.manifest_valid }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
+      - name: Resolve published driver release source
+        id: published_source
+        env:
+          DRIVER_RELEASE_TOKEN: ${{ secrets.DRIVER_RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREV_TAG="$(git describe --tags --match 'v*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
+          manifest_path="$RUNNER_TEMP/published-driver-manifest.json"
+          if [[ -z "$PREV_TAG" ]]; then
+            echo "source_commit=" >> "$GITHUB_OUTPUT"
+            echo "has_manifest=false" >> "$GITHUB_OUTPUT"
+            echo "manifest_valid=false" >> "$GITHUB_OUTPUT"
+            echo "🧭 No previous stable tag found; full rebuild will be used"
+            exit 0
+          fi
+          SOURCE_COMMIT="$(python3 tools/resolve-driver-release-source.py --repo Syngnat/GoNavi-DriverAgents --tag "$PREV_TAG" --manifest-output "$manifest_path")"
+          echo "source_commit=${SOURCE_COMMIT}" >> "$GITHUB_OUTPUT"
+          if [[ -s "$manifest_path" ]]; then
+            echo "has_manifest=true" >> "$GITHUB_OUTPUT"
+            echo "🧭 Published driver release exposes revision manifest"
+          else
+            echo "has_manifest=false" >> "$GITHUB_OUTPUT"
+            echo "🧭 Published driver release has no revision manifest"
+          fi
+          if [[ -n "$SOURCE_COMMIT" && -s "$manifest_path" ]]; then
+            if bash ./tools/validate-driver-release-manifest.sh --commit "$SOURCE_COMMIT" --manifest "$manifest_path"; then
+              if python3 tools/validate-driver-release-assets.py --repo Syngnat/GoNavi-DriverAgents --tag "$PREV_TAG"; then
+                echo "manifest_valid=true" >> "$GITHUB_OUTPUT"
+                echo "🧭 Published driver release manifest and actual assets are consistent with its source commit"
+              else
+                echo "manifest_valid=false" >> "$GITHUB_OUTPUT"
+                echo "⚠️ Published driver release assets do not match manifest; forcing full rebuild"
+              fi
+            else
+              echo "manifest_valid=false" >> "$GITHUB_OUTPUT"
+              echo "⚠️ Published driver release manifest is stale; forcing full rebuild"
+            fi
+          else
+            echo "manifest_valid=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -n "$SOURCE_COMMIT" ]]; then
+            echo "🧭 Last published release source commit (${PREV_TAG}): $SOURCE_COMMIT"
+          else
+            echo "🧭 Unable to resolve published release source commit for ${PREV_TAG}; fallback to previous tag diff"
+          fi
+
       - name: Detect changed driver agents
         id: detect
         shell: bash
         run: |
           set -euo pipefail
+          merge_csv() {
+            local current="$1"
+            local incoming="$2"
+            local merged="$current"
+            local seen=",${current},"
+            local item
+            IFS=',' read -r -a items <<< "$incoming"
+            for item in "${items[@]}"; do
+              item="$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+              if [[ -z "$item" ]]; then
+                continue
+              fi
+              if [[ "$seen" == *",$item,"* ]]; then
+                continue
+              fi
+              if [[ -n "$merged" ]]; then
+                merged="${merged},${item}"
+              else
+                merged="$item"
+              fi
+              seen="${seen}${item},"
+            done
+            printf '%s\n' "$merged"
+          }
+
           git fetch --force --tags
           PREV_TAG="$(git describe --tags --match 'v*' --abbrev=0 "${GITHUB_SHA}^" 2>/dev/null || true)"
           if [ -n "$PREV_TAG" ]; then
@@ -86,15 +163,48 @@ jobs:
             BASE_REF="all"
             RELEASE_SOURCE="all"
           fi
+          HAS_MANIFEST="${{ steps.published_source.outputs.has_manifest }}"
+          MANIFEST_VALID="${{ steps.published_source.outputs.manifest_valid }}"
+          if [[ "$RELEASE_SOURCE" != "all" && "$HAS_MANIFEST" != "true" ]]; then
+            echo "⚠️ Published driver release lacks revision manifest; forcing full rebuild to self-heal old assets"
+            BASE_REF="all"
+            RELEASE_SOURCE="all"
+          elif [[ "$RELEASE_SOURCE" != "all" && "$MANIFEST_VALID" != "true" ]]; then
+            echo "⚠️ Published driver release manifest is stale; forcing full rebuild to self-heal old assets"
+            BASE_REF="all"
+            RELEASE_SOURCE="all"
+          fi
           DRIVERS="$(bash ./tools/detect-changed-driver-agents.sh --base "$BASE_REF" --head "$GITHUB_SHA")"
+          if [[ "$BASE_REF" != "all" ]]; then
+            REVISION_DRIVERS=""
+            for PLATFORM in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64; do
+              PLATFORM_DRIVERS="$(bash ./tools/diff-driver-agent-revisions.sh --base "$BASE_REF" --head "$GITHUB_SHA" --platform "$PLATFORM")" || {
+                echo "⚠️ 平台 revision 差异对比失败（${PLATFORM}），保守回退为全量驱动重建"
+                DRIVERS="$(bash ./tools/detect-changed-driver-agents.sh --base all --head "$GITHUB_SHA")"
+                REVISION_DRIVERS=""
+                break
+              }
+              REVISION_DRIVERS="$(merge_csv "$REVISION_DRIVERS" "$PLATFORM_DRIVERS")"
+            done
+            if [[ -n "$REVISION_DRIVERS" ]]; then
+              echo "🧭 Revision diff union drivers: $REVISION_DRIVERS"
+              DRIVERS="$(merge_csv "$DRIVERS" "$REVISION_DRIVERS")"
+            fi
+          fi
+          FORCE_GLOBAL_DRIVER_BUILDS="$(bash ./tools/should-force-global-driver-builds.sh --base "$BASE_REF" --head "$GITHUB_SHA")"
           echo "drivers=${DRIVERS}" >> "$GITHUB_OUTPUT"
           echo "release_source=${RELEASE_SOURCE}" >> "$GITHUB_OUTPUT"
+          echo "compare_base=${BASE_REF}" >> "$GITHUB_OUTPUT"
+          echo "force_global_driver_builds=${FORCE_GLOBAL_DRIVER_BUILDS}" >> "$GITHUB_OUTPUT"
           if [ -n "$DRIVERS" ]; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
             echo "🧭 Changed driver agents since ${BASE_REF}: $DRIVERS"
           else
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
             echo "🧭 No driver-agent changes since ${BASE_REF}"
+          fi
+          if [[ "$FORCE_GLOBAL_DRIVER_BUILDS" == "true" ]]; then
+            echo "🧭 Driver build/release plumbing changed; preserve global driver rebuild set on every platform"
           fi
 
   # Phase 1: Build in parallel and output artifacts
@@ -167,24 +277,41 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.24'
+          go-version-file: 'go.mod'
 
       - name: Download frontend dist
+        id: download_frontend_dist
+        continue-on-error: true
         uses: actions/download-artifact@v7
         with:
           name: frontend-dist
-          path: .
+          path: frontend-artifact
+
+      - name: Reset failed frontend dist download
+        if: steps.download_frontend_dist.outcome != 'success'
+        shell: bash
+        run: rm -rf frontend-artifact
+
+      - name: Retry frontend dist download
+        if: steps.download_frontend_dist.outcome != 'success'
+        uses: actions/download-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend-artifact
 
       - name: Extract frontend dist
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p frontend/dist
-          tar -xf frontend-dist.tar -C frontend/dist
+          test -s frontend-artifact/frontend-dist.tar
+          tar -xf frontend-artifact/frontend-dist.tar -C frontend/dist
           test -s frontend/dist/index.html
 
       - name: Install UPX (Windows)
@@ -255,7 +382,7 @@ jobs:
 
       - name: Setup MSYS2 Toolchain For DuckDB (Windows AMD64)
         id: msys2_duckdb
-        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' && contains(format(',{0},', needs.driver_agents.outputs.drivers), ',duckdb,') }}
+        if: ${{ matrix.platform == 'windows/amd64' }}
         continue-on-error: true
         uses: msys2/setup-msys2@v2
         with:
@@ -263,9 +390,10 @@ jobs:
           update: true
           install: >-
             mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-binutils
 
       - name: Configure DuckDB CGO Toolchain (Windows AMD64)
-        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' && contains(format(',{0},', needs.driver_agents.outputs.drivers), ',duckdb,') }}
+        if: ${{ matrix.platform == 'windows/amd64' }}
         shell: pwsh
         run: |
           function Find-MingwBin([string[]]$candidates) {
@@ -323,7 +451,7 @@ jobs:
           Write-Host "✅ 已配置 DuckDB cgo 编译器: gcc=$gcc g++=$gxx"
 
       - name: Verify DuckDB CGO Toolchain (Windows AMD64)
-        if: ${{ matrix.build_optional_agents && matrix.platform == 'windows/amd64' && contains(format(',{0},', needs.driver_agents.outputs.drivers), ',duckdb,') }}
+        if: ${{ matrix.platform == 'windows/amd64' }}
         shell: pwsh
         run: |
           & "$env:CC" --version
@@ -331,31 +459,82 @@ jobs:
 
       - name: Build
         shell: bash
-        env:
-          CHANGED_DRIVER_AGENTS: ${{ needs.driver_agents.outputs.drivers }}
         run: |
           set -euo pipefail
-          if [ -n "$CHANGED_DRIVER_AGENTS" ]; then
-            ./tools/generate-driver-agent-revisions.sh --platform "${{ matrix.platform }}" --drivers "$CHANGED_DRIVER_AGENTS"
-          else
-            echo "🧭 No driver-agent changes; keeping committed driver revisions"
-          fi
+          echo "🧭 为 ${{ matrix.platform }} 全量生成 driver-agent revision 指纹，避免跨平台沿用旧 revision"
+          ./tools/generate-driver-agent-revisions.sh --platform "${{ matrix.platform }}"
+          REVISION_HASH="$(python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          print(hashlib.sha256(Path("internal/db/driver_agent_revisions_gen.go").read_bytes()).hexdigest())
+          PY
+          )"
+          export GOCACHE="${RUNNER_TEMP}/go-build-${{ matrix.os_name }}-${{ matrix.arch_name }}-${REVISION_HASH}"
+          mkdir -p "$GOCACHE"
+          echo "🧭 使用隔离 GOCACHE：$GOCACHE"
           if [ -n "${{ matrix.wails_tags }}" ]; then
             wails build -s -skipbindings -platform ${{ matrix.platform }} -clean -o ${{ matrix.build_name }} -tags "${{ matrix.wails_tags }}" -ldflags "-s -w -X GoNavi-Wails/internal/app.AppVersion=${{ github.ref_name }}"
           else
             wails build -s -skipbindings -platform ${{ matrix.platform }} -clean -o ${{ matrix.build_name }} -ldflags "-s -w -X GoNavi-Wails/internal/app.AppVersion=${{ github.ref_name }}"
           fi
 
-      - name: Build Optional Driver Agents
+      - name: Resolve Platform Driver Revision Diff
+        id: revision_diff
         if: ${{ matrix.build_optional_agents && needs.driver_agents.outputs.has_changes == 'true' }}
         shell: bash
+        run: |
+          set -euo pipefail
+          BASE_REF="${{ needs.driver_agents.outputs.compare_base }}"
+          FALLBACK_DRIVERS="${{ needs.driver_agents.outputs.drivers }}"
+          FORCE_GLOBAL_DRIVER_BUILDS="${{ needs.driver_agents.outputs.force_global_driver_builds }}"
+
+          if [[ -z "$BASE_REF" || "$BASE_REF" == "all" || "$FORCE_GLOBAL_DRIVER_BUILDS" == "true" ]]; then
+            if [[ "$FORCE_GLOBAL_DRIVER_BUILDS" == "true" && -n "$BASE_REF" && "$BASE_REF" != "all" ]]; then
+              echo "⚠️ 当前提交涉及 driver 构建/发布链路，保留全局驱动重建结果：${FALLBACK_DRIVERS}"
+            else
+              echo "⚠️ 未拿到可比对的历史 release 基线，回退使用全局检测结果：${FALLBACK_DRIVERS}"
+            fi
+            echo "drivers=${FALLBACK_DRIVERS}" >> "$GITHUB_OUTPUT"
+          else
+            echo "🧭 对比当前平台 revision：base=${BASE_REF} head=${GITHUB_SHA} platform=${{ matrix.platform }}"
+            if DRIVERS="$(bash ./tools/diff-driver-agent-revisions.sh --base "$BASE_REF" --head "$GITHUB_SHA" --platform "${{ matrix.platform }}")"; then
+              echo "🧭 当前平台实际需要重建的 driver agents: ${DRIVERS:-<empty>}"
+              echo "drivers=${DRIVERS}" >> "$GITHUB_OUTPUT"
+            else
+              echo "⚠️ revision 差异对比失败，保守回退为全量重建"
+              ALL_DRIVERS="$(bash ./tools/detect-changed-driver-agents.sh --base all --head "$GITHUB_SHA")"
+              echo "drivers=${ALL_DRIVERS}" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+          DRIVERS="$(sed -n 's/^drivers=//p' "$GITHUB_OUTPUT" | tail -n 1)"
+          if [[ -n "$DRIVERS" ]]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Optional Driver Agents
+        if: ${{ matrix.build_optional_agents && steps.revision_diff.outputs.has_changes == 'true' }}
+        shell: bash
         env:
-          CHANGED_DRIVER_AGENTS: ${{ needs.driver_agents.outputs.drivers }}
+          CHANGED_DRIVER_AGENTS: ${{ steps.revision_diff.outputs.drivers }}
         run: |
           set -euo pipefail
           TARGET_PLATFORM="${{ matrix.platform }}"
           GOOS="${TARGET_PLATFORM%%/*}"
           GOARCH="${TARGET_PLATFORM##*/}"
+          REVISION_HASH="$(python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+
+          print(hashlib.sha256(Path("internal/db/driver_agent_revisions_gen.go").read_bytes()).hexdigest())
+          PY
+          )"
+          export GOCACHE="${RUNNER_TEMP}/go-build-${{ matrix.os_name }}-${{ matrix.arch_name }}-${REVISION_HASH}"
+          mkdir -p "$GOCACHE"
+          echo "🧭 可选驱动使用隔离 GOCACHE：$GOCACHE"
           IFS=',' read -r -a DRIVERS <<< "$CHANGED_DRIVER_AGENTS"
           OUTDIR="drivers/${{ matrix.os_name }}"
           mkdir -p "$OUTDIR"
@@ -364,17 +543,51 @@ jobs:
 
           prepare_duckdb_windows_library() {
             local lib_dir="$RUNNER_TEMP/duckdb-windows-${DUCKDB_WINDOWS_LIBRARY_VERSION}"
+            local extract_dir="$RUNNER_TEMP/duckdb-windows-extract-${DUCKDB_WINDOWS_LIBRARY_VERSION}"
             local zip_path="$RUNNER_TEMP/libduckdb-windows-amd64.zip"
-            if [ -f "$lib_dir/duckdb.dll" ] && [ -f "$lib_dir/duckdb.lib" ]; then
+            if [ -f "$lib_dir/duckdb.dll" ] && [ -f "$lib_dir/libduckdb.dll.a" ] && [ -f "$lib_dir/libduckdb.a" ]; then
               echo "$lib_dir"
               return 0
             fi
             mkdir -p "$lib_dir"
-            curl -fsSL "$DUCKDB_WINDOWS_LIBRARY_URL" -o "$zip_path"
-            unzip -qo "$zip_path" -d "$lib_dir"
-            cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.dll.a"
-            cp "$lib_dir/duckdb.lib" "$lib_dir/libduckdb.a"
-            echo "$lib_dir"
+            rm -rf "$extract_dir"
+            rm -f "$zip_path"
+            local attempt dll_path
+            for attempt in 1 2 3; do
+              echo "📥 下载 DuckDB Windows 动态库 (${attempt}/3): ${DUCKDB_WINDOWS_LIBRARY_URL}" >&2
+              if curl --retry 3 --retry-delay 2 --retry-all-errors --connect-timeout 20 --max-time 300 -fsSL "$DUCKDB_WINDOWS_LIBRARY_URL" -o "$zip_path"; then
+                if unzip -tq "$zip_path" >/dev/null 2>&1; then
+                  rm -rf "$lib_dir"
+                  rm -rf "$extract_dir"
+                  mkdir -p "$lib_dir"
+                  mkdir -p "$extract_dir"
+                  unzip -qo "$zip_path" -d "$extract_dir"
+                  dll_path="$(find "$extract_dir" -type f -name duckdb.dll | head -n 1 || true)"
+                  if [ -n "$dll_path" ]; then
+                    cp "$dll_path" "$lib_dir/duckdb.dll"
+                    go run ./cmd/mingw-import-lib \
+                      --dll "$lib_dir/duckdb.dll" \
+                      --output-lib "$lib_dir/libduckdb.dll.a"
+                    cp "$lib_dir/libduckdb.dll.a" "$lib_dir/libduckdb.a"
+                    rm -rf "$extract_dir"
+                    echo "$lib_dir"
+                    return 0
+                  fi
+                  echo "⚠️ DuckDB Windows 动态库压缩包缺少 duckdb.dll，准备重试" >&2
+                else
+                  echo "⚠️ DuckDB Windows 动态库压缩包校验失败，准备重试" >&2
+                fi
+              else
+                echo "⚠️ DuckDB Windows 动态库下载失败，准备重试" >&2
+              fi
+              rm -f "$zip_path"
+              rm -rf "$lib_dir"
+              rm -rf "$extract_dir"
+              mkdir -p "$lib_dir"
+              sleep $((attempt * 2))
+            done
+            echo "❌ 无法准备 DuckDB Windows 动态库：${DUCKDB_WINDOWS_LIBRARY_URL}" >&2
+            return 1
           }
 
           for DRIVER in "${DRIVERS[@]}"; do
@@ -386,47 +599,97 @@ jobs:
               echo "⚠️ 跳过 DuckDB driver（当前平台 ${GOOS}/${GOARCH} 不受支持，仅支持 windows/amd64）"
               continue
             fi
-            TAG="gonavi_${BUILD_DRIVER}_driver"
-            BUILD_TAGS="$TAG"
-            OUTPUT="${DRIVER}-driver-agent-${GOOS}-${GOARCH}"
-            if [ "$GOOS" = "windows" ]; then
-              OUTPUT="${OUTPUT}.exe"
+            DRIVER_VARIANTS=("")
+            if [ "$DRIVER" = "mongodb" ]; then
+              DRIVER_VARIANTS=("v1" "v2" "")
             fi
-            OUTPUT_PATH="${OUTDIR}/${OUTPUT}"
-            DUCKDB_LIB_DIR=""
-            if [ "$DRIVER" = "duckdb" ] && [ "$GOOS" = "windows" ] && [ "$GOARCH" = "amd64" ]; then
-              DUCKDB_LIB_DIR="$(prepare_duckdb_windows_library)"
-              BUILD_TAGS="${BUILD_TAGS} duckdb_use_lib"
-            fi
-            echo "🔧 构建 ${OUTPUT_PATH} (tags=${BUILD_TAGS})"
-            if [ "$DRIVER" = "duckdb" ]; then
-              if [ -n "$DUCKDB_LIB_DIR" ]; then
-                CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" CGO_LDFLAGS="-L${DUCKDB_LIB_DIR} -lduckdb" PATH="${DUCKDB_LIB_DIR}:$PATH" go build \
-                  -tags "${BUILD_TAGS}" \
-                  -trimpath \
-                  -ldflags "-s -w" \
-                  -o "${OUTPUT_PATH}" \
-                  ./cmd/optional-driver-agent
-                cp "$DUCKDB_LIB_DIR/duckdb.dll" "$OUTDIR/duckdb.dll"
-                bash ./tools/compress-driver-artifact.sh "$OUTDIR/duckdb.dll" "$TARGET_PLATFORM" "${{ matrix.os_name }}/duckdb.dll"
+            for DRIVER_VARIANT in "${DRIVER_VARIANTS[@]}"; do
+              TAG="gonavi_${BUILD_DRIVER}_driver"
+              BUILD_TAGS="$TAG"
+              OUTPUT_STEM="${DRIVER}-driver-agent"
+              if [ "$DRIVER" = "mongodb" ]; then
+                if [ "$DRIVER_VARIANT" = "v1" ]; then
+                  BUILD_TAGS="gonavi_mongodb_driver_v1"
+                  OUTPUT_STEM="mongodb-driver-agent-v1"
+                elif [ "$DRIVER_VARIANT" = "v2" ]; then
+                  BUILD_TAGS="gonavi_mongodb_driver"
+                  OUTPUT_STEM="mongodb-driver-agent-v2"
+                else
+                  BUILD_TAGS="gonavi_mongodb_driver"
+                fi
+              fi
+              OUTPUT="${OUTPUT_STEM}-${GOOS}-${GOARCH}"
+              if [ "$GOOS" = "windows" ]; then
+                OUTPUT="${OUTPUT}.exe"
+              fi
+              OUTPUT_PATH="${OUTDIR}/${OUTPUT}"
+              DUCKDB_LIB_DIR=""
+              if [ "$DRIVER" = "duckdb" ] && [ "$GOOS" = "windows" ] && [ "$GOARCH" = "amd64" ]; then
+                DUCKDB_LIB_DIR="$(prepare_duckdb_windows_library)"
+                BUILD_TAGS="${BUILD_TAGS} duckdb_use_lib"
+              fi
+              echo "🔧 构建 ${OUTPUT_PATH} (tags=${BUILD_TAGS})"
+              if [ "$DRIVER" = "duckdb" ]; then
+                if [ -n "$DUCKDB_LIB_DIR" ]; then
+                  DUCKDB_LIB_DIR_GCC="$(cygpath -m "$DUCKDB_LIB_DIR")"
+                  DUCKDB_LIB_DIR_PATH="$(cygpath -u "$DUCKDB_LIB_DIR")"
+                  # cgo 会把每个 CGO_LDFLAGS 片段转成 //go:cgo_ldflag，-L 参数不能再额外包引号。
+                  DUCKDB_WINDOWS_CGO_LDFLAGS="-L${DUCKDB_LIB_DIR_GCC} -lduckdb -lstdc++ -lm -lws2_32 -lwsock32 -lrstrtmgr"
+                  CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" CGO_LDFLAGS="${DUCKDB_WINDOWS_CGO_LDFLAGS}" PATH="${DUCKDB_LIB_DIR_PATH}:$PATH" go build \
+                    -tags "${BUILD_TAGS}" \
+                    -trimpath \
+                    -ldflags "-s -w" \
+                    -o "${OUTPUT_PATH}" \
+                    ./cmd/optional-driver-agent
+                  cp "$DUCKDB_LIB_DIR/duckdb.dll" "$OUTDIR/duckdb.dll"
+                  bash ./tools/compress-driver-artifact.sh "$OUTDIR/duckdb.dll" "$TARGET_PLATFORM" "${{ matrix.os_name }}/duckdb.dll"
+                else
+                  CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" go build \
+                    -tags "${BUILD_TAGS}" \
+                    -trimpath \
+                    -ldflags "-s -w" \
+                    -o "${OUTPUT_PATH}" \
+                    ./cmd/optional-driver-agent
+                fi
               else
-                CGO_ENABLED=1 GOOS="$GOOS" GOARCH="$GOARCH" go build \
+                CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
                   -tags "${BUILD_TAGS}" \
                   -trimpath \
                   -ldflags "-s -w" \
                   -o "${OUTPUT_PATH}" \
                   ./cmd/optional-driver-agent
               fi
-            else
-              CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
-                -tags "${BUILD_TAGS}" \
-                -trimpath \
-                -ldflags "-s -w" \
-                -o "${OUTPUT_PATH}" \
-                ./cmd/optional-driver-agent
-            fi
-            bash ./tools/compress-driver-artifact.sh "${OUTPUT_PATH}" "$TARGET_PLATFORM" "${{ matrix.os_name }}/${OUTPUT}"
+              bash ./tools/compress-driver-artifact.sh "${OUTPUT_PATH}" "$TARGET_PLATFORM" "${{ matrix.os_name }}/${OUTPUT}"
+              if [ "$DRIVER" = "duckdb" ] && [ -n "$DUCKDB_LIB_DIR" ]; then
+                DUCKDB_ZIP_PATH="${OUTDIR}/duckdb-driver.zip"
+                export DUCKDB_ZIP_PATH
+                export DUCKDB_AGENT_PATH="${OUTPUT_PATH}"
+                export DUCKDB_DLL_PATH="${OUTDIR}/duckdb.dll"
+              python3 - <<'PY'
+          import os
+          import zipfile
+
+          zip_path = os.environ["DUCKDB_ZIP_PATH"]
+          entries = [
+              ("Windows/duckdb-driver-agent-windows-amd64.exe", os.environ["DUCKDB_AGENT_PATH"]),
+              ("Windows/duckdb.dll", os.environ["DUCKDB_DLL_PATH"]),
+          ]
+
+          with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+              for arcname, src in entries:
+                  if not os.path.isfile(src):
+                      raise FileNotFoundError(src)
+                  zf.write(src, arcname)
+          PY
+                echo "📦 已生成 DuckDB Windows 专属驱动包: ${DUCKDB_ZIP_PATH}"
+              fi
+            done
           done
+
+          bash ./tools/verify-driver-agent-revisions.sh \
+            --assets-dir drivers \
+            --platform "$TARGET_PLATFORM" \
+            --drivers "$CHANGED_DRIVER_AGENTS"
 
       # macOS Packaging
       - name: Package macOS DMG
@@ -702,6 +965,7 @@ jobs:
               REQUIRED_FILES+=("drivers/Windows/${driver}-driver-agent-windows-arm64.exe")
             else
               REQUIRED_FILES+=("drivers/Windows/duckdb.dll")
+              REQUIRED_FILES+=("drivers/Windows/duckdb-driver.zip")
             fi
 
             for file in "${REQUIRED_FILES[@]}"; do
@@ -738,53 +1002,13 @@ jobs:
           fi
 
           echo "📦 打包驱动总包：GoNavi-DriverAgents.zip"
-          python3 - <<'PY'
-          import json
-          import os
-          import shutil
-          import zipfile
-          from pathlib import Path
+          python3 ../tools/package-driver-release-assets.py \
+            drivers \
+            ../driver-release-assets
 
-          out_name = "GoNavi-DriverAgents.zip"
-          index_name = "GoNavi-DriverAgents-Index.json"
-          base = Path("drivers")
-          driver_release_dir = Path("../driver-release-assets")
-          if driver_release_dir.exists():
-              shutil.rmtree(driver_release_dir)
-          driver_release_dir.mkdir(parents=True, exist_ok=True)
-          out_path = driver_release_dir / out_name
-          index_path = driver_release_dir / index_name
-          if out_path.exists():
-              out_path.unlink()
-          if index_path.exists():
-              index_path.unlink()
-
-          size_index = {}
-          standalone_assets = []
-          with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-              for p in sorted(base.rglob("*")):
-                  if not p.is_file():
-                      continue
-                  arcname = p.relative_to(base).as_posix()
-                  if p.name in size_index:
-                      raise RuntimeError(f"driver asset name conflict: {p.name}")
-                  zf.write(p, arcname)
-                  size_index[p.name] = p.stat().st_size
-                  standalone_path = driver_release_dir / p.name
-                  if standalone_path.exists():
-                      raise RuntimeError(f"release asset already exists: {standalone_path}")
-                  shutil.copy2(p, standalone_path)
-                  standalone_assets.append(standalone_path.name)
-
-          index_path.write_text(
-              json.dumps({"assets": size_index}, ensure_ascii=False, indent=2),
-              encoding="utf-8",
-          )
-
-          print(f"created {out_name} size={out_path.stat().st_size} bytes")
-          print(f"created {index_name} entries={len(size_index)}")
-          print(f"published standalone driver assets={len(standalone_assets)}")
-          PY
+          python3 ../tools/generate-driver-release-manifest.py \
+            --assets-dir drivers \
+            --output ../driver-release-assets/GoNavi-DriverAgents-Manifest.json
 
           # GoNavi 主仓库只保留主程序包；驱动资产发布到独立仓库。
           rm -rf drivers
@@ -825,18 +1049,28 @@ jobs:
           sha256sum "${FILES[@]}" > SHA256SUMS
 
       - name: Create Driver Agents Release
-        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/') && steps.driver_assets.outputs.has_driver_assets == 'true'
-        with:
-          repository: Syngnat/GoNavi-DriverAgents
-          tag_name: ${{ github.ref_name }}
-          name: "GoNavi Driver Agents ${{ github.ref_name }}"
-          files: driver-release-assets/*
-          fail_on_unmatched_files: true
-          make_latest: true
-          body: |
+        env:
+          GH_TOKEN: ${{ secrets.DRIVER_RELEASE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t DRIVER_RELEASE_ASSETS < <(find driver-release-assets -maxdepth 1 -type f | sort)
+          if [ ${#DRIVER_RELEASE_ASSETS[@]} -eq 0 ]; then
+            echo "未找到 driver release assets"
+            exit 1
+          fi
+
+          NOTES_FILE="$RUNNER_TEMP/driver-release-notes.md"
+          cat > "$NOTES_FILE" <<'EOF'
             GoNavi driver-agent assets for `${{ github.ref_name }}`.
-          token: ${{ secrets.DRIVER_RELEASE_TOKEN }}
+          EOF
+
+          gh release create "${{ github.ref_name }}" "${DRIVER_RELEASE_ASSETS[@]}" \
+            --repo Syngnat/GoNavi-DriverAgents \
+            --title "GoNavi Driver Agents ${{ github.ref_name }}" \
+            --notes-file "$NOTES_FILE" \
+            --latest
 
       - name: Checkout code for changelog
         uses: actions/checkout@v5

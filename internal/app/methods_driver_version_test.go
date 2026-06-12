@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"GoNavi-Wails/internal/db"
 )
 
 func TestResolveVersionedDriverOptionUsesPublishedMongoV1Release(t *testing.T) {
@@ -39,6 +41,20 @@ func TestResolveVersionedDriverOptionUsesPublishedMongoV1Release(t *testing.T) {
 	wantURL := fmt.Sprintf("https://github.com/%s/releases/download/v%s/%s", driverReleaseRepo, version, assetName)
 	if gotURL != wantURL {
 		t.Fatalf("expected published release URL %q, got %q", wantURL, gotURL)
+	}
+}
+
+func TestMongoDBDefaultDriverVersionUsesLegacyCompatibleLine(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+
+	if definition.PinnedVersion != "1.17.9" {
+		t.Fatalf("expected MongoDB default driver version 1.17.9, got %q", definition.PinnedVersion)
+	}
+	if got := resolveDriverInstallVersion("", definition.DefaultDownloadURL, definition); got != "1.17.9" {
+		t.Fatalf("expected builtin MongoDB install to resolve version 1.17.9, got %q", got)
 	}
 }
 
@@ -90,11 +106,40 @@ func TestResolveOptionalDriverBundleDownloadURLsUsesDriverReleaseRepo(t *testing
 	urls := resolveOptionalDriverBundleDownloadURLs()
 	wantTagged := driverReleaseDownloadURL("v0.7.4", optionalDriverBundleAssetName)
 	wantLatest := driverReleaseLatestDownloadURL(optionalDriverBundleAssetName)
-	if len(urls) != 2 {
-		t.Fatalf("expected tagged and latest bundle URLs, got %v", urls)
+	if len(urls) < 2 {
+		t.Fatalf("expected at least tagged and latest bundle URLs, got %v", urls)
 	}
-	if urls[0] != wantTagged || urls[1] != wantLatest {
-		t.Fatalf("unexpected driver bundle URLs: got %v want [%q %q]", urls, wantTagged, wantLatest)
+	foundTagged := false
+	foundLatest := false
+	for _, candidate := range urls {
+		if candidate == wantTagged {
+			foundTagged = true
+		}
+		if candidate == wantLatest {
+			foundLatest = true
+		}
+	}
+	if !foundTagged || !foundLatest {
+		t.Fatalf("expected bundle URLs to include tagged=%q and latest=%q, got %v", wantTagged, wantLatest, urls)
+	}
+}
+
+func TestDriverReleaseAssetAPIURLUsesReleaseAssetEndpoint(t *testing.T) {
+	asset := githubAsset{
+		Name:               "kingbase-driver-agent-darwin-arm64",
+		BrowserDownloadURL: "https://github.com/Syngnat/GoNavi-DriverAgents/releases/download/dev-latest/kingbase-driver-agent-darwin-arm64",
+		URL:                "https://api.github.com/repos/Syngnat/GoNavi-DriverAgents/releases/assets/123456",
+		Size:               18 << 20,
+	}
+	if got := driverReleaseAssetAPIURL(asset); got != "https://api.github.com/repos/Syngnat/GoNavi-DriverAgents/releases/assets/123456#kingbase-driver-agent-darwin-arm64" {
+		t.Fatalf("expected release asset API URL, got %q", got)
+	}
+}
+
+func TestOptionalDriverDownloadZipURLAcceptsAssetAPIFragment(t *testing.T) {
+	urlText := "https://api.github.com/repos/Syngnat/GoNavi-DriverAgents/releases/assets/123456#duckdb-driver.zip"
+	if !isOptionalDriverDownloadZipURL(urlText) {
+		t.Fatalf("expected asset API URL with zip fragment to be treated as zip download: %q", urlText)
 	}
 }
 
@@ -189,6 +234,90 @@ func TestResolveOptionalDriverAgentDownloadURLsDoesNotFallbackForHistoricalVersi
 	}
 }
 
+func TestResolveOptionalDriverAgentDownloadURLsUsesMongoV1AssetForCompatibleDefault(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+
+	originalVersion := AppVersion
+	AppVersion = "0.7.9"
+	t.Cleanup(func() {
+		AppVersion = originalVersion
+	})
+
+	assetName := mongoVersionedReleaseAssetName(1)
+	seedReleaseAssetSizeCache(t, "tag:v0.7.9", map[string]int64{
+		assetName: 24 << 20,
+	})
+	seedReleaseAssetSizeCache(t, "latest", map[string]int64{})
+
+	urls := resolveOptionalDriverAgentDownloadURLs(
+		definition,
+		"builtin://activate/mongodb",
+		"1.17.9",
+	)
+	want := driverReleaseDownloadURL("v0.7.9", assetName)
+	for _, got := range urls {
+		if got == want {
+			return
+		}
+	}
+	t.Fatalf("expected MongoDB v1 release asset %q in candidates, got %v", want, urls)
+}
+
+func TestResolveOptionalDriverAgentDownloadURLsDoesNotUseMongoV2BaseForCompatibleDefault(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mongodb")
+	if !ok {
+		t.Fatal("expected mongodb driver definition")
+	}
+
+	originalVersion := AppVersion
+	AppVersion = "0.7.9"
+	t.Cleanup(func() {
+		AppVersion = originalVersion
+	})
+
+	baseAssetName := optionalDriverReleaseAssetNameForType("mongodb", runtime.GOOS, runtime.GOARCH)
+	seedReleaseAssetSizeCache(t, "tag:v0.7.9", map[string]int64{
+		baseAssetName: 24 << 20,
+	})
+	seedReleaseAssetSizeCache(t, "latest", map[string]int64{
+		baseAssetName: 24 << 20,
+	})
+
+	urls := resolveOptionalDriverAgentDownloadURLs(
+		definition,
+		"builtin://activate/mongodb",
+		"1.17.9",
+	)
+	for _, got := range urls {
+		if strings.Contains(got, baseAssetName) {
+			t.Fatalf("expected MongoDB v1 install not to use ambiguous base asset %q, got %v", baseAssetName, urls)
+		}
+	}
+}
+
+func TestMongoDBVersionedAssetNamesDoNotFallbackToBaseForV1(t *testing.T) {
+	v1AssetName := mongoVersionedReleaseAssetName(1)
+	baseAssetName := optionalDriverReleaseAssetNameForType("mongodb", runtime.GOOS, runtime.GOARCH)
+
+	v1Names := optionalDriverReleaseAssetNamesForVersion("mongodb", "1.17.9")
+	if len(v1Names) != 1 || v1Names[0] != v1AssetName {
+		t.Fatalf("expected MongoDB v1 to use only %q, got %v", v1AssetName, v1Names)
+	}
+	for _, name := range v1Names {
+		if name == baseAssetName {
+			t.Fatalf("MongoDB v1 must not fallback to ambiguous base asset %q", baseAssetName)
+		}
+	}
+
+	v2Names := optionalDriverReleaseAssetNamesForVersion("mongodb", "2.5.0")
+	if len(v2Names) < 2 || v2Names[0] != mongoVersionedReleaseAssetName(2) || v2Names[1] != baseAssetName {
+		t.Fatalf("expected MongoDB v2 to prefer versioned asset then base compatibility asset, got %v", v2Names)
+	}
+}
+
 func TestResolveOptionalDriverAgentDownloadURLsSkipsBundleOnlyDamengAsset(t *testing.T) {
 	definition, ok := resolveDriverDefinition("dameng")
 	if !ok {
@@ -207,6 +336,45 @@ func TestResolveOptionalDriverAgentDownloadURLsSkipsBundleOnlyDamengAsset(t *tes
 	urls := resolveOptionalDriverAgentDownloadURLs(definition, "builtin://activate/dameng", version)
 	if len(urls) != 0 {
 		t.Fatalf("expected bundle-only dameng install to skip direct asset URLs, got %v", urls)
+	}
+}
+
+func TestShouldUseOptionalDriverBundleFallbackSkipsWhenDirectAssetExists(t *testing.T) {
+	if shouldUseOptionalDriverBundleFallback("sqlserver", false, 1) {
+		t.Fatal("expected published single-file driver asset to avoid 497MB bundle fallback")
+	}
+}
+
+func TestShouldUseOptionalDriverBundleFallbackKeepsBundleWhenDirectAssetMissing(t *testing.T) {
+	if !shouldUseOptionalDriverBundleFallback("dameng", false, 0) {
+		t.Fatal("expected missing single-file driver asset to keep bundle fallback")
+	}
+	if shouldUseOptionalDriverBundleFallback("dameng", true, 0) {
+		t.Fatal("expected explicit version artifact installs to skip bundle fallback")
+	}
+}
+
+func TestFormatOptionalDriverAttemptErrorRemovesDuplicatedSourcePrefix(t *testing.T) {
+	source := "https://github.com/Syngnat/GoNavi-DriverAgents/releases/download/dev-latest/kingbase-driver-agent-darwin-arm64"
+	err := fmt.Errorf("%s: kingbase 驱动代理 revision 不匹配（已安装：src-old，当前需要：src-new），请安装当前版本对应的 driver-agent", source)
+
+	got := formatOptionalDriverAttemptError(source, err)
+	if strings.Count(got, source) != 1 {
+		t.Fatalf("expected source to appear once, got %q", got)
+	}
+	if !strings.Contains(got, "kingbase 驱动代理 revision 不匹配") {
+		t.Fatalf("expected revision mismatch detail, got %q", got)
+	}
+}
+
+func TestAppendOptionalDriverAttemptErrorDeduplicatesIdenticalEntries(t *testing.T) {
+	source := "https://github.com/Syngnat/GoNavi-DriverAgents/releases/latest/download/GoNavi-DriverAgents.zip#MacOS/kingbase-driver-agent-darwin-arm64"
+	err := fmt.Errorf("kingbase 驱动代理 revision 不匹配（已安装：src-old，当前需要：src-new），请安装当前版本对应的 driver-agent")
+
+	entries := appendOptionalDriverAttemptError(nil, source, err)
+	entries = appendOptionalDriverAttemptError(entries, source, err)
+	if len(entries) != 1 {
+		t.Fatalf("expected duplicate driver attempt error to be collapsed, got %d entries: %v", len(entries), entries)
 	}
 }
 
@@ -339,9 +507,38 @@ func TestDuckDBWindowsBuildUsesDynamicLibraryTag(t *testing.T) {
 	if !shouldSkipReusableAgentCandidate("duckdb", "") {
 		t.Fatal("expected DuckDB Windows install to skip reusable static agent candidates")
 	}
-	urls := resolveOptionalDriverAgentDownloadURLs(driverDefinition{Type: "duckdb"}, "https://example.com/duckdb-driver-agent-windows-amd64.exe", "")
-	if len(urls) != 0 {
-		t.Fatalf("expected DuckDB Windows install to skip single-file direct downloads, got %v", urls)
+	seedReleaseAssetCacheEntry(t, "latest", map[string]int64{
+		duckDBWindowsDriverZipAssetName: 19 << 20,
+	}, map[string]int64{
+		duckDBWindowsDriverZipAssetName: 19 << 20,
+	})
+	legacyDirectURL := "https://example.com/duckdb-driver-agent-windows-amd64.exe"
+	urls := resolveOptionalDriverAgentDownloadURLs(driverDefinition{Type: "duckdb"}, legacyDirectURL, "")
+	if len(urls) < 2 {
+		t.Fatalf("expected DuckDB Windows install to keep dedicated zip ahead of legacy direct candidate, got %v", urls)
+	}
+	if urls[0] != driverReleaseLatestDownloadURL(duckDBWindowsDriverZipAssetName) {
+		t.Fatalf("expected DuckDB Windows dedicated zip candidate first, got %v", urls)
+	}
+	if urls[1] != legacyDirectURL {
+		t.Fatalf("expected DuckDB Windows to keep legacy direct candidate after dedicated zip, got %v", urls)
+	}
+}
+
+func TestDuckDBWindowsDynamicLibraryCGOLDFlagsIncludeSupportLibraries(t *testing.T) {
+	flags := duckDBWindowsDynamicLibraryCGOLDFlags(`C:\tmp\duckdb lib`)
+	for _, expected := range []string{
+		`-LC:/tmp/duckdb lib`,
+		"-lduckdb",
+		"-lstdc++",
+		"-lm",
+		"-lws2_32",
+		"-lwsock32",
+		"-lrstrtmgr",
+	} {
+		if !strings.Contains(flags, expected) {
+			t.Fatalf("expected flags %q to contain %q", flags, expected)
+		}
 	}
 }
 
@@ -393,6 +590,90 @@ func TestInstallOptionalDriverAgentFromLocalZipExtractsDuckDBDLL(t *testing.T) {
 	}
 	if string(dllBytes) != "dll" {
 		t.Fatalf("unexpected duckdb.dll content: %q", string(dllBytes))
+	}
+}
+
+func TestDownloadOptionalDriverAgentBinaryInstallsDuckDBDedicatedZip(t *testing.T) {
+	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
+		t.Skip("DuckDB dedicated zip flow only applies on windows/amd64")
+	}
+
+	originalValidateFunc := validateOptionalDriverAgentExecutableFunc
+	validateOptionalDriverAgentExecutableFunc = func(driverType string, executablePath string) error {
+		return nil
+	}
+	t.Cleanup(func() {
+		validateOptionalDriverAgentExecutableFunc = originalValidateFunc
+	})
+
+	tmpDir := t.TempDir()
+	zipPath := filepath.Join(tmpDir, duckDBWindowsDriverZipAssetName)
+	zipFile, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatalf("create zip failed: %v", err)
+	}
+	zw := zip.NewWriter(zipFile)
+	for name, content := range map[string]string{
+		"Windows/duckdb-driver-agent-windows-amd64.exe": "agent",
+		"Windows/duckdb.dll":                            "dll",
+	} {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s failed: %v", name, err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatalf("write zip entry %s failed: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip writer failed: %v", err)
+	}
+	if err := zipFile.Close(); err != nil {
+		t.Fatalf("close zip file failed: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, zipPath)
+	}))
+	defer server.Close()
+	proxySnapshot := currentGlobalProxyConfig()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy)
+	})
+
+	target := filepath.Join(tmpDir, "install", "duckdb-driver-agent.exe")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("create install dir failed: %v", err)
+	}
+
+	hash, err := downloadOptionalDriverAgentBinary(nil, driverDefinition{Type: "duckdb", Name: "DuckDB"}, server.URL+"/"+duckDBWindowsDriverZipAssetName+"?source=release", target)
+	if err != nil {
+		t.Fatalf("download dedicated zip failed: %v", err)
+	}
+	if strings.TrimSpace(hash) == "" {
+		t.Fatal("expected hash for installed duckdb agent")
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("expected duckdb agent to be installed: %v", err)
+	}
+	dllBytes, err := os.ReadFile(filepath.Join(filepath.Dir(target), "duckdb.dll"))
+	if err != nil {
+		t.Fatalf("expected duckdb.dll to be installed: %v", err)
+	}
+	if string(dllBytes) != "dll" {
+		t.Fatalf("unexpected duckdb.dll content: %q", string(dllBytes))
+	}
+}
+
+func TestOptionalDriverDownloadZipURLAcceptsQueryString(t *testing.T) {
+	if !isOptionalDriverDownloadZipURL("https://example.com/duckdb-driver.zip?token=abc") {
+		t.Fatal("expected signed zip URL to be treated as zip download")
+	}
+	if isOptionalDriverDownloadZipURL("https://example.com/duckdb-driver-agent.exe?token=abc") {
+		t.Fatal("expected exe URL with query to remain non-zip download")
 	}
 }
 
@@ -479,8 +760,8 @@ func TestResolveRecentDriverVersionMetasFallsBackToHistoricalTDengineMatrix(t *t
 }
 
 func TestShouldForceSourceBuildForResolvedDownload(t *testing.T) {
-	if !shouldForceSourceBuildForResolvedDownload("mongodb", "1.17.4", "builtin://activate/mongodb?channel=history&version=1.17.4") {
-		t.Fatal("expected mongodb v1 builtin install to keep source build mode")
+	if shouldForceSourceBuildForResolvedDownload("mongodb", "1.17.4", "builtin://activate/mongodb?channel=history&version=1.17.4") {
+		t.Fatal("expected mongodb v1 builtin install to try published assets before source build")
 	}
 
 	explicitURL := driverReleaseDownloadURL("v1.17.4", mongoVersionedReleaseAssetName(1))
@@ -500,11 +781,11 @@ func TestShouldPreferSourceBuildBeforeDownloadDoesNotPreferKingbase(t *testing.T
 }
 
 func TestShouldPreferSourceBuildBeforeDownloadForDevelopmentBuild(t *testing.T) {
-	if !shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "mariadb", "1.9.3") {
-		t.Fatal("expected development build to prefer local driver-agent source build")
+	if shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "mariadb", "1.9.3") {
+		t.Fatal("expected development release build to prefer published MariaDB driver-agent before source fallback")
 	}
-	if !shouldPreferSourceBuildBeforeDownloadForBuildType("development", "clickhouse", "2.43.1") {
-		t.Fatal("expected development build alias to prefer local driver-agent source build")
+	if shouldPreferSourceBuildBeforeDownloadForBuildType("development", "clickhouse", "2.43.1") && !shouldUseDuckDBWindowsDynamicLibrary("clickhouse") {
+		t.Fatal("expected development build alias not to prefer source build for ClickHouse")
 	}
 	if shouldPreferSourceBuildBeforeDownloadForBuildType("production", "mariadb", "1.9.3") {
 		t.Fatal("expected production build not to prefer source build for MariaDB")
@@ -515,17 +796,33 @@ func TestShouldPreferSourceBuildBeforeDownloadForDevelopmentBuild(t *testing.T) 
 }
 
 func TestShouldRequireSourceBuildBeforeDownloadForDevelopmentBuild(t *testing.T) {
-	if !shouldRequireSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
-		t.Fatal("expected development build to require local DuckDB driver-agent source build")
+	if shouldRequireSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
+		t.Fatal("expected development build to allow DuckDB release bundle fallback after local build failure")
 	}
-	if !shouldRequireSourceBuildBeforeDownloadForBuildType("development", "mariadb", "1.9.3") {
-		t.Fatal("expected development build alias to require local driver-agent source build")
+	if shouldUseDuckDBWindowsDynamicLibrary("duckdb") {
+		if !shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
+			t.Fatal("expected DuckDB Windows dynamic-library install to prefer local source build before bundle fallback")
+		}
+	} else if shouldPreferSourceBuildBeforeDownloadForBuildType("dev", "duckdb", "2.5.6") {
+		t.Fatal("expected development build not to prefer DuckDB source build on non-Windows dynamic-library platforms")
+	}
+	if shouldRequireSourceBuildBeforeDownloadForBuildType("development", "mariadb", "1.9.3") {
+		t.Fatal("expected development build alias to allow published MariaDB driver-agent fallback")
 	}
 	if shouldRequireSourceBuildBeforeDownloadForBuildType("production", "duckdb", "2.5.6") {
 		t.Fatal("expected production build to allow DuckDB release bundle fallback")
 	}
 	if shouldRequireSourceBuildBeforeDownloadForBuildType("dev", "mysql", "") {
 		t.Fatal("expected built-in drivers not to require optional driver-agent source build")
+	}
+}
+
+func TestOptionalDriverInstallTimeoutsStayBounded(t *testing.T) {
+	if optionalDriverBundleDownloadTimeout > 15*time.Minute {
+		t.Fatalf("driver bundle download timeout should stay bounded, got %s", optionalDriverBundleDownloadTimeout)
+	}
+	if optionalDriverSourceBuildTimeout > 8*time.Minute {
+		t.Fatalf("driver source build timeout should stay bounded, got %s", optionalDriverSourceBuildTimeout)
 	}
 }
 
@@ -721,6 +1018,66 @@ func TestDownloadOptionalDriverAgentFromBundleSharesConcurrentDownload(t *testin
 	}
 	if got := atomic.LoadInt32(&requestCount); got != 1 {
 		t.Fatalf("expected one shared bundle download, got %d requests", got)
+	}
+}
+
+func TestInstallOptionalDriverAgentPackageAcceptsStaleDownloadRevision(t *testing.T) {
+	originalProbe := optionalDriverAgentMetadataProbe
+	t.Cleanup(func() {
+		optionalDriverAgentMetadataProbe = originalProbe
+	})
+
+	tmpDir := t.TempDir()
+	staleAgent := filepath.Join(tmpDir, "stale-driver-agent")
+	if runtime.GOOS == "windows" {
+		staleAgent += ".exe"
+	}
+	writeSelfExecutable(t, staleAgent)
+
+	staleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, staleAgent)
+	}))
+	defer staleServer.Close()
+	proxySnapshot := currentGlobalProxyConfig()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy)
+	})
+
+	optionalDriverAgentMetadataProbe = func(driverType string, executablePath string) (db.OptionalDriverAgentMetadata, error) {
+		return db.OptionalDriverAgentMetadata{
+			DriverType:    driverType,
+			AgentRevision: "src-stale-agent",
+		}, nil
+	}
+
+	meta, err := installOptionalDriverAgentPackage(
+		nil,
+		driverDefinition{Type: "sqlserver", Name: "SQL Server"},
+		"1.9.6",
+		filepath.Join(tmpDir, "drivers"),
+		staleServer.URL,
+	)
+	if err != nil {
+		t.Fatalf("expected stale direct download to be installed with an update hint, got %v", err)
+	}
+	if meta.DownloadURL != staleServer.URL {
+		t.Fatalf("expected direct download source to be preserved, got %q", meta.DownloadURL)
+	}
+	if meta.AgentRevision != "src-stale-agent" {
+		t.Fatalf("expected stale agent revision to be recorded, got %q", meta.AgentRevision)
+	}
+	if _, err := os.Stat(meta.ExecutablePath); err != nil {
+		t.Fatalf("expected runtime executable to stay installed, got %v", err)
+	}
+	needsUpdate, reason, expectedRevision := optionalDriverAgentRevisionStatus("sqlserver", meta, true)
+	if !needsUpdate {
+		t.Fatalf("expected stale installed revision to be surfaced as needsUpdate; expected=%q", expectedRevision)
+	}
+	if !strings.Contains(reason, "强烈建议重装") {
+		t.Fatalf("expected advisory reinstall reason, got %q", reason)
 	}
 }
 

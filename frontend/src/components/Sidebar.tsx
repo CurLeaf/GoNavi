@@ -48,12 +48,11 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
 import {
     buildSidebarRootConnectionToken,
     buildSidebarRootTagToken,
-    buildSidebarTablePinKey,
     resolveSidebarRootOrderTokens,
     useStore,
 } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-		import { SavedConnection, SavedQuery, ConnectionTag, ExternalSQLDirectory, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
+		import { SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
 import { getDbIcon } from './DatabaseIcons';
 		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, CreateSQLFile, CreateSQLDirectory, DeleteSQLFile, DeleteSQLDirectory, RenameSQLFile, RenameSQLDirectory, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
@@ -62,9 +61,17 @@ import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDa
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
-import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
-import { normalizeSidebarViewName, resolveSidebarRuntimeDatabase } from '../utils/sidebarMetadata';
+import {
+  buildMySQLCompatibleViewMetadataSqls,
+  isSidebarViewTableType,
+  normalizeSidebarViewMetadataEntry,
+  resolveSidebarMetadataDialect,
+  resolveSidebarRuntimeDatabase,
+  type SidebarViewMetadataEntry,
+} from '../utils/sidebarMetadata';
+import { splitQualifiedNameLast } from '../utils/qualifiedName';
 import { buildStarRocksMaterializedViewPreviewSql } from './tableDesignerSchemaSql';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { resolveConnectionHostSummary, resolveConnectionHostTokens } from '../utils/tabDisplay';
@@ -82,7 +89,29 @@ import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
+import { SIDEBAR_SQL_EDITOR_DRAG_MIME, encodeSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
+import type { DriverStatusSnapshot } from '../utils/connectionDriverType';
 import JVMModeBadge from './jvm/JVMModeBadge';
+import {
+  SEARCH_SCOPE_LABEL_MAP,
+  SEARCH_SCOPE_OPTIONS,
+  SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT,
+  SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH,
+  buildConnectionReloadSignature,
+  isConnectionTreeKey,
+  isExternalSQLDirectoryModalMode,
+  isPostgresSchemaDialect,
+  isV2SidebarObjectNode,
+  normalizeDriverType,
+  normalizeMySQLViewDDLForEditing,
+  resolveSavedConnectionDriverType,
+  resolveSidebarContextMenuPosition,
+  resolveSidebarObjectDragText,
+  type ExternalSQLFileModalMode,
+  type SearchScope,
+} from './sidebarCoreUtils';
+export { resolveSidebarContextMenuPosition } from './sidebarCoreUtils';
+export type { ExternalSQLFileModalMode, SearchScope } from './sidebarCoreUtils';
 import {
     V2DatabaseContextMenuView,
     V2ConnectionGroupContextMenuView,
@@ -96,6 +125,77 @@ import {
     type V2TableContextMenuStats,
     type V2TableGroupContextMenuActionKey,
 } from './V2TableContextMenu';
+import {
+  V2_EXPLORER_FILTER_OPTIONS,
+  V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE,
+  buildSidebarTableChildrenForUi,
+  buildV2RailConnectionGroups,
+  buildV2SidebarTableSectionedChildren,
+  estimateV2TreeHorizontalScrollWidth,
+  filterV2CommandSearchTreeItems,
+  filterV2ExplorerTreeByKind,
+  formatSidebarRowCount,
+  getV2RailConnectionGroupBadgeText,
+  hasSidebarLazyChildren,
+  isSidebarTablePinned,
+  normalizeSidebarTreeRelativeDropPosition,
+  parseV2CommandSearchQuery,
+  resolveSidebarConnectionIdFromKey,
+  resolveSidebarDropInsertBefore,
+  resolveSidebarDropNodeFromDomEvent,
+  resolveSidebarDropTargetMetricsFromDomEvent,
+  resolveSidebarNodeConnectionId,
+  resolveSidebarTableNameForCopy,
+  resolveSidebarTagDropInsertBefore,
+  resolveV2ActiveConnectionId,
+  resolveV2CommandSearchPersistentFilter,
+  shouldClearSidebarActiveContextOnEmptySelect,
+  shouldCloseV2CommandSearchOnGlobalKey,
+  shouldLoadSidebarNodeOnExpand,
+  shouldRunV2CommandSearchEnter,
+  shouldSkipSidebarLoadOnExpandWhileDragging,
+  shouldSkipSidebarSelectWhileDragging,
+  sortSidebarTableEntries,
+  type V2CommandSearchItem,
+  type V2ExplorerFilter,
+  type V2RailConnectionGroup,
+} from './sidebarV2Utils';
+
+export {
+  buildSidebarTableChildrenForUi,
+  buildV2RailConnectionGroups,
+  buildV2SidebarTableSectionedChildren,
+  estimateV2TreeHorizontalScrollWidth,
+  filterV2CommandSearchTreeItems,
+  filterV2ExplorerTreeByKind,
+  formatSidebarRowCount,
+  getV2RailConnectionGroupBadgeText,
+  hasSidebarLazyChildren,
+  isSidebarTablePinned,
+  normalizeSidebarTreeRelativeDropPosition,
+  parseV2CommandSearchQuery,
+  resolveSidebarConnectionIdFromKey,
+  resolveSidebarDropInsertBefore,
+  resolveSidebarDropNodeFromDomEvent,
+  resolveSidebarDropTargetMetricsFromDomEvent,
+  resolveSidebarNodeConnectionId,
+  resolveSidebarTableNameForCopy,
+  resolveSidebarTagDropInsertBefore,
+  resolveV2ActiveConnectionId,
+  resolveV2CommandSearchPersistentFilter,
+  shouldClearSidebarActiveContextOnEmptySelect,
+  shouldCloseV2CommandSearchOnGlobalKey,
+  shouldLoadSidebarNodeOnExpand,
+  shouldRunV2CommandSearchEnter,
+  shouldSkipSidebarLoadOnExpandWhileDragging,
+  shouldSkipSidebarSelectWhileDragging,
+  sortSidebarTableEntries,
+};
+export type {
+  V2CommandSearchItem,
+  V2ExplorerFilter,
+  V2RailConnectionGroup,
+} from './sidebarV2Utils';
 
 const { Search } = Input;
 type SidebarContextMenuState = {
@@ -111,40 +211,9 @@ type SidebarContextMenuState = {
   maxHeight?: number;
 };
 
-const SIDEBAR_CONTEXT_MENU_SAFE_GAP = 8;
-const SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH = 264;
-const SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT = 420;
-type ExternalSQLFileModalMode = 'create' | 'rename' | 'create-directory' | 'rename-directory';
+const SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS = 50;
+const SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS = 160;
 
-const isExternalSQLDirectoryModalMode = (mode: ExternalSQLFileModalMode): boolean =>
-  mode === 'create-directory' || mode === 'rename-directory';
-
-export const resolveSidebarContextMenuPosition = (
-  x: number,
-  y: number,
-  options?: {
-    width?: number;
-    height?: number;
-    viewportWidth?: number;
-    viewportHeight?: number;
-    safeGap?: number;
-  },
-): { x: number; y: number; maxHeight: number } => {
-  const safeGap = options?.safeGap ?? SIDEBAR_CONTEXT_MENU_SAFE_GAP;
-  const viewportWidth = options?.viewportWidth ?? (typeof window === 'undefined' ? 1024 : window.innerWidth);
-  const viewportHeight = options?.viewportHeight ?? (typeof window === 'undefined' ? 768 : window.innerHeight);
-  const width = Math.max(0, options?.width ?? SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH);
-  const height = Math.max(0, options?.height ?? SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT);
-  const maxX = Math.max(safeGap, viewportWidth - width - safeGap);
-  const maxY = Math.max(safeGap, viewportHeight - height - safeGap);
-  const nextX = Math.max(safeGap, Math.min(x, maxX));
-  const nextY = Math.max(safeGap, Math.min(y, maxY));
-  return {
-    x: nextX,
-    y: nextY,
-    maxHeight: Math.max(120, viewportHeight - nextY - safeGap),
-  };
-};
 interface TreeNode {
   title: string;
   key: string;
@@ -156,353 +225,10 @@ interface TreeNode {
   type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'db-event' | 'routine' | 'object-group' | 'v2-table-section' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
 }
 
-const isV2SidebarObjectNode = (node: Pick<TreeNode, 'type'> | null | undefined): boolean => {
-  return node?.type === 'table'
-      || node?.type === 'view'
-      || node?.type === 'materialized-view'
-      || node?.type === 'db-trigger'
-      || node?.type === 'db-event'
-      || node?.type === 'routine';
-};
-
-export const hasSidebarLazyChildren = (children: unknown): boolean => {
-  return Array.isArray(children) && children.length > 0;
-};
-
-export const shouldLoadSidebarNodeOnExpand = (
-  node: Pick<TreeNode, 'type' | 'children' | 'isLeaf'> | null | undefined,
-): boolean => {
-  if (!node || node.isLeaf === true || hasSidebarLazyChildren(node.children)) return false;
-  return node.type === 'connection'
-      || node.type === 'database'
-      || node.type === 'external-sql-root'
-      || node.type === 'table'
-      || node.type === 'jvm-mode'
-      || node.type === 'jvm-resource';
-};
-
-export const resolveSidebarTableNameForCopy = (node: Pick<TreeNode, 'title' | 'dataRef'> | null | undefined): string => {
-  return String(node?.dataRef?.tableName || node?.title || '').trim();
-};
-
-type SidebarTableSortPreference = 'name' | 'frequency';
-
-type SidebarTableEntryForSort = {
-  tableName: string;
-  schemaName?: string;
-  displayName: string;
-  rowCount?: number;
-};
-
-export const isSidebarTablePinned = (
-  pinnedKeys: string[],
-  connectionId: string,
-  dbName: string,
-  tableName: string,
-  schemaName = '',
-): boolean => {
-  const key = buildSidebarTablePinKey(connectionId, dbName, tableName, schemaName);
-  return !!key && pinnedKeys.includes(key);
-};
-
-export const sortSidebarTableEntries = <T extends SidebarTableEntryForSort>(
-  entries: T[],
-  options: {
-    connectionId: string;
-    dbName: string;
-    sortBy: SidebarTableSortPreference;
-    tableAccessCount?: Record<string, number>;
-    pinnedSidebarTables?: string[];
-  },
-): T[] => {
-  const pinnedKeys = options.pinnedSidebarTables || [];
-  const accessCount = options.tableAccessCount || {};
-  const compareByName = (a: T, b: T) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase());
-  const compareWithinPinnedGroup = (a: T, b: T) => {
-    if (options.sortBy === 'frequency') {
-      const keyA = `${options.connectionId}-${options.dbName}-${a.tableName}`;
-      const keyB = `${options.connectionId}-${options.dbName}-${b.tableName}`;
-      const countA = accessCount[keyA] || 0;
-      const countB = accessCount[keyB] || 0;
-      if (countA !== countB) {
-        return countB - countA;
-      }
-    }
-    return compareByName(a, b);
-  };
-
-  return [...entries].sort((a, b) => {
-    const pinnedA = isSidebarTablePinned(pinnedKeys, options.connectionId, options.dbName, a.tableName, a.schemaName || '');
-    const pinnedB = isSidebarTablePinned(pinnedKeys, options.connectionId, options.dbName, b.tableName, b.schemaName || '');
-    if (pinnedA !== pinnedB) {
-      return pinnedA ? -1 : 1;
-    }
-    return compareWithinPinnedGroup(a, b);
-  });
-};
-
-export const buildV2SidebarTableSectionedChildren = (
-  parentKey: string,
-  tableNodes: TreeNode[],
-): TreeNode[] => {
-  const pinnedTables = tableNodes.filter((node) => node?.dataRef?.pinnedSidebarTable);
-  if (pinnedTables.length === 0) return tableNodes;
-
-  const regularTables = tableNodes.filter((node) => !node?.dataRef?.pinnedSidebarTable);
-  const buildSectionNode = (kind: 'pinned' | 'all', title: string): TreeNode => ({
-    title,
-    key: `${parentKey}-v2-${kind}-tables-section`,
-    type: 'v2-table-section',
-    isLeaf: true,
-    selectable: false,
-    dataRef: {
-      sectionKind: kind,
-    },
-  });
-
-  return [
-    buildSectionNode('pinned', '置顶'),
-    ...pinnedTables,
-    buildSectionNode('all', '全部'),
-    ...regularTables,
-  ];
-};
-
-export const buildSidebarTableChildrenForUi = (
-  parentKey: string,
-  tableNodes: TreeNode[],
-  isV2Ui: boolean,
-): TreeNode[] => {
-  if (!isV2Ui) return tableNodes;
-  return buildV2SidebarTableSectionedChildren(parentKey, tableNodes);
-};
-
-export const formatSidebarRowCount = (count: number): string => {
-  if (!Number.isFinite(count) || count < 0) return '';
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
-  return String(Math.round(count));
-};
-
 type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
 type BatchObjectType = 'table' | 'view';
 type BatchObjectFilterType = 'all' | BatchObjectType;
 type BatchSelectionScope = 'filtered' | 'all';
-type SearchScope = 'smart' | 'object' | 'database' | 'host' | 'tag';
-type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines' | 'events';
-
-export const V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID = '__gonavi-v2-ungrouped-connections__';
-
-export interface V2RailConnectionGroup {
-  id: string;
-  name: string;
-  connections: SavedConnection[];
-  isUngrouped?: boolean;
-  rootToken: string;
-}
-
-export const buildV2RailConnectionGroups = (
-  connections: SavedConnection[],
-  connectionTags: ConnectionTag[],
-  sidebarRootOrder: string[] = [],
-): V2RailConnectionGroup[] => {
-  const connectionById = new Map(connections.map((conn) => [conn.id, conn]));
-  const groupedConnectionIds = new Set<string>();
-  const tagGroups = new Map<string, V2RailConnectionGroup>();
-
-  connectionTags.forEach((tag) => {
-    const tagConnections: SavedConnection[] = [];
-    tag.connectionIds.forEach((connectionId) => {
-      const conn = connectionById.get(connectionId);
-      if (!conn || groupedConnectionIds.has(conn.id)) return;
-      groupedConnectionIds.add(conn.id);
-      tagConnections.push(conn);
-    });
-    if (tagConnections.length === 0) return;
-    tagGroups.set(tag.id, {
-      id: tag.id,
-      name: tag.name || '未命名分组',
-      connections: tagConnections,
-      rootToken: buildSidebarRootTagToken(tag.id),
-    });
-  });
-
-  const ungroupedConnectionMap = new Map(
-    connections
-      .filter((conn) => !groupedConnectionIds.has(conn.id))
-      .map((conn) => [conn.id, conn]),
-  );
-  const orderedRootTokens = resolveSidebarRootOrderTokens(
-    sidebarRootOrder,
-    connectionTags,
-    connections,
-  );
-  const groups: V2RailConnectionGroup[] = [];
-
-  orderedRootTokens.forEach((token) => {
-    if (token.startsWith('tag:')) {
-      const tagId = token.slice('tag:'.length);
-      const group = tagGroups.get(tagId);
-      if (!group) return;
-      groups.push(group);
-      tagGroups.delete(tagId);
-      return;
-    }
-    if (token.startsWith('connection:')) {
-      const connectionId = token.slice('connection:'.length);
-      const conn = ungroupedConnectionMap.get(connectionId);
-      if (!conn) return;
-      groups.push({
-        id: connectionId,
-        name: conn.name,
-        connections: [conn],
-        isUngrouped: true,
-        rootToken: buildSidebarRootConnectionToken(connectionId),
-      });
-      ungroupedConnectionMap.delete(connectionId);
-    }
-  });
-
-  tagGroups.forEach((group) => {
-    groups.push(group);
-  });
-  ungroupedConnectionMap.forEach((conn) => {
-    groups.push({
-      id: conn.id,
-      name: conn.name,
-      connections: [conn],
-      isUngrouped: true,
-      rootToken: buildSidebarRootConnectionToken(conn.id),
-    });
-  });
-
-  return groups;
-};
-
-export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = '组'): string => {
-  const trimmed = String(name ?? '').trim();
-  if (!trimmed) return fallback;
-  const cjkParts = trimmed.match(/[\u4e00-\u9fa5]/g);
-  if (cjkParts && cjkParts.length > 0) {
-    return cjkParts.slice(0, 1).join('');
-  }
-  const latinTokens = trimmed.match(/[a-z0-9]+/gi) || [];
-  if (latinTokens.length >= 2) {
-    const firstToken = latinTokens[0] || '';
-    const secondToken = latinTokens[1] || '';
-    return `${firstToken[0] || ''}${secondToken[0] || ''}`.toUpperCase();
-  }
-  if (latinTokens.length === 1) {
-    const token = latinTokens[0] || '';
-    const alphaPrefix = token.match(/^[a-z]+/i)?.[0] || '';
-    if (alphaPrefix) {
-      return alphaPrefix.slice(0, 2).toUpperCase();
-    }
-    const trailingDigits = token.match(/(\d{2,})$/)?.[1];
-    if (trailingDigits) {
-      return trailingDigits.slice(-2).toUpperCase();
-    }
-    return token.slice(0, 2).toUpperCase();
-  }
-  return trimmed.slice(0, 2);
-};
-
-const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: string }> = [
-  { key: 'all', label: '全部' },
-  { key: 'tables', label: '表' },
-  { key: 'views', label: '视图' },
-  { key: 'routines', label: '函数' },
-  { key: 'events', label: '事件' },
-];
-
-const V2_EXPLORER_FILTER_GROUP_KEYS: Record<Exclude<V2ExplorerFilter, 'all'>, string[]> = {
-  tables: ['tables'],
-  views: ['views', 'materializedViews'],
-  routines: ['routines'],
-  events: ['events'],
-};
-
-const V2_TREE_HORIZONTAL_SCROLL_MAX_WIDTH = 960;
-const V2_TREE_HORIZONTAL_SCROLL_BASE_WIDTH = 88;
-const V2_TREE_HORIZONTAL_SCROLL_INDENT_WIDTH = 24;
-const V2_TREE_HORIZONTAL_SCROLL_AVG_CHAR_WIDTH = 8;
-const V2_TREE_HORIZONTAL_SCROLL_VIEWPORT_BUFFER = 48;
-
-export const estimateV2TreeHorizontalScrollWidth = (
-  nodes: TreeNode[],
-  viewportWidth: number,
-): number | undefined => {
-  const safeViewportWidth = Math.max(0, Math.ceil(viewportWidth || 0));
-  let estimatedContentWidth = safeViewportWidth;
-
-  const visit = (items: TreeNode[], depth: number) => {
-    items.forEach((node) => {
-      const title = String(node?.title || '');
-      const metaText = node?.dataRef?.groupKey === 'tables' && Array.isArray(node.children)
-        ? String(node.children.length)
-        : '';
-      const nodeWidth = V2_TREE_HORIZONTAL_SCROLL_BASE_WIDTH
-        + (depth * V2_TREE_HORIZONTAL_SCROLL_INDENT_WIDTH)
-        + ((title.length + metaText.length) * V2_TREE_HORIZONTAL_SCROLL_AVG_CHAR_WIDTH);
-      estimatedContentWidth = Math.max(estimatedContentWidth, nodeWidth);
-      if (node.children?.length) {
-        visit(node.children, depth + 1);
-      }
-    });
-  };
-  visit(nodes, 0);
-
-  if (estimatedContentWidth <= safeViewportWidth + 8) {
-    return undefined;
-  }
-  const scrollWidth = Math.min(
-    V2_TREE_HORIZONTAL_SCROLL_MAX_WIDTH,
-    Math.max(safeViewportWidth + V2_TREE_HORIZONTAL_SCROLL_VIEWPORT_BUFFER, Math.ceil(estimatedContentWidth)),
-  );
-  return scrollWidth;
-};
-
-export const filterV2ExplorerTreeByKind = (
-  nodes: TreeNode[],
-  filter: V2ExplorerFilter,
-): TreeNode[] => {
-  if (filter === 'all') return nodes;
-  const allowedGroupKeys = new Set(V2_EXPLORER_FILTER_GROUP_KEYS[filter]);
-  const objectTypeMatches = (node: TreeNode): boolean => {
-    if (filter === 'tables') return node.type === 'table';
-    if (filter === 'views') return node.type === 'view' || node.type === 'materialized-view';
-    if (filter === 'routines') return node.type === 'routine';
-    if (filter === 'events') return node.type === 'db-event';
-    return false;
-  };
-
-  const visit = (node: TreeNode): TreeNode | null => {
-    if (node.type === 'external-sql-root') {
-      return node;
-    }
-    const groupKey = String(node?.dataRef?.groupKey || '');
-    if (node.type === 'object-group') {
-      if (allowedGroupKeys.has(groupKey)) {
-        return node;
-      }
-      if (groupKey === 'schema') {
-        const schemaChildren = (node.children || []).map(visit).filter(Boolean) as TreeNode[];
-        return schemaChildren.length > 0 ? { ...node, children: schemaChildren, isLeaf: false } : null;
-      }
-      return null;
-    }
-    if (objectTypeMatches(node)) {
-      return node;
-    }
-    if (node.type === 'database') {
-      const filteredChildren = (node.children || []).map(visit).filter(Boolean) as TreeNode[];
-      return filteredChildren.length > 0 ? { ...node, children: filteredChildren, isLeaf: false } : null;
-    }
-    return null;
-  };
-
-  return nodes.map(visit).filter(Boolean) as TreeNode[];
-};
 
 interface BatchObjectItem {
   title: string;
@@ -512,424 +238,7 @@ interface BatchObjectItem {
   dataRef: any;
 }
 
-export type V2CommandSearchItem =
-  | {
-      key: string;
-      kind: 'node';
-      title: string;
-      meta: string;
-      icon: React.ReactNode;
-      node: TreeNode;
-    }
-  | {
-      key: string;
-      kind: 'action';
-      title: string;
-      meta: string;
-      shortcut?: string;
-      icon: React.ReactNode;
-      onRun: () => void;
-    }
-  | {
-      key: string;
-      kind: 'recent';
-      title: string;
-      meta: string;
-      icon: React.ReactNode;
-      sql: string;
-      connectionId?: string;
-      dbName?: string;
-    };
-
-export type V2CommandSearchMode = 'default' | 'object' | 'ai';
-
-export interface V2CommandSearchQuery {
-  mode: V2CommandSearchMode;
-  rawValue: string;
-  keyword: string;
-  normalizedKeyword: string;
-  aiPrompt: string;
-}
-
-export const parseV2CommandSearchQuery = (value: unknown): V2CommandSearchQuery => {
-  const rawValue = String(value ?? '');
-  const trimmedValue = rawValue.trim();
-  const firstChar = trimmedValue.charAt(0);
-
-  if (firstChar === '@' || firstChar === '＠') {
-    const keyword = trimmedValue.slice(1).trim();
-    return {
-      mode: 'object',
-      rawValue,
-      keyword,
-      normalizedKeyword: keyword.toLowerCase(),
-      aiPrompt: '',
-    };
-  }
-
-  if (firstChar === '?' || firstChar === '？') {
-    const aiPrompt = trimmedValue.slice(1).trim();
-    return {
-      mode: 'ai',
-      rawValue,
-      keyword: aiPrompt,
-      normalizedKeyword: aiPrompt.toLowerCase(),
-      aiPrompt,
-    };
-  }
-
-  return {
-    mode: 'default',
-    rawValue,
-    keyword: trimmedValue,
-    normalizedKeyword: trimmedValue.toLowerCase(),
-    aiPrompt: '',
-  };
-};
-
-const isV2CommandSearchObjectNode = (node: TreeNode): boolean => {
-  return node.type === 'table'
-      || node.type === 'view'
-      || node.type === 'materialized-view';
-};
-
-const V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT = 24;
-
-export const filterV2CommandSearchTreeItems = (
-  items: V2CommandSearchItem[],
-  query: V2CommandSearchQuery,
-): V2CommandSearchItem[] => {
-  if (query.mode === 'ai') return [];
-  const normalizedKeyword = query.normalizedKeyword;
-  const objectMode = query.mode === 'object';
-  const matchedItems = items.filter((item) => {
-    if (item.kind !== 'node') return false;
-    const node = item.node;
-    const dataRef = node.dataRef || {};
-    if (objectMode && !isV2CommandSearchObjectNode(node)) {
-      return false;
-    }
-    if (!normalizedKeyword) return true;
-    const objectName = String(dataRef.tableName || dataRef.viewName || item.title || '').toLowerCase();
-    if (objectMode) {
-      return objectName.includes(normalizedKeyword)
-          || String(item.title || '').toLowerCase().includes(normalizedKeyword);
-    }
-    const haystack = [
-      item.title,
-      item.meta,
-      dataRef.tableName,
-      dataRef.viewName,
-      dataRef.dbName,
-      dataRef.name,
-      dataRef.config?.host,
-    ].filter(Boolean).join(' ').toLowerCase();
-    return haystack.includes(normalizedKeyword);
-  });
-  return normalizedKeyword ? matchedItems : matchedItems.slice(0, V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT);
-};
-
-export interface V2CommandSearchEnterState {
-  key: string;
-  isComposing?: boolean;
-  keyCode?: number;
-  activeItemCount: number;
-}
-
-export const shouldRunV2CommandSearchEnter = ({
-  key,
-  isComposing,
-  keyCode,
-  activeItemCount,
-}: V2CommandSearchEnterState): boolean => {
-  if (key !== 'Enter') return false;
-  if (isComposing || keyCode === 229) return false;
-  return activeItemCount > 0;
-};
-
-export const resolveSidebarConnectionIdFromKey = (
-  key: unknown,
-  connectionIds: string[],
-): string => {
-  const keyText = String(key ?? '').trim();
-  if (!keyText) return '';
-
-  const sortedIds = Array.from(new Set(connectionIds.filter(Boolean)))
-      .sort((a, b) => b.length - a.length);
-  return sortedIds.find((id) => keyText === id || keyText.startsWith(`${id}-`)) || '';
-};
-
-export const resolveSidebarNodeConnectionId = (
-  node: { key?: unknown; dataRef?: Record<string, unknown> } | null | undefined,
-  connectionIds: string[],
-): string => {
-  const directId = String(node?.dataRef?.id || node?.dataRef?.connectionId || '').trim();
-  if (directId && connectionIds.includes(directId)) return directId;
-  return resolveSidebarConnectionIdFromKey(node?.key, connectionIds);
-};
-
-export const normalizeSidebarTreeRelativeDropPosition = (
-  absoluteDropPosition: number,
-  nodePos: unknown,
-): number => {
-  const segments = String(nodePos || '').split('-');
-  const tailIndex = Number(segments[segments.length - 1] || 0);
-  return absoluteDropPosition - tailIndex;
-};
-
-export const resolveSidebarDropInsertBefore = (
-  relativeDropPosition: number,
-  metrics?: {
-    clientY?: number;
-    top?: number;
-    height?: number;
-  } | null,
-): boolean => {
-  if (relativeDropPosition < 0) return true;
-  if (relativeDropPosition > 0) return false;
-  const clientY = metrics?.clientY;
-  const top = metrics?.top;
-  const height = metrics?.height;
-  if (
-    typeof clientY !== 'number'
-    || typeof top !== 'number'
-    || typeof height !== 'number'
-    || !Number.isFinite(clientY)
-    || !Number.isFinite(top)
-    || !Number.isFinite(height)
-    || height <= 0
-  ) {
-    return false;
-  }
-  return clientY < (top + height / 2);
-};
-
-const resolveSidebarDropBaseElementFromDomEvent = (
-  event: {
-    clientX?: number;
-    clientY?: number;
-    target?: EventTarget | null;
-  } | null | undefined,
-): Element | null => {
-  if (typeof document === 'undefined') return null;
-  const fallbackTarget = event?.target && typeof (event.target as any).closest === 'function'
-    ? (event.target as unknown as Element)
-    : null;
-  const pointTarget = (
-    typeof event?.clientX === 'number'
-    && typeof event?.clientY === 'number'
-  )
-    ? document.elementFromPoint(event.clientX, event.clientY)
-    : null;
-  const baseElement = pointTarget || fallbackTarget;
-  if (!baseElement || typeof baseElement.closest !== 'function') return null;
-  return baseElement;
-};
-
-export const resolveSidebarDropNodeFromDomEvent = (
-  event: {
-    clientX?: number;
-    clientY?: number;
-    target?: EventTarget | null;
-  } | null | undefined,
-): { key: string; type: string } | null => {
-  const baseElement = resolveSidebarDropBaseElementFromDomEvent(event);
-  if (!baseElement) return null;
-  const marker = baseElement.closest('[data-sidebar-node-key]') as HTMLElement | null;
-  if (!marker) return null;
-  const key = String(marker.getAttribute('data-sidebar-node-key') || '').trim();
-  const type = String(marker.getAttribute('data-sidebar-node-type') || '').trim();
-  if (!key || !type) return null;
-  return { key, type };
-};
-
-export const resolveSidebarDropTargetMetricsFromDomEvent = (
-  event: {
-    clientX?: number;
-    clientY?: number;
-    target?: EventTarget | null;
-  } | null | undefined,
-): { top: number; height: number } | null => {
-  const baseElement = resolveSidebarDropBaseElementFromDomEvent(event);
-  if (!baseElement) return null;
-  const treeNode = baseElement.closest('.ant-tree-treenode') as HTMLElement | null;
-  if (!treeNode || typeof treeNode.getBoundingClientRect !== 'function') return null;
-  const rect = treeNode.getBoundingClientRect();
-  if (!Number.isFinite(rect.top) || !Number.isFinite(rect.height) || rect.height <= 0) {
-    return null;
-  }
-  return {
-    top: rect.top,
-    height: rect.height,
-  };
-};
-
-export const resolveSidebarTagDropInsertBefore = (options: {
-  currentTagOrder: string[];
-  dragTagId: string;
-  dropTagId: string;
-  relativeDropPosition: number;
-  fallbackInsertBefore: boolean;
-  metrics?: {
-    clientY?: number;
-    top?: number;
-    height?: number;
-  } | null;
-}): boolean => {
-  const {
-    currentTagOrder,
-    dragTagId,
-    dropTagId,
-    relativeDropPosition,
-    fallbackInsertBefore,
-    metrics,
-  } = options;
-
-  if (relativeDropPosition !== 0) {
-    return fallbackInsertBefore;
-  }
-
-  const clientY = metrics?.clientY;
-  const top = metrics?.top;
-  const height = metrics?.height;
-  if (
-    typeof clientY !== 'number'
-    || typeof top !== 'number'
-    || typeof height !== 'number'
-    || !Number.isFinite(clientY)
-    || !Number.isFinite(top)
-    || !Number.isFinite(height)
-    || height <= 0
-  ) {
-    return fallbackInsertBefore;
-  }
-
-  const ratio = (clientY - top) / height;
-  if (ratio < 0.35) return true;
-  if (ratio > 0.65) return false;
-
-  const dragIndex = currentTagOrder.indexOf(dragTagId);
-  const dropIndex = currentTagOrder.indexOf(dropTagId);
-  if (dragIndex === -1 || dropIndex === -1 || dragIndex === dropIndex) {
-    return fallbackInsertBefore;
-  }
-  return dragIndex > dropIndex;
-};
-
-export const shouldSkipSidebarSelectWhileDragging = (
-  isTreeDragging: boolean,
-  info: { selected?: boolean } | null | undefined,
-): boolean => isTreeDragging || !info?.selected;
-
-export const shouldSkipSidebarLoadOnExpandWhileDragging = (
-  isTreeDragging: boolean,
-  info: { expanded?: boolean; node?: Pick<TreeNode, 'type' | 'children' | 'isLeaf'> | null } | null | undefined,
-): boolean => {
-  if (isTreeDragging) return true;
-  if (!info?.expanded) return true;
-  return !shouldLoadSidebarNodeOnExpand(info.node);
-};
-
-export const resolveV2ActiveConnectionId = ({
-  activeContextConnectionId,
-  activeTabConnectionId,
-  selectedKeys,
-  connectionIds,
-  fallbackConnectionId,
-}: {
-  activeContextConnectionId?: unknown;
-  activeTabConnectionId?: unknown;
-  selectedKeys: unknown[];
-  connectionIds: string[];
-  fallbackConnectionId?: unknown;
-}): string => {
-  const connectionIdSet = new Set(connectionIds);
-  const normalizeDirectId = (value: unknown): string => {
-    const text = String(value || '').trim();
-    return text && connectionIdSet.has(text) ? text : '';
-  };
-  const selectedConnectionId = selectedKeys
-      .map((key) => resolveSidebarConnectionIdFromKey(key, connectionIds))
-      .find(Boolean) || '';
-
-  return normalizeDirectId(activeContextConnectionId)
-      || selectedConnectionId
-      || normalizeDirectId(fallbackConnectionId)
-      || normalizeDirectId(activeTabConnectionId)
-      || '';
-};
-
-export const shouldClearSidebarActiveContextOnEmptySelect = (isV2Ui: boolean): boolean => !isV2Ui;
-
-type DriverStatusSnapshot = {
-  type: string;
-  name: string;
-  connectable: boolean;
-  expectedRevision?: string;
-  needsUpdate?: boolean;
-  updateReason?: string;
-  message?: string;
-};
-
-const buildConnectionReloadSignature = (conn?: SavedConnection | null): string => {
-  if (!conn) return '';
-  return JSON.stringify({
-    config: conn.config || {},
-    includeDatabases: conn.includeDatabases || [],
-    includeRedisDatabases: conn.includeRedisDatabases || [],
-  });
-};
-
-const isConnectionTreeKey = (key: React.Key, connectionId: string): boolean => {
-  const text = String(key);
-  return text === connectionId || text.startsWith(`${connectionId}-`);
-};
-
 const DRIVER_STATUS_CACHE_TTL_MS = 30_000;
-
-const normalizeDriverType = (value: string): string => {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'postgresql' || normalized === 'pg' || normalized === 'pq' || normalized === 'pgx') return 'postgres';
-  if (normalized === 'doris') return 'diros';
-  if (
-    normalized === 'open_gauss' ||
-    normalized === 'open-gauss' ||
-    normalized === 'opengauss'
-  ) return 'opengauss';
-  if (
-    normalized === 'intersystems' ||
-    normalized === 'intersystemsiris' ||
-    normalized === 'inter-systems' ||
-    normalized === 'inter-systems-iris'
-  ) return 'iris';
-  return normalized;
-};
-
-const resolveSavedConnectionDriverType = (conn: SavedConnection | undefined): string => {
-  const type = normalizeDriverType(conn?.config?.type || '');
-  if (type !== 'custom') {
-    return type;
-  }
-  return normalizeDriverType(conn?.config?.driver || '');
-};
-
-const isPostgresSchemaDialect = (dialect: string): boolean => (
-  ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss'].includes(normalizeDriverType(dialect))
-);
-
-const SEARCH_SCOPE_OPTIONS: Array<{ value: SearchScope; label: string }> = [
-  { value: 'smart', label: '智能' },
-  { value: 'object', label: '表对象' },
-  { value: 'database', label: '库' },
-  { value: 'host', label: 'Host' },
-  { value: 'tag', label: '标签' },
-];
-
-const SEARCH_SCOPE_LABEL_MAP: Record<SearchScope, string> = SEARCH_SCOPE_OPTIONS.reduce((acc, option) => {
-  acc[option.value] = option.label;
-  return acc;
-}, {} as Record<SearchScope, string>);
-
 
 const SEARCH_SCOPE_ICON_MAP: Record<SearchScope, React.ReactNode> = {
   smart: <ThunderboltOutlined />,
@@ -937,23 +246,6 @@ const SEARCH_SCOPE_ICON_MAP: Record<SearchScope, React.ReactNode> = {
   database: <DatabaseOutlined />,
   host: <CloudOutlined />,
   tag: <TagOutlined />,
-};
-
-const normalizeMySQLViewDDLForEditing = (viewName: string, rawDefinition: unknown): string => {
-  const text = String(rawDefinition || '').trim();
-  if (!text) return '';
-
-  const normalized = text.replace(/\r\n/g, '\n').trim().replace(/;+\s*$/, '');
-  const createViewPrefixPattern = /^\s*create\s+(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*(?:`[^`]+`|\S+)\s*@\s*(?:`[^`]+`|\S+)\s+)?(?:sql\s+security\s+(?:definer|invoker)\s+)?view\s+/i;
-  if (createViewPrefixPattern.test(normalized)) {
-    return `${normalized.replace(createViewPrefixPattern, 'CREATE OR REPLACE VIEW ')};`;
-  }
-
-  if (/^\s*(select|with)\b/i.test(normalized)) {
-    return `CREATE OR REPLACE VIEW ${viewName} AS\n${normalized};`;
-  }
-
-  return `${normalized};`;
 };
 
 const Sidebar: React.FC<{
@@ -1155,11 +447,23 @@ const Sidebar: React.FC<{
       setV2CommandActiveIndex(0);
   }, []);
 
+  const commitV2CommandSearchPersistentFilter = useCallback((value = v2CommandSearchValue) => {
+      if (!v2CommandSearchPersistentFilterEnabled) {
+          return;
+      }
+      const nextFilter = value.trim();
+      setSearchValue(nextFilter);
+      if (nextFilter !== v2PersistedSidebarFilter) {
+          setAppearance({ v2SidebarPersistedFilter: nextFilter });
+      }
+  }, [setAppearance, v2CommandSearchPersistentFilterEnabled, v2CommandSearchValue, v2PersistedSidebarFilter]);
+
   const closeV2CommandSearch = useCallback(() => {
+      commitV2CommandSearchPersistentFilter();
       setIsV2CommandSearchOpen(false);
       setV2CommandSearchValue('');
       setV2CommandActiveIndex(0);
-  }, []);
+  }, [commitV2CommandSearchPersistentFilter]);
 
   useEffect(() => {
       setSearchValue(v2PersistedSidebarFilter);
@@ -1183,13 +487,21 @@ const Sidebar: React.FC<{
       if (!v2CommandSearchPersistentFilterEnabled) {
           return;
       }
-      const nextFilter = deferredV2CommandSearchValue.trim();
+      if (!isV2CommandSearchOpen) {
+          return;
+      }
+      const nextFilter = resolveV2CommandSearchPersistentFilter({
+          commandSearchValue: deferredV2CommandSearchValue,
+          persistedFilter: v2PersistedSidebarFilter,
+          enabled: v2CommandSearchPersistentFilterEnabled,
+          isOpen: isV2CommandSearchOpen,
+      });
       setSearchValue(nextFilter);
       const timer = window.setTimeout(() => {
           setAppearance({ v2SidebarPersistedFilter: nextFilter });
       }, 160);
       return () => window.clearTimeout(timer);
-  }, [deferredV2CommandSearchValue, setAppearance, v2CommandSearchPersistentFilterEnabled]);
+  }, [deferredV2CommandSearchValue, isV2CommandSearchOpen, setAppearance, v2CommandSearchPersistentFilterEnabled, v2PersistedSidebarFilter]);
 
   const toggleV2CommandSearchPersistentFilter = useCallback((enabled: boolean) => {
       const nextFilter = enabled ? v2CommandSearchValue.trim() : '';
@@ -1263,6 +575,20 @@ const Sidebar: React.FC<{
       }, 0);
       return () => window.clearTimeout(timer);
   }, [isV2CommandSearchOpen]);
+
+  useEffect(() => {
+      if (!isV2CommandSearchOpen) return;
+      const handleV2CommandSearchGlobalKeyDown = (event: KeyboardEvent) => {
+          if (!shouldCloseV2CommandSearchOnGlobalKey({ key: event.key, isOpen: isV2CommandSearchOpen })) {
+              return;
+          }
+          event.preventDefault();
+          event.stopPropagation();
+          closeV2CommandSearch();
+      };
+      window.addEventListener('keydown', handleV2CommandSearchGlobalKeyDown, true);
+      return () => window.removeEventListener('keydown', handleV2CommandSearchGlobalKeyDown, true);
+  }, [closeV2CommandSearch, isV2CommandSearchOpen]);
   
   // Connection Status State: key -> 'success' | 'error'
   const [connectionStates, setConnectionStates] = useState<Record<string, 'success' | 'error'>>({});
@@ -1718,23 +1044,16 @@ const Sidebar: React.FC<{
       const rawName = String(tableName || '').trim();
       if (!rawName) return rawName;
       if (!shouldHideSchemaPrefix(conn)) return rawName;
-      const lastDotIndex = rawName.lastIndexOf('.');
-      if (lastDotIndex <= 0 || lastDotIndex >= rawName.length - 1) return rawName;
-      return rawName.substring(lastDotIndex + 1);
+      const parsed = splitQualifiedName(rawName);
+      return parsed.objectName || rawName;
   };
 
   const getMetadataDialect = (conn: SavedConnection | undefined): string => {
-      const type = normalizeDriverType(String(conn?.config?.type || '').trim());
-      if (type === 'custom') {
-          const driver = normalizeDriverType(String(conn?.config?.driver || '').trim());
-          if (driver === 'diros' || driver === 'doris') return 'mysql';
-          if (driver === 'oceanbase') return normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
-          return driver;
-      }
-      if (type === 'oceanbase' && normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle') return 'oracle';
-      if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
-      if (type === 'dameng') return 'dm';
-      return type;
+      return resolveSidebarMetadataDialect(
+          conn?.config?.type || '',
+          conn?.config?.driver || '',
+          conn?.config?.oceanBaseProtocol,
+      );
   };
 
   const supportsDatabaseEvents = (conn: SavedConnection | undefined): boolean => {
@@ -1905,16 +1224,19 @@ const Sidebar: React.FC<{
       return `${schema}.${name}`;
   };
 
+  const buildSidebarObjectKeyName = (dbName: string, schemaName: string, objectName: string): string => {
+      const schema = String(schemaName || '').trim();
+      const name = String(objectName || '').trim();
+      if (!schema || !name || name.includes('.')) return name;
+      if (schema.toLowerCase() === String(dbName || '').trim().toLowerCase()) return name;
+      return `${schema}.${name}`;
+  };
+
   const splitQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
-      const raw = String(qualifiedName || '').trim();
-      if (!raw) return { schemaName: '', objectName: '' };
-      const idx = raw.lastIndexOf('.');
-      if (idx <= 0 || idx >= raw.length - 1) {
-          return { schemaName: '', objectName: raw };
-      }
+      const parsed = splitQualifiedNameLast(qualifiedName);
       return {
-          schemaName: raw.substring(0, idx),
-          objectName: raw.substring(idx + 1),
+          schemaName: parsed.parentPath,
+          objectName: parsed.objectName,
       };
   };
 
@@ -1961,16 +1283,9 @@ const Sidebar: React.FC<{
       switch (dialect) {
           case 'mysql':
           case 'starrocks': {
-              const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
-              return normalizeMetadataQuerySpecs([
-                  {
-                      sql: safeDbName
-                          ? `SELECT TABLE_NAME AS view_name, TABLE_SCHEMA AS schema_name FROM information_schema.views WHERE table_schema = '${safeDbName}' ORDER BY TABLE_NAME`
-                          : '',
-                  },
-                  { sql: dbIdent ? `SHOW FULL TABLES FROM \`${dbIdent}\`` : '' },
-                  { sql: `SHOW FULL TABLES` },
-              ]);
+              return normalizeMetadataQuerySpecs(
+                  buildMySQLCompatibleViewMetadataSqls(dbName).map((sql) => ({ sql })),
+              );
           }
           case 'postgres':
           case 'kingbase':
@@ -2168,27 +1483,29 @@ const Sidebar: React.FC<{
       return { results, hasSuccessfulQuery };
   };
 
-  const loadViews = async (conn: any, dbName: string): Promise<{ views: string[]; supported: boolean }> => {
+  const loadViews = async (conn: any, dbName: string): Promise<{ views: SidebarViewMetadataEntry[]; supported: boolean }> => {
       const savedConn = conn as SavedConnection;
       const dialect = getMetadataDialect(savedConn);
       const querySpecs = buildViewsMetadataQuerySpecs(dialect, dbName);
       const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
       const seen = new Set<string>();
-      const views: string[] = [];
+      const views: SidebarViewMetadataEntry[] = [];
 
       results.forEach((queryResult) => {
           queryResult.rows.forEach((row) => {
               const tableType = getCaseInsensitiveValue(row, ['table_type', 'table type', 'type']);
-              if (tableType && tableType.toUpperCase() !== 'VIEW') return;
+              if (!isSidebarViewTableType(tableType)) return;
               const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'schemaname', 'owner', 'table_schema', 'db']);
               const viewName =
                   getCaseInsensitiveValue(row, ['view_name', 'viewname', 'table_name', 'name'])
                   || getMySQLShowTablesName(row)
                   || getFirstRowValue(row);
-              const fullName = normalizeSidebarViewName(dialect, dbName, schemaName, viewName);
-              if (!fullName || seen.has(fullName)) return;
-              seen.add(fullName);
-              views.push(fullName);
+              const entry = normalizeSidebarViewMetadataEntry(dialect, dbName, schemaName, viewName);
+              if (!entry) return;
+              const uniqueKey = `${entry.schemaName.toLowerCase()}@@${entry.viewName.toLowerCase()}`;
+              if (seen.has(uniqueKey)) return;
+              seen.add(uniqueKey);
+              views.push(entry);
           });
       });
       return { views, supported: hasSuccessfulQuery };
@@ -2197,7 +1514,7 @@ const Sidebar: React.FC<{
   const loadStarRocksMaterializedViews = async (
       conn: any,
       dbName: string
-  ): Promise<{ views: string[]; supported: boolean }> => {
+  ): Promise<{ views: SidebarViewMetadataEntry[]; supported: boolean }> => {
       const dialect = getMetadataDialect(conn as SavedConnection);
       if (dialect !== 'starrocks') {
           return { views: [], supported: false };
@@ -2216,7 +1533,7 @@ const Sidebar: React.FC<{
       ]);
       const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
       const seen = new Set<string>();
-      const views: string[] = [];
+      const views: SidebarViewMetadataEntry[] = [];
 
       results.forEach((queryResult) => {
           queryResult.rows.forEach((row) => {
@@ -2224,10 +1541,12 @@ const Sidebar: React.FC<{
               const viewName =
                   getCaseInsensitiveValue(row, ['object_name', 'view_name', 'table_name', 'name', 'materialized_view_name', 'mv_name'])
                   || getFirstRowValue(row);
-              const fullName = normalizeSidebarViewName(dialect, dbName, schemaName, viewName);
-              if (!fullName || seen.has(fullName)) return;
-              seen.add(fullName);
-              views.push(fullName);
+              const entry = normalizeSidebarViewMetadataEntry(dialect, dbName, schemaName, viewName);
+              if (!entry) return;
+              const uniqueKey = `${entry.schemaName.toLowerCase()}@@${entry.viewName.toLowerCase()}`;
+              if (seen.has(uniqueKey)) return;
+              seen.add(uniqueKey);
+              views.push(entry);
           });
       });
 
@@ -2698,28 +2017,28 @@ const Sidebar: React.FC<{
 	                loadFunctions(conn, conn.dbName),
 	                loadDatabaseEvents(conn, conn.dbName),
 	            ]);
-            const viewRows: string[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
-            const materializedViewRows: string[] = Array.isArray(materializedViewsResult.views) ? materializedViewsResult.views : [];
+            const viewRows: SidebarViewMetadataEntry[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
+            const materializedViewRows: SidebarViewMetadataEntry[] = Array.isArray(materializedViewsResult.views) ? materializedViewsResult.views : [];
             const triggerRows: any[] = Array.isArray(triggersResult.triggers) ? triggersResult.triggers : [];
             const routineRows: any[] = Array.isArray(routinesResult.routines) ? routinesResult.routines : [];
             const eventRows: any[] = Array.isArray(eventsResult.events) ? eventsResult.events : [];
             const schemaRows: string[] = Array.isArray(schemasResult.schemas) ? schemasResult.schemas : [];
 
-            const viewEntries = viewRows.map((viewName: string) => {
-                const parsed = splitQualifiedName(viewName);
+            const viewEntries = viewRows.map((entry: SidebarViewMetadataEntry) => {
+                const parsed = splitQualifiedName(entry.viewName);
                 return {
-                    viewName,
-	                    schemaName: parsed.schemaName,
-	                    displayName: getSidebarTableDisplayName(conn, viewName),
+                    viewName: entry.viewName,
+	                    schemaName: entry.schemaName || parsed.schemaName,
+	                    displayName: getSidebarTableDisplayName(conn, entry.viewName),
 	                };
 	            });
 
-            const materializedViewEntries = materializedViewRows.map((viewName: string) => {
-                const parsed = splitQualifiedName(viewName);
+            const materializedViewEntries = materializedViewRows.map((entry: SidebarViewMetadataEntry) => {
+                const parsed = splitQualifiedName(entry.viewName);
                 return {
-                    viewName,
-                    schemaName: parsed.schemaName,
-                    displayName: getSidebarTableDisplayName(conn, viewName),
+                    viewName: entry.viewName,
+                    schemaName: entry.schemaName || parsed.schemaName,
+                    displayName: getSidebarTableDisplayName(conn, entry.viewName),
                 };
             });
 
@@ -2836,30 +2155,36 @@ const Sidebar: React.FC<{
 	                };
 	            };
 
-	            const buildViewNode = (entry: { viewName: string; schemaName: string; displayName: string }): TreeNode => ({
-	                title: entry.displayName,
-	                key: `${conn.id}-${conn.dbName}-view-${entry.viewName}`,
-	                icon: <EyeOutlined />,
-	                type: 'view',
-	                dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName },
-	                isLeaf: true,
-	            });
+	            const buildViewNode = (entry: { viewName: string; schemaName: string; displayName: string }): TreeNode => {
+	                const keyName = buildSidebarObjectKeyName(conn.dbName, entry.schemaName, entry.viewName);
+	                return {
+	                    title: entry.displayName,
+	                    key: `${conn.id}-${conn.dbName}-view-${keyName}`,
+	                    icon: <EyeOutlined />,
+	                    type: 'view',
+	                    dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName },
+	                    isLeaf: true,
+	                };
+	            };
 
-	            const buildMaterializedViewNode = (entry: { viewName: string; schemaName: string; displayName: string }): TreeNode => ({
-	                title: entry.displayName,
-	                key: `${conn.id}-${conn.dbName}-materialized-view-${entry.viewName}`,
-	                icon: <ThunderboltOutlined />,
-	                type: 'materialized-view',
-	                dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName, objectKind: 'materialized-view' },
-	                isLeaf: true,
-	            });
+	            const buildMaterializedViewNode = (entry: { viewName: string; schemaName: string; displayName: string }): TreeNode => {
+	                const keyName = buildSidebarObjectKeyName(conn.dbName, entry.schemaName, entry.viewName);
+	                return {
+	                    title: entry.displayName,
+	                    key: `${conn.id}-${conn.dbName}-materialized-view-${keyName}`,
+	                    icon: <ThunderboltOutlined />,
+	                    type: 'materialized-view',
+	                    dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName, objectKind: 'materialized-view' },
+	                    isLeaf: true,
+	                };
+	            };
 
 	            const buildTriggerNode = (entry: { triggerName: string; tableName: string; schemaName: string; displayName: string }): TreeNode => ({
 	                title: entry.displayName,
 	                key: `${conn.id}-${conn.dbName}-trigger-${entry.triggerName}-${entry.tableName}`,
 	                icon: <FunctionOutlined />,
 	                type: 'db-trigger',
-	                dataRef: { ...conn, triggerName: entry.triggerName, triggerTableName: entry.tableName, schemaName: entry.schemaName },
+	                dataRef: { ...conn, triggerName: entry.triggerName, triggerTableName: entry.tableName, tableName: entry.tableName, schemaName: entry.schemaName },
 	                isLeaf: true,
 	            });
 
@@ -3009,10 +2334,11 @@ const Sidebar: React.FC<{
 
   const locateObjectInSidebarRef = useRef<(detail: unknown) => Promise<void>>(async () => {});
 
-  const waitForSidebarLoadKey = async (loadKey: string) => {
-      for (let attempt = 0; attempt < 30 && loadingNodesRef.current.has(loadKey); attempt += 1) {
-          await new Promise(resolve => window.setTimeout(resolve, 50));
+  const waitForSidebarLoadKey = async (loadKey: string): Promise<boolean> => {
+      for (let attempt = 0; attempt < SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS && loadingNodesRef.current.has(loadKey); attempt += 1) {
+          await new Promise(resolve => window.setTimeout(resolve, SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS));
       }
+      return !loadingNodesRef.current.has(loadKey);
   };
 
   const locateObjectInSidebar = async (detail: unknown) => {
@@ -3054,7 +2380,15 @@ const Sidebar: React.FC<{
       const target = resolveSidebarLocateTarget(request, {
           groupBySchema: shouldHideSchemaPrefix(conn),
       });
-      const objectLabel = request.objectGroup === 'materializedViews' ? '物化视图' : (request.objectGroup === 'views' ? '视图' : '表');
+      const objectLabel = request.objectGroup === 'materializedViews'
+          ? '物化视图'
+          : request.objectGroup === 'views'
+              ? '视图'
+              : request.objectGroup === 'triggers'
+                  ? '触发器'
+                  : request.objectGroup === 'routines'
+                      ? '函数/存储过程'
+                      : '表';
 
       let path = findSidebarNodePathForLocate(treeDataRef.current as SidebarLocateTreeNodeLike[], target);
       const dbLoadKey = `dbs-${request.connectionId}`;
@@ -3067,7 +2401,11 @@ const Sidebar: React.FC<{
               return;
           }
           if (loadingNodesRef.current.has(dbLoadKey)) {
-              await waitForSidebarLoadKey(dbLoadKey);
+              const loaded = await waitForSidebarLoadKey(dbLoadKey);
+              if (!loaded) {
+                  message.info(`数据库节点仍在加载中：${request.dbName}，请稍后再试`);
+                  return;
+              }
           } else {
               await loadDatabases(connectionNode);
           }
@@ -3082,7 +2420,11 @@ const Sidebar: React.FC<{
       path = findSidebarNodePathForLocate(treeDataRef.current as SidebarLocateTreeNodeLike[], target);
       if (!path) {
           if (loadingNodesRef.current.has(tableLoadKey)) {
-              await waitForSidebarLoadKey(tableLoadKey);
+              const loaded = await waitForSidebarLoadKey(tableLoadKey);
+              if (!loaded) {
+                  message.info(`${objectLabel}所在数据库对象仍在加载中：${request.dbName}，请稍后再试`);
+                  return;
+              }
           } else {
               await loadTables(dbNode);
           }
@@ -3198,17 +2540,25 @@ const Sidebar: React.FC<{
     }
   };
 
+  const isNonRelationalDbType = (connectionId: string): boolean => {
+      const conn = connections.find(c => c.id === connectionId);
+      if (!conn) return false;
+      const dbType = resolveDataSourceType(conn.config);
+      return dbType === 'elasticsearch' || dbType === 'mongodb' || dbType === 'redis';
+  };
+
   const openDesign = (node: any, initialTab: string, readOnly: boolean = false) => {
       const { tableName, dbName, id } = node.dataRef;
+      const forceReadOnly = readOnly || isNonRelationalDbType(id);
       addTab({
           id: `design-${id}-${dbName}-${tableName}`,
-          title: `${readOnly ? '表结构' : '设计表'} (${tableName})`,
+          title: `${forceReadOnly ? '表结构' : '设计表'} (${tableName})`,
           type: 'design',
           connectionId: id,
           dbName: dbName,
           tableName: tableName,
           initialTab: initialTab,
-          readOnly: readOnly
+          readOnly: forceReadOnly
       });
   };
 
@@ -3334,10 +2684,11 @@ const Sidebar: React.FC<{
               connectionId: id,
               dbName,
               tableName,
+              objectType: 'table',
           });
           return;
       } else if (node.type === 'view' || node.type === 'materialized-view') {
-          const { viewName, dbName, id } = node.dataRef;
+          const { viewName, dbName, id, schemaName } = node.dataRef;
           addTab({
               id: node.key,
               title: viewName,
@@ -3345,6 +2696,9 @@ const Sidebar: React.FC<{
               connectionId: id,
               dbName,
               tableName: viewName,
+              objectType: node.type === 'materialized-view' ? 'materialized-view' : 'view',
+              schemaName,
+              sidebarLocateKey: String(node.key || ''),
           });
           return;
       } else if (node.type === 'saved-query') {
@@ -3373,14 +2727,17 @@ const Sidebar: React.FC<{
           });
           return;
       } else if (node.type === 'db-trigger') {
-          const { triggerName, dbName, id } = node.dataRef;
+          const { triggerName, triggerTableName, schemaName, dbName, id } = node.dataRef;
           addTab({
               id: `trigger-${node.key}`,
               title: `触发器: ${triggerName}`,
               type: 'trigger',
               connectionId: id,
               dbName,
-              triggerName
+              triggerName,
+              triggerTableName,
+              schemaName,
+              sidebarLocateKey: String(node.key || ''),
           });
           return;
       } else if (node.type === 'db-event') {
@@ -3446,17 +2803,25 @@ const Sidebar: React.FC<{
       }
   };
 
+  const resolveCopyObjectNameLabel = (node: any): string => {
+      if (node?.type === 'view') return '视图名称';
+      if (node?.type === 'materialized-view') return '物化视图名称';
+      if (node?.type === 'db-event') return '事件名称';
+      return '表名';
+  };
+
   const handleCopyTableName = async (node: any) => {
-      const tableName = resolveSidebarTableNameForCopy(node);
-      if (!tableName) {
-          message.warning('表名为空，无法复制');
+      const objectName = resolveSidebarTableNameForCopy(node);
+      const label = resolveCopyObjectNameLabel(node);
+      if (!objectName) {
+          message.warning(`${label}为空，无法复制`);
           return;
       }
       try {
-          await navigator.clipboard.writeText(tableName);
-          message.success('表名已复制到剪贴板');
+          await navigator.clipboard.writeText(objectName);
+          message.success(`${label}已复制到剪贴板`);
       } catch (e: any) {
-          message.error('复制表名失败: ' + (e?.message || String(e)));
+          message.error(`复制${label}失败: ` + (e?.message || String(e)));
       }
   };
 
@@ -3675,8 +3040,16 @@ const Sidebar: React.FC<{
       }
 
       const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
-      const viewRows: string[] = Array.isArray(viewResult.views) ? viewResult.views : [];
-      const viewSet = new Set(viewRows.map((view: string) => view.toLowerCase()));
+      const viewRows: SidebarViewMetadataEntry[] = Array.isArray(viewResult.views) ? viewResult.views : [];
+      const viewSet = new Set(
+          viewRows.flatMap((view) => {
+              const names = [view.viewName.toLowerCase()];
+              if (view.schemaName && !view.viewName.includes('.')) {
+                  names.push(`${view.schemaName}.${view.viewName}`.toLowerCase());
+              }
+              return names;
+          })
+      );
 
       const tableObjects: BatchObjectItem[] = tableRows
           .map((row: any) => Object.values(row)[0] as string)
@@ -3689,13 +3062,16 @@ const Sidebar: React.FC<{
               dataRef: { ...conn, tableName, dbName, objectType: 'table' },
           }));
 
-      const viewObjects: BatchObjectItem[] = viewRows.map((viewName: string) => ({
-          title: getSidebarTableDisplayName(conn, viewName),
-          key: `${conn.id}-${dbName}-view-${viewName}`,
-          objectName: viewName,
-          objectType: 'view' as const,
-          dataRef: { ...conn, tableName: viewName, dbName, objectType: 'view' },
-      }));
+      const viewObjects: BatchObjectItem[] = viewRows.map((view) => {
+          const keyName = buildSidebarObjectKeyName(dbName, view.schemaName, view.viewName);
+          return {
+              title: getSidebarTableDisplayName(conn, view.viewName),
+              key: `${conn.id}-${dbName}-view-${keyName}`,
+              objectName: view.viewName,
+              objectType: 'view' as const,
+              dataRef: { ...conn, tableName: view.viewName, schemaName: view.schemaName, dbName, objectType: 'view' },
+          };
+      });
 
       tableObjects.sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase()));
       viewObjects.sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase()));
@@ -4696,12 +4072,7 @@ const Sidebar: React.FC<{
   };
 
   const extractObjectName = (fullName: string) => {
-      const raw = String(fullName || '').trim();
-      const idx = raw.lastIndexOf('.');
-      if (idx >= 0 && idx < raw.length - 1) {
-          return raw.substring(idx + 1);
-      }
-      return raw;
+      return splitQualifiedName(String(fullName || '').trim()).objectName || String(fullName || '').trim();
   };
 
   const handleRenameDatabase = async () => {
@@ -4894,7 +4265,7 @@ const Sidebar: React.FC<{
 
   // --- 视图操作 ---
   const openViewDefinition = (node: any) => {
-      const { viewName, dbName, id } = node.dataRef;
+      const { viewName, dbName, id, schemaName } = node.dataRef;
       const isMaterialized = node.type === 'materialized-view' || node.dataRef?.objectKind === 'materialized-view';
       addTab({
           id: `view-def-${id}-${dbName}-${viewName}`,
@@ -4904,6 +4275,8 @@ const Sidebar: React.FC<{
           dbName,
           viewName,
           viewKind: isMaterialized ? 'materialized' : 'view',
+          schemaName,
+          sidebarLocateKey: String(node.key || ''),
       });
   };
 
@@ -4923,9 +4296,9 @@ const Sidebar: React.FC<{
                   query = `SHOW CREATE VIEW \`${viewName.replace(/`/g, '``')}\``;
                   break;
               case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': {
-                  const parts = viewName.split('.');
-                  const schema = parts.length > 1 ? parts[0] : 'public';
-                  const name = parts.length > 1 ? parts[1] : viewName;
+                  const parts = splitQualifiedName(viewName);
+                  const schema = parts.schemaName || 'public';
+                  const name = parts.objectName || viewName;
                   query = `SELECT pg_get_viewdef('${escapeSQLLiteral(schema)}.${escapeSQLLiteral(name)}'::regclass, true) AS view_definition`;
                   break;
               }
@@ -5044,7 +4417,10 @@ const Sidebar: React.FC<{
       const conn = node.dataRef;
       const { tableName, dbName, id } = conn;
       const safeTable = String(tableName || 'table_name').trim();
-      const quotedTable = safeTable.includes('`') ? safeTable : safeTable.split('.').map(part => `\`${part.replace(/`/g, '``')}\``).join('.');
+      const safeTableParts = [splitQualifiedName(safeTable).schemaName, splitQualifiedName(safeTable).objectName].filter(Boolean);
+      const quotedTable = safeTable.includes('`')
+          ? safeTable
+          : (safeTableParts.length > 0 ? safeTableParts : [safeTable]).map(part => `\`${part.replace(/`/g, '``')}\``).join('.');
       addTab({
           id: `query-create-starrocks-rollup-${Date.now()}`,
           title: '新增 Rollup',
@@ -6159,6 +5535,9 @@ const Sidebar: React.FC<{
       () => estimateV2TreeHorizontalScrollWidth(v2VisibleTreeData, treeViewportWidth),
       [treeViewportWidth, v2VisibleTreeData],
   );
+  const effectiveTreeHeight = isV2Ui && v2TreeHorizontalScrollWidth
+      ? Math.max(1, treeHeight - V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE)
+      : treeHeight;
   const v2TreeMetrics = useMemo(() => {
       const databaseTableCounts = new Map<React.Key, number>();
       const objectGroupCounts = new Map<React.Key, number>();
@@ -6412,7 +5791,7 @@ const Sidebar: React.FC<{
       const dbName = String(conn?.dbName || '').trim();
       const tableName = String(conn?.tableName || node?.title || '').trim();
       const objectName = extractObjectName(tableName);
-      const schemaName = String(conn?.schemaName || (tableName.includes('.') ? tableName.split('.').slice(0, -1).join('.') : '')).trim();
+      const schemaName = String(conn?.schemaName || splitQualifiedName(tableName).schemaName || '').trim();
       switch (dialect) {
           case 'mysql':
           case 'starrocks':
@@ -6688,6 +6067,7 @@ const Sidebar: React.FC<{
   const renderV2TreeTitle = (node: any, hoverTitle: string, statusBadge: React.ReactNode) => {
       const rawTitle = String(node.title ?? '');
       const groupKey = String(node?.dataRef?.groupKey || '');
+      const dragText = resolveSidebarObjectDragText(node);
       if (node.type === 'v2-table-section') {
           return (
               <span
@@ -6776,10 +6156,32 @@ const Sidebar: React.FC<{
           <span
               className={titleClassName}
               title={hoverTitle}
+              draggable={!!dragText}
               data-node-type={node.type}
               data-group-key={groupKey || undefined}
               data-sidebar-node-key={String(node.key || '')}
               data-sidebar-node-type={String(node.type || '')}
+              onDragStart={dragText ? (event) => {
+                  snapshotTreeSelectionBeforeDrag();
+                  treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                  setIsTreeDragging(true);
+                  event.stopPropagation();
+                  event.dataTransfer.effectAllowed = 'copy';
+                  event.dataTransfer.setData('text/plain', dragText);
+                  event.dataTransfer.setData(
+                      SIDEBAR_SQL_EDITOR_DRAG_MIME,
+                      encodeSidebarSqlEditorDragPayload({
+                          text: dragText,
+                          nodeType: node.type,
+                          connectionId: String(node?.dataRef?.id || ''),
+                          dbName: String(node?.dataRef?.dbName || ''),
+                      }),
+                  );
+              } : undefined}
+              onDragEnd={dragText ? () => {
+                  restoreTreeSelectionAfterDrag();
+                  setIsTreeDragging(false);
+              } : undefined}
           >
               {statusBadge}
               <span className="gn-v2-tree-label">{displayTitle}</span>
@@ -6840,6 +6242,7 @@ const Sidebar: React.FC<{
       }
       if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
           void locateObjectInSidebar({
+              tabId: String(node.key || ''),
               connectionId: dataRef.id,
               dbName: dataRef.dbName,
               tableName: dataRef.tableName || dataRef.viewName,
@@ -7543,6 +6946,12 @@ const Sidebar: React.FC<{
                 icon: <CodeOutlined />,
                 onClick: () => openViewDefinition(node)
             },
+            {
+                key: 'copy-view-name',
+                label: '复制名称',
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyTableName(node)
+            },
             { type: 'divider' },
             {
                 key: 'edit-view',
@@ -7604,6 +7013,12 @@ const Sidebar: React.FC<{
                 label: '查看物化视图定义',
                 icon: <CodeOutlined />,
                 onClick: () => openViewDefinition(node)
+            },
+            {
+                key: 'copy-materialized-view-name',
+                label: '复制名称',
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyTableName(node)
             },
             {
                 key: 'new-query',
@@ -8019,13 +7434,13 @@ const Sidebar: React.FC<{
     ) : null;
 
     const displayTitle = String(node.title ?? '');
+    const dragText = resolveSidebarObjectDragText(node);
     let hoverTitle = displayTitle;
     if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view' || node.type === 'db-event') {
         const rawTableName = String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || '').trim();
         const conn = node?.dataRef as SavedConnection | undefined;
         if (rawTableName && shouldHideSchemaPrefix(conn)) {
-            const lastDotIndex = rawTableName.lastIndexOf('.');
-            if (lastDotIndex > 0 && lastDotIndex < rawTableName.length - 1) {
+            if (splitQualifiedName(rawTableName).schemaName) {
                 hoverTitle = rawTableName;
             }
         }
@@ -8084,6 +7499,38 @@ const Sidebar: React.FC<{
 
     if (isV2Ui) {
         return renderV2TreeTitle(node, hoverTitle, statusBadge);
+    }
+
+    if (dragText) {
+        return (
+            <span
+                title={hoverTitle}
+                draggable
+                onDragStart={(event) => {
+                    snapshotTreeSelectionBeforeDrag();
+                    treeDragSelectSuppressUntilRef.current = Date.now() + 600;
+                    setIsTreeDragging(true);
+                    event.stopPropagation();
+                    event.dataTransfer.effectAllowed = 'copy';
+                    event.dataTransfer.setData('text/plain', dragText);
+                    event.dataTransfer.setData(
+                        SIDEBAR_SQL_EDITOR_DRAG_MIME,
+                        encodeSidebarSqlEditorDragPayload({
+                            text: dragText,
+                            nodeType: node.type,
+                            connectionId: String(node?.dataRef?.id || ''),
+                            dbName: String(node?.dataRef?.dbName || ''),
+                        }),
+                    );
+                }}
+                onDragEnd={() => {
+                    restoreTreeSelectionAfterDrag();
+                    setIsTreeDragging(false);
+                }}
+            >
+                {statusBadge}{displayTitle}
+            </span>
+        );
     }
 
     return <span title={hoverTitle}>{statusBadge}{displayTitle}</span>;
@@ -8850,7 +8297,7 @@ const Sidebar: React.FC<{
                     autoExpandParent={autoExpandParent}
                     selectedKeys={selectedKeys}
                     blockNode
-                    height={treeHeight}
+                    height={effectiveTreeHeight}
                     scrollWidth={isV2Ui ? v2TreeHorizontalScrollWidth : undefined}
                     onRightClick={onRightClick}
                 />

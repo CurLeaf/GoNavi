@@ -17,6 +17,7 @@ import (
 	"GoNavi-Wails/internal/ssh"
 	"GoNavi-Wails/internal/utils"
 
+	"github.com/golang-sql/sqlexp"
 	_ "github.com/microsoft/go-mssqldb"
 )
 
@@ -24,6 +25,85 @@ type SqlServerDB struct {
 	conn        *sql.DB
 	pingTimeout time.Duration
 	forwarder   *ssh.LocalForwarder
+}
+
+type sqlServerSessionExecer struct {
+	conn *sql.Conn
+}
+
+func scanSQLServerRowsWithMessages(ctx context.Context, rows *sql.Rows, retmsg *sqlexp.ReturnMessage) ([]connection.ResultSetData, []string, error) {
+	if rows == nil {
+		return []connection.ResultSetData{{Rows: []map[string]interface{}{}, Columns: []string{}}}, nil, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var (
+		resultSets  []connection.ResultSetData
+		messages    []string
+		allMessages []string
+	)
+	active := true
+	for active {
+		raw := retmsg.Message(ctx)
+		switch msg := raw.(type) {
+		case sqlexp.MsgNotice:
+			text := strings.TrimSpace(fmt.Sprint(msg.Message))
+			if text != "" {
+				messages = append(messages, text)
+				allMessages = append(allMessages, text)
+			}
+		case sqlexp.MsgNext:
+			data, cols, err := scanRows(rows)
+			if err != nil {
+				return resultSets, messages, err
+			}
+			if data == nil {
+				data = []map[string]interface{}{}
+			}
+			if cols == nil {
+				cols = []string{}
+			}
+			resultSets = append(resultSets, connection.ResultSetData{
+				Rows:     data,
+				Columns:  cols,
+				Messages: append([]string(nil), messages...),
+			})
+			messages = nil
+		case sqlexp.MsgRowsAffected:
+			resultSets = append(resultSets, connection.ResultSetData{
+				Rows:     []map[string]interface{}{{"affectedRows": msg.Count}},
+				Columns:  []string{"affectedRows"},
+				Messages: append([]string(nil), messages...),
+			})
+			messages = nil
+		case sqlexp.MsgNextResultSet:
+			active = rows.NextResultSet()
+		case sqlexp.MsgError:
+			return resultSets, messages, msg.Error
+		default:
+			active = false
+		}
+	}
+
+	if len(messages) > 0 {
+		resultSets = append(resultSets, connection.ResultSetData{
+			Rows:     []map[string]interface{}{},
+			Columns:  []string{},
+			Messages: append([]string(nil), messages...),
+		})
+	}
+	if len(resultSets) == 0 {
+		resultSets = []connection.ResultSetData{{
+			Rows:    []map[string]interface{}{},
+			Columns: []string{},
+		}}
+	}
+	if err := rows.Err(); err != nil {
+		return resultSets, allMessages, err
+	}
+	return resultSets, allMessages, nil
 }
 
 // quoteBracket escapes ] in identifiers for safe use in SQL Server [bracket] notation
@@ -133,54 +213,76 @@ func (s *SqlServerDB) Ping() error {
 }
 
 func (s *SqlServerDB) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	results, _, err := s.QueryMultiWithMessages(query)
+	return results, err
+}
+
+func (s *SqlServerDB) QueryMultiWithMessages(query string) ([]connection.ResultSetData, []string, error) {
 	if s.conn == nil {
-		return nil, fmt.Errorf("连接未打开")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
-	rows, err := s.conn.Query(query)
+	ctx := context.Background()
+	retmsg := &sqlexp.ReturnMessage{}
+	rows, err := s.conn.QueryContext(ctx, query, retmsg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanSQLServerRowsWithMessages(ctx, rows, retmsg)
 }
 
 func (s *SqlServerDB) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	results, _, err := s.QueryMultiContextWithMessages(ctx, query)
+	return results, err
+}
+
+func (s *SqlServerDB) QueryMultiContextWithMessages(ctx context.Context, query string) ([]connection.ResultSetData, []string, error) {
 	if s.conn == nil {
-		return nil, fmt.Errorf("连接未打开")
+		return nil, nil, fmt.Errorf("连接未打开")
 	}
-	rows, err := s.conn.QueryContext(ctx, query)
+	retmsg := &sqlexp.ReturnMessage{}
+	rows, err := s.conn.QueryContext(ctx, query, retmsg)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanSQLServerRowsWithMessages(ctx, rows, retmsg)
 }
 
 func (s *SqlServerDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	rows, columns, _, err := s.QueryContextWithMessages(ctx, query)
+	return rows, columns, err
+}
+
+func (s *SqlServerDB) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
 	if s.conn == nil {
-		return nil, nil, fmt.Errorf("连接未打开")
+		return nil, nil, nil, fmt.Errorf("连接未打开")
 	}
 
-	rows, err := s.conn.QueryContext(ctx, query)
+	resultSets, messages, err := s.QueryMultiContextWithMessages(ctx, query)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	defer rows.Close()
-
-	return scanRows(rows)
+	if len(resultSets) == 0 {
+		return []map[string]interface{}{}, []string{}, messages, nil
+	}
+	first := resultSets[0]
+	if first.Rows == nil {
+		first.Rows = []map[string]interface{}{}
+	}
+	if first.Columns == nil {
+		first.Columns = []string{}
+	}
+	return first.Rows, first.Columns, messages, nil
 }
 
 func (s *SqlServerDB) Query(query string) ([]map[string]interface{}, []string, error) {
-	if s.conn == nil {
-		return nil, nil, fmt.Errorf("连接未打开")
-	}
+	rows, columns, _, err := s.QueryWithMessages(query)
+	return rows, columns, err
+}
 
-	rows, err := s.conn.Query(query)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer rows.Close()
-	return scanRows(rows)
+func (s *SqlServerDB) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	return s.QueryContextWithMessages(context.Background(), query)
 }
 
 func (s *SqlServerDB) ExecContext(ctx context.Context, query string) (int64, error) {
@@ -213,7 +315,7 @@ func (s *SqlServerDB) OpenSessionExecer(ctx context.Context) (StatementExecer, e
 	if err != nil {
 		return nil, err
 	}
-	return NewSQLConnStatementExecer(conn), nil
+	return &sqlServerSessionExecer{conn: conn}, nil
 }
 
 func (s *SqlServerDB) Exec(query string) (int64, error) {
@@ -225,6 +327,87 @@ func (s *SqlServerDB) Exec(query string) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (e *sqlServerSessionExecer) Exec(query string) (int64, error) {
+	return e.ExecContext(context.Background(), query)
+}
+
+func (e *sqlServerSessionExecer) ExecContext(ctx context.Context, query string) (int64, error) {
+	if e == nil || e.conn == nil {
+		return 0, fmt.Errorf("连接未打开")
+	}
+	res, err := e.conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *sqlServerSessionExecer) Query(query string) ([]map[string]interface{}, []string, error) {
+	rows, columns, _, err := e.QueryWithMessages(query)
+	return rows, columns, err
+}
+
+func (e *sqlServerSessionExecer) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	rows, columns, _, err := e.QueryContextWithMessages(ctx, query)
+	return rows, columns, err
+}
+
+func (e *sqlServerSessionExecer) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	return e.QueryContextWithMessages(context.Background(), query)
+}
+
+func (e *sqlServerSessionExecer) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
+	results, messages, err := e.QueryMultiContextWithMessages(ctx, query)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(results) == 0 {
+		return []map[string]interface{}{}, []string{}, messages, nil
+	}
+	first := results[0]
+	if first.Rows == nil {
+		first.Rows = []map[string]interface{}{}
+	}
+	if first.Columns == nil {
+		first.Columns = []string{}
+	}
+	return first.Rows, first.Columns, messages, nil
+}
+
+func (e *sqlServerSessionExecer) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	results, _, err := e.QueryMultiWithMessages(query)
+	return results, err
+}
+
+func (e *sqlServerSessionExecer) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	results, _, err := e.QueryMultiContextWithMessages(ctx, query)
+	return results, err
+}
+
+func (e *sqlServerSessionExecer) QueryMultiWithMessages(query string) ([]connection.ResultSetData, []string, error) {
+	return e.QueryMultiContextWithMessages(context.Background(), query)
+}
+
+func (e *sqlServerSessionExecer) QueryMultiContextWithMessages(ctx context.Context, query string) ([]connection.ResultSetData, []string, error) {
+	if e == nil || e.conn == nil {
+		return nil, nil, fmt.Errorf("连接未打开")
+	}
+	retmsg := &sqlexp.ReturnMessage{}
+	rows, err := e.conn.QueryContext(ctx, query, retmsg)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	return scanSQLServerRowsWithMessages(ctx, rows, retmsg)
+}
+
+func (e *sqlServerSessionExecer) Close() error {
+	if e == nil || e.conn == nil {
+		return nil
+	}
+	return e.conn.Close()
 }
 
 func (s *SqlServerDB) GetDatabases() ([]string, error) {

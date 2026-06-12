@@ -96,6 +96,21 @@ describe('sidebarLocate', () => {
     })).toBeNull();
   });
 
+  it('keeps table-style view tabs on the views branch', () => {
+    expect(normalizeSidebarLocateObjectRequestFromTab({
+      id: 'legacy-view-tab-id',
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'GDB_APP',
+      tableName: 'V_ACCOUNT',
+      objectType: 'view',
+    })).toMatchObject({
+      tabId: 'legacy-view-tab-id',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    });
+  });
+
   it('builds locate requests from trigger and routine tabs', () => {
     expect(normalizeSidebarLocateObjectRequestFromTab({
       id: 'trigger-conn-1-main-audit.users_bi',
@@ -307,6 +322,843 @@ describe('sidebarLocate', () => {
       'conn-1-main-schema-reporting-routines',
       'conn-1-main-routine-reporting.refresh_stats',
     ]);
+  });
+
+  it('finds schema objects when tree nodes use unqualified names or different case', () => {
+    const viewTarget = resolveSidebarLocateTarget({
+      tabId: 'conn-1-main-view-reporting.active_users',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'reporting.active_users',
+      schemaName: 'reporting',
+      objectGroup: 'views',
+    }, { groupBySchema: true });
+
+    const routineTarget = resolveSidebarLocateTarget({
+      tabId: 'conn-1-main-routine-reporting.refresh_stats',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'reporting.refresh_stats',
+      schemaName: 'reporting',
+      objectGroup: 'routines',
+    }, { groupBySchema: true });
+
+    const triggerTarget = resolveSidebarLocateTarget({
+      tabId: 'conn-1-main-trigger-audit.users_bi-audit.users',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'audit.users_bi',
+      schemaName: 'audit',
+      objectGroup: 'triggers',
+    }, { groupBySchema: true });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-main',
+            dataRef: { id: 'conn-1', dbName: 'main' },
+            children: [
+              {
+                key: 'conn-1-main-schema-REPORTING',
+                children: [
+                  {
+                    key: 'conn-1-main-schema-REPORTING-views',
+                    children: [
+                      {
+                        key: 'conn-1-main-view-ACTIVE_USERS',
+                        type: 'view',
+                        dataRef: { id: 'conn-1', dbName: 'main', viewName: 'ACTIVE_USERS', schemaName: 'REPORTING' },
+                      },
+                    ],
+                  },
+                  {
+                    key: 'conn-1-main-schema-REPORTING-routines',
+                    children: [
+                      {
+                        key: 'conn-1-main-routine-REFRESH_STATS',
+                        type: 'routine',
+                        dataRef: { id: 'conn-1', dbName: 'main', routineName: 'REFRESH_STATS', schemaName: 'REPORTING' },
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                key: 'conn-1-main-schema-AUDIT',
+                children: [
+                  {
+                    key: 'conn-1-main-schema-AUDIT-triggers',
+                    children: [
+                      {
+                        key: 'conn-1-main-trigger-USERS_BI-AUDIT.USERS',
+                        type: 'db-trigger',
+                        dataRef: { id: 'conn-1', dbName: 'main', triggerName: 'USERS_BI', tableName: 'AUDIT.USERS', schemaName: 'AUDIT' },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, viewTarget)).toEqual([
+      'conn-1',
+      'conn-1-main',
+      'conn-1-main-schema-REPORTING',
+      'conn-1-main-schema-REPORTING-views',
+      'conn-1-main-view-ACTIVE_USERS',
+    ]);
+    expect(findSidebarNodePathForLocate(tree, routineTarget)).toEqual([
+      'conn-1',
+      'conn-1-main',
+      'conn-1-main-schema-REPORTING',
+      'conn-1-main-schema-REPORTING-routines',
+      'conn-1-main-routine-REFRESH_STATS',
+    ]);
+    expect(findSidebarNodePathForLocate(tree, triggerTarget)).toEqual([
+      'conn-1',
+      'conn-1-main',
+      'conn-1-main-schema-AUDIT',
+      'conn-1-main-schema-AUDIT-triggers',
+      'conn-1-main-trigger-USERS_BI-AUDIT.USERS',
+    ]);
+  });
+
+  it('finds a unique schema-qualified view when the locate request only has the view name', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'conn-1-SYSDBA-view-V_ACCOUNT',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: true });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-schema-SYSDBA',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-schema-SYSDBA-views',
+                    children: [
+                      {
+                        key: 'conn-1-SYSDBA-view-SYSDBA.V_ACCOUNT',
+                        type: 'view',
+                        dataRef: {
+                          id: 'conn-1',
+                          dbName: 'SYSDBA',
+                          viewName: 'SYSDBA.V_ACCOUNT',
+                          schemaName: 'SYSDBA',
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-schema-SYSDBA',
+      'conn-1-SYSDBA-schema-SYSDBA-views',
+      'conn-1-SYSDBA-view-SYSDBA.V_ACCOUNT',
+    ]);
+  });
+
+  it('finds a unique bare view node when metadata supplies schema separately', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-views',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-view-V_ACCOUNT',
+                    type: 'view',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'SYSDBA',
+                      viewName: 'V_ACCOUNT',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-views',
+      'conn-1-SYSDBA-view-V_ACCOUNT',
+    ]);
+  });
+
+  it('finds a bare mysql-compatible view node when the locate request keeps a different schema name', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'GDB_APP',
+      tableName: 'V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-GDB_APP',
+            dataRef: { id: 'conn-1', dbName: 'GDB_APP' },
+            children: [
+              {
+                key: 'conn-1-GDB_APP-views',
+                children: [
+                  {
+                    key: 'conn-1-GDB_APP-view-V_ACCOUNT',
+                    type: 'view',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'GDB_APP',
+                      viewName: 'V_ACCOUNT',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-GDB_APP',
+      'conn-1-GDB_APP-views',
+      'conn-1-GDB_APP-view-V_ACCOUNT',
+    ]);
+  });
+
+  it('finds a mysql-compatible view node when objectType carries the view identity', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'GDB_APP',
+      tableName: 'V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-GDB_APP',
+            dataRef: { id: 'conn-1', dbName: 'GDB_APP' },
+            children: [
+              {
+                key: 'conn-1-GDB_APP-views',
+                children: [
+                  {
+                    key: 'opaque-view-node',
+                    type: 'database-object',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'GDB_APP',
+                      tableName: 'V_ACCOUNT',
+                      objectType: 'view',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-GDB_APP',
+      'conn-1-GDB_APP-views',
+      'opaque-view-node',
+    ]);
+  });
+
+  it('falls back to a table-like node when a view is only present in the tables branch', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-tables',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-V_ACCOUNT',
+                    type: 'table',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'SYSDBA',
+                      tableName: 'V_ACCOUNT',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-tables',
+      'conn-1-SYSDBA-V_ACCOUNT',
+    ]);
+  });
+
+  it('falls back to a visual table-like node when view metadata is not present on the node', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-tables',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-V_ACCOUNT',
+                    title: 'V_ACCOUNT',
+                    type: 'table',
+                    dataRef: {},
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-tables',
+      'conn-1-SYSDBA-V_ACCOUNT',
+    ]);
+  });
+
+  it('falls back to a visual table-like node with a table-prefixed key for a view request', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-tables',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-table-V_ACCOUNT',
+                    type: 'table',
+                    dataRef: {},
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-tables',
+      'conn-1-SYSDBA-table-V_ACCOUNT',
+    ]);
+  });
+
+  it('finds a view node by title when the tree node is missing object metadata', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-views',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-view-generated-key',
+                    title: 'V_ACCOUNT',
+                    type: 'view',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'SYSDBA',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-views',
+      'conn-1-SYSDBA-view-generated-key',
+    ]);
+  });
+
+  it('finds a view node by title under the views group when node type metadata is missing', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'GDB_APP',
+      tableName: 'V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-GDB_APP',
+            dataRef: { id: 'conn-1', dbName: 'GDB_APP' },
+            children: [
+              {
+                key: 'conn-1-GDB_APP-views',
+                children: [
+                  {
+                    key: 'conn-1-GDB_APP-view-generated-key',
+                    title: 'V_ACCOUNT',
+                    dataRef: {},
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-GDB_APP',
+      'conn-1-GDB_APP-views',
+      'conn-1-GDB_APP-view-generated-key',
+    ]);
+  });
+
+  it('finds a schema-qualified view request by visual title when the node has no schema metadata', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'GDB_APP',
+      tableName: 'SYSDBA.V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-GDB_APP',
+            dataRef: { id: 'conn-1', dbName: 'GDB_APP' },
+            children: [
+              {
+                key: 'conn-1-GDB_APP-views',
+                children: [
+                  {
+                    key: 'conn-1-GDB_APP-view-generated-key',
+                    title: 'V_ACCOUNT',
+                    type: 'view',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'GDB_APP',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-GDB_APP',
+      'conn-1-GDB_APP-views',
+      'conn-1-GDB_APP-view-generated-key',
+    ]);
+  });
+
+  it('falls back from a schema-qualified view request to a bare table-like node in the same database', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'SYSDBA.V_ACCOUNT',
+      schemaName: 'SYSDBA',
+      objectGroup: 'views',
+    }, { groupBySchema: false });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-tables',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-V_ACCOUNT',
+                    type: 'table',
+                    dataRef: {
+                      id: 'conn-1',
+                      dbName: 'SYSDBA',
+                      tableName: 'V_ACCOUNT',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-tables',
+      'conn-1-SYSDBA-V_ACCOUNT',
+    ]);
+  });
+
+  it('falls back to a unique schema-qualified table-like node for an unqualified view request', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'stale-view-tab-id',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: true });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-schema-SYSDBA',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-schema-SYSDBA-tables',
+                    children: [
+                      {
+                        key: 'conn-1-SYSDBA-SYSDBA.V_ACCOUNT',
+                        type: 'table',
+                        dataRef: {
+                          id: 'conn-1',
+                          dbName: 'SYSDBA',
+                          tableName: 'SYSDBA.V_ACCOUNT',
+                          schemaName: 'SYSDBA',
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-schema-SYSDBA',
+      'conn-1-SYSDBA-schema-SYSDBA-tables',
+      'conn-1-SYSDBA-SYSDBA.V_ACCOUNT',
+    ]);
+  });
+
+  it('prefers the current database schema when an unqualified view request matches multiple schemas', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'conn-1-SYSDBA-view-V_ACCOUNT',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: true });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-schema-SYSDBA',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-schema-SYSDBA-views',
+                    children: [
+                      {
+                        key: 'conn-1-SYSDBA-view-SYSDBA.V_ACCOUNT',
+                        type: 'view',
+                        dataRef: { id: 'conn-1', dbName: 'SYSDBA', viewName: 'SYSDBA.V_ACCOUNT', schemaName: 'SYSDBA' },
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                key: 'conn-1-SYSDBA-schema-REPORT',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-schema-REPORT-views',
+                    children: [
+                      {
+                        key: 'conn-1-SYSDBA-view-REPORT.V_ACCOUNT',
+                        type: 'view',
+                        dataRef: { id: 'conn-1', dbName: 'SYSDBA', viewName: 'REPORT.V_ACCOUNT', schemaName: 'REPORT' },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-schema-SYSDBA',
+      'conn-1-SYSDBA-schema-SYSDBA-views',
+      'conn-1-SYSDBA-view-SYSDBA.V_ACCOUNT',
+    ]);
+  });
+
+  it('prefers the current database schema when bare view nodes keep schema metadata separately', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'conn-1-SYSDBA-view-V_ACCOUNT',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: true });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-schema-REPORT',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-schema-REPORT-views',
+                    children: [
+                      {
+                        key: 'conn-1-SYSDBA-view-REPORT.V_ACCOUNT',
+                        title: 'V_ACCOUNT',
+                        type: 'view',
+                        dataRef: { id: 'conn-1', dbName: 'SYSDBA', viewName: 'V_ACCOUNT', schemaName: 'REPORT' },
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                key: 'conn-1-SYSDBA-schema-SYSDBA',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-schema-SYSDBA-views',
+                    children: [
+                      {
+                        key: 'conn-1-SYSDBA-view-SYSDBA.V_ACCOUNT',
+                        title: 'V_ACCOUNT',
+                        type: 'view',
+                        dataRef: { id: 'conn-1', dbName: 'SYSDBA', viewName: 'V_ACCOUNT', schemaName: 'SYSDBA' },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toEqual([
+      'conn-1',
+      'conn-1-SYSDBA',
+      'conn-1-SYSDBA-schema-SYSDBA',
+      'conn-1-SYSDBA-schema-SYSDBA-views',
+      'conn-1-SYSDBA-view-SYSDBA.V_ACCOUNT',
+    ]);
+  });
+
+  it('does not guess a schema-qualified view when no current-schema preference resolves ambiguity', () => {
+    const target = resolveSidebarLocateTarget({
+      tabId: 'conn-1-SYSDBA-view-V_ACCOUNT',
+      connectionId: 'conn-1',
+      dbName: 'SYSDBA',
+      tableName: 'V_ACCOUNT',
+      objectGroup: 'views',
+    }, { groupBySchema: true });
+
+    const tree = [
+      {
+        key: 'conn-1',
+        children: [
+          {
+            key: 'conn-1-SYSDBA',
+            dataRef: { id: 'conn-1', dbName: 'SYSDBA' },
+            children: [
+              {
+                key: 'conn-1-SYSDBA-schema-APP',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-schema-APP-views',
+                    children: [
+                      {
+                        key: 'conn-1-SYSDBA-view-APP.V_ACCOUNT',
+                        type: 'view',
+                        dataRef: { id: 'conn-1', dbName: 'SYSDBA', viewName: 'APP.V_ACCOUNT', schemaName: 'APP' },
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                key: 'conn-1-SYSDBA-schema-REPORT',
+                children: [
+                  {
+                    key: 'conn-1-SYSDBA-schema-REPORT-views',
+                    children: [
+                      {
+                        key: 'conn-1-SYSDBA-view-REPORT.V_ACCOUNT',
+                        type: 'view',
+                        dataRef: { id: 'conn-1', dbName: 'SYSDBA', viewName: 'REPORT.V_ACCOUNT', schemaName: 'REPORT' },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    expect(findSidebarNodePathForLocate(tree, target)).toBeNull();
   });
 
   it('finds external SQL file paths from loaded tree data', () => {

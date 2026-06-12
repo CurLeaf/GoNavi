@@ -112,6 +112,17 @@ const resolveRedisDbIndex = (raw?: string): number => {
   return Number.isInteger(value) && value >= 0 && value <= 15 ? value : 0;
 };
 
+const isServiceNameBackedSyncConnection = (conn?: SavedConnection): boolean => {
+  const type = String(conn?.config?.type || '').trim().toLowerCase();
+  if (type === 'oracle') return true;
+  if (type !== 'oceanbase') return false;
+  const explicitProtocol = String((conn?.config as any)?.oceanBaseProtocol || '').trim().toLowerCase();
+  if (explicitProtocol === 'oracle') return true;
+  const params = new URLSearchParams(String(conn?.config?.connectionParams || ''));
+  const protocol = String(params.get('protocol') || params.get('tenantMode') || '').trim().toLowerCase();
+  return protocol === 'oracle';
+};
+
 const buildSqlPreview = (
   previewData: any,
   tableName: string,
@@ -253,7 +264,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
 
   const normalizeConnConfig = (conn: SavedConnection, database?: string) => (
       buildRpcConnectionConfig(conn.config, {
-          database: typeof database === 'string' ? database : (conn.config.database || ''),
+          database: typeof database === 'string' && !isServiceNameBackedSyncConnection(conn) ? database : (conn.config.database || ''),
       })
   );
 
@@ -473,6 +484,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
       const config = buildDataSyncRequest({
           sourceConfig: normalizeConnConfig(sConn, sourceDb),
           targetConfig: normalizeConnConfig(tConn, targetDb),
+          sourceDatabase: sourceDb,
+          targetDatabase: targetDb,
           selectedTables,
           sourceDatasetMode,
           sourceQuery,
@@ -528,6 +541,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
       const config = buildDataSyncRequest({
           sourceConfig: normalizeConnConfig(sConn, sourceDb),
           targetConfig: normalizeConnConfig(tConn, targetDb),
+          sourceDatabase: sourceDb,
+          targetDatabase: targetDb,
           selectedTables,
           sourceDatasetMode,
           sourceQuery,
@@ -600,6 +615,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open,
       const config = buildDataSyncRequest({
           sourceConfig: normalizeConnConfig(sConn, sourceDb),
           targetConfig: normalizeConnConfig(tConn, targetDb),
+          sourceDatabase: sourceDb,
+          targetDatabase: targetDb,
           selectedTables,
           sourceDatasetMode,
           sourceQuery,

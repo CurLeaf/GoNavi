@@ -47,7 +47,7 @@ func validateSourceQuerySyncConfig(config SyncConfig) (string, error) {
 
 func resolveTargetQueryTable(config SyncConfig, tableName string) (string, string, string, string) {
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	targetSchema, targetTable := normalizeSchemaAndTable(targetType, config.TargetConfig.Database, tableName)
+	targetSchema, targetTable := normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
 	targetQueryTable := qualifiedNameForQuery(targetType, targetSchema, targetTable, tableName)
 	return targetType, targetSchema, targetTable, targetQueryTable
 }

@@ -52,6 +52,49 @@ func TestNormalizeSchemaAndTable_KingbaseNormalizesEscapedQualifiedName(t *testi
 	}
 }
 
+func TestNormalizeSyncConnectionDatabasesKeepsOracleServiceName(t *testing.T) {
+	t.Parallel()
+
+	config := SyncConfig{
+		SourceConfig:   connection.ConnectionConfig{Type: "oracle", Database: "ORCLPDB1"},
+		SourceDatabase: "APP_SCHEMA",
+		TargetConfig:   connection.ConnectionConfig{Type: "mysql", Database: "old_target"},
+		TargetDatabase: "warehouse",
+	}
+
+	got := normalizeSyncConnectionDatabases(config)
+	if got.SourceConfig.Database != "ORCLPDB1" {
+		t.Fatalf("Oracle 连接 Service Name 不应被 schema 覆盖，got=%q", got.SourceConfig.Database)
+	}
+	if selectedSyncSourceDatabase(got) != "APP_SCHEMA" {
+		t.Fatalf("Oracle 选中 schema 应保留在 SourceDatabase，got=%q", selectedSyncSourceDatabase(got))
+	}
+	if got.TargetConfig.Database != "warehouse" {
+		t.Fatalf("非 Oracle 目标库应继续写入连接 Database，got=%q", got.TargetConfig.Database)
+	}
+}
+
+func TestNormalizeSyncConnectionDatabasesKeepsOceanBaseOracleServiceName(t *testing.T) {
+	t.Parallel()
+
+	config := SyncConfig{
+		SourceConfig: connection.ConnectionConfig{
+			Type:             "oceanbase",
+			Database:         "ORCL",
+			ConnectionParams: "protocol=oracle",
+		},
+		SourceDatabase: "APP_SCHEMA",
+	}
+
+	got := normalizeSyncConnectionDatabases(config)
+	if got.SourceConfig.Database != "ORCL" {
+		t.Fatalf("OceanBase Oracle 服务名不应被 schema 覆盖，got=%q", got.SourceConfig.Database)
+	}
+	if selectedSyncSourceDatabase(got) != "APP_SCHEMA" {
+		t.Fatalf("OceanBase Oracle 选中 schema 应保留在 SourceDatabase，got=%q", selectedSyncSourceDatabase(got))
+	}
+}
+
 func TestNormalizeMigrationDBType_KingbaseAliases(t *testing.T) {
 	t.Parallel()
 

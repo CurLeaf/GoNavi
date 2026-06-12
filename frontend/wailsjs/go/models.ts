@@ -1,5 +1,183 @@
 export namespace ai {
 	
+	export class MCPClientInstallResult {
+	    success: boolean;
+	    client?: string;
+	    message: string;
+	    configPath?: string;
+	    command?: string;
+	    args?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPClientInstallResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.success = source["success"];
+	        this.client = source["client"];
+	        this.message = source["message"];
+	        this.configPath = source["configPath"];
+	        this.command = source["command"];
+	        this.args = source["args"];
+	    }
+	}
+	export class MCPClientInstallStatus {
+	    client: string;
+	    displayName: string;
+	    installMode?: string;
+	    installed: boolean;
+	    matchesCurrent: boolean;
+	    clientDetected: boolean;
+	    clientCommand?: string;
+	    clientPath?: string;
+	    message: string;
+	    configPath?: string;
+	    command?: string;
+	    args?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPClientInstallStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.client = source["client"];
+	        this.displayName = source["displayName"];
+	        this.installMode = source["installMode"];
+	        this.installed = source["installed"];
+	        this.matchesCurrent = source["matchesCurrent"];
+	        this.clientDetected = source["clientDetected"];
+	        this.clientCommand = source["clientCommand"];
+	        this.clientPath = source["clientPath"];
+	        this.message = source["message"];
+	        this.configPath = source["configPath"];
+	        this.command = source["command"];
+	        this.args = source["args"];
+	    }
+	}
+	export class MCPHTTPServerOptions {
+	    addr?: string;
+	    path?: string;
+	    token?: string;
+	    schemaOnly: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPHTTPServerOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.addr = source["addr"];
+	        this.path = source["path"];
+	        this.token = source["token"];
+	        this.schemaOnly = source["schemaOnly"];
+	    }
+	}
+	export class MCPHTTPServerStatus {
+	    running: boolean;
+	    addr: string;
+	    path: string;
+	    url: string;
+	    schemaOnly: boolean;
+	    token?: string;
+	    authorizationHeader?: string;
+	    startedAt?: number;
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPHTTPServerStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.running = source["running"];
+	        this.addr = source["addr"];
+	        this.path = source["path"];
+	        this.url = source["url"];
+	        this.schemaOnly = source["schemaOnly"];
+	        this.token = source["token"];
+	        this.authorizationHeader = source["authorizationHeader"];
+	        this.startedAt = source["startedAt"];
+	        this.message = source["message"];
+	    }
+	}
+	export class MCPServerConfig {
+	    id: string;
+	    name: string;
+	    transport: string;
+	    command: string;
+	    args?: string[];
+	    env?: Record<string, string>;
+	    enabled: boolean;
+	    timeoutSeconds: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPServerConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.transport = source["transport"];
+	        this.command = source["command"];
+	        this.args = source["args"];
+	        this.env = source["env"];
+	        this.enabled = source["enabled"];
+	        this.timeoutSeconds = source["timeoutSeconds"];
+	    }
+	}
+	export class MCPToolCallResult {
+	    alias: string;
+	    serverId: string;
+	    serverName: string;
+	    originalName: string;
+	    title?: string;
+	    content: string;
+	    structuredContent?: any;
+	    isError: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPToolCallResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.alias = source["alias"];
+	        this.serverId = source["serverId"];
+	        this.serverName = source["serverName"];
+	        this.originalName = source["originalName"];
+	        this.title = source["title"];
+	        this.content = source["content"];
+	        this.structuredContent = source["structuredContent"];
+	        this.isError = source["isError"];
+	    }
+	}
+	export class MCPToolDescriptor {
+	    alias: string;
+	    serverId: string;
+	    serverName: string;
+	    originalName: string;
+	    title?: string;
+	    description?: string;
+	    inputSchema?: Record<string, any>;
+	
+	    static createFrom(source: any = {}) {
+	        return new MCPToolDescriptor(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.alias = source["alias"];
+	        this.serverId = source["serverId"];
+	        this.serverName = source["serverName"];
+	        this.originalName = source["originalName"];
+	        this.title = source["title"];
+	        this.description = source["description"];
+	        this.inputSchema = source["inputSchema"];
+	    }
+	}
 	export class ToolCallFunction {
 	    name: string;
 	    arguments: string;
@@ -142,6 +320,30 @@ export namespace ai {
 	        this.warningMessage = source["warningMessage"];
 	    }
 	}
+	export class SkillConfig {
+	    id: string;
+	    name: string;
+	    description?: string;
+	    systemPrompt: string;
+	    enabled: boolean;
+	    scopes?: string[];
+	    requiredTools?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	        this.systemPrompt = source["systemPrompt"];
+	        this.enabled = source["enabled"];
+	        this.scopes = source["scopes"];
+	        this.requiredTools = source["requiredTools"];
+	    }
+	}
 	export class ToolFunction {
 	    name: string;
 	    description: string;
@@ -192,6 +394,25 @@ export namespace ai {
 	}
 	
 	
+	
+	export class UserPromptSettings {
+	    global: string;
+	    database: string;
+	    jvm: string;
+	    jvmDiagnostic: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UserPromptSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.global = source["global"];
+	        this.database = source["database"];
+	        this.jvm = source["jvm"];
+	        this.jvmDiagnostic = source["jvmDiagnostic"];
+	    }
+	}
 
 }
 
@@ -687,6 +908,9 @@ export namespace connection {
 	    connectionParams?: string;
 	    timeout?: number;
 	    redisDB?: number;
+	    redisSentinelMaster?: string;
+	    redisSentinelUser?: string;
+	    redisSentinelPassword?: string;
 	    uri?: string;
 	    clickHouseProtocol?: string;
 	    oceanBaseProtocol?: string;
@@ -733,6 +957,9 @@ export namespace connection {
 	        this.connectionParams = source["connectionParams"];
 	        this.timeout = source["timeout"];
 	        this.redisDB = source["redisDB"];
+	        this.redisSentinelMaster = source["redisSentinelMaster"];
+	        this.redisSentinelUser = source["redisSentinelUser"];
+	        this.redisSentinelPassword = source["redisSentinelPassword"];
 	        this.uri = source["uri"];
 	        this.clickHouseProtocol = source["clickHouseProtocol"];
 	        this.oceanBaseProtocol = source["oceanBaseProtocol"];
@@ -806,7 +1033,10 @@ export namespace connection {
 	    message: string;
 	    data: any;
 	    fields?: string[];
+	    messages?: string[];
 	    queryId?: string;
+	    transactionId?: string;
+	    transactionPending?: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new QueryResult(source);
@@ -818,7 +1048,10 @@ export namespace connection {
 	        this.message = source["message"];
 	        this.data = source["data"];
 	        this.fields = source["fields"];
+	        this.messages = source["messages"];
 	        this.queryId = source["queryId"];
+	        this.transactionId = source["transactionId"];
+	        this.transactionPending = source["transactionPending"];
 	    }
 	}
 	
@@ -858,6 +1091,7 @@ export namespace connection {
 	    clearHttpTunnelPassword?: boolean;
 	    clearMySQLReplicaPassword?: boolean;
 	    clearMongoReplicaPassword?: boolean;
+	    clearRedisSentinelPassword?: boolean;
 	    clearOpaqueURI?: boolean;
 	    clearOpaqueDSN?: boolean;
 	
@@ -880,6 +1114,7 @@ export namespace connection {
 	        this.clearHttpTunnelPassword = source["clearHttpTunnelPassword"];
 	        this.clearMySQLReplicaPassword = source["clearMySQLReplicaPassword"];
 	        this.clearMongoReplicaPassword = source["clearMongoReplicaPassword"];
+	        this.clearRedisSentinelPassword = source["clearRedisSentinelPassword"];
 	        this.clearOpaqueURI = source["clearOpaqueURI"];
 	        this.clearOpaqueDSN = source["clearOpaqueDSN"];
 	    }
@@ -917,6 +1152,7 @@ export namespace connection {
 	    hasHttpTunnelPassword?: boolean;
 	    hasMySQLReplicaPassword?: boolean;
 	    hasMongoReplicaPassword?: boolean;
+	    hasRedisSentinelPassword?: boolean;
 	    hasOpaqueURI?: boolean;
 	    hasOpaqueDSN?: boolean;
 	
@@ -940,6 +1176,7 @@ export namespace connection {
 	        this.hasHttpTunnelPassword = source["hasHttpTunnelPassword"];
 	        this.hasMySQLReplicaPassword = source["hasMySQLReplicaPassword"];
 	        this.hasMongoReplicaPassword = source["hasMongoReplicaPassword"];
+	        this.hasRedisSentinelPassword = source["hasRedisSentinelPassword"];
 	        this.hasOpaqueURI = source["hasOpaqueURI"];
 	        this.hasOpaqueDSN = source["hasOpaqueDSN"];
 	    }
@@ -1076,6 +1313,8 @@ export namespace sync {
 	export class SyncConfig {
 	    sourceConfig: connection.ConnectionConfig;
 	    targetConfig: connection.ConnectionConfig;
+	    sourceDatabase?: string;
+	    targetDatabase?: string;
 	    tables: string[];
 	    sourceQuery?: string;
 	    content?: string;
@@ -1095,6 +1334,8 @@ export namespace sync {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.sourceConfig = this.convertValues(source["sourceConfig"], connection.ConnectionConfig);
 	        this.targetConfig = this.convertValues(source["targetConfig"], connection.ConnectionConfig);
+	        this.sourceDatabase = source["sourceDatabase"];
+	        this.targetDatabase = source["targetDatabase"];
 	        this.tables = source["tables"];
 	        this.sourceQuery = source["sourceQuery"];
 	        this.content = source["content"];

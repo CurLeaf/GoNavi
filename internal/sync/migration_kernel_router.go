@@ -434,8 +434,8 @@ func (mongoToRelationalPlanner) BuildPlan(ctx MigrationBuildContext) (SchemaMigr
 		return SchemaMigrationPlan{}, nil, nil, err
 	}
 	plan := SchemaMigrationPlan{}
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, ctx.Config.SourceConfig.Database, ctx.TableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, ctx.Config.TargetConfig.Database, ctx.TableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(ctx.Config), ctx.TableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(ctx.Config), ctx.TableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, ctx.TableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, ctx.TableName)
 	plan.PlannedAction = "当前库对已进入迁移内核规划阶段，等待 schema 推断与目标方言生成器落地"

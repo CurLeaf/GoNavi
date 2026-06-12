@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -195,5 +196,131 @@ func TestProviderConfigStoreSaveKeepsExistingSecretRef(t *testing.T) {
 	}
 	if snapshot.Providers[0].Headers["Authorization"] != "Bearer existing" {
 		t.Fatalf("expected reload to restore existing sensitive header, got %#v", snapshot.Providers[0].Headers)
+	}
+}
+
+func TestProviderConfigStoreSaveAndLoadUserPromptSettings(t *testing.T) {
+	configStore := newProviderConfigStore(t.TempDir(), failOnUseSecretStore{})
+
+	expected := ai.UserPromptSettings{
+		Global:        "所有回答先给结论。",
+		Database:      "生成 SQL 前先确认字段名。",
+		JVM:           "优先输出资源级风险判断。",
+		JVMDiagnostic: "先给诊断计划，再给命令。",
+	}
+
+	err := configStore.Save(ProviderConfigStoreSnapshot{
+		Providers:          []ai.ProviderConfig{},
+		ActiveProvider:     "",
+		SafetyLevel:        ai.PermissionReadOnly,
+		ContextLevel:       ai.ContextSchemaOnly,
+		UserPromptSettings: expected,
+	})
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+
+	snapshot, err := configStore.Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if snapshot.UserPromptSettings != expected {
+		t.Fatalf("expected user prompt settings %#v, got %#v", expected, snapshot.UserPromptSettings)
+	}
+
+	configData, err := os.ReadFile(filepath.Join(configStore.configDir, aiConfigFileName))
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	text := string(configData)
+	if !strings.Contains(text, `"userPromptSettings"`) {
+		t.Fatalf("expected config file to contain userPromptSettings, got %s", text)
+	}
+}
+
+func TestProviderConfigStoreSaveAndLoadMCPServers(t *testing.T) {
+	configStore := newProviderConfigStore(t.TempDir(), failOnUseSecretStore{})
+
+	expected := []ai.MCPServerConfig{
+		{
+			ID:             "mcp-local",
+			Name:           "本地文件助手",
+			Transport:      ai.MCPTransportStdio,
+			Command:        "node",
+			Args:           []string{"server.js", "--stdio"},
+			Env:            map[string]string{"API_KEY": "test"},
+			Enabled:        true,
+			TimeoutSeconds: 18,
+		},
+	}
+
+	err := configStore.Save(ProviderConfigStoreSnapshot{
+		Providers:      []ai.ProviderConfig{},
+		ActiveProvider: "",
+		SafetyLevel:    ai.PermissionReadOnly,
+		ContextLevel:   ai.ContextSchemaOnly,
+		MCPServers:     expected,
+	})
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+
+	snapshot, err := configStore.Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if !reflect.DeepEqual(snapshot.MCPServers, expected) {
+		t.Fatalf("expected MCP servers %#v, got %#v", expected, snapshot.MCPServers)
+	}
+
+	configData, err := os.ReadFile(filepath.Join(configStore.configDir, aiConfigFileName))
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if !strings.Contains(string(configData), `"mcpServers"`) {
+		t.Fatalf("expected config file to contain mcpServers, got %s", string(configData))
+	}
+}
+
+func TestProviderConfigStoreSaveAndLoadSkills(t *testing.T) {
+	configStore := newProviderConfigStore(t.TempDir(), failOnUseSecretStore{})
+
+	expected := []ai.SkillConfig{
+		{
+			ID:            "skill-sql-review",
+			Name:          "SQL 审查",
+			Description:   "生成 SQL 前先校验字段和风险",
+			SystemPrompt:  "先确认字段，再输出 SQL。",
+			Enabled:       true,
+			Scopes:        []string{string(ai.SkillScopeDatabase)},
+			RequiredTools: []string{"get_columns", "execute_sql"},
+		},
+	}
+
+	err := configStore.Save(ProviderConfigStoreSnapshot{
+		Providers:      []ai.ProviderConfig{},
+		ActiveProvider: "",
+		SafetyLevel:    ai.PermissionReadOnly,
+		ContextLevel:   ai.ContextSchemaOnly,
+		Skills:         expected,
+	})
+	if err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+
+	snapshot, err := configStore.Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if !reflect.DeepEqual(snapshot.Skills, expected) {
+		t.Fatalf("expected skills %#v, got %#v", expected, snapshot.Skills)
+	}
+
+	configData, err := os.ReadFile(filepath.Join(configStore.configDir, aiConfigFileName))
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if !strings.Contains(string(configData), `"skills"`) {
+		t.Fatalf("expected config file to contain skills, got %s", string(configData))
 	}
 }

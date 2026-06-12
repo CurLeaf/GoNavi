@@ -12,7 +12,106 @@ export interface SqlExecutionSelection {
 }
 
 const isWhitespace = (ch: string): boolean => (
-  ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r'
+  ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f'
+);
+
+const isSqlIdentifierStart = (ch: string): boolean => /^[A-Za-z_]$/.test(ch);
+
+const isSqlIdentifierPart = (ch: string): boolean => /^[A-Za-z0-9_$#]$/.test(ch);
+
+const skipSqlWhitespaceAndComments = (text: string, position: number): number => {
+  let index = position;
+  while (index < text.length) {
+    const ch = text[index];
+    const next = index + 1 < text.length ? text[index + 1] : '';
+    if (isWhitespace(ch)) {
+      index += 1;
+      continue;
+    }
+    if (ch === '-' && next === '-') {
+      index += 2;
+      while (index < text.length && text[index] !== '\n') index += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      index += 2;
+      while (index + 1 < text.length && !(text[index] === '*' && text[index + 1] === '/')) {
+        index += 1;
+      }
+      if (index + 1 < text.length) index += 2;
+      continue;
+    }
+    break;
+  }
+  return index;
+};
+
+const nextSqlSignificantToken = (text: string, position: number): string => {
+  const index = skipSqlWhitespaceAndComments(text, position);
+  if (index >= text.length || !isSqlIdentifierStart(text[index])) return '';
+  let end = index + 1;
+  while (end < text.length && isSqlIdentifierPart(text[end])) end += 1;
+  return text.slice(index, end).toLowerCase();
+};
+
+const nextSqlSignificantChar = (text: string, position: number): string => {
+  const index = skipSqlWhitespaceAndComments(text, position);
+  return index >= text.length ? '' : text[index];
+};
+
+const shouldEnterPlsqlBeginBlock = (text: string, tokenEnd: number): boolean => {
+  const nextChar = nextSqlSignificantChar(text, tokenEnd);
+  if (!nextChar || nextChar === ';') return false;
+  return !['transaction', 'work', 'isolation', 'read', 'write'].includes(nextSqlSignificantToken(text, tokenEnd));
+};
+
+const shouldEnterPlsqlDeclareBlock = (text: string, tokenEnd: number): boolean => Boolean(nextSqlSignificantToken(text, tokenEnd));
+
+const nextSqlSignificantTokenSpan = (text: string, position: number): { token: string; end: number } => {
+  const index = skipSqlWhitespaceAndComments(text, position);
+  if (index >= text.length || !isSqlIdentifierStart(text[index])) {
+    return { token: '', end: index };
+  }
+  let end = index + 1;
+  while (end < text.length && isSqlIdentifierPart(text[end])) end += 1;
+  return { token: text.slice(index, end).toLowerCase(), end };
+};
+
+const isCreateRoutineHeaderPrefix = (text: string): boolean => {
+  let current = nextSqlSignificantTokenSpan(text, 0);
+  if (current.token !== 'create') return false;
+
+  current = nextSqlSignificantTokenSpan(text, current.end);
+  if (current.token === 'or') {
+    current = nextSqlSignificantTokenSpan(text, current.end);
+    if (current.token !== 'replace') return false;
+    current = nextSqlSignificantTokenSpan(text, current.end);
+  }
+
+  while (['editionable', 'noneditionable'].includes(current.token)) {
+    current = nextSqlSignificantTokenSpan(text, current.end);
+  }
+
+  return current.token === 'procedure' || current.token === 'function';
+};
+
+const shouldEnterPlsqlCreateRoutineBlock = (
+  text: string,
+  statementStart: number,
+  token: string,
+  tokenEnd: number,
+): boolean => {
+  if (token !== 'is' && token !== 'as') return false;
+  const nextChar = nextSqlSignificantChar(text, tokenEnd);
+  if (!nextChar) return false;
+  if (token === 'as' && (nextChar === '$' || nextChar === "'" || nextChar === '"')) {
+    return false;
+  }
+  return isCreateRoutineHeaderPrefix(text.slice(statementStart, tokenEnd - token.length));
+};
+
+const isPlsqlControlEnd = (text: string, tokenEnd: number): boolean => (
+  ['if', 'loop', 'case'].includes(nextSqlSignificantToken(text, tokenEnd))
 );
 
 const trimStatementRange = (sql: string, start: number, end: number): SqlStatementRange | null => {
@@ -49,6 +148,9 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
   let inLineComment = false;
   let inBlockComment = false;
   let dollarTag: string | null = null;
+  let plsqlDepth = 0;
+  let plsqlDeclareBeginSkips = 0;
+  let justClosedPLSQLBlock = false;
 
   const push = (end: number) => {
     const range = trimStatementRange(text, statementStart, end);
@@ -134,9 +236,45 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
       continue;
     }
 
+    if (!inSingle && !inDouble && !inBacktick && !dollarTag && isSqlIdentifierStart(ch)) {
+      let tokenEnd = index + 1;
+      while (tokenEnd < text.length && isSqlIdentifierPart(text[tokenEnd])) {
+        tokenEnd++;
+      }
+      const token = text.slice(index, tokenEnd).toLowerCase();
+      if (token === 'begin' && plsqlDeclareBeginSkips > 0) {
+        plsqlDeclareBeginSkips--;
+        justClosedPLSQLBlock = false;
+      } else if (token === 'begin' && shouldEnterPlsqlBeginBlock(text, tokenEnd)) {
+        plsqlDepth++;
+        justClosedPLSQLBlock = false;
+      } else if (token === 'declare' && shouldEnterPlsqlDeclareBlock(text, tokenEnd)) {
+        plsqlDepth++;
+        plsqlDeclareBeginSkips++;
+        justClosedPLSQLBlock = false;
+      } else if (plsqlDepth === 0 && shouldEnterPlsqlCreateRoutineBlock(text, statementStart, token, tokenEnd)) {
+        plsqlDepth++;
+        plsqlDeclareBeginSkips++;
+        justClosedPLSQLBlock = false;
+      } else if (token === 'end' && plsqlDepth > 0 && !isPlsqlControlEnd(text, tokenEnd)) {
+        plsqlDepth--;
+        if (plsqlDeclareBeginSkips > plsqlDepth) {
+          plsqlDeclareBeginSkips = plsqlDepth;
+        }
+        justClosedPLSQLBlock = plsqlDepth === 0;
+      }
+      index = tokenEnd - 1;
+      continue;
+    }
+
     if (!inSingle && !inDouble && !inBacktick && (ch === ';' || ch === '；')) {
-      push(index);
+      if (plsqlDepth > 0) {
+        continue;
+      }
+      push(justClosedPLSQLBlock ? index + 1 : index);
       statementStart = index + 1;
+      justClosedPLSQLBlock = false;
+      continue;
     }
   }
 

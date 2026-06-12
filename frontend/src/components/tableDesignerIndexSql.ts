@@ -23,7 +23,7 @@ export interface BuildIndexCreateSqlResult {
   severity?: 'error' | 'warning';
 }
 
-const isNonRelationalDialect = (dbType: string): boolean => dbType === 'redis' || dbType === 'mongodb';
+const isNonRelationalDialect = (dbType: string): boolean => dbType === 'redis' || dbType === 'mongodb' || dbType === 'elasticsearch';
 
 export const buildIndexCreateSqlPreview = (input: BuildIndexCreateSqlInput): BuildIndexCreateSqlResult => {
   const dbType = input.dbType;

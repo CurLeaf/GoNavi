@@ -1,10 +1,15 @@
 package provider
 
 import (
-	"GoNavi-Wails/internal/ai"
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"GoNavi-Wails/internal/ai"
 )
 
 func TestNormalizeOpenAICompatibleBaseURL(t *testing.T) {
@@ -165,6 +170,207 @@ func TestOpenAIProvider_DefaultMaxTokens(t *testing.T) {
 	op := p.(*OpenAIProvider)
 	if op.config.MaxTokens != 4096 {
 		t.Fatalf("expected default max tokens 4096, got %d", op.config.MaxTokens)
+	}
+}
+
+func TestOpenAIProviderChatRetriesWithoutImagesOnHTTP400(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body failed: %v", err)
+		}
+		defer r.Body.Close()
+
+		if strings.Contains(string(body), `"image_url"`) {
+			http.Error(w, `{"error":{"message":"Model do not support image input"}}`, http.StatusBadRequest)
+			return
+		}
+		if !strings.Contains(string(body), omittedImageNotice) {
+			t.Fatalf("expected retry body to explain omitted image, got %s", body)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	providerInstance, err := NewOpenAIProvider(ai.ProviderConfig{
+		Type:        "openai",
+		Name:        "test-openai",
+		APIKey:      "sk-test",
+		BaseURL:     server.URL,
+		Model:       "custom-text-model",
+		MaxTokens:   64,
+		Temperature: 0.1,
+	})
+	if err != nil {
+		t.Fatalf("create provider failed: %v", err)
+	}
+
+	resp, err := providerInstance.Chat(context.Background(), ai.ChatRequest{
+		Messages: []ai.Message{{
+			Role:    "user",
+			Content: "请描述这张图片",
+			Images:  []string{"data:image/png;base64,abc"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("expected chat image fallback to succeed, got %v", err)
+	}
+	if resp.Content != "pong" {
+		t.Fatalf("expected fallback content %q, got %q", "pong", resp.Content)
+	}
+	if requestCount != 2 {
+		t.Fatalf("expected 2 requests (with image then fallback), got %d", requestCount)
+	}
+}
+
+func TestOpenAIProviderChatOmitsImagesUpfrontForMiniMaxTextModel(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body failed: %v", err)
+		}
+		defer r.Body.Close()
+
+		bodyText := string(body)
+		if strings.Contains(bodyText, `"image_url"`) {
+			t.Fatalf("expected MiniMax text request to omit image_url, got %s", body)
+		}
+		if !strings.Contains(bodyText, omittedImageNotice) {
+			t.Fatalf("expected request body to explain omitted image, got %s", body)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	providerInstance, err := NewOpenAIProvider(ai.ProviderConfig{
+		Type:        "openai",
+		Name:        "test-openai",
+		APIKey:      "sk-test",
+		BaseURL:     server.URL,
+		Model:       "MiniMax-M2.7-highspeed",
+		MaxTokens:   64,
+		Temperature: 0.1,
+	})
+	if err != nil {
+		t.Fatalf("create provider failed: %v", err)
+	}
+
+	resp, err := providerInstance.Chat(context.Background(), ai.ChatRequest{
+		Messages: []ai.Message{{
+			Role:    "user",
+			Content: "请描述这张图片",
+			Images:  []string{"data:image/png;base64,abc"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("expected chat to succeed without sending image, got %v", err)
+	}
+	if resp.Content != "pong" {
+		t.Fatalf("expected content %q, got %q", "pong", resp.Content)
+	}
+	if requestCount != 1 {
+		t.Fatalf("expected 1 request without image retry, got %d", requestCount)
+	}
+}
+
+func TestPrepareOpenAIRequestMessagesKeepsImagesForVisionModel(t *testing.T) {
+	got := prepareOpenAIRequestMessages([]ai.Message{{
+		Role:    "user",
+		Content: "请描述图片",
+		Images:  []string{"data:image/png;base64,abc"},
+	}}, "gpt-5.4", "https://sub.syngnat.top/v1")
+
+	if len(got) != 1 || len(got[0].Images) != 1 {
+		t.Fatalf("expected vision-capable model to keep images, got %#v", got)
+	}
+}
+
+func TestOpenAIProviderChatStreamRetriesWithoutToolsThenImagesOnHTTP400(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body failed: %v", err)
+		}
+		defer r.Body.Close()
+
+		bodyText := string(body)
+		if strings.Contains(bodyText, `"tools"`) {
+			http.Error(w, `{"error":{"message":"A parameter specified in the request is not valid"}}`, http.StatusBadRequest)
+			return
+		}
+		if strings.Contains(bodyText, `"image_url"`) {
+			http.Error(w, `{"error":{"message":"A parameter specified in the request is not valid"}}`, http.StatusBadRequest)
+			return
+		}
+		if !strings.Contains(bodyText, omittedImageNotice) {
+			t.Fatalf("expected retry body to explain omitted image, got %s", body)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(strings.Join([]string{
+			`data: {"choices":[{"delta":{"content":"pong"},"finish_reason":null}]}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n")))
+	}))
+	defer server.Close()
+
+	providerInstance, err := NewOpenAIProvider(ai.ProviderConfig{
+		Type:        "openai",
+		Name:        "test-openai",
+		APIKey:      "sk-test",
+		BaseURL:     server.URL,
+		Model:       "custom-text-model",
+		MaxTokens:   64,
+		Temperature: 0.1,
+	})
+	if err != nil {
+		t.Fatalf("create provider failed: %v", err)
+	}
+
+	var chunks []ai.StreamChunk
+	err = providerInstance.ChatStream(context.Background(), ai.ChatRequest{
+		Messages: []ai.Message{{
+			Role:    "user",
+			Content: "请描述这张图片",
+			Images:  []string{"data:image/png;base64,abc"},
+		}},
+		Tools: []ai.Tool{{
+			Type: "function",
+			Function: ai.ToolFunction{
+				Name:        "inspect_ai_last_render_error",
+				Description: "test tool",
+				Parameters:  map[string]interface{}{"type": "object"},
+			},
+		}},
+	}, func(chunk ai.StreamChunk) {
+		chunks = append(chunks, chunk)
+	})
+	if err != nil {
+		t.Fatalf("expected stream fallback to succeed, got %v", err)
+	}
+	if requestCount != 3 {
+		t.Fatalf("expected 3 requests (with tools, without tools, without images), got %d", requestCount)
+	}
+	if len(chunks) < 2 {
+		t.Fatalf("expected content and done chunks, got %#v", chunks)
+	}
+	if chunks[0].Content != "pong" {
+		t.Fatalf("expected first chunk content %q, got %#v", "pong", chunks[0])
+	}
+	if !chunks[len(chunks)-1].Done {
+		t.Fatalf("expected final done chunk, got %#v", chunks[len(chunks)-1])
 	}
 }
 

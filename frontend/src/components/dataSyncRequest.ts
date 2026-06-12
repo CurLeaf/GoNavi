@@ -6,6 +6,8 @@ type TargetTableStrategy = 'existing_only' | 'auto_create_if_missing' | 'smart';
 type BuildDataSyncRequestParams = {
   sourceConfig: any;
   targetConfig: any;
+  sourceDatabase?: string;
+  targetDatabase?: string;
   selectedTables: string[];
   sourceDatasetMode: SourceDatasetMode;
   sourceQuery: string;
@@ -54,6 +56,8 @@ export const validateDataSyncSelection = ({
 export const buildDataSyncRequest = ({
   sourceConfig,
   targetConfig,
+  sourceDatabase,
+  targetDatabase,
   selectedTables,
   sourceDatasetMode,
   sourceQuery,
@@ -71,6 +75,8 @@ export const buildDataSyncRequest = ({
   return {
     sourceConfig,
     targetConfig,
+    sourceDatabase: String(sourceDatabase || '').trim(),
+    targetDatabase: String(targetDatabase || '').trim(),
     tables: selectedTables,
     sourceQuery: isQueryMode ? String(sourceQuery || '').trim() : undefined,
     content: isQueryMode ? 'data' : syncContent,

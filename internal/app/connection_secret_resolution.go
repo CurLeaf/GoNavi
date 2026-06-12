@@ -59,6 +59,7 @@ func connectionConfigCarriesInlineSecrets(config connection.ConnectionConfig) bo
 		strings.TrimSpace(config.HTTPTunnel.Password) != "" ||
 		strings.TrimSpace(config.MySQLReplicaPassword) != "" ||
 		strings.TrimSpace(config.MongoReplicaPassword) != "" ||
+		strings.TrimSpace(config.RedisSentinelPassword) != "" ||
 		strings.TrimSpace(config.URI) != "" ||
 		strings.TrimSpace(config.DSN) != ""
 }
@@ -82,6 +83,9 @@ func mergeInlineConnectionSecrets(base connection.ConnectionConfig, inline conne
 	}
 	if strings.TrimSpace(inline.MongoReplicaPassword) != "" {
 		merged.MongoReplicaPassword = inline.MongoReplicaPassword
+	}
+	if strings.TrimSpace(inline.RedisSentinelPassword) != "" {
+		merged.RedisSentinelPassword = inline.RedisSentinelPassword
 	}
 	if strings.TrimSpace(inline.URI) != "" {
 		merged.URI = inline.URI
@@ -143,6 +147,9 @@ func mergeConnectionSecretBundleIntoConfig(config connection.ConnectionConfig, b
 	}
 	if strings.TrimSpace(merged.MongoReplicaPassword) == "" {
 		merged.MongoReplicaPassword = bundle.MongoReplicaPassword
+	}
+	if strings.TrimSpace(merged.RedisSentinelPassword) == "" {
+		merged.RedisSentinelPassword = bundle.RedisSentinelPassword
 	}
 	if strings.TrimSpace(merged.URI) == "" {
 		merged.URI = bundle.OpaqueURI

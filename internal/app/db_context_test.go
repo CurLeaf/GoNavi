@@ -62,6 +62,132 @@ func TestNormalizeSchemaAndTable_KingbaseNormalizesEscapedQualifiedName(t *testi
 	}
 }
 
+func TestNormalizeSchemaAndTable_KingbasePureTableUsesCurrentSearchPath(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "kingbase",
+	}, "demo_db", "users")
+
+	if schema != "" || table != "users" {
+		t.Fatalf("expected kingbase pure table to use current search_path, got %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeSchemaAndTable_PGLikePureTableKeepsPublicFallback(t *testing.T) {
+	t.Parallel()
+
+	for _, dbType := range []string{"postgres", "highgo", "vastbase", "opengauss"} {
+		t.Run(dbType, func(t *testing.T) {
+			t.Parallel()
+
+			schema, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+				Type: dbType,
+			}, "demo_db", "users")
+
+			if schema != "public" || table != "users" {
+				t.Fatalf("expected %s pure table to keep public fallback, got %q.%q", dbType, schema, table)
+			}
+		})
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_PGLikePureTableUsesSearchPath(t *testing.T) {
+	t.Parallel()
+
+	for _, dbType := range []string{"postgres", "highgo", "vastbase", "opengauss", "kingbase"} {
+		t.Run(dbType, func(t *testing.T) {
+			t.Parallel()
+
+			schema, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+				Type: dbType,
+			}, "demo_db", "users")
+
+			if schema != "" || table != "users" {
+				t.Fatalf("expected %s metadata pure table to use search_path, got %q.%q", dbType, schema, table)
+			}
+		})
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_PGLikeQualifiedTableKeepsSchema(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "postgres",
+	}, "demo_db", `"audit.schema"."order.items"`)
+
+	if schema != "audit.schema" || table != "order.items" {
+		t.Fatalf("expected metadata qualified table to keep schema/table, got %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_PGLikeDottedUnquotedTableKeepsFallback(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "postgres",
+	}, "demo_db", "audit.users")
+
+	if schema != "audit" || table != "users" {
+		t.Fatalf("expected metadata dotted table to keep explicit schema, got %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_PGLikeQuotedDottedTableUsesSearchPath(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "postgres",
+	}, "demo_db", `"order.items"`)
+
+	if schema != "" || table != "order.items" {
+		t.Fatalf("expected quoted dotted metadata table to use search_path, got %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_NonPGLikeKeepsNormalBehavior(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "mysql",
+	}, "demo_db", "users")
+
+	if schema != "demo_db" || table != "users" {
+		t.Fatalf("expected mysql metadata to keep db/table behavior, got %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeSchemaAndTable_PGLikePureTableStillSplitsKingbaseSearchPathOnlyInMetadata(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "kingbase",
+	}, "demo_db", "users")
+
+	if schema != "" || table != "users" {
+		t.Fatalf("expected kingbase normal path to keep existing search_path behavior, got %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_PGLikePreservesNormalFallbackForQuotedQualifiedTable(t *testing.T) {
+	t.Parallel()
+
+	for _, dbType := range []string{"highgo", "vastbase", "opengauss"} {
+		t.Run(dbType, func(t *testing.T) {
+			t.Parallel()
+
+			schema, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+				Type: dbType,
+			}, "demo_db", `"audit"."users"`)
+
+			if schema != "audit" || table != "users" {
+				t.Fatalf("expected %s metadata qualified table to keep schema, got %q.%q", dbType, schema, table)
+			}
+		})
+	}
+}
+
 func TestNormalizeRunConfig_OceanBaseOracleKeepsServiceName(t *testing.T) {
 	t.Parallel()
 
@@ -103,6 +229,19 @@ func TestNormalizeRunConfig_IRISUsesNamespaceFromTree(t *testing.T) {
 	}
 }
 
+func TestNormalizeRunConfig_RedisAllowsDatabaseIndexAboveDefault(t *testing.T) {
+	t.Parallel()
+
+	runConfig := normalizeRunConfig(connection.ConnectionConfig{
+		Type:    "redis",
+		RedisDB: 0,
+	}, "31")
+
+	if runConfig.Database != "31" || runConfig.RedisDB != 31 {
+		t.Fatalf("expected Redis db31 from tree, got database=%q redisDB=%d", runConfig.Database, runConfig.RedisDB)
+	}
+}
+
 func TestNormalizeSchemaAndTable_IRISDoesNotTreatNamespaceAsSchema(t *testing.T) {
 	t.Parallel()
 
@@ -137,6 +276,21 @@ func TestNormalizeSchemaAndTable_OceanBaseOracleUsesSchemaFromDatabaseTree(t *te
 
 	if schema != "SYS" || table != "ORDERS" {
 		t.Fatalf("expected OceanBase Oracle schema/table SYS.ORDERS, got %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeSchemaAndTable_DuckDBPreservesQuotedQualifiedName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "duckdb",
+	}, `"analytics.catalog"."main.schema"`, `"daily.events"."2026.06"`)
+
+	if schemaOrDb != `"analytics.catalog"."main.schema"` {
+		t.Fatalf("expected duckdb dbName/catalog path preserved, got %q", schemaOrDb)
+	}
+	if table != `"daily.events"."2026.06"` {
+		t.Fatalf("expected duckdb qualified table preserved, got %q", table)
 	}
 }
 

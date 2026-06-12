@@ -34,6 +34,7 @@ type TableDiffPreview struct {
 }
 
 func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (TableDiffPreview, error) {
+	config = normalizeSyncConnectionDatabases(config)
 	if limit <= 0 {
 		limit = 200
 	}

@@ -6,6 +6,14 @@ const appSource = readFileSync(
   fileURLToPath(new globalThis.URL('./App.tsx', import.meta.url)),
   'utf8',
 );
+const appCss = readFileSync(
+  fileURLToPath(new globalThis.URL('./App.css', import.meta.url)),
+  'utf8',
+);
+const linuxCJKFontBannerSource = readFileSync(
+  fileURLToPath(new globalThis.URL('./components/LinuxCJKFontBanner.tsx', import.meta.url)),
+  'utf8',
+);
 
 const getGlobalShortcutCaseBlock = (action: string) => {
   const caseToken = `case '${action}':`;
@@ -112,6 +120,10 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;');
   });
 
+  it('keeps legacy sidebar resize bounds aligned with the v2 sider CSS limits', () => {
+    expect(appCss).toMatch(/body\[data-ui-version="legacy"\]\s+\.ant-layout-sider\s*\{[^}]*min-width:\s*232px\s*!important;[^}]*max-width:\s*420px\s*!important;/s);
+  });
+
   it('keeps connection modal warm-mounted while leaving the other heavyweight modals conditional', () => {
     expect(appSource).toContain('const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);');
     expect(appSource).toContain('{isConnectionModalMounted && (');
@@ -188,7 +200,22 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('const shouldResetWebViewZoom = shouldResetWebViewZoomForScaleFix(reason, hasViewportScaleDrift);');
     expect(appSource).toContain('if (shouldResetWebViewZoom && !isMaximised)');
     expect(appSource).toContain('const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();');
+    expect(appSource).toContain('if (!shouldApplyWindowsScaleFix(reason, hasViewportScaleDrift))');
+    expect(appSource).toContain('const nudgedWidth = getWindowsScaleFixNudgedWidth(width);');
+    expect(appSource).toContain('WindowSetSize(nudgedWidth, height);');
     expect(appSource).toContain('该异常不一定表现为 viewport ratio drift');
+  });
+
+  it('captures window state on startup and lifecycle events instead of waiting only for the polling interval', () => {
+    expect(appSource).toContain('const scheduleWindowStateSave = (delayMs = 120) => {');
+    expect(appSource).toContain('if (hydrated) {');
+    expect(appSource).toContain('scheduleWindowStateSave(320);');
+    expect(appSource).toContain('const unsubscribeHydration = useStore.persist.onFinishHydration(() => {');
+    expect(appSource).toContain("window.addEventListener('resize', handleWindowRuntimeChange);");
+    expect(appSource).toContain("window.addEventListener('focus', handleWindowRuntimeChange);");
+    expect(appSource).toContain("window.addEventListener('pageshow', handleWindowRuntimeChange);");
+    expect(appSource).toContain("window.addEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });");
+    expect(appSource).toContain("window.addEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });");
   });
 
   it('keeps titlebar double-click on maximise while shortcuts may enter macOS fullscreen', () => {
@@ -202,6 +229,12 @@ describe('tool center menu entries', () => {
   it('captures global shortcuts before Monaco/editor defaults consume them', () => {
     expect(appSource).toContain("window.addEventListener('keydown', handleGlobalShortcut, true);");
     expect(appSource).toContain("window.removeEventListener('keydown', handleGlobalShortcut, true);");
+  });
+
+  it('skips the native mac titlebar bridge when the current runtime does not expose it', () => {
+    expect(appSource).toContain("const backendApp = (window as any).go?.app?.App;");
+    expect(appSource).toContain("if (typeof backendApp?.SetMacNativeWindowControls !== 'function') {");
+    expect(appSource).toContain('void safeWindowRuntimeCall(() => SetMacNativeWindowControls(useNativeMacWindowControls), undefined);');
   });
 
   it('listens for command search query-tab events and routes them through handleNewQuery', () => {
@@ -232,6 +265,11 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies)');
     expect(appSource).toContain('ListInstalledFontFamilies()');
     expect(appSource).toContain('const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);');
+    expect(appSource).toContain("import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';");
+    expect(appSource).toContain('<LinuxCJKFontBanner');
+    expect(linuxCJKFontBannerSource).toContain('data-gonavi-linux-cjk-font-banner="true"');
+    expect(linuxCJKFontBannerSource).toContain('Linux CJK fonts missing / Ubuntu 中文字体缺失');
+    expect(appSource).toContain('setIsLinuxCJKFontBannerDismissed(true)');
     expect(appSource).toContain('matchFontFamilyOption');
     expect(appSource).toContain('showSearch');
     expect(appSource).toContain('const dataTableFontSizeFollowsGlobal = appearance.dataTableFontSizeFollowGlobal !== false;');

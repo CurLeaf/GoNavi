@@ -20,14 +20,15 @@ const (
 )
 
 type connectionSecretBundle struct {
-	Password             string `json:"password,omitempty"`
-	SSHPassword          string `json:"sshPassword,omitempty"`
-	ProxyPassword        string `json:"proxyPassword,omitempty"`
-	HTTPTunnelPassword   string `json:"httpTunnelPassword,omitempty"`
-	MySQLReplicaPassword string `json:"mysqlReplicaPassword,omitempty"`
-	MongoReplicaPassword string `json:"mongoReplicaPassword,omitempty"`
-	OpaqueURI            string `json:"opaqueURI,omitempty"`
-	OpaqueDSN            string `json:"opaqueDSN,omitempty"`
+	Password              string `json:"password,omitempty"`
+	SSHPassword           string `json:"sshPassword,omitempty"`
+	ProxyPassword         string `json:"proxyPassword,omitempty"`
+	HTTPTunnelPassword    string `json:"httpTunnelPassword,omitempty"`
+	MySQLReplicaPassword  string `json:"mysqlReplicaPassword,omitempty"`
+	MongoReplicaPassword  string `json:"mongoReplicaPassword,omitempty"`
+	RedisSentinelPassword string `json:"redisSentinelPassword,omitempty"`
+	OpaqueURI             string `json:"opaqueURI,omitempty"`
+	OpaqueDSN             string `json:"opaqueDSN,omitempty"`
 }
 
 type savedConnectionsFile struct {
@@ -60,6 +61,7 @@ func (b connectionSecretBundle) hasAny() bool {
 		strings.TrimSpace(b.HTTPTunnelPassword) != "" ||
 		strings.TrimSpace(b.MySQLReplicaPassword) != "" ||
 		strings.TrimSpace(b.MongoReplicaPassword) != "" ||
+		strings.TrimSpace(b.RedisSentinelPassword) != "" ||
 		strings.TrimSpace(b.OpaqueURI) != "" ||
 		strings.TrimSpace(b.OpaqueDSN) != ""
 }
@@ -83,6 +85,9 @@ func mergeConnectionSecretBundles(base, overlay connectionSecretBundle) connecti
 	}
 	if strings.TrimSpace(overlay.MongoReplicaPassword) != "" {
 		merged.MongoReplicaPassword = overlay.MongoReplicaPassword
+	}
+	if strings.TrimSpace(overlay.RedisSentinelPassword) != "" {
+		merged.RedisSentinelPassword = overlay.RedisSentinelPassword
 	}
 	if strings.TrimSpace(overlay.OpaqueURI) != "" {
 		merged.OpaqueURI = overlay.OpaqueURI
@@ -112,6 +117,9 @@ func applyConnectionSecretClears(bundle connectionSecretBundle, input connection
 	}
 	if input.ClearMongoReplicaPassword {
 		cleared.MongoReplicaPassword = ""
+	}
+	if input.ClearRedisSentinelPassword {
+		cleared.RedisSentinelPassword = ""
 	}
 	if input.ClearOpaqueURI {
 		cleared.OpaqueURI = ""
@@ -154,21 +162,22 @@ func splitConnectionSecrets(input connection.SavedConnectionInput) (connection.S
 	meta = stripConnectionSecretFields(meta)
 
 	view := connection.SavedConnectionView{
-		ID:                      id,
-		Name:                    strings.TrimSpace(input.Name),
-		Config:                  meta,
-		IncludeDatabases:        cloneStringSlice(input.IncludeDatabases),
-		IncludeRedisDatabases:   cloneIntSlice(input.IncludeRedisDatabases),
-		IconType:                strings.TrimSpace(input.IconType),
-		IconColor:               strings.TrimSpace(input.IconColor),
-		HasPrimaryPassword:      strings.TrimSpace(bundle.Password) != "",
-		HasSSHPassword:          strings.TrimSpace(bundle.SSHPassword) != "",
-		HasProxyPassword:        strings.TrimSpace(bundle.ProxyPassword) != "",
-		HasHTTPTunnelPassword:   strings.TrimSpace(bundle.HTTPTunnelPassword) != "",
-		HasMySQLReplicaPassword: strings.TrimSpace(bundle.MySQLReplicaPassword) != "",
-		HasMongoReplicaPassword: strings.TrimSpace(bundle.MongoReplicaPassword) != "",
-		HasOpaqueURI:            strings.TrimSpace(bundle.OpaqueURI) != "",
-		HasOpaqueDSN:            strings.TrimSpace(bundle.OpaqueDSN) != "",
+		ID:                       id,
+		Name:                     strings.TrimSpace(input.Name),
+		Config:                   meta,
+		IncludeDatabases:         cloneStringSlice(input.IncludeDatabases),
+		IncludeRedisDatabases:    cloneIntSlice(input.IncludeRedisDatabases),
+		IconType:                 strings.TrimSpace(input.IconType),
+		IconColor:                strings.TrimSpace(input.IconColor),
+		HasPrimaryPassword:       strings.TrimSpace(bundle.Password) != "",
+		HasSSHPassword:           strings.TrimSpace(bundle.SSHPassword) != "",
+		HasProxyPassword:         strings.TrimSpace(bundle.ProxyPassword) != "",
+		HasHTTPTunnelPassword:    strings.TrimSpace(bundle.HTTPTunnelPassword) != "",
+		HasMySQLReplicaPassword:  strings.TrimSpace(bundle.MySQLReplicaPassword) != "",
+		HasMongoReplicaPassword:  strings.TrimSpace(bundle.MongoReplicaPassword) != "",
+		HasRedisSentinelPassword: strings.TrimSpace(bundle.RedisSentinelPassword) != "",
+		HasOpaqueURI:             strings.TrimSpace(bundle.OpaqueURI) != "",
+		HasOpaqueDSN:             strings.TrimSpace(bundle.OpaqueDSN) != "",
 	}
 	return view, bundle
 }
@@ -358,7 +367,7 @@ func (r *savedConnectionRepository) loadSecretBundleFromStore(view connection.Sa
 
 func savedConnectionViewHasSecrets(view connection.SavedConnectionView) bool {
 	return view.HasPrimaryPassword || view.HasSSHPassword || view.HasProxyPassword || view.HasHTTPTunnelPassword ||
-		view.HasMySQLReplicaPassword || view.HasMongoReplicaPassword || view.HasOpaqueURI || view.HasOpaqueDSN
+		view.HasMySQLReplicaPassword || view.HasMongoReplicaPassword || view.HasRedisSentinelPassword || view.HasOpaqueURI || view.HasOpaqueDSN
 }
 
 func applyConnectionBundleFlags(view *connection.SavedConnectionView, bundle connectionSecretBundle) {
@@ -368,6 +377,7 @@ func applyConnectionBundleFlags(view *connection.SavedConnectionView, bundle con
 	view.HasHTTPTunnelPassword = strings.TrimSpace(bundle.HTTPTunnelPassword) != ""
 	view.HasMySQLReplicaPassword = strings.TrimSpace(bundle.MySQLReplicaPassword) != ""
 	view.HasMongoReplicaPassword = strings.TrimSpace(bundle.MongoReplicaPassword) != ""
+	view.HasRedisSentinelPassword = strings.TrimSpace(bundle.RedisSentinelPassword) != ""
 	view.HasOpaqueURI = strings.TrimSpace(bundle.OpaqueURI) != ""
 	view.HasOpaqueDSN = strings.TrimSpace(bundle.OpaqueDSN) != ""
 }

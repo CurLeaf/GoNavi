@@ -88,6 +88,13 @@ describe('connectionExport', () => {
     ]))).toBe('legacy-json');
   });
 
+  it('detects Navicat NCX xml exports', () => {
+    expect(detectConnectionImportKind(`<?xml version="1.0" encoding="UTF-8"?>
+<Connections>
+  <Connection ConnType="MYSQL" ConnectionName="Local MySQL" Host="127.0.0.1" Port="3306" UserName="root" Password="ABCD" SavePassword="true" />
+</Connections>`)).toBe('navicat-ncx');
+  });
+
   it('returns invalid for malformed or unsupported content', () => {
     expect(detectConnectionImportKind('{not-json}')).toBe('invalid');
     expect(detectConnectionImportKind(JSON.stringify({

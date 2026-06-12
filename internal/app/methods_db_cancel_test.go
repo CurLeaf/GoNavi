@@ -147,3 +147,26 @@ func TestDBQueryWithCancel_QueryIDPropagation(t *testing.T) {
 		t.Fatalf("Expected QueryID 'test-query-id' in result, got: %s", result.QueryID)
 	}
 }
+
+func TestNewQueryExecutionContext_UsesTimeoutForNetworkDatabases(t *testing.T) {
+	ctx, cancel := newQueryExecutionContext(connection.ConnectionConfig{Type: "mysql", Timeout: 7})
+	defer cancel()
+
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("expected network database query context to carry a deadline")
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 || remaining > 8*time.Second {
+		t.Fatalf("expected deadline around 7s, got remaining=%s", remaining)
+	}
+}
+
+func TestNewQueryExecutionContext_DoesNotApplyConnectTimeoutToDuckDBQueries(t *testing.T) {
+	ctx, cancel := newQueryExecutionContext(connection.ConnectionConfig{Type: "duckdb", Timeout: 1})
+	defer cancel()
+
+	if _, ok := ctx.Deadline(); ok {
+		t.Fatal("expected DuckDB query context to avoid connection-timeout deadline")
+	}
+}

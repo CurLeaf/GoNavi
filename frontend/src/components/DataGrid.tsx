@@ -129,6 +129,7 @@ import DataGridPreviewPanel from './DataGridPreviewPanel';
 import { DataGridJsonView, DataGridTextView } from './DataGridRecordViews';
 import { DataGridV2DdlSideWorkspace, DataGridV2DdlView } from './DataGridV2DdlWorkspace';
 import { DataGridV2ErView, DataGridV2FieldsView } from './DataGridV2MetadataViews';
+import TableDesigner from './TableDesigner';
 import { useDataGridFilters } from './useDataGridFilters';
 import { useDataGridDdlView } from './useDataGridDdlView';
 import { useDataGridModalEditors } from './useDataGridModalEditors';
@@ -188,6 +189,12 @@ const CELL_KEY_SEP = '\u0001';
 const CELL_SELECTION_DRAG_THRESHOLD_PX = 4;
 const DATE_TIME_CACHE_LIMIT = 2000;
 const TABLE_CELL_PREVIEW_MAX_CHARS = 240;
+const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = [
+    { value: 3000, label: '3 秒' },
+    { value: 5000, label: '5 秒' },
+    { value: 10000, label: '10 秒' },
+    { value: 30000, label: '30 秒' },
+];
 const DATA_GRID_DISPLAY_RENDER_VERSION = Symbol('DATA_GRID_DISPLAY_RENDER_VERSION');
 const DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION = Symbol('DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION');
 const DEFAULT_GRID_MONO_FONT_FAMILY = '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
@@ -770,6 +777,7 @@ interface EditableCellProps {
   handleSave: (record: Item) => void;
   focusCell?: (record: Item, dataIndex: string, title: React.ReactNode) => void;
   columnType?: string;
+  dbType?: string;
   inputCellPadding?: React.CSSProperties;
   as?: any;
   modifiedColumns?: Record<string, Set<string>>;
@@ -819,6 +827,7 @@ const areEditableCellPropsEqual = (prevProps: EditableCellProps, nextProps: Edit
   if (prevProps.dataIndex !== nextProps.dataIndex) return false;
   if (prevProps.title !== nextProps.title) return false;
   if (prevProps.columnType !== nextProps.columnType) return false;
+  if (prevProps.dbType !== nextProps.dbType) return false;
   if (prevProps.darkMode !== nextProps.darkMode) return false;
   if (prevProps.as !== nextProps.as) return false;
   if (prevProps.handleSave !== nextProps.handleSave) return false;
@@ -856,6 +865,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   handleSave,
   focusCell,
   columnType,
+  dbType,
   inputCellPadding,
   as: Component = 'td',
   modifiedColumns,
@@ -943,7 +953,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 
   let childNode = children;
 
-  const pickerType = getTemporalPickerType(columnType);
+  const pickerType = getTemporalPickerType(columnType, dbType);
   const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[dataIndex] || '')));
 
   const isRowDeleted = deletedRowKeys && rowKeyStr && record?.[GONAVI_ROW_KEY] !== undefined
@@ -1191,8 +1201,10 @@ interface DataGridProps {
     columnNames: string[];
     loading: boolean;
     tableName?: string;
+    objectType?: 'table' | 'view' | 'materialized-view';
     exportScope?: 'table' | 'queryResult';
     resultSql?: string;
+    resultExportAllSql?: string;
     dbName?: string;
     connectionId?: string;
     pkColumns?: string[];
@@ -1224,6 +1236,7 @@ interface DataGridProps {
     onApplyQuickWhereCondition?: (condition: string) => void;
     scrollSnapshot?: { top: number; left: number };
     onScrollSnapshotChange?: (snapshot: { top: number; left: number }) => void;
+    toolbarExtraActions?: React.ReactNode;
 }
 
 type GridFilterCondition = FilterCondition & {
@@ -1482,10 +1495,11 @@ const VIRTUAL_EDITING_CELL_STYLE: React.CSSProperties = {
 };
 
 const DataGrid: React.FC<DataGridProps> = ({
-    data, columnNames, loading, tableName, exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
+    data, columnNames, loading, tableName, objectType = 'table', exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
+    resultExportAllSql,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
     onApplyQuickWhereCondition,
-    scrollSnapshot, onScrollSnapshotChange
+    scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions
 }) => {
   const connections = useStore(state => state.connections);
   const addTab = useStore(state => state.addTab);
@@ -1496,6 +1510,8 @@ const DataGrid: React.FC<DataGridProps> = ({
   const uiScale = useStore(state => state.uiScale);
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
+  const dataEditTransactionOptions = useStore(state => state.dataEditTransactionOptions);
+  const setDataEditTransactionOptions = useStore(state => state.setDataEditTransactionOptions);
   const tableColumnOrders = useStore(state => state.tableColumnOrders);
   const enableColumnOrderMemory = useStore(state => state.enableColumnOrderMemory);
   const setTableColumnOrder = useStore(state => state.setTableColumnOrder);
@@ -1720,6 +1736,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const canImport = exportScope === 'table' && !!tableName;
   const canExport = !!connectionId && (isQueryResultExport || !!tableName);
   const canViewDdl = exportScope === 'table' && !!connectionId && !!tableName;
+  const canOpenObjectDesigner = exportScope === 'table' && objectType === 'table' && !!connectionId && !!tableName;
   const filteredExportSql = useMemo(() => String(exportSqlWithFilter || '').trim(), [exportSqlWithFilter]);
   const hasFilteredExportSql = exportScope === 'table' && filteredExportSql.length > 0;
 
@@ -2320,7 +2337,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (value === undefined) return undefined;
           const normalizedName = String(columnName || '').trim();
           const meta = columnMetaMap[normalizedName] || columnMetaMapByLowerName[normalizedName.toLowerCase()];
-          const temporal = isTemporalColumnType(meta?.type);
+          const temporal = isTemporalColumnType(meta?.type, dbType);
 
           if (!temporal) {
               return value;
@@ -2341,7 +2358,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
           return value;
       },
-      [columnMetaMap, columnMetaMapByLowerName]
+      [columnMetaMap, columnMetaMapByLowerName, dbType]
   );
 
   const openForeignKeyTarget = useCallback((target: ForeignKeyTarget) => {
@@ -2357,6 +2374,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           connectionId,
           dbName: targetDbName,
           tableName: refTableName,
+          objectType: 'table',
       });
   }, [addTab, connectionId, dbName, setActiveContext]);
 
@@ -3210,6 +3228,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       canViewDdl,
       currentConnConfig,
       dbName,
+      dbType,
       tableName,
       isV2Ui,
       cellEditMode,
@@ -3224,6 +3243,22 @@ const DataGrid: React.FC<DataGridProps> = ({
           },
       },
   });
+
+  useEffect(() => {
+      const handleExternalViewModeChange = (event: Event) => {
+          const detail = (event as CustomEvent<any>)?.detail || {};
+          if (String(detail.connectionId || '') !== String(connectionId || '')) return;
+          if (String(detail.dbName || '') !== String(dbName || '')) return;
+          if (String(detail.tableName || '') !== String(tableName || '')) return;
+          const nextMode = String(detail.viewMode || '').trim();
+          if (!nextMode) return;
+          if (!['table', 'json', 'text', 'fields', 'ddl', 'er'].includes(nextMode)) return;
+          handleViewModeChange(nextMode as GridViewMode);
+      };
+
+      window.addEventListener('gonavi:data-grid:set-view-mode', handleExternalViewModeChange as EventListener);
+      return () => window.removeEventListener('gonavi:data-grid:set-view-mode', handleExternalViewModeChange as EventListener);
+  }, [canOpenObjectDesigner, connectionId, dbName, handleViewModeChange, tableName]);
 
   useEffect(() => {
       if (!isTableSurfaceActive || !isV2Ui || !cellContextMenu.visible) return;
@@ -3940,6 +3975,26 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const pendingChangeCount = addedRows.length + Object.keys(modifiedRows).length + deletedRowKeys.size;
   const hasChanges = pendingChangeCount > 0;
+  const dataEditCommitMode = dataEditTransactionOptions?.commitMode === 'auto' ? 'auto' : 'manual';
+  const dataEditAutoCommitDelayMs = DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS.some((item) => item.value === dataEditTransactionOptions?.autoCommitDelayMs)
+      ? Number(dataEditTransactionOptions?.autoCommitDelayMs)
+      : 5000;
+  const [autoCommitRemainingSeconds, setAutoCommitRemainingSeconds] = useState<number | null>(null);
+  const autoCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoCommitCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoCommitChangeTokenRef = useRef(0);
+  const autoCommitFailedTokenRef = useRef(-1);
+  const clearAutoCommitTimer = useCallback(() => {
+      if (autoCommitTimerRef.current) {
+          clearTimeout(autoCommitTimerRef.current);
+          autoCommitTimerRef.current = null;
+      }
+      if (autoCommitCountdownRef.current) {
+          clearInterval(autoCommitCountdownRef.current);
+          autoCommitCountdownRef.current = null;
+      }
+      setAutoCommitRemainingSeconds(null);
+  }, []);
 
   const allSelectedAreDeleted = useMemo(() => {
       if (selectedRowKeys.length === 0) return false;
@@ -3957,6 +4012,11 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [addedRows, rowKeyStr]);
 
   const modifiedRowKeySet = useMemo(() => new Set(Object.keys(modifiedRows)), [modifiedRows]);
+  useEffect(() => {
+      autoCommitChangeTokenRef.current += 1;
+      autoCommitFailedTokenRef.current = -1;
+  }, [addedRows, modifiedRows, deletedRowKeys]);
+
   const rowClassName = useCallback((record: Item) => {
       const k = record?.[GONAVI_ROW_KEY];
       if (k === undefined || k === null) return '';
@@ -4319,7 +4379,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
 
       const columnType = (columnMetaMap[dataIndex] || columnMetaMapByLowerName[dataIndex.toLowerCase()])?.type;
-      const pickerType = getTemporalPickerType(columnType);
+      const pickerType = getTemporalPickerType(columnType, dbType);
       const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(raw || '')));
       const fieldName = getCellFieldName(record, dataIndex);
       if (isDateTimeField) {
@@ -4334,7 +4394,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           title,
           columnType,
       });
-  }, [canModifyData, columnMetaMap, columnMetaMapByLowerName, form, openCellEditor, rowKeyStr]);
+  }, [canModifyData, columnMetaMap, columnMetaMapByLowerName, dbType, form, openCellEditor, rowKeyStr]);
 
   const handleVirtualCellActivate = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
       if (!canModifyData) return;
@@ -4464,7 +4524,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           return;
       }
 
-      const pickerType = getTemporalPickerType(editingCell.columnType);
+      const pickerType = getTemporalPickerType(editingCell.columnType, dbType);
       const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[editingCell.dataIndex] || '')));
       const fieldName = getCellFieldName(record, editingCell.dataIndex);
       try {
@@ -4483,7 +4543,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               closeVirtualInlineEditor();
           }
       }
-  }, [closeVirtualInlineEditor, form, handleCellSave, virtualEditingCell]);
+  }, [closeVirtualInlineEditor, dbType, form, handleCellSave, virtualEditingCell]);
 
   const pageFindMatches = useMemo(() => collectDataGridFindMatches(
       mergedDisplayData,
@@ -4605,7 +4665,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           displayMap[col] = toFormText(displayVal);
           // 日期时间类型: 将字符串值转为 dayjs 对象供 DatePicker 使用
           const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-          const rowPickerType = getTemporalPickerType(colMeta?.type);
+          const rowPickerType = getTemporalPickerType(colMeta?.type, dbType);
           if (rowPickerType && displayVal !== null && displayVal !== undefined) {
               const dVal = parseToDayjs(displayVal, rowPickerType);
               formMap[col] = dVal;
@@ -4622,7 +4682,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           nullCols,
           formValues: formMap,
       });
-  }, [canModifyData, mergedDisplayData, data, addedRows, visibleColumnNames, rowKeyStr, columnMetaMap, columnMetaMapByLowerName, openRowEditor]);
+  }, [canModifyData, mergedDisplayData, data, addedRows, visibleColumnNames, rowKeyStr, columnMetaMap, columnMetaMapByLowerName, dbType, openRowEditor]);
 
   const openCurrentViewRowEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -4787,7 +4847,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               if (!isWritableResultColumn(col, effectiveEditLocator)) return;
               if (val && dayjs.isDayjs(val)) {
                   const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-                  const rowPickerType = getTemporalPickerType(colMeta?.type);
+                  const rowPickerType = getTemporalPickerType(colMeta?.type, dbType);
                   convertedValues[col] = formatFromDayjs(val as dayjs.Dayjs, rowPickerType);
               } else {
                   convertedValues[col] = val;
@@ -4806,7 +4866,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           // 日期时间类型: 将 dayjs 对象转回格式化字符串
           if (nextVal && dayjs.isDayjs(nextVal)) {
               const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-              const rowPickerType = getTemporalPickerType(colMeta?.type);
+              const rowPickerType = getTemporalPickerType(colMeta?.type, dbType);
               nextVal = formatFromDayjs(nextVal as dayjs.Dayjs, rowPickerType);
           }
           const baseVal = baseRawMap[col];
@@ -4821,7 +4881,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       closeRowEditor();
-  }, [rowEditorRowKey, rowEditorForm, addedRows, visibleColumnNames, rowKeyStr, closeRowEditor, effectiveEditLocator, columnMetaMap, columnMetaMapByLowerName]);
+  }, [rowEditorRowKey, rowEditorForm, addedRows, visibleColumnNames, rowKeyStr, closeRowEditor, effectiveEditLocator, columnMetaMap, columnMetaMapByLowerName, dbType]);
 
 
   const enableVirtual = isTableSurfaceActive;
@@ -4937,6 +4997,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                   cellProps.handleSave = handleCellSave;
                   cellProps.focusCell = openCellEditor;
                   cellProps.columnType = displayColumnTypeMap[dataIndex];
+                  cellProps.dbType = dbType;
                   cellProps.inputCellPadding = inputCellPadding;
                   cellProps.modifiedColumns = modifiedColumns;
                   cellProps.rowKeyStr = rowKeyStr;
@@ -4967,7 +5028,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                   : undefined;
               const shouldUsePlainVirtualContent = isV2Ui && !modifiedStyle;
               if (enableVirtual && enableInlineEditableCell) {
-                  const pickerType = getTemporalPickerType(columnType);
+                  const pickerType = getTemporalPickerType(columnType, dbType);
                   const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[dataIndex] || '')));
                   const virtualCellStyle = modifiedStyle ? { ...virtualCellWrapperStyle, ...modifiedStyle } : virtualCellWrapperStyle;
                   const virtualEditable = !!col.editable && !rowDeletedForRender;
@@ -5081,7 +5142,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               return originalRenderContent;
           }
       };
-  }), [columns, useInlineEditableBodyCell, enableInlineEditableCell, enableVirtual, handleCellSave, openCellEditor, handleVirtualCellActivate, handleSharedCellContextMenu, displayColumnTypeMap, inputCellPadding, virtualCellWrapperStyle, modifiedColumns, rowKeyStr, deletedRowKeys, darkMode, virtualEditingCell, form, saveVirtualInlineEditor, lockVirtualInlineTableScroll, closeVirtualInlineEditor, updateFocusedCell]);
+  }), [columns, useInlineEditableBodyCell, enableInlineEditableCell, enableVirtual, handleCellSave, openCellEditor, handleVirtualCellActivate, handleSharedCellContextMenu, displayColumnTypeMap, dbType, inputCellPadding, virtualCellWrapperStyle, modifiedColumns, rowKeyStr, deletedRowKeys, darkMode, virtualEditingCell, form, saveVirtualInlineEditor, lockVirtualInlineTableScroll, closeVirtualInlineEditor, updateFocusedCell]);
 
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;
@@ -5233,7 +5294,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       visibleColumnNames, rowKeyStr, normalizeCommitCellValue, shouldCommitColumn,
       connectionId, tableName, connections]);
 
-  const handleCommit = async () => {
+  const handleCommit = useCallback(async (source: 'manual' | 'auto' = 'manual') => {
+      clearAutoCommitTimer();
       if (!connectionId || !tableName) return;
       const conn = connections.find(c => c.id === connectionId);
       if (!conn) return;
@@ -5279,6 +5341,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       if (deletes.length > 0) logSql += `DELETE ${deletes.length} rows;\n`;
       
       if (res.success) {
+          autoCommitFailedTokenRef.current = -1;
           addSqlLog({
               id: Date.now().toString(),
               timestamp: Date.now(),
@@ -5288,7 +5351,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               message: res.message,
               dbName
           });
-          void message.success("事务提交成功");
+          void message.success(source === 'auto' ? "自动提交成功" : "事务提交成功");
           setAddedRows([]);
           setModifiedRows({});
           setDeletedRowKeys(new Set());
@@ -5304,9 +5367,70 @@ const DataGrid: React.FC<DataGridProps> = ({
               message: res.message,
               dbName
           });
-          void message.error("提交失败: " + res.message);
+          if (source === 'auto') {
+              autoCommitFailedTokenRef.current = autoCommitChangeTokenRef.current;
+          }
+          void message.error((source === 'auto' ? "自动提交失败: " : "提交失败: ") + res.message);
       }
-  };
+  }, [
+      clearAutoCommitTimer,
+      connectionId,
+      tableName,
+      connections,
+      addedRows,
+      modifiedRows,
+      deletedRowKeys,
+      data,
+      effectiveEditLocator,
+      visibleColumnNames,
+      rowKeyStr,
+      normalizeCommitCellValue,
+      shouldCommitColumn,
+      dbName,
+      addSqlLog,
+      onReload,
+  ]);
+
+  useEffect(() => {
+      if (!canModifyData || dataEditCommitMode !== 'auto' || !hasChanges) {
+          clearAutoCommitTimer();
+          return;
+      }
+      if (autoCommitFailedTokenRef.current === autoCommitChangeTokenRef.current) {
+          clearAutoCommitTimer();
+          return;
+      }
+
+      const delayMs = dataEditAutoCommitDelayMs;
+      const dueAt = Date.now() + delayMs;
+      const updateRemaining = () => {
+          setAutoCommitRemainingSeconds(Math.max(1, Math.ceil((dueAt - Date.now()) / 1000)));
+      };
+      clearAutoCommitTimer();
+      updateRemaining();
+      autoCommitCountdownRef.current = setInterval(updateRemaining, 250);
+      autoCommitTimerRef.current = setTimeout(() => {
+          autoCommitTimerRef.current = null;
+          if (autoCommitCountdownRef.current) {
+              clearInterval(autoCommitCountdownRef.current);
+              autoCommitCountdownRef.current = null;
+          }
+          setAutoCommitRemainingSeconds(null);
+          void handleCommit('auto');
+      }, delayMs);
+
+      return clearAutoCommitTimer;
+  }, [
+      canModifyData,
+      dataEditCommitMode,
+      dataEditAutoCommitDelayMs,
+      hasChanges,
+      pendingChangeCount,
+      handleCommit,
+      clearAutoCommitTimer,
+  ]);
+
+  useEffect(() => clearAutoCommitTimer, [clearAutoCommitTimer]);
 
   const copyToClipboard = useCallback((text: string) => {
       navigator.clipboard.writeText(text).catch(console.error);
@@ -5792,12 +5916,15 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [tableName, filterConditions, quickWhereCondition, sortInfo, pkColumns, displayOutputColumnNames]);
 
   const queryResultCurrentPageRows = useMemo(() => {
+      if (isQueryResultExport) {
+          return mergedDisplayData;
+      }
       if (!pagination) {
           return mergedDisplayData;
       }
       const offset = Math.max(0, (pagination.current - 1) * pagination.pageSize);
       return mergedDisplayData.slice(offset, offset + pagination.pageSize);
-  }, [mergedDisplayData, pagination]);
+  }, [isQueryResultExport, mergedDisplayData, pagination]);
 
   const exportQueryResultRows = useCallback(async (format: string, scope: QueryResultExportScope) => {
       if (scope === 'selected') {
@@ -5817,8 +5944,13 @@ const DataGrid: React.FC<DataGridProps> = ({
           await exportData(queryResultCurrentPageRows, format);
           return;
       }
+      const exportAllSql = String(resultExportAllSql || '').trim();
+      if (exportAllSql && connectionId) {
+          await exportByQuery(exportAllSql, format, tableName || 'query_result');
+          return;
+      }
       await exportData(mergedDisplayData, format);
-  }, [exportData, mergedDisplayData, queryResultCurrentPageRows, rowKeyStr, selectedRowKeys]);
+  }, [connectionId, exportByQuery, exportData, mergedDisplayData, queryResultCurrentPageRows, resultExportAllSql, rowKeyStr, selectedRowKeys, tableName]);
 
   const openQueryResultExportScopeModal = useCallback((format: string) => {
       let instance: { destroy: () => void } | null = null;
@@ -5844,7 +5976,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                           当前页导出 ({queryResultCurrentPageRows.length}条)
                       </Button>
                       <Button type="primary" onClick={() => { void runExport('all'); }}>
-                          全部导出 ({mergedDisplayData.length}条)
+                          {resultExportAllSql ? '全部导出（重新查询）' : `全部导出 (${mergedDisplayData.length}条)`}
                       </Button>
                   </div>
               </div>
@@ -5853,7 +5985,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           okButtonProps: { style: { display: 'none' } },
           maskClosable: true,
       });
-  }, [exportQueryResultRows, mergedDisplayData.length, modal, queryResultCurrentPageRows.length, selectedRowKeys.length]);
+  }, [exportQueryResultRows, mergedDisplayData.length, modal, queryResultCurrentPageRows.length, resultExportAllSql, selectedRowKeys.length]);
 
   // Context Menu Export
   const handleExportSelected = useCallback(async (format: string, record: any) => {
@@ -7311,7 +7443,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const isJson = looksLikeJsonText(sample);
           const useTextArea = isJson || sample.includes('\n') || sample.length >= 160;
           const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-          const pickerType = getTemporalPickerType(colMeta?.type);
+          const pickerType = getTemporalPickerType(colMeta?.type, dbType);
           const isTemporalValue = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(sample || '')));
           const isWritable = isWritableResultColumn(col, effectiveEditLocator);
           return {
@@ -7325,15 +7457,26 @@ const DataGrid: React.FC<DataGridProps> = ({
               isWritable,
           };
       })
-  ), [displayColumnNames, columnMetaMap, columnMetaMapByLowerName, effectiveEditLocator, rowEditorOpen, rowEditorRowKey]);
+  ), [displayColumnNames, columnMetaMap, columnMetaMapByLowerName, dbType, effectiveEditLocator, rowEditorOpen, rowEditorRowKey]);
 
   const handleRefreshGrid = useCallback(() => {
+      clearAutoCommitTimer();
+      autoCommitFailedTokenRef.current = -1;
       setAddedRows([]);
       setModifiedRows({});
       setDeletedRowKeys(new Set());
       setSelectedRowKeys([]);
       if (onReload) onReload();
-  }, [onReload]);
+  }, [clearAutoCommitTimer, onReload]);
+
+  const handleResetPendingChanges = useCallback(() => {
+      clearAutoCommitTimer();
+      autoCommitFailedTokenRef.current = -1;
+      setAddedRows([]);
+      setModifiedRows({});
+      setDeletedRowKeys(new Set());
+      setModifiedColumns({});
+  }, [clearAutoCommitTimer]);
 
   const handleToggleFilterWithDefault = useCallback(() => {
       if (!onToggleFilter) return;
@@ -7403,6 +7546,10 @@ const DataGrid: React.FC<DataGridProps> = ({
             copiedCellPatchColumnCount={copiedCellPatch ? Object.keys(copiedCellPatch.values).length : 0}
             hasChanges={hasChanges}
             pendingChangeCount={pendingChangeCount}
+            dataEditCommitMode={dataEditCommitMode}
+            dataEditAutoCommitDelayMs={dataEditAutoCommitDelayMs}
+            dataEditAutoCommitDelayOptions={DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS}
+            autoCommitRemainingSeconds={autoCommitRemainingSeconds}
             canImport={canImport}
             canExport={canExport}
             isQueryResultExport={isQueryResultExport}
@@ -7411,6 +7558,7 @@ const DataGrid: React.FC<DataGridProps> = ({
             aiShortcutLabel={aiShortcutLabel}
             legacyAiButtonStyle={legacyAiButtonStyle}
             paginationTotalCountLoading={pagination?.totalCountLoading}
+            toolbarExtraActions={toolbarExtraActions}
             filterConditions={filterConditions}
             sortInfo={sortInfo}
             displayColumnNames={displayColumnNames}
@@ -7428,12 +7576,9 @@ const DataGrid: React.FC<DataGridProps> = ({
             exportMenu={exportMenu}
             queryResultCopyMenu={queryResultCopyMenu}
             dbType={dbType}
-            onResetPendingChanges={() => {
-                setAddedRows([]);
-                setModifiedRows({});
-                setDeletedRowKeys(new Set());
-                setModifiedColumns({});
-            }}
+            onResetPendingChanges={handleResetPendingChanges}
+            onDataEditCommitModeChange={(mode) => setDataEditTransactionOptions({ commitMode: mode })}
+            onDataEditAutoCommitDelayChange={(delayMs) => setDataEditTransactionOptions({ autoCommitDelayMs: delayMs })}
             onRefresh={handleRefreshGrid}
             onToggleFilterClick={handleToggleFilterWithDefault}
             onAddRow={handleAddRow}
@@ -7542,14 +7687,31 @@ const DataGrid: React.FC<DataGridProps> = ({
         {viewMode === 'table' ? (
             renderDataTableView()
         ) : isV2Ui && viewMode === 'fields' ? (
-            <DataGridV2FieldsView
-                tableName={tableName}
-                displayOutputColumnNames={displayOutputColumnNames}
-                pkColumns={pkColumns}
-                locatorColumns={effectiveEditLocator?.columns}
-                columnMetaMap={columnMetaMap}
-                columnMetaMapByLowerName={columnMetaMapByLowerName}
-            />
+            canOpenObjectDesigner ? (
+                <TableDesigner
+                    embedded
+                    tab={{
+                        id: `embedded-design-${connectionId || ''}-${dbName || ''}-${tableName || ''}`,
+                        title: `设计表 (${tableName || ''})`,
+                        type: 'design',
+                        connectionId: String(connectionId || ''),
+                        dbName,
+                        tableName,
+                        initialTab: 'columns',
+                        readOnly,
+                        objectType: 'table',
+                    }}
+                />
+            ) : (
+                <DataGridV2FieldsView
+                    tableName={tableName}
+                    displayOutputColumnNames={displayOutputColumnNames}
+                    pkColumns={pkColumns}
+                    locatorColumns={effectiveEditLocator?.columns}
+                    columnMetaMap={columnMetaMap}
+                    columnMetaMapByLowerName={columnMetaMapByLowerName}
+                />
+            )
         ) : isV2Ui && viewMode === 'ddl' && ddlViewLayout === 'side' ? (
             <DataGridV2DdlSideWorkspace
                 tableContent={renderDataTableView()}
@@ -7759,6 +7921,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 	       <DataGridSecondaryActions
                 isV2Ui={isV2Ui}
                 canViewDdl={canViewDdl}
+                canOpenObjectDesigner={canOpenObjectDesigner}
                 viewMode={viewMode}
                 ddlLoading={ddlLoading}
                 showColumnComment={showColumnComment}

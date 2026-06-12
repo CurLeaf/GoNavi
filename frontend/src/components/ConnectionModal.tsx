@@ -63,6 +63,32 @@ import { resolveConnectionSecretDraft } from "../utils/connectionSecretDraft";
 import { getCustomConnectionDsnValidationMessage } from "../utils/customConnectionDsn";
 import { mergeParsedUriValuesForForm } from "../utils/connectionUriMerge";
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
+import {
+  buildRedisUriFromValues,
+  parseRedisUriToFormValues,
+  resolveRedisConfigDraft,
+} from "../utils/redisConnectionUri";
+import {
+  CONNECTION_TYPE_GROUPS,
+  getAllConnectionTypeCatalogItems,
+  getConnectionTypeDefaultPort as getDefaultPortByType,
+  getConnectionTypeHint,
+} from "../utils/connectionTypeCatalog";
+import {
+  isFileDatabaseType,
+  isMySQLCompatibleType,
+  isPostgresCompatibleSSLType,
+  singleHostUriSchemesByType,
+  supportsConnectionParamsForType,
+  supportsSSLCAPathForType,
+  supportsSSLClientCertificateForType,
+  supportsSSLForType,
+} from "../utils/connectionTypeCapabilities";
+import {
+  normalizeDriverType,
+  resolveConnectionDriverType,
+  type DriverStatusSnapshot,
+} from "../utils/connectionDriverType";
 import { CUSTOM_CONNECTION_DRIVER_HELP } from "../utils/driverImportGuidance";
 import {
   describeUnsupportedOceanBaseProtocol,
@@ -91,12 +117,15 @@ import {
   MongoDiscoverMembers,
   TestConnection,
   RedisConnect,
+  RedisGetDatabases,
   SelectDatabaseFile,
   SelectCertificateFile,
   SelectSSHKeyFile,
   TestJVMConnection,
 } from "../../wailsjs/go/app/App";
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from "../types";
+import ConnectionModalMongoSections from "./ConnectionModalMongoSections";
+import ConnectionModalRedisSections from "./ConnectionModalRedisSections";
 
 const { Text } = Typography;
 type EditableJVMMode = (typeof JVM_EDITABLE_MODES)[number];
@@ -113,6 +142,7 @@ const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
 const CONNECTION_MODAL_WIDTH = 960;
 const CONNECTION_MODAL_BODY_HEIGHT = 620;
+const REDIS_DEFAULT_DATABASE_COUNT = 16;
 const STEP1_SIDEBAR_DIVIDER_DARK = "rgba(255, 255, 255, 0.16)";
 const STEP1_SIDEBAR_DIVIDER_LIGHT = "rgba(0, 0, 0, 0.08)";
 const CLICKHOUSE_PROTOCOL_OPTIONS: Array<{
@@ -130,6 +160,62 @@ const OCEANBASE_PROTOCOL_OPTIONS: Array<{
   { value: "mysql", label: "MySQL" },
   { value: "oracle", label: "Oracle" },
 ];
+
+const normalizeRedisDatabaseIndex = (value: unknown): number | null => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return Math.trunc(parsed);
+};
+
+const buildRedisDatabaseList = (...values: unknown[]): number[] => {
+  const indexes = new Set<number>();
+  for (let i = 0; i < REDIS_DEFAULT_DATABASE_COUNT; i += 1) {
+    indexes.add(i);
+  }
+  const collect = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(collect);
+      return;
+    }
+    const index = normalizeRedisDatabaseIndex(value);
+    if (index !== null) {
+      indexes.add(index);
+    }
+  };
+  values.forEach(collect);
+  return Array.from(indexes).sort((a, b) => a - b);
+};
+
+const extractRedisDatabaseList = (value: unknown): number[] => {
+  if (!Array.isArray(value)) return [];
+  const indexes = new Set<number>();
+  value.forEach((row: any) => {
+    const index = normalizeRedisDatabaseIndex(row?.index ?? row?.Index);
+    if (index !== null) {
+      indexes.add(index);
+    }
+  });
+  const result = Array.from(indexes).sort((a, b) => a - b);
+  return result.length > 0 ? result : buildRedisDatabaseList();
+};
+
+const normalizeRedisDatabaseSelection = (
+  value: unknown,
+  supportedDbs: number[],
+): number[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const supported = new Set(supportedDbs);
+  const selected = Array.from(
+    new Set(
+      value
+        .map(normalizeRedisDatabaseIndex)
+        .filter((index): index is number => index !== null)
+        .filter((index) => supported.size === 0 || supported.has(index)),
+    ),
+  ).sort((a, b) => a - b);
+  return selected.length > 0 ? selected : undefined;
+};
+
 const normalizeClickHouseProtocolValue = (
   value: unknown,
 ): ClickHouseProtocolChoice => {
@@ -176,6 +262,7 @@ type ConnectionSecretKey =
   | "httpTunnelPassword"
   | "mysqlReplicaPassword"
   | "mongoReplicaPassword"
+  | "redisSentinelPassword"
   | "opaqueURI"
   | "opaqueDSN";
 
@@ -189,6 +276,7 @@ const createEmptyConnectionSecretClearState =
     httpTunnelPassword: false,
     mysqlReplicaPassword: false,
     mongoReplicaPassword: false,
+    redisSentinelPassword: false,
     opaqueURI: false,
     opaqueDSN: false,
   });
@@ -215,6 +303,8 @@ const resolveInitialSecretFieldValue = (
       return String(config.mysqlReplicaPassword || "");
     case "mongoReplicaPassword":
       return String(config.mongoReplicaPassword || "");
+    case "redisSentinelPassword":
+      return String(config.redisSentinelPassword || "");
     case "uri":
       return String(config.uri || "");
     case "dsn":
@@ -222,238 +312,6 @@ const resolveInitialSecretFieldValue = (
     default:
       return "";
   }
-};
-
-const getDefaultPortByType = (type: string) => {
-  switch (type) {
-    case "jvm":
-      return 9010;
-    case "mysql":
-      return 3306;
-    case "oceanbase":
-      return 2881;
-    case "doris":
-    case "diros":
-    case "starrocks":
-      return 9030;
-    case "sphinx":
-      return 9306;
-    case "clickhouse":
-      return 9000;
-    case "postgres":
-    case "opengauss":
-      return 5432;
-    case "redis":
-      return 6379;
-    case "tdengine":
-      return 6041;
-    case "oracle":
-      return 1521;
-    case "dameng":
-      return 5236;
-    case "kingbase":
-      return 54321;
-    case "sqlserver":
-      return 1433;
-    case "iris":
-      return 1972;
-    case "mongodb":
-      return 27017;
-    case "elasticsearch":
-      return 9200;
-    case "highgo":
-      return 5866;
-    case "mariadb":
-      return 3306;
-    case "vastbase":
-      return 5432;
-    case "sqlite":
-      return 0;
-    case "duckdb":
-      return 0;
-    default:
-      return 3306;
-  }
-};
-
-const singleHostUriSchemesByType: Record<string, string[]> = {
-  postgres: ["postgresql", "postgres"],
-  opengauss: ["opengauss", "jdbc:opengauss", "postgresql", "postgres"],
-  clickhouse: ["clickhouse"],
-  oracle: ["oracle"],
-  sqlserver: ["sqlserver"],
-  iris: ["iris", "intersystems"],
-  redis: ["redis"],
-  elasticsearch: ["http", "https"],
-  tdengine: ["tdengine"],
-  dameng: ["dameng", "dm"],
-  kingbase: ["kingbase"],
-  highgo: ["highgo"],
-  vastbase: ["vastbase"],
-};
-
-const sslSupportedTypes = new Set([
-  "mysql",
-  "mariadb",
-  "oceanbase",
-  "doris",
-  "diros",
-  "starrocks",
-  "sphinx",
-  "dameng",
-  "clickhouse",
-  "postgres",
-  "sqlserver",
-  "oracle",
-  "kingbase",
-  "highgo",
-  "vastbase",
-  "opengauss",
-  "mongodb",
-  "redis",
-  "elasticsearch",
-  "tdengine",
-]);
-
-const supportsSSLForType = (type: string) =>
-  sslSupportedTypes.has(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const sslCAPathSupportedTypes = new Set([
-  "mysql",
-  "mariadb",
-  "oceanbase",
-  "diros",
-  "starrocks",
-  "sphinx",
-  "clickhouse",
-  "postgres",
-  "sqlserver",
-  "kingbase",
-  "highgo",
-  "vastbase",
-  "opengauss",
-  "mongodb",
-  "redis",
-  "elasticsearch",
-]);
-
-const sslClientCertificateSupportedTypes = new Set([
-  "mysql",
-  "mariadb",
-  "oceanbase",
-  "diros",
-  "starrocks",
-  "sphinx",
-  "dameng",
-  "clickhouse",
-  "postgres",
-  "kingbase",
-  "highgo",
-  "vastbase",
-  "opengauss",
-  "mongodb",
-  "redis",
-  "elasticsearch",
-]);
-
-const supportsSSLCAPathForType = (type: string) =>
-  sslCAPathSupportedTypes.has(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const supportsSSLClientCertificateForType = (type: string) =>
-  sslClientCertificateSupportedTypes.has(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const isPostgresCompatibleSSLType = (type: string) =>
-  [
-    "postgres",
-    "kingbase",
-    "highgo",
-    "vastbase",
-    "opengauss",
-  ].includes(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const isFileDatabaseType = (type: string) =>
-  type === "sqlite" || type === "duckdb";
-
-const isMySQLCompatibleType = (type: string) =>
-  type === "mysql" ||
-  type === "mariadb" ||
-  type === "oceanbase" ||
-  type === "doris" ||
-  type === "diros" ||
-  type === "starrocks" ||
-  type === "sphinx";
-
-const supportsConnectionParamsForType = (type: string) =>
-  isMySQLCompatibleType(type) ||
-  type === "postgres" ||
-  type === "kingbase" ||
-  type === "highgo" ||
-  type === "vastbase" ||
-  type === "opengauss" ||
-  type === "oracle" ||
-  type === "sqlserver" ||
-  type === "iris" ||
-  type === "clickhouse" ||
-  type === "mongodb" ||
-  type === "elasticsearch" ||
-  type === "dameng" ||
-  type === "tdengine";
-
-type DriverStatusSnapshot = {
-  type: string;
-  name: string;
-  connectable: boolean;
-  expectedRevision?: string;
-  needsUpdate?: boolean;
-  updateReason?: string;
-  affectedConnections?: number;
-  message?: string;
-};
-
-const normalizeDriverType = (value: string): string => {
-  const normalized = String(value || "")
-    .trim()
-    .toLowerCase();
-  if (normalized === "postgresql") return "postgres";
-  if (normalized === "doris") return "diros";
-  if (
-    normalized === "intersystems" ||
-    normalized === "intersystemsiris" ||
-    normalized === "inter-systems-iris" ||
-    normalized === "inter-systems"
-  )
-    return "iris";
-  if (
-    normalized === "open_gauss" ||
-    normalized === "open-gauss" ||
-    normalized === "opengauss"
-  )
-    return "opengauss";
-  return normalized;
-};
-
-const resolveConnectionDriverType = (type: string, driver?: string): string => {
-  const normalizedType = normalizeDriverType(type);
-  if (normalizedType !== "custom") {
-    return normalizedType;
-  }
-  return normalizeDriverType(driver || "");
 };
 
 const ConnectionModal: React.FC<{
@@ -490,7 +348,7 @@ const ConnectionModal: React.FC<{
   } | null>(null);
   const [testErrorLogOpen, setTestErrorLogOpen] = useState(false);
   const [dbList, setDbList] = useState<string[]>([]);
-  const [redisDbList, setRedisDbList] = useState<number[]>([]); // Redis databases 0-15
+  const [redisDbList, setRedisDbList] = useState<number[]>([]);
   const [mongoMembers, setMongoMembers] = useState<MongoMemberInfo[]>([]);
   const [discoveringMembers, setDiscoveringMembers] = useState(false);
   const [uriFeedback, setUriFeedback] = useState<{
@@ -915,19 +773,30 @@ const ConnectionModal: React.FC<{
       setMongoMembers([]);
     }
     if (fieldName === "redisTopology") {
-      const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
+      const nextRedisTopology = String(value || "single").toLowerCase();
+      const currentRedisPort = Number(form.getFieldValue("port") || 0);
+      if (
+        nextRedisTopology === "sentinel" &&
+        (!currentRedisPort || currentRedisPort === 6379)
+      ) {
+        form.setFieldValue("port", 26379);
+      } else if (
+        nextRedisTopology !== "sentinel" &&
+        currentRedisPort === 26379
+      ) {
+        form.setFieldValue("port", 6379);
+      }
+      const supportedDbs = buildRedisDatabaseList(
+        form.getFieldValue("redisDB"),
+        form.getFieldValue("includeRedisDatabases"),
+      );
       setRedisDbList(supportedDbs);
-      const selectedDbsRaw = form.getFieldValue("includeRedisDatabases");
-      const selectedDbs = Array.isArray(selectedDbsRaw)
-        ? selectedDbsRaw.map((entry: any) => Number(entry))
-        : [];
-      const validDbs = selectedDbs
-        .filter((entry: number) => Number.isFinite(entry))
-        .map((entry: number) => Math.trunc(entry))
-        .filter((entry: number) => supportedDbs.includes(entry));
       form.setFieldValue(
         "includeRedisDatabases",
-        validDbs.length > 0 ? validDbs : undefined,
+        normalizeRedisDatabaseSelection(
+          form.getFieldValue("includeRedisDatabases"),
+          supportedDbs,
+        ),
       );
     }
     if (fieldName === "proxyType") {
@@ -1676,61 +1545,7 @@ const ConnectionModal: React.FC<{
     }
 
     if (type === "redis") {
-      const parsed =
-        parseMultiHostUri(trimmedUri, "redis") ||
-        parseMultiHostUri(trimmedUri, "rediss");
-      if (!parsed) {
-        return null;
-      }
-      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
-        return null;
-      }
-      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
-        return null;
-      }
-      const hostList = normalizeAddressList(parsed.hosts, 6379);
-      if (!hostList.length) {
-        return null;
-      }
-      const primary = parseHostPort(hostList[0] || "localhost:6379", 6379);
-      const topologyParam = String(
-        parsed.params.get("topology") || "",
-      ).toLowerCase();
-      const dbText = String(parsed.database || "")
-        .trim()
-        .replace(/^\//, "");
-      const dbIndex = Number(dbText);
-      const isRediss = trimmedUri.toLowerCase().startsWith("rediss://");
-      const skipVerifyText = String(parsed.params.get("skip_verify") || "")
-        .trim()
-        .toLowerCase();
-      const skipVerify =
-        skipVerifyText === "1" ||
-        skipVerifyText === "true" ||
-        skipVerifyText === "yes" ||
-        skipVerifyText === "on";
-      return {
-        host: primary?.host || "localhost",
-        port: primary?.port || 6379,
-        user: parsed.username || "",
-        password: parsed.password || "",
-        useSSL: isRediss,
-        sslMode: isRediss
-          ? skipVerify
-            ? "skip-verify"
-            : "required"
-          : "disable",
-        ...extractSSLPathValuesFromParams(parsed.params, type),
-        redisTopology:
-          hostList.length > 1 || topologyParam === "cluster"
-            ? "cluster"
-            : "single",
-        redisHosts: hostList.slice(1),
-        redisDB:
-          Number.isFinite(dbIndex) && dbIndex >= 0 && dbIndex <= 15
-            ? Math.trunc(dbIndex)
-            : 0,
-      };
+      return parseRedisUriToFormValues(trimmedUri);
     }
 
     if (type === "mongodb") {
@@ -1974,15 +1789,6 @@ const ConnectionModal: React.FC<{
             parsedValues.useSSL = false;
             parsedValues.sslMode = "disable";
           }
-        } else if (type === "elasticsearch") {
-          const isHTTPS = trimmedUri.toLowerCase().startsWith("https://");
-          const skipVerify = normalizeBool(parsed.params.get("skip_verify"));
-          parsedValues.useSSL = isHTTPS;
-          parsedValues.sslMode = isHTTPS
-            ? skipVerify
-              ? "skip-verify"
-              : "required"
-            : "disable";
         }
       }
       return parsedValues;
@@ -2046,10 +1852,7 @@ const ConnectionModal: React.FC<{
       return "clickhouse://default:pass@127.0.0.1:9000/default";
     }
     if (dbType === "redis") {
-      return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster";
-    }
-    if (dbType === "elasticsearch") {
-      return "http://elastic:pass@127.0.0.1:9200/logs-*";
+      return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster 或 redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster";
     }
     if (dbType === "oracle") {
       return "oracle://user:pass@127.0.0.1:1521/ORCLPDB1";
@@ -2156,43 +1959,7 @@ const ConnectionModal: React.FC<{
     }
 
     if (type === "redis") {
-      const primary = toAddress(host, port, 6379);
-      const clusterHosts =
-        values.redisTopology === "cluster"
-          ? normalizeAddressList(values.redisHosts, 6379)
-          : [];
-      const hosts = normalizeAddressList([primary, ...clusterHosts], 6379);
-      const params = new URLSearchParams();
-      if (hosts.length > 1 || values.redisTopology === "cluster") {
-        params.set("topology", "cluster");
-      }
-      const redisUser = String(values.user || "").trim();
-      const redisPassword = String(values.password || "");
-      let redisAuth = "";
-      if (redisUser || redisPassword) {
-        const encodedPassword = redisPassword
-          ? encodeURIComponent(redisPassword)
-          : "";
-        redisAuth = redisUser
-          ? `${encodeURIComponent(redisUser)}${redisPassword ? `:${encodedPassword}` : ""}@`
-          : `:${encodedPassword}@`;
-      }
-      const redisDB = Number.isFinite(Number(values.redisDB))
-        ? Math.max(0, Math.min(15, Math.trunc(Number(values.redisDB))))
-        : 0;
-      const dbPath = `/${redisDB}`;
-      if (values.useSSL) {
-        const mode = String(values.sslMode || "preferred")
-          .trim()
-          .toLowerCase();
-        if (mode === "skip-verify" || mode === "preferred") {
-          params.set("skip_verify", "true");
-        }
-      }
-      appendSSLPathParamsForUri(params, type, values);
-      const query = params.toString();
-      const scheme = values.useSSL ? "rediss" : "redis";
-      return `${scheme}://${redisAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
+      return buildRedisUriFromValues(values);
     }
 
     if (isFileDatabaseType(type)) {
@@ -2270,10 +2037,6 @@ const ConnectionModal: React.FC<{
           ? values.useSSL
             ? "https"
             : "http"
-          : type === "elasticsearch"
-            ? values.useSSL
-              ? "https"
-              : "http"
           : type;
     const dbPath = database ? `/${encodeURIComponent(database)}` : "";
     const params = new URLSearchParams();
@@ -2320,11 +2083,6 @@ const ConnectionModal: React.FC<{
         if (mode === "skip-verify" || mode === "preferred") {
           params.set("skip_verify", "true");
         }
-      } else if (type === "elasticsearch") {
-        if (mode === "skip-verify" || mode === "preferred") {
-          params.set("skip_verify", "true");
-        }
-        appendSSLPathParamsForUri(params, type, values);
       }
     } else if (supportsSSLForType(type)) {
       if (isPostgresCompatibleSSLType(type)) {
@@ -2521,18 +2279,27 @@ const ConnectionModal: React.FC<{
         const defaultPort = getDefaultPortByType(configType);
         const isFileDbConfigType = isFileDatabaseType(configType);
         const jvmDefaultValues = buildDefaultJVMConnectionValues();
+        const savedPrimaryAddress = isFileDbConfigType
+          ? ""
+          : toAddress(
+              config.host || "localhost",
+              Number(config.port || defaultPort),
+              defaultPort,
+            );
         const normalizedHosts = isFileDbConfigType
           ? []
-          : normalizeAddressList(config.hosts, defaultPort);
+          : normalizeAddressList(
+              [
+                savedPrimaryAddress,
+                ...(Array.isArray(config.hosts) ? config.hosts : []),
+              ],
+              defaultPort,
+            );
         const primaryAddress = isFileDbConfigType
           ? null
           : parseHostPort(
               normalizedHosts[0] ||
-                toAddress(
-                  config.host || "localhost",
-                  Number(config.port || defaultPort),
-                  defaultPort,
-                ),
+                savedPrimaryAddress,
               defaultPort,
             );
         const primaryHost = isFileDbConfigType
@@ -2561,9 +2328,11 @@ const ConnectionModal: React.FC<{
           String(config.topology || "").toLowerCase() === "replica" ||
           mongoHosts.length > 0 ||
           !!config.replicaSet;
+        const redisTopologyValue = String(config.topology || "").toLowerCase();
+        const redisIsSentinel = redisTopologyValue === "sentinel";
         const redisIsCluster =
-          String(config.topology || "").toLowerCase() === "cluster" ||
-          redisHosts.length > 0;
+          !redisIsSentinel &&
+          (redisTopologyValue === "cluster" || redisHosts.length > 0);
         const {
           allowedModes: resolvedJvmAllowedModes,
           preferredMode: resolvedJvmPreferredMode,
@@ -2631,8 +2400,15 @@ const ConnectionModal: React.FC<{
           mysqlReplicaPassword: config.mysqlReplicaPassword || "",
           mongoTopology: mongoIsReplica ? "replica" : "single",
           mongoHosts: mongoHosts,
-          redisTopology: redisIsCluster ? "cluster" : "single",
+          redisTopology: redisIsSentinel
+            ? "sentinel"
+            : redisIsCluster
+              ? "cluster"
+              : "single",
           redisHosts: redisHosts,
+          redisSentinelMaster: config.redisSentinelMaster || "",
+          redisSentinelUser: config.redisSentinelUser || "",
+          redisSentinelPassword: config.redisSentinelPassword || "",
           mongoSrv: !!config.mongoSrv,
           mongoReplicaSet: config.replicaSet || "",
           mongoAuthSource: config.authSource || "",
@@ -2752,7 +2528,12 @@ const ConnectionModal: React.FC<{
         }
         // 如果是 Redis 编辑模式，设置已保存的 Redis 数据库列表
         if (configType === "redis") {
-          setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
+          setRedisDbList(
+            buildRedisDatabaseList(
+              config.redisDB,
+              initialValues.includeRedisDatabases,
+            ),
+          );
         }
       } else {
         // Create mode: Start at step 1
@@ -2829,6 +2610,16 @@ const ConnectionModal: React.FC<{
       clearSecret: clearSecrets.mongoReplicaPassword,
       forceClear: !mongoReplicaEnabled,
     });
+    const redisSentinelEnabled =
+      config.type === "redis" &&
+      config.topology === "sentinel" &&
+      values.savePassword !== false;
+    const redisSentinelDraft = resolveConnectionSecretDraft({
+      hasSecret: initialValues?.hasRedisSentinelPassword,
+      valueInput: config.redisSentinelPassword,
+      clearSecret: clearSecrets.redisSentinelPassword,
+      forceClear: !redisSentinelEnabled,
+    });
     const opaqueUriDraft = resolveConnectionSecretDraft({
       hasSecret: initialValues?.hasOpaqueURI,
       valueInput: config.uri,
@@ -2897,6 +2688,7 @@ const ConnectionModal: React.FC<{
         dsn: opaqueDsnDraft.value,
         mysqlReplicaPassword: mysqlReplicaDraft.value,
         mongoReplicaPassword: mongoReplicaDraft.value,
+        redisSentinelPassword: redisSentinelDraft.value,
       },
       includeDatabases: values.includeDatabases,
       includeRedisDatabases: isRedisType
@@ -2910,6 +2702,7 @@ const ConnectionModal: React.FC<{
       clearHttpTunnelPassword: httpTunnelDraft.clearStoredSecret,
       clearMySQLReplicaPassword: mysqlReplicaDraft.clearStoredSecret,
       clearMongoReplicaPassword: mongoReplicaDraft.clearStoredSecret,
+      clearRedisSentinelPassword: redisSentinelDraft.clearStoredSecret,
       clearOpaqueURI: opaqueUriDraft.clearStoredSecret,
       clearOpaqueDSN: opaqueDsnDraft.clearStoredSecret,
     };
@@ -3057,6 +2850,14 @@ const ConnectionModal: React.FC<{
       return "测试连接前请填写新的副本集密码，或取消清除已保存副本集密码";
     }
     if (
+      clearSecrets.redisSentinelPassword &&
+      values.type === "redis" &&
+      values.redisTopology === "sentinel" &&
+      String(values.redisSentinelPassword ?? "") === ""
+    ) {
+      return "测试连接前请填写新的 Sentinel 密码，或取消清除已保存 Sentinel 密码";
+    }
+    if (
       values.type === "mongodb" &&
       values.savePassword === false &&
       initialValues?.hasPrimaryPassword &&
@@ -3138,7 +2939,32 @@ const ConnectionModal: React.FC<{
         void message.destroy("connection-test-failure");
         setTestResult({ type: "success", message: res.message });
         if (isRedisType) {
-          setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
+          const dbRes = await withClientTimeout(
+            RedisGetDatabases(config as any),
+            rpcTimeoutMs,
+            `连接成功但拉取 Redis 数据库列表超时（>${timeoutSeconds} 秒）`,
+          );
+          if (dbRes.success) {
+            const supportedDbs = extractRedisDatabaseList(dbRes.data);
+            setRedisDbList(supportedDbs);
+            form.setFieldValue(
+              "includeRedisDatabases",
+              normalizeRedisDatabaseSelection(
+                form.getFieldValue("includeRedisDatabases"),
+                supportedDbs,
+              ),
+            );
+          } else {
+            setRedisDbList(
+              buildRedisDatabaseList(
+                config.redisDB,
+                form.getFieldValue("includeRedisDatabases"),
+              ),
+            );
+            message.warning(
+              `连接成功，但获取 Redis 数据库列表失败：${normalizeConnectionSecretErrorMessage(dbRes.message, "未知错误")}`,
+            );
+          }
         } else if (!isJVMType) {
           // Other databases: fetch database list
           const dbRes = await withClientTimeout(
@@ -3493,7 +3319,7 @@ const ConnectionModal: React.FC<{
     }
 
     let hosts: string[] = [];
-    let topology: "single" | "replica" | "cluster" | undefined;
+    let topology: "single" | "replica" | "cluster" | "sentinel" | undefined;
     let replicaSet = "";
     let authSource = "";
     let readPreference = "";
@@ -3503,6 +3329,9 @@ const ConnectionModal: React.FC<{
     let mongoAuthMechanism = "";
     let mongoReplicaUser = "";
     let mongoReplicaPassword = "";
+    let redisSentinelMaster = "";
+    let redisSentinelUser = "";
+    let redisSentinelPassword = "";
     const savePassword =
       type === "mongodb" ? mergedValues.savePassword !== false : true;
 
@@ -3564,23 +3393,19 @@ const ConnectionModal: React.FC<{
     }
 
     if (type === "redis") {
-      const clusterNodes =
-        mergedValues.redisTopology === "cluster"
-          ? normalizeAddressList(mergedValues.redisHosts, defaultPort)
-          : [];
-      const allHosts = normalizeAddressList(
-        [`${primaryHost}:${primaryPort}`, ...clusterNodes],
+      const redisDraft = resolveRedisConfigDraft(
+        mergedValues,
+        primaryHost,
+        primaryPort,
         defaultPort,
       );
-      if (mergedValues.redisTopology === "cluster" || allHosts.length > 1) {
-        hosts = allHosts;
-        topology = "cluster";
-      } else {
-        topology = "single";
-      }
-      mergedValues.redisDB = Number.isFinite(Number(mergedValues.redisDB))
-        ? Math.max(0, Math.min(15, Math.trunc(Number(mergedValues.redisDB))))
-        : 0;
+      primaryPort = redisDraft.primaryPort;
+      hosts = redisDraft.hosts;
+      topology = redisDraft.topology;
+      redisSentinelMaster = redisDraft.redisSentinelMaster;
+      redisSentinelUser = redisDraft.redisSentinelUser;
+      redisSentinelPassword = redisDraft.redisSentinelPassword;
+      mergedValues.redisDB = redisDraft.redisDB;
     }
 
     const sshConfig = mergedValues.useSSH
@@ -3680,8 +3505,11 @@ const ConnectionModal: React.FC<{
       connectionParams: normalizedConnectionParams,
       timeout: Number(mergedValues.timeout || 30),
       redisDB: Number.isFinite(Number(mergedValues.redisDB))
-        ? Math.max(0, Math.min(15, Math.trunc(Number(mergedValues.redisDB))))
+        ? Math.max(0, Math.trunc(Number(mergedValues.redisDB)))
         : 0,
+      redisSentinelMaster: redisSentinelMaster,
+      redisSentinelUser: redisSentinelUser,
+      redisSentinelPassword: keepPassword ? redisSentinelPassword : "",
       uri: String(mergedValues.uri || "").trim(),
       clickHouseProtocol:
         type === "clickhouse"
@@ -3772,6 +3600,9 @@ const ConnectionModal: React.FC<{
         savePassword: true,
         mysqlReplicaHosts: [],
         redisHosts: [],
+        redisSentinelMaster: "",
+        redisSentinelUser: "",
+        redisSentinelPassword: "",
         mongoHosts: [],
         mysqlReplicaUser: "",
         mysqlReplicaPassword: "",
@@ -3831,6 +3662,9 @@ const ConnectionModal: React.FC<{
         savePassword: true,
         mysqlReplicaHosts: [],
         redisHosts: [],
+        redisSentinelMaster: "",
+        redisSentinelUser: "",
+        redisSentinelPassword: "",
         mongoHosts: [],
         mysqlReplicaUser: "",
         mysqlReplicaPassword: "",
@@ -3841,13 +3675,7 @@ const ConnectionModal: React.FC<{
       });
     } else if (type !== "custom") {
       const defaultUser =
-        type === "clickhouse"
-          ? "default"
-          : type === "redis"
-            ? ""
-            : type === "elasticsearch"
-              ? "elastic"
-              : "root";
+        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch") ? "" : "root";
       const sslCapableType = supportsSSLForType(type);
       setUseSSL(false);
       setUseHttpTunnel(false);
@@ -3876,6 +3704,9 @@ const ConnectionModal: React.FC<{
         savePassword: true,
         mysqlReplicaHosts: [],
         redisHosts: [],
+        redisSentinelMaster: "",
+        redisSentinelUser: "",
+        redisSentinelPassword: "",
         mongoHosts: [],
         mysqlReplicaUser: "",
         mysqlReplicaPassword: "",
@@ -3925,176 +3756,19 @@ const ConnectionModal: React.FC<{
   const driverStatusChecking =
     hasCurrentDriverType && !driverStatusLoaded && step === 2;
 
-  const dbTypeGroups = [
-    {
-      label: "关系型数据库",
-      items: [
-        {
-          key: "mysql",
-          name: "MySQL",
-          icon: getDbIcon("mysql", undefined, 36),
-        },
-        {
-          key: "mariadb",
-          name: "MariaDB",
-          icon: getDbIcon("mariadb", undefined, 36),
-        },
-        {
-          key: "diros",
-          name: "Doris",
-          icon: getDbIcon("diros", undefined, 36),
-        },
-        {
-          key: "starrocks",
-          name: "StarRocks",
-          icon: getDbIcon("starrocks", undefined, 36),
-        },
-        {
-          key: "sphinx",
-          name: "Sphinx",
-          icon: getDbIcon("sphinx", undefined, 36),
-        },
-        {
-          key: "clickhouse",
-          name: "ClickHouse",
-          icon: getDbIcon("clickhouse", undefined, 36),
-        },
-        {
-          key: "postgres",
-          name: "PostgreSQL",
-          icon: getDbIcon("postgres", undefined, 36),
-        },
-        {
-          key: "sqlserver",
-          name: "SQL Server",
-          icon: getDbIcon("sqlserver", undefined, 36),
-        },
-        {
-          key: "iris",
-          name: "InterSystems IRIS",
-          icon: getDbIcon("iris", undefined, 36),
-        },
-        {
-          key: "sqlite",
-          name: "SQLite",
-          icon: getDbIcon("sqlite", undefined, 36),
-        },
-        {
-          key: "duckdb",
-          name: "DuckDB",
-          icon: getDbIcon("duckdb", undefined, 36),
-        },
-        {
-          key: "oracle",
-          name: "Oracle",
-          icon: getDbIcon("oracle", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: "国产数据库",
-      items: [
-        {
-          key: "oceanbase",
-          name: "OceanBase",
-          icon: getDbIcon("oceanbase", undefined, 36),
-        },
-        {
-          key: "dameng",
-          name: "Dameng (达梦)",
-          icon: getDbIcon("dameng", undefined, 36),
-        },
-        {
-          key: "kingbase",
-          name: "Kingbase (人大金仓)",
-          icon: getDbIcon("kingbase", undefined, 36),
-        },
-        {
-          key: "highgo",
-          name: "HighGo (瀚高)",
-          icon: getDbIcon("highgo", undefined, 36),
-        },
-        {
-          key: "vastbase",
-          name: "Vastbase (海量)",
-          icon: getDbIcon("vastbase", undefined, 36),
-        },
-        {
-          key: "opengauss",
-          name: "OpenGauss",
-          icon: getDbIcon("opengauss", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: "NoSQL",
-      items: [
-        {
-          key: "mongodb",
-          name: "MongoDB",
-          icon: getDbIcon("mongodb", undefined, 36),
-        },
-        {
-          key: "redis",
-          name: "Redis",
-          icon: getDbIcon("redis", undefined, 36),
-        },
-        {
-          key: "elasticsearch",
-          name: "Elasticsearch",
-          icon: getDbIcon("elasticsearch", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: "时序数据库",
-      items: [
-        {
-          key: "tdengine",
-          name: "TDengine",
-          icon: getDbIcon("tdengine", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: "其他",
-      items: [
-        {
-          key: "jvm",
-          name: "JVM Runtime",
-          icon: getDbIcon("jvm", undefined, 36),
-        },
-        {
-          key: "custom",
-          name: "Custom (自定义)",
-          icon: getDbIcon("custom", undefined, 36),
-        },
-      ],
-    },
-  ];
+  const dbTypeGroups = useMemo(
+    () =>
+      CONNECTION_TYPE_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.map((item) => ({
+          ...item,
+          icon: getDbIcon(item.key, undefined, 36),
+        })),
+      })),
+    [],
+  );
 
-  const dbTypes = dbTypeGroups.flatMap((g) => g.items);
-  const getDbTypeHint = (type: string) => {
-    switch (type) {
-      case "jvm":
-        return "JMX / Endpoint / Agent";
-      case "custom":
-        return "自定义驱动与 DSN";
-      case "redis":
-        return "单机 / 集群";
-      case "mongodb":
-        return "单机 / 副本集";
-      case "elasticsearch":
-        return "索引 / JSON DSL";
-      case "oceanbase":
-        return "MySQL / Oracle 租户";
-      case "sqlite":
-      case "duckdb":
-        return "本地文件连接";
-      default:
-        return "标准连接配置";
-    }
-  };
+  const dbTypes = getAllConnectionTypeCatalogItems();
 
   const renderStep1 = () => (
     <div
@@ -4251,7 +3925,7 @@ const ConnectionModal: React.FC<{
                       {item.name}
                     </Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      {getDbTypeHint(item.key)}
+                      {getConnectionTypeHint(item.key)}
                     </Text>
                   </div>
                 </Card>
@@ -5128,25 +4802,6 @@ const ConnectionModal: React.FC<{
                   ),
                 })}
 
-              {dbType === "elasticsearch" &&
-                renderConfigSectionCard({
-                  sectionKey: "service",
-                  icon: <DatabaseOutlined />,
-                  children: (
-                    <Form.Item
-                      name="database"
-                      label="默认索引（可选）"
-                      help="留空时 JSON DSL 和 query_string 会默认查询所有可见索引；也可以填写 logs-* 这类索引通配符。"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input
-                        {...noAutoCapInputProps}
-                        placeholder="例如：logs-*"
-                      />
-                    </Form.Item>
-                  ),
-                })}
-
               {(dbType === "oracle" || isOceanBaseOracle) &&
                 renderConfigSectionCard({
                   sectionKey: "service",
@@ -5262,399 +4917,38 @@ const ConnectionModal: React.FC<{
                   ),
                 })}
 
-              {dbType === "mongodb" &&
-                renderConfigSectionCard({
-                  sectionKey: "connectionMode",
-                  icon: <ClusterOutlined />,
-                  children: renderChoiceCards({
-                    fieldName: "mongoTopology",
-                    value: String(mongoTopology),
-                    options: [
-                      {
-                        value: "single",
-                        label: "单机模式",
-                        description: "只连接一个 MongoDB 节点。",
-                      },
-                      {
-                        value: "replica",
-                        label: "副本集 / 多节点",
-                        description: "配置副本集名称和多个候选节点。",
-                      },
-                    ],
-                  }),
-                })}
+              {dbType === "mongodb" && (
+                <ConnectionModalMongoSections
+                  mongoTopology={String(mongoTopology)}
+                  mongoSrv={Boolean(mongoSrv)}
+                  useSSH={useSSH}
+                  darkMode={darkMode}
+                  modalMutedTextStyle={modalMutedTextStyle}
+                  mongoReadPreference={String(mongoReadPreference)}
+                  mongoMembers={mongoMembers}
+                  discoveringMembers={discoveringMembers}
+                  initialValues={initialValues}
+                  renderChoiceCards={renderChoiceCards}
+                  renderConfigSectionCard={renderConfigSectionCard}
+                  renderStoredSecretControls={renderStoredSecretControls}
+                  setChoiceFieldValue={setChoiceFieldValue}
+                  handleDiscoverMongoMembers={handleDiscoverMongoMembers}
+                />
+              )}
 
-              {dbType === "mongodb" &&
-                renderConfigSectionCard({
-                  sectionKey: "mongoDiscovery",
-                  icon: <ApiOutlined />,
-                  children: (
-                    <>
-                      <Form.Item name="mongoSrv" hidden valuePropName="checked">
-                        <Checkbox />
-                      </Form.Item>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns:
-                            "repeat(auto-fit, minmax(180px, 1fr))",
-                          gap: 10,
-                        }}
-                      >
-                        {[
-                          {
-                            value: false,
-                            label: "标准地址",
-                            description: "使用 host:port 直连或副本集节点列表。",
-                          },
-                          {
-                            value: true,
-                            label: "SRV 地址",
-                            description:
-                              "使用 mongodb+srv，由 DNS 发现目标节点。",
-                          },
-                        ].map((option) => {
-                          const active = mongoSrv === option.value;
-                          return (
-                            <button
-                              key={String(option.value)}
-                              type="button"
-                              aria-pressed={active}
-                              onClick={() =>
-                                setChoiceFieldValue("mongoSrv", option.value)
-                              }
-                              style={{
-                                textAlign: "left",
-                                padding: "12px 14px",
-                                borderRadius: 14,
-                                border: active
-                                  ? darkMode
-                                    ? "1px solid rgba(255,214,102,0.42)"
-                                    : "1px solid rgba(22,119,255,0.36)"
-                                  : darkMode
-                                    ? "1px solid rgba(255,255,255,0.08)"
-                                    : "1px solid rgba(16,24,40,0.08)",
-                                background: active
-                                  ? darkMode
-                                    ? "rgba(255,214,102,0.10)"
-                                    : "rgba(22,119,255,0.07)"
-                                  : darkMode
-                                    ? "rgba(255,255,255,0.03)"
-                                    : "rgba(16,24,40,0.03)",
-                                color: darkMode ? "#f5f7ff" : "#162033",
-                                cursor: "pointer",
-                              }}
-                            >
-                              <Space size={8} wrap>
-                                <Text strong>{option.label}</Text>
-                                {active ? <Tag color="blue">当前</Tag> : null}
-                              </Space>
-                              <div
-                                style={{
-                                  ...modalMutedTextStyle,
-                                  marginTop: 6,
-                                }}
-                              >
-                                {option.description}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      {mongoSrv && useSSH && (
-                        <Alert
-                          type="warning"
-                          showIcon
-                          style={{ marginTop: 12 }}
-                          message="SRV 与 SSH 隧道同时启用时，可能依赖本地 DNS 解析能力"
-                        />
-                      )}
-                    </>
-                  ),
-                })}
-
-              {dbType === "mongodb" &&
-                mongoTopology === "replica" &&
-                renderConfigSectionCard({
-                  sectionKey: "replica",
-                  icon: <ClusterOutlined />,
-                  children: (
-                    <>
-                      <Form.Item
-                        name="mongoHosts"
-                        label={
-                          mongoSrv ? "附加 SRV 主机（可选）" : "附加节点地址"
-                        }
-                        help={
-                          mongoSrv
-                            ? "可输入多个候选主机名，格式：host；若留空则仅使用上方主机。"
-                            : "可输入多个节点地址，格式：host:port（回车确认）"
-                        }
-                      >
-                        <Select
-                          mode="tags"
-                          placeholder={
-                            mongoSrv
-                              ? "例如：cluster-a.example.com、cluster-b.example.com"
-                              : "例如：10.10.0.12:27017、10.10.0.13:27017"
-                          }
-                          tokenSeparators={[",", ";", " "]}
-                        />
-                      </Form.Item>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                          gap: 16,
-                        }}
-                      >
-                        <Form.Item
-                          name="mongoReplicaSet"
-                          label="副本集名称（可选）"
-                          style={{ marginBottom: 0 }}
-                        >
-                          <Input
-                            {...noAutoCapInputProps}
-                            placeholder="例如：rs0"
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          name="mongoReplicaUser"
-                          label="副本集用户名（可选）"
-                          style={{ marginBottom: 0 }}
-                        >
-                          <Input
-                            {...noAutoCapInputProps}
-                            placeholder="留空沿用主用户名"
-                          />
-                        </Form.Item>
-                      </div>
-                      <Form.Item
-                        name="mongoReplicaPassword"
-                        label="副本集密码（可选）"
-                        style={{ marginTop: 16, marginBottom: 0 }}
-                      >
-                        <Input.Password
-                          {...noAutoCapInputProps}
-                          placeholder={getStoredSecretPlaceholder({
-                            hasStoredSecret:
-                              initialValues?.hasMongoReplicaPassword,
-                            emptyPlaceholder: "留空沿用主密码",
-                            retainedLabel: "已保存副本集密码",
-                          })}
-                        />
-                      </Form.Item>
-                      {renderStoredSecretControls({
-                        fieldName: "mongoReplicaPassword",
-                        clearKey: "mongoReplicaPassword",
-                        hasStoredSecret: initialValues?.hasMongoReplicaPassword,
-                        clearLabel: "清除已保存副本集密码",
-                        description:
-                          "当前已保存副本集密码。留空表示继续沿用，输入新值表示替换。",
-                      })}
-                      <Space
-                        size={8}
-                        style={{ marginTop: 12, marginBottom: 12 }}
-                      >
-                        <Button
-                          onClick={handleDiscoverMongoMembers}
-                          loading={discoveringMembers}
-                        >
-                          自动发现成员
-                        </Button>
-                      </Space>
-                      {mongoMembers.length > 0 && (
-                        <Table
-                          size="small"
-                          rowKey={(record) => record.host}
-                          pagination={false}
-                          dataSource={mongoMembers}
-                          style={{ marginBottom: 12 }}
-                          columns={[
-                            { title: "Host", dataIndex: "host", width: "48%" },
-                            {
-                              title: "角色",
-                              dataIndex: "role",
-                              width: "32%",
-                              render: (
-                                value: string,
-                                record: MongoMemberInfo,
-                              ) => (
-                                <Tag
-                                  color={record.isSelf ? "blue" : "default"}
-                                >
-                                  {value || "UNKNOWN"}
-                                </Tag>
-                              ),
-                            },
-                            {
-                              title: "健康",
-                              dataIndex: "healthy",
-                              width: "20%",
-                              render: (value: boolean) => (
-                                <Tag color={value ? "success" : "error"}>
-                                  {value ? "正常" : "异常"}
-                                </Tag>
-                              ),
-                            },
-                          ]}
-                        />
-                      )}
-                    </>
-                  ),
-                })}
-
-              {dbType === "mongodb" &&
-                renderConfigSectionCard({
-                  sectionKey: "mongoPolicy",
-                  icon: <ThunderboltOutlined />,
-                  children: (
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                        gap: 16,
-                      }}
-                    >
-                      <Form.Item
-                        name="mongoAuthSource"
-                        label="认证库 (authSource)"
-                        style={{ marginBottom: 0 }}
-                      >
-                        <Input
-                          {...noAutoCapInputProps}
-                          placeholder="默认使用 database 或 admin"
-                        />
-                      </Form.Item>
-                      <div style={{ display: "grid", gap: 8 }}>
-                        <Text strong>读偏好 (readPreference)</Text>
-                        {renderChoiceCards({
-                          fieldName: "mongoReadPreference",
-                          value: String(mongoReadPreference),
-                          minWidth: 130,
-                          options: [
-                            {
-                              value: "primary",
-                              label: "primary",
-                              description: "只读主节点。",
-                            },
-                            {
-                              value: "primaryPreferred",
-                              label: "primaryPreferred",
-                              description: "主节点优先。",
-                            },
-                            {
-                              value: "secondary",
-                              label: "secondary",
-                              description: "只读从节点。",
-                            },
-                            {
-                              value: "secondaryPreferred",
-                              label: "secondaryPreferred",
-                              description: "从节点优先。",
-                            },
-                            {
-                              value: "nearest",
-                              label: "nearest",
-                              description: "选择最近节点。",
-                            },
-                          ],
-                        })}
-                      </div>
-                    </div>
-                  ),
-                })}
-
-              {isRedis &&
-                renderConfigSectionCard({
-                  sectionKey: "connectionMode",
-                  icon: <ClusterOutlined />,
-                  children: (
-                    <>
-                      {renderChoiceCards({
-                        fieldName: "redisTopology",
-                        value: String(redisTopology),
-                        options: [
-                          {
-                            value: "single",
-                            label: "单机模式",
-                            description: "只连接一个 Redis 节点。",
-                          },
-                          {
-                            value: "cluster",
-                            label: "集群模式",
-                            description: "Redis Cluster，配置多个种子节点。",
-                          },
-                        ],
-                      })}
-                      {redisTopology === "cluster" && (
-                        <Form.Item
-                          name="redisHosts"
-                          label="集群附加节点地址"
-                          help="主节点使用上方主机地址；这里填写其他种子节点，格式：host:port"
-                          style={{ marginTop: 16, marginBottom: 0 }}
-                        >
-                          <Select
-                            mode="tags"
-                            placeholder="例如：10.10.0.12:6379、10.10.0.13:6379"
-                            tokenSeparators={[",", ";", " "]}
-                          />
-                        </Form.Item>
-                      )}
-                    </>
-                  ),
-                })}
-
-              {isRedis &&
-                renderConfigSectionCard({
-                  sectionKey: "credentials",
-                  icon: <SafetyCertificateOutlined />,
-                  children: (
-                    <>
-                      <Form.Item name="password" label="密码 (可选)">
-                        <Input.Password
-                          {...noAutoCapInputProps}
-                          visibilityToggle={{
-                            visible: primaryPasswordVisible,
-                            onVisibleChange: setPrimaryPasswordVisible,
-                          }}
-                          placeholder={getStoredSecretPlaceholder({
-                            hasStoredSecret: initialValues?.hasPrimaryPassword,
-                            emptyPlaceholder:
-                              "Redis 密码（如果设置了 requirepass）",
-                            retainedLabel: "已保存 Redis 密码",
-                          })}
-                        />
-                      </Form.Item>
-                    </>
-                  ),
-                })}
-
-              {isRedis &&
-                renderConfigSectionCard({
-                  sectionKey: "databaseScope",
-                  icon: <DatabaseOutlined />,
-                  children: (
-                    <Form.Item
-                      name="includeRedisDatabases"
-                      label="显示数据库 (留空显示全部)"
-                      help="连接测试成功后可选择"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Select
-                        mode="multiple"
-                        placeholder="选择显示的数据库 (0-15)"
-                        allowClear
-                      >
-                        {redisDbList.map((db) => (
-                          <Select.Option key={db} value={db}>
-                            db{db}
-                          </Select.Option>
-                        ))}
-                      </Select>
-                    </Form.Item>
-                  ),
-                })}
+              {isRedis && (
+                <ConnectionModalRedisSections
+                  redisTopology={String(redisTopology)}
+                  redisDbList={redisDbList}
+                  initialValues={initialValues}
+                  primaryPasswordVisible={primaryPasswordVisible}
+                  setPrimaryPasswordVisible={setPrimaryPasswordVisible}
+                  renderChoiceCards={renderChoiceCards}
+                  renderConfigSectionCard={renderConfigSectionCard}
+                  renderStoredSecretControls={renderStoredSecretControls}
+                  createUriAwareRequiredRule={createUriAwareRequiredRule}
+                />
+              )}
 
               {!isFileDb &&
                 !isRedis &&
@@ -5677,13 +4971,13 @@ const ConnectionModal: React.FC<{
                           name="user"
                           label="用户名"
                           rules={
-                            dbType === "mongodb"
+                            (dbType === "mongodb" || dbType === "elasticsearch")
                               ? []
                               : [createUriAwareRequiredRule("请输入用户名")]
                           }
                           style={{ marginBottom: 0 }}
                         >
-                          <Input {...noAutoCapInputProps} />
+                          <Input {...noAutoCapInputProps} placeholder={dbType === "elasticsearch" ? "未开启认证可留空" : undefined} />
                         </Form.Item>
                         <Form.Item
                           name="password"
@@ -5763,25 +5057,13 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="includeDatabases"
-                      label={
-                        dbType === "elasticsearch"
-                          ? "显示索引 (留空显示全部)"
-                          : "显示数据库 (留空显示全部)"
-                      }
-                      help={
-                        dbType === "elasticsearch"
-                          ? "连接测试成功后可选择需要展示的索引"
-                          : "连接测试成功后可选择"
-                      }
+                      label="显示数据库 (留空显示全部)"
+                      help="连接测试成功后可选择"
                       style={{ marginBottom: 0 }}
                     >
                       <Select
                         mode="multiple"
-                        placeholder={
-                          dbType === "elasticsearch"
-                            ? "选择显示的索引"
-                            : "选择显示的数据库"
-                        }
+                        placeholder="选择显示的数据库"
                         allowClear
                       >
                         {dbList.map((db) => (
@@ -6624,6 +5906,9 @@ const ConnectionModal: React.FC<{
           savePassword: true,
           mysqlReplicaHosts: [],
           redisHosts: [],
+          redisSentinelMaster: "",
+          redisSentinelUser: "",
+          redisSentinelPassword: "",
           mongoHosts: [],
           mysqlReplicaUser: "",
           mysqlReplicaPassword: "",
@@ -6743,19 +6028,32 @@ const ConnectionModal: React.FC<{
             );
           }
           if (changed.redisTopology !== undefined) {
-            const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
+            const nextRedisTopology = String(
+              changed.redisTopology || "single",
+            ).toLowerCase();
+            const currentRedisPort = Number(form.getFieldValue("port") || 0);
+            if (
+              nextRedisTopology === "sentinel" &&
+              (!currentRedisPort || currentRedisPort === 6379)
+            ) {
+              form.setFieldValue("port", 26379);
+            } else if (
+              nextRedisTopology !== "sentinel" &&
+              currentRedisPort === 26379
+            ) {
+              form.setFieldValue("port", 6379);
+            }
+            const supportedDbs = buildRedisDatabaseList(
+              form.getFieldValue("redisDB"),
+              form.getFieldValue("includeRedisDatabases"),
+            );
             setRedisDbList(supportedDbs);
-            const selectedDbsRaw = form.getFieldValue("includeRedisDatabases");
-            const selectedDbs = Array.isArray(selectedDbsRaw)
-              ? selectedDbsRaw.map((entry: any) => Number(entry))
-              : [];
-            const validDbs = selectedDbs
-              .filter((entry: number) => Number.isFinite(entry))
-              .map((entry: number) => Math.trunc(entry))
-              .filter((entry: number) => supportedDbs.includes(entry));
             form.setFieldValue(
               "includeRedisDatabases",
-              validDbs.length > 0 ? validDbs : undefined,
+              normalizeRedisDatabaseSelection(
+                form.getFieldValue("includeRedisDatabases"),
+                supportedDbs,
+              ),
             );
           }
           if (

@@ -71,9 +71,9 @@ func (p *GeminiProvider) Validate() error {
 }
 
 type geminiRequest struct {
-	Contents         []geminiContent  `json:"contents"`
+	Contents          []geminiContent `json:"contents"`
 	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
-	GenerationConfig geminiGenConfig  `json:"generationConfig,omitempty"`
+	GenerationConfig  geminiGenConfig `json:"generationConfig,omitempty"`
 }
 
 type geminiContent struct {
@@ -255,7 +255,7 @@ func (p *GeminiProvider) buildRequest(req ai.ChatRequest) geminiRequest {
 		Contents:          contents,
 		SystemInstruction: systemInstruction,
 		GenerationConfig: geminiGenConfig{
-			Temperature:     temperature,
+			Temperature: temperature,
 		},
 	}
 }
@@ -266,8 +266,10 @@ func (p *GeminiProvider) doRequest(ctx context.Context, url string, body interfa
 		return nil, fmt.Errorf("序列化请求失败: %w", err)
 	}
 
+	requestLog := logAIUpstreamRequestStart(p.Name(), http.MethodPost, url, body)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
+		logAIUpstreamRequestFinish(requestLog, 0, err)
 		return nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -280,14 +282,18 @@ func (p *GeminiProvider) doRequest(ctx context.Context, url string, body interfa
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
+		logAIUpstreamRequestFinish(requestLog, 0, err)
 		return nil, fmt.Errorf("发送请求到 Gemini 失败: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Gemini API 返回错误 (HTTP %d): %s", resp.StatusCode, string(bodyBytes))
+		statusErr := fmt.Errorf("Gemini API 返回错误 (HTTP %d): %s", resp.StatusCode, string(bodyBytes))
+		logAIUpstreamRequestFinish(requestLog, resp.StatusCode, statusErr)
+		return nil, statusErr
 	}
 
+	logAIUpstreamRequestFinish(requestLog, resp.StatusCode, nil)
 	return resp.Body, nil
 }

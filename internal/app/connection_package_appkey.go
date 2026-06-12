@@ -143,6 +143,10 @@ func encryptSecretBundle(appKey []byte, bundle connectionSecretBundle, connectio
 	if err != nil {
 		return connectionSecretBundle{}, err
 	}
+	encrypted.RedisSentinelPassword, err = encryptSecretField(appKey, bundle.RedisSentinelPassword, connectionID)
+	if err != nil {
+		return connectionSecretBundle{}, err
+	}
 	encrypted.OpaqueURI, err = encryptSecretField(appKey, bundle.OpaqueURI, connectionID)
 	if err != nil {
 		return connectionSecretBundle{}, err
@@ -180,6 +184,10 @@ func decryptSecretBundle(appKey []byte, bundle connectionSecretBundle, connectio
 		return connectionSecretBundle{}, err
 	}
 	decrypted.MongoReplicaPassword, err = decryptSecretField(appKey, bundle.MongoReplicaPassword, connectionID)
+	if err != nil {
+		return connectionSecretBundle{}, err
+	}
+	decrypted.RedisSentinelPassword, err = decryptSecretField(appKey, bundle.RedisSentinelPassword, connectionID)
 	if err != nil {
 		return connectionSecretBundle{}, err
 	}

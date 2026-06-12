@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
+SCRIPT_DIR_WINDOWS="$(pwd -W 2>/dev/null || true)"
+SCRIPT_DIR_WINDOWS="${SCRIPT_DIR_WINDOWS//\\//}"
 
 DEFAULT_DRIVERS=(mariadb oceanbase diros starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss iris mongodb tdengine clickhouse elasticsearch)
 OUTPUT_FILE="internal/db/driver_agent_revisions_gen.go"
@@ -27,7 +29,7 @@ normalize_driver() {
     doris|diros) echo "diros" ;;
     oceanbase) echo "oceanbase" ;;
     opengauss|open_gauss|open-gauss) echo "opengauss" ;;
-    elastic|elasticsearch) echo "elasticsearch" ;;
+    elasticsearch|elastic) echo "elasticsearch" ;;
     mariadb|diros|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|iris|mongodb|tdengine|clickhouse)
       echo "$value"
       ;;
@@ -116,6 +118,7 @@ sphinx:internal/db/mysql_impl.go|\
 sqlserver:internal/db/sqlserver_impl.go|\
 sqlite:internal/db/sqlite_impl.go|\
 duckdb:internal/db/duckdb_impl.go|\
+duckdb:internal/db/duckdb_metadata.go|\
 duckdb:internal/db/duckdb_driver_import.go|\
 duckdb:internal/db/duckdb_platform_supported.go|\
 duckdb:internal/db/duckdb_platform_unsupported.go|\
@@ -132,8 +135,8 @@ mongodb:internal/db/mongodb_impl.go|\
 mongodb:internal/db/mongodb_impl_v1.go|\
 tdengine:internal/db/tdengine_impl.go|\
 clickhouse:internal/db/clickhouse_impl.go|\
-elasticsearch:internal/db/elasticsearch_helpers.go|\
-elasticsearch:internal/db/elasticsearch_impl.go)
+elasticsearch:internal/db/elasticsearch_impl.go|\
+elasticsearch:internal/db/elasticsearch_helpers.go)
       return 0
       ;;
   esac
@@ -144,6 +147,11 @@ elasticsearch:internal/db/elasticsearch_impl.go)
 should_include_source_file() {
   local driver="$1"
   local identity="$2"
+  case "$identity" in
+    internal/appdata/*|internal/connection/*|internal/logger/*)
+      return 1
+      ;;
+  esac
   if [[ "$identity" == internal/db/* ]]; then
     should_include_internal_db_file "$driver" "$identity"
     return
@@ -192,6 +200,7 @@ fi
 goos="${target_platform%%/*}"
 goarch="${target_platform##*/}"
 gomodcache="$(go env GOMODCACHE)"
+gomodcache="${gomodcache//\\//}"
 
 declare -a drivers=()
 if [[ -n "$driver_csv" ]]; then
@@ -276,18 +285,23 @@ fingerprint_driver() {
   } >"$tmp"
 
   while IFS= read -r file; do
+    file="${file//\\//}"
     [[ -n "$file" && -f "$file" ]] || continue
-    case "$file" in
-      "$SCRIPT_DIR"/*)
-        identity="${file#$SCRIPT_DIR/}"
-        ;;
-      "$gomodcache"/*)
-        identity="gomod/${file#$gomodcache/}"
-        ;;
-      *)
-        identity="$file"
-        ;;
-    esac
+    if [[ -n "$SCRIPT_DIR_WINDOWS" && "$file" == "$SCRIPT_DIR_WINDOWS"/* ]]; then
+      identity="${file#$SCRIPT_DIR_WINDOWS/}"
+    else
+      case "$file" in
+        "$SCRIPT_DIR"/*)
+          identity="${file#$SCRIPT_DIR/}"
+          ;;
+        "$gomodcache"/*)
+          identity="gomod/${file#$gomodcache/}"
+          ;;
+        *)
+          identity="$file"
+          ;;
+      esac
+    fi
     if [[ "$identity" == "$OUTPUT_FILE" ]]; then
       continue
     fi

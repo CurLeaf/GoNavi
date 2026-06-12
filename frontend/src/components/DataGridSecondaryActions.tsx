@@ -14,6 +14,7 @@ type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er';
 export interface DataGridSecondaryActionsProps {
   isV2Ui: boolean;
   canViewDdl: boolean;
+  canOpenObjectDesigner: boolean;
   viewMode: GridViewMode;
   ddlLoading: boolean;
   showColumnComment: boolean;
@@ -35,6 +36,7 @@ export interface DataGridSecondaryActionsProps {
 const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
   isV2Ui,
   canViewDdl,
+  canOpenObjectDesigner,
   viewMode,
   ddlLoading,
   showColumnComment,
@@ -53,9 +55,11 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
   onOpenTableDdl,
 }) => {
   if (isV2Ui) {
+    const fieldsActionLabel = canOpenObjectDesigner ? '对象设计' : '字段信息';
+    const fieldsActionIcon = canOpenObjectDesigner ? <EditOutlined /> : <FileTextOutlined />;
     const viewTabItems: Array<{ key: GridViewMode; label: string; icon: React.ReactNode; disabled?: boolean }> = [
       { key: 'table', label: '数据预览', icon: <TableOutlined /> },
-      { key: 'fields', label: '字段信息', icon: <FileTextOutlined /> },
+      { key: 'fields', label: fieldsActionLabel, icon: fieldsActionIcon },
       { key: 'ddl', label: '查看 DDL', icon: <ConsoleSqlOutlined />, disabled: !canViewDdl },
       { key: 'er', label: 'ER 图', icon: <LinkOutlined /> },
     ];

@@ -122,6 +122,7 @@ const MAX_PERSISTED_SQL_LOG_LENGTH = 100 * 1024;
 const MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH = 2 * 1024;
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
+const MAX_REDIS_DATABASE_INDEX = Number.MAX_SAFE_INTEGER;
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   enabled: false,
   type: "socks5",
@@ -223,6 +224,36 @@ const createDebouncedPersistStorage = <S>(
       await baseStorage.removeItem(name);
     },
   };
+};
+
+const writePersistedStatePatch = (
+  patch: Record<string, unknown>,
+): void => {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    const payload = localStorage.getItem(PERSIST_STORAGE_KEY);
+    const raw =
+      payload && payload.trim() !== ""
+        ? (JSON.parse(payload) as Record<string, unknown>)
+        : {};
+    const state = unwrapPersistedAppState(raw);
+    localStorage.setItem(
+      PERSIST_STORAGE_KEY,
+      JSON.stringify({
+        ...raw,
+        state: {
+          ...state,
+          ...patch,
+        },
+        version:
+          typeof raw.version === "number" ? raw.version : PERSIST_VERSION,
+      }),
+    );
+  } catch {
+    // ignore
+  }
 };
 
 const resolveOceanBaseProtocol = (
@@ -726,6 +757,8 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
         ? "replica"
         : raw.topology === "cluster"
           ? "cluster"
+          : raw.topology === "sentinel"
+            ? "sentinel"
           : "single",
     mysqlReplicaUser: toTrimmedString(raw.mysqlReplicaUser),
     mysqlReplicaPassword: savePassword
@@ -749,7 +782,17 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
   };
 
   if (type === "redis") {
-    safeConfig.redisDB = normalizeIntegerInRange(raw.redisDB, 0, 0, 15);
+    safeConfig.redisDB = normalizeIntegerInRange(
+      raw.redisDB,
+      0,
+      0,
+      MAX_REDIS_DATABASE_INDEX,
+    );
+    safeConfig.redisSentinelMaster = toTrimmedString(raw.redisSentinelMaster);
+    safeConfig.redisSentinelUser = toTrimmedString(raw.redisSentinelUser);
+    safeConfig.redisSentinelPassword = savePassword
+      ? toTrimmedString(raw.redisSentinelPassword)
+      : "";
   }
 
   if (type === "clickhouse") {
@@ -820,7 +863,7 @@ const sanitizeSavedConnection = (
   const includeRedisDatabases = sanitizeNumberArray(
     raw.includeRedisDatabases,
     0,
-    15,
+    MAX_REDIS_DATABASE_INDEX,
   );
 
   return {
@@ -834,6 +877,7 @@ const sanitizeSavedConnection = (
     hasHttpTunnelPassword: raw.hasHttpTunnelPassword === true,
     hasMySQLReplicaPassword: raw.hasMySQLReplicaPassword === true,
     hasMongoReplicaPassword: raw.hasMongoReplicaPassword === true,
+    hasRedisSentinelPassword: raw.hasRedisSentinelPassword === true,
     hasOpaqueURI: raw.hasOpaqueURI === true,
     hasOpaqueDSN: raw.hasOpaqueDSN === true,
     includeDatabases:
@@ -1081,6 +1125,27 @@ export interface QueryOptions {
   maxRows: number;
   showColumnComment: boolean;
   showColumnType: boolean;
+  showQueryResultsPanel: boolean;
+}
+
+export interface DataEditTransactionOptions {
+  commitMode: "manual" | "auto";
+  autoCommitDelayMs: number;
+}
+
+export interface SqlEditorTransactionOptions {
+  commitMode: "manual" | "auto";
+  autoCommitDelayMs: number;
+}
+
+export interface SqlEditorPendingTransactionState {
+  id: string;
+  tabId: string;
+  commitMode: "manual" | "auto";
+  autoCommitDelayMs: number;
+  createdAt: number;
+  autoCommitDueAt?: number | null;
+  statementCount?: number;
 }
 
 interface AppState {
@@ -1100,6 +1165,9 @@ interface AppState {
   globalProxy: GlobalProxyConfig;
   sqlFormatOptions: { keywordCase: "upper" | "lower" };
   queryOptions: QueryOptions;
+  dataEditTransactionOptions: DataEditTransactionOptions;
+  sqlEditorTransactionOptions: SqlEditorTransactionOptions;
+  sqlEditorPendingTransactions: Record<string, SqlEditorPendingTransactionState>;
   shortcutOptions: ShortcutOptions;
   sqlSnippets: SqlSnippet[];
   sqlLogs: SqlLog[];
@@ -1171,7 +1239,12 @@ interface AppState {
   addTab: (tab: TabData) => void;
   updateQueryTabDraft: (
     id: string,
-    draft: Partial<Pick<TabData, "query" | "connectionId" | "dbName" | "title">>,
+    draft: Partial<
+      Pick<
+        TabData,
+        "query" | "connectionId" | "dbName" | "title" | "resultPanelVisible"
+      >
+    >,
   ) => void;
   closeTab: (id: string) => void;
   closeOtherTabs: (id: string) => void;
@@ -1200,6 +1273,16 @@ interface AppState {
   replaceGlobalProxy: (proxy: Partial<GlobalProxyConfig>) => void;
   setSqlFormatOptions: (options: { keywordCase: "upper" | "lower" }) => void;
   setQueryOptions: (options: Partial<QueryOptions>) => void;
+  setDataEditTransactionOptions: (
+    options: Partial<DataEditTransactionOptions>,
+  ) => void;
+  setSqlEditorTransactionOptions: (
+    options: Partial<SqlEditorTransactionOptions>,
+  ) => void;
+  setSqlEditorPendingTransaction: (
+    tabId: string,
+    transaction: Omit<SqlEditorPendingTransactionState, "tabId"> | null,
+  ) => void;
   updateShortcut: (
     action: ShortcutAction,
     binding: Partial<ShortcutPlatformBinding>,
@@ -1329,6 +1412,7 @@ const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
       prefix,
       name: toTrimmedString(raw.name, `片段-${index + 1}`) || `片段-${index + 1}`,
       description: toTrimmedString(raw.description) || undefined,
+      syntaxHelp: toTrimmedString(raw.syntaxHelp) || undefined,
       body,
       isBuiltin: raw.isBuiltin === true,
       createdAt: Number.isFinite(Number(raw.createdAt))
@@ -1403,6 +1487,10 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
       connectionId: toTrimmedString(raw.connectionId),
       dbName: toTrimmedString(raw.dbName),
       query,
+      resultPanelVisible:
+        typeof raw.resultPanelVisible === "boolean"
+          ? raw.resultPanelVisible
+          : undefined,
       filePath: filePath || undefined,
       savedQueryId: savedQueryId || undefined,
       readOnly: raw.readOnly === true,
@@ -1522,6 +1610,7 @@ const hasLegacyConnectionSecrets = (
       toTrimmedString(httpTunnel.password) !== "" ||
       toTrimmedString(config.mysqlReplicaPassword) !== "" ||
       toTrimmedString(config.mongoReplicaPassword) !== "" ||
+      toTrimmedString(config.redisSentinelPassword) !== "" ||
       toTrimmedString(config.uri) !== "" ||
       toTrimmedString(config.dsn) !== ""
     );
@@ -1551,13 +1640,51 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     typeof raw.showColumnComment === "boolean" ? raw.showColumnComment : true;
   const showColumnType =
     typeof raw.showColumnType === "boolean" ? raw.showColumnType : true;
+  const showQueryResultsPanel =
+    typeof raw.showQueryResultsPanel === "boolean" ? raw.showQueryResultsPanel : false;
   if (!Number.isFinite(maxRows) || maxRows <= 0) {
-    return { maxRows: 5000, showColumnComment, showColumnType };
+    return { maxRows: 5000, showColumnComment, showColumnType, showQueryResultsPanel };
   }
   return {
     maxRows: Math.min(50000, Math.trunc(maxRows)),
     showColumnComment,
     showColumnType,
+    showQueryResultsPanel,
+  };
+};
+
+const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = new Set([3000, 5000, 10000, 30000]);
+const SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS = new Set([0, 3000, 5000, 10000, 30000]);
+
+const sanitizeDataEditTransactionOptions = (
+  value: unknown,
+): DataEditTransactionOptions => {
+  const raw =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const autoCommitDelayMs = Number(raw.autoCommitDelayMs);
+  return {
+    commitMode: raw.commitMode === "auto" ? "auto" : "manual",
+    autoCommitDelayMs: DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS.has(autoCommitDelayMs)
+      ? autoCommitDelayMs
+      : 5000,
+  };
+};
+
+const sanitizeSqlEditorTransactionOptions = (
+  value: unknown,
+): SqlEditorTransactionOptions => {
+  const raw =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const autoCommitDelayMs = Number(raw.autoCommitDelayMs);
+  return {
+    commitMode: raw.commitMode === "auto" ? "auto" : "manual",
+    autoCommitDelayMs: SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS.has(autoCommitDelayMs)
+      ? autoCommitDelayMs
+      : 0,
   };
 };
 
@@ -1945,7 +2072,17 @@ export const useStore = create<AppState>()(
         maxRows: 5000,
         showColumnComment: true,
         showColumnType: true,
+        showQueryResultsPanel: false,
       },
+      dataEditTransactionOptions: {
+        commitMode: "manual",
+        autoCommitDelayMs: 5000,
+      },
+      sqlEditorTransactionOptions: {
+        commitMode: "manual",
+        autoCommitDelayMs: 0,
+      },
+      sqlEditorPendingTransactions: {},
       shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
       sqlSnippets: DEFAULT_SQL_SNIPPETS,
       sqlLogs: [],
@@ -2273,41 +2410,48 @@ export const useStore = create<AppState>()(
 
       addTab: (tab) =>
         set((state) => {
-          const index = state.tabs.findIndex((t) => t.id === tab.id);
+          const incomingTab =
+            tab.type === "query" && tab.resultPanelVisible === undefined
+              ? {
+                  ...tab,
+                  resultPanelVisible: state.queryOptions.showQueryResultsPanel,
+                }
+              : tab;
+          const index = state.tabs.findIndex((t) => t.id === incomingTab.id);
           if (index !== -1) {
             // Update existing tab with new data (e.g. switch initialTab)
             const newTabs = [...state.tabs];
-            newTabs[index] = { ...newTabs[index], ...tab };
+            newTabs[index] = { ...newTabs[index], ...incomingTab };
             return {
               tabs: newTabs,
-              activeTabId: tab.id,
+              activeTabId: incomingTab.id,
               activeContext: resolveActiveContextForTabId(
                 newTabs,
-                tab.id,
+                incomingTab.id,
                 state.activeContext,
               ),
             };
           }
           // 语义去重：对 table/design 类型按 connectionId+dbName+tableName 匹配已有 Tab
           if (
-            (tab.type === "table" || tab.type === "design") &&
-            tab.tableName &&
-            tab.connectionId &&
-            tab.dbName
+            (incomingTab.type === "table" || incomingTab.type === "design") &&
+            incomingTab.tableName &&
+            incomingTab.connectionId &&
+            incomingTab.dbName
           ) {
             const semanticIndex = state.tabs.findIndex(
               (t) =>
-                t.type === tab.type &&
-                t.connectionId === tab.connectionId &&
-                t.dbName === tab.dbName &&
-                t.tableName === tab.tableName,
+                t.type === incomingTab.type &&
+                t.connectionId === incomingTab.connectionId &&
+                t.dbName === incomingTab.dbName &&
+                t.tableName === incomingTab.tableName,
             );
             if (semanticIndex !== -1) {
               const existingTab = state.tabs[semanticIndex];
               const newTabs = [...state.tabs];
               newTabs[semanticIndex] = {
                 ...existingTab,
-                ...tab,
+                ...incomingTab,
                 id: existingTab.id,
               };
               return {
@@ -2322,19 +2466,19 @@ export const useStore = create<AppState>()(
             }
           }
           // 语义去重：对 query 类型按 savedQueryId 匹配已有 Tab（避免保存后重复打开）
-          if (tab.type === "query" && tab.savedQueryId) {
+          if (incomingTab.type === "query" && incomingTab.savedQueryId) {
             const savedQueryIndex = state.tabs.findIndex(
               (t) =>
                 t.type === "query" &&
-                (t.savedQueryId === tab.savedQueryId ||
-                  t.id === tab.savedQueryId),
+                (t.savedQueryId === incomingTab.savedQueryId ||
+                  t.id === incomingTab.savedQueryId),
             );
             if (savedQueryIndex !== -1) {
               const existingTab = state.tabs[savedQueryIndex];
               const newTabs = [...state.tabs];
               newTabs[savedQueryIndex] = {
                 ...existingTab,
-                ...tab,
+                ...incomingTab,
                 id: existingTab.id,
               };
               return {
@@ -2348,13 +2492,13 @@ export const useStore = create<AppState>()(
               };
             }
           }
-          const nextTabs = [...state.tabs, tab];
+          const nextTabs = [...state.tabs, incomingTab];
           return {
             tabs: nextTabs,
-            activeTabId: tab.id,
+            activeTabId: incomingTab.id,
             activeContext: resolveActiveContextForTabId(
               nextTabs,
-              tab.id,
+              incomingTab.id,
               state.activeContext,
             ),
           };
@@ -2395,6 +2539,13 @@ export const useStore = create<AppState>()(
               const nextTitle = toTrimmedString(draft.title, nextTab.title) || nextTab.title;
               if (nextTab.title !== nextTitle) {
                 nextTab.title = nextTitle;
+                changed = true;
+              }
+            }
+            if (draft.resultPanelVisible !== undefined) {
+              const nextResultPanelVisible = draft.resultPanelVisible === true;
+              if (nextTab.resultPanelVisible !== nextResultPanelVisible) {
+                nextTab.resultPanelVisible = nextResultPanelVisible;
                 changed = true;
               }
             }
@@ -2654,7 +2805,11 @@ export const useStore = create<AppState>()(
         })),
       setUiScale: (scale) => set({ uiScale: sanitizeUiScale(scale) }),
       setFontSize: (size) => set({ fontSize: sanitizeFontSize(size) }),
-      setStartupFullscreen: (enabled) => set({ startupFullscreen: !!enabled }),
+      setStartupFullscreen: (enabled) => {
+        const nextValue = !!enabled;
+        set({ startupFullscreen: nextValue });
+        writePersistedStatePatch({ startupFullscreen: nextValue });
+      },
       setGlobalProxy: (proxy) =>
         set((state) => ({
           globalProxy: sanitizeGlobalProxy({ ...state.globalProxy, ...proxy }),
@@ -2672,6 +2827,37 @@ export const useStore = create<AppState>()(
         set((state) => ({
           queryOptions: { ...state.queryOptions, ...options },
         })),
+      setDataEditTransactionOptions: (options) =>
+        set((state) => ({
+          dataEditTransactionOptions: sanitizeDataEditTransactionOptions({
+            ...state.dataEditTransactionOptions,
+            ...options,
+          }),
+        })),
+      setSqlEditorTransactionOptions: (options) =>
+        set((state) => ({
+          sqlEditorTransactionOptions: sanitizeSqlEditorTransactionOptions({
+            ...state.sqlEditorTransactionOptions,
+            ...options,
+          }),
+        })),
+      setSqlEditorPendingTransaction: (tabId, transaction) =>
+        set((state) => {
+          const safeTabId = String(tabId || "").trim();
+          if (!safeTabId) {
+            return {};
+          }
+          const next = { ...state.sqlEditorPendingTransactions };
+          if (!transaction) {
+            delete next[safeTabId];
+            return { sqlEditorPendingTransactions: next };
+          }
+          next[safeTabId] = {
+            ...transaction,
+            tabId: safeTabId,
+          };
+          return { sqlEditorPendingTransactions: next };
+        }),
       updateShortcut: (action, binding, platform) => {
         runWithExplicitShortcutPersistence(() => {
           const targetPlatform = platform ?? getShortcutPlatform();
@@ -3078,6 +3264,10 @@ export const useStore = create<AppState>()(
           state.sqlFormatOptions,
         );
         nextState.queryOptions = sanitizeQueryOptions(state.queryOptions);
+        nextState.dataEditTransactionOptions =
+          sanitizeDataEditTransactionOptions(state.dataEditTransactionOptions);
+        nextState.sqlEditorTransactionOptions =
+          sanitizeSqlEditorTransactionOptions(state.sqlEditorTransactionOptions);
         nextState.shortcutOptions = sanitizeShortcutOptions(
           state.shortcutOptions,
         );
@@ -3180,6 +3370,12 @@ export const useStore = create<AppState>()(
 
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
+          dataEditTransactionOptions: sanitizeDataEditTransactionOptions(
+            state.dataEditTransactionOptions,
+          ),
+          sqlEditorTransactionOptions: sanitizeSqlEditorTransactionOptions(
+            state.sqlEditorTransactionOptions,
+          ),
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
           sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: sanitizeSqlSnippets(state.sqlSnippets),
@@ -3210,6 +3406,8 @@ export const useStore = create<AppState>()(
               : toPersistedGlobalProxy(state.globalProxy),
           sqlFormatOptions: state.sqlFormatOptions,
           queryOptions: state.queryOptions,
+          dataEditTransactionOptions: state.dataEditTransactionOptions,
+          sqlEditorTransactionOptions: state.sqlEditorTransactionOptions,
           shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
           sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: state.sqlSnippets,

@@ -86,6 +86,127 @@ type ProviderConfig struct {
 	Temperature float64           `json:"temperature"`
 }
 
+// UserPromptSettings 表示用户级自定义提示词配置
+type UserPromptSettings struct {
+	Global        string `json:"global"`
+	Database      string `json:"database"`
+	JVM           string `json:"jvm"`
+	JVMDiagnostic string `json:"jvmDiagnostic"`
+}
+
+// MCPTransport 表示 MCP 服务的传输方式
+type MCPTransport string
+
+const (
+	MCPTransportStdio MCPTransport = "stdio"
+)
+
+// MCPServerConfig 表示一个可配置的 MCP 服务
+type MCPServerConfig struct {
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	Transport      MCPTransport      `json:"transport"`
+	Command        string            `json:"command"`
+	Args           []string          `json:"args,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	Enabled        bool              `json:"enabled"`
+	TimeoutSeconds int               `json:"timeoutSeconds"`
+}
+
+// MCPToolDescriptor 表示暴露给模型和前端的 MCP 工具描述
+type MCPToolDescriptor struct {
+	Alias        string         `json:"alias"`
+	ServerID     string         `json:"serverId"`
+	ServerName   string         `json:"serverName"`
+	OriginalName string         `json:"originalName"`
+	Title        string         `json:"title,omitempty"`
+	Description  string         `json:"description,omitempty"`
+	InputSchema  map[string]any `json:"inputSchema,omitempty"`
+}
+
+// MCPToolCallResult 表示一次 MCP 工具调用的结果
+type MCPToolCallResult struct {
+	Alias             string `json:"alias"`
+	ServerID          string `json:"serverId"`
+	ServerName        string `json:"serverName"`
+	OriginalName      string `json:"originalName"`
+	Title             string `json:"title,omitempty"`
+	Content           string `json:"content"`
+	StructuredContent any    `json:"structuredContent,omitempty"`
+	IsError           bool   `json:"isError"`
+}
+
+// MCPClientInstallResult 表示安装 GoNavi 到外部 MCP 客户端配置文件的结果。
+type MCPClientInstallResult struct {
+	Success    bool     `json:"success"`
+	Client     string   `json:"client,omitempty"`
+	Message    string   `json:"message"`
+	ConfigPath string   `json:"configPath,omitempty"`
+	Command    string   `json:"command,omitempty"`
+	Args       []string `json:"args,omitempty"`
+}
+
+// MCPClientInstallStatus 表示 GoNavi MCP 在外部客户端中的当前安装状态。
+type MCPClientInstallStatus struct {
+	Client         string   `json:"client"`
+	DisplayName    string   `json:"displayName"`
+	InstallMode    string   `json:"installMode,omitempty"`
+	Installed      bool     `json:"installed"`
+	MatchesCurrent bool     `json:"matchesCurrent"`
+	ClientDetected bool     `json:"clientDetected"`
+	ClientCommand  string   `json:"clientCommand,omitempty"`
+	ClientPath     string   `json:"clientPath,omitempty"`
+	Message        string   `json:"message"`
+	ConfigPath     string   `json:"configPath,omitempty"`
+	Command        string   `json:"command,omitempty"`
+	Args           []string `json:"args,omitempty"`
+}
+
+// MCPHTTPServerOptions 表示从客户端启动 GoNavi Streamable HTTP MCP 的参数。
+type MCPHTTPServerOptions struct {
+	Addr       string `json:"addr,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Token      string `json:"token,omitempty"`
+	SchemaOnly bool   `json:"schemaOnly"`
+}
+
+// MCPHTTPServerStatus 表示客户端内置 HTTP MCP 服务运行状态。
+type MCPHTTPServerStatus struct {
+	Running             bool   `json:"running"`
+	Addr                string `json:"addr"`
+	Path                string `json:"path"`
+	URL                 string `json:"url"`
+	SchemaOnly          bool   `json:"schemaOnly"`
+	Token               string `json:"token,omitempty"`
+	AuthorizationHeader string `json:"authorizationHeader,omitempty"`
+	StartedAt           int64  `json:"startedAt,omitempty"`
+	Message             string `json:"message"`
+}
+
+// ClaudeCodeMCPInstallResult 兼容旧命名，便于平滑迁移到通用结果类型。
+type ClaudeCodeMCPInstallResult = MCPClientInstallResult
+
+// SkillScope 表示 Skill 的适用场景
+type SkillScope string
+
+const (
+	SkillScopeGlobal        SkillScope = "global"
+	SkillScopeDatabase      SkillScope = "database"
+	SkillScopeJVM           SkillScope = "jvm"
+	SkillScopeJVMDiagnostic SkillScope = "jvmDiagnostic"
+)
+
+// SkillConfig 表示一个可配置的 Skill
+type SkillConfig struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Description   string   `json:"description,omitempty"`
+	SystemPrompt  string   `json:"systemPrompt"`
+	Enabled       bool     `json:"enabled"`
+	Scopes        []string `json:"scopes,omitempty"`
+	RequiredTools []string `json:"requiredTools,omitempty"`
+}
+
 // SQLPermissionLevel AI SQL 执行权限级别
 type SQLPermissionLevel string
 

@@ -24,3 +24,26 @@ func TestIsLowMemoryMode(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldRunMCPServerMode(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "empty", args: nil, want: false},
+		{name: "mcp-server", args: []string{"mcp-server"}, want: true},
+		{name: "flag style", args: []string{"--mcp-server"}, want: true},
+		{name: "mcp-server http mode", args: []string{"mcp-server", "http"}, want: true},
+		{name: "mcp-server remote config", args: []string{"mcp-server", "remote-config"}, want: true},
+		{name: "unknown", args: []string{"serve"}, want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldRunMCPServerMode(tc.args); got != tc.want {
+				t.Fatalf("shouldRunMCPServerMode(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}

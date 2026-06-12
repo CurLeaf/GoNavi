@@ -14,6 +14,7 @@ import Sidebar, {
   hasSidebarLazyChildren,
   normalizeSidebarTreeRelativeDropPosition,
   parseV2CommandSearchQuery,
+  resolveV2CommandSearchPersistentFilter,
   type V2CommandSearchItem,
   resolveSidebarDropNodeFromDomEvent,
   resolveSidebarTagDropInsertBefore,
@@ -27,6 +28,7 @@ import Sidebar, {
   shouldSkipSidebarLoadOnExpandWhileDragging,
   shouldSkipSidebarSelectWhileDragging,
   shouldLoadSidebarNodeOnExpand,
+  shouldCloseV2CommandSearchOnGlobalKey,
   shouldRunV2CommandSearchEnter,
   sortSidebarTableEntries,
 } from './Sidebar';
@@ -231,6 +233,10 @@ describe('Sidebar locate toolbar', () => {
       dataRef: { tableName: 'public.users' },
     })).toBe('public.users');
     expect(resolveSidebarTableNameForCopy({
+      title: 'v_users',
+      dataRef: { viewName: 'reporting.v_users' },
+    })).toBe('reporting.v_users');
+    expect(resolveSidebarTableNameForCopy({
       title: 'users',
       dataRef: {},
     })).toBe('users');
@@ -299,6 +305,51 @@ describe('Sidebar locate toolbar', () => {
     expect(shouldRunV2CommandSearchEnter({
       key: 'Escape',
       activeItemCount: 1,
+    })).toBe(false);
+  });
+
+  it('keeps v2 command search persisted filter after closing the palette', () => {
+    expect(resolveV2CommandSearchPersistentFilter({
+      commandSearchValue: '  org  ',
+      persistedFilter: '',
+      enabled: true,
+      isOpen: true,
+    })).toBe('org');
+
+    expect(resolveV2CommandSearchPersistentFilter({
+      commandSearchValue: '',
+      persistedFilter: 'org',
+      enabled: true,
+      isOpen: false,
+    })).toBe('org');
+
+    expect(resolveV2CommandSearchPersistentFilter({
+      commandSearchValue: 'org',
+      persistedFilter: 'org',
+      enabled: false,
+      isOpen: true,
+    })).toBe('');
+  });
+
+  it('closes v2 command search on global escape only while the palette is open', () => {
+    expect(shouldCloseV2CommandSearchOnGlobalKey({
+      key: 'Escape',
+      isOpen: true,
+    })).toBe(true);
+
+    expect(shouldCloseV2CommandSearchOnGlobalKey({
+      key: 'Esc',
+      isOpen: true,
+    })).toBe(true);
+
+    expect(shouldCloseV2CommandSearchOnGlobalKey({
+      key: 'Escape',
+      isOpen: false,
+    })).toBe(false);
+
+    expect(shouldCloseV2CommandSearchOnGlobalKey({
+      key: 'Enter',
+      isOpen: true,
     })).toBe(false);
   });
 
@@ -456,6 +507,16 @@ describe('Sidebar locate toolbar', () => {
     expect(locateActionIndex).toBeGreaterThan(externalSqlActionIndex);
   });
 
+  it('passes the exact tree key when locating a command-search object node', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const commandSearchRunSource = source.slice(
+      source.indexOf("if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view')"),
+      source.indexOf("if (node.type === 'db-trigger' || node.type === 'db-event' || node.type === 'routine')"),
+    );
+
+    expect(commandSearchRunSource).toContain("tabId: String(node.key || '')");
+  });
+
   it('wires external SQL directory file actions to dedicated Wails APIs', () => {
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
     const loadTablesSource = source.slice(
@@ -538,6 +599,8 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('handleV2CommandSearchValueChange(event.target.value)');
     expect(source).toContain('toggleV2CommandSearchPersistentFilter');
     expect(source).toContain('gn-v2-command-filter-switch');
+    expect(source).toContain("window.addEventListener('keydown', handleV2CommandSearchGlobalKeyDown, true)");
+    expect(source).toContain("window.removeEventListener('keydown', handleV2CommandSearchGlobalKeyDown, true)");
     expect(source).toContain('onClick={() => setV2ExplorerFilter(item.key)}');
     expect(source).toContain('treeData={isV2Ui ? v2VisibleTreeData : displayTreeData}');
     expect(markup).toContain('gn-v2-sidebar-log-footer');
@@ -653,18 +716,32 @@ describe('Sidebar locate toolbar', () => {
   it('keeps v2 tree status dots circular while using virtual horizontal scroll for long labels', () => {
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const utilsSource = readFileSync(new URL('./sidebarV2Utils.ts', import.meta.url), 'utf8');
 
     expect(source).toContain('gn-v2-tree-status is-${status}');
     expect(source).toContain('data-sidebar-tree-folder-icon="true"');
     expect(source).toContain("overflow: 'hidden'");
     expect(source).not.toContain("overflowX: isV2Ui ? 'auto' : 'hidden'");
     expect(source).toContain('scrollWidth={isV2Ui ? v2TreeHorizontalScrollWidth : undefined}');
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \{[^}]*overflow: hidden !important;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree \{[^}]*width: 100%;[^}]*min-width: 0;/s);
+    expect(utilsSource).toContain('export const V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE = 32;');
+    expect(source).toContain('const effectiveTreeHeight = isV2Ui && v2TreeHorizontalScrollWidth');
+    expect(source).toContain('treeHeight - V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE');
+    expect(source).toContain('height={effectiveTreeHeight}');
+    expect(source).toContain('treeData={isV2Ui ? v2VisibleTreeData : displayTreeData}');
+    expect(source).not.toContain('__v2-tree-horizontal-scroll-spacer__');
+    expect(source).not.toContain('v2TreeDataWithScrollSpacer');
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \{[^}]*--gn-v2-tree-horizontal-scroll-reserve: 32px;[^}]*overflow: hidden !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.sidebar-tree-scroll-content \{[^}]*display: flex;[^}]*height: 100%;[^}]*padding: 4px 0 0;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree \{[^}]*flex: 1 1 auto;[^}]*width: 100%;[^}]*min-width: 0;[^}]*height: 100%;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list \{[^}]*height: calc\(100% - var\(--gn-v2-tree-horizontal-scroll-reserve\)\);[^}]*min-height: 0;[^}]*box-sizing: border-box;/s);
+    expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list \{[^}]*height: 100%;/s);
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder-inner \{[^}]*width: 100%;[^}]*min-width: 100%;/s);
     expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder-inner \{[^}]*width: max-content;/s);
+    expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list \{[^}]*position: static !important;/s);
+    expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder \{[^}]*calc\(100% - var\(--gn-v2-tree-horizontal-scroll-reserve\)\)/s);
     expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder \{[^}]*overflow-x: auto !important;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*height: 12px !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*height: 12px !important;[^}]*bottom: calc\(\(var\(--gn-v2-tree-horizontal-scroll-reserve\) - 12px\) \* -1\) !important;/s);
+    expect(css).not.toContain('.gn-v2-tree-horizontal-scroll-spacer');
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \.ant-tree-list-scrollbar-thumb \{[^}]*height: 8px !important;/s);
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-node-content-wrapper \{[^}]*display: flex !important;/s);
     expect(css).toMatch(/\.gn-v2-tree-title\.is-connection \{[^}]*align-items:\s*center;/s);
@@ -807,6 +884,7 @@ describe('Sidebar locate toolbar', () => {
 
   it('reorders dragged connections instead of only moving them between groups', () => {
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const utilsSource = readFileSync(new URL('./sidebarV2Utils.ts', import.meta.url), 'utf8');
 
     expect(source).toContain('const reorderConnections = useStore(state => state.reorderConnections);');
     expect(source).toContain('reorderConnections(');
@@ -814,7 +892,7 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('const domDropNode = resolveSidebarDropNodeFromDomEvent(info?.event);');
     expect(source).toContain('const dropTargetMetrics = resolveSidebarDropTargetMetricsFromDomEvent(info?.event);');
     expect(source).toContain("findTreeNodeByKeyRef.current(treeDataRef.current, domDropNode.key)");
-    expect(source).toContain("const treeNode = baseElement.closest('.ant-tree-treenode') as HTMLElement | null;");
+    expect(utilsSource).toContain("const treeNode = baseElement.closest('.ant-tree-treenode') as HTMLElement | null;");
     expect(source).toContain('insertBefore,');
   });
 
@@ -1032,6 +1110,43 @@ describe('Sidebar locate toolbar', () => {
     expect(filterV2ExplorerTreeByKind(tree, 'views')[0].children?.map((node) => node.key)).toEqual(['conn-main-views']);
     expect(filterV2ExplorerTreeByKind(tree, 'routines')[0].children?.map((node) => node.key)).toEqual(['conn-main-routines']);
     expect(filterV2ExplorerTreeByKind(tree, 'events')[0].children?.map((node) => node.key)).toEqual(['conn-main-events']);
+  });
+
+  it('hides external SQL roots from v2 object kind filters', () => {
+    const tree = [
+      {
+        title: 'front_end_sys',
+        key: 'conn-main',
+        type: 'database' as const,
+        children: [
+          {
+            title: '表',
+            key: 'conn-main-tables',
+            type: 'object-group' as const,
+            dataRef: { groupKey: 'tables' },
+            children: [{ title: 'users', key: 'users', type: 'table' as const }],
+          },
+        ],
+      },
+      {
+        title: '外部 SQL 目录',
+        key: 'external-sql-root',
+        type: 'external-sql-root' as const,
+        children: [
+          {
+            title: 'scripts',
+            key: 'external-sql-folder:scripts',
+            type: 'external-sql-folder' as const,
+          },
+        ],
+      },
+    ];
+
+    expect(filterV2ExplorerTreeByKind(tree, 'all').map((node) => node.key)).toEqual([
+      'conn-main',
+      'external-sql-root',
+    ]);
+    expect(filterV2ExplorerTreeByKind(tree, 'tables').map((node) => node.key)).toEqual(['conn-main']);
   });
 
   it('adds rename to the saved query context menu', () => {
@@ -1332,5 +1447,16 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('findTreeNodeByKeyRef.current(treeDataRef.current, `${connectionId}-${dbName}`)');
     expect(source).toContain('void loadTables(dbNode);');
     expect(source).toContain("window.removeEventListener('gonavi:sidebar-table-pin-changed'");
+  });
+
+  it('waits long enough for slow object-tree loads before reporting locate misses', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('const SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS = 50;');
+    expect(source).toContain('const SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS = 160;');
+    expect(source).toContain('attempt < SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS');
+    expect(source).toContain('window.setTimeout(resolve, SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS)');
+    expect(source).toContain('return !loadingNodesRef.current.has(loadKey);');
+    expect(source).toContain('对象仍在加载中');
   });
 });

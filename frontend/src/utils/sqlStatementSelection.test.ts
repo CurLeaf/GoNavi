@@ -28,6 +28,140 @@ describe('sqlStatementSelection', () => {
     ]);
   });
 
+  it('keeps Oracle anonymous PL/SQL blocks as one executable statement', () => {
+    const plsql = [
+      'BEGIN',
+      "  INSERT INTO tmp_disable_trigger (table_name) VALUES ('t_memcard_reg');",
+      "  UPDATE t_memcard_reg SET CARDLEVEL = 1 WHERE MEMCARDNO = '8032277312';",
+      "  DELETE FROM tmp_disable_trigger WHERE table_name = 't_memcard_reg';",
+      'END;',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(plsql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'BEGIN',
+        "  INSERT INTO tmp_disable_trigger (table_name) VALUES ('t_memcard_reg');",
+        "  UPDATE t_memcard_reg SET CARDLEVEL = 1 WHERE MEMCARDNO = '8032277312';",
+        "  DELETE FROM tmp_disable_trigger WHERE table_name = 't_memcard_reg';",
+        'END;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(plsql, plsql.indexOf('UPDATE'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+  });
+
+  it('keeps Oracle DECLARE blocks as one executable statement', () => {
+    const sql = [
+      'DECLARE',
+      '  v_count NUMBER;',
+      'BEGIN',
+      '  SELECT COUNT(*) INTO v_count FROM t_memcard_reg;',
+      "  UPDATE t_memcard_reg SET CARDLEVEL = v_count WHERE MEMCARDNO = '8032277312';",
+      'END;',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'DECLARE',
+        '  v_count NUMBER;',
+        'BEGIN',
+        '  SELECT COUNT(*) INTO v_count FROM t_memcard_reg;',
+        "  UPDATE t_memcard_reg SET CARDLEVEL = v_count WHERE MEMCARDNO = '8032277312';",
+        'END;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('UPDATE'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+  });
+
+  it('keeps Oracle CREATE PROCEDURE definitions as one executable statement', () => {
+    const sql = [
+      'CREATE OR REPLACE PROCEDURE proc_tally2accept(',
+      '  p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE,',
+      '  out_acceptno OUT t_accept_h.acceptno%TYPE',
+      ') IS',
+      '  v_busno t_tally_accept_h.busno%TYPE;',
+      '  v_count PLS_INTEGER;',
+      'BEGIN',
+      "  SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;",
+      '  IF v_count > 0 THEN',
+      '    out_acceptno := p_tallyacceptno;',
+      '  END IF;',
+      'END;',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'CREATE OR REPLACE PROCEDURE proc_tally2accept(',
+        '  p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE,',
+        '  out_acceptno OUT t_accept_h.acceptno%TYPE',
+        ') IS',
+        '  v_busno t_tally_accept_h.busno%TYPE;',
+        '  v_count PLS_INTEGER;',
+        'BEGIN',
+        "  SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;",
+        '  IF v_count > 0 THEN',
+        '    out_acceptno := p_tallyacceptno;',
+        '  END IF;',
+        'END;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('v_busno'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+  });
+
+  it('keeps PostgreSQL dollar-quoted CREATE FUNCTION definitions as one executable statement', () => {
+    const sql = [
+      'CREATE OR REPLACE FUNCTION refresh_stats() RETURNS void AS $$',
+      'BEGIN',
+      '  PERFORM refresh_now();',
+      'END;',
+      '$$ LANGUAGE plpgsql;',
+      'SELECT 2;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'CREATE OR REPLACE FUNCTION refresh_stats() RETURNS void AS $$',
+        'BEGIN',
+        '  PERFORM refresh_now();',
+        'END;',
+        '$$ LANGUAGE plpgsql',
+      ].join('\n'),
+      'SELECT 2',
+    ]);
+  });
+
+  it('still splits transaction BEGIN statements', () => {
+    const sql = 'BEGIN; UPDATE accounts SET balance = balance - 1 WHERE id = 1; COMMIT;';
+
+    expect(findSqlStatementRanges(sql).map((range) => range.text)).toEqual([
+      'BEGIN',
+      'UPDATE accounts SET balance = balance - 1 WHERE id = 1',
+      'COMMIT',
+    ]);
+  });
+
   it('selects the next statement when the cursor is on whitespace before it', () => {
     const sql = 'select 1;\n\n  select 2;';
     const range = resolveCurrentSqlStatementRange(sql, sql.indexOf('  select 2'));

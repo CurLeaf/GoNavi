@@ -23,6 +23,17 @@ func normalizeTestConnectionConfig(config connection.ConnectionConfig) connectio
 	return normalized
 }
 
+func newQueryExecutionContext(config connection.ConnectionConfig) (context.Context, context.CancelFunc) {
+	if strings.EqualFold(strings.TrimSpace(config.Type), "duckdb") {
+		return context.WithCancel(context.Background())
+	}
+	timeoutSeconds := config.Timeout
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+	return utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+}
+
 func validateTestConnectionInput(config connection.ConnectionConfig) error {
 	dbType := strings.ToLower(strings.TrimSpace(config.Type))
 	if dbType == "" {
@@ -290,6 +301,11 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		return rawDB, rawTable
 	}
 
+	// Elasticsearch：索引名可能含多个点，不能按点分割
+	if dbType == "elasticsearch" {
+		return rawDB, rawTable
+	}
+
 	if dbType == "kingbase" {
 		schema, table := db.SplitKingbaseQualifiedName(rawTable)
 		if schema != "" && table != "" {
@@ -318,6 +334,10 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		if table != "" {
 			return "", table
 		}
+	}
+
+	if dbType == "duckdb" {
+		return rawDB, rawTable
 	}
 
 	if parts := strings.SplitN(rawTable, ".", 2); len(parts) == 2 {
@@ -591,11 +611,7 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 	}
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	timeoutSeconds := runConfig.Timeout
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 30
-	}
-	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
 	// Store cancel function for potential manual cancellation
@@ -614,6 +630,7 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 	}()
 
 	isReadQuery := isReadOnlySQLQuery(runConfig.Type, query)
+	tryQueryFirst := shouldTryQueryResultFirst(runConfig.Type, query)
 
 	runReadQuery := func(inst db.Database) ([]map[string]interface{}, []string, error) {
 		if q, ok := inst.(interface {
@@ -622,6 +639,14 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 			return q.QueryContext(ctx, query)
 		}
 		return inst.Query(query)
+	}
+
+	runReadQueryWithMessages := func(inst db.Database) ([]map[string]interface{}, []string, []string, error) {
+		if q, ok := inst.(db.QueryMessageExecer); ok {
+			return q.QueryContextWithMessages(ctx, query)
+		}
+		data, columns, err := runReadQuery(inst)
+		return data, columns, nil, err
 	}
 
 	runExecQuery := func(inst db.Database) (int64, error) {
@@ -633,8 +658,8 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 		return inst.Exec(query)
 	}
 
-	if isReadQuery {
-		data, columns, err := runReadQuery(dbInst)
+	if isReadQuery || tryQueryFirst {
+		data, columns, messages, err := runReadQueryWithMessages(dbInst)
 		if err != nil && shouldRefreshCachedConnection(err) {
 			if a.invalidateCachedDatabase(runConfig, err) {
 				retryInst, retryErr := a.getDatabaseForcePing(runConfig)
@@ -642,32 +667,34 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 					logger.Error(retryErr, "DBQuery 重建连接失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 					return connection.QueryResult{Success: false, Message: retryErr.Error()}
 				}
-				data, columns, err = runReadQuery(retryInst)
+				data, columns, messages, err = runReadQueryWithMessages(retryInst)
 			}
 		}
-		if err != nil {
+		if err == nil {
+			return connection.QueryResult{Success: true, Data: data, Fields: columns, Messages: messages, QueryID: queryID}
+		}
+		if isReadQuery {
 			logger.Error(err, "DBQuery 查询失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 		}
-		return connection.QueryResult{Success: true, Data: data, Fields: columns, QueryID: queryID}
-	} else {
-		affected, err := runExecQuery(dbInst)
-		if err != nil && shouldRefreshCachedConnection(err) {
-			if a.invalidateCachedDatabase(runConfig, err) {
-				retryInst, retryErr := a.getDatabaseForcePing(runConfig)
-				if retryErr != nil {
-					logger.Error(retryErr, "DBQuery 重建连接失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
-					return connection.QueryResult{Success: false, Message: retryErr.Error()}
-				}
-				affected, err = runExecQuery(retryInst)
-			}
-		}
-		if err != nil {
-			logger.Error(err, "DBQuery 执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
-			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
-		}
-		return connection.QueryResult{Success: true, Data: map[string]int64{"affectedRows": affected}, QueryID: queryID}
 	}
+
+	affected, err := runExecQuery(dbInst)
+	if err != nil && shouldRefreshCachedConnection(err) {
+		if a.invalidateCachedDatabase(runConfig, err) {
+			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+			if retryErr != nil {
+				logger.Error(retryErr, "DBQuery 重建连接失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+				return connection.QueryResult{Success: false, Message: retryErr.Error()}
+			}
+			affected, err = runExecQuery(retryInst)
+		}
+	}
+	if err != nil {
+		logger.Error(err, "DBQuery 执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]int64{"affectedRows": affected}, QueryID: queryID}
 }
 
 // DBQueryMulti 执行可能包含多条 SQL 语句的查询，返回多个结果集。
@@ -687,11 +714,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	}
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	timeoutSeconds := runConfig.Timeout
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 30
-	}
-	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
 	a.queryMu.Lock()
@@ -710,28 +733,35 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	// 注意：原生 conn.Query() 执行写操作（UPDATE/INSERT/DELETE）时，
 	// sql.Rows 不暴露 RowsAffected，导致影响行数丢失。
 	// 因此仅在全部语句皆为读操作时才使用原生路径。
+	statements := splitSQLStatements(query)
 	allReadOnly := true
-	for _, stmt := range splitSQLStatements(query) {
+	for _, stmt := range statements {
 		if strings.TrimSpace(stmt) != "" && !isReadOnlySQLQuery(runConfig.Type, stmt) {
 			allReadOnly = false
 			break
 		}
 	}
+	useNativeMultiResult := shouldUseNativeMultiResultBatch(runConfig.Type, statements, allReadOnly)
 
-	runMultiQuery := func(inst db.Database) ([]connection.ResultSetData, error) {
-		if !allReadOnly {
-			return nil, nil // 包含写操作，走逐条执行路径
+	runMultiQuery := func(inst db.Database) ([]connection.ResultSetData, []string, error) {
+		if !useNativeMultiResult {
+			return nil, nil, nil // 包含写操作，走逐条执行路径
+		}
+		if q, ok := inst.(db.MultiResultQueryMessageExecer); ok {
+			return q.QueryMultiContextWithMessages(ctx, query)
 		}
 		if q, ok := inst.(db.MultiResultQuerierContext); ok {
-			return q.QueryMultiContext(ctx, query)
+			results, err := q.QueryMultiContext(ctx, query)
+			return results, nil, err
 		}
 		if q, ok := inst.(db.MultiResultQuerier); ok {
-			return q.QueryMulti(query)
+			results, err := q.QueryMulti(query)
+			return results, nil, err
 		}
-		return nil, nil // 返回 nil 表示不支持
+		return nil, nil, nil // 返回 nil 表示不支持
 	}
 
-	results, err := runMultiQuery(dbInst)
+	results, resultMessages, err := runMultiQuery(dbInst)
 	if err != nil && shouldRefreshCachedConnection(err) {
 		if a.invalidateCachedDatabase(runConfig, err) {
 			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
@@ -739,7 +769,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				logger.Error(retryErr, "DBQueryMulti 重建连接失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 				return connection.QueryResult{Success: false, Message: retryErr.Error(), QueryID: queryID}
 			}
-			results, err = runMultiQuery(retryInst)
+			results, resultMessages, err = runMultiQuery(retryInst)
 		}
 	}
 	if err != nil {
@@ -749,11 +779,10 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 
 	// 驱动支持多结果集，直接返回
 	if results != nil {
-		return connection.QueryResult{Success: true, Data: results, QueryID: queryID}
+		return connection.QueryResult{Success: true, Data: results, Messages: resultMessages, QueryID: queryID}
 	}
 
 	// 驱动不支持多结果集，回退到逐条执行
-	statements := splitSQLStatements(query)
 	if len(statements) == 0 {
 		return connection.QueryResult{
 			Success: true,
@@ -762,18 +791,65 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		}
 	}
 
-	// 全部为写操作且驱动支持批量 Exec → 一次性发送，大幅减少网络往返
-	// 适用于 MySQL/MariaDB/Doris/PostgreSQL/SQLite/DuckDB 等支持多语句 Exec 的驱动
-	if !allReadOnly {
-		allWrite := true
-		for _, stmt := range statements {
-			if strings.TrimSpace(stmt) != "" && isReadOnlySQLQuery(runConfig.Type, stmt) {
-				allWrite = false
-				break
+	var sessionQueryTarget db.StatementQueryExecer
+	var sessionQueryMessageTarget db.StatementQueryMessageExecer
+	var sessionMultiQueryTarget db.StatementMultiResultQueryExecer
+	var sessionMultiQueryMessageTarget db.StatementMultiResultQueryMessageExecer
+	var sessionExecTarget db.StatementExecer
+	var sessionBatchTarget db.BatchWriteExecer
+	closeExecTarget := func() {}
+	if provider, ok := dbInst.(db.SessionExecerProvider); ok {
+		sessionExecer, sessionErr := provider.OpenSessionExecer(ctx)
+		if sessionErr != nil {
+			logger.Warnf("DBQueryMulti 打开会话级执行器失败，将回退共享连接：%s SQL片段=%q err=%v", formatConnSummary(runConfig), sqlSnippet(query), sessionErr)
+		} else {
+			if statementQueryExecer, ok := sessionExecer.(db.StatementQueryExecer); ok {
+				sessionQueryTarget = statementQueryExecer
+			}
+			if statementQueryMessageExecer, ok := sessionExecer.(db.StatementQueryMessageExecer); ok {
+				sessionQueryMessageTarget = statementQueryMessageExecer
+			}
+			if statementMultiResultQueryExecer, ok := sessionExecer.(db.StatementMultiResultQueryExecer); ok {
+				sessionMultiQueryTarget = statementMultiResultQueryExecer
+			}
+			if statementMultiResultQueryMessageExecer, ok := sessionExecer.(db.StatementMultiResultQueryMessageExecer); ok {
+				sessionMultiQueryMessageTarget = statementMultiResultQueryMessageExecer
+			}
+			sessionExecTarget = sessionExecer
+			if batcher, ok := sessionExecer.(db.BatchWriteExecer); ok {
+				sessionBatchTarget = batcher
+			}
+			closeExecTarget = func() {
+				if err := sessionExecer.Close(); err != nil {
+					logger.Warnf("DBQueryMulti 关闭会话级执行器失败：%v", err)
+				}
 			}
 		}
-		if allWrite {
-			if batcher, ok := dbInst.(db.BatchWriteExecer); ok {
+	}
+	defer closeExecTarget()
+
+	// 单条写语句且驱动支持批量 Exec 时，可复用批量路径。
+	// 多条写语句必须逐条返回结果；部分驱动对多语句 Exec 仅暴露最后一条 RowsAffected，
+	// 会导致前面语句已成功执行但结果页只剩一个写入结果。
+	if !allReadOnly {
+		allWrite := true
+		containsPLSQLBlock := false
+		for _, stmt := range statements {
+			if strings.TrimSpace(stmt) != "" && !isBatchableWriteSQLStatement(runConfig.Type, stmt) {
+				allWrite = false
+			}
+			if isPLSQLBlockStatement(stmt) {
+				containsPLSQLBlock = true
+			}
+		}
+		if allWrite && !containsPLSQLBlock && len(statements) == 1 {
+			batcher := sessionBatchTarget
+			if batcher == nil {
+				if fallbackBatcher, ok := dbInst.(db.BatchWriteExecer); ok {
+					batcher = fallbackBatcher
+				}
+			}
+			if batcher != nil {
 				affected, batchErr := batcher.ExecBatchContext(ctx, query)
 				if batchErr != nil && shouldRefreshCachedConnection(batchErr) {
 					if a.invalidateCachedDatabase(runConfig, batchErr) {
@@ -811,17 +887,80 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 			continue
 		}
 
-		if isReadOnlySQLQuery(runConfig.Type, stmt) {
-			var data []map[string]interface{}
-			var columns []string
-			if q, ok := dbInst.(interface {
+		isReadStmt := isReadOnlySQLQuery(runConfig.Type, stmt)
+		tryQueryStmtFirst := shouldTryQueryResultFirst(runConfig.Type, stmt)
+		if isReadStmt || tryQueryStmtFirst {
+			var (
+				data             []map[string]interface{}
+				columns          []string
+				messages         []string
+				statementResults []connection.ResultSetData
+				usedMultiResult  bool
+			)
+			if sessionMultiQueryMessageTarget != nil {
+				statementResults, messages, err = sessionMultiQueryMessageTarget.QueryMultiContextWithMessages(ctx, stmt)
+				usedMultiResult = true
+			} else if sessionMultiQueryTarget != nil {
+				statementResults, err = sessionMultiQueryTarget.QueryMultiContext(ctx, stmt)
+				usedMultiResult = true
+			} else if q, ok := dbInst.(db.MultiResultQueryMessageExecer); ok {
+				statementResults, messages, err = q.QueryMultiContextWithMessages(ctx, stmt)
+				usedMultiResult = true
+			} else if q, ok := dbInst.(db.MultiResultQuerierContext); ok {
+				statementResults, err = q.QueryMultiContext(ctx, stmt)
+				usedMultiResult = true
+			} else if q, ok := dbInst.(db.MultiResultQuerier); ok {
+				statementResults, err = q.QueryMulti(stmt)
+				usedMultiResult = true
+			} else if sessionQueryMessageTarget != nil {
+				data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
+			} else if sessionQueryTarget != nil {
+				data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
+			} else if q, ok := dbInst.(db.QueryMessageExecer); ok {
+				data, columns, messages, err = q.QueryContextWithMessages(ctx, stmt)
+			} else if q, ok := dbInst.(interface {
 				QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
 			}); ok {
 				data, columns, err = q.QueryContext(ctx, stmt)
 			} else {
 				data, columns, err = dbInst.Query(stmt)
 			}
-			if err != nil {
+			if err == nil {
+				if usedMultiResult {
+					if len(statementResults) == 0 && len(messages) > 0 {
+						statementResults = []connection.ResultSetData{{
+							Rows:     []map[string]interface{}{},
+							Columns:  []string{},
+							Messages: append([]string(nil), messages...),
+						}}
+					}
+					for _, statementResult := range statementResults {
+						if statementResult.Rows == nil {
+							statementResult.Rows = []map[string]interface{}{}
+						}
+						if statementResult.Columns == nil {
+							statementResult.Columns = []string{}
+						}
+						statementResult.StatementIndex = idx + 1
+						resultSets = append(resultSets, statementResult)
+					}
+					continue
+				}
+				if data == nil {
+					data = make([]map[string]interface{}, 0)
+				}
+				if columns == nil {
+					columns = []string{}
+				}
+				resultSets = append(resultSets, connection.ResultSetData{
+					Rows:           data,
+					Columns:        columns,
+					Messages:       messages,
+					StatementIndex: idx + 1,
+				})
+				continue
+			}
+			if isReadStmt {
 				logger.Error(err, "DBQueryMulti 逐条查询失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
 				errMsg := fmt.Sprintf("第 %d 条语句执行失败: %v", idx+1, err)
 				if len(resultSets) > 0 {
@@ -829,35 +968,31 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				}
 				return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
 			}
-			if data == nil {
-				data = make([]map[string]interface{}, 0)
-			}
-			if columns == nil {
-				columns = []string{}
-			}
-			resultSets = append(resultSets, connection.ResultSetData{Rows: data, Columns: columns})
-		} else {
-			var affected int64
-			if e, ok := dbInst.(interface {
-				ExecContext(context.Context, string) (int64, error)
-			}); ok {
-				affected, err = e.ExecContext(ctx, stmt)
-			} else {
-				affected, err = dbInst.Exec(stmt)
-			}
-			if err != nil {
-				logger.Error(err, "DBQueryMulti 逐条执行失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
-				errMsg := fmt.Sprintf("第 %d 条语句执行失败: %v", idx+1, err)
-				if len(resultSets) > 0 {
-					errMsg += fmt.Sprintf("（前 %d 条已执行成功）", len(resultSets))
-				}
-				return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
-			}
-			resultSets = append(resultSets, connection.ResultSetData{
-				Rows:    []map[string]interface{}{{"affectedRows": affected}},
-				Columns: []string{"affectedRows"},
-			})
 		}
+
+		var affected int64
+		if sessionExecTarget != nil {
+			affected, err = sessionExecTarget.ExecContext(ctx, stmt)
+		} else if e, ok := dbInst.(interface {
+			ExecContext(context.Context, string) (int64, error)
+		}); ok {
+			affected, err = e.ExecContext(ctx, stmt)
+		} else {
+			affected, err = dbInst.Exec(stmt)
+		}
+		if err != nil {
+			logger.Error(err, "DBQueryMulti 逐条执行失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
+			errMsg := fmt.Sprintf("第 %d 条语句执行失败: %v", idx+1, err)
+			if len(resultSets) > 0 {
+				errMsg += fmt.Sprintf("（前 %d 条已执行成功）", len(resultSets))
+			}
+			return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
+		}
+		resultSets = append(resultSets, connection.ResultSetData{
+			Rows:           []map[string]interface{}{{"affectedRows": affected}},
+			Columns:        []string{"affectedRows"},
+			StatementIndex: idx + 1,
+		})
 	}
 
 	if resultSets == nil {
@@ -869,6 +1004,47 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		fallbackMsg = fmt.Sprintf("当前数据源（%s）不支持原生多语句执行，已自动拆分为 %d 条语句逐条执行。", runConfig.Type, len(statements))
 	}
 	return connection.QueryResult{Success: true, Data: resultSets, QueryID: queryID, Message: fallbackMsg}
+}
+
+func shouldUseNativeMultiResultBatch(dbType string, statements []string, allReadOnly bool) bool {
+	if allReadOnly {
+		return true
+	}
+	if !strings.EqualFold(strings.TrimSpace(dbType), "sqlserver") {
+		return false
+	}
+	for _, stmt := range statements {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if isReadOnlySQLQuery(dbType, stmt) || shouldTryQueryResultFirst(dbType, stmt) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func shouldTryQueryResultFirst(dbType string, query string) bool {
+	isSQLServer := strings.EqualFold(strings.TrimSpace(dbType), "sqlserver")
+	if keyword, withHasWrite := sqlDataOperationInfo(query); withHasWrite && keyword == "select" {
+		return true
+	}
+	keyword := leadingSQLKeyword(query)
+	switch keyword {
+	case "exec", "execute", "call":
+		return true
+	case "set", "print":
+		return isSQLServer
+	case "dbcc":
+		return isSQLServer
+	default:
+		if isSQLServer {
+			return strings.HasPrefix(keyword, "sp_") || strings.HasPrefix(keyword, "xp_")
+		}
+		return false
+	}
 }
 
 func (a *App) DBQueryIsolated(config connection.ConnectionConfig, dbName string, query string) connection.QueryResult {
@@ -886,30 +1062,34 @@ func (a *App) DBQueryIsolated(config connection.ConnectionConfig, dbName string,
 	}()
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	timeoutSeconds := runConfig.Timeout
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 30
-	}
-	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
 	isReadQuery := isReadOnlySQLQuery(runConfig.Type, query)
+	tryQueryFirst := shouldTryQueryResultFirst(runConfig.Type, query)
 
-	if isReadQuery {
-		var data []map[string]interface{}
-		var columns []string
-		if q, ok := dbInst.(interface {
+	if isReadQuery || tryQueryFirst {
+		var (
+			data     []map[string]interface{}
+			columns  []string
+			messages []string
+		)
+		if q, ok := dbInst.(db.QueryMessageExecer); ok {
+			data, columns, messages, err = q.QueryContextWithMessages(ctx, query)
+		} else if q, ok := dbInst.(interface {
 			QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
 		}); ok {
 			data, columns, err = q.QueryContext(ctx, query)
 		} else {
 			data, columns, err = dbInst.Query(query)
 		}
-		if err != nil {
+		if err == nil {
+			return connection.QueryResult{Success: true, Data: data, Fields: columns, Messages: messages}
+		}
+		if isReadQuery {
 			logger.Error(err, "DBQueryIsolated 查询失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
-		return connection.QueryResult{Success: true, Data: data, Fields: columns}
 	}
 
 	var affected int64
@@ -1289,7 +1469,7 @@ func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, ta
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
+	schemaName, pureTableName := normalizeMetadataSchemaAndTable(config, dbName, tableName)
 	columns, err := dbInst.GetColumns(schemaName, pureTableName)
 	if err != nil && shouldRefreshCachedConnection(err) {
 		if a.invalidateCachedDatabase(runConfig, err) {
@@ -1318,7 +1498,7 @@ func (a *App) DBGetIndexes(config connection.ConnectionConfig, dbName string, ta
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
+	schemaName, pureTableName := normalizeMetadataSchemaAndTable(config, dbName, tableName)
 	indexes, err := dbInst.GetIndexes(schemaName, pureTableName)
 	if err != nil && shouldRefreshCachedConnection(err) {
 		if a.invalidateCachedDatabase(runConfig, err) {

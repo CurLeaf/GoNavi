@@ -1,13 +1,101 @@
 package redis
 
 import (
+	"GoNavi-Wails/internal/connection"
+	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"math"
 	"math/big"
+	"net"
 	"sort"
+	"strconv"
+	"strings"
 	"testing"
+
+	goredis "github.com/redis/go-redis/v9"
 )
+
+func startRedisProtocolTestServer(t *testing.T, handler func([]string) string) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen redis test server failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = listener.Close()
+	})
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				reader := bufio.NewReader(conn)
+				for {
+					args, err := readRedisProtocolArray(reader)
+					if err != nil {
+						return
+					}
+					response := handler(args)
+					if response == "" {
+						response = "+OK\r\n"
+					}
+					if _, err := conn.Write([]byte(response)); err != nil {
+						return
+					}
+				}
+			}()
+		}
+	}()
+
+	return listener.Addr().String()
+}
+
+func readRedisProtocolArray(reader *bufio.Reader) ([]string, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return nil, err
+	}
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "*") {
+		return nil, fmt.Errorf("expected array, got %q", line)
+	}
+	count, err := strconv.Atoi(strings.TrimPrefix(line, "*"))
+	if err != nil {
+		return nil, err
+	}
+	args := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		bulkHeader, err := reader.ReadString('\n')
+		if err != nil {
+			return nil, err
+		}
+		bulkHeader = strings.TrimSpace(bulkHeader)
+		if !strings.HasPrefix(bulkHeader, "$") {
+			return nil, fmt.Errorf("expected bulk string, got %q", bulkHeader)
+		}
+		size, err := strconv.Atoi(strings.TrimPrefix(bulkHeader, "$"))
+		if err != nil {
+			return nil, err
+		}
+		buf := make([]byte, size+2)
+		if _, err := io.ReadFull(reader, buf); err != nil {
+			return nil, err
+		}
+		args = append(args, string(buf[:size]))
+	}
+	return args, nil
+}
+
+func redisBulkString(value string) string {
+	return fmt.Sprintf("$%d\r\n%s\r\n", len(value), value)
+}
 
 // 回归保护：HGETALL 在 RESP3 下返回 map[interface{}]interface{}（go-redis v9 默认 RESP3），
 // 这种类型 encoding/json 无法序列化，原值穿透到 Wails RPC 会让 Windows 进程退出（用户感知闪退）。
@@ -221,6 +309,160 @@ func TestSanitizeRedisPassword(t *testing.T) {
 				t.Errorf("sanitizeRedisPassword(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestRedisSentinelRequiresMasterNameBeforeDial(t *testing.T) {
+	client := NewRedisClient()
+	err := client.Connect(connection.ConnectionConfig{
+		Type:     "redis",
+		Host:     "127.0.0.1",
+		Port:     26379,
+		Topology: "sentinel",
+	})
+	if err == nil || !strings.Contains(err.Error(), "master 名称") {
+		t.Fatalf("expected missing Sentinel master validation error, got %v", err)
+	}
+}
+
+func TestRedisSentinelWithMultipleAddrsDoesNotUseClusterBranch(t *testing.T) {
+	client := NewRedisClient()
+	err := client.Connect(connection.ConnectionConfig{
+		Type:                "redis",
+		Host:                "127.0.0.1",
+		Port:                26379,
+		Hosts:               []string{"127.0.0.2:26379"},
+		Topology:            "sentinel",
+		RedisSentinelMaster: "mymaster",
+		UseSSH:              true,
+	})
+	if err == nil {
+		t.Fatal("expected Sentinel SSH validation error")
+	}
+	if !strings.Contains(err.Error(), "Sentinel模式暂不支持 SSH 隧道") {
+		t.Fatalf("expected Sentinel-specific SSH error, got %v", err)
+	}
+}
+
+func TestRedisClusterKeepsSSHValidation(t *testing.T) {
+	client := NewRedisClient()
+	err := client.Connect(connection.ConnectionConfig{
+		Type:     "redis",
+		Host:     "127.0.0.1",
+		Port:     6379,
+		Topology: "cluster",
+		UseSSH:   true,
+	})
+	if err == nil {
+		t.Fatal("expected cluster SSH validation error")
+	}
+	if !strings.Contains(err.Error(), "集群模式暂不支持 SSH 隧道") {
+		t.Fatalf("expected cluster SSH error, got %v", err)
+	}
+}
+
+func TestRedisGetDatabasesUsesConfiguredDatabaseCountAboveDefault(t *testing.T) {
+	keyspaceInfo := "# Keyspace\r\ndb0:keys=1,expires=0,avg_ttl=0\r\ndb31:keys=2,expires=0,avg_ttl=0\r\n"
+	addr := startRedisProtocolTestServer(t, func(args []string) string {
+		command := strings.ToUpper(strings.TrimSpace(args[0]))
+		switch command {
+		case "HELLO":
+			return "-ERR unknown command 'HELLO'\r\n"
+		case "CLIENT":
+			return "-ERR unknown subcommand\r\n"
+		case "CONFIG":
+			if len(args) >= 3 && strings.EqualFold(args[1], "GET") && strings.EqualFold(args[2], "databases") {
+				return "*2\r\n$9\r\ndatabases\r\n$2\r\n32\r\n"
+			}
+		case "INFO":
+			return redisBulkString(keyspaceInfo)
+		}
+		return "+OK\r\n"
+	})
+
+	rawClient := goredis.NewClient(&goredis.Options{
+		Addr:     addr,
+		Protocol: 2,
+	})
+	client := &RedisClientImpl{
+		client:       rawClient,
+		singleClient: rawClient,
+	}
+	defer client.Close()
+
+	dbs, err := client.GetDatabases()
+	if err != nil {
+		t.Fatalf("GetDatabases returned error: %v", err)
+	}
+	if len(dbs) != 32 {
+		t.Fatalf("expected 32 redis databases, got %d (%#v)", len(dbs), dbs)
+	}
+	if dbs[31].Index != 31 || dbs[31].Keys != 2 {
+		t.Fatalf("expected db31 with 2 keys, got %#v", dbs[31])
+	}
+}
+
+func TestRedisSelectDBReconnectsWithSentinelConfig(t *testing.T) {
+	oldConnect := redisDBSwitchConnect
+	defer func() {
+		redisDBSwitchConnect = oldConnect
+	}()
+
+	var captured connection.ConnectionConfig
+	redisDBSwitchConnect = func(client *RedisClientImpl, config connection.ConnectionConfig) error {
+		captured = config
+		next := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:0"})
+		client.client = next
+		client.singleClient = next
+		client.config = config
+		client.currentDB = config.RedisDB
+		return nil
+	}
+
+	oldClient := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:0"})
+	client := &RedisClientImpl{
+		client:       oldClient,
+		singleClient: oldClient,
+		config: connection.ConnectionConfig{
+			Type:                  "redis",
+			Host:                  "sentinel-a.local",
+			Port:                  26379,
+			Hosts:                 []string{"sentinel-b.local:26379", "sentinel-c.local:26379"},
+			Topology:              "sentinel",
+			User:                  "data-user",
+			Password:              "data-pass",
+			RedisSentinelMaster:   "mymaster",
+			RedisSentinelUser:     "sentinel-user",
+			RedisSentinelPassword: "sentinel-pass",
+			UseSSL:                true,
+			SSLMode:               "required",
+			RedisDB:               0,
+		},
+		currentDB: 0,
+	}
+	defer client.Close()
+
+	if err := client.SelectDB(31); err != nil {
+		t.Fatalf("SelectDB returned error: %v", err)
+	}
+
+	if captured.RedisDB != 31 || client.currentDB != 31 {
+		t.Fatalf("expected RedisDB/currentDB=31, captured=%d current=%d", captured.RedisDB, client.currentDB)
+	}
+	if captured.Topology != "sentinel" {
+		t.Fatalf("expected sentinel topology to be preserved, got %q", captured.Topology)
+	}
+	if captured.RedisSentinelMaster != "mymaster" {
+		t.Fatalf("expected Sentinel master to be preserved, got %q", captured.RedisSentinelMaster)
+	}
+	if captured.RedisSentinelUser != "sentinel-user" || captured.RedisSentinelPassword != "sentinel-pass" {
+		t.Fatalf("expected Sentinel credentials to be preserved, got user=%q password=%q", captured.RedisSentinelUser, captured.RedisSentinelPassword)
+	}
+	if len(captured.Hosts) != 2 || captured.Hosts[0] != "sentinel-b.local:26379" || captured.Hosts[1] != "sentinel-c.local:26379" {
+		t.Fatalf("expected Sentinel hosts to be preserved, got %#v", captured.Hosts)
+	}
+	if !captured.UseSSL || captured.SSLMode != "required" {
+		t.Fatalf("expected TLS settings to be preserved, got useSSL=%v sslMode=%q", captured.UseSSL, captured.SSLMode)
 	}
 }
 

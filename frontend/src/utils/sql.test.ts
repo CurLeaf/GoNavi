@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildOrderBySQL, buildPaginatedSelectSQL, reverseOrderBySQL } from './sql';
+import { buildOrderBySQL, buildPaginatedSelectSQL, quoteQualifiedIdent, reverseOrderBySQL } from './sql';
 
 describe('buildOrderBySQL', () => {
   it('does not add fallback ORDER BY for DuckDB without explicit sort', () => {
@@ -50,5 +50,17 @@ describe('reverseOrderBySQL', () => {
   it('reverses comma separated order parts without splitting function arguments', () => {
     expect(reverseOrderBySQL(' ORDER BY COALESCE([a], [b]) ASC, [id] DESC'))
       .toBe(' ORDER BY COALESCE([a], [b]) DESC, [id] ASC');
+  });
+});
+
+describe('quoteQualifiedIdent', () => {
+  it('does not split dots inside quoted DuckDB identifiers', () => {
+    expect(quoteQualifiedIdent('duckdb', '"daily.events"."2026.06"'))
+      .toBe('"daily.events"."2026.06"');
+  });
+
+  it('preserves three-part DuckDB names with quoted dots', () => {
+    expect(quoteQualifiedIdent('duckdb', '"analytics.catalog"."main.schema"."daily.events"'))
+      .toBe('"analytics.catalog"."main.schema"."daily.events"');
   });
 });

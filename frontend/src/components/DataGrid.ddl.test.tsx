@@ -8,7 +8,7 @@ import DataGrid, {
   GONAVI_ROW_KEY,
   hasDataGridVirtualEditRenderVersionChanged,
 } from './DataGrid';
-import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
+import { DUCKDB_ROWID_LOCATOR_COLUMN, ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 
 const storeState = vi.hoisted(() => ({
   connections: [
@@ -40,6 +40,11 @@ const storeState = vi.hoisted(() => ({
     showColumnType: false,
   },
   setQueryOptions: vi.fn(),
+  dataEditTransactionOptions: {
+    commitMode: 'manual' as 'manual' | 'auto',
+    autoCommitDelayMs: 5000,
+  },
+  setDataEditTransactionOptions: vi.fn(),
   addTab: vi.fn(),
   setActiveContext: vi.fn(),
   tableColumnOrders: {},
@@ -65,6 +70,8 @@ const backendApp = vi.hoisted(() => ({
   DBGetColumns: vi.fn(),
   DBGetIndexes: vi.fn(),
   DBGetForeignKeys: vi.fn(),
+  DBGetTriggers: vi.fn(),
+  DBQuery: vi.fn(),
   DBShowCreateTable: vi.fn(),
 }));
 
@@ -112,6 +119,16 @@ vi.mock('./ImportPreviewModal', () => ({
   default: () => null,
 }));
 
+vi.mock('./TableDesigner', () => ({
+  default: ({ tab, embedded }: { tab: { tableName?: string; initialTab?: string }; embedded?: boolean }) => (
+    <div data-table-designer={embedded ? 'embedded' : 'standalone'}>
+      <span>SCHEMA DESIGNER</span>
+      <span>{tab.tableName || 'unknown-table'}</span>
+      <span>{tab.initialTab || 'columns'}</span>
+    </div>
+  ),
+}));
+
 vi.mock('@ant-design/icons', () => {
   const Icon = () => <span />;
 
@@ -152,6 +169,7 @@ vi.mock('@ant-design/icons', () => {
 vi.mock('@dnd-kit/core', () => ({
   DndContext: ({ children }: any) => <>{children}</>,
   PointerSensor: vi.fn(),
+  KeyboardSensor: vi.fn(),
   MouseSensor: vi.fn(),
   TouchSensor: vi.fn(),
   useSensor: vi.fn(() => ({})),
@@ -170,6 +188,7 @@ vi.mock('@dnd-kit/sortable', () => ({
     isDragging: false,
   })),
   horizontalListSortingStrategy: vi.fn(),
+  sortableKeyboardCoordinates: vi.fn(),
   arrayMove: (items: any[], from: number, to: number) => {
     const next = [...items];
     const [item] = next.splice(from, 1);
@@ -220,9 +239,54 @@ vi.mock('antd', () => {
       </section>
     ) : null
   );
-  Modal.useModal = () => [{ info: vi.fn(() => ({ destroy: vi.fn() })) }, null];
+  Modal.useModal = () => {
+    const [infoConfig, setInfoConfig] = React.useState<any>(null);
+    return [{
+      info: vi.fn((config: any) => {
+        setInfoConfig(config);
+        return {
+          destroy: vi.fn(() => {
+            setInfoConfig(null);
+          }),
+        };
+      }),
+    }, infoConfig ? <section data-modal-use-holder="true">{infoConfig.content}</section> : null];
+  };
 
   const passthrough = ({ children }: any) => <>{children}</>;
+  const Dropdown = ({ children, menu, disabled }: any) => (
+    <>
+      {children}
+      {!disabled && menu?.items?.map((item: any) => (
+        item?.type === 'divider'
+          ? null
+          : <button key={item.key} type="button" disabled={item.disabled} onClick={item.onClick}>{item.label}</button>
+      ))}
+    </>
+  );
+  const Space = ({ children }: any) => <div>{children}</div>;
+  const Tabs = ({ items = [], activeKey, onChange }: any) => {
+    const resolvedActiveKey = activeKey ?? items[0]?.key;
+    const activeItem = items.find((item: any) => item.key === resolvedActiveKey) || items[0];
+    return (
+      <div data-tabs-active-key={resolvedActiveKey}>
+        <div>
+          {items.map((item: any) => (
+            <button key={item.key} type="button" data-tab-key={item.key} onClick={() => onChange?.(item.key)}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div>{activeItem?.children ?? null}</div>
+      </div>
+    );
+  };
+  const Empty: any = ({ description }: any) => <div>{description || 'empty'}</div>;
+  Empty.PRESENTED_IMAGE_SIMPLE = 'presented-image-simple';
+  const Tag = ({ children }: any) => <span>{children}</span>;
+  const Radio: any = ({ children }: any) => <span>{children}</span>;
+  Radio.Group = ({ children }: any) => <div>{children}</div>;
+  Radio.Button = ({ children }: any) => <button type="button">{children}</button>;
   const Segmented = ({ value, options, onChange }: any) => (
     <div data-segmented-value={value}>
       {(options || []).map((option: any) => (
@@ -252,10 +316,10 @@ vi.mock('antd', () => {
     message: messageApi,
     Input,
     Button,
-    Dropdown: passthrough,
+    Dropdown,
     Form,
     Pagination: () => null,
-    Select: () => null,
+    Select: ({ children }: any) => <div>{children}</div>,
     Modal,
     Checkbox: ({ checked, onChange }: any) => <input type="checkbox" checked={checked} onChange={onChange} />,
     Segmented,
@@ -264,6 +328,11 @@ vi.mock('antd', () => {
     DatePicker: () => null,
     TimePicker: () => null,
     AutoComplete: ({ children }: any) => <>{children}</>,
+    Tabs,
+    Empty,
+    Space,
+    Tag,
+    Radio,
   };
 });
 
@@ -346,6 +415,37 @@ describe('DataGrid commit change set', () => {
       changes: {
         inserts: [],
         updates: [{ keys: { ROWID: 'AAAA' }, values: { NAME: 'new-name' } }],
+        deletes: [],
+      },
+    });
+  });
+
+  it('uses hidden DuckDB rowid only as locator and excludes it from update values', () => {
+    const result = buildDataGridCommitChangeSet({
+      addedRows: [],
+      modifiedRows: {
+        'row-1': { [GONAVI_ROW_KEY]: 'row-1', NAME: 'new-name', [DUCKDB_ROWID_LOCATOR_COLUMN]: 18 },
+      },
+      deletedRowKeys: new Set(),
+      data: [{ [GONAVI_ROW_KEY]: 'row-1', NAME: 'old-name', [DUCKDB_ROWID_LOCATOR_COLUMN]: 17 }],
+      editLocator: {
+        strategy: 'duckdb-rowid',
+        columns: ['rowid'],
+        valueColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+        hiddenColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+        readOnly: false,
+      },
+      visibleColumnNames: ['NAME'],
+      rowKeyToString,
+      normalizeCommitCellValue: normalizeValue,
+      shouldCommitColumn: commitColumnGuard,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      changes: {
+        inserts: [],
+        updates: [{ keys: { rowid: 17 }, values: { NAME: 'new-name' } }],
         deletes: [],
       },
     });
@@ -509,8 +609,21 @@ describe('DataGrid DDL interactions', () => {
     backendApp.DBGetColumns.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetIndexes.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetForeignKeys.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBGetTriggers.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBQuery.mockResolvedValue({ success: true, data: [] });
     backendApp.DBShowCreateTable.mockResolvedValue({ success: true, data: 'CREATE TABLE users' });
     storeState.appearance.uiVersion = 'legacy';
+    storeState.dataEditTransactionOptions = {
+      commitMode: 'manual',
+      autoCommitDelayMs: 5000,
+    };
+    storeState.setDataEditTransactionOptions.mockReset();
+    storeState.setDataEditTransactionOptions.mockImplementation((options: Partial<typeof storeState.dataEditTransactionOptions>) => {
+      storeState.dataEditTransactionOptions = {
+        ...storeState.dataEditTransactionOptions,
+        ...options,
+      };
+    });
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
     testRenderState.latestColumns = [];
@@ -549,6 +662,7 @@ describe('DataGrid DDL interactions', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     backendApp.ImportData.mockReset();
     backendApp.ExportTable.mockReset();
     backendApp.ExportData.mockReset();
@@ -557,6 +671,8 @@ describe('DataGrid DDL interactions', () => {
     backendApp.DBGetColumns.mockReset();
     backendApp.DBGetIndexes.mockReset();
     backendApp.DBGetForeignKeys.mockReset();
+    backendApp.DBGetTriggers.mockReset();
+    backendApp.DBQuery.mockReset();
     backendApp.DBShowCreateTable.mockReset();
     vi.unstubAllGlobals();
   });
@@ -654,6 +770,7 @@ describe('DataGrid DDL interactions', () => {
         connectionId: 'conn-1',
         dbName: 'main',
         tableName: 'customers',
+        objectType: 'table',
       });
     },
   );
@@ -757,6 +874,49 @@ describe('DataGrid DDL interactions', () => {
     expect(textContent(renderer!.root)).toContain('复制为 INSERT');
     expect(textContent(renderer!.root)).toContain('导出');
     renderer!.unmount();
+  });
+
+  it('exports query-result rows from in-memory data without rerunning ExportQuery', async () => {
+    backendApp.ExportData.mockResolvedValue({ success: true });
+    backendApp.ExportQuery.mockResolvedValue({ success: true });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', owner: 'sa' },
+            { __gonavi_row_key__: 'row-2', owner: 'dbo' },
+          ]}
+          columnNames={['owner']}
+          loading={false}
+          exportScope="queryResult"
+          resultSql="EXEC sp_helpdb"
+          dbName="master"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      await findButton(renderer!, 'HTML').props.onClick();
+    });
+
+    const exportAllButton = findButton(renderer!, '全部导出');
+    await act(async () => {
+      await exportAllButton.props.onClick();
+    });
+    await waitForEffects();
+
+    expect(backendApp.ExportData).toHaveBeenCalledTimes(1);
+    expect(backendApp.ExportData).toHaveBeenCalledWith(
+      [{ owner: 'sa' }, { owner: 'dbo' }],
+      ['owner'],
+      'export',
+      'html',
+    );
+    expect(backendApp.ExportQuery).not.toHaveBeenCalled();
   });
 
   it('copies loaded column data from the v2 column header context menu', async () => {
@@ -949,8 +1109,114 @@ describe('DataGrid DDL interactions', () => {
     renderer!.unmount();
   });
 
-  it('switches the v2 footer field tab into the main fields view', async () => {
+  it('auto commits pending table edits after the configured delay', async () => {
+    vi.useFakeTimers();
     storeState.appearance.uiVersion = 'v2';
+    storeState.dataEditTransactionOptions = {
+      commitMode: 'auto',
+      autoCommitDelayMs: 3000,
+    };
+    backendApp.ApplyChanges.mockResolvedValue({ success: true, message: 'ok' });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[
+            { __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const nameColumn = testRenderState.latestColumns.find((column) => column.key === 'name');
+    const contextTarget = {
+      closest: (selector: string) => selector === '[data-row-key][data-col-name]'
+        ? {
+            getAttribute: (name: string) => {
+              if (name === 'data-row-key') return 'row-1';
+              if (name === 'data-col-name') return 'name';
+              return null;
+            },
+          }
+        : null,
+    } as unknown as HTMLElement;
+
+    const openMenu = async () => {
+      const cellProps = nameColumn.onCell({ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' });
+      await act(async () => {
+        cellProps.onContextMenu({
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+          clientX: 160,
+          clientY: 120,
+          currentTarget: contextTarget,
+          target: contextTarget,
+        });
+      });
+    };
+
+    await openMenu();
+    await act(async () => {
+      findButton(renderer!, '复制本行为新增行').props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+    await openMenu();
+    await act(async () => {
+      findButton(renderer!, '粘贴为新增行 (1)').props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    expect(backendApp.ApplyChanges).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(2999);
+      await Promise.resolve();
+    });
+    expect(backendApp.ApplyChanges).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.ApplyChanges).toHaveBeenCalledTimes(1);
+    expect(backendApp.ApplyChanges.mock.calls[0][3]).toMatchObject({
+      inserts: [
+        expect.objectContaining({
+          id: 1,
+          name: 'alpha',
+        }),
+      ],
+      updates: [],
+      deletes: [],
+      locatorStrategy: 'primary-key',
+    });
+    expect(messageApi.success).toHaveBeenCalledWith('自动提交成功');
+    renderer!.unmount();
+  });
+
+  it('switches the v2 footer object tab into the embedded designer view', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { name: 'id', type: 'bigint', key: 'PRI', nullable: 'NO', default: '', comment: '' },
+        { name: 'name', type: 'varchar(255)', key: '', nullable: 'YES', default: '', comment: '' },
+      ],
+    });
 
     let renderer: ReactTestRenderer;
     await act(async () => {
@@ -968,12 +1234,12 @@ describe('DataGrid DDL interactions', () => {
     await waitForEffects();
 
     await act(async () => {
-      findButton(renderer!, '字段信息').props.onClick();
+      findButton(renderer!, '对象设计').props.onClick();
     });
 
     const content = textContent(renderer!.root);
-    expect(content).toContain('FIELDS');
-    expect(content).toContain('2 个字段');
+    expect(content).toContain('SCHEMA DESIGNER');
+    expect(content).toContain('字段');
     expect(content).toContain('id');
     expect(content).toContain('name');
   });
@@ -997,9 +1263,9 @@ describe('DataGrid DDL interactions', () => {
     await waitForEffects();
 
     await act(async () => {
-      findButton(renderer!, '字段信息').props.onClick();
+      findButton(renderer!, '对象设计').props.onClick();
     });
-    expect(textContent(renderer!.root)).toContain('FIELDS');
+    expect(textContent(renderer!.root)).toContain('SCHEMA DESIGNER');
 
     storeState.appearance.uiVersion = 'legacy';
     await act(async () => {
@@ -1017,11 +1283,52 @@ describe('DataGrid DDL interactions', () => {
     await waitForEffects();
 
     const content = textContent(renderer!.root);
-    expect(content).not.toContain('FIELDS');
+    expect(content).not.toContain('SCHEMA DESIGNER');
     expect(content).not.toContain('gn-v2-data-grid-fields-view');
     expect(content).toContain('数据预览');
     expect(content).toContain('结果视图');
     expect(content).toContain('字段信息');
+  });
+
+  it('keeps the v2 fields tab as read-only field info for views', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { name: 'id', type: 'bigint', key: '', nullable: 'NO', default: '', comment: '' },
+        { name: 'name', type: 'varchar(255)', key: '', nullable: 'YES', default: '', comment: '' },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' }]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="user_view"
+          dbName="main"
+          connectionId="conn-1"
+          objectType="view"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    expect(textContent(renderer!.root)).toContain('字段信息');
+    expect(textContent(renderer!.root)).not.toContain('对象设计');
+
+    await act(async () => {
+      findButton(renderer!, '字段信息').props.onClick();
+    });
+
+    const content = textContent(renderer!.root);
+    expect(content).toContain('FIELDS');
+    expect(content).toContain('2 个字段');
+    expect(content).toContain('id');
+    expect(content).toContain('name');
+    expect(content).not.toContain('SCHEMA DESIGNER');
   });
 
   it('renders the v2 footer DDL view with the Monaco SQL editor', async () => {
@@ -1055,8 +1362,46 @@ describe('DataGrid DDL interactions', () => {
     expect(editors).toHaveLength(1);
     expect(editors[0].props['data-language']).toBe('sql');
     expect(editors[0].props['data-read-only']).toBe('true');
-    expect(textContent(editors[0])).toContain('CREATE TABLE users');
+    expect(textContent(editors[0])).toContain('CREATE TABLE');
+    expect(textContent(editors[0])).toContain('users');
     expect(renderer!.root.findAll((node) => node.type === 'pre' && textContent(node).includes('CREATE TABLE users'))).toHaveLength(0);
+  });
+
+  it('formats DuckDB DDL into readable multiline SQL in the v2 view', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.connections[0].config.type = 'duckdb';
+    backendApp.DBShowCreateTable.mockResolvedValueOnce({
+      success: true,
+      data: 'CREATE TABLE customers(customer_id BIGINT, customer_code VARCHAR, city VARCHAR, tier VARCHAR, signup_date DATE, lifetime_value DECIMAL(12,2), PRIMARY KEY(customer_id));',
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', customer_id: 1 }]}
+          columnNames={['customer_id']}
+          loading={false}
+          tableName="example.main.customers"
+          dbName="main"
+          connectionId="conn-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      findButton(renderer!, '查看 DDL').props.onClick();
+    });
+    await waitForEffects();
+
+    const editors = renderer!.root.findAll((node) => node.props['data-monaco-editor'] === 'true');
+    expect(editors).toHaveLength(1);
+    const ddlText = textContent(editors[0]);
+    expect(ddlText).toContain('CREATE TABLE customers (');
+    expect(ddlText).toContain('customer_id BIGINT,');
+    expect(ddlText).toContain('PRIMARY KEY (customer_id)');
+    expect(ddlText).toContain('\n');
   });
 
   it('opens the v2 DDL view as a right sidebar while keeping the table visible', async () => {

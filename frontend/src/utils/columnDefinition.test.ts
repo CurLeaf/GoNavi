@@ -28,4 +28,57 @@ describe('columnDefinition metadata normalization', () => {
       comment: '更新时间',
     });
   });
+
+  it('prefers complete column type aliases over base data type', () => {
+    const column = {
+      COLUMN_NAME: 'USER_NAME',
+      DATA_TYPE: 'varchar',
+      COLUMN_TYPE: 'varchar(64)',
+      IS_NULLABLE: 'NO',
+    };
+
+    expect(normalizeColumnDefinition(column)).toMatchObject({
+      name: 'USER_NAME',
+      type: 'varchar(64)',
+      nullable: 'NO',
+    });
+  });
+
+  it('builds display type from base type and length metadata', () => {
+    const column = {
+      column_name: 'amount',
+      data_type: 'decimal',
+      numeric_precision: 10,
+      numeric_scale: 2,
+      is_nullable: 'YES',
+    };
+
+    expect(normalizeColumnDefinition(column)).toMatchObject({
+      name: 'amount',
+      type: 'decimal(10,2)',
+      nullable: 'YES',
+    });
+  });
+
+  it('normalizes Dameng style data length and nullable flags', () => {
+    const column = {
+      COLUMN_NAME: 'USER_NAME',
+      DATA_TYPE: 'VARCHAR2',
+      DATA_LENGTH: 64,
+      NULLABLE: 'N',
+    };
+
+    expect(normalizeColumnDefinition(column)).toMatchObject({
+      name: 'USER_NAME',
+      type: 'VARCHAR2(64)',
+      nullable: 'NO',
+    });
+  });
+
+  it('maps boolean primary and unique metadata aliases to GoNavi keys', () => {
+    expect(getColumnDefinitionKey({ column_name: 'id', isPrimary: true })).toBe('PRI');
+    expect(getColumnDefinitionKey({ column_name: 'id', primary_key: 't' })).toBe('PRI');
+    expect(getColumnDefinitionKey({ column_name: 'email', is_unique: 'yes' })).toBe('UNI');
+    expect(getColumnDefinitionKey({ column_name: 'id', column_key: 'primary key' })).toBe('PRI');
+  });
 });

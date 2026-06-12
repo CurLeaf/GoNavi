@@ -26,6 +26,7 @@ const emptyDraft = (): DraftSnippet => ({
   prefix: '',
   name: '',
   description: '',
+  syntaxHelp: '',
   body: '',
   isBuiltin: false,
 });
@@ -122,6 +123,7 @@ export default function SnippetSettingsModal({
       prefix,
       name: draft.name.trim(),
       description: draft.description?.trim() || undefined,
+      syntaxHelp: draft.syntaxHelp?.trim() || undefined,
       body: draft.body,
       isBuiltin: draft.isBuiltin,
       createdAt: draft.createdAt ?? Date.now(),
@@ -150,7 +152,7 @@ export default function SnippetSettingsModal({
       resetBuiltinSqlSnippet(id);
       const original = BUILTIN_SNIPPET_MAP[id];
       if (original && selectedId === id) {
-        setDraft({ ...original });
+        setDraft({ ...original, syntaxHelp: original.syntaxHelp || '' });
       }
       void message.success('已重置为默认');
     },
@@ -160,7 +162,7 @@ export default function SnippetSettingsModal({
   const syntaxHelpItems = [
     {
       key: 'syntax',
-      label: '片段语法说明',
+      label: '占位符语法参考',
       children: (
         <div style={{ fontSize: 12, lineHeight: 1.8, color: mutedColor, fontFamily: 'var(--gn-font-mono)' }}>
           <div>{'${1:占位符}   第一个 Tab 位，占位符为提示文字'}</div>
@@ -348,6 +350,18 @@ export default function SnippetSettingsModal({
                   placeholder="补全详情中的描述文字"
                   maxLength={200}
                   size="small"
+                />
+              </div>
+
+              <div>
+                <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>片段语法说明（可选）</div>
+                <Input.TextArea
+                  value={draft.syntaxHelp || ''}
+                  onChange={(e) => setDraft((d) => ({ ...d, syntaxHelp: e.target.value }))}
+                  placeholder="展示在补全详情中的用法说明，例如占位符含义、参数约定或注意事项"
+                  maxLength={1000}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                  style={{ fontSize: 12, resize: 'none' }}
                 />
               </div>
 

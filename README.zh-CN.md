@@ -50,6 +50,7 @@ GoNavi 面向开发者与 DBA，核心目标是让数据库操作在桌面端做
 | 文档型 | MongoDB | 可选驱动代理 | 文档查询、集合浏览、连接管理 |
 | 时序 | TDengine | 可选驱动代理 | 时序库表浏览、查询分析 |
 | 列式分析 | ClickHouse | 可选驱动代理 | 分析查询、对象浏览、SQL 执行 |
+| 搜索 | Elasticsearch | 可选驱动代理 | 索引浏览、Mapping 检查、JSON DSL / query_string 查询 |
 | 扩展接入 | Custom Driver/DSN | 自定义 | 通过 Driver + DSN 接入更多数据源 |
 
 <h2 align="center">📸 项目截图</h2>
@@ -193,6 +194,16 @@ sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-
 # Ubuntu 22.04 / Debian 12
 sudo apt-get update
 sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.0-37 libjavascriptcoregtk-4.0-18
+```
+
+### Linux 中文显示为方框
+
+Ubuntu 24.04 LTS 的最小化桌面或服务器环境可能没有安装中文 CJK 字体，GoNavi 打开后中文会显示为方框。安装 Noto / 文泉驿字体后重启 GoNavi：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y fonts-noto-cjk fonts-wqy-microhei
+fc-cache -fv
 ```
 
 ---

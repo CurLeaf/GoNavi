@@ -214,12 +214,7 @@ func (m *MariaDB) GetTables(dbName string) ([]string, error) {
 }
 
 func (m *MariaDB) GetCreateStatement(dbName, tableName string) (string, error) {
-	query := fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", dbName, tableName)
-	if dbName == "" {
-		query = fmt.Sprintf("SHOW CREATE TABLE `%s`", tableName)
-	}
-
-	data, _, err := m.Query(query)
+	data, _, err := m.Query(buildMySQLShowCreateTableQuery(dbName, tableName))
 	if err != nil {
 		return "", err
 	}

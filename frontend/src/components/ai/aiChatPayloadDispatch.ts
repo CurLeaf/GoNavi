@@ -1,0 +1,158 @@
+import type {
+  AIChatMessage,
+  JVMAIPlanContext,
+  JVMDiagnosticPlanContext,
+} from '../../types';
+import type { AIChatToolDefinition } from '../../utils/aiToolRegistry';
+import { sanitizeErrorMsg } from '../../utils/aiChatRuntime';
+
+interface AIChatService {
+  AIChatStream?: (sid: string, messages: any[], tools: AIChatToolDefinition[]) => Promise<any>;
+  AIChatSend?: (messages: any[], tools: AIChatToolDefinition[]) => Promise<any>;
+}
+
+interface DispatchAIChatPayloadOptions {
+  sid: string;
+  messages: any[];
+  tools: AIChatToolDefinition[];
+  addAIChatMessage: (sid: string, message: AIChatMessage) => void;
+  updateAIChatMessage?: (
+    sid: string,
+    messageId: string,
+    patch: Partial<AIChatMessage>,
+  ) => void;
+  setSending: (sending: boolean) => void;
+  nextMessageId: () => string;
+  pendingAssistantMessageId?: string;
+  jvmPlanContext?: JVMAIPlanContext;
+  jvmDiagnosticPlanContext?: JVMDiagnosticPlanContext;
+  unavailableContent?: string;
+  onNonStreamSuccess?: () => void;
+}
+
+const getAIChatService = (): AIChatService | undefined =>
+  (window as any)?.go?.aiservice?.Service;
+
+const settleAssistantMessage = ({
+  sid,
+  patch,
+  addAIChatMessage,
+  updateAIChatMessage,
+  nextMessageId,
+  pendingAssistantMessageId,
+}: {
+  sid: string;
+  patch: Partial<AIChatMessage>;
+  addAIChatMessage: (sid: string, message: AIChatMessage) => void;
+  updateAIChatMessage?: (
+    sid: string,
+    messageId: string,
+    patch: Partial<AIChatMessage>,
+  ) => void;
+  nextMessageId: () => string;
+  pendingAssistantMessageId?: string;
+}) => {
+  const settledPatch: Partial<AIChatMessage> = {
+    ...patch,
+    loading: false,
+    phase: 'idle',
+  };
+
+  if (pendingAssistantMessageId && updateAIChatMessage) {
+    updateAIChatMessage(sid, pendingAssistantMessageId, settledPatch);
+    return;
+  }
+
+  addAIChatMessage(sid, {
+    id: nextMessageId(),
+    role: 'assistant',
+    timestamp: Date.now(),
+    ...settledPatch,
+  } as AIChatMessage);
+};
+
+export const dispatchAIChatPayload = async ({
+  sid,
+  messages,
+  tools,
+  addAIChatMessage,
+  updateAIChatMessage,
+  setSending,
+  nextMessageId,
+  pendingAssistantMessageId,
+  jvmPlanContext,
+  jvmDiagnosticPlanContext,
+  unavailableContent,
+  onNonStreamSuccess,
+}: DispatchAIChatPayloadOptions): Promise<'stream' | 'send' | 'unavailable' | 'error'> => {
+  try {
+    const service = getAIChatService();
+    if (service?.AIChatStream) {
+      await service.AIChatStream(sid, messages, tools);
+      return 'stream';
+    }
+
+    if (service?.AIChatSend) {
+      const result = await service.AIChatSend(messages, tools);
+      const rawError = result?.error || '未知错误';
+      const cleanError = sanitizeErrorMsg(rawError);
+
+      settleAssistantMessage({
+        sid,
+        addAIChatMessage,
+        updateAIChatMessage,
+        nextMessageId,
+        pendingAssistantMessageId,
+        patch: {
+          content: result?.success ? result.content : `❌ ${cleanError}`,
+          thinking: result?.success ? result.reasoning_content : undefined,
+          reasoning_content: result?.success ? result.reasoning_content : undefined,
+          rawError: !result?.success && cleanError !== rawError ? rawError : undefined,
+          jvmPlanContext,
+          jvmDiagnosticPlanContext,
+        },
+      });
+      setSending(false);
+      if (result?.success) {
+        onNonStreamSuccess?.();
+      }
+      return 'send';
+    }
+
+    const resolvedUnavailableContent = unavailableContent || (pendingAssistantMessageId ? '❌ AI Service 未就绪' : '');
+    if (resolvedUnavailableContent) {
+      settleAssistantMessage({
+        sid,
+        addAIChatMessage,
+        updateAIChatMessage,
+        nextMessageId,
+        pendingAssistantMessageId,
+        patch: {
+          content: resolvedUnavailableContent,
+          jvmPlanContext,
+          jvmDiagnosticPlanContext,
+        },
+      });
+    }
+    setSending(false);
+    return 'unavailable';
+  } catch (error: any) {
+    const rawError = error?.message || String(error);
+    const cleanError = sanitizeErrorMsg(rawError);
+    settleAssistantMessage({
+      sid,
+      addAIChatMessage,
+      updateAIChatMessage,
+      nextMessageId,
+      pendingAssistantMessageId,
+      patch: {
+        content: `❌ 发送失败: ${cleanError}`,
+        rawError: cleanError !== rawError ? rawError : undefined,
+        jvmPlanContext,
+        jvmDiagnosticPlanContext,
+      },
+    });
+    setSending(false);
+    return 'error';
+  }
+};

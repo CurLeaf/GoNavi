@@ -129,10 +129,31 @@ const flushEffects = async () => {
   });
 };
 
+const collectRenderedText = (node: any): string => {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(collectRenderedText).join('');
+  if (Array.isArray(node.children)) return node.children.map(collectRenderedText).join('');
+  return '';
+};
+
 describe('RedisViewer tree interactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     antdState.treeProps = null;
+    storeState.connections = [
+      {
+        id: 'redis-1',
+        name: 'redis',
+        config: {
+          type: 'redis',
+          host: '127.0.0.1',
+          port: 6379,
+          password: '',
+          database: '',
+        },
+      },
+    ];
     redisBackend.RedisScanKeys.mockResolvedValue({
       success: true,
       data: {
@@ -187,6 +208,37 @@ describe('RedisViewer tree interactions', () => {
     expect(event.stopPropagation).toHaveBeenCalled();
     expect(antdState.treeProps.expandedKeys).toContain('group:app');
     expect(antdState.treeProps.checkedKeys.checked).toEqual([]);
+
+    renderer!.unmount();
+  });
+
+  it('shows Redis Cluster topology context in the key explorer header', async () => {
+    storeState.connections = [
+      {
+        id: 'redis-1',
+        name: 'redis-cluster',
+        config: {
+          type: 'redis',
+          host: '10.0.0.1',
+          port: 6379,
+          hosts: ['10.0.0.2:6379', '10.0.0.3:6379'],
+          topology: 'cluster',
+          password: '',
+          database: '',
+        } as any,
+      },
+    ];
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<RedisViewer connectionId="redis-1" redisDB={2} />);
+    });
+    await flushEffects();
+
+    const renderedText = collectRenderedText(renderer!.toJSON());
+    expect(renderedText).toContain('db2');
+    expect(renderedText).toContain('Cluster');
+    expect(renderedText).toContain('3 节点');
 
     renderer!.unmount();
   });

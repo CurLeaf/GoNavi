@@ -45,7 +45,8 @@ func (p *panicChromium) PutZoomFactor(float64) {
 }
 
 type panicFrontend struct {
-	chromium *panicChromium
+	chromium   *panicChromium
+	mainWindow *fakeWindow
 }
 
 // 测试必须用 wails 一致的 string key "frontend" 作为 context.WithValue 的 key，
@@ -122,7 +123,10 @@ func TestResetWebViewZoomFactorErrorsWhenFrontendMissing(t *testing.T) {
 }
 
 func TestResetWebViewZoomFactorRecoversFromPutZoomFactorPanic(t *testing.T) {
-	ctx := context.WithValue(context.Background(), stringContextKey("frontend"), &panicFrontend{chromium: &panicChromium{}})
+	ctx := context.WithValue(context.Background(), stringContextKey("frontend"), &panicFrontend{
+		chromium:   &panicChromium{},
+		mainWindow: &fakeWindow{},
+	})
 
 	err := resetWebViewZoomFactor(ctx, 1.0)
 	if err == nil {

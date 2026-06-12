@@ -21,6 +21,8 @@ usage() {
 说明：
   通过 go list -deps 计算每个 driver-agent 的真实源码依赖，再与 git diff 文件求交集。
   如果无法解析基准或依赖分析失败，会保守输出全部 driver。
+  如果 driver 构建 / 发布工作流本身发生变化，也会保守输出全部 driver，
+  避免新应用 revision 与旧 driver-assets 再次错配。
 EOF
 }
 
@@ -320,9 +322,31 @@ add_all_forced_drivers() {
   done
 }
 
+revision_file_changed_drivers() {
+  local line driver emitted_seen
+  emitted_seen="|"
+  while IFS= read -r line; do
+    case "$line" in
+      +++*|---*|@@*)
+        continue
+        ;;
+      +*|-*)
+        if [[ "$line" =~ \"([^\"]+)\"[[:space:]]*:[[:space:]]*\"src-[^\"]+\" ]]; then
+          driver="$(normalize_driver "${BASH_REMATCH[1]}")" || continue
+          if [[ "$emitted_seen" == *"|$driver|"* ]]; then
+            continue
+          fi
+          printf '%s\n' "$driver"
+          emitted_seen="${emitted_seen}${driver}|"
+        fi
+        ;;
+    esac
+  done < <(git diff --unified=0 "$base_commit" "$head_commit" -- internal/db/driver_agent_revisions_gen.go)
+}
+
 is_ignored_driver_agent_source_file() {
   case "$1" in
-    *_test.go|frontend/*|internal/app/*|internal/db/driver_agent_revisions_gen.go)
+    *_test.go|frontend/*|internal/app/*|internal/appdata/*|internal/connection/*|internal/logger/*)
       return 0
       ;;
   esac
@@ -465,10 +489,35 @@ if [[ ${#changed_file_set[@]} -eq 0 ]]; then
   exit 0
 fi
 
+has_revision_file_change=false
+only_workflow_changes=true
+for file in "${!changed_file_set[@]}"; do
+  case "$file" in
+    internal/db/driver_agent_revisions_gen.go)
+      has_revision_file_change=true
+      only_workflow_changes=false
+      ;;
+    .github/workflows/dev-build.yml|.github/workflows/release.yml)
+      ;;
+    *)
+      only_workflow_changes=false
+      ;;
+  esac
+done
+
 declare -a forced_changed_drivers=()
 forced_driver_seen="|"
 for file in "${!changed_file_set[@]}"; do
   case "$file" in
+    internal/db/driver_agent_revisions_gen.go)
+      revision_delta="$(revision_file_changed_drivers)"
+      if [[ -z "$revision_delta" ]]; then
+        echo "检测到 driver-agent revision 文件存在无法归因的变更；保守构建全部 driver-agent：$file" >&2
+        all_drivers_csv
+        exit 0
+      fi
+      add_forced_drivers_from_tokens "$revision_delta"
+      ;;
     go.mod|go.sum|build-driver-agents.sh|tools/generate-driver-agent-revisions.sh)
       set +e
       shared_delta="$(shared_file_driver_delta "$file")"
@@ -481,13 +530,33 @@ for file in "${!changed_file_set[@]}"; do
       fi
       add_forced_drivers_from_tokens "$shared_delta"
       ;;
-    tools/compress-driver-artifact.sh)
-      echo "检测到 driver-agent 压缩脚本变更；保守构建全部 driver-agent：$file" >&2
+    tools/compress-driver-artifact.sh|\
+    tools/package-driver-release-assets.py|\
+    tools/generate-driver-release-manifest.py|\
+    tools/validate-driver-release-assets.py|\
+    tools/complete-driver-release-assets.py|\
+    tools/resolve-driver-release-source.py|\
+    tools/validate-driver-release-manifest.sh|\
+    tools/should-force-global-driver-builds.sh)
+      echo "检测到 driver-agent 构建/发布链路脚本变更；保守构建全部 driver-agent：$file" >&2
+      all_drivers_csv
+      exit 0
+      ;;
+    .github/workflows/dev-build.yml|.github/workflows/release.yml)
+      if [[ "$has_revision_file_change" == "true" ]]; then
+        continue
+      fi
+      if [[ "$only_workflow_changes" == "true" && -f internal/db/driver_agent_revisions_gen.go ]]; then
+        continue
+      fi
+      echo "检测到 driver-agent 构建/发布工作流变更；保守构建全部 driver-agent：$file" >&2
       all_drivers_csv
       exit 0
       ;;
     tools/detect-changed-driver-agents.sh)
-      # This script only selects CI work; it is not embedded in driver-agent binaries.
+      echo "检测到 driver-agent 变更检测脚本更新；保守构建全部 driver-agent：$file" >&2
+      all_drivers_csv
+      exit 0
       ;;
   esac
 done

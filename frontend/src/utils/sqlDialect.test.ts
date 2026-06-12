@@ -24,6 +24,9 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('custom', 'kingbase8')).toBe('kingbase');
     expect(resolveSqlDialect('custom', 'dm8')).toBe('dameng');
     expect(resolveSqlDialect('custom', 'mariadb')).toBe('mariadb');
+    expect(resolveSqlDialect('custom', 'gdb')).toBe('mysql');
+    expect(resolveSqlDialect('custom', 'goldendb')).toBe('mysql');
+    expect(resolveSqlDialect('custom', 'greatdb')).toBe('mysql');
     expect(resolveSqlDialect('custom', 'open_gauss')).toBe('opengauss');
     expect(resolveSqlDialect('Elasticsearch')).toBe('elasticsearch');
     expect(resolveSqlDialect('custom', 'elastic')).toBe('elasticsearch');

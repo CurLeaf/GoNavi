@@ -42,6 +42,44 @@ func TestResolveConnectionConfigByIDLoadsSecretsFromStore(t *testing.T) {
 	}
 }
 
+func TestResolveConnectionConfigByIDLoadsRedisSentinelPasswordFromStore(t *testing.T) {
+	store := newFakeAppSecretStore()
+	app := NewAppWithSecretStore(store)
+	app.configDir = t.TempDir()
+
+	view, err := app.SaveConnection(connection.SavedConnectionInput{
+		ID:   "redis-sentinel",
+		Name: "Redis Sentinel",
+		Config: connection.ConnectionConfig{
+			ID:                    "redis-sentinel",
+			Type:                  "redis",
+			Host:                  "sentinel.local",
+			Port:                  26379,
+			Topology:              "sentinel",
+			RedisSentinelMaster:   "mymaster",
+			RedisSentinelUser:     "sentinel-user",
+			RedisSentinelPassword: "sentinel-secret",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveConnection returned error: %v", err)
+	}
+	if view.Config.RedisSentinelPassword != "" {
+		t.Fatal("saved metadata must not expose Redis Sentinel password")
+	}
+	if !view.HasRedisSentinelPassword {
+		t.Fatal("expected saved view to report Redis Sentinel password")
+	}
+
+	resolved, err := app.resolveConnectionSecrets(view.Config)
+	if err != nil {
+		t.Fatalf("resolveConnectionSecrets returned error: %v", err)
+	}
+	if resolved.RedisSentinelPassword != "sentinel-secret" {
+		t.Fatalf("expected restored Redis Sentinel password, got %q", resolved.RedisSentinelPassword)
+	}
+}
+
 func TestResolveConnectionSecretsOnDarwinUsesInlineSavedSecrets(t *testing.T) {
 	app := NewAppWithSecretStore(failOnUseSecretStore{})
 	app.configDir = t.TempDir()

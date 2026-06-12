@@ -82,3 +82,53 @@ func TestCollectMySQLDatabaseNames_ReturnsOriginalErrorWhenNoDatabaseResolved(t 
 		t.Fatalf("错误不符合预期: %v", err)
 	}
 }
+
+func TestBuildMySQLShowCreateTableQueryNormalizesQuotedIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		dbName    string
+		tableName string
+		want      string
+	}{
+		{
+			name:      "plain db and quoted table",
+			dbName:    "app",
+			tableName: `"activate_record"`,
+			want:      "SHOW CREATE TABLE `app`.`activate_record`",
+		},
+		{
+			name:      "escaped quoted qualified table overrides db",
+			dbName:    "ignored",
+			tableName: `\"crm\".\"activate_record\"`,
+			want:      "SHOW CREATE TABLE `crm`.`activate_record`",
+		},
+		{
+			name:      "backtick escaping",
+			dbName:    "app`prod",
+			tableName: "`audit``log`",
+			want:      "SHOW CREATE TABLE `app``prod`.`audit``log`",
+		},
+		{
+			name:      "quoted table containing dot is not split",
+			dbName:    "app",
+			tableName: `"activate.record"`,
+			want:      "SHOW CREATE TABLE `app`.`activate.record`",
+		},
+		{
+			name:      "mixed quote artifact from UI row value",
+			dbName:    "app",
+			tableName: `'activate_record"`,
+			want:      "SHOW CREATE TABLE `app`.`activate_record`",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildMySQLShowCreateTableQuery(tt.dbName, tt.tableName); got != tt.want {
+				t.Fatalf("buildMySQLShowCreateTableQuery(%q,%q)=%q,want=%q", tt.dbName, tt.tableName, got, tt.want)
+			}
+		})
+	}
+}

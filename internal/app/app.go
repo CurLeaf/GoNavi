@@ -36,6 +36,8 @@ const (
 var (
 	newDatabaseFunc                = db.NewDatabase
 	resolveDialConfigWithProxyFunc = resolveDialConfigWithProxy
+	driverRuntimeSupportStatusFunc = db.DriverRuntimeSupportStatus
+	verifyDriverAgentRevisionFunc  = verifyRuntimeOptionalDriverAgentRevision
 )
 
 type cachedDatabase struct {
@@ -53,6 +55,17 @@ type queryContext struct {
 	started time.Time
 }
 
+type managedSQLTransaction struct {
+	id          string
+	execer      db.StatementExecer
+	transactor  db.TransactionExecer
+	cancel      context.CancelFunc
+	dbType      string
+	commitSQL   string
+	rollbackSQL string
+	createdAt   time.Time
+}
+
 // App struct
 type App struct {
 	ctx                context.Context
@@ -66,6 +79,8 @@ type App struct {
 	configDir          string
 	secretStore        secretstore.SecretStore
 	runningQueries     map[string]queryContext // queryID -> cancelFunc and start time
+	sqlTransactionMu   sync.Mutex
+	sqlTransactions    map[string]*managedSQLTransaction
 	jvmPreviewTokenMu  sync.Mutex
 	jvmPreviewTokens   map[string]jvmPreviewConfirmationToken
 	jvmPreviewTokenTTL time.Duration
@@ -84,6 +99,7 @@ func NewAppWithSecretStore(store secretstore.SecretStore) *App {
 		dbCache:            make(map[string]cachedDatabase),
 		connectFailures:    make(map[string]cachedConnectFailure),
 		runningQueries:     make(map[string]queryContext),
+		sqlTransactions:    make(map[string]*managedSQLTransaction),
 		configDir:          resolveAppConfigDir(),
 		secretStore:        store,
 		jvmPreviewTokens:   make(map[string]jvmPreviewConfirmationToken),
@@ -165,6 +181,7 @@ func (a *App) LogWindowDiagnostic(stage string, payload string) {
 // Shutdown is called when the app terminates
 func (a *App) Shutdown(ctx context.Context) {
 	logger.Infof("应用开始关闭，准备释放资源")
+	a.rollbackPendingSQLTransactionsOnShutdown()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, dbInst := range a.dbCache {
@@ -236,6 +253,9 @@ func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.Conn
 		normalized.ConnectionParams = ""
 		normalized.Hosts = nil
 		normalized.Topology = ""
+		normalized.RedisSentinelMaster = ""
+		normalized.RedisSentinelUser = ""
+		normalized.RedisSentinelPassword = ""
 		normalized.MySQLReplicaUser = ""
 		normalized.MySQLReplicaPassword = ""
 		normalized.ReplicaSet = ""
@@ -556,13 +576,13 @@ func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Datab
 		return nil, wrapConnectError(config, err)
 	}
 	effectiveConfig := applyGlobalProxyToConnection(resolvedConfig)
-	if supported, reason := db.DriverRuntimeSupportStatus(effectiveConfig.Type); !supported {
+	if supported, reason := driverRuntimeSupportStatusFunc(effectiveConfig.Type); !supported {
 		if strings.TrimSpace(reason) == "" {
 			reason = fmt.Sprintf("%s 驱动未启用，请先在驱动管理中安装启用", strings.TrimSpace(effectiveConfig.Type))
 		}
 		return nil, withLogHint{err: fmt.Errorf("%s", reason), logPath: logger.Path()}
 	}
-	if revisionErr := verifyRuntimeOptionalDriverAgentRevision(effectiveConfig); revisionErr != nil {
+	if revisionErr := verifyDriverAgentRevisionFunc(effectiveConfig); revisionErr != nil {
 		return nil, withLogHint{err: revisionErr, logPath: logger.Path()}
 	}
 
@@ -600,7 +620,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 			strings.TrimSpace(effectiveConfig.Type), rawDSN, normalizedDSN, effectiveConfig.Timeout, forcePing, shortKey)
 	}
 
-	if supported, reason := db.DriverRuntimeSupportStatus(effectiveConfig.Type); !supported {
+	if supported, reason := driverRuntimeSupportStatusFunc(effectiveConfig.Type); !supported {
 		if strings.TrimSpace(reason) == "" {
 			reason = fmt.Sprintf("%s 驱动未启用，请先在驱动管理中安装启用", strings.TrimSpace(effectiveConfig.Type))
 		}
@@ -677,7 +697,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 			formatConnSummary(effectiveConfig), shortKey, formatConnectFailureCooldown(remaining), normalizeErrorMessage(failure.err))
 		return nil, withLogHint{err: fmt.Errorf("%s", message), logPath: logger.Path()}
 	}
-	if revisionErr := verifyRuntimeOptionalDriverAgentRevision(effectiveConfig); revisionErr != nil {
+	if revisionErr := verifyDriverAgentRevisionFunc(effectiveConfig); revisionErr != nil {
 		return nil, withLogHint{err: revisionErr, logPath: logger.Path()}
 	}
 
@@ -783,15 +803,31 @@ func verifyRuntimeOptionalDriverAgentRevision(config connection.ConnectionConfig
 	if packageMetaExists {
 		selectedVersion = strings.TrimSpace(pkg.Version)
 	}
-	agentRevision, err := verifyInstalledOptionalDriverAgentRevision(driverType, executablePath, selectedVersion)
+	if !shouldVerifyOptionalDriverAgentRevision(driverType, selectedVersion) {
+		return nil
+	}
+	expectedRevision := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType))
+	if expectedRevision == "" {
+		return nil
+	}
+	displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
+	agentRevision, current, err := optionalDriverAgentRevisionCurrent(driverType, executablePath)
 	if err != nil {
-		return err
+		logger.Warnf("%s driver-agent revision 元数据不可用，继续使用已安装代理：version=%s path=%s err=%v；建议在驱动管理中重装",
+			displayName, selectedVersion, executablePath, err)
+		return nil
 	}
-	if expectedRevision := strings.TrimSpace(db.OptionalDriverAgentRevision(driverType)); expectedRevision != "" {
-		displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
-		logger.Infof("%s driver-agent revision 校验通过：已安装=%s 当前需要=%s version=%s path=%s",
-			displayName, strings.TrimSpace(agentRevision), expectedRevision, selectedVersion, executablePath)
+	if !current {
+		actualLabel := strings.TrimSpace(agentRevision)
+		if actualLabel == "" {
+			actualLabel = "空"
+		}
+		logger.Warnf("%s driver-agent revision 不匹配，继续使用已安装代理：已安装=%s 当前需要=%s version=%s path=%s；建议在驱动管理中重装",
+			displayName, actualLabel, expectedRevision, selectedVersion, executablePath)
+		return nil
 	}
+	logger.Infof("%s driver-agent revision 校验通过：已安装=%s 当前需要=%s version=%s path=%s",
+		displayName, strings.TrimSpace(agentRevision), expectedRevision, selectedVersion, executablePath)
 	return nil
 }
 
