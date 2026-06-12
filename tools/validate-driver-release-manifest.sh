@@ -107,31 +107,43 @@ platforms = sorted({str(meta.get("platform") or "").strip() for meta in assets.v
 if not platforms:
     raise SystemExit("manifest 未包含平台信息")
 
-def extract_revision(file_path: Path, driver: str) -> str:
+def normalize_driver(driver: str) -> str:
+    value = str(driver or "").strip().lower()
+    if value == "doris":
+        return "diros"
+    return value
+
+
+def parse_revision_file(file_path: Path):
     import re
     text = file_path.read_text(encoding="utf-8")
-    pattern = re.compile(rf'"{re.escape(driver)}"\s*:\s*"([^"]+)"')
-    match = pattern.search(text)
-    return match.group(1) if match else ""
+    revisions = {}
+    for match in re.finditer(r'"([^"]+)"\s*:\s*"([^"]+)"', text):
+        revisions[match.group(1)] = match.group(2)
+    return revisions
 
-revision_files = {}
+drivers_by_platform = {}
+for meta in assets.values():
+    platform = str(meta.get("platform") or "").strip()
+    driver = normalize_driver(meta.get("driver") or meta.get("driverType"))
+    if platform and driver:
+        drivers_by_platform.setdefault(platform, set()).add(driver)
+
+revision_maps = {}
 for platform in platforms:
-    subprocess.run(
-        ["bash", "./tools/generate-driver-agent-revisions.sh", "--platform", platform],
-        cwd=worktree,
-        check=True,
-        stdout=subprocess.DEVNULL,
-    )
-    revision_files[platform] = worktree / "internal/db/driver_agent_revisions_gen.go"
+    command = ["bash", "./tools/generate-driver-agent-revisions.sh", "--platform", platform]
+    platform_drivers = sorted(drivers_by_platform.get(platform) or [])
+    if platform_drivers:
+        command.extend(["--drivers", ",".join(platform_drivers)])
+    subprocess.run(command, cwd=worktree, check=True, stdout=subprocess.DEVNULL)
+    revision_maps[platform] = parse_revision_file(worktree / "internal/db/driver_agent_revisions_gen.go")
 
 mismatches = []
 for asset_name, meta in sorted(assets.items()):
-    driver = str(meta.get("driver") or meta.get("driverType") or "").strip().lower()
-    if driver == "doris":
-        driver = "diros"
+    driver = normalize_driver(meta.get("driver") or meta.get("driverType"))
     platform = str(meta.get("platform") or "").strip()
     published_revision = str(meta.get("revision") or "").strip()
-    expected_revision = extract_revision(revision_files[platform], driver)
+    expected_revision = (revision_maps.get(platform) or {}).get(driver, "")
     if not expected_revision:
         mismatches.append((asset_name, platform, driver, published_revision, "<missing>"))
         continue
