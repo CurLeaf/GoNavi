@@ -168,14 +168,14 @@ export const BUILTIN_AI_INSPECTION_DIAGNOSTICS_TOOL_INFO: AIBuiltinToolInfo[] = 
     icon: "🧱",
     desc: "查看前端大文件和拆分热点",
     detail:
-      "返回当前 GoNavi 前端代码中的大文件热点、行数、风险等级、建议拆分切片和应该运行的回归测试。适合用户要求继续治理几千行大文件、评估下一步该拆哪个组件，或 AI 在修改前需要先判断改动风险时调用。",
+      "返回当前 GoNavi 前端代码中的大文件热点、行数、风险等级、拆分成熟度、安全边界、建议拆分切片和应该运行的回归测试。适合用户要求继续治理几千行大文件、评估下一步该拆哪个组件，或 AI 在修改前需要先判断改动风险时调用。",
     params: "keyword?, minLines?(默认 1000), limit?(默认 8), includeRecommendations?(默认 true)",
     tool: {
       type: "function",
       function: {
         name: "inspect_codebase_hotspots",
         description:
-          "读取 GoNavi 前端大文件和拆分热点快照，返回文件路径、行数、风险等级、建议拆分切片和测试目标。适用于用户提到几千行文件太臃肿、需要继续拆分组件、评估下一个重构切入点或在改 UI/AI/MCP 前需要先判断代码热点风险时优先调用。",
+          "读取 GoNavi 前端大文件和拆分热点快照，返回文件路径、行数、风险等级、拆分成熟度、首选切片、安全拆分边界、建议拆分切片、测试目标和验证计划。适用于用户提到几千行文件太臃肿、需要继续拆分组件、评估下一个重构切入点或在改 UI/AI/MCP 前需要先判断代码热点风险时优先调用。",
         parameters: {
           type: "object",
           properties: {

@@ -349,6 +349,8 @@ vi.mock('antd', () => {
     </button>
   );
   Button.Group = ({ children }: any) => <div>{children}</div>;
+  const Space: any = ({ children }: any) => <div>{children}</div>;
+  Space.Compact = ({ children, className }: any) => <div className={className}>{children}</div>;
 
   const Form: any = ({ children }: any) => <form>{children}</form>;
   Form.Item = ({ children }: any) => <>{children}</>;
@@ -356,6 +358,7 @@ vi.mock('antd', () => {
 
   return {
     Button,
+    Space,
     message: messageApi,
     Modal: ({ children, open, onOk, okText = '确认' }: any) => (open ? (
       <section>
@@ -3707,16 +3710,18 @@ describe('QueryEditor external SQL save', () => {
 
   it('keeps the v2 query editor toolbar grouped and compact', () => {
     const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+    const toolbarSource = readFileSync(new URL('./QueryEditorToolbar.tsx', import.meta.url), 'utf8');
     const transactionSettingsSource = readFileSync(new URL('./QueryEditorTransactionSettings.tsx', import.meta.url), 'utf8');
     const transactionToolbarSource = readFileSync(new URL('./QueryEditorTransactionToolbar.tsx', import.meta.url), 'utf8');
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
 
-    expect(source).toContain('gn-v2-query-toolbar-selects');
-    expect(source).toContain('gn-v2-query-toolbar-actions');
-    expect(source).toContain('gn-v2-query-toolbar-connection-select');
-    expect(source).toContain('gn-v2-query-toolbar-database-select');
-    expect(source).toContain('gn-v2-query-toolbar-max-rows-select');
-    expect(source).toContain('QueryEditorTransactionSettings');
+    expect(source).toContain('QueryEditorToolbar');
+    expect(toolbarSource).toContain('gn-v2-query-toolbar-selects');
+    expect(toolbarSource).toContain('gn-v2-query-toolbar-actions');
+    expect(toolbarSource).toContain('gn-v2-query-toolbar-connection-select');
+    expect(toolbarSource).toContain('gn-v2-query-toolbar-database-select');
+    expect(toolbarSource).toContain('gn-v2-query-toolbar-max-rows-select');
+    expect(toolbarSource).toContain('QueryEditorTransactionSettings');
     expect(transactionSettingsSource).toContain('gn-v2-query-toolbar-transaction-mode-select');
     expect(transactionSettingsSource).toContain('gn-v2-query-toolbar-transaction-delay-select');
     expect(transactionSettingsSource).toContain('参考 DBeaver');
@@ -3729,10 +3734,10 @@ describe('QueryEditor external SQL save', () => {
     expect(transactionToolbarSource).toContain('未提交 ${statementCount} 条变更语句');
     expect(transactionToolbarSource).toContain('事务执行成功${pendingCountText}，正在自动提交');
     expect(transactionToolbarSource).toContain('onFinish');
-    expect(source).toContain('gn-v2-query-toolbar-action-group');
+    expect(toolbarSource).toContain('gn-v2-query-toolbar-action-group');
     expect(transactionSettingsSource).toContain('style={isV2Ui ? undefined : { width: 160 }}');
-    expect(source).toContain('style={isV2Ui ? undefined : { width: 200 }}');
-    expect(source).toContain('style={isV2Ui ? undefined : { width: 170 }}');
+    expect(toolbarSource).toContain('style={isV2Ui ? undefined : { width: 200 }}');
+    expect(toolbarSource).toContain('style={isV2Ui ? undefined : { width: 170 }}');
 
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-selects');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-actions');

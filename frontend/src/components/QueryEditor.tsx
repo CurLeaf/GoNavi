@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Editor, { type OnMount } from './MonacoEditor';
-import { Button, message, Modal, Input, Form, Dropdown, MenuProps, Tooltip, Select } from 'antd';
-import { PlayCircleOutlined, SaveOutlined, FormatPainterOutlined, SettingOutlined, StopOutlined, RobotOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
+import { message, Modal, Input, Form, MenuProps } from 'antd';
 import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition, IndexDefinition } from '../types';
@@ -41,10 +40,9 @@ import {
     getColumnDefinitionName,
 } from '../utils/columnDefinition';
 import QueryEditorResultsPanel, { type QueryEditorResultSet } from './QueryEditorResultsPanel';
-import QueryEditorTransactionSettings, {
-    SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS,
-} from './QueryEditorTransactionSettings';
+import { SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS } from './QueryEditorTransactionSettings';
 import QueryEditorTransactionToolbar from './QueryEditorTransactionToolbar';
+import QueryEditorToolbar from './QueryEditorToolbar';
 import { useSqlEditorTransactionController } from './useSqlEditorTransactionController';
 
 // HMR 重载时释放旧注册避免补全和 hover 内容重复
@@ -5134,134 +5132,44 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         className={isV2Ui ? 'gn-v2-query-editor-pane' : undefined}
         style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: isResultPanelVisible ? '0 0 auto' : '1 1 auto' }}
       >
-      <div className={isV2Ui ? 'gn-v2-query-toolbar' : undefined} style={{ padding: '4px 8px 8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
-        <div
-          className={isV2Ui ? 'gn-v2-query-toolbar-selects' : undefined}
-          style={{ display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}
-        >
-          <Select
-              className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-connection-select' : undefined}
-              style={isV2Ui ? undefined : { width: 150 }}
-              placeholder="选择连接"
-              value={currentConnectionId}
-              onChange={(val) => {
-                  setCurrentConnectionId(val);
-                  setCurrentDb('');
-              }}
-              options={queryCapableConnections.map(c => ({ label: c.name, value: c.id }))}
-              showSearch
-          />
-          <Select
-              className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-database-select' : undefined}
-              style={isV2Ui ? undefined : { width: 200 }}
-              placeholder="选择数据库"
-              value={currentDb}
-              onChange={setCurrentDb}
-              options={dbList.map(db => ({ label: db, value: db }))}
-              showSearch
-          />
-          <Tooltip title="最大返回行数（会对 SELECT 自动加 LIMIT，防止大结果集卡死）">
-              <Select
-                  className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-max-rows-select' : undefined}
-                  style={isV2Ui ? undefined : { width: 170 }}
-                  value={queryOptions?.maxRows ?? 5000}
-                  onChange={(val) => setQueryOptions({ maxRows: Number(val) })}
-                  options={[
-                      { label: '最大行数：500', value: 500 },
-                      { label: '最大行数：1000', value: 1000 },
-                      { label: '最大行数：5000', value: 5000 },
-                      { label: '最大行数：20000', value: 20000 },
-                      { label: '最大行数：不限', value: 0 },
-                  ]}
-              />
-          </Tooltip>
-          <QueryEditorTransactionSettings
-              isV2Ui={isV2Ui}
-              commitMode={sqlEditorCommitMode}
-              autoCommitDelayMs={sqlEditorAutoCommitDelayMs}
-              onCommitModeChange={(mode) => setSqlEditorTransactionOptions(
-                  mode === 'auto'
-                      ? { commitMode: mode, autoCommitDelayMs: 0 }
-                      : { commitMode: mode },
-              )}
-              onAutoCommitDelayMsChange={(delayMs) => setSqlEditorTransactionOptions({ autoCommitDelayMs: delayMs })}
-          />
-          {pendingSqlTransaction && sqlEditorTransactionToolbar}
-        </div>
-        <div
-          className={isV2Ui ? 'gn-v2-query-toolbar-actions' : undefined}
-          style={{ display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}
-        >
-          <Button.Group className={isV2Ui ? 'gn-v2-query-toolbar-action-group' : undefined}>
-            <Tooltip
-                title={
-	                    runQueryShortcutBinding.enabled && runQueryShortcutBinding.combo
-	                        ? `运行（${getShortcutDisplayLabel(runQueryShortcutBinding.combo, activeShortcutPlatform)}）`
-	                        : '运行'
-                }
-            >
-                <Button className={isV2Ui ? 'gn-v2-query-toolbar-run-action' : undefined} type="primary" icon={<PlayCircleOutlined />} onMouseDown={captureEditorCursorPosition} onClick={handleRun} loading={loading}>
-                  运行
-                </Button>
-            </Tooltip>
-            {loading && (
-              <Button type="primary" danger icon={<StopOutlined />} onClick={handleCancel}>
-                停止
-              </Button>
-            )}
-          </Button.Group>
-          <Button.Group className={isV2Ui ? 'gn-v2-query-toolbar-action-group' : undefined}>
-              <Tooltip
-                  title={
-                      saveQueryShortcutBinding.enabled && saveQueryShortcutBinding.combo
-                          ? `保存（${getShortcutDisplayLabel(saveQueryShortcutBinding.combo, activeShortcutPlatform)}）`
-                          : '保存'
-                  }
-              >
-                <Button icon={<SaveOutlined />} onClick={handleQuickSave}>
-                  保存
-                </Button>
-              </Tooltip>
-              <Dropdown menu={{ items: saveMoreMenuItems }} placement="bottomRight">
-                  <Button>更多</Button>
-              </Dropdown>
-          </Button.Group>
-
-          <Button.Group className={isV2Ui ? 'gn-v2-query-toolbar-action-group' : undefined}>
-              <Tooltip title="美化 SQL">
-                  <Button icon={<FormatPainterOutlined />} onClick={handleFormat}>美化</Button>
-              </Tooltip>
-              <Dropdown menu={{ items: formatSettingsMenu }} placement="bottomRight">
-                  <Button className={isV2Ui ? 'gn-v2-query-toolbar-icon-action' : undefined} icon={<SettingOutlined />} />
-              </Dropdown>
-          </Button.Group>
-
-          <Tooltip
-              title={
-                  toggleQueryResultsPanelShortcutBinding.enabled && toggleQueryResultsPanelShortcutBinding.combo
-                      ? `${isResultPanelVisible ? '隐藏结果区' : '显示结果区'}（${getShortcutDisplayLabel(toggleQueryResultsPanelShortcutBinding.combo, activeShortcutPlatform)}）`
-                      : (isResultPanelVisible ? '隐藏结果区' : '显示结果区')
-              }
-          >
-              <Button
-                  icon={isResultPanelVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-                  onClick={toggleResultPanelVisibility}
-              >
-                  结果
-              </Button>
-          </Tooltip>
-
-          <Dropdown menu={{ items: [
-              { key: 'ai-generate', label: '生成 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('generate') },
-              { key: 'ai-explain', label: '解释 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('explain') },
-              { key: 'ai-optimize', label: '优化 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('optimize') },
-              { type: 'divider' as const },
-              { key: 'ai-schema', label: 'Schema 分析', icon: <RobotOutlined />, onClick: () => handleAIAction('schema') },
-          ] }} placement="bottomRight">
-              <Button className={isV2Ui ? 'gn-v2-query-toolbar-ai-action' : undefined} icon={<RobotOutlined />} style={{ color: '#818cf8' }}>AI</Button>
-          </Dropdown>
-        </div>
-      </div>
+      <QueryEditorToolbar
+        isV2Ui={isV2Ui}
+        currentConnectionId={currentConnectionId}
+        currentDb={currentDb}
+        queryCapableConnections={queryCapableConnections}
+        dbList={dbList}
+        maxRows={queryOptions?.maxRows ?? 5000}
+        sqlEditorCommitMode={sqlEditorCommitMode}
+        sqlEditorAutoCommitDelayMs={sqlEditorAutoCommitDelayMs}
+        pendingTransactionToolbar={pendingSqlTransaction ? sqlEditorTransactionToolbar : null}
+        runQueryShortcutBinding={runQueryShortcutBinding}
+        saveQueryShortcutBinding={saveQueryShortcutBinding}
+        toggleQueryResultsPanelShortcutBinding={toggleQueryResultsPanelShortcutBinding}
+        activeShortcutPlatform={activeShortcutPlatform}
+        isResultPanelVisible={isResultPanelVisible}
+        loading={loading}
+        saveMoreMenuItems={saveMoreMenuItems}
+        formatSettingsMenu={formatSettingsMenu}
+        onConnectionChange={(val) => {
+            setCurrentConnectionId(val);
+            setCurrentDb('');
+        }}
+        onDatabaseChange={setCurrentDb}
+        onMaxRowsChange={(maxRows) => setQueryOptions({ maxRows })}
+        onCommitModeChange={(mode) => setSqlEditorTransactionOptions(
+            mode === 'auto'
+                ? { commitMode: mode, autoCommitDelayMs: 0 }
+                : { commitMode: mode },
+        )}
+        onAutoCommitDelayMsChange={(delayMs) => setSqlEditorTransactionOptions({ autoCommitDelayMs: delayMs })}
+        onCaptureEditorCursorPosition={captureEditorCursorPosition}
+        onRun={handleRun}
+        onCancel={handleCancel}
+        onQuickSave={handleQuickSave}
+        onFormat={handleFormat}
+        onToggleResultPanelVisibility={toggleResultPanelVisibility}
+        onAIAction={handleAIAction}
+      />
       
       <div
         ref={editorShellRef}

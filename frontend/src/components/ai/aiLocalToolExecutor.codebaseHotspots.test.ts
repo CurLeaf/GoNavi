@@ -45,8 +45,13 @@ describe('aiLocalToolExecutor inspect_codebase_hotspots', () => {
     expect(result.content).toContain('"kind":"codebase_hotspots"');
     expect(result.content).toContain('frontend/src/components/QueryEditor.tsx');
     expect(result.content).toContain('"riskLevel":"critical"');
+    expect(result.content).toContain('"readiness":"readyToExtract"');
+    expect(result.content).toContain('"preferredNextSlice":"编辑器工具栏"');
+    expect(result.content).toContain('工具栏 JSX 可通过 props 透传状态和回调');
     expect(result.content).toContain('事务状态条');
     expect(result.content).toContain('QueryEditor.result-panel.test.tsx');
+    expect(result.content).toContain('QueryEditor.external-sql-save.test.tsx');
+    expect(result.content).toContain('浏览器打开 SQL 编辑器');
     expect(result.content).not.toContain('import React');
   });
 });
