@@ -20,7 +20,7 @@ func normalizeRunConfig(config connection.ConnectionConfig, dbName string) conne
 		if !isOceanBaseOracleProtocol(config) {
 			runConfig.Database = name
 		}
-	case "mysql", "mariadb", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "iris", "intersystems", "intersystemsiris", "inter-systems", "inter-systems-iris", "mongodb", "tdengine", "iotdb", "clickhouse":
+	case "mysql", "mariadb", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "iris", "intersystems", "intersystemsiris", "inter-systems", "inter-systems-iris", "mongodb", "tdengine", "iotdb", "clickhouse":
 		// 这些类型的 dbName 表示"数据库"，需要写入连接配置以选择目标库。
 		runConfig.Database = name
 	case "dameng":
@@ -98,7 +98,7 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 	}
 
 	switch dbType {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		// PG/金仓/瀚高/海量：dbName 在 UI 里是"数据库"，未限定 schema 的普通导出/DDL 路径沿用 public。
 		return "public", rawTable
 	default:
@@ -110,7 +110,7 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 func normalizeMetadataSchemaAndTable(config connection.ConnectionConfig, dbName string, tableName string) (string, string) {
 	schema, table := normalizeSchemaAndTable(config, dbName, tableName)
 	switch resolveDDLDBType(config) {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		rawTable := strings.TrimSpace(tableName)
 		if rawTable == "" {
 			return schema, table

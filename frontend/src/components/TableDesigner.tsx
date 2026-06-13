@@ -930,6 +930,7 @@ const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, em
       if (normalized === 'mssql' || normalized === 'sql_server' || normalized === 'sql-server') return 'sqlserver';
       if (normalized === 'doris') return 'diros';
       if (normalized === 'open_gauss' || normalized === 'open-gauss') return 'opengauss';
+      if (normalized === 'gauss_db' || normalized === 'gauss-db') return 'gaussdb';
       return normalized;
   };
 
@@ -981,6 +982,7 @@ END;`;
       case 'highgo':
       case 'vastbase':
       case 'opengauss':
+      case 'gaussdb':
         return `CREATE OR REPLACE FUNCTION trigger_function_name()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -1039,6 +1041,7 @@ END;`;
       case 'highgo':
       case 'vastbase':
       case 'opengauss':
+      case 'gaussdb':
         return `DROP TRIGGER IF EXISTS "${triggerName}" ON "${tblName}"`;
       case 'sqlserver':
         return `DROP TRIGGER IF EXISTS [${triggerName}]`;

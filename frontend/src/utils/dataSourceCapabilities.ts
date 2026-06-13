@@ -16,6 +16,10 @@ const normalizeDataSourceToken = (raw: string): string => {
     case 'open_gauss':
     case 'open-gauss':
       return 'opengauss';
+    case 'gaussdb':
+    case 'gauss_db':
+    case 'gauss-db':
+      return 'gaussdb';
     case 'dm':
       return 'dameng';
     case 'elastic':
@@ -68,6 +72,7 @@ const SQL_QUERY_EXPORT_TYPES = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
   'sqlserver',
   'iris',
   'sqlite',
@@ -90,6 +95,7 @@ const COPY_INSERT_TYPES = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
   'sqlserver',
   'iris',
   'sqlite',
@@ -131,6 +137,7 @@ const CREATE_DATABASE_TYPES = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
   'sqlserver',
   'tdengine',
   'clickhouse',
@@ -143,6 +150,7 @@ const RENAME_DATABASE_TYPES = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
 ]);
 
 const DROP_DATABASE_TYPES = new Set([
@@ -156,6 +164,7 @@ const DROP_DATABASE_TYPES = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
   'tdengine',
   'clickhouse',
 ]);

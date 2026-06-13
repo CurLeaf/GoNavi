@@ -19,6 +19,7 @@ export type SqlDialect =
   | 'highgo'
   | 'vastbase'
   | 'opengauss'
+  | 'gaussdb'
   | 'oracle'
   | 'dameng'
   | 'sqlserver'
@@ -69,6 +70,10 @@ export const resolveSqlDialect = (
     case 'open_gauss':
     case 'open-gauss':
       return 'opengauss';
+    case 'gaussdb':
+    case 'gauss_db':
+    case 'gauss-db':
+      return 'gaussdb';
     case 'mssql':
     case 'sql_server':
     case 'sql-server':
@@ -135,6 +140,7 @@ export const resolveSqlDialect = (
   }
 
   if (source.includes('opengauss') || source.includes('open_gauss') || source.includes('open-gauss')) return 'opengauss';
+  if (source.includes('gaussdb') || source.includes('gauss_db') || source.includes('gauss-db')) return 'gaussdb';
   if (source.includes('postgres')) return 'postgres';
   if (source.includes('oceanbase')) return 'oceanbase';
   if (source.includes('mariadb')) return 'mariadb';
@@ -167,7 +173,7 @@ export const isMysqlFamilyDialect = (dbType: string): boolean => (
 );
 
 export const isPgLikeDialect = (dbType: string): boolean => (
-  ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss'].includes(resolveSqlDialect(dbType))
+  ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss', 'gaussdb'].includes(resolveSqlDialect(dbType))
 );
 
 export const isOracleLikeDialect = (dbType: string): boolean => (

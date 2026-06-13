@@ -21,6 +21,7 @@ describe('connectionTypeCatalog', () => {
     const keys = getAllConnectionTypeCatalogItems().map((item) => item.key);
     expect(keys).toContain('mysql');
     expect(keys).toContain('oceanbase');
+    expect(keys).toContain('gaussdb');
     expect(keys).toContain('mongodb');
     expect(keys).toContain('redis');
     expect(keys).toContain('elasticsearch');
@@ -37,6 +38,7 @@ describe('connectionTypeCatalog', () => {
     expect(getConnectionTypeDefaultPort('oceanbase')).toBe(2881);
     expect(getConnectionTypeDefaultPort('diros')).toBe(9030);
     expect(getConnectionTypeDefaultPort('postgres')).toBe(5432);
+    expect(getConnectionTypeDefaultPort('gaussdb')).toBe(5432);
     expect(getConnectionTypeDefaultPort('redis')).toBe(6379);
     expect(getConnectionTypeDefaultPort('oracle')).toBe(1521);
     expect(getConnectionTypeDefaultPort('mongodb')).toBe(27017);

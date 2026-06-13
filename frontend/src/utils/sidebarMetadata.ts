@@ -11,6 +11,7 @@ const normalizeSidebarConnectionDialect = (type: string, driver: string, oceanBa
     const normalizedDriver = String(driver || '').trim().toLowerCase();
     if (normalizedDriver === 'postgresql' || normalizedDriver === 'postgres' || normalizedDriver === 'pg') return 'postgres';
     if (normalizedDriver === 'opengauss' || normalizedDriver === 'open_gauss' || normalizedDriver === 'open-gauss') return 'opengauss';
+    if (normalizedDriver === 'gaussdb' || normalizedDriver === 'gauss_db' || normalizedDriver === 'gauss-db') return 'gaussdb';
     if (normalizedDriver === 'dameng' || normalizedDriver === 'dm' || normalizedDriver === 'dm8') return 'dm';
     if (normalizedDriver === 'oceanbase') {
       return normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
@@ -22,6 +23,7 @@ const normalizeSidebarConnectionDialect = (type: string, driver: string, oceanBa
     return normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
   }
   if (normalizedType === 'open_gauss' || normalizedType === 'open-gauss') return 'opengauss';
+  if (normalizedType === 'gauss_db' || normalizedType === 'gauss-db') return 'gaussdb';
   if (normalizedType === 'dameng') return 'dm';
   return normalizedType;
 };

@@ -1009,6 +1009,7 @@ const Sidebar: React.FC<{
       'highgo',
       'vastbase',
       'opengauss',
+      'gaussdb',
       'open_gauss',
       'open-gauss',
       'sqlserver',
@@ -1023,6 +1024,7 @@ const Sidebar: React.FC<{
       'highgo',
       'vastbase',
       'opengauss',
+      'gaussdb',
       'open_gauss',
       'open-gauss',
       'sqlserver',
@@ -1171,6 +1173,7 @@ const Sidebar: React.FC<{
           case 'vastbase':
           case 'highgo':
           case 'opengauss':
+          case 'gaussdb':
               return [
                   "SELECT n.nspname || '.' || c.relname AS table_name, c.reltuples::bigint AS table_rows",
                   'FROM pg_class c',
@@ -1292,6 +1295,7 @@ const Sidebar: React.FC<{
           case 'highgo':
           case 'vastbase':
           case 'opengauss':
+          case 'gaussdb':
               return [{ sql: `SELECT schemaname AS schema_name, viewname AS view_name FROM pg_catalog.pg_views WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY schemaname, viewname` }];
           case 'sqlserver': {
               const safeDb = quoteSqlServerIdentifier(dbName || 'master');
@@ -1338,6 +1342,7 @@ const Sidebar: React.FC<{
           case 'highgo':
           case 'vastbase':
           case 'opengauss':
+          case 'gaussdb':
               return [{ sql: `SELECT DISTINCT event_object_schema AS schema_name, event_object_table AS table_name, trigger_name FROM information_schema.triggers WHERE trigger_schema NOT IN ('pg_catalog', 'information_schema') AND trigger_schema NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY event_object_schema, event_object_table, trigger_name` }];
           case 'sqlserver': {
               const safeDb = quoteSqlServerIdentifier(dbName || 'master');
@@ -1387,6 +1392,7 @@ const Sidebar: React.FC<{
           case 'highgo':
           case 'vastbase':
           case 'opengauss':
+          case 'gaussdb':
               return normalizeMetadataQuerySpecs([
                   {
                       // PostgreSQL 11+ / 部分 PG-like：通过 prokind 区分 FUNCTION/PROCEDURE
@@ -4299,7 +4305,7 @@ const Sidebar: React.FC<{
               case 'starrocks':
                   query = `SHOW CREATE VIEW \`${viewName.replace(/`/g, '``')}\``;
                   break;
-              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': {
+              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb': {
                   const parts = splitQualifiedName(viewName);
                   const schema = parts.schemaName || 'public';
                   const name = parts.objectName || viewName;
@@ -4356,7 +4362,7 @@ const Sidebar: React.FC<{
           case 'starrocks':
               template = `CREATE VIEW \`view_name\` AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
               break;
-          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss':
+          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb':
               template = `CREATE OR REPLACE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
               break;
           case 'sqlserver':
@@ -4583,7 +4589,7 @@ const Sidebar: React.FC<{
               case 'starrocks':
                   query = `SHOW CREATE ${routineType} \`${name.replace(/`/g, '``')}\``;
                   break;
-              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': {
+              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb': {
                   const schemaRef = schema || 'public';
                   query = `SELECT pg_get_functiondef(p.oid) AS routine_definition FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = '${escapeSQLLiteral(schemaRef)}' AND p.proname = '${escapeSQLLiteral(name)}' LIMIT 1`;
                   break;
@@ -4654,7 +4660,7 @@ const Sidebar: React.FC<{
                   ? `DELIMITER $$\nCREATE PROCEDURE proc_name(IN param1 INT)\nBEGIN\n    SELECT * FROM table_name WHERE id = param1;\nEND$$\nDELIMITER ;`
                   : `DELIMITER $$\nCREATE FUNCTION func_name(param1 INT)\nRETURNS INT\nDETERMINISTIC\nBEGIN\n    RETURN param1 * 2;\nEND$$\nDELIMITER ;`;
               break;
-          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss':
+          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb':
               template = isProc
                   ? `CREATE OR REPLACE PROCEDURE proc_name(param1 integer)\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    -- procedure body\nEND;\n$$;`
                   : `CREATE OR REPLACE FUNCTION func_name(param1 integer)\nRETURNS integer\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    RETURN param1 * 2;\nEND;\n$$;`;
@@ -5655,6 +5661,7 @@ const Sidebar: React.FC<{
       const iconType = resolveConnectionIconType(conn);
       if (iconType === 'mysql' || iconType === 'mariadb' || iconType === 'oceanbase') return 'MY';
       if (iconType === 'postgres') return 'PG';
+      if (iconType === 'gaussdb') return 'GS';
       if (iconType === 'redis') return 'R';
       if (iconType === 'mongodb') return 'MO';
       if (iconType === 'oracle') return 'OR';
@@ -5810,7 +5817,8 @@ const Sidebar: React.FC<{
           case 'kingbase':
           case 'vastbase':
           case 'highgo':
-          case 'opengauss': {
+          case 'opengauss':
+          case 'gaussdb': {
               const schema = schemaName || 'public';
               return [
                   "SELECT c.reltuples::bigint AS table_rows, pg_total_relation_size(c.oid) AS data_length, pg_indexes_size(c.oid) AS index_length, 'heap' AS engine",

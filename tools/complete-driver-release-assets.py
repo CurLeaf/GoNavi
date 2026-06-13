@@ -27,6 +27,7 @@ DRIVERS = [
     "highgo",
     "vastbase",
     "opengauss",
+    "gaussdb",
     "iris",
     "mongodb",
     "tdengine",

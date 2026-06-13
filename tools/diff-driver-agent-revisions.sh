@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
 
-DEFAULT_DRIVERS=(mariadb oceanbase diros starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss iris mongodb tdengine iotdb clickhouse elasticsearch)
+DEFAULT_DRIVERS=(mariadb oceanbase diros starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss gaussdb iris mongodb tdengine iotdb clickhouse elasticsearch)
 
 usage() {
   cat <<'EOF'

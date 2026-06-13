@@ -505,7 +505,7 @@ func (s *SyncEngine) runSourceQuerySync(config SyncConfig) SyncResult {
 	deletes := make([]map[string]interface{}, 0)
 	applyTableName := ctx.TargetTable
 	switch ctx.TargetType {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver":
 		applyTableName = ctx.TargetQueryTable
 	}
 

@@ -13,6 +13,10 @@ const resolveCustomDriverDialect = (driver: string): string => {
     case 'open_gauss':
     case 'open-gauss':
       return 'opengauss';
+    case 'gaussdb':
+    case 'gauss_db':
+    case 'gauss-db':
+      return 'gaussdb';
     case 'dm':
     case 'dameng':
     case 'dm8':
@@ -49,6 +53,7 @@ const resolveCustomDriverDialect = (driver: string): string => {
   }
 
   if (normalized.includes('opengauss') || normalized.includes('open_gauss') || normalized.includes('open-gauss')) return 'opengauss';
+  if (normalized.includes('gaussdb') || normalized.includes('gauss_db') || normalized.includes('gauss-db')) return 'gaussdb';
   if (normalized.includes('postgres')) return 'postgres';
   if (normalized.includes('oceanbase')) return 'oceanbase';
   if (normalized.includes('kingbase')) return 'kingbase';
@@ -81,6 +86,7 @@ export const supportsTableTruncateAction = (type: string, driver?: string): bool
     case 'highgo':
     case 'vastbase':
     case 'opengauss':
+    case 'gaussdb':
     case 'sqlserver':
     case 'iris':
     case 'oracle':

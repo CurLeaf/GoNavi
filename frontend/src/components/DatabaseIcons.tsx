@@ -46,6 +46,7 @@ const DB_DEFAULT_COLORS: Record<string, string> = {
     duckdb:     '#FFC107',
     vastbase:   '#0066CC',
     opengauss:  '#2446A8',
+    gaussdb:    '#0B7FAB',
     highgo:     '#00A86B',
     iris:       '#1F6FEB',
     tdengine:   '#2962FF',
@@ -172,6 +173,9 @@ const VastBaseIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
 const OpenGaussIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.opengauss} label="OG" />
 );
+const GaussDBIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
+    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.gaussdb} label="GS" />
+);
 const HighGoIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.highgo} label="HG" />
 );
@@ -240,6 +244,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
     duckdb: DuckDBIcon,
     vastbase: VastBaseIcon,
     opengauss: OpenGaussIcon,
+    gaussdb: GaussDBIcon,
     highgo: HighGoIcon,
     iris: IrisIcon,
     tdengine: TDengineIcon,
@@ -254,7 +259,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
 export const DB_ICON_TYPES: string[] = [
     'mysql', 'mariadb', 'oceanbase', 'postgres', 'redis', 'mongodb', 'jvm',
     'oracle', 'sqlserver', 'sqlite', 'duckdb', 'clickhouse', 'starrocks',
-    'kingbase', 'dameng', 'vastbase', 'opengauss', 'highgo', 'iris', 'tdengine', 'iotdb', 'chroma', 'qdrant', 'elasticsearch', 'custom',
+    'kingbase', 'dameng', 'vastbase', 'opengauss', 'gaussdb', 'highgo', 'iris', 'tdengine', 'iotdb', 'chroma', 'qdrant', 'elasticsearch', 'custom',
 ];
 
 /** 该类型是否有品牌 SVG 文件 */
@@ -276,7 +281,7 @@ export const getDbIconLabel = (type: string): string => {
         sqlserver: 'SQL Server', clickhouse: 'ClickHouse', sqlite: 'SQLite',
         starrocks: 'StarRocks',
         duckdb: 'DuckDB', kingbase: '金仓', dameng: '达梦',
-        vastbase: 'VastBase', opengauss: 'OpenGauss', highgo: '瀚高', iris: 'InterSystems IRIS', tdengine: 'TDengine', iotdb: 'Apache IoTDB',
+        vastbase: 'VastBase', opengauss: 'OpenGauss', gaussdb: 'GaussDB', highgo: '瀚高', iris: 'InterSystems IRIS', tdengine: 'TDengine', iotdb: 'Apache IoTDB',
         chroma: 'Chroma',
         qdrant: 'Qdrant',
         elasticsearch: 'Elasticsearch',

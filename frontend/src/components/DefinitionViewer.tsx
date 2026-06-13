@@ -98,6 +98,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             if (driver === 'diros' || driver === 'doris') return 'mysql';
             if (driver === 'oceanbase') return normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
             if (driver === 'opengauss' || driver === 'open_gauss' || driver === 'open-gauss') return 'opengauss';
+            if (driver === 'gaussdb' || driver === 'gauss_db' || driver === 'gauss-db') return 'gaussdb';
             return driver;
         }
         if (type === 'oceanbase' && normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle') return 'oracle';
@@ -196,7 +197,8 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             case 'kingbase':
             case 'highgo':
             case 'vastbase':
-            case 'opengauss': {
+            case 'opengauss':
+            case 'gaussdb': {
                 const schemaRef = schema || 'public';
                 return [`SELECT pg_get_viewdef('${escapeSQLLiteral(schemaRef)}.${safeName}'::regclass, true) AS view_definition`];
             }
@@ -244,7 +246,8 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             case 'kingbase':
             case 'highgo':
             case 'vastbase':
-            case 'opengauss': {
+            case 'opengauss':
+            case 'gaussdb': {
                 const schemaRef = schema || 'public';
                 return [`SELECT pg_get_functiondef(p.oid) AS routine_definition FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = '${escapeSQLLiteral(schemaRef)}' AND p.proname = '${safeName}' LIMIT 1`];
             }

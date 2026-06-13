@@ -300,6 +300,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "jvm",
   "sqlite",
   "duckdb",
@@ -321,6 +322,7 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "mongodb",
   "redis",
   "elasticsearch",
@@ -349,6 +351,7 @@ const getDefaultPortByType = (type: string): number => {
     case "postgres":
     case "vastbase":
     case "opengauss":
+    case "gaussdb":
       return 5432;
     case "redis":
       return 6379;
@@ -518,6 +521,9 @@ const normalizeConnectionType = (value: unknown): string => {
     type === "opengauss"
   ) {
     return "opengauss";
+  }
+  if (type === "gaussdb" || type === "gauss_db" || type === "gauss-db") {
+    return "gaussdb";
   }
   if (
     type === "inter-systems" ||

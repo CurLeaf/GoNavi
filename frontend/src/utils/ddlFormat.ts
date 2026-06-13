@@ -12,6 +12,7 @@ const resolveDdlFormatterLanguage = (dbType: string): SqlLanguage => {
     case 'kingbase':
     case 'highgo':
     case 'opengauss':
+    case 'gaussdb':
     case 'vastbase':
       return 'postgresql';
     case 'mariadb':

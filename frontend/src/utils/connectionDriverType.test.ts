@@ -20,6 +20,7 @@ describe('connectionDriverType', () => {
     expect(normalizeDriverType('apache_iotdb')).toBe('iotdb');
     expect(normalizeDriverType('doris')).toBe('diros');
     expect(normalizeDriverType('open-gauss')).toBe('opengauss');
+    expect(normalizeDriverType('gauss-db')).toBe('gaussdb');
     expect(normalizeDriverType('InterSystemsIRIS')).toBe('iris');
   });
 
@@ -27,6 +28,7 @@ describe('connectionDriverType', () => {
     expect(resolveConnectionDriverType('mysql', 'postgresql')).toBe('mysql');
     expect(resolveConnectionDriverType('custom', 'postgresql')).toBe('postgres');
     expect(resolveConnectionDriverType('custom', 'open_gauss')).toBe('opengauss');
+    expect(resolveConnectionDriverType('custom', 'gauss_db')).toBe('gaussdb');
     expect(resolveConnectionDriverType('custom', '')).toBe('');
   });
 
@@ -44,6 +46,7 @@ describe('connectionDriverType', () => {
     expect(isPostgresSchemaDialect('postgres')).toBe(true);
     expect(isPostgresSchemaDialect('kingbase')).toBe(true);
     expect(isPostgresSchemaDialect('open-gauss')).toBe(true);
+    expect(isPostgresSchemaDialect('gauss-db')).toBe(true);
     expect(isPostgresSchemaDialect('mysql')).toBe(false);
   });
 });

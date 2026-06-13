@@ -381,10 +381,12 @@ func sanitizeSQLForPgLike(dbType string, query string) string {
 		normalizedType = "postgres"
 	case "kingbase8", "kingbasees", "kingbasev8":
 		normalizedType = "kingbase"
+	case "gauss_db", "gauss-db":
+		normalizedType = "gaussdb"
 	}
 
 	switch normalizedType {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		// 有些情况下会出现多层重复引用（例如 """"schema"""" 或 ""schema"""），单次修复不一定收敛。
 		// 这里做有限次数的迭代，直到输出不再变化。
 		out := query

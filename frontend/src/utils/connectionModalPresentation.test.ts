@@ -84,6 +84,7 @@ describe('connectionModalPresentation', () => {
       'highgo',
       'vastbase',
       'opengauss',
+      'gaussdb',
       'iris',
       'mongodb',
       'elasticsearch',
@@ -176,6 +177,14 @@ describe('connectionModalPresentation', () => {
       'databaseScope',
     ]);
     expect(resolveConnectionConfigLayout('iotdb').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'service',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('gaussdb').sections).toEqual([
       'identity',
       'uri',
       'target',

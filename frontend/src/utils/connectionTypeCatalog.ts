@@ -35,6 +35,7 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
       { key: 'highgo', name: 'HighGo (瀚高)' },
       { key: 'vastbase', name: 'Vastbase (海量)' },
       { key: 'opengauss', name: 'OpenGauss' },
+      { key: 'gaussdb', name: 'GaussDB' },
     ],
   },
   {
@@ -86,6 +87,7 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 9000;
     case 'postgres':
     case 'opengauss':
+    case 'gaussdb':
       return 5432;
     case 'redis':
       return 6379;

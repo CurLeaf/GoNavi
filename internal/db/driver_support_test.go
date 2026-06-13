@@ -117,7 +117,7 @@ func TestNewCompatibleDriversAreOptionalAgentDrivers(t *testing.T) {
 	tmpDir := t.TempDir()
 	SetExternalDriverDownloadDirectory(tmpDir)
 
-	for _, driverType := range []string{"oceanbase", "opengauss", "open_gauss", "starrocks", "iris", "intersystems"} {
+	for _, driverType := range []string{"oceanbase", "opengauss", "open_gauss", "gaussdb", "gauss_db", "starrocks", "iris", "intersystems"} {
 		if IsBuiltinDriver(driverType) {
 			t.Fatalf("%s 不应是免安装内置驱动", driverType)
 		}

@@ -189,7 +189,7 @@ const isSystemMetadataQueryResult = (tableRef: QueryResultTableRef, dbType: stri
     if (['mysql', 'mariadb', 'oceanbase', 'diros', 'starrocks', 'sphinx', 'tidb'].includes(normalizedDbType)) {
         return MYSQL_SYSTEM_METADATA_SCHEMAS.has(metadataDbName);
     }
-    if (['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss'].includes(normalizedDbType)) {
+    if (['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss', 'gaussdb'].includes(normalizedDbType)) {
         return POSTGRES_SYSTEM_METADATA_SCHEMAS.has(metadataDbName);
     }
     if (normalizedDbType === 'sqlite' || normalizedDbType === 'duckdb') {
@@ -479,6 +479,7 @@ const buildCompletionTableCommentSQL = (dialect: string, dbName: string): string
         case 'vastbase':
         case 'highgo':
         case 'opengauss':
+        case 'gaussdb':
             return `SELECT n.nspname || '.' || c.relname AS table_name, obj_description(c.oid, 'pg_class') AS table_comment FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY n.nspname, c.relname`;
         case 'sqlserver': {
             const safeDb = quoteSqlServerDbIdentifier(db);
@@ -685,6 +686,7 @@ const buildCompletionViewsMetadataQuerySpecs = (dialect: string, dbName: string)
         case 'highgo':
         case 'vastbase':
         case 'opengauss':
+        case 'gaussdb':
             return [{ sql: `SELECT schemaname AS schema_name, viewname AS view_name FROM pg_catalog.pg_views WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY schemaname, viewname` }];
         case 'sqlserver': {
             const safeDb = quoteSqlServerDbIdentifier(dbName || 'master');
@@ -748,6 +750,7 @@ const buildCompletionTriggersMetadataQuerySpecs = (dialect: string, dbName: stri
         case 'highgo':
         case 'vastbase':
         case 'opengauss':
+        case 'gaussdb':
             return [{ sql: `SELECT DISTINCT event_object_schema AS schema_name, event_object_table AS table_name, trigger_name FROM information_schema.triggers WHERE trigger_schema NOT IN ('pg_catalog', 'information_schema') AND trigger_schema NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY event_object_schema, event_object_table, trigger_name` }];
         case 'sqlserver': {
             const safeDb = quoteSqlServerDbIdentifier(dbName || 'master');
@@ -790,6 +793,7 @@ const buildCompletionFunctionsMetadataQuerySpecs = (dialect: string, dbName: str
         case 'highgo':
         case 'vastbase':
         case 'opengauss':
+        case 'gaussdb':
             return normalizeMetadataQuerySpecs([
                 {
                     sql: `SELECT n.nspname AS schema_name, p.proname AS routine_name, CASE WHEN p.prokind = 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END AS routine_type FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY n.nspname, routine_type, p.proname`,

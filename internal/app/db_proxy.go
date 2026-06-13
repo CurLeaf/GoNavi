@@ -211,7 +211,7 @@ func defaultPortByType(driverType string) int {
 		return 9030
 	case "sphinx":
 		return 9306
-	case "postgres", "vastbase", "opengauss":
+	case "postgres", "vastbase", "opengauss", "gaussdb":
 		return 5432
 	case "redis":
 		return 6379

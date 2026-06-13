@@ -71,6 +71,7 @@ const postgresCompatibleTypes = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
 ]);
 const fileDatabaseTypes = new Set(['sqlite', 'duckdb']);
 

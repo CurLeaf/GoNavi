@@ -77,7 +77,7 @@ func TestNormalizeSchemaAndTable_KingbasePureTableUsesCurrentSearchPath(t *testi
 func TestNormalizeSchemaAndTable_PGLikePureTableKeepsPublicFallback(t *testing.T) {
 	t.Parallel()
 
-	for _, dbType := range []string{"postgres", "highgo", "vastbase", "opengauss"} {
+	for _, dbType := range []string{"postgres", "highgo", "vastbase", "opengauss", "gaussdb"} {
 		t.Run(dbType, func(t *testing.T) {
 			t.Parallel()
 
@@ -95,7 +95,7 @@ func TestNormalizeSchemaAndTable_PGLikePureTableKeepsPublicFallback(t *testing.T
 func TestNormalizeMetadataSchemaAndTable_PGLikePureTableUsesSearchPath(t *testing.T) {
 	t.Parallel()
 
-	for _, dbType := range []string{"postgres", "highgo", "vastbase", "opengauss", "kingbase"} {
+	for _, dbType := range []string{"postgres", "highgo", "vastbase", "opengauss", "gaussdb", "kingbase"} {
 		t.Run(dbType, func(t *testing.T) {
 			t.Parallel()
 
@@ -173,7 +173,7 @@ func TestNormalizeSchemaAndTable_PGLikePureTableStillSplitsKingbaseSearchPathOnl
 func TestNormalizeMetadataSchemaAndTable_PGLikePreservesNormalFallbackForQuotedQualifiedTable(t *testing.T) {
 	t.Parallel()
 
-	for _, dbType := range []string{"highgo", "vastbase", "opengauss"} {
+	for _, dbType := range []string{"highgo", "vastbase", "opengauss", "gaussdb"} {
 		t.Run(dbType, func(t *testing.T) {
 			t.Parallel()
 

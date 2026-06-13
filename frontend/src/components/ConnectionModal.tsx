@@ -1676,7 +1676,8 @@ const ConnectionModal: React.FC<{
           type === "kingbase" ||
           type === "highgo" ||
           type === "vastbase" ||
-          type === "opengauss"
+          type === "opengauss" ||
+          type === "gaussdb"
         ) {
           const sslMode = String(parsed.params.get("sslmode") || "")
             .trim()
@@ -1888,6 +1889,9 @@ const ConnectionModal: React.FC<{
     if (dbType === "opengauss") {
       return "opengauss://user:pass@127.0.0.1:5432/db_name";
     }
+    if (dbType === "gaussdb") {
+      return "gaussdb://user:pass@127.0.0.1:5432/db_name";
+    }
     return "例如: postgres://user:pass@127.0.0.1:5432/db_name";
   };
 
@@ -1906,6 +1910,7 @@ const ConnectionModal: React.FC<{
       case "highgo":
       case "vastbase":
       case "opengauss":
+      case "gaussdb":
         return "application_name=GoNavi&statement_timeout=30000";
       case "oracle":
         return "PREFETCH_ROWS=5000&TRACE FILE=/tmp/go-ora.trc";
@@ -2062,7 +2067,9 @@ const ConnectionModal: React.FC<{
         ? normalizeClickHouseProtocolValue(values.clickHouseProtocol)
         : "auto";
     const scheme =
-      type === "postgres"
+      type === "gaussdb"
+        ? "gaussdb"
+        : type === "postgres"
         ? "postgresql"
         : type === "chroma" || type === "qdrant"
           ? values.useSSL
@@ -4826,7 +4833,8 @@ const ConnectionModal: React.FC<{
                 dbType === "kingbase" ||
                 dbType === "highgo" ||
                 dbType === "vastbase" ||
-                dbType === "opengauss") &&
+                dbType === "opengauss" ||
+                dbType === "gaussdb") &&
                 renderConfigSectionCard({
                   sectionKey: "service",
                   icon: <DatabaseOutlined />,

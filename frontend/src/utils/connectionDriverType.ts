@@ -25,6 +25,11 @@ export const normalizeDriverType = (value: string): string => {
     normalized === 'opengauss'
   ) return 'opengauss';
   if (
+    normalized === 'gaussdb' ||
+    normalized === 'gauss_db' ||
+    normalized === 'gauss-db'
+  ) return 'gaussdb';
+  if (
     normalized === 'intersystems' ||
     normalized === 'intersystemsiris' ||
     normalized === 'inter-systems' ||
@@ -46,5 +51,5 @@ export const resolveSavedConnectionDriverType = (conn: SavedConnection | undefin
 };
 
 export const isPostgresSchemaDialect = (dialect: string): boolean => (
-  ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss'].includes(normalizeDriverType(dialect))
+  ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss', 'gaussdb'].includes(normalizeDriverType(dialect))
 );

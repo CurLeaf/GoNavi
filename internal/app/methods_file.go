@@ -88,14 +88,14 @@ type SQLDirectoryEntry struct {
 }
 
 type appLogTailSnapshot struct {
-	LogPath              string            `json:"logPath"`
-	Keyword              string            `json:"keyword,omitempty"`
-	RequestedLineLimit   int               `json:"requestedLineLimit"`
-	ReturnedLineCount    int               `json:"returnedLineCount"`
-	FileWindowTruncated  bool              `json:"fileWindowTruncated"`
-	MatchedLinesTruncated bool             `json:"matchedLinesTruncated"`
-	LevelBreakdown       map[string]int    `json:"levelBreakdown"`
-	Lines                []string          `json:"lines"`
+	LogPath               string         `json:"logPath"`
+	Keyword               string         `json:"keyword,omitempty"`
+	RequestedLineLimit    int            `json:"requestedLineLimit"`
+	ReturnedLineCount     int            `json:"returnedLineCount"`
+	FileWindowTruncated   bool           `json:"fileWindowTruncated"`
+	MatchedLinesTruncated bool           `json:"matchedLinesTruncated"`
+	LevelBreakdown        map[string]int `json:"levelBreakdown"`
+	Lines                 []string       `json:"lines"`
 }
 
 func normalizeSQLFileName(rawName string) (string, error) {
@@ -820,7 +820,7 @@ func sqlFileBatchTransactionSQL(dbType string) (beginSQL string, commitSQL strin
 		return "START TRANSACTION", "COMMIT", "ROLLBACK", true
 	case "sqlserver":
 		return "BEGIN TRANSACTION", "COMMIT TRANSACTION", "ROLLBACK TRANSACTION", true
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlite", "duckdb", "iris":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlite", "duckdb", "iris":
 		return "BEGIN", "COMMIT", "ROLLBACK", true
 	default:
 		return "", "", "", false
@@ -1760,7 +1760,7 @@ func normalizeImportTemporalValue(dbType, columnType, raw string) string {
 
 func isPgLikeBooleanDBType(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "postgres", "postgresql", "pg", "pq", "pgx", "kingbase", "kingbase8", "kingbasees", "kingbasev8", "highgo", "vastbase", "opengauss", "open_gauss", "open-gauss":
+	case "postgres", "postgresql", "pg", "pq", "pgx", "kingbase", "kingbase8", "kingbasees", "kingbasev8", "highgo", "vastbase", "opengauss", "open_gauss", "open-gauss", "gaussdb", "gauss_db", "gauss-db":
 		return true
 	default:
 		return false
@@ -2222,7 +2222,7 @@ const (
 
 func supportsTruncateTableForDBType(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "iris", "oracle", "dameng", "clickhouse", "duckdb":
+	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "iris", "oracle", "dameng", "clickhouse", "duckdb":
 		return true
 	default:
 		return false
@@ -2587,7 +2587,7 @@ func buildListViewQueries(config connection.ConnectionConfig, dbName string) []s
 			queries = append(queries, fmt.Sprintf("SHOW FULL TABLES FROM %s WHERE Table_type = 'VIEW'", quoteIdentByType("mysql", dbName)))
 		}
 		return queries
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		return []string{
 			`SELECT table_schema AS schema_name, table_name AS object_name FROM information_schema.views WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_schema, table_name`,
 		}
@@ -2694,7 +2694,7 @@ func buildViewCreateQueries(config connection.ConnectionConfig, dbName, schemaNa
 		return []string{
 			fmt.Sprintf("SHOW CREATE VIEW %s", quoteIdentByType("mysql", safeView)),
 		}
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		if safeSchema == "" {
 			safeSchema = "public"
 		}

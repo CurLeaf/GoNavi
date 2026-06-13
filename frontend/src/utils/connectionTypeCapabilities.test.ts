@@ -15,6 +15,7 @@ describe('connectionTypeCapabilities', () => {
   it('keeps single-host URI scheme aliases for URI parsing', () => {
     expect(singleHostUriSchemesByType.postgres).toEqual(['postgresql', 'postgres']);
     expect(singleHostUriSchemesByType.opengauss).toContain('jdbc:opengauss');
+    expect(singleHostUriSchemesByType.gaussdb).toEqual(['gaussdb', 'postgresql', 'postgres']);
     expect(singleHostUriSchemesByType.dameng).toEqual(['dameng', 'dm']);
     expect(singleHostUriSchemesByType.elasticsearch).toEqual(['http', 'https']);
     expect(singleHostUriSchemesByType.chroma).toEqual(['http', 'https', 'chroma']);
@@ -27,6 +28,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsSSLForType('redis')).toBe(true);
     expect(supportsSSLForType('MongoDB')).toBe(true);
     expect(supportsSSLForType('elasticsearch')).toBe(true);
+    expect(supportsSSLForType('gaussdb')).toBe(true);
     expect(supportsSSLForType('chroma')).toBe(true);
     expect(supportsSSLForType('qdrant')).toBe(true);
     expect(supportsSSLForType('tdengine')).toBe(true);
@@ -38,6 +40,8 @@ describe('connectionTypeCapabilities', () => {
   it('keeps CA path and client certificate support distinct', () => {
     expect(supportsSSLCAPathForType('dameng')).toBe(false);
     expect(supportsSSLClientCertificateForType('dameng')).toBe(true);
+    expect(supportsSSLCAPathForType('gaussdb')).toBe(true);
+    expect(supportsSSLClientCertificateForType('gaussdb')).toBe(true);
     expect(supportsSSLCAPathForType('sqlserver')).toBe(true);
     expect(supportsSSLClientCertificateForType('sqlserver')).toBe(false);
     expect(supportsSSLCAPathForType('redis')).toBe(true);
@@ -51,6 +55,7 @@ describe('connectionTypeCapabilities', () => {
   it('detects postgres-compatible SSL parameter dialects', () => {
     expect(isPostgresCompatibleSSLType('postgres')).toBe(true);
     expect(isPostgresCompatibleSSLType('kingbase')).toBe(true);
+    expect(isPostgresCompatibleSSLType('gaussdb')).toBe(true);
     expect(isPostgresCompatibleSSLType('HighGo')).toBe(true);
     expect(isPostgresCompatibleSSLType('mysql')).toBe(false);
   });
@@ -68,6 +73,7 @@ describe('connectionTypeCapabilities', () => {
   it('keeps advanced connection params enabled only for supported database types', () => {
     expect(supportsConnectionParamsForType('mysql')).toBe(true);
     expect(supportsConnectionParamsForType('postgres')).toBe(true);
+    expect(supportsConnectionParamsForType('gaussdb')).toBe(true);
     expect(supportsConnectionParamsForType('oracle')).toBe(true);
     expect(supportsConnectionParamsForType('mongodb')).toBe(true);
     expect(supportsConnectionParamsForType('dameng')).toBe(true);

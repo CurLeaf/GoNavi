@@ -34,7 +34,7 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
   }
 
   // 对于 KingBase/PostgreSQL，只在必要时加引号
-  if (dbTypeLower === 'kingbase' || dbTypeLower === 'postgres' || dbTypeLower === 'opengauss') {
+  if (dbTypeLower === 'kingbase' || dbTypeLower === 'postgres' || dbTypeLower === 'opengauss' || dbTypeLower === 'gaussdb') {
     if (needsQuote(raw)) {
       return `"${raw.replace(/"/g, '""')}"`;
     }

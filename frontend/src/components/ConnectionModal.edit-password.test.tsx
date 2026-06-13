@@ -76,6 +76,19 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('return "iotdb://root:root@127.0.0.1:6667/root.sg";');
     expect(source).toContain('return "fetchSize=1024&timeZone=Asia%2FShanghai";');
   });
+
+  it('exposes GaussDB in the create-connection picker with PostgreSQL-family defaults', () => {
+    expect(source).toContain("case 'gaussdb':");
+    expect(source).toContain('return 5432;');
+    expect(source).toContain('gaussdb: ["gaussdb", "postgresql", "postgres"]');
+    expect(source).toContain("key: 'gaussdb'");
+    expect(source).toContain("name: 'GaussDB'");
+    expect(source).toContain('type === "gaussdb"');
+    expect(source).toContain('return "gaussdb://user:pass@127.0.0.1:5432/db_name";');
+    expect(source).toContain('return "application_name=GoNavi&statement_timeout=30000";');
+    expect(source).toContain('? "gaussdb"');
+    expect(source).toContain('dbType === "gaussdb"');
+  });
 });
 
 describe('ConnectionModal Redis Sentinel configuration', () => {

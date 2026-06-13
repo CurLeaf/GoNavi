@@ -502,6 +502,39 @@ func TestIoTDBDriverDefinitionUsesOptionalAgent(t *testing.T) {
 	}
 }
 
+func TestGaussDBDriverDefinitionUsesOptionalAgent(t *testing.T) {
+	definition, ok := resolveDriverDefinition("gaussdb")
+	if !ok {
+		t.Fatal("expected gaussdb driver definition")
+	}
+	if definition.Name != "GaussDB" {
+		t.Fatalf("unexpected gaussdb driver name: %q", definition.Name)
+	}
+	if definition.BuiltIn {
+		t.Fatal("expected gaussdb to be an optional driver agent")
+	}
+	if driverGoModulePathMap["gaussdb"] != "github.com/HuaweiCloudDeveloper/gaussdb-go" {
+		t.Fatalf("unexpected gaussdb go module path: %q", driverGoModulePathMap["gaussdb"])
+	}
+	if definition.PinnedVersion != "v1.0.0-rc1" {
+		t.Fatalf("unexpected gaussdb definition pinned version: %q", definition.PinnedVersion)
+	}
+	if definition.DefaultDownloadURL != "builtin://activate/gaussdb" {
+		t.Fatalf("unexpected gaussdb default download URL: %q", definition.DefaultDownloadURL)
+	}
+	if latestDriverVersionMap["gaussdb"] != "v1.0.0-rc1" {
+		t.Fatalf("unexpected gaussdb pinned version: %q", latestDriverVersionMap["gaussdb"])
+	}
+
+	tags, err := optionalDriverBuildTags("gaussdb", "")
+	if err != nil {
+		t.Fatalf("resolve gaussdb build tags failed: %v", err)
+	}
+	if tags != "gonavi_gaussdb_driver" {
+		t.Fatalf("unexpected gaussdb build tag: %q", tags)
+	}
+}
+
 func TestBuildOptionalDriverInstallPlanMessagePrefersDirectThenBundle(t *testing.T) {
 	message := buildOptionalDriverInstallPlanMessage("SQL Server", "1.9.6", false, false, false, false, 1, 2)
 	if !strings.Contains(message, "先尝试 1 个预编译直链") {

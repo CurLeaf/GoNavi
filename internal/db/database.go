@@ -516,6 +516,8 @@ func normalizeDatabaseType(dbType string) string {
 		return "kingbase"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
+	case "gaussdb", "gauss_db", "gauss-db":
+		return "gaussdb"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
 	case "chromadb", "chroma-db":

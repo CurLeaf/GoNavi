@@ -4291,6 +4291,7 @@ describe('QueryEditor external SQL save', () => {
     'highgo',
     'vastbase',
     'opengauss',
+    'gaussdb',
     'sqlserver',
     'sqlite',
     'duckdb',

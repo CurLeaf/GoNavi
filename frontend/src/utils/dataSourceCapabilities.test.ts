@@ -54,6 +54,25 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats GaussDB as an editable PostgreSQL-family datasource with database-level DDL actions', () => {
+    expect(getDataSourceCapabilities({ type: 'gaussdb' })).toMatchObject({
+      type: 'gaussdb',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: true,
+      supportsCopyInsert: true,
+      supportsCreateDatabase: true,
+      supportsRenameDatabase: true,
+      supportsDropDatabase: true,
+      forceReadOnlyQueryResult: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'gauss-db' })).toMatchObject({
+      type: 'gaussdb',
+      supportsQueryEditor: true,
+      supportsCopyInsert: true,
+      supportsRenameDatabase: true,
+    });
+  });
+
   it('treats Elasticsearch as a queryable read-only datasource', () => {
     expect(getDataSourceCapabilities({ type: 'elasticsearch' })).toMatchObject({
       type: 'elasticsearch',

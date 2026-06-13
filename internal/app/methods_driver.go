@@ -351,6 +351,7 @@ const builtinDriverManifestJSON = `{
     "highgo":    { "engine": "go", "version": "0.0.0-local", "checksumPolicy": "off", "downloadUrl": "builtin://activate/highgo" },
     "vastbase":  { "engine": "go", "version": "1.11.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/vastbase" },
     "opengauss": { "engine": "go", "version": "1.11.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/opengauss" },
+    "gaussdb":   { "engine": "go", "version": "v1.0.0-rc1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/gaussdb" },
     "iris":      { "engine": "go", "version": "0.2.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/iris" },
     "mongodb":   { "engine": "go", "version": "1.17.9", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mongodb" },
     "tdengine":  { "engine": "go", "version": "3.7.8", "checksumPolicy": "off", "downloadUrl": "builtin://activate/tdengine" },
@@ -414,6 +415,7 @@ var latestDriverVersionMap = map[string]string{
 	"highgo":        "0.0.0-local",
 	"vastbase":      "1.11.2",
 	"opengauss":     "1.11.1",
+	"gaussdb":       "v1.0.0-rc1",
 	"iris":          "0.2.1",
 	"mongodb":       "2.5.0",
 	"tdengine":      "3.7.8",
@@ -439,6 +441,7 @@ var driverGoModulePathMap = map[string]string{
 	"highgo":        "github.com/highgo/pq-sm3",
 	"vastbase":      "github.com/lib/pq",
 	"opengauss":     "github.com/lib/pq",
+	"gaussdb":       "github.com/HuaweiCloudDeveloper/gaussdb-go",
 	"iris":          "github.com/caretdev/go-irisnative",
 	"mongodb":       "go.mongodb.org/mongo-driver/v2",
 	"tdengine":      "github.com/taosdata/driver-go/v3",
@@ -1422,6 +1425,8 @@ func normalizeDriverType(driverType string) string {
 		return "postgres"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
+	case "gaussdb", "gauss_db", "gauss-db":
+		return "gaussdb"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
 	default:
@@ -1505,6 +1510,7 @@ func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) [
 		buildOptionalGoDriverDefinition("highgo", "HighGo", packages),
 		buildOptionalGoDriverDefinition("vastbase", "Vastbase", packages),
 		buildOptionalGoDriverDefinition("opengauss", "OpenGauss", packages),
+		buildOptionalGoDriverDefinition("gaussdb", "GaussDB", packages),
 		buildOptionalGoDriverDefinition("iris", "InterSystems IRIS", packages),
 		buildOptionalGoDriverDefinition("mongodb", "MongoDB", packages),
 		buildOptionalGoDriverDefinition("tdengine", "TDengine", packages),
@@ -4076,6 +4082,8 @@ func optionalDriverBuildTag(driverType string, selectedVersion string) (string, 
 		return "gonavi_vastbase_driver", nil
 	case "opengauss":
 		return "gonavi_opengauss_driver", nil
+	case "gaussdb":
+		return "gonavi_gaussdb_driver", nil
 	case "iris":
 		return "gonavi_iris_driver", nil
 	case "mongodb":

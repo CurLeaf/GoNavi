@@ -1,6 +1,7 @@
 export const singleHostUriSchemesByType: Record<string, string[]> = {
   postgres: ["postgresql", "postgres"],
   opengauss: ["opengauss", "jdbc:opengauss", "postgresql", "postgres"],
+  gaussdb: ["gaussdb", "postgresql", "postgres"],
   clickhouse: ["clickhouse"],
   oracle: ["oracle"],
   sqlserver: ["sqlserver"],
@@ -39,6 +40,7 @@ const sslSupportedTypes = new Set([
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "mongodb",
   "redis",
   "tdengine",
@@ -64,6 +66,7 @@ const sslCAPathSupportedTypes = new Set([
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "mongodb",
   "redis",
   "elasticsearch",
@@ -85,6 +88,7 @@ const sslClientCertificateSupportedTypes = new Set([
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "mongodb",
   "redis",
 ]);
@@ -102,6 +106,7 @@ export const isPostgresCompatibleSSLType = (type: string) =>
     "highgo",
     "vastbase",
     "opengauss",
+    "gaussdb",
   ].includes(normalizeConnectionType(type));
 
 export const isFileDatabaseType = (type: string) =>
@@ -123,6 +128,7 @@ export const supportsConnectionParamsForType = (type: string) =>
   type === "highgo" ||
   type === "vastbase" ||
   type === "opengauss" ||
+  type === "gaussdb" ||
   type === "oracle" ||
   type === "sqlserver" ||
   type === "iris" ||

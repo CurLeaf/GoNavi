@@ -17,6 +17,7 @@ func init() {
 		"highgo":        "src-5a29a1d3685eb6b4",
 		"vastbase":      "src-e3cfef65512feb23",
 		"opengauss":     "src-58227ba3bc1ec894",
+		"gaussdb":       "src-1458564993a9d455",
 		"iris":          "src-1b072c57af08bec4",
 		"mongodb":       "src-57fdd8bfebdcd46e",
 		"tdengine":      "src-939715f94df1ec9c",

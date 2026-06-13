@@ -122,6 +122,7 @@ const getMetadataDialect = (connType: string, driver?: string, oceanBaseProtocol
         if (d === 'diros' || d === 'doris') return 'mysql';
         if (d === 'oceanbase') return normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
         if (d === 'opengauss' || d === 'open_gauss' || d === 'open-gauss') return 'opengauss';
+        if (d === 'gaussdb' || d === 'gauss_db' || d === 'gauss-db') return 'gaussdb';
         return d;
     }
     if (type === 'oceanbase' && normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle') return 'oracle';
@@ -158,7 +159,8 @@ ORDER BY table_name`;
         case 'kingbase':
         case 'vastbase':
         case 'highgo':
-        case 'opengauss': {
+        case 'opengauss':
+        case 'gaussdb': {
             const schema = schemaName || 'public';
             return `
 SELECT
