@@ -64,6 +64,11 @@ describe('quoteQualifiedIdent', () => {
       .toBe('"logs.app-1"');
   });
 
+  it('quotes GoldenDB identifiers with MySQL-style backticks', () => {
+    expect(quoteQualifiedIdent('goldendb', 'ledger.entries'))
+      .toBe('`ledger`.`entries`');
+  });
+
   it('does not split dots inside quoted DuckDB identifiers', () => {
     expect(quoteQualifiedIdent('duckdb', '"daily.events"."2026.06"'))
       .toBe('"daily.events"."2026.06"');

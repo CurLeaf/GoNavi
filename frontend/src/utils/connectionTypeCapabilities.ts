@@ -19,12 +19,23 @@ export const singleHostUriSchemesByType: Record<string, string[]> = {
 };
 
 const normalizeConnectionType = (type: string) =>
-  String(type || "")
-    .trim()
-    .toLowerCase();
+  {
+    const normalized = String(type || "")
+      .trim()
+      .toLowerCase();
+    switch (normalized) {
+      case "goldendb":
+      case "greatdb":
+      case "gdb":
+        return "goldendb";
+      default:
+        return normalized;
+    }
+  };
 
 const sslSupportedTypes = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "doris",
@@ -55,6 +66,7 @@ export const supportsSSLForType = (type: string) =>
 
 const sslCAPathSupportedTypes = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "diros",
@@ -78,6 +90,7 @@ const sslCAPathSupportedTypes = new Set([
 
 const sslClientCertificateSupportedTypes = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "diros",
@@ -116,13 +129,14 @@ export const isFileDatabaseType = (type: string) =>
   type === "sqlite" || type === "duckdb";
 
 export const isMySQLCompatibleType = (type: string) =>
-  type === "mysql" ||
-  type === "mariadb" ||
-  type === "oceanbase" ||
-  type === "doris" ||
-  type === "diros" ||
-  type === "starrocks" ||
-  type === "sphinx";
+  normalizeConnectionType(type) === "mysql" ||
+  normalizeConnectionType(type) === "goldendb" ||
+  normalizeConnectionType(type) === "mariadb" ||
+  normalizeConnectionType(type) === "oceanbase" ||
+  normalizeConnectionType(type) === "doris" ||
+  normalizeConnectionType(type) === "diros" ||
+  normalizeConnectionType(type) === "starrocks" ||
+  normalizeConnectionType(type) === "sphinx";
 
 export const supportsConnectionParamsForType = (type: string) =>
   isMySQLCompatibleType(type) ||

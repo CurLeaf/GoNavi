@@ -120,13 +120,14 @@ const getMetadataDialect = (connType: string, driver?: string, oceanBaseProtocol
     if (type === 'custom') {
         const d = (driver || '').trim().toLowerCase();
         if (d === 'diros' || d === 'doris') return 'mysql';
+        if (d === 'goldendb' || d === 'greatdb' || d === 'gdb') return 'mysql';
         if (d === 'oceanbase') return normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
         if (d === 'opengauss' || d === 'open_gauss' || d === 'open-gauss') return 'opengauss';
         if (d === 'gaussdb' || d === 'gauss_db' || d === 'gauss-db') return 'gaussdb';
         return d;
     }
     if (type === 'oceanbase' && normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle') return 'oracle';
-    if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
+    if (type === 'goldendb' || type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
     if (type === 'dameng') return 'dm';
     return type;
 };

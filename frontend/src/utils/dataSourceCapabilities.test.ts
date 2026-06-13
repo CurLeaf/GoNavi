@@ -30,6 +30,24 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats GoldenDB as an editable MySQL-family datasource with database-level DDL actions', () => {
+    expect(getDataSourceCapabilities({ type: 'goldendb' })).toMatchObject({
+      type: 'goldendb',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: true,
+      supportsCopyInsert: true,
+      supportsCreateDatabase: true,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: true,
+      forceReadOnlyQueryResult: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'greatdb' })).toMatchObject({
+      type: 'goldendb',
+      supportsQueryEditor: true,
+      supportsCopyInsert: true,
+    });
+  });
+
   it('keeps StarRocks as an independent SQL datasource capability', () => {
     expect(getDataSourceCapabilities({ type: 'starrocks' })).toMatchObject({
       type: 'starrocks',

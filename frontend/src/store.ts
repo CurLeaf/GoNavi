@@ -279,6 +279,7 @@ const resolveOceanBaseProtocol = (
 };
 const SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "doris",
@@ -309,6 +310,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
 ]);
 const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "diros",
@@ -338,6 +340,8 @@ const getDefaultPortByType = (type: string): number => {
     case "mysql":
     case "mariadb":
       return 3306;
+    case "goldendb":
+      return 1523;
     case "oceanbase":
       return 2881;
     case "doris":
@@ -528,6 +532,9 @@ const normalizeConnectionType = (value: unknown): string => {
   }
   if (type === "gaussdb" || type === "gauss_db" || type === "gauss-db") {
     return "gaussdb";
+  }
+  if (type === "goldendb" || type === "greatdb" || type === "gdb") {
+    return "goldendb";
   }
   if (type === "kafka" || type === "apache-kafka" || type === "apache_kafka") {
     return "kafka";

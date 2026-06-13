@@ -1458,6 +1458,9 @@ const ConnectionModal: React.FC<{
       const mysqlDefaultPort = getDefaultPortByType(type);
       const parsed =
         parseMultiHostUri(trimmedUri, "mysql") ||
+        parseMultiHostUri(trimmedUri, "goldendb") ||
+        parseMultiHostUri(trimmedUri, "greatdb") ||
+        parseMultiHostUri(trimmedUri, "gdb") ||
         parseMultiHostUri(trimmedUri, "jdbc:mysql") ||
         parseMultiHostUri(trimmedUri, "oceanbase") ||
         parseMultiHostUri(trimmedUri, "jdbc:oceanbase") ||
@@ -1909,7 +1912,7 @@ const ConnectionModal: React.FC<{
     if (isMySQLCompatibleType(dbType)) {
       const defaultPort = getDefaultPortByType(dbType);
       const scheme =
-        dbType === "diros" ? "doris" : dbType === "starrocks" ? "starrocks" : dbType === "oceanbase" ? "oceanbase" : "mysql";
+        dbType === "diros" ? "doris" : dbType === "starrocks" ? "starrocks" : dbType === "oceanbase" ? "oceanbase" : dbType === "goldendb" ? "goldendb" : "mysql";
       if (dbType === "oceanbase") {
         return `${scheme}://sys%40oracle001:pass@127.0.0.1:${defaultPort}/SERVICE_NAME?protocol=oracle`;
       }
@@ -2053,7 +2056,7 @@ const ConnectionModal: React.FC<{
       const dbPath = database ? `/${encodeURIComponent(database)}` : "/";
       const query = params.toString();
       const scheme =
-        type === "diros" ? "doris" : type === "starrocks" ? "starrocks" : type === "oceanbase" ? "oceanbase" : "mysql";
+        type === "diros" ? "doris" : type === "starrocks" ? "starrocks" : type === "oceanbase" ? "oceanbase" : type === "goldendb" ? "goldendb" : "mysql";
       return `${scheme}://${encodedAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
     }
 
@@ -2450,6 +2453,7 @@ const ConnectionModal: React.FC<{
           : primaryAddress?.port || Number(config.port || defaultPort);
         const mysqlReplicaHosts =
           configType === "mysql" ||
+          configType === "goldendb" ||
           configType === "mariadb" ||
           configType === "oceanbase" ||
           configType === "diros" ||

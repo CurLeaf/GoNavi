@@ -23,6 +23,7 @@ describe('connectionTypeCatalog', () => {
     expect(keys).toContain('mysql');
     expect(keys).toContain('oceanbase');
     expect(keys).toContain('gaussdb');
+    expect(keys).toContain('goldendb');
     expect(keys).toContain('mongodb');
     expect(keys).toContain('redis');
     expect(keys).toContain('elasticsearch');
@@ -38,6 +39,7 @@ describe('connectionTypeCatalog', () => {
   it('returns the existing default port mapping for supported connection types', () => {
     expect(getConnectionTypeDefaultPort('mysql')).toBe(3306);
     expect(getConnectionTypeDefaultPort('oceanbase')).toBe(2881);
+    expect(getConnectionTypeDefaultPort('goldendb')).toBe(1523);
     expect(getConnectionTypeDefaultPort('diros')).toBe(9030);
     expect(getConnectionTypeDefaultPort('postgres')).toBe(5432);
     expect(getConnectionTypeDefaultPort('gaussdb')).toBe(5432);
@@ -63,6 +65,7 @@ describe('connectionTypeCatalog', () => {
     expect(getConnectionTypeHint('iotdb')).toContain('Timeseries');
     expect(getConnectionTypeHint('kafka')).toContain('Consumer Group');
     expect(getConnectionTypeHint('oceanbase')).toBe('MySQL / Oracle 租户');
+    expect(getConnectionTypeHint('goldendb')).toBe('MySQL 兼容 / 分布式事务');
     expect(getConnectionTypeHint('duckdb')).toBe('本地文件连接');
     expect(getConnectionTypeHint('mysql')).toBe('标准连接配置');
   });

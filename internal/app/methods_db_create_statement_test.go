@@ -115,6 +115,20 @@ func TestResolveDDLDBType_IRISTypeAlias(t *testing.T) {
 	}
 }
 
+func TestResolveDDLDBType_GoldenDBUsesMySQLDialect(t *testing.T) {
+	t.Parallel()
+
+	if got := resolveDDLDBType(connection.ConnectionConfig{Type: "goldendb"}); got != "mysql" {
+		t.Fatalf("expected goldendb type to resolve to mysql, got %q", got)
+	}
+	if got := resolveDDLDBType(connection.ConnectionConfig{Type: "custom", Driver: "greatdb"}); got != "mysql" {
+		t.Fatalf("expected greatdb custom driver to resolve to mysql, got %q", got)
+	}
+	if got := resolveDDLDBType(connection.ConnectionConfig{Type: "custom", Driver: "gdb"}); got != "mysql" {
+		t.Fatalf("expected gdb custom driver to resolve to mysql, got %q", got)
+	}
+}
+
 func TestNormalizeSchemaAndTableByType_PGLikeQuotedQualifiedName(t *testing.T) {
 	t.Parallel()
 

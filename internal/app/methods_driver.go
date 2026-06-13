@@ -338,6 +338,7 @@ const builtinDriverManifestJSON = `{
   "engine": "go",
   "drivers": {
     "mysql":     { "engine": "go", "version": "1.9.3", "checksumPolicy": "off" },
+    "goldendb":  { "engine": "go", "version": "1.9.3", "checksumPolicy": "off" },
     "mariadb":   { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mariadb" },
     "oceanbase": { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/oceanbase" },
     "doris":     { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/doris" },
@@ -402,6 +403,7 @@ var pinnedDriverPackageMap = map[string]pinnedDriverPackage{
 
 var latestDriverVersionMap = map[string]string{
 	"mysql":         "1.9.3",
+	"goldendb":      "1.9.3",
 	"mariadb":       "1.9.3",
 	"oceanbase":     "1.9.3",
 	"diros":         "1.9.3",
@@ -428,6 +430,7 @@ var latestDriverVersionMap = map[string]string{
 }
 
 var driverGoModulePathMap = map[string]string{
+	"goldendb":      "github.com/go-sql-driver/mysql",
 	"mariadb":       "github.com/go-sql-driver/mysql",
 	"oceanbase":     "github.com/go-sql-driver/mysql",
 	"diros":         "github.com/go-sql-driver/mysql",
@@ -1427,6 +1430,8 @@ func normalizeDriverType(driverType string) string {
 		return "opengauss"
 	case "gaussdb", "gauss_db", "gauss-db":
 		return "gaussdb"
+	case "goldendb", "greatdb", "gdb":
+		return "goldendb"
 	case "kafka", "apache-kafka", "apache_kafka":
 		return "kafka"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
@@ -1494,6 +1499,7 @@ func resolveDriverDefinitionWithPackages(driverType string, packages map[string]
 func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) []driverDefinition {
 	return []driverDefinition{
 		{Type: "mysql", Name: "MySQL", Engine: driverEngineGo, BuiltIn: true},
+		{Type: "goldendb", Name: "GoldenDB", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "oracle", Name: "Oracle", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "redis", Name: "Redis", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "postgres", Name: "PostgreSQL", Engine: driverEngineGo, BuiltIn: true},

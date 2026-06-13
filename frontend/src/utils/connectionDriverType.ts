@@ -31,6 +31,11 @@ export const normalizeDriverType = (value: string): string => {
     normalized === 'gauss-db'
   ) return 'gaussdb';
   if (
+    normalized === 'goldendb' ||
+    normalized === 'greatdb' ||
+    normalized === 'gdb'
+  ) return 'goldendb';
+  if (
     normalized === 'intersystems' ||
     normalized === 'intersystemsiris' ||
     normalized === 'inter-systems' ||

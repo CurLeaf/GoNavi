@@ -36,6 +36,7 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
       { key: 'vastbase', name: 'Vastbase (海量)' },
       { key: 'opengauss', name: 'OpenGauss' },
       { key: 'gaussdb', name: 'GaussDB' },
+      { key: 'goldendb', name: 'GoldenDB' },
     ],
   },
   {
@@ -83,6 +84,8 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 3306;
     case 'oceanbase':
       return 2881;
+    case 'goldendb':
+      return 1523;
     case 'doris':
     case 'diros':
     case 'starrocks':
@@ -157,6 +160,8 @@ export const getConnectionTypeHint = (type: string): string => {
       return 'Broker / Topic / Consumer Group';
     case 'oceanbase':
       return 'MySQL / Oracle 租户';
+    case 'goldendb':
+      return 'MySQL 兼容 / 分布式事务';
     case 'sqlite':
     case 'duckdb':
       return '本地文件连接';

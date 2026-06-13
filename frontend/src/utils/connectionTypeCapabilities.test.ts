@@ -29,6 +29,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsSSLForType('MongoDB')).toBe(true);
     expect(supportsSSLForType('elasticsearch')).toBe(true);
     expect(supportsSSLForType('gaussdb')).toBe(true);
+    expect(supportsSSLForType('greatdb')).toBe(true);
     expect(supportsSSLForType('chroma')).toBe(true);
     expect(supportsSSLForType('qdrant')).toBe(true);
     expect(supportsSSLForType('kafka')).toBe(true);
@@ -68,6 +69,7 @@ describe('connectionTypeCapabilities', () => {
     expect(isFileDatabaseType('duckdb')).toBe(true);
     expect(isFileDatabaseType('DuckDB')).toBe(false);
     expect(isMySQLCompatibleType('mysql')).toBe(true);
+    expect(isMySQLCompatibleType('goldendb')).toBe(true);
     expect(isMySQLCompatibleType('oceanbase')).toBe(true);
     expect(isMySQLCompatibleType('diros')).toBe(true);
     expect(isMySQLCompatibleType('postgres')).toBe(false);
@@ -75,6 +77,7 @@ describe('connectionTypeCapabilities', () => {
 
   it('keeps advanced connection params enabled only for supported database types', () => {
     expect(supportsConnectionParamsForType('mysql')).toBe(true);
+    expect(supportsConnectionParamsForType('gdb')).toBe(true);
     expect(supportsConnectionParamsForType('postgres')).toBe(true);
     expect(supportsConnectionParamsForType('gaussdb')).toBe(true);
     expect(supportsConnectionParamsForType('oracle')).toBe(true);

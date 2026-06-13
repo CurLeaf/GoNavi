@@ -20,6 +20,10 @@ const normalizeDataSourceToken = (raw: string): string => {
     case 'gauss_db':
     case 'gauss-db':
       return 'gaussdb';
+    case 'goldendb':
+    case 'greatdb':
+    case 'gdb':
+      return 'goldendb';
     case 'dm':
       return 'dameng';
     case 'elastic':
@@ -66,6 +70,7 @@ export const resolveDataSourceType = (config: ConnectionLike): string => {
 
 const SQL_QUERY_EXPORT_TYPES = new Set([
   'mysql',
+  'goldendb',
   'mariadb',
   'oceanbase',
   'diros',
@@ -89,6 +94,7 @@ const SQL_QUERY_EXPORT_TYPES = new Set([
 
 const COPY_INSERT_TYPES = new Set([
   'mysql',
+  'goldendb',
   'mariadb',
   'oceanbase',
   'diros',
@@ -132,6 +138,7 @@ export type DataSourceCapabilities = {
 
 const CREATE_DATABASE_TYPES = new Set([
   'mysql',
+  'goldendb',
   'mariadb',
   'oceanbase',
   'diros',
@@ -159,6 +166,7 @@ const RENAME_DATABASE_TYPES = new Set([
 
 const DROP_DATABASE_TYPES = new Set([
   'mysql',
+  'goldendb',
   'mariadb',
   'oceanbase',
   'diros',

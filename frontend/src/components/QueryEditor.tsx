@@ -186,7 +186,7 @@ const isSystemMetadataQueryResult = (tableRef: QueryResultTableRef, dbType: stri
     const metadataDbName = stripQueryIdentifierQuotes(tableRef.metadataDbName).toLowerCase();
     const metadataTableName = stripQueryIdentifierQuotes(tableRef.metadataTableName).toLowerCase();
 
-    if (['mysql', 'mariadb', 'oceanbase', 'diros', 'starrocks', 'sphinx', 'tidb'].includes(normalizedDbType)) {
+    if (['mysql', 'goldendb', 'mariadb', 'oceanbase', 'diros', 'starrocks', 'sphinx', 'tidb'].includes(normalizedDbType)) {
         return MYSQL_SYSTEM_METADATA_SCHEMAS.has(metadataDbName);
     }
     if (['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss', 'gaussdb'].includes(normalizedDbType)) {

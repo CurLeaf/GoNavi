@@ -53,6 +53,13 @@ describe('DatabaseIcons', () => {
     expect(markup).toContain('>GS</text>');
   });
 
+  it('includes GoldenDB in the selectable database icons', () => {
+    expect(DB_ICON_TYPES).toContain('goldendb');
+    expect(getDbIconLabel('goldendb')).toBe('GoldenDB');
+    const markup = renderToStaticMarkup(<>{getDbIcon('goldendb', undefined, 22)}</>);
+    expect(markup).toContain('>GD</text>');
+  });
+
   it('wraps database icons in a consistent frame for sidebar sizing', () => {
     const mysqlMarkup = renderToStaticMarkup(<>{getDbIcon('mysql', undefined, 22)}</>);
     const jvmMarkup = renderToStaticMarkup(<>{getDbIcon('jvm', undefined, 22)}</>);

@@ -101,6 +101,18 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('? "gaussdb"');
     expect(source).toContain('dbType === "gaussdb"');
   });
+
+  it('exposes GoldenDB in the create-connection picker with MySQL-compatible defaults', () => {
+    expect(source).toContain("case 'goldendb':");
+    expect(source).toContain('return 1523;');
+    expect(source).toContain("key: 'goldendb'");
+    expect(source).toContain("name: 'GoldenDB'");
+    expect(source).toContain('type === "goldendb"');
+    expect(source).toContain("return 'MySQL 兼容 / 分布式事务';");
+    expect(source).toContain('dbType === "goldendb" ? "goldendb" : "mysql"');
+    expect(source).toContain('type === "goldendb" ? "goldendb" : "mysql"');
+    expect(source).toContain('? "goldendb"');
+  });
 });
 
 describe('ConnectionModal Redis Sentinel configuration', () => {

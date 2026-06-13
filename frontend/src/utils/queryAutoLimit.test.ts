@@ -5,6 +5,7 @@ import { applyQueryAutoLimit } from './queryAutoLimit';
 describe('applyQueryAutoLimit', () => {
   const limitDialects = [
     'mysql',
+    'goldendb',
     'mariadb',
     'oceanbase',
     'diros',

@@ -18,6 +18,7 @@ const resolveDdlFormatterLanguage = (dbType: string): SqlLanguage => {
     case 'mariadb':
       return 'mariadb';
     case 'mysql':
+    case 'goldendb':
     case 'sphinx':
       return 'mysql';
     case 'sqlserver':

@@ -23,6 +23,8 @@ describe('connectionDriverType', () => {
     expect(normalizeDriverType('doris')).toBe('diros');
     expect(normalizeDriverType('open-gauss')).toBe('opengauss');
     expect(normalizeDriverType('gauss-db')).toBe('gaussdb');
+    expect(normalizeDriverType('greatdb')).toBe('goldendb');
+    expect(normalizeDriverType('gdb')).toBe('goldendb');
     expect(normalizeDriverType('InterSystemsIRIS')).toBe('iris');
   });
 
@@ -31,6 +33,7 @@ describe('connectionDriverType', () => {
     expect(resolveConnectionDriverType('custom', 'postgresql')).toBe('postgres');
     expect(resolveConnectionDriverType('custom', 'open_gauss')).toBe('opengauss');
     expect(resolveConnectionDriverType('custom', 'gauss_db')).toBe('gaussdb');
+    expect(resolveConnectionDriverType('custom', 'goldendb')).toBe('goldendb');
     expect(resolveConnectionDriverType('custom', '')).toBe('');
   });
 

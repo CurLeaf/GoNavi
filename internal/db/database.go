@@ -471,6 +471,9 @@ var databaseFactories = map[string]databaseFactory{
 	"mysql": func() Database {
 		return &MySQLDB{}
 	},
+	"goldendb": func() Database {
+		return &MySQLDB{}
+	},
 	"postgres": func() Database {
 		return &PostgresDB{}
 	},
@@ -521,6 +524,8 @@ func normalizeDatabaseType(dbType string) string {
 		return "opengauss"
 	case "gaussdb", "gauss_db", "gauss-db":
 		return "gaussdb"
+	case "goldendb", "greatdb", "gdb":
+		return "goldendb"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
 	case "chromadb", "chroma-db":

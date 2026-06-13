@@ -518,6 +518,28 @@ func TestKafkaDriverDefinitionIsBuiltIn(t *testing.T) {
 	}
 }
 
+func TestGoldenDBDriverDefinitionIsBuiltIn(t *testing.T) {
+	definition, ok := resolveDriverDefinition("greatdb")
+	if !ok {
+		t.Fatal("expected goldendb driver definition")
+	}
+	if definition.Name != "GoldenDB" {
+		t.Fatalf("unexpected goldendb driver name: %q", definition.Name)
+	}
+	if !definition.BuiltIn {
+		t.Fatal("expected goldendb to be a built-in driver")
+	}
+	if definition.PinnedVersion != "" || definition.DefaultDownloadURL != "" {
+		t.Fatalf("expected goldendb builtin definition to omit optional metadata: %#v", definition)
+	}
+	if latestDriverVersionMap["goldendb"] != "1.9.3" {
+		t.Fatalf("unexpected goldendb pinned version: %q", latestDriverVersionMap["goldendb"])
+	}
+	if driverGoModulePathMap["goldendb"] != "github.com/go-sql-driver/mysql" {
+		t.Fatalf("unexpected goldendb go module path: %q", driverGoModulePathMap["goldendb"])
+	}
+}
+
 func TestGaussDBDriverDefinitionUsesOptionalAgent(t *testing.T) {
 	definition, ok := resolveDriverDefinition("gaussdb")
 	if !ok {

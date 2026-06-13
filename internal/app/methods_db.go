@@ -224,6 +224,9 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 	if dbType == "gauss_db" || dbType == "gauss-db" {
 		return "gaussdb"
 	}
+	if dbType == "goldendb" || dbType == "greatdb" || dbType == "gdb" {
+		return "mysql"
+	}
 	if dbType == "kingbase8" || dbType == "kingbasees" || dbType == "kingbasev8" {
 		return "kingbase"
 	}
@@ -245,6 +248,8 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 		return "opengauss"
 	case "gaussdb", "gauss_db", "gauss-db":
 		return "gaussdb"
+	case "goldendb", "greatdb", "gdb":
+		return "mysql"
 	case "dm", "dameng", "dm8":
 		return "dameng"
 	case "sqlite3", "sqlite":
@@ -274,6 +279,8 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 		return "opengauss"
 	case strings.Contains(driver, "gaussdb"), strings.Contains(driver, "gauss_db"), strings.Contains(driver, "gauss-db"):
 		return "gaussdb"
+	case strings.Contains(driver, "goldendb"), strings.Contains(driver, "greatdb"):
+		return "mysql"
 	case strings.Contains(driver, "postgres"):
 		return "postgres"
 	case strings.Contains(driver, "kingbase"):

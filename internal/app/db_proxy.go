@@ -203,6 +203,8 @@ func defaultPortByType(driverType string) int {
 	switch strings.ToLower(strings.TrimSpace(driverType)) {
 	case "mysql", "mariadb":
 		return 3306
+	case "goldendb", "greatdb", "gdb":
+		return 1523
 	case "oceanbase":
 		return 2881
 	case "diros":

@@ -13,6 +13,7 @@ import (
 // coreBuiltinDrivers 是始终内置可用的核心驱动，无需额外安装即可使用。
 var coreBuiltinDrivers = map[string]struct{}{
 	"mysql":    {},
+	"goldendb": {},
 	"redis":    {},
 	"oracle":   {},
 	"postgres": {},
@@ -69,6 +70,8 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "opengauss"
 	case "gaussdb", "gauss_db", "gauss-db":
 		return "gaussdb"
+	case "goldendb", "greatdb", "gdb":
+		return "goldendb"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
 	case "elastic":
@@ -90,6 +93,8 @@ func driverDisplayName(driverType string) string {
 	switch normalizeRuntimeDriverType(driverType) {
 	case "mysql":
 		return "MySQL"
+	case "goldendb":
+		return "GoldenDB"
 	case "oracle":
 		return "Oracle"
 	case "redis":

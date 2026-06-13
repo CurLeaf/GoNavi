@@ -67,6 +67,7 @@ describe('connectionModalPresentation', () => {
   it('assigns card-based configuration sections to every supported data source type', () => {
     const allTypes = [
       'mysql',
+      'goldendb',
       'mariadb',
       'oceanbase',
       'doris',
@@ -109,6 +110,15 @@ describe('connectionModalPresentation', () => {
 
   it('keeps datasource-specific connection options in the layout contract', () => {
     expect(resolveConnectionConfigLayout('mysql').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'connectionMode',
+      'replica',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('goldendb').sections).toEqual([
       'identity',
       'uri',
       'target',

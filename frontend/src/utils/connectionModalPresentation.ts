@@ -58,6 +58,7 @@ type ConnectionConfigSectionCopy = {
 
 const mysqlCompatibleTypes = new Set([
   'mysql',
+  'goldendb',
   'mariadb',
   'oceanbase',
   'doris',

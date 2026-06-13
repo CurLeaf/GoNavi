@@ -216,6 +216,19 @@ func TestNormalizeRunConfig_StarRocksUsesDatabaseFromTree(t *testing.T) {
 	}
 }
 
+func TestNormalizeRunConfig_GoldenDBUsesDatabaseFromTree(t *testing.T) {
+	t.Parallel()
+
+	runConfig := normalizeRunConfig(connection.ConnectionConfig{
+		Type:     "goldendb",
+		Database: "legacy_default",
+	}, "finance_core")
+
+	if runConfig.Database != "finance_core" {
+		t.Fatalf("expected GoldenDB database from tree, got %q", runConfig.Database)
+	}
+}
+
 func TestNormalizeRunConfig_IRISUsesNamespaceFromTree(t *testing.T) {
 	t.Parallel()
 
