@@ -31,6 +31,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsSSLForType('gaussdb')).toBe(true);
     expect(supportsSSLForType('chroma')).toBe(true);
     expect(supportsSSLForType('qdrant')).toBe(true);
+    expect(supportsSSLForType('kafka')).toBe(true);
     expect(supportsSSLForType('tdengine')).toBe(true);
     expect(supportsSSLForType('iotdb')).toBe(false);
     expect(supportsSSLForType('dameng')).toBe(true);
@@ -50,6 +51,8 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsSSLClientCertificateForType('chroma')).toBe(false);
     expect(supportsSSLCAPathForType('qdrant')).toBe(true);
     expect(supportsSSLClientCertificateForType('qdrant')).toBe(false);
+    expect(supportsSSLCAPathForType('kafka')).toBe(true);
+    expect(supportsSSLClientCertificateForType('kafka')).toBe(true);
   });
 
   it('detects postgres-compatible SSL parameter dialects', () => {
@@ -82,6 +85,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsConnectionParamsForType('elasticsearch')).toBe(true);
     expect(supportsConnectionParamsForType('chroma')).toBe(true);
     expect(supportsConnectionParamsForType('qdrant')).toBe(true);
+    expect(supportsConnectionParamsForType('kafka')).toBe(true);
     expect(supportsConnectionParamsForType('redis')).toBe(false);
     expect(supportsConnectionParamsForType('sqlite')).toBe(false);
     expect(supportsConnectionParamsForType('jvm')).toBe(false);

@@ -502,6 +502,22 @@ func TestIoTDBDriverDefinitionUsesOptionalAgent(t *testing.T) {
 	}
 }
 
+func TestKafkaDriverDefinitionIsBuiltIn(t *testing.T) {
+	definition, ok := resolveDriverDefinition("apache-kafka")
+	if !ok {
+		t.Fatal("expected kafka driver definition")
+	}
+	if definition.Name != "Kafka" {
+		t.Fatalf("unexpected kafka driver name: %q", definition.Name)
+	}
+	if !definition.BuiltIn {
+		t.Fatal("expected kafka to be a built-in driver")
+	}
+	if definition.PinnedVersion != "" || definition.DefaultDownloadURL != "" {
+		t.Fatalf("expected kafka builtin definition to omit optional-agent metadata: %#v", definition)
+	}
+}
+
 func TestGaussDBDriverDefinitionUsesOptionalAgent(t *testing.T) {
 	definition, ok := resolveDriverDefinition("gaussdb")
 	if !ok {

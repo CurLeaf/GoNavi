@@ -33,10 +33,10 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('type === "elasticsearch"');
     expect(source).toContain("return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';");
     expect(source).toContain(
-      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant") ? "" : "root";',
+      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "kafka") ? "" : "root";',
     );
     expect(source).toContain(
-      'placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant") ? "未开启认证可留空" : undefined}',
+      'placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "kafka") ? "未开启认证可留空" : undefined}',
     );
     expect(source).toContain('label="显示数据库 (留空显示全部)"');
   });
@@ -75,6 +75,18 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain("return 'Storage Group / Device / Timeseries';");
     expect(source).toContain('return "iotdb://root:root@127.0.0.1:6667/root.sg";');
     expect(source).toContain('return "fetchSize=1024&timeZone=Asia%2FShanghai";');
+  });
+
+  it('exposes Kafka in the create-connection picker with broker and topic defaults', () => {
+    expect(source).toContain("case 'kafka':");
+    expect(source).toContain('return 9092;');
+    expect(source).toContain("key: 'kafka'");
+    expect(source).toContain("name: 'Kafka'");
+    expect(source).toContain('dbType === "kafka"');
+    expect(source).toContain("return 'Broker / Topic / Consumer Group';");
+    expect(source).toContain('return "kafka://user:pass@127.0.0.1:9092,127.0.0.2:9092/orders.events?topology=cluster&groupId=analytics&mechanism=scram-sha-256";');
+    expect(source).toContain('return "groupId=gonavi&mechanism=scram-sha-256&clientId=gonavi-desktop&startOffset=latest";');
+    expect(source).toContain('label="默认 Topic（可选）"');
   });
 
   it('exposes GaussDB in the create-connection picker with PostgreSQL-family defaults', () => {

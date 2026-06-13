@@ -42,6 +42,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
+	github.com/segmentio/kafka-go v0.4.51 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

@@ -282,6 +282,20 @@ export const resolveConnectionConfigLayout = (
       ],
     };
   }
+  if (type === 'kafka') {
+    return {
+      kind: 'generic-sql',
+      sections: [
+        'identity',
+        'uri',
+        'target',
+        'connectionMode',
+        'replica',
+        'service',
+        'credentials',
+      ],
+    };
+  }
   if (postgresCompatibleTypes.has(type)) {
     return {
       kind: 'postgres-compatible',

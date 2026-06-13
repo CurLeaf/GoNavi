@@ -39,6 +39,13 @@ describe('DatabaseIcons', () => {
     expect(markup).toContain('>Io</text>');
   });
 
+  it('includes Kafka in the selectable database icons', () => {
+    expect(DB_ICON_TYPES).toContain('kafka');
+    expect(getDbIconLabel('kafka')).toBe('Kafka');
+    const markup = renderToStaticMarkup(<>{getDbIcon('kafka', undefined, 22)}</>);
+    expect(markup).toContain('>Kf</text>');
+  });
+
   it('includes GaussDB in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('gaussdb');
     expect(getDbIconLabel('gaussdb')).toBe('GaussDB');

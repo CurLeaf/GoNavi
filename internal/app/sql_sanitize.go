@@ -346,7 +346,7 @@ func isReadOnlySQLQuery(dbType string, query string) bool {
 		return false
 	}
 	switch keyword {
-	case "select", "with", "show", "describe", "desc", "explain", "pragma", "values":
+	case "select", "with", "show", "describe", "desc", "explain", "pragma", "values", "consume":
 		return true
 	default:
 		return false

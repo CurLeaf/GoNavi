@@ -38,6 +38,8 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('custom', 'qdrant-db')).toBe('qdrant');
     expect(resolveSqlDialect('Apache-IoTDB')).toBe('iotdb');
     expect(resolveSqlDialect('custom', 'apache_iotdb')).toBe('iotdb');
+    expect(resolveSqlDialect('Apache-Kafka')).toBe('kafka');
+    expect(resolveSqlDialect('custom', 'apache_kafka')).toBe('kafka');
     expect(resolveSqlDialect('OceanBase', '', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(resolveSqlDialect('custom', 'oceanbase', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(isMysqlFamilyDialect('mariadb')).toBe(true);
@@ -69,6 +71,11 @@ describe('sqlDialect', () => {
     expect(resolveSqlKeywords('iotdb')).toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'SHOW TIMESERIES', 'WITH DATATYPE']));
     expect(names(resolveSqlFunctions('iotdb'))).toEqual(expect.arrayContaining(['DATE_BIN', 'DIFF', 'TOP_K']));
     expect(resolveSqlKeywords('iotdb')).not.toEqual(expect.arrayContaining(['TAGS', 'USING']));
+  });
+
+  it('resolves Kafka completion keywords for topic discovery and consume syntax', () => {
+    expect(resolveSqlKeywords('kafka')).toEqual(expect.arrayContaining(['SHOW TOPICS', 'DESCRIBE TOPIC', 'CONSUME']));
+    expect(resolveSqlKeywords('kafka')).not.toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'AUTO_INCREMENT']));
   });
 
   it('resolves GaussDB completion keywords and functions as a PostgreSQL-like dialect', () => {

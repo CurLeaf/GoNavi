@@ -86,6 +86,12 @@ func TestIsReadOnlySQLQuery_ClassifiesWithByTopLevelOperation(t *testing.T) {
 	}
 }
 
+func TestIsReadOnlySQLQuery_TreatsKafkaConsumeAsReadOnly(t *testing.T) {
+	if !isReadOnlySQLQuery("kafka", `CONSUME GROUP "analytics" FROM "orders.events" LIMIT 20`) {
+		t.Fatal("Kafka CONSUME should be treated as read-only")
+	}
+}
+
 func TestIsBatchableWriteSQLStatement_OnlyMatchesRealWriteStatements(t *testing.T) {
 	if !isBatchableWriteSQLStatement("mysql", "INSERT INTO demo(id) VALUES (1)") {
 		t.Fatal("expected INSERT to be treated as batchable write")

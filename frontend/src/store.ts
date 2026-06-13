@@ -290,6 +290,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "redis",
   "tdengine",
   "iotdb",
+  "kafka",
   "oracle",
   "dameng",
   "kingbase",
@@ -327,6 +328,7 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "redis",
   "elasticsearch",
   "tdengine",
+  "kafka",
 ]);
 
 const getDefaultPortByType = (type: string): number => {
@@ -359,6 +361,8 @@ const getDefaultPortByType = (type: string): number => {
       return 6041;
     case "iotdb":
       return 6667;
+    case "kafka":
+      return 9092;
     case "oracle":
       return 1521;
     case "dameng":
@@ -524,6 +528,9 @@ const normalizeConnectionType = (value: unknown): string => {
   }
   if (type === "gaussdb" || type === "gauss_db" || type === "gauss-db") {
     return "gaussdb";
+  }
+  if (type === "kafka" || type === "apache-kafka" || type === "apache_kafka") {
+    return "kafka";
   }
   if (
     type === "inter-systems" ||

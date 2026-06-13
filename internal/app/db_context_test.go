@@ -242,6 +242,19 @@ func TestNormalizeRunConfig_RedisAllowsDatabaseIndexAboveDefault(t *testing.T) {
 	}
 }
 
+func TestNormalizeRunConfig_KafkaKeepsDefaultTopic(t *testing.T) {
+	t.Parallel()
+
+	runConfig := normalizeRunConfig(connection.ConnectionConfig{
+		Type:     "kafka",
+		Database: "orders.events",
+	}, "topics")
+
+	if runConfig.Database != "orders.events" {
+		t.Fatalf("expected Kafka default topic to stay orders.events, got %q", runConfig.Database)
+	}
+}
+
 func TestNormalizeSchemaAndTable_IRISDoesNotTreatNamespaceAsSchema(t *testing.T) {
 	t.Parallel()
 
@@ -291,6 +304,30 @@ func TestNormalizeSchemaAndTable_DuckDBPreservesQuotedQualifiedName(t *testing.T
 	}
 	if table != `"daily.events"."2026.06"` {
 		t.Fatalf("expected duckdb qualified table preserved, got %q", table)
+	}
+}
+
+func TestNormalizeSchemaAndTable_KafkaPreservesDottedTopicName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "kafka",
+	}, "topics", "orders.events.v1")
+
+	if schemaOrDb != "topics" || table != "orders.events.v1" {
+		t.Fatalf("expected kafka topic to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_KafkaPreservesDottedTopicName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "kafka",
+	}, "topics", "logs.app-1")
+
+	if schemaOrDb != "topics" || table != "logs.app-1" {
+		t.Fatalf("expected kafka metadata topic to stay intact, got %q.%q", schemaOrDb, table)
 	}
 }
 

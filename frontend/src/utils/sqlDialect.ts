@@ -29,6 +29,7 @@ export type SqlDialect =
   | 'clickhouse'
   | 'tdengine'
   | 'iotdb'
+  | 'kafka'
   | 'mongodb'
   | 'redis'
   | 'elasticsearch'
@@ -135,6 +136,10 @@ export const resolveSqlDialect = (
     case 'apache-iotdb':
     case 'apache_iotdb':
       return 'iotdb';
+    case 'kafka':
+    case 'apache-kafka':
+    case 'apache_kafka':
+      return 'kafka';
     default:
       break;
   }
@@ -159,6 +164,7 @@ export const resolveSqlDialect = (
   if (source.includes('clickhouse')) return 'clickhouse';
   if (source.includes('tdengine')) return 'tdengine';
   if (source.includes('iotdb')) return 'iotdb';
+  if (source.includes('kafka')) return 'kafka';
   if (source.includes('sqlserver') || source.includes('mssql')) return 'sqlserver';
   if (source.includes('iris') || source.includes('intersystems')) return 'iris';
   if (source.includes('elastic')) return 'elasticsearch';
@@ -611,6 +617,17 @@ const IOTDB_KEYWORDS = [
   'COMPRESSION',
 ];
 
+const KAFKA_KEYWORDS = [
+  'SHOW TOPICS',
+  'SHOW TOPIC',
+  'DESCRIBE TOPIC',
+  'CONSUME',
+  'GROUP',
+  'FROM',
+  'LIMIT',
+  'OFFSET',
+];
+
 export const resolveSqlKeywords = (dbType: string): string[] => {
   const dialect = resolveSqlDialect(dbType);
   if (dialect === 'starrocks') return unique([...COMMON_KEYWORDS, ...MYSQL_KEYWORDS, ...STARROCKS_KEYWORDS]);
@@ -623,6 +640,7 @@ export const resolveSqlKeywords = (dbType: string): string[] => {
   if (dialect === 'clickhouse') return unique([...COMMON_KEYWORDS, ...CLICKHOUSE_KEYWORDS]);
   if (dialect === 'tdengine') return unique([...COMMON_KEYWORDS, ...TDENGINE_KEYWORDS]);
   if (dialect === 'iotdb') return unique([...COMMON_KEYWORDS, ...IOTDB_KEYWORDS]);
+  if (dialect === 'kafka') return unique([...COMMON_KEYWORDS, ...KAFKA_KEYWORDS]);
   return COMMON_KEYWORDS;
 };
 

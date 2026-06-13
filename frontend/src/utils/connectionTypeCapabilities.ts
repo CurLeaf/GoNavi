@@ -47,6 +47,7 @@ const sslSupportedTypes = new Set([
   "elasticsearch",
   "chroma",
   "qdrant",
+  "kafka",
 ]);
 
 export const supportsSSLForType = (type: string) =>
@@ -72,6 +73,7 @@ const sslCAPathSupportedTypes = new Set([
   "elasticsearch",
   "chroma",
   "qdrant",
+  "kafka",
 ]);
 
 const sslClientCertificateSupportedTypes = new Set([
@@ -91,6 +93,7 @@ const sslClientCertificateSupportedTypes = new Set([
   "gaussdb",
   "mongodb",
   "redis",
+  "kafka",
 ]);
 
 export const supportsSSLCAPathForType = (type: string) =>
@@ -139,4 +142,5 @@ export const supportsConnectionParamsForType = (type: string) =>
   type === "iotdb" ||
   type === "elasticsearch" ||
   type === "chroma" ||
-  type === "qdrant";
+  type === "qdrant" ||
+  type === "kafka";

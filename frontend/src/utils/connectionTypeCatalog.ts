@@ -61,6 +61,12 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
     ],
   },
   {
+    label: '消息队列',
+    items: [
+      { key: 'kafka', name: 'Kafka' },
+    ],
+  },
+  {
     label: '其他',
     items: [
       { key: 'jvm', name: 'JVM Runtime' },
@@ -113,6 +119,8 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 8000;
     case 'qdrant':
       return 6333;
+    case 'kafka':
+      return 9092;
     case 'highgo':
       return 5866;
     case 'mariadb':
@@ -145,6 +153,8 @@ export const getConnectionTypeHint = (type: string): string => {
       return 'Collection 浏览、向量搜索和 Payload 过滤';
     case 'iotdb':
       return 'Storage Group / Device / Timeseries';
+    case 'kafka':
+      return 'Broker / Topic / Consumer Group';
     case 'oceanbase':
       return 'MySQL / Oracle 租户';
     case 'sqlite':

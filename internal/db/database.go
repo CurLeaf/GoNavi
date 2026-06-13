@@ -486,6 +486,9 @@ var databaseFactories = map[string]databaseFactory{
 	"qdrant": func() Database {
 		return &QdrantDB{}
 	},
+	"kafka": func() Database {
+		return &KafkaDB{}
+	},
 }
 
 func init() {
@@ -524,6 +527,8 @@ func normalizeDatabaseType(dbType string) string {
 		return "chroma"
 	case "qdrantdb", "qdrant-db":
 		return "qdrant"
+	case "kafka", "apache-kafka", "apache_kafka":
+		return "kafka"
 	default:
 		return normalized
 	}

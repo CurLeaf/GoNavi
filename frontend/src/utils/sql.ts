@@ -54,6 +54,9 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
 export const quoteQualifiedIdent = (dbType: string, ident: string) => {
   const raw = (ident || '').trim();
   if (!raw) return raw;
+  if ((dbType || '').trim().toLowerCase() === 'kafka') {
+    return quoteIdentPart(dbType, raw);
+  }
   const parts = splitQualifiedNameSegments(raw).filter(Boolean);
   if (parts.length === 0) return quoteIdentPart(dbType, raw);
   if (parts.length === 1 && parts[0] === normalizeIdentPart(raw)) return quoteIdentPart(dbType, raw);

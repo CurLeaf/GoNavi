@@ -59,6 +59,11 @@ describe('quoteQualifiedIdent', () => {
       .toBe('`root`.`sg`.`d1`');
   });
 
+  it('keeps Kafka topic names as one quoted identifier', () => {
+    expect(quoteQualifiedIdent('kafka', 'logs.app-1'))
+      .toBe('"logs.app-1"');
+  });
+
   it('does not split dots inside quoted DuckDB identifiers', () => {
     expect(quoteQualifiedIdent('duckdb', '"daily.events"."2026.06"'))
       .toBe('"daily.events"."2026.06"');

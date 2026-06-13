@@ -18,6 +18,7 @@ var coreBuiltinDrivers = map[string]struct{}{
 	"postgres": {},
 	"chroma":   {},
 	"qdrant":   {},
+	"kafka":    {},
 }
 
 // optionalGoDrivers 表示需要用户“安装启用”后才能使用的纯 Go 驱动。
@@ -78,6 +79,8 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "qdrant"
 	case "apache-iotdb", "apache_iotdb", "iotdb":
 		return "iotdb"
+	case "kafka", "apache-kafka", "apache_kafka":
+		return "kafka"
 	default:
 		return normalized
 	}
@@ -137,6 +140,8 @@ func driverDisplayName(driverType string) string {
 		return "Chroma"
 	case "qdrant":
 		return "Qdrant"
+	case "kafka":
+		return "Kafka"
 	default:
 		return strings.ToUpper(strings.TrimSpace(driverType))
 	}

@@ -93,6 +93,7 @@ describe('connectionModalPresentation', () => {
       'redis',
       'tdengine',
       'iotdb',
+      'kafka',
       'custom',
       'jvm',
     ];
@@ -191,6 +192,15 @@ describe('connectionModalPresentation', () => {
       'service',
       'credentials',
       'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('kafka').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'connectionMode',
+      'replica',
+      'service',
+      'credentials',
     ]);
   });
 

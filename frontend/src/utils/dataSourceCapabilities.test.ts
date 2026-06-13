@@ -146,6 +146,24 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats Kafka as a queryable read-only messaging datasource', () => {
+    expect(getDataSourceCapabilities({ type: 'kafka' })).toMatchObject({
+      type: 'kafka',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: true,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'apache-kafka' })).toMatchObject({
+      type: 'kafka',
+      supportsQueryEditor: true,
+      forceReadOnlyQueryResult: true,
+    });
+  });
+
   it('treats OceanBase Oracle protocol as Oracle capabilities', () => {
     expect(getDataSourceCapabilities({
       type: 'oceanbase',

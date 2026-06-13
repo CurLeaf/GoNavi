@@ -18,6 +18,8 @@ describe('connectionDriverType', () => {
     expect(normalizeDriverType('qdrant-db')).toBe('qdrant');
     expect(normalizeDriverType('apache-iotdb')).toBe('iotdb');
     expect(normalizeDriverType('apache_iotdb')).toBe('iotdb');
+    expect(normalizeDriverType('apache-kafka')).toBe('kafka');
+    expect(normalizeDriverType('apache_kafka')).toBe('kafka');
     expect(normalizeDriverType('doris')).toBe('diros');
     expect(normalizeDriverType('open-gauss')).toBe('opengauss');
     expect(normalizeDriverType('gauss-db')).toBe('gaussdb');

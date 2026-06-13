@@ -29,6 +29,11 @@ func TestBuiltinLikeDriversRemainAvailable(t *testing.T) {
 	if !supported {
 		t.Fatalf("redis 应始终可用，reason=%s", reason)
 	}
+
+	supported, reason = DriverRuntimeSupportStatus("kafka")
+	if !supported {
+		t.Fatalf("kafka 应始终可用，reason=%s", reason)
+	}
 }
 
 func TestOptionalDriverAgentRevisionsGeneratedForOptionalDrivers(t *testing.T) {

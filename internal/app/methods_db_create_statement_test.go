@@ -143,6 +143,15 @@ func TestNormalizeSchemaAndTableByType_PGLikeQuotedQualifiedName(t *testing.T) {
 	}
 }
 
+func TestNormalizeSchemaAndTableByType_KafkaPreservesDottedTopicName(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTableByType("kafka", "topics", "orders.events.v1")
+	if schema != "topics" || table != "orders.events.v1" {
+		t.Fatalf("expected kafka topic to stay intact, got %q.%q", schema, table)
+	}
+}
+
 func TestBuildRunConfigForDDL_CustomHighGoUsesDatabase(t *testing.T) {
 	t.Parallel()
 
