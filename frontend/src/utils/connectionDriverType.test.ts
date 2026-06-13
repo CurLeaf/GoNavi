@@ -14,6 +14,8 @@ describe('connectionDriverType', () => {
     expect(normalizeDriverType('elastic')).toBe('elasticsearch');
     expect(normalizeDriverType('chromadb')).toBe('chroma');
     expect(normalizeDriverType('chroma-db')).toBe('chroma');
+    expect(normalizeDriverType('qdrantdb')).toBe('qdrant');
+    expect(normalizeDriverType('qdrant-db')).toBe('qdrant');
     expect(normalizeDriverType('doris')).toBe('diros');
     expect(normalizeDriverType('open-gauss')).toBe('opengauss');
     expect(normalizeDriverType('InterSystemsIRIS')).toBe('iris');

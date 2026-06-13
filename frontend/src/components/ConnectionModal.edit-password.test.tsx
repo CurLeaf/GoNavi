@@ -33,10 +33,10 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('type === "elasticsearch"');
     expect(source).toContain("return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';");
     expect(source).toContain(
-      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma") ? "" : "root";',
+      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant") ? "" : "root";',
     );
     expect(source).toContain(
-      'placeholder={(dbType === "elasticsearch" || dbType === "chroma") ? "未开启认证可留空" : undefined}',
+      'placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant") ? "未开启认证可留空" : undefined}',
     );
     expect(source).toContain('label="显示数据库 (留空显示全部)"');
   });
@@ -51,6 +51,18 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain("return 'Collection 浏览、向量检索和元数据过滤';");
     expect(source).toContain('return "http://127.0.0.1:8000/default_database?tenant=default_tenant";');
     expect(source).toContain('return "tenant=default_tenant&apiKey=...";');
+  });
+
+  it('exposes Qdrant in the create-connection picker with vector defaults', () => {
+    expect(source).toContain("case 'qdrant':");
+    expect(source).toContain('return 6333;');
+    expect(source).toContain('qdrant: ["http", "https", "qdrant"]');
+    expect(source).toContain("key: 'qdrant'");
+    expect(source).toContain("name: 'Qdrant'");
+    expect(source).toContain('type === "qdrant"');
+    expect(source).toContain("return 'Collection 浏览、向量搜索和 Payload 过滤';");
+    expect(source).toContain('return "http://127.0.0.1:6333";');
+    expect(source).toContain('return "apiKey=...";');
   });
 });
 

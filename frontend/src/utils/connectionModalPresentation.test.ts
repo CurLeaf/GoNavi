@@ -88,6 +88,7 @@ describe('connectionModalPresentation', () => {
       'mongodb',
       'elasticsearch',
       'chroma',
+      'qdrant',
       'redis',
       'tdengine',
       'custom',
@@ -158,6 +159,14 @@ describe('connectionModalPresentation', () => {
       'databaseScope',
     ]);
     expect(resolveConnectionConfigLayout('chroma').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'service',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('qdrant').sections).toEqual([
       'identity',
       'uri',
       'target',

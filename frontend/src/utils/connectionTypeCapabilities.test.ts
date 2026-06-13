@@ -18,6 +18,7 @@ describe('connectionTypeCapabilities', () => {
     expect(singleHostUriSchemesByType.dameng).toEqual(['dameng', 'dm']);
     expect(singleHostUriSchemesByType.elasticsearch).toEqual(['http', 'https']);
     expect(singleHostUriSchemesByType.chroma).toEqual(['http', 'https', 'chroma']);
+    expect(singleHostUriSchemesByType.qdrant).toEqual(['http', 'https', 'qdrant']);
     expect(singleHostUriSchemesByType.redis).toEqual(['redis']);
   });
 
@@ -26,6 +27,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsSSLForType('MongoDB')).toBe(true);
     expect(supportsSSLForType('elasticsearch')).toBe(true);
     expect(supportsSSLForType('chroma')).toBe(true);
+    expect(supportsSSLForType('qdrant')).toBe(true);
     expect(supportsSSLForType('tdengine')).toBe(true);
     expect(supportsSSLForType('dameng')).toBe(true);
     expect(supportsSSLForType('sqlite')).toBe(false);
@@ -40,6 +42,8 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsSSLClientCertificateForType('redis')).toBe(true);
     expect(supportsSSLCAPathForType('chroma')).toBe(true);
     expect(supportsSSLClientCertificateForType('chroma')).toBe(false);
+    expect(supportsSSLCAPathForType('qdrant')).toBe(true);
+    expect(supportsSSLClientCertificateForType('qdrant')).toBe(false);
   });
 
   it('detects postgres-compatible SSL parameter dialects', () => {
@@ -68,6 +72,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsConnectionParamsForType('tdengine')).toBe(true);
     expect(supportsConnectionParamsForType('elasticsearch')).toBe(true);
     expect(supportsConnectionParamsForType('chroma')).toBe(true);
+    expect(supportsConnectionParamsForType('qdrant')).toBe(true);
     expect(supportsConnectionParamsForType('redis')).toBe(false);
     expect(supportsConnectionParamsForType('sqlite')).toBe(false);
     expect(supportsConnectionParamsForType('jvm')).toBe(false);

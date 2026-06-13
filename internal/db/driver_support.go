@@ -17,6 +17,7 @@ var coreBuiltinDrivers = map[string]struct{}{
 	"oracle":   {},
 	"postgres": {},
 	"chroma":   {},
+	"qdrant":   {},
 }
 
 // optionalGoDrivers 表示需要用户“安装启用”后才能使用的纯 Go 驱动。
@@ -69,6 +70,8 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "elasticsearch"
 	case "chromadb", "chroma-db":
 		return "chroma"
+	case "qdrantdb", "qdrant-db":
+		return "qdrant"
 	default:
 		return normalized
 	}
@@ -122,6 +125,8 @@ func driverDisplayName(driverType string) string {
 		return "Elasticsearch"
 	case "chroma":
 		return "Chroma"
+	case "qdrant":
+		return "Qdrant"
 	default:
 		return strings.ToUpper(strings.TrimSpace(driverType))
 	}

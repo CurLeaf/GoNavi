@@ -235,6 +235,8 @@ func defaultPortByType(driverType string) int {
 		return 1972
 	case "chroma":
 		return 8000
+	case "qdrant":
+		return 6333
 	default:
 		return 0
 	}

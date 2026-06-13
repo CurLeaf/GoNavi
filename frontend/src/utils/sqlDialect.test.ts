@@ -32,6 +32,8 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('custom', 'elastic')).toBe('elasticsearch');
     expect(resolveSqlDialect('ChromaDB')).toBe('chroma');
     expect(resolveSqlDialect('custom', 'chroma-db')).toBe('chroma');
+    expect(resolveSqlDialect('QdrantDB')).toBe('qdrant');
+    expect(resolveSqlDialect('custom', 'qdrant-db')).toBe('qdrant');
     expect(resolveSqlDialect('OceanBase', '', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(resolveSqlDialect('custom', 'oceanbase', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(isMysqlFamilyDialect('mariadb')).toBe(true);

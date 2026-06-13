@@ -90,6 +90,24 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats Qdrant as a queryable vector datasource without SQL export actions', () => {
+    expect(getDataSourceCapabilities({ type: 'qdrant' })).toMatchObject({
+      type: 'qdrant',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'qdrantdb' })).toMatchObject({
+      type: 'qdrant',
+      supportsQueryEditor: true,
+      supportsCopyInsert: false,
+    });
+  });
+
   it('treats OceanBase Oracle protocol as Oracle capabilities', () => {
     expect(getDataSourceCapabilities({
       type: 'oceanbase',

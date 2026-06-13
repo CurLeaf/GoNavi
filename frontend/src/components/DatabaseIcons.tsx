@@ -50,6 +50,7 @@ const DB_DEFAULT_COLORS: Record<string, string> = {
     iris:       '#1F6FEB',
     tdengine:   '#2962FF',
     chroma:     '#7C3AED',
+    qdrant:     '#DC244C',
     diros:      '#0050B3',
     starrocks:  '#00A6A6',
     sphinx:     '#2F5D62',
@@ -182,6 +183,9 @@ const TDengineIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
 const ChromaIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.chroma} label="Ch" />
 );
+const QdrantIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
+    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.qdrant} label="Qd" />
+);
 const JVMIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.jvm} label="JVM" />
 );
@@ -236,6 +240,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
     iris: IrisIcon,
     tdengine: TDengineIcon,
     chroma: ChromaIcon,
+    qdrant: QdrantIcon,
     elasticsearch: ElasticsearchIcon,
     custom: CustomIcon,
 };
@@ -244,7 +249,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
 export const DB_ICON_TYPES: string[] = [
     'mysql', 'mariadb', 'oceanbase', 'postgres', 'redis', 'mongodb', 'jvm',
     'oracle', 'sqlserver', 'sqlite', 'duckdb', 'clickhouse', 'starrocks',
-    'kingbase', 'dameng', 'vastbase', 'opengauss', 'highgo', 'iris', 'tdengine', 'chroma', 'elasticsearch', 'custom',
+    'kingbase', 'dameng', 'vastbase', 'opengauss', 'highgo', 'iris', 'tdengine', 'chroma', 'qdrant', 'elasticsearch', 'custom',
 ];
 
 /** 该类型是否有品牌 SVG 文件 */
@@ -268,6 +273,7 @@ export const getDbIconLabel = (type: string): string => {
         duckdb: 'DuckDB', kingbase: '金仓', dameng: '达梦',
         vastbase: 'VastBase', opengauss: 'OpenGauss', highgo: '瀚高', iris: 'InterSystems IRIS', tdengine: 'TDengine',
         chroma: 'Chroma',
+        qdrant: 'Qdrant',
         elasticsearch: 'Elasticsearch',
         custom: '自定义',
     };

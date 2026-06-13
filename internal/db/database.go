@@ -483,6 +483,9 @@ var databaseFactories = map[string]databaseFactory{
 	"chroma": func() Database {
 		return &ChromaDB{}
 	},
+	"qdrant": func() Database {
+		return &QdrantDB{}
+	},
 }
 
 func init() {
@@ -517,6 +520,8 @@ func normalizeDatabaseType(dbType string) string {
 		return "iris"
 	case "chromadb", "chroma-db":
 		return "chroma"
+	case "qdrantdb", "qdrant-db":
+		return "qdrant"
 	default:
 		return normalized
 	}

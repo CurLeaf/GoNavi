@@ -16,6 +16,7 @@ export const normalizeDriverType = (value: string): string => {
   if (normalized === 'postgresql' || normalized === 'pg' || normalized === 'pq' || normalized === 'pgx') return 'postgres';
   if (normalized === 'elastic') return 'elasticsearch';
   if (normalized === 'chromadb' || normalized === 'chroma-db') return 'chroma';
+  if (normalized === 'qdrantdb' || normalized === 'qdrant-db') return 'qdrant';
   if (normalized === 'doris') return 'diros';
   if (
     normalized === 'open_gauss' ||

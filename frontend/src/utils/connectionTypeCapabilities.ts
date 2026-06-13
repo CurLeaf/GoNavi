@@ -13,6 +13,7 @@ export const singleHostUriSchemesByType: Record<string, string[]> = {
   vastbase: ["vastbase"],
   elasticsearch: ["http", "https"],
   chroma: ["http", "https", "chroma"],
+  qdrant: ["http", "https", "qdrant"],
 };
 
 const normalizeConnectionType = (type: string) =>
@@ -42,6 +43,7 @@ const sslSupportedTypes = new Set([
   "tdengine",
   "elasticsearch",
   "chroma",
+  "qdrant",
 ]);
 
 export const supportsSSLForType = (type: string) =>
@@ -65,6 +67,7 @@ const sslCAPathSupportedTypes = new Set([
   "redis",
   "elasticsearch",
   "chroma",
+  "qdrant",
 ]);
 
 const sslClientCertificateSupportedTypes = new Set([
@@ -127,4 +130,5 @@ export const supportsConnectionParamsForType = (type: string) =>
   type === "dameng" ||
   type === "tdengine" ||
   type === "elasticsearch" ||
-  type === "chroma";
+  type === "chroma" ||
+  type === "qdrant";

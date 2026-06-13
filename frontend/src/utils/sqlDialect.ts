@@ -31,6 +31,7 @@ export type SqlDialect =
   | 'redis'
   | 'elasticsearch'
   | 'chroma'
+  | 'qdrant'
   | 'unknown'
   | string;
 
@@ -120,6 +121,10 @@ export const resolveSqlDialect = (
     case 'chroma-db':
     case 'chroma':
       return 'chroma';
+    case 'qdrantdb':
+    case 'qdrant-db':
+    case 'qdrant':
+      return 'qdrant';
     default:
       break;
   }
@@ -146,6 +151,7 @@ export const resolveSqlDialect = (
   if (source.includes('iris') || source.includes('intersystems')) return 'iris';
   if (source.includes('elastic')) return 'elasticsearch';
   if (source.includes('chroma')) return 'chroma';
+  if (source.includes('qdrant')) return 'qdrant';
 
   return source;
 };

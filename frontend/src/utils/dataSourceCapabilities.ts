@@ -24,6 +24,9 @@ const normalizeDataSourceToken = (raw: string): string => {
     case 'chromadb':
     case 'chroma-db':
       return 'chroma';
+    case 'qdrantdb':
+    case 'qdrant-db':
+      return 'qdrant';
     case 'intersystems':
     case 'intersystemsiris':
     case 'inter-systems':
