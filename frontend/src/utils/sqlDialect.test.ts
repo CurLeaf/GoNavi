@@ -34,6 +34,8 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('custom', 'chroma-db')).toBe('chroma');
     expect(resolveSqlDialect('QdrantDB')).toBe('qdrant');
     expect(resolveSqlDialect('custom', 'qdrant-db')).toBe('qdrant');
+    expect(resolveSqlDialect('Apache-IoTDB')).toBe('iotdb');
+    expect(resolveSqlDialect('custom', 'apache_iotdb')).toBe('iotdb');
     expect(resolveSqlDialect('OceanBase', '', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(resolveSqlDialect('custom', 'oceanbase', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(isMysqlFamilyDialect('mariadb')).toBe(true);
@@ -56,7 +58,14 @@ describe('sqlDialect', () => {
     expect(values(resolveColumnTypeOptions('clickhouse'))).toContain('DateTime64(3)');
     expect(values(resolveColumnTypeOptions('iris'))).toContain('varchar(255)');
     expect(values(resolveColumnTypeOptions('tdengine'))).toContain('TIMESTAMP');
+    expect(values(resolveColumnTypeOptions('iotdb'))).toContain('INT64');
     expect(values(resolveColumnTypeOptions('duckdb'))).toContain('STRUCT');
+  });
+
+  it('resolves Apache IoTDB completion keywords and functions independently', () => {
+    expect(resolveSqlKeywords('iotdb')).toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'SHOW TIMESERIES', 'WITH DATATYPE']));
+    expect(names(resolveSqlFunctions('iotdb'))).toEqual(expect.arrayContaining(['DATE_BIN', 'DIFF', 'TOP_K']));
+    expect(resolveSqlKeywords('iotdb')).not.toEqual(expect.arrayContaining(['TAGS', 'USING']));
   });
 
   it('resolves oracle completion keywords and functions without mysql-only suggestions', () => {

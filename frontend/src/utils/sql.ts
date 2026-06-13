@@ -29,7 +29,7 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
   if (!raw) return raw;
   const dbTypeLower = (dbType || '').toLowerCase();
 
-  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'starrocks' || dbTypeLower === 'sphinx' || dbTypeLower === 'tdengine' || dbTypeLower === 'clickhouse') {
+  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'starrocks' || dbTypeLower === 'sphinx' || dbTypeLower === 'tdengine' || dbTypeLower === 'iotdb' || dbTypeLower === 'clickhouse') {
     return `\`${raw.replace(/`/g, '``')}\``;
   }
 

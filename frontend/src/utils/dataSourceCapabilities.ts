@@ -27,6 +27,9 @@ const normalizeDataSourceToken = (raw: string): string => {
     case 'qdrantdb':
     case 'qdrant-db':
       return 'qdrant';
+    case 'apache-iotdb':
+    case 'apache_iotdb':
+      return 'iotdb';
     case 'intersystems':
     case 'intersystemsiris':
     case 'inter-systems':
@@ -98,7 +101,7 @@ const COPY_INSERT_TYPES = new Set([
 ]);
 
 const QUERY_EDITOR_DISABLED_TYPES = new Set(['redis']);
-const FORCE_READ_ONLY_QUERY_TYPES = new Set(['tdengine', 'clickhouse']);
+const FORCE_READ_ONLY_QUERY_TYPES = new Set(['tdengine', 'iotdb', 'clickhouse']);
 const MANUAL_TOTAL_COUNT_TYPES = new Set(['duckdb', 'oracle']);
 const APPROXIMATE_TABLE_COUNT_TYPES = new Set(['duckdb', 'oracle']);
 const APPROXIMATE_TOTAL_PAGE_TYPES = new Set(['duckdb']);

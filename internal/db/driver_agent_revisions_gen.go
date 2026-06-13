@@ -20,6 +20,7 @@ func init() {
 		"iris":          "src-1b072c57af08bec4",
 		"mongodb":       "src-57fdd8bfebdcd46e",
 		"tdengine":      "src-939715f94df1ec9c",
+		"iotdb":         "src-473c39891f926db2",
 		"clickhouse":    "src-482d62ed565b3e69",
 		"elasticsearch": "src-2fb00b94d7067c56",
 	}

@@ -7,6 +7,7 @@ export const singleHostUriSchemesByType: Record<string, string[]> = {
   iris: ["iris", "intersystems"],
   redis: ["redis"],
   tdengine: ["tdengine"],
+  iotdb: ["iotdb"],
   dameng: ["dameng", "dm"],
   kingbase: ["kingbase"],
   highgo: ["highgo"],
@@ -129,6 +130,7 @@ export const supportsConnectionParamsForType = (type: string) =>
   type === "mongodb" ||
   type === "dameng" ||
   type === "tdengine" ||
+  type === "iotdb" ||
   type === "elasticsearch" ||
   type === "chroma" ||
   type === "qdrant";

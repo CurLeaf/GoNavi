@@ -132,6 +132,11 @@ const getMetadataDialect = (connType: string, driver?: string, oceanBaseProtocol
 
 const buildTableStatusSQL = (dialect: string, dbName: string, schemaName?: string): string => {
         const escapeLiteral = (s: string) => s.replace(/'/g, "''");
+        const iotdbDevicePattern = (name: string) => {
+            const normalized = String(name || '').trim().replace(/[`"]/g, '');
+            if (!normalized) return '';
+            return normalized.endsWith('.**') ? normalized : `${normalized}.**`;
+        };
         switch (dialect) {
         case 'mysql':
         case 'starrocks':
@@ -190,6 +195,10 @@ ORDER BY s.name, t.name`;
             return `SELECT name AS table_name, comment AS table_comment, total_rows AS table_rows, total_bytes AS data_length, 0 AS index_length FROM system.tables WHERE database = '${escapeLiteral(dbName)}' AND engine NOT IN ('View', 'MaterializedView') ORDER BY name`;
         case 'tdengine':
             return `SHOW TABLES FROM \`${dbName.replace(/`/g, '``')}\``;
+        case 'iotdb': {
+            const pattern = iotdbDevicePattern(dbName);
+            return pattern ? `SHOW DEVICES ${pattern}` : 'SHOW DEVICES';
+        }
         case 'dm':
         case 'oracle': {
             const owner = (schemaName || dbName).toUpperCase();
@@ -219,7 +228,7 @@ const parseTableStats = (dialect: string, rows: Record<string, any>[]): TableSta
         };
 
         return {
-            name: strVal(['Name', 'name', 'table_name', 'tablename', 'TABLE_NAME']),
+            name: strVal(['Name', 'name', 'table_name', 'tablename', 'TABLE_NAME', 'Device', 'device']),
             comment: strVal(['Comment', 'table_comment', 'TABLE_COMMENT', 'comments']),
             rows: numVal(['Rows', 'table_rows', 'TABLE_ROWS', 'num_rows', 'reltuples', 'total_rows']),
             dataSize: numVal(['Data_length', 'data_length', 'DATA_LENGTH', 'total_bytes']),
@@ -263,6 +272,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         [connection?.config?.driver, connection?.config?.oceanBaseProtocol, connection?.config?.type]
     );
     const schemaName = String((tab as any).schemaName || '').trim();
+    const supportsDesignWrite = metadataDialect !== 'iotdb';
     const autoFetchVisible = useAutoFetchVisibility();
 
     const loadData = useCallback(async () => {
@@ -415,17 +425,18 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const openDesign = useCallback((tableName: string) => {
         if (!connection) return;
         setActiveContext({ connectionId: connection.id, dbName: tab.dbName || '' });
+        const structureOnly = !supportsDesignWrite;
         addTab({
             id: `design-${connection.id}-${tab.dbName}-${tableName}`,
-            title: `设计表 (${tableName})`,
+            title: `${structureOnly ? '表结构' : '设计表'} (${tableName})`,
             type: 'design',
             connectionId: connection.id,
             dbName: tab.dbName,
             tableName,
             initialTab: 'columns',
-            readOnly: false,
+            readOnly: structureOnly,
         });
-    }, [connection, tab.dbName, addTab, setActiveContext]);
+    }, [connection, tab.dbName, addTab, setActiveContext, supportsDesignWrite]);
 
     const openTableDdl = useCallback((tableName: string) => {
         if (!connection) return;
@@ -827,7 +838,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const buildLegacyTableContextMenuItems = useCallback((table: TableStatRow): MenuProps['items'] => [
         { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => openQueryForTable(table.name) },
         { type: 'divider' },
-        { key: 'design-table', label: '设计表', icon: <EditOutlined />, onClick: () => openDesign(table.name) },
+        { key: 'design-table', label: supportsDesignWrite ? '设计表' : '表结构', icon: <EditOutlined />, onClick: () => openDesign(table.name) },
         { key: 'copy-table-name', label: '复制表名', icon: <CopyOutlined />, onClick: () => handleCopyTableName(table.name) },
         { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(table.name) },
         { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(table.name, 'sql') },
@@ -855,6 +866,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         handleTableDataDangerAction,
         openDesign,
         openQueryForTable,
+        supportsDesignWrite,
     ]);
 
     const renderOverviewSectionTitle = (section: OverviewTableSection) => (

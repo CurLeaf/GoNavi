@@ -16,6 +16,8 @@ describe('connectionDriverType', () => {
     expect(normalizeDriverType('chroma-db')).toBe('chroma');
     expect(normalizeDriverType('qdrantdb')).toBe('qdrant');
     expect(normalizeDriverType('qdrant-db')).toBe('qdrant');
+    expect(normalizeDriverType('apache-iotdb')).toBe('iotdb');
+    expect(normalizeDriverType('apache_iotdb')).toBe('iotdb');
     expect(normalizeDriverType('doris')).toBe('diros');
     expect(normalizeDriverType('open-gauss')).toBe('opengauss');
     expect(normalizeDriverType('InterSystemsIRIS')).toBe('iris');

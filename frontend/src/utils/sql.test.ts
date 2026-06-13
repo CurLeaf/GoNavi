@@ -54,6 +54,11 @@ describe('reverseOrderBySQL', () => {
 });
 
 describe('quoteQualifiedIdent', () => {
+  it('quotes Apache IoTDB device paths with backticks per path segment', () => {
+    expect(quoteQualifiedIdent('iotdb', 'root.sg.d1'))
+      .toBe('`root`.`sg`.`d1`');
+  });
+
   it('does not split dots inside quoted DuckDB identifiers', () => {
     expect(quoteQualifiedIdent('duckdb', '"daily.events"."2026.06"'))
       .toBe('"daily.events"."2026.06"');

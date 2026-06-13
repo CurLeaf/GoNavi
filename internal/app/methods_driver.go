@@ -354,6 +354,7 @@ const builtinDriverManifestJSON = `{
     "iris":      { "engine": "go", "version": "0.2.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/iris" },
     "mongodb":   { "engine": "go", "version": "1.17.9", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mongodb" },
     "tdengine":  { "engine": "go", "version": "3.7.8", "checksumPolicy": "off", "downloadUrl": "builtin://activate/tdengine" },
+    "iotdb":     { "engine": "go", "version": "1.3.7", "checksumPolicy": "off", "downloadUrl": "builtin://activate/iotdb" },
     "clickhouse": { "engine": "go", "version": "2.43.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/clickhouse" },
     "elasticsearch": { "engine": "go", "version": "8.19.6", "checksumPolicy": "off", "downloadUrl": "builtin://activate/elasticsearch" }
   }
@@ -416,6 +417,7 @@ var latestDriverVersionMap = map[string]string{
 	"iris":          "0.2.1",
 	"mongodb":       "2.5.0",
 	"tdengine":      "3.7.8",
+	"iotdb":         "1.3.7",
 	"clickhouse":    "2.43.1",
 	"elasticsearch": "8.19.6",
 	"oracle":        "2.9.0",
@@ -440,6 +442,7 @@ var driverGoModulePathMap = map[string]string{
 	"iris":          "github.com/caretdev/go-irisnative",
 	"mongodb":       "go.mongodb.org/mongo-driver/v2",
 	"tdengine":      "github.com/taosdata/driver-go/v3",
+	"iotdb":         "github.com/apache/iotdb-client-go",
 	"clickhouse":    "github.com/ClickHouse/clickhouse-go/v2",
 	"elasticsearch": "github.com/elastic/go-elasticsearch/v8",
 }
@@ -1505,6 +1508,7 @@ func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) [
 		buildOptionalGoDriverDefinition("iris", "InterSystems IRIS", packages),
 		buildOptionalGoDriverDefinition("mongodb", "MongoDB", packages),
 		buildOptionalGoDriverDefinition("tdengine", "TDengine", packages),
+		buildOptionalGoDriverDefinition("iotdb", "Apache IoTDB", packages),
 		buildOptionalGoDriverDefinition("clickhouse", "ClickHouse", packages),
 		buildOptionalGoDriverDefinition("elasticsearch", "Elasticsearch", packages),
 	}
@@ -4081,6 +4085,8 @@ func optionalDriverBuildTag(driverType string, selectedVersion string) (string, 
 		return "gonavi_mongodb_driver", nil
 	case "tdengine":
 		return "gonavi_tdengine_driver", nil
+	case "iotdb":
+		return "gonavi_iotdb_driver", nil
 	case "clickhouse":
 		return "gonavi_clickhouse_driver", nil
 	case "elasticsearch":

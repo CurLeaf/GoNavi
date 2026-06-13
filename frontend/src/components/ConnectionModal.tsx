@@ -1873,6 +1873,9 @@ const ConnectionModal: React.FC<{
     if (dbType === "qdrant") {
       return "http://127.0.0.1:6333";
     }
+    if (dbType === "iotdb") {
+      return "iotdb://root:root@127.0.0.1:6667/root.sg";
+    }
     if (dbType === "redis") {
       return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster 或 redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster";
     }
@@ -1922,6 +1925,8 @@ const ConnectionModal: React.FC<{
         return "schema=SYSDBA";
       case "tdengine":
         return "timezone=Asia%2FShanghai";
+      case "iotdb":
+        return "fetchSize=1024&timeZone=Asia%2FShanghai";
       default:
         return "key=value&another=value";
     }

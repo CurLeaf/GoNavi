@@ -19,6 +19,7 @@ describe('connectionTypeCapabilities', () => {
     expect(singleHostUriSchemesByType.elasticsearch).toEqual(['http', 'https']);
     expect(singleHostUriSchemesByType.chroma).toEqual(['http', 'https', 'chroma']);
     expect(singleHostUriSchemesByType.qdrant).toEqual(['http', 'https', 'qdrant']);
+    expect(singleHostUriSchemesByType.iotdb).toEqual(['iotdb']);
     expect(singleHostUriSchemesByType.redis).toEqual(['redis']);
   });
 
@@ -29,6 +30,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsSSLForType('chroma')).toBe(true);
     expect(supportsSSLForType('qdrant')).toBe(true);
     expect(supportsSSLForType('tdengine')).toBe(true);
+    expect(supportsSSLForType('iotdb')).toBe(false);
     expect(supportsSSLForType('dameng')).toBe(true);
     expect(supportsSSLForType('sqlite')).toBe(false);
   });
@@ -70,6 +72,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsConnectionParamsForType('mongodb')).toBe(true);
     expect(supportsConnectionParamsForType('dameng')).toBe(true);
     expect(supportsConnectionParamsForType('tdengine')).toBe(true);
+    expect(supportsConnectionParamsForType('iotdb')).toBe(true);
     expect(supportsConnectionParamsForType('elasticsearch')).toBe(true);
     expect(supportsConnectionParamsForType('chroma')).toBe(true);
     expect(supportsConnectionParamsForType('qdrant')).toBe(true);

@@ -2540,16 +2540,16 @@ const Sidebar: React.FC<{
     }
   };
 
-  const isNonRelationalDbType = (connectionId: string): boolean => {
+  const isStructureOnlyDbType = (connectionId: string): boolean => {
       const conn = connections.find(c => c.id === connectionId);
       if (!conn) return false;
       const dbType = resolveDataSourceType(conn.config);
-      return dbType === 'elasticsearch' || dbType === 'mongodb' || dbType === 'redis';
+      return dbType === 'elasticsearch' || dbType === 'mongodb' || dbType === 'redis' || dbType === 'iotdb';
   };
 
   const openDesign = (node: any, initialTab: string, readOnly: boolean = false) => {
       const { tableName, dbName, id } = node.dataRef;
-      const forceReadOnly = readOnly || isNonRelationalDbType(id);
+      const forceReadOnly = readOnly || isStructureOnlyDbType(id);
       addTab({
           id: `design-${id}-${dbName}-${tableName}`,
           title: `${forceReadOnly ? '表结构' : '设计表'} (${tableName})`,
@@ -2564,6 +2564,10 @@ const Sidebar: React.FC<{
 
   const openNewTableDesign = (node: any) => {
       const { dbName, id } = node.dataRef;
+      if (isStructureOnlyDbType(id)) {
+          message.warning('当前数据源暂不支持可视化新建表');
+          return;
+      }
       addTab({
           id: `new-table-${id}-${dbName}-${Date.now()}`,
           title: `新建表 - ${dbName}`,
@@ -6405,14 +6409,15 @@ const Sidebar: React.FC<{
         const groupData = node.dataRef; // { ...conn, dbName, groupKey }
         const sortPreferenceKey = `${groupData.id}-${groupData.dbName}`;
         const currentSort = tableSortPreference[sortPreferenceKey] || 'name';
+        const canCreateTable = !isStructureOnlyDbType(String(groupData.id || ''));
 
         return [
-            {
+            ...(canCreateTable ? [{
                 key: 'new-table',
                 label: '新建表',
                 icon: <TableOutlined />,
                 onClick: () => openNewTableDesign(node)
-            },
+            }] : []),
             { type: 'divider' },
             {
                 key: 'sort-by-name',
@@ -6845,13 +6850,14 @@ const Sidebar: React.FC<{
        const capabilities = getDataSourceCapabilities(databaseConn?.config);
        const isStarRocks = dialect === 'starrocks';
        const supportsSchemaActions = isPostgresSchemaDialect(dialect);
+       const canCreateTable = !isStructureOnlyDbType(String(databaseConn?.id || ''));
        return [
-           {
+           ...(canCreateTable ? [{
                key: 'new-table',
                label: '新建表',
                icon: <TableOutlined />,
                onClick: () => openNewTableDesign(node)
-           },
+           }] : []),
            ...(supportsSchemaActions ? [
                {
                    key: 'new-schema',
@@ -7116,7 +7122,7 @@ const Sidebar: React.FC<{
             { type: 'divider' },
             {
                 key: 'design-table',
-                label: '设计表',
+                label: isStructureOnlyDbType(String(node.dataRef?.id || '')) ? '表结构' : '设计表',
                 icon: <EditOutlined />,
                 onClick: () => openDesign(node, 'columns', false)
             },

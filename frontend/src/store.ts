@@ -289,6 +289,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "postgres",
   "redis",
   "tdengine",
+  "iotdb",
   "oracle",
   "dameng",
   "kingbase",
@@ -353,6 +354,8 @@ const getDefaultPortByType = (type: string): number => {
       return 6379;
     case "tdengine":
       return 6041;
+    case "iotdb":
+      return 6667;
     case "oracle":
       return 1521;
     case "dameng":

@@ -91,6 +91,7 @@ describe('connectionModalPresentation', () => {
       'qdrant',
       'redis',
       'tdengine',
+      'iotdb',
       'custom',
       'jvm',
     ];
@@ -174,6 +175,14 @@ describe('connectionModalPresentation', () => {
       'credentials',
       'databaseScope',
     ]);
+    expect(resolveConnectionConfigLayout('iotdb').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'service',
+      'credentials',
+      'databaseScope',
+    ]);
   });
 
   it('uses localized labels for layout kinds shown in the modal', () => {
@@ -181,5 +190,6 @@ describe('connectionModalPresentation', () => {
     expect(getConnectionConfigLayoutKindLabel('file')).toBe('文件型数据库');
     expect(getConnectionConfigLayoutKindLabel('search')).toBe('搜索引擎');
     expect(getConnectionConfigLayoutKindLabel('vector')).toBe('向量数据库');
+    expect(getConnectionConfigLayoutKindLabel('timeseries')).toBe('时序数据库');
   });
 });

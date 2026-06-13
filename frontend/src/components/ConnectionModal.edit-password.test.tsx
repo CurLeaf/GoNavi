@@ -64,6 +64,18 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('return "http://127.0.0.1:6333";');
     expect(source).toContain('return "apiKey=...";');
   });
+
+  it('exposes Apache IoTDB in the create-connection picker with timeseries defaults', () => {
+    expect(source).toContain("case 'iotdb':");
+    expect(source).toContain('return 6667;');
+    expect(source).toContain('iotdb: ["iotdb"]');
+    expect(source).toContain("key: 'iotdb'");
+    expect(source).toContain("name: 'Apache IoTDB'");
+    expect(source).toContain('dbType === "iotdb"');
+    expect(source).toContain("return 'Storage Group / Device / Timeseries';");
+    expect(source).toContain('return "iotdb://root:root@127.0.0.1:6667/root.sg";');
+    expect(source).toContain('return "fetchSize=1024&timeZone=Asia%2FShanghai";');
+  });
 });
 
 describe('ConnectionModal Redis Sentinel configuration', () => {

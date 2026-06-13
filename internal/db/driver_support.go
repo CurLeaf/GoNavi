@@ -39,6 +39,7 @@ var optionalGoDrivers = map[string]struct{}{
 	"iris":          {},
 	"mongodb":       {},
 	"tdengine":      {},
+	"iotdb":         {},
 	"clickhouse":    {},
 	"elasticsearch": {},
 }
@@ -72,6 +73,8 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "chroma"
 	case "qdrantdb", "qdrant-db":
 		return "qdrant"
+	case "apache-iotdb", "apache_iotdb", "iotdb":
+		return "iotdb"
 	default:
 		return normalized
 	}
@@ -119,6 +122,8 @@ func driverDisplayName(driverType string) string {
 		return "MongoDB"
 	case "tdengine":
 		return "TDengine"
+	case "iotdb":
+		return "Apache IoTDB"
 	case "clickhouse":
 		return "ClickHouse"
 	case "elasticsearch":

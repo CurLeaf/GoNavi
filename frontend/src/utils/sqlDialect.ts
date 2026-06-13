@@ -27,6 +27,7 @@ export type SqlDialect =
   | 'duckdb'
   | 'clickhouse'
   | 'tdengine'
+  | 'iotdb'
   | 'mongodb'
   | 'redis'
   | 'elasticsearch'
@@ -111,6 +112,7 @@ export const resolveSqlDialect = (
     case 'duckdb':
     case 'clickhouse':
     case 'tdengine':
+    case 'iotdb':
     case 'mongodb':
     case 'redis':
     case 'elasticsearch':
@@ -125,6 +127,9 @@ export const resolveSqlDialect = (
     case 'qdrant-db':
     case 'qdrant':
       return 'qdrant';
+    case 'apache-iotdb':
+    case 'apache_iotdb':
+      return 'iotdb';
     default:
       break;
   }
@@ -147,6 +152,7 @@ export const resolveSqlDialect = (
   if (source.includes('duckdb')) return 'duckdb';
   if (source.includes('clickhouse')) return 'clickhouse';
   if (source.includes('tdengine')) return 'tdengine';
+  if (source.includes('iotdb')) return 'iotdb';
   if (source.includes('sqlserver') || source.includes('mssql')) return 'sqlserver';
   if (source.includes('iris') || source.includes('intersystems')) return 'iris';
   if (source.includes('elastic')) return 'elasticsearch';
@@ -171,7 +177,7 @@ export const isOracleLikeDialect = (dbType: string): boolean => (
 export const isSqlServerDialect = (dbType: string): boolean => resolveSqlDialect(dbType) === 'sqlserver';
 
 export const isBacktickIdentifierDialect = (dbType: string): boolean => (
-  isMysqlFamilyDialect(dbType) || ['clickhouse', 'tdengine'].includes(resolveSqlDialect(dbType))
+  isMysqlFamilyDialect(dbType) || ['clickhouse', 'tdengine', 'iotdb'].includes(resolveSqlDialect(dbType))
 );
 
 const stripIdentifierQuotes = (part: string): string => {
@@ -470,6 +476,19 @@ const TDENGINE_TYPES = optionValues([
   'GEOMETRY',
 ]);
 
+const IOTDB_TYPES = optionValues([
+  'BOOLEAN',
+  'INT32',
+  'INT64',
+  'FLOAT',
+  'DOUBLE',
+  'TEXT',
+  'STRING',
+  'BLOB',
+  'TIMESTAMP',
+  'DATE',
+]);
+
 const DUCKDB_TYPES = optionValues([
   'BOOLEAN',
   'TINYINT',
@@ -514,6 +533,7 @@ export const resolveColumnTypeOptions = (dbType: string): ColumnTypeOption[] => 
   if (dialect === 'duckdb') return DUCKDB_TYPES;
   if (dialect === 'clickhouse') return CLICKHOUSE_TYPES;
   if (dialect === 'tdengine') return TDENGINE_TYPES;
+  if (dialect === 'iotdb') return IOTDB_TYPES;
   return COMMON_TYPES;
 };
 
@@ -565,6 +585,26 @@ const STARROCKS_KEYWORDS = [
 
 const TDENGINE_KEYWORDS = ['LIMIT', 'SLIMIT', 'SOFFSET', 'TAGS', 'USING', 'INTERVAL', 'FILL', 'PARTITION BY'];
 
+const IOTDB_KEYWORDS = [
+  'LIMIT',
+  'OFFSET',
+  'ALIGN BY DEVICE',
+  'DISABLE ALIGN',
+  'GROUP BY',
+  'LEVEL',
+  'FILL',
+  'SLIMIT',
+  'SOFFSET',
+  'CREATE TIMESERIES',
+  'SHOW TIMESERIES',
+  'SHOW DEVICES',
+  'SHOW DATABASES',
+  'STORAGE GROUP',
+  'WITH DATATYPE',
+  'ENCODING',
+  'COMPRESSION',
+];
+
 export const resolveSqlKeywords = (dbType: string): string[] => {
   const dialect = resolveSqlDialect(dbType);
   if (dialect === 'starrocks') return unique([...COMMON_KEYWORDS, ...MYSQL_KEYWORDS, ...STARROCKS_KEYWORDS]);
@@ -576,6 +616,7 @@ export const resolveSqlKeywords = (dbType: string): string[] => {
   if (dialect === 'duckdb') return unique([...COMMON_KEYWORDS, ...DUCKDB_KEYWORDS]);
   if (dialect === 'clickhouse') return unique([...COMMON_KEYWORDS, ...CLICKHOUSE_KEYWORDS]);
   if (dialect === 'tdengine') return unique([...COMMON_KEYWORDS, ...TDENGINE_KEYWORDS]);
+  if (dialect === 'iotdb') return unique([...COMMON_KEYWORDS, ...IOTDB_KEYWORDS]);
   return COMMON_KEYWORDS;
 };
 
@@ -793,6 +834,19 @@ const TDENGINE_FUNCTIONS = [
   fn('IRATE', 'TDengine - 瞬时变化率'),
 ];
 
+const IOTDB_FUNCTIONS = [
+  fn('NOW', 'IoTDB - 当前时间'),
+  fn('DATE_BIN', 'IoTDB - 时间分桶'),
+  fn('DIFF', 'IoTDB - 差分'),
+  fn('TIME_DIFFERENCE', 'IoTDB - 时间差'),
+  fn('DERIVATIVE', 'IoTDB - 导数'),
+  fn('NON_NEGATIVE_DERIVATIVE', 'IoTDB - 非负导数'),
+  fn('TOP_K', 'IoTDB - Top K'),
+  fn('BOTTOM_K', 'IoTDB - Bottom K'),
+  fn('M4', 'IoTDB - M4 降采样'),
+  fn('EQUAL_SIZE_BUCKET_RANDOM_SAMPLE', 'IoTDB - 等宽随机采样'),
+];
+
 const mergeFunctions = (items: SqlFunctionCompletion[]): SqlFunctionCompletion[] => {
   const seen = new Set<string>();
   const result: SqlFunctionCompletion[] = [];
@@ -816,5 +870,6 @@ export const resolveSqlFunctions = (dbType: string): SqlFunctionCompletion[] => 
   if (dialect === 'duckdb') return mergeFunctions([...COMMON_FUNCTIONS, ...DUCKDB_FUNCTIONS]);
   if (dialect === 'clickhouse') return mergeFunctions([...COMMON_FUNCTIONS, ...CLICKHOUSE_FUNCTIONS]);
   if (dialect === 'tdengine') return mergeFunctions([...COMMON_FUNCTIONS, ...TDENGINE_FUNCTIONS]);
+  if (dialect === 'iotdb') return mergeFunctions([...COMMON_FUNCTIONS, ...IOTDB_FUNCTIONS]);
   return COMMON_FUNCTIONS;
 };

@@ -56,6 +56,7 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
     label: '时序数据库',
     items: [
       { key: 'tdengine', name: 'TDengine' },
+      { key: 'iotdb', name: 'Apache IoTDB' },
     ],
   },
   {
@@ -90,6 +91,8 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 6379;
     case 'tdengine':
       return 6041;
+    case 'iotdb':
+      return 6667;
     case 'oracle':
       return 1521;
     case 'dameng':
@@ -138,6 +141,8 @@ export const getConnectionTypeHint = (type: string): string => {
       return 'Collection 浏览、向量检索和元数据过滤';
     case 'qdrant':
       return 'Collection 浏览、向量搜索和 Payload 过滤';
+    case 'iotdb':
+      return 'Storage Group / Device / Timeseries';
     case 'oceanbase':
       return 'MySQL / Oracle 租户';
     case 'sqlite':

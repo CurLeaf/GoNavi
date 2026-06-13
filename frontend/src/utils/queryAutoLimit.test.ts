@@ -25,6 +25,7 @@ describe('applyQueryAutoLimit', () => {
     'duckdb',
     'clickhouse',
     'tdengine',
+    'iotdb',
   ];
 
   it.each(limitDialects)('adds generic LIMIT for %s connections', (dbType) => {

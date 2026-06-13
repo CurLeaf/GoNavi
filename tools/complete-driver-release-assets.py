@@ -30,6 +30,7 @@ DRIVERS = [
     "iris",
     "mongodb",
     "tdengine",
+    "iotdb",
     "clickhouse",
     "elasticsearch",
 ]

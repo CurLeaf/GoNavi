@@ -920,6 +920,41 @@ func TestBuildSchemaMigrationPlan_TDengineTargetWarnsInsertOnlyBoundary(t *testi
 	}
 }
 
+func TestBuildSchemaMigrationPlan_IoTDBTargetWarnsInsertOnlyBoundary(t *testing.T) {
+	t.Parallel()
+
+	sourceDB := &fakeMigrationDB{
+		columns: map[string][]connection.ColumnDefinition{
+			"shop.metrics": {
+				{Name: "Time", Type: "timestamp", Nullable: "NO", Key: "PRI"},
+				{Name: "value", Type: "double", Nullable: "YES"},
+			},
+		},
+	}
+	targetDB := &fakeMigrationDB{
+		columns: map[string][]connection.ColumnDefinition{
+			"root.sg.metrics": {
+				{Name: "Time", Type: "timestamp", Nullable: "NO", Key: "PRI"},
+				{Name: "value", Type: "double", Nullable: "YES"},
+			},
+		},
+	}
+	cfg := SyncConfig{
+		SourceConfig: connection.ConnectionConfig{Type: "mysql", Database: "shop"},
+		TargetConfig: connection.ConnectionConfig{Type: "iotdb", Database: "root.sg"},
+		Mode:         "insert_update",
+	}
+
+	plan, _, _, err := buildSchemaMigrationPlan(cfg, "metrics", sourceDB, targetDB)
+	if err != nil {
+		t.Fatalf("buildSchemaMigrationPlan returned error: %v", err)
+	}
+	warnings := strings.Join(plan.Warnings, " ")
+	if !strings.Contains(warnings, "仅支持 INSERT 写入") {
+		t.Fatalf("expected IoTDB target warning, got: %v", plan.Warnings)
+	}
+}
+
 func TestBuildMySQLLikeToTDenginePlan_AutoCreateWhenTargetMissing(t *testing.T) {
 	t.Parallel()
 

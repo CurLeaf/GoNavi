@@ -108,6 +108,25 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats Apache IoTDB as a queryable timeseries datasource with IoTDB-specific writes', () => {
+    expect(getDataSourceCapabilities({ type: 'iotdb' })).toMatchObject({
+      type: 'iotdb',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: true,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'apache-iotdb' })).toMatchObject({
+      type: 'iotdb',
+      supportsQueryEditor: true,
+      supportsCopyInsert: false,
+      forceReadOnlyQueryResult: true,
+    });
+  });
+
   it('treats OceanBase Oracle protocol as Oracle capabilities', () => {
     expect(getDataSourceCapabilities({
       type: 'oceanbase',

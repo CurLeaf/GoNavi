@@ -32,6 +32,13 @@ describe('DatabaseIcons', () => {
     expect(markup).toContain('>Qd</text>');
   });
 
+  it('includes Apache IoTDB in the selectable database icons', () => {
+    expect(DB_ICON_TYPES).toContain('iotdb');
+    expect(getDbIconLabel('iotdb')).toBe('Apache IoTDB');
+    const markup = renderToStaticMarkup(<>{getDbIcon('iotdb', undefined, 22)}</>);
+    expect(markup).toContain('>Io</text>');
+  });
+
   it('wraps database icons in a consistent frame for sidebar sizing', () => {
     const mysqlMarkup = renderToStaticMarkup(<>{getDbIcon('mysql', undefined, 22)}</>);
     const jvmMarkup = renderToStaticMarkup(<>{getDbIcon('jvm', undefined, 22)}</>);

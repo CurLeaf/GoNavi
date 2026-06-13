@@ -469,6 +469,39 @@ func TestElasticsearchDriverDefinitionUsesOptionalAgent(t *testing.T) {
 	}
 }
 
+func TestIoTDBDriverDefinitionUsesOptionalAgent(t *testing.T) {
+	definition, ok := resolveDriverDefinition("iotdb")
+	if !ok {
+		t.Fatal("expected iotdb driver definition")
+	}
+	if definition.Name != "Apache IoTDB" {
+		t.Fatalf("unexpected iotdb driver name: %q", definition.Name)
+	}
+	if definition.BuiltIn {
+		t.Fatal("expected iotdb to be an optional driver agent")
+	}
+	if driverGoModulePathMap["iotdb"] != "github.com/apache/iotdb-client-go" {
+		t.Fatalf("unexpected iotdb go module path: %q", driverGoModulePathMap["iotdb"])
+	}
+	if definition.PinnedVersion != "1.3.7" {
+		t.Fatalf("unexpected iotdb definition pinned version: %q", definition.PinnedVersion)
+	}
+	if definition.DefaultDownloadURL != "builtin://activate/iotdb" {
+		t.Fatalf("unexpected iotdb default download URL: %q", definition.DefaultDownloadURL)
+	}
+	if latestDriverVersionMap["iotdb"] != "1.3.7" {
+		t.Fatalf("unexpected iotdb pinned version: %q", latestDriverVersionMap["iotdb"])
+	}
+
+	tags, err := optionalDriverBuildTags("iotdb", "")
+	if err != nil {
+		t.Fatalf("resolve iotdb build tags failed: %v", err)
+	}
+	if tags != "gonavi_iotdb_driver" {
+		t.Fatalf("unexpected iotdb build tag: %q", tags)
+	}
+}
+
 func TestBuildOptionalDriverInstallPlanMessagePrefersDirectThenBundle(t *testing.T) {
 	message := buildOptionalDriverInstallPlanMessage("SQL Server", "1.9.6", false, false, false, false, 1, 2)
 	if !strings.Contains(message, "先尝试 1 个预编译直链") {

@@ -6,6 +6,7 @@ require (
 	gitea.com/kingbase/gokb v0.0.0-20201021123113-29bd62a876c3
 	gitee.com/chunanyong/dm v1.8.22
 	github.com/ClickHouse/clickhouse-go/v2 v2.43.0
+	github.com/apache/iotdb-client-go v1.3.7
 	github.com/caretdev/go-irisnative v0.2.1
 	github.com/duckdb/duckdb-go/v2 v2.5.5
 	github.com/elastic/go-elasticsearch/v8 v8.19.6
@@ -31,6 +32,7 @@ require (
 )
 
 require (
+	github.com/apache/thrift v0.22.0 // indirect
 	github.com/elastic/elastic-transport-go/v8 v8.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

@@ -70,7 +70,7 @@ normalize_driver() {
     doris|diros) echo "diros" ;;
     opengauss|open_gauss|open-gauss) echo "opengauss" ;;
     elasticsearch|elastic) echo "elasticsearch" ;;
-    mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|iris|mongodb|tdengine|clickhouse)
+    mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|iris|mongodb|tdengine|iotdb|clickhouse)
       echo "$value"
       ;;
     *)

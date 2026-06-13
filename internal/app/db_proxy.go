@@ -217,6 +217,8 @@ func defaultPortByType(driverType string) int {
 		return 6379
 	case "tdengine":
 		return 6041
+	case "iotdb":
+		return 6667
 	case "oracle":
 		return 1521
 	case "dameng":

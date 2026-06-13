@@ -26,6 +26,7 @@ describe('connectionTypeCatalog', () => {
     expect(keys).toContain('elasticsearch');
     expect(keys).toContain('chroma');
     expect(keys).toContain('qdrant');
+    expect(keys).toContain('iotdb');
     expect(keys).toContain('jvm');
     expect(keys).toContain('custom');
     expect(new Set(keys).size).toBe(keys.length);
@@ -42,6 +43,7 @@ describe('connectionTypeCatalog', () => {
     expect(getConnectionTypeDefaultPort('elasticsearch')).toBe(9200);
     expect(getConnectionTypeDefaultPort('chroma')).toBe(8000);
     expect(getConnectionTypeDefaultPort('qdrant')).toBe(6333);
+    expect(getConnectionTypeDefaultPort('iotdb')).toBe(6667);
     expect(getConnectionTypeDefaultPort('sqlite')).toBe(0);
     expect(getConnectionTypeDefaultPort('duckdb')).toBe(0);
     expect(getConnectionTypeDefaultPort('unknown')).toBe(3306);
@@ -53,6 +55,7 @@ describe('connectionTypeCatalog', () => {
     expect(getConnectionTypeHint('elasticsearch')).toContain('Mapping');
     expect(getConnectionTypeHint('chroma')).toContain('向量');
     expect(getConnectionTypeHint('qdrant')).toContain('Payload');
+    expect(getConnectionTypeHint('iotdb')).toContain('Timeseries');
     expect(getConnectionTypeHint('oceanbase')).toBe('MySQL / Oracle 租户');
     expect(getConnectionTypeHint('duckdb')).toBe('本地文件连接');
     expect(getConnectionTypeHint('mysql')).toBe('标准连接配置');

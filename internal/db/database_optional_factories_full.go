@@ -19,6 +19,7 @@ func registerOptionalDatabaseFactories() {
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("iris"), "iris", "intersystems")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("mongodb"), "mongodb")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("tdengine"), "tdengine")
+	registerDatabaseFactory(newOptionalDriverAgentDatabase("iotdb"), "iotdb", "apache-iotdb", "apache_iotdb")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("clickhouse"), "clickhouse")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("elasticsearch"), "elasticsearch", "elastic")
 }

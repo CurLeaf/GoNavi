@@ -41,6 +41,7 @@ export type ConnectionConfigLayoutKind =
   | 'file'
   | 'search'
   | 'vector'
+  | 'timeseries'
   | 'custom'
   | 'jvm'
   | 'generic-sql';
@@ -163,6 +164,8 @@ export const getConnectionConfigLayoutKindLabel = (
       return '搜索引擎';
     case 'vector':
       return '向量数据库';
+    case 'timeseries':
+      return '时序数据库';
     case 'custom':
       return '自定义连接';
     case 'jvm':
@@ -255,6 +258,19 @@ export const resolveConnectionConfigLayout = (
   if (type === 'chroma' || type === 'qdrant') {
     return {
       kind: 'vector',
+      sections: [
+        'identity',
+        'uri',
+        'target',
+        'service',
+        'credentials',
+        'databaseScope',
+      ],
+    };
+  }
+  if (type === 'iotdb') {
+    return {
+      kind: 'timeseries',
       sections: [
         'identity',
         'uri',

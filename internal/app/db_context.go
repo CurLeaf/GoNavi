@@ -20,7 +20,7 @@ func normalizeRunConfig(config connection.ConnectionConfig, dbName string) conne
 		if !isOceanBaseOracleProtocol(config) {
 			runConfig.Database = name
 		}
-	case "mysql", "mariadb", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "iris", "intersystems", "intersystemsiris", "inter-systems", "inter-systems-iris", "mongodb", "tdengine", "clickhouse":
+	case "mysql", "mariadb", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "iris", "intersystems", "intersystemsiris", "inter-systems", "inter-systems-iris", "mongodb", "tdengine", "iotdb", "clickhouse":
 		// 这些类型的 dbName 表示"数据库"，需要写入连接配置以选择目标库。
 		runConfig.Database = name
 	case "dameng":
@@ -51,7 +51,7 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 
 	// Elasticsearch：索引名可能含多个点（如 iot_pro_biz_operate_log.index.20240626），
 	// 不能按点分割，直接返回原始数据库名和完整表名。
-	if dbType == "elasticsearch" {
+	if dbType == "elasticsearch" || dbType == "iotdb" {
 		return rawDB, rawTable
 	}
 
