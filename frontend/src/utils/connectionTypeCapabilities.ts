@@ -12,6 +12,7 @@ export const singleHostUriSchemesByType: Record<string, string[]> = {
   highgo: ["highgo"],
   vastbase: ["vastbase"],
   elasticsearch: ["http", "https"],
+  chroma: ["http", "https", "chroma"],
 };
 
 const normalizeConnectionType = (type: string) =>
@@ -40,6 +41,7 @@ const sslSupportedTypes = new Set([
   "redis",
   "tdengine",
   "elasticsearch",
+  "chroma",
 ]);
 
 export const supportsSSLForType = (type: string) =>
@@ -62,6 +64,7 @@ const sslCAPathSupportedTypes = new Set([
   "mongodb",
   "redis",
   "elasticsearch",
+  "chroma",
 ]);
 
 const sslClientCertificateSupportedTypes = new Set([
@@ -123,4 +126,5 @@ export const supportsConnectionParamsForType = (type: string) =>
   type === "mongodb" ||
   type === "dameng" ||
   type === "tdengine" ||
-  type === "elasticsearch";
+  type === "elasticsearch" ||
+  type === "chroma";

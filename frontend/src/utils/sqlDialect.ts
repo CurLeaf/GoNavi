@@ -30,6 +30,7 @@ export type SqlDialect =
   | 'mongodb'
   | 'redis'
   | 'elasticsearch'
+  | 'chroma'
   | 'unknown'
   | string;
 
@@ -115,6 +116,10 @@ export const resolveSqlDialect = (
       return source;
     case 'elastic':
       return 'elasticsearch';
+    case 'chromadb':
+    case 'chroma-db':
+    case 'chroma':
+      return 'chroma';
     default:
       break;
   }
@@ -140,6 +145,7 @@ export const resolveSqlDialect = (
   if (source.includes('sqlserver') || source.includes('mssql')) return 'sqlserver';
   if (source.includes('iris') || source.includes('intersystems')) return 'iris';
   if (source.includes('elastic')) return 'elasticsearch';
+  if (source.includes('chroma')) return 'chroma';
 
   return source;
 };

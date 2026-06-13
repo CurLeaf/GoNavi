@@ -16,28 +16,29 @@ var coreBuiltinDrivers = map[string]struct{}{
 	"redis":    {},
 	"oracle":   {},
 	"postgres": {},
+	"chroma":   {},
 }
 
 // optionalGoDrivers 表示需要用户“安装启用”后才能使用的纯 Go 驱动。
 // 注意：这是一种运行时门控（installed.json 标记），并不减少主二进制体积。
 var optionalGoDrivers = map[string]struct{}{
-	"mariadb":    {},
-	"oceanbase":  {},
-	"diros":      {},
-	"starrocks":  {},
-	"sphinx":     {},
-	"sqlserver":  {},
-	"sqlite":     {},
-	"duckdb":     {},
-	"dameng":     {},
-	"kingbase":   {},
-	"highgo":     {},
-	"vastbase":   {},
-	"opengauss":  {},
-	"iris":       {},
-	"mongodb":      {},
-	"tdengine":     {},
-	"clickhouse":   {},
+	"mariadb":       {},
+	"oceanbase":     {},
+	"diros":         {},
+	"starrocks":     {},
+	"sphinx":        {},
+	"sqlserver":     {},
+	"sqlite":        {},
+	"duckdb":        {},
+	"dameng":        {},
+	"kingbase":      {},
+	"highgo":        {},
+	"vastbase":      {},
+	"opengauss":     {},
+	"iris":          {},
+	"mongodb":       {},
+	"tdengine":      {},
+	"clickhouse":    {},
 	"elasticsearch": {},
 }
 
@@ -66,6 +67,8 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "iris"
 	case "elastic":
 		return "elasticsearch"
+	case "chromadb", "chroma-db":
+		return "chroma"
 	default:
 		return normalized
 	}
@@ -117,6 +120,8 @@ func driverDisplayName(driverType string) string {
 		return "ClickHouse"
 	case "elasticsearch":
 		return "Elasticsearch"
+	case "chroma":
+		return "Chroma"
 	default:
 		return strings.ToUpper(strings.TrimSpace(driverType))
 	}

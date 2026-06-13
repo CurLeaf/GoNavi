@@ -46,6 +46,12 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
     ],
   },
   {
+    label: '向量数据库',
+    items: [
+      { key: 'chroma', name: 'Chroma' },
+    ],
+  },
+  {
     label: '时序数据库',
     items: [
       { key: 'tdengine', name: 'TDengine' },
@@ -97,6 +103,8 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 27017;
     case 'elasticsearch':
       return 9200;
+    case 'chroma':
+      return 8000;
     case 'highgo':
       return 5866;
     case 'mariadb':
@@ -123,6 +131,8 @@ export const getConnectionTypeHint = (type: string): string => {
       return '单机 / 副本集';
     case 'elasticsearch':
       return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';
+    case 'chroma':
+      return 'Collection 浏览、向量检索和元数据过滤';
     case 'oceanbase':
       return 'MySQL / Oracle 租户';
     case 'sqlite':

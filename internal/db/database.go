@@ -480,6 +480,9 @@ var databaseFactories = map[string]databaseFactory{
 	"custom": func() Database {
 		return &CustomDB{}
 	},
+	"chroma": func() Database {
+		return &ChromaDB{}
+	},
 }
 
 func init() {
@@ -512,6 +515,8 @@ func normalizeDatabaseType(dbType string) string {
 		return "opengauss"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
+	case "chromadb", "chroma-db":
+		return "chroma"
 	default:
 		return normalized
 	}

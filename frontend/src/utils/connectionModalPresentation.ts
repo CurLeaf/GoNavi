@@ -40,6 +40,7 @@ export type ConnectionConfigLayoutKind =
   | 'oracle'
   | 'file'
   | 'search'
+  | 'vector'
   | 'custom'
   | 'jvm'
   | 'generic-sql';
@@ -160,6 +161,8 @@ export const getConnectionConfigLayoutKindLabel = (
       return '文件型数据库';
     case 'search':
       return '搜索引擎';
+    case 'vector':
+      return '向量数据库';
     case 'custom':
       return '自定义连接';
     case 'jvm':
@@ -239,6 +242,19 @@ export const resolveConnectionConfigLayout = (
   if (type === 'elasticsearch') {
     return {
       kind: 'search',
+      sections: [
+        'identity',
+        'uri',
+        'target',
+        'service',
+        'credentials',
+        'databaseScope',
+      ],
+    };
+  }
+  if (type === 'chroma') {
+    return {
+      kind: 'vector',
       sections: [
         'identity',
         'uri',

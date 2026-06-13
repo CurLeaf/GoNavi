@@ -13,6 +13,7 @@ describe('connectionTypeCatalog', () => {
       '关系型数据库',
       '国产数据库',
       'NoSQL',
+      '向量数据库',
       '时序数据库',
       '其他',
     ]);
@@ -23,6 +24,7 @@ describe('connectionTypeCatalog', () => {
     expect(keys).toContain('mongodb');
     expect(keys).toContain('redis');
     expect(keys).toContain('elasticsearch');
+    expect(keys).toContain('chroma');
     expect(keys).toContain('jvm');
     expect(keys).toContain('custom');
     expect(new Set(keys).size).toBe(keys.length);
@@ -37,6 +39,7 @@ describe('connectionTypeCatalog', () => {
     expect(getConnectionTypeDefaultPort('oracle')).toBe(1521);
     expect(getConnectionTypeDefaultPort('mongodb')).toBe(27017);
     expect(getConnectionTypeDefaultPort('elasticsearch')).toBe(9200);
+    expect(getConnectionTypeDefaultPort('chroma')).toBe(8000);
     expect(getConnectionTypeDefaultPort('sqlite')).toBe(0);
     expect(getConnectionTypeDefaultPort('duckdb')).toBe(0);
     expect(getConnectionTypeDefaultPort('unknown')).toBe(3306);
@@ -46,6 +49,7 @@ describe('connectionTypeCatalog', () => {
     expect(getConnectionTypeHint('redis')).toBe('单机 / 哨兵 / 集群');
     expect(getConnectionTypeHint('mongodb')).toBe('单机 / 副本集');
     expect(getConnectionTypeHint('elasticsearch')).toContain('Mapping');
+    expect(getConnectionTypeHint('chroma')).toContain('向量');
     expect(getConnectionTypeHint('oceanbase')).toBe('MySQL / Oracle 租户');
     expect(getConnectionTypeHint('duckdb')).toBe('本地文件连接');
     expect(getConnectionTypeHint('mysql')).toBe('标准连接配置');

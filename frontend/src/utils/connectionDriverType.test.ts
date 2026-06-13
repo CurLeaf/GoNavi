@@ -12,6 +12,8 @@ describe('connectionDriverType', () => {
     expect(normalizeDriverType('postgresql')).toBe('postgres');
     expect(normalizeDriverType('pgx')).toBe('postgres');
     expect(normalizeDriverType('elastic')).toBe('elasticsearch');
+    expect(normalizeDriverType('chromadb')).toBe('chroma');
+    expect(normalizeDriverType('chroma-db')).toBe('chroma');
     expect(normalizeDriverType('doris')).toBe('diros');
     expect(normalizeDriverType('open-gauss')).toBe('opengauss');
     expect(normalizeDriverType('InterSystemsIRIS')).toBe('iris');

@@ -1789,6 +1789,22 @@ const ConnectionModal: React.FC<{
             parsedValues.useSSL = false;
             parsedValues.sslMode = "disable";
           }
+        } else if (type === "chroma") {
+          const tls = String(
+            parsed.params.get("tls") ||
+              parsed.params.get("ssl") ||
+              parsed.params.get("useSSL") ||
+              parsed.params.get("use_ssl") ||
+              "",
+          )
+            .trim()
+            .toLowerCase();
+          const skipVerify = normalizeBool(
+            parsed.params.get("skip_verify") || parsed.params.get("skipVerify"),
+          );
+          const enabled = tls ? normalizeBool(tls) : trimmedUri.toLowerCase().startsWith("https://");
+          parsedValues.useSSL = enabled;
+          parsedValues.sslMode = enabled ? (skipVerify ? "skip-verify" : "required") : "disable";
         }
       }
       return parsedValues;
@@ -1851,6 +1867,9 @@ const ConnectionModal: React.FC<{
     if (dbType === "clickhouse") {
       return "clickhouse://default:pass@127.0.0.1:9000/default";
     }
+    if (dbType === "chroma") {
+      return "http://127.0.0.1:8000/default_database?tenant=default_tenant";
+    }
     if (dbType === "redis") {
       return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster 或 redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster";
     }
@@ -1892,6 +1911,8 @@ const ConnectionModal: React.FC<{
         return "max_execution_time=60&compress=lz4";
       case "mongodb":
         return "retryWrites=true&readPreference=secondaryPreferred";
+      case "chroma":
+        return "tenant=default_tenant&apiKey=...";
       case "dameng":
         return "schema=SYSDBA";
       case "tdengine":
@@ -2033,6 +2054,10 @@ const ConnectionModal: React.FC<{
     const scheme =
       type === "postgres"
         ? "postgresql"
+        : type === "chroma"
+          ? values.useSSL
+            ? "https"
+            : "http"
         : type === "clickhouse" && clickHouseProtocol === "http"
           ? values.useSSL
             ? "https"
@@ -2083,6 +2108,11 @@ const ConnectionModal: React.FC<{
         if (mode === "skip-verify" || mode === "preferred") {
           params.set("skip_verify", "true");
         }
+      } else if (type === "chroma") {
+        if (mode === "skip-verify" || mode === "preferred") {
+          params.set("skip_verify", "true");
+        }
+        appendSSLPathParamsForUri(params, type, values);
       }
     } else if (supportsSSLForType(type)) {
       if (isPostgresCompatibleSSLType(type)) {
@@ -3675,7 +3705,7 @@ const ConnectionModal: React.FC<{
       });
     } else if (type !== "custom") {
       const defaultUser =
-        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch") ? "" : "root";
+        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma") ? "" : "root";
       const sslCapableType = supportsSSLForType(type);
       setUseSSL(false);
       setUseHttpTunnel(false);
@@ -4971,13 +5001,13 @@ const ConnectionModal: React.FC<{
                           name="user"
                           label="用户名"
                           rules={
-                            (dbType === "mongodb" || dbType === "elasticsearch")
+                            (dbType === "mongodb" || dbType === "elasticsearch" || dbType === "chroma")
                               ? []
                               : [createUriAwareRequiredRule("请输入用户名")]
                           }
                           style={{ marginBottom: 0 }}
                         >
-                          <Input {...noAutoCapInputProps} placeholder={dbType === "elasticsearch" ? "未开启认证可留空" : undefined} />
+                          <Input {...noAutoCapInputProps} placeholder={(dbType === "elasticsearch" || dbType === "chroma") ? "未开启认证可留空" : undefined} />
                         </Form.Item>
                         <Form.Item
                           name="password"

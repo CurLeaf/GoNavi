@@ -33,12 +33,24 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('type === "elasticsearch"');
     expect(source).toContain("return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';");
     expect(source).toContain(
-      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch") ? "" : "root";',
+      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma") ? "" : "root";',
     );
     expect(source).toContain(
-      'placeholder={dbType === "elasticsearch" ? "未开启认证可留空" : undefined}',
+      'placeholder={(dbType === "elasticsearch" || dbType === "chroma") ? "未开启认证可留空" : undefined}',
     );
     expect(source).toContain('label="显示数据库 (留空显示全部)"');
+  });
+
+  it('exposes Chroma in the create-connection picker with vector defaults', () => {
+    expect(source).toContain("case 'chroma':");
+    expect(source).toContain('return 8000;');
+    expect(source).toContain('chroma: ["http", "https", "chroma"]');
+    expect(source).toContain("key: 'chroma'");
+    expect(source).toContain("name: 'Chroma'");
+    expect(source).toContain('type === "chroma"');
+    expect(source).toContain("return 'Collection 浏览、向量检索和元数据过滤';");
+    expect(source).toContain('return "http://127.0.0.1:8000/default_database?tenant=default_tenant";');
+    expect(source).toContain('return "tenant=default_tenant&apiKey=...";');
   });
 });
 

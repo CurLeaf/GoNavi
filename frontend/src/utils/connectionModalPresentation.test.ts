@@ -87,6 +87,7 @@ describe('connectionModalPresentation', () => {
       'iris',
       'mongodb',
       'elasticsearch',
+      'chroma',
       'redis',
       'tdengine',
       'custom',
@@ -156,11 +157,20 @@ describe('connectionModalPresentation', () => {
       'credentials',
       'databaseScope',
     ]);
+    expect(resolveConnectionConfigLayout('chroma').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'service',
+      'credentials',
+      'databaseScope',
+    ]);
   });
 
   it('uses localized labels for layout kinds shown in the modal', () => {
     expect(getConnectionConfigLayoutKindLabel('mysql-compatible')).toBe('MySQL 兼容');
     expect(getConnectionConfigLayoutKindLabel('file')).toBe('文件型数据库');
     expect(getConnectionConfigLayoutKindLabel('search')).toBe('搜索引擎');
+    expect(getConnectionConfigLayoutKindLabel('vector')).toBe('向量数据库');
   });
 });

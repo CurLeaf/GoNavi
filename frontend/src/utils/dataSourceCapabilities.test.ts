@@ -72,6 +72,24 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats Chroma as a queryable vector datasource without SQL export actions', () => {
+    expect(getDataSourceCapabilities({ type: 'chroma' })).toMatchObject({
+      type: 'chroma',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'chromadb' })).toMatchObject({
+      type: 'chroma',
+      supportsQueryEditor: true,
+      supportsCopyInsert: false,
+    });
+  });
+
   it('treats OceanBase Oracle protocol as Oracle capabilities', () => {
     expect(getDataSourceCapabilities({
       type: 'oceanbase',

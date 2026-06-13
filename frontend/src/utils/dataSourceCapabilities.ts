@@ -21,6 +21,9 @@ const normalizeDataSourceToken = (raw: string): string => {
     case 'elastic':
     case 'elasticsearch':
       return 'elasticsearch';
+    case 'chromadb':
+    case 'chroma-db':
+      return 'chroma';
     case 'intersystems':
     case 'intersystemsiris':
     case 'inter-systems':

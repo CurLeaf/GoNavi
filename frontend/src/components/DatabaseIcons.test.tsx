@@ -18,6 +18,13 @@ describe('DatabaseIcons', () => {
     expect(markup).toContain('alt="elasticsearch"');
   });
 
+  it('includes Chroma in the selectable database icons', () => {
+    expect(DB_ICON_TYPES).toContain('chroma');
+    expect(getDbIconLabel('chroma')).toBe('Chroma');
+    const markup = renderToStaticMarkup(<>{getDbIcon('chroma', undefined, 22)}</>);
+    expect(markup).toContain('>Ch</text>');
+  });
+
   it('wraps database icons in a consistent frame for sidebar sizing', () => {
     const mysqlMarkup = renderToStaticMarkup(<>{getDbIcon('mysql', undefined, 22)}</>);
     const jvmMarkup = renderToStaticMarkup(<>{getDbIcon('jvm', undefined, 22)}</>);
