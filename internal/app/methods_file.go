@@ -806,12 +806,10 @@ func isSQLFileBatchableWriteStatement(dbType string, stmt string) bool {
 	if isPLSQLBlockStatement(stmt) {
 		return false
 	}
-	switch leadingSQLKeyword(stmt) {
-	case "insert", "update", "delete", "replace", "merge", "upsert":
-		return true
-	default:
+	if shouldTryQueryResultFirst(dbType, stmt) {
 		return false
 	}
+	return isBatchableWriteSQLStatement(dbType, stmt)
 }
 
 func sqlFileBatchTransactionSQL(dbType string) (beginSQL string, commitSQL string, rollbackSQL string, ok bool) {

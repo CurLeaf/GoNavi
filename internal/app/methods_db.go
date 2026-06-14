@@ -932,15 +932,23 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	if !allReadOnly {
 		allWrite := true
 		containsPLSQLBlock := false
+		containsQueryFirstWrite := false
 		for _, stmt := range statements {
-			if strings.TrimSpace(stmt) != "" && !isBatchableWriteSQLStatement(runConfig.Type, stmt) {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			if !isBatchableWriteSQLStatement(runConfig.Type, stmt) {
 				allWrite = false
+			}
+			if shouldTryQueryResultFirst(runConfig.Type, stmt) {
+				containsQueryFirstWrite = true
 			}
 			if isPLSQLBlockStatement(stmt) {
 				containsPLSQLBlock = true
 			}
 		}
-		if allWrite && !containsPLSQLBlock && len(statements) == 1 {
+		if allWrite && !containsPLSQLBlock && !containsQueryFirstWrite && len(statements) == 1 {
 			batcher := sessionBatchTarget
 			if batcher == nil {
 				if fallbackBatcher, ok := dbInst.(db.BatchWriteExecer); ok {
@@ -1125,8 +1133,8 @@ func shouldUseNativeMultiResultBatch(dbType string, statements []string, allRead
 }
 
 func shouldTryQueryResultFirst(dbType string, query string) bool {
-	isSQLServer := strings.EqualFold(strings.TrimSpace(dbType), "sqlserver")
-	if keyword, withHasWrite := sqlDataOperationInfo(query); withHasWrite && keyword == "select" {
+	isSQLServer := isSQLServerDBType(dbType)
+	if sqlWriteStatementReturnsRows(dbType, query) {
 		return true
 	}
 	keyword := leadingSQLKeyword(query)
@@ -1137,11 +1145,63 @@ func shouldTryQueryResultFirst(dbType string, query string) bool {
 		return isSQLServer
 	case "dbcc":
 		return isSQLServer
+	case "do":
+		return isPostgresNoticeCapableDBType(dbType) && strings.Contains(strings.ToLower(query), "raise")
 	default:
 		if isSQLServer {
-			return strings.HasPrefix(keyword, "sp_") || strings.HasPrefix(keyword, "xp_")
+			if strings.HasPrefix(keyword, "sp_") || strings.HasPrefix(keyword, "xp_") {
+				return true
+			}
+			if sqlServerControlFlowMayReturnMessages(query) {
+				return true
+			}
+			return looksLikeSQLServerProcedureInvocation(query)
 		}
 		return false
+	}
+}
+
+func looksLikeSQLServerProcedureInvocation(query string) bool {
+	switch leadingSQLKeyword(query) {
+	case "select", "with", "insert", "update", "delete", "merge", "replace", "upsert",
+		"if", "begin", "declare", "while", "create", "alter", "drop", "truncate", "grant", "revoke",
+		"use", "set", "print", "dbcc", "commit", "rollback", "save", "return", "throw", "raiserror",
+		"waitfor", "open", "fetch", "close", "deallocate":
+		return false
+	}
+
+	pos := skipSQLTrivia(query, 0)
+	if pos >= len(query) {
+		return false
+	}
+
+	next, ok := skipSQLIdentifierToken(query, pos)
+	if !ok || next <= pos {
+		return false
+	}
+	pos = skipSQLTrivia(query, next)
+	for pos < len(query) && query[pos] == '.' {
+		pos = skipSQLTrivia(query, pos+1)
+		next, ok = skipSQLIdentifierToken(query, pos)
+		if !ok || next <= pos {
+			return false
+		}
+		pos = skipSQLTrivia(query, next)
+	}
+
+	if pos >= len(query) {
+		return true
+	}
+	switch ch := query[pos]; {
+	case ch == ';' || ch == ',' || ch == '@' || ch == '\'' || ch == '"' || ch == '[' || ch == '(':
+		return true
+	case ch == '+' || ch == '-':
+		return true
+	case ch >= '0' && ch <= '9':
+		return true
+	default:
+		keyword, _ := nextSQLKeyword(query, pos)
+		return keyword != ""
 	}
 }
 

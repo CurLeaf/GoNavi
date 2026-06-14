@@ -1446,3 +1446,231 @@ func TestDBQueryMultiKeepsAllResultSetsFromSingleSQLServerStatement(t *testing.T
 		t.Fatalf("expected exec path to be skipped, got execCalls=%d", fakeDB.execCalls)
 	}
 }
+
+func TestDBQueryMultiTreatsBareSQLServerProcedureCallAsQueryFirst(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := `p_get_select c_dyscript,'projectid = 1',1`
+	fakeDB := &fakeBatchWriteDB{
+		messageMap: map[string][]string{
+			query: {`INSERT c_dyscript(id,name) values (1,"demo")`},
+		},
+		queryErr: map[string]error{},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "sqlserver", Host: "127.0.0.1", Port: 1433, User: "sa"}
+
+	result := app.DBQueryMulti(config, "master", query, "sqlserver-bare-proc-query-first-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.session == nil {
+		t.Fatal("expected bare SQL Server procedure call to use a pinned query session")
+	}
+	if fakeDB.session.queryCalls != 1 {
+		t.Fatalf("expected one session query call, got %d", fakeDB.session.queryCalls)
+	}
+	if fakeDB.session.execCalls != 0 {
+		t.Fatalf("expected exec path to be skipped, got execCalls=%d", fakeDB.session.execCalls)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 1 {
+		t.Fatalf("expected one result set, got %#v", resultSets)
+	}
+	if len(resultSets[0].Rows) != 0 || len(resultSets[0].Columns) != 0 {
+		t.Fatalf("expected message-only result set, got %#v", resultSets[0])
+	}
+	if len(resultSets[0].Messages) != 1 || !strings.Contains(resultSets[0].Messages[0], "INSERT c_dyscript") {
+		t.Fatalf("expected procedure output message to be preserved, got %#v", resultSets[0].Messages)
+	}
+}
+
+func TestDBQueryMultiTreatsReturningWriteAsQueryFirst(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "INSERT INTO audit_logs(id) VALUES (1) RETURNING id"
+	fakeDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"id": 1},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"id"},
+		},
+		queryErr: map[string]error{},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "postgres", Host: "127.0.0.1", Port: 5432, User: "postgres"}
+
+	result := app.DBQueryMulti(config, "main", query, "postgres-returning-query-first-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.batchCalls != 0 {
+		t.Fatalf("expected RETURNING write to skip batch exec path, got batchCalls=%d", fakeDB.batchCalls)
+	}
+	if fakeDB.session == nil || fakeDB.session.queryCalls != 1 {
+		t.Fatalf("expected RETURNING write to query through pinned session, got session=%#v", fakeDB.session)
+	}
+	if fakeDB.session.execCalls != 0 {
+		t.Fatalf("expected exec path to be skipped, got execCalls=%d", fakeDB.session.execCalls)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 1 || len(resultSets[0].Rows) != 1 || resultSets[0].Rows[0]["id"] != 1 {
+		t.Fatalf("expected RETURNING rows to be preserved, got %#v", resultSets)
+	}
+}
+
+func TestDBQueryMultiTreatsSQLServerOutputWriteAsQueryFirst(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "UPDATE users SET name = 'next' OUTPUT inserted.id WHERE id = 1"
+	fakeDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"id": 1},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"id"},
+		},
+		queryErr: map[string]error{},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "sqlserver", Host: "127.0.0.1", Port: 1433, User: "sa"}
+
+	result := app.DBQueryMulti(config, "master", query, "sqlserver-output-query-first-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.batchCalls != 0 {
+		t.Fatalf("expected OUTPUT write to skip batch exec path, got batchCalls=%d", fakeDB.batchCalls)
+	}
+	if fakeDB.session == nil || fakeDB.session.queryCalls != 1 {
+		t.Fatalf("expected OUTPUT write to query through pinned session, got session=%#v", fakeDB.session)
+	}
+	if fakeDB.session.execCalls != 0 {
+		t.Fatalf("expected exec path to be skipped, got execCalls=%d", fakeDB.session.execCalls)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 1 || len(resultSets[0].Rows) != 1 || resultSets[0].Rows[0]["id"] != 1 {
+		t.Fatalf("expected OUTPUT rows to be preserved, got %#v", resultSets)
+	}
+}
+
+func TestDBQueryMultiTreatsWrappedMessageBlocksAsQueryFirst(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	sqlServerQuery := "IF 1 = 1 PRINT 'done'"
+	postgresQuery := "DO $$ BEGIN RAISE NOTICE 'done'; END $$"
+	fakeDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			sqlServerQuery: {},
+			postgresQuery:  {},
+		},
+		fieldMap: map[string][]string{
+			sqlServerQuery: {},
+			postgresQuery:  {},
+		},
+		messageMap: map[string][]string{
+			sqlServerQuery: {"done"},
+			postgresQuery:  {"done"},
+		},
+		queryErr: map[string]error{},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+
+	sqlServerResult := app.DBQueryMulti(connection.ConnectionConfig{Type: "sqlserver", Host: "127.0.0.1", Port: 1433, User: "sa"}, "master", sqlServerQuery, "sqlserver-print-block-test")
+	if !sqlServerResult.Success {
+		t.Fatalf("expected SQL Server block success, got failure: %s", sqlServerResult.Message)
+	}
+
+	postgresResult := app.DBQueryMulti(connection.ConnectionConfig{Type: "postgres", Host: "127.0.0.1", Port: 5432, User: "postgres"}, "main", postgresQuery, "postgres-notice-block-test")
+	if !postgresResult.Success {
+		t.Fatalf("expected PostgreSQL notice block success, got failure: %s", postgresResult.Message)
+	}
+	if fakeDB.batchCalls != 0 {
+		t.Fatalf("expected message blocks to skip batch exec path, got batchCalls=%d", fakeDB.batchCalls)
+	}
+	if fakeDB.execCalls != 0 {
+		t.Fatalf("expected message blocks to avoid shared exec path, got execCalls=%d", fakeDB.execCalls)
+	}
+}
+
+func TestDBQueryMultiTransactionalTreatsSelectIntoAsManagedWrite(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	stmt := "SELECT * INTO archived_users FROM users"
+	fakeDB := &fakeBatchWriteDB{
+		execAffected: map[string]int64{
+			stmt: 12,
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "postgres", Host: "127.0.0.1", Port: 5432, User: "postgres"}
+
+	result := app.DBQueryMultiTransactional(config, "main", stmt, "select-into-managed-tx-test")
+	if !result.Success {
+		t.Fatalf("expected managed SELECT INTO success, got failure: %s", result.Message)
+	}
+	if result.TransactionID == "" || !result.TransactionPending {
+		t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", result.TransactionID, result.TransactionPending)
+	}
+	if fakeDB.session == nil || fakeDB.session.closed {
+		t.Fatal("expected managed SELECT INTO transaction session to stay open")
+	}
+	wantExecs := []string{"BEGIN", stmt}
+	if len(fakeDB.execQueries) != len(wantExecs) {
+		t.Fatalf("expected exec queries %#v, got %#v", wantExecs, fakeDB.execQueries)
+	}
+	for i, want := range wantExecs {
+		if fakeDB.execQueries[i] != want {
+			t.Fatalf("expected exec query %d = %q, got %q", i, want, fakeDB.execQueries[i])
+		}
+	}
+}

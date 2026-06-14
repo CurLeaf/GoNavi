@@ -5,6 +5,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"net"
 	"net/url"
@@ -18,7 +19,7 @@ import (
 	"GoNavi-Wails/internal/ssh"
 	"GoNavi-Wails/internal/utils"
 
-	_ "gitea.com/kingbase/gokb" // Registers "kingbase" driver
+	gokb "gitea.com/kingbase/gokb" // Registers "kingbase" driver
 )
 
 type KingbaseDB struct {
@@ -26,6 +27,13 @@ type KingbaseDB struct {
 	pingTimeout time.Duration
 	forwarder   *ssh.LocalForwarder // Store SSH tunnel forwarder
 }
+
+type kingbaseSessionExecer struct {
+	*sqlConnStatementExecer
+}
+
+var _ QueryMessageExecer = (*KingbaseDB)(nil)
+var _ StatementQueryMessageExecer = (*kingbaseSessionExecer)(nil)
 
 func quoteConnValue(v string) string {
 	if v == "" {
@@ -280,6 +288,20 @@ func (k *KingbaseDB) QueryContext(ctx context.Context, query string) ([]map[stri
 	return scanRows(rows)
 }
 
+func (k *KingbaseDB) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
+	if k.conn == nil {
+		return nil, nil, nil, fmt.Errorf("连接未打开")
+	}
+
+	conn, err := k.conn.Conn(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer conn.Close()
+
+	return queryKingbaseConnWithMessages(ctx, conn, query)
+}
+
 func (k *KingbaseDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if k.conn == nil {
 		return nil, nil, fmt.Errorf("连接未打开")
@@ -291,6 +313,10 @@ func (k *KingbaseDB) Query(query string) ([]map[string]interface{}, []string, er
 	}
 	defer rows.Close()
 	return scanRows(rows)
+}
+
+func (k *KingbaseDB) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	return k.QueryContextWithMessages(context.Background(), query)
 }
 
 func (k *KingbaseDB) ExecContext(ctx context.Context, query string) (int64, error) {
@@ -323,7 +349,7 @@ func (k *KingbaseDB) OpenSessionExecer(ctx context.Context) (StatementExecer, er
 	if err != nil {
 		return nil, err
 	}
-	return NewSQLConnStatementExecer(conn), nil
+	return &kingbaseSessionExecer{sqlConnStatementExecer: &sqlConnStatementExecer{conn: conn}}, nil
 }
 
 func (k *KingbaseDB) Exec(query string) (int64, error) {
@@ -335,6 +361,31 @@ func (k *KingbaseDB) Exec(query string) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (e *kingbaseSessionExecer) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	return e.QueryContextWithMessages(context.Background(), query)
+}
+
+func (e *kingbaseSessionExecer) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
+	if e == nil || e.conn == nil {
+		return nil, nil, nil, fmt.Errorf("连接未打开")
+	}
+	return queryKingbaseConnWithMessages(ctx, e.conn, query)
+}
+
+func queryKingbaseConnWithMessages(ctx context.Context, conn *sql.Conn, query string) ([]map[string]interface{}, []string, []string, error) {
+	return querySQLConnWithTextNotices(ctx, conn, query, func(driverConn driver.Conn, addNotice func(string)) {
+		if addNotice == nil {
+			gokb.SetNoticeHandler(driverConn, nil)
+			return
+		}
+		gokb.SetNoticeHandler(driverConn, func(notice *gokb.Error) {
+			if notice != nil {
+				addNotice(notice.Message)
+			}
+		})
+	})
 }
 
 func (k *KingbaseDB) GetDatabases() ([]string, error) {

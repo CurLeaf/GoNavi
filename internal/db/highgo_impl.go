@@ -5,6 +5,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"net"
 	"net/url"
@@ -17,7 +18,7 @@ import (
 	"GoNavi-Wails/internal/ssh"
 	"GoNavi-Wails/internal/utils"
 
-	_ "github.com/highgo/pq-sm3" // HighGo uses dedicated SM3-capable driver
+	highgopq "github.com/highgo/pq-sm3" // HighGo uses dedicated SM3-capable driver
 )
 
 // HighGoDB implements Database interface for HighGo (瀚高) database
@@ -27,6 +28,13 @@ type HighGoDB struct {
 	pingTimeout time.Duration
 	forwarder   *ssh.LocalForwarder
 }
+
+type highgoSessionExecer struct {
+	*sqlConnStatementExecer
+}
+
+var _ QueryMessageExecer = (*HighGoDB)(nil)
+var _ StatementQueryMessageExecer = (*highgoSessionExecer)(nil)
 
 func (h *HighGoDB) getDSN(config connection.ConnectionConfig) string {
 	// postgres://user:password@host:port/dbname?sslmode=disable
@@ -152,6 +160,20 @@ func (h *HighGoDB) QueryContext(ctx context.Context, query string) ([]map[string
 	return scanRows(rows)
 }
 
+func (h *HighGoDB) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
+	if h.conn == nil {
+		return nil, nil, nil, fmt.Errorf("连接未打开")
+	}
+
+	conn, err := h.conn.Conn(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer conn.Close()
+
+	return queryHighGoConnWithMessages(ctx, conn, query)
+}
+
 func (h *HighGoDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if h.conn == nil {
 		return nil, nil, fmt.Errorf("连接未打开")
@@ -163,6 +185,10 @@ func (h *HighGoDB) Query(query string) ([]map[string]interface{}, []string, erro
 	}
 	defer rows.Close()
 	return scanRows(rows)
+}
+
+func (h *HighGoDB) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	return h.QueryContextWithMessages(context.Background(), query)
 }
 
 func (h *HighGoDB) ExecContext(ctx context.Context, query string) (int64, error) {
@@ -195,7 +221,7 @@ func (h *HighGoDB) OpenSessionExecer(ctx context.Context) (StatementExecer, erro
 	if err != nil {
 		return nil, err
 	}
-	return NewSQLConnStatementExecer(conn), nil
+	return &highgoSessionExecer{sqlConnStatementExecer: &sqlConnStatementExecer{conn: conn}}, nil
 }
 
 func (h *HighGoDB) Exec(query string) (int64, error) {
@@ -207,6 +233,31 @@ func (h *HighGoDB) Exec(query string) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (e *highgoSessionExecer) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	return e.QueryContextWithMessages(context.Background(), query)
+}
+
+func (e *highgoSessionExecer) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
+	if e == nil || e.conn == nil {
+		return nil, nil, nil, fmt.Errorf("连接未打开")
+	}
+	return queryHighGoConnWithMessages(ctx, e.conn, query)
+}
+
+func queryHighGoConnWithMessages(ctx context.Context, conn *sql.Conn, query string) ([]map[string]interface{}, []string, []string, error) {
+	return querySQLConnWithTextNotices(ctx, conn, query, func(driverConn driver.Conn, addNotice func(string)) {
+		if addNotice == nil {
+			highgopq.SetNoticeHandler(driverConn, nil)
+			return
+		}
+		highgopq.SetNoticeHandler(driverConn, func(notice *highgopq.Error) {
+			if notice != nil {
+				addNotice(notice.Message)
+			}
+		})
+	})
 }
 
 func (h *HighGoDB) GetDatabases() ([]string, error) {
