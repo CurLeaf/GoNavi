@@ -4148,12 +4148,14 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-actions');
     expect(css).toContain('width: 74px !important;');
     expect(css).toContain('width: 62px !important;');
-    expect(css).toContain('flex: 0 1 auto !important;');
+    expect(css).toContain('flex: 0 0 auto !important;');
     expect(css).toContain('justify-content: flex-start;');
     expect(css).toContain('height: 32px !important;');
     expect(css).toContain('line-height: 30px !important;');
     expect(css).toContain('display: inline-flex !important;');
     expect(css).toContain('gap: 6px;');
+    expect(css).toContain('overflow-x: auto;');
+    expect(css).toContain('overflow-y: hidden;');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-action-pair');
     expect(css).toContain('gap: 8px;');
     expect(css).toContain('margin-left: 0 !important;');
@@ -4166,6 +4168,9 @@ describe('QueryEditor external SQL save', () => {
     expect(css).not.toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-row {');
 
     const queryToolbarMainCss = css.slice(css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar-main {'), css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar-selects {'));
+    expect(queryToolbarMainCss).toContain('flex-wrap: nowrap;');
+    expect(queryToolbarMainCss).toContain('width: max-content;');
+    expect(queryToolbarMainCss).not.toContain('flex-wrap: wrap;');
     expect(queryToolbarMainCss).not.toContain('margin-left: auto;');
     expect(queryToolbarMainCss).not.toContain('justify-content: flex-end;');
   });

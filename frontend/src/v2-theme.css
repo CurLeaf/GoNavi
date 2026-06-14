@@ -4797,34 +4797,37 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar {
   padding: 8px 12px !important;
   gap: 6px 10px !important;
   align-items: center !important;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
   background: var(--gn-bg-panel) !important;
   border-bottom: 0.5px solid var(--gn-br-1) !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-main {
-  display: flex;
-  width: 100%;
-  min-width: 0;
+  display: inline-flex;
+  width: max-content;
+  min-width: 100%;
   gap: 6px 10px !important;
   align-items: center !important;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-selects,
 body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
   min-width: 0;
   gap: 6px !important;
+  flex: 0 0 auto !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-selects {
-  flex: 0 1 auto !important;
   flex-wrap: nowrap;
   max-width: 760px;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
-  flex: 0 1 auto !important;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-start;
 }
 
@@ -4832,6 +4835,7 @@ body[data-ui-version="v2"] .gn-v2-query-transaction-toolbar {
   display: inline-flex;
   max-width: 100%;
   flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-select {
@@ -4963,16 +4967,15 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-ai-action.ant-btn {
 
 @media (max-width: 900px) {
   body[data-ui-version="v2"] .gn-v2-query-toolbar-main {
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
   }
 
   body[data-ui-version="v2"] .gn-v2-query-toolbar-selects {
-    flex: 1 1 100% !important;
     max-width: none;
   }
 
   body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
-    width: 100%;
     justify-content: flex-start;
   }
 }
