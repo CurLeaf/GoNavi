@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Editor, { type OnMount } from './MonacoEditor';
 import { message, Modal, Input, Form, MenuProps } from 'antd';
-import { format } from 'sql-formatter';
+import { format, type SqlLanguage } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition, IndexDefinition } from '../types';
 import { useStore } from '../store';
@@ -466,6 +466,38 @@ const normalizeMetadataDialect = (conn: any): string => {
     if (dialect === 'diros' || dialect === 'sphinx' || dialect === 'mariadb' || dialect === 'oceanbase') return 'mysql';
     if (dialect === 'dameng') return 'oracle';
     return String(dialect || '').toLowerCase();
+};
+
+const resolveQueryEditorFormatterLanguage = (conn: any): SqlLanguage => {
+    const dialect = normalizeMetadataDialect(conn);
+    switch (dialect) {
+        case 'postgres':
+        case 'kingbase':
+        case 'highgo':
+        case 'vastbase':
+        case 'opengauss':
+        case 'gaussdb':
+            return 'postgresql';
+        case 'duckdb':
+            return 'duckdb';
+        case 'sqlite':
+            return 'sqlite';
+        case 'sqlserver':
+            return 'transactsql';
+        case 'oracle':
+        case 'dameng':
+            return 'plsql';
+        case 'clickhouse':
+            return 'clickhouse';
+        case 'mysql':
+        case 'goldendb':
+        case 'sphinx':
+            return 'mysql';
+        case 'mariadb':
+            return 'mariadb';
+        default:
+            return 'sql';
+    }
 };
 
 const buildCompletionTableCommentSQL = (dialect: string, dbName: string): string => {
@@ -3684,7 +3716,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const handleFormat = () => {
       try {
-          const formatted = format(getCurrentQuery(), { language: 'mysql', keywordCase: sqlFormatOptions.keywordCase });
+          const formatterLanguage = resolveQueryEditorFormatterLanguage(connections.find(c => c.id === currentConnectionId));
+          const formatted = format(getCurrentQuery(), { language: formatterLanguage, keywordCase: sqlFormatOptions.keywordCase });
           const editor = editorRef.current;
           const monaco = monacoRef.current;
           const model = editor?.getModel?.();

@@ -1408,6 +1408,37 @@ describe('QueryEditor external SQL save', () => {
     );
   });
 
+  it('formats postgres window-function SQL with cast syntax through Monaco edits', async () => {
+    let renderer!: ReactTestRenderer;
+    storeState.connections[0].config.type = 'postgres';
+    storeState.connections[0].config.database = 'main';
+    const pgSql = [
+      'SELECT',
+      `FLOOR(DATE_PART('epoch', "CREATE_TIME" - LAG("END_TIME") OVER (ORDER BY "CREATE_TIME" asc, "ID" desc))*1000)::int as time_diff_seconds,`,
+      '*',
+      `FROM "FAM_RU_BLOCK" WHERE "RU_JOB_ID" = ''`,
+    ].join('\n');
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: pgSql, dbName: 'main' })} />);
+    });
+
+    const formatButton = findButton(renderer, '美化');
+    await act(async () => {
+      await formatButton.props.onClick();
+    });
+
+    expect(messageApi.error).not.toHaveBeenCalled();
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-format-sql',
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: expect.stringContaining(')::int AS time_diff_seconds'),
+        }),
+      ]),
+    );
+  });
+
   it('shows object info via editor ctrl+q action', async () => {
     editorState.value = 'select users.id from users';
     autoFetchState.visible = true;
