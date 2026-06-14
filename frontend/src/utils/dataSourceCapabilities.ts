@@ -35,6 +35,9 @@ const normalizeDataSourceToken = (raw: string): string => {
     case 'qdrantdb':
     case 'qdrant-db':
       return 'qdrant';
+    case 'mqtt':
+    case 'mqtts':
+      return 'mqtt';
     case 'apache-iotdb':
     case 'apache_iotdb':
       return 'iotdb';
@@ -121,9 +124,9 @@ const COPY_INSERT_TYPES = new Set([
 ]);
 
 const QUERY_EDITOR_DISABLED_TYPES = new Set(['redis']);
-const FORCE_READ_ONLY_QUERY_TYPES = new Set(['tdengine', 'iotdb', 'clickhouse', 'kafka', 'rabbitmq']);
-const MESSAGE_PUBLISH_TYPES = new Set(['kafka', 'rabbitmq']);
-const MANUAL_TOTAL_COUNT_TYPES = new Set(['duckdb', 'oracle']);
+const FORCE_READ_ONLY_QUERY_TYPES = new Set(['tdengine', 'iotdb', 'clickhouse', 'mqtt', 'kafka', 'rabbitmq']);
+const MESSAGE_PUBLISH_TYPES = new Set(['mqtt', 'kafka', 'rabbitmq']);
+const MANUAL_TOTAL_COUNT_TYPES = new Set(['duckdb', 'oracle', 'mqtt']);
 const APPROXIMATE_TABLE_COUNT_TYPES = new Set(['duckdb', 'oracle']);
 const APPROXIMATE_TOTAL_PAGE_TYPES = new Set(['duckdb']);
 

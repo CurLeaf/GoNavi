@@ -164,6 +164,27 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats MQTT as a queryable messaging datasource with manual total count and publish support', () => {
+    expect(getDataSourceCapabilities({ type: 'mqtt' })).toMatchObject({
+      type: 'mqtt',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
+      preferManualTotalCount: true,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'mqtts' })).toMatchObject({
+      type: 'mqtt',
+      supportsQueryEditor: true,
+      supportsMessagePublish: true,
+      preferManualTotalCount: true,
+    });
+  });
+
   it('treats Kafka as a queryable read-only messaging datasource', () => {
     expect(getDataSourceCapabilities({ type: 'kafka' })).toMatchObject({
       type: 'kafka',

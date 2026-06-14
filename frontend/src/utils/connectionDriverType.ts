@@ -18,6 +18,7 @@ export const normalizeDriverType = (value: string): string => {
   if (normalized === 'chromadb' || normalized === 'chroma-db') return 'chroma';
   if (normalized === 'qdrantdb' || normalized === 'qdrant-db') return 'qdrant';
   if (normalized === 'apache-iotdb' || normalized === 'apache_iotdb') return 'iotdb';
+  if (normalized === 'mqtts') return 'mqtt';
   if (normalized === 'apache-kafka' || normalized === 'apache_kafka') return 'kafka';
   if (normalized === 'rabbit-mq' || normalized === 'rabbit_mq') return 'rabbitmq';
   if (normalized === 'doris') return 'diros';

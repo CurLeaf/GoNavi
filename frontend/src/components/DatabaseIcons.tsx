@@ -52,6 +52,7 @@ const DB_DEFAULT_COLORS: Record<string, string> = {
     iris:       '#1F6FEB',
     tdengine:   '#2962FF',
     iotdb:      '#0F766E',
+    mqtt:       '#0EA5A4',
     kafka:      '#F97316',
     rabbitmq:   '#FF6B35',
     chroma:     '#7C3AED',
@@ -194,6 +195,9 @@ const TDengineIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
 const IoTDBIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.iotdb} label="Io" />
 );
+const MQTTIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
+    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.mqtt} label="Mq" />
+);
 const KafkaIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.kafka} label="Kf" />
 );
@@ -262,6 +266,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
     iris: IrisIcon,
     tdengine: TDengineIcon,
     iotdb: IoTDBIcon,
+    mqtt: MQTTIcon,
     kafka: KafkaIcon,
     rabbitmq: RabbitMQIcon,
     chroma: ChromaIcon,
@@ -274,7 +279,7 @@ const DB_ICON_MAP: Record<string, React.FC<DbIconProps>> = {
 export const DB_ICON_TYPES: string[] = [
     'mysql', 'mariadb', 'oceanbase', 'postgres', 'redis', 'mongodb', 'jvm',
     'oracle', 'sqlserver', 'sqlite', 'duckdb', 'clickhouse', 'starrocks',
-    'kingbase', 'dameng', 'vastbase', 'opengauss', 'gaussdb', 'goldendb', 'highgo', 'iris', 'tdengine', 'iotdb', 'kafka', 'rabbitmq', 'chroma', 'qdrant', 'elasticsearch', 'custom',
+    'kingbase', 'dameng', 'vastbase', 'opengauss', 'gaussdb', 'goldendb', 'highgo', 'iris', 'tdengine', 'iotdb', 'mqtt', 'kafka', 'rabbitmq', 'chroma', 'qdrant', 'elasticsearch', 'custom',
 ];
 
 /** 该类型是否有品牌 SVG 文件 */
@@ -296,7 +301,7 @@ export const getDbIconLabel = (type: string): string => {
         sqlserver: 'SQL Server', clickhouse: 'ClickHouse', sqlite: 'SQLite',
         starrocks: 'StarRocks',
         duckdb: 'DuckDB', kingbase: '金仓', dameng: '达梦',
-        vastbase: 'VastBase', opengauss: 'OpenGauss', gaussdb: 'GaussDB', goldendb: 'GoldenDB', highgo: '瀚高', iris: 'InterSystems IRIS', tdengine: 'TDengine', iotdb: 'Apache IoTDB', kafka: 'Kafka', rabbitmq: 'RabbitMQ',
+        vastbase: 'VastBase', opengauss: 'OpenGauss', gaussdb: 'GaussDB', goldendb: 'GoldenDB', highgo: '瀚高', iris: 'InterSystems IRIS', tdengine: 'TDengine', iotdb: 'Apache IoTDB', mqtt: 'MQTT', kafka: 'Kafka', rabbitmq: 'RabbitMQ',
         chroma: 'Chroma',
         qdrant: 'Qdrant',
         elasticsearch: 'Elasticsearch',

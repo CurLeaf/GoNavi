@@ -166,6 +166,15 @@ func TestNormalizeSchemaAndTableByType_KafkaPreservesDottedTopicName(t *testing.
 	}
 }
 
+func TestNormalizeSchemaAndTableByType_MQTTPreservesTopicFilter(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTableByType("mqtt", "topics", "devices/floor1.sensor.v1")
+	if schema != "topics" || table != "devices/floor1.sensor.v1" {
+		t.Fatalf("expected mqtt topic filter to stay intact, got %q.%q", schema, table)
+	}
+}
+
 func TestNormalizeSchemaAndTableByType_RabbitMQPreservesDottedQueueName(t *testing.T) {
 	t.Parallel()
 

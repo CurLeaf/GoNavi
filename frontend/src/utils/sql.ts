@@ -54,7 +54,7 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
 export const quoteQualifiedIdent = (dbType: string, ident: string) => {
   const raw = (ident || '').trim();
   if (!raw) return raw;
-  if (['kafka', 'rabbitmq'].includes((dbType || '').trim().toLowerCase())) {
+  if (['mqtt', 'kafka', 'rabbitmq'].includes((dbType || '').trim().toLowerCase())) {
     return quoteIdentPart(dbType, raw);
   }
   const parts = splitQualifiedNameSegments(raw).filter(Boolean);

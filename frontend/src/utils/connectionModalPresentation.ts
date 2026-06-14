@@ -283,6 +283,20 @@ export const resolveConnectionConfigLayout = (
       ],
     };
   }
+  if (type === 'mqtt') {
+    return {
+      kind: 'generic-sql',
+      sections: [
+        'identity',
+        'uri',
+        'target',
+        'connectionMode',
+        'replica',
+        'service',
+        'credentials',
+      ],
+    };
+  }
   if (type === 'kafka') {
     return {
       kind: 'generic-sql',

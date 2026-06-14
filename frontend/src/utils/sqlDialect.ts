@@ -29,6 +29,7 @@ export type SqlDialect =
   | 'clickhouse'
   | 'tdengine'
   | 'iotdb'
+  | 'mqtt'
   | 'kafka'
   | 'rabbitmq'
   | 'mongodb'
@@ -137,6 +138,9 @@ export const resolveSqlDialect = (
     case 'apache-iotdb':
     case 'apache_iotdb':
       return 'iotdb';
+    case 'mqtt':
+    case 'mqtts':
+      return 'mqtt';
     case 'kafka':
     case 'apache-kafka':
     case 'apache_kafka':
@@ -169,6 +173,7 @@ export const resolveSqlDialect = (
   if (source.includes('clickhouse')) return 'clickhouse';
   if (source.includes('tdengine')) return 'tdengine';
   if (source.includes('iotdb')) return 'iotdb';
+  if (source.includes('mqtt')) return 'mqtt';
   if (source.includes('kafka')) return 'kafka';
   if (source.includes('rabbitmq') || source.includes('rabbit-mq') || source.includes('rabbit_mq')) return 'rabbitmq';
   if (source.includes('sqlserver') || source.includes('mssql')) return 'sqlserver';
@@ -623,6 +628,15 @@ const IOTDB_KEYWORDS = [
   'COMPRESSION',
 ];
 
+const MQTT_KEYWORDS = [
+  'SHOW TOPICS',
+  'DESCRIBE TOPIC',
+  'CONSUME',
+  'FROM',
+  'LIMIT',
+  'OFFSET',
+];
+
 const KAFKA_KEYWORDS = [
   'SHOW TOPICS',
   'SHOW TOPIC',
@@ -658,6 +672,7 @@ export const resolveSqlKeywords = (dbType: string): string[] => {
   if (dialect === 'clickhouse') return unique([...COMMON_KEYWORDS, ...CLICKHOUSE_KEYWORDS]);
   if (dialect === 'tdengine') return unique([...COMMON_KEYWORDS, ...TDENGINE_KEYWORDS]);
   if (dialect === 'iotdb') return unique([...COMMON_KEYWORDS, ...IOTDB_KEYWORDS]);
+  if (dialect === 'mqtt') return unique([...COMMON_KEYWORDS, ...MQTT_KEYWORDS]);
   if (dialect === 'kafka') return unique([...COMMON_KEYWORDS, ...KAFKA_KEYWORDS]);
   if (dialect === 'rabbitmq') return unique([...COMMON_KEYWORDS, ...RABBITMQ_KEYWORDS]);
   return COMMON_KEYWORDS;

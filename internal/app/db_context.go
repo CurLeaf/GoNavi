@@ -16,6 +16,8 @@ func normalizeRunConfig(config connection.ConnectionConfig, dbName string) conne
 	}
 
 	switch strings.ToLower(strings.TrimSpace(config.Type)) {
+	case "mqtt", "mqtts":
+		// MQTT 的 Database 字段表示默认 Topic，不能被树上的 synthetic database(topics) 覆盖。
 	case "kafka", "apache-kafka", "apache_kafka":
 		// Kafka 的 Database 字段表示默认 Topic，不能被树上的 synthetic database(topics) 覆盖。
 	case "oceanbase":
@@ -53,7 +55,7 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 
 	// Elasticsearch：索引名可能含多个点（如 iot_pro_biz_operate_log.index.20240626），
 	// 不能按点分割，直接返回原始数据库名和完整表名。
-	if dbType == "elasticsearch" || dbType == "iotdb" || dbType == "kafka" || dbType == "rabbitmq" {
+	if dbType == "elasticsearch" || dbType == "iotdb" || dbType == "mqtt" || dbType == "kafka" || dbType == "rabbitmq" {
 		return rawDB, rawTable
 	}
 
@@ -112,7 +114,7 @@ func normalizeSchemaAndTable(config connection.ConnectionConfig, dbName string, 
 func normalizeMetadataSchemaAndTable(config connection.ConnectionConfig, dbName string, tableName string) (string, string) {
 	schema, table := normalizeSchemaAndTable(config, dbName, tableName)
 	switch resolveDDLDBType(config) {
-	case "kafka", "rabbitmq":
+	case "mqtt", "kafka", "rabbitmq":
 		return schema, table
 	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		rawTable := strings.TrimSpace(tableName)

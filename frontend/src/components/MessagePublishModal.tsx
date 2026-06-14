@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Form, Input, Modal, Select, Space, Typography, message } from 'antd';
+import { Alert, Checkbox, Form, Input, Modal, Select, Space, Typography, message } from 'antd';
 
 import { DBQuery } from '../../wailsjs/go/app/App';
 import type { SavedConnection } from '../types';
@@ -146,6 +146,28 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
               extra="留空时默认使用当前 Queue 名。"
             >
               <Input placeholder="例如：orders.queue" />
+            </Form.Item>
+          )}
+
+          {presentation.showQos && (
+            <Form.Item
+              label="QoS"
+              name="qos"
+              extra="0 为至多一次，1 为至少一次，2 为仅一次。"
+            >
+              <Select
+                options={[
+                  { label: '0 · At most once', value: 0 },
+                  { label: '1 · At least once', value: 1 },
+                  { label: '2 · Exactly once', value: 2 },
+                ]}
+              />
+            </Form.Item>
+          )}
+
+          {presentation.showRetain && (
+            <Form.Item name="retain" valuePropName="checked" style={{ marginBottom: 16 }}>
+              <Checkbox>Retain 消息</Checkbox>
             </Form.Item>
           )}
 

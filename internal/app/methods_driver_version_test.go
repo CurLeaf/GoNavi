@@ -518,6 +518,22 @@ func TestKafkaDriverDefinitionIsBuiltIn(t *testing.T) {
 	}
 }
 
+func TestMQTTDriverDefinitionIsBuiltIn(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mqtts")
+	if !ok {
+		t.Fatal("expected mqtt driver definition")
+	}
+	if definition.Name != "MQTT" {
+		t.Fatalf("unexpected mqtt driver name: %q", definition.Name)
+	}
+	if !definition.BuiltIn {
+		t.Fatal("expected mqtt to be a built-in driver")
+	}
+	if definition.PinnedVersion != "" || definition.DefaultDownloadURL != "" {
+		t.Fatalf("expected mqtt builtin definition to omit optional-agent metadata: %#v", definition)
+	}
+}
+
 func TestRabbitMQDriverDefinitionIsBuiltIn(t *testing.T) {
 	definition, ok := resolveDriverDefinition("rabbit-mq")
 	if !ok {

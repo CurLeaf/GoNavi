@@ -6,10 +6,12 @@ require (
 	gitea.com/kingbase/gokb v0.0.0-20201021123113-29bd62a876c3
 	gitee.com/chunanyong/dm v1.8.22
 	github.com/ClickHouse/clickhouse-go/v2 v2.43.0
+	github.com/HuaweiCloudDeveloper/gaussdb-go v1.0.0-rc1
 	github.com/apache/iotdb-client-go v1.3.7
 	github.com/caretdev/go-irisnative v0.2.1
 	github.com/duckdb/duckdb-go/v2 v2.5.5
 	github.com/elastic/go-elasticsearch/v8 v8.19.6
+	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/google/uuid v1.6.0
 	github.com/highgo/pq-sm3 v0.0.0
@@ -17,6 +19,7 @@ require (
 	github.com/microsoft/go-mssqldb v1.9.6
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/redis/go-redis/v9 v9.17.3
+	github.com/segmentio/kafka-go v0.4.51
 	github.com/sijms/go-ora/v2 v2.9.0
 	github.com/taosdata/driver-go/v3 v3.7.8
 	github.com/wailsapp/wails/v2 v2.11.0
@@ -32,7 +35,6 @@ require (
 )
 
 require (
-	github.com/HuaweiCloudDeveloper/gaussdb-go v1.0.0-rc1 // indirect
 	github.com/apache/thrift v0.22.0 // indirect
 	github.com/elastic/elastic-transport-go/v8 v8.9.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
@@ -42,7 +44,6 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect
-	github.com/segmentio/kafka-go v0.4.51 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

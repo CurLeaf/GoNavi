@@ -15,6 +15,8 @@ export type MessagePublishDraft = {
   destination: string;
   exchange?: string;
   routingKey?: string;
+  qos?: number;
+  retain?: boolean;
   keyMode?: MessagePublishValueMode;
   key?: string;
   bodyMode?: MessagePublishValueMode;
@@ -40,6 +42,8 @@ export type MessagePublishPresentation = {
   showExchange: boolean;
   showRoutingKey: boolean;
   showProperties: boolean;
+  showQos: boolean;
+  showRetain: boolean;
 };
 
 const normalizeMode = (value: unknown, fallback: MessagePublishValueMode): MessagePublishValueMode => {
@@ -138,6 +142,9 @@ const resolveDefaultDestination = (config: ConnectionLike, explicitDestination: 
   if (resolvedType === 'kafka') {
     return String(config?.database || '').trim();
   }
+  if (resolvedType === 'mqtt') {
+    return String(config?.database || params.get('defaultTopic') || params.get('topic') || '').trim();
+  }
   if (resolvedType === 'rabbitmq') {
     return String(params.get('defaultQueue') || params.get('queue') || '').trim();
   }
@@ -161,6 +168,25 @@ export const getMessagePublishPresentation = (
       showExchange: true,
       showRoutingKey: true,
       showProperties: true,
+      showQos: false,
+      showRetain: false,
+    };
+  }
+
+  if (resolvedType === 'mqtt') {
+    return {
+      transportLabel: 'MQTT Topic',
+      destinationLabel: 'Topic',
+      destinationPlaceholder: '例如：devices/device-001/telemetry',
+      destinationRequiredMessage: '请输入 Topic',
+      alertMessage: '当前表单会自动拼装 MQTT publish JSON 命令，并直接通过 broker 执行测试发送。',
+      successHint: 'QoS 与 retain 可单独指定；未填写时沿用当前连接中的默认参数。',
+      showKey: false,
+      showExchange: false,
+      showRoutingKey: false,
+      showProperties: false,
+      showQos: true,
+      showRetain: true,
     };
   }
 
@@ -175,6 +201,8 @@ export const getMessagePublishPresentation = (
     showExchange: false,
     showRoutingKey: false,
     showProperties: false,
+    showQos: false,
+    showRetain: false,
   };
 };
 
@@ -198,6 +226,18 @@ export const createDefaultMessagePublishDraft = (
     };
   }
 
+  if (resolvedType === 'mqtt') {
+    const qosValue = Number(params.get('qos'));
+    return {
+      destination: resolvedDestination,
+      qos: Number.isFinite(qosValue) ? Math.min(2, Math.max(0, Math.trunc(qosValue))) : 0,
+      retain: ['1', 'true', 'yes', 'on'].includes(String(params.get('retain') || '').trim().toLowerCase()),
+      bodyMode: 'json',
+      body: '{\n  "event": "test",\n  "source": "gonavi"\n}',
+      headers: '',
+    };
+  }
+
   return {
     destination: resolvedDestination,
     keyMode: 'text',
@@ -216,6 +256,27 @@ export const buildMessagePublishCommand = (
   const destination = String(draft.destination || '').trim();
   if (!destination) {
     throw new Error('请输入目标 Topic / Queue');
+  }
+
+  if (resolvedType === 'mqtt') {
+    if (/[#+]/.test(destination)) {
+      throw new Error('MQTT 发送 Topic 不能包含 + 或 # 通配符');
+    }
+    const bodyMode = normalizeMode(draft.bodyMode, 'json');
+    const qosValue = Number(draft.qos);
+    const qos = Number.isFinite(qosValue) ? Math.min(2, Math.max(0, Math.trunc(qosValue))) : 0;
+    const command: Record<string, unknown> = {
+      publish: destination,
+      payload: parseRequiredPayload(draft.body, bodyMode, '消息体'),
+      qos,
+      retain: !!draft.retain,
+    };
+
+    return {
+      commandText: JSON.stringify(command, null, 2),
+      destinationLabel: destination,
+      transportLabel: 'MQTT Topic',
+    };
   }
 
   if (resolvedType === 'rabbitmq') {

@@ -332,6 +332,18 @@ func TestNormalizeSchemaAndTable_KafkaPreservesDottedTopicName(t *testing.T) {
 	}
 }
 
+func TestNormalizeSchemaAndTable_MQTTPreservesTopicFilter(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "mqtt",
+	}, "topics", "devices/floor1.sensor.v1")
+
+	if schemaOrDb != "topics" || table != "devices/floor1.sensor.v1" {
+		t.Fatalf("expected mqtt topic filter to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
 func TestNormalizeSchemaAndTable_RabbitMQPreservesDottedQueueName(t *testing.T) {
 	t.Parallel()
 
@@ -353,6 +365,18 @@ func TestNormalizeMetadataSchemaAndTable_KafkaPreservesDottedTopicName(t *testin
 
 	if schemaOrDb != "topics" || table != "logs.app-1" {
 		t.Fatalf("expected kafka metadata topic to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_MQTTPreservesTopicFilter(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "mqtt",
+	}, "topics", "devices/floor1.sensor.v1")
+
+	if schemaOrDb != "topics" || table != "devices/floor1.sensor.v1" {
+		t.Fatalf("expected mqtt metadata topic filter to stay intact, got %q.%q", schemaOrDb, table)
 	}
 }
 

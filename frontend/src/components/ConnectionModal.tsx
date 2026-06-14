@@ -385,6 +385,7 @@ const ConnectionModal: React.FC<{
   );
   const disableLocalBackdropFilter = isMacLikePlatform();
   const mysqlTopology = Form.useWatch("mysqlTopology", form) || "single";
+  const mqttTopology = Form.useWatch("mqttTopology", form) || "single";
   const kafkaTopology = Form.useWatch("kafkaTopology", form) || "single";
   const mongoTopology = Form.useWatch("mongoTopology", form) || "single";
   const mongoSrv = Form.useWatch("mongoSrv", form) || false;
@@ -419,6 +420,7 @@ const ConnectionModal: React.FC<{
   );
   const isOceanBaseOracle = dbType === "oceanbase" && oceanBaseProtocol === "oracle";
   const isMySQLLike = isMySQLCompatibleType(dbType) && !isOceanBaseOracle;
+  const isMQTT = dbType === "mqtt";
   const isKafka = dbType === "kafka";
   const isRabbitMQ = dbType === "rabbitmq";
   const supportsConnectionParams = supportsConnectionParamsForType(dbType);
@@ -1691,6 +1693,69 @@ const ConnectionModal: React.FC<{
       };
     }
 
+    if (type === "mqtt") {
+      const defaultPort = getDefaultPortByType(type);
+      const parsed =
+        parseMultiHostUri(trimmedUri, "mqtt") ||
+        parseMultiHostUri(trimmedUri, "mqtts") ||
+        parseMultiHostUri(trimmedUri, "tcp") ||
+        parseMultiHostUri(trimmedUri, "ssl") ||
+        parseMultiHostUri(trimmedUri, "tls");
+      if (!parsed) {
+        return null;
+      }
+      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+        return null;
+      }
+      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
+        return null;
+      }
+      const hostList = normalizeAddressList(parsed.hosts, defaultPort);
+      if (!hostList.length) {
+        return null;
+      }
+      const primary = parseHostPort(
+        hostList[0] || `localhost:${defaultPort}`,
+        defaultPort,
+      );
+      const lowerUri = trimmedUri.toLowerCase();
+      const tlsEnabled =
+        lowerUri.startsWith("mqtts://") ||
+        lowerUri.startsWith("ssl://") ||
+        lowerUri.startsWith("tls://") ||
+        normalizeUriBool(
+          parsed.params.get("tls") ||
+            parsed.params.get("ssl") ||
+            parsed.params.get("useSSL") ||
+            parsed.params.get("use_ssl"),
+        );
+      const skipVerify = normalizeUriBool(
+        parsed.params.get("skip_verify") || parsed.params.get("skipVerify"),
+      );
+      const topology = String(parsed.params.get("topology") || "")
+        .trim()
+        .toLowerCase();
+      const timeoutValue = Number(parsed.params.get("timeout"));
+      return {
+        host: primary?.host || "localhost",
+        port: primary?.port || defaultPort,
+        user: parsed.username,
+        password: parsed.password,
+        database: parsed.database || "",
+        useSSL: tlsEnabled,
+        sslMode: tlsEnabled ? (skipVerify ? "skip-verify" : "required") : "disable",
+        ...extractSSLPathValuesFromParams(parsed.params, type),
+        mqttTopology:
+          topology === "cluster" || hostList.length > 1 ? "cluster" : "single",
+        mqttHosts: hostList.slice(1),
+        connectionParams: serializeConnectionParams(parsed.params),
+        timeout:
+          Number.isFinite(timeoutValue) && timeoutValue > 0
+            ? Math.min(MAX_TIMEOUT_SECONDS, Math.trunc(timeoutValue))
+            : undefined,
+      };
+    }
+
     if (type === "rabbitmq") {
       const defaultPort = getDefaultPortByType(type);
       const parsed = parseSingleHostUri(
@@ -1979,6 +2044,9 @@ const ConnectionModal: React.FC<{
     if (dbType === "iotdb") {
       return "iotdb://root:root@127.0.0.1:6667/root.sg";
     }
+    if (dbType === "mqtt") {
+      return "mqtt://user:pass@127.0.0.1:1883/devices%2F%2B%2Ftelemetry?topology=cluster&clientId=gonavi-desktop&qos=1";
+    }
     if (dbType === "kafka") {
       return "kafka://user:pass@127.0.0.1:9092,127.0.0.2:9092/orders.events?topology=cluster&groupId=analytics&mechanism=scram-sha-256";
     }
@@ -2040,6 +2108,8 @@ const ConnectionModal: React.FC<{
         return "timezone=Asia%2FShanghai";
       case "iotdb":
         return "fetchSize=1024&timeZone=Asia%2FShanghai";
+      case "mqtt":
+        return "topics=devices%2F%2B%2Ftelemetry,%24SYS%2F%23&clientId=gonavi-desktop&qos=1&cleanSession=true&fetchWaitMs=4000";
       case "kafka":
         return "groupId=gonavi&mechanism=scram-sha-256&clientId=gonavi-desktop&startOffset=latest";
       case "rabbitmq":
@@ -2134,6 +2204,36 @@ const ConnectionModal: React.FC<{
       const topicPath = database ? `/${encodeURIComponent(database)}` : "";
       const query = params.toString();
       return `kafka://${encodedAuth}${allBrokers.join(",")}${topicPath}${query ? `?${query}` : ""}`;
+    }
+
+    if (type === "mqtt") {
+      const primary = toAddress(host, port, defaultPort);
+      const brokers =
+        values.mqttTopology === "cluster"
+          ? normalizeAddressList(values.mqttHosts, defaultPort)
+          : [];
+      const allBrokers = normalizeAddressList([primary, ...brokers], defaultPort);
+      const params = new URLSearchParams();
+      if (allBrokers.length > 1 || values.mqttTopology === "cluster") {
+        params.set("topology", "cluster");
+      }
+      if (values.useSSL) {
+        const mode = String(values.sslMode || "preferred")
+          .trim()
+          .toLowerCase();
+        params.set("tls", "true");
+        if (mode === "skip-verify" || mode === "preferred") {
+          params.set("skip_verify", "true");
+        }
+        appendSSLPathParamsForUri(params, type, values);
+      }
+      if (Number.isFinite(timeout) && timeout > 0) {
+        params.set("timeout", String(timeout));
+      }
+      mergeConnectionParams(params, values.connectionParams);
+      const topicPath = database ? `/${encodeURIComponent(database)}` : "";
+      const query = params.toString();
+      return `mqtt://${encodedAuth}${allBrokers.join(",")}${topicPath}${query ? `?${query}` : ""}`;
     }
 
     if (type === "rabbitmq") {
@@ -2529,6 +2629,8 @@ const ConnectionModal: React.FC<{
           configType === "sphinx"
             ? normalizedHosts.slice(1)
             : [];
+        const mqttHosts =
+          configType === "mqtt" ? normalizedHosts.slice(1) : [];
         const kafkaHosts =
           configType === "kafka" ? normalizedHosts.slice(1) : [];
         const mongoHosts =
@@ -2538,6 +2640,9 @@ const ConnectionModal: React.FC<{
         const mysqlIsReplica =
           String(config.topology || "").toLowerCase() === "replica" ||
           mysqlReplicaHosts.length > 0;
+        const mqttIsCluster =
+          String(config.topology || "").toLowerCase() === "cluster" ||
+          mqttHosts.length > 0;
         const kafkaIsCluster =
           String(config.topology || "").toLowerCase() === "cluster" ||
           kafkaHosts.length > 0;
@@ -2613,6 +2718,8 @@ const ConnectionModal: React.FC<{
           timeout: resolvedJvmTimeout,
           mysqlTopology: mysqlIsReplica ? "replica" : "single",
           mysqlReplicaHosts: mysqlReplicaHosts,
+          mqttTopology: mqttIsCluster ? "cluster" : "single",
+          mqttHosts: mqttHosts,
           kafkaTopology: kafkaIsCluster ? "cluster" : "single",
           kafkaHosts: kafkaHosts,
           mysqlReplicaUser: config.mysqlReplicaUser || "",
@@ -3590,6 +3697,23 @@ const ConnectionModal: React.FC<{
       }
     }
 
+    if (type === "mqtt") {
+      const brokers =
+        mergedValues.mqttTopology === "cluster"
+          ? normalizeAddressList(mergedValues.mqttHosts, defaultPort)
+          : [];
+      const allHosts = normalizeAddressList(
+        [`${primaryHost}:${primaryPort}`, ...brokers],
+        defaultPort,
+      );
+      if (mergedValues.mqttTopology === "cluster" || allHosts.length > 1) {
+        hosts = allHosts;
+        topology = "cluster";
+      } else {
+        topology = "single";
+      }
+    }
+
     if (type === "mongodb") {
       mongoSrvEnabled = !!mergedValues.mongoSrv;
       const extraHosts =
@@ -3826,6 +3950,7 @@ const ConnectionModal: React.FC<{
         includeDatabases: undefined,
         includeRedisDatabases: undefined,
         mysqlTopology: "single",
+        mqttTopology: "single",
         kafkaTopology: "single",
         redisTopology: "single",
         mongoTopology: "single",
@@ -3836,6 +3961,7 @@ const ConnectionModal: React.FC<{
         mongoAuthMechanism: "",
         savePassword: true,
         mysqlReplicaHosts: [],
+        mqttHosts: [],
         kafkaHosts: [],
         redisHosts: [],
         redisSentinelMaster: "",
@@ -3915,7 +4041,7 @@ const ConnectionModal: React.FC<{
       });
     } else if (type !== "custom") {
       const defaultUser =
-        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "kafka" || type === "rabbitmq") ? "" : "root";
+        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";
       const sslCapableType = supportsSSLForType(type);
       setUseSSL(false);
       setUseHttpTunnel(false);
@@ -3934,6 +4060,7 @@ const ConnectionModal: React.FC<{
         httpTunnelUser: "",
         httpTunnelPassword: "",
         mysqlTopology: "single",
+        mqttTopology: "single",
         kafkaTopology: "single",
         redisTopology: "single",
         mongoTopology: "single",
@@ -3944,6 +4071,7 @@ const ConnectionModal: React.FC<{
         mongoAuthMechanism: "",
         savePassword: true,
         mysqlReplicaHosts: [],
+        mqttHosts: [],
         kafkaHosts: [],
         redisHosts: [],
         redisSentinelMaster: "",
@@ -5061,6 +5189,22 @@ const ConnectionModal: React.FC<{
                   ),
                 })}
 
+              {dbType === "mqtt" &&
+                renderConfigSectionCard({
+                  sectionKey: "service",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="database"
+                      label="默认 Topic / Filter（可选）"
+                      help="留空时必须在 SQL 中显式指定 Topic；填写后可直接执行 SHOW、CONSUME 或 SELECT 预览。支持使用 /、+、#。"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input {...noAutoCapInputProps} placeholder="例如：devices/+/telemetry" />
+                    </Form.Item>
+                  ),
+                })}
+
               {dbType === "rabbitmq" &&
                 renderConfigSectionCard({
                   sectionKey: "service",
@@ -5151,6 +5295,28 @@ const ConnectionModal: React.FC<{
                   }),
                 })}
 
+              {isMQTT &&
+                renderConfigSectionCard({
+                  sectionKey: "connectionMode",
+                  icon: <ClusterOutlined />,
+                  children: renderChoiceCards({
+                    fieldName: "mqttTopology",
+                    value: String(mqttTopology),
+                    options: [
+                      {
+                        value: "single",
+                        label: "单 Broker",
+                        description: "只配置一个 broker，适合本地或简单环境。",
+                      },
+                      {
+                        value: "cluster",
+                        label: "集群模式",
+                        description: "配置多个 broker，提高连接发现与故障切换成功率。",
+                      },
+                    ],
+                  }),
+                })}
+
               {isKafka &&
                 kafkaTopology === "cluster" &&
                 renderConfigSectionCard({
@@ -5165,6 +5331,26 @@ const ConnectionModal: React.FC<{
                       <Select
                         mode="tags"
                         placeholder="例如：10.10.0.12:9092、10.10.0.13:9092"
+                        tokenSeparators={[",", ";", " "]}
+                      />
+                    </Form.Item>
+                  ),
+                })}
+
+              {isMQTT &&
+                mqttTopology === "cluster" &&
+                renderConfigSectionCard({
+                  sectionKey: "replica",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <Form.Item
+                      name="mqttHosts"
+                      label="额外 Broker 地址"
+                      help="可输入多个 broker 地址，格式：host:port（回车确认）"
+                    >
+                      <Select
+                        mode="tags"
+                        placeholder="例如：10.10.0.12:1883、10.10.0.13:1883"
                         tokenSeparators={[",", ";", " "]}
                       />
                     </Form.Item>
@@ -5294,7 +5480,7 @@ const ConnectionModal: React.FC<{
                           }
                           style={{ marginBottom: 0 }}
                         >
-                          <Input {...noAutoCapInputProps} placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined} />
+                          <Input {...noAutoCapInputProps} placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "mqtt" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined} />
                         </Form.Item>
                         <Form.Item
                           name="password"
@@ -6216,6 +6402,7 @@ const ConnectionModal: React.FC<{
           connectionParams: "",
           oceanBaseProtocol: "mysql",
           mysqlTopology: "single",
+          mqttTopology: "single",
           kafkaTopology: "single",
           redisTopology: "single",
           mongoTopology: "single",
@@ -6224,6 +6411,7 @@ const ConnectionModal: React.FC<{
           mongoAuthMechanism: "",
           savePassword: true,
           mysqlReplicaHosts: [],
+          mqttHosts: [],
           kafkaHosts: [],
           redisHosts: [],
           redisSentinelMaster: "",

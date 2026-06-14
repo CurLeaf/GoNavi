@@ -59,6 +59,11 @@ describe('quoteQualifiedIdent', () => {
       .toBe('`root`.`sg`.`d1`');
   });
 
+  it('keeps MQTT topic filters as one quoted identifier', () => {
+    expect(quoteQualifiedIdent('mqtt', 'devices/+/telemetry.v1'))
+      .toBe('"devices/+/telemetry.v1"');
+  });
+
   it('keeps Kafka topic names as one quoted identifier', () => {
     expect(quoteQualifiedIdent('kafka', 'logs.app-1'))
       .toBe('"logs.app-1"');

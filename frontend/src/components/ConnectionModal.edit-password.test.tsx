@@ -33,10 +33,10 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('type === "elasticsearch"');
     expect(source).toContain("return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';");
     expect(source).toContain(
-      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "kafka" || type === "rabbitmq") ? "" : "root";',
+      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";',
     );
     expect(source).toContain(
-      'placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined}',
+      'placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "mqtt" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined}',
     );
     expect(source).toContain('label="显示数据库 (留空显示全部)"');
   });
@@ -75,6 +75,19 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain("return 'Storage Group / Device / Timeseries';");
     expect(source).toContain('return "iotdb://root:root@127.0.0.1:6667/root.sg";');
     expect(source).toContain('return "fetchSize=1024&timeZone=Asia%2FShanghai";');
+  });
+
+  it('exposes MQTT in the create-connection picker with broker and topic-filter defaults', () => {
+    expect(source).toContain("case 'mqtt':");
+    expect(source).toContain('return 1883;');
+    expect(source).toContain('mqtt: ["mqtt", "mqtts", "tcp", "ssl", "tls"]');
+    expect(source).toContain("key: 'mqtt'");
+    expect(source).toContain("name: 'MQTT'");
+    expect(source).toContain('dbType === "mqtt"');
+    expect(source).toContain("return 'Broker / Topic Filter / QoS';");
+    expect(source).toContain('return "mqtt://user:pass@127.0.0.1:1883/devices%2F%2B%2Ftelemetry?topology=cluster&clientId=gonavi-desktop&qos=1";');
+    expect(source).toContain('return "topics=devices%2F%2B%2Ftelemetry,%24SYS%2F%23&clientId=gonavi-desktop&qos=1&cleanSession=true&fetchWaitMs=4000";');
+    expect(source).toContain('label="默认 Topic / Filter（可选）"');
   });
 
   it('exposes Kafka in the create-connection picker with broker and topic defaults', () => {

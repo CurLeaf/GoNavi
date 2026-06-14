@@ -16,6 +16,7 @@ export const singleHostUriSchemesByType: Record<string, string[]> = {
   elasticsearch: ["http", "https"],
   chroma: ["http", "https", "chroma"],
   qdrant: ["http", "https", "qdrant"],
+  mqtt: ["mqtt", "mqtts", "tcp", "ssl", "tls"],
   rabbitmq: ["rabbitmq", "http", "https"],
 };
 
@@ -29,6 +30,8 @@ const normalizeConnectionType = (type: string) =>
       case "greatdb":
       case "gdb":
         return "goldendb";
+      case "mqtts":
+        return "mqtt";
       default:
         return normalized;
     }
@@ -59,6 +62,7 @@ const sslSupportedTypes = new Set([
   "elasticsearch",
   "chroma",
   "qdrant",
+  "mqtt",
   "kafka",
   "rabbitmq",
 ]);
@@ -87,6 +91,7 @@ const sslCAPathSupportedTypes = new Set([
   "elasticsearch",
   "chroma",
   "qdrant",
+  "mqtt",
   "kafka",
   "rabbitmq",
 ]);
@@ -109,6 +114,7 @@ const sslClientCertificateSupportedTypes = new Set([
   "gaussdb",
   "mongodb",
   "redis",
+  "mqtt",
   "kafka",
   "rabbitmq",
 ]);
@@ -161,5 +167,6 @@ export const supportsConnectionParamsForType = (type: string) =>
   type === "elasticsearch" ||
   type === "chroma" ||
   type === "qdrant" ||
+  type === "mqtt" ||
   type === "kafka" ||
   type === "rabbitmq";

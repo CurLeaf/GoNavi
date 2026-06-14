@@ -38,6 +38,8 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('custom', 'qdrant-db')).toBe('qdrant');
     expect(resolveSqlDialect('Apache-IoTDB')).toBe('iotdb');
     expect(resolveSqlDialect('custom', 'apache_iotdb')).toBe('iotdb');
+    expect(resolveSqlDialect('MQTTS')).toBe('mqtt');
+    expect(resolveSqlDialect('custom', 'mqtts')).toBe('mqtt');
     expect(resolveSqlDialect('Apache-Kafka')).toBe('kafka');
     expect(resolveSqlDialect('custom', 'apache_kafka')).toBe('kafka');
     expect(resolveSqlDialect('Rabbit-MQ')).toBe('rabbitmq');
@@ -73,6 +75,11 @@ describe('sqlDialect', () => {
     expect(resolveSqlKeywords('iotdb')).toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'SHOW TIMESERIES', 'WITH DATATYPE']));
     expect(names(resolveSqlFunctions('iotdb'))).toEqual(expect.arrayContaining(['DATE_BIN', 'DIFF', 'TOP_K']));
     expect(resolveSqlKeywords('iotdb')).not.toEqual(expect.arrayContaining(['TAGS', 'USING']));
+  });
+
+  it('resolves MQTT completion keywords for topic discovery and consume syntax', () => {
+    expect(resolveSqlKeywords('mqtt')).toEqual(expect.arrayContaining(['SHOW TOPICS', 'DESCRIBE TOPIC', 'CONSUME']));
+    expect(resolveSqlKeywords('mqtt')).not.toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'AUTO_INCREMENT']));
   });
 
   it('resolves Kafka completion keywords for topic discovery and consume syntax', () => {
