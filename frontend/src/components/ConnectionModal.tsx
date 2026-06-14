@@ -140,6 +140,16 @@ const MAX_URI_LENGTH = 4096;
 const MAX_CONNECTION_PARAMS_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
+const PRIMARY_USERNAME_OPTIONAL_TYPES = new Set([
+  "mongodb",
+  "elasticsearch",
+  "chroma",
+  "qdrant",
+  "rocketmq",
+  "mqtt",
+  "kafka",
+  "rabbitmq",
+]);
 const CONNECTION_MODAL_WIDTH = 960;
 const CONNECTION_MODAL_BODY_HEIGHT = 620;
 const REDIS_DEFAULT_DATABASE_COUNT = 16;
@@ -5634,13 +5644,20 @@ const ConnectionModal: React.FC<{
                           name="user"
                           label={dbType === "rocketmq" ? "Access Key" : "用户名"}
                           rules={
-                            (dbType === "mongodb" || dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "rocketmq" || dbType === "kafka" || dbType === "rabbitmq")
+                            PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)
                               ? []
                               : [createUriAwareRequiredRule("请输入用户名")]
                           }
                           style={{ marginBottom: 0 }}
                         >
-                          <Input {...noAutoCapInputProps} placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "rocketmq" || dbType === "mqtt" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined} />
+                          <Input
+                            {...noAutoCapInputProps}
+                            placeholder={
+                              PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)
+                                ? "未开启认证可留空"
+                                : undefined
+                            }
+                          />
                         </Form.Item>
                         <Form.Item
                           name="password"

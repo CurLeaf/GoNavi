@@ -32,13 +32,20 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('icon: getDbIcon(item.key, undefined, 36)');
     expect(source).toContain('type === "elasticsearch"');
     expect(source).toContain("return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';");
+    expect(source).toContain('const PRIMARY_USERNAME_OPTIONAL_TYPES = new Set([');
+    expect(source).toContain('"mqtt",');
     expect(source).toContain(
       'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "rocketmq" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";',
     );
-    expect(source).toContain(
-      'placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "rocketmq" || dbType === "mqtt" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined}',
-    );
+    expect(source).toContain('PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)');
     expect(source).toContain('label="显示数据库 (留空显示全部)"');
+  });
+
+  it('keeps MQTT username optional during test-connection validation', () => {
+    expect(source).toContain('"mqtt",');
+    expect(source).toContain('PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)');
+    expect(source).toContain(': [createUriAwareRequiredRule("请输入用户名")]');
+    expect(source).toContain('? "未开启认证可留空"');
   });
 
   it('exposes Chroma in the create-connection picker with vector defaults', () => {
