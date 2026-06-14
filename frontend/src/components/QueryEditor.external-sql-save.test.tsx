@@ -3832,9 +3832,9 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('width: 34px !important;');
     expect(css).toContain('@media (max-width: 900px)');
 
-    const queryToolbarCss = css.slice(css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar {'), css.indexOf('body[data-ui-version="v2"] .gn-v2-query-monaco-shell {'));
-    expect(queryToolbarCss).not.toContain('margin-left: auto;');
-    expect(queryToolbarCss).not.toContain('justify-content: flex-end;');
+    const queryToolbarMainCss = css.slice(css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar-main {'), css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar-selects {'));
+    expect(queryToolbarMainCss).not.toContain('margin-left: auto;');
+    expect(queryToolbarMainCss).not.toContain('justify-content: flex-end;');
   });
 
   it('keeps custom SQL snippet syntax help editable and uses it in completion details', () => {

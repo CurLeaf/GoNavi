@@ -77,8 +77,8 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   onFormat,
   onToggleResultPanelVisibility,
   onAIAction,
-}) => (
-  <div className={isV2Ui ? 'gn-v2-query-toolbar' : undefined} style={{ padding: '4px 8px 8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
+}) => {
+  const selects = (
     <div
       className={isV2Ui ? 'gn-v2-query-toolbar-selects' : undefined}
       style={{ display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}
@@ -123,8 +123,11 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
         onCommitModeChange={onCommitModeChange}
         onAutoCommitDelayMsChange={onAutoCommitDelayMsChange}
       />
-      {pendingTransactionToolbar}
+      {!isV2Ui && pendingTransactionToolbar}
     </div>
+  );
+
+  const actions = (
     <div
       className={isV2Ui ? 'gn-v2-query-toolbar-actions' : undefined}
       style={{ display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}
@@ -198,7 +201,33 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
         <Button className={isV2Ui ? 'gn-v2-query-toolbar-ai-action' : undefined} icon={<RobotOutlined />} style={{ color: '#818cf8' }}>AI</Button>
       </Dropdown>
     </div>
-  </div>
-);
+  );
+
+  if (!isV2Ui) {
+    return (
+      <div className={undefined} style={{ padding: '4px 8px 8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
+        {selects}
+        {actions}
+      </div>
+    );
+  }
+
+  return (
+    <div className="gn-v2-query-toolbar" style={{ padding: '4px 8px 8px', display: 'flex', gap: '8px', flexShrink: 0 }}>
+      <div
+        className="gn-v2-query-toolbar-main"
+        style={{ display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}
+      >
+        {selects}
+        {actions}
+      </div>
+      {pendingTransactionToolbar && (
+        <div className="gn-v2-query-toolbar-transaction-row">
+          {pendingTransactionToolbar}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default QueryEditorToolbar;

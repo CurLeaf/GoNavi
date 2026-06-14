@@ -4796,9 +4796,20 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar {
   min-height: 48px;
   padding: 8px 12px !important;
   gap: 6px 10px !important;
-  align-items: center !important;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch !important;
   background: var(--gn-bg-panel) !important;
   border-bottom: 0.5px solid var(--gn-br-1) !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-main {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  gap: 6px 10px !important;
+  align-items: center !important;
+  flex-wrap: wrap;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-selects,
@@ -4817,6 +4828,18 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
   flex: 0 1 auto !important;
   flex-wrap: wrap;
   justify-content: flex-start;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-transaction-toolbar {
+  display: inline-flex;
+  max-width: 100%;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-select {
@@ -4897,11 +4920,28 @@ body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button {
   font-weight: 750 !important;
 }
 
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:hover,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus-visible,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:active {
+  border-color: transparent !important;
+  background: var(--gn-accent-soft) !important;
+  color: var(--gn-accent-2) !important;
+}
+
 body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button .gn-v2-toolbar-kbd {
   margin-left: 0;
   min-width: 18px;
   justify-content: center;
   border: none;
+  background: rgba(22, 163, 74, 0.18);
+  color: var(--gn-accent-2);
+}
+
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:hover .gn-v2-toolbar-kbd,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus .gn-v2-toolbar-kbd,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus-visible .gn-v2-toolbar-kbd,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:active .gn-v2-toolbar-kbd {
   background: rgba(22, 163, 74, 0.18);
   color: var(--gn-accent-2);
 }
@@ -4923,6 +4963,10 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-ai-action.ant-btn {
 }
 
 @media (max-width: 900px) {
+  body[data-ui-version="v2"] .gn-v2-query-toolbar-main {
+    width: 100%;
+  }
+
   body[data-ui-version="v2"] .gn-v2-query-toolbar-selects {
     flex: 1 1 100% !important;
     max-width: none;
@@ -4930,6 +4974,10 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-ai-action.ant-btn {
 
   body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
     width: 100%;
+    justify-content: flex-start;
+  }
+
+  body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-row {
     justify-content: flex-start;
   }
 }
