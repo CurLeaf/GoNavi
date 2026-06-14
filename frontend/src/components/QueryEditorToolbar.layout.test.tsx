@@ -30,8 +30,24 @@ describe('QueryEditorToolbar layout', () => {
 
   it('keeps commit button hover styling in source and v2 css', () => {
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const commitBaseCss = css.slice(
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button {'),
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:hover,'),
+    );
+    const commitHoverCss = css.slice(
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:hover,'),
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button .gn-v2-toolbar-kbd {'),
+    );
+    const commitKbdHoverCss = css.slice(
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:hover .gn-v2-toolbar-kbd,'),
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar-icon-action.ant-btn,'),
+    );
 
     expect(css).toContain('.gn-v2-query-transaction-commit-button:hover');
     expect(css).toContain('.gn-v2-query-transaction-commit-button:focus-visible');
+    expect(commitBaseCss).toContain('background: var(--gn-accent-soft) !important;');
+    expect(commitHoverCss).not.toContain('background: var(--gn-accent-soft) !important;');
+    expect(commitHoverCss).toContain('box-shadow:');
+    expect(commitKbdHoverCss).toContain('background:');
   });
 });

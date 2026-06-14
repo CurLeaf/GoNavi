@@ -4921,15 +4921,17 @@ body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button {
   background: var(--gn-accent-soft) !important;
   color: var(--gn-accent-2) !important;
   font-weight: 750 !important;
+  transition: background-color 120ms ease, box-shadow 120ms ease, border-color 120ms ease !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:hover,
 body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus,
 body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus-visible,
 body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:active {
-  border-color: transparent !important;
-  background: var(--gn-accent-soft) !important;
+  border-color: rgba(22, 163, 74, 0.18) !important;
+  background: color-mix(in srgb, var(--gn-accent-soft) 80%, rgba(22, 163, 74, 0.28)) !important;
   color: var(--gn-accent-2) !important;
+  box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.12), 0 6px 14px rgba(22, 163, 74, 0.12) !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button .gn-v2-toolbar-kbd {
@@ -4945,7 +4947,7 @@ body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:hover .gn-v2-t
 body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus .gn-v2-toolbar-kbd,
 body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus-visible .gn-v2-toolbar-kbd,
 body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:active .gn-v2-toolbar-kbd {
-  background: rgba(22, 163, 74, 0.18);
+  background: rgba(22, 163, 74, 0.24);
   color: var(--gn-accent-2);
 }
 
