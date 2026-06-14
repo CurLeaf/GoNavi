@@ -354,7 +354,7 @@ const rewriteOracleSelectAllWithExpressions = (sql: string, expressions: string[
     if (!selectAllFound) return undefined;
 
     const fromTrimmed = fromTail.trimStart();
-    const tableMatch = fromTrimmed.match(/^((?:[`"\[]?\w+[`"\]]?)(?:\s*\.\s*(?:[`"\[]?\w+[`"\]]?)){0,2})([\s\S]*)$/);
+    const tableMatch = fromTrimmed.match(QUERY_EDITOR_SQL_LEADING_IDENTIFIER_PATH_REGEX);
     if (!tableMatch) return undefined;
 
     const tableText = tableMatch[1];
@@ -907,6 +907,25 @@ type QueryEditorHoverTarget =
     | { kind: 'column'; dbName: string; tableName: string; columnName: string; type?: string; comment?: string; schemaName?: string; range: { startColumn: number; endColumn: number } };
 
 const QUERY_EDITOR_IDENTIFIER_CHAR_REGEX = /[A-Za-z0-9_$`"\[\].]/;
+const QUERY_EDITOR_SQL_UNQUOTED_IDENTIFIER_PATTERN = '[A-Za-z_][A-Za-z0-9_$]*';
+const QUERY_EDITOR_SQL_QUOTED_IDENTIFIER_PATTERN = '(?:`[^`]+`|"[^"]+"|\\[[^\\]]+\\])';
+const QUERY_EDITOR_SQL_IDENTIFIER_PATTERN = `(?:${QUERY_EDITOR_SQL_QUOTED_IDENTIFIER_PATTERN}|${QUERY_EDITOR_SQL_UNQUOTED_IDENTIFIER_PATTERN})`;
+const QUERY_EDITOR_SQL_IDENTIFIER_PATH_PATTERN = `${QUERY_EDITOR_SQL_IDENTIFIER_PATTERN}(?:\\s*\\.\\s*${QUERY_EDITOR_SQL_IDENTIFIER_PATTERN}){0,2}`;
+const QUERY_EDITOR_SQL_THREE_PART_COMPLETION_REGEX = new RegExp(
+    `(${QUERY_EDITOR_SQL_IDENTIFIER_PATTERN})\\s*\\.\\s*(${QUERY_EDITOR_SQL_IDENTIFIER_PATTERN})\\s*\\.\\s*([A-Za-z0-9_$]*)$`,
+);
+const QUERY_EDITOR_SQL_QUALIFIER_COMPLETION_REGEX = new RegExp(
+    `(${QUERY_EDITOR_SQL_IDENTIFIER_PATTERN})\\s*\\.\\s*([A-Za-z0-9_$]*)$`,
+);
+const QUERY_EDITOR_SQL_TABLE_REFERENCE_REGEX = new RegExp(
+    `\\b(?:FROM|JOIN|UPDATE|INTO|DELETE\\s+FROM)\\s+(${QUERY_EDITOR_SQL_IDENTIFIER_PATH_PATTERN})`,
+    'gi',
+);
+const QUERY_EDITOR_SQL_ALIAS_REFERENCE_REGEX = new RegExp(
+    `\\b(?:FROM|JOIN|UPDATE|INTO|DELETE\\s+FROM)\\s+(${QUERY_EDITOR_SQL_IDENTIFIER_PATH_PATTERN})(?:\\s+(?:AS\\s+)?(${QUERY_EDITOR_SQL_IDENTIFIER_PATTERN}))?`,
+    'gi',
+);
+const QUERY_EDITOR_SQL_LEADING_IDENTIFIER_PATH_REGEX = new RegExp(`^(${QUERY_EDITOR_SQL_IDENTIFIER_PATH_PATTERN})([\\s\\S]*)$`);
 const QUERY_EDITOR_HOVER_DELAY_MS = 1000;
 const QUERY_EDITOR_OBJECT_DECORATION_MAX_TEXT_LENGTH = 200_000;
 const QUERY_EDITOR_OBJECT_DECORATION_MAX_IDENTIFIERS = 800;
@@ -1168,7 +1187,8 @@ const buildQueryEditorAliasMap = (
         'left', 'right', 'inner', 'outer', 'full', 'cross', 'join',
         'union', 'except', 'intersect', 'as', 'set', 'values', 'returning',
     ]);
-    const aliasRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?\w+[`"]?(?:\s*\.\s*[`"]?\w+[`"]?)?)(?:\s+(?:AS\s+)?([`"]?\w+[`"]?))?/gi;
+    const aliasRegex = QUERY_EDITOR_SQL_ALIAS_REFERENCE_REGEX;
+    aliasRegex.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = aliasRegex.exec(fullText)) !== null) {
         const tableIdent = normalizeCompletionQualifiedName(match[1] || '');
@@ -3151,7 +3171,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
               const stripQuotes = stripCompletionIdentifierQuotes;
               const normalizeQualifiedName = normalizeCompletionQualifiedName;
-              const getLastPart = getCompletionQualifiedNameLastPart;
               const splitSchemaAndTable = splitCompletionSchemaAndTable;
 
               const buildConnConfig = () => {
@@ -3233,7 +3252,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               const linePrefix = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
 
               // 0) 三段式 db.table.column 格式：当输入 db.table. 时提示列
-              const threePartMatch = linePrefix.match(/([`"]?\w+[`"]?)\.([`"]?\w+[`"]?)\.(\w*)$/);
+              const threePartMatch = linePrefix.match(QUERY_EDITOR_SQL_THREE_PART_COMPLETION_REGEX);
               if (threePartMatch) {
                   const dbPart = stripQuotes(threePartMatch[1]);
                   const tablePart = stripQuotes(threePartMatch[2]);
@@ -3262,7 +3281,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }
 
               // 1) 两段式 qualifier.xxx 格式
-              const qualifierMatch = linePrefix.match(/([`"]?[A-Za-z_]\w*[`"]?)\.(\w*)$/);
+              const qualifierMatch = linePrefix.match(QUERY_EDITOR_SQL_QUALIFIER_COMPLETION_REGEX);
               if (qualifierMatch) {
                   const qualifier = stripQuotes(qualifierMatch[1]);
                   const prefix = (qualifierMatch[2] || '').toLowerCase();
@@ -3322,39 +3341,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   }
 
                   // 否则检查是否是表别名或表名，提示列
-                  const reserved = new Set([
-                      'where', 'on', 'group', 'order', 'limit', 'having',
-                      'left', 'right', 'inner', 'outer', 'full', 'cross', 'join',
-                      'union', 'except', 'intersect', 'as', 'set', 'values', 'returning',
-                  ]);
-
-                  const aliasMap: Record<string, {dbName: string, tableName: string}> = {};
-                  // Capture table and optional alias, support db.table format
-                  const aliasRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?\w+[`"]?(?:\s*\.\s*[`"]?\w+[`"]?)?)(?:\s+(?:AS\s+)?([`"]?\w+[`"]?))?/gi;
-                  let m;
-                  while ((m = aliasRegex.exec(fullText)) !== null) {
-                      const tableIdent = normalizeQualifiedName(m[1] || '');
-                      if (!tableIdent) continue;
-
-                      // 解析 db.table 或 table 格式
-                      const parts = tableIdent.split('.');
-                      let dbName = sharedCurrentDb || '';
-                      let tableName = tableIdent;
-                      if (parts.length === 2) {
-                          dbName = parts[0];
-                          tableName = parts[1];
-                      }
-
-                      const shortTable = getLastPart(tableIdent);
-                      // 用表名作为 qualifier
-                      if (shortTable) aliasMap[shortTable.toLowerCase()] = { dbName, tableName };
-
-                      const a = stripQuotes(m[2] || '').trim();
-                      if (!a) continue;
-                      const al = a.toLowerCase();
-                      if (reserved.has(al)) continue;
-                      aliasMap[al] = { dbName, tableName };
-                  }
+                  const aliasMap = buildQueryEditorAliasMap(fullText, sharedCurrentDb || '');
 
                   const tableInfo = aliasMap[qualifier.toLowerCase()];
                   if (tableInfo) {
@@ -3401,7 +3388,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }
 
               // 2) global/table/column completion
-              const tableRegex = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM)\s+([`"]?\w+[`"]?(?:\s*\.\s*[`"]?\w+[`"]?)?)/gi;
+              const tableRegex = QUERY_EDITOR_SQL_TABLE_REFERENCE_REGEX;
+              tableRegex.lastIndex = 0;
               const foundTables = new Set<string>();
               let match;
               while ((match = tableRegex.exec(fullText)) !== null) {

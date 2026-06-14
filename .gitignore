@@ -10,6 +10,7 @@ build/bin/
 
 # wails / node artifacts (按需)
 node_modules/
+frontend/wailsjs/tsconfig.json
 
 dist/
 .DS_Store

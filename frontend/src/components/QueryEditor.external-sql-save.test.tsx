@@ -1096,6 +1096,72 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
+  it('suggests columns in WHERE for cross-database MySQL tables with quoted hyphenated database names', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = '';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({
+      success: true,
+      data: [{ Database: 'sanpin' }, { Database: 'ccbim-document-07' }],
+    });
+    backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'sanpin') {
+        return { success: true, data: [{ Table: 'orders' }] };
+      }
+      if (dbName === 'ccbim-document-07') {
+        return { success: true, data: [{ Table: 'doc' }] };
+      }
+      return { success: true, data: [] };
+    });
+    backendApp.DBGetAllColumns.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'sanpin') {
+        return {
+          success: true,
+          data: [{ tableName: 'orders', name: 'id', type: 'bigint' }],
+        };
+      }
+      if (dbName === 'ccbim-document-07') {
+        return {
+          success: true,
+          data: [
+            { tableName: 'doc', name: 'node_id', type: 'varchar(64)' },
+            { tableName: 'doc', name: 'node_name', type: 'varchar(255)' },
+          ],
+        };
+      }
+      return { success: true, data: [] };
+    });
+
+    editorState.value = 'SELECT *\nFROM `ccbim-document-07`.doc\nWHERE no';
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'sanpin' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sqlProvider = editorState.providers.find((provider) => Array.isArray(provider.triggerCharacters) && provider.triggerCharacters.includes('.'));
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.latestOnChange?.(editorState.value);
+    const result = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 3, column: 'WHERE no'.length + 1 },
+    );
+    const labels = result.suggestions.map((item: any) => item.label);
+
+    expect(labels).toContain('node_id');
+    expect(labels).toContain('node_name');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('resolves database and table targets for ctrl/cmd navigation', () => {
     const tables = [
       { dbName: 'main', tableName: 'users' },
