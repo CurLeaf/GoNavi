@@ -994,6 +994,108 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
+  it('quotes uppercase postgres table names in FROM completion insert text', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'postgres';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Table: 'public.MyTable' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '', dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sqlProvider = editorState.providers.find((provider) => Array.isArray(provider.triggerCharacters) && provider.triggerCharacters.includes('.'));
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.value = 'SELECT * FROM My';
+    editorState.latestOnChange?.(editorState.value);
+    const result = await sqlProvider.provideCompletionItems(editorState.editor.getModel(), { lineNumber: 1, column: editorState.value.length + 1 });
+    const match = result.suggestions.find((item: any) => item.label === 'MyTable');
+
+    expect(match?.insertText).toBe('"MyTable"');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('quotes uppercase postgres table names after schema qualifiers in completion insert text', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'postgres';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Table: 'public.MyTable' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '', dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sqlProvider = editorState.providers.find((provider) => Array.isArray(provider.triggerCharacters) && provider.triggerCharacters.includes('.'));
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.value = 'SELECT * FROM public.';
+    editorState.latestOnChange?.(editorState.value);
+    const result = await sqlProvider.provideCompletionItems(editorState.editor.getModel(), { lineNumber: 1, column: editorState.value.length + 1 });
+    const match = result.suggestions.find((item: any) => item.label === 'MyTable');
+
+    expect(match?.insertText).toBe('"MyTable"');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('quotes uppercase postgres column names in completion insert text', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'postgres';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Table: 'public.MyTable' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ tableName: 'public.MyTable', name: 'DisplayName', type: 'text' }],
+    });
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '', dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sqlProvider = editorState.providers.find((provider) => Array.isArray(provider.triggerCharacters) && provider.triggerCharacters.includes('.'));
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.value = 'SELECT Dis FROM public."MyTable"';
+    editorState.latestOnChange?.(editorState.value);
+    const result = await sqlProvider.provideCompletionItems(editorState.editor.getModel(), { lineNumber: 1, column: 'SELECT Dis'.length + 1 });
+    const match = result.suggestions.find((item: any) => item.label === 'DisplayName');
+
+    expect(match?.insertText).toBe('"DisplayName"');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('resolves database and table targets for ctrl/cmd navigation', () => {
     const tables = [
       { dbName: 'main', tableName: 'users' },

@@ -12,6 +12,7 @@ import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../uti
 import { getShortcutDisplayLabel, getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, isEditableElement, isShortcutMatch, comboToMonacoKeyBinding, resolveShortcutBinding } from "../utils/shortcuts";
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { isPostgresSchemaDialect } from '../utils/connectionDriverType';
 import { isOracleLikeDialect, resolveSqlDialect, resolveSqlFunctions, resolveSqlKeywords } from '../utils/sqlDialect';
 import { applyQueryAutoLimit } from '../utils/queryAutoLimit';
 import {
@@ -20,7 +21,7 @@ import {
     resolveQueryResultPaginationTotal,
 } from '../utils/queryResultPagination';
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
-import { quoteIdentPart } from '../utils/sql';
+import { quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
 import { formatSqlExecutionError } from '../utils/sqlErrorSemantics';
 import { shouldUseSqlEditorManagedTransaction } from '../utils/sqlEditorTransaction';
 import { findSqlStatementRanges, resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/sqlStatementSelection';
@@ -3102,6 +3103,17 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   String(activeConnection?.config?.driver || ''),
                   { oceanBaseProtocol: activeConnection?.config?.oceanBaseProtocol },
               );
+              const shouldQuoteCompletionIdentifiers = isPostgresSchemaDialect(activeDialect);
+              const quoteCompletionPart = (ident: string) => {
+                  const raw = String(ident || '').trim();
+                  if (!raw) return raw;
+                  return shouldQuoteCompletionIdentifiers ? quoteIdentPart(activeDialect, raw) : raw;
+              };
+              const quoteCompletionPath = (ident: string) => {
+                  const raw = String(ident || '').trim();
+                  if (!raw) return raw;
+                  return shouldQuoteCompletionIdentifiers ? quoteQualifiedIdent(activeDialect, raw) : raw;
+              };
               const dialectKeywords = resolveSqlKeywords(activeDialect);
               const dialectFunctions = resolveSqlFunctions(activeDialect);
 
@@ -3208,7 +3220,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   const suggestions = filtered.map(c => ({
                       label: c.name,
                       kind: monaco.languages.CompletionItemKind.Field,
-                      insertText: c.name,
+                      insertText: quoteCompletionPart(c.name),
                       detail: appendCommentToDetail(`${c.type} (${c.dbName}.${c.tableName})`, c.comment),
                       documentation: buildCompletionDocumentation(c.comment),
                       range,
@@ -3238,7 +3250,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       const suggestions = filtered.map(t => ({
                           label: t.tableName,
                           kind: monaco.languages.CompletionItemKind.Class,
-                          insertText: t.tableName,
+                          insertText: quoteCompletionPath(t.tableName),
                           detail: appendCommentToDetail(`Table (${t.dbName})`, t.comment),
                           documentation: buildCompletionDocumentation(t.comment),
                           range,
@@ -3268,7 +3280,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       const suggestions = filtered.map(t => ({
                           label: t.table,
                           kind: monaco.languages.CompletionItemKind.Class,
-                          insertText: t.table,
+                          insertText: quoteCompletionPart(t.table),
                           detail: appendCommentToDetail(`Table (${t.dbName}${t.schema ? '.' + t.schema : ''})`, t.comment),
                           documentation: buildCompletionDocumentation(t.comment),
                           range,
@@ -3343,7 +3355,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       const suggestions = filtered.map(c => ({
                           label: c.name,
                           kind: monaco.languages.CompletionItemKind.Field,
-                          insertText: c.name,
+                          insertText: quoteCompletionPart(c.name),
                           detail: appendCommentToDetail(
                               c.type ? `${c.type} (${c.dbName ? c.dbName + '.' : ''}${c.tableName})` : (c.tableName ? `(${c.tableName})` : ''),
                               c.comment,
@@ -3427,7 +3439,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       return {
                           label: c.name,
                           kind: monaco.languages.CompletionItemKind.Field,
-                          insertText: c.name,
+                          insertText: quoteCompletionPart(c.name),
                           detail: appendCommentToDetail(`${c.type} (${c.dbName}.${c.tableName})`, c.comment),
                           documentation: buildCompletionDocumentation(c.comment),
                           range,
@@ -3472,7 +3484,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       return {
                           label,
                           kind: monaco.languages.CompletionItemKind.Class,
-                          insertText: label,
+                          insertText: quoteCompletionPath(label),
                           detail: appendCommentToDetail(`Table (${t.dbName})`, t.comment),
                           documentation: buildCompletionDocumentation(t.comment),
                           range,
@@ -3484,7 +3496,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   const hasDuplicate = schemas.length > 1;
                   // 同名表存在于多个 schema → 显示 schema.table；否则只显示纯表名
                   const label = hasDuplicate ? t.tableName : pureTable;
-                  const insertText = hasDuplicate ? t.tableName : pureTable;
+                  const insertText = quoteCompletionPath(hasDuplicate ? t.tableName : pureTable);
                   const schemaInfo = parsed.schema ? ` (${parsed.schema})` : '';
                   return {
                       label,
