@@ -114,6 +114,10 @@ export function DBQueryWithCancel(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DBQueryWithCancel'](arg1, arg2, arg3, arg4);
 }
 
+export function DBReleaseConnection(arg1) {
+  return window['go']['app']['App']['DBReleaseConnection'](arg1);
+}
+
 export function DBRollbackTransaction(arg1) {
   return window['go']['app']['App']['DBRollbackTransaction'](arg1);
 }

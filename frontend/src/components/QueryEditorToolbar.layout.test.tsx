@@ -28,6 +28,17 @@ describe('QueryEditorToolbar layout', () => {
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-action-pair {');
   });
 
+  it('keeps run and stop buttons separated in the v2 toolbar action group', () => {
+    const toolbarSource = readFileSync(new URL('./QueryEditorToolbar.tsx', import.meta.url), 'utf8');
+    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+
+    expect(toolbarSource).toContain('gn-v2-query-toolbar-action-group');
+    expect(toolbarSource).not.toContain('Space.Compact');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group {');
+    expect(css).not.toContain('.gn-v2-query-toolbar-action-group.ant-btn-group');
+    expect(css).toContain('gap: 6px;');
+  });
+
   it('keeps commit button hover styling in source and v2 css', () => {
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
     const commitBaseCss = css.slice(

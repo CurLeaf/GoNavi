@@ -167,6 +167,7 @@ vi.mock('../../wailsjs/go/app/App', () => ({
   DBGetTables: mocks.noop,
   DBQuery: mocks.noop,
   DBShowCreateTable: mocks.noop,
+  DBReleaseConnection: mocks.noop,
   ExportTable: mocks.noop,
   OpenSQLFile: mocks.noop,
   ExecuteSQLFile: mocks.noop,
@@ -496,6 +497,18 @@ describe('Sidebar locate toolbar', () => {
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('}> = React.memo(({');
+  });
+
+  it('releases backend database connections when disconnecting a sidebar connection', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const disconnectSource = source.slice(
+      source.indexOf('const releaseConnectionResources = async'),
+      source.indexOf('const deleteConnectionNode ='),
+    );
+
+    expect(source).toContain('DBReleaseConnection');
+    expect(disconnectSource).toContain('await releaseConnectionResources(conn);');
+    expect(source.match(/onClick: \(\) => void disconnectConnectionNode\(node\)/g)).toHaveLength(2);
   });
 
   it('renders the current table locate action in the sidebar toolbar', () => {

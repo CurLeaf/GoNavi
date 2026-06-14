@@ -43,6 +43,7 @@ var (
 type cachedDatabase struct {
 	inst     db.Database
 	lastPing time.Time
+	config   connection.ConnectionConfig
 }
 
 type cachedConnectFailure struct {
@@ -189,6 +190,7 @@ func (a *App) Shutdown() {
 			logger.Error(err, "关闭数据库连接失败")
 		}
 	}
+	a.dbCache = make(map[string]cachedDatabase)
 	proxytunnel.CloseAllForwarders()
 	// Close all Redis connections
 	CloseAllRedisClients()
@@ -286,6 +288,20 @@ func resolveFileDatabaseDSN(config connection.ConnectionConfig) string {
 // Helper: Generate a unique key for the connection config
 func getCacheKey(config connection.ConnectionConfig) string {
 	normalized := normalizeCacheKeyConfig(config)
+	b, _ := json.Marshal(normalized)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+func normalizeConnectionReleaseMatchConfig(config connection.ConnectionConfig) connection.ConnectionConfig {
+	normalized := normalizeCacheKeyConfig(config)
+	normalized.Database = ""
+	normalized.RedisDB = 0
+	return normalized
+}
+
+func getConnectionReleaseMatchKey(config connection.ConnectionConfig) string {
+	normalized := normalizeConnectionReleaseMatchConfig(config)
 	b, _ := json.Marshal(normalized)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
@@ -726,7 +742,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 		}
 		return existing.inst, nil
 	}
-	a.dbCache[key] = cachedDatabase{inst: dbInst, lastPing: now}
+	a.dbCache[key] = cachedDatabase{inst: dbInst, lastPing: now, config: normalizeCacheKeyConfig(effectiveConfig)}
 	a.mu.Unlock()
 
 	logger.Infof("数据库连接成功并写入缓存：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)

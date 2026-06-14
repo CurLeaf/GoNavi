@@ -62,6 +62,8 @@ export function DBQueryMultiTransactional(arg1:connection.ConnectionConfig,arg2:
 
 export function DBQueryWithCancel(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function DBReleaseConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
 export function DBRollbackTransaction(arg1:string):Promise<connection.QueryResult>;
 
 export function DBShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;

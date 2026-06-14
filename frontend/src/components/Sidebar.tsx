@@ -55,7 +55,7 @@ import {
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 		import { SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
 import { getDbIcon } from './DatabaseIcons';
-		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, CreateSQLFile, CreateSQLDirectory, DeleteSQLFile, DeleteSQLDirectory, RenameSQLFile, RenameSQLDirectory, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
+		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, DBReleaseConnection, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, CreateSQLFile, CreateSQLDirectory, DeleteSQLFile, DeleteSQLDirectory, RenameSQLFile, RenameSQLDirectory, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
@@ -5095,9 +5095,18 @@ const Sidebar: React.FC<{
       loadDatabases(node);
   };
 
-  const disconnectConnectionNode = (node: any) => {
+  const releaseConnectionResources = async (conn: SavedConnection | undefined) => {
+      if (!conn?.config) return;
+      const res = await DBReleaseConnection(buildRpcConnectionConfig(conn.config, { id: conn.id }) as any);
+      if (res && res.success === false) {
+          throw new Error(res.message || '释放连接失败');
+      }
+  };
+
+  const disconnectConnectionNode = async (node: any) => {
       const connKey = String(node?.key || node?.dataRef?.id || '');
       if (!connKey) return;
+      const conn = (connections.find((item) => item.id === connKey) || node?.dataRef) as SavedConnection | undefined;
       Array.from(loadingNodesRef.current).forEach((loadingKey) => {
           if (loadingKey === `dbs-${connKey}` || loadingKey.startsWith(`tables-${connKey}-`)) {
               loadingNodesRef.current.delete(loadingKey);
@@ -5116,6 +5125,11 @@ const Sidebar: React.FC<{
       setLoadedKeys(prev => prev.filter(k => k !== connKey && !k.toString().startsWith(`${connKey}-`)));
       replaceTreeNodeChildren(connKey, undefined);
       closeTabsByConnection(connKey);
+      try {
+          await releaseConnectionResources(conn);
+      } catch (error: any) {
+          message.warning(error?.message || '连接已从侧边栏断开，但后端连接释放失败');
+      }
       message.success("已断开连接");
   };
 
@@ -5205,7 +5219,7 @@ const Sidebar: React.FC<{
               void handleDuplicateConnection(node.dataRef as SavedConnection);
               return;
           case 'disconnect':
-              disconnectConnectionNode(node);
+              void disconnectConnectionNode(node);
               return;
           case 'delete':
               deleteConnectionNode(node);
@@ -6849,22 +6863,7 @@ const Sidebar: React.FC<{
                     key: 'disconnect',
                     label: '断开连接',
                     icon: <DisconnectOutlined />,
-                    onClick: () => {
-                        setConnectionStates(prev => {
-                            const next = { ...prev };
-                            Object.keys(next).forEach(k => {
-                                if (k === node.key || k.startsWith(`${node.key}-`)) {
-                                    delete next[k];
-                                }
-                            });
-                            return next;
-                        });
-                        setExpandedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                        setLoadedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                        replaceTreeNodeChildren(node.key, undefined);
-                        closeTabsByConnection(String(node.key));
-                        message.success("已断开连接");
-                    }
+                    onClick: () => void disconnectConnectionNode(node)
                 },
                 {
                     key: 'delete',
@@ -6989,33 +6988,7 @@ const Sidebar: React.FC<{
                  key: 'disconnect',
                  label: '断开连接',
                  icon: <DisconnectOutlined />,
-                 onClick: () => {
-                     const connId = String(node.key || '');
-                     // 强制清理该连接相关的 loading 标记，避免网络卡住后重连仍被短路。
-                     Array.from(loadingNodesRef.current).forEach((loadingKey) => {
-                         if (loadingKey === `dbs-${connId}` || loadingKey.startsWith(`tables-${connId}-`)) {
-                             loadingNodesRef.current.delete(loadingKey);
-                         }
-                     });
-                     // Reset status recursively
-                     setConnectionStates(prev => {
-                         const next = { ...prev };
-                         Object.keys(next).forEach(k => {
-                             if (k === node.key || k.startsWith(`${node.key}-`)) {
-                                 delete next[k];
-                             }
-                         });
-                         return next;
-                     });
-                     // Collapse node and children
-                     setExpandedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                     // Reset loaded state recursively
-                     setLoadedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                     // Clear children (undefined to trigger reload)
-                     replaceTreeNodeChildren(node.key, undefined);
-                     closeTabsByConnection(String(node.key));
-                     message.success("已断开连接");
-                 }
+                 onClick: () => void disconnectConnectionNode(node)
              },
              {
                  key: 'delete',

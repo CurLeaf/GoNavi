@@ -37,8 +37,10 @@ import {
 } from '../utils/rowLocator';
 import { getQueryTabDraft, hasQueryTabDraft, setQueryTabDraft, setSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
 import {
+    getColumnDefinitionComment,
     getColumnDefinitionKey,
     getColumnDefinitionName,
+    getColumnDefinitionType,
 } from '../utils/columnDefinition';
 import QueryEditorResultsPanel, { type QueryEditorResultSet } from './QueryEditorResultsPanel';
 import { SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS } from './QueryEditorTransactionSettings';
@@ -81,6 +83,22 @@ const sharedLazyTablesInFlight: Record<string, Promise<CompletionTableMeta[]> | 
 const createEmptySqlCompletionResult = () => ({ suggestions: [] as any[] });
 const isSqlCompletionRequestCancelled = (token?: { isCancellationRequested?: boolean } | null) =>
     Boolean(token?.isCancellationRequested);
+const clearRecord = (record: Record<string, unknown>) => {
+    Object.keys(record).forEach((key) => {
+        delete record[key];
+    });
+};
+const resetSharedQueryEditorMetadata = () => {
+    sharedTablesData = [];
+    sharedAllColumnsData = [];
+    sharedViewsData = [];
+    sharedMaterializedViewsData = [];
+    sharedTriggersData = [];
+    sharedRoutinesData = [];
+    sharedColumnsCacheData = {};
+    clearRecord(sharedLazyTablesCache);
+    clearRecord(sharedLazyTablesInFlight);
+};
 
 const QUERY_LOCATOR_ALIAS_PREFIX = '__gonavi_locator_';
 
@@ -1215,6 +1233,53 @@ const buildQueryEditorAliasMap = (
     return aliasMap;
 };
 
+const collectQueryEditorReferencedDatabaseNames = (
+    fullText: string,
+    currentDb: string,
+    visibleDbs: string[],
+): string[] => {
+    const result: string[] = [];
+    const seen = new Set<string>();
+    const addDb = (dbName: string) => {
+        const normalized = String(dbName || '').trim();
+        if (!normalized) return;
+        const key = normalized.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        result.push(normalized);
+    };
+
+    addDb(currentDb);
+
+    const visibleDbByLower = new Map(
+        visibleDbs
+            .map((db) => String(db || '').trim())
+            .filter(Boolean)
+            .map((db) => [db.toLowerCase(), db] as const),
+    );
+    const commonSchemaNames = new Set(['public', 'dbo', 'sys', 'information_schema', 'pg_catalog', 'mysql', 'performance_schema']);
+    const tableRegex = QUERY_EDITOR_SQL_TABLE_REFERENCE_REGEX;
+    tableRegex.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = tableRegex.exec(String(fullText || ''))) !== null) {
+        const tableIdent = normalizeCompletionQualifiedName(match[1] || '');
+        if (!tableIdent) continue;
+        const parts = tableIdent.split('.');
+        if (parts.length < 2) continue;
+        const candidate = visibleDbByLower.get(String(parts[0] || '').toLowerCase());
+        if (candidate) {
+            addDb(candidate);
+        } else if (visibleDbByLower.size === 0) {
+            const inferredDb = String(parts[0] || '').trim();
+            const inferredKey = inferredDb.toLowerCase();
+            if (inferredDb && inferredKey !== String(currentDb || '').trim().toLowerCase() && !commonSchemaNames.has(inferredKey)) {
+                addDb(inferredDb);
+            }
+        }
+    }
+    return result;
+};
+
 export const resolveQueryEditorNavigationTarget = (
     lineContent: string,
     column: number,
@@ -1918,6 +1983,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const triggersRef = useRef<CompletionTriggerMeta[]>([]);
   const routinesRef = useRef<CompletionRoutineMeta[]>([]);
   const visibleDbsRef = useRef<string[]>([]); // Store visible databases for cross-db intellisense
+  const metadataFetchKeyRef = useRef<string>('');
+  const metadataContextKeyRef = useRef<string>('');
 
   const connections = useStore(state => state.connections);
   const queryCapableConnections = useMemo(
@@ -1995,6 +2062,28 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       pendingSqlTransactionRef,
   } = useSqlEditorTransactionController({ tabId: tab.id });
   const autoFetchVisible = useAutoFetchVisibility();
+
+  useEffect(() => {
+      const nextContextKey = [
+          String(currentConnectionId || '').trim(),
+          String(currentDb || '').trim().toLowerCase(),
+      ].join('\u0000');
+      if (metadataContextKeyRef.current === nextContextKey) {
+          return;
+      }
+      metadataContextKeyRef.current = nextContextKey;
+      metadataFetchKeyRef.current = '';
+      tablesRef.current = [];
+      allColumnsRef.current = [];
+      viewsRef.current = [];
+      materializedViewsRef.current = [];
+      triggersRef.current = [];
+      routinesRef.current = [];
+      columnsCacheRef.current = {};
+      if (isActive) {
+          resetSharedQueryEditorMetadata();
+      }
+  }, [currentConnectionId, currentDb, isActive]);
 
   const currentSavedQuery = useMemo(() => {
       const savedId = String(tab.savedQueryId || '').trim();
@@ -2255,12 +2344,40 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return true;
   }, []);
 
+  const mergeSidebarDropObjectMetadata = useCallback((payload: ReturnType<typeof decodeSidebarSqlEditorDragPayload>) => {
+      if (!payload?.text || !payload.dbName) {
+          return;
+      }
+      const nodeType = String(payload.nodeType || '').trim().toLowerCase();
+      if (nodeType && nodeType !== 'table') {
+          return;
+      }
+      const dbName = String(payload.dbName || '').trim();
+      const tableName = normalizeCompletionQualifiedName(payload.text);
+      if (!dbName || !tableName) {
+          return;
+      }
+      const visibleKey = dbName.toLowerCase();
+      if (!visibleDbsRef.current.some((db) => String(db || '').toLowerCase() === visibleKey)) {
+          visibleDbsRef.current = [...visibleDbsRef.current, dbName];
+      }
+      const tableKey = `${visibleKey}\u0000${tableName.toLowerCase()}`;
+      if (!tablesRef.current.some((table) => `${String(table.dbName || '').toLowerCase()}\u0000${String(table.tableName || '').toLowerCase()}` === tableKey)) {
+          tablesRef.current = [...tablesRef.current, { dbName, tableName }];
+      }
+      if (isActive) {
+          sharedVisibleDbs = visibleDbsRef.current;
+          sharedTablesData = tablesRef.current;
+      }
+  }, [isActive]);
+
   const handleSidebarObjectDrop = useCallback((event: DragEvent) => {
       if (!hasSidebarSqlEditorDragPayload(event.dataTransfer)) {
           return;
       }
       event.preventDefault();
       event.stopPropagation();
+      const payload = decodeSidebarSqlEditorDragPayload(String(event.dataTransfer?.getData(SIDEBAR_SQL_EDITOR_DRAG_MIME) || ''));
       const dragText = readSidebarSqlDropText(event, currentConnectionIdRef.current, currentDbRef.current);
       if (!dragText) {
           return;
@@ -2268,9 +2385,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const editor = editorRef.current;
       const dropTarget = editor?.getTargetAtClientPoint?.(event.clientX, event.clientY);
       if (insertTextIntoEditorAtPosition(dragText, normalizeEditorPosition(dropTarget?.position))) {
+          mergeSidebarDropObjectMetadata(payload);
           refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
       }
-  }, [insertTextIntoEditorAtPosition, refreshObjectDecorations]);
+  }, [insertTextIntoEditorAtPosition, mergeSidebarDropObjectMetadata, refreshObjectDecorations]);
 
   const handleSelectCurrentStatement = () => {
       const editor = editorRef.current;
@@ -2378,12 +2496,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           return;
       }
 
+      let cancelled = false;
       const fetchMetadata = async () => {
           const conn = connections.find(c => c.id === currentConnectionId);
           if (!conn) return;
 
           const visibleDbs = visibleDbsRef.current;
-          if (!visibleDbs || visibleDbs.length === 0) return;
 
           const config = {
             ...conn.config,
@@ -2394,7 +2512,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
           };
 
-          // 加载所有可见数据库的表
+          const metadataDbName = String(currentDbRef.current || currentDb || '').trim();
+          if (!metadataDbName) return;
+          const metadataDbNames = collectQueryEditorReferencedDatabaseNames(
+              getCurrentQuery(),
+              metadataDbName,
+              visibleDbs,
+          );
+          const metadataFetchKey = [
+              currentConnectionId,
+              ...metadataDbNames.map((dbName) => String(dbName || '').toLowerCase()),
+          ].join('\u0000');
+          if (metadataFetchKeyRef.current === metadataFetchKey) return;
+          metadataFetchKeyRef.current = metadataFetchKey;
+
           const allTables: CompletionTableMeta[] = [];
           const allColumns: CompletionColumnMeta[] = [];
           const allViews: CompletionViewMeta[] = [];
@@ -2402,13 +2533,35 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const allTriggers: CompletionTriggerMeta[] = [];
           const allRoutines: CompletionRoutineMeta[] = [];
           const metadataDialect = normalizeMetadataDialect(conn);
+          const syncMetadataSnapshot = () => {
+              if (cancelled) {
+                  return false;
+              }
+              tablesRef.current = [...allTables];
+              allColumnsRef.current = [...allColumns];
+              viewsRef.current = [...allViews];
+              materializedViewsRef.current = [...allMaterializedViews];
+              triggersRef.current = [...allTriggers];
+              routinesRef.current = [...allRoutines];
+              if (isActive) {
+                  sharedTablesData = tablesRef.current;
+                  sharedAllColumnsData = allColumnsRef.current;
+                  sharedViewsData = viewsRef.current;
+                  sharedMaterializedViewsData = materializedViewsRef.current;
+                  sharedTriggersData = triggersRef.current;
+                  sharedRoutinesData = routinesRef.current;
+              }
+              return true;
+          };
 
-          for (const dbName of visibleDbs) {
+          for (const dbName of metadataDbNames) {
+              if (cancelled) return;
               const tableComments = new Map<string, string>();
               const tableCommentSQL = buildCompletionTableCommentSQL(metadataDialect, dbName);
               if (tableCommentSQL) {
                   try {
                       const resTableComments = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, tableCommentSQL);
+                      if (cancelled) return;
                       if (resTableComments.success && Array.isArray(resTableComments.data)) {
                           resTableComments.data.forEach((row: any) => {
                               const tableName = normalizeCommentText(getCaseInsensitiveValue(row, ['table_name', 'TABLE_NAME', 'name', 'Name']));
@@ -2423,6 +2576,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
               // 获取表
               const resTables = await DBGetTables(buildRpcConnectionConfig(config) as any, dbName);
+              if (cancelled) return;
               if (resTables.success && Array.isArray(resTables.data)) {
                   const tableNames = resTables.data.map((row: any) => Object.values(row)[0] as string);
                   tableNames.forEach((tableName: string) => {
@@ -2436,9 +2590,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       });
                   });
               }
+              if (!syncMetadataSnapshot()) return;
 
               // 获取列 (所有数据库类型都支持 DBGetAllColumns)
               const resCols = await DBGetAllColumns(buildRpcConnectionConfig(config) as any, dbName);
+              if (cancelled) return;
               if (resCols.success && Array.isArray(resCols.data)) {
                   resCols.data.forEach((col: any) => {
                       allColumns.push({
@@ -2450,12 +2606,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       });
                   });
               }
+              if (!syncMetadataSnapshot()) return;
 
               const viewResults = await queryCompletionMetadataRowsBySpecs(
                   config,
                   dbName,
                   buildCompletionViewsMetadataQuerySpecs(metadataDialect, dbName),
               );
+              if (cancelled) return;
               const seenViews = new Set<string>();
               viewResults.forEach((queryResult) => {
                   queryResult.rows.forEach((row) => {
@@ -2478,12 +2636,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       });
                   });
               });
+              if (!syncMetadataSnapshot()) return;
 
               const materializedViewResults = await queryCompletionMetadataRowsBySpecs(
                   config,
                   dbName,
                   buildCompletionMaterializedViewsMetadataQuerySpecs(metadataDialect, dbName),
               );
+              if (cancelled) return;
               const seenMaterializedViews = new Set<string>();
               materializedViewResults.forEach((queryResult) => {
                   queryResult.rows.forEach((row) => {
@@ -2502,12 +2662,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       });
                   });
               });
+              if (!syncMetadataSnapshot()) return;
 
               const triggerResults = await queryCompletionMetadataRowsBySpecs(
                   config,
                   dbName,
                   buildCompletionTriggersMetadataQuerySpecs(metadataDialect, dbName),
               );
+              if (cancelled) return;
               const seenTriggers = new Set<string>();
               triggerResults.forEach((queryResult) => {
                   queryResult.rows.forEach((row) => {
@@ -2533,12 +2695,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       });
                   });
               });
+              if (!syncMetadataSnapshot()) return;
 
               const routineResults = await queryCompletionMetadataRowsBySpecs(
                   config,
                   dbName,
                   buildCompletionFunctionsMetadataQuerySpecs(metadataDialect, dbName),
               );
+              if (cancelled) return;
               const seenRoutines = new Set<string>();
               routineResults.forEach((queryResult) => {
                   queryResult.rows.forEach((row) => {
@@ -2560,27 +2724,17 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       });
                   });
               });
+              if (!syncMetadataSnapshot()) return;
           }
 
-          tablesRef.current = allTables;
-          allColumnsRef.current = allColumns;
-          viewsRef.current = allViews;
-          materializedViewsRef.current = allMaterializedViews;
-          triggersRef.current = allTriggers;
-          routinesRef.current = allRoutines;
-          // 如果当前 Tab 是活跃 Tab，同步更新共享变量
-          if (isActive) {
-              sharedTablesData = allTables;
-              sharedAllColumnsData = allColumns;
-              sharedViewsData = allViews;
-              sharedMaterializedViewsData = allMaterializedViews;
-              sharedTriggersData = allTriggers;
-              sharedRoutinesData = allRoutines;
-          }
+          if (!syncMetadataSnapshot()) return;
           refreshObjectDecorations();
       };
       void fetchMetadata();
-  }, [autoFetchVisible, currentConnectionId, connections, dbList, isActive, isObjectEditQueryTab, refreshObjectDecorations]); // dbList 变化时触发重新加载
+      return () => {
+          cancelled = true;
+      };
+  }, [autoFetchVisible, currentConnectionId, currentDb, connections, isActive, isObjectEditQueryTab, refreshObjectDecorations]);
 
   // Query ID management helpers
   const setQueryId = (id: string) => {
@@ -3239,24 +3393,85 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   return sharedLazyTablesInFlight[key];
               };
 
-              const getColumnsByDB = async (tableIdent: string) => {
+              const toCompletionColumns = (
+                  columns: ColumnDefinition[],
+                  dbName: string,
+                  tableName: string,
+              ): CompletionColumnMeta[] => columns
+                  .map((column) => ({
+                      dbName,
+                      tableName,
+                      name: getColumnDefinitionName(column),
+                      type: getColumnDefinitionType(column),
+                      comment: getColumnDefinitionComment(column),
+                  }))
+                  .filter((column) => !!column.name);
+
+              const findPreloadedColumns = (dbName: string, tableName: string) => {
+                  const targetDbLower = String(dbName || '').toLowerCase();
+                  const targetTableLower = String(tableName || '').toLowerCase();
+                  return sharedAllColumnsData.filter((column) => {
+                      if (String(column.dbName || '').toLowerCase() !== targetDbLower) return false;
+                      const columnTableLower = String(column.tableName || '').toLowerCase();
+                      if (columnTableLower === targetTableLower) return true;
+                      const parsed = splitSchemaAndTable(column.tableName || '');
+                      return String(parsed.table || '').toLowerCase() === targetTableLower;
+                  });
+              };
+
+              const mergeSharedCompletionColumns = (columns: CompletionColumnMeta[]) => {
+                  if (columns.length === 0) return;
+                  const existingKeys = new Set(sharedAllColumnsData.map((column) => [
+                      String(column.dbName || '').toLowerCase(),
+                      String(column.tableName || '').toLowerCase(),
+                      String(column.name || '').toLowerCase(),
+                  ].join('\u0000')));
+                  const missing = columns.filter((column) => {
+                      const key = [
+                          String(column.dbName || '').toLowerCase(),
+                          String(column.tableName || '').toLowerCase(),
+                          String(column.name || '').toLowerCase(),
+                      ].join('\u0000');
+                      if (existingKeys.has(key)) return false;
+                      existingKeys.add(key);
+                      return true;
+                  });
+                  if (missing.length > 0) {
+                      sharedAllColumnsData = [...sharedAllColumnsData, ...missing];
+                  }
+              };
+
+              const getCompletionColumnsByTable = async (dbName: string, tableIdent: string) => {
                   const connId = sharedCurrentConnectionId;
-                  const dbName = sharedCurrentDb;
-                  if (!connId || !dbName) return [] as ColumnDefinition[];
-                  const key = `${connId}|${dbName}|${tableIdent}`;
-                  const cached = sharedColumnsCacheData[key];
-                  if (cached) return cached;
+                  const targetDb = String(dbName || '').trim();
+                  const targetTable = String(tableIdent || '').trim();
+                  if (!connId || !targetDb || !targetTable) return [] as CompletionColumnMeta[];
+
+                  const preloaded = findPreloadedColumns(targetDb, targetTable);
+                  if (preloaded.length > 0) {
+                      return preloaded;
+                  }
+
+                  const key = `${connId}|${targetDb}|${targetTable}`;
+                  const cached = sharedColumnsCacheData[key] as ColumnDefinition[] | undefined;
+                  if (cached) {
+                      const cachedColumns = toCompletionColumns(cached, targetDb, targetTable);
+                      mergeSharedCompletionColumns(cachedColumns);
+                      return cachedColumns;
+                  }
 
                   const config = buildConnConfig();
-                  if (!config) return [] as ColumnDefinition[];
+                  if (!config) return [] as CompletionColumnMeta[];
 
-                  const res = await DBGetColumns(buildRpcConnectionConfig(config) as any, dbName, tableIdent);
+                  const res = await DBGetColumns(buildRpcConnectionConfig(config) as any, targetDb, targetTable);
                   if (res?.success && Array.isArray(res.data)) {
                       const cols = res.data as ColumnDefinition[];
                       sharedColumnsCacheData[key] = cols;
-                      return cols;
+                      const completionColumns = toCompletionColumns(cols, targetDb, targetTable);
+                      mergeSharedCompletionColumns(completionColumns);
+                      return completionColumns;
                   }
-                  return [] as ColumnDefinition[];
+                  return [] as CompletionColumnMeta[];
               };
 
               const fullText = model.getValue();
@@ -3271,11 +3486,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   const tablePart = stripQuotes(threePartMatch[2]);
                   const colPrefix = (threePartMatch[3] || '').toLowerCase();
 
-                  // 在 allColumnsRef 中查找匹配的列
-                  const cols = sharedAllColumnsData.filter(c =>
-                      (c.dbName || '').toLowerCase() === dbPart.toLowerCase() &&
-                      (c.tableName || '').toLowerCase() === tablePart.toLowerCase()
-                  );
+                  const cols = await getCompletionColumnsByTable(dbPart, tablePart);
+                  if (isSqlCompletionRequestCancelled(token)) {
+                      return createEmptySqlCompletionResult();
+                  }
 
                   const filtered = colPrefix
                       ? cols.filter(c => (c.name || '').toLowerCase().startsWith(colPrefix))
@@ -3304,9 +3518,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   const visibleDbs = sharedVisibleDbs;
                   if (visibleDbs.some(db => db.toLowerCase() === qualifierLower)) {
                       // qualifier 是数据库名，提示该库的表
-                      const tables = sharedTablesData.filter(t =>
+                      let tables = sharedTablesData.filter(t =>
                           (t.dbName || '').toLowerCase() === qualifierLower
                       );
+                      if (tables.length === 0) {
+                          tables = await getLazyTablesByDB(qualifier);
+                          if (isSqlCompletionRequestCancelled(token)) {
+                              return createEmptySqlCompletionResult();
+                          }
+                      }
                       const filtered = prefix
                           ? tables.filter(t => (t.tableName || '').toLowerCase().startsWith(prefix))
                           : tables;
@@ -3358,26 +3578,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
                   const tableInfo = aliasMap[qualifier.toLowerCase()];
                   if (tableInfo) {
-                      // Prefer preloaded MySQL all-columns cache
-                      let cols: { name: string, type?: string, tableName?: string, dbName?: string, comment?: string }[];
-                      if (sharedAllColumnsData.length > 0) {
-                          const tiTableLower = (tableInfo.tableName || '').toLowerCase();
-                          cols = sharedAllColumnsData
-                              .filter(c => {
-                                  if ((c.dbName || '').toLowerCase() !== (tableInfo.dbName || '').toLowerCase()) return false;
-                                  const cTableLower = (c.tableName || '').toLowerCase();
-                                  if (cTableLower === tiTableLower) return true;
-                                  // schema.table 格式匹配纯表名
-                                  const parsed = splitSchemaAndTable(c.tableName || '');
-                                  return (parsed.table || '').toLowerCase() === tiTableLower;
-                              })
-                              .map(c => ({ name: c.name, type: c.type, tableName: c.tableName, dbName: c.dbName, comment: c.comment }));
-                      } else {
-                          const dbCols = await getColumnsByDB(tableInfo.tableName);
-                          if (isSqlCompletionRequestCancelled(token)) {
-                              return createEmptySqlCompletionResult();
-                          }
-                          cols = dbCols.map(c => ({ name: c.name, type: c.type, tableName: tableInfo.tableName, comment: c.comment }));
+                      const cols = await getCompletionColumnsByTable(tableInfo.dbName, tableInfo.tableName);
+                      if (isSqlCompletionRequestCancelled(token)) {
+                          return createEmptySqlCompletionResult();
                       }
 
                       const filtered = prefix
@@ -3455,9 +3658,30 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   }
               }
 
+              const referencedColumns: CompletionColumnMeta[] = [];
+              if (!expectsTableName) {
+                  const aliasMapForReferencedTables = buildQueryEditorAliasMap(fullText, currentDatabase);
+                  const seenReferencedTables = new Set<string>();
+                  for (const tableInfo of Object.values(aliasMapForReferencedTables)) {
+                      const key = `${String(tableInfo.dbName || '').toLowerCase()}.${String(tableInfo.tableName || '').toLowerCase()}`;
+                      if (!tableInfo.dbName || !tableInfo.tableName || seenReferencedTables.has(key)) continue;
+                      seenReferencedTables.add(key);
+                      const preloaded = findPreloadedColumns(tableInfo.dbName, tableInfo.tableName);
+                      if (preloaded.length > 0) continue;
+                      const cols = await getCompletionColumnsByTable(tableInfo.dbName, tableInfo.tableName);
+                      if (isSqlCompletionRequestCancelled(token)) {
+                          return createEmptySqlCompletionResult();
+                      }
+                      referencedColumns.push(...cols);
+                  }
+              }
+              const completionColumns = referencedColumns.length > 0
+                  ? [...sharedAllColumnsData, ...referencedColumns]
+                  : sharedAllColumnsData;
+
               // 相关列提示：匹配 SQL 中引用的表（FROM/JOIN 等）
               // 权重最高，输入 WHERE 条件时优先显示
-              const relevantColumns = (expectsTableName ? [] : sharedAllColumnsData)
+              const relevantColumns = (expectsTableName ? [] : completionColumns)
                   .filter(c => {
                       const fullIdent = `${c.dbName}.${c.tableName}`.toLowerCase();
                       const shortIdent = (c.tableName || '').toLowerCase();
@@ -3843,8 +4067,55 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return merged;
   };
 
+  const isDisplayableResultSet = (result?: ResultSet | null): boolean => {
+      if (!result) {
+          return false;
+      }
+      if (Array.isArray(result.messages) && result.messages.length > 0) {
+          return true;
+      }
+      if (Array.isArray(result.columns) && result.columns.length > 0) {
+          return true;
+      }
+      if (Array.isArray(result.rows) && result.rows.length > 0) {
+          return true;
+      }
+      return false;
+  };
+
+  const isAffectedRowsResultSet = (result?: ResultSet | null): boolean =>
+      Boolean(
+          result &&
+          Array.isArray(result.columns) &&
+          result.columns.length === 1 &&
+          result.columns[0] === 'affectedRows',
+      );
+
+  const isMessageLikeResultSet = (result?: ResultSet | null): boolean =>
+      Boolean(
+          result &&
+          Array.isArray(result.messages) &&
+          result.messages.length > 0 &&
+          result.resultType !== 'grid',
+      );
+
+  const isConcreteGridResultSet = (result?: ResultSet | null): boolean =>
+      Boolean(
+          result &&
+          result.resultType !== 'message' &&
+          !isAffectedRowsResultSet(result) &&
+          (
+              (Array.isArray(result.columns) && result.columns.length > 0) ||
+              (Array.isArray(result.rows) && result.rows.length > 0)
+          ),
+      );
+
   const resolveActiveResultKeyAfterMerge = (merged: ResultSet[], executed: ResultSet[]): string => {
-      const firstExecutedResult = executed[0];
+      const firstExecutedResult = executed.find((result) => isConcreteGridResultSet(result))
+          || executed.find((result) => isMessageLikeResultSet(result))
+          || executed.find((result) => isDisplayableResultSet(result) && !isAffectedRowsResultSet(result))
+          || executed.find((result) => isDisplayableResultSet(result))
+          || executed[0];
       if (!firstExecutedResult) {
           return '';
       }
@@ -4427,6 +4698,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
             // res.data 是 ResultSetData[] 数组
             const resultSetDataArray = Array.isArray(res.data) ? (res.data as any[]) : [];
+            const topLevelMessages = Array.isArray(res.messages)
+                ? (res.messages as any[]).map((item) => String(item ?? '').trim()).filter(Boolean)
+                : [];
             const nextResultSets: ResultSet[] = [];
             const maxRows = Number(queryOptions?.maxRows) || 0;
             let anyTruncated = false;
@@ -4523,16 +4797,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 }
             }
 
-            if (resultSetDataArray.length === 0 && Array.isArray(res.messages) && res.messages.length > 0) {
+            if (topLevelMessages.length > 0 && !nextResultSets.some((result) => Array.isArray(result.messages) && result.messages.length > 0)) {
                 nextResultSets.push({
-                    key: 'result-1',
+                    key: `result-${nextResultSets.length + 1}`,
                     sql: fullSQL,
                     exportSql: sourceStatements.join(';\n'),
                     sourceStatementIndex: 1,
-                    statementResultIndex: 1,
+                    statementResultIndex: (statementResultCounts.get(1) || 0) + 1,
                     rows: [],
                     columns: [],
-                    messages: res.messages,
+                    messages: topLevelMessages,
                     resultType: 'message',
                     pkColumns: [],
                     readOnly: true,

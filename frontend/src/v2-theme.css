@@ -4886,7 +4886,7 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn {
   font-size: 12.5px !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group {
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group {
   display: inline-flex !important;
   align-items: center;
   flex: 0 0 auto;
@@ -4900,16 +4900,16 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-action-pair {
   gap: 8px;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group > .ant-btn {
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group > .ant-btn {
   flex: 0 0 auto;
   border-radius: 9px !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group > .ant-btn:not(:first-child) {
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group > .ant-btn:not(:first-child) {
   margin-left: 0 !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group > .ant-btn::before {
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group > .ant-btn::before {
   display: none !important;
 }
 

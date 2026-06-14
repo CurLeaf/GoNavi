@@ -63,6 +63,50 @@ func (a *App) DBConnect(config connection.ConnectionConfig) connection.QueryResu
 	return connection.QueryResult{Success: true, Message: "连接成功"}
 }
 
+func (a *App) DBReleaseConnection(config connection.ConnectionConfig) connection.QueryResult {
+	dbType := strings.ToLower(strings.TrimSpace(config.Type))
+	if dbType == "redis" {
+		closed, err := a.releaseRedisClientsForConfig(config)
+		if err != nil {
+			logger.Error(err, "DBReleaseConnection 释放 Redis 连接失败：%s", formatConnSummary(config))
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		logger.Infof("DBReleaseConnection 已释放 Redis 连接：%s 数量=%d", formatConnSummary(config), closed)
+		return connection.QueryResult{Success: true, Message: "连接已释放", Data: map[string]int{"closed": closed}}
+	}
+
+	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	if err != nil {
+		wrapped := wrapConnectError(config, err)
+		logger.Error(wrapped, "DBReleaseConnection 解析连接密文失败：%s", formatConnSummary(config))
+		return connection.QueryResult{Success: false, Message: wrapped.Error()}
+	}
+	targetKey := getConnectionReleaseMatchKey(applyGlobalProxyToConnection(resolvedConfig))
+	closed := 0
+
+	a.mu.Lock()
+	for key, entry := range a.dbCache {
+		entryConfig := entry.config
+		if strings.TrimSpace(entryConfig.Type) == "" {
+			continue
+		}
+		if getConnectionReleaseMatchKey(entryConfig) != targetKey {
+			continue
+		}
+		if entry.inst != nil {
+			if closeErr := entry.inst.Close(); closeErr != nil {
+				logger.Error(closeErr, "DBReleaseConnection 关闭缓存连接失败：缓存Key=%s", shortCacheKey(key))
+			}
+		}
+		delete(a.dbCache, key)
+		closed++
+	}
+	a.mu.Unlock()
+
+	logger.Infof("DBReleaseConnection 已释放数据库连接：%s 数量=%d", formatConnSummary(resolvedConfig), closed)
+	return connection.QueryResult{Success: true, Message: "连接已释放", Data: map[string]int{"closed": closed}}
+}
+
 func (a *App) TestConnection(config connection.ConnectionConfig) connection.QueryResult {
 	testConfig := normalizeTestConnectionConfig(config)
 	started := time.Now()

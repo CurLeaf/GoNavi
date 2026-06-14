@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Dropdown, Select, Space, Tooltip, type MenuProps } from "antd";
+import { Button, Dropdown, Select, Tooltip, type MenuProps } from "antd";
 import {
   EyeInvisibleOutlined,
   EyeOutlined,
@@ -214,8 +214,9 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
         alignItems: "center",
       }}
     >
-      <Space.Compact
+      <div
         className={isV2Ui ? "gn-v2-query-toolbar-action-group" : undefined}
+        style={{ display: "flex", gap: "8px", alignItems: "center" }}
       >
         <Tooltip
           title={
@@ -245,7 +246,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
             停止
           </Button>
         )}
-      </Space.Compact>
+      </div>
       {isV2Ui && pendingTransactionToolbar}
       <div
         className={isV2Ui ? "gn-v2-query-toolbar-action-pair" : undefined}

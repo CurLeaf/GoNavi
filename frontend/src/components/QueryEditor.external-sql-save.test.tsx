@@ -505,8 +505,10 @@ describe('QueryEditor external SQL save', () => {
       }
       storeState.sqlEditorPendingTransactions[tabId] = transaction;
     });
+    Object.values(backendApp).forEach((fn) => fn.mockReset());
     messageApi.success.mockReset();
     messageApi.error.mockReset();
+    messageApi.info.mockReset();
     messageApi.warning.mockReset();
     backendApp.DBQuery.mockResolvedValue({ success: true, data: [] });
     backendApp.WriteSQLFile.mockResolvedValue({ success: true });
@@ -915,8 +917,6 @@ describe('QueryEditor external SQL save', () => {
     autoFetchState.visible = true;
     storeState.connections[0].config.database = '';
     backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'information_schema' }, { Database: 'main' }] });
-    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [] });
-    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
     backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'organization' }] });
     backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
 
@@ -950,8 +950,6 @@ describe('QueryEditor external SQL save', () => {
     autoFetchState.visible = true;
     storeState.connections[0].config.database = '';
     backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'information_schema' }, { Database: 'main' }] });
-    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [] });
-    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
     backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'fs_org_auth_application' }] });
     backendApp.DBGetAllColumns.mockResolvedValueOnce({
       success: true,
@@ -1105,6 +1103,47 @@ describe('QueryEditor external SQL save', () => {
     const match = result.suggestions.find((item: any) => item.label === 'DisplayName');
 
     expect(match?.insertText).toBe('"DisplayName"');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('preloads metadata only for the current database when many databases are visible', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = '';
+    const databaseRows = [
+      { Database: 'main' },
+      ...Array.from({ length: 40 }, (_, index) => ({ Database: `tenant_${String(index + 1).padStart(3, '0')}` })),
+    ];
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: databaseRows });
+    backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => ({
+      success: true,
+      data: dbName === 'main' ? [{ Tables_in_main: 'users' }] : [{ [`Tables_in_${dbName}`]: 'unexpected_table' }],
+    }));
+    backendApp.DBGetAllColumns.mockImplementation(async (_config: any, dbName: string) => ({
+      success: true,
+      data: dbName === 'main' ? [{ tableName: 'users', name: 'id', type: 'bigint' }] : [],
+    }));
+    backendApp.DBQuery.mockResolvedValue({ success: true, data: [] });
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'SELECT * FROM users', dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBGetDatabases).toHaveBeenCalledTimes(1);
+    expect(backendApp.DBGetTables.mock.calls.map((call: any[]) => call[1])).toEqual(['main']);
+    expect(backendApp.DBGetAllColumns.mock.calls.map((call: any[]) => call[1])).toEqual(['main']);
+    const metadataQueryDbs = new Set(backendApp.DBQuery.mock.calls.map((call: any[]) => call[1]));
+    expect([...metadataQueryDbs]).toEqual(['main']);
 
     await act(async () => {
       renderer.unmount();
@@ -3251,6 +3290,154 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer!.toJSON())).toContain('结果 1');
     expect(textContent(renderer!.toJSON())).toContain('结果 2');
     expect(dataGridState.latestProps?.columnNames).toEqual(['name']);
+  });
+
+  it('prefers the first displayable sqlserver procedure result when empty result sets are returned', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'hydee';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { statementIndex: 1, columns: [], rows: [] },
+        {
+          statementIndex: 1,
+          columns: ['insert_sql'],
+          rows: [
+            { insert_sql: "insert into c_user(userid) values('168')" },
+            { insert_sql: "insert into c_user(userid) values('169')" },
+          ],
+        },
+        { statementIndex: 1, columns: [], rows: [] },
+        { statementIndex: 1, columns: [], rows: [] },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'hydee', query: "p_get_select 'c_user','userid = ''168''',1" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(textContent(renderer!.toJSON())).toContain('结果 4');
+    expect(dataGridState.latestProps?.columnNames).toEqual(['insert_sql']);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({
+      insert_sql: "insert into c_user(userid) values('168')",
+    });
+  });
+
+  it('prefers concrete sqlserver procedure rows over affected-row status results', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'hydee';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { statementIndex: 1, columns: ['affectedRows'], rows: [{ affectedRows: 0 }] },
+        { statementIndex: 1, columns: [], rows: [] },
+        {
+          statementIndex: 1,
+          columns: ['insert_sql'],
+          rows: [
+            { insert_sql: "insert into c_user(userid) values('168')" },
+          ],
+        },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'hydee', query: "p_get_select 'c_user','userid = ''168''',1" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.columnNames).toEqual(['insert_sql']);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({
+      insert_sql: "insert into c_user(userid) values('168')",
+    });
+    expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
+  });
+
+  it('prefers sqlserver print output messages over affected-row status results', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'hydee';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { statementIndex: 1, columns: ['affectedRows'], rows: [{ affectedRows: 0 }] },
+        {
+          statementIndex: 1,
+          columns: [],
+          rows: [],
+          messages: [
+            "insert into c_dyscript(projectid,name) values (1,'demo')",
+            "insert into c_dyscript(projectid,name) values (2,'next')",
+          ],
+        },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'hydee', query: "p_get_select c_dyscript,'projectid = 1',1" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(textContent(renderer!.toJSON())).toContain('消息 2');
+    expect(textContent(renderer!.toJSON())).toContain("insert into c_dyscript(projectid,name) values (1,'demo')");
+    expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
+    expect(dataGridState.latestProps).toBeNull();
+  });
+
+  it('renders top-level sqlserver print messages when result sets contain only status rows', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'hydee';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { statementIndex: 1, columns: ['affectedRows'], rows: [{ affectedRows: 0 }] },
+      ],
+      messages: [
+        "insert into c_dyscript(projectid,name) values (1,'demo')",
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'hydee', query: "p_get_select c_dyscript,'projectid = 1',1" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(textContent(renderer!.toJSON())).toContain('消息 2');
+    expect(textContent(renderer!.toJSON())).toContain("insert into c_dyscript(projectid,name) values (1,'demo')");
+    expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
+    expect(dataGridState.latestProps).toBeNull();
   });
 
   it('keeps both tabs when rerunning the same single sqlserver statement with multiple result sets', async () => {
