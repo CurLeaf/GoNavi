@@ -522,8 +522,20 @@ describe('QueryEditor external SQL save', () => {
     backendApp.DBGetDatabases.mockResolvedValue({ success: true, data: [] });
     backendApp.DBGetTables.mockResolvedValue({ success: true, data: [] });
     backendApp.GenerateQueryID.mockResolvedValue('query-1');
-    storeState.connections[0].config.type = 'mysql';
-    storeState.connections[0].config.database = 'main';
+    storeState.connections = [
+      {
+        id: 'conn-1',
+        name: 'local',
+        config: {
+          type: 'mysql',
+          host: '127.0.0.1',
+          port: 3306,
+          user: 'root',
+          password: '',
+          database: 'main',
+        },
+      },
+    ];
     storeState.appearance.uiVersion = 'legacy';
     autoFetchState.visible = false;
     dataGridState.latestProps = null;
@@ -1503,6 +1515,79 @@ describe('QueryEditor external SQL save', () => {
       expect.arrayContaining([
         expect.objectContaining({
           text: expect.stringContaining(')::int AS time_diff_seconds'),
+        }),
+      ]),
+    );
+  });
+
+  it('formats postgres cast syntax after switching to another query tab connection', async () => {
+    let renderer!: ReactTestRenderer;
+    storeState.connections = [
+      {
+        id: 'conn-1',
+        name: 'mysql-local',
+        config: {
+          type: 'mysql',
+          host: '127.0.0.1',
+          port: 3306,
+          user: 'root',
+          password: '',
+          database: 'main',
+        },
+      },
+      {
+        id: 'conn-2',
+        name: 'pg-local',
+        config: {
+          type: 'postgres',
+          host: '127.0.0.1',
+          port: 5432,
+          user: 'postgres',
+          password: '',
+          database: 'main',
+        },
+      },
+    ];
+    const pgSql = [
+      'SELECT',
+      '    *,',
+      '    is_del = 0',
+      'FROM',
+      '    wm_stock',
+      'WHERE',
+      '    1 = 1',
+      '    AND is_del = 0',
+      "    and create_date > '2025-06-25'::date;",
+    ].join('\n');
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ id: 'tab-1', connectionId: 'conn-1', query: 'select 1;' })} />);
+    });
+
+    await act(async () => {
+      renderer.update(
+        <QueryEditor
+          tab={createTab({
+            id: 'tab-2',
+            connectionId: 'conn-2',
+            dbName: 'main',
+            query: pgSql,
+          })}
+        />,
+      );
+    });
+
+    const formatButton = findButton(renderer, '美化');
+    await act(async () => {
+      await formatButton.props.onClick();
+    });
+
+    expect(messageApi.error).not.toHaveBeenCalled();
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-format-sql',
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: expect.stringContaining("'2025-06-25'::date;"),
         }),
       ]),
     );

@@ -2048,6 +2048,19 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [currentDb]);
 
   useEffect(() => {
+      const nextConnectionId = String(tab.connectionId || '').trim();
+      const nextDb = String(tab.dbName || '').trim();
+      if (nextConnectionId !== currentConnectionIdRef.current) {
+          currentConnectionIdRef.current = nextConnectionId;
+          setCurrentConnectionId(nextConnectionId);
+      }
+      if (nextDb !== currentDbRef.current) {
+          currentDbRef.current = nextDb;
+          setCurrentDb(nextDb);
+      }
+  }, [tab.id, tab.connectionId, tab.dbName]);
+
+  useEffect(() => {
       if (isExternalSQLFileTab) return;
       const currentDraft = getQueryTabDraft(tab.id, query);
       const shouldPersistQuery = currentDraft.length <= QUERY_EDITOR_PERSISTED_DRAFT_MAX_TEXT_LENGTH;
@@ -3704,7 +3717,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const handleFormat = () => {
       try {
-          const formatterLanguage = resolveQueryEditorFormatterLanguage(connections.find(c => c.id === currentConnectionId));
+          const activeConnectionId = String(currentConnectionIdRef.current || '').trim();
+          const tabConnectionId = String(tab.connectionId || '').trim();
+          const conn = connectionsRef.current.find(c => c.id === activeConnectionId)
+              || (tabConnectionId && tabConnectionId !== activeConnectionId
+                  ? connectionsRef.current.find(c => c.id === tabConnectionId)
+                  : undefined);
+          const formatterLanguage = resolveQueryEditorFormatterLanguage(conn);
           const formatted = format(getCurrentQuery(), { language: formatterLanguage, keywordCase: sqlFormatOptions.keywordCase });
           const editor = editorRef.current;
           const monaco = monacoRef.current;
