@@ -16,6 +16,7 @@ export const singleHostUriSchemesByType: Record<string, string[]> = {
   elasticsearch: ["http", "https"],
   chroma: ["http", "https", "chroma"],
   qdrant: ["http", "https", "qdrant"],
+  rabbitmq: ["rabbitmq", "http", "https"],
 };
 
 const normalizeConnectionType = (type: string) =>
@@ -59,6 +60,7 @@ const sslSupportedTypes = new Set([
   "chroma",
   "qdrant",
   "kafka",
+  "rabbitmq",
 ]);
 
 export const supportsSSLForType = (type: string) =>
@@ -86,6 +88,7 @@ const sslCAPathSupportedTypes = new Set([
   "chroma",
   "qdrant",
   "kafka",
+  "rabbitmq",
 ]);
 
 const sslClientCertificateSupportedTypes = new Set([
@@ -107,6 +110,7 @@ const sslClientCertificateSupportedTypes = new Set([
   "mongodb",
   "redis",
   "kafka",
+  "rabbitmq",
 ]);
 
 export const supportsSSLCAPathForType = (type: string) =>
@@ -157,4 +161,5 @@ export const supportsConnectionParamsForType = (type: string) =>
   type === "elasticsearch" ||
   type === "chroma" ||
   type === "qdrant" ||
-  type === "kafka";
+  type === "kafka" ||
+  type === "rabbitmq";

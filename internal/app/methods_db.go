@@ -315,8 +315,8 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		return rawDB, rawTable
 	}
 
-	// Elasticsearch：索引名可能含多个点，不能按点分割
-	if dbType == "elasticsearch" || dbType == "kafka" {
+	// Elasticsearch / RabbitMQ / Kafka：对象名可能含多个点，不能按点分割
+	if dbType == "elasticsearch" || dbType == "kafka" || dbType == "rabbitmq" {
 		return rawDB, rawTable
 	}
 

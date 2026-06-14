@@ -46,6 +46,13 @@ describe('DatabaseIcons', () => {
     expect(markup).toContain('>Kf</text>');
   });
 
+  it('includes RabbitMQ in the selectable database icons', () => {
+    expect(DB_ICON_TYPES).toContain('rabbitmq');
+    expect(getDbIconLabel('rabbitmq')).toBe('RabbitMQ');
+    const markup = renderToStaticMarkup(<>{getDbIcon('rabbitmq', undefined, 22)}</>);
+    expect(markup).toContain('>RM</text>');
+  });
+
   it('includes GaussDB in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('gaussdb');
     expect(getDbIconLabel('gaussdb')).toBe('GaussDB');

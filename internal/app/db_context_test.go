@@ -332,6 +332,18 @@ func TestNormalizeSchemaAndTable_KafkaPreservesDottedTopicName(t *testing.T) {
 	}
 }
 
+func TestNormalizeSchemaAndTable_RabbitMQPreservesDottedQueueName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "rabbitmq",
+	}, "/", "orders.events.v1")
+
+	if schemaOrDb != "/" || table != "orders.events.v1" {
+		t.Fatalf("expected rabbitmq queue to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
 func TestNormalizeMetadataSchemaAndTable_KafkaPreservesDottedTopicName(t *testing.T) {
 	t.Parallel()
 
@@ -341,6 +353,18 @@ func TestNormalizeMetadataSchemaAndTable_KafkaPreservesDottedTopicName(t *testin
 
 	if schemaOrDb != "topics" || table != "logs.app-1" {
 		t.Fatalf("expected kafka metadata topic to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_RabbitMQPreservesDottedQueueName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "rabbitmq",
+	}, "/", "logs.app-1")
+
+	if schemaOrDb != "/" || table != "logs.app-1" {
+		t.Fatalf("expected rabbitmq metadata queue to stay intact, got %q.%q", schemaOrDb, table)
 	}
 }
 

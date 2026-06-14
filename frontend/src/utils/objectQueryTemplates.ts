@@ -5,7 +5,7 @@ export const buildTableSelectQuery = (dbType: string, tableName: string): string
   if (!normalizedTableName) {
     return 'SELECT * FROM ';
   }
-  if (String(dbType || '').trim().toLowerCase() === 'kafka') {
+  if (['kafka', 'rabbitmq'].includes(String(dbType || '').trim().toLowerCase())) {
     return `SELECT * FROM ${quoteQualifiedIdent(dbType, normalizedTableName)} LIMIT 100;`;
   }
   return `SELECT * FROM ${quoteQualifiedIdent(dbType, normalizedTableName)};`;

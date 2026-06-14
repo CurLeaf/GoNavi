@@ -173,11 +173,33 @@ describe('dataSourceCapabilities', () => {
       supportsCreateDatabase: false,
       supportsRenameDatabase: false,
       supportsDropDatabase: false,
+      supportsMessagePublish: true,
       forceReadOnlyQueryResult: true,
     });
     expect(getDataSourceCapabilities({ type: 'custom', driver: 'apache-kafka' })).toMatchObject({
       type: 'kafka',
       supportsQueryEditor: true,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
+    });
+  });
+
+  it('treats RabbitMQ as a queryable messaging datasource with publish support', () => {
+    expect(getDataSourceCapabilities({ type: 'rabbitmq' })).toMatchObject({
+      type: 'rabbitmq',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'rabbit-mq' })).toMatchObject({
+      type: 'rabbitmq',
+      supportsQueryEditor: true,
+      supportsMessagePublish: true,
       forceReadOnlyQueryResult: true,
     });
   });

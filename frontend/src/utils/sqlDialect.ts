@@ -30,6 +30,7 @@ export type SqlDialect =
   | 'tdengine'
   | 'iotdb'
   | 'kafka'
+  | 'rabbitmq'
   | 'mongodb'
   | 'redis'
   | 'elasticsearch'
@@ -140,6 +141,10 @@ export const resolveSqlDialect = (
     case 'apache-kafka':
     case 'apache_kafka':
       return 'kafka';
+    case 'rabbitmq':
+    case 'rabbit-mq':
+    case 'rabbit_mq':
+      return 'rabbitmq';
     default:
       break;
   }
@@ -165,6 +170,7 @@ export const resolveSqlDialect = (
   if (source.includes('tdengine')) return 'tdengine';
   if (source.includes('iotdb')) return 'iotdb';
   if (source.includes('kafka')) return 'kafka';
+  if (source.includes('rabbitmq') || source.includes('rabbit-mq') || source.includes('rabbit_mq')) return 'rabbitmq';
   if (source.includes('sqlserver') || source.includes('mssql')) return 'sqlserver';
   if (source.includes('iris') || source.includes('intersystems')) return 'iris';
   if (source.includes('elastic')) return 'elasticsearch';
@@ -628,6 +634,18 @@ const KAFKA_KEYWORDS = [
   'OFFSET',
 ];
 
+const RABBITMQ_KEYWORDS = [
+  'SHOW VHOSTS',
+  'SHOW QUEUES',
+  'SHOW EXCHANGES',
+  'DESCRIBE QUEUE',
+  'DESCRIBE EXCHANGE',
+  'CONSUME',
+  'FROM',
+  'LIMIT',
+  'OFFSET',
+];
+
 export const resolveSqlKeywords = (dbType: string): string[] => {
   const dialect = resolveSqlDialect(dbType);
   if (dialect === 'starrocks') return unique([...COMMON_KEYWORDS, ...MYSQL_KEYWORDS, ...STARROCKS_KEYWORDS]);
@@ -641,6 +659,7 @@ export const resolveSqlKeywords = (dbType: string): string[] => {
   if (dialect === 'tdengine') return unique([...COMMON_KEYWORDS, ...TDENGINE_KEYWORDS]);
   if (dialect === 'iotdb') return unique([...COMMON_KEYWORDS, ...IOTDB_KEYWORDS]);
   if (dialect === 'kafka') return unique([...COMMON_KEYWORDS, ...KAFKA_KEYWORDS]);
+  if (dialect === 'rabbitmq') return unique([...COMMON_KEYWORDS, ...RABBITMQ_KEYWORDS]);
   return COMMON_KEYWORDS;
 };
 

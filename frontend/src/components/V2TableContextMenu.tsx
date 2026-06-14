@@ -11,6 +11,7 @@ import {
   FolderOpenOutlined,
   FolderOutlined,
   SaveOutlined,
+  SendOutlined,
   LinkOutlined,
   ReloadOutlined,
   TableOutlined,
@@ -39,6 +40,7 @@ export type V2TableContextMenuActionKey =
   | 'design-table'
   | 'open-new-tab'
   | 'new-query'
+  | 'publish-message'
   | 'view-ddl'
   | 'view-er'
   | 'copy-table-name'
@@ -159,6 +161,7 @@ export const V2TableContextMenuView: React.FC<{
   isPinned?: boolean;
   supportsTruncate?: boolean;
   supportsStarRocksRollup?: boolean;
+  supportsMessagePublish?: boolean;
   onAction?: (action: V2TableContextMenuActionKey) => void;
 }> = ({
   tableName,
@@ -167,6 +170,7 @@ export const V2TableContextMenuView: React.FC<{
   isPinned = false,
   supportsTruncate = true,
   supportsStarRocksRollup = false,
+  supportsMessagePublish = false,
   onAction,
 }) => {
   const renderItems = (items: V2TableContextMenuItemConfig[]) => renderV2ContextMenuItems(
@@ -202,6 +206,7 @@ export const V2TableContextMenuView: React.FC<{
           { action: 'design-table', icon: <EditOutlined />, title: '设计表 · 字段 / 索引 / 外键', kbd: primaryShortcut('D', shortcutPlatform) },
           { action: 'open-new-tab', icon: <FileAddOutlined />, title: '在新标签打开', kbd: primaryShortcut('Enter', shortcutPlatform) },
           { action: 'new-query', icon: <ConsoleSqlOutlined />, title: '新建查询' },
+          ...(supportsMessagePublish ? [{ action: 'publish-message' as const, icon: <SendOutlined />, title: '测试发送消息' }] : []),
         ])}
 
         <div className="gn-v2-context-menu-section-title">元信息</div>

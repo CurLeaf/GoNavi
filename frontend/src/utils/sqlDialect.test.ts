@@ -40,6 +40,8 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('custom', 'apache_iotdb')).toBe('iotdb');
     expect(resolveSqlDialect('Apache-Kafka')).toBe('kafka');
     expect(resolveSqlDialect('custom', 'apache_kafka')).toBe('kafka');
+    expect(resolveSqlDialect('Rabbit-MQ')).toBe('rabbitmq');
+    expect(resolveSqlDialect('custom', 'rabbit_mq')).toBe('rabbitmq');
     expect(resolveSqlDialect('OceanBase', '', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(resolveSqlDialect('custom', 'oceanbase', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(isMysqlFamilyDialect('mariadb')).toBe(true);
@@ -76,6 +78,11 @@ describe('sqlDialect', () => {
   it('resolves Kafka completion keywords for topic discovery and consume syntax', () => {
     expect(resolveSqlKeywords('kafka')).toEqual(expect.arrayContaining(['SHOW TOPICS', 'DESCRIBE TOPIC', 'CONSUME']));
     expect(resolveSqlKeywords('kafka')).not.toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'AUTO_INCREMENT']));
+  });
+
+  it('resolves RabbitMQ completion keywords for queue and exchange discovery', () => {
+    expect(resolveSqlKeywords('rabbitmq')).toEqual(expect.arrayContaining(['SHOW VHOSTS', 'SHOW QUEUES', 'SHOW EXCHANGES', 'DESCRIBE QUEUE']));
+    expect(resolveSqlKeywords('rabbitmq')).not.toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'AUTO_INCREMENT']));
   });
 
   it('resolves GaussDB completion keywords and functions as a PostgreSQL-like dialect', () => {

@@ -65,6 +65,7 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
     label: '消息队列',
     items: [
       { key: 'kafka', name: 'Kafka' },
+      { key: 'rabbitmq', name: 'RabbitMQ' },
     ],
   },
   {
@@ -124,6 +125,8 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 6333;
     case 'kafka':
       return 9092;
+    case 'rabbitmq':
+      return 15672;
     case 'highgo':
       return 5866;
     case 'mariadb':
@@ -158,6 +161,8 @@ export const getConnectionTypeHint = (type: string): string => {
       return 'Storage Group / Device / Timeseries';
     case 'kafka':
       return 'Broker / Topic / Consumer Group';
+    case 'rabbitmq':
+      return 'Management API / Virtual Host / Queue';
     case 'oceanbase':
       return 'MySQL / Oracle 租户';
     case 'goldendb':

@@ -33,10 +33,10 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('type === "elasticsearch"');
     expect(source).toContain("return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';");
     expect(source).toContain(
-      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "kafka") ? "" : "root";',
+      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "kafka" || type === "rabbitmq") ? "" : "root";',
     );
     expect(source).toContain(
-      'placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "kafka") ? "未开启认证可留空" : undefined}',
+      'placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined}',
     );
     expect(source).toContain('label="显示数据库 (留空显示全部)"');
   });
@@ -87,6 +87,19 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('return "kafka://user:pass@127.0.0.1:9092,127.0.0.2:9092/orders.events?topology=cluster&groupId=analytics&mechanism=scram-sha-256";');
     expect(source).toContain('return "groupId=gonavi&mechanism=scram-sha-256&clientId=gonavi-desktop&startOffset=latest";');
     expect(source).toContain('label="默认 Topic（可选）"');
+  });
+
+  it('exposes RabbitMQ in the create-connection picker with management-api and vhost defaults', () => {
+    expect(source).toContain("case 'rabbitmq':");
+    expect(source).toContain('return 15672;');
+    expect(source).toContain('rabbitmq: ["rabbitmq", "http", "https"]');
+    expect(source).toContain("key: 'rabbitmq'");
+    expect(source).toContain("name: 'RabbitMQ'");
+    expect(source).toContain('dbType === "rabbitmq"');
+    expect(source).toContain("return 'Management API / Virtual Host / Queue';");
+    expect(source).toContain('return "rabbitmq://guest:guest@127.0.0.1:15672/%2F?defaultQueue=orders.queue&exchange=events.topic&timeout=30";');
+    expect(source).toContain('return "defaultQueue=orders.queue&exchange=events.topic&managementPathPrefix=/rabbitmq";');
+    expect(source).toContain('label="默认 Virtual Host（可选）"');
   });
 
   it('exposes GaussDB in the create-connection picker with PostgreSQL-family defaults', () => {

@@ -20,6 +20,7 @@ var coreBuiltinDrivers = map[string]struct{}{
 	"chroma":   {},
 	"qdrant":   {},
 	"kafka":    {},
+	"rabbitmq": {},
 }
 
 // optionalGoDrivers 表示需要用户“安装启用”后才能使用的纯 Go 驱动。
@@ -84,6 +85,8 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "iotdb"
 	case "kafka", "apache-kafka", "apache_kafka":
 		return "kafka"
+	case "rabbitmq", "rabbit-mq", "rabbit_mq":
+		return "rabbitmq"
 	default:
 		return normalized
 	}
@@ -147,6 +150,8 @@ func driverDisplayName(driverType string) string {
 		return "Qdrant"
 	case "kafka":
 		return "Kafka"
+	case "rabbitmq":
+		return "RabbitMQ"
 	default:
 		return strings.ToUpper(strings.TrimSpace(driverType))
 	}

@@ -53,6 +53,7 @@ export const buildConnectionCapabilitiesSnapshot = (params: {
     capabilities.supportsCreateDatabase ? 'create_database' : '',
     capabilities.supportsRenameDatabase ? 'rename_database' : '',
     capabilities.supportsDropDatabase ? 'drop_database' : '',
+    capabilities.supportsMessagePublish ? 'publish_message' : '',
     capabilities.supportsApproximateTableCount ? 'approximate_table_count' : '',
     capabilities.supportsApproximateTotalPages ? 'approximate_total_pages' : '',
   ].filter(Boolean);
@@ -75,6 +76,9 @@ export const buildConnectionCapabilitiesSnapshot = (params: {
     capabilities.supportsApproximateTableCount
       ? '表浏览场景允许显示近似行数，减少大表统计开销。'
       : '表浏览场景默认不使用近似行数。',
+    capabilities.supportsMessagePublish
+      ? '当前数据源提供测试发送消息入口，适合做 Topic/Queue 的联调验证。'
+      : '当前数据源未暴露测试发送消息入口。',
   ];
 
   return {

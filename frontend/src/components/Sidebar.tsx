@@ -25,6 +25,7 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   FileAddOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SendOutlined,
   DeleteOutlined,
   DisconnectOutlined,
   CloudOutlined,
@@ -92,6 +93,7 @@ import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQL
 import { SIDEBAR_SQL_EDITOR_DRAG_MIME, encodeSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
 import type { DriverStatusSnapshot } from '../utils/connectionDriverType';
 import JVMModeBadge from './jvm/JVMModeBadge';
+import MessagePublishModal from './MessagePublishModal';
 import {
   SEARCH_SCOPE_LABEL_MAP,
   SEARCH_SCOPE_OPTIONS,
@@ -229,6 +231,11 @@ type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
 type BatchObjectType = 'table' | 'view';
 type BatchObjectFilterType = 'all' | BatchObjectType;
 type BatchSelectionScope = 'filtered' | 'all';
+type SidebarMessagePublishTarget = {
+  connection: SavedConnection;
+  executionDbName: string;
+  destination: string;
+};
 
 interface BatchObjectItem {
   title: string;
@@ -607,6 +614,7 @@ const Sidebar: React.FC<{
   const [isRenameTableModalOpen, setIsRenameTableModalOpen] = useState(false);
   const [renameTableForm] = Form.useForm();
   const [renameTableTarget, setRenameTableTarget] = useState<any>(null);
+  const [messagePublishTarget, setMessagePublishTarget] = useState<SidebarMessagePublishTarget | null>(null);
   const [isRenameViewModalOpen, setIsRenameViewModalOpen] = useState(false);
   const [renameViewForm] = Form.useForm();
   const [renameViewTarget, setRenameViewTarget] = useState<any>(null);
@@ -4719,6 +4727,37 @@ const Sidebar: React.FC<{
       });
   };
 
+  const resolveMessagePublishTarget = (node: any): SidebarMessagePublishTarget | null => {
+      const connectionId = String(node?.dataRef?.id || '').trim();
+      const liveConnection = connections.find((item) => item.id === connectionId);
+      const sourceConnection = (liveConnection || node?.dataRef) as SavedConnection | undefined;
+      if (!sourceConnection?.config) return null;
+      const capabilities = getDataSourceCapabilities(sourceConnection.config);
+      if (!capabilities.supportsMessagePublish) return null;
+
+      return {
+          connection: sourceConnection,
+          executionDbName: String(node?.dataRef?.dbName || ''),
+          destination: String(node?.dataRef?.tableName || node?.title || '').trim(),
+      };
+  };
+
+  const openMessagePublishModal = (node: any) => {
+      const target = resolveMessagePublishTarget(node);
+      if (!target) {
+          message.warning('当前对象不支持测试发送消息');
+          return;
+      }
+      setMessagePublishTarget(target);
+  };
+
+  const handleMessagePublishSuccess = (result: { destination: string; affectedRows: number }) => {
+      const destination = String(result.destination || '').trim();
+      const suffix = result.affectedRows > 0 ? `（已提交 ${result.affectedRows} 条）` : '';
+      message.success(`测试消息已发送到 ${destination || '目标'}${suffix}`);
+      setMessagePublishTarget(null);
+  };
+
   const handleV2TableContextMenuAction = (node: any, action: V2TableContextMenuActionKey) => {
       switch (action) {
           case 'pin-table':
@@ -4746,6 +4785,9 @@ const Sidebar: React.FC<{
               });
               return;
           }
+          case 'publish-message':
+              openMessagePublishModal(node);
+              return;
           case 'view-ddl':
               openTableDdlInDesigner(node);
               return;
@@ -5873,6 +5915,7 @@ const Sidebar: React.FC<{
       const statsKey = getV2TableContextMenuStatsKey(node);
       const stats = v2TableContextMenuStats[statsKey];
       const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
+      const supportsMessagePublish = Boolean(resolveMessagePublishTarget(node));
       const isPinned = isSidebarTablePinned(
           pinnedSidebarTables,
           String(node?.dataRef?.id || ''),
@@ -5888,6 +5931,7 @@ const Sidebar: React.FC<{
               isPinned={isPinned}
               supportsTruncate={supportsTableTruncateAction(node.dataRef?.config?.type, node.dataRef?.config?.driver)}
               supportsStarRocksRollup={isStarRocks}
+              supportsMessagePublish={supportsMessagePublish}
               onAction={(action) => {
                   setContextMenu(null);
                   handleV2TableContextMenuAction(node, action);
@@ -7109,6 +7153,7 @@ const Sidebar: React.FC<{
         ];
     } else if (node.type === 'table') {
         const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
+        const messagePublishTarget = resolveMessagePublishTarget(node);
         return [
             {
                 key: 'new-query',
@@ -7127,6 +7172,12 @@ const Sidebar: React.FC<{
                    });
                 }
             },
+            ...(messagePublishTarget ? [{
+                key: 'publish-message',
+                label: '测试发送消息',
+                icon: <SendOutlined />,
+                onClick: () => openMessagePublishModal(node),
+            }] : []),
             { type: 'divider' },
             {
                 key: 'design-table',
@@ -8927,6 +8978,14 @@ const Sidebar: React.FC<{
             onClose={() => setFindInDbContext({ open: false, connectionId: '', dbName: '' })}
             connectionId={findInDbContext.connectionId}
             dbName={findInDbContext.dbName}
+        />
+        <MessagePublishModal
+            open={Boolean(messagePublishTarget)}
+            connection={messagePublishTarget?.connection || null}
+            executionDbName={messagePublishTarget?.executionDbName || ''}
+            defaultDestination={messagePublishTarget?.destination || ''}
+            onCancel={() => setMessagePublishTarget(null)}
+            onSuccess={handleMessagePublishSuccess}
         />
     </div>
   );

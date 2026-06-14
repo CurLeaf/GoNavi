@@ -166,6 +166,15 @@ func TestNormalizeSchemaAndTableByType_KafkaPreservesDottedTopicName(t *testing.
 	}
 }
 
+func TestNormalizeSchemaAndTableByType_RabbitMQPreservesDottedQueueName(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTableByType("rabbitmq", "/", "orders.events.v1")
+	if schema != "/" || table != "orders.events.v1" {
+		t.Fatalf("expected rabbitmq queue to stay intact, got %q.%q", schema, table)
+	}
+}
+
 func TestBuildRunConfigForDDL_CustomHighGoUsesDatabase(t *testing.T) {
 	t.Parallel()
 

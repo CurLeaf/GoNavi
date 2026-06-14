@@ -42,6 +42,10 @@ const normalizeDataSourceToken = (raw: string): string => {
     case 'apache-kafka':
     case 'apache_kafka':
       return 'kafka';
+    case 'rabbitmq':
+    case 'rabbit-mq':
+    case 'rabbit_mq':
+      return 'rabbitmq';
     case 'intersystems':
     case 'intersystemsiris':
     case 'inter-systems':
@@ -117,7 +121,8 @@ const COPY_INSERT_TYPES = new Set([
 ]);
 
 const QUERY_EDITOR_DISABLED_TYPES = new Set(['redis']);
-const FORCE_READ_ONLY_QUERY_TYPES = new Set(['tdengine', 'iotdb', 'clickhouse', 'kafka']);
+const FORCE_READ_ONLY_QUERY_TYPES = new Set(['tdengine', 'iotdb', 'clickhouse', 'kafka', 'rabbitmq']);
+const MESSAGE_PUBLISH_TYPES = new Set(['kafka', 'rabbitmq']);
 const MANUAL_TOTAL_COUNT_TYPES = new Set(['duckdb', 'oracle']);
 const APPROXIMATE_TABLE_COUNT_TYPES = new Set(['duckdb', 'oracle']);
 const APPROXIMATE_TOTAL_PAGE_TYPES = new Set(['duckdb']);
@@ -130,6 +135,7 @@ export type DataSourceCapabilities = {
   supportsCreateDatabase: boolean;
   supportsRenameDatabase: boolean;
   supportsDropDatabase: boolean;
+  supportsMessagePublish: boolean;
   forceReadOnlyQueryResult: boolean;
   preferManualTotalCount: boolean;
   supportsApproximateTableCount: boolean;
@@ -191,6 +197,7 @@ export const getDataSourceCapabilities = (config: ConnectionLike): DataSourceCap
     supportsCreateDatabase: CREATE_DATABASE_TYPES.has(type),
     supportsRenameDatabase: RENAME_DATABASE_TYPES.has(type),
     supportsDropDatabase: DROP_DATABASE_TYPES.has(type),
+    supportsMessagePublish: MESSAGE_PUBLISH_TYPES.has(type),
     forceReadOnlyQueryResult: FORCE_READ_ONLY_QUERY_TYPES.has(type),
     preferManualTotalCount: MANUAL_TOTAL_COUNT_TYPES.has(type),
     supportsApproximateTableCount: APPROXIMATE_TABLE_COUNT_TYPES.has(type),

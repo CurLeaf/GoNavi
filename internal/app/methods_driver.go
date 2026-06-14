@@ -1434,6 +1434,8 @@ func normalizeDriverType(driverType string) string {
 		return "goldendb"
 	case "kafka", "apache-kafka", "apache_kafka":
 		return "kafka"
+	case "rabbitmq", "rabbit-mq", "rabbit_mq":
+		return "rabbitmq"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
 	default:
@@ -1504,6 +1506,7 @@ func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) [
 		{Type: "redis", Name: "Redis", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "postgres", Name: "PostgreSQL", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "kafka", Name: "Kafka", Engine: driverEngineGo, BuiltIn: true},
+		{Type: "rabbitmq", Name: "RabbitMQ", Engine: driverEngineGo, BuiltIn: true},
 
 		// 其他数据源需要先在驱动管理中“安装启用”。
 		buildOptionalGoDriverDefinition("mariadb", "MariaDB", packages),

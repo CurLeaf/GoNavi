@@ -420,6 +420,7 @@ const ConnectionModal: React.FC<{
   const isOceanBaseOracle = dbType === "oceanbase" && oceanBaseProtocol === "oracle";
   const isMySQLLike = isMySQLCompatibleType(dbType) && !isOceanBaseOracle;
   const isKafka = dbType === "kafka";
+  const isRabbitMQ = dbType === "rabbitmq";
   const supportsConnectionParams = supportsConnectionParamsForType(dbType);
   const isSSLType = supportsSSLForType(dbType);
   const supportsSSLCAPath = supportsSSLCAPathForType(dbType);
@@ -1690,6 +1691,46 @@ const ConnectionModal: React.FC<{
       };
     }
 
+    if (type === "rabbitmq") {
+      const defaultPort = getDefaultPortByType(type);
+      const parsed = parseSingleHostUri(
+        trimmedUri,
+        ["rabbitmq", "http", "https"],
+        defaultPort,
+      );
+      if (!parsed) {
+        return null;
+      }
+      const lowerUri = trimmedUri.toLowerCase();
+      const tlsEnabled =
+        lowerUri.startsWith("https://") ||
+        normalizeUriBool(
+          parsed.params.get("tls") ||
+            parsed.params.get("ssl") ||
+            parsed.params.get("useSSL") ||
+            parsed.params.get("use_ssl"),
+        );
+      const skipVerify = normalizeUriBool(
+        parsed.params.get("skip_verify") || parsed.params.get("skipVerify"),
+      );
+      const timeoutValue = Number(parsed.params.get("timeout"));
+      return {
+        host: parsed.host,
+        port: parsed.port,
+        user: parsed.username,
+        password: parsed.password,
+        database: parsed.database || "",
+        useSSL: tlsEnabled,
+        sslMode: tlsEnabled ? (skipVerify ? "skip-verify" : "required") : "disable",
+        ...extractSSLPathValuesFromParams(parsed.params, type),
+        connectionParams: serializeConnectionParams(parsed.params),
+        timeout:
+          Number.isFinite(timeoutValue) && timeoutValue > 0
+            ? Math.min(MAX_TIMEOUT_SECONDS, Math.trunc(timeoutValue))
+            : undefined,
+      };
+    }
+
     if (type === "clickhouse") {
       const httpValues = parseClickHouseHTTPUriToValues(trimmedUri);
       if (httpValues) {
@@ -1941,6 +1982,9 @@ const ConnectionModal: React.FC<{
     if (dbType === "kafka") {
       return "kafka://user:pass@127.0.0.1:9092,127.0.0.2:9092/orders.events?topology=cluster&groupId=analytics&mechanism=scram-sha-256";
     }
+    if (dbType === "rabbitmq") {
+      return "rabbitmq://guest:guest@127.0.0.1:15672/%2F?defaultQueue=orders.queue&exchange=events.topic&timeout=30";
+    }
     if (dbType === "redis") {
       return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster 或 redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster";
     }
@@ -1998,6 +2042,8 @@ const ConnectionModal: React.FC<{
         return "fetchSize=1024&timeZone=Asia%2FShanghai";
       case "kafka":
         return "groupId=gonavi&mechanism=scram-sha-256&clientId=gonavi-desktop&startOffset=latest";
+      case "rabbitmq":
+        return "defaultQueue=orders.queue&exchange=events.topic&managementPathPrefix=/rabbitmq";
       default:
         return "key=value&another=value";
     }
@@ -2088,6 +2134,28 @@ const ConnectionModal: React.FC<{
       const topicPath = database ? `/${encodeURIComponent(database)}` : "";
       const query = params.toString();
       return `kafka://${encodedAuth}${allBrokers.join(",")}${topicPath}${query ? `?${query}` : ""}`;
+    }
+
+    if (type === "rabbitmq") {
+      const address = toAddress(host, port, defaultPort);
+      const params = new URLSearchParams();
+      if (values.useSSL) {
+        const mode = String(values.sslMode || "preferred")
+          .trim()
+          .toLowerCase();
+        params.set("tls", "true");
+        if (mode === "skip-verify" || mode === "preferred") {
+          params.set("skip_verify", "true");
+        }
+        appendSSLPathParamsForUri(params, type, values);
+      }
+      if (Number.isFinite(timeout) && timeout > 0) {
+        params.set("timeout", String(timeout));
+      }
+      mergeConnectionParams(params, values.connectionParams);
+      const vhostPath = database ? `/${encodeURIComponent(database)}` : "";
+      const query = params.toString();
+      return `rabbitmq://${encodedAuth}${address}${vhostPath}${query ? `?${query}` : ""}`;
     }
 
     if (type === "redis") {
@@ -3847,7 +3915,7 @@ const ConnectionModal: React.FC<{
       });
     } else if (type !== "custom") {
       const defaultUser =
-        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "kafka") ? "" : "root";
+        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "kafka" || type === "rabbitmq") ? "" : "root";
       const sslCapableType = supportsSSLForType(type);
       setUseSSL(false);
       setUseHttpTunnel(false);
@@ -4993,6 +5061,22 @@ const ConnectionModal: React.FC<{
                   ),
                 })}
 
+              {dbType === "rabbitmq" &&
+                renderConfigSectionCard({
+                  sectionKey: "service",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="database"
+                      label="默认 Virtual Host（可选）"
+                      help="留空默认使用 /；填写后查询编辑器会以当前 vhost 作为 Queue 浏览与测试发送上下文。"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input {...noAutoCapInputProps} placeholder="例如：/ 或 orders-vhost" />
+                    </Form.Item>
+                  ),
+                })}
+
               {(dbType === "oracle" || isOceanBaseOracle) &&
                 renderConfigSectionCard({
                   sectionKey: "service",
@@ -5204,13 +5288,13 @@ const ConnectionModal: React.FC<{
                           name="user"
                           label="用户名"
                           rules={
-                            (dbType === "mongodb" || dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "kafka")
+                            (dbType === "mongodb" || dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "kafka" || dbType === "rabbitmq")
                               ? []
                               : [createUriAwareRequiredRule("请输入用户名")]
                           }
                           style={{ marginBottom: 0 }}
                         >
-                          <Input {...noAutoCapInputProps} placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "kafka") ? "未开启认证可留空" : undefined} />
+                          <Input {...noAutoCapInputProps} placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined} />
                         </Form.Item>
                         <Form.Item
                           name="password"

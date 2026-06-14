@@ -518,6 +518,22 @@ func TestKafkaDriverDefinitionIsBuiltIn(t *testing.T) {
 	}
 }
 
+func TestRabbitMQDriverDefinitionIsBuiltIn(t *testing.T) {
+	definition, ok := resolveDriverDefinition("rabbit-mq")
+	if !ok {
+		t.Fatal("expected rabbitmq driver definition")
+	}
+	if definition.Name != "RabbitMQ" {
+		t.Fatalf("unexpected rabbitmq driver name: %q", definition.Name)
+	}
+	if !definition.BuiltIn {
+		t.Fatal("expected rabbitmq to be a built-in driver")
+	}
+	if definition.PinnedVersion != "" || definition.DefaultDownloadURL != "" {
+		t.Fatalf("expected rabbitmq builtin definition to omit optional-agent metadata: %#v", definition)
+	}
+}
+
 func TestGoldenDBDriverDefinitionIsBuiltIn(t *testing.T) {
 	definition, ok := resolveDriverDefinition("greatdb")
 	if !ok {

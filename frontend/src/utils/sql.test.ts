@@ -64,6 +64,11 @@ describe('quoteQualifiedIdent', () => {
       .toBe('"logs.app-1"');
   });
 
+  it('keeps RabbitMQ queue names as one quoted identifier', () => {
+    expect(quoteQualifiedIdent('rabbitmq', 'orders.events.v1'))
+      .toBe('"orders.events.v1"');
+  });
+
   it('quotes GoldenDB identifiers with MySQL-style backticks', () => {
     expect(quoteQualifiedIdent('goldendb', 'ledger.entries'))
       .toBe('`ledger`.`entries`');
