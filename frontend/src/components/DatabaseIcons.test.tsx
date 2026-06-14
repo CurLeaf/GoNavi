@@ -22,63 +22,72 @@ describe('DatabaseIcons', () => {
     expect(DB_ICON_TYPES).toContain('chroma');
     expect(getDbIconLabel('chroma')).toBe('Chroma');
     const markup = renderToStaticMarkup(<>{getDbIcon('chroma', undefined, 22)}</>);
-    expect(markup).toContain('>Ch</text>');
+    expect(markup).toContain('chroma.svg');
+    expect(markup).toContain('alt="chroma"');
   });
 
   it('includes Qdrant in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('qdrant');
     expect(getDbIconLabel('qdrant')).toBe('Qdrant');
     const markup = renderToStaticMarkup(<>{getDbIcon('qdrant', undefined, 22)}</>);
-    expect(markup).toContain('>Qd</text>');
+    expect(markup).toContain('qdrant.svg');
+    expect(markup).toContain('alt="qdrant"');
   });
 
   it('includes Apache IoTDB in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('iotdb');
     expect(getDbIconLabel('iotdb')).toBe('Apache IoTDB');
     const markup = renderToStaticMarkup(<>{getDbIcon('iotdb', undefined, 22)}</>);
-    expect(markup).toContain('>Io</text>');
+    expect(markup).toContain('iotdb.svg');
+    expect(markup).toContain('alt="iotdb"');
   });
 
   it('includes RocketMQ in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('rocketmq');
     expect(getDbIconLabel('rocketmq')).toBe('RocketMQ');
     const markup = renderToStaticMarkup(<>{getDbIcon('rocketmq', undefined, 22)}</>);
-    expect(markup).toContain('>Rm</text>');
+    expect(markup).toContain('rocketmq.svg');
+    expect(markup).toContain('alt="rocketmq"');
   });
 
   it('includes MQTT in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('mqtt');
     expect(getDbIconLabel('mqtt')).toBe('MQTT');
     const markup = renderToStaticMarkup(<>{getDbIcon('mqtt', undefined, 22)}</>);
-    expect(markup).toContain('>Mq</text>');
+    expect(markup).toContain('mqtt.svg');
+    expect(markup).toContain('alt="mqtt"');
   });
 
   it('includes Kafka in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('kafka');
     expect(getDbIconLabel('kafka')).toBe('Kafka');
     const markup = renderToStaticMarkup(<>{getDbIcon('kafka', undefined, 22)}</>);
-    expect(markup).toContain('>Kf</text>');
+    expect(markup).toContain('kafka.svg');
+    expect(markup).toContain('alt="kafka"');
   });
 
   it('includes RabbitMQ in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('rabbitmq');
     expect(getDbIconLabel('rabbitmq')).toBe('RabbitMQ');
     const markup = renderToStaticMarkup(<>{getDbIcon('rabbitmq', undefined, 22)}</>);
-    expect(markup).toContain('>RM</text>');
+    expect(markup).toContain('rabbitmq.svg');
+    expect(markup).toContain('alt="rabbitmq"');
   });
 
   it('includes GaussDB in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('gaussdb');
     expect(getDbIconLabel('gaussdb')).toBe('GaussDB');
     const markup = renderToStaticMarkup(<>{getDbIcon('gaussdb', undefined, 22)}</>);
-    expect(markup).toContain('>GS</text>');
+    expect(markup).toContain('gaussdb.svg');
+    expect(markup).toContain('alt="gaussdb"');
   });
 
   it('includes GoldenDB in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('goldendb');
     expect(getDbIconLabel('goldendb')).toBe('GoldenDB');
     const markup = renderToStaticMarkup(<>{getDbIcon('goldendb', undefined, 22)}</>);
-    expect(markup).toContain('>GD</text>');
+    expect(markup).toContain('goldendb.svg');
+    expect(markup).toContain('alt="goldendb"');
   });
 
   it('wraps database icons in a consistent frame for sidebar sizing', () => {

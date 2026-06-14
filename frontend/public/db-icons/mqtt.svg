@@ -1,0 +1,9 @@
+<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <title>MQTT</title>
+  <circle cx="12" cy="12" r="2.4" fill="#0EA5A4"/>
+  <circle cx="6.1" cy="8.2" r="2" fill="#14B8A6"/>
+  <circle cx="17.9" cy="8.2" r="2" fill="#14B8A6"/>
+  <circle cx="7.5" cy="17.1" r="1.8" fill="#0F766E"/>
+  <circle cx="16.5" cy="17.1" r="1.8" fill="#0F766E"/>
+  <path d="M7.7 9.1 10 11M16.3 9.1 14 11M8.8 15.7l1.5-2M15.2 15.7l-1.5-2" fill="none" stroke="#0EA5A4" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

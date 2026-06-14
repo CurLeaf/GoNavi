@@ -1,0 +1,9 @@
+<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <title>RabbitMQ</title>
+  <path d="M8.8 9.2V5.7c0-1.2.7-2.2 1.7-2.2s1.7 1 1.7 2.2v3.1" fill="#FF6B35"/>
+  <path d="M13 8.6V4.7c0-1.2.7-2.2 1.7-2.2s1.7 1 1.7 2.2v4.6" fill="#FF6B35"/>
+  <path d="M6 13.2A6 5.8 0 1 1 18 13.2C18 16.4 15.3 19 12 19s-6-2.6-6-5.8Z" fill="#FF6B35"/>
+  <circle cx="10" cy="13.1" r="1" fill="#FFFFFF"/>
+  <circle cx="14" cy="13.1" r="1" fill="#FFFFFF"/>
+  <path d="M10.3 16c.9.8 2.5.8 3.4 0" fill="none" stroke="#FFFFFF" stroke-width="1.4" stroke-linecap="round"/>
+</svg>

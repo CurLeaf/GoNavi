@@ -1,0 +1,11 @@
+<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <title>Kafka</title>
+  <circle cx="12" cy="12" r="2.2" fill="#111827"/>
+  <circle cx="12" cy="5.2" r="1.8" fill="#111827"/>
+  <circle cx="12" cy="18.8" r="1.8" fill="#111827"/>
+  <circle cx="6.1" cy="8.6" r="1.8" fill="#111827"/>
+  <circle cx="17.9" cy="8.6" r="1.8" fill="#111827"/>
+  <circle cx="6.1" cy="15.4" r="1.8" fill="#111827"/>
+  <circle cx="17.9" cy="15.4" r="1.8" fill="#111827"/>
+  <path d="M12 7.1v2.7M12 14.2v2.7M7.8 9.6l2.1 1.1M16.2 9.6 14.1 10.7M7.8 14.4l2.1-1.1M16.2 14.4l-2.1-1.1" fill="none" stroke="#111827" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

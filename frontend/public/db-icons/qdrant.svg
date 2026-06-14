@@ -1,0 +1,7 @@
+<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <title>Qdrant</title>
+  <path d="M12 4.5a7.5 7.5 0 1 0 5.3 12.8" fill="none" stroke="#DC244C" stroke-width="3" stroke-linecap="round"/>
+  <path d="M15.8 15.8 19 19" fill="none" stroke="#DC244C" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="16.9" cy="7.4" r="1.7" fill="#F59E0B"/>
+  <circle cx="7.7" cy="16.8" r="1.7" fill="#7C3AED"/>
+</svg>

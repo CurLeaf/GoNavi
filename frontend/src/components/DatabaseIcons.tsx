@@ -72,6 +72,8 @@ export const getDbDefaultColor = (type: string): string =>
 const BRAND_SVG_TYPES = new Set([
     'mysql', 'mariadb', 'postgres', 'redis', 'mongodb', 'clickhouse', 'sqlite',
     'diros', 'sphinx', 'duckdb', 'sqlserver', 'elasticsearch',
+    'gaussdb', 'goldendb', 'iotdb', 'rocketmq', 'mqtt', 'kafka', 'rabbitmq',
+    'chroma', 'qdrant',
 ]);
 
 /** 品牌 SVG 图标：用 <img> 加载 /db-icons/*.svg */
@@ -179,10 +181,10 @@ const OpenGaussIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.opengauss} label="OG" />
 );
 const GaussDBIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
-    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.gaussdb} label="GS" />
+    <BrandSvgIcon type="gaussdb" size={size} color={color} />
 );
 const GoldenDBIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
-    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.goldendb} label="GD" />
+    <BrandSvgIcon type="goldendb" size={size} color={color} />
 );
 const HighGoIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.highgo} label="HG" />
@@ -194,25 +196,25 @@ const TDengineIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.tdengine} label="TD" />
 );
 const IoTDBIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
-    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.iotdb} label="Io" />
+    <BrandSvgIcon type="iotdb" size={size} color={color} />
 );
 const RocketMQIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
-    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.rocketmq} label="Rm" />
+    <BrandSvgIcon type="rocketmq" size={size} color={color} />
 );
 const MQTTIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
-    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.mqtt} label="Mq" />
+    <BrandSvgIcon type="mqtt" size={size} color={color} />
 );
 const KafkaIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
-    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.kafka} label="Kf" />
+    <BrandSvgIcon type="kafka" size={size} color={color} />
 );
 const RabbitMQIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
-    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.rabbitmq} label="RM" />
+    <BrandSvgIcon type="rabbitmq" size={size} color={color} />
 );
 const ChromaIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
-    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.chroma} label="Ch" />
+    <BrandSvgIcon type="chroma" size={size} color={color} />
 );
 const QdrantIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
-    <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.qdrant} label="Qd" />
+    <BrandSvgIcon type="qdrant" size={size} color={color} />
 );
 const JVMIcon: React.FC<DbIconProps> = ({ size = 16, color }) => (
     <ColorBadge size={size} color={color || DB_DEFAULT_COLORS.jvm} label="JVM" />
