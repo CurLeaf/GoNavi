@@ -5279,7 +5279,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           currentDb={currentDb}
           currentConnectionId={currentConnectionId}
           toggleShortcutLabel={toggleQueryResultsPanelShortcutLabel}
-          transactionToolbar={sqlEditorTransactionToolbar}
           onActiveResultKeyChange={setActiveResultKey}
           onHide={() => updateResultPanelVisibility(false)}
           onCloseResult={handleCloseResult}

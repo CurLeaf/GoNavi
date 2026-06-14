@@ -417,6 +417,9 @@ const textContent = (node: any): string =>
 const findButton = (renderer: ReactTestRenderer, text: string) =>
   renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text))[0];
 
+const findButtons = (renderer: ReactTestRenderer, text: string) =>
+  renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text));
+
 const findExactButton = (renderer: ReactTestRenderer, text: string) =>
   renderer.root.findAll((node) => node.type === 'button' && textContent(node) === text)[0];
 
@@ -2448,7 +2451,8 @@ describe('QueryEditor external SQL save', () => {
       'query-1',
     );
     expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
-    expect(textContent(renderer!.root)).toContain('未提交');
+    expect(textContent(renderer!.root)).not.toContain('未提交');
+    expect(textContent(renderer!.root)).toContain('提交');
     expect(textContent(renderer!.root)).toContain('影响行数：2');
 
     await act(async () => {
@@ -2494,7 +2498,8 @@ describe('QueryEditor external SQL save', () => {
       'query-1',
     );
     expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
-    expect(textContent(renderer!.root)).toContain('未提交');
+    expect(textContent(renderer!.root)).not.toContain('未提交');
+    expect(textContent(renderer!.root)).toContain('提交');
 
     await act(async () => {
       await findButton(renderer!, '提交').props.onClick();
@@ -2544,7 +2549,7 @@ describe('QueryEditor external SQL save', () => {
       expect.stringContaining('DELETE FROM users'),
       'query-1',
     );
-    expect(textContent(renderer!.root)).toContain('未提交');
+    expect(textContent(renderer!.root)).not.toContain('未提交');
     expect(textContent(renderer!.root)).toContain('提交 (2)');
     expect(storeState.sqlEditorPendingTransactions['tab-1']).toMatchObject({
       id: 'tx-multi-dml',
@@ -2581,6 +2586,35 @@ describe('QueryEditor external SQL save', () => {
       'query-1',
     );
     expect(backendApp.DBQueryMultiTransactional).not.toHaveBeenCalled();
+  });
+
+  it('keeps manual SQL transaction actions inline in the top toolbar without duplicating them in result tabs', async () => {
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+      success: true,
+      transactionId: 'tx-toolbar-inline',
+      transactionPending: true,
+      data: [
+        { columns: ['affectedRows'], rows: [{ affectedRows: 1 }], statementIndex: 1 },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: "UPDATE users SET active = 0 WHERE id = 1" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const pageText = textContent(renderer!.root);
+    expect(pageText).not.toContain('未提交');
+    expect(findButtons(renderer!, '提交')).toHaveLength(1);
+    expect(findButtons(renderer!, '回滚')).toHaveLength(1);
   });
 
   it('adds pagination to limited query results and reloads the selected page only', async () => {
@@ -2673,7 +2707,7 @@ describe('QueryEditor external SQL save', () => {
       'query-1',
     );
     expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
-    expect(textContent(renderer!.root)).toContain('未提交');
+    expect(textContent(renderer!.root)).not.toContain('未提交');
   });
 
   it('auto commits SQL editor DML transactions after the configured delay', async () => {
@@ -3980,6 +4014,7 @@ describe('QueryEditor external SQL save', () => {
   it('keeps the v2 query editor toolbar grouped and compact', () => {
     const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
     const toolbarSource = readFileSync(new URL('./QueryEditorToolbar.tsx', import.meta.url), 'utf8');
+    const resultsPanelSource = readFileSync(new URL('./QueryEditorResultsPanel.tsx', import.meta.url), 'utf8');
     const transactionSettingsSource = readFileSync(new URL('./QueryEditorTransactionSettings.tsx', import.meta.url), 'utf8');
     const transactionToolbarSource = readFileSync(new URL('./QueryEditorTransactionToolbar.tsx', import.meta.url), 'utf8');
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
@@ -4002,12 +4037,23 @@ describe('QueryEditor external SQL save', () => {
     expect(transactionSettingsSource).toContain("label: '3s'");
     expect(source).toContain('QueryEditorTransactionToolbar');
     expect(transactionToolbarSource).toContain("className={isV2Ui ? 'gn-v2-query-transaction-toolbar' : undefined}");
-    expect(transactionToolbarSource).toContain("'未提交'");
+    expect(transactionToolbarSource).toContain(": null;");
     expect(transactionToolbarSource).toContain('gn-v2-query-transaction-commit-button');
     expect(transactionToolbarSource).toContain('gn-v2-toolbar-kbd');
     expect(transactionToolbarSource).toContain("'自动提交中'");
     expect(transactionToolbarSource).toContain('onFinish');
+    expect(toolbarSource).toContain('{isV2Ui && pendingTransactionToolbar}');
+    expect(toolbarSource).not.toContain('gn-v2-query-toolbar-transaction-row');
+    expect(resultsPanelSource).not.toContain('transactionToolbar?: React.ReactNode;');
     expect(toolbarSource).toContain('gn-v2-query-toolbar-action-group');
+    expect(toolbarSource).toContain('gn-v2-query-toolbar-action-pair');
+    expect(toolbarSource).toContain('const aiMenuItems');
+    expect(toolbarSource).toContain('key: "toggle-result-panel"');
+    expect(toolbarSource).toContain('{!isV2Ui && (');
+    expect(toolbarSource).toContain('trigger={["click"]}');
+    expect(toolbarSource.indexOf('onClick={onQuickSave}')).toBeLessThan(toolbarSource.indexOf('menu={{ items: aiMenuItems }}'));
+    expect(toolbarSource.indexOf('menu={{ items: aiMenuItems }}')).toBeLessThan(toolbarSource.indexOf('menu={{ items: moreMenuItems }}'));
+    expect(toolbarSource.indexOf('menu={{ items: moreMenuItems }}')).toBeLessThan(toolbarSource.indexOf('icon={<FormatPainterOutlined />}'));
     expect(transactionSettingsSource).toContain('style={isV2Ui ? undefined : { width: 78 }}');
     expect(transactionSettingsSource).toContain('style={isV2Ui ? undefined : { width: 68 }}');
     expect(toolbarSource).toContain('style={isV2Ui ? undefined : { width: 200 }}');
@@ -4023,6 +4069,8 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('line-height: 30px !important;');
     expect(css).toContain('display: inline-flex !important;');
     expect(css).toContain('gap: 6px;');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-action-pair');
+    expect(css).toContain('gap: 8px;');
     expect(css).toContain('margin-left: 0 !important;');
     expect(css).toContain('max-width: 760px;');
     expect(css).toContain('width: 140px !important;');
@@ -4030,6 +4078,7 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('width: 132px !important;');
     expect(css).toContain('width: 34px !important;');
     expect(css).toContain('@media (max-width: 900px)');
+    expect(css).not.toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-row {');
 
     const queryToolbarMainCss = css.slice(css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar-main {'), css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar-selects {'));
     expect(queryToolbarMainCss).not.toContain('margin-left: auto;');

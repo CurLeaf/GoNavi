@@ -4796,9 +4796,7 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar {
   min-height: 48px;
   padding: 8px 12px !important;
   gap: 6px 10px !important;
-  flex-direction: column;
-  flex-wrap: nowrap;
-  align-items: stretch !important;
+  align-items: center !important;
   background: var(--gn-bg-panel) !important;
   border-bottom: 0.5px solid var(--gn-br-1) !important;
 }
@@ -4830,16 +4828,10 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
   justify-content: flex-start;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-row {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  justify-content: flex-end;
-}
-
 body[data-ui-version="v2"] .gn-v2-query-transaction-toolbar {
   display: inline-flex;
   max-width: 100%;
+  flex: 0 0 auto;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-select {
@@ -4895,6 +4887,13 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group {
   align-items: center;
   flex: 0 0 auto;
   gap: 6px;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-pair {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group > .ant-btn {
@@ -4974,10 +4973,6 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-ai-action.ant-btn {
 
   body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
     width: 100%;
-    justify-content: flex-start;
-  }
-
-  body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-row {
     justify-content: flex-start;
   }
 }
