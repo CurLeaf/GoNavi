@@ -293,7 +293,7 @@ func (s *SqlServerDB) ExecContext(ctx context.Context, query string) (int64, err
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	return sqlServerRowsAffected(query, res)
 }
 
 func (s *SqlServerDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
@@ -304,7 +304,7 @@ func (s *SqlServerDB) ExecBatchContext(ctx context.Context, query string) (int64
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	return sqlServerRowsAffected(query, res)
 }
 
 func (s *SqlServerDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
@@ -326,7 +326,7 @@ func (s *SqlServerDB) Exec(query string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	return sqlServerRowsAffected(query, res)
 }
 
 func (e *sqlServerSessionExecer) Exec(query string) (int64, error) {
@@ -341,7 +341,38 @@ func (e *sqlServerSessionExecer) ExecContext(ctx context.Context, query string) 
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	return sqlServerRowsAffected(query, res)
+}
+
+func sqlServerRowsAffected(query string, res sql.Result) (int64, error) {
+	if res == nil {
+		return 0, nil
+	}
+	affected, err := res.RowsAffected()
+	if err == nil {
+		return affected, nil
+	}
+	if sqlServerAllowsUnknownRowsAffected(query) {
+		return 0, nil
+	}
+	return 0, err
+}
+
+func sqlServerAllowsUnknownRowsAffected(query string) bool {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return false
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return false
+	}
+	switch strings.ToLower(fields[0]) {
+	case "begin", "commit", "rollback", "save":
+		return true
+	default:
+		return false
+	}
 }
 
 func (e *sqlServerSessionExecer) Query(query string) ([]map[string]interface{}, []string, error) {
