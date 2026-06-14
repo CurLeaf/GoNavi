@@ -11,6 +11,7 @@ import DataGrid, {
   resolveNextGridFilterOperatorForColumnChange,
 } from './DataGrid';
 import DataGridPaginationBar from './DataGridPaginationBar';
+import { V2CellContextMenuView } from './V2TableContextMenu';
 import { cloneShortcutOptions, DEFAULT_SHORTCUT_OPTIONS } from '../utils/shortcuts';
 
 vi.mock('../store', () => ({
@@ -278,6 +279,26 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('提交事务');
     expect(markup).toContain('手动提交');
     expect(markup).toContain('AI 洞察');
+  });
+
+  it('clears modified cell markers when refreshing the grid', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    expect(source).toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setModifiedColumns\(\{\}\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}, \[clearAutoCommitTimer, onReload\]\);/);
+  });
+
+  it('renders a cell-level undo action in the v2 context menu for modified cells', () => {
+    const markup = renderToStaticMarkup(
+      <V2CellContextMenuView
+        fieldName="status"
+        tableName="orders"
+        rowLabel="row 1"
+        canModifyData
+        canUndoCellChange
+      />,
+    );
+
+    expect(markup).toContain('撤销此单元格修改');
   });
 
   it('preserves fractional seconds when rendering datetime values', () => {

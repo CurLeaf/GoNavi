@@ -27,6 +27,7 @@ import {
   FolderAddOutlined,
   HddOutlined,
   PushpinOutlined,
+  UndoOutlined,
   SortAscendingOutlined,
   SortDescendingOutlined,
   VerticalAlignBottomOutlined,
@@ -543,6 +544,7 @@ export type V2CellContextMenuActionKey =
   | 'copy-row-for-paste'
   | 'paste-row-as-new'
   | 'copy-column-data'
+  | 'undo-cell-change'
   | 'set-null'
   | 'edit-row'
   | 'fill-selected'
@@ -652,6 +654,7 @@ export const V2CellContextMenuView: React.FC<{
   rowLabel?: string;
   selectedRowCount?: number;
   canModifyData?: boolean;
+  canUndoCellChange?: boolean;
   copiedRowCount?: number;
   canPasteCopiedColumns?: boolean;
   supportsCopyInsert?: boolean;
@@ -663,6 +666,7 @@ export const V2CellContextMenuView: React.FC<{
   rowLabel,
   selectedRowCount = 0,
   canModifyData = false,
+  canUndoCellChange = false,
   copiedRowCount = 0,
   canPasteCopiedColumns = false,
   supportsCopyInsert = true,
@@ -694,6 +698,12 @@ export const V2CellContextMenuView: React.FC<{
           <>
             <div className="gn-v2-context-menu-section-title">编辑</div>
             {renderItems([
+              {
+                action: 'undo-cell-change',
+                icon: <UndoOutlined />,
+                title: '撤销此单元格修改',
+                disabled: !canUndoCellChange,
+              },
               { action: 'set-null', icon: <ClearOutlined />, title: '设置为 NULL' },
               { action: 'edit-row', icon: <EditOutlined />, title: '编辑本行', kbd: '↵' },
               { action: 'copy-row-for-paste', icon: <CopyOutlined />, title: '复制本行为新增行' },

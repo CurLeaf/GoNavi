@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { CopyOutlined, EditOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons';
+import { CopyOutlined, EditOutlined, UndoOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons';
 
 interface CellContextMenuState {
   visible: boolean;
@@ -19,12 +19,14 @@ interface DataGridLegacyCellContextMenuProps {
   copiedRowsForPasteLength: number;
   selectedRowKeysLength: number;
   copiedCellPatchAvailable: boolean;
+  canUndoCellChange: boolean;
   supportsCopyInsert: boolean;
   onClose: () => void;
   onCopyFieldName: () => void;
   onCopyRowData: () => void;
   onCopyRowForPaste: () => void;
   onPasteCopiedRowsAsNew: () => void;
+  onUndoCellChange: () => void;
   onSetNull: () => void;
   onEditRow: () => void;
   onFillToSelected: () => void;
@@ -62,12 +64,14 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
   copiedRowsForPasteLength,
   selectedRowKeysLength,
   copiedCellPatchAvailable,
+  canUndoCellChange,
   supportsCopyInsert,
   onClose,
   onCopyFieldName,
   onCopyRowData,
   onCopyRowForPaste,
   onPasteCopiedRowsAsNew,
+  onUndoCellChange,
   onSetNull,
   onEditRow,
   onFillToSelected,
@@ -131,6 +135,22 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
       <div style={separatorStyle(darkMode)} />
       {canModifyData && (
         <>
+          <div
+            style={{
+              ...baseItemStyle,
+              cursor: canUndoCellChange ? 'pointer' : 'not-allowed',
+              opacity: canUndoCellChange ? 1 : 0.5,
+            }}
+            {...makeHoverHandlers(canUndoCellChange)}
+            onClick={() => {
+              if (canUndoCellChange) {
+                onUndoCellChange();
+              }
+            }}
+          >
+            <UndoOutlined style={{ marginRight: 8 }} />
+            撤销此单元格修改
+          </div>
           <div style={baseItemStyle} {...makeHoverHandlers()} onClick={onSetNull}>
             设置为 NULL
           </div>
