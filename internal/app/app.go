@@ -178,8 +178,8 @@ func (a *App) LogWindowDiagnostic(stage string, payload string) {
 	logger.Warnf("窗口诊断：stage=%s payload=%s", stage, payload)
 }
 
-// Shutdown is called when the app terminates
-func (a *App) Shutdown(ctx context.Context) {
+// Shutdown is called when the app terminates.
+func (a *App) Shutdown() {
 	logger.Infof("应用开始关闭，准备释放资源")
 	a.rollbackPendingSQLTransactionsOnShutdown()
 	a.mu.Lock()

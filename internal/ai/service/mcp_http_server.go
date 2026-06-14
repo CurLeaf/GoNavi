@@ -163,7 +163,8 @@ func (s *Service) stopMCPHTTPServer(ctx context.Context, message string) (ai.MCP
 }
 
 // Shutdown 释放 AI Service 中的运行时资源。
-func (s *Service) Shutdown(ctx context.Context) {
+func (s *Service) Shutdown() {
+	ctx := context.Background()
 	_, _ = s.stopMCPHTTPServer(ctx, "应用关闭，GoNavi MCP HTTP 服务已停止")
 }
 

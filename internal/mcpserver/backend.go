@@ -47,10 +47,7 @@ func (b *AppBackend) Close(ctx context.Context) error {
 	if b == nil || b.app == nil {
 		return nil
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	b.app.Shutdown(ctx)
+	b.app.Shutdown()
 	return nil
 }
 

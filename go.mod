@@ -8,6 +8,7 @@ require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.43.0
 	github.com/HuaweiCloudDeveloper/gaussdb-go v1.0.0-rc1
 	github.com/apache/iotdb-client-go v1.3.7
+	github.com/apache/rocketmq-client-go/v2 v2.1.2
 	github.com/caretdev/go-irisnative v0.2.1
 	github.com/duckdb/duckdb-go/v2 v2.5.5
 	github.com/eclipse/paho.mqtt.golang v1.5.1
@@ -35,7 +36,6 @@ require (
 )
 
 require (
-	github.com/apache/rocketmq-client-go/v2 v2.1.2 // indirect
 	github.com/apache/thrift v0.22.0 // indirect
 	github.com/elastic/elastic-transport-go/v8 v8.9.0 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect

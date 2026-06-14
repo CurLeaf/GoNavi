@@ -594,6 +594,18 @@ var mysqlDatabaseQueries = []string{
 	"SELECT DATABASE() AS `Database`",
 }
 
+var mysqlDatabaseNameKeys = []string{
+	"Database",
+	"database",
+	"DATABASE",
+	"database_name",
+	"DATABASE_NAME",
+	"schema",
+	"SCHEMA",
+	"schema_name",
+	"SCHEMA_NAME",
+}
+
 func collectMySQLDatabaseNames(queryFn func(string) ([]map[string]interface{}, []string, error)) ([]string, error) {
 	if queryFn == nil {
 		return nil, fmt.Errorf("查询函数为空")
@@ -603,34 +615,59 @@ func collectMySQLDatabaseNames(queryFn func(string) ([]map[string]interface{}, [
 	seen := make(map[string]struct{}, 8)
 	var lastErr error
 
-	appendNames := func(rows []map[string]interface{}) {
-		for _, row := range rows {
-			for _, key := range []string{"Database", "database"} {
-				val, ok := row[key]
-				if !ok || val == nil {
-					continue
-				}
-				name := strings.TrimSpace(fmt.Sprintf("%v", val))
-				if name == "" || strings.EqualFold(name, "<nil>") {
-					continue
-				}
-				if _, exists := seen[name]; exists {
-					continue
-				}
-				seen[name] = struct{}{}
-				names = append(names, name)
-				break
+	normalizeName := func(val interface{}) string {
+		if val == nil {
+			return ""
+		}
+		name := strings.TrimSpace(fmt.Sprintf("%v", val))
+		if name == "" || strings.EqualFold(name, "<nil>") || strings.EqualFold(name, "null") {
+			return ""
+		}
+		return name
+	}
+
+	extractName := func(row map[string]interface{}, columns []string) string {
+		for _, key := range mysqlDatabaseNameKeys {
+			if name := normalizeName(row[key]); name != "" {
+				return name
 			}
+		}
+		for _, column := range columns {
+			if name := normalizeName(row[column]); name != "" {
+				return name
+			}
+		}
+		if len(row) == 1 {
+			for _, val := range row {
+				if name := normalizeName(val); name != "" {
+					return name
+				}
+			}
+		}
+		return ""
+	}
+
+	appendNames := func(rows []map[string]interface{}, columns []string) {
+		for _, row := range rows {
+			name := extractName(row, columns)
+			if name == "" {
+				continue
+			}
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
+			names = append(names, name)
 		}
 	}
 
 	for _, sqlText := range mysqlDatabaseQueries {
-		rows, _, err := queryFn(sqlText)
+		rows, columns, err := queryFn(sqlText)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		appendNames(rows)
+		appendNames(rows, columns)
 		if len(names) > 0 {
 			return names, nil
 		}
