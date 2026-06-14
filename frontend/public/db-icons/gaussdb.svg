@@ -1,7 +1,0 @@
-<svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-  <title>GaussDB</title>
-  <circle cx="12" cy="12" r="2.2" fill="#0B7FAB"/>
-  <ellipse cx="12" cy="12" rx="7.2" ry="4.8" fill="none" stroke="#0B7FAB" stroke-width="2"/>
-  <ellipse cx="12" cy="12" rx="7.2" ry="4.8" fill="none" stroke="#38BDF8" stroke-width="2" opacity="0.9" transform="rotate(60 12 12)"/>
-  <circle cx="18.6" cy="10.1" r="1.6" fill="#38BDF8"/>
-</svg>
