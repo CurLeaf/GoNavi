@@ -88,6 +88,8 @@ export function DropDatabase(arg1:connection.ConnectionConfig,arg2:string):Promi
 
 export function DropFunction(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function DropSchema(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
 export function DropTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DropView(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
@@ -105,6 +107,8 @@ export function ExportDatabaseSQL(arg1:connection.ConnectionConfig,arg2:string,a
 export function ExportQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:string):Promise<connection.QueryResult>;
 
 export function ExportSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function ExportSchemaSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:boolean):Promise<connection.QueryResult>;
 
 export function ExportTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
@@ -265,6 +269,8 @@ export function RenameDatabase(arg1:connection.ConnectionConfig,arg2:string,arg3
 export function RenameSQLDirectory(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function RenameSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function RenameSchema(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function RenameTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 

@@ -182,14 +182,52 @@ func buildCreateSchemaSQL(dbType string, schemaName string) (string, error) {
 	return fmt.Sprintf("CREATE SCHEMA %s", quoteIdentByType(dbType, schemaName)), nil
 }
 
-func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
-	dbType := resolveDDLDBType(config)
+func buildRenameSchemaSQL(dbType string, oldSchemaName string, newSchemaName string) (string, error) {
+	oldSchemaName = strings.TrimSpace(oldSchemaName)
+	newSchemaName = strings.TrimSpace(newSchemaName)
+	if oldSchemaName == "" || newSchemaName == "" {
+		return "", fmt.Errorf("模式名称不能为空")
+	}
+	if strings.EqualFold(oldSchemaName, newSchemaName) {
+		return "", fmt.Errorf("新旧模式名称不能相同")
+	}
+	if !isPostgresSchemaDDLDBType(dbType) {
+		return "", fmt.Errorf("当前数据源（%s）暂不支持通过此入口编辑模式", dbType)
+	}
+	return fmt.Sprintf(
+		"ALTER SCHEMA %s RENAME TO %s",
+		quoteIdentByType(dbType, oldSchemaName),
+		quoteIdentByType(dbType, newSchemaName),
+	), nil
+}
+
+func buildDropSchemaSQL(dbType string, schemaName string) (string, error) {
+	schemaName = strings.TrimSpace(schemaName)
+	if schemaName == "" {
+		return "", fmt.Errorf("模式名称不能为空")
+	}
+	if !isPostgresSchemaDDLDBType(dbType) {
+		return "", fmt.Errorf("当前数据源（%s）暂不支持通过此入口删除模式", dbType)
+	}
+	return fmt.Sprintf("DROP SCHEMA %s CASCADE", quoteIdentByType(dbType, schemaName)), nil
+}
+
+func resolveSchemaDDLTargetDatabase(config connection.ConnectionConfig, dbName string) (string, error) {
 	targetDbName := strings.TrimSpace(dbName)
 	if targetDbName == "" {
 		targetDbName = strings.TrimSpace(config.Database)
 	}
 	if targetDbName == "" {
-		return connection.QueryResult{Success: false, Message: "目标数据库不能为空"}
+		return "", fmt.Errorf("目标数据库不能为空")
+	}
+	return targetDbName, nil
+}
+
+func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
+	dbType := resolveDDLDBType(config)
+	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	query, err := buildCreateSchemaSQL(dbType, schemaName)
@@ -208,6 +246,52 @@ func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, sc
 	}
 
 	return connection.QueryResult{Success: true, Message: "模式创建成功"}
+}
+
+func (a *App) RenameSchema(config connection.ConnectionConfig, dbName string, oldSchemaName string, newSchemaName string) connection.QueryResult {
+	dbType := resolveDDLDBType(config)
+	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	query, err := buildRenameSchemaSQL(dbType, oldSchemaName, newSchemaName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	runConfig := buildRunConfigForDDL(config, dbType, targetDbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := dbInst.Exec(query); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "模式重命名成功"}
+}
+
+func (a *App) DropSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
+	dbType := resolveDDLDBType(config)
+	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	query, err := buildDropSchemaSQL(dbType, schemaName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	runConfig := buildRunConfigForDDL(config, dbType, targetDbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := dbInst.Exec(query); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "模式删除成功"}
 }
 
 func resolveDDLDBType(config connection.ConnectionConfig) string {

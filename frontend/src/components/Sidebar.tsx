@@ -118,11 +118,13 @@ import {
     V2DatabaseContextMenuView,
     V2ConnectionGroupContextMenuView,
     V2ConnectionContextMenuView,
+    V2SchemaContextMenuView,
     V2TableContextMenuView,
     V2TableGroupContextMenuView,
     type V2DatabaseContextMenuActionKey,
     type V2ConnectionGroupContextMenuActionKey,
     type V2ConnectionContextMenuActionKey,
+    type V2SchemaContextMenuActionKey,
     type V2TableContextMenuActionKey,
     type V2TableContextMenuStats,
     type V2TableGroupContextMenuActionKey,
@@ -206,7 +208,7 @@ type SidebarContextMenuState = {
   sourceX?: number;
   sourceY?: number;
   items: MenuProps['items'];
-  kind?: 'v2-table' | 'v2-database' | 'v2-table-group' | 'v2-connection' | 'v2-connection-group';
+  kind?: 'v2-table' | 'v2-database' | 'v2-schema' | 'v2-table-group' | 'v2-connection' | 'v2-connection-group';
   node?: any;
   rootClassName?: string;
   overlayStyle?: React.CSSProperties;
@@ -608,6 +610,9 @@ const Sidebar: React.FC<{
   const [isCreateSchemaModalOpen, setIsCreateSchemaModalOpen] = useState(false);
   const [createSchemaForm] = Form.useForm();
   const [createSchemaTarget, setCreateSchemaTarget] = useState<any>(null);
+  const [isRenameSchemaModalOpen, setIsRenameSchemaModalOpen] = useState(false);
+  const [renameSchemaForm] = Form.useForm();
+  const [renameSchemaTarget, setRenameSchemaTarget] = useState<any>(null);
   const [isRenameDbModalOpen, setIsRenameDbModalOpen] = useState(false);
   const [renameDbForm] = Form.useForm();
   const [renameDbTarget, setRenameDbTarget] = useState<any>(null);
@@ -2937,6 +2942,39 @@ const Sidebar: React.FC<{
       }
   };
 
+  const handleExportSchemaSQL = async (node: any, includeData: boolean) => {
+      const conn = node?.dataRef;
+      const dbName = String(conn?.dbName || '').trim();
+      const schemaName = String(conn?.schemaName || '').trim();
+      if (!conn || !dbName || !schemaName) {
+          message.error('未找到目标模式，无法导出');
+          return;
+      }
+      const hide = message.loading(
+          includeData
+              ? `正在备份模式 ${schemaName} (结构+数据)...`
+              : `正在导出模式 ${schemaName} 表结构...`,
+          0,
+      );
+      try {
+          const res = await (window as any).go.app.App.ExportSchemaSQL(
+              buildRpcConnectionConfig(conn.config, { database: dbName }) as any,
+              dbName,
+              schemaName,
+              includeData,
+          );
+          hide();
+          if (res.success) {
+              message.success('导出成功');
+          } else if (res.message !== '已取消') {
+              message.error('导出失败: ' + res.message);
+          }
+      } catch (e: any) {
+          hide();
+          message.error('导出失败: ' + (e?.message || String(e)));
+      }
+  };
+
   const handleExportTablesSQL = async (nodes: any[], includeData: boolean) => {
       if (!nodes || nodes.length === 0) return;
       const first = nodes[0].dataRef;
@@ -3986,6 +4024,89 @@ const Sidebar: React.FC<{
       } catch (e) {
           // Validate failed
       }
+  };
+
+  const openRenameSchemaModal = (node: any) => {
+      const dialect = getMetadataDialect(node?.dataRef as SavedConnection);
+      const schemaName = String(node?.dataRef?.schemaName || '').trim();
+      if (!isPostgresSchemaDialect(dialect) || !schemaName) {
+          message.warning('当前节点不支持通过此入口编辑模式');
+          return;
+      }
+      setRenameSchemaTarget(node);
+      renameSchemaForm.setFieldsValue({ newName: schemaName });
+      setIsRenameSchemaModalOpen(true);
+  };
+
+  const handleRenameSchema = async () => {
+      try {
+          const values = await renameSchemaForm.validateFields();
+          const node = renameSchemaTarget;
+          const conn = node?.dataRef;
+          const dbName = String(conn?.dbName || '').trim();
+          const oldSchemaName = String(conn?.schemaName || '').trim();
+          const newSchemaName = String(values?.newName || '').trim();
+          if (!conn || !dbName || !oldSchemaName || !newSchemaName) {
+              message.error('未找到目标模式，无法编辑');
+              return;
+          }
+          if (oldSchemaName === newSchemaName) {
+              message.warning('新旧模式名称相同，无需修改');
+              return;
+          }
+
+          const res = await (window as any).go.app.App.RenameSchema(
+              buildRpcConnectionConfig(conn.config, { database: dbName }) as any,
+              dbName,
+              oldSchemaName,
+              newSchemaName,
+          );
+          if (res.success) {
+              message.success('模式重命名成功');
+              const schemaKeyPrefix = `${conn.id}-${dbName}-schema-${oldSchemaName || 'default'}`;
+              setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
+              setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
+              await loadTables(getDatabaseNodeRef(conn, dbName));
+              setIsRenameSchemaModalOpen(false);
+              setRenameSchemaTarget(null);
+              renameSchemaForm.resetFields();
+          } else {
+              message.error('编辑失败: ' + res.message);
+          }
+      } catch (e) {
+          // Validate failed
+      }
+  };
+
+  const handleDeleteSchema = (node: any) => {
+      const conn = node?.dataRef;
+      const dbName = String(conn?.dbName || '').trim();
+      const schemaName = String(conn?.schemaName || '').trim();
+      if (!conn || !dbName || !schemaName) {
+          message.error('未找到目标模式，无法删除');
+          return;
+      }
+      Modal.confirm({
+          title: '确认删除模式',
+          content: `确定删除模式 "${schemaName}" 吗？这将删除该模式及其中所有对象，操作不可恢复。`,
+          okButtonProps: { danger: true },
+          onOk: async () => {
+              const res = await (window as any).go.app.App.DropSchema(
+                  buildRpcConnectionConfig(conn.config, { database: dbName }) as any,
+                  dbName,
+                  schemaName,
+              );
+              if (res.success) {
+                  message.success('模式删除成功');
+                  const schemaKeyPrefix = `${conn.id}-${dbName}-schema-${schemaName || 'default'}`;
+                  setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
+                  setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
+                  await loadTables(getDatabaseNodeRef(conn, dbName));
+              } else {
+                  message.error('删除失败: ' + res.message);
+              }
+          }
+      });
   };
 
   const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {
@@ -5979,6 +6100,40 @@ const Sidebar: React.FC<{
       );
   };
 
+  const handleV2SchemaContextMenuAction = (node: any, action: V2SchemaContextMenuActionKey) => {
+      switch (action) {
+          case 'rename-schema':
+              openRenameSchemaModal(node);
+              return;
+          case 'refresh-schema':
+              void loadTables(getDatabaseNodeRef(node?.dataRef, String(node?.dataRef?.dbName || '').trim()));
+              return;
+          case 'export-schema':
+              void handleExportSchemaSQL(node, false);
+              return;
+          case 'backup-schema-sql':
+              void handleExportSchemaSQL(node, true);
+              return;
+          case 'drop-schema':
+              handleDeleteSchema(node);
+              return;
+          default:
+              return;
+      }
+  };
+
+  const renderV2SchemaContextMenu = (node: any) => (
+      <V2SchemaContextMenuView
+          dbName={String(node?.dataRef?.dbName || '')}
+          schemaName={String(node?.dataRef?.schemaName || node?.title || '')}
+          shortcutPlatform={activeShortcutPlatform}
+          onAction={(action) => {
+              setContextMenu(null);
+              handleV2SchemaContextMenuAction(node, action);
+          }}
+      />
+  );
+
   const renderV2ConnectionContextMenu = (node: any) => {
       const conn = node.dataRef as SavedConnection;
       const capabilities = getDataSourceCapabilities(conn?.config);
@@ -6019,6 +6174,7 @@ const Sidebar: React.FC<{
       if (!menu.node) return null;
       if (menu.kind === 'v2-table') return renderV2TableContextMenu(menu.node);
       if (menu.kind === 'v2-database') return renderV2DatabaseContextMenu(menu.node);
+      if (menu.kind === 'v2-schema') return renderV2SchemaContextMenu(menu.node);
       if (menu.kind === 'v2-table-group') return renderV2TableGroupContextMenu(menu.node);
       if (menu.kind === 'v2-connection') return renderV2ConnectionContextMenu(menu.node);
       if (menu.kind === 'v2-connection-group') return renderV2ConnectionGroupContextMenu(menu.node);
@@ -6455,6 +6611,48 @@ const Sidebar: React.FC<{
   const getNodeMenuItems = (node: any): MenuProps['items'] => {
     const conn = node.dataRef as SavedConnection;
     const isRedis = conn?.config?.type === 'redis';
+
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'schema') {
+        const dialect = getMetadataDialect(node.dataRef as SavedConnection);
+        const schemaName = String(node?.dataRef?.schemaName || '').trim();
+        if (!isPostgresSchemaDialect(dialect) || !schemaName) {
+            return [];
+        }
+        return [
+            {
+                key: 'rename-schema',
+                label: '编辑模式',
+                icon: <EditOutlined />,
+                onClick: () => openRenameSchemaModal(node)
+            },
+            {
+                key: 'refresh-schema',
+                label: '刷新',
+                icon: <ReloadOutlined />,
+                onClick: () => void loadTables(getDatabaseNodeRef(node.dataRef, node.dataRef.dbName))
+            },
+            {
+                key: 'export-schema',
+                label: '导出当前模式表结构 (SQL)',
+                icon: <ExportOutlined />,
+                onClick: () => void handleExportSchemaSQL(node, false)
+            },
+            {
+                key: 'backup-schema-sql',
+                label: '备份当前模式全部表 (结构+数据 SQL)',
+                icon: <SaveOutlined />,
+                onClick: () => void handleExportSchemaSQL(node, true)
+            },
+            { type: 'divider' },
+            {
+                key: 'drop-schema',
+                label: '删除模式',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => handleDeleteSchema(node)
+            },
+        ];
+    }
 
     // 表分组节点的右键菜单
     if (node.type === 'object-group' && node.dataRef?.groupKey === 'tables') {
@@ -7765,6 +7963,28 @@ const Sidebar: React.FC<{
           });
           return;
       }
+      if (
+          isV2Ui
+          && node?.type === 'object-group'
+          && node?.dataRef?.groupKey === 'schema'
+          && isPostgresSchemaDialect(getMetadataDialect(node.dataRef as SavedConnection))
+          && String(node?.dataRef?.schemaName || '').trim()
+      ) {
+          const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
+          setContextMenu({
+              x: position.x,
+              y: position.y,
+              sourceX: event.clientX,
+              sourceY: event.clientY,
+              items: [],
+              kind: 'v2-schema',
+              node,
+              rootClassName: 'gn-v2-table-context-menu-popup',
+              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+              maxHeight: position.maxHeight,
+          });
+          return;
+      }
       if (isV2Ui && node?.type === 'object-group' && node?.dataRef?.groupKey === 'tables') {
           const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
           setContextMenu({
@@ -8506,6 +8726,23 @@ const Sidebar: React.FC<{
         >
             <Form form={createSchemaForm} layout="vertical">
                 <Form.Item name="name" label="模式名称" rules={[{ required: true, message: '请输入模式名称' }]}>
+                    <Input {...noAutoCapInputProps} />
+                </Form.Item>
+            </Form>
+        </Modal>
+
+        <Modal
+            title={`编辑模式${renameSchemaTarget?.dataRef?.dbName && renameSchemaTarget?.dataRef?.schemaName ? ` (${renameSchemaTarget.dataRef.dbName}.${renameSchemaTarget.dataRef.schemaName})` : ''}`}
+            open={isRenameSchemaModalOpen}
+            onOk={handleRenameSchema}
+            onCancel={() => {
+                setIsRenameSchemaModalOpen(false);
+                setRenameSchemaTarget(null);
+                renameSchemaForm.resetFields();
+            }}
+        >
+            <Form form={renameSchemaForm} layout="vertical">
+                <Form.Item name="newName" label="模式名称" rules={[{ required: true, message: '请输入模式名称' }]}>
                     <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>

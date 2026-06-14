@@ -2213,6 +2213,74 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
+func (a *App) ExportSchemaSQL(config connection.ConnectionConfig, dbName string, schemaName string, includeData bool) connection.QueryResult {
+	safeDbName := strings.TrimSpace(dbName)
+	safeSchemaName := strings.TrimSpace(schemaName)
+	if safeDbName == "" {
+		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+	}
+	if safeSchemaName == "" {
+		return connection.QueryResult{Success: false, Message: "模式名称不能为空"}
+	}
+
+	suffix := "schema"
+	if includeData {
+		suffix = "backup"
+	}
+
+	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           fmt.Sprintf("Export %s.%s (SQL)", safeDbName, safeSchemaName),
+		DefaultFilename: fmt.Sprintf("%s_%s_%s.sql", safeDbName, safeSchemaName, suffix),
+	})
+	if err != nil || filename == "" {
+		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+
+	runConfig := normalizeRunConfig(config, dbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	tables, err := dbInst.GetTables(dbName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	viewLookup := listViewNameLookup(dbInst, runConfig, dbName)
+	filteredTables := filterExportObjectsBySchema(runConfig, dbName, tables, safeSchemaName)
+	filteredViews := filterExportViewLookupBySchema(runConfig, dbName, viewLookup, safeSchemaName)
+	objects := buildExportObjectOrder(runConfig, dbName, filteredTables, filteredViews, true)
+	if len(objects) == 0 {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("未在模式 %s 下获取到可导出的表或视图", safeSchemaName)}
+	}
+
+	f, err := os.Create(filename)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	defer f.Close()
+
+	w := bufio.NewWriterSize(f, 1024*1024)
+	defer w.Flush()
+
+	if err := writeSQLHeader(w, runConfig, dbName); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := w.WriteString(fmt.Sprintf("-- Schema: %s\n\n", safeSchemaName)); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	for _, objectName := range objects {
+		if err := dumpTableSQL(w, dbInst, runConfig, dbName, objectName, true, includeData, filteredViews); err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+	}
+	if err := writeSQLFooter(w, runConfig); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	return connection.QueryResult{Success: true, Message: "导出完成"}
+}
+
 type tableDataClearMode string
 
 const (
@@ -2508,6 +2576,56 @@ func buildExportObjectOrder(
 	tables := mapValuesSorted(tableSet)
 	views := mapValuesSorted(viewSet)
 	return append(tables, views...)
+}
+
+func filterExportObjectsBySchema(
+	config connection.ConnectionConfig,
+	dbName string,
+	rawObjects []string,
+	schemaName string,
+) []string {
+	safeSchemaName := strings.TrimSpace(schemaName)
+	if safeSchemaName == "" {
+		return append([]string(nil), rawObjects...)
+	}
+
+	filtered := make([]string, 0, len(rawObjects))
+	for _, rawName := range rawObjects {
+		objectName := strings.TrimSpace(rawName)
+		if objectName == "" {
+			continue
+		}
+		objectSchemaName, _ := normalizeSchemaAndTable(config, dbName, objectName)
+		if strings.EqualFold(strings.TrimSpace(objectSchemaName), safeSchemaName) {
+			filtered = append(filtered, objectName)
+		}
+	}
+	return filtered
+}
+
+func filterExportViewLookupBySchema(
+	config connection.ConnectionConfig,
+	dbName string,
+	viewLookup map[string]string,
+	schemaName string,
+) map[string]string {
+	safeSchemaName := strings.TrimSpace(schemaName)
+	if safeSchemaName == "" {
+		cloned := make(map[string]string, len(viewLookup))
+		for key, value := range viewLookup {
+			cloned[key] = value
+		}
+		return cloned
+	}
+
+	filtered := make(map[string]string, len(viewLookup))
+	for key, objectName := range viewLookup {
+		objectSchemaName, _ := normalizeSchemaAndTable(config, dbName, objectName)
+		if strings.EqualFold(strings.TrimSpace(objectSchemaName), safeSchemaName) {
+			filtered[key] = objectName
+		}
+	}
+	return filtered
 }
 
 func mapValuesSorted(values map[string]string) []string {

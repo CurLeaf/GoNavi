@@ -45,6 +45,7 @@ import {
   V2ConnectionGroupContextMenuView,
   V2ConnectionContextMenuView,
   V2DatabaseContextMenuView,
+  V2SchemaContextMenuView,
   V2TableContextMenuView,
   V2TableGroupContextMenuView,
   formatV2TableContextMenuRows,
@@ -1362,6 +1363,24 @@ describe('Sidebar locate toolbar', () => {
     );
 
     expect(markup).toContain('新建模式');
+  });
+
+  it('renders the v2 schema context menu with rename and schema-level export actions', () => {
+    const markup = renderToStaticMarkup(
+      <V2SchemaContextMenuView
+        dbName="app_db"
+        schemaName="sales"
+      />,
+    );
+
+    expect(markup).toContain('data-v2-schema-context-menu="true"');
+    expect(markup).toContain('sales');
+    expect(markup).toContain('SCHEMA');
+    expect(markup).toContain('编辑模式');
+    expect(markup).toContain('刷新对象树');
+    expect(markup).toContain('导出当前模式表结构 · SQL');
+    expect(markup).toContain('备份当前模式全部表 · 结构 + 数据');
+    expect(markup).toContain('删除模式 · DROP CASCADE');
   });
 
   it('renders the v2 connection context menu for host rail actions', () => {

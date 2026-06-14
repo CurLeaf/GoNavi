@@ -166,6 +166,10 @@ export function DropFunction(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DropFunction'](arg1, arg2, arg3, arg4);
 }
 
+export function DropSchema(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DropSchema'](arg1, arg2, arg3);
+}
+
 export function DropTable(arg1, arg2, arg3) {
   return window['go']['app']['App']['DropTable'](arg1, arg2, arg3);
 }
@@ -200,6 +204,10 @@ export function ExportQuery(arg1, arg2, arg3, arg4, arg5) {
 
 export function ExportSQLFile(arg1, arg2) {
   return window['go']['app']['App']['ExportSQLFile'](arg1, arg2);
+}
+
+export function ExportSchemaSQL(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExportSchemaSQL'](arg1, arg2, arg3, arg4);
 }
 
 export function ExportTable(arg1, arg2, arg3, arg4) {
@@ -520,6 +528,10 @@ export function RenameSQLDirectory(arg1, arg2) {
 
 export function RenameSQLFile(arg1, arg2) {
   return window['go']['app']['App']['RenameSQLFile'](arg1, arg2);
+}
+
+export function RenameSchema(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RenameSchema'](arg1, arg2, arg3, arg4);
 }
 
 export function RenameTable(arg1, arg2, arg3, arg4) {

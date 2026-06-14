@@ -310,6 +310,13 @@ export type V2DatabaseContextMenuActionKey =
   | 'run-sql'
   | 'drop-db';
 
+export type V2SchemaContextMenuActionKey =
+  | 'rename-schema'
+  | 'refresh-schema'
+  | 'export-schema'
+  | 'backup-schema-sql'
+  | 'drop-schema';
+
 export const V2DatabaseContextMenuView: React.FC<{
   dbName: string;
   shortcutPlatform?: ShortcutPlatform;
@@ -377,6 +384,53 @@ export const V2DatabaseContextMenuView: React.FC<{
         <div className="gn-v2-context-menu-divider" />
         {supportsDropDatabase && renderItems([
           { action: 'drop-db', icon: <DeleteOutlined />, title: '删除数据库 · DROP', tone: 'danger', kbd: '⌫' },
+        ])}
+      </div>
+    </div>
+  );
+};
+
+export const V2SchemaContextMenuView: React.FC<{
+  dbName: string;
+  schemaName: string;
+  shortcutPlatform?: ShortcutPlatform;
+  onAction?: (action: V2SchemaContextMenuActionKey) => void;
+}> = ({
+  dbName,
+  schemaName,
+  shortcutPlatform = DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM,
+  onAction,
+}) => {
+  const renderItems = (items: V2TableContextMenuItemConfig[]) => renderV2ContextMenuItems(
+    items,
+    onAction as (action: string) => void,
+  );
+
+  return (
+    <div className="gn-v2-table-context-menu gn-v2-database-context-menu" data-v2-schema-context-menu="true" role="menu">
+      <V2ContextMenuHeader
+        icon={<FolderOpenOutlined />}
+        title={schemaName}
+        meta={`${dbName || '当前数据库'} · 模式操作`}
+        pill="SCHEMA"
+      />
+
+      <div className="gn-v2-context-menu-body">
+        <div className="gn-v2-context-menu-section-title">维护</div>
+        {renderItems([
+          { action: 'rename-schema', icon: <EditOutlined />, title: '编辑模式', kbd: 'F2', featured: true },
+          { action: 'refresh-schema', icon: <ReloadOutlined />, title: '刷新对象树', kbd: primaryShortcut('R', shortcutPlatform) },
+        ])}
+
+        <div className="gn-v2-context-menu-section-title">导出与备份</div>
+        {renderItems([
+          { action: 'export-schema', icon: <ExportOutlined />, title: '导出当前模式表结构 · SQL' },
+          { action: 'backup-schema-sql', icon: <SaveOutlined />, title: '备份当前模式全部表 · 结构 + 数据' },
+        ])}
+
+        <div className="gn-v2-context-menu-divider" />
+        {renderItems([
+          { action: 'drop-schema', icon: <DeleteOutlined />, title: '删除模式 · DROP CASCADE', tone: 'danger', kbd: '⌫' },
         ])}
       </div>
     </div>
