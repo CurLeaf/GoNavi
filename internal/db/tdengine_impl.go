@@ -211,13 +211,7 @@ func (t *TDengineDB) GetDatabases() ([]string, error) {
 }
 
 func (t *TDengineDB) GetTables(dbName string) ([]string, error) {
-	queries := make([]string, 0, 4)
-	if strings.TrimSpace(dbName) != "" {
-		queries = append(queries, fmt.Sprintf("SHOW TABLES FROM `%s`", escapeBacktickIdent(dbName)))
-		queries = append(queries, fmt.Sprintf("SHOW STABLES FROM `%s`", escapeBacktickIdent(dbName)))
-	}
-	queries = append(queries, "SHOW TABLES")
-	queries = append(queries, "SHOW STABLES")
+	queries := tdengineShowTablesQueries(dbName)
 
 	var lastErr error
 	tableSet := make(map[string]struct{})
@@ -513,6 +507,35 @@ func getValueFromRow(row map[string]interface{}, keys ...string) (interface{}, b
 
 func escapeBacktickIdent(ident string) string {
 	return strings.ReplaceAll(strings.TrimSpace(ident), "`", "``")
+}
+
+func tdengineShowTablesQueries(dbName string) []string {
+	queries := make([]string, 0, 6)
+	appendQuery := func(query string) {
+		query = strings.TrimSpace(query)
+		if query == "" {
+			return
+		}
+		for _, existing := range queries {
+			if existing == query {
+				return
+			}
+		}
+		queries = append(queries, query)
+	}
+
+	db := strings.TrimSpace(dbName)
+	if db != "" {
+		escaped := escapeBacktickIdent(db)
+		appendQuery(fmt.Sprintf("SHOW TABLES FROM `%s`", escaped))
+		appendQuery(fmt.Sprintf("SHOW STABLES FROM `%s`", escaped))
+		appendQuery(fmt.Sprintf("SHOW TABLES FROM %s", db))
+		appendQuery(fmt.Sprintf("SHOW STABLES FROM %s", db))
+	}
+
+	appendQuery("SHOW TABLES")
+	appendQuery("SHOW STABLES")
+	return queries
 }
 
 func tdengineDescribeQueries(dbName, tableName string) []string {

@@ -71,7 +71,32 @@ vi.mock('antd', () => {
     <input value={value} onChange={onChange} placeholder={placeholder} />
   );
 
-  const Select = () => null;
+  const Select = ({ value, options, disabled, loading, placeholder, onOpenChange, onChange }: any) => (
+    <select
+      value={value}
+      disabled={disabled}
+      data-select-loading={String(loading)}
+      data-select-placeholder={placeholder}
+      onFocus={() => onOpenChange?.(true)}
+      onChange={(event) => onChange?.(event.target.value)}
+    >
+      <option value="">{placeholder || ''}</option>
+      {(options || []).flatMap((item: any) => {
+        if (Array.isArray(item?.options)) {
+          return item.options.map((grouped: any) => (
+            <option key={grouped.value} value={grouped.value}>
+              {String(grouped.label || grouped.value)}
+            </option>
+          ));
+        }
+        return (
+          <option key={item.value} value={item.value}>
+            {String(item.label || item.value)}
+          </option>
+        );
+      })}
+    </select>
+  );
   const Progress = () => <div data-progress="true" />;
   const Tag = ({ children }: any) => <span>{children}</span>;
   const Switch = ({ checked, onChange, disabled }: any) => (
@@ -287,5 +312,77 @@ describe('DriverManagerModal toolbar actions', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('allows switching installed TDengine drivers to a historical compatible version', async () => {
+    backendApp.GetDriverStatusList.mockResolvedValue({
+      success: true,
+      data: {
+        downloadDir: 'D:/drivers',
+        drivers: [
+          {
+            type: 'tdengine',
+            name: 'TDengine',
+            builtIn: false,
+            pinnedVersion: '3.7.8',
+            installedVersion: '3.7.8',
+            runtimeAvailable: true,
+            packageInstalled: true,
+            connectable: true,
+            defaultDownloadUrl: 'builtin://activate/tdengine',
+            message: '已启用',
+          },
+        ],
+      },
+    });
+    backendApp.GetDriverVersionList.mockResolvedValue({
+      success: true,
+      data: {
+        versions: [
+          { version: '3.7.8', downloadUrl: 'builtin://activate/tdengine', recommended: true },
+          { version: '3.3.1', downloadUrl: 'builtin://activate/tdengine?channel=history&version=3.3.1' },
+        ],
+      },
+    });
+    backendApp.DownloadDriverPackage.mockResolvedValue({ success: true });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<DriverManagerModal open onClose={vi.fn()} />);
+    });
+    await flushPromises();
+
+    const refreshButton = findButton(renderer!, '刷新');
+    await act(async () => {
+      await refreshButton.props.onClick();
+    });
+    await flushPromises();
+
+    const versionSelect = renderer!.root.findByType('select');
+    await act(async () => {
+      versionSelect.props.onFocus();
+    });
+    await flushPromises();
+    expect(backendApp.GetDriverVersionList).toHaveBeenCalledWith('tdengine', '');
+
+    const reloadedVersionSelect = renderer!.root.findByType('select');
+    await act(async () => {
+      reloadedVersionSelect.props.onChange({ target: { value: '3.3.1@@builtin://activate/tdengine?channel=history&version=3.3.1' } });
+    });
+    await flushPromises();
+
+    const switchButtons = renderer!.root.findAll((node) => node.type === 'button' && textContent(node).includes('切换版本'));
+    expect(switchButtons).toHaveLength(1);
+    const switchButton = switchButtons[0];
+    await act(async () => {
+      await switchButton.props.onClick();
+    });
+
+    expect(backendApp.DownloadDriverPackage).toHaveBeenCalledWith(
+      'tdengine',
+      '3.3.1',
+      'builtin://activate/tdengine?channel=history&version=3.3.1',
+      'D:/drivers',
+    );
   });
 });

@@ -252,6 +252,56 @@ func TestTDengineGetTablesIncludesSuperTables(t *testing.T) {
 	}
 }
 
+func TestTDengineGetTablesFallsBackToLegacyFromSyntax(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openTDengineRecordingDB(t)
+	state.mu.Lock()
+	state.queryResults["SHOW TABLES FROM `metrics`"] = tdengineQueryResult{
+		err: fmt.Errorf("[0x2600] syntax error near '`metrics`'"),
+	}
+	state.queryResults["SHOW STABLES FROM `metrics`"] = tdengineQueryResult{
+		err: fmt.Errorf("[0x2600] syntax error near '`metrics`'"),
+	}
+	state.queryResults["SHOW TABLES FROM metrics"] = tdengineQueryResult{
+		columns: []string{"name"},
+		rows: [][]driver.Value{
+			{"d001"},
+		},
+	}
+	state.queryResults["SHOW STABLES FROM metrics"] = tdengineQueryResult{
+		columns: []string{"name"},
+		rows: [][]driver.Value{
+			{"meters"},
+		},
+	}
+	state.mu.Unlock()
+
+	td := &TDengineDB{conn: dbConn}
+	tables, err := td.GetTables("metrics")
+	if err != nil {
+		t.Fatalf("GetTables returned error: %v", err)
+	}
+
+	wantTables := []string{"d001", "meters"}
+	if !reflect.DeepEqual(tables, wantTables) {
+		t.Fatalf("unexpected tables: got=%v want=%v", tables, wantTables)
+	}
+
+	queries := state.snapshotQueries()
+	wantQueries := []string{
+		"SHOW TABLES FROM `metrics`",
+		"SHOW STABLES FROM `metrics`",
+		"SHOW TABLES FROM metrics",
+		"SHOW STABLES FROM metrics",
+		"SHOW TABLES",
+		"SHOW STABLES",
+	}
+	if !reflect.DeepEqual(queries, wantQueries) {
+		t.Fatalf("unexpected query sequence: got=%v want=%v", queries, wantQueries)
+	}
+}
+
 func TestTDengineGetColumnsFallsBackToLegacyDescribeSyntax(t *testing.T) {
 	t.Parallel()
 

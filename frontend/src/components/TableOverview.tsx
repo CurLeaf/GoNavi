@@ -4,7 +4,7 @@ import { Input, Spin, Empty, Dropdown, message, Tooltip, Modal, Button } from 'a
 import type { MenuProps } from 'antd';
 import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined, WarningOutlined } from '@ant-design/icons';
 import { buildSidebarTablePinKey, useStore } from '../store';
-import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
+import { DBGetTables, DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
 import type { TabData } from '../types';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
@@ -231,7 +231,7 @@ const parseTableStats = (dialect: string, rows: Record<string, any>[]): TableSta
         };
 
         return {
-            name: strVal(['Name', 'name', 'table_name', 'tablename', 'TABLE_NAME', 'Device', 'device']),
+            name: strVal(['Name', 'name', 'table_name', 'tablename', 'TABLE_NAME', 'Table', 'table', 'Device', 'device']),
             comment: strVal(['Comment', 'table_comment', 'TABLE_COMMENT', 'comments']),
             rows: numVal(['Rows', 'table_rows', 'TABLE_ROWS', 'num_rows', 'reltuples', 'total_rows']),
             dataSize: numVal(['Data_length', 'data_length', 'DATA_LENGTH', 'total_bytes']),
@@ -290,6 +290,15 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 useSSH: connection.config.useSSH || false,
                 ssh: connection.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
             };
+            if (metadataDialect === 'tdengine') {
+                const res = await DBGetTables(buildRpcConnectionConfig(config) as any, tab.dbName || '');
+                if (res.success && Array.isArray(res.data)) {
+                    setTables(parseTableStats(metadataDialect, res.data));
+                } else {
+                    message.error('获取表信息失败: ' + (res.message || '未知错误'));
+                }
+                return;
+            }
             const sql = buildTableStatusSQL(metadataDialect, tab.dbName || '', schemaName);
             const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', sql);
             if (res.success && Array.isArray(res.data)) {
