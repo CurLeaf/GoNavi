@@ -344,6 +344,18 @@ func TestNormalizeSchemaAndTable_MQTTPreservesTopicFilter(t *testing.T) {
 	}
 }
 
+func TestNormalizeSchemaAndTable_RocketMQPreservesTopicName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "rocketmq",
+	}, "topics", "orders.events.v1")
+
+	if schemaOrDb != "topics" || table != "orders.events.v1" {
+		t.Fatalf("expected rocketmq topic name to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
 func TestNormalizeSchemaAndTable_RabbitMQPreservesDottedQueueName(t *testing.T) {
 	t.Parallel()
 
@@ -377,6 +389,18 @@ func TestNormalizeMetadataSchemaAndTable_MQTTPreservesTopicFilter(t *testing.T) 
 
 	if schemaOrDb != "topics" || table != "devices/floor1.sensor.v1" {
 		t.Fatalf("expected mqtt metadata topic filter to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_RocketMQPreservesTopicName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "rocketmq",
+	}, "topics", "orders.events.v1")
+
+	if schemaOrDb != "topics" || table != "orders.events.v1" {
+		t.Fatalf("expected rocketmq metadata topic name to stay intact, got %q.%q", schemaOrDb, table)
 	}
 }
 

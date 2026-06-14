@@ -489,6 +489,9 @@ var databaseFactories = map[string]databaseFactory{
 	"qdrant": func() Database {
 		return &QdrantDB{}
 	},
+	"rocketmq": func() Database {
+		return &RocketMQDB{}
+	},
 	"mqtt": func() Database {
 		return &MQTTDB{}
 	},
@@ -538,6 +541,8 @@ func normalizeDatabaseType(dbType string) string {
 		return "chroma"
 	case "qdrantdb", "qdrant-db":
 		return "qdrant"
+	case "rocketmq", "rocket-mq", "rocket_mq", "apache-rocketmq", "apache_rocketmq", "rmq":
+		return "rocketmq"
 	case "mqtt", "mqtts":
 		return "mqtt"
 	case "kafka", "apache-kafka", "apache_kafka":

@@ -385,6 +385,7 @@ const ConnectionModal: React.FC<{
   );
   const disableLocalBackdropFilter = isMacLikePlatform();
   const mysqlTopology = Form.useWatch("mysqlTopology", form) || "single";
+  const rocketmqTopology = Form.useWatch("rocketmqTopology", form) || "single";
   const mqttTopology = Form.useWatch("mqttTopology", form) || "single";
   const kafkaTopology = Form.useWatch("kafkaTopology", form) || "single";
   const mongoTopology = Form.useWatch("mongoTopology", form) || "single";
@@ -420,6 +421,7 @@ const ConnectionModal: React.FC<{
   );
   const isOceanBaseOracle = dbType === "oceanbase" && oceanBaseProtocol === "oracle";
   const isMySQLLike = isMySQLCompatibleType(dbType) && !isOceanBaseOracle;
+  const isRocketMQ = dbType === "rocketmq";
   const isMQTT = dbType === "mqtt";
   const isKafka = dbType === "kafka";
   const isRabbitMQ = dbType === "rabbitmq";
@@ -1756,6 +1758,49 @@ const ConnectionModal: React.FC<{
       };
     }
 
+    if (type === "rocketmq") {
+      const defaultPort = getDefaultPortByType(type);
+      const parsed =
+        parseMultiHostUri(trimmedUri, "rocketmq") ||
+        parseMultiHostUri(trimmedUri, "rmq");
+      if (!parsed) {
+        return null;
+      }
+      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+        return null;
+      }
+      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
+        return null;
+      }
+      const hostList = normalizeAddressList(parsed.hosts, defaultPort);
+      if (!hostList.length) {
+        return null;
+      }
+      const primary = parseHostPort(
+        hostList[0] || `localhost:${defaultPort}`,
+        defaultPort,
+      );
+      const topology = String(parsed.params.get("topology") || "")
+        .trim()
+        .toLowerCase();
+      const timeoutValue = Number(parsed.params.get("timeout"));
+      return {
+        host: primary?.host || "localhost",
+        port: primary?.port || defaultPort,
+        user: parsed.username,
+        password: parsed.password,
+        database: parsed.database || "",
+        rocketmqTopology:
+          topology === "cluster" || hostList.length > 1 ? "cluster" : "single",
+        rocketmqHosts: hostList.slice(1),
+        connectionParams: serializeConnectionParams(parsed.params),
+        timeout:
+          Number.isFinite(timeoutValue) && timeoutValue > 0
+            ? Math.min(MAX_TIMEOUT_SECONDS, Math.trunc(timeoutValue))
+            : undefined,
+      };
+    }
+
     if (type === "rabbitmq") {
       const defaultPort = getDefaultPortByType(type);
       const parsed = parseSingleHostUri(
@@ -2044,6 +2089,9 @@ const ConnectionModal: React.FC<{
     if (dbType === "iotdb") {
       return "iotdb://root:root@127.0.0.1:6667/root.sg";
     }
+    if (dbType === "rocketmq") {
+      return "rocketmq://accessKey:secretKey@127.0.0.1:9876,127.0.0.2:9876/orders.events?topology=cluster&groupId=gonavi&namespace=prod&tag=TagA&pullBatchSize=32&startOffset=latest";
+    }
     if (dbType === "mqtt") {
       return "mqtt://user:pass@127.0.0.1:1883/devices%2F%2B%2Ftelemetry?topology=cluster&clientId=gonavi-desktop&qos=1";
     }
@@ -2108,6 +2156,8 @@ const ConnectionModal: React.FC<{
         return "timezone=Asia%2FShanghai";
       case "iotdb":
         return "fetchSize=1024&timeZone=Asia%2FShanghai";
+      case "rocketmq":
+        return "groupId=gonavi&namespace=prod&tag=TagA&pullBatchSize=32&startOffset=latest";
       case "mqtt":
         return "topics=devices%2F%2B%2Ftelemetry,%24SYS%2F%23&clientId=gonavi-desktop&qos=1&cleanSession=true&fetchWaitMs=4000";
       case "kafka":
@@ -2234,6 +2284,26 @@ const ConnectionModal: React.FC<{
       const topicPath = database ? `/${encodeURIComponent(database)}` : "";
       const query = params.toString();
       return `mqtt://${encodedAuth}${allBrokers.join(",")}${topicPath}${query ? `?${query}` : ""}`;
+    }
+
+    if (type === "rocketmq") {
+      const primary = toAddress(host, port, defaultPort);
+      const nameservers =
+        values.rocketmqTopology === "cluster"
+          ? normalizeAddressList(values.rocketmqHosts, defaultPort)
+          : [];
+      const allNameServers = normalizeAddressList([primary, ...nameservers], defaultPort);
+      const params = new URLSearchParams();
+      if (allNameServers.length > 1 || values.rocketmqTopology === "cluster") {
+        params.set("topology", "cluster");
+      }
+      if (Number.isFinite(timeout) && timeout > 0) {
+        params.set("timeout", String(timeout));
+      }
+      mergeConnectionParams(params, values.connectionParams);
+      const topicPath = database ? `/${encodeURIComponent(database)}` : "";
+      const query = params.toString();
+      return `rocketmq://${encodedAuth}${allNameServers.join(",")}${topicPath}${query ? `?${query}` : ""}`;
     }
 
     if (type === "rabbitmq") {
@@ -2629,6 +2699,8 @@ const ConnectionModal: React.FC<{
           configType === "sphinx"
             ? normalizedHosts.slice(1)
             : [];
+        const rocketmqHosts =
+          configType === "rocketmq" ? normalizedHosts.slice(1) : [];
         const mqttHosts =
           configType === "mqtt" ? normalizedHosts.slice(1) : [];
         const kafkaHosts =
@@ -2640,6 +2712,9 @@ const ConnectionModal: React.FC<{
         const mysqlIsReplica =
           String(config.topology || "").toLowerCase() === "replica" ||
           mysqlReplicaHosts.length > 0;
+        const rocketmqIsCluster =
+          String(config.topology || "").toLowerCase() === "cluster" ||
+          rocketmqHosts.length > 0;
         const mqttIsCluster =
           String(config.topology || "").toLowerCase() === "cluster" ||
           mqttHosts.length > 0;
@@ -2718,6 +2793,8 @@ const ConnectionModal: React.FC<{
           timeout: resolvedJvmTimeout,
           mysqlTopology: mysqlIsReplica ? "replica" : "single",
           mysqlReplicaHosts: mysqlReplicaHosts,
+          rocketmqTopology: rocketmqIsCluster ? "cluster" : "single",
+          rocketmqHosts: rocketmqHosts,
           mqttTopology: mqttIsCluster ? "cluster" : "single",
           mqttHosts: mqttHosts,
           kafkaTopology: kafkaIsCluster ? "cluster" : "single",
@@ -3714,6 +3791,23 @@ const ConnectionModal: React.FC<{
       }
     }
 
+    if (type === "rocketmq") {
+      const nameservers =
+        mergedValues.rocketmqTopology === "cluster"
+          ? normalizeAddressList(mergedValues.rocketmqHosts, defaultPort)
+          : [];
+      const allHosts = normalizeAddressList(
+        [`${primaryHost}:${primaryPort}`, ...nameservers],
+        defaultPort,
+      );
+      if (mergedValues.rocketmqTopology === "cluster" || allHosts.length > 1) {
+        hosts = allHosts;
+        topology = "cluster";
+      } else {
+        topology = "single";
+      }
+    }
+
     if (type === "mongodb") {
       mongoSrvEnabled = !!mergedValues.mongoSrv;
       const extraHosts =
@@ -3950,6 +4044,7 @@ const ConnectionModal: React.FC<{
         includeDatabases: undefined,
         includeRedisDatabases: undefined,
         mysqlTopology: "single",
+        rocketmqTopology: "single",
         mqttTopology: "single",
         kafkaTopology: "single",
         redisTopology: "single",
@@ -3961,6 +4056,7 @@ const ConnectionModal: React.FC<{
         mongoAuthMechanism: "",
         savePassword: true,
         mysqlReplicaHosts: [],
+        rocketmqHosts: [],
         mqttHosts: [],
         kafkaHosts: [],
         redisHosts: [],
@@ -4016,6 +4112,8 @@ const ConnectionModal: React.FC<{
         httpTunnelUser: "",
         httpTunnelPassword: "",
         mysqlTopology: "single",
+        rocketmqTopology: "single",
+        mqttTopology: "single",
         kafkaTopology: "single",
         redisTopology: "single",
         mongoTopology: "single",
@@ -4026,6 +4124,8 @@ const ConnectionModal: React.FC<{
         mongoAuthMechanism: "",
         savePassword: true,
         mysqlReplicaHosts: [],
+        rocketmqHosts: [],
+        mqttHosts: [],
         kafkaHosts: [],
         redisHosts: [],
         redisSentinelMaster: "",
@@ -4041,7 +4141,7 @@ const ConnectionModal: React.FC<{
       });
     } else if (type !== "custom") {
       const defaultUser =
-        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";
+        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "rocketmq" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";
       const sslCapableType = supportsSSLForType(type);
       setUseSSL(false);
       setUseHttpTunnel(false);
@@ -4060,6 +4160,7 @@ const ConnectionModal: React.FC<{
         httpTunnelUser: "",
         httpTunnelPassword: "",
         mysqlTopology: "single",
+        rocketmqTopology: "single",
         mqttTopology: "single",
         kafkaTopology: "single",
         redisTopology: "single",
@@ -4071,6 +4172,7 @@ const ConnectionModal: React.FC<{
         mongoAuthMechanism: "",
         savePassword: true,
         mysqlReplicaHosts: [],
+        rocketmqHosts: [],
         mqttHosts: [],
         kafkaHosts: [],
         redisHosts: [],
@@ -5189,6 +5291,22 @@ const ConnectionModal: React.FC<{
                   ),
                 })}
 
+              {dbType === "rocketmq" &&
+                renderConfigSectionCard({
+                  sectionKey: "service",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="database"
+                      label="默认 Topic（可选）"
+                      help="留空时必须在 SQL 中显式指定 Topic；连接参数可继续补充 groupId、namespace、tag、pullBatchSize 与 startOffset。"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input {...noAutoCapInputProps} placeholder="例如：orders.events" />
+                    </Form.Item>
+                  ),
+                })}
+
               {dbType === "mqtt" &&
                 renderConfigSectionCard({
                   sectionKey: "service",
@@ -5295,6 +5413,28 @@ const ConnectionModal: React.FC<{
                   }),
                 })}
 
+              {isRocketMQ &&
+                renderConfigSectionCard({
+                  sectionKey: "connectionMode",
+                  icon: <ClusterOutlined />,
+                  children: renderChoiceCards({
+                    fieldName: "rocketmqTopology",
+                    value: String(rocketmqTopology),
+                    options: [
+                      {
+                        value: "single",
+                        label: "单 NameServer",
+                        description: "只配置一个 NameServer，适合本地或简单环境。",
+                      },
+                      {
+                        value: "cluster",
+                        label: "集群模式",
+                        description: "配置多个 NameServer，提高路由发现与故障切换成功率。",
+                      },
+                    ],
+                  }),
+                })}
+
               {isMQTT &&
                 renderConfigSectionCard({
                   sectionKey: "connectionMode",
@@ -5331,6 +5471,26 @@ const ConnectionModal: React.FC<{
                       <Select
                         mode="tags"
                         placeholder="例如：10.10.0.12:9092、10.10.0.13:9092"
+                        tokenSeparators={[",", ";", " "]}
+                      />
+                    </Form.Item>
+                  ),
+                })}
+
+              {isRocketMQ &&
+                rocketmqTopology === "cluster" &&
+                renderConfigSectionCard({
+                  sectionKey: "replica",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <Form.Item
+                      name="rocketmqHosts"
+                      label="额外 NameServer 地址"
+                      help="可输入多个 NameServer 地址，格式：host:port（回车确认）"
+                    >
+                      <Select
+                        mode="tags"
+                        placeholder="例如：10.10.0.12:9876、10.10.0.13:9876"
                         tokenSeparators={[",", ";", " "]}
                       />
                     </Form.Item>
@@ -5472,19 +5632,19 @@ const ConnectionModal: React.FC<{
                       >
                         <Form.Item
                           name="user"
-                          label="用户名"
+                          label={dbType === "rocketmq" ? "Access Key" : "用户名"}
                           rules={
-                            (dbType === "mongodb" || dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "kafka" || dbType === "rabbitmq")
+                            (dbType === "mongodb" || dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "rocketmq" || dbType === "kafka" || dbType === "rabbitmq")
                               ? []
                               : [createUriAwareRequiredRule("请输入用户名")]
                           }
                           style={{ marginBottom: 0 }}
                         >
-                          <Input {...noAutoCapInputProps} placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "mqtt" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined} />
+                          <Input {...noAutoCapInputProps} placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "rocketmq" || dbType === "mqtt" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined} />
                         </Form.Item>
                         <Form.Item
                           name="password"
-                          label="密码"
+                          label={dbType === "rocketmq" ? "Secret Key" : "密码"}
                           style={{ marginBottom: 0 }}
                         >
                           <Input.Password
@@ -5496,8 +5656,8 @@ const ConnectionModal: React.FC<{
                             placeholder={getStoredSecretPlaceholder({
                               hasStoredSecret:
                                 initialValues?.hasPrimaryPassword,
-                              emptyPlaceholder: "密码",
-                              retainedLabel: "已保存密码",
+                              emptyPlaceholder: dbType === "rocketmq" ? "未开启认证可留空" : "密码",
+                              retainedLabel: dbType === "rocketmq" ? "已保存 Secret Key" : "已保存密码",
                             })}
                           />
                         </Form.Item>
@@ -6402,6 +6562,7 @@ const ConnectionModal: React.FC<{
           connectionParams: "",
           oceanBaseProtocol: "mysql",
           mysqlTopology: "single",
+          rocketmqTopology: "single",
           mqttTopology: "single",
           kafkaTopology: "single",
           redisTopology: "single",
@@ -6411,6 +6572,7 @@ const ConnectionModal: React.FC<{
           mongoAuthMechanism: "",
           savePassword: true,
           mysqlReplicaHosts: [],
+          rocketmqHosts: [],
           mqttHosts: [],
           kafkaHosts: [],
           redisHosts: [],

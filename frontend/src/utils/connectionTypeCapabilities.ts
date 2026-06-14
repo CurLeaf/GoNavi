@@ -16,6 +16,7 @@ export const singleHostUriSchemesByType: Record<string, string[]> = {
   elasticsearch: ["http", "https"],
   chroma: ["http", "https", "chroma"],
   qdrant: ["http", "https", "qdrant"],
+  rocketmq: ["rocketmq", "rmq"],
   mqtt: ["mqtt", "mqtts", "tcp", "ssl", "tls"],
   rabbitmq: ["rabbitmq", "http", "https"],
 };
@@ -30,6 +31,12 @@ const normalizeConnectionType = (type: string) =>
       case "greatdb":
       case "gdb":
         return "goldendb";
+      case "rocket-mq":
+      case "rocket_mq":
+      case "apache-rocketmq":
+      case "apache_rocketmq":
+      case "rmq":
+        return "rocketmq";
       case "mqtts":
         return "mqtt";
       default:
@@ -167,6 +174,7 @@ export const supportsConnectionParamsForType = (type: string) =>
   type === "elasticsearch" ||
   type === "chroma" ||
   type === "qdrant" ||
+  type === "rocketmq" ||
   type === "mqtt" ||
   type === "kafka" ||
   type === "rabbitmq";

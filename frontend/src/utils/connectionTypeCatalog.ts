@@ -64,6 +64,7 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
   {
     label: '消息队列',
     items: [
+      { key: 'rocketmq', name: 'RocketMQ' },
       { key: 'mqtt', name: 'MQTT' },
       { key: 'kafka', name: 'Kafka' },
       { key: 'rabbitmq', name: 'RabbitMQ' },
@@ -124,6 +125,8 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 8000;
     case 'qdrant':
       return 6333;
+    case 'rocketmq':
+      return 9876;
     case 'mqtt':
       return 1883;
     case 'kafka':
@@ -162,6 +165,8 @@ export const getConnectionTypeHint = (type: string): string => {
       return 'Collection 浏览、向量搜索和 Payload 过滤';
     case 'iotdb':
       return 'Storage Group / Device / Timeseries';
+    case 'rocketmq':
+      return 'NameServer / Topic / Consumer Group';
     case 'mqtt':
       return 'Broker / Topic Filter / QoS';
     case 'kafka':

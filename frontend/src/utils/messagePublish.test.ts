@@ -128,4 +128,45 @@ describe('messagePublish', () => {
       bodyMode: 'json',
     });
   });
+
+  it('builds a RocketMQ publish JSON command with tag, keys and delay level', () => {
+    const result = buildMessagePublishCommand(
+      { type: 'rocketmq' },
+      {
+        destination: 'orders.events',
+        key: 'key-a,key-b',
+        tag: 'TagA',
+        delayLevel: 3,
+        bodyMode: 'json',
+        body: '{"id":1,"event":"created"}',
+        properties: '{"trace":"trace-1"}',
+      },
+    );
+
+    const command = JSON.parse(result.commandText);
+    expect(result.transportLabel).toBe('RocketMQ Topic');
+    expect(result.destinationLabel).toBe('orders.events');
+    expect(command).toMatchObject({
+      publish: 'orders.events',
+      tag: 'TagA',
+      delayLevel: 3,
+      properties: {
+        trace: 'trace-1',
+      },
+    });
+    expect(command.keys).toEqual(['key-a', 'key-b']);
+    expect(command.payload).toMatchObject({ id: 1, event: 'created' });
+  });
+
+  it('seeds RocketMQ default publish draft with connection tag and delay level defaults', () => {
+    expect(createDefaultMessagePublishDraft(
+      { type: 'rocketmq', database: 'orders.events', connectionParams: 'tag=TagA&delayLevel=5' },
+      '',
+    )).toMatchObject({
+      destination: 'orders.events',
+      tag: 'TagA',
+      delayLevel: 5,
+      bodyMode: 'json',
+    });
+  });
 });

@@ -29,6 +29,7 @@ export type SqlDialect =
   | 'clickhouse'
   | 'tdengine'
   | 'iotdb'
+  | 'rocketmq'
   | 'mqtt'
   | 'kafka'
   | 'rabbitmq'
@@ -138,6 +139,13 @@ export const resolveSqlDialect = (
     case 'apache-iotdb':
     case 'apache_iotdb':
       return 'iotdb';
+    case 'rocketmq':
+    case 'rocket-mq':
+    case 'rocket_mq':
+    case 'apache-rocketmq':
+    case 'apache_rocketmq':
+    case 'rmq':
+      return 'rocketmq';
     case 'mqtt':
     case 'mqtts':
       return 'mqtt';
@@ -173,6 +181,7 @@ export const resolveSqlDialect = (
   if (source.includes('clickhouse')) return 'clickhouse';
   if (source.includes('tdengine')) return 'tdengine';
   if (source.includes('iotdb')) return 'iotdb';
+  if (source.includes('rocketmq') || source.includes('rocket-mq') || source.includes('rocket_mq') || source === 'rmq') return 'rocketmq';
   if (source.includes('mqtt')) return 'mqtt';
   if (source.includes('kafka')) return 'kafka';
   if (source.includes('rabbitmq') || source.includes('rabbit-mq') || source.includes('rabbit_mq')) return 'rabbitmq';
@@ -628,6 +637,15 @@ const IOTDB_KEYWORDS = [
   'COMPRESSION',
 ];
 
+const ROCKETMQ_KEYWORDS = [
+  'SHOW TOPICS',
+  'DESCRIBE TOPIC',
+  'CONSUME',
+  'FROM',
+  'LIMIT',
+  'OFFSET',
+];
+
 const MQTT_KEYWORDS = [
   'SHOW TOPICS',
   'DESCRIBE TOPIC',
@@ -672,6 +690,7 @@ export const resolveSqlKeywords = (dbType: string): string[] => {
   if (dialect === 'clickhouse') return unique([...COMMON_KEYWORDS, ...CLICKHOUSE_KEYWORDS]);
   if (dialect === 'tdengine') return unique([...COMMON_KEYWORDS, ...TDENGINE_KEYWORDS]);
   if (dialect === 'iotdb') return unique([...COMMON_KEYWORDS, ...IOTDB_KEYWORDS]);
+  if (dialect === 'rocketmq') return unique([...COMMON_KEYWORDS, ...ROCKETMQ_KEYWORDS]);
   if (dialect === 'mqtt') return unique([...COMMON_KEYWORDS, ...MQTT_KEYWORDS]);
   if (dialect === 'kafka') return unique([...COMMON_KEYWORDS, ...KAFKA_KEYWORDS]);
   if (dialect === 'rabbitmq') return unique([...COMMON_KEYWORDS, ...RABBITMQ_KEYWORDS]);

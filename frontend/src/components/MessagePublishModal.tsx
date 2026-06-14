@@ -14,6 +14,28 @@ import {
 const { Text } = Typography;
 const { TextArea } = Input;
 
+const ROCKETMQ_DELAY_LEVEL_OPTIONS = [
+  { label: '不延时', value: 0 },
+  { label: '1 · 1s', value: 1 },
+  { label: '2 · 5s', value: 2 },
+  { label: '3 · 10s', value: 3 },
+  { label: '4 · 30s', value: 4 },
+  { label: '5 · 1m', value: 5 },
+  { label: '6 · 2m', value: 6 },
+  { label: '7 · 3m', value: 7 },
+  { label: '8 · 4m', value: 8 },
+  { label: '9 · 5m', value: 9 },
+  { label: '10 · 6m', value: 10 },
+  { label: '11 · 7m', value: 11 },
+  { label: '12 · 8m', value: 12 },
+  { label: '13 · 9m', value: 13 },
+  { label: '14 · 10m', value: 14 },
+  { label: '15 · 20m', value: 15 },
+  { label: '16 · 30m', value: 16 },
+  { label: '17 · 1h', value: 17 },
+  { label: '18 · 2h', value: 18 },
+];
+
 export type MessagePublishModalProps = {
   open: boolean;
   connection: SavedConnection | null;
@@ -171,22 +193,48 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
             </Form.Item>
           )}
 
+          {presentation.showTag && (
+            <Form.Item
+              label="Tag（可选）"
+              name="tag"
+              extra="留空表示不过滤或不写入 Tag。"
+            >
+              <Input placeholder={presentation.tagPlaceholder} />
+            </Form.Item>
+          )}
+
+          {presentation.showDelayLevel && (
+            <Form.Item
+              label="Delay Level（可选）"
+              name="delayLevel"
+              extra="RocketMQ 使用固定延时级别，0 表示立即发送。"
+            >
+              <Select options={ROCKETMQ_DELAY_LEVEL_OPTIONS} />
+            </Form.Item>
+          )}
+
           {presentation.showKey && (
-            <Form.Item label="消息 Key（可选）">
-              <Space.Compact style={{ width: '100%' }}>
-                <Form.Item name="keyMode" noStyle>
-                  <Select
-                    style={{ width: 120 }}
-                    options={[
-                      { label: '文本', value: 'text' },
-                      { label: 'JSON', value: 'json' },
-                    ]}
-                  />
-                </Form.Item>
+            <Form.Item label={presentation.keyLabel}>
+              {presentation.showKeyMode ? (
+                <Space.Compact style={{ width: '100%' }}>
+                  <Form.Item name="keyMode" noStyle>
+                    <Select
+                      style={{ width: 120 }}
+                      options={[
+                        { label: '文本', value: 'text' },
+                        { label: 'JSON', value: 'json' },
+                      ]}
+                    />
+                  </Form.Item>
+                  <Form.Item name="key" noStyle>
+                    <Input placeholder={presentation.keyPlaceholder} />
+                  </Form.Item>
+                </Space.Compact>
+              ) : (
                 <Form.Item name="key" noStyle>
-                  <Input placeholder="可留空；JSON 模式请输入一行合法 JSON" />
+                  <Input placeholder={presentation.keyPlaceholder} />
                 </Form.Item>
-              </Space.Compact>
+              )}
             </Form.Item>
           )}
 
@@ -208,13 +256,15 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
             <TextArea rows={8} placeholder="请输入消息体" />
           </Form.Item>
 
-          <Form.Item
-            label="Headers（可选）"
-            name="headers"
-            extra={'需为 JSON 对象，例如 {"x-source":"gonavi"}。'}
-          >
-            <TextArea rows={5} placeholder='{"x-source":"gonavi"}' />
-          </Form.Item>
+          {presentation.showHeaders && (
+            <Form.Item
+              label="Headers（可选）"
+              name="headers"
+              extra={'需为 JSON 对象，例如 {"x-source":"gonavi"}。'}
+            >
+              <TextArea rows={5} placeholder='{"x-source":"gonavi"}' />
+            </Form.Item>
+          )}
 
           {presentation.showProperties && (
             <Form.Item

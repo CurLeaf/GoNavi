@@ -175,6 +175,15 @@ func TestNormalizeSchemaAndTableByType_MQTTPreservesTopicFilter(t *testing.T) {
 	}
 }
 
+func TestNormalizeSchemaAndTableByType_RocketMQPreservesTopicName(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTableByType("rocketmq", "topics", "orders.events.v1")
+	if schema != "topics" || table != "orders.events.v1" {
+		t.Fatalf("expected rocketmq topic name to stay intact, got %q.%q", schema, table)
+	}
+}
+
 func TestNormalizeSchemaAndTableByType_RabbitMQPreservesDottedQueueName(t *testing.T) {
 	t.Parallel()
 

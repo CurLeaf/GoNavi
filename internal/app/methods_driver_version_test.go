@@ -534,6 +534,22 @@ func TestMQTTDriverDefinitionIsBuiltIn(t *testing.T) {
 	}
 }
 
+func TestRocketMQDriverDefinitionIsBuiltIn(t *testing.T) {
+	definition, ok := resolveDriverDefinition("rmq")
+	if !ok {
+		t.Fatal("expected rocketmq driver definition")
+	}
+	if definition.Name != "RocketMQ" {
+		t.Fatalf("unexpected rocketmq driver name: %q", definition.Name)
+	}
+	if !definition.BuiltIn {
+		t.Fatal("expected rocketmq to be a built-in driver")
+	}
+	if definition.PinnedVersion != "" || definition.DefaultDownloadURL != "" {
+		t.Fatalf("expected rocketmq builtin definition to omit optional-agent metadata: %#v", definition)
+	}
+}
+
 func TestRabbitMQDriverDefinitionIsBuiltIn(t *testing.T) {
 	definition, ok := resolveDriverDefinition("rabbit-mq")
 	if !ok {

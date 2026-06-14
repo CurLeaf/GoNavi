@@ -164,6 +164,28 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats RocketMQ as a queryable messaging datasource with manual total count and publish support', () => {
+    expect(getDataSourceCapabilities({ type: 'rocketmq' })).toMatchObject({
+      type: 'rocketmq',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
+      preferManualTotalCount: true,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'rmq' })).toMatchObject({
+      type: 'rocketmq',
+      supportsQueryEditor: true,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
+      preferManualTotalCount: true,
+    });
+  });
+
   it('treats MQTT as a queryable messaging datasource with manual total count and publish support', () => {
     expect(getDataSourceCapabilities({ type: 'mqtt' })).toMatchObject({
       type: 'mqtt',

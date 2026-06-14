@@ -39,6 +39,13 @@ describe('DatabaseIcons', () => {
     expect(markup).toContain('>Io</text>');
   });
 
+  it('includes RocketMQ in the selectable database icons', () => {
+    expect(DB_ICON_TYPES).toContain('rocketmq');
+    expect(getDbIconLabel('rocketmq')).toBe('RocketMQ');
+    const markup = renderToStaticMarkup(<>{getDbIcon('rocketmq', undefined, 22)}</>);
+    expect(markup).toContain('>Rm</text>');
+  });
+
   it('includes MQTT in the selectable database icons', () => {
     expect(DB_ICON_TYPES).toContain('mqtt');
     expect(getDbIconLabel('mqtt')).toBe('MQTT');

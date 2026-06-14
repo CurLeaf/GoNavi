@@ -17,6 +17,8 @@ export type MessagePublishDraft = {
   routingKey?: string;
   qos?: number;
   retain?: boolean;
+  tag?: string;
+  delayLevel?: number;
   keyMode?: MessagePublishValueMode;
   key?: string;
   bodyMode?: MessagePublishValueMode;
@@ -39,9 +41,16 @@ export type MessagePublishPresentation = {
   alertMessage: string;
   successHint: string;
   showKey: boolean;
+  showKeyMode: boolean;
+  keyLabel: string;
+  keyPlaceholder: string;
   showExchange: boolean;
   showRoutingKey: boolean;
+  showHeaders: boolean;
   showProperties: boolean;
+  showTag: boolean;
+  tagPlaceholder: string;
+  showDelayLevel: boolean;
   showQos: boolean;
   showRetain: boolean;
 };
@@ -142,6 +151,9 @@ const resolveDefaultDestination = (config: ConnectionLike, explicitDestination: 
   if (resolvedType === 'kafka') {
     return String(config?.database || '').trim();
   }
+  if (resolvedType === 'rocketmq') {
+    return String(config?.database || params.get('defaultTopic') || params.get('topic') || '').trim();
+  }
   if (resolvedType === 'mqtt') {
     return String(config?.database || params.get('defaultTopic') || params.get('topic') || '').trim();
   }
@@ -165,9 +177,40 @@ export const getMessagePublishPresentation = (
       alertMessage: '当前表单会自动拼装 RabbitMQ publish JSON 命令，并通过 Management API 执行测试发送。',
       successHint: '留空 Exchange 时会使用默认交换机并按 Queue 名作为 routing key。',
       showKey: false,
+      showKeyMode: false,
+      keyLabel: '消息 Key（可选）',
+      keyPlaceholder: '',
       showExchange: true,
       showRoutingKey: true,
+      showHeaders: true,
       showProperties: true,
+      showTag: false,
+      tagPlaceholder: '',
+      showDelayLevel: false,
+      showQos: false,
+      showRetain: false,
+    };
+  }
+
+  if (resolvedType === 'rocketmq') {
+    return {
+      transportLabel: 'RocketMQ Topic',
+      destinationLabel: 'Topic',
+      destinationPlaceholder: '例如：orders.events',
+      destinationRequiredMessage: '请输入 Topic',
+      alertMessage: '当前表单会自动拼装 RocketMQ publish JSON 命令，并通过 NameServer/Broker 执行测试发送。',
+      successHint: 'Tag、Keys、Delay Level 与 Properties 会一并写入 RocketMQ 消息属性。',
+      showKey: true,
+      showKeyMode: false,
+      keyLabel: '消息 Keys（可选）',
+      keyPlaceholder: '可输入多个 Key，使用逗号分隔',
+      showExchange: false,
+      showRoutingKey: false,
+      showHeaders: false,
+      showProperties: true,
+      showTag: true,
+      tagPlaceholder: '例如：TagA',
+      showDelayLevel: true,
       showQos: false,
       showRetain: false,
     };
@@ -182,9 +225,16 @@ export const getMessagePublishPresentation = (
       alertMessage: '当前表单会自动拼装 MQTT publish JSON 命令，并直接通过 broker 执行测试发送。',
       successHint: 'QoS 与 retain 可单独指定；未填写时沿用当前连接中的默认参数。',
       showKey: false,
+      showKeyMode: false,
+      keyLabel: '消息 Key（可选）',
+      keyPlaceholder: '',
       showExchange: false,
       showRoutingKey: false,
+      showHeaders: false,
       showProperties: false,
+      showTag: false,
+      tagPlaceholder: '',
+      showDelayLevel: false,
       showQos: true,
       showRetain: true,
     };
@@ -198,9 +248,16 @@ export const getMessagePublishPresentation = (
     alertMessage: '当前表单会自动拼装 Kafka publish JSON 命令，并直接调用后端执行测试发送。',
     successHint: 'Headers 会作为 Kafka Record Headers 一并发送。',
     showKey: true,
+    showKeyMode: true,
+    keyLabel: '消息 Key（可选）',
+    keyPlaceholder: '可留空；JSON 模式请输入一行合法 JSON',
     showExchange: false,
     showRoutingKey: false,
+    showHeaders: true,
     showProperties: false,
+    showTag: false,
+    tagPlaceholder: '',
+    showDelayLevel: false,
     showQos: false,
     showRetain: false,
   };
@@ -223,6 +280,20 @@ export const createDefaultMessagePublishDraft = (
       body: '{\n  "event": "test",\n  "source": "gonavi"\n}',
       headers: '{\n  "x-source": "gonavi"\n}',
       properties: '{\n  "content_type": "application/json"\n}',
+    };
+  }
+
+  if (resolvedType === 'rocketmq') {
+    const delayLevel = Number(params.get('delayLevel') || params.get('delay_level'));
+    return {
+      destination: resolvedDestination,
+      tag: String(params.get('tag') || params.get('tags') || '').trim(),
+      delayLevel: Number.isFinite(delayLevel) && delayLevel > 0 ? Math.trunc(delayLevel) : undefined,
+      key: '',
+      bodyMode: 'json',
+      body: '{\n  "event": "test",\n  "source": "gonavi"\n}',
+      headers: '',
+      properties: '{\n  "x-source": "gonavi"\n}',
     };
   }
 
@@ -276,6 +347,43 @@ export const buildMessagePublishCommand = (
       commandText: JSON.stringify(command, null, 2),
       destinationLabel: destination,
       transportLabel: 'MQTT Topic',
+    };
+  }
+
+  if (resolvedType === 'rocketmq') {
+    const bodyMode = normalizeMode(draft.bodyMode, 'json');
+    const command: Record<string, unknown> = {
+      publish: destination,
+      payload: parseRequiredPayload(draft.body, bodyMode, '消息体'),
+    };
+
+    const keys = String(draft.key || '')
+      .split(/[,;|\s，]+/g)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (keys.length > 0) {
+      command.keys = keys;
+    }
+
+    const tag = String(draft.tag || '').trim();
+    if (tag) {
+      command.tag = tag;
+    }
+
+    const delayLevel = Number(draft.delayLevel);
+    if (Number.isFinite(delayLevel) && delayLevel > 0) {
+      command.delayLevel = Math.trunc(delayLevel);
+    }
+
+    const properties = parseOptionalJSONObject(draft.properties, 'Properties');
+    if (properties && Object.keys(properties).length > 0) {
+      command.properties = properties;
+    }
+
+    return {
+      commandText: JSON.stringify(command, null, 2),
+      destinationLabel: destination,
+      transportLabel: 'RocketMQ Topic',
     };
   }
 

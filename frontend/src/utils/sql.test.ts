@@ -59,6 +59,11 @@ describe('quoteQualifiedIdent', () => {
       .toBe('`root`.`sg`.`d1`');
   });
 
+  it('keeps RocketMQ topic names as one quoted identifier', () => {
+    expect(quoteQualifiedIdent('rocketmq', 'orders.events.v1'))
+      .toBe('"orders.events.v1"');
+  });
+
   it('keeps MQTT topic filters as one quoted identifier', () => {
     expect(quoteQualifiedIdent('mqtt', 'devices/+/telemetry.v1'))
       .toBe('"devices/+/telemetry.v1"');

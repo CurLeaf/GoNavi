@@ -1432,6 +1432,8 @@ func normalizeDriverType(driverType string) string {
 		return "gaussdb"
 	case "goldendb", "greatdb", "gdb":
 		return "goldendb"
+	case "rocketmq", "rocket-mq", "rocket_mq", "apache-rocketmq", "apache_rocketmq", "rmq":
+		return "rocketmq"
 	case "mqtt", "mqtts":
 		return "mqtt"
 	case "kafka", "apache-kafka", "apache_kafka":
@@ -1507,6 +1509,7 @@ func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) [
 		{Type: "oracle", Name: "Oracle", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "redis", Name: "Redis", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "postgres", Name: "PostgreSQL", Engine: driverEngineGo, BuiltIn: true},
+		{Type: "rocketmq", Name: "RocketMQ", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "mqtt", Name: "MQTT", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "kafka", Name: "Kafka", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "rabbitmq", Name: "RabbitMQ", Engine: driverEngineGo, BuiltIn: true},

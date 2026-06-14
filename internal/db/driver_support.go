@@ -19,6 +19,7 @@ var coreBuiltinDrivers = map[string]struct{}{
 	"postgres": {},
 	"chroma":   {},
 	"qdrant":   {},
+	"rocketmq": {},
 	"mqtt":     {},
 	"kafka":    {},
 	"rabbitmq": {},
@@ -82,6 +83,8 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "chroma"
 	case "qdrantdb", "qdrant-db":
 		return "qdrant"
+	case "rocketmq", "rocket-mq", "rocket_mq", "apache-rocketmq", "apache_rocketmq", "rmq":
+		return "rocketmq"
 	case "mqtt", "mqtts":
 		return "mqtt"
 	case "apache-iotdb", "apache_iotdb", "iotdb":
@@ -151,6 +154,8 @@ func driverDisplayName(driverType string) string {
 		return "Chroma"
 	case "qdrant":
 		return "Qdrant"
+	case "rocketmq":
+		return "RocketMQ"
 	case "mqtt":
 		return "MQTT"
 	case "kafka":

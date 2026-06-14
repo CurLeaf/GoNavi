@@ -7,6 +7,10 @@ describe('buildTableSelectQuery', () => {
     expect(buildTableSelectQuery('postgres', 'public.MyTable')).toBe('SELECT * FROM public."MyTable";');
   });
 
+  it('adds a preview limit for RocketMQ topic browsing', () => {
+    expect(buildTableSelectQuery('rocketmq', 'orders.events')).toBe('SELECT * FROM "orders.events" LIMIT 100;');
+  });
+
   it('adds a preview limit for Kafka topic browsing', () => {
     expect(buildTableSelectQuery('kafka', 'logs.app-1')).toBe('SELECT * FROM "logs.app-1" LIMIT 100;');
   });

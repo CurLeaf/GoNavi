@@ -33,10 +33,10 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('type === "elasticsearch"');
     expect(source).toContain("return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';");
     expect(source).toContain(
-      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";',
+      'type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "rocketmq" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";',
     );
     expect(source).toContain(
-      'placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "mqtt" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined}',
+      'placeholder={(dbType === "elasticsearch" || dbType === "chroma" || dbType === "qdrant" || dbType === "rocketmq" || dbType === "mqtt" || dbType === "kafka" || dbType === "rabbitmq") ? "未开启认证可留空" : undefined}',
     );
     expect(source).toContain('label="显示数据库 (留空显示全部)"');
   });
@@ -75,6 +75,23 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain("return 'Storage Group / Device / Timeseries';");
     expect(source).toContain('return "iotdb://root:root@127.0.0.1:6667/root.sg";');
     expect(source).toContain('return "fetchSize=1024&timeZone=Asia%2FShanghai";');
+  });
+
+  it('exposes RocketMQ in the create-connection picker with nameserver and topic defaults', () => {
+    expect(source).toContain("case 'rocketmq':");
+    expect(source).toContain('return 9876;');
+    expect(source).toContain('rocketmq: ["rocketmq", "rmq"]');
+    expect(source).toContain("key: 'rocketmq'");
+    expect(source).toContain("name: 'RocketMQ'");
+    expect(source).toContain('dbType === "rocketmq"');
+    expect(source).toContain("return 'NameServer / Topic / Consumer Group';");
+    expect(source).toContain('return "rocketmq://accessKey:secretKey@127.0.0.1:9876,127.0.0.2:9876/orders.events?topology=cluster&groupId=gonavi&namespace=prod&tag=TagA&pullBatchSize=32&startOffset=latest";');
+    expect(source).toContain('return "groupId=gonavi&namespace=prod&tag=TagA&pullBatchSize=32&startOffset=latest";');
+    expect(source).toContain('label="默认 Topic（可选）"');
+    expect(source).toContain('label={dbType === "rocketmq" ? "Access Key" : "用户名"}');
+    expect(source).toContain('label={dbType === "rocketmq" ? "Secret Key" : "密码"}');
+    expect(source).toContain('emptyPlaceholder: dbType === "rocketmq" ? "未开启认证可留空" : "密码"');
+    expect(source).toContain('retainedLabel: dbType === "rocketmq" ? "已保存 Secret Key" : "已保存密码"');
   });
 
   it('exposes MQTT in the create-connection picker with broker and topic-filter defaults', () => {
