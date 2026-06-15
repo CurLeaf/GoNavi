@@ -26,27 +26,33 @@ type ValidateDataSyncSelectionParams = {
   syncContent: SyncContent;
 };
 
+export type DataSyncSelectionErrorKey =
+  | 'data_sync.validation.source_query_required'
+  | 'data_sync.validation.single_target_table_required'
+  | 'data_sync.validation.query_mode_data_only'
+  | 'data_sync.validation.select_at_least_one_table';
+
 export const validateDataSyncSelection = ({
   sourceDatasetMode,
   selectedTables,
   sourceQuery,
   syncContent,
-}: ValidateDataSyncSelectionParams): string | null => {
+}: ValidateDataSyncSelectionParams): DataSyncSelectionErrorKey | null => {
   if (sourceDatasetMode === 'query') {
     if (!String(sourceQuery || '').trim()) {
-      return '请输入源查询 SQL';
+      return 'data_sync.validation.source_query_required';
     }
     if (selectedTables.length !== 1) {
-      return 'SQL 结果集同步需要选择一个目标表';
+      return 'data_sync.validation.single_target_table_required';
     }
     if (syncContent !== 'data') {
-      return 'SQL 结果集同步仅支持仅同步数据';
+      return 'data_sync.validation.query_mode_data_only';
     }
     return null;
   }
 
   if (selectedTables.length === 0) {
-    return '请选择至少一张表';
+    return 'data_sync.validation.select_at_least_one_table';
   }
   return null;
 };

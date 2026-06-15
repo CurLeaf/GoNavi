@@ -24,7 +24,8 @@ const getGlobalShortcutCaseBlock = (action: string) => {
 describe('tool center menu entries', () => {
   it('exposes snippet management next to shortcut management', () => {
     expect(appSource).toContain("key: 'snippet-settings'");
-    expect(appSource).toContain("title: '代码片段管理'");
+    expect(appSource).toContain("title: t('app.tools.entry.snippets.title')");
+    expect(appSource).toContain("description: t('app.tools.entry.snippets.description')");
     expect(appSource).toContain('setIsSnippetModalOpen(true)');
 
     const snippetIndex = appSource.indexOf("key: 'snippet-settings'");
@@ -66,7 +67,10 @@ describe('tool center menu entries', () => {
   it('lets the v2 Sidebar own the entire left layout instead of stacking legacy controls above it', () => {
     const siderIndex = appSource.indexOf("className={isV2Ui ? 'gn-v2-app-sider' : undefined}");
     const legacyGuardIndex = appSource.indexOf('{!isV2Ui && (', siderIndex);
-    const legacyCreateIndex = appSource.indexOf('新建连接', legacyGuardIndex);
+    const legacyCreateIndex = appSource.indexOf('<Button icon={<PlusOutlined />} onClick={handleCreateConnection}', legacyGuardIndex);
+    const legacyCreateTitleIndex = appSource.indexOf("title={t('connection.new')}", legacyCreateIndex);
+    const legacyQueryIndex = appSource.indexOf('<Button icon={<ConsoleSqlOutlined />} onClick={handleNewQuery}', legacyGuardIndex);
+    const legacyQueryTitleIndex = appSource.indexOf("title={t('query.new')}", legacyQueryIndex);
     const sidebarIndex = appSource.indexOf('<Sidebar', legacyGuardIndex);
     const floatingLogIndex = appSource.indexOf('Floating SQL Log Toggle', sidebarIndex);
     const floatingLogGuardIndex = appSource.indexOf('{!isV2Ui && (', floatingLogIndex);
@@ -75,6 +79,10 @@ describe('tool center menu entries', () => {
     expect(legacyGuardIndex).toBeGreaterThan(siderIndex);
     expect(legacyCreateIndex).toBeGreaterThan(legacyGuardIndex);
     expect(legacyCreateIndex).toBeLessThan(sidebarIndex);
+    expect(legacyCreateTitleIndex).toBeGreaterThan(legacyCreateIndex);
+    expect(legacyQueryIndex).toBeGreaterThan(legacyCreateIndex);
+    expect(legacyQueryIndex).toBeLessThan(sidebarIndex);
+    expect(legacyQueryTitleIndex).toBeGreaterThan(legacyQueryIndex);
     expect(appSource).toContain('paddingBottom: isV2Ui ? 0 : 58');
     expect(floatingLogIndex).toBeGreaterThan(sidebarIndex);
     expect(floatingLogGuardIndex).toBeGreaterThan(floatingLogIndex);
@@ -127,6 +135,10 @@ describe('tool center menu entries', () => {
   it('loads editable connection details before opening the edit modal so stored secrets can be shown', () => {
     expect(appSource).toContain("typeof backendApp?.GetEditableSavedConnection === 'function'");
     expect(appSource).toContain('const editableConnection = await backendApp.GetEditableSavedConnection(conn.id);');
+    expect(appSource).toContain('const errorMessage = error?.message;');
+    expect(appSource).toContain("typeof errorMessage === 'string'");
+    expect(appSource).toContain("t('app.connection.message.editable_load_failed_with_detail', { detail })");
+    expect(appSource).toContain("t('app.connection.message.editable_load_failed')");
     expect(appSource).toContain('setEditingConnection(nextConnection);');
     expect(appSource).toContain('setIsModalOpen(true);');
   });
@@ -210,8 +222,8 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain("setProperty('--gn-control-height-sm'");
     expect(appSource).toContain('fontFamily: resolvedUiFontFamily');
     expect(appSource).toContain('fontFamilyCode: resolvedMonoFontFamily');
-    expect(appSource).toContain('数据表字体大小');
-    expect(appSource).toContain('左侧库表字体大小');
+    expect(appSource).toContain("t('app.theme.data_table.font_size')");
+    expect(appSource).toContain("t('app.theme.data_table.sidebar_tree_font_size')");
     expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'ui\', installedFontFamilies)');
     expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies)');
     expect(appSource).toContain('ListInstalledFontFamilies()');

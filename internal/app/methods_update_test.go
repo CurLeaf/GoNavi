@@ -160,6 +160,19 @@ func TestCheckForUpdatesSilentlySkipsFailureLogs(t *testing.T) {
 	}
 }
 
+func TestDownloadUpdateUsesCurrentLanguageForBackendMessage(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage("en-US")
+
+	result := app.DownloadUpdate()
+	if result.Success {
+		t.Fatalf("expected failure result, got %#v", result)
+	}
+	if result.Message != "Check for updates first" {
+		t.Fatalf("expected localized message, got %q", result.Message)
+	}
+}
+
 func TestExpectedAssetNameForExecutableUsesLinuxWebKit41Suffix(t *testing.T) {
 	assetName, err := expectedAssetNameForExecutable(
 		"linux",

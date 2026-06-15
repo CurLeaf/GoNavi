@@ -1,4 +1,7 @@
 import React from 'react';
+import { t as defaultTranslate, type I18nParams } from '../i18n';
+
+type DataGridMetadataTranslate = (key: string, params?: I18nParams) => string;
 
 export interface DataGridV2FieldsViewProps {
   tableName?: string;
@@ -7,6 +10,7 @@ export interface DataGridV2FieldsViewProps {
   locatorColumns?: string[];
   columnMetaMap: Record<string, { type?: string; comment?: string }>;
   columnMetaMapByLowerName: Record<string, { type?: string; comment?: string }>;
+  translate?: DataGridMetadataTranslate;
 }
 
 export const DataGridV2FieldsView: React.FC<DataGridV2FieldsViewProps> = ({
@@ -16,26 +20,27 @@ export const DataGridV2FieldsView: React.FC<DataGridV2FieldsViewProps> = ({
   locatorColumns,
   columnMetaMap,
   columnMetaMapByLowerName,
+  translate = defaultTranslate,
 }) => (
   <div className="gn-v2-data-grid-fields-view">
     <div className="gn-v2-data-grid-fields-head">
       <div>
-        <span>FIELDS</span>
-        <strong>{tableName || '查询结果'}</strong>
+        <span>{translate('data_grid.metadata_view.fields_badge')}</span>
+        <strong>{tableName || translate('data_grid.table_fallback.query_result')}</strong>
       </div>
       <div>
-        <span>{displayOutputColumnNames.length} 个字段</span>
+        <span>{translate('data_grid.metadata_view.field_count', { count: displayOutputColumnNames.length })}</span>
       </div>
     </div>
     <div className="gn-v2-data-grid-fields-table">
       <div className="gn-v2-data-grid-fields-row is-head">
         <span>#</span>
-        <span>名称</span>
-        <span>类型</span>
+        <span>{translate('data_grid.metadata_view.column_name')}</span>
+        <span>{translate('data_grid.metadata_view.column_type')}</span>
         <span>NN</span>
         <span>PK</span>
-        <span>默认值</span>
-        <span>注释</span>
+        <span>{translate('data_grid.metadata_view.default_value')}</span>
+        <span>{translate('data_grid.metadata_view.comment')}</span>
       </div>
       {displayOutputColumnNames.map((columnName, index) => {
         const meta = columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()];
@@ -61,6 +66,7 @@ export interface DataGridV2ErViewProps {
   displayOutputColumnNames: string[];
   columnMetaMap: Record<string, { type?: string; comment?: string }>;
   columnMetaMapByLowerName: Record<string, { type?: string; comment?: string }>;
+  translate?: DataGridMetadataTranslate;
 }
 
 export const DataGridV2ErView: React.FC<DataGridV2ErViewProps> = ({
@@ -68,12 +74,13 @@ export const DataGridV2ErView: React.FC<DataGridV2ErViewProps> = ({
   displayOutputColumnNames,
   columnMetaMap,
   columnMetaMapByLowerName,
+  translate = defaultTranslate,
 }) => (
   <div className="gn-v2-data-grid-er-view">
     <div className="gn-v2-data-grid-er-node is-main">
-      <span>TABLE</span>
-      <strong>{tableName || '查询结果'}</strong>
-      <small>{displayOutputColumnNames.length} fields</small>
+      <span>{translate('data_grid.metadata_view.er_table_badge')}</span>
+      <strong>{tableName || translate('data_grid.table_fallback.query_result')}</strong>
+      <small>{translate('data_grid.metadata_view.field_count', { count: displayOutputColumnNames.length })}</small>
     </div>
     <div className="gn-v2-data-grid-er-lines">
       <span />
@@ -82,7 +89,7 @@ export const DataGridV2ErView: React.FC<DataGridV2ErViewProps> = ({
     <div className="gn-v2-data-grid-er-side">
       {displayOutputColumnNames.slice(0, 6).map((columnName) => (
         <div className="gn-v2-data-grid-er-node" key={columnName}>
-          <span>FIELD</span>
+          <span>{translate('data_grid.metadata_view.er_field_badge')}</span>
           <strong>{columnName}</strong>
           <small>{(columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type || '-'}</small>
         </div>

@@ -99,6 +99,47 @@ describe('store appearance persistence', () => {
     expect(appearance.dataTableDensity).toBe('compact');
   });
 
+  it('persists language preference and sanitizes unsupported persisted values', async () => {
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().languagePreference).toBe('system');
+
+    useStore.getState().setLanguagePreference('ja-JP');
+    expect(useStore.getState().languagePreference).toBe('ja-JP');
+
+    let persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.languagePreference).toBe('ja-JP');
+
+    vi.resetModules();
+    let reloaded = await importStore();
+    expect(reloaded.useStore.getState().languagePreference).toBe('ja-JP');
+
+    reloaded.useStore.getState().setLanguagePreference('system');
+    expect(reloaded.useStore.getState().languagePreference).toBe('system');
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        languagePreference: 'fr-FR',
+      },
+      version: 10,
+    }));
+
+    vi.resetModules();
+    reloaded = await importStore();
+    expect(reloaded.useStore.getState().languagePreference).toBe('system');
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        languagePreference: 'zh-CN',
+      },
+      version: 10,
+    }));
+
+    vi.resetModules();
+    reloaded = await importStore();
+    expect(reloaded.useStore.getState().languagePreference).toBe('zh-CN');
+  });
+
   it('persists custom font families and sanitizes blank values', async () => {
     const { useStore } = await importStore();
 
@@ -726,6 +767,77 @@ describe('store appearance persistence', () => {
         dbName: 'demo',
         createdAt: 1,
       },
+    ]);
+  });
+
+  it('uses localized external SQL directory fallback names without overriding explicit names or path segments', async () => {
+    const i18n = await import('./i18n');
+    i18n.setCurrentLanguage('de-DE');
+    const { useStore } = await importStore();
+
+    useStore.getState().saveExternalSQLDirectory({
+      id: 'ext-fallback',
+      name: '   ',
+      path: '/',
+      connectionId: 'conn-1',
+      dbName: 'demo',
+      createdAt: 1,
+    });
+    useStore.getState().saveExternalSQLDirectory({
+      id: 'ext-segment',
+      name: '',
+      path: 'D:/sql/reports',
+      connectionId: 'conn-1',
+      dbName: 'demo',
+      createdAt: 2,
+    });
+    useStore.getState().saveExternalSQLDirectory({
+      id: 'ext-explicit',
+      name: 'Handwritten scripts',
+      path: 'D:/sql/handwritten',
+      connectionId: 'conn-1',
+      dbName: 'demo',
+      createdAt: 3,
+    });
+
+    expect(useStore.getState().externalSQLDirectories.map((directory) => directory.name)).toEqual([
+      i18n.t('sidebar.sql_directory.default_name'),
+      'reports',
+      'Handwritten scripts',
+    ]);
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        externalSQLDirectories: [
+          {
+            id: 'ext-reloaded-fallback',
+            name: '',
+            path: '/',
+            connectionId: 'conn-2',
+            dbName: 'demo2',
+            createdAt: 4,
+          },
+          {
+            id: 'ext-reloaded-segment',
+            name: '  ',
+            path: 'D:/sql/migrations',
+            connectionId: 'conn-2',
+            dbName: 'demo2',
+            createdAt: 5,
+          },
+        ],
+      },
+      version: 10,
+    }));
+
+    vi.resetModules();
+    const reloadedI18n = await import('./i18n');
+    reloadedI18n.setCurrentLanguage('ja-JP');
+    const reloaded = await importStore();
+
+    expect(reloaded.useStore.getState().externalSQLDirectories.map((directory) => directory.name)).toEqual([
+      reloadedI18n.t('sidebar.sql_directory.default_name'),
+      'migrations',
     ]);
   });
 

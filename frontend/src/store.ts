@@ -47,6 +47,13 @@ import {
   resolveOceanBaseProtocolFromQueryText,
 } from "./utils/oceanBaseProtocol";
 import { sanitizeFontFamilyInput } from "./utils/fontFamilies";
+import {
+  DEFAULT_LANGUAGE,
+  LANGUAGE_PREFERENCES,
+  resolveLanguage,
+  t as translate,
+  type LanguagePreference,
+} from "./i18n";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
@@ -95,6 +102,7 @@ const MAX_PERSISTED_SQL_LOG_LENGTH = 100 * 1024;
 const MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH = 2 * 1024;
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
+const DEFAULT_LANGUAGE_PREFERENCE: LanguagePreference = "system";
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   enabled: false,
   type: "socks5",
@@ -1062,6 +1070,7 @@ interface AppState {
   savedQueries: SavedQuery[];
   externalSQLDirectories: ExternalSQLDirectory[];
   theme: "light" | "dark";
+  languagePreference: LanguagePreference;
   appearance: AppearanceSettings;
   uiScale: number;
   fontSize: number;
@@ -1161,6 +1170,7 @@ interface AppState {
   deleteExternalSQLDirectory: (id: string) => void;
 
   setTheme: (theme: "light" | "dark") => void;
+  setLanguagePreference: (languagePreference: LanguagePreference) => void;
   setAppearance: (appearance: Partial<AppearanceSettings>) => void;
   setUiScale: (scale: number) => void;
   setFontSize: (size: number) => void;
@@ -1308,27 +1318,32 @@ const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
   return result;
 };
 
+const resolveExternalSQLDirectoryName = (name: unknown, path: string): string => {
+  const explicitName = toTrimmedString(name);
+  if (explicitName) return explicitName;
+  const pathSegment = path.split(/[\\/]/).filter(Boolean).pop();
+  return pathSegment || translate("sidebar.sql_directory.default_name");
+};
+
 const sanitizeExternalSQLDirectories = (
   value: unknown,
 ): ExternalSQLDirectory[] => {
   if (!Array.isArray(value)) return [];
   const result: ExternalSQLDirectory[] = [];
-  value.forEach((entry, index) => {
+  value.forEach((entry) => {
     if (!entry || typeof entry !== "object") return;
     const raw = entry as Record<string, unknown>;
     const path = toTrimmedString(raw.path);
     const connectionId = toTrimmedString(raw.connectionId);
     const dbName = toTrimmedString(raw.dbName);
     if (!path || !connectionId || !dbName) return;
-    const fallbackName =
-      path.split(/[\\/]/).filter(Boolean).pop() || `SQL目录-${index + 1}`;
     result.push({
       id:
         toTrimmedString(
           raw.id,
           buildExternalSQLDirectoryId(connectionId, dbName, path),
         ) || buildExternalSQLDirectoryId(connectionId, dbName, path),
-      name: toTrimmedString(raw.name, fallbackName) || fallbackName,
+      name: resolveExternalSQLDirectoryName(raw.name, path),
       path,
       connectionId,
       dbName,
@@ -1495,6 +1510,22 @@ const hasLegacyConnectionSecrets = (
 
 const sanitizeTheme = (value: unknown): "light" | "dark" =>
   value === "dark" ? "dark" : "light";
+
+const sanitizeLanguagePreference = (value: unknown): LanguagePreference => {
+  if (
+    typeof value === "string" &&
+    (LANGUAGE_PREFERENCES as readonly string[]).includes(value)
+  ) {
+    return value as LanguagePreference;
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const resolved = resolveLanguage(value, []);
+    if (resolved !== DEFAULT_LANGUAGE) {
+      return resolved;
+    }
+  }
+  return DEFAULT_LANGUAGE_PREFERENCE;
+};
 
 const sanitizeSqlFormatOptions = (
   value: unknown,
@@ -1889,6 +1920,7 @@ export const useStore = create<AppState>()(
       savedQueries: [],
       externalSQLDirectories: [],
       theme: "light",
+      languagePreference: DEFAULT_LANGUAGE_PREFERENCE,
       appearance: { ...DEFAULT_APPEARANCE },
       uiScale: DEFAULT_UI_SCALE,
       fontSize: DEFAULT_FONT_SIZE,
@@ -2558,11 +2590,7 @@ export const useStore = create<AppState>()(
                 directory.id,
                 buildExternalSQLDirectoryId(connectionId, dbName, path),
               ) || buildExternalSQLDirectoryId(connectionId, dbName, path),
-            name:
-              toTrimmedString(
-                directory.name,
-                path.split(/[\\/]/).filter(Boolean).pop() || "SQL目录",
-              ) || "SQL目录",
+            name: resolveExternalSQLDirectoryName(directory.name, path),
             path,
             connectionId,
             dbName,
@@ -2600,6 +2628,10 @@ export const useStore = create<AppState>()(
         })),
 
       setTheme: (theme) => set({ theme }),
+      setLanguagePreference: (languagePreference) =>
+        set({
+          languagePreference: sanitizeLanguagePreference(languagePreference),
+        }),
       setAppearance: (appearance) =>
         set((state) => ({
           appearance: sanitizeAppearance(
@@ -3022,6 +3054,9 @@ export const useStore = create<AppState>()(
           state.externalSQLDirectories,
         );
         nextState.theme = sanitizeTheme(state.theme);
+        nextState.languagePreference = sanitizeLanguagePreference(
+          state.languagePreference,
+        );
         nextState.appearance = sanitizeAppearance(state.appearance, version);
         nextState.uiScale = sanitizeUiScale(state.uiScale);
         nextState.fontSize = sanitizeFontSize(state.fontSize);
@@ -3112,6 +3147,9 @@ export const useStore = create<AppState>()(
             state.externalSQLDirectories,
           ),
           theme: sanitizeTheme(state.theme),
+          languagePreference: sanitizeLanguagePreference(
+            state.languagePreference,
+          ),
           appearance: sanitizeAppearance(state.appearance, PERSIST_VERSION),
           uiScale: sanitizeUiScale(state.uiScale),
           fontSize: sanitizeFontSize(state.fontSize),
@@ -3155,6 +3193,7 @@ export const useStore = create<AppState>()(
           savedQueries: state.savedQueries,
           externalSQLDirectories: state.externalSQLDirectories,
           theme: state.theme,
+          languagePreference: state.languagePreference,
           appearance: state.appearance,
           uiScale: state.uiScale,
           fontSize: state.fontSize,

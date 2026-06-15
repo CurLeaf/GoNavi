@@ -82,6 +82,7 @@ import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
+import { getCurrentLanguage, t } from '../i18n';
 import JVMModeBadge from './jvm/JVMModeBadge';
 import {
     V2DatabaseContextMenuView,
@@ -151,6 +152,109 @@ interface TreeNode {
   dataRef?: any;
   type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'db-event' | 'routine' | 'object-group' | 'v2-table-section' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
 }
+
+export const resolveV2ObjectGroupTitle = (node: Pick<TreeNode, 'type' | 'dataRef'> | null | undefined): string | null => {
+  if (node?.type !== 'object-group') return null;
+  const groupKey = String(node?.dataRef?.groupKey || '');
+  if (groupKey === 'tables') return t('sidebar.v2_table_group_menu.title');
+  if (groupKey === 'views') return t('sidebar.object_group.views');
+  if (groupKey === 'routines') return t('sidebar.object_group.routines');
+  if (groupKey === 'triggers') return t('sidebar.object_group.triggers');
+  if (groupKey === 'events') return t('sidebar.object_group.events');
+  if (groupKey === 'materializedViews') return t('sidebar.object_group.materialized_views');
+  return null;
+};
+
+export type SQLFileExecutionStatus = 'running' | 'done' | 'cancelled' | 'error';
+
+export type SQLFileExecutionProgressState = {
+  fileSizeMB: string;
+  status: SQLFileExecutionStatus;
+  executed: number;
+  failed: number;
+  percent: number;
+  currentSQL: string;
+  resultMessage: string;
+};
+
+const resolveSQLFileExecutionStatusLabel = (status: SQLFileExecutionStatus): string => {
+  switch (status) {
+    case 'done':
+      return `✅ ${t('sidebar.sql_file_exec.status.done')}`;
+    case 'cancelled':
+      return `⚠️ ${t('sidebar.sql_file_exec.status.cancelled')}`;
+    case 'error':
+      return `❌ ${t('sidebar.sql_file_exec.status.error')}`;
+    case 'running':
+    default:
+      return t('sidebar.sql_file_exec.status.running');
+  }
+};
+
+export const buildSQLFileExecutionFooter = ({
+  status,
+  onCancelExecution,
+  onClose,
+}: {
+  status: SQLFileExecutionStatus;
+  onCancelExecution: () => void;
+  onClose: () => void;
+}): React.ReactNode[] => {
+  if (status === 'running') {
+    return [
+      <Button key="cancel" danger onClick={onCancelExecution}>
+        {t('sidebar.sql_file_exec.cancel')}
+      </Button>,
+    ];
+  }
+
+  return [
+    <Button key="close" type="primary" onClick={onClose}>
+      {t('sidebar.action.close')}
+    </Button>,
+  ];
+};
+
+export const SQLFileExecutionProgressContent: React.FC<SQLFileExecutionProgressState> = ({
+  fileSizeMB,
+  status,
+  executed,
+  failed,
+  percent,
+  currentSQL,
+  resultMessage,
+}) => (
+  <>
+    <div style={{ marginBottom: 16 }}>
+      <Progress
+        percent={Math.round(percent)}
+        status={status === 'error' ? 'exception' : status === 'done' ? 'success' : 'active'}
+        strokeColor={status === 'cancelled' ? '#faad14' : undefined}
+      />
+    </div>
+    <div style={{ fontSize: 13, lineHeight: '22px', marginBottom: 8 }}>
+      <div>{t('sidebar.sql_file_exec.file_size')}<strong>{fileSizeMB} MB</strong></div>
+      <div>{t('sidebar.sql_file_exec.status_label')}<strong>{resolveSQLFileExecutionStatusLabel(status)}</strong></div>
+      <div>
+        {t('sidebar.sql_file_exec.executed_label')}
+        <strong style={{ color: '#52c41a' }}>{executed}</strong>
+        {t('sidebar.sql_file_exec.rows_separator')}
+        <strong style={{ color: failed > 0 ? '#ff4d4f' : undefined }}>{failed}</strong>
+        {t('sidebar.sql_file_exec.rows_suffix')}
+      </div>
+    </div>
+    {currentSQL && status === 'running' && (
+      <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.8)', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '6px 10px', marginTop: 8, fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all', maxHeight: 60, overflow: 'hidden' }}>
+        {currentSQL}
+      </div>
+    )}
+    {resultMessage && status !== 'running' && (
+      <div style={{ fontSize: 12, marginTop: 12, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '8px 12px' }}>
+        {resultMessage}
+      </div>
+    )}
+  </>
+);
 
 const isV2SidebarObjectNode = (node: Pick<TreeNode, 'type'> | null | undefined): boolean => {
   return node?.type === 'table'
@@ -256,9 +360,9 @@ export const buildV2SidebarTableSectionedChildren = (
   });
 
   return [
-    buildSectionNode('pinned', '置顶'),
+    buildSectionNode('pinned', t('table_overview.section.pinned')),
     ...pinnedTables,
-    buildSectionNode('all', '全部'),
+    buildSectionNode('all', t('table_overview.section.all')),
     ...regularTables,
   ];
 };
@@ -278,6 +382,14 @@ export const formatSidebarRowCount = (count: number): string => {
   if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
   return String(Math.round(count));
 };
+
+const buildConnectionRootQueryTabTitle = () => t('query.new');
+
+const buildConnectionRootRedisCommandTabTitle = (redisDbLabel = 'db0') =>
+  t('sidebar.tab.redis_command', { database: redisDbLabel });
+
+const buildConnectionRootRedisMonitorTabTitle = (redisDbLabel = 'db0') =>
+  t('sidebar.tab.redis_monitor', { database: redisDbLabel });
 
 type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
 type BatchObjectType = 'table' | 'view';
@@ -402,12 +514,12 @@ export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = '组
   return trimmed.slice(0, 2);
 };
 
-const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: string }> = [
-  { key: 'all', label: '全部' },
-  { key: 'tables', label: '表' },
-  { key: 'views', label: '视图' },
-  { key: 'routines', label: '函数' },
-  { key: 'events', label: '事件' },
+const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; labelKey: string }> = [
+  { key: 'all', labelKey: 'sidebar.command_search.object_kind.all' },
+  { key: 'tables', labelKey: 'sidebar.command_search.object_kind.tables' },
+  { key: 'views', labelKey: 'sidebar.command_search.object_kind.views' },
+  { key: 'routines', labelKey: 'sidebar.command_search.object_kind.routines' },
+  { key: 'events', labelKey: 'sidebar.command_search.object_kind.events' },
 ];
 
 const V2_EXPLORER_FILTER_GROUP_KEYS: Record<Exclude<V2ExplorerFilter, 'all'>, string[]> = {
@@ -763,6 +875,21 @@ type DriverStatusSnapshot = {
   message?: string;
 };
 
+export const formatSidebarDriverAgentUpdateWarning = (
+  driverName: string,
+  status: Pick<DriverStatusSnapshot, 'message' | 'updateReason'>,
+): string => {
+  const rawMessage = String(status.message || '').trim();
+  if (rawMessage) {
+    return rawMessage;
+  }
+  const rawUpdateReason = String(status.updateReason || '').trim();
+  if (rawUpdateReason) {
+    return rawUpdateReason;
+  }
+  return t('connection.modal.driver.updateFallback', { name: driverName });
+};
+
 const buildConnectionReloadSignature = (conn?: SavedConnection | null): string => {
   if (!conn) return '';
   return JSON.stringify({
@@ -809,16 +936,16 @@ const isPostgresSchemaDialect = (dialect: string): boolean => (
   ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss'].includes(normalizeDriverType(dialect))
 );
 
-const SEARCH_SCOPE_OPTIONS: Array<{ value: SearchScope; label: string }> = [
-  { value: 'smart', label: '智能' },
-  { value: 'object', label: '表对象' },
-  { value: 'database', label: '库' },
-  { value: 'host', label: 'Host' },
-  { value: 'tag', label: '标签' },
+const SEARCH_SCOPE_OPTIONS: Array<{ value: SearchScope; labelKey: string }> = [
+  { value: 'smart', labelKey: 'sidebar.command_search.scope.smart' },
+  { value: 'object', labelKey: 'sidebar.command_search.scope.object' },
+  { value: 'database', labelKey: 'sidebar.command_search.scope.database' },
+  { value: 'host', labelKey: 'sidebar.command_search.scope.host' },
+  { value: 'tag', labelKey: 'sidebar.command_search.scope.tag' },
 ];
 
-const SEARCH_SCOPE_LABEL_MAP: Record<SearchScope, string> = SEARCH_SCOPE_OPTIONS.reduce((acc, option) => {
-  acc[option.value] = option.label;
+const SEARCH_SCOPE_LABEL_KEY_MAP: Record<SearchScope, string> = SEARCH_SCOPE_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.labelKey;
   return acc;
 }, {} as Record<SearchScope, string>);
 
@@ -906,8 +1033,10 @@ const Sidebar: React.FC<{
   const addSqlLog = useStore(state => state.addSqlLog);
   const sqlLogs = useStore(state => state.sqlLogs) || [];
   const shortcutOptions = useStore(state => state.shortcutOptions);
+  const languagePreference = useStore(state => state.languagePreference);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
   const addAIContext = useStore(state => state.addAIContext);
+  void languagePreference;
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
@@ -1337,19 +1466,21 @@ const Sidebar: React.FC<{
 
     const backendApp = (window as any).go?.app?.App;
     if (typeof backendApp?.DuplicateConnection !== 'function') {
-      message.error('复制连接失败：后端接口不可用');
+      message.error(t('connection.sidebar.duplicate.backendUnavailable'));
       return;
     }
 
     try {
       const duplicatedConnection = await backendApp.DuplicateConnection(conn.id);
       if (!duplicatedConnection) {
-        throw new Error('复制连接失败：后端未返回结果');
+        throw new Error(t('connection.sidebar.duplicate.noResult'));
       }
       addConnection(duplicatedConnection);
-      message.success(`已复制连接: ${duplicatedConnection.name}`);
+      message.success(t('connection.sidebar.duplicate.success', {
+        name: duplicatedConnection.name,
+      }));
     } catch (error: any) {
-      message.error(error?.message || '复制连接失败');
+      message.error(error?.message || t('connection.sidebar.duplicate.failureFallback'));
     }
   };
   const updateTreeData = (list: TreeNode[], key: React.Key, children: TreeNode[] | undefined): TreeNode[] => {
@@ -2197,9 +2328,8 @@ const Sidebar: React.FC<{
 	          }
 	          driverUpdateWarningKeysRef.current.add(warningKey);
 	          const driverName = status.name || driverType;
-	          const reason = status.message || status.updateReason || `${driverName} driver-agent 与当前 GoNavi 版本要求不一致`;
 	          message.warning({
-	              content: `${driverName} 驱动代理需要重装：${reason}`,
+	              content: formatSidebarDriverAgentUpdateWarning(driverName, status),
 	              key: `driver-agent-update-${conn.id}`,
 	              duration: 10,
 	          });
@@ -2262,7 +2392,12 @@ const Sidebar: React.FC<{
                       setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
                       if (diagnosticNode.length > 0) {
                           replaceTreeNodeChildren(node.key, diagnosticNode);
-                          message.warning({ content: `JVM Provider 探测失败：${res.message || '未知错误'}；已保留诊断增强入口`, key: `conn-${conn.id}-jvm-caps` });
+                          message.warning({
+                              content: t('sidebar.message.jvm_provider_probe_failed_with_diagnostic', {
+                                  error: res.message || t('sidebar.error.unknown'),
+                              }),
+                              key: `conn-${conn.id}-jvm-caps`,
+                          });
                       } else {
                           setLoadedKeys(prev => prev.filter(k => k !== node.key));
                           message.error({ content: res.message, key: `conn-${conn.id}-jvm-caps` });
@@ -2273,10 +2408,18 @@ const Sidebar: React.FC<{
                   setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
                   if (diagnosticNode.length > 0) {
                       replaceTreeNodeChildren(node.key, diagnosticNode);
-                      message.warning({ content: `JVM Provider 探测异常：${e?.message || String(e)}；已保留诊断增强入口`, key: `conn-${conn.id}-jvm-caps` });
+                      message.warning({
+                          content: t('sidebar.message.jvm_provider_probe_exception_with_diagnostic', {
+                              error: e?.message || String(e),
+                          }),
+                          key: `conn-${conn.id}-jvm-caps`,
+                      });
                   } else {
                       setLoadedKeys(prev => prev.filter(k => k !== node.key));
-                      message.error({ content: '连接失败: ' + (e?.message || String(e)), key: `conn-${conn.id}-jvm-caps` });
+                      message.error({
+                          content: t('sidebar.message.connection_failed', { error: e?.message || String(e) }),
+                          key: `conn-${conn.id}-jvm-caps`,
+                      });
                   }
               } finally {
                   loadingNodesRef.current.delete(loadKey);
@@ -2311,7 +2454,10 @@ const Sidebar: React.FC<{
                   }
               } catch (e: any) {
                   setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
-                  message.error({ content: '连接失败: ' + (e?.message || String(e)), key: `conn-${conn.id}-dbs` });
+                  message.error({
+                      content: t('sidebar.message.connection_failed', { error: e?.message || String(e) }),
+                      key: `conn-${conn.id}-dbs`,
+                  });
               } finally {
                   loadingNodesRef.current.delete(loadKey);
               }
@@ -2342,7 +2488,7 @@ const Sidebar: React.FC<{
             } else {
                 // 空列表：清理 loadedKeys 以允许重新加载，不设置 children = []
                 setLoadedKeys(prev => prev.filter(k => k !== node.key));
-                message.warning({ content: '未获取到可见数据库/schema，请检查账号权限或右键刷新', key: `conn-${conn.id}-dbs` });
+                message.warning({ content: t('sidebar.message.no_visible_databases'), key: `conn-${conn.id}-dbs` });
             }
 	          } else {
 	            setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
@@ -2352,7 +2498,10 @@ const Sidebar: React.FC<{
 	      } catch (e: any) {
 	          setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
 	          setLoadedKeys(prev => prev.filter(k => k !== node.key));
-	          message.error({ content: '连接失败: ' + (e?.message || String(e)), key: `conn-${conn.id}-dbs` });
+	          message.error({
+                content: t('sidebar.message.connection_failed', { error: e?.message || String(e) }),
+                key: `conn-${conn.id}-dbs`,
+            });
 	      } finally {
 	          loadingNodesRef.current.delete(loadKey);
 	      }
@@ -2369,7 +2518,7 @@ const Sidebar: React.FC<{
       try {
           const backendApp = (window as any).go?.app?.App;
           if (typeof backendApp?.JVMListResources !== 'function') {
-              throw new Error('JVMListResources 后端方法不可用');
+              throw new Error(t('sidebar.message.jvm_resources_backend_unavailable'));
           }
 
           const res = await backendApp.JVMListResources(buildJVMRuntimeConfig(conn, providerMode), parentPath);
@@ -2399,7 +2548,10 @@ const Sidebar: React.FC<{
           }
       } catch (e: any) {
           setLoadedKeys(prev => prev.filter(k => k !== node.key));
-          message.error({ content: '加载 JVM 资源失败: ' + (e?.message || String(e)), key: `jvm-resource-${node.key}` });
+          message.error({
+              content: t('sidebar.message.load_jvm_resources_failed', { error: e?.message || String(e) }),
+              key: `jvm-resource-${node.key}`,
+          });
       } finally {
           loadingNodesRef.current.delete(loadKey);
       }
@@ -2417,13 +2569,13 @@ const Sidebar: React.FC<{
       const dbExternalSQLDirectories = useStore.getState().externalSQLDirectories.filter(directory => directory.connectionId === conn.id && directory.dbName === dbName);
       
       const queriesNode: TreeNode = {
-          title: '已存查询',
+          title: t('sidebar.tree.saved_queries'),
           key: `${key}-queries`,
           icon: <FolderOpenOutlined />,
           type: 'queries-folder',
           isLeaf: dbQueries.length === 0,
           children: dbQueries.map(q => ({
-              title: q.name,
+              title: resolveSavedQueryDisplayName(q.name),
               key: q.id,
               icon: <FileTextOutlined />,
               type: 'saved-query',
@@ -2489,7 +2641,10 @@ const Sidebar: React.FC<{
                         if (!directoryRes.success) {
                             message.warning({
                                 key: `external-sql-${directory.id}`,
-                                content: `SQL 目录读取失败: ${directory.name} (${directoryRes.message})`,
+                                content: t('sidebar.message.external_sql_directory_read_failed', {
+                                    name: directory.name,
+                                    error: directoryRes.message,
+                                }),
                             });
                             return { id: directory.id, entries: [] as ExternalSQLTreeEntry[] };
                         }
@@ -2509,6 +2664,10 @@ const Sidebar: React.FC<{
                     dbName: String(conn.dbName),
                     directories: dbExternalSQLDirectories,
                     directoryTrees: externalSQLTrees,
+                    labels: {
+                        root: t('sidebar.external_sql.root'),
+                        directoryFallback: t('sidebar.external_sql.directory_fallback'),
+                    },
                 }));
 
             const viewRows: string[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
@@ -2831,7 +2990,7 @@ const Sidebar: React.FC<{
   const locateObjectInSidebar = async (detail: unknown) => {
       const request = normalizeSidebarLocateObjectRequest(detail);
       if (!request) {
-          message.warning('当前标签页没有可定位的表上下文');
+          message.warning(t('sidebar.message.locate_current_table_unavailable'));
           return;
       }
 
@@ -2896,7 +3055,7 @@ const Sidebar: React.FC<{
 
   const handleLocateActiveTabInSidebar = () => {
       if (!activeTabLocateRequest) {
-          message.warning('当前标签页没有可定位的表上下文');
+          message.warning(t('sidebar.message.locate_current_table_unavailable'));
           return;
       }
       void locateObjectInSidebar(activeTabLocateRequest);
@@ -3144,7 +3303,7 @@ const Sidebar: React.FC<{
           const q = node.dataRef;
           addTab({
               id: q.id,
-              title: q.name,
+              title: resolveSavedQueryDisplayName(q.name),
               type: 'query',
               connectionId: q.connectionId,
               dbName: q.dbName,
@@ -3822,7 +3981,7 @@ const Sidebar: React.FC<{
               const dbName = node.dataRef?.dbName || '';
               const conn = connections.find(c => c.id === connId);
               if (!conn) {
-                  message.error('未找到对应的连接配置');
+                  message.error(t('sidebar.message.connection_config_not_found'));
                   return;
               }
               startSQLFileExecution(conn.config, dbName, data.filePath, data.fileSizeMB);
@@ -3833,21 +3992,21 @@ const Sidebar: React.FC<{
           const { dbName, id } = node.dataRef;
           addTab({
               id: `query-${Date.now()}`,
-              title: `运行外部SQL文件`,
+              title: t('sidebar.sql_file_exec.title'),
               type: 'query',
               connectionId: node.type === 'connection' ? node.key : node.dataRef.id,
               dbName: dbName,
               query: sqlContent
           });
       } else if (res.message !== '已取消') {
-          message.error('读取文件失败: ' + res.message);
+          message.error(t('sidebar.message.read_file_failed', { error: res.message }));
       }
   };
 
   const handleOpenSQLFileFromToolbar = async () => {
       const ctx = useStore.getState().activeContext;
       if (!ctx?.connectionId) {
-          message.warning('请先选择一个连接或数据库');
+          message.warning(t('sidebar.message.select_connection_or_database_first'));
           return;
       }
       const res = await OpenSQLFile();
@@ -3857,7 +4016,7 @@ const Sidebar: React.FC<{
           if (data && typeof data === 'object' && data.isLargeFile) {
               const conn = connections.find(c => c.id === ctx.connectionId);
               if (!conn) {
-                  message.error('未找到对应的连接配置');
+                  message.error(t('sidebar.message.connection_config_not_found'));
                   return;
               }
               startSQLFileExecution(conn.config, ctx.dbName || '', data.filePath, data.fileSizeMB);
@@ -3866,14 +4025,14 @@ const Sidebar: React.FC<{
           // 小文件
           addTab({
               id: `query-${Date.now()}`,
-              title: `运行外部SQL文件`,
+              title: t('sidebar.sql_file_exec.title'),
               type: 'query',
               connectionId: ctx.connectionId,
               dbName: ctx.dbName || undefined,
               query: data
           });
       } else if (res.message !== '已取消') {
-          message.error('读取文件失败: ' + res.message);
+          message.error(t('sidebar.message.read_file_failed', { error: res.message }));
       }
   };
 
@@ -3882,7 +4041,7 @@ const Sidebar: React.FC<{
       open: boolean;
       jobId: string;
       fileSizeMB: string;
-      status: 'running' | 'done' | 'cancelled' | 'error';
+      status: SQLFileExecutionStatus;
       executed: number;
       failed: number;
       total: number;
@@ -3948,16 +4107,16 @@ const Sidebar: React.FC<{
       const connectionId = String(fileNode?.dataRef?.connectionId || '').trim();
       const dbName = String(fileNode?.dataRef?.dbName || '').trim();
       const filePath = String(fileNode?.dataRef?.path || '').trim();
-      const fileName = String(fileNode?.dataRef?.name || fileNode?.title || 'SQL文件').trim() || 'SQL文件';
+      const fileName = String(fileNode?.dataRef?.name || fileNode?.title || t('sidebar.sql_file.default_name')).trim() || t('sidebar.sql_file.default_name');
       if (!connectionId || !dbName || !filePath) {
-          message.error('SQL 文件上下文不完整，无法打开');
+          message.error(t('sidebar.message.sql_file_context_incomplete'));
           return;
       }
 
       const res = await ReadSQLFile(filePath);
       if (!res.success) {
           if (res.message !== '已取消') {
-              message.error('读取 SQL 文件失败: ' + res.message);
+              message.error(t('sidebar.message.read_sql_file_failed', { error: res.message }));
           }
           return;
       }
@@ -3966,7 +4125,7 @@ const Sidebar: React.FC<{
       if (data && typeof data === 'object' && data.isLargeFile) {
           const conn = connections.find((item) => item.id === connectionId);
           if (!conn) {
-              message.error('未找到对应的连接配置');
+              message.error(t('sidebar.message.connection_config_not_found'));
               return;
           }
           startSQLFileExecution(conn.config, dbName, data.filePath, data.fileSizeMB);
@@ -3987,7 +4146,7 @@ const Sidebar: React.FC<{
   const handleAddExternalSQLDirectory = async (node: any) => {
       const context = getNodeDatabaseContext(node);
       if (!context?.connectionId || !context?.dbName || !context?.dbNodeKey) {
-          message.warning('请在具体数据库下添加外部 SQL 目录');
+          message.warning(t('sidebar.message.add_sql_directory_database_required'));
           return;
       }
 
@@ -3997,7 +4156,7 @@ const Sidebar: React.FC<{
       const selection = await SelectSQLDirectory(currentDirectory);
       if (!selection.success) {
           if (selection.message !== '已取消') {
-              message.error('选择 SQL 目录失败: ' + selection.message);
+              message.error(t('sidebar.message.select_sql_directory_failed', { error: selection.message }));
           }
           return;
       }
@@ -4006,14 +4165,14 @@ const Sidebar: React.FC<{
       const path = String(payload.path || '').trim();
       const name = String(payload.name || '').trim();
       if (!path) {
-          message.error('未获取到有效的 SQL 目录路径');
+          message.error(t('sidebar.message.sql_directory_path_invalid'));
           return;
       }
 
       const directoryId = buildExternalSQLDirectoryId(context.connectionId, context.dbName, path);
       saveExternalSQLDirectory({
           id: directoryId,
-          name: name || path.split(/[\\/]/).filter(Boolean).pop() || 'SQL目录',
+          name: name || path.split(/[\\/]/).filter(Boolean).pop() || t('sidebar.sql_directory.default_name'),
           path,
           connectionId: context.connectionId,
           dbName: context.dbName,
@@ -4023,29 +4182,29 @@ const Sidebar: React.FC<{
       setExpandedKeys((prev) => Array.from(new Set([...prev, context.dbNodeKey, `${context.dbNodeKey}-external-sql`])));
       setAutoExpandParent(false);
       await refreshDatabaseNode(context.dbNodeKey);
-      message.success('外部 SQL 目录已添加');
+      message.success(t('sidebar.message.external_sql_directory_added'));
   };
 
   const handleRemoveExternalSQLDirectory = async (node: any) => {
       const directoryId = String(node?.dataRef?.id || '').trim();
       const dbNodeKey = String(node?.dataRef?.dbNodeKey || '').trim();
       if (!directoryId) {
-          message.error('未找到可移除的 SQL 目录');
+          message.error(t('sidebar.message.external_sql_directory_not_found'));
           return;
       }
       deleteExternalSQLDirectory(directoryId);
       await refreshDatabaseNode(dbNodeKey);
-      message.success('外部 SQL 目录已移除');
+      message.success(t('sidebar.message.external_sql_directory_removed'));
   };
 
   const handleRefreshExternalSQLDirectory = async (node: any) => {
       const dbNodeKey = String(node?.dataRef?.dbNodeKey || '').trim();
       if (!dbNodeKey) {
-          message.warning('当前目录缺少数据库上下文，无法刷新');
+          message.warning(t('sidebar.message.external_sql_directory_context_missing'));
           return;
       }
       await refreshDatabaseNode(dbNodeKey);
-      message.success('外部 SQL 目录已刷新');
+      message.success(t('sidebar.message.external_sql_directory_refreshed'));
   };
 
   const handleCreateDatabase = async () => {
@@ -4079,7 +4238,7 @@ const Sidebar: React.FC<{
   const openCreateSchemaModal = (node: any) => {
       const dialect = getMetadataDialect(node?.dataRef as SavedConnection);
       if (!isPostgresSchemaDialect(dialect)) {
-          message.warning('当前数据源暂不支持通过此入口新建模式');
+          message.warning(t('sidebar.message.schema_create_unsupported'));
           return;
       }
       setCreateSchemaTarget(node);
@@ -4094,19 +4253,19 @@ const Sidebar: React.FC<{
           const conn = node?.dataRef;
           const dbName = String(conn?.dbName || node?.title || '').trim();
           if (!conn || !dbName) {
-              message.error('未找到目标数据库，无法新建模式');
+              message.error(t('sidebar.message.schema_target_missing'));
               return;
           }
 
           const res = await CreateSchema(buildRpcConnectionConfig(conn.config, { database: dbName }) as any, dbName, values.name);
           if (res.success) {
-              message.success('模式创建成功');
+              message.success(t('sidebar.message.schema_created'));
               setIsCreateSchemaModalOpen(false);
               setCreateSchemaTarget(null);
               createSchemaForm.resetFields();
               await loadTables(node);
           } else {
-              message.error('创建失败: ' + res.message);
+              message.error(t('sidebar.message.operation_create_failed', { error: res.message }));
           }
       } catch (e) {
           // Validate failed
@@ -4231,18 +4390,18 @@ const Sidebar: React.FC<{
           const oldDbName = String(conn.dbName || '').trim();
           const newDbName = String(values.newName || '').trim();
           if (!oldDbName || !newDbName) {
-              message.error("数据库名称不能为空");
+              message.error(t('sidebar.message.database_name_required'));
               return;
           }
           if (oldDbName === newDbName) {
-              message.warning("新旧数据库名称相同，无需修改");
+              message.warning(t('sidebar.message.database_name_unchanged'));
               return;
           }
 
           const config = buildRuntimeConfig(conn, conn.dbName);
           const res = await RenameDatabase(buildRpcConnectionConfig(config) as any, oldDbName, newDbName);
           if (res.success) {
-              message.success("数据库重命名成功");
+              message.success(t('sidebar.message.database_renamed'));
               setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${oldDbName}`)));
               setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${oldDbName}`)));
               await loadDatabases(getConnectionNodeRef(conn));
@@ -4250,7 +4409,7 @@ const Sidebar: React.FC<{
               setRenameDbTarget(null);
               renameDbForm.resetFields();
           } else {
-              message.error("重命名失败: " + res.message);
+              message.error(t('sidebar.message.operation_rename_failed', { error: res.message }));
           }
       } catch (e) {
           // Validate failed
@@ -4262,20 +4421,20 @@ const Sidebar: React.FC<{
       const dbName = String(conn.dbName || '').trim();
       if (!dbName) return;
       Modal.confirm({
-          title: '确认删除数据库',
-          content: `确定删除数据库 "${dbName}" 吗？该操作不可恢复。`,
+          title: t('sidebar.modal.confirm_delete_database.title'),
+          content: t('sidebar.modal.confirm_delete_database.content', { name: dbName }),
           okButtonProps: { danger: true },
           onOk: async () => {
               const config = buildRuntimeConfig(conn, conn.dbName);
               const res = await DropDatabase(buildRpcConnectionConfig(config) as any, dbName);
               if (res.success) {
-                  message.success("数据库删除成功");
+                  message.success(t('sidebar.message.database_deleted'));
                   closeTabsByDatabase(conn.id, dbName);
                   setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${dbName}`)));
                   setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${dbName}`)));
                   await loadDatabases(getConnectionNodeRef(conn));
               } else {
-                  message.error("删除失败: " + res.message);
+                  message.error(t('sidebar.message.operation_drop_failed', { error: res.message }));
               }
           }
       });
@@ -4538,7 +4697,7 @@ const Sidebar: React.FC<{
       });
       addTab({
           id: `query-create-starrocks-mv-${Date.now()}`,
-          title: '新建物化视图',
+          title: t('sidebar.v2_database_menu.new_materialized_view'),
           type: 'query',
           connectionId: id,
           dbName,
@@ -4551,7 +4710,7 @@ const Sidebar: React.FC<{
       const { dbName, id } = conn;
       addTab({
           id: `query-create-starrocks-catalog-${Date.now()}`,
-          title: '新建外部 Catalog',
+          title: t('sidebar.v2_database_menu.new_external_catalog'),
           type: 'query',
           connectionId: id,
           dbName,
@@ -4628,8 +4787,13 @@ const Sidebar: React.FC<{
 
   const openRenameSavedQueryModal = (query: SavedQuery) => {
       setRenameSavedQueryTarget(query);
-      renameSavedQueryForm.setFieldsValue({ name: query.name || '未命名查询' });
+      renameSavedQueryForm.setFieldsValue({ name: query.name || t('query_editor.save_modal.unnamed') });
       setIsRenameSavedQueryModalOpen(true);
+  };
+
+  const resolveSavedQueryDisplayName = (name: string | null | undefined) => {
+      const rawName = String(name || '').trim();
+      return rawName || t('query_editor.save_modal.unnamed');
   };
 
   const handleRenameSavedQuery = async () => {
@@ -4638,11 +4802,11 @@ const Sidebar: React.FC<{
           const values = await renameSavedQueryForm.validateFields();
           const nextName = String(values.name || '').trim();
           if (!nextName) {
-              message.error('查询名称不能为空');
+              message.error(t('query_editor.save_modal.name_required'));
               return;
           }
           if (nextName === renameSavedQueryTarget.name) {
-              message.warning('新旧查询名称相同，无需修改');
+              message.warning(t('sidebar.message.saved_query_name_unchanged'));
               return;
           }
 
@@ -4667,7 +4831,7 @@ const Sidebar: React.FC<{
           tabs
               .filter(tab => tab.type === 'query' && (tab.savedQueryId === renameSavedQueryTarget.id || tab.id === renameSavedQueryTarget.id))
               .forEach(tab => updateQueryTabDraft(tab.id, { title: nextName }));
-          message.success('查询已重命名');
+          message.success(t('sidebar.message.saved_query_renamed'));
           setIsRenameSavedQueryModalOpen(false);
           setRenameSavedQueryTarget(null);
           renameSavedQueryForm.resetFields();
@@ -4871,7 +5035,7 @@ const Sidebar: React.FC<{
               const queryTemplate = buildTableSelectQuery(getMetadataDialect(node.dataRef as SavedConnection), tableName);
               addTab({
                   id: `query-${Date.now()}`,
-                  title: `新建查询`,
+                  title: t('query.new'),
                   type: 'query',
                   connectionId: node.dataRef.id,
                   dbName: node.dataRef.dbName,
@@ -4949,7 +5113,7 @@ const Sidebar: React.FC<{
       const shouldPin = pinned ?? !currentlyPinned;
       setSidebarTablePinned(conn.id, dbName, tableName, conn.schemaName || '', shouldPin);
       void loadTables(getDatabaseNodeRef(conn, dbName));
-      message.success(shouldPin ? '已置顶表' : '已取消置顶');
+      message.success(shouldPin ? t('sidebar.message.table_pinned') : t('sidebar.message.table_unpinned'));
   };
 
   const handleTableGroupSortAction = (node: any, sortBy: 'name' | 'frequency') => {
@@ -4993,13 +5157,13 @@ const Sidebar: React.FC<{
       if (dbConnId && dbName) {
           closeTabsByDatabase(dbConnId, dbName);
       }
-      message.success("已关闭数据库");
+      message.success(t('sidebar.message.database_closed'));
   };
 
   const openDatabaseQuery = (node: any) => {
       addTab({
           id: `query-${Date.now()}`,
-          title: `新建查询 (${node.title})`,
+          title: t('sidebar.tab.new_query_database', { database: node.title }),
           type: 'query',
           connectionId: node.dataRef.id,
           dbName: node.title,
@@ -5086,27 +5250,27 @@ const Sidebar: React.FC<{
       setLoadedKeys(prev => prev.filter(k => k !== connKey && !k.toString().startsWith(`${connKey}-`)));
       replaceTreeNodeChildren(connKey, undefined);
       closeTabsByConnection(connKey);
-      message.success("已断开连接");
+      message.success(t('connection.sidebar.disconnect.success'));
   };
 
   const deleteConnectionNode = (node: any) => {
       Modal.confirm({
-          title: '确认删除',
-          content: `确定要删除连接 "${node.title}" 吗？`,
+          title: t('connection.sidebar.delete.confirmTitle'),
+          content: t('connection.sidebar.delete.confirmContent', { name: node.title }),
           onOk: async () => {
               const connId = String(node.key);
               const backendApp = (window as any).go?.app?.App;
               if (typeof backendApp?.DeleteConnection !== 'function') {
-                  message.error('删除连接失败：后端接口不可用');
+                  message.error(t('connection.sidebar.delete.backendUnavailable'));
                   throw new Error('DeleteConnection unavailable');
               }
               try {
                   await backendApp.DeleteConnection(connId);
                   closeTabsByConnection(connId);
                   removeConnection(connId);
-                  message.success('已删除连接');
+                  message.success(t('connection.sidebar.delete.success'));
               } catch (error: any) {
-                  message.error(error?.message || '删除连接失败');
+                  message.error(error?.message || t('connection.sidebar.delete.failureFallback'));
                   throw error;
               }
           }
@@ -5140,7 +5304,7 @@ const Sidebar: React.FC<{
           case 'new-query':
               addTab({
                   id: `query-${Date.now()}`,
-                  title: `新建查询`,
+                  title: buildConnectionRootQueryTabTitle(),
                   type: 'query',
                   connectionId: connId,
                   dbName: undefined,
@@ -5153,7 +5317,7 @@ const Sidebar: React.FC<{
           case 'new-command':
               addTab({
                   id: `redis-cmd-${connId}-${Date.now()}`,
-                  title: '命令 - db0',
+                  title: buildConnectionRootRedisCommandTabTitle(),
                   type: 'redis-command',
                   connectionId: connId,
                   redisDB: 0
@@ -5162,7 +5326,7 @@ const Sidebar: React.FC<{
           case 'open-monitor':
               addTab({
                   id: `redis-monitor-${connId}-${Date.now()}`,
-                  title: '监控 - db0',
+                  title: buildConnectionRootRedisMonitorTabTitle(),
                   type: 'redis-monitor',
                   connectionId: connId,
                   redisDB: 0
@@ -5206,8 +5370,8 @@ const Sidebar: React.FC<{
       }
       if (action === 'delete-group') {
           Modal.confirm({
-              title: '确认删除',
-              content: `确定要删除分组 "${tag.name}" 吗？这不会删除里面的连接。`,
+              title: t('connection.sidebar.group.deleteConfirmTitle'),
+              content: t('connection.sidebar.group.deleteConfirmContent', { name: tag.name }),
               onOk: () => {
                   removeConnectionTag(tag.id);
               },
@@ -5265,12 +5429,14 @@ const Sidebar: React.FC<{
       }
   };
 
+  const currentLanguage = getCurrentLanguage();
+
   const searchScopeSummary = useMemo(() => {
       if (searchScopes.includes('smart')) {
-          return '智能';
+          return t('sidebar.command_search.scope.summary_smart');
       }
-      return searchScopes.map((scope) => SEARCH_SCOPE_LABEL_MAP[scope]).join(' + ');
-  }, [searchScopes]);
+      return searchScopes.map((scope) => t(SEARCH_SCOPE_LABEL_KEY_MAP[scope])).join(' + ');
+  }, [searchScopes, currentLanguage]);
 
   const searchScopePopoverContent = useMemo(() => {
       const smartSelected = searchScopes.includes('smart');
@@ -5302,8 +5468,8 @@ const Sidebar: React.FC<{
           <div style={{ minWidth: 280, display: 'flex', flexDirection: 'column', background: panelBg, padding: 14, gap: 12 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                   <div>
-                      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, color: mutedTextColor, textTransform: 'uppercase' }}>搜索范围</div>
-                      <div style={{ marginTop: 4, fontSize: 13, lineHeight: 1.5, color: mutedTextColor }}>“智能”自动匹配最可能的命中项；手动模式支持按维度组合筛选。</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, color: mutedTextColor, textTransform: 'uppercase' }}>{t('sidebar.command_search.scope.title')}</div>
+                      <div style={{ marginTop: 4, fontSize: 13, lineHeight: 1.5, color: mutedTextColor }}>{t('sidebar.command_search.scope.description')}</div>
                   </div>
                   <div style={{ width: 32, height: 32, borderRadius: 10, display: 'grid', placeItems: 'center', background: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(17,24,39,0.06)', color: darkMode ? '#ffd666' : '#1677ff', flexShrink: 0 }}>
                       <FilterOutlined />
@@ -5321,10 +5487,10 @@ const Sidebar: React.FC<{
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                              <span style={{ fontSize: 14, fontWeight: 700, color: titleColor }}>智能</span>
-                              <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, color: darkMode ? '#ffe58f' : '#ad6800', background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(255,214,102,0.35)' }}>推荐</span>
+                              <span style={{ fontSize: 14, fontWeight: 700, color: titleColor }}>{t('sidebar.command_search.scope.smart')}</span>
+                              <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, color: darkMode ? '#ffe58f' : '#ad6800', background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(255,214,102,0.35)' }}>{t('sidebar.command_search.scope.recommended')}</span>
                           </div>
-                          <div style={{ marginTop: 3, fontSize: 12, lineHeight: 1.5, color: mutedTextColor }}>适合日常检索，自动覆盖名称、库、Host 和标签等高频维度。</div>
+                          <div style={{ marginTop: 3, fontSize: 12, lineHeight: 1.5, color: mutedTextColor }}>{t('sidebar.command_search.scope.smart_help')}</div>
                       </div>
                   </div>
               </label>
@@ -5332,8 +5498,8 @@ const Sidebar: React.FC<{
               <div style={{ height: 1, background: overlayTheme.divider, opacity: 0.9 }} />
 
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: mutedTextColor, textTransform: 'uppercase' }}>手动范围</div>
-                  <div style={{ fontSize: 12, color: mutedTextColor }}>支持多选组合</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: mutedTextColor, textTransform: 'uppercase' }}>{t('sidebar.command_search.scope.manual_title')}</div>
+                  <div style={{ fontSize: 12, color: mutedTextColor }}>{t('sidebar.command_search.scope.multi_select')}</div>
               </div>
 
               <div style={{ display: 'grid', gap: 8 }}>
@@ -5350,7 +5516,7 @@ const Sidebar: React.FC<{
                                       <div style={{ width: 28, height: 28, borderRadius: 9, display: 'grid', placeItems: 'center', background: checked ? (darkMode ? 'rgba(118,169,250,0.2)' : 'rgba(24,144,255,0.12)') : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(17,24,39,0.06)'), color: checked ? (darkMode ? '#91caff' : '#1677ff') : mutedTextColor, flexShrink: 0 }}>
                                           {SEARCH_SCOPE_ICON_MAP[option.value]}
                                       </div>
-                                      <span style={{ fontSize: 14, fontWeight: 600, color: titleColor, whiteSpace: 'nowrap' }}>{option.label}</span>
+                                      <span style={{ fontSize: 14, fontWeight: 600, color: titleColor, whiteSpace: 'nowrap' }}>{t(option.labelKey)}</span>
                                   </div>
                                   <div style={{ width: 18, display: 'flex', justifyContent: 'center', color: checked ? (darkMode ? '#91caff' : '#1677ff') : 'transparent', flexShrink: 0 }}>
                                       <CheckOutlined />
@@ -5362,11 +5528,11 @@ const Sidebar: React.FC<{
               </div>
 
               <div style={{ padding: '10px 12px', borderRadius: 12, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(17,24,39,0.04)', color: mutedTextColor, fontSize: 12, lineHeight: 1.6 }}>
-                  智能与其他项互斥。若你明确知道要搜的是对象、库、Host 或标签，建议切到手动范围以减少噪音结果。
+                  {t('sidebar.command_search.scope.manual_help')}
               </div>
           </div>
       );
-  }, [darkMode, overlayTheme, searchScopes]);
+  }, [darkMode, overlayTheme, searchScopes, currentLanguage]);
 
   const getConnectionHostSearchText = (node: TreeNode): string => {
       if (node.type !== 'connection') return '';
@@ -5447,8 +5613,8 @@ const Sidebar: React.FC<{
                   result.push({
                       key: `node-${node.key}`,
                       kind: 'node',
-                      title: String(node.title || conn.name || '未命名连接'),
-                      meta: resolveConnectionHostSummary(conn.config) || conn.config?.type || '连接',
+                      title: String(node.title || conn.name || t('connection.unnamed')),
+                      meta: resolveConnectionHostSummary(conn.config) || conn.config?.type || t('connection.sidebar.menu.section'),
                       icon: getDbIcon(resolveConnectionIconType(conn), resolveConnectionAccentColor(conn), 16),
                       node,
                   });
@@ -5457,8 +5623,8 @@ const Sidebar: React.FC<{
                   result.push({
                       key: `node-${node.key}`,
                       kind: 'node',
-                      title: String(node.title || dataRef.dbName || '未命名数据库'),
-                      meta: conn?.name || dataRef.id || '数据库',
+                      title: String(node.title || dataRef.dbName || t('database.unnamed')),
+                      meta: conn?.name || dataRef.id || t('database.label'),
                       icon: <DatabaseOutlined />,
                       node,
                   });
@@ -5508,7 +5674,7 @@ const Sidebar: React.FC<{
       {
           key: 'action-new-query',
 	          kind: 'action',
-	          title: '新建查询',
+	          title: t('query.new'),
 	          meta: '打开一个新的 SQL 编辑页',
 	          shortcut: resolveShortcutDisplay(shortcutOptions, 'newQueryTab', activeShortcutPlatform),
 	          icon: <PlusOutlined />,
@@ -5664,7 +5830,7 @@ const Sidebar: React.FC<{
           .find(Boolean),
   });
   const activeConnection = connections.find((conn) => conn.id === activeConnectionId) || null;
-  const activeConnectionDisplayName = String(activeConnection?.name || '').trim() || '未选择 Host';
+  const activeConnectionDisplayName = String(activeConnection?.name || '').trim() || t('sidebar.active_connection.no_host_selected');
   const activeDatabaseDisplayName = useMemo(() => {
       if (activeContext && typeof activeContext === 'object' && 'dbName' in activeContext) {
           return String(activeContext.dbName || '').trim();
@@ -6051,7 +6217,6 @@ const Sidebar: React.FC<{
       const currentSort = tableSortPreference[sortPreferenceKey] || 'name';
       return (
           <V2TableGroupContextMenuView
-              title="表 · tables"
               shortcutPlatform={activeShortcutPlatform}
               dbName={String(groupData.dbName || '')}
               count={Array.isArray(node.children) ? node.children.length : 0}
@@ -6090,7 +6255,7 @@ const Sidebar: React.FC<{
       const currentTagId = connectionTags.find((tag) => tag.connectionIds.includes(String(conn.id || node.key)))?.id || '';
       return (
           <V2ConnectionContextMenuView
-              connectionName={String(conn?.name || node.title || '未命名连接')}
+              connectionName={String(conn?.name || node.title || t('connection.unnamed'))}
               shortcutPlatform={activeShortcutPlatform}
               hostSummary={resolveConnectionHostSummary(conn?.config)}
               driverLabel={resolveConnectionIconType(conn)}
@@ -6240,18 +6405,14 @@ const Sidebar: React.FC<{
           );
       }
       const displayTitle = (() => {
-          if (node.type === 'queries-folder') return '已存查询 · saved';
-          if (node.type === 'external-sql-root') return '外部 SQL 目录';
-          if (node.type === 'object-group') {
-              if (groupKey === 'tables') return '表 · tables';
-              if (groupKey === 'views') return '视图 · views';
-              if (groupKey === 'routines') return '函数 · functions';
-              if (groupKey === 'triggers') return '触发器 · triggers';
-              if (groupKey === 'events') return '事件 · events';
-              if (groupKey === 'materializedViews') return '物化视图 · materialized';
-          }
-          return rawTitle;
-      })();
+           if (node.type === 'queries-folder') return t('sidebar.tree.saved_queries');
+           if (node.type === 'external-sql-root') return t('sidebar.external_sql.root');
+           if (node.type === 'object-group') {
+              const objectGroupTitle = resolveV2ObjectGroupTitle(node);
+              if (objectGroupTitle) return objectGroupTitle;
+           }
+           return rawTitle;
+       })();
       const metaText = getV2TreeMetaText(node);
       const isMono = node.type === 'table'
           || node.type === 'view'
@@ -6274,8 +6435,8 @@ const Sidebar: React.FC<{
                   'gn-v2-table-pin-action',
                   node?.dataRef?.pinnedSidebarTable ? 'is-pinned' : '',
               ].filter(Boolean).join(' ')}
-              title={node?.dataRef?.pinnedSidebarTable ? '取消置顶表' : '置顶表'}
-              aria-label={node?.dataRef?.pinnedSidebarTable ? '取消置顶表' : '置顶表'}
+              title={node?.dataRef?.pinnedSidebarTable ? t('sidebar.action.unpin_table') : t('sidebar.action.pin_table')}
+              aria-label={node?.dataRef?.pinnedSidebarTable ? t('sidebar.action.unpin_table') : t('sidebar.action.pin_table')}
               aria-pressed={node?.dataRef?.pinnedSidebarTable ? true : false}
               data-v2-sidebar-table-pin-action="true"
               onMouseDown={(event) => {
@@ -6467,7 +6628,7 @@ const Sidebar: React.FC<{
 	              : '未找到匹配项。可输入 @表名 只搜表对象，或输入 ?问题 让 AI 回答。');
 	      return (
 	          <div className="gn-v2-command-backdrop" data-v2-command-search="true" onMouseDown={closeV2CommandSearch}>
-              <div className="gn-v2-command-palette" role="dialog" aria-modal="true" aria-label="搜索表、连接、动作" onMouseDown={(event) => event.stopPropagation()}>
+              <div className="gn-v2-command-palette" role="dialog" aria-modal="true" aria-label={v2CommandSearchLabel} onMouseDown={(event) => event.stopPropagation()}>
                   <div className="gn-v2-command-searchbar">
                       <SearchOutlined />
                       <Input
@@ -6477,7 +6638,7 @@ const Sidebar: React.FC<{
                           value={v2CommandSearchValue}
                           onChange={(event) => setV2CommandSearchValue(event.target.value)}
                           onKeyDown={handleV2CommandSearchKeyDown}
-                          placeholder="搜索表、连接、动作... 或问 AI"
+                          placeholder={v2CommandSearchPlaceholder}
                       />
                       <kbd>esc</kbd>
                   </div>
@@ -6646,7 +6807,7 @@ const Sidebar: React.FC<{
             return [
                 {
                     key: 'refresh',
-                    label: '刷新',
+                    label: t('sidebar.menu.refresh'),
                     icon: <ReloadOutlined />,
                     onClick: () => {
                         const connKey = String(node.key);
@@ -6663,12 +6824,12 @@ const Sidebar: React.FC<{
                 { type: 'divider' },
                 {
                     key: 'new-command',
-                    label: '新建命令窗口',
+                    label: t('sidebar.menu.new_command_window'),
                     icon: <ConsoleSqlOutlined />,
                     onClick: () => {
                         addTab({
                             id: `redis-cmd-${node.key}-${Date.now()}`,
-                            title: '命令 - db0',
+                            title: buildConnectionRootRedisCommandTabTitle(),
                             type: 'redis-command',
                             connectionId: node.key,
                             redisDB: 0
@@ -6677,12 +6838,12 @@ const Sidebar: React.FC<{
                 },
                 {
                     key: 'open-monitor',
-                    label: 'Redis 实例监控',
+                    label: t('redis_monitor.title.instance'),
                     icon: <DashboardOutlined />,
                     onClick: () => {
                         addTab({
                             id: `redis-monitor-${node.key}-${Date.now()}`,
-                            title: '监控 - db0',
+                            title: buildConnectionRootRedisMonitorTabTitle(),
                             type: 'redis-monitor',
                             connectionId: node.key,
                             redisDB: 0
@@ -6692,7 +6853,7 @@ const Sidebar: React.FC<{
                 { type: 'divider' },
                 {
                     key: 'edit',
-                    label: '编辑连接',
+                    label: t('sidebar.menu.edit_connection'),
                     icon: <EditOutlined />,
                     onClick: () => {
                         if (onEditConnection) onEditConnection(node.dataRef);
@@ -6700,59 +6861,22 @@ const Sidebar: React.FC<{
                 },
                 {
                     key: 'copy-connection',
-                    label: '复制连接',
+                    label: t('connection.sidebar.menu.copy'),
                     icon: <CopyOutlined />,
                     onClick: () => handleDuplicateConnection(node.dataRef as SavedConnection)
                 },
                 {
                     key: 'disconnect',
-                    label: '断开连接',
+                    label: t('connection.sidebar.menu.disconnect'),
                     icon: <DisconnectOutlined />,
-                    onClick: () => {
-                        setConnectionStates(prev => {
-                            const next = { ...prev };
-                            Object.keys(next).forEach(k => {
-                                if (k === node.key || k.startsWith(`${node.key}-`)) {
-                                    delete next[k];
-                                }
-                            });
-                            return next;
-                        });
-                        setExpandedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                        setLoadedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                        replaceTreeNodeChildren(node.key, undefined);
-                        closeTabsByConnection(String(node.key));
-                        message.success("已断开连接");
-                    }
+                    onClick: () => disconnectConnectionNode(node)
                 },
                 {
                     key: 'delete',
-                    label: '删除连接',
+                    label: t('connection.sidebar.menu.delete'),
                     icon: <DeleteOutlined />,
                     danger: true,
-                    onClick: () => {
-                        Modal.confirm({
-                            title: '确认删除',
-                            content: `确定要删除连接 "${node.title}" 吗？`,
-                            onOk: async () => {
-                                const connId = String(node.key);
-                                const backendApp = (window as any).go?.app?.App;
-                                if (typeof backendApp?.DeleteConnection !== 'function') {
-                                    message.error('删除连接失败：后端接口不可用');
-                                    throw new Error('DeleteConnection unavailable');
-                                }
-                                try {
-                                    await backendApp.DeleteConnection(connId);
-                                    closeTabsByConnection(connId);
-                                    removeConnection(connId);
-                                    message.success('已删除连接');
-                                } catch (error: any) {
-                                    message.error(error?.message || '删除连接失败');
-                                    throw error;
-                                }
-                            }
-                        });
-                    }
+                    onClick: () => deleteConnectionNode(node)
                 }
             ];
         }
@@ -6769,7 +6893,7 @@ const Sidebar: React.FC<{
         }
         tagSubMenuItems.push({
             key: 'move-to-ungrouped',
-            label: '移出标签',
+            label: t('connection.sidebar.menu.moveOutTag'),
             onClick: () => moveConnectionToTag(node.key, null)
         });
 
@@ -6778,7 +6902,7 @@ const Sidebar: React.FC<{
         return [
             ...(connectionCapabilities.supportsCreateDatabase ? [{
                 key: 'new-db',
-                label: '新建数据库',
+                label: t('connection.sidebar.menu.createDatabase'),
                 icon: <DatabaseOutlined />,
                 onClick: () => {
                     setTargetConnection(node);
@@ -6787,7 +6911,7 @@ const Sidebar: React.FC<{
             }] : []),
             {
                 key: 'refresh',
-                label: '刷新',
+                label: t('sidebar.menu.refresh'),
                 icon: <ReloadOutlined />,
                 onClick: () => {
                     const connKey = String(node.key);
@@ -6802,14 +6926,14 @@ const Sidebar: React.FC<{
                 }
             },
             { type: 'divider' },
-            {
+             {
                key: 'new-query',
-               label: '新建查询',
+               label: t('sidebar.menu.new_query'),
                icon: <ConsoleSqlOutlined />,
                onClick: () => {
                    addTab({
                        id: `query-${Date.now()}`,
-                       title: `新建查询`,
+                       title: buildConnectionRootQueryTabTitle(),
                        type: 'query',
                        connectionId: node.key,
                        dbName: undefined,
@@ -6819,14 +6943,14 @@ const Sidebar: React.FC<{
              },
              {
                  key: 'open-sql-file',
-                 label: '运行外部SQL文件',
+                 label: t('sidebar.sql_file_exec.title'),
                  icon: <FileAddOutlined />,
                  onClick: () => handleRunSQLFile(node)
              },
              { type: 'divider' },
              {
                  key: 'edit',
-                 label: '编辑连接',
+                 label: t('sidebar.menu.edit_connection'),
                  icon: <EditOutlined />,
                  onClick: () => {
                      if (onEditConnection) onEditConnection(node.dataRef);
@@ -6834,76 +6958,28 @@ const Sidebar: React.FC<{
              },
              {
                  key: 'copy-connection',
-                 label: '复制连接',
+                 label: t('connection.sidebar.menu.copy'),
                  icon: <CopyOutlined />,
                  onClick: () => handleDuplicateConnection(node.dataRef as SavedConnection)
              },
              {
                  key: 'move-to-tag',
-                 label: '移至标签',
+                 label: t('connection.sidebar.menu.moveToTag'),
                  icon: <FolderOpenOutlined />,
                  children: tagSubMenuItems
              },
              {
                  key: 'disconnect',
-                 label: '断开连接',
+                 label: t('connection.sidebar.menu.disconnect'),
                  icon: <DisconnectOutlined />,
-                 onClick: () => {
-                     const connId = String(node.key || '');
-                     // 强制清理该连接相关的 loading 标记，避免网络卡住后重连仍被短路。
-                     Array.from(loadingNodesRef.current).forEach((loadingKey) => {
-                         if (loadingKey === `dbs-${connId}` || loadingKey.startsWith(`tables-${connId}-`)) {
-                             loadingNodesRef.current.delete(loadingKey);
-                         }
-                     });
-                     // Reset status recursively
-                     setConnectionStates(prev => {
-                         const next = { ...prev };
-                         Object.keys(next).forEach(k => {
-                             if (k === node.key || k.startsWith(`${node.key}-`)) {
-                                 delete next[k];
-                             }
-                         });
-                         return next;
-                     });
-                     // Collapse node and children
-                     setExpandedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                     // Reset loaded state recursively
-                     setLoadedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                     // Clear children (undefined to trigger reload)
-                     replaceTreeNodeChildren(node.key, undefined);
-                     closeTabsByConnection(String(node.key));
-                     message.success("已断开连接");
-                 }
+                 onClick: () => disconnectConnectionNode(node)
              },
              {
                  key: 'delete',
-                 label: '删除连接',
+                 label: t('connection.sidebar.menu.delete'),
                  icon: <DeleteOutlined />,
                  danger: true,
-                 onClick: () => {
-                     Modal.confirm({
-                         title: '确认删除',
-                         content: `确定要删除连接 "${node.title}" 吗？`,
-                         onOk: async () => {
-                             const connId = String(node.key);
-                             const backendApp = (window as any).go?.app?.App;
-                             if (typeof backendApp?.DeleteConnection !== 'function') {
-                                 message.error('删除连接失败：后端接口不可用');
-                                 throw new Error('DeleteConnection unavailable');
-                             }
-                             try {
-                                 await backendApp.DeleteConnection(connId);
-                                 closeTabsByConnection(connId);
-                                 removeConnection(connId);
-                                 message.success('已删除连接');
-                             } catch (error: any) {
-                                 message.error(error?.message || '删除连接失败');
-                                 throw error;
-                             }
-                         }
-                     });
-                 }
+                 onClick: () => deleteConnectionNode(node)
              }
         ];
     } else if (node.type === 'redis-db') {
@@ -6961,90 +7037,90 @@ const Sidebar: React.FC<{
        const supportsSchemaActions = isPostgresSchemaDialect(dialect);
        return [
            {
-               key: 'new-table',
-               label: '新建表',
-               icon: <TableOutlined />,
-               onClick: () => openNewTableDesign(node)
-           },
-           ...(supportsSchemaActions ? [
-               {
-                   key: 'new-schema',
-                   label: '新建模式',
-                   icon: <FolderAddOutlined />,
-                   onClick: () => handleV2DatabaseContextMenuAction(node, 'new-schema')
-               },
-           ] : []),
-           ...(isStarRocks ? [
-               {
-                   key: 'new-materialized-view',
-                   label: '新建物化视图',
-                   icon: <ThunderboltOutlined />,
-                   onClick: () => openCreateStarRocksMaterializedView(node)
-               },
-               {
-                   key: 'new-external-catalog',
-                   label: '新建外部 Catalog',
-                   icon: <CloudOutlined />,
-                   onClick: () => openCreateStarRocksExternalCatalog(node)
-               },
-           ] : []),
-           ...(capabilities.supportsRenameDatabase ? [{
-               key: 'rename-db',
-               label: '重命名数据库',
-               icon: <EditOutlined />,
-               onClick: () => handleV2DatabaseContextMenuAction(node, 'rename-db')
-           }] : []),
-           ...(capabilities.supportsDropDatabase ? [{
-               key: 'danger-zone',
-               label: '危险操作',
-               icon: <WarningOutlined />,
-               children: [
-                   {
-                       key: 'drop-db',
-                       label: '删除数据库',
-                       icon: <DeleteOutlined />,
-                       danger: true,
-                       onClick: () => handleV2DatabaseContextMenuAction(node, 'drop-db')
-                   }
-               ]
-           }] : []),
-           {
-               key: 'refresh',
-               label: '刷新',
-               icon: <ReloadOutlined />,
-               onClick: () => handleV2DatabaseContextMenuAction(node, 'refresh')
-           },
-           {
-               key: 'export-db-schema',
-               label: '导出全部表结构 (SQL)',
-               icon: <ExportOutlined />,
-               onClick: () => handleV2DatabaseContextMenuAction(node, 'export-db-schema')
-           },
-           {
-               key: 'backup-db-sql',
-               label: '备份全部表 (结构+数据 SQL)',
-               icon: <SaveOutlined />,
-               onClick: () => handleV2DatabaseContextMenuAction(node, 'backup-db-sql')
-           },
-           { type: 'divider' },
-           {
-               key: 'disconnect-db',
-               label: '关闭数据库',
-               icon: <DisconnectOutlined />,
-               onClick: () => handleV2DatabaseContextMenuAction(node, 'disconnect-db')
-           },
-           {
-               key: 'new-query',
-               label: '新建查询',
-               icon: <ConsoleSqlOutlined />,
-               onClick: () => handleV2DatabaseContextMenuAction(node, 'new-query')
-             },
+                key: 'new-table',
+                label: t('sidebar.menu.create_table'),
+                icon: <TableOutlined />,
+                onClick: () => openNewTableDesign(node)
+            },
+            ...(supportsSchemaActions ? [
+                {
+                    key: 'new-schema',
+                    label: t('sidebar.v2_database_menu.new_schema'),
+                    icon: <FolderAddOutlined />,
+                    onClick: () => handleV2DatabaseContextMenuAction(node, 'new-schema')
+                },
+            ] : []),
+            ...(isStarRocks ? [
+                {
+                    key: 'new-materialized-view',
+                    label: t('sidebar.v2_database_menu.new_materialized_view'),
+                    icon: <ThunderboltOutlined />,
+                    onClick: () => openCreateStarRocksMaterializedView(node)
+                },
+                {
+                    key: 'new-external-catalog',
+                    label: t('sidebar.v2_database_menu.new_external_catalog'),
+                    icon: <CloudOutlined />,
+                    onClick: () => openCreateStarRocksExternalCatalog(node)
+                },
+            ] : []),
+            ...(capabilities.supportsRenameDatabase ? [{
+                key: 'rename-db',
+                label: t('sidebar.menu.rename_database'),
+                icon: <EditOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'rename-db')
+            }] : []),
+            ...(capabilities.supportsDropDatabase ? [{
+                key: 'danger-zone',
+                label: t('sidebar.menu.danger_operations'),
+                icon: <WarningOutlined />,
+                children: [
+                    {
+                        key: 'drop-db',
+                        label: t('sidebar.v2_table_menu.item_with_suffix', { label: t('sidebar.menu.delete_database'), suffix: 'DROP' }),
+                        icon: <DeleteOutlined />,
+                        danger: true,
+                        onClick: () => handleV2DatabaseContextMenuAction(node, 'drop-db')
+                    }
+                ]
+            }] : []),
+            {
+                key: 'refresh',
+                label: t('sidebar.v2_database_menu.refresh_object_tree'),
+                icon: <ReloadOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'refresh')
+            },
+            {
+                key: 'export-db-schema',
+                label: t('sidebar.v2_database_menu.export_all_table_schema_sql'),
+                icon: <ExportOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'export-db-schema')
+            },
+            {
+                key: 'backup-db-sql',
+                label: t('sidebar.v2_database_menu.backup_all_tables_sql'),
+                icon: <SaveOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'backup-db-sql')
+            },
+            { type: 'divider' },
+            {
+                key: 'disconnect-db',
+                label: t('sidebar.menu.close_database'),
+                icon: <DisconnectOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'disconnect-db')
+            },
              {
-                 key: 'run-sql',
-                 label: '运行外部SQL文件',
-                 icon: <FileAddOutlined />,
-                 onClick: () => handleV2DatabaseContextMenuAction(node, 'run-sql')
-             }
+                 key: 'new-query',
+                 label: t('sidebar.menu.new_query'),
+                 icon: <ConsoleSqlOutlined />,
+                 onClick: () => handleV2DatabaseContextMenuAction(node, 'new-query')
+              },
+             {
+                  key: 'run-sql',
+                  label: t('sidebar.sql_file_exec.title'),
+                  icon: <FileAddOutlined />,
+                  onClick: () => handleV2DatabaseContextMenuAction(node, 'run-sql')
+              }
        ];
     } else if (node.type === 'view') {
         return [
@@ -7069,12 +7145,12 @@ const Sidebar: React.FC<{
             },
             {
                 key: 'new-query',
-                label: '新建查询',
+                label: t('sidebar.menu.new_query'),
                 icon: <ConsoleSqlOutlined />,
                 onClick: () => {
                     addTab({
                         id: `query-${Date.now()}`,
-                        title: `新建查询`,
+                        title: t('query.new'),
                         type: 'query',
                         connectionId: node.dataRef.id,
                         dbName: node.dataRef.dbName,
@@ -7124,12 +7200,12 @@ const Sidebar: React.FC<{
             },
             {
                 key: 'new-query',
-                label: '新建查询',
+                label: t('sidebar.menu.new_query'),
                 icon: <ConsoleSqlOutlined />,
                 onClick: () => {
                     addTab({
                         id: `query-${Date.now()}`,
-                        title: `新建查询`,
+                        title: t('query.new'),
                         type: 'query',
                         connectionId: node.dataRef.id,
                         dbName: node.dataRef.dbName,
@@ -7200,14 +7276,14 @@ const Sidebar: React.FC<{
         return [
             {
                 key: 'new-query',
-                label: '新建查询',
+                label: t('sidebar.menu.new_query'),
                 icon: <ConsoleSqlOutlined />,
                 onClick: () => {
                    const tableName = String(node.dataRef?.tableName || '').trim();
                    const queryTemplate = buildTableSelectQuery(getMetadataDialect(node.dataRef as SavedConnection), tableName);
                    addTab({
                        id: `query-${Date.now()}`,
-                       title: `新建查询`,
+                       title: t('query.new'),
                        type: 'query',
                        connectionId: node.dataRef.id,
                        dbName: node.dataRef.dbName,
@@ -7306,12 +7382,12 @@ const Sidebar: React.FC<{
         return [
             {
                 key: 'open-query',
-                label: '打开查询',
+                label: t('sidebar.menu.open_query'),
                 icon: <ConsoleSqlOutlined />,
                 onClick: () => {
                     addTab({
                         id: q.id,
-                        title: q.name,
+                        title: resolveSavedQueryDisplayName(q.name),
                         type: 'query',
                         connectionId: q.connectionId,
                         dbName: q.dbName,
@@ -7323,19 +7399,19 @@ const Sidebar: React.FC<{
             { type: 'divider' },
             {
                 key: 'rename-query',
-                label: '重命名查询',
+                label: t('sidebar.menu.rename_query'),
                 icon: <EditOutlined />,
                 onClick: () => openRenameSavedQueryModal(q),
             },
             {
                 key: 'delete-query',
-                label: '删除查询',
+                label: t('sidebar.menu.delete_query'),
                 icon: <DeleteOutlined />,
                 danger: true,
                 onClick: () => {
                     Modal.confirm({
-                        title: '确认删除',
-                        content: `确定要删除已保存的查询 "${q.name}" 吗？此操作不可恢复。`,
+                        title: t('sidebar.modal.confirm_delete.title'),
+                        content: t('sidebar.modal.confirm_delete_saved_query.content', { name: resolveSavedQueryDisplayName(q.name) }),
                         okButtonProps: { danger: true },
                         onOk: () => {
                             deleteQuery(q.id);
@@ -7347,7 +7423,7 @@ const Sidebar: React.FC<{
                             const nextTreeData = removeNode(treeDataRef.current);
                             treeDataRef.current = nextTreeData;
                             setTreeData(nextTreeData);
-                            message.success('查询已删除');
+                            message.success(t('sidebar.message.saved_query_deleted'));
                         }
                     });
                 }
@@ -7359,7 +7435,7 @@ const Sidebar: React.FC<{
         return [
             {
                 key: 'add-external-sql-directory',
-                label: '添加 SQL 目录',
+                label: t('sidebar.menu.add_sql_directory'),
                 icon: <PlusOutlined />,
                 onClick: () => {
                     void handleAddExternalSQLDirectory(node);
@@ -7372,7 +7448,7 @@ const Sidebar: React.FC<{
         return [
             {
                 key: 'refresh-external-sql-directory',
-                label: '刷新目录',
+                label: t('sidebar.menu.refresh_directory'),
                 icon: <ReloadOutlined />,
                 onClick: () => {
                     void handleRefreshExternalSQLDirectory(node);
@@ -7381,7 +7457,7 @@ const Sidebar: React.FC<{
             { type: 'divider' },
             {
                 key: 'remove-external-sql-directory',
-                label: '移除目录',
+                label: t('sidebar.menu.remove_directory'),
                 icon: <DeleteOutlined />,
                 danger: true,
                 onClick: () => {
@@ -7395,7 +7471,7 @@ const Sidebar: React.FC<{
         return [
             {
                 key: 'open-external-sql-file',
-                label: '打开 SQL 文件',
+                label: t('sidebar.menu.open_sql_file'),
                 icon: <ConsoleSqlOutlined />,
                 onClick: () => {
                     void openExternalSQLFile(node);
@@ -7431,6 +7507,11 @@ const Sidebar: React.FC<{
                 hoverTitle = rawTableName;
             }
         }
+    } else if (node.type === 'object-group') {
+        const objectGroupTitle = resolveV2ObjectGroupTitle(node);
+        if (objectGroupTitle) {
+            hoverTitle = objectGroupTitle;
+        }
     } else if (node.type === 'external-sql-directory' || node.type === 'external-sql-folder' || node.type === 'external-sql-file') {
         hoverTitle = String(node?.dataRef?.path || displayTitle);
     }
@@ -7451,9 +7532,11 @@ const Sidebar: React.FC<{
     }
 
     if (node.type === 'external-sql-root') {
+        const externalSqlRootTitle = t('sidebar.external_sql.root');
+        const addSqlDirectoryLabel = t('sidebar.menu.add_sql_directory');
         return (
             <span
-                title={hoverTitle}
+                title={externalSqlRootTitle}
                 className="gn-v2-tree-external-root"
             >
                 <span
@@ -7464,15 +7547,15 @@ const Sidebar: React.FC<{
                 >
                     <span className="gn-v2-tree-label">
                         {statusBadge}
-                        {displayTitle}
+                        {externalSqlRootTitle}
                     </span>
                 </span>
                 <Button
                     size="small"
                     type="text"
                     icon={<PlusOutlined />}
-                    title="添加外部 SQL 目录"
-                    aria-label="添加外部 SQL 目录"
+                    title={addSqlDirectoryLabel}
+                    aria-label={addSqlDirectoryLabel}
                     onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
@@ -7766,7 +7849,7 @@ const Sidebar: React.FC<{
 
   const renderV2RailConnectionGroup = (group: V2RailConnectionGroup) => {
       const collapsed = collapsedV2RailGroupIdSet.has(group.id);
-      const groupTitle = group.name || '连接';
+      const groupTitle = group.name || t('connection.sidebar.group.untitled');
       const rootToken = group.rootToken;
 
       return (
@@ -7811,7 +7894,7 @@ const Sidebar: React.FC<{
               }}
           >
               {hasV2RailConnectionGroups && (
-                  <Tooltip title={`${groupTitle} · ${group.connections.length} 个连接`} placement="right">
+                  <Tooltip title={t('connection.sidebar.group.meta', { count: group.connections.length.toLocaleString() })} placement="right">
                       <button
                           type="button"
                           className={`gn-v2-rail-group-header${group.isUngrouped ? ' is-ungrouped' : ''}`}
@@ -7834,9 +7917,9 @@ const Sidebar: React.FC<{
                                   maxHeight: position.maxHeight,
                               });
                           }}
-                          aria-label={`${collapsed ? '展开' : '折叠'}连接分组 ${groupTitle}`}
+                          aria-label={t(collapsed ? 'connection.sidebar.group.expandAria' : 'connection.sidebar.group.collapseAria', { name: groupTitle })}
                           aria-expanded={!collapsed}
-                          title={`${groupTitle} · ${group.connections.length} 个连接`}
+                          title={t('connection.sidebar.group.meta', { count: group.connections.length.toLocaleString() })}
                           data-v2-rail-connection-group-header="true"
                       >
                           <span className="gn-v2-rail-group-chevron">
@@ -7856,60 +7939,77 @@ const Sidebar: React.FC<{
       );
   };
 
+  const v2RailObjectActionsLabel = t('sidebar.rail.object_actions');
+  const v2RailSystemActionsLabel = t('sidebar.rail.system_actions');
+  const v2NewGroupLabel = t('sidebar.action.new_group');
+  const v2BatchTablesLabel = t('sidebar.action.batch_tables');
+  const v2BatchDatabasesLabel = t('sidebar.action.batch_databases');
+  const v2OpenExternalSqlFileLabel = t('sidebar.sql_file_exec.title');
+  const v2LocateCurrentTableLabel = t('sidebar.action.locate_current_table');
+  const v2LocateCurrentTableUnavailableLabel = t('sidebar.message.locate_current_table_unavailable');
+  const v2AiAssistantLabel = t('app.sidebar.ai_assistant');
+  const v2ToolsLabel = t('app.sidebar.tools');
+  const v2SettingsLabel = t('app.sidebar.settings');
+  const v2ActiveConnectionHeaderLabel = t('sidebar.active_connection.current_host_database');
+  const v2NoDatabaseSelectedLabel = t('sidebar.active_connection.no_database_selected');
+  const v2ConnectionActionsLabel = t('sidebar.active_connection.actions');
+  const v2CommandSearchLabel = t('sidebar.command_search.label');
+  const v2CommandSearchPlaceholder = t('sidebar.command_search.placeholder');
+
   const renderV2ConnectionRail = () => (
-      <div className="gn-v2-connection-rail" aria-label="系统操作">
-          <div className="gn-v2-rail-primary-actions" aria-label="对象区快捷操作">
-              <Tooltip title="新建组" placement="right">
+      <div className="gn-v2-connection-rail" aria-label={v2RailSystemActionsLabel}>
+          <div className="gn-v2-rail-primary-actions" aria-label={v2RailObjectActionsLabel}>
+              <Tooltip title={v2NewGroupLabel} placement="right">
                   <button
                       type="button"
                       className="gn-v2-rail-tool gn-v2-rail-action"
                       onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
-                      aria-label="新建组"
+                      aria-label={v2NewGroupLabel}
                       data-sidebar-create-group-action="true"
                   >
                       <FolderOpenOutlined />
                   </button>
               </Tooltip>
-              <Tooltip title="批量操作表" placement="right">
+              <Tooltip title={v2BatchTablesLabel} placement="right">
                   <button
                       type="button"
                       className="gn-v2-rail-tool gn-v2-rail-action"
                       onClick={() => openBatchOperationModal()}
-                      aria-label="批量操作表"
+                      aria-label={v2BatchTablesLabel}
                       data-sidebar-batch-table-action="true"
                   >
                       <TableOutlined />
                   </button>
               </Tooltip>
-              <Tooltip title="批量操作库" placement="right">
+              <Tooltip title={v2BatchDatabasesLabel} placement="right">
                   <button
                       type="button"
                       className="gn-v2-rail-tool gn-v2-rail-action"
                       onClick={() => openBatchDatabaseModal()}
-                      aria-label="批量操作库"
+                      aria-label={v2BatchDatabasesLabel}
                       data-sidebar-batch-database-action="true"
                   >
                       <DatabaseOutlined />
                   </button>
               </Tooltip>
-              <Tooltip title="运行外部SQL文件" placement="right">
+              <Tooltip title={v2OpenExternalSqlFileLabel} placement="right">
                   <button
                       type="button"
                       className="gn-v2-rail-tool gn-v2-rail-action"
                       onClick={handleOpenSQLFileFromToolbar}
-                      aria-label="运行外部 SQL 文件"
+                      aria-label={v2OpenExternalSqlFileLabel}
                       data-sidebar-open-external-sql-file-action="true"
                   >
                       <FileAddOutlined />
                   </button>
               </Tooltip>
-              <Tooltip title={canLocateActiveTab ? '定位当前打开表' : '当前标签页没有可定位的表'} placement="right">
+              <Tooltip title={canLocateActiveTab ? v2LocateCurrentTableLabel : v2LocateCurrentTableUnavailableLabel} placement="right">
                   <span className="gn-v2-rail-action-wrap">
                       <button
                           type="button"
                           className="gn-v2-rail-tool gn-v2-rail-action"
                           onClick={handleLocateActiveTabInSidebar}
-                          aria-label="定位当前打开表"
+                          aria-label={v2LocateCurrentTableLabel}
                           data-sidebar-locate-current-tab-action="true"
                           disabled={!canLocateActiveTab}
                       >
@@ -7918,31 +8018,31 @@ const Sidebar: React.FC<{
                   </span>
               </Tooltip>
           </div>
-          <div className="gn-v2-rail-secondary-actions" aria-label="系统操作">
-              <Tooltip title="AI 助手" placement="right">
+          <div className="gn-v2-rail-secondary-actions" aria-label={v2RailSystemActionsLabel}>
+              <Tooltip title={v2AiAssistantLabel} placement="right">
                   <button
                       type="button"
                       className="gn-v2-rail-tool"
                       onClick={onToggleAI}
-                      aria-label="AI 助手"
+                      aria-label={v2AiAssistantLabel}
                       data-gonavi-ai-entry-action="true"
                   >
                       <RobotOutlined />
                   </button>
               </Tooltip>
-              <Tooltip title="工具" placement="right">
+              <Tooltip title={v2ToolsLabel} placement="right">
                   <button
                       type="button"
                       className="gn-v2-rail-tool"
                       onClick={onOpenTools}
-                      aria-label="工具"
+                      aria-label={v2ToolsLabel}
                       data-gonavi-open-tools-action="true"
                   >
                       <ToolOutlined />
                   </button>
               </Tooltip>
-              <Tooltip title="设置" placement="right">
-                  <button type="button" className="gn-v2-rail-tool" onClick={onOpenSettings} aria-label="设置">
+              <Tooltip title={v2SettingsLabel} placement="right">
+                  <button type="button" className="gn-v2-rail-tool" onClick={onOpenSettings} aria-label={v2SettingsLabel}>
                       <SettingOutlined />
                   </button>
               </Tooltip>
@@ -7956,32 +8056,32 @@ const Sidebar: React.FC<{
         <div className={isV2Ui ? 'gn-v2-object-explorer' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, flex: 1 }}>
         {isV2Ui && (
             <div className="gn-v2-active-connection-header" data-object-count={activeConnectionObjectCount}>
-                <div className="gn-v2-active-connection-trigger" aria-label="当前 Host 与数据库">
+                <div className="gn-v2-active-connection-trigger" aria-label={v2ActiveConnectionHeaderLabel}>
                     <span className={`gn-v2-live-dot is-${activeConnection ? buildRailConnectionStatus(activeConnection.id) : 'idle'}`} />
                     <div className="gn-v2-active-connection-copy">
                         <strong>{activeConnectionDisplayName}</strong>
-                        <span>{activeDatabaseDisplayName || '未选择数据库'}</span>
+                        <span>{activeDatabaseDisplayName || v2NoDatabaseSelectedLabel}</span>
                     </div>
                 </div>
                 <div className="gn-v2-active-connection-actions">
                     {onCreateConnection && (
-                        <Tooltip title="新建连接">
+                        <Tooltip title={t('connection.new')}>
                             <Button
                                 size="small"
                                 type="text"
                                 icon={<PlusOutlined />}
-                                aria-label="新建连接"
+                                aria-label={t('connection.new')}
                                 data-gonavi-create-connection-action="true"
                                 onClick={onCreateConnection}
                             />
                         </Tooltip>
                     )}
-                    <Tooltip title="连接操作">
+                    <Tooltip title={v2ConnectionActionsLabel}>
                         <Button
                             size="small"
                             type="text"
                             icon={<MoreOutlined />}
-                            aria-label="连接操作"
+                            aria-label={v2ConnectionActionsLabel}
                             disabled={!activeConnection}
                             onClick={(event) => {
                                 if (activeConnection) {
@@ -8002,10 +8102,10 @@ const Sidebar: React.FC<{
                         openV2CommandSearch();
                         onFocusCommandSearch?.();
                     }}
-                    aria-label="搜索表、连接、动作"
+                    aria-label={v2CommandSearchLabel}
                 >
                     <SearchOutlined />
-                    <span>搜索表、连接、动作... 或问 AI</span>
+                    <span>{v2CommandSearchPlaceholder}</span>
                     {focusSidebarSearchShortcutTokens.length > 0 ? (
                         <span className="gn-v2-search-shortcut" aria-hidden="true">
                             {focusSidebarSearchShortcutTokens.map((token, index) => (
@@ -8018,7 +8118,7 @@ const Sidebar: React.FC<{
                 <Input
                     {...noAutoCapInputProps}
                     ref={searchInputRef}
-                    placeholder="搜索..."
+                    placeholder={t('sidebar.search.placeholder')}
                     onChange={onSearch}
                     size="small"
                     prefix={<SearchOutlined style={{ color: darkMode ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.35)' }} />}
@@ -8039,7 +8139,7 @@ const Sidebar: React.FC<{
                             onOpenChange={setIsSearchScopePopoverOpen}
                             styles={{ body: { padding: 0, borderRadius: 16, overflow: 'hidden' } }}
                         >
-                            <Tooltip title={`搜索范围：${searchScopeSummary}`}>
+                            <Tooltip title={t('sidebar.command_search.scope.tooltip', { scope: searchScopeSummary })}>
                                 <div
                                     style={{
                                         display: 'flex',
@@ -8073,7 +8173,7 @@ const Sidebar: React.FC<{
                                 >
                                     <FilterOutlined style={{ fontSize: 13 }} />
                                     <span style={{ fontSize: 12, fontWeight: 500 }}>
-                                        {searchScopes.includes('smart') ? '智' : searchScopes.length}
+                                        {searchScopes.includes('smart') ? t('sidebar.command_search.scope.compact_smart') : searchScopes.length}
                                     </span>
                                 </div>
                             </Tooltip>
@@ -8084,7 +8184,7 @@ const Sidebar: React.FC<{
         </div>
 
         {isV2Ui && (
-            <div className="gn-v2-explorer-filter-tabs" aria-label="对象筛选">
+            <div className="gn-v2-explorer-filter-tabs" aria-label={t('sidebar.command_search.object_kind.filter_aria')}>
                 {V2_EXPLORER_FILTER_OPTIONS.map((item) => (
                     <button
                         key={item.key}
@@ -8093,7 +8193,7 @@ const Sidebar: React.FC<{
                         aria-pressed={v2ExplorerFilter === item.key}
                         onClick={() => setV2ExplorerFilter(item.key)}
                     >
-                        {item.label}
+                        {t(item.labelKey)}
                     </button>
                 ))}
             </div>
@@ -8142,12 +8242,12 @@ const Sidebar: React.FC<{
                 </Tooltip>
             </div>
             <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
-                <Tooltip title="运行外部SQL文件">
+                <Tooltip title={v2OpenExternalSqlFileLabel}>
                     <Button
                         size="small"
                         type="text"
                         icon={<FileAddOutlined />}
-                        aria-label="运行外部 SQL 文件"
+                        aria-label={v2OpenExternalSqlFileLabel}
                         data-sidebar-open-external-sql-file-action="true"
                         onClick={handleOpenSQLFileFromToolbar}
                         style={{ color: legacyToolbarButtonColor }}
@@ -8264,8 +8364,8 @@ const Sidebar: React.FC<{
         <Modal
             title={renderSidebarModalTitle(
                 <FolderOpenOutlined />,
-                renameViewTarget?.type === 'tag' ? "编辑标签" : "新建组",
-                renameViewTarget?.type === 'tag' ? "调整分组名称和包含的连接。" : "为连接树创建一个更清晰的分组视图。"
+                renameViewTarget?.type === 'tag' ? t('sidebar.modal.tag.edit_title') : t('sidebar.modal.tag.create_title'),
+                renameViewTarget?.type === 'tag' ? t('sidebar.modal.tag.edit_description') : t('sidebar.modal.tag.create_description')
             )}
             open={isCreateTagModalOpen}
             centered
@@ -8305,10 +8405,10 @@ const Sidebar: React.FC<{
         >
             <Form form={createTagForm} layout="vertical">
                 <div style={modalSectionStyle}>
-                    <Form.Item name="name" label="标签名称" rules={[{ required: true, message: '请输入标签名称' }]}>
-                        <Input placeholder="例如：线上环境 / 核心业务 / 临时调试" />
+                    <Form.Item name="name" label={t('sidebar.field.tag_name')} rules={[{ required: true, message: t('sidebar.validation.tag_name_required') }]}>
+                        <Input placeholder={t('sidebar.placeholder.tag_name')} />
                     </Form.Item>
-                    <Form.Item name="connectionIds" label="选择连接" style={{ marginBottom: 0 }}>
+                    <Form.Item name="connectionIds" label={t('sidebar.field.select_connections')} style={{ marginBottom: 0 }}>
                         <Checkbox.Group style={{ width: '100%' }}>
                             <div style={modalScrollSectionStyle}>
                                 <Space direction="vertical" style={{ width: '100%' }}>
@@ -8340,7 +8440,7 @@ const Sidebar: React.FC<{
         </Modal>
 
         <Modal
-            title={`新建模式${createSchemaTarget?.dataRef?.dbName ? ` (${createSchemaTarget.dataRef.dbName})` : ''}`}
+            title={`${t('sidebar.v2_database_menu.new_schema')}${createSchemaTarget?.dataRef?.dbName ? ` (${createSchemaTarget.dataRef.dbName})` : ''}`}
             open={isCreateSchemaModalOpen}
             onOk={handleCreateSchema}
             onCancel={() => {
@@ -8350,14 +8450,14 @@ const Sidebar: React.FC<{
             }}
         >
             <Form form={createSchemaForm} layout="vertical">
-                <Form.Item name="name" label="模式名称" rules={[{ required: true, message: '请输入模式名称' }]}>
+                <Form.Item name="name" label={t('sidebar.field.schema_name')} rules={[{ required: true, message: t('sidebar.validation.schema_name_required') }]}>
                     <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>
         </Modal>
 
         <Modal
-            title={`重命名数据库${renameDbTarget?.dataRef?.dbName ? ` (${renameDbTarget.dataRef.dbName})` : ''}`}
+            title={renameDbTarget?.dataRef?.dbName ? t('sidebar.modal.rename_database.title', { name: renameDbTarget.dataRef.dbName }) : t('sidebar.menu.rename_database')}
             open={isRenameDbModalOpen}
             onOk={handleRenameDatabase}
             onCancel={() => {
@@ -8367,7 +8467,7 @@ const Sidebar: React.FC<{
             }}
         >
             <Form form={renameDbForm} layout="vertical">
-                <Form.Item name="newName" label="新数据库名称" rules={[{ required: true, message: '请输入新数据库名称' }]}>
+                <Form.Item name="newName" label={t('sidebar.field.new_database_name')} rules={[{ required: true, message: t('sidebar.validation.new_database_name_required') }]}>
                     <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>
@@ -8408,7 +8508,7 @@ const Sidebar: React.FC<{
         </Modal>
 
         <Modal
-            title={`重命名查询${renameSavedQueryTarget?.name ? ` (${renameSavedQueryTarget.name})` : ''}`}
+            title={`${t('query_editor.save_modal.rename_title')}${renameSavedQueryTarget?.name ? ` (${renameSavedQueryTarget.name})` : ''}`}
             open={isRenameSavedQueryModalOpen}
             onOk={handleRenameSavedQuery}
             onCancel={() => {
@@ -8416,11 +8516,11 @@ const Sidebar: React.FC<{
                 setRenameSavedQueryTarget(null);
                 renameSavedQueryForm.resetFields();
             }}
-            okText="重命名"
-            cancelText="取消"
+            okText={t('query_editor.action.rename_query')}
+            cancelText={t('common.cancel')}
         >
             <Form form={renameSavedQueryForm} layout="vertical">
-                <Form.Item name="name" label="查询名称" rules={[{ required: true, message: '请输入查询名称' }]}>
+                <Form.Item name="name" label={t('query_editor.save_modal.name_label')} rules={[{ required: true, message: t('query_editor.save_modal.name_required') }]}>
                     <Input {...noAutoCapInputProps} />
                 </Form.Item>
             </Form>
@@ -8724,23 +8824,19 @@ const Sidebar: React.FC<{
 
         {/* SQL 文件流式执行进度 Modal */}
         <Modal
-            title="运行外部SQL文件"
+            title={v2OpenExternalSqlFileLabel}
             open={sqlFileExecState.open}
             centered
             closable={sqlFileExecState.status !== 'running'}
             maskClosable={false}
-            footer={sqlFileExecState.status === 'running' ? [
-                <Button key="cancel" danger onClick={() => {
+            footer={buildSQLFileExecutionFooter({
+                status: sqlFileExecState.status,
+                onCancelExecution: () => {
                     CancelSQLFileExecution(sqlFileExecState.jobId);
                     setSqlFileExecState(prev => ({ ...prev, status: 'cancelled' }));
-                }}>
-                    取消执行
-                </Button>
-            ] : [
-                <Button key="close" type="primary" onClick={() => setSqlFileExecState(prev => ({ ...prev, open: false }))}>
-                    关闭
-                </Button>
-            ]}
+                },
+                onClose: () => setSqlFileExecState(prev => ({ ...prev, open: false })),
+            })}
             onCancel={() => {
                 if (sqlFileExecState.status !== 'running') {
                     setSqlFileExecState(prev => ({ ...prev, open: false }));
@@ -8748,32 +8844,15 @@ const Sidebar: React.FC<{
             }}
             styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none' }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none' } }}
         >
-            <div style={{ marginBottom: 16 }}>
-                <Progress
-                    percent={Math.round(sqlFileExecState.percent)}
-                    status={sqlFileExecState.status === 'error' ? 'exception' : sqlFileExecState.status === 'done' ? 'success' : 'active'}
-                    strokeColor={sqlFileExecState.status === 'cancelled' ? '#faad14' : undefined}
-                />
-            </div>
-            <div style={{ fontSize: 13, lineHeight: '22px', marginBottom: 8 }}>
-                <div>文件大小：<strong>{sqlFileExecState.fileSizeMB} MB</strong></div>
-                <div>状态：<strong>{
-                    sqlFileExecState.status === 'running' ? '执行中...' :
-                    sqlFileExecState.status === 'done' ? '✅ 完成' :
-                    sqlFileExecState.status === 'cancelled' ? '⚠️ 已取消' : '❌ 出错'
-                }</strong></div>
-                <div>已执行：<strong style={{ color: '#52c41a' }}>{sqlFileExecState.executed}</strong> 条 | 失败：<strong style={{ color: sqlFileExecState.failed > 0 ? '#ff4d4f' : undefined }}>{sqlFileExecState.failed}</strong> 条</div>
-            </div>
-            {sqlFileExecState.currentSQL && sqlFileExecState.status === 'running' && (
-                <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.8)', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '6px 10px', marginTop: 8, fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all', maxHeight: 60, overflow: 'hidden' }}>
-                    {sqlFileExecState.currentSQL}
-                </div>
-            )}
-            {sqlFileExecState.resultMessage && sqlFileExecState.status !== 'running' && (
-                <div style={{ fontSize: 12, marginTop: 12, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '8px 12px' }}>
-                    {sqlFileExecState.resultMessage}
-                </div>
-            )}
+            <SQLFileExecutionProgressContent
+                fileSizeMB={sqlFileExecState.fileSizeMB}
+                status={sqlFileExecState.status}
+                executed={sqlFileExecState.executed}
+                failed={sqlFileExecState.failed}
+                percent={sqlFileExecState.percent}
+                currentSQL={sqlFileExecState.currentSQL}
+                resultMessage={sqlFileExecState.resultMessage}
+            />
         </Modal>
         <FindInDatabaseModal
             open={findInDbContext.open}

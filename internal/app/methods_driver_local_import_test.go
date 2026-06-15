@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,5 +34,42 @@ func TestInstallLocalDriverPackageRejectsJdbcJarBeforeBuildChecks(t *testing.T) 
 	}
 	if !strings.Contains(result.Message, "JDBC Jar") {
 		t.Fatalf("expected JDBC jar guidance, got %q", result.Message)
+	}
+}
+
+func TestInstallLocalDriverPackageUsesCurrentLanguageForJdbcJarWrapper(t *testing.T) {
+	jarPath := filepath.Join(t.TempDir(), "kingbase8.jar")
+	if err := os.WriteFile(jarPath, []byte("fake-jar"), 0o644); err != nil {
+		t.Fatalf("write temp jar: %v", err)
+	}
+
+	app := NewApp()
+	app.SetLanguage("en-US")
+
+	result := app.InstallLocalDriverPackage("kingbase", jarPath, t.TempDir(), "")
+	if result.Success {
+		t.Fatal("expected local jar import to fail")
+	}
+	if !strings.Contains(result.Message, "Importing JDBC Jar files directly is not supported.") {
+		t.Fatalf("expected English JDBC jar guidance, got %q", result.Message)
+	}
+	if strings.Contains(result.Message, "当前驱动管理不支持直接导入 JDBC Jar") {
+		t.Fatalf("expected localized wrapper instead of fixed Chinese, got %q", result.Message)
+	}
+}
+
+func TestDriverOperationFailureDetailUsesCurrentLanguageForLogHint(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage("en-US")
+
+	text := app.driverOperationErrorMessage(errors.New("boom"), "test driver error")
+	if !strings.Contains(text, "boom") {
+		t.Fatalf("expected raw detail in localized message, got %q", text)
+	}
+	if !strings.Contains(text, "detail log:") {
+		t.Fatalf("expected English log hint, got %q", text)
+	}
+	if strings.Contains(text, "详细日志") {
+		t.Fatalf("expected no Chinese log hint in en-US message, got %q", text)
 	}
 }

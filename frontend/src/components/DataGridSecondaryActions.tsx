@@ -8,8 +8,11 @@ import {
   LinkOutlined,
   TableOutlined,
 } from '@ant-design/icons';
+import { t as defaultTranslate, type I18nParams } from '../i18n';
 
 type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er';
+
+export type DataGridSecondaryActionsTranslate = (key: string, params?: I18nParams) => string;
 
 export interface DataGridSecondaryActionsProps {
   isV2Ui: boolean;
@@ -30,6 +33,7 @@ export interface DataGridSecondaryActionsProps {
   isTableSurfaceActive: boolean;
   onToggleDataPanel: () => void;
   onOpenTableDdl: () => void;
+  translate?: DataGridSecondaryActionsTranslate;
 }
 
 const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
@@ -51,13 +55,14 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
   isTableSurfaceActive,
   onToggleDataPanel,
   onOpenTableDdl,
+  translate = defaultTranslate,
 }) => {
   if (isV2Ui) {
     const viewTabItems: Array<{ key: GridViewMode; label: string; icon: React.ReactNode; disabled?: boolean }> = [
-      { key: 'table', label: '数据预览', icon: <TableOutlined /> },
-      { key: 'fields', label: '字段信息', icon: <FileTextOutlined /> },
-      { key: 'ddl', label: '查看 DDL', icon: <ConsoleSqlOutlined />, disabled: !canViewDdl },
-      { key: 'er', label: 'ER 图', icon: <LinkOutlined /> },
+      { key: 'table', label: translate('data_grid.secondary.data_preview'), icon: <TableOutlined /> },
+      { key: 'fields', label: translate('data_grid.column_settings.field_info'), icon: <FileTextOutlined /> },
+      { key: 'ddl', label: translate('data_grid.secondary.view_ddl'), icon: <ConsoleSqlOutlined />, disabled: !canViewDdl },
+      { key: 'er', label: translate('data_grid.secondary.er_diagram'), icon: <LinkOutlined /> },
     ];
 
     return (
@@ -94,7 +99,7 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
               type={showColumnComment || showColumnType ? 'primary' : 'text'}
               icon={<FileTextOutlined />}
             >
-              字段显示
+              {translate('data_grid.secondary.column_display')}
             </Button>
           </Popover>
           <Popover trigger="click" placement="topRight" content={<div style={{ padding: 4 }}>{columnQuickFindContent}</div>}>
@@ -104,14 +109,14 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
               type="text"
               icon={<AimOutlined />}
             >
-              跳列
+              {translate('data_grid.secondary.jump_column')}
             </Button>
           </Popover>
           {pageFindContent}
           <div className="gn-v2-data-grid-status-center">
-            <span className="gn-v2-data-grid-live">live</span>
-            <span>{mergedDisplayCount} 行</span>
-            <span>未提交 {pendingChangeCount}</span>
+            <span className="gn-v2-data-grid-live">{translate('data_grid.secondary.live')}</span>
+            <span>{translate('data_grid.secondary.row_count', { count: mergedDisplayCount })}</span>
+            <span>{translate('data_grid.secondary.pending_changes', { count: pendingChangeCount })}</span>
           </div>
         </div>
         <div className="gn-v2-data-grid-status-right">
@@ -150,10 +155,10 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
               disabled={!isTableSurfaceActive}
               onClick={onToggleDataPanel}
             >
-              数据预览
+              {translate('data_grid.secondary.data_preview')}
             </Button>
             <Popover trigger="click" placement="bottomRight" content={columnInfoSettingContent}>
-              <Button data-grid-column-display-action="true" icon={<FileTextOutlined />}>字段信息</Button>
+              <Button data-grid-column-display-action="true" icon={<FileTextOutlined />}>{translate('data_grid.column_settings.field_info')}</Button>
             </Popover>
             {canViewDdl && (
               <Button
@@ -162,7 +167,7 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
                 loading={ddlLoading}
                 onClick={onOpenTableDdl}
               >
-                查看 DDL
+                {translate('data_grid.secondary.view_ddl')}
               </Button>
             )}
           </div>

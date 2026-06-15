@@ -1,6 +1,9 @@
 import React from 'react';
 import { AutoComplete, Input, Tooltip } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
+import { t as defaultTranslate, type I18nParams } from '../i18n';
+
+export type DataGridColumnQuickFindTranslate = (key: string, params?: I18nParams) => string;
 
 export interface DataGridColumnQuickFindProps {
   isV2Ui: boolean;
@@ -9,6 +12,7 @@ export interface DataGridColumnQuickFindProps {
   value: string;
   options: Array<{ value: string; label?: React.ReactNode }>;
   hasTarget: boolean;
+  translate?: DataGridColumnQuickFindTranslate;
   onChange: (value: string) => void;
   onSubmit: (value?: string) => void;
 }
@@ -18,13 +22,14 @@ const DataGridColumnQuickFind: React.FC<DataGridColumnQuickFindProps> = ({
   inputProps,
   value,
   options,
+  translate = defaultTranslate,
   onChange,
   onSubmit,
 }) => {
   const legacyDropdownOpen = !isV2Ui && String(value || '').trim().length > 0 && options.length > 0;
 
   return (
-    <Tooltip title="输入字段名，回车或点定位按钮即可跳到对应列">
+    <Tooltip title={translate('data_grid.column_quick_find.tooltip')}>
       <div
         data-grid-column-quick-find="true"
         className={isV2Ui ? 'gn-v2-data-grid-column-quick-find' : undefined}
@@ -54,7 +59,7 @@ const DataGridColumnQuickFind: React.FC<DataGridColumnQuickFindProps> = ({
                 size="small"
                 variant="borderless"
                 prefix={<SearchOutlined />}
-                placeholder="跳到字段列..."
+                placeholder={translate('data_grid.column_quick_find.placeholder')}
                 value={value}
                 onChange={(event) => onChange(event.target.value)}
                 onPressEnter={() => onSubmit(value)}

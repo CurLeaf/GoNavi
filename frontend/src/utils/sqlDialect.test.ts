@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { setCurrentLanguage } from '../i18n';
 import {
   isMysqlFamilyDialect,
   resolveColumnTypeOptions,
@@ -10,6 +11,9 @@ import {
 
 const values = (options: Array<{ value: string }>) => options.map((item) => item.value);
 const names = (items: Array<{ name: string }>) => items.map((item) => item.name);
+const detailByName = (dbType: string, name: string) => (
+  resolveSqlFunctions(dbType).find((item) => item.name === name)?.detail
+);
 
 describe('sqlDialect', () => {
   it('normalizes datasource aliases without collapsing all dialects to mysql', () => {
@@ -70,5 +74,55 @@ describe('sqlDialect', () => {
     expect(resolveSqlKeywords('sqlserver')).not.toEqual(expect.arrayContaining(['AUTO_INCREMENT', 'CHANGE']));
     expect(names(resolveSqlFunctions('sqlserver'))).toEqual(expect.arrayContaining(['GETDATE', 'ISNULL', 'NEWID']));
     expect(names(resolveSqlFunctions('sqlserver'))).not.toEqual(expect.arrayContaining(['GROUP_CONCAT']));
+  });
+
+  it('localizes common function completion details for zh-CN and en-US', () => {
+    setCurrentLanguage('zh-CN');
+    expect(detailByName('mysql', 'COUNT')).toBe('聚合函数 - 计数');
+
+    setCurrentLanguage('en-US');
+    expect(detailByName('mysql', 'COUNT')).toBe('Aggregate function - count');
+  });
+
+  it('localizes mysql and starrocks function completion details for zh-CN and en-US', () => {
+    setCurrentLanguage('zh-CN');
+    expect(detailByName('mysql', 'GROUP_CONCAT')).toBe('MySQL - 分组拼接');
+    expect(detailByName('starrocks', 'TO_BITMAP')).toBe('StarRocks - 构造 Bitmap');
+
+    setCurrentLanguage('en-US');
+    expect(detailByName('mysql', 'GROUP_CONCAT')).toBe('MySQL - grouped concatenation');
+    expect(detailByName('starrocks', 'TO_BITMAP')).toBe('StarRocks - build bitmap');
+  });
+
+  it('localizes postgresql and oracle function completion details for zh-CN and en-US', () => {
+    setCurrentLanguage('zh-CN');
+    expect(detailByName('postgres', 'STRING_AGG')).toBe('PostgreSQL - 字符串聚合');
+    expect(detailByName('oracle', 'NVL')).toBe('Oracle - NULL 替换');
+
+    setCurrentLanguage('en-US');
+    expect(detailByName('postgres', 'STRING_AGG')).toBe('PostgreSQL - string aggregation');
+    expect(detailByName('oracle', 'NVL')).toBe('Oracle - null replacement');
+  });
+
+  it('localizes sql server and sqlite function completion details for zh-CN and en-US', () => {
+    setCurrentLanguage('zh-CN');
+    expect(detailByName('sqlserver', 'GETDATE')).toBe('SQL Server - 当前日期时间');
+    expect(detailByName('sqlite', 'JSON_EXTRACT')).toBe('SQLite - JSON 提取');
+
+    setCurrentLanguage('en-US');
+    expect(detailByName('sqlserver', 'GETDATE')).toBe('SQL Server - current date and time');
+    expect(detailByName('sqlite', 'JSON_EXTRACT')).toBe('SQLite - JSON value extraction');
+  });
+
+  it('localizes duckdb clickhouse and tdengine function completion details for zh-CN and en-US', () => {
+    setCurrentLanguage('zh-CN');
+    expect(detailByName('duckdb', 'STRUCT_PACK')).toBe('DuckDB - 构造结构体');
+    expect(detailByName('clickhouse', 'formatDateTime')).toBe('ClickHouse - 日期格式化');
+    expect(detailByName('tdengine', 'TIMEDIFF')).toBe('TDengine - 时间差');
+
+    setCurrentLanguage('en-US');
+    expect(detailByName('duckdb', 'STRUCT_PACK')).toBe('DuckDB - build struct');
+    expect(detailByName('clickhouse', 'formatDateTime')).toBe('ClickHouse - date formatting');
+    expect(detailByName('tdengine', 'TIMEDIFF')).toBe('TDengine - time difference');
   });
 });

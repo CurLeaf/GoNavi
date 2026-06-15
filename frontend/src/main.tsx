@@ -1,15 +1,13 @@
-import React from 'react'
+import React, { useSyncExternalStore } from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import PerfDataGridHarness from './dev/PerfDataGridHarness'
 // import './index.css' // Optional global styles
 
-// 全局配置 dayjs 使用中文 locale，使 Ant Design 的 DatePicker/TimePicker 等组件
-// 的月份、星期等文本显示为中文。必须在 Ant Design 组件渲染前完成配置。
-import dayjs from 'dayjs'
-import 'dayjs/locale/zh-cn'
-dayjs.locale('zh-cn')
-
+import { setCurrentLanguage, t } from './i18n'
+import { I18nProvider } from './i18n/provider'
+import { applyDayjsLocale } from './i18n/runtime'
+import { useStore } from './store'
 import { cloneBrowserMockValue, duplicateBrowserMockConnection, resolveBrowserMockSecretFlag } from './utils/browserMockConnections'
 
 const resolveDevHarnessMode = (): string => {
@@ -76,7 +74,7 @@ if (typeof window !== 'undefined' && !(window as any).go) {
         mockConnectionSecrets.set(nextId, nextSecrets);
         const view = {
             id: nextId,
-            name: String(input?.name || existing?.name || '未命名连接'),
+            name: String(input?.name || existing?.name || t('connection.unnamed')),
             config: {
                 ...config,
                 id: nextId,
@@ -152,6 +150,7 @@ if (typeof window !== 'undefined' && !(window as any).go) {
             App: {
                 CheckUpdate: async () => ({ success: false }),
                 DownloadUpdate: async () => ({ success: false }),
+                SetLanguage: async () => null,
                 GetSavedConnections: async () => cloneBrowserMockValue(mockConnections),
                 GetEditableSavedConnection: async (id: string) => {
                     const existing = mockConnections.find((item) => item.id === id);
@@ -216,7 +215,7 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 ListSQLDirectory: async () => ({ success: true, data: [] }),
                 ReadSQLFile: async () => ({ success: false, message: '已取消' }),
                 WriteSQLFile: async (_filePath: string, _content: string) => ({ success: true }),
-                ExportSQLFile: async (_defaultName: string, _content: string) => ({ success: false, message: '浏览器 mock 不支持 SQL 文件导出' }),
+                ExportSQLFile: async (_defaultName: string, _content: string) => ({ success: false, message: t('app.browser_mock.export_sql_unsupported') }),
                 InstallUpdateAndRestart: async () => ({ success: false }),
                 ImportConfigFile: async () => ({ success: false, message: '已取消' }),
                 ImportConnectionsPayload: async (raw: string, _password?: string) => {
@@ -226,11 +225,11 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                             return parsed.map((item) => saveMockConnection(item));
                         }
                     } catch {
-                        throw new Error('浏览器 mock 不支持恢复包导入，仅支持历史 JSON 连接数组');
+                        throw new Error(t('app.browser_mock.import_connection_package_unsupported'));
                     }
-                    throw new Error('浏览器 mock 不支持恢复包导入，仅支持历史 JSON 连接数组');
+                    throw new Error(t('app.browser_mock.import_connection_package_unsupported'));
                 },
-                ExportConnectionsPackage: async (_options?: { includeSecrets?: boolean; filePassword?: string }) => ({ success: false, message: '浏览器 mock 不支持恢复包导出' }),
+                ExportConnectionsPackage: async (_options?: { includeSecrets?: boolean; filePassword?: string }) => ({ success: false, message: t('app.browser_mock.export_connection_package_unsupported') }),
                 ExportData: async () => ({ success: false }),
                 GetGlobalProxyConfig: async () => ({ success: true, data: cloneBrowserMockValue(mockGlobalProxy) }),
                 SaveGlobalProxy: async (input: any) => saveMockGlobalProxy(input),
@@ -287,19 +286,69 @@ if (typeof window !== 'undefined' && !(window as any).go) {
                 }),
                 AISetSafetyLevel: async () => null,
                 AISetContextLevel: async () => null,
+                AISetLanguage: async () => null,
             },
         }
     };
 }
 const rootNode = document.getElementById('root')!;
+
 const devHarnessMode = import.meta.env.DEV ? resolveDevHarnessMode() : '';
 const rootComponent = devHarnessMode === 'datagrid-perf'
     ? <PerfDataGridHarness />
     : <App />;
 
+const readBrowserLanguages = (): string[] => {
+    if (typeof navigator === 'undefined') return [];
+    if (Array.isArray(navigator.languages) && navigator.languages.length > 0) {
+        return [...navigator.languages];
+    }
+    return navigator.language ? [navigator.language] : [];
+};
+
+const subscribeStoreHydration = (listener: () => void) => {
+    if (useStore.persist.hasHydrated()) {
+        listener();
+        return () => {};
+    }
+    return useStore.persist.onFinishHydration(() => {
+        listener();
+    });
+};
+
+const getStoreHydrationSnapshot = () => useStore.persist.hasHydrated();
+
+const Root = () => {
+    const isStoreHydrated = useSyncExternalStore(
+        subscribeStoreHydration,
+        getStoreHydrationSnapshot,
+        getStoreHydrationSnapshot,
+    );
+    const languagePreference = useStore((state) => state.languagePreference);
+    const setLanguagePreference = useStore((state) => state.setLanguagePreference);
+
+    if (!isStoreHydrated) {
+        return null;
+    }
+
+    const systemLanguages = readBrowserLanguages();
+    const resolvedLanguage = setCurrentLanguage(languagePreference, systemLanguages);
+    applyDayjsLocale(resolvedLanguage);
+
+    return (
+        <I18nProvider
+            preference={languagePreference}
+            onPreferenceChange={setLanguagePreference}
+            systemLanguages={systemLanguages}
+        >
+            {rootComponent}
+        </I18nProvider>
+    );
+};
+
 ReactDOM.createRoot(rootNode).render(
   <React.StrictMode>
-    {rootComponent}
+    <Root />
   </React.StrictMode>,
 )
 

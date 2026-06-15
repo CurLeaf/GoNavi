@@ -2,7 +2,6 @@ package aiservice
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +9,7 @@ import (
 	"GoNavi-Wails/internal/ai"
 	"GoNavi-Wails/internal/dailysecret"
 	"GoNavi-Wails/internal/secretstore"
+	"GoNavi-Wails/shared/i18n"
 )
 
 const (
@@ -41,9 +41,14 @@ type ProviderConfigStore struct {
 	configDir    string
 	secretStore  secretstore.SecretStore
 	dailySecrets *dailysecret.Store
+	localizer    *i18n.Localizer
 }
 
 func NewProviderConfigStore(configDir string, store secretstore.SecretStore) *ProviderConfigStore {
+	return NewProviderConfigStoreWithLanguage(configDir, store, i18n.LanguageEnUS)
+}
+
+func NewProviderConfigStoreWithLanguage(configDir string, store secretstore.SecretStore, language i18n.Language) *ProviderConfigStore {
 	if strings.TrimSpace(configDir) == "" {
 		configDir = resolveConfigDir()
 	}
@@ -54,6 +59,7 @@ func NewProviderConfigStore(configDir string, store secretstore.SecretStore) *Pr
 		configDir:    configDir,
 		secretStore:  store,
 		dailySecrets: dailysecret.NewStore(configDir),
+		localizer:    newServiceLocalizerForLanguage(language),
 	}
 }
 
@@ -63,6 +69,10 @@ func newProviderConfigStore(configDir string, store secretstore.SecretStore) *Pr
 
 func (s *ProviderConfigStore) configPath() string {
 	return filepath.Join(s.configDir, aiConfigFileName)
+}
+
+func (s *ProviderConfigStore) storeError(key string, params map[string]any, cause error) error {
+	return serviceErrorFromLocalizer(s.localizer, key, params, cause)
 }
 
 func (s *ProviderConfigStore) Load() (ProviderConfigStoreSnapshot, error) {
@@ -76,7 +86,9 @@ func (s *ProviderConfigStore) Load() (ProviderConfigStoreSnapshot, error) {
 	for _, providerConfig := range snapshot.Providers {
 		runtimeConfig, rewritten, loadErr := s.loadStoredProviderConfig(providerConfig)
 		if loadErr != nil {
-			return snapshot, fmt.Errorf("加载 AI Provider secret 失败(provider=%s): %w", providerConfig.ID, loadErr)
+			return snapshot, s.storeError("ai_service.backend.error.provider_secret_load_failed", map[string]any{
+				"provider": providerConfig.ID,
+			}, loadErr)
 		}
 		if rewritten {
 			shouldRewrite = true
@@ -90,7 +102,7 @@ func (s *ProviderConfigStore) Load() (ProviderConfigStoreSnapshot, error) {
 
 	if shouldRewrite {
 		if err := s.Save(snapshot); err != nil {
-			return snapshot, fmt.Errorf("重写 AI 配置失败: %w", err)
+			return snapshot, s.storeError("ai_service.backend.error.config_rewrite_failed", nil, err)
 		}
 	}
 
@@ -126,15 +138,15 @@ func (s *ProviderConfigStore) Save(snapshot ProviderConfigStoreSnapshot) error {
 		runtimeConfig := normalizeProviderConfig(providerConfig)
 		meta, bundle := splitProviderSecrets(runtimeConfig)
 		if bundle.hasAny() {
-			storedMeta, err := persistProviderSecretBundle(s.dailySecrets, meta, bundle)
+			storedMeta, err := persistProviderSecretBundleWithLocalizer(s.dailySecrets, meta, bundle, s.localizer)
 			if err != nil {
-				return fmt.Errorf("保存 Provider secret 失败: %w", err)
+				return s.storeError("ai_service.backend.error.provider_secret_save_failed", nil, err)
 			}
 			meta = storedMeta
 		} else if meta.HasSecret {
 			resolved, _, err := s.loadStoredProviderConfig(meta)
 			if err != nil {
-				return fmt.Errorf("保存 Provider secret 失败: %w", err)
+				return s.storeError("ai_service.backend.error.provider_secret_save_failed", nil, err)
 			}
 			meta = providerMetadataView(resolved)
 		}
@@ -154,13 +166,13 @@ func (s *ProviderConfigStore) Save(snapshot ProviderConfigStoreSnapshot) error {
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return fmt.Errorf("序列化 AI 配置失败: %w", err)
+		return s.storeError("ai_service.backend.error.config_serialize_failed", nil, err)
 	}
 	if err := os.MkdirAll(s.configDir, 0o755); err != nil {
-		return fmt.Errorf("创建配置目录失败: %w", err)
+		return s.storeError("ai_service.backend.error.config_dir_create_failed", nil, err)
 	}
 	if err := os.WriteFile(s.configPath(), data, 0o644); err != nil {
-		return fmt.Errorf("写入 AI 配置失败: %w", err)
+		return s.storeError("ai_service.backend.error.config_write_failed", nil, err)
 	}
 	return nil
 }
@@ -177,12 +189,12 @@ func (s *ProviderConfigStore) readStoredSnapshot() (aiConfig, ProviderConfigStor
 		if os.IsNotExist(err) {
 			return aiConfig{}, snapshot, nil
 		}
-		return aiConfig{}, snapshot, fmt.Errorf("读取 AI 配置失败: %w", err)
+		return aiConfig{}, snapshot, s.storeError("ai_service.backend.error.config_read_failed", nil, err)
 	}
 
 	var cfg aiConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return aiConfig{}, snapshot, fmt.Errorf("加载 AI 配置失败: %w", err)
+		return aiConfig{}, snapshot, s.storeError("ai_service.backend.error.config_load_failed", nil, err)
 	}
 
 	snapshot.ActiveProvider = cfg.ActiveProvider
@@ -210,7 +222,7 @@ func (s *ProviderConfigStore) readStoredSnapshot() (aiConfig, ProviderConfigStor
 func (s *ProviderConfigStore) loadStoredProviderConfig(config ai.ProviderConfig) (ai.ProviderConfig, bool, error) {
 	meta, bundle := splitProviderSecrets(config)
 	if bundle.hasAny() {
-		storedMeta, err := persistProviderSecretBundle(s.dailySecrets, meta, bundle)
+		storedMeta, err := persistProviderSecretBundleWithLocalizer(s.dailySecrets, meta, bundle, s.localizer)
 		if err != nil {
 			return meta, false, err
 		}
@@ -236,7 +248,7 @@ func (s *ProviderConfigStore) loadStoredProviderConfig(config ai.ProviderConfig)
 	}
 
 	if strings.TrimSpace(meta.SecretRef) != "" {
-		resolved, err := resolveProviderConfigSecretsFromStore(s.secretStore, meta)
+		resolved, err := resolveProviderConfigSecretsFromStoreWithLocalizer(s.secretStore, meta, s.localizer)
 		if err != nil {
 			if os.IsNotExist(err) || secretstore.IsUnavailable(err) {
 				meta.HasSecret = false
@@ -246,7 +258,7 @@ func (s *ProviderConfigStore) loadStoredProviderConfig(config ai.ProviderConfig)
 			return meta, false, err
 		}
 		_, migratedBundle := splitProviderSecrets(resolved)
-		storedMeta, err := persistProviderSecretBundle(s.dailySecrets, meta, migratedBundle)
+		storedMeta, err := persistProviderSecretBundleWithLocalizer(s.dailySecrets, meta, migratedBundle, s.localizer)
 		if err != nil {
 			return meta, false, err
 		}

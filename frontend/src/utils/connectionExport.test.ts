@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
+import { setCurrentLanguage } from '../i18n';
 import {
   detectConnectionImportKind,
   isConnectionPackagePasswordRequiredError,
@@ -9,6 +10,10 @@ import {
 } from './connectionExport';
 
 describe('connectionExport', () => {
+  beforeEach(() => {
+    setCurrentLanguage('en-US');
+  });
+
   it('detects v2 app-managed packages', () => {
     expect(detectConnectionImportKind(JSON.stringify({
       v: 2,
@@ -175,12 +180,12 @@ describe('connectionExport', () => {
 
     expect(resolveConnectionPackageExportResult(staleDialog, { success: false, message: '磁盘已满' })).toEqual({
       kind: 'failed',
-      error: '磁盘已满',
+      error: 'Export failed: 磁盘已满',
     });
 
     expect(resolveConnectionPackageExportResult(staleDialog, undefined)).toEqual({
       kind: 'failed',
-      error: '导出失败',
+      error: 'Export failed',
     });
   });
 });

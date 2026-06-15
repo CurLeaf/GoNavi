@@ -41,6 +41,7 @@ export interface DataGridToolbarFrameProps {
   isV2Ui: boolean;
   tableName?: string;
   dbName?: string;
+  translate?: (key: string, params?: Record<string, string | number>) => string;
   loading: boolean;
   darkMode: boolean;
   bgFilter: string;
@@ -134,6 +135,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
   isV2Ui,
   tableName,
   dbName,
+  translate: translateProp,
   loading,
   darkMode,
   bgFilter,
@@ -222,6 +224,10 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
   onDisableAllFilters,
   onClearFiltersAndSorts,
 }) => {
+  const translate = React.useCallback(
+    (key: string, params?: Record<string, string | number>) => translateProp?.(key, params) ?? key,
+    [translateProp],
+  );
   const renderToolbarDivider = () => (
     <div
       className={isV2Ui ? 'gn-v2-toolbar-divider' : undefined}
@@ -231,8 +237,9 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
   );
 
   const quickWherePlaceholder = dbType === 'mongodb'
-    ? '输入 MongoDB JSON 查询对象，例如 {"status":"A"}'
-    : '输入 WHERE 后面的条件，例如 status = 1 AND name LIKE \'A%\'';
+    ? translate('data_grid.filter.mongodb_query_placeholder')
+    : translate('data_grid.filter.quick_where_placeholder');
+  const toolbarTitle = tableName || translate('data_grid.table_fallback.query_result');
 
   return (
     <div
@@ -270,7 +277,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
           <>
             <div className="gn-v2-data-grid-toolbar-title">
               <TableOutlined className="gn-v2-data-grid-icon" />
-              <strong title={tableName || '查询结果'}>{tableName || '查询结果'}</strong>
+              <strong title={toolbarTitle}>{toolbarTitle}</strong>
               {dbName && <small title={dbName}>· {dbName}</small>}
             </div>
             {renderToolbarDivider()}
@@ -278,7 +285,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
         )}
         {onReload && (
           <Button icon={<ReloadOutlined />} disabled={loading} onClick={onRefresh}>
-            刷新
+            {translate('data_grid.toolbar.refresh')}
           </Button>
         )}
 
@@ -286,7 +293,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
           <>
             {renderToolbarDivider()}
             <Button icon={<FilterOutlined />} type={showFilter ? 'primary' : 'default'} onClick={onToggleFilterClick}>
-              筛选
+              {translate('data_grid.toolbar.filter')}
             </Button>
           </>
         )}
@@ -294,13 +301,13 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
         {canModifyData && (
           <>
             {renderToolbarDivider()}
-            <Button icon={<PlusOutlined />} onClick={onAddRow}>添加行</Button>
+            <Button icon={<PlusOutlined />} onClick={onAddRow}>{translate('data_grid.toolbar.add_row')}</Button>
             {allSelectedAreDeleted ? (
-              <Button icon={<UndoOutlined />} disabled={selectedRowKeysLength === 0} onClick={onUndoDeleteSelected}>撤销删除</Button>
+              <Button icon={<UndoOutlined />} disabled={selectedRowKeysLength === 0} onClick={onUndoDeleteSelected}>{translate('data_grid.toolbar.undo_delete')}</Button>
             ) : (
-              <Button icon={<DeleteOutlined />} danger disabled={selectedRowKeysLength === 0} onClick={onDeleteSelected}>删除选中</Button>
+              <Button icon={<DeleteOutlined />} danger disabled={selectedRowKeysLength === 0} onClick={onDeleteSelected}>{translate('data_grid.toolbar.delete_selected')}</Button>
             )}
-            {selectedRowKeysLength > 0 && <span style={{ fontSize: '12px', color: '#888' }}>已选 {selectedRowKeysLength}</span>}
+            {selectedRowKeysLength > 0 && <span style={{ fontSize: '12px', color: '#888' }}>{translate('data_grid.toolbar.selected_count', { count: selectedRowKeysLength })}</span>}
             {renderToolbarDivider()}
             <Button
               data-grid-cell-editor-action="true"
@@ -308,18 +315,18 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
               type={cellEditMode ? 'primary' : 'default'}
               onClick={onToggleCellEditMode}
             >
-              单元格编辑器
+              {translate('data_grid.toolbar.cell_editor')}
             </Button>
             {cellEditMode && selectedCellsSize > 0 && (
               <>
                 <Button icon={<CopyOutlined />} onClick={onCopySelectedCellsToClipboard}>
-                  复制选区 ({selectedCellsSize})
+                  {translate('data_grid.toolbar.copy_selection', { count: selectedCellsSize })}
                 </Button>
                 <Button icon={<CopyOutlined />} onClick={onCopySelectedColumnsFromRow}>
-                  复制选区列值 ({selectedCellsSize})
+                  {translate('data_grid.toolbar.copy_selection_columns', { count: selectedCellsSize })}
                 </Button>
                 <Button type="primary" onClick={onOpenBatchEditModal}>
-                  批量填充 ({selectedCellsSize})
+                  {translate('data_grid.toolbar.batch_fill', { count: selectedCellsSize })}
                 </Button>
               </>
             )}
@@ -330,10 +337,10 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
                   disabled={selectedRowKeysLength === 0}
                   onClick={onPasteCopiedColumnsToSelectedRows}
                 >
-                  粘贴到选中行 ({selectedRowKeysLength})
+                  {translate('data_grid.toolbar.paste_to_selected_rows', { count: selectedRowKeysLength })}
                 </Button>
                 <span style={{ fontSize: '12px', color: '#888' }}>
-                  已复制 {copiedCellPatchColumnCount} 列
+                  {translate('data_grid.toolbar.copied_columns_count', { count: copiedCellPatchColumnCount })}
                 </span>
               </>
             )}
@@ -347,25 +354,25 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
             >
               {isV2Ui ? (
                 <>
-                  <span>提交事务</span>
+                  <span>{translate('data_grid.toolbar.commit_label')}</span>
                   <span className="gn-v2-toolbar-kbd">{pendingChangeCount}</span>
                 </>
-              ) : `提交事务 (${pendingChangeCount})`}
+              ) : translate('data_grid.toolbar.commit', { count: pendingChangeCount })}
             </Button>
             {hasChanges && (
-              <Dropdown menu={{ items: [{ key: 'preview-sql', label: '生成预览 SQL', icon: <ConsoleSqlOutlined />, onClick: onPreviewChanges }] }}>
-                <Button icon={<ConsoleSqlOutlined />}>预览SQL <DownOutlined /></Button>
+              <Dropdown menu={{ items: [{ key: 'preview-sql', label: translate('data_grid.toolbar.preview_sql_generate'), icon: <ConsoleSqlOutlined />, onClick: onPreviewChanges }] }}>
+                <Button icon={<ConsoleSqlOutlined />}>{translate('data_grid.toolbar.preview_sql')} <DownOutlined /></Button>
               </Dropdown>
             )}
-            {hasChanges && <Button icon={<UndoOutlined />} onClick={onResetPendingChanges}>回滚</Button>}
+            {hasChanges && <Button icon={<UndoOutlined />} onClick={onResetPendingChanges}>{translate('data_grid.toolbar.rollback')}</Button>}
           </>
         )}
 
         {(canImport || canExport) && (
           <>
             {renderToolbarDivider()}
-            {canImport && <Button icon={<ImportOutlined />} onClick={onImport}>导入</Button>}
-            {canExport && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>导出 <DownOutlined /></Button></Dropdown>}
+            {canImport && <Button icon={<ImportOutlined />} onClick={onImport}>{translate('data_grid.toolbar.import')}</Button>}
+            {canExport && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>{translate('data_grid.toolbar.export')} <DownOutlined /></Button></Dropdown>}
           </>
         )}
 
@@ -379,7 +386,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
                 disabled={!canCopyQueryResult}
                 onClick={onCopyQueryResultCsv}
               >
-                复制 <DownOutlined />
+                {translate('data_grid.toolbar.copy')} <DownOutlined />
               </Button>
             </Dropdown>
           </>
@@ -387,7 +394,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
 
         <>
           {renderToolbarDivider()}
-          <Tooltip title="一键借助 AI 智能分析当前查询页数据">
+          <Tooltip title={translate('data_grid.toolbar.ai_insight_tooltip')}>
             <Button
               className={isV2Ui ? 'gn-v2-ai-insight-button' : undefined}
               icon={<RobotOutlined />}
@@ -404,7 +411,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
               }}
               onClick={onRequestAiInsight}
             >
-              <span>{isV2Ui ? 'AI 洞察' : 'AI 数据洞察'}</span>
+              <span>{isV2Ui ? translate('data_grid.toolbar.ai_insight_short') : translate('data_grid.toolbar.ai_insight')}</span>
               {isV2Ui && aiShortcutLabel !== '-' && <span className="gn-v2-toolbar-kbd">{aiShortcutLabel}</span>}
             </Button>
           </Tooltip>
@@ -413,12 +420,12 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
         {prefersManualTotalCount && (
           <>
             {renderToolbarDivider()}
-            <Tooltip title={paginationTotalCountLoading ? '取消本次精确总数统计（不会影响当前浏览）' : '按当前筛选统计精确总数'}>
+            <Tooltip title={paginationTotalCountLoading ? translate('data_grid.toolbar.cancel_count_tooltip') : translate('data_grid.toolbar.count_total_tooltip')}>
               <Button
                 icon={paginationTotalCountLoading ? <CloseOutlined /> : <VerticalAlignBottomOutlined />}
                 onClick={onToggleTotalCount}
               >
-                {paginationTotalCountLoading ? '取消统计' : '统计总数'}
+                {paginationTotalCountLoading ? translate('data_grid.toolbar.cancel_count') : translate('data_grid.toolbar.count_total')}
               </Button>
             </Tooltip>
           </>
@@ -494,10 +501,10 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
               />
             </AutoComplete>
             <Button size="small" type="primary" onClick={onApplyQuickWhere}>
-              应用 WHERE
+              {translate('data_grid.filter.apply_where')}
             </Button>
             <Button size="small" onClick={onClearQuickWhere} disabled={!quickWhereDraft && !quickWhereCondition}>
-              清空
+              {translate('data_grid.filter.clear')}
             </Button>
           </div>
 
@@ -509,13 +516,13 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
                   onChange={(event) => updateFilter(cond.id, 'enabled', event.target.checked)}
                   style={{ marginTop: 6, flex: '0 0 auto', whiteSpace: 'nowrap' }}
                 >
-                  启用
+                  {translate('data_grid.filter.enabled')}
                 </Checkbox>
                 <Select
                   style={{ width: 96, minWidth: 96, maxWidth: 96, flex: '0 0 96px' }}
                   value={condIndex === 0 ? '__FIRST__' : (cond.logic === 'OR' ? 'OR' : 'AND')}
                   onChange={(value) => updateFilter(cond.id, 'logic', value)}
-                  options={condIndex === 0 ? [{ value: '__FIRST__', label: '首条' }] : filterLogicOptions}
+                  options={condIndex === 0 ? [{ value: '__FIRST__', label: translate('data_grid.filter.first_condition') }] : filterLogicOptions}
                   disabled={condIndex === 0}
                 />
                 <Select
@@ -532,7 +539,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
                       .toLowerCase()
                       .includes(String(input || '').trim().toLowerCase())
                   }
-                  placeholder="搜索字段名"
+                  placeholder={translate('data_grid.filter.search_field_placeholder')}
                   disabled={cond.op === 'CUSTOM'}
                 />
                 <Select
@@ -549,7 +556,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
                     autoSize={{ minRows: 1, maxRows: 4 }}
                     value={cond.value}
                     onChange={(event) => updateFilter(cond.id, 'value', event.target.value)}
-                    placeholder="输入自定义 WHERE 表达式（不需要再写 WHERE），例如：status IN ('A','B')"
+                    placeholder={translate('data_grid.filter.custom_where_placeholder')}
                   />
                 ) : isListOp(cond.op) ? (
                   <Input.TextArea
@@ -558,7 +565,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
                     autoSize={{ minRows: 1, maxRows: 4 }}
                     value={cond.value}
                     onChange={(event) => updateFilter(cond.id, 'value', event.target.value)}
-                    placeholder="多个值用逗号或换行分隔"
+                    placeholder={translate('data_grid.filter.list_values_placeholder')}
                   />
                 ) : isBetweenOp(cond.op) ? (
                   <>
@@ -567,18 +574,18 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
                       style={{ width: 220 }}
                       value={cond.value}
                       onChange={(event) => updateFilter(cond.id, 'value', event.target.value)}
-                      placeholder="开始值"
+                      placeholder={translate('data_grid.filter.start_value_placeholder')}
                     />
                     <Input
                       {...noAutoCapInputProps}
                       style={{ width: 220 }}
                       value={cond.value2 || ''}
                       onChange={(event) => updateFilter(cond.id, 'value2', event.target.value)}
-                      placeholder="结束值"
+                      placeholder={translate('data_grid.filter.end_value_placeholder')}
                     />
                   </>
                 ) : isNoValueOp(cond.op) ? (
-                  <Input {...noAutoCapInputProps} style={{ width: 220 }} value="" disabled placeholder="无需输入值" />
+                  <Input {...noAutoCapInputProps} style={{ width: 220 }} value="" disabled placeholder={translate('data_grid.filter.no_value_placeholder')} />
                 ) : (
                   <Input
                     {...noAutoCapInputProps}
@@ -605,7 +612,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
                     style={{ flex: '0 0 auto' }}
                   />
                   <span style={{ fontSize: 12, color: 'inherit', opacity: 0.7, whiteSpace: 'nowrap', minWidth: 32 }}>
-                    {index === 0 ? '排序' : '然后'}
+                    {index === 0 ? translate('data_grid.filter.sort_label') : translate('data_grid.filter.then_label')}
                   </span>
                   <Select
                     style={filterFieldSelectStyle}
@@ -631,7 +638,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
                         .toLowerCase()
                         .includes(String(input || '').trim().toLowerCase())
                     }
-                    placeholder="选择排序字段"
+                    placeholder={translate('data_grid.filter.select_sort_field_placeholder')}
                     allowClear
                     onClear={() => {
                       const next = sortInfo.filter((_, itemIndex) => itemIndex !== index);
@@ -647,8 +654,8 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
                       onApplySortInfo(next);
                     }}
                     options={[
-                      { value: 'ascend', label: '升序 ↑' },
-                      { value: 'descend', label: '降序 ↓' },
+                      { value: 'ascend', label: `${translate('data_grid.filter.sort_asc')} ↑` },
+                      { value: 'descend', label: `${translate('data_grid.filter.sort_desc')} ↓` },
                     ]}
                     disabled={!item.columnKey}
                   />
@@ -677,7 +684,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
               borderTop: ((enableSortControls && sortInfo.length > 0) || filterConditions.length > 0) ? `1px dashed ${panelFrameColor}` : 'none',
             }}
           >
-            <Button type="primary" ghost onClick={addFilter} size="small" icon={<PlusOutlined />}>添加条件</Button>
+            <Button type="primary" ghost onClick={addFilter} size="small" icon={<PlusOutlined />}>{translate('data_grid.filter.add_condition')}</Button>
             {enableSortControls && (
               <Button
                 type="dashed"
@@ -689,15 +696,15 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
                 }}
                 disabled={sortInfo.length >= displayColumnNames.length}
               >
-                添加排序
+                {translate('data_grid.filter.add_sort')}
               </Button>
             )}
             <div style={{ width: 1, height: 16, background: panelFrameColor, margin: '0 2px', flexShrink: 0 }} />
-            <Button size="small" onClick={onEnableAllFilters}>全启用</Button>
-            <Button size="small" onClick={onDisableAllFilters}>全停用</Button>
+            <Button size="small" onClick={onEnableAllFilters}>{translate('data_grid.filter.enable_all')}</Button>
+            <Button size="small" onClick={onDisableAllFilters}>{translate('data_grid.filter.disable_all')}</Button>
             <div style={{ width: 1, height: 16, background: panelFrameColor, margin: '0 2px', flexShrink: 0 }} />
-            <Button type="primary" onClick={onApplyFilters} size="small">应用</Button>
-            <Button size="small" icon={<ClearOutlined />} onClick={onClearFiltersAndSorts}>清除</Button>
+            <Button type="primary" onClick={onApplyFilters} size="small">{translate('data_grid.filter.apply')}</Button>
+            <Button size="small" icon={<ClearOutlined />} onClick={onClearFiltersAndSorts}>{translate('data_grid.filter.clear')}</Button>
           </div>
         </div>
       )}

@@ -10,8 +10,22 @@ import DataGrid, {
   resolveDefaultGridFilterOperator,
   resolveNextGridFilterOperatorForColumnChange,
 } from './DataGrid';
+import DataGridPageFind from './DataGridPageFind';
 import DataGridPaginationBar from './DataGridPaginationBar';
+import DataGridPreviewPanel from './DataGridPreviewPanel';
+import { DataGridJsonView, DataGridTextView } from './DataGridRecordViews';
+import DataGridResultViewSwitcher from './DataGridResultViewSwitcher';
+import DataGridSecondaryActions from './DataGridSecondaryActions';
+import { DataGridV2DdlSideWorkspace, DataGridV2DdlView } from './DataGridV2DdlWorkspace';
+import { DataGridV2ErView, DataGridV2FieldsView } from './DataGridV2MetadataViews';
+import { I18nProvider } from '../i18n/provider';
+import { getCurrentLanguage, setCurrentLanguage, type LanguagePreference } from '../i18n';
 import { cloneShortcutOptions, DEFAULT_SHORTCUT_OPTIONS } from '../utils/shortcuts';
+
+const mockStoreState = vi.hoisted(() => ({
+  languagePreference: 'system' as LanguagePreference,
+  uiVersion: 'v2',
+}));
 
 vi.mock('../store', () => ({
   useStore: (selector: (state: any) => any) => selector({
@@ -24,7 +38,7 @@ vi.mock('../store', () => ({
       blur: 0,
       showDataTableVerticalBorders: false,
       dataTableDensity: 'comfortable',
-      uiVersion: 'v2',
+      uiVersion: mockStoreState.uiVersion,
     },
     queryOptions: {
       showColumnComment: false,
@@ -44,6 +58,7 @@ vi.mock('../store', () => ({
     setEnableHiddenColumnMemory: vi.fn(),
     clearTableHiddenColumns: vi.fn(),
     shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
+    languagePreference: mockStoreState.languagePreference,
     aiPanelVisible: false,
     setAIPanelVisible: vi.fn(),
   }),
@@ -62,12 +77,30 @@ vi.mock('../../wailsjs/go/app/App', () => ({
 }));
 
 vi.mock('@monaco-editor/react', () => ({
-  default: () => null,
+  default: (props: { value?: string }) => (
+    <pre data-monaco-editor="true">{props.value ?? ''}</pre>
+  ),
 }));
+
+const renderDataGridWithI18n = (
+  element: React.ReactElement,
+  options: { preference?: LanguagePreference; systemLanguages?: readonly string[] } = {},
+) => {
+  const preference = options.preference ?? mockStoreState.languagePreference;
+  return renderToStaticMarkup(
+    <I18nProvider
+      preference={preference}
+      systemLanguages={options.systemLanguages ?? ['zh-CN']}
+      onPreferenceChange={() => {}}
+    >
+      {element}
+    </I18nProvider>,
+  );
+};
 
 describe('DataGrid layout', () => {
   it('renders a secondary action strip for view switching and auxiliary actions', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderDataGridWithI18n(
       <DataGrid
         data={[
           {
@@ -110,6 +143,756 @@ describe('DataGrid layout', () => {
     expect(markup).not.toContain('class="ant-pagination');
     expect(markup).not.toContain('class="data-grid-pagination-kicker"');
     expect(markup).toContain('当前页查找...');
+  });
+
+  it('localizes DataGrid error boundary, column drag affordances, and legacy row context menu labels through i18n keys', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const expectedKeys = [
+      'data_grid.error_boundary.title',
+      'data_grid.error_boundary.description',
+      'data_grid.error_boundary.retry',
+      'data_grid.column.resize_tooltip',
+      'data_grid.column.drag_tooltip',
+      'data_grid.context_menu.copy_as_insert',
+      'data_grid.context_menu.copy_as_update',
+      'data_grid.context_menu.copy_as_delete',
+      'data_grid.context_menu.copy_as_json',
+      'data_grid.context_menu.copy_as_csv',
+      'data_grid.context_menu.copy_as_markdown',
+      'data_grid.context_menu.export_selected',
+    ];
+
+    expectedKeys.forEach((key) => {
+      expect(source).toMatch(new RegExp(`\\bt\\(\\s*['"]${key.replace(/\./g, '\\.')}['"]`));
+    });
+
+    const legacyRowContextMenuSource = source.slice(
+      source.indexOf("const menuItems: MenuProps['items'] = ["),
+      source.indexOf('return (', source.indexOf("const menuItems: MenuProps['items'] = [")),
+    );
+    const expectedLegacyRowMenuLabels = [
+      ['insert', 'data_grid.context_menu.copy_as_insert'],
+      ['update', 'data_grid.context_menu.copy_as_update'],
+      ['delete', 'data_grid.context_menu.copy_as_delete'],
+      ['json', 'data_grid.context_menu.copy_as_json'],
+      ['csv', 'data_grid.context_menu.copy_as_csv'],
+      ['copy', 'data_grid.context_menu.copy_as_markdown'],
+      ['export-selected', 'data_grid.context_menu.export_selected'],
+    ];
+
+    expectedLegacyRowMenuLabels.forEach(([itemKey, i18nKey]) => {
+      expect(legacyRowContextMenuSource).toMatch(new RegExp(
+        `key:\\s*['"]${itemKey}['"][\\s\\S]*?label:\\s*t\\(\\s*['"]${i18nKey.replace(/\./g, '\\.')}['"]\\s*\\)`,
+      ));
+    });
+
+    [
+      ['exp-csv', 'CSV'],
+      ['exp-xlsx', 'Excel'],
+      ['exp-json', 'JSON'],
+      ['exp-md', 'Markdown'],
+      ['exp-html', 'HTML'],
+    ].forEach(([itemKey, rawLabel]) => {
+      expect(legacyRowContextMenuSource).toMatch(new RegExp(
+        `key:\\s*['"]${itemKey}['"][\\s\\S]*?label:\\s*['"]${rawLabel}['"]`,
+      ));
+    });
+    expect(source).not.toMatch(/<h4>\s*渲染错误\s*<\/h4>/);
+    expect(source).not.toMatch(/<p>\s*数据表格渲染时发生错误，可能是数据格式问题。\s*<\/p>/);
+    expect(source).not.toMatch(/>\s*重试\s*<\/Button>/);
+    expect(source).not.toContain('title="拖动调整列宽，双击按内容自适应"');
+    expect(source).not.toContain('title="拖拽以调整列顺序"');
+    expect(source).not.toMatch(/label:\s*['"]复制为 INSERT['"]/);
+    expect(source).not.toMatch(/label:\s*['"]复制为 UPDATE['"]/);
+    expect(source).not.toMatch(/label:\s*['"]复制为 DELETE['"]/);
+    expect(source).not.toMatch(/label:\s*['"]复制为 JSON['"]/);
+    expect(source).not.toMatch(/label:\s*['"]复制为 CSV['"]/);
+    expect(source).not.toMatch(/label:\s*['"]复制为 Markdown['"]/);
+    expect(source).not.toMatch(/label:\s*['"]导出选中数据['"]/);
+  });
+
+  it('localizes legacy cell context menu labels through translateDataGrid', () => {
+    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const legacyMenuSource = readFileSync(new URL('./DataGridLegacyCellContextMenu.tsx', import.meta.url), 'utf8');
+    const legacyMountStart = dataGridSource.indexOf('<DataGridLegacyCellContextMenu');
+    const legacyMountSource = dataGridSource.slice(
+      legacyMountStart,
+      dataGridSource.indexOf('/>', legacyMountStart),
+    );
+    const expectedKeys = [
+      'data_grid.context_menu.copy_field_name',
+      'data_grid.batch_fill.set_null',
+      'data_grid.context_menu.edit_row',
+      'data_grid.context_menu.copy_row_as_new',
+      'data_grid.context_menu.paste_row_as_new',
+      'data_grid.context_menu.paste_row_as_new_count',
+      'data_grid.context_menu.fill_to_selected_rows',
+      'data_grid.context_menu.paste_copied_columns',
+      'data_grid.context_menu.copy_row_data',
+      'data_grid.context_menu.copy_as_insert',
+      'data_grid.context_menu.copy_as_update',
+      'data_grid.context_menu.copy_as_delete',
+      'data_grid.context_menu.copy_as_json',
+      'data_grid.context_menu.copy_as_csv',
+      'data_grid.context_menu.copy_as_markdown',
+      'data_grid.context_menu.export_as_csv',
+      'data_grid.context_menu.export_as_excel',
+      'data_grid.context_menu.export_as_json',
+      'data_grid.context_menu.export_as_html',
+    ];
+
+    expect(legacyMountStart).toBeGreaterThanOrEqual(0);
+    expect(legacyMountSource).toContain('translate={translateDataGrid}');
+    expect(legacyMenuSource).toContain('translate?: (key: string, params?: Record<string, unknown>) => string');
+    expectedKeys.forEach((key) => {
+      expect(legacyMenuSource).toContain(`translate('${key}'`);
+    });
+    expect(legacyMenuSource).toMatch(
+      /translate\(\s*'data_grid\.context_menu\.paste_row_as_new_count'\s*,\s*\{\s*count:\s*copiedRowsForPasteLength\s*\}\s*\)/,
+    );
+    expect(legacyMenuSource).toMatch(
+      /translate\(\s*'data_grid\.context_menu\.fill_to_selected_rows'\s*,\s*\{\s*count:\s*selectedRowKeysLength\s*\}\s*\)/,
+    );
+    [
+      '复制字段名称',
+      '设置为 NULL',
+      '编辑本行',
+      '复制本行为新增行',
+      '粘贴为新增行',
+      '填充到选中行',
+      '粘贴已复制列',
+      '复制行数据',
+      '复制为 INSERT',
+      '复制为 UPDATE',
+      '复制为 DELETE',
+      '复制为 JSON',
+      '复制为 CSV',
+      '复制为 Markdown',
+      '导出为 CSV',
+      '导出为 Excel',
+      '导出为 JSON',
+      '导出为 HTML',
+    ].forEach((literal) => {
+      expect(legacyMenuSource).not.toContain(literal);
+    });
+  });
+
+  it('localizes row copy and paste feedback through DataGrid i18n keys', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const rowCopyPasteFeedbackKeys = [
+      'data_grid.message.select_rows_to_copy',
+      'data_grid.message.copied_rows',
+      'data_grid.message.copy_rows_first',
+      'data_grid.message.no_pasteable_rows',
+      'data_grid.message.pasted_rows_as_new',
+    ];
+
+    rowCopyPasteFeedbackKeys.forEach((key) => {
+      expect(source).toMatch(new RegExp(`translateDataGrid\\(\\s*['"]${key.replace(/\./g, '\\.')}['"]`));
+    });
+    expect(source).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.copied_rows['"]\s*,\s*\{\s*count:\s*copiedRows\.length\s*\}\s*\)/,
+    );
+    expect(source).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.pasted_rows_as_new['"]\s*,\s*\{\s*count:\s*nextRows\.length\s*\}\s*\)/,
+    );
+
+    [
+      'zh-CN',
+      'zh-TW',
+      'en-US',
+      'ja-JP',
+      'de-DE',
+      'ru-RU',
+    ].forEach((locale) => {
+      const catalog = JSON.parse(
+        readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8'),
+      ) as Record<string, string>;
+
+      rowCopyPasteFeedbackKeys.forEach((key) => {
+        expect(catalog[key]).toEqual(expect.any(String));
+        expect(catalog[key].length).toBeGreaterThan(0);
+      });
+    });
+
+    [
+      '请先选择要复制的行',
+      '已复制 ${copiedRows.length} 行，可粘贴为新增行',
+      '请先复制行',
+      '没有可粘贴的行',
+      '已粘贴 ${nextRows.length} 行为新增行，请检查后提交事务',
+    ].forEach((literal) => {
+      expect(source).not.toContain(literal);
+    });
+  });
+
+  it('localizes selected-column copy and paste feedback through DataGrid i18n keys', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const columnCopyPasteFeedbackKeys = [
+      'data_grid.message.select_same_row_cells_to_copy',
+      'data_grid.message.no_copyable_cells',
+      'data_grid.message.copy_columns_same_row_only',
+      'data_grid.message.no_copyable_columns',
+      'data_grid.message.copied_columns',
+      'data_grid.message.copy_columns_first',
+      'data_grid.message.no_pasteable_editable_fields',
+      'data_grid.message.select_target_rows',
+      'data_grid.message.target_rows_cannot_only_source',
+      'data_grid.message.target_rows_no_update',
+      'data_grid.message.pasted_columns_to_rows',
+    ];
+
+    columnCopyPasteFeedbackKeys.forEach((key) => {
+      expect(source).toMatch(new RegExp(`translateDataGrid\\(\\s*['"]${key.replace(/\./g, '\\.')}['"]`));
+    });
+    expect(source).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.copied_columns['"]\s*,\s*\{\s*count:\s*selectedColumnNames\.length\s*\}\s*\)/,
+    );
+    expect(source).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.pasted_columns_to_rows['"]\s*,\s*\{\s*rows:\s*patchesByRow\.size\s*,\s*cells:\s*updatedCellCount\s*\}\s*\)/,
+    );
+
+    const copyCallbackStart = source.indexOf('const handleCopySelectedColumnsFromRow = useCallback(() => {');
+    expect(copyCallbackStart).toBeGreaterThan(-1);
+    const pasteCallbackStart = source.indexOf('const handlePasteCopiedColumnsToSelectedRows = useCallback', copyCallbackStart);
+    expect(pasteCallbackStart).toBeGreaterThan(copyCallbackStart);
+    const batchFillCallbackStart = source.indexOf('const handleBatchFillToSelected = useCallback', pasteCallbackStart);
+    expect(batchFillCallbackStart).toBeGreaterThan(pasteCallbackStart);
+
+    const copyCallbackSource = source.slice(copyCallbackStart, pasteCallbackStart);
+    const pasteCallbackSource = source.slice(pasteCallbackStart, batchFillCallbackStart);
+    const columnCopyPasteCallbackSource = `${copyCallbackSource}\n${pasteCallbackSource}`;
+    expect(copyCallbackSource).toMatch(/},\s*\[[\s\S]*translateDataGrid[\s\S]*\]\);/);
+    expect(pasteCallbackSource).toMatch(/},\s*\[[\s\S]*translateDataGrid[\s\S]*\]\);/);
+    expect(pasteCallbackSource).not.toContain('data_grid.message.no_pasteable_rows');
+
+    [
+      'zh-CN',
+      'zh-TW',
+      'en-US',
+      'ja-JP',
+      'de-DE',
+      'ru-RU',
+    ].forEach((locale) => {
+      const catalog = JSON.parse(
+        readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8'),
+      ) as Record<string, string>;
+
+      columnCopyPasteFeedbackKeys.forEach((key) => {
+        expect(catalog[key]).toEqual(expect.any(String));
+        expect(catalog[key].length).toBeGreaterThan(0);
+      });
+      expect(catalog['data_grid.message.copied_columns']).toContain('{{count}}');
+      expect(catalog['data_grid.message.pasted_columns_to_rows']).toContain('{{rows}}');
+      expect(catalog['data_grid.message.pasted_columns_to_rows']).toContain('{{cells}}');
+    });
+
+    [
+      '请先在同一行选中要复制的单元格',
+      '未识别到可复制的单元格',
+      '复制列值时请只选择同一行的单元格',
+      '未识别到可复制的列',
+      '已复制 ${selectedColumnNames.length} 列，可粘贴到目标行',
+      '请先复制列值',
+      '没有可粘贴的可编辑字段',
+      '请先选择目标行',
+      '目标行不能仅为源行，请选择其他行',
+      '目标行无需更新',
+      '已粘贴到 ${patchesByRow.size} 行，共 ${updatedCellCount} 个单元格',
+    ].forEach((literal) => {
+      expect(columnCopyPasteCallbackSource).not.toContain(literal);
+    });
+  });
+
+  it('localizes commit, preview SQL, and basic copy feedback in the scoped DataGrid windows', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const previewCommitCopyStart = source.indexOf('const handlePreviewChanges = useCallback');
+    const clipboardRowsStart = source.indexOf('const getClipboardRows = useCallback', previewCommitCopyStart);
+    expect(previewCommitCopyStart).toBeGreaterThan(-1);
+    expect(clipboardRowsStart).toBeGreaterThan(previewCommitCopyStart);
+    const previewCommitCopySource = source.slice(previewCommitCopyStart, clipboardRowsStart);
+
+    [
+      'data_grid.message.change_set_build_failed',
+      'data_grid.message.change_set_build_failed_detail',
+      'data_grid.message.preview_sql_failed',
+      'data_grid.message.preview_sql_failed_detail',
+      'data_grid.message.commit_failed',
+      'data_grid.message.transaction_committed',
+      'data_grid.message.no_changes_to_commit',
+      'data_grid.message.copied_to_clipboard',
+      'data_grid.message.no_field_name',
+      'data_grid.message.no_copyable_columns',
+      'data_grid.message.keep_one_visible_column',
+      'data_grid.message.result_set_no_copyable_content',
+    ].forEach((key) => {
+      expect(previewCommitCopySource).toMatch(new RegExp(`translateDataGrid\\(\\s*['"]${key.replace(/\./g, '\\.')}['"]`));
+    });
+
+    expect(previewCommitCopySource).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.change_set_build_failed_detail['"]\s*,\s*\{\s*detail:\s*changeSetResult\.error\s*\}\s*\)/,
+    );
+    expect(previewCommitCopySource).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.preview_sql_failed_detail['"]\s*,\s*\{\s*detail:\s*res\.message\s*\}\s*\)/,
+    );
+    expect(previewCommitCopySource).toMatch(
+      /const\s+rawErrorMessage\s*=\s*e\?\.message\s*\|\|\s*String\(e\);[\s\S]*translateDataGrid\(\s*['"]data_grid\.message\.preview_sql_failed_detail['"]\s*,\s*\{\s*detail:\s*rawErrorMessage\s*\}\s*\)/,
+    );
+    expect(previewCommitCopySource).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.commit_failed['"]\s*,\s*\{\s*detail:\s*res\.message\s*\}\s*\)/,
+    );
+
+    [
+      '无法构建变更集',
+      '生成预览 SQL 失败',
+      '生成预览 SQL 失败：',
+      '没有可提交的变更',
+      '事务提交成功',
+      '提交失败: ',
+      '已复制到剪贴板',
+      '未识别到字段名称',
+      '未识别到可复制的列',
+      '至少保留一个可见字段',
+      '当前结果集没有可复制内容',
+    ].forEach((literal) => {
+      expect(previewCommitCopySource).not.toContain(literal);
+    });
+  });
+
+  it('localizes Preview SQL Modal chrome while preserving raw SQL text and operation labels', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const previewModalStart = source.indexOf('{/* Preview SQL Modal */}');
+    const importPreviewStart = source.indexOf('{/* Import Preview Modal */}', previewModalStart);
+    expect(previewModalStart).toBeGreaterThan(-1);
+    expect(importPreviewStart).toBeGreaterThan(previewModalStart);
+    const previewModalSource = source.slice(previewModalStart, importPreviewStart);
+
+    [
+      'data_grid.preview_sql.title',
+      'data_grid.preview_sql.copied',
+      'data_grid.preview_sql.no_changes',
+      'data_grid.preview_sql.summary',
+    ].forEach((key) => {
+      expect(previewModalSource).toMatch(new RegExp(`translateDataGrid\\(\\s*['"]${key.replace(/\./g, '\\.')}['"]`));
+    });
+
+    expect(previewModalSource).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.preview_sql\.summary['"]\s*,\s*\{\s*deletes:\s*previewSqlData\.deletes\.length,\s*updates:\s*previewSqlData\.updates\.length,\s*inserts:\s*previewSqlData\.inserts\.length\s*\}\s*\)/,
+    );
+    expect(previewModalSource.match(/navigator\.clipboard\.writeText\(sql\)/g)).toHaveLength(3);
+    expect(previewModalSource.match(/\{sql\}<\/pre>/g)).toHaveLength(3);
+    expect(previewModalSource).toContain('DELETE ({previewSqlData.deletes.length})');
+    expect(previewModalSource).toContain('UPDATE ({previewSqlData.updates.length})');
+    expect(previewModalSource).toContain('INSERT ({previewSqlData.inserts.length})');
+
+    [
+      'title="变更预览"',
+      "message.success('已复制')",
+      '>无变更</div>',
+      '共 {previewSqlData.deletes.length} 条 DELETE',
+    ].forEach((literal) => {
+      expect(previewModalSource).not.toContain(literal);
+    });
+  });
+
+  it('localizes query-result, selected-cell, copy-SQL, and current-row copy feedback', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const copyFeedbackStart = source.indexOf('const getClipboardRows = useCallback');
+    const copyFeedbackEnd = source.indexOf('const buildConnConfig = useCallback', copyFeedbackStart);
+    expect(copyFeedbackStart).toBeGreaterThan(-1);
+    expect(copyFeedbackEnd).toBeGreaterThan(copyFeedbackStart);
+    const copyFeedbackSource = source.slice(copyFeedbackStart, copyFeedbackEnd);
+
+    [
+      'data_grid.message.result_set_no_copyable_content',
+      'data_grid.message.drag_select_cells_to_copy',
+      'data_grid.message.no_copyable_cells',
+      'data_grid.message.selection_no_copyable_content',
+      'data_grid.message.copy_sql_not_supported',
+      'data_grid.copy_sql.error.missing_safe_where',
+      'data_grid.copy_sql.error.missing_table_name',
+      'data_grid.copy_sql.error.no_copyable_fields',
+      'data_grid.message.current_row_no_copyable_content',
+    ].forEach((key) => {
+      expect(copyFeedbackSource).toMatch(new RegExp(`translateDataGrid\\(\\s*['"]${key.replace(/\./g, '\\.')}['"]`));
+    });
+
+    expect(copyFeedbackSource).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.copy_sql\.error\.missing_table_name['"]\s*,\s*error\.params\s*\)/,
+    );
+
+    [
+      '当前结果集没有可复制内容',
+      '请先拖选要复制的单元格',
+      '未识别到可复制的单元格',
+      '当前选区没有可复制内容',
+      '当前数据源不支持复制 SQL，请使用 JSON/CSV/Markdown 复制。',
+      '当前行没有可复制内容',
+    ].forEach((literal) => {
+      expect(copyFeedbackSource).not.toContain(literal);
+    });
+  });
+
+  it('localizes batch fill feedback through DataGrid i18n keys', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const batchFillCellsKeys = [
+      'data_grid.message.select_cells_to_fill',
+      'data_grid.message.selected_cells_no_update',
+      'data_grid.message.filled_cells',
+    ];
+    const batchFillToSelectedKeys = [
+      'data_grid.message.current_field_not_editable',
+      'data_grid.message.select_rows_to_fill',
+      'data_grid.message.no_other_rows_to_fill',
+      'data_grid.message.filled_rows',
+    ];
+    const batchFillFeedbackKeys = [
+      ...batchFillCellsKeys,
+      ...batchFillToSelectedKeys,
+    ];
+
+    const batchFillCellsStart = source.indexOf('const handleBatchFillCells = useCallback(() => {');
+    expect(batchFillCellsStart).toBeGreaterThan(-1);
+    const batchFillCellsEnd = source.indexOf('  // 事件委托', batchFillCellsStart);
+    expect(batchFillCellsEnd).toBeGreaterThan(batchFillCellsStart);
+    const batchFillCellsSource = source.slice(batchFillCellsStart, batchFillCellsEnd);
+
+    const batchFillToSelectedStart = source.indexOf('const handleBatchFillToSelected = useCallback((sourceRecord: Item, dataIndex: string) => {');
+    expect(batchFillToSelectedStart).toBeGreaterThan(-1);
+    const batchFillToSelectedEnd = source.indexOf('  const displayData = useMemo', batchFillToSelectedStart);
+    expect(batchFillToSelectedEnd).toBeGreaterThan(batchFillToSelectedStart);
+    const batchFillToSelectedSource = source.slice(batchFillToSelectedStart, batchFillToSelectedEnd);
+
+    batchFillCellsKeys.forEach((key) => {
+      expect(batchFillCellsSource).toMatch(new RegExp(`translateDataGrid\\(\\s*['"]${key.replace(/\./g, '\\.')}['"]`));
+    });
+    batchFillToSelectedKeys.forEach((key) => {
+      expect(batchFillToSelectedSource).toMatch(new RegExp(`translateDataGrid\\(\\s*['"]${key.replace(/\./g, '\\.')}['"]`));
+    });
+    expect(batchFillCellsSource).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.filled_cells['"]\s*,\s*\{\s*count:\s*updatedCount\s*\}\s*\)/,
+    );
+    expect(batchFillToSelectedSource).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.filled_rows['"]\s*,\s*\{\s*count:\s*updatedCount\s*\}\s*\)/,
+    );
+    expect(batchFillCellsSource).toMatch(/},\s*\[[\s\S]*translateDataGrid[\s\S]*\]\);/);
+    expect(batchFillToSelectedSource).toMatch(/},\s*\[[\s\S]*translateDataGrid[\s\S]*\]\);/);
+
+    [
+      'zh-CN',
+      'zh-TW',
+      'en-US',
+      'ja-JP',
+      'de-DE',
+      'ru-RU',
+    ].forEach((locale) => {
+      const catalog = JSON.parse(
+        readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8'),
+      ) as Record<string, string>;
+
+      batchFillFeedbackKeys.forEach((key) => {
+        expect(catalog[key]).toEqual(expect.any(String));
+        expect(catalog[key].length).toBeGreaterThan(0);
+      });
+      expect(catalog['data_grid.message.filled_cells']).toContain('{{count}}');
+      expect(catalog['data_grid.message.filled_rows']).toContain('{{count}}');
+    });
+
+    const batchFillCallbackSource = `${batchFillCellsSource}\n${batchFillToSelectedSource}`;
+    [
+      '请先选择要填充的单元格',
+      '选中的单元格无需更新',
+      '已填充 ${updatedCount} 个单元格',
+      '当前字段不可编辑',
+      '请先选择要填充的行',
+      '没有其他选中的行可以填充',
+      '已填充 ${updatedCount} 行',
+    ].forEach((literal) => {
+      expect(batchFillCallbackSource).not.toContain(literal);
+    });
+  });
+
+  it('localizes editor and JSON feedback through DataGrid i18n keys', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const sliceCallback = (startMarker: string, endMarker: string) => {
+      const start = source.indexOf(startMarker);
+      expect(start).toBeGreaterThan(-1);
+      const end = source.indexOf(endMarker, start);
+      expect(end).toBeGreaterThan(start);
+      return source.slice(start, end);
+    };
+    const expectTranslateCall = (callbackSource: string, key: string) => {
+      expect(callbackSource).toMatch(new RegExp(`translateDataGrid\\(\\s*['"]${key.replace(/\./g, '\\.')}['"]`));
+    };
+    const expectTranslateDependency = (callbackSource: string) => {
+      expect(callbackSource).toMatch(/},\s*\[[\s\S]*translateDataGrid[\s\S]*\]\);/);
+    };
+
+    const handleDataPanelSaveSource = sliceCallback(
+      'const handleDataPanelSave = useCallback(() => {',
+      'const handleCellSetNull = useCallback(() => {',
+    );
+    const handleCellSetNullSource = sliceCallback(
+      'const handleCellSetNull = useCallback(() => {',
+      'const handleCellEditorSave = useCallback(() => {',
+    );
+    const handleCellEditorSaveSource = sliceCallback(
+      'const handleCellEditorSave = useCallback(() => {',
+      'const handleFormatJsonInEditor = useCallback(() => {',
+    );
+    const openRowEditorByKeySource = sliceCallback(
+      'const openRowEditorByKey = useCallback((keyStr?: string) => {',
+      'const openCurrentViewRowEditor = useCallback(() => {',
+    );
+    const openCurrentViewRowEditorSource = sliceCallback(
+      'const openCurrentViewRowEditor = useCallback(() => {',
+      'const handleOpenJsonEditor = useCallback(() => {',
+    );
+    const applyJsonEditorSource = sliceCallback(
+      'const applyJsonEditor = useCallback(() => {',
+      'const openRowEditorFieldEditor = useCallback((dataIndex: string) => {',
+    );
+    const openRowEditorFieldEditorSource = sliceCallback(
+      'const openRowEditorFieldEditor = useCallback((dataIndex: string) => {',
+      'const applyRowEditor = useCallback(() => {',
+    );
+
+    [
+      [handleDataPanelSaveSource, [
+        'data_grid.message.current_field_not_editable',
+        'data_grid.message.no_data_changes',
+        'data_grid.message.saved',
+      ]],
+      [handleCellSetNullSource, ['data_grid.message.current_field_not_editable']],
+      [handleCellEditorSaveSource, ['data_grid.message.current_field_not_editable']],
+      [openRowEditorByKeySource, [
+        'data_grid.message.locate_record_to_edit',
+        'data_grid.message.target_row_not_found',
+      ]],
+      [openCurrentViewRowEditorSource, ['data_grid.message.current_record_not_editable']],
+      [applyJsonEditorSource, [
+        'data_grid.message.json_parse_failed',
+        'data_grid.message.json_view_must_be_array',
+        'data_grid.message.json_record_count_mismatch',
+        'data_grid.message.json_record_not_object',
+        'data_grid.message.json_record_missing_row_key',
+        'data_grid.message.json_applied',
+      ]],
+      [openRowEditorFieldEditorSource, ['data_grid.message.current_field_not_editable']],
+    ].forEach(([callbackSource, keys]) => {
+      (keys as string[]).forEach((key) => expectTranslateCall(callbackSource as string, key));
+      expectTranslateDependency(callbackSource as string);
+    });
+
+    expect(applyJsonEditorSource).toMatch(
+      /const\s+rawErrorMessage\s*=\s*e\?\.message\s*\|\|\s*String\(e\);[\s\S]*translateDataGrid\(\s*['"]data_grid\.message\.json_parse_failed['"]\s*,\s*\{\s*detail:\s*rawErrorMessage\s*\}\s*\)/,
+    );
+    expect(applyJsonEditorSource).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.json_record_count_mismatch['"]\s*,\s*\{\s*current:\s*mergedDisplayData\.length\s*,\s*json:\s*parsed\.length\s*\}\s*\)/,
+    );
+    expect(applyJsonEditorSource).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.json_record_not_object['"]\s*,\s*\{\s*index:\s*idx\s*\+\s*1\s*\}\s*\)/,
+    );
+    expect(applyJsonEditorSource).toMatch(
+      /translateDataGrid\(\s*['"]data_grid\.message\.json_record_missing_row_key['"]\s*,\s*\{\s*index:\s*idx\s*\+\s*1\s*\}\s*\)/,
+    );
+
+    const targetCallbackSource = [
+      handleDataPanelSaveSource,
+      handleCellSetNullSource,
+      handleCellEditorSaveSource,
+      openRowEditorByKeySource,
+      openCurrentViewRowEditorSource,
+      applyJsonEditorSource,
+      openRowEditorFieldEditorSource,
+    ].join('\n');
+    [
+      '当前字段不可编辑',
+      '数据未变更',
+      '已保存',
+      '请先定位到要编辑的记录',
+      '未找到目标行，请刷新后重试',
+      '当前记录不可编辑',
+      'JSON 解析失败：',
+      'JSON 视图必须是数组格式（每项对应一条记录）',
+      '记录条数不一致：当前 ${mergedDisplayData.length} 条，JSON 中 ${parsed.length} 条。请勿在此模式增删记录。',
+      '第 ${idx + 1} 条记录不是对象，无法应用',
+      '第 ${idx + 1} 条记录缺少行标识，无法应用',
+      'JSON 修改已应用到当前结果集，可继续“提交事务”',
+    ].forEach((literal) => {
+      expect(targetCallbackSource).not.toContain(literal);
+    });
+  });
+
+  it('refreshes DataGrid localized chrome when the language preference changes', () => {
+    mockStoreState.languagePreference = 'system';
+    const previousUiVersion = mockStoreState.uiVersion;
+    mockStoreState.uiVersion = 'legacy';
+    const renderLocalizedGrid = (systemLanguages: readonly string[]) => renderDataGridWithI18n(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            id: 1,
+            name: 'alpha',
+          },
+        ]}
+        columnNames={['id', 'name']}
+        loading={false}
+        tableName="users"
+        readOnly
+        pagination={{
+          current: 1,
+          pageSize: 100,
+          total: 1,
+        }}
+        onPageChange={() => {}}
+      />,
+      { systemLanguages },
+    );
+
+    try {
+      const zhMarkup = renderLocalizedGrid(['zh-CN']);
+      expect(zhMarkup).toContain('placeholder="跳到字段列..."');
+      expect(zhMarkup).not.toContain('placeholder="Jump to column..."');
+
+      const enMarkup = renderLocalizedGrid(['en-US']);
+      expect(enMarkup).toContain('placeholder="Jump to column..."');
+    } finally {
+      mockStoreState.uiVersion = previousUiVersion;
+    }
+
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    expect(source).toMatch(/import\s+\{\s*getCurrentLanguage,\s*t\s*\}\s+from\s+['"]\.\.\/i18n['"]/);
+    expect(source).toMatch(/import\s+\{\s*useOptionalI18n\s*\}\s+from\s+['"]\.\.\/i18n\/provider['"]/);
+    expect(source).toMatch(/const\s+useDataGridI18nLanguage\s*=\s*\(\s*\)\s*=>\s*{[\s\S]*?const\s+i18n\s*=\s*useOptionalI18n\(\s*\);[\s\S]*?return\s+i18n\?\.language\s*\?\?\s*getCurrentLanguage\(\s*\);[\s\S]*?};/);
+    expect(source).toMatch(/const\s+language\s*=\s*useDataGridI18nLanguage\(\s*\);/);
+    expect(source).not.toMatch(/const\s+\{\s*language\s*\}\s*=\s*useI18n\(\s*\);/);
+    expect(source).toMatch(/t\(key,\s*params,\s*language\)/);
+    expect(source).not.toMatch(/t\(key,\s*params,\s*languagePreference\)/);
+    expect(source).toContain("'data-i18n-language': language");
+    expect(source).toMatch(/}\s*,\s*\[[^\]]*language[^\]]*\]\);/);
+    expect(source).toMatch(/const\s+DataGridWithErrorBoundary:\s*React\.FC<DataGridProps>\s*=\s*\(props\)\s*=>\s*{/);
+    expect(source).toMatch(/<DataGridErrorBoundary\s+i18nLanguage={language}>/);
+    expect(source).not.toMatch(/<DataGridErrorBoundary\s+key={language}/);
+  });
+
+  it('falls back to the current i18n language when rendered outside I18nProvider', () => {
+    const previousUiVersion = mockStoreState.uiVersion;
+    const previousLanguage = getCurrentLanguage();
+    mockStoreState.uiVersion = 'legacy';
+    setCurrentLanguage('en-US');
+
+    try {
+      const markup = renderToStaticMarkup(
+        <DataGrid
+          data={[
+            {
+              __gonavi_row_key__: 'row-1',
+              id: 1,
+              name: 'alpha',
+            },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          readOnly
+        />,
+      );
+
+      expect(markup).toContain('placeholder="Jump to column..."');
+      expect(markup).not.toContain('placeholder="跳到字段列..."');
+    } finally {
+      setCurrentLanguage(previousLanguage);
+      mockStoreState.uiVersion = previousUiVersion;
+    }
+  });
+
+  it('localizes legacy and v2 pagination summaries through DataGrid i18n', () => {
+    mockStoreState.languagePreference = 'system';
+    const previousUiVersion = mockStoreState.uiVersion;
+    const renderLocalizedGrid = (uiVersion: 'legacy' | 'v2', pagination: React.ComponentProps<typeof DataGrid>['pagination']) => {
+      mockStoreState.uiVersion = uiVersion;
+      return renderDataGridWithI18n(
+        <DataGrid
+          data={[
+            {
+              __gonavi_row_key__: 'row-1',
+              id: 1,
+              name: 'alpha',
+            },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          readOnly
+          pagination={pagination}
+          onPageChange={() => {}}
+        />,
+        { systemLanguages: ['en-US'] },
+      );
+    };
+
+    try {
+      const legacyMarkup = renderLocalizedGrid('legacy', {
+        current: 1,
+        pageSize: 100,
+        total: 1,
+      });
+      expect(legacyMarkup).toContain('Current 1 rows / 1 rows total');
+      expect(legacyMarkup).not.toContain('当前 1 条');
+
+      const v2Markup = renderLocalizedGrid('v2', {
+        current: 1,
+        pageSize: 100,
+        total: 1,
+        totalKnown: false,
+        totalCountLoading: true,
+      });
+      expect(v2Markup).toContain('Current 1 rows / counting total...');
+      expect(v2Markup).not.toContain('正在统计');
+    } finally {
+      mockStoreState.uiVersion = previousUiVersion;
+    }
+  });
+
+  it('keeps v2 pagination page text out of the summary because the page chip owns it', () => {
+    mockStoreState.languagePreference = 'system';
+    const previousUiVersion = mockStoreState.uiVersion;
+    mockStoreState.uiVersion = 'v2';
+
+    try {
+      const markup = renderDataGridWithI18n(
+        <DataGrid
+          data={[
+            {
+              __gonavi_row_key__: 'row-1',
+              id: 1,
+              name: 'alpha',
+            },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          readOnly
+          pagination={{
+            current: 1,
+            pageSize: 100,
+            total: 1,
+          }}
+          onPageChange={() => {}}
+        />,
+        { systemLanguages: ['en-US'] },
+      );
+
+      expect(markup).toContain('Current 1 rows / 1 rows total');
+      expect(markup).toContain('data-grid-v2-page-chip="true"');
+      expect(markup).toContain('<strong>1</strong><span>/</span><span>1</span>');
+      expect(markup).not.toContain('Page 1 / 1');
+    } finally {
+      mockStoreState.uiVersion = previousUiVersion;
+    }
   });
 
   it('hides current-page find in JSON and text record views', () => {
@@ -196,8 +979,822 @@ describe('DataGrid layout', () => {
     expect(markup).not.toContain('第 1 / 1 页');
   });
 
+  it('keeps detached DataGrid chrome text behind translateDataGrid', () => {
+    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const toolbarFrameSource = readFileSync(new URL('./DataGridToolbarFrame.tsx', import.meta.url), 'utf8');
+    const pageFindSource = readFileSync(new URL('./DataGridPageFind.tsx', import.meta.url), 'utf8');
+    const resultViewSource = readFileSync(new URL('./DataGridResultViewSwitcher.tsx', import.meta.url), 'utf8');
+    const paginationSource = readFileSync(new URL('./DataGridPaginationBar.tsx', import.meta.url), 'utf8');
+    const secondaryActionsSource = readFileSync(new URL('./DataGridSecondaryActions.tsx', import.meta.url), 'utf8');
+    const recordViewsSource = readFileSync(new URL('./DataGridRecordViews.tsx', import.meta.url), 'utf8');
+    const previewPanelSource = readFileSync(new URL('./DataGridPreviewPanel.tsx', import.meta.url), 'utf8');
+    const modalsSource = readFileSync(new URL('./DataGridModals.tsx', import.meta.url), 'utf8');
+    const ddlWorkspaceSource = readFileSync(new URL('./DataGridV2DdlWorkspace.tsx', import.meta.url), 'utf8');
+    const detachedChromeSource = [
+      pageFindSource,
+      resultViewSource,
+      paginationSource,
+      secondaryActionsSource,
+      recordViewsSource,
+      previewPanelSource,
+      modalsSource,
+      ddlWorkspaceSource,
+    ].join('\n');
+
+    expect(dataGridSource).toMatch(/<DataGridToolbarFrame[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridPageFind[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridResultViewSwitcher[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridPaginationBar[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridSecondaryActions[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridJsonView[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridTextView[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridPreviewPanel[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridModals[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridV2FieldsView[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridV2ErView[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridV2DdlSideWorkspace[\s\S]*?translate={translateDataGrid}/);
+    expect(dataGridSource).toMatch(/<DataGridV2DdlView[\s\S]*?translate={translateDataGrid}/);
+    expect(detachedChromeSource).toContain("translate('data_grid.page_find.tooltip')");
+    expect(detachedChromeSource).toContain("translate('data_grid.page_find.placeholder')");
+    expect(detachedChromeSource).toContain("translate('data_grid.page_find.summary'");
+    expect(detachedChromeSource).toContain("translate('data_grid.pagination.result_set')");
+    expect(detachedChromeSource).toContain("translate('data_grid.pagination.page_size_aria')");
+    expect(detachedChromeSource).toContain("translate('data_grid.pagination.page_size_option'");
+    expect(detachedChromeSource).toContain("translate('data_grid.pagination.jump_label')");
+    expect(detachedChromeSource).toContain("translate('data_grid.pagination.jump_aria')");
+    expect(detachedChromeSource).toContain("translate('data_grid.pagination.jump_action')");
+    expect(detachedChromeSource).toContain("translate('data_grid.view.result_view')");
+    expect(detachedChromeSource).toContain("translate('data_grid.view.table')");
+    expect(detachedChromeSource).toContain("translate('data_grid.view.text')");
+    expect(detachedChromeSource).toContain("translate('data_grid.secondary.data_preview')");
+    expect(detachedChromeSource).toContain("translate('data_grid.column_settings.field_info')");
+    expect(detachedChromeSource).toContain("translate('data_grid.secondary.view_ddl')");
+    expect(detachedChromeSource).toContain("translate('data_grid.secondary.er_diagram')");
+    expect(detachedChromeSource).toContain("translate('data_grid.secondary.column_display')");
+    expect(detachedChromeSource).toContain("translate('data_grid.secondary.jump_column')");
+    expect(detachedChromeSource).toContain("translate('data_grid.secondary.row_count'");
+    expect(detachedChromeSource).toContain("translate('data_grid.secondary.pending_changes'");
+    expect(detachedChromeSource).toContain("translate('data_grid.secondary.live')");
+    expect(detachedChromeSource).toContain("translate('data_grid.record_view.empty')");
+    expect(detachedChromeSource).toContain("translate('data_grid.record_view.json_record_count'");
+    expect(detachedChromeSource).toContain("translate('data_grid.record_view.edit_json')");
+    expect(detachedChromeSource).toContain("translate('data_grid.record_view.previous')");
+    expect(detachedChromeSource).toContain("translate('data_grid.record_view.next')");
+    expect(detachedChromeSource).toContain("translate('data_grid.record_view.record_position'");
+    expect(detachedChromeSource).toContain("translate('data_grid.record_view.edit_current')");
+    expect(detachedChromeSource).toContain("translate('data_grid.preview_panel.no_cell_title')");
+    expect(detachedChromeSource).toContain("translate('data_grid.preview_panel.no_cell_description')");
+    expect(detachedChromeSource).toContain("translate('data_grid.row_editor.title')");
+    expect(detachedChromeSource).toContain("translate('data_grid.row_editor.popup_edit')");
+    expect(detachedChromeSource).toContain("translate('data_grid.cell_editor.title')");
+    expect(detachedChromeSource).toContain("translate('data_grid.cell_editor.title_with_column'");
+    expect(detachedChromeSource).toContain("translate('data_grid.batch_fill.title'");
+    expect(detachedChromeSource).toContain("translate('data_grid.batch_fill.set_null')");
+    expect(detachedChromeSource).toContain("translate('data_grid.batch_fill.value_placeholder')");
+    expect(detachedChromeSource).toContain("translate('data_grid.json_editor.title')");
+    expect(detachedChromeSource).toContain("translate('data_grid.json_editor.description')");
+    expect(detachedChromeSource).toContain("translate('data_grid.json_editor.format')");
+    expect(detachedChromeSource).toContain("translate('data_grid.json_editor.apply_changes')");
+    expect(detachedChromeSource).toContain("translate('data_grid.ddl.layout_bottom')");
+    expect(detachedChromeSource).toContain("translate('data_grid.ddl.layout_side')");
+    expect(detachedChromeSource).toContain("translate('data_grid.ddl.reload')");
+    expect(detachedChromeSource).toContain("translate('data_grid.ddl.copy')");
+    expect(detachedChromeSource).toContain("translate('data_grid.ddl.loading')");
+    expect(detachedChromeSource).toContain("translate('data_grid.ddl.sidebar_aria')");
+    expect(detachedChromeSource).toContain("translate('common.cancel')");
+    expect(detachedChromeSource).toContain("translate('common.close')");
+    expect(detachedChromeSource).toContain("translate('common.save')");
+    expect(detachedChromeSource).toContain("translate('data_grid.action.apply')");
+    expect(toolbarFrameSource).toContain('translate?: (key: string, params?: Record<string, string | number>) => string');
+    [
+      'data_grid.table_fallback.query_result',
+      'data_grid.toolbar.refresh',
+      'data_grid.toolbar.filter',
+      'data_grid.toolbar.add_row',
+      'data_grid.toolbar.undo_delete',
+      'data_grid.toolbar.delete_selected',
+      'data_grid.toolbar.selected_count',
+      'data_grid.toolbar.cell_editor',
+      'data_grid.toolbar.copy_selection',
+      'data_grid.toolbar.copy_selection_columns',
+      'data_grid.toolbar.batch_fill',
+      'data_grid.toolbar.paste_to_selected_rows',
+      'data_grid.toolbar.copied_columns_count',
+      'data_grid.toolbar.commit_label',
+      'data_grid.toolbar.commit',
+      'data_grid.toolbar.preview_sql_generate',
+      'data_grid.toolbar.preview_sql',
+      'data_grid.toolbar.rollback',
+      'data_grid.toolbar.import',
+      'data_grid.toolbar.export',
+      'data_grid.toolbar.copy',
+      'data_grid.toolbar.ai_insight',
+      'data_grid.toolbar.ai_insight_short',
+      'data_grid.toolbar.ai_insight_tooltip',
+      'data_grid.toolbar.cancel_count',
+      'data_grid.toolbar.cancel_count_tooltip',
+      'data_grid.toolbar.count_total',
+      'data_grid.toolbar.count_total_tooltip',
+      'data_grid.filter.mongodb_query_placeholder',
+      'data_grid.filter.quick_where_placeholder',
+      'data_grid.filter.apply_where',
+      'data_grid.filter.clear',
+      'data_grid.filter.enabled',
+      'data_grid.filter.first_condition',
+      'data_grid.filter.search_field_placeholder',
+      'data_grid.filter.custom_where_placeholder',
+      'data_grid.filter.list_values_placeholder',
+      'data_grid.filter.start_value_placeholder',
+      'data_grid.filter.end_value_placeholder',
+      'data_grid.filter.no_value_placeholder',
+      'data_grid.filter.sort_label',
+      'data_grid.filter.then_label',
+      'data_grid.filter.select_sort_field_placeholder',
+      'data_grid.filter.sort_asc',
+      'data_grid.filter.sort_desc',
+      'data_grid.filter.add_condition',
+      'data_grid.filter.add_sort',
+      'data_grid.filter.enable_all',
+      'data_grid.filter.disable_all',
+      'data_grid.filter.apply',
+    ].forEach((key) => {
+      expect(toolbarFrameSource).toContain(`translate('${key}`);
+    });
+    [
+      /translate\('data_grid\.toolbar\.selected_count', \{ count: selectedRowKeysLength \}\)/,
+      /translate\('data_grid\.toolbar\.copy_selection', \{ count: selectedCellsSize \}\)/,
+      /translate\('data_grid\.toolbar\.copy_selection_columns', \{ count: selectedCellsSize \}\)/,
+      /translate\('data_grid\.toolbar\.batch_fill', \{ count: selectedCellsSize \}\)/,
+      /translate\('data_grid\.toolbar\.paste_to_selected_rows', \{ count: selectedRowKeysLength \}\)/,
+      /translate\('data_grid\.toolbar\.copied_columns_count', \{ count: copiedCellPatchColumnCount \}\)/,
+      /translate\('data_grid\.toolbar\.commit', \{ count: pendingChangeCount \}\)/,
+    ].forEach((pattern) => {
+      expect(toolbarFrameSource).toMatch(pattern);
+    });
+    [
+      '查询结果',
+      '刷新',
+      '筛选',
+      '添加行',
+      '撤销删除',
+      '删除选中',
+      '单元格编辑器',
+      '复制选区',
+      '复制选区列值',
+      '批量填充',
+      '粘贴到选中行',
+      '提交事务',
+      '生成预览 SQL',
+      '预览SQL',
+      '回滚',
+      '导入',
+      '导出',
+      '一键借助 AI 智能分析当前查询页数据',
+      'AI 洞察',
+      'AI 数据洞察',
+      '取消本次精确总数统计（不会影响当前浏览）',
+      '按当前筛选统计精确总数',
+      '取消统计',
+      '统计总数',
+      '应用 WHERE',
+      '清空',
+      '启用',
+      '首条',
+      '搜索字段名',
+      '输入自定义 WHERE 表达式',
+      '多个值用逗号或换行分隔',
+      '开始值',
+      '结束值',
+      '无需输入值',
+      '排序',
+      '然后',
+      '选择排序字段',
+      '升序',
+      '降序',
+      '添加条件',
+      '添加排序',
+      '全启用',
+      '全停用',
+      '>应用<',
+      '>复制<',
+    ].forEach((literal) => {
+      expect(toolbarFrameSource).not.toContain(literal);
+    });
+    expect(toolbarFrameSource).toContain('WHERE');
+    expect(toolbarFrameSource).toContain('tableName');
+    expect(toolbarFrameSource).toContain('dbName');
+    (['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const).forEach((locale) => {
+      const catalog = JSON.parse(
+        readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8'),
+      );
+      expect(catalog['data_grid.filter.quick_where_placeholder']).toContain('WHERE');
+      expect(catalog['data_grid.filter.quick_where_placeholder']).toContain("status = 1 AND name LIKE 'A%'");
+      expect(catalog['data_grid.filter.mongodb_query_placeholder']).toContain('MongoDB');
+      expect(catalog['data_grid.filter.mongodb_query_placeholder']).toContain('JSON');
+      expect(catalog['data_grid.filter.mongodb_query_placeholder']).toContain('{"status":"A"}');
+      expect(catalog['data_grid.toolbar.preview_sql']).toContain('SQL');
+      expect(catalog['data_grid.toolbar.preview_sql_generate']).toContain('SQL');
+    });
+    expect(dataGridSource).toContain("translateDataGrid('data_grid.json_editor.invalid_format', { error:");
+    expect(dataGridSource).not.toContain('JSON 格式无效：');
+
+    const handleCopyDdlSourceStart = dataGridSource.indexOf('const handleCopyDdl = useCallback(() => {');
+    const handleCopyDdlSource = dataGridSource.slice(
+      handleCopyDdlSourceStart,
+      dataGridSource.indexOf('const handleCopySelectedCellsToClipboard', handleCopyDdlSourceStart),
+    );
+    [
+      'data_grid.message.no_ddl_to_copy',
+      'data_grid.message.ddl_copied',
+      'data_grid.message.ddl_copy_failed',
+    ].forEach((key) => {
+      expect(handleCopyDdlSource).toContain(`translateDataGrid('${key}')`);
+    });
+    [
+      '暂无可复制的 DDL',
+      'DDL 已复制到剪贴板',
+      '复制 DDL 失败',
+    ].forEach((literal) => {
+      expect(handleCopyDdlSource).not.toContain(literal);
+    });
+    expect(dataGridSource.match(/message\.info\(translateDataGrid\('data_grid\.message\.no_copyable_rows'\)\)/g) ?? []).toHaveLength(3);
+    expect(dataGridSource).not.toContain("message.info('未识别到可复制的行')");
+    expect(dataGridSource).toContain("translateDataGrid('data_grid.message.cell_edit_mode_entered')");
+    expect(dataGridSource).toContain("translateDataGrid('data_grid.message.cell_edit_mode_exited')");
+    expect(dataGridSource).not.toContain("'已进入单元格编辑模式，可拖拽选择多个单元格'");
+    expect(dataGridSource).not.toContain("'已退出单元格编辑模式'");
+
+    const ddlWorkspaceInlineLiterals = [
+      '底部',
+      '侧栏',
+      '重新加载',
+      '复制 DDL',
+      '正在加载 DDL...',
+      '表 DDL 侧栏',
+    ];
+    ddlWorkspaceInlineLiterals.forEach((literal) => {
+      expect(ddlWorkspaceSource).not.toContain(literal);
+    });
+
+    const ddlWorkspaceTranslateCalls: Array<{ key: string; params?: Record<string, unknown> }> = [];
+    const translate = (key: string, params?: Record<string, unknown>) => {
+      ddlWorkspaceTranslateCalls.push({ key, params });
+      return `[${key}]`;
+    };
+    const rawTableName = 'catalog.system_raw_error';
+    const rawDdl = 'CREATE TABLE catalog.system_raw_error (sql_text text, checksum text, github_release text, http_status int);';
+
+    const bottomDdlMarkup = renderToStaticMarkup(
+      <DataGridV2DdlView
+        layout="bottom"
+        tableName={rawTableName}
+        ddlViewLayout="bottom"
+        ddlLoading={false}
+        ddlText={rawDdl}
+        darkMode={false}
+        onDdlViewLayoutChange={() => {}}
+        onReload={() => {}}
+        onCopy={() => {}}
+        translate={translate}
+      />,
+    );
+    const sideDdlMarkup = renderToStaticMarkup(
+      <DataGridV2DdlSideWorkspace
+        tableContent={<div data-table-content="true">rows</div>}
+        tableName={rawTableName}
+        ddlViewLayout="side"
+        ddlLoading
+        ddlText={rawDdl}
+        darkMode={false}
+        onDdlViewLayoutChange={() => {}}
+        onReload={() => {}}
+        onCopy={() => {}}
+        ddlSidebarWidth={420}
+        ddlSidebarResizePreviewX={null}
+        onResizeStart={() => {}}
+        translate={translate}
+      />,
+    );
+
+    expect(bottomDdlMarkup).toContain('[data_grid.ddl.layout_bottom]');
+    expect(bottomDdlMarkup).toContain('[data_grid.ddl.layout_side]');
+    expect(bottomDdlMarkup).toContain('[data_grid.ddl.reload]');
+    expect(bottomDdlMarkup).toContain('[data_grid.ddl.copy]');
+    expect(bottomDdlMarkup).toContain(rawTableName);
+    expect(bottomDdlMarkup).toContain(rawDdl);
+    expect(sideDdlMarkup).toContain('aria-label="[data_grid.ddl.sidebar_aria]"');
+    expect(sideDdlMarkup).toContain('[common.close]');
+    expect(sideDdlMarkup).toContain('[data_grid.ddl.loading]');
+    expect(ddlWorkspaceTranslateCalls.map((call) => call.key)).toEqual([
+      'data_grid.ddl.layout_bottom',
+      'data_grid.ddl.layout_side',
+      'data_grid.ddl.reload',
+      'data_grid.ddl.copy',
+      'data_grid.ddl.sidebar_aria',
+      'data_grid.ddl.layout_bottom',
+      'data_grid.ddl.layout_side',
+      'data_grid.ddl.reload',
+      'data_grid.ddl.copy',
+      'common.close',
+      'data_grid.ddl.loading',
+    ]);
+    expect(ddlWorkspaceTranslateCalls.every((call) => call.params === undefined)).toBe(true);
+
+    expect(modalsSource).not.toMatch(/<Button key="format"[^>]*>\s*格式化 JSON\s*<\/Button>/);
+    expect(modalsSource).not.toContain('编辑行');
+    expect(modalsSource).not.toContain('编辑单元格');
+    expect(modalsSource).not.toContain('title="弹窗编辑"');
+    expect(modalsSource).not.toMatch(/<Button key="cancel" onClick=\{onCloseCellEditor\}>\s*取消\s*<\/Button>/);
+    expect(modalsSource).not.toMatch(/<Button key="ok" type="primary" onClick=\{onSaveCellEditor\}>\s*保存\s*<\/Button>/);
+    expect(modalsSource).not.toMatch(/<Button key="cancel" onClick=\{onCloseJsonEditor\}>\s*取消\s*<\/Button>/);
+    expect(modalsSource).not.toMatch(/<Button key="ok" type="primary" onClick=\{onApplyJsonEditor\}>\s*应用修改\s*<\/Button>/);
+    expect(modalsSource).not.toContain('批量填充');
+    expect(modalsSource).not.toContain('设置为 NULL');
+    expect(modalsSource).not.toContain('placeholder="输入要填充的值"');
+    expect(modalsSource).not.toContain('复制 DDL');
+    expect(modalsSource).not.toMatch(/<Button key="close" type="primary" onClick=\{onCloseDdlModal\}>\s*关闭\s*<\/Button>/);
+    expect(modalsSource).not.toContain("'正在加载 DDL...'");
+
+    [
+      '仅查找当前页已加载数据，不改变 WHERE 条件',
+      '当前页查找...',
+      '匹配 ',
+      '结果视图',
+      '表格',
+      '文本',
+      '数据预览',
+      '字段信息',
+      '字段显示',
+      '跳列',
+      '未提交',
+      '跳页',
+      '跳转页码',
+      '>跳<',
+      '每页条数',
+      '结果集',
+      '当前结果集无数据',
+      '当前结果集 ',
+      ' 条记录',
+      '编辑 JSON',
+      '上一条',
+      '下一条',
+      '记录 ',
+      '编辑当前记录',
+      '点击单元格查看数据',
+      '编辑行',
+      '编辑 JSON 结果集',
+      '说明：此处按当前结果集顺序编辑',
+      '格式化 JSON',
+      '应用修改',
+      '批量填充',
+      '设置为 NULL',
+      '输入要填充的值',
+      '复制 DDL',
+      '正在加载 DDL...',
+      '>保存<',
+      '点击表格中的单元格以预览完整数据',
+    ].forEach((literal) => {
+      expect(detachedChromeSource).not.toContain(literal);
+    });
+  });
+
+  it('localizes V2 metadata fields and ER view chrome while preserving raw metadata values', () => {
+    const translate = (key: string, params?: Record<string, unknown>) => {
+      const labels: Record<string, string> = {
+        'data_grid.table_fallback.query_result': 'Query fallback',
+        'data_grid.metadata_view.fields_badge': 'Meta fields',
+        'data_grid.metadata_view.er_table_badge': 'Entity table',
+        'data_grid.metadata_view.er_field_badge': 'Entity field',
+        'data_grid.metadata_view.field_count': `${params?.count} localized fields`,
+        'data_grid.metadata_view.column_name': 'Localized name',
+        'data_grid.metadata_view.column_type': 'Localized type',
+        'data_grid.metadata_view.default_value': 'Localized default',
+        'data_grid.metadata_view.comment': 'Localized comment',
+      };
+      return labels[key] ?? `missing:${key}`;
+    };
+
+    const fieldsMarkup = renderToStaticMarkup(
+      <DataGridV2FieldsView
+        translate={translate}
+        tableName="raw_users"
+        displayOutputColumnNames={['raw_id', 'raw_name']}
+        pkColumns={['raw_id']}
+        columnMetaMap={{
+          raw_id: { type: 'bigint', comment: 'raw primary key' },
+          raw_name: { type: 'varchar(64)', comment: 'raw display name' },
+        }}
+        columnMetaMapByLowerName={{}}
+      />,
+    );
+
+    expect(fieldsMarkup).toContain('Meta fields');
+    expect(fieldsMarkup).toContain('2 localized fields');
+    expect(fieldsMarkup).toContain('Localized name');
+    expect(fieldsMarkup).toContain('Localized type');
+    expect(fieldsMarkup).toContain('Localized default');
+    expect(fieldsMarkup).toContain('Localized comment');
+    expect(fieldsMarkup).toContain('raw_users');
+    expect(fieldsMarkup).toContain('raw_id');
+    expect(fieldsMarkup).toContain('varchar(64)');
+    expect(fieldsMarkup).toContain('raw display name');
+    expect(fieldsMarkup).toContain('PK');
+    expect(fieldsMarkup).not.toContain('FIELDS');
+    expect(fieldsMarkup).not.toContain('名称');
+    expect(fieldsMarkup).not.toContain('默认值');
+
+    const erMarkup = renderToStaticMarkup(
+      <DataGridV2ErView
+        translate={translate}
+        displayOutputColumnNames={['raw_name']}
+        columnMetaMap={{ raw_name: { type: 'varchar(64)', comment: 'raw display name' } }}
+        columnMetaMapByLowerName={{}}
+      />,
+    );
+
+    expect(erMarkup).toContain('Entity table');
+    expect(erMarkup).toContain('Entity field');
+    expect(erMarkup).toContain('Query fallback');
+    expect(erMarkup).toContain('1 localized fields');
+    expect(erMarkup).toContain('raw_name');
+    expect(erMarkup).toContain('varchar(64)');
+    expect(erMarkup).not.toContain('TABLE');
+    expect(erMarkup).not.toContain('FIELD');
+    expect(erMarkup).not.toContain('1 fields');
+  });
+
+  it('keeps V2 metadata view i18n keys in every locale catalog and removes fixed source literals', () => {
+    const metadataSource = readFileSync(new URL('./DataGridV2MetadataViews.tsx', import.meta.url), 'utf8');
+    const expectedKeys = [
+      'data_grid.table_fallback.query_result',
+      'data_grid.metadata_view.fields_badge',
+      'data_grid.metadata_view.er_table_badge',
+      'data_grid.metadata_view.er_field_badge',
+      'data_grid.metadata_view.field_count',
+      'data_grid.metadata_view.column_name',
+      'data_grid.metadata_view.column_type',
+      'data_grid.metadata_view.default_value',
+      'data_grid.metadata_view.comment',
+    ];
+
+    expectedKeys.forEach((key) => {
+      expect(metadataSource).toContain(`'${key}'`);
+    });
+    [
+      '查询结果',
+      '个字段',
+      '名称',
+      '类型',
+      '默认值',
+      '注释',
+    ].forEach((literal) => {
+      expect(metadataSource).not.toContain(literal);
+    });
+    expect(metadataSource).not.toMatch(/>\s*FIELDS\s*</);
+    expect(metadataSource).not.toMatch(/>\s*TABLE\s*</);
+    expect(metadataSource).not.toMatch(/>\s*FIELD\s*</);
+    expect(metadataSource).not.toMatch(/>\s*\{displayOutputColumnNames\.length\}\s*fields\s*</);
+
+    [
+      'zh-CN',
+      'zh-TW',
+      'en-US',
+      'ja-JP',
+      'de-DE',
+      'ru-RU',
+    ].forEach((locale) => {
+      const catalog = JSON.parse(
+        readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8'),
+      ) as Record<string, string>;
+
+      expectedKeys.forEach((key) => {
+        expect(catalog[key]).toEqual(expect.any(String));
+        expect(catalog[key].length).toBeGreaterThan(0);
+      });
+      expect(catalog['data_grid.metadata_view.field_count']).toContain('{{count}}');
+    });
+  });
+
+  it('localizes DataGrid filter option labels through the filter hook translator', () => {
+    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const filterHookSource = readFileSync(new URL('./useDataGridFilters.tsx', import.meta.url), 'utf8');
+    const filterOpOptionsStart = filterHookSource.indexOf('const filterOpOptions = React.useMemo');
+    const filterLogicOptionsStart = filterHookSource.indexOf('const filterLogicOptions = React.useMemo');
+    const hookCallStart = dataGridSource.indexOf('} = useDataGridFilters({');
+    const hookCallSource = dataGridSource.slice(
+      hookCallStart,
+      dataGridSource.indexOf('});', hookCallStart) + 3,
+    );
+    const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    expect(filterOpOptionsStart).toBeGreaterThan(-1);
+    expect(filterLogicOptionsStart).toBeGreaterThan(filterOpOptionsStart);
+    expect(hookCallStart).toBeGreaterThan(-1);
+    expect(filterHookSource).toContain('translate?: (key: string, params?: Record<string, string | number>) => string;');
+    expect(hookCallSource).toContain('translate: translateDataGrid');
+
+    const filterOpOptionsSource = filterHookSource.slice(filterOpOptionsStart, filterLogicOptionsStart);
+    const filterLogicOptionsSource = filterHookSource.slice(
+      filterLogicOptionsStart,
+      filterHookSource.indexOf('const isNoValueOp', filterLogicOptionsStart),
+    );
+    const rawOperatorLabels = ['=', '!=', '<', '<=', '>', '>='];
+    rawOperatorLabels.forEach((operator) => {
+      const operatorPattern = escapeRegExp(operator);
+      expect(filterOpOptionsSource).toMatch(new RegExp(
+        `\\{\\s*value:\\s*['"]${operatorPattern}['"],\\s*label:\\s*['"]${operatorPattern}['"]\\s*\\}`,
+      ));
+    });
+
+    const translatedOperatorKeys: Array<[string, string]> = [
+      ['CONTAINS', 'data_grid.filter.op.contains'],
+      ['NOT_CONTAINS', 'data_grid.filter.op.not_contains'],
+      ['STARTS_WITH', 'data_grid.filter.op.starts_with'],
+      ['NOT_STARTS_WITH', 'data_grid.filter.op.not_starts_with'],
+      ['ENDS_WITH', 'data_grid.filter.op.ends_with'],
+      ['NOT_ENDS_WITH', 'data_grid.filter.op.not_ends_with'],
+      ['IS_NULL', 'data_grid.filter.op.is_null'],
+      ['IS_NOT_NULL', 'data_grid.filter.op.is_not_null'],
+      ['IS_EMPTY', 'data_grid.filter.op.is_empty'],
+      ['IS_NOT_EMPTY', 'data_grid.filter.op.is_not_empty'],
+      ['BETWEEN', 'data_grid.filter.op.between'],
+      ['NOT_BETWEEN', 'data_grid.filter.op.not_between'],
+      ['IN', 'data_grid.filter.op.in_list'],
+      ['NOT_IN', 'data_grid.filter.op.not_in_list'],
+      ['CUSTOM', 'data_grid.filter.op.custom'],
+    ];
+    translatedOperatorKeys.forEach(([value, key]) => {
+      expect(filterOpOptionsSource).toMatch(new RegExp(
+        `\\{\\s*value:\\s*['"]${value}['"],\\s*label:\\s*translate\\(\\s*['"]${key.replace(/\./g, '\\.')}['"]\\s*\\)\\s*\\}`,
+      ));
+    });
+    expect(filterLogicOptionsSource).toMatch(
+      /\{\s*value:\s*['"]AND['"],\s*label:\s*translate\(\s*['"]data_grid\.filter\.logic\.and['"]\s*\)\s*\}/,
+    );
+    expect(filterLogicOptionsSource).toMatch(
+      /\{\s*value:\s*['"]OR['"],\s*label:\s*translate\(\s*['"]data_grid\.filter\.logic\.or['"]\s*\)\s*\}/,
+    );
+
+    [
+      '包含',
+      '不包含',
+      '开始以',
+      '不是开始于',
+      '结束以',
+      '不是结束于',
+      '是 null',
+      '不是 null',
+      '是空的',
+      '不是空的',
+      '介于',
+      '不介于',
+      '在列表',
+      '不在列表',
+      '[自定义]',
+      '且 (AND)',
+      '或 (OR)',
+    ].forEach((literal) => {
+      expect(`${filterOpOptionsSource}\n${filterLogicOptionsSource}`).not.toContain(literal);
+    });
+
+    (['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const).forEach((locale) => {
+      const catalog = JSON.parse(
+        readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8'),
+      ) as Record<string, string>;
+      translatedOperatorKeys.forEach(([, key]) => {
+        expect(catalog[key]).toEqual(expect.any(String));
+        expect(catalog[key].length).toBeGreaterThan(0);
+      });
+      expect(catalog['data_grid.filter.logic.and']).toContain('AND');
+      expect(catalog['data_grid.filter.logic.or']).toContain('OR');
+    });
+  });
+
+  it('renders detached DataGrid chrome with translated labels instead of i18n keys', () => {
+    const translate = (key: string, params?: Record<string, unknown>): string => {
+      const values: Record<string, string> = {
+        'data_grid.page_find.tooltip': 'Find only this page',
+        'data_grid.page_find.placeholder': 'Find current page',
+        'data_grid.page_find.summary': `${params?.occurrences} hits / ${params?.cells} cells`,
+        'data_grid.pagination.result_set': 'Result set label',
+        'data_grid.pagination.page_size_aria': 'Rows per page label',
+        'data_grid.pagination.page_size_option': `${params?.count} rows per page`,
+        'data_grid.pagination.jump_label': 'Jump label',
+        'data_grid.pagination.jump_aria': 'Jump page aria',
+        'data_grid.pagination.jump_action': 'Go action',
+        'data_grid.view.result_view': 'Result view label',
+        'data_grid.view.table': 'Table label',
+        'data_grid.view.text': 'Text label',
+        'data_grid.secondary.data_preview': 'Data preview label',
+        'data_grid.column_settings.field_info': 'Field info label',
+        'data_grid.secondary.view_ddl': 'View DDL label',
+        'data_grid.secondary.er_diagram': 'ER diagram label',
+        'data_grid.secondary.column_display': 'Column display label',
+        'data_grid.secondary.jump_column': 'Jump column label',
+        'data_grid.secondary.row_count': `${params?.count} rows label`,
+        'data_grid.secondary.pending_changes': `${params?.count} pending label`,
+        'data_grid.secondary.live': 'Live label',
+        'data_grid.record_view.empty': 'No rows label',
+        'data_grid.record_view.json_record_count': `${params?.count} JSON rows label`,
+        'data_grid.record_view.edit_json': 'Edit JSON label',
+        'data_grid.record_view.previous': 'Previous label',
+        'data_grid.record_view.next': 'Next label',
+        'data_grid.record_view.record_position': `Record label ${params?.current} of ${params?.total}`,
+        'data_grid.record_view.edit_current': 'Edit current label',
+        'data_grid.preview_panel.no_cell_title': 'Select cell title',
+        'data_grid.preview_panel.no_cell_description': 'Select cell description',
+        'data_grid.json_editor.format': 'Format JSON label',
+        'common.save': 'Save label',
+      };
+      return values[key] ?? key;
+    };
+
+    const pageFindMarkup = renderToStaticMarkup(
+      <DataGridPageFind
+        isV2Ui={false}
+        darkMode={false}
+        pageFindText="al"
+        normalizedPageFindText="al"
+        hasMatches
+        activePageFindPosition={1}
+        matchCount={3}
+        occurrenceCount={4}
+        matchedCellCount={2}
+        translate={translate}
+        onPageFindTextChange={() => {}}
+        onCancel={() => {}}
+        onNavigatePrevious={() => {}}
+        onNavigateNext={() => {}}
+      />,
+    );
+    expect(pageFindMarkup).toContain('placeholder="Find current page"');
+    expect(pageFindMarkup).toContain('1 / 3');
+    expect(pageFindMarkup).toContain('4 hits / 2 cells');
+    expect(pageFindMarkup).not.toContain('data_grid.page_find');
+
+    const resultViewMarkup = renderToStaticMarkup(
+      <DataGridResultViewSwitcher
+        isV2Ui={false}
+        darkMode={false}
+        viewMode="table"
+        translate={translate}
+        onViewModeChange={() => {}}
+      />,
+    );
+    expect(resultViewMarkup).toContain('Result view label');
+    expect(resultViewMarkup).toContain('Table label');
+    expect(resultViewMarkup).toContain('JSON');
+    expect(resultViewMarkup).toContain('Text label');
+    expect(resultViewMarkup).not.toContain('data_grid.view');
+
+    const paginationMarkup = renderToStaticMarkup(
+      <DataGridPaginationBar
+        isV2Ui={false}
+        pagination={{
+          current: 1,
+          pageSize: 100,
+          total: 24,
+        }}
+        paginationV2SummaryText="24 rows"
+        paginationSummaryText="24 rows"
+        paginationControlTotal={24}
+        paginationTotalPages={2}
+        paginationPageSizeOptions={['100', '200']}
+        translate={translate}
+        onPageChange={() => {}}
+        onPageSizeChange={() => {}}
+        onV2PageStep={() => {}}
+      />,
+    );
+    expect(paginationMarkup).toContain('Result set label');
+    expect(paginationMarkup).toContain('Jump label');
+    expect(paginationMarkup).toContain('Jump page aria');
+    expect(paginationMarkup).toContain('Go action');
+    expect(paginationMarkup).toContain('100 rows per page');
+    expect(paginationMarkup).not.toContain('data_grid.pagination');
+
+    const secondaryMarkup = renderToStaticMarkup(
+      <DataGridSecondaryActions
+        isV2Ui
+        canViewDdl
+        viewMode="table"
+        ddlLoading={false}
+        showColumnComment={false}
+        showColumnType={false}
+        mergedDisplayCount={3}
+        pendingChangeCount={2}
+        resultViewSwitcher={<span>view switcher</span>}
+        columnInfoSettingContent={<span>column settings</span>}
+        columnQuickFindContent={<span>quick find</span>}
+        pageFindContent={<span>page find</span>}
+        paginationContent={<span>pagination</span>}
+        translate={translate}
+        onViewModeChange={() => {}}
+        dataPanelOpen={false}
+        isTableSurfaceActive
+        onToggleDataPanel={() => {}}
+        onOpenTableDdl={() => {}}
+      />,
+    );
+    expect(secondaryMarkup).toContain('Data preview label');
+    expect(secondaryMarkup).toContain('Field info label');
+    expect(secondaryMarkup).toContain('View DDL label');
+    expect(secondaryMarkup).toContain('ER diagram label');
+    expect(secondaryMarkup).toContain('Column display label');
+    expect(secondaryMarkup).toContain('Jump column label');
+    expect(secondaryMarkup).toContain('3 rows label');
+    expect(secondaryMarkup).toContain('2 pending label');
+    expect(secondaryMarkup).toContain('Live label');
+    expect(secondaryMarkup).not.toContain('data_grid.secondary');
+
+    const jsonRecordMarkup = renderToStaticMarkup(
+      <DataGridJsonView
+        darkMode={false}
+        rowCount={5}
+        canModifyData
+        jsonViewText="[]"
+        translate={translate}
+        onOpenJsonEditor={() => {}}
+      />,
+    );
+    expect(jsonRecordMarkup).toContain('5 JSON rows label');
+    expect(jsonRecordMarkup).toContain('Edit JSON label');
+    expect(jsonRecordMarkup).not.toContain('data_grid.record_view');
+
+    const textRecordMarkup = renderToStaticMarkup(
+      <DataGridTextView
+        darkMode={false}
+        rowCount={2}
+        textRecordIndex={0}
+        canModifyData
+        currentTextRow={{ raw_sql: 'GitHub release HTTP 500 checksum abc123' }}
+        displayOutputColumnNames={['raw_sql']}
+        translate={translate}
+        onPrev={() => {}}
+        onNext={() => {}}
+        onEditCurrent={() => {}}
+        formatTextViewValue={(value) => String(value)}
+      />,
+    );
+    expect(textRecordMarkup).toContain('Previous label');
+    expect(textRecordMarkup).toContain('Next label');
+    expect(textRecordMarkup).toContain('Record label 1 of 2');
+    expect(textRecordMarkup).toContain('Edit current label');
+    expect(textRecordMarkup).toContain('raw_sql');
+    expect(textRecordMarkup).toContain('GitHub release HTTP 500 checksum abc123');
+    expect(textRecordMarkup).not.toContain('data_grid.record_view');
+
+    const previewWithCellMarkup = renderToStaticMarkup(
+      <DataGridPreviewPanel
+        visible
+        isTableSurfaceActive
+        darkMode={false}
+        focusedCellInfo={{ dataIndex: 'raw_sql' }}
+        dataPanelIsJson
+        focusedCellWritable
+        dataPanelValue='{"raw":true}'
+        columnMetaMap={{ raw_sql: { type: 'varchar(64)' } }}
+        columnMetaMapByLowerName={{}}
+        translate={translate}
+        onFormatJson={() => {}}
+        onSave={() => {}}
+        onValueChange={() => {}}
+        onDirtyChange={() => {}}
+        isDirtyComparedToOriginal={() => false}
+      />,
+    );
+    expect(previewWithCellMarkup).toContain('raw_sql');
+    expect(previewWithCellMarkup).toContain('varchar(64)');
+    expect(previewWithCellMarkup).toContain('Format JSON label');
+    expect(previewWithCellMarkup).toContain('Save label');
+    expect(previewWithCellMarkup).not.toContain('data_grid.preview_panel');
+
+    const emptyPreviewMarkup = renderToStaticMarkup(
+      <DataGridPreviewPanel
+        visible
+        isTableSurfaceActive
+        darkMode={false}
+        focusedCellInfo={null}
+        dataPanelIsJson={false}
+        focusedCellWritable={false}
+        dataPanelValue=""
+        columnMetaMap={{}}
+        columnMetaMapByLowerName={{}}
+        translate={translate}
+        onFormatJson={() => {}}
+        onSave={() => {}}
+        onValueChange={() => {}}
+        onDirtyChange={() => {}}
+        isDirtyComparedToOriginal={() => false}
+      />,
+    );
+    expect(emptyPreviewMarkup).toContain('Select cell title');
+    expect(emptyPreviewMarkup).toContain('Select cell description');
+    expect(emptyPreviewMarkup).not.toContain('data_grid.preview_panel');
+  });
+
   it('renders the v2 DataGrid toolbar using the redesigned topbar hooks', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderDataGridWithI18n(
       <DataGrid
         data={[
           {
@@ -302,7 +1899,7 @@ describe('DataGrid layout', () => {
   });
 
   it('renders a DDL action for table data pages only', () => {
-    const tableMarkup = renderToStaticMarkup(
+    const tableMarkup = renderDataGridWithI18n(
       <DataGrid
         data={[
           {
@@ -323,7 +1920,7 @@ describe('DataGrid layout', () => {
     expect(tableMarkup).toContain('查看 DDL');
     expect(tableMarkup).not.toContain('data-grid-locate-sidebar-action="true"');
 
-    const schemaTableMarkup = renderToStaticMarkup(
+    const schemaTableMarkup = renderDataGridWithI18n(
       <DataGrid
         data={[
           {
@@ -344,7 +1941,7 @@ describe('DataGrid layout', () => {
     expect(schemaTableMarkup).toContain('查看 DDL');
     expect(schemaTableMarkup).toContain('data-grid-page-find="true"');
 
-    const queryMarkup = renderToStaticMarkup(
+    const queryMarkup = renderDataGridWithI18n(
       <DataGrid
         data={[
           {
@@ -366,7 +1963,7 @@ describe('DataGrid layout', () => {
   });
 
   it('keeps row copy and paste as context menu actions instead of toolbar buttons', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderDataGridWithI18n(
       <DataGrid
         data={[
           {
@@ -387,7 +1984,7 @@ describe('DataGrid layout', () => {
   });
 
   it('renders a clickable copy action for aggregate query results', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderDataGridWithI18n(
       <DataGrid
         data={[
           {
@@ -407,19 +2004,112 @@ describe('DataGrid layout', () => {
     expect(markup.match(/data-grid-query-copy-action="true"/g)?.length).toBe(1);
   });
 
-  it('keeps query-result export scopes explicit and repositions v2 context menus after measuring', () => {
+  it('keeps export and import chrome behind translateDataGrid while preserving raw details', () => {
     const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const exportDataSource = source.slice(
+      source.indexOf('  const exportData = async (rows: any[], format: string) => {'),
+      source.indexOf('  const [sortInfo, setSortInfo]'),
+    );
+    const exportChromeSource = source.slice(
+      source.indexOf('  const exportByQuery = useCallback(async (sql: string, format: string, defaultName: string) => {'),
+      source.indexOf("  const queryResultCopyMenu: MenuProps['items'] ="),
+    );
+    const exportSource = `${exportDataSource}\n${exportChromeSource}`;
+    const exportChromeKeys = [
+      'data_grid.message.exporting_rows',
+      'data_grid.message.exporting',
+      'data_grid.message.export_success',
+      'data_grid.message.export_failed',
+      'data_grid.message.export_with_uncommitted_changes',
+      'data_grid.message.no_filter_applied',
+      'data_grid.message.filtered_export_not_supported',
+      'data_grid.message.filtered_export_uses_committed_data',
+      'data_grid.message.no_rows_selected',
+      'data_grid.message.select_file_failed',
+      'data_grid.message.import_done',
+      'data_grid.export.query_result_title',
+      'data_grid.export.scope_prompt',
+      'data_grid.export.selected_rows',
+      'data_grid.export.current_page_rows',
+      'data_grid.export.all_rows',
+      'data_grid.export.options_title',
+      'data_grid.export.no_selection_prompt',
+      'data_grid.export.current_page',
+      'data_grid.export.all_data',
+      'data_grid.export.group_filtered_results',
+      'data_grid.export.group_full_table',
+    ];
 
     expect(source).toContain("type QueryResultExportScope = 'selected' | 'page' | 'all';");
-    expect(source).toContain("title: '导出查询结果'");
+    exportChromeKeys.forEach((key) => {
+      expect(exportSource).toContain(`translateDataGrid('${key}'`);
+    });
+    expect(exportChromeSource).toContain("translateDataGrid('common.cancel')");
+    expect(exportChromeSource).toContain('data-query-result-export-scope="true"');
+    expect(exportDataSource).toMatch(/message\.loading\(\s*translateDataGrid\(\s*'data_grid\.message\.exporting_rows'\s*,\s*\{\s*count:\s*rows\.length\s*\}\s*\)\s*,\s*0\s*\)/);
+    expect(exportDataSource).toMatch(/message\.success\(\s*translateDataGrid\(\s*'data_grid\.message\.export_success'\s*\)\s*\)/);
+    expect(exportDataSource).toMatch(/translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*res\.message\s*\}\s*\)/);
+    expect(exportDataSource).toMatch(/const\s+rawErrorMessage\s*=\s*e\?\.message\s*\|\|\s*String\(e\);[\s\S]*translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*rawErrorMessage\s*\}\s*\)/);
+    expect(exportChromeSource).toMatch(/translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*res\.message\s*\}\s*\)/);
+    expect(exportChromeSource).toMatch(/const\s+rawErrorMessage\s*=\s*e\?\.message\s*\|\|\s*String\(e\);[\s\S]*translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*rawErrorMessage\s*\}\s*\)/);
+    expect(exportChromeSource).toMatch(/translateDataGrid\(\s*'data_grid\.message\.select_file_failed'\s*,\s*\{\s*detail:\s*res\.message\s*\}\s*\)/);
+    expect(exportChromeSource).toMatch(/},\s*\[[\s\S]*translateDataGrid[\s\S]*\]\);/);
     expect(source).toContain('data-query-result-export-scope="true"');
-    expect(source).toContain('选中导出');
-    expect(source).toContain('当前页导出');
-    expect(source).toContain('全部导出');
     expect(source).toContain('const queryResultCurrentPageRows = useMemo(() => {');
     expect(source).toContain('const resolveContextMenuPosition = useCallback((x: number, y: number, estimatedWidth: number, estimatedHeight: number) => {');
     expect(source).toContain('const rect = element.getBoundingClientRect();');
     expect(source).toContain('ref={cellContextMenuPortalRef}');
+    [
+      '正在导出 ${rows.length} 条数据...',
+      '正在导出...',
+      '导出成功',
+      '导出失败: ',
+      '导出失败：',
+      '当前未选中任何行',
+      '导出查询结果',
+      '请选择导出范围：',
+      '选中导出',
+      '当前页导出',
+      '全部导出',
+      '当前存在未提交修改，导出将按界面数据生成；如需完整长字段建议先提交后再导出。',
+      '导出选项',
+      '您未选中任何行，请选择导出范围：',
+      '导出当前页',
+      '导出全部数据',
+      '当前数据源不支持按筛选结果导出',
+      '当前存在未提交修改，筛选结果导出基于数据库已提交数据。',
+      '选择文件失败: ',
+      '导入完成',
+      '筛选结果',
+      '全表',
+    ].forEach((literal) => {
+      expect(exportSource).not.toContain(literal);
+    });
+
+    [
+      'zh-CN',
+      'zh-TW',
+      'en-US',
+      'ja-JP',
+      'de-DE',
+      'ru-RU',
+    ].forEach((locale) => {
+      const catalog = JSON.parse(
+        readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8'),
+      ) as Record<string, string>;
+
+      exportChromeKeys.forEach((key) => {
+        expect(catalog[key]).toEqual(expect.any(String));
+        expect(catalog[key].length).toBeGreaterThan(0);
+      });
+      expect(catalog['data_grid.message.exporting_rows']).toContain('{{count}}');
+      expect(catalog['data_grid.message.export_failed']).toContain('{{detail}}');
+      expect(catalog['data_grid.message.select_file_failed']).toContain('{{detail}}');
+      expect(catalog['data_grid.export.selected_rows']).toContain('{{count}}');
+      expect(catalog['data_grid.export.current_page_rows']).toContain('{{count}}');
+      expect(catalog['data_grid.export.all_rows']).toContain('{{count}}');
+      expect(catalog['data_grid.export.current_page']).toContain('{{count}}');
+    });
   });
 
   it('keeps inline cell editors stretched to the full cell width', () => {
@@ -434,7 +2124,7 @@ describe('DataGrid layout', () => {
   });
 
   it('renders a quick WHERE condition editor when table filters are visible', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderDataGridWithI18n(
       <DataGrid
         data={[
           {
@@ -455,7 +2145,27 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-quick-where="true"');
     expect(markup).toContain('data-grid-quick-where-input="true"');
     expect(markup).toContain('WHERE');
-    expect(markup).toContain('输入 WHERE 后面的条件');
+    const englishMarkup = renderDataGridWithI18n(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            id: 1,
+            name: 'alpha',
+          },
+        ]}
+        columnNames={['id', 'name']}
+        loading={false}
+        tableName="users"
+        showFilter
+        quickWhereCondition="name like 'a%'"
+        onApplyQuickWhereCondition={() => {}}
+      />,
+      { preference: 'en-US' },
+    );
+
+    expect(englishMarkup).toContain('Enter the condition after WHERE');
+    expect(englishMarkup).not.toContain('输入 WHERE 后面的条件');
   });
 
   it('keeps quick WHERE input clipboard editing isolated from grid shortcuts', () => {
@@ -544,7 +2254,7 @@ describe('DataGrid layout', () => {
     expect(columnTitleSource).toContain("data-grid-column-highlighted={highlighted ? 'true' : undefined}");
     expect(columnTitleSource).toContain('data-column-name={normalizedName}');
     expect(columnQuickFindSource).toContain('AutoComplete');
-    expect(columnQuickFindSource).toContain('placeholder="跳到字段列..."');
+    expect(columnQuickFindSource).toContain("placeholder={translate('data_grid.column_quick_find.placeholder')}");
     expect(secondaryActionsSource.indexOf('{pageFindContent}')).toBeLessThan(secondaryActionsSource.indexOf('gn-v2-data-grid-status-center'));
     expect(css).toContain('width: 66px !important;');
     expect(css).toContain('grid-template-columns: 160px 26px 26px !important;');
@@ -555,7 +2265,8 @@ describe('DataGrid layout', () => {
     expect(css).toContain('@container gn-v2-data-grid-statusbar (max-width: 760px)');
     expect(css).toContain('.data-grid-pagination-size-select.ant-select-focused .ant-select-selector');
     expect(css).toContain('overflow-x: auto;');
-    expect(paginationBarSource).toContain("label: `${value}/页`");
+    expect(paginationBarSource).toContain("label: translate('data_grid.pagination.page_size_option', { count: value })");
+    expect(paginationBarSource).not.toContain("label: `${value}/页`");
     expect(paginationBarSource).toContain('const maxJumpPage = Math.max(1, paginationTotalPages);');
     expect(paginationBarSource).toContain('Math.min(maxJumpPage, Math.max(1, Math.trunc(Number(jumpPage))))');
     expect(paginationBarSource).toContain('onPressEnter={submitJumpPage}');

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "i18n:scan": "go run ../tools/i18n-scan --root .."
   },
   "dependencies": {
     "@ant-design/icons": "^5.2.6",

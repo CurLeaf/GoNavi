@@ -23,6 +23,7 @@ import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
 import { normalizeSidebarViewName } from '../utils/sidebarMetadata';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
 import { ORACLE_ROWID_LOCATOR_COLUMN, type EditRowLocator } from '../utils/rowLocator';
+import { SUPPORTED_LANGUAGES, t as translate } from '../i18n';
 import {
     getColumnDefinitionKey,
     getColumnDefinitionName,
@@ -35,6 +36,48 @@ const SQL_KEYWORDS = [
     'COLUMN', 'KEY', 'PRIMARY', 'FOREIGN', 'REFERENCES', 'CONSTRAINT', 'DEFAULT', 'AUTO_INCREMENT',
     'COMMENT', 'SHOW', 'DESCRIBE', 'EXPLAIN',
 ];
+
+const UNTITLED_QUERY_DATABASE_PLACEHOLDER = '__GONAVI_QUERY_DATABASE__';
+
+const UNTITLED_QUERY_TITLE_PREFIXES = Array.from(
+    new Set(
+        SUPPORTED_LANGUAGES
+            .flatMap((language) => {
+                const titles = [translate('query.new', undefined, language).trim()];
+                const databaseQueryTitle = translate(
+                    'sidebar.tab.new_query_database',
+                    { database: UNTITLED_QUERY_DATABASE_PLACEHOLDER },
+                    language,
+                ).trim();
+                const databasePrefixIndex = databaseQueryTitle.indexOf(UNTITLED_QUERY_DATABASE_PLACEHOLDER);
+                if (databasePrefixIndex > 0) {
+                    titles.push(databaseQueryTitle.slice(0, databasePrefixIndex).trim());
+                }
+                return titles;
+            })
+            .filter(Boolean)
+    )
+);
+
+const buildQueryEditorMonacoActionLabel = (key: string): string =>
+    `GoNavi: ${translate(key)}`;
+
+const QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER = '{SQL}';
+
+const buildQueryEditorAiContextPrompt = (connection: any, database: string): string => {
+    if (!connection) {
+        return '';
+    }
+
+    const sourceLabel = String(connection.config?.type || '').trim() || translate('query_editor.ai_prompt.default_source');
+    const databaseLabel = String(database || '').trim() || translate('query_editor.ai_prompt.default_database');
+
+    return translate('query_editor.ai_prompt.context', {
+        type: sourceLabel,
+        name: `"${connection.name}"`,
+        database: `"${databaseLabel}"`,
+    });
+};
 
 // SQL 常用内置函数（通用，适用于 MySQL/PostgreSQL/Oracle/SQL Server 等主流数据源）
 const SQL_FUNCTIONS: { name: string; detail: string }[] = [
@@ -553,7 +596,7 @@ const normalizeCommentText = (value: unknown): string => {
 
 const buildCompletionDocumentation = (comment?: string): string | undefined => {
     const text = normalizeCommentText(comment);
-    return text ? `备注：${text}` : undefined;
+    return text ? translate('query_editor.completion.documentation.comment', { comment: text }) : undefined;
 };
 
 const appendCommentToDetail = (detail: string, comment?: string): string => {
@@ -946,21 +989,26 @@ const buildQueryEditorHoverMarkdown = (target: QueryEditorHoverTarget): string =
         const normalized = normalizeCommentText(comment);
         return normalized ? `\n\n${normalized}` : '';
     };
+    const objectInfoLabelSeparator = translate('query_editor.object_info.label.separator');
+    const buildObjectInfoTitle = (key: string, value: string): string =>
+        `**${translate(key)}** \`${value}\``;
+    const buildObjectInfoLabel = (key: string, value: string): string =>
+        `${translate(key)}${objectInfoLabelSeparator}\`${value}\``;
     switch (target.kind) {
         case 'database':
-            return `**数据库**\n\n\`${target.dbName}\``;
+            return buildObjectInfoTitle('query_editor.object_info.database', target.dbName);
         case 'table':
-            return `**表** \`${target.tableName}\`\n\n库：\`${target.dbName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}${appendComment(target.comment)}`;
+            return `${buildObjectInfoTitle('query_editor.object_info.table', target.tableName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.database', target.dbName)}${target.schemaName ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.schema', target.schemaName)}` : ''}${appendComment(target.comment)}`;
         case 'view':
-            return `**视图** \`${target.viewName}\`\n\n库：\`${target.dbName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}`;
+            return `${buildObjectInfoTitle('sidebar.object.view', target.viewName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.database', target.dbName)}${target.schemaName ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.schema', target.schemaName)}` : ''}`;
         case 'materialized-view':
-            return `**物化视图** \`${target.viewName}\`\n\n库：\`${target.dbName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}`;
+            return `${buildObjectInfoTitle('query_editor.object_info.materialized_view', target.viewName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.database', target.dbName)}${target.schemaName ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.schema', target.schemaName)}` : ''}`;
         case 'trigger':
-            return `**触发器** \`${target.triggerName}\`\n\n库：\`${target.dbName}\`\n\n表：\`${target.tableName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}`;
+            return `${buildObjectInfoTitle('trigger_viewer.field.trigger', target.triggerName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.database', target.dbName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.table', target.tableName)}${target.schemaName ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.schema', target.schemaName)}` : ''}`;
         case 'routine':
-            return `**${target.routineType === 'PROCEDURE' ? '存储过程' : '函数'}** \`${target.routineName}\`\n\n库：\`${target.dbName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}`;
+            return `${buildObjectInfoTitle(target.routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function', target.routineName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.database', target.dbName)}${target.schemaName ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.schema', target.schemaName)}` : ''}`;
         case 'column':
-            return `**字段** \`${target.columnName}\`${target.type ? `\n\n类型：\`${target.type}\`` : ''}\n\n表：\`${target.tableName}\`\n\n库：\`${target.dbName}\`${target.schemaName ? `\n\nSchema：\`${target.schemaName}\`` : ''}${appendComment(target.comment)}`;
+            return `${buildObjectInfoTitle('query_editor.object_info.column', target.columnName)}${target.type ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.type', target.type)}` : ''}\n\n${buildObjectInfoLabel('query_editor.object_info.label.table', target.tableName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.database', target.dbName)}${target.schemaName ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.schema', target.schemaName)}` : ''}${appendComment(target.comment)}`;
         default:
             return '';
     }
@@ -1261,7 +1309,13 @@ const resolveQueryEditorHoverTarget = (
             const itemObjectName = String(parsed.objectName || itemRawName).trim().toLowerCase();
             const itemSchemaName = String(parsed.schemaName || '').trim().toLowerCase();
             if (normalizedSchemaName) {
-                return itemSchemaName === normalizedSchemaName && (itemObjectName === normalizedRawTableName || String(itemRawName).trim().toLowerCase() === `${normalizedSchemaName}.${normalizedRawTableName}`);
+                const normalizedItemRawName = String(itemRawName).trim().toLowerCase();
+                return itemSchemaName === normalizedSchemaName
+                    && (
+                        itemObjectName === normalizedRawTableName
+                        || normalizedItemRawName === normalizedRawTableName
+                        || normalizedItemRawName === `${normalizedSchemaName}.${normalizedRawTableName}`
+                    );
             }
             return itemObjectName === normalizedRawTableName || String(itemRawName).trim().toLowerCase() === normalizedRawTableName;
         }) || null;
@@ -1410,23 +1464,37 @@ export const resolveQueryEditorNavigationDecorations = (
 
     const hoverMessage = (() => {
         if (navigationTarget.type === 'database') {
-            return `${shortcutModifierLabel} + 点击切换到该数据库`;
+            return translate('query_editor.hover.switch_database_with_shortcut', {
+                shortcut: shortcutModifierLabel,
+            });
         }
         if (navigationTarget.type === 'table') {
-            return `${shortcutModifierLabel} + 点击打开该表`;
+            return translate('query_editor.hover.open_table_with_shortcut', {
+                shortcut: shortcutModifierLabel,
+            });
         }
         if (navigationTarget.type === 'view') {
-            return `${shortcutModifierLabel} + 点击打开该视图`;
+            return translate('query_editor.hover.open_view_with_shortcut', {
+                shortcut: shortcutModifierLabel,
+            });
         }
         if (navigationTarget.type === 'materialized-view') {
-            return `${shortcutModifierLabel} + 点击打开该物化视图`;
+            return translate('query_editor.hover.open_materialized_view_with_shortcut', {
+                shortcut: shortcutModifierLabel,
+            });
         }
         if (navigationTarget.type === 'trigger') {
-            return `${shortcutModifierLabel} + 点击打开该触发器`;
+            return translate('query_editor.hover.open_trigger_with_shortcut', {
+                shortcut: shortcutModifierLabel,
+            });
         }
         return navigationTarget.routineType === 'PROCEDURE'
-            ? `${shortcutModifierLabel} + 点击打开该存储过程`
-            : `${shortcutModifierLabel} + 点击打开该函数`;
+            ? translate('query_editor.hover.open_procedure_with_shortcut', {
+                shortcut: shortcutModifierLabel,
+            })
+            : translate('query_editor.hover.open_function_with_shortcut', {
+                shortcut: shortcutModifierLabel,
+            });
     })();
 
     return [{
@@ -1527,9 +1595,11 @@ const resolveQueryLocatorPlan = async ({
                 .catch((error: any) => ({ success: false, message: String(error?.message || error || '加载索引失败'), data: [] })),
         ]);
         if (!resCols?.success || !Array.isArray(resCols.data)) {
-            const reason = `无法加载 ${tableRef.metadataDbName}.${tableRef.metadataTableName} 的主键/唯一索引元数据，无法安全提交修改。`;
+            const reason = translate('query_editor.message.read_only_table_locator_metadata_unavailable', {
+                table: `${tableRef.metadataDbName}.${tableRef.metadataTableName}`,
+            });
             plan.editLocator = buildQueryReadOnlyLocator(reason);
-            plan.warning = `查询结果保持只读：${reason}`;
+            plan.warning = translate('query_editor.message.read_only_warning_with_detail', { detail: reason });
             return plan;
         }
 
@@ -1591,11 +1661,19 @@ const resolveQueryLocatorPlan = async ({
                     readOnly: false,
                 };
             } else {
-                const reason = !resIndexes?.success
-                    ? '无法加载唯一索引元数据，无法安全提交修改。'
-                    : '未检测到主键或可用唯一索引，无法安全提交修改。';
-                plan.editLocator = buildQueryReadOnlyLocator(reason);
-                plan.warning = `查询结果保持只读：${tableRef.metadataDbName}.${tableRef.metadataTableName} ${reason}`;
+                if (!resIndexes?.success) {
+                    const reason = translate('query_editor.message.read_only_index_metadata_unavailable');
+                    plan.editLocator = buildQueryReadOnlyLocator(reason);
+                    plan.warning = translate('query_editor.message.read_only_warning_with_detail', {
+                        detail: `${tableRef.metadataDbName}.${tableRef.metadataTableName} ${reason}`,
+                    });
+                } else {
+                    const reason = translate('query_editor.message.read_only_no_safe_locator');
+                    plan.editLocator = buildQueryReadOnlyLocator(reason);
+                    plan.warning = translate('query_editor.message.read_only_warning_with_detail', {
+                        detail: `${tableRef.metadataDbName}.${tableRef.metadataTableName} ${reason}`,
+                    });
+                }
             }
         }
 
@@ -1611,18 +1689,20 @@ const resolveQueryLocatorPlan = async ({
                 return plan;
             }
 
-            const reason = 'Oracle 查询使用 * 时无法自动注入 ROWID 定位列，已保持只读。';
+            const reason = translate('query_editor.message.read_only_oracle_rowid_injection_unavailable');
             plan.editLocator = buildQueryReadOnlyLocator(reason);
-            plan.warning = `查询结果保持只读：${reason}`;
+            plan.warning = translate('query_editor.message.read_only_warning_with_detail', { detail: reason });
             return plan;
         }
 
         plan.executedSql = appendQuerySelectExpressions(statement, executableAppendExpressions);
         return plan;
     } catch {
-        const reason = `无法加载 ${tableRef.metadataDbName}.${tableRef.metadataTableName} 的主键/唯一索引元数据，无法安全提交修改。`;
+        const reason = translate('query_editor.message.read_only_table_locator_metadata_unavailable', {
+            table: `${tableRef.metadataDbName}.${tableRef.metadataTableName}`,
+        });
         plan.editLocator = buildQueryReadOnlyLocator(reason);
-        plan.warning = `查询结果保持只读：${reason}`;
+        plan.warning = translate('query_editor.message.read_only_warning_with_detail', { detail: reason });
         return plan;
     }
 };
@@ -1668,6 +1748,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const runQueryActionRef = useRef<any>(null);
   const selectCurrentStatementActionRef = useRef<any>(null);
   const saveQueryActionRef = useRef<any>(null);
+  const aiContextMenuActionDisposablesRef = useRef<any[]>([]);
   const lastExternalQueryRef = useRef<string>(getTabQueryValue(tab));
   const lastEditorCursorPositionRef = useRef<any>(null);
   const lastHoverTargetPositionRef = useRef<{ lineNumber: number; column: number } | null>(null);
@@ -1704,6 +1785,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const columnsCacheRef = useRef<Record<string, ColumnDefinition[]>>({});
   const saveQuery = useStore(state => state.saveQuery);
   const theme = useStore(state => state.theme);
+  const languagePreference = useStore((state) => state.languagePreference);
+  void languagePreference;
   const appearance = useStore(state => state.appearance);
   const darkMode = theme === 'dark';
   const isV2Ui = appearance.uiVersion === 'v2';
@@ -1896,6 +1979,37 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, []);
 
   useEffect(() => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      objectHoverActionRef.current?.dispose?.();
+      const showObjectInfoKeybinding = monaco.KeyMod?.CtrlCmd && monaco.KeyCode?.KeyQ
+          ? [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyQ]
+          : undefined;
+      objectHoverActionRef.current = editor.addAction({
+          id: 'gonavi.queryEditor.showObjectInfo',
+          label: buildQueryEditorMonacoActionLabel('query_editor.action.show_object_info'),
+          keybindings: showObjectInfoKeybinding,
+          run: () => {
+              const preferredPosition = lastHoverTargetPositionRef.current || editor.getPosition?.();
+              const shown = showObjectInfoAtPosition(preferredPosition);
+              if (!shown) {
+                  void message.info({
+                      key: 'gonavi-query-editor-object-info-miss',
+                      content: translate('query_editor.message.object_info_target_not_found'),
+                  });
+              }
+          },
+      });
+
+      return () => {
+          objectHoverActionRef.current?.dispose?.();
+          objectHoverActionRef.current = null;
+      };
+  }, [languagePreference, showObjectInfoAtPosition]);
+
+  useEffect(() => {
       refreshObjectDecorations();
   }, [query, currentDb, refreshObjectDecorations]);
 
@@ -1918,7 +2032,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const cursorOffset = model.getOffsetAt?.(position);
       const range = resolveCurrentSqlStatementRange(fullSQL, Number(cursorOffset));
       if (!range) {
-          void message.info('没有可选择的 SQL 语句。');
+          void message.info(translate('query_editor.message.no_selectable_sql'));
           return;
       }
 
@@ -1929,6 +2043,114 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       editor.revealRangeInCenterIfOutsideViewport?.(selection);
       editor.focus?.();
   };
+
+  const buildQueryEditorAiContextMenuActions = useCallback(() => ([
+      {
+          id: 'ai.generateSQL',
+          label: `AI ${translate('query_editor.action.ai_generate_sql_menu')}`,
+          prompt: translate('query_editor.ai_prompt.generate'),
+      },
+      {
+          id: 'ai.explainSQL',
+          label: `AI ${translate('query_editor.action.ai_explain_sql_menu')}`,
+          useSelection: true,
+          prompt: translate('query_editor.ai_prompt.explain', { sql: QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER }),
+      },
+      {
+          id: 'ai.optimizeSQL',
+          label: `AI ${translate('query_editor.action.ai_optimize_sql_menu')}`,
+          useSelection: true,
+          prompt: translate('query_editor.ai_prompt.optimize', { sql: QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER }),
+      },
+  ]), []);
+
+  const disposeQueryEditorAiContextMenuActions = useCallback(() => {
+      aiContextMenuActionDisposablesRef.current.forEach((disposable) => disposable?.dispose?.());
+      aiContextMenuActionDisposablesRef.current = [];
+  }, []);
+
+  const registerQueryEditorAiContextMenuActions = useCallback((editor: any) => {
+      disposeQueryEditorAiContextMenuActions();
+      aiContextMenuActionDisposablesRef.current = buildQueryEditorAiContextMenuActions().map((action) => (
+          editor.addAction({
+              id: action.id,
+              label: action.label,
+              contextMenuGroupId: '9_ai',
+              contextMenuOrder: 1,
+              run: (ed: any) => {
+                  const selection = ed.getModel()?.getValueInRange(ed.getSelection());
+                  const conn = connectionsRef.current.find(c => c.id === currentConnectionIdRef.current);
+                  const ctxText = buildQueryEditorAiContextPrompt(conn, currentDbRef.current);
+                  let prompt = ctxText + action.prompt;
+                  if (action.useSelection && selection) {
+                      prompt = prompt.replace(QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER, selection);
+                  }
+                  const store = useStore.getState();
+                  if (!store.aiPanelVisible) {
+                      store.setAIPanelVisible(true);
+                  }
+                  window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
+              },
+          })
+      ));
+  }, [buildQueryEditorAiContextMenuActions, disposeQueryEditorAiContextMenuActions]);
+
+  const buildQueryEditorSlashCommandDefs = useCallback(() => ([
+      {
+          cmd: '/query',
+          label: `🔍 ${translate('query_editor.slash_command.query.label')}`,
+          desc: translate('query_editor.slash_command.query.description'),
+          prompt: translate('query_editor.slash_command.query.prompt'),
+      },
+      {
+          cmd: '/sql',
+          label: `📝 ${translate('query_editor.slash_command.sql.label')}`,
+          desc: translate('query_editor.slash_command.sql.description'),
+          prompt: translate('query_editor.slash_command.sql.prompt'),
+      },
+      {
+          cmd: '/explain',
+          label: `💡 ${translate('query_editor.slash_command.explain.label')}`,
+          desc: translate('query_editor.slash_command.explain.description'),
+          prompt: translate('query_editor.slash_command.explain.prompt', { sql: QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER }),
+          useSelection: true,
+      },
+      {
+          cmd: '/optimize',
+          label: `⚡ ${translate('query_editor.slash_command.optimize.label')}`,
+          desc: translate('query_editor.slash_command.optimize.description'),
+          prompt: translate('query_editor.slash_command.optimize.prompt', { sql: QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER }),
+          useSelection: true,
+      },
+      {
+          cmd: '/schema',
+          label: `🏗️ ${translate('query_editor.slash_command.schema.label')}`,
+          desc: translate('query_editor.slash_command.schema.description'),
+          prompt: translate('query_editor.slash_command.schema.prompt'),
+      },
+      {
+          cmd: '/index',
+          label: `📊 ${translate('query_editor.slash_command.index.label')}`,
+          desc: translate('query_editor.slash_command.index.description'),
+          prompt: translate('query_editor.slash_command.index.prompt'),
+      },
+      {
+          cmd: '/diff',
+          label: `🔄 ${translate('query_editor.slash_command.diff.label')}`,
+          desc: translate('query_editor.slash_command.diff.description'),
+          prompt: translate('query_editor.slash_command.diff.prompt'),
+      },
+      {
+          cmd: '/mock',
+          label: `🎲 ${translate('query_editor.slash_command.mock.label')}`,
+          desc: translate('query_editor.slash_command.mock.description'),
+          prompt: translate('query_editor.slash_command.mock.prompt'),
+      },
+  ]), []);
+
+  const refreshQueryEditorSlashCommandDefs = useCallback(() => {
+      (window as any).__gonaviSlashCmdDefs = buildQueryEditorSlashCommandDefs();
+  }, [buildQueryEditorSlashCommandDefs]);
 
   const syncQueryToEditor = (sql: string) => {
       const next = sql || '';
@@ -2390,7 +2612,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           : undefined;
       objectHoverActionRef.current = editor.addAction({
           id: 'gonavi.queryEditor.showObjectInfo',
-          label: 'GoNavi: 查看对象信息',
+          label: buildQueryEditorMonacoActionLabel('query_editor.action.show_object_info'),
           keybindings: showObjectInfoKeybinding,
           run: () => {
               const preferredPosition = lastHoverTargetPositionRef.current || editor.getPosition?.();
@@ -2398,7 +2620,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               if (!shown) {
                   void message.info({
                       key: 'gonavi-query-editor-object-info-miss',
-                      content: '当前光标未定位到可识别的表或字段。',
+                      content: translate('query_editor.message.object_info_target_not_found'),
                   });
               }
           },
@@ -2512,9 +2734,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (navigationTarget.type === 'view' || navigationTarget.type === 'materialized-view') {
               const targetViewName = String(navigationTarget.viewName || '').trim();
               if (!targetViewName) return;
+              const viewTitle = navigationTarget.type === 'materialized-view'
+                  ? translate('sidebar.tab.materialized_view_definition', { name: targetViewName })
+                  : translate('sidebar.tab.view_definition', { name: targetViewName });
               addTab({
                   id: `view-def-${connectionId}-${targetDbName}-${targetViewName}`,
-                  title: `${navigationTarget.type === 'materialized-view' ? '物化视图' : '视图'}: ${targetViewName}`,
+                  title: viewTitle,
                   type: 'view-def',
                   connectionId,
                   dbName: targetDbName,
@@ -2537,7 +2762,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               if (!targetTriggerName) return;
               addTab({
                   id: `trigger-${connectionId}-${targetDbName}-${targetTriggerName}`,
-                  title: `触发器: ${targetTriggerName}`,
+                  title: translate('sidebar.tab.trigger', { name: targetTriggerName }),
                   type: 'trigger',
                   connectionId,
                   dbName: targetDbName,
@@ -2556,9 +2781,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
           const targetRoutineName = String(navigationTarget.routineName || '').trim();
           if (!targetRoutineName) return;
+          const routineTypeLabel = navigationTarget.routineType === 'PROCEDURE'
+              ? translate('sidebar.object.procedure')
+              : translate('sidebar.object.function');
           addTab({
               id: `routine-def-${connectionId}-${targetDbName}-${targetRoutineName}`,
-              title: `${navigationTarget.routineType === 'PROCEDURE' ? '存储过程' : '函数'}: ${targetRoutineName}`,
+              title: translate('sidebar.tab.routine_definition', {
+                  type: routineTypeLabel,
+                  name: targetRoutineName,
+              }),
               type: 'routine-def',
               connectionId,
               dbName: targetDbName,
@@ -2581,6 +2812,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           setQueryEditorMouseCursor(editor, '');
           objectHoverActionRef.current?.dispose?.();
           objectHoverActionRef.current = null;
+          disposeQueryEditorAiContextMenuActions();
           hoverProviderDisposableRef.current?.dispose?.();
           hoverProviderDisposableRef.current = null;
           window.removeEventListener('keydown', syncModifierState);
@@ -2591,36 +2823,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       refreshObjectDecorations();
 
       // 注册 AI 右键菜单操作
-      const aiActions = [
-          { id: 'ai.generateSQL', label: '🤖 AI 生成 SQL', prompt: '请根据当前数据库表结构生成查询语句：' },
-          { id: 'ai.explainSQL', label: '🤖 AI 解释 SQL', useSelection: true, prompt: '请解释以下 SQL 语句的执行逻辑：\n```sql\n{SQL}\n```' },
-          { id: 'ai.optimizeSQL', label: '🤖 AI 优化 SQL', useSelection: true, prompt: '请分析以下 SQL 语句的性能并给出优化建议：\n```sql\n{SQL}\n```' },
-      ];
-
-      aiActions.forEach(action => {
-          editor.addAction({
-              id: action.id,
-              label: action.label,
-              contextMenuGroupId: '9_ai',
-              contextMenuOrder: 1,
-              run: (ed: any) => {
-                  const selection = ed.getModel()?.getValueInRange(ed.getSelection());
-                  const conn = connectionsRef.current.find(c => c.id === currentConnectionIdRef.current);
-                  const ctxText = conn ? `【上下文环境：${conn.config?.type || '数据库'} "${conn.name}", 当前库选定为 "${currentDbRef.current || '默认'}"】\n` : '';
-                  let prompt = ctxText + action.prompt;
-                  if (action.useSelection && selection) {
-                      prompt = prompt.replace('{SQL}', selection);
-                  }
-                  // 打开 AI 面板并填入 prompt
-                  const store = useStore.getState();
-                  if (!store.aiPanelVisible) {
-                      store.setAIPanelVisible(true);
-                  }
-                  // 通过自定义事件将 prompt 发送到 AI 面板
-                  window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
-              },
-          });
-      });
+      registerQueryEditorAiContextMenuActions(editor);
 
       // Register runQuery shortcut inside Monaco so it overrides Monaco's default keybinding
       const runBinding = runQueryShortcutBinding;
@@ -2631,7 +2834,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (keyBinding) {
               runQueryActionRef.current = editor.addAction({
                   id: 'gonavi.runQuery',
-                  label: 'GoNavi: 执行 SQL',
+                  label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.runQuery.label'),
                   keybindings: [keyBinding.keyMod | keyBinding.keyCode],
                   run: () => {
                       window.dispatchEvent(new CustomEvent('gonavi:run-active-query'));
@@ -2648,7 +2851,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (keyBinding) {
               selectCurrentStatementActionRef.current = editor.addAction({
                   id: 'gonavi.selectCurrentStatement',
-                  label: 'GoNavi: 选择当前语句',
+                  label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.selectCurrentStatement.label'),
                   keybindings: [keyBinding.keyMod | keyBinding.keyCode],
                   run: handleSelectCurrentStatement,
               });
@@ -2663,7 +2866,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (keyBinding) {
               saveQueryActionRef.current = editor.addAction({
                   id: 'gonavi.saveQuery',
-                  label: 'GoNavi: 保存查询',
+                  label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.saveQuery.label'),
                   keybindings: [keyBinding.keyMod | keyBinding.keyCode],
                   run: () => {
                       window.dispatchEvent(new CustomEvent('gonavi:save-active-query'));
@@ -2671,6 +2874,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               });
           }
       }
+
+      // 注册 / 斜杠命令 AI 快捷补全
+      refreshQueryEditorSlashCommandDefs();
 
       // HMR 重载时释放旧注册避免补全项重复
       if (!sqlCompletionRegistered) {
@@ -2792,7 +2998,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           label: t.tableName,
                           kind: monaco.languages.CompletionItemKind.Class,
                           insertText: t.tableName,
-                          detail: appendCommentToDetail(`Table (${t.dbName})`, t.comment),
+                          detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${t.dbName})`, t.comment),
                           documentation: buildCompletionDocumentation(t.comment),
                           range,
                           sortText: '0' + t.tableName
@@ -2822,7 +3028,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           label: t.table,
                           kind: monaco.languages.CompletionItemKind.Class,
                           insertText: t.table,
-                          detail: appendCommentToDetail(`Table (${t.dbName}${t.schema ? '.' + t.schema : ''})`, t.comment),
+                          detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${t.dbName}${t.schema ? '.' + t.schema : ''})`, t.comment),
                           documentation: buildCompletionDocumentation(t.comment),
                           range,
                           sortText: '0' + t.table
@@ -2989,7 +3195,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           label,
                           kind: monaco.languages.CompletionItemKind.Class,
                           insertText: label,
-                          detail: appendCommentToDetail(`Table (${t.dbName})`, t.comment),
+                          detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${t.dbName})`, t.comment),
                           documentation: buildCompletionDocumentation(t.comment),
                           range,
                           sortText: sortGroups.tableOther + t.tableName,
@@ -3008,7 +3214,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       label,
                       kind: monaco.languages.CompletionItemKind.Class,
                       insertText,
-                      detail: appendCommentToDetail(`Table${schemaInfo}`, t.comment),
+                      detail: appendCommentToDetail(`${translate('query_editor.object_info.table')}${schemaInfo}`, t.comment),
                       documentation: buildCompletionDocumentation(t.comment),
                       range,
                       sortText: sortGroups.tableCurrent + pureTable,
@@ -3022,7 +3228,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       label: db,
                       kind: monaco.languages.CompletionItemKind.Module,
                       insertText: db,
-                      detail: 'Database',
+                      detail: translate('query_editor.object_info.database'),
                       range,
                       sortText: sortGroups.db + db,
                   }));
@@ -3061,20 +3267,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               return { suggestions };
           }
       }));
-      // 注册 / 斜杠命令 AI 快捷补全
-      const slashCmdDefs = [
-          { cmd: '/query',    label: '🔍 自然语言查询',  desc: '用中文描述你想查什么',   prompt: '帮我写一条 SQL 查询：' },
-          { cmd: '/sql',      label: '📝 生成 SQL',      desc: '描述需求自动生成语句',   prompt: '请根据以下需求生成 SQL：' },
-          { cmd: '/explain',  label: '💡 解释 SQL',      desc: '解释选中 SQL 的逻辑',    prompt: '请解释以下 SQL 的执行逻辑和每一步的作用：\n```sql\n{SQL}\n```', useSelection: true },
-          { cmd: '/optimize', label: '⚡ 优化分析',      desc: '分析 SQL 性能瓶颈',      prompt: '请分析以下 SQL 的性能问题，并给出优化后的版本：\n```sql\n{SQL}\n```', useSelection: true },
-          { cmd: '/schema',   label: '🏗️ 表设计评审',    desc: '评审表结构设计质量',     prompt: '请全面评审当前关联表的设计，包括字段类型、范式、索引策略等方面的改进建议：' },
-          { cmd: '/index',    label: '📊 索引建议',      desc: '推荐最优索引方案',       prompt: '请基于当前表结构和常见查询场景，推荐最优的索引方案并给出建表语句：' },
-          { cmd: '/diff',     label: '🔄 表对比',        desc: '对比两表差异生成变更',   prompt: '请对比以下两张表的结构差异，并生成从旧版本迁移到新版本的 ALTER 语句：' },
-          { cmd: '/mock',     label: '🎲 造测试数据',    desc: '生成 INSERT 测试数据',   prompt: '请为当前关联的表生成 10 条符合业务语义的测试数据 INSERT 语句：' },
-      ];
-      // 全局变量存储命令定义，供 onDidChangeModelContent 使用
-      (window as any).__gonaviSlashCmdDefs = slashCmdDefs;
-
       sqlCompletionDisposables.push(monaco.languages.registerCompletionItemProvider('sql', {
           triggerCharacters: ['/'],
           provideCompletionItems: (model: any, position: any) => {
@@ -3092,7 +3284,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               };
 
               return {
-                  suggestions: slashCmdDefs.map((c, i) => ({
+                  suggestions: ((window as any).__gonaviSlashCmdDefs || []).map((c: any, i: number) => ({
                       label: `${c.cmd}  ${c.label}`,
                       kind: monaco.languages.CompletionItemKind.Event,
                       detail: c.desc,
@@ -3166,12 +3358,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
           // 组装 prompt
           const conn = connectionsRef.current.find(c => c.id === currentConnectionIdRef.current);
-          const ctxText = conn ? `【上下文环境：${conn.config?.type || '数据库'} "${conn.name}", 当前库选定为 "${currentDbRef.current || '默认'}"】\n` : '';
+          const ctxText = buildQueryEditorAiContextPrompt(conn, currentDbRef.current);
           let finalPrompt = ctxText + cmdDef.prompt;
           if (cmdDef.useSelection) {
               const sel = editor.getSelection();
               const selText = sel ? model.getValueInRange(sel) : '';
-              finalPrompt = finalPrompt.replace('{SQL}', selText || getCurrentQuery());
+              finalPrompt = finalPrompt.replace(QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER, selText || getCurrentQuery());
           }
 
           // 打开 AI 面板并注入 prompt
@@ -3209,10 +3401,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               setQuery(typeof nextValue === 'string' ? nextValue : formatted);
               refreshObjectDecorations();
               return;
-          }
-          syncQueryToEditor(formatted);
-      } catch (e) {
-          void message.error("格式化失败: SQL 语法可能有误");
+      }
+      syncQueryToEditor(formatted);
+  } catch (e) {
+          void message.error(translate('query_editor.message.format_failed'));
       }
   };
 
@@ -3222,13 +3414,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const fullSQL = getCurrentQuery();
 
       const conn = connections.find(c => c.id === currentConnectionId);
-      const ctxText = conn ? `【上下文环境：${conn.config?.type || '数据库'} "${conn.name}", 当前库选定为 "${currentDb || '默认'}"】\n` : '';
+      const ctxText = buildQueryEditorAiContextPrompt(conn, currentDb);
 
       const prompts: Record<string, string> = {
-          generate: `${ctxText}请根据当前数据库表结构生成查询语句：`,
-          explain: `${ctxText}请解释以下 SQL 语句的执行逻辑：\n\`\`\`sql\n${selection || fullSQL}\n\`\`\``,
-          optimize: `${ctxText}请分析以下 SQL 语句的性能并给出优化建议：\n\`\`\`sql\n${selection || fullSQL}\n\`\`\``,
-          schema: `${ctxText}请针对当前数据库的表结构进行系统分析，并给出性能和设计上的优化建议。`,
+          generate: `${ctxText}${translate('query_editor.ai_prompt.generate')}`,
+          explain: `${ctxText}${translate('query_editor.ai_prompt.explain', { sql: selection || fullSQL || QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER })}`,
+          optimize: `${ctxText}${translate('query_editor.ai_prompt.optimize', { sql: selection || fullSQL || QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER })}`,
+          schema: `${ctxText}${translate('query_editor.ai_prompt.schema')}`,
       };
 
       const store = useStore.getState();
@@ -3241,25 +3433,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const formatSettingsMenu: MenuProps['items'] = [
       { 
           key: 'upper', 
-          label: '关键字大写', 
+          label: translate('query_editor.format.keyword_upper'),
           icon: sqlFormatOptions.keywordCase === 'upper' ? '✓' : undefined,
           onClick: () => setSqlFormatOptions({ keywordCase: 'upper' }) 
       },
       { 
           key: 'lower', 
-          label: '关键字小写', 
+          label: translate('query_editor.format.keyword_lower'),
           icon: sqlFormatOptions.keywordCase === 'lower' ? '✓' : undefined,
           onClick: () => setSqlFormatOptions({ keywordCase: 'lower' }) 
       },
       { type: 'divider' },
       {
           key: 'snippet-settings',
-          label: '代码片段管理...',
+          label: translate('query_editor.format.snippet_settings'),
           onClick: () => window.dispatchEvent(new CustomEvent('gonavi:open-snippet-settings')),
       },
       {
           key: 'shortcut-settings',
-          label: '快捷键管理...',
+          label: translate('query_editor.format.shortcut_settings'),
           onClick: () => window.dispatchEvent(new CustomEvent('gonavi:open-shortcut-settings')),
       },
   ];
@@ -3511,7 +3703,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
           const res = await DBQueryMulti(buildRpcConnectionConfig(config) as any, currentDb, sql, queryId);
           if (!res?.success) {
-              message.error('刷新失败: ' + (res?.message || '未知错误'));
+              message.error(translate('query_editor.message.refresh_failed', {
+                  error: res?.message || translate('common.unknown'),
+              }));
               return;
           }
 
@@ -3545,7 +3739,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   : rs
           ));
       } catch (err: any) {
-          message.error('刷新失败: ' + (err?.message || '未知错误'));
+          message.error(translate('query_editor.message.refresh_failed', {
+              error: err?.message || translate('common.unknown'),
+          }));
       } finally {
           setLoading(false);
       }
@@ -3556,13 +3752,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
     if (!currentQuery.trim()) return;
     const executableSQL = getExecutableSQL();
     if (!executableSQL.trim()) {
-        message.info('没有可执行的 SQL。');
+        message.info(translate('query_editor.message.no_executable_sql'));
         setResultSets([]);
         setActiveResultKey('');
         return;
     }
     if (!currentDb) {
-        message.error("请先选择数据库");
+        message.error(translate('query_editor.message.select_database_first'));
         return;
     }
     // 如果已有查询在运行，先取消它
@@ -3581,13 +3777,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       const runStartTime = Date.now();
     const conn = connections.find(c => c.id === currentConnectionId);
     if (!conn) {
-        message.error("Connection not found");
+        message.error(translate('query_editor.message.connection_not_found'));
         if (runSeqRef.current === runSeq) setLoading(false);
         return;
     }
     const connCaps = getDataSourceCapabilities(conn.config);
     if (!connCaps.supportsQueryEditor) {
-        message.error("当前数据源不支持 SQL 查询编辑器，请使用对应专用页面。");
+        message.error(translate('query_editor.message.unsupported_source'));
         if (runSeqRef.current === runSeq) setLoading(false);
         return;
     }
@@ -3630,7 +3826,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 statements,
             );
             if (statements.length === 0) {
-                message.info('没有可执行的 SQL。');
+                message.info(translate('query_editor.message.no_executable_sql'));
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
@@ -3647,7 +3843,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 const shellConvert = convertMongoShellToJsonCommand(executedSql);
                 if (shellConvert.recognized) {
                     if (shellConvert.error) {
-                        const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
+                        const prefix = statements.length > 1
+                            ? translate('query_editor.message.statement_failed_prefix', { index: idx + 1 })
+                            : '';
                         setExecutionError(prefix + shellConvert.error);
                         setResultSets([]);
                         setActiveResultKey('');
@@ -3686,7 +3884,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     dbName: currentDb
                 });
                 if (!res.success) {
-                    const prefix = statements.length > 1 ? `第 ${idx + 1} 条语句执行失败：` : '';
+                    const prefix = statements.length > 1
+                        ? translate('query_editor.message.statement_failed_prefix', { index: idx + 1 })
+                        : '';
                     setExecutionError(prefix + res.message);
                     setResultSets([]);
                     setActiveResultKey('');
@@ -3740,9 +3940,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 lastExecutedEditorQueryRef.current = currentQuery;
             }
             if (statements.length > 1) {
-                message.success(`已执行 ${statements.length} 条语句，生成 ${nextResultSets.length} 个结果集。`);
+                message.success(translate('query_editor.message.execution_multi_success', {
+                    statements: statements.length,
+                    results: nextResultSets.length,
+                }));
             } else if (nextResultSets.length === 0) {
-                message.success('执行成功。');
+                message.success(translate('query_editor.message.execution_success'));
             }
 
         } else {
@@ -3757,7 +3960,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 sourceStatements,
             );
             if (sourceStatements.length === 0) {
-                message.info('没有可执行的 SQL。');
+                message.info(translate('query_editor.message.no_executable_sql'));
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
@@ -3917,14 +4120,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 message.info(res.message);
             }
             if (resultSetDataArray.length > 1) {
-                message.success(`已执行完成，生成 ${nextResultSets.length} 个结果集。`);
+                message.success(translate('query_editor.message.execution_result_sets_success', {
+                    results: nextResultSets.length,
+                }));
             } else if (nextResultSets.length === 0) {
-                message.success('执行成功。');
+                message.success(translate('query_editor.message.execution_success'));
             }
 
         }
     } catch (e: any) {
-        message.error("Error executing query: " + e.message);
+        message.error(translate('query_editor.message.execution_failed_with_error', { error: e.message }));
         addSqlLog({
             id: `log-${Date.now()}-error`,
             timestamp: Date.now(),
@@ -3945,14 +4150,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const handleCancel = async () => {
     if (!currentQueryIdRef.current) {
-      message.warning('没有正在运行的查询可取消');
+      message.warning(translate('query_editor.message.cancel_no_running'));
       return;
     }
     const queryIdToCancel = currentQueryIdRef.current;
     try {
       const res = await CancelQuery(queryIdToCancel);
       if (res.success) {
-        message.success('查询已取消');
+        message.success(translate('query_editor.message.cancel_success'));
         // Clear query ID after successful cancellation
         if (currentQueryIdRef.current === queryIdToCancel) {
           clearQueryId()
@@ -3961,7 +4166,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         message.warning(res.message);
       }
     } catch (error: any) {
-      message.error('取消查询失败: ' + error.message);
+      message.error(translate('query_editor.message.cancel_failed', { error: error.message }));
     }
   };
 
@@ -4051,7 +4256,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       if (keyBinding) {
           runQueryActionRef.current = editor.addAction({
               id: 'gonavi.runQuery',
-              label: 'GoNavi: 执行 SQL',
+              label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.runQuery.label'),
               keybindings: [keyBinding.keyMod | keyBinding.keyCode],
               run: () => {
                   window.dispatchEvent(new CustomEvent('gonavi:run-active-query'));
@@ -4065,7 +4270,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               runQueryActionRef.current = null;
           }
       };
-  }, [runQueryShortcutBinding]);
+  }, [languagePreference, runQueryShortcutBinding]);
 
   useEffect(() => {
       if (selectCurrentStatementActionRef.current) {
@@ -4084,7 +4289,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       if (keyBinding) {
           selectCurrentStatementActionRef.current = editor.addAction({
               id: 'gonavi.selectCurrentStatement',
-              label: 'GoNavi: 选择当前语句',
+              label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.selectCurrentStatement.label'),
               keybindings: [keyBinding.keyMod | keyBinding.keyCode],
               run: handleSelectCurrentStatement,
           });
@@ -4096,7 +4301,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               selectCurrentStatementActionRef.current = null;
           }
       };
-  }, [selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);
+  }, [languagePreference, selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);
 
   useEffect(() => {
       if (saveQueryActionRef.current) {
@@ -4115,7 +4320,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       if (keyBinding) {
           saveQueryActionRef.current = editor.addAction({
               id: 'gonavi.saveQuery',
-              label: 'GoNavi: 保存查询',
+              label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.saveQuery.label'),
               keybindings: [keyBinding.keyMod | keyBinding.keyCode],
               run: () => {
                   window.dispatchEvent(new CustomEvent('gonavi:save-active-query'));
@@ -4129,7 +4334,22 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               saveQueryActionRef.current = null;
           }
       };
-  }, [saveQueryShortcutBinding]);
+  }, [languagePreference, saveQueryShortcutBinding]);
+
+  useEffect(() => {
+      const editor = editorRef.current;
+      if (!editor) return;
+
+      registerQueryEditorAiContextMenuActions(editor);
+
+      return () => {
+          disposeQueryEditorAiContextMenuActions();
+      };
+  }, [languagePreference, disposeQueryEditorAiContextMenuActions, registerQueryEditorAiContextMenuActions]);
+
+  useEffect(() => {
+      refreshQueryEditorSlashCommandDefs();
+  }, [languagePreference, refreshQueryEditorSlashCommandDefs]);
 
   useEffect(() => {
       const handleRunActiveQuery = () => {
@@ -4209,7 +4429,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   editor.focus();
                   
                   if (!e.detail.runImmediately) {
-                      message.success('代码已在当前光标处成功插入');
+                      message.success(translate('query_editor.message.insert_success'));
                   }
 
                   if (e.detail.runImmediately) {
@@ -4225,7 +4445,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               }
           } else {
               setQuery((prev: string) => prev ? prev + '\n' + sqlText : sqlText);
-              message.success('代码已追加');
+              message.success(translate('query_editor.message.append_success'));
           }
       };
       window.addEventListener('gonavi:insert-sql-to-tab', handleInsertSql as EventListener);
@@ -4234,8 +4454,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const resolveDefaultQueryName = () => {
       const rawTitle = String(tab.title || '').trim();
-      if (!rawTitle || rawTitle.startsWith('新建查询')) {
-          return '未命名查询';
+      if (!rawTitle || UNTITLED_QUERY_TITLE_PREFIXES.some((title) => rawTitle.startsWith(title))) {
+          return translate('query_editor.save_modal.unnamed');
       }
       return rawTitle;
   };
@@ -4275,7 +4495,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           try {
               const res = await WriteSQLFile(filePath, sql);
               if (!res.success) {
-                  message.error('保存 SQL 文件失败: ' + (res.message || '未知错误'));
+                  message.error(translate('query_editor.message.save_sql_file_failed', {
+                      error: res.message || translate('common.unknown'),
+                  }));
                   return;
               }
               addTab({
@@ -4286,9 +4508,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   filePath,
                   savedQueryId: undefined,
               });
-              message.success('SQL 文件已保存！');
+              message.success(translate('query_editor.message.sql_file_saved'));
           } catch (error) {
-              message.error('保存 SQL 文件失败: ' + (error instanceof Error ? error.message : String(error)));
+              message.error(translate('query_editor.message.save_sql_file_failed', {
+                  error: error instanceof Error ? error.message : String(error),
+              }));
           }
           return;
       }
@@ -4302,14 +4526,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
       const saveName = existed?.name || resolveDefaultQueryName();
       persistQuery({ id: saveId, name: saveName, createdAt: existed?.createdAt });
-      message.success('查询已保存！');
+      message.success(translate('query_editor.message.saved'));
   };
 
   const handleRenameQuery = () => {
       const existed = currentSavedQuery || null;
       const fallbackSavedId = String(tab.savedQueryId || '').trim();
       if (!existed && !fallbackSavedId) {
-          message.warning('请先保存查询后再重命名');
+          message.warning(translate('query_editor.message.save_first_before_rename'));
           openSaveQueryModal('save');
           return;
       }
@@ -4321,26 +4545,35 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const res = await ExportSQLFile(currentSavedQuery?.name || resolveDefaultQueryName(), getCurrentQuery());
           if (!res.success) {
               if ((res.message || '') !== '已取消') {
-                  message.error('导出 SQL 文件失败: ' + (res.message || '未知错误'));
+                  message.error(translate('query_editor.message.export_sql_file_failed', {
+                      error: res.message || translate('common.unknown'),
+                  }));
               }
               return;
           }
-          message.success('SQL 文件已导出！');
+          message.success(translate('query_editor.message.export_sql_file_success'));
       } catch (error) {
-          message.error('导出 SQL 文件失败: ' + (error instanceof Error ? error.message : String(error)));
+          const errorDetail = error instanceof Error
+              ? error.message || translate('common.unknown')
+              : (typeof (error as any)?.message === 'string' && (error as any).message)
+                  || (typeof error === 'string' && error)
+                  || translate('common.unknown');
+          message.error(translate('query_editor.message.export_sql_file_failed', {
+              error: errorDetail,
+          }));
       }
   };
 
   const saveMoreMenuItems: MenuProps['items'] = [
       {
           key: 'rename-query',
-          label: '重命名查询',
+          label: translate('query_editor.action.rename_query'),
           disabled: !!tab.filePath,
           onClick: handleRenameQuery,
       },
       {
           key: 'export-sql-file',
-          label: '导出 SQL 文件',
+          label: translate('query_editor.action.export_sql_file'),
           onClick: () => void handleExportSQLFile(),
       },
   ];
@@ -4400,10 +4633,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const nextSavedId = existed?.id || fallbackSavedId || `saved-${Date.now()}`;
           persistQuery({
               id: nextSavedId,
-              name: String(values.name || '').trim() || '未命名查询',
+              name: String(values.name || '').trim() || translate('query_editor.save_modal.unnamed'),
               createdAt: existed?.createdAt,
           });
-          message.success(saveModalMode === 'rename' ? '查询已重命名！' : '查询已保存！');
+          message.success(translate(
+              saveModalMode === 'rename' ? 'query_editor.message.renamed' : 'query_editor.message.saved'
+          ));
           setIsSaveModalOpen(false);
       } catch (e) {
       }
@@ -4512,7 +4747,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       <div className={isV2Ui ? 'gn-v2-query-toolbar' : undefined} style={{ padding: '4px 8px 8px', display: 'flex', gap: '8px', flexShrink: 0, alignItems: 'center' }}>
         <Select 
             style={{ width: 150 }} 
-            placeholder="选择连接"
+            placeholder={translate('query_editor.placeholder.connection')}
             value={currentConnectionId}
             onChange={(val) => {
                 setCurrentConnectionId(val);
@@ -4523,23 +4758,23 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         />
         <Select 
             style={{ width: 200 }} 
-            placeholder="选择数据库"
+            placeholder={translate('query_editor.placeholder.database')}
             value={currentDb}
             onChange={setCurrentDb}
             options={dbList.map(db => ({ label: db, value: db }))}
             showSearch
         />
-        <Tooltip title="最大返回行数（会对 SELECT 自动加 LIMIT，防止大结果集卡死）">
+        <Tooltip title={translate('query_editor.max_rows.tooltip')}>
             <Select
                 style={{ width: 170 }}
                 value={queryOptions?.maxRows ?? 5000}
                 onChange={(val) => setQueryOptions({ maxRows: Number(val) })}
                 options={[
-                    { label: '最大行数：500', value: 500 },
-                    { label: '最大行数：1000', value: 1000 },
-                    { label: '最大行数：5000', value: 5000 },
-                    { label: '最大行数：20000', value: 20000 },
-                    { label: '最大行数：不限', value: 0 },
+                    { label: translate('query_editor.max_rows.option_500'), value: 500 },
+                    { label: translate('query_editor.max_rows.option_1000'), value: 1000 },
+                    { label: translate('query_editor.max_rows.option_5000'), value: 5000 },
+                    { label: translate('query_editor.max_rows.option_20000'), value: 20000 },
+                    { label: translate('query_editor.max_rows.option_unlimited'), value: 0 },
                 ]}
             />
         </Tooltip>
@@ -4547,40 +4782,46 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           <Tooltip
               title={
 	                  runQueryShortcutBinding.enabled && runQueryShortcutBinding.combo
-	                      ? `运行（${getShortcutDisplayLabel(runQueryShortcutBinding.combo, activeShortcutPlatform)}）`
-	                      : '运行'
+	                      ? translate('query_editor.action.run_with_shortcut', {
+                              shortcut: getShortcutDisplayLabel(runQueryShortcutBinding.combo, activeShortcutPlatform),
+                          })
+	                      : translate('query_editor.action.run')
               }
           >
               <Button type="primary" icon={<PlayCircleOutlined />} onMouseDown={captureEditorCursorPosition} onClick={handleRun} loading={loading}>
-                运行
+                {translate('query_editor.action.run')}
               </Button>
           </Tooltip>
           {loading && (
-            <Button type="primary" danger icon={<StopOutlined />} onClick={handleCancel}>
-              停止
-            </Button>
+            <Tooltip title={translate('query_editor.action.stop')}>
+              <Button type="primary" danger icon={<StopOutlined />} onClick={handleCancel}>
+                {translate('query_editor.action.stop')}
+              </Button>
+            </Tooltip>
           )}
         </Button.Group>
         <Button.Group>
             <Tooltip
                 title={
                     saveQueryShortcutBinding.enabled && saveQueryShortcutBinding.combo
-                        ? `保存（${getShortcutDisplayLabel(saveQueryShortcutBinding.combo, activeShortcutPlatform)}）`
-                        : '保存'
+                        ? translate('query_editor.action.save_with_shortcut', {
+                            shortcut: getShortcutDisplayLabel(saveQueryShortcutBinding.combo, activeShortcutPlatform),
+                        })
+                        : translate('query_editor.action.save')
                 }
             >
               <Button icon={<SaveOutlined />} onClick={handleQuickSave}>
-                保存
+                {translate('query_editor.action.save')}
               </Button>
             </Tooltip>
             <Dropdown menu={{ items: saveMoreMenuItems }} placement="bottomRight">
-                <Button>更多</Button>
+                <Button>{translate('query_editor.action.more')}</Button>
             </Dropdown>
         </Button.Group>
         
         <Button.Group>
-            <Tooltip title="美化 SQL">
-                <Button icon={<FormatPainterOutlined />} onClick={handleFormat}>美化</Button>
+            <Tooltip title={translate('query_editor.action.format_sql')}>
+                <Button icon={<FormatPainterOutlined />} onClick={handleFormat}>{translate('query_editor.action.format')}</Button>
             </Tooltip>
             <Dropdown menu={{ items: formatSettingsMenu }} placement="bottomRight">
                 <Button icon={<SettingOutlined />} />
@@ -4588,11 +4829,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         </Button.Group>
 
         <Dropdown menu={{ items: [
-            { key: 'ai-generate', label: '生成 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('generate') },
-            { key: 'ai-explain', label: '解释 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('explain') },
-            { key: 'ai-optimize', label: '优化 SQL', icon: <RobotOutlined />, onClick: () => handleAIAction('optimize') },
+            { key: 'ai-generate', label: translate('query_editor.action.ai_generate_sql_menu'), icon: <RobotOutlined />, onClick: () => handleAIAction('generate') },
+            { key: 'ai-explain', label: translate('query_editor.action.ai_explain_sql_menu'), icon: <RobotOutlined />, onClick: () => handleAIAction('explain') },
+            { key: 'ai-optimize', label: translate('query_editor.action.ai_optimize_sql_menu'), icon: <RobotOutlined />, onClick: () => handleAIAction('optimize') },
             { type: 'divider' as const },
-            { key: 'ai-schema', label: 'Schema 分析', icon: <RobotOutlined />, onClick: () => handleAIAction('schema') },
+            { key: 'ai-schema', label: translate('query_editor.action.ai_schema_analysis'), icon: <RobotOutlined />, onClick: () => handleAIAction('schema') },
         ] }} placement="bottomRight">
             <Button icon={<RobotOutlined />} style={{ color: '#818cf8' }}>AI</Button>
         </Dropdown>
@@ -4625,7 +4866,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             flexShrink: 0,
             zIndex: 10 
         }} 
-        title="拖动调整高度"
+        title={translate('query_editor.action.resize_editor')}
       />
       </div>
 
@@ -4644,11 +4885,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           <Tooltip title={rs.sql}>
                           <span className="query-result-tab-text">{(() => {
                               const isAffected = rs.columns.length === 1 && rs.columns[0] === 'affectedRows';
-                              if (isAffected) return `结果 ${idx + 1} ✓`;
-                              return `结果 ${idx + 1}${Array.isArray(rs.rows) ? ` (${rs.rows.length})` : ''}`;
+                              if (isAffected) return translate('query_editor.result.tab_title_success', { index: idx + 1 });
+                              return translate('query_editor.result.tab_title', {
+                                  index: idx + 1,
+                                  count: Array.isArray(rs.rows) ? rs.rows.length : 0,
+                              });
                           })()}</span>
                           </Tooltip>
-                          <Tooltip title="关闭结果">
+                          <Tooltip title={translate('query_editor.result.close')}>
                               <span
                                   className="query-result-tab-close"
                                   onClick={(e) => {
@@ -4673,8 +4917,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                                   flexDirection: 'column', gap: 8, color: '#666', userSelect: 'text',
                               }}>
                                   <span style={{ fontSize: 36, color: '#52c41a' }}>✓</span>
-                                  <span style={{ fontSize: 14, fontWeight: 500 }}>执行成功</span>
-                                  <span style={{ fontSize: 13, color: '#999' }}>影响行数：{affected}</span>
+                                  <span style={{ fontSize: 14, fontWeight: 500 }}>{translate('query_editor.result.execution_success')}</span>
+                                  <span style={{ fontSize: 13, color: '#999' }}>
+                                      {translate('query_editor.result.affected_rows', { count: affected })}
+                                  </span>
                               </div>
                           );
                       }
@@ -4703,7 +4949,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           <div className={isV2Ui ? 'gn-v2-query-error' : undefined} style={{ flex: 1, minHeight: 0, padding: 24, display: 'flex', flexDirection: 'column', gap: 16, background: darkMode ? '#1e1e1e' : '#fafafa', overflow: 'auto' }}>
               <div style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <CloseOutlined />
-                  <span>执行失败</span>
+                  <span>{translate('query_editor.result.execution_failed')}</span>
               </div>
               <div className="custom-scrollbar" style={{ padding: 16, background: darkMode ? '#2d1a1a' : '#fff2f0', border: `1px solid ${darkMode ? '#5c2020' : '#ffccc7'}`, borderRadius: 6, color: darkMode ? '#ffa39e' : '#cf1322', fontFamily: 'var(--gn-font-mono)', fontSize: 'var(--gn-font-size-mono, 13px)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '40vh', overflow: 'auto' }}>
                   {executionError}
@@ -4715,7 +4961,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       style={{ background: '#818cf8', borderColor: '#818cf8', boxShadow: '0 2px 0 rgba(129, 140, 248, 0.2)' }}
                       onClick={() => {
                           const errSql = getCurrentQuery();
-                          const prompt = `我在执行以下 SQL 时遇到了错误：\n\`\`\`sql\n${errSql}\n\`\`\`\n\n数据库报错信息如下：\n\`\`\`text\n${executionError}\n\`\`\`\n\n请帮我分析错误原因，并给出修改建议。`;
+                          const prompt = translate('query_editor.ai_prompt.diagnose', {
+                              sql: errSql,
+                              error: executionError,
+                          });
                           const store = useStore.getState();
                           const wasClosed = !store.aiPanelVisible;
                           if (wasClosed) store.setAIPanelVisible(true);
@@ -4724,7 +4973,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           }, wasClosed ? 350 : 0);
                       }}
                   >
-                      一键 AI 诊断
+                      {translate('query_editor.result.ai_diagnose')}
                   </Button>
               </div>
           </div>
@@ -4732,8 +4981,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           <div className={isV2Ui ? 'gn-v2-query-empty' : undefined} style={{ flex: 1, minHeight: 0 }}>
             {isV2Ui && (
               <div>
-                <strong>等待执行 SQL</strong>
-                <span>运行查询后，结果会在下方以新版数据网格展示。</span>
+                <strong>{translate('query_editor.empty_state.title')}</strong>
+                <span>{translate('query_editor.empty_state.description')}</span>
               </div>
             )}
           </div>
@@ -4741,16 +4990,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       </div>
 
       <Modal 
-        title={saveModalMode === 'rename' ? '重命名查询' : '保存查询'}
+        title={translate(saveModalMode === 'rename' ? 'query_editor.save_modal.rename_title' : 'query_editor.save_modal.title')}
         open={isSaveModalOpen} 
         onOk={handleSave} 
         onCancel={() => setIsSaveModalOpen(false)}
-        okText={saveModalMode === 'rename' ? '重命名' : '保存'}
-        cancelText="取消"
+        okText={translate(saveModalMode === 'rename' ? 'query_editor.save_modal.rename_ok' : 'common.save')}
+        cancelText={translate('common.cancel')}
       >
           <Form form={saveForm} layout="vertical">
-              <Form.Item name="name" label="查询名称" rules={[{ required: true, message: '请输入查询名称' }]}>
-                  <Input placeholder="例如：查询所有用户" />
+              <Form.Item name="name" label={translate('query_editor.save_modal.name_label')} rules={[{ required: true, message: translate('query_editor.save_modal.name_required') }]}>
+                  <Input placeholder={translate('query_editor.save_modal.name_placeholder')} />
               </Form.Item>
           </Form>
       </Modal>

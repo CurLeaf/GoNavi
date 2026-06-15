@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
+import {
+  setCurrentLanguage,
+} from '../i18n';
 import {
   DEFAULT_SHORTCUT_OPTIONS,
   findReservedConflict,
@@ -17,6 +20,10 @@ import {
   SHORTCUT_ACTION_META,
 } from './shortcuts';
 import type { ConflictInfo } from './shortcuts';
+
+beforeEach(() => {
+  setCurrentLanguage('zh-CN');
+});
 
 // ─── findReservedConflict ────────────────────────────────────────────
 
@@ -109,6 +116,30 @@ describe('describeConflictContext', () => {
 
   it('describes datagrid context', () => {
     expect(describeConflictContext('datagrid')).toBe('数据表格');
+  });
+});
+
+describe('shortcut localization', () => {
+  it('localizes action meta and reserved conflict copy for the active language while preserving raw combos', () => {
+    setCurrentLanguage('en-US');
+    try {
+      expect(SHORTCUT_ACTION_META.runQuery.label).toBe('Run SQL');
+      expect(SHORTCUT_ACTION_META.saveQuery.description).toBe('Save the current query tab; unnamed queries open the save dialog');
+      expect(SHORTCUT_ACTION_META.sendAIChatMessage.description).toContain('Shift+Enter');
+      expect(describeConflictContext('global')).toBe('Browser');
+
+      const browserSave = findReservedConflict('Ctrl+S');
+      expect(browserSave).toMatchObject({
+        label: 'Browser Save',
+        context: 'global',
+      });
+
+      setCurrentLanguage('zh-CN');
+      expect(SHORTCUT_ACTION_META.runQuery.label).toBe('执行 SQL');
+      expect(findReservedConflict('Ctrl+S')?.label).toBe('浏览器保存');
+    } finally {
+      setCurrentLanguage('zh-CN');
+    }
   });
 });
 

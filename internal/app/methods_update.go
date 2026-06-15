@@ -105,6 +105,26 @@ type githubAsset struct {
 	Size               int64  `json:"size"`
 }
 
+type localizedUpdateError struct {
+	key    string
+	params map[string]any
+}
+
+func (e localizedUpdateError) Error() string {
+	return e.key
+}
+
+func (a *App) localizedUpdateError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var localized localizedUpdateError
+	if errors.As(err, &localized) {
+		return a.appText(localized.key, localized.params)
+	}
+	return err.Error()
+}
+
 func (a *App) CheckForUpdates() connection.QueryResult {
 	return a.checkForUpdates(true)
 }
@@ -119,7 +139,7 @@ func (a *App) checkForUpdates(logFailure bool) connection.QueryResult {
 		if logFailure {
 			updateLogCheckError(err)
 		}
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: a.localizedUpdateError(err)}
 	}
 
 	var currentStaged *stagedUpdate
@@ -145,9 +165,9 @@ func (a *App) checkForUpdates(logFailure bool) connection.QueryResult {
 	a.updateState.staged = currentStaged
 	a.updateMu.Unlock()
 
-	msg := "已是最新版本"
+	msg := a.appText("app.update.backend.message.latest", nil)
 	if info.HasUpdate {
-		msg = fmt.Sprintf("发现新版本：%s", info.LatestVersion)
+		msg = a.appText("app.update.backend.message.update_found", map[string]any{"version": info.LatestVersion})
 	}
 	return connection.QueryResult{Success: true, Message: msg, Data: info}
 }
@@ -169,26 +189,26 @@ func (a *App) DownloadUpdate() connection.QueryResult {
 	a.updateMu.Lock()
 	if a.updateState.downloading {
 		a.updateMu.Unlock()
-		return connection.QueryResult{Success: false, Message: "更新包正在下载中，请稍后重试"}
+		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.download_in_progress", nil)}
 	}
 	info := a.updateState.lastCheck
 	if info == nil {
 		a.updateMu.Unlock()
-		return connection.QueryResult{Success: false, Message: "请先检查更新"}
+		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.check_first", nil)}
 	}
 	if !info.HasUpdate {
 		a.updateMu.Unlock()
-		return connection.QueryResult{Success: false, Message: "当前已是最新版本"}
+		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.latest", nil)}
 	}
 	if info.AssetURL == "" || info.AssetName == "" {
 		a.updateMu.Unlock()
-		return connection.QueryResult{Success: false, Message: "未找到可用的更新包"}
+		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.no_update_package", nil)}
 	}
 	staged := resolveReusableStagedUpdate(*info, a.updateState.staged)
 	if staged != nil {
 		a.updateState.staged = staged
 		a.updateMu.Unlock()
-		return connection.QueryResult{Success: true, Message: "更新包已下载完成", Data: buildUpdateDownloadResult(*info, staged)}
+		return connection.QueryResult{Success: true, Message: a.appText("app.update.backend.message.package_already_downloaded", nil), Data: buildUpdateDownloadResult(*info, staged)}
 	}
 	a.updateState.staged = nil
 	a.updateState.downloading = true
@@ -212,14 +232,18 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 	}
 	a.updateMu.Unlock()
 	if staged == nil {
-		return connection.QueryResult{Success: false, Message: "未找到已下载的更新包"}
+		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.no_downloaded_package", nil)}
 	}
 
 	if err := launchUpdateScript(staged); err != nil {
 		logger.Error(err, "启动更新脚本失败")
-		msg := err.Error()
+		detail := a.localizedUpdateError(err)
+		msg := a.appText("app.update.backend.message.install_launch_failed", map[string]any{"detail": detail})
 		if staged.InstallLogPath != "" {
-			msg = fmt.Sprintf("%s（更新日志：%s）", msg, staged.InstallLogPath)
+			msg = a.appText("app.update.backend.message.install_launch_failed_with_log", map[string]any{
+				"detail": detail,
+				"path":   staged.InstallLogPath,
+			})
 		}
 		return connection.QueryResult{
 			Success: false,
@@ -238,9 +262,9 @@ func (a *App) InstallUpdateAndRestart() connection.QueryResult {
 		os.Exit(0)
 	}()
 
-	msg := "更新已开始安装"
+	msg := a.appText("app.update.backend.message.install_started", nil)
 	if staged.InstallLogPath != "" {
-		msg = fmt.Sprintf("更新已开始安装，日志路径：%s", staged.InstallLogPath)
+		msg = a.appText("app.update.backend.message.install_started_with_log", map[string]any{"path": staged.InstallLogPath})
 	}
 	return connection.QueryResult{
 		Success: true,
@@ -256,18 +280,18 @@ func (a *App) OpenDownloadedUpdateDirectory() connection.QueryResult {
 	staged := a.updateState.staged
 	a.updateMu.Unlock()
 	if staged == nil {
-		return connection.QueryResult{Success: false, Message: "未找到已下载的更新包"}
+		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.no_downloaded_package", nil)}
 	}
 	assetPath := strings.TrimSpace(staged.FilePath)
 	if assetPath == "" {
-		return connection.QueryResult{Success: false, Message: "更新包路径为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.package_path_empty", nil)}
 	}
 	dirPath := strings.TrimSpace(filepath.Dir(assetPath))
 	if dirPath == "" || dirPath == "." {
-		return connection.QueryResult{Success: false, Message: "无法解析更新目录"}
+		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.package_directory_unresolved", nil)}
 	}
 	if stat, err := os.Stat(dirPath); err != nil || !stat.IsDir() {
-		return connection.QueryResult{Success: false, Message: "更新目录不存在或不可访问"}
+		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.package_directory_unavailable", nil)}
 	}
 
 	var cmd *exec.Cmd
@@ -279,15 +303,15 @@ func (a *App) OpenDownloadedUpdateDirectory() connection.QueryResult {
 	case "linux":
 		cmd = exec.Command("xdg-open", dirPath)
 	default:
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前平台暂不支持打开目录：%s", stdRuntime.GOOS)}
+		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.open_directory_unsupported", map[string]any{"platform": stdRuntime.GOOS})}
 	}
 	if err := cmd.Start(); err != nil {
 		logger.Error(err, "打开更新目录失败")
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("打开更新目录失败：%v", err)}
+		return connection.QueryResult{Success: false, Message: a.appText("app.update.backend.message.open_directory_failed", map[string]any{"detail": err.Error()})}
 	}
 	return connection.QueryResult{
 		Success: true,
-		Message: fmt.Sprintf("已打开安装目录：%s", dirPath),
+		Message: a.appText("app.update.backend.message.opened_install_directory", map[string]any{"path": dirPath}),
 		Data: map[string]any{
 			"path": dirPath,
 		},
@@ -297,11 +321,12 @@ func (a *App) OpenDownloadedUpdateDirectory() connection.QueryResult {
 func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 	workspaceDir := strings.TrimSpace(resolveUpdateWorkspaceDir(info.LatestVersion))
 	if workspaceDir == "" {
-		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, "无法确定当前应用目录")
-		return connection.QueryResult{Success: false, Message: "无法确定当前应用目录，无法下载更新"}
+		message := a.appText("app.update.backend.message.app_directory_unresolved_download", nil)
+		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, message)
+		return connection.QueryResult{Success: false, Message: message}
 	}
 	if err := os.MkdirAll(workspaceDir, 0o755); err != nil {
-		errMsg := fmt.Sprintf("无法访问应用目录：%s", workspaceDir)
+		errMsg := a.appText("app.update.backend.message.app_directory_unavailable", map[string]any{"path": workspaceDir})
 		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, errMsg)
 		return connection.QueryResult{Success: false, Message: errMsg}
 	}
@@ -323,7 +348,7 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 		}
 	}
 	if err := os.MkdirAll(stagedDir, 0o755); err != nil {
-		errMsg := fmt.Sprintf("无法在应用目录创建更新工作目录：%s", stagedDir)
+		errMsg := a.appText("app.update.backend.message.create_workspace_failed", map[string]any{"path": stagedDir})
 		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, errMsg)
 		return connection.QueryResult{Success: false, Message: errMsg}
 	}
@@ -340,21 +365,24 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 	if err != nil {
 		_ = os.Remove(assetPath)
 		_ = os.RemoveAll(stagedDir)
-		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, err.Error())
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		message := a.localizedUpdateError(err)
+		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, message)
+		return connection.QueryResult{Success: false, Message: message}
 	}
 
 	if info.SHA256 == "" {
 		_ = os.Remove(assetPath)
 		_ = os.RemoveAll(stagedDir)
-		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, "缺少更新包校验值（SHA256SUMS）")
-		return connection.QueryResult{Success: false, Message: "缺少更新包校验值（SHA256SUMS）"}
+		message := a.appText("app.update.backend.message.checksum_missing", nil)
+		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, message)
+		return connection.QueryResult{Success: false, Message: message}
 	}
 	if !strings.EqualFold(info.SHA256, actualHash) {
 		_ = os.Remove(assetPath)
 		_ = os.RemoveAll(stagedDir)
-		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, "更新包校验失败，请重试")
-		return connection.QueryResult{Success: false, Message: "更新包校验失败，请重试"}
+		message := a.appText("app.update.backend.message.checksum_failed", nil)
+		a.emitUpdateDownloadProgress("error", 0, info.AssetSize, message)
+		return connection.QueryResult{Success: false, Message: message}
 	}
 
 	staged := &stagedUpdate{
@@ -371,7 +399,7 @@ func (a *App) downloadAndStageUpdate(info UpdateInfo) connection.QueryResult {
 	a.updateMu.Unlock()
 
 	a.emitUpdateDownloadProgress("done", info.AssetSize, info.AssetSize, "")
-	return connection.QueryResult{Success: true, Message: "更新包下载完成", Data: buildUpdateDownloadResult(info, staged)}
+	return connection.QueryResult{Success: true, Message: a.appText("app.update.backend.message.package_downloaded", nil), Data: buildUpdateDownloadResult(info, staged)}
 }
 
 func fetchLatestUpdateInfo() (UpdateInfo, error) {
@@ -383,7 +411,7 @@ func fetchLatestUpdateInfo() (UpdateInfo, error) {
 	currentVersion := getCurrentVersion()
 	latestVersion := normalizeVersion(release.TagName)
 	if latestVersion == "" {
-		return UpdateInfo{}, errors.New("无法解析最新版本号")
+		return UpdateInfo{}, localizedUpdateError{key: "app.update.backend.error.latest_version_unparseable"}
 	}
 
 	hasUpdate := compareVersion(currentVersion, latestVersion) < 0
@@ -416,7 +444,7 @@ func fetchLatestUpdateInfo() (UpdateInfo, error) {
 	}
 	sha256Value := strings.TrimSpace(hashMap[assetName])
 	if sha256Value == "" {
-		return UpdateInfo{}, errors.New("SHA256SUMS 未包含当前平台更新包")
+		return UpdateInfo{}, localizedUpdateError{key: "app.update.backend.error.sha256_missing_current_package"}
 	}
 	return UpdateInfo{
 		HasUpdate:       hasUpdate,
@@ -482,7 +510,10 @@ func fetchLatestRelease() (*githubRelease, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("检查更新失败：HTTP %d", resp.StatusCode)
+		return nil, localizedUpdateError{
+			key:    "app.update.backend.error.check_http_status",
+			params: map[string]any{"status": resp.StatusCode},
+		}
 	}
 
 	var release githubRelease
@@ -510,7 +541,7 @@ func expectedAssetNameForExecutable(goos, goarch, version, executablePath string
 	version = strings.TrimPrefix(version, "v")
 	version = strings.TrimPrefix(version, "V")
 	if version == "" {
-		return "", errors.New("无法解析发布版本号")
+		return "", localizedUpdateError{key: "app.update.backend.error.release_version_unparseable"}
 	}
 
 	switch goos {
@@ -533,7 +564,10 @@ func expectedAssetNameForExecutable(goos, goarch, version, executablePath string
 			return fmt.Sprintf("GoNavi-%s-Linux-Amd64%s.tar.gz", version, resolveLinuxReleaseArtifactSuffix(executablePath)), nil
 		}
 	}
-	return "", fmt.Errorf("当前平台暂不支持在线更新：%s/%s", goos, goarch)
+	return "", localizedUpdateError{
+		key:    "app.update.backend.error.online_update_unsupported",
+		params: map[string]any{"platform": goos + "/" + goarch},
+	}
 }
 
 func resolveLinuxReleaseArtifactSuffix(executablePath string) string {
@@ -556,7 +590,10 @@ func findReleaseAsset(assets []githubAsset, name string) (*githubAsset, error) {
 			return &asset, nil
 		}
 	}
-	return nil, fmt.Errorf("未找到更新包：%s", name)
+	return nil, localizedUpdateError{
+		key:    "app.update.backend.error.update_package_not_found",
+		params: map[string]any{"name": name},
+	}
 }
 
 func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
@@ -568,7 +605,7 @@ func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
 		}
 	}
 	if checksumURL == "" {
-		return nil, errors.New("Release 未提供 SHA256SUMS")
+		return nil, localizedUpdateError{key: "app.update.backend.error.sha256sums_missing"}
 	}
 
 	client := newHTTPClientWithGlobalProxy(15 * time.Second)
@@ -584,7 +621,10 @@ func fetchReleaseSHA256(assets []githubAsset) (map[string]string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("下载 SHA256SUMS 失败：HTTP %d", resp.StatusCode)
+		return nil, localizedUpdateError{
+			key:    "app.update.backend.error.sha256sums_download_failed",
+			params: map[string]any{"status": resp.StatusCode},
+		}
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -663,7 +703,10 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("下载更新包失败：HTTP %d", resp.StatusCode)
+		return "", localizedUpdateError{
+			key:    "app.update.backend.error.package_download_http_failed",
+			params: map[string]any{"status": resp.StatusCode},
+		}
 	}
 
 	// Windows 上旧文件可能被杀毒软件/索引服务占用，先尝试删除并重试
@@ -679,7 +722,10 @@ func downloadFileWithHashWithTimeout(url, filePath string, onProgress func(downl
 		}
 	}
 	if err != nil {
-		return "", fmt.Errorf("更新下载失败，文件被占用：%w", err)
+		return "", localizedUpdateError{
+			key:    "app.update.backend.error.package_file_busy",
+			params: map[string]any{"detail": err.Error()},
+		}
 	}
 
 	hasher := sha256.New()
@@ -929,7 +975,10 @@ func launchUpdateScript(staged *stagedUpdate) error {
 	case "linux":
 		return launchLinuxUpdate(staged, exePath, pid)
 	default:
-		return fmt.Errorf("当前平台暂不支持更新安装：%s", stdRuntime.GOOS)
+		return localizedUpdateError{
+			key:    "app.update.backend.error.install_unsupported",
+			params: map[string]any{"platform": stdRuntime.GOOS},
+		}
 	}
 }
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Checkbox, Input, Modal, Typography } from 'antd';
+import { useI18n } from '../i18n/provider';
 
 const { Text } = Typography;
 
@@ -32,29 +33,34 @@ export default function ConnectionPackagePasswordModal({
   password,
   error,
   confirmLoading,
-  confirmText = '确认',
-  cancelText = '取消',
+  confirmText,
+  cancelText,
   onIncludeSecretsChange,
   onUseFilePasswordChange,
   onPasswordChange,
   onConfirm,
   onCancel,
 }: ConnectionPackagePasswordModalProps) {
+  const { t } = useI18n();
   const isExportMode = mode === 'export';
   const showFilePasswordInput = isExportMode ? useFilePassword : true;
-  const placeholder = isExportMode ? '请输入文件保护密码（可选）' : '请输入恢复包密码';
+  const resolvedConfirmText = confirmText ?? t('common.confirm');
+  const resolvedCancelText = cancelText ?? t('common.cancel');
+  const placeholder = isExportMode
+    ? t('app.connection_package.dialog.file_password_placeholder')
+    : t('app.connection_package.dialog.restore_password_placeholder');
   const helperText = !includeSecrets
-    ? '将仅导出连接配置，不包含密码。'
+    ? t('app.connection_package.dialog.help.exclude_passwords')
     : (useFilePassword
-      ? '请通过单独渠道将密码告知接收方，不要和文件一起发送。'
-      : '密码已加密保护。如需通过公网传输，建议设置文件保护密码。');
+      ? t('app.connection_package.dialog.help.share_file_password_separately')
+      : t('app.connection_package.dialog.help.encrypted_passwords_recommend_file_password'));
 
   return (
     <Modal
       open={open}
       title={title}
-      okText={confirmText}
-      cancelText={cancelText}
+      okText={resolvedConfirmText}
+      cancelText={resolvedCancelText}
       confirmLoading={confirmLoading}
       onOk={onConfirm}
       onCancel={onCancel}
@@ -67,14 +73,14 @@ export default function ConnectionPackagePasswordModal({
             checked={includeSecrets}
             onChange={(event) => onIncludeSecretsChange?.(event.target.checked)}
           >
-            导出连接密码
+            {t('app.connection_package.dialog.option.include_passwords')}
           </Checkbox>
           <Checkbox
             checked={useFilePassword}
             disabled={!includeSecrets}
             onChange={(event) => onUseFilePasswordChange?.(event.target.checked)}
           >
-            设置文件保护密码
+            {t('app.connection_package.dialog.option.use_file_password')}
           </Checkbox>
         </div>
       ) : null}

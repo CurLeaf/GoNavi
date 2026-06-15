@@ -554,6 +554,10 @@ export function SelectSSHKeyFile(arg1) {
   return window['go']['app']['App']['SelectSSHKeyFile'](arg1);
 }
 
+export function SetLanguage(arg1) {
+  return window['go']['app']['App']['SetLanguage'](arg1);
+}
+
 export function SetMacNativeWindowControls(arg1) {
   return window['go']['app']['App']['SetMacNativeWindowControls'](arg1);
 }

@@ -6,22 +6,57 @@ export interface AIComposerNotice {
   description: string;
 }
 
-const defaultModelFetchFailedDescription = '请检查供应商入口、API Key 或账号权限，然后重新打开模型下拉。';
+export type AIComposerNoticeDescriptor =
+  | { kind: 'missing_provider' }
+  | { kind: 'missing_model' }
+  | { kind: 'model_fetch_failed'; detail?: string | number | boolean | null | undefined };
 
-export const buildMissingProviderNotice = (): AIComposerNotice => ({
+export type AIComposerNoticeTranslator = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>
+) => string;
+
+export const buildMissingProviderNotice = (t: AIComposerNoticeTranslator): AIComposerNotice => ({
   tone: 'warning',
-  title: '还没有可用供应商',
-  description: '先在 AI 设置里添加并启用一个模型供应商。',
+  title: t('ai_chat.composer_notice.missing_provider.title'),
+  description: t('ai_chat.composer_notice.missing_provider.description'),
 });
 
-export const buildMissingModelNotice = (): AIComposerNotice => ({
+export const buildMissingModelNotice = (t: AIComposerNoticeTranslator): AIComposerNotice => ({
   tone: 'warning',
-  title: '先选择一个模型',
-  description: '打开下方模型下拉并选择模型；如果列表为空，请检查供应商入口和 API Key。',
+  title: t('ai_chat.composer_notice.missing_model.title'),
+  description: t('ai_chat.composer_notice.missing_model.description'),
 });
 
-export const buildModelFetchFailedNotice = (error?: string): AIComposerNotice => ({
-  tone: 'error',
-  title: '模型列表加载失败',
-  description: String(error || '').trim() || defaultModelFetchFailedDescription,
-});
+export const buildModelFetchFailedNotice = (
+  t: AIComposerNoticeTranslator,
+  error?: string | number | boolean | null | undefined
+): AIComposerNotice => {
+  const detail = String(error || '').trim();
+
+  return {
+    tone: 'error',
+    title: t('ai_chat.composer_notice.model_fetch_failed.title'),
+    description: detail
+      ? t('ai_chat.composer_notice.model_fetch_failed.detail_description', { detail })
+      : t('ai_chat.composer_notice.model_fetch_failed.default_description'),
+  };
+};
+
+export const buildAIComposerNotice = (
+  t: AIComposerNoticeTranslator,
+  descriptor: AIComposerNoticeDescriptor | null
+): AIComposerNotice | null => {
+  if (!descriptor) {
+    return null;
+  }
+
+  if (descriptor.kind === 'missing_provider') {
+    return buildMissingProviderNotice(t);
+  }
+  if (descriptor.kind === 'missing_model') {
+    return buildMissingModelNotice(t);
+  }
+
+  return buildModelFetchFailedNotice(t, descriptor.detail);
+};

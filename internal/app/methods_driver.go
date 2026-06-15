@@ -54,7 +54,34 @@ var (
 	optionalDriverBundleDownloads  = make(map[string]*optionalDriverBundleDownloadState)
 )
 
-var errOptionalDriverAgentMetadataUnavailable = errors.New("driver-agent metadata unavailable")
+var (
+	errOptionalDriverAgentMetadataUnavailable = errors.New("driver-agent metadata unavailable")
+	errLocalDriverPackageJDBCJarUnsupported   = errors.New("JDBC Jar unsupported")
+)
+
+type driverBuildUnavailableError struct {
+	Name string
+}
+
+func (e *driverBuildUnavailableError) Error() string {
+	return fmt.Sprintf("%s 当前发行包为精简构建，未内置该驱动；如需使用请安装 Full 版", strings.TrimSpace(e.Name))
+}
+
+type driverVersionValidationError struct {
+	DriverType string
+	Version    string
+}
+
+func (e *driverVersionValidationError) Error() string {
+	driverType := normalizeDriverType(e.DriverType)
+	versionText := normalizeVersion(strings.TrimSpace(e.Version))
+	switch driverType {
+	case "mongodb":
+		return fmt.Sprintf("MongoDB 版本 %s 当前不受支持；仅支持 1.17.x 和 2.x", versionText)
+	default:
+		return fmt.Sprintf("%s 版本 %s 当前不受支持", driverType, versionText)
+	}
+}
 
 // resolveGoBinaryPath 定位 Go 可执行文件，兼容 macOS 图形应用未继承 shell PATH 的场景 by AI.Coding
 func resolveGoBinaryPath() (string, error) {
@@ -173,6 +200,7 @@ type driverStatusItem struct {
 	NeedsUpdate         bool   `json:"needsUpdate,omitempty"`
 	UpdateReason        string `json:"updateReason,omitempty"`
 	AffectedConnections int    `json:"affectedConnections,omitempty"`
+	ReasonCode          string `json:"reasonCode,omitempty"`
 	Message             string `json:"message,omitempty"`
 }
 
@@ -188,6 +216,7 @@ type driverDownloadProgressPayload struct {
 }
 
 type driverNetworkProbeItem struct {
+	ProbeCode   string `json:"probeCode,omitempty"`
 	Name        string `json:"name"`
 	URL         string `json:"url"`
 	Reachable   bool   `json:"reachable"`
@@ -198,6 +227,14 @@ type driverNetworkProbeItem struct {
 	Method      string `json:"method,omitempty"`
 	Error       string `json:"error,omitempty"`
 }
+
+const (
+	driverStatusReasonSlimBuildMissingDriver = "slim_build_missing_driver"
+	driverNetworkProbeCodeGitHubAPI          = "github_api"
+	driverNetworkProbeCodeGitHubRelease      = "github_release"
+	driverNetworkProbeCodeGitHubReleaseAsset = "github_release_asset"
+	driverNetworkProbeCodeGoModuleProxy      = "go_module_proxy"
+)
 
 type pinnedDriverPackage struct {
 	Version     string
@@ -506,7 +543,7 @@ func (a *App) SelectDriverDownloadDirectory(currentDir string) connection.QueryR
 	}
 
 	selection, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:                "选择驱动下载目录",
+		Title:                a.appText("driver_manager.backend.dialog.select_download_directory", nil),
 		DefaultDirectory:     defaultDir,
 		CanCreateDirectories: true,
 	})
@@ -537,9 +574,165 @@ func validateLocalDriverPackagePath(path string) error {
 		return nil
 	}
 	if strings.EqualFold(filepath.Ext(pathText), ".jar") {
-		return fmt.Errorf("当前驱动管理不支持直接导入 JDBC Jar。GoNavi 使用 Go 驱动与可选 driver-agent；请改用驱动包/驱动目录，如需连接人大金仓请优先使用“Kingbase”连接类型，或在自定义连接中填写 kingbase / kingbase8")
+		return errLocalDriverPackageJDBCJarUnsupported
 	}
 	return nil
+}
+
+func (a *App) localizeLocalDriverPackagePathError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, errLocalDriverPackageJDBCJarUnsupported) {
+		return errors.New(a.appText("driver_manager.backend.message.jdbc_jar_unsupported", nil))
+	}
+	return err
+}
+
+func (a *App) localizeDriverSelectionError(definition driverDefinition, err error) error {
+	if err == nil {
+		return nil
+	}
+	var buildErr *driverBuildUnavailableError
+	if errors.As(err, &buildErr) {
+		return errors.New(a.appText("driver_manager.backend.status.slim_build_required", map[string]any{
+			"name": a.driverStatusDisplayName(definition),
+		}))
+	}
+	var versionErr *driverVersionValidationError
+	if errors.As(err, &versionErr) && normalizeDriverType(versionErr.DriverType) == "mongodb" {
+		return errors.New(a.appText("driver_manager.backend.error.mongo_version_unsupported", map[string]any{
+			"version": normalizeVersion(strings.TrimSpace(versionErr.Version)),
+		}))
+	}
+	return err
+}
+
+func (a *App) driverOperationErrorMessage(err error, format string, args ...interface{}) string {
+	message := a.localizedDriverOperationDetail(err)
+	logger.Error(err, format, args...)
+	return message
+}
+
+func (a *App) localizedDriverOperationDetail(err error) string {
+	message := normalizeErrorMessage(err)
+	if strings.TrimSpace(message) == "" {
+		message = a.appText("driver_manager.backend.error.unknown", nil)
+	}
+	return strings.TrimSpace(message) + a.localizedDriverLogHint()
+}
+
+func (a *App) localizedDriverLogHint() string {
+	path := strings.TrimSpace(logger.Path())
+	if path == "" {
+		return ""
+	}
+	return a.appText("driver_manager.backend.message.log_hint", map[string]any{"path": path})
+}
+
+func (a *App) driverStatusDisplayName(definition driverDefinition) string {
+	name := strings.TrimSpace(definition.Name)
+	if name != "" {
+		return name
+	}
+	name = strings.TrimSpace(definition.Type)
+	if name != "" {
+		return name
+	}
+	return a.appText("driver_manager.backend.driver_fallback_name", nil)
+}
+
+func parseDriverAgentArchIncompatibleDetail(detail string) (string, string, bool) {
+	const prefix = "可执行文件架构不兼容（文件="
+	const middle = "，当前进程="
+
+	start := strings.Index(detail, prefix)
+	if start < 0 {
+		return "", "", false
+	}
+	rest := detail[start+len(prefix):]
+	mid := strings.Index(rest, middle)
+	if mid < 0 {
+		return "", "", false
+	}
+	fileText := strings.TrimSpace(rest[:mid])
+	processText := rest[mid+len(middle):]
+	end := strings.Index(processText, "）")
+	if end < 0 {
+		return "", "", false
+	}
+	processText = strings.TrimSpace(processText[:end])
+	if fileText == "" || processText == "" {
+		return "", "", false
+	}
+	return fileText, processText, true
+}
+
+func parseDriverAgentUnavailableDetail(reason string, name string) (string, bool) {
+	const suffix = "；请在驱动管理中重新安装启用"
+	prefix := strings.TrimSpace(name) + " 驱动代理不可用："
+	if !strings.HasPrefix(reason, prefix) || !strings.HasSuffix(reason, suffix) {
+		return "", false
+	}
+	detail := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(reason, prefix), suffix))
+	if detail == "" {
+		return "", false
+	}
+	return detail, true
+}
+
+func (a *App) localizeDriverRuntimeReason(definition driverDefinition, reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return ""
+	}
+
+	name := a.driverStatusDisplayName(definition)
+	switch reason {
+	case "未识别的数据源类型":
+		return a.appText("driver_manager.backend.status.unrecognized_driver_type", nil)
+	case fmt.Sprintf("%s 当前发行包为精简构建，未内置该驱动；如需使用请安装 Full 版", name):
+		return a.appText("driver_manager.backend.status.slim_build_required", map[string]any{"name": name})
+	case fmt.Sprintf("%s 驱动代理路径解析失败，请在驱动管理中重新安装启用", name),
+		fmt.Sprintf("%s 驱动代理路径为空；请在驱动管理中重新安装启用", name):
+		return a.appText("driver_manager.backend.status.agent_path_failed", map[string]any{"name": name})
+	case fmt.Sprintf("%s 驱动代理缺失，请在驱动管理中重新安装启用", name):
+		return a.appText("driver_manager.backend.status.agent_missing", map[string]any{"name": name})
+	case fmt.Sprintf("%s 纯 Go 驱动未启用，请先在驱动管理中点击“安装启用”", name):
+		return a.appText("driver_manager.backend.status.optional_disabled", map[string]any{"name": name})
+	}
+
+	if detail, ok := parseDriverAgentUnavailableDetail(reason, name); ok {
+		if fileText, processText, ok := parseDriverAgentArchIncompatibleDetail(detail); ok {
+			return a.appText("driver_manager.backend.status.agent_arch_incompatible_detail", map[string]any{
+				"name":    name,
+				"file":    fileText,
+				"process": processText,
+			})
+		}
+		return a.appText("driver_manager.backend.status.agent_unavailable_reinstall", map[string]any{
+			"name":   name,
+			"detail": detail,
+		})
+	}
+
+	return reason
+}
+
+func (a *App) localizedDriverNeedsUpdateTexts(actual string, expected string, affectedConnections int) (string, string) {
+	reasonParts := []string{a.appText("driver_manager.backend.status.needs_update", nil)}
+	if strings.TrimSpace(actual) != "" {
+		reasonParts = append(reasonParts, a.appText("driver_manager.backend.status.installed_revision", map[string]any{"revision": strings.TrimSpace(actual)}))
+	}
+	if strings.TrimSpace(expected) != "" {
+		reasonParts = append(reasonParts, a.appText("driver_manager.backend.status.expected_revision", map[string]any{"revision": strings.TrimSpace(expected)}))
+	}
+	reason := strings.Join(reasonParts, " ")
+	messageParts := []string{reason}
+	if affectedConnections > 0 {
+		messageParts = append(messageParts, a.appText("driver_manager.backend.status.affected_connections", map[string]any{"count": affectedConnections}))
+	}
+	return reason, strings.Join(messageParts, " ")
 }
 
 func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult {
@@ -557,7 +750,7 @@ func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult
 	}
 
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "选择驱动包文件（非 JDBC Jar）",
+		Title:            a.appText("driver_manager.backend.dialog.select_package_file", nil),
 		DefaultDirectory: defaultDir,
 	})
 	if err != nil {
@@ -570,7 +763,7 @@ func (a *App) SelectDriverPackageFile(currentPath string) connection.QueryResult
 	if abs, err := filepath.Abs(selection); err == nil {
 		selection = abs
 	}
-	if err := validateLocalDriverPackagePath(selection); err != nil {
+	if err := a.localizeLocalDriverPackagePathError(validateLocalDriverPackagePath(selection)); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"path": selection}}
@@ -591,7 +784,7 @@ func (a *App) SelectDriverPackageDirectory(currentPath string) connection.QueryR
 	}
 
 	selection, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "选择驱动包目录",
+		Title:            a.appText("driver_manager.backend.dialog.select_package_directory", nil),
 		DefaultDirectory: defaultDir,
 	})
 	if err != nil {
@@ -612,7 +805,7 @@ func (a *App) OpenDriverDownloadDirectory(directory string) connection.QueryResu
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if err := os.MkdirAll(resolved, 0o755); err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("创建驱动目录失败：%v", err)}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.create_directory_failed", map[string]any{"detail": err.Error()})}
 	}
 
 	var cmd *exec.Cmd
@@ -624,15 +817,15 @@ func (a *App) OpenDriverDownloadDirectory(directory string) connection.QueryResu
 	case "linux":
 		cmd = exec.Command("xdg-open", resolved)
 	default:
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前平台暂不支持打开目录：%s", stdRuntime.GOOS)}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.open_directory_unsupported", map[string]any{"platform": stdRuntime.GOOS})}
 	}
 	if err := cmd.Start(); err != nil {
 		logger.Error(err, "打开驱动目录失败")
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("打开驱动目录失败：%v", err)}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.open_directory_failed", map[string]any{"detail": err.Error()})}
 	}
 	return connection.QueryResult{
 		Success: true,
-		Message: fmt.Sprintf("已打开驱动目录：%s", resolved),
+		Message: a.appText("driver_manager.backend.message.opened_directory", map[string]any{"path": resolved}),
 		Data:    map[string]interface{}{"path": resolved},
 	}
 }
@@ -658,7 +851,7 @@ func (a *App) ConfigureDriverRuntimeDirectory(directory string) connection.Query
 			"defaultPath":   defaultDriverDownloadDirectory(),
 			"isDefaultPath": strings.TrimSpace(directory) == "",
 		},
-		Message: "驱动运行时目录已生效",
+		Message: a.appText("driver_manager.backend.message.runtime_directory_configured", nil),
 	}
 }
 
@@ -674,13 +867,13 @@ func (a *App) ResolveDriverPackageDownloadURL(driverType string, repositoryURL s
 	effectivePackages, manifestErr := resolveEffectiveDriverPackages(repositoryURL)
 	definition, ok := resolveDriverDefinitionWithPackages(driverType, effectivePackages)
 	if !ok {
-		return connection.QueryResult{Success: false, Message: "不支持的驱动类型"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.unsupported_driver_type", nil)}
 	}
 	engine := effectiveDriverEngine(definition)
 	if definition.BuiltIn {
-		return connection.QueryResult{Success: false, Message: "内置驱动无需下载扩展包"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.builtin_download_not_required", nil)}
 	}
-	if err := ensureOptionalDriverBuildAvailable(definition); err != nil {
+	if err := a.localizeDriverSelectionError(definition, ensureOptionalDriverBuildAvailable(definition)); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if engine == driverEngineGo && !definition.BuiltIn {
@@ -700,19 +893,19 @@ func (a *App) ResolveDriverPackageDownloadURL(driverType string, repositoryURL s
 		}
 		return connection.QueryResult{Success: true, Data: data}
 	}
-	return connection.QueryResult{Success: false, Message: "当前仅支持纯 Go 可选驱动的安装启用"}
+	return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.optional_go_only", nil)}
 }
 
 func (a *App) GetDriverVersionList(driverType string, repositoryURL string) connection.QueryResult {
 	effectivePackages, manifestErr := resolveEffectiveDriverPackages(repositoryURL)
 	definition, ok := resolveDriverDefinitionWithPackages(driverType, effectivePackages)
 	if !ok {
-		return connection.QueryResult{Success: false, Message: "不支持的驱动类型"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.unsupported_driver_type", nil)}
 	}
 	if definition.BuiltIn {
-		return connection.QueryResult{Success: false, Message: "内置驱动无需选择版本"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.builtin_version_not_required", nil)}
 	}
-	if err := ensureOptionalDriverBuildAvailable(definition); err != nil {
+	if err := a.localizeDriverSelectionError(definition, ensureOptionalDriverBuildAvailable(definition)); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	options, err := resolveDriverVersionOptions(definition, repositoryURL)
@@ -734,27 +927,27 @@ func (a *App) GetDriverVersionList(driverType string, repositoryURL string) conn
 func (a *App) GetDriverVersionPackageSize(driverType string, version string) connection.QueryResult {
 	definition, ok := resolveDriverDefinition(driverType)
 	if !ok {
-		return connection.QueryResult{Success: false, Message: "不支持的驱动类型"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.unsupported_driver_type", nil)}
 	}
 	if definition.BuiltIn {
-		return connection.QueryResult{Success: false, Message: "内置驱动无需安装包"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.builtin_package_not_required", nil)}
 	}
 
 	normalizedType := normalizeDriverType(definition.Type)
 	if normalizedType == "" || !db.IsOptionalGoDriver(normalizedType) {
-		return connection.QueryResult{Success: false, Message: "当前驱动不支持安装包查询"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.package_size_unsupported", nil)}
 	}
 
 	normalizedVersion := normalizeVersion(strings.TrimSpace(version))
 	if normalizedVersion == "" {
-		return connection.QueryResult{Success: false, Message: "版本号为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.version_empty", nil)}
 	}
-	if err := validateDriverSelectedVersion(definition, normalizedVersion); err != nil {
+	if err := a.localizeDriverSelectionError(definition, validateDriverSelectedVersion(definition, normalizedVersion)); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	assetName := optionalDriverReleaseAssetNameForVersion(normalizedType, normalizedVersion)
 	if strings.TrimSpace(assetName) == "" {
-		return connection.QueryResult{Success: false, Message: "驱动资产名称为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.asset_name_empty", nil)}
 	}
 
 	tag := "v" + normalizedVersion
@@ -834,39 +1027,42 @@ func (a *App) GetDriverStatusList(downloadDir string, manifestURL string) connec
 			UpdateReason:        updateReason,
 			AffectedConnections: usageCounts[normalizeDriverType(definition.Type)],
 		}
+		if !runtimeAvailable && db.IsOptionalGoDriver(definition.Type) && !db.IsOptionalGoDriverBuildIncluded(definition.Type) {
+			item.ReasonCode = driverStatusReasonSlimBuildMissingDriver
+		}
 		if packageMetaExists {
 			item.PackagePath = pkg.FilePath
 			item.PackageFileName = pkg.FileName
 			item.DownloadedAt = pkg.DownloadedAt
 			item.ExecutablePath = pkg.ExecutablePath
 		}
+		runtimeReason = a.localizeDriverRuntimeReason(definition, runtimeReason)
+		if needsUpdate {
+			item.UpdateReason, item.Message = a.localizedDriverNeedsUpdateTexts(item.AgentRevision, expectedRevision, item.AffectedConnections)
+		}
 
 		switch {
 		case definition.BuiltIn:
-			item.Message = "内置驱动，可直接连接"
+			item.Message = a.appText("driver_manager.backend.status.built_in_available", nil)
 		case needsUpdate:
-			if item.AffectedConnections > 0 {
-				item.Message = fmt.Sprintf("%s；检测到 %d 个已保存连接正在使用该驱动，请在工具-驱动管理中重装", updateReason, item.AffectedConnections)
-			} else {
-				item.Message = updateReason + "，请在工具-驱动管理中重装"
-			}
+			// item.UpdateReason / item.Message already localized above.
 		case runtimeAvailable:
-			item.Message = "纯 Go 驱动已启用，可直接连接"
+			item.Message = a.appText("driver_manager.backend.status.optional_enabled", nil)
 		case packageInstalled && strings.TrimSpace(runtimeReason) != "":
 			item.Message = runtimeReason
 		case packageInstalled:
 			if item.InstalledVersion != "" {
-				item.Message = fmt.Sprintf("驱动已安装（版本：%s），待生效", item.InstalledVersion)
+				item.Message = a.appText("driver_manager.backend.status.installed_pending_with_version", map[string]any{"version": item.InstalledVersion})
 			} else {
-				item.Message = "驱动已安装，待生效"
+				item.Message = a.appText("driver_manager.backend.status.installed_pending", nil)
 			}
 		case strings.TrimSpace(runtimeReason) != "":
 			item.Message = runtimeReason
 		default:
 			if strings.TrimSpace(definition.PinnedVersion) != "" {
-				item.Message = fmt.Sprintf("未启用（版本：%s）", strings.TrimSpace(definition.PinnedVersion))
+				item.Message = a.appText("driver_manager.backend.status.optional_disabled_with_version", map[string]any{"version": strings.TrimSpace(definition.PinnedVersion)})
 			} else {
-				item.Message = "未启用"
+				item.Message = a.appText("driver_manager.backend.status.optional_disabled_generic", nil)
 			}
 		}
 
@@ -887,20 +1083,24 @@ func (a *App) GetDriverStatusList(downloadDir string, manifestURL string) connec
 func (a *App) CheckDriverNetworkStatus() connection.QueryResult {
 	checks := []driverNetworkProbeItem{
 		{
-			Name: "GitHub API",
-			URL:  "https://api.github.com/rate_limit",
+			ProbeCode: driverNetworkProbeCodeGitHubAPI,
+			Name:      "GitHub API",
+			URL:       "https://api.github.com/rate_limit",
 		},
 		{
-			Name: "GitHub 驱动发布",
-			URL:  driverReleaseLatestDownloadURL(optionalDriverBundleAssetName),
+			ProbeCode: driverNetworkProbeCodeGitHubRelease,
+			Name:      a.appText("driver_manager.backend.network.probe.github_driver_release", nil),
+			URL:       driverReleaseLatestDownloadURL(optionalDriverBundleAssetName),
 		},
 		{
-			Name: "GitHub Release 资产域名",
-			URL:  "https://release-assets.githubusercontent.com/",
+			ProbeCode: driverNetworkProbeCodeGitHubReleaseAsset,
+			Name:      a.appText("driver_manager.backend.network.probe.github_release_asset_domain", nil),
+			URL:       "https://release-assets.githubusercontent.com/",
 		},
 		{
-			Name: "Go 模块代理",
-			URL:  "https://proxy.golang.org/github.com/go-sql-driver/mysql/@v/list",
+			ProbeCode: driverNetworkProbeCodeGoModuleProxy,
+			Name:      a.appText("driver_manager.backend.network.probe.go_module_proxy", nil),
+			URL:       "https://proxy.golang.org/github.com/go-sql-driver/mysql/@v/list",
 		},
 	}
 
@@ -912,29 +1112,29 @@ func (a *App) CheckDriverNetworkStatus() connection.QueryResult {
 			allReachable = false
 		}
 	}
-	findProbe := func(name string) (driverNetworkProbeItem, bool) {
+	findProbe := func(probeCode string) (driverNetworkProbeItem, bool) {
 		for _, item := range checks {
-			if strings.EqualFold(strings.TrimSpace(item.Name), strings.TrimSpace(name)) {
+			if strings.EqualFold(strings.TrimSpace(item.ProbeCode), strings.TrimSpace(probeCode)) {
 				return item, true
 			}
 		}
 		return driverNetworkProbeItem{}, false
 	}
-	githubAPICheck, _ := findProbe("GitHub API")
-	githubReleaseCheck, _ := findProbe("GitHub 驱动发布")
-	releaseAssetsCheck, _ := findProbe("GitHub Release 资产域名")
+	githubAPICheck, _ := findProbe(driverNetworkProbeCodeGitHubAPI)
+	githubReleaseCheck, _ := findProbe(driverNetworkProbeCodeGitHubRelease)
+	releaseAssetsCheck, _ := findProbe(driverNetworkProbeCodeGitHubReleaseAsset)
 	downloadChainReachable := githubReleaseCheck.Reachable && releaseAssetsCheck.Reachable
 
 	proxyEnv := collectDriverProxyEnv()
 	proxyConfigured := len(proxyEnv) > 0
-	summary := "驱动下载网络检测通过，可直接安装驱动。"
+	summary := a.appText("driver_manager.network.summary.reachable", nil)
 	if githubAPICheck.Reachable && !downloadChainReachable {
-		summary = "重要提醒：GitHub API 可达，但驱动下载链路不可达。请优先在 GoNavi 启用全局代理（填写代理应用本地地址和端口），并在代理规则中放行 github.com、api.github.com、release-assets.githubusercontent.com、objects.githubusercontent.com、raw.githubusercontent.com；若仍失败，再考虑开启 TUN 模式。"
+		summary = a.appText("driver_manager.backend.network.summary.download_chain_unreachable", nil)
 	} else if !allReachable {
 		if proxyConfigured {
-			summary = "检测到部分驱动下载地址不可达，请确认系统代理配置有效后重试。"
+			summary = a.appText("driver_manager.network.summary.unreachable_proxy_configured", nil)
 		} else {
-			summary = "检测到部分驱动下载地址不可达，建议先配置 HTTP/HTTPS/SOCKS5 代理后再安装驱动。"
+			summary = a.appText("driver_manager.network.summary.proxy_recommended", nil)
 		}
 	}
 
@@ -967,20 +1167,20 @@ func (a *App) CheckDriverNetworkStatus() connection.QueryResult {
 func (a *App) InstallLocalDriverPackage(driverType string, filePath string, downloadDir string, version string) connection.QueryResult {
 	definition, ok := resolveDriverDefinition(driverType)
 	if !ok {
-		return connection.QueryResult{Success: false, Message: "不支持的驱动类型"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.unsupported_driver_type", nil)}
 	}
 	if definition.BuiltIn {
-		return connection.QueryResult{Success: false, Message: "内置驱动无需安装扩展包"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.builtin_install_not_required", nil)}
 	}
-	if err := validateLocalDriverPackagePath(filePath); err != nil {
+	if err := a.localizeLocalDriverPackagePathError(validateLocalDriverPackagePath(filePath)); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	if err := ensureOptionalDriverBuildAvailable(definition); err != nil {
+	if err := a.localizeDriverSelectionError(definition, ensureOptionalDriverBuildAvailable(definition)); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	engine := effectiveDriverEngine(definition)
 	if !(engine == driverEngineGo && !definition.BuiltIn) {
-		return connection.QueryResult{Success: false, Message: "当前仅支持纯 Go 可选驱动的安装启用"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.optional_go_only", nil)}
 	}
 
 	resolvedDir, err := resolveDriverDownloadDirectory(downloadDir)
@@ -991,7 +1191,7 @@ func (a *App) InstallLocalDriverPackage(driverType string, filePath string, down
 
 	a.emitDriverDownloadProgress(definition.Type, "start", 0, 100, "开始安装本地驱动包")
 	selectedVersion := resolveDriverInstallVersion(version, "local://manual", definition)
-	if err := validateDriverSelectedVersion(definition, selectedVersion); err != nil {
+	if err := a.localizeDriverSelectionError(definition, validateDriverSelectedVersion(definition, selectedVersion)); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	meta, installErr := installOptionalDriverAgentFromLocalPath(definition, filePath, resolvedDir, selectedVersion)
@@ -1000,7 +1200,9 @@ func (a *App) InstallLocalDriverPackage(driverType string, filePath string, down
 		a.emitDriverDownloadProgress(definition.Type, "error", 0, 0, errText)
 		return connection.QueryResult{
 			Success: false,
-			Message: logDriverOperationError(installErr, "导入本地驱动包失败，driver=%s file=%s", definition.Type, strings.TrimSpace(filePath)),
+			Message: a.appText("driver_manager.backend.message.local_import_failed_detail", map[string]any{
+				"detail": a.driverOperationErrorMessage(installErr, "导入本地驱动包失败，driver=%s file=%s", definition.Type, strings.TrimSpace(filePath)),
+			}),
 		}
 	}
 	a.emitDriverDownloadProgress(definition.Type, "downloading", 90, 100, "写入驱动元数据")
@@ -1009,12 +1211,14 @@ func (a *App) InstallLocalDriverPackage(driverType string, filePath string, down
 		a.emitDriverDownloadProgress(definition.Type, "error", 0, 0, errText)
 		return connection.QueryResult{
 			Success: false,
-			Message: logDriverOperationError(err, "写入本地驱动元数据失败，driver=%s", definition.Type),
+			Message: a.appText("driver_manager.backend.message.metadata_write_failed_detail", map[string]any{
+				"detail": a.driverOperationErrorMessage(err, "写入本地驱动元数据失败，driver=%s", definition.Type),
+			}),
 		}
 	}
 	a.emitDriverDownloadProgress(definition.Type, "done", 100, 100, "本地驱动包导入完成")
 
-	return connection.QueryResult{Success: true, Message: "驱动安装成功", Data: map[string]interface{}{
+	return connection.QueryResult{Success: true, Message: a.appText("driver_manager.backend.message.driver_install_success", nil), Data: map[string]interface{}{
 		"driverType": definition.Type,
 		"driverName": definition.Name,
 		"engine":     engine,
@@ -1024,17 +1228,17 @@ func (a *App) InstallLocalDriverPackage(driverType string, filePath string, down
 func (a *App) DownloadDriverPackage(driverType string, version string, downloadURL string, downloadDir string) connection.QueryResult {
 	definition, ok := resolveDriverDefinition(driverType)
 	if !ok {
-		return connection.QueryResult{Success: false, Message: "不支持的驱动类型"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.unsupported_driver_type", nil)}
 	}
 	engine := effectiveDriverEngine(definition)
 	if definition.BuiltIn {
-		return connection.QueryResult{Success: false, Message: "内置驱动无需下载扩展包"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.builtin_download_not_required", nil)}
 	}
-	if err := ensureOptionalDriverBuildAvailable(definition); err != nil {
+	if err := a.localizeDriverSelectionError(definition, ensureOptionalDriverBuildAvailable(definition)); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if !(engine == driverEngineGo && !definition.BuiltIn) {
-		return connection.QueryResult{Success: false, Message: "当前仅支持纯 Go 可选驱动的安装启用"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.optional_go_only", nil)}
 	}
 
 	urlText := strings.TrimSpace(downloadURL)
@@ -1045,7 +1249,7 @@ func (a *App) DownloadDriverPackage(driverType string, version string, downloadU
 		urlText = fmt.Sprintf("builtin://activate/%s", optionalDriverPublicTypeName(definition.Type))
 	}
 	selectedVersion := resolveDriverInstallVersion(version, urlText, definition)
-	if err := validateDriverSelectedVersion(definition, selectedVersion); err != nil {
+	if err := a.localizeDriverSelectionError(definition, validateDriverSelectedVersion(definition, selectedVersion)); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
@@ -1056,38 +1260,39 @@ func (a *App) DownloadDriverPackage(driverType string, version string, downloadU
 	db.SetExternalDriverDownloadDirectory(resolvedDir)
 
 	if db.IsOptionalGoDriver(definition.Type) {
-		displayName := strings.TrimSpace(definition.Name)
-		if displayName == "" {
-			displayName = strings.TrimSpace(definition.Type)
-		}
-		a.emitDriverDownloadProgress(definition.Type, "start", 0, 100, fmt.Sprintf("开始安装 %s 驱动代理", displayName))
+		displayName := a.driverStatusDisplayName(definition)
+		a.emitDriverDownloadProgress(definition.Type, "start", 0, 100, a.appText("driver_manager.progress.agent_install_start", map[string]any{"name": displayName}))
 		meta, installErr := installOptionalDriverAgentPackage(a, definition, selectedVersion, resolvedDir, urlText)
 		if installErr != nil {
 			errText := normalizeErrorMessage(installErr)
 			a.emitDriverDownloadProgress(definition.Type, "error", 0, 0, errText)
 			return connection.QueryResult{
 				Success: false,
-				Message: logDriverOperationError(installErr, "驱动下载安装失败，driver=%s version=%s url=%s", definition.Type, selectedVersion, urlText),
+				Message: a.appText("driver_manager.backend.message.download_failed_detail", map[string]any{
+					"detail": a.driverOperationErrorMessage(installErr, "驱动下载安装失败，driver=%s version=%s url=%s", definition.Type, selectedVersion, urlText),
+				}),
 			}
 		}
-		a.emitDriverDownloadProgress(definition.Type, "downloading", 95, 100, "写入驱动元数据")
+		a.emitDriverDownloadProgress(definition.Type, "downloading", 95, 100, a.appText("driver_manager.progress.metadata_write", nil))
 		if writeErr := writeInstalledDriverPackage(resolvedDir, definition.Type, meta); writeErr != nil {
 			errText := normalizeErrorMessage(writeErr)
 			a.emitDriverDownloadProgress(definition.Type, "error", 0, 0, errText)
 			return connection.QueryResult{
 				Success: false,
-				Message: logDriverOperationError(writeErr, "写入驱动元数据失败，driver=%s version=%s", definition.Type, selectedVersion),
+				Message: a.appText("driver_manager.backend.message.metadata_write_failed_detail", map[string]any{
+					"detail": a.driverOperationErrorMessage(writeErr, "写入驱动元数据失败，driver=%s version=%s", definition.Type, selectedVersion),
+				}),
 			}
 		}
-		a.emitDriverDownloadProgress(definition.Type, "done", 100, 100, fmt.Sprintf("%s 驱动代理安装完成", displayName))
-		return connection.QueryResult{Success: true, Message: "驱动安装成功", Data: map[string]interface{}{
+		a.emitDriverDownloadProgress(definition.Type, "done", 100, 100, a.appText("driver_manager.progress.agent_install_done", map[string]any{"name": displayName}))
+		return connection.QueryResult{Success: true, Message: a.appText("driver_manager.backend.message.driver_install_success", nil), Data: map[string]interface{}{
 			"driverType": definition.Type,
 			"driverName": definition.Name,
 			"engine":     engine,
 		}}
 	}
 
-	a.emitDriverDownloadProgress(definition.Type, "start", 0, 0, "开始安装")
+	a.emitDriverDownloadProgress(definition.Type, "start", 0, 0, a.appText("driver_manager.progress.install_start", nil))
 	meta := installedDriverPackage{
 		DriverType:   definition.Type,
 		Version:      selectedVersion,
@@ -1102,12 +1307,14 @@ func (a *App) DownloadDriverPackage(driverType string, version string, downloadU
 		a.emitDriverDownloadProgress(definition.Type, "error", 0, 0, errText)
 		return connection.QueryResult{
 			Success: false,
-			Message: logDriverOperationError(err, "写入驱动元数据失败，driver=%s version=%s", definition.Type, selectedVersion),
+			Message: a.appText("driver_manager.backend.message.metadata_write_failed_detail", map[string]any{
+				"detail": a.driverOperationErrorMessage(err, "写入驱动元数据失败，driver=%s version=%s", definition.Type, selectedVersion),
+			}),
 		}
 	}
-	a.emitDriverDownloadProgress(definition.Type, "done", 1, 1, "安装完成（纯 Go 驱动已启用）")
+	a.emitDriverDownloadProgress(definition.Type, "done", 1, 1, a.appText("driver_manager.progress.pure_go_enabled", nil))
 
-	return connection.QueryResult{Success: true, Message: "驱动安装成功", Data: map[string]interface{}{
+	return connection.QueryResult{Success: true, Message: a.appText("driver_manager.backend.message.driver_install_success", nil), Data: map[string]interface{}{
 		"driverType": definition.Type,
 		"driverName": definition.Name,
 		"engine":     engine,
@@ -1117,10 +1324,10 @@ func (a *App) DownloadDriverPackage(driverType string, version string, downloadU
 func (a *App) RemoveDriverPackage(driverType string, downloadDir string) connection.QueryResult {
 	definition, ok := resolveDriverDefinition(driverType)
 	if !ok {
-		return connection.QueryResult{Success: false, Message: "不支持的驱动类型"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.unsupported_driver_type", nil)}
 	}
 	if definition.BuiltIn {
-		return connection.QueryResult{Success: false, Message: "内置驱动不可移除"}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.builtin_remove_not_allowed", nil)}
 	}
 
 	resolvedDir, err := resolveDriverDownloadDirectory(downloadDir)
@@ -1131,10 +1338,12 @@ func (a *App) RemoveDriverPackage(driverType string, downloadDir string) connect
 
 	driverDir := driverInstallDir(resolvedDir, definition.Type)
 	if err := os.RemoveAll(driverDir); err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("移除驱动包失败：%v", err)}
+		return connection.QueryResult{Success: false, Message: a.appText("driver_manager.backend.error.remove_package_failed", map[string]any{
+			"detail": a.driverOperationErrorMessage(err, "移除驱动包失败，driver=%s path=%s", definition.Type, driverDir),
+		})}
 	}
 
-	return connection.QueryResult{Success: true, Message: "驱动包已移除", Data: map[string]interface{}{
+	return connection.QueryResult{Success: true, Message: a.appText("driver_manager.backend.message.package_removed", nil), Data: map[string]interface{}{
 		"driverType": definition.Type,
 		"driverName": definition.Name,
 	}}
@@ -1523,7 +1732,7 @@ func ensureOptionalDriverBuildAvailable(definition driverDefinition) error {
 	if driverName == "" {
 		driverName = strings.TrimSpace(definition.Type)
 	}
-	return fmt.Errorf("%s 当前发行包为精简构建，未内置该驱动；如需使用请安装 Full 版", driverName)
+	return &driverBuildUnavailableError{Name: driverName}
 }
 
 func driverPinnedPackage(driverType string) pinnedDriverPackage {
@@ -1854,7 +2063,10 @@ func validateDriverSelectedVersion(definition driverDefinition, version string) 
 		if strings.HasPrefix(versionText, "1.17.") {
 			return nil
 		}
-		return fmt.Errorf("MongoDB 版本 %s 当前不受支持；仅支持 1.17.x 和 2.x", versionText)
+		return &driverVersionValidationError{
+			DriverType: driverType,
+			Version:    versionText,
+		}
 	default:
 		return nil
 	}

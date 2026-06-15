@@ -215,7 +215,49 @@ describe('buildCopyInsertSQL', () => {
     if (result.ok) {
       throw new Error('expected buildCopyDeleteSQL to fail');
     }
-    expect(result.error).toContain('主键');
-    expect(result.error).toContain('全部字段');
+    expect(result.error).toEqual({
+      key: 'data_grid.copy_sql.error.missing_safe_where',
+    });
+  });
+
+  it('returns a structured missing-table error with the raw SQL mode placeholder', () => {
+    const result = buildCopyUpdateSQL({
+      dbType: 'postgres',
+      tableName: '',
+      orderedCols: ['note'],
+      record: {
+        note: 'partial row',
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error('expected buildCopyUpdateSQL to fail');
+    }
+    expect(result.error).toEqual({
+      key: 'data_grid.copy_sql.error.missing_table_name',
+      params: {
+        mode: 'UPDATE',
+      },
+    });
+  });
+
+  it('returns a structured no-copyable-fields error', () => {
+    const result = buildCopyDeleteSQL({
+      dbType: 'mysql',
+      tableName: 'orders',
+      orderedCols: [],
+      record: {
+        id: 7,
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error('expected buildCopyDeleteSQL to fail');
+    }
+    expect(result.error).toEqual({
+      key: 'data_grid.copy_sql.error.no_copyable_fields',
+    });
   });
 });

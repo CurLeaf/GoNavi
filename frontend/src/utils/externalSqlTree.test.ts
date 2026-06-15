@@ -41,7 +41,7 @@ describe('externalSqlTree helpers', () => {
     });
 
     expect(node.type).toBe('external-sql-root');
-    expect(node.title).toBe('外部 SQL 目录 (1)');
+    expect(node.title).toBe('External SQL files (1)');
     expect(node.children).toHaveLength(1);
     expect(node.children?.[0]).toMatchObject({
       title: 'scripts',
@@ -55,6 +55,54 @@ describe('externalSqlTree helpers', () => {
       title: 'init.sql',
       type: 'external-sql-file',
     });
+  });
+
+  it('uses localized root and directory fallback labels while preserving explicit and path segment names', () => {
+    const directories: ExternalSQLDirectory[] = [
+      {
+        id: 'dir-explicit',
+        name: 'Reports',
+        path: 'D:/sql/reports',
+        connectionId: 'conn-1',
+        dbName: 'demo',
+        createdAt: 1,
+      },
+      {
+        id: 'dir-segment',
+        name: '   ',
+        path: 'D:/sql/migrations',
+        connectionId: 'conn-1',
+        dbName: 'demo',
+        createdAt: 2,
+      },
+      {
+        id: 'dir-fallback',
+        name: '',
+        path: '/',
+        connectionId: 'conn-1',
+        dbName: 'demo',
+        createdAt: 3,
+      },
+    ];
+
+    const node = buildExternalSQLRootNode({
+      dbNodeKey: 'conn-1-demo',
+      connectionId: 'conn-1',
+      dbName: 'demo',
+      directories,
+      directoryTrees: {},
+      labels: {
+        root: 'External SQL files',
+        directoryFallback: 'SQL directory',
+      },
+    });
+
+    expect(node.title).toBe('External SQL files (3)');
+    expect(node.children?.map((child) => child.title)).toEqual([
+      'migrations',
+      'Reports',
+      'SQL directory',
+    ]);
   });
 
   it('builds query tab ids with connection and database isolation', () => {
