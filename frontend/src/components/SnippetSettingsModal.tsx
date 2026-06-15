@@ -159,29 +159,51 @@ export default function SnippetSettingsModal({
     [resetBuiltinSqlSnippet, selectedId],
   );
 
-  const syntaxHelpItems = [
-    {
-      key: 'syntax',
-      label: '占位符语法参考',
-      children: (
-        <div style={{ fontSize: 12, lineHeight: 1.8, color: mutedColor, fontFamily: 'var(--gn-font-mono)' }}>
-          <div>{'${1:占位符}   第一个 Tab 位，占位符为提示文字'}</div>
-          <div>{'${2:默认值}   第二个 Tab 位，默认值可直接确认'}</div>
-          <div>{'$0            最终光标位置'}</div>
-          <div>{'${1:表名}     同一数字在多处出现时会同步编辑'}</div>
-          <div style={{ marginTop: 6, fontWeight: 600, color: textColor }}>{'内置变量（展开时自动替换为实际值）：'}</div>
-          <div>{'${CURRENT_YEAR}-${CURRENT_MONTH}-${CURRENT_DATE}  当前日期'}</div>
-          <div>{'${CURRENT_HOUR}:${CURRENT_MINUTE}:${CURRENT_SECOND}  当前时间'}</div>
-          <div>{'${CURRENT_SECONDS_UNIX}  Unix 时间戳'}</div>
-          <div>{'${UUID}       随机 UUID'}</div>
-          <div>{'${RANDOM}     6 位随机数'}</div>
-          <div style={{ marginTop: 8, fontFamily: 'inherit', color: textColor }}>
-            {'示例：SELECT ${1:列名} FROM ${2:表名} WHERE date >= \'${CURRENT_YEAR}-${CURRENT_MONTH}-${CURRENT_DATE}\';$0'}
+  const syntaxHelpItems = useMemo(
+    () => [
+      {
+        key: 'snippet-help',
+        label: '片段语法说明（可编辑）',
+        children: (
+          <Input.TextArea
+            data-sql-snippet-syntax-help-editor="true"
+            value={draft.syntaxHelp || ''}
+            onChange={(e) => setDraft((d) => ({ ...d, syntaxHelp: e.target.value }))}
+            placeholder="展示在补全详情中的用法说明，例如占位符含义、参数约定或注意事项"
+            maxLength={1000}
+            autoSize={{ minRows: 4, maxRows: 8 }}
+            style={{
+              fontSize: 12,
+              resize: 'none',
+              fontFamily: 'var(--gn-font-mono)',
+            }}
+          />
+        ),
+      },
+      {
+        key: 'syntax',
+        label: '占位符语法参考',
+        children: (
+          <div style={{ fontSize: 12, lineHeight: 1.8, color: mutedColor, fontFamily: 'var(--gn-font-mono)' }}>
+            <div>{'${1:占位符}   第一个 Tab 位，占位符为提示文字'}</div>
+            <div>{'${2:默认值}   第二个 Tab 位，默认值可直接确认'}</div>
+            <div>{'$0            最终光标位置'}</div>
+            <div>{'${1:表名}     同一数字在多处出现时会同步编辑'}</div>
+            <div style={{ marginTop: 6, fontWeight: 600, color: textColor }}>{'内置变量（展开时自动替换为实际值）：'}</div>
+            <div>{'${CURRENT_YEAR}-${CURRENT_MONTH}-${CURRENT_DATE}  当前日期'}</div>
+            <div>{'${CURRENT_HOUR}:${CURRENT_MINUTE}:${CURRENT_SECOND}  当前时间'}</div>
+            <div>{'${CURRENT_SECONDS_UNIX}  Unix 时间戳'}</div>
+            <div>{'${UUID}       随机 UUID'}</div>
+            <div>{'${RANDOM}     6 位随机数'}</div>
+            <div style={{ marginTop: 8, fontFamily: 'inherit', color: textColor }}>
+              {'示例：SELECT ${1:列名} FROM ${2:表名} WHERE date >= \'${CURRENT_YEAR}-${CURRENT_MONTH}-${CURRENT_DATE}\';$0'}
+            </div>
           </div>
-        </div>
-      ),
-    },
-  ];
+        ),
+      },
+    ],
+    [draft.syntaxHelp, mutedColor, textColor],
+  );
 
   const showEditor = isCreating || selectedSnippet;
 
@@ -217,14 +239,9 @@ export default function SnippetSettingsModal({
       styles={{
         content: shellStyle,
         header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
-        body: { paddingTop: 8 },
-        footer: { background: 'transparent', borderTop: 'none', paddingTop: 40 },
+        body: { paddingTop: 8, paddingBottom: 24 },
       }}
-      footer={[
-        <Button key="close" type="primary" onClick={onClose}>
-          关闭
-        </Button>,
-      ]}
+      footer={null}
     >
       <div style={{ display: 'flex', gap: 16, minHeight: 420 }}>
         {/* Left: snippet list */}
@@ -353,18 +370,6 @@ export default function SnippetSettingsModal({
                 />
               </div>
 
-              <div>
-                <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>片段语法说明（可选）</div>
-                <Input.TextArea
-                  value={draft.syntaxHelp || ''}
-                  onChange={(e) => setDraft((d) => ({ ...d, syntaxHelp: e.target.value }))}
-                  placeholder="展示在补全详情中的用法说明，例如占位符含义、参数约定或注意事项"
-                  maxLength={1000}
-                  autoSize={{ minRows: 2, maxRows: 4 }}
-                  style={{ fontSize: 12, resize: 'none' }}
-                />
-              </div>
-
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
                 <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>片段内容</div>
                 <Input.TextArea
@@ -381,38 +386,12 @@ export default function SnippetSettingsModal({
                 />
                 <Collapse
                   size="small"
+                  defaultActiveKey={['snippet-help']}
                   items={syntaxHelpItems}
                   style={{ marginTop: 8, background: 'transparent' }}
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
-                {draft.isBuiltin && draft.createdAt && (
-                  <Popconfirm
-                    title="重置为默认"
-                    description="将恢复此内置片段的原始内容"
-                    onConfirm={() => handleReset(draft.id)}
-                  >
-                    <Button icon={<UndoOutlined />} size="small">
-                      重置为默认
-                    </Button>
-                  </Popconfirm>
-                )}
-                {!draft.isBuiltin && !isCreating && (
-                  <Popconfirm
-                    title="删除片段"
-                    description="确定要删除此片段吗？"
-                    onConfirm={() => handleDelete(draft.id)}
-                  >
-                    <Button danger icon={<DeleteOutlined />} size="small">
-                      删除
-                    </Button>
-                  </Popconfirm>
-                )}
-                <Button type="primary" icon={<SaveOutlined />} size="small" onClick={handleSave}>
-                  保存
-                </Button>
-              </div>
             </div>
           ) : (
             <div
@@ -429,6 +408,49 @@ export default function SnippetSettingsModal({
             </div>
           )}
         </div>
+      </div>
+      <div
+        data-sql-snippet-action-row="true"
+        style={{
+          display: 'flex',
+          gap: 12,
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+          paddingTop: 18,
+          marginTop: 18,
+          borderTop: overlayTheme.sectionBorder,
+        }}
+      >
+        {showEditor && draft.isBuiltin && draft.createdAt && (
+          <Popconfirm
+            title="重置为默认"
+            description="将恢复此内置片段的原始内容"
+            onConfirm={() => handleReset(draft.id)}
+          >
+            <Button icon={<UndoOutlined />} size="large" style={{ minWidth: 118 }}>
+              重置为默认
+            </Button>
+          </Popconfirm>
+        )}
+        {showEditor && !draft.isBuiltin && !isCreating && (
+          <Popconfirm
+            title="删除片段"
+            description="确定要删除此片段吗？"
+            onConfirm={() => handleDelete(draft.id)}
+          >
+            <Button danger icon={<DeleteOutlined />} size="large" style={{ minWidth: 96 }}>
+              删除
+            </Button>
+          </Popconfirm>
+        )}
+        {showEditor && (
+          <Button type="primary" icon={<SaveOutlined />} size="large" style={{ minWidth: 96 }} onClick={handleSave}>
+            保存
+          </Button>
+        )}
+        <Button size="large" style={{ minWidth: 96 }} onClick={onClose}>
+          关闭
+        </Button>
       </div>
     </Modal>
   );

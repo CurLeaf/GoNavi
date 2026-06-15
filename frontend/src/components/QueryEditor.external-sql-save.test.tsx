@@ -4367,7 +4367,14 @@ describe('QueryEditor external SQL save', () => {
     const modalSource = readFileSync(new URL('./SnippetSettingsModal.tsx', import.meta.url), 'utf8');
     const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
 
-    expect(modalSource).toContain('片段语法说明（可选）');
+    expect(modalSource).toContain('片段语法说明（可编辑）');
+    expect(modalSource).toContain('data-sql-snippet-syntax-help-editor="true"');
+    expect(modalSource).toContain("defaultActiveKey={['snippet-help']}");
+    expect(modalSource).toContain('footer={null}');
+    expect(modalSource).toContain('data-sql-snippet-action-row="true"');
+    expect(modalSource).toContain('body: { paddingTop: 8, paddingBottom: 24 }');
+    expect(modalSource).toContain("size=\"large\"");
+    expect(modalSource).toContain('minWidth: 96');
     expect(modalSource).toContain('syntaxHelp');
     expect(modalSource).toContain('占位符语法参考');
     expect(source).toContain('s.syntaxHelp || s.description || s.body');

@@ -1195,4 +1195,41 @@ describe('store appearance persistence', () => {
       windows: { combo: 'Enter', enabled: true },
     });
   });
+
+  it('updates an existing custom SQL snippet by id and persists editable syntax help', async () => {
+    const { useStore } = await importStore();
+    const original = {
+      id: 'custom-merge',
+      prefix: 'mrg',
+      name: 'MERGE INTO',
+      description: 'Oracle merge 模板',
+      syntaxHelp: '旧说明',
+      body: 'MERGE INTO t USING s ON (t.id = s.id)$0',
+      isBuiltin: false,
+      createdAt: 1710000000000,
+    };
+
+    useStore.getState().saveSqlSnippet(original);
+    useStore.getState().saveSqlSnippet({
+      ...original,
+      name: 'MERGE INTO 更新',
+      syntaxHelp: '新说明：目标表、数据源、关联字段均可修改',
+      body: 'MERGE INTO ${1:目标表} t USING ${2:源表} s ON (${3:关联条件})$0',
+    });
+
+    const snippets = useStore.getState().sqlSnippets.filter((s) => s.id === original.id);
+    expect(snippets).toHaveLength(1);
+    expect(snippets[0]).toMatchObject({
+      prefix: 'mrg',
+      name: 'MERGE INTO 更新',
+      syntaxHelp: '新说明：目标表、数据源、关联字段均可修改',
+      body: 'MERGE INTO ${1:目标表} t USING ${2:源表} s ON (${3:关联条件})$0',
+      isBuiltin: false,
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    const persistedSnippets = persisted.state.sqlSnippets.filter((s: { id: string }) => s.id === original.id);
+    expect(persistedSnippets).toHaveLength(1);
+    expect(persistedSnippets[0].syntaxHelp).toBe('新说明：目标表、数据源、关联字段均可修改');
+  });
 });
