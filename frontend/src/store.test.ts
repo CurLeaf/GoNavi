@@ -879,6 +879,10 @@ describe('store appearance persistence', () => {
       query: 'select * from orders where status = "paid";',
       connectionId: 'conn-2',
       dbName: 'reporting',
+      formatRestoreSnapshot: {
+        query: 'select * from orders where status="paid";',
+        createdAt: 123,
+      },
     });
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
@@ -890,6 +894,10 @@ describe('store appearance persistence', () => {
         connectionId: 'conn-2',
         dbName: 'reporting',
         query: 'select * from orders where status = "paid";',
+        formatRestoreSnapshot: {
+          query: 'select * from orders where status="paid";',
+          createdAt: 123,
+        },
       }),
     ]);
     expect(persisted.state.activeTabId).toBe('query-tab-1');
@@ -903,9 +911,19 @@ describe('store appearance persistence', () => {
         connectionId: 'conn-2',
         dbName: 'reporting',
         query: 'select * from orders where status = "paid";',
+        formatRestoreSnapshot: {
+          query: 'select * from orders where status="paid";',
+          createdAt: 123,
+        },
       }),
     ]);
     expect(reloaded.useStore.getState().activeTabId).toBe('query-tab-1');
+
+    reloaded.useStore.getState().updateQueryTabDraft('query-tab-1', {
+      formatRestoreSnapshot: undefined,
+    });
+
+    expect(reloaded.useStore.getState().tabs[0].formatRestoreSnapshot).toBeUndefined();
   });
 
   it('updates activeContext when switching between tabs with different host or database', async () => {

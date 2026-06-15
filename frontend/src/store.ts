@@ -1279,7 +1279,12 @@ interface AppState {
     draft: Partial<
       Pick<
         TabData,
-        "query" | "connectionId" | "dbName" | "title" | "resultPanelVisible"
+        | "query"
+        | "connectionId"
+        | "dbName"
+        | "title"
+        | "resultPanelVisible"
+        | "formatRestoreSnapshot"
       >
     >,
   ) => void;
@@ -1483,6 +1488,15 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
     const query = typeof raw.query === "string" ? raw.query.slice(0, MAX_PERSISTED_QUERY_LENGTH) : "";
     const filePath = toTrimmedString(raw.filePath);
     const savedQueryId = toTrimmedString(raw.savedQueryId);
+    const rawFormatRestoreSnapshot =
+      raw.formatRestoreSnapshot && typeof raw.formatRestoreSnapshot === "object"
+        ? (raw.formatRestoreSnapshot as Record<string, unknown>)
+        : null;
+    const formatRestoreQuery =
+      typeof rawFormatRestoreSnapshot?.query === "string"
+        ? rawFormatRestoreSnapshot.query.slice(0, MAX_PERSISTED_QUERY_LENGTH)
+        : "";
+    const formatRestoreCreatedAt = Number(rawFormatRestoreSnapshot?.createdAt);
     if (!query.trim() && !filePath && !savedQueryId) return;
 
     let id = toTrimmedString(raw.id, `query-${index + 1}`) || `query-${index + 1}`;
@@ -1505,6 +1519,14 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
       filePath: filePath || undefined,
       savedQueryId: savedQueryId || undefined,
       readOnly: raw.readOnly === true,
+      formatRestoreSnapshot: formatRestoreQuery
+        ? {
+            query: formatRestoreQuery,
+            createdAt: Number.isFinite(formatRestoreCreatedAt)
+              ? formatRestoreCreatedAt
+              : Date.now(),
+          }
+        : undefined,
     });
   });
 
@@ -2557,6 +2579,30 @@ export const useStore = create<AppState>()(
               const nextResultPanelVisible = draft.resultPanelVisible === true;
               if (nextTab.resultPanelVisible !== nextResultPanelVisible) {
                 nextTab.resultPanelVisible = nextResultPanelVisible;
+                changed = true;
+              }
+            }
+            if (Object.prototype.hasOwnProperty.call(draft, "formatRestoreSnapshot")) {
+              const rawSnapshot = draft.formatRestoreSnapshot;
+              const nextSnapshot =
+                rawSnapshot && typeof rawSnapshot.query === "string"
+                  ? {
+                      query: rawSnapshot.query.slice(0, MAX_PERSISTED_QUERY_LENGTH),
+                      createdAt: Number.isFinite(Number(rawSnapshot.createdAt))
+                        ? Number(rawSnapshot.createdAt)
+                        : Date.now(),
+                    }
+                  : undefined;
+              const currentSnapshot = nextTab.formatRestoreSnapshot;
+              if (
+                currentSnapshot?.query !== nextSnapshot?.query ||
+                currentSnapshot?.createdAt !== nextSnapshot?.createdAt
+              ) {
+                if (nextSnapshot?.query) {
+                  nextTab.formatRestoreSnapshot = nextSnapshot;
+                } else {
+                  delete nextTab.formatRestoreSnapshot;
+                }
                 changed = true;
               }
             }

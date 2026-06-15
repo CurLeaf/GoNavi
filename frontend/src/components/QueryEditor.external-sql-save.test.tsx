@@ -1527,6 +1527,43 @@ describe('QueryEditor external SQL save', () => {
         }),
       ]),
     );
+    expect(storeState.updateQueryTabDraft).toHaveBeenCalledWith('tab-1', {
+      formatRestoreSnapshot: {
+        query: 'select * from users where id=1',
+        createdAt: expect.any(Number),
+      },
+    });
+  });
+
+  it('restores the last pre-beautify SQL snapshot after reopening a query tab', async () => {
+    let renderer!: ReactTestRenderer;
+    const originalSql = 'select * from users where id=1';
+
+    await act(async () => {
+      renderer = create(
+        <QueryEditor
+          tab={createTab({
+            query: 'SELECT\n  *\nFROM\n  users\nWHERE\n  id = 1',
+            formatRestoreSnapshot: {
+              query: originalSql,
+              createdAt: 123,
+            },
+          })}
+        />,
+      );
+    });
+
+    const restoreButton = findButton(renderer, '还原上次美化');
+    await act(async () => {
+      await restoreButton.props.onClick();
+    });
+
+    expect(editorState.value).toBe(originalSql);
+    expect(storeState.updateQueryTabDraft).toHaveBeenCalledWith('tab-1', {
+      query: originalSql,
+      formatRestoreSnapshot: undefined,
+    });
+    expect(messageApi.success).toHaveBeenCalledWith('已还原到美化前 SQL');
   });
 
   it('formats postgres window-function SQL with cast syntax through Monaco edits', async () => {

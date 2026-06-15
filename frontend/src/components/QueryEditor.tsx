@@ -3948,12 +3948,22 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ? connectionsRef.current.find(c => c.id === tabConnectionId)
                   : undefined);
           const formatterLanguage = resolveQueryEditorFormatterLanguage(conn);
-          const formatted = format(getCurrentQuery(), { language: formatterLanguage, keywordCase: sqlFormatOptions.keywordCase });
+          const sourceSql = getCurrentQuery();
+          const formatted = format(sourceSql, { language: formatterLanguage, keywordCase: sqlFormatOptions.keywordCase });
+          if (sourceSql === formatted) {
+              return;
+          }
+          updateQueryTabDraft(tab.id, {
+              formatRestoreSnapshot: {
+                  query: sourceSql,
+                  createdAt: Date.now(),
+              },
+          });
           const editor = editorRef.current;
           const monaco = monacoRef.current;
           const model = editor?.getModel?.();
           if (editor && monaco && model) {
-              const currentValue = String(model.getValue?.() || '');
+              const currentValue = String(model.getValue?.() || sourceSql);
               if (currentValue === formatted) {
                   return;
               }
@@ -3975,6 +3985,21 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       } catch (e) {
           void message.error("格式化失败: SQL 语法可能有误");
       }
+  };
+
+  const handleRestoreLastFormat = () => {
+      const previousQuery = tab.formatRestoreSnapshot?.query;
+      if (!previousQuery) {
+          void message.info('没有可还原的美化前 SQL');
+          return;
+      }
+      syncQueryToEditor(previousQuery);
+      updateQueryTabDraft(tab.id, {
+          query: previousQuery,
+          formatRestoreSnapshot: undefined,
+      });
+      refreshObjectDecorations();
+      void message.success('已还原到美化前 SQL');
   };
 
   const handleAIAction = (action: 'generate' | 'explain' | 'optimize' | 'schema') => {
@@ -4011,6 +4036,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           label: '关键字小写', 
           icon: sqlFormatOptions.keywordCase === 'lower' ? '✓' : undefined,
           onClick: () => setSqlFormatOptions({ keywordCase: 'lower' }) 
+      },
+      { type: 'divider' },
+      {
+          key: 'restore-last-format',
+          label: '还原上次美化',
+          disabled: !tab.formatRestoreSnapshot?.query,
+          onClick: handleRestoreLastFormat,
       },
       { type: 'divider' },
       {
