@@ -5,7 +5,6 @@ import {sync} from '../models';
 import {app} from '../models';
 import {jvm} from '../models';
 import {redis} from '../models';
-import {context} from '../models';
 
 export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:connection.ChangeSet):Promise<connection.QueryResult>;
 
@@ -63,6 +62,8 @@ export function DBQueryMultiTransactional(arg1:connection.ConnectionConfig,arg2:
 
 export function DBQueryWithCancel(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function DBReleaseConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
 export function DBRollbackTransaction(arg1:string):Promise<connection.QueryResult>;
 
 export function DBShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
@@ -89,6 +90,8 @@ export function DropDatabase(arg1:connection.ConnectionConfig,arg2:string):Promi
 
 export function DropFunction(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function DropSchema(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
 export function DropTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DropView(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
@@ -106,6 +109,8 @@ export function ExportDatabaseSQL(arg1:connection.ConnectionConfig,arg2:string,a
 export function ExportQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:string):Promise<connection.QueryResult>;
 
 export function ExportSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function ExportSchemaSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:boolean):Promise<connection.QueryResult>;
 
 export function ExportTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
@@ -267,6 +272,8 @@ export function RenameSQLDirectory(arg1:string,arg2:string):Promise<connection.Q
 
 export function RenameSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
+export function RenameSchema(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
 export function RenameTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function RenameView(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
@@ -307,7 +314,7 @@ export function SetMacNativeWindowControls(arg1:boolean):Promise<void>;
 
 export function SetWindowTranslucency(arg1:number,arg2:number):Promise<void>;
 
-export function Shutdown(arg1:context.Context):Promise<void>;
+export function Shutdown():Promise<void>;
 
 export function StartSecurityUpdate(arg1:app.StartSecurityUpdateRequest):Promise<app.SecurityUpdateStatus>;
 

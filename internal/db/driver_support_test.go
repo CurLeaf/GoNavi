@@ -29,6 +29,16 @@ func TestBuiltinLikeDriversRemainAvailable(t *testing.T) {
 	if !supported {
 		t.Fatalf("redis 应始终可用，reason=%s", reason)
 	}
+
+	supported, reason = DriverRuntimeSupportStatus("kafka")
+	if !supported {
+		t.Fatalf("kafka 应始终可用，reason=%s", reason)
+	}
+
+	supported, reason = DriverRuntimeSupportStatus("goldendb")
+	if !supported {
+		t.Fatalf("goldendb 应始终可用，reason=%s", reason)
+	}
 }
 
 func TestOptionalDriverAgentRevisionsGeneratedForOptionalDrivers(t *testing.T) {
@@ -52,6 +62,12 @@ func TestKingbaseRuntimeAliasesNormalizeToKingbase(t *testing.T) {
 	}
 	if got := normalizeDatabaseType("kingbasees"); got != "kingbase" {
 		t.Fatalf("expected kingbasees database alias to normalize to kingbase, got %q", got)
+	}
+	if got := normalizeRuntimeDriverType("greatdb"); got != "goldendb" {
+		t.Fatalf("expected greatdb runtime alias to normalize to goldendb, got %q", got)
+	}
+	if got := normalizeDatabaseType("gdb"); got != "goldendb" {
+		t.Fatalf("expected gdb database alias to normalize to goldendb, got %q", got)
 	}
 }
 
@@ -117,7 +133,7 @@ func TestNewCompatibleDriversAreOptionalAgentDrivers(t *testing.T) {
 	tmpDir := t.TempDir()
 	SetExternalDriverDownloadDirectory(tmpDir)
 
-	for _, driverType := range []string{"oceanbase", "opengauss", "open_gauss", "starrocks", "iris", "intersystems"} {
+	for _, driverType := range []string{"oceanbase", "opengauss", "open_gauss", "gaussdb", "gauss_db", "starrocks", "iris", "intersystems"} {
 		if IsBuiltinDriver(driverType) {
 			t.Fatalf("%s 不应是免安装内置驱动", driverType)
 		}
@@ -138,5 +154,15 @@ func TestMySQLBuiltinRuntimeSupportAvailable(t *testing.T) {
 	supported, reason := DriverRuntimeSupportStatus("mysql")
 	if !supported {
 		t.Fatalf("mysql 属于免安装内置驱动，应可用，reason=%s", reason)
+	}
+}
+
+func TestGoldenDBBuiltinDatabaseFactoryUsesMySQLImplementation(t *testing.T) {
+	dbInst, err := NewDatabase("goldendb")
+	if err != nil {
+		t.Fatalf("expected goldendb database factory, got err=%v", err)
+	}
+	if _, ok := dbInst.(*MySQLDB); !ok {
+		t.Fatalf("expected goldendb to reuse MySQLDB implementation, got %T", dbInst)
 	}
 }

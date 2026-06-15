@@ -27,12 +27,37 @@ type MySQLDB struct {
 
 const (
 	defaultMySQLPort            = 3306
+	defaultGoldenDBPort         = 1523
 	defaultMySQLInsertBatchSize = 1000
 	maxMySQLInsertBatchArgs     = 60000
 )
 
+var mysqlCompatibleURISchemes = []string{
+	"mysql",
+	"mariadb",
+	"doris",
+	"diros",
+	"oceanbase",
+	"starrocks",
+	"goldendb",
+	"greatdb",
+	"gdb",
+}
+
 func parseMySQLCompatibleURI(raw string, allowedSchemes ...string) (*url.URL, bool) {
 	return parseConnectionURI(raw, allowedSchemes...)
+}
+
+func resolveMySQLCompatibleDefaultPort(config connection.ConnectionConfig) int {
+	if config.Port > 0 {
+		return config.Port
+	}
+	switch strings.ToLower(strings.TrimSpace(config.Type)) {
+	case "goldendb", "greatdb", "gdb":
+		return defaultGoldenDBPort
+	default:
+		return defaultMySQLPort
+	}
 }
 
 func mysqlConnectionParamsFromText(raw string) url.Values {
@@ -319,7 +344,7 @@ func hasMySQLConnectionParam(config connection.ConnectionConfig, names ...string
 		return false
 	}
 
-	if parsed, ok := parseMySQLCompatibleURI(config.URI, "mysql", "mariadb", "doris", "diros", "oceanbase", "starrocks"); ok && hasMatchingKey(parsed.Query()) {
+	if parsed, ok := parseMySQLCompatibleURI(config.URI, mysqlCompatibleURISchemes...); ok && hasMatchingKey(parsed.Query()) {
 		return true
 	}
 	return hasMatchingKey(mysqlConnectionParamsFromText(config.ConnectionParams))
@@ -368,7 +393,7 @@ func buildMySQLCompatibleDSNWithOptions(config connection.ConnectionConfig, prot
 		defaultMultiStatements = *options.defaultMultiStatements
 	}
 	params.Set("multiStatements", strconv.FormatBool(defaultMultiStatements))
-	if parsed, ok := parseMySQLCompatibleURI(config.URI, "mysql", "doris", "diros", "oceanbase"); ok {
+	if parsed, ok := parseMySQLCompatibleURI(config.URI, mysqlCompatibleURISchemes...); ok {
 		mergeMySQLConnectionParams(params, parsed.Query())
 	}
 	mergeMySQLConnectionParams(params, mysqlConnectionParamsFromText(config.ConnectionParams))
@@ -569,6 +594,18 @@ var mysqlDatabaseQueries = []string{
 	"SELECT DATABASE() AS `Database`",
 }
 
+var mysqlDatabaseNameKeys = []string{
+	"Database",
+	"database",
+	"DATABASE",
+	"database_name",
+	"DATABASE_NAME",
+	"schema",
+	"SCHEMA",
+	"schema_name",
+	"SCHEMA_NAME",
+}
+
 func collectMySQLDatabaseNames(queryFn func(string) ([]map[string]interface{}, []string, error)) ([]string, error) {
 	if queryFn == nil {
 		return nil, fmt.Errorf("查询函数为空")
@@ -578,34 +615,59 @@ func collectMySQLDatabaseNames(queryFn func(string) ([]map[string]interface{}, [
 	seen := make(map[string]struct{}, 8)
 	var lastErr error
 
-	appendNames := func(rows []map[string]interface{}) {
-		for _, row := range rows {
-			for _, key := range []string{"Database", "database"} {
-				val, ok := row[key]
-				if !ok || val == nil {
-					continue
-				}
-				name := strings.TrimSpace(fmt.Sprintf("%v", val))
-				if name == "" || strings.EqualFold(name, "<nil>") {
-					continue
-				}
-				if _, exists := seen[name]; exists {
-					continue
-				}
-				seen[name] = struct{}{}
-				names = append(names, name)
-				break
+	normalizeName := func(val interface{}) string {
+		if val == nil {
+			return ""
+		}
+		name := strings.TrimSpace(fmt.Sprintf("%v", val))
+		if name == "" || strings.EqualFold(name, "<nil>") || strings.EqualFold(name, "null") {
+			return ""
+		}
+		return name
+	}
+
+	extractName := func(row map[string]interface{}, columns []string) string {
+		for _, key := range mysqlDatabaseNameKeys {
+			if name := normalizeName(row[key]); name != "" {
+				return name
 			}
+		}
+		for _, column := range columns {
+			if name := normalizeName(row[column]); name != "" {
+				return name
+			}
+		}
+		if len(row) == 1 {
+			for _, val := range row {
+				if name := normalizeName(val); name != "" {
+					return name
+				}
+			}
+		}
+		return ""
+	}
+
+	appendNames := func(rows []map[string]interface{}, columns []string) {
+		for _, row := range rows {
+			name := extractName(row, columns)
+			if name == "" {
+				continue
+			}
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
+			names = append(names, name)
 		}
 	}
 
 	for _, sqlText := range mysqlDatabaseQueries {
-		rows, _, err := queryFn(sqlText)
+		rows, columns, err := queryFn(sqlText)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		appendNames(rows)
+		appendNames(rows, columns)
 		if len(names) > 0 {
 			return names, nil
 		}
@@ -625,7 +687,7 @@ func applyMySQLURI(config connection.ConnectionConfig) connection.ConnectionConf
 	if uriText == "" {
 		return config
 	}
-	parsed, ok := parseMySQLCompatibleURI(uriText, "mysql")
+	parsed, ok := parseMySQLCompatibleURI(uriText, mysqlCompatibleURISchemes...)
 	if !ok {
 		return config
 	}
@@ -643,10 +705,7 @@ func applyMySQLURI(config connection.ConnectionConfig) connection.ConnectionConf
 		config.Database = dbName
 	}
 
-	defaultPort := config.Port
-	if defaultPort <= 0 {
-		defaultPort = defaultMySQLPort
-	}
+	defaultPort := resolveMySQLCompatibleDefaultPort(config)
 
 	hostsFromURI := make([]string, 0, 4)
 	hostText := strings.TrimSpace(parsed.Host)
@@ -682,10 +741,7 @@ func applyMySQLURI(config connection.ConnectionConfig) connection.ConnectionConf
 }
 
 func collectMySQLAddresses(config connection.ConnectionConfig) []string {
-	defaultPort := config.Port
-	if defaultPort <= 0 {
-		defaultPort = defaultMySQLPort
-	}
+	defaultPort := resolveMySQLCompatibleDefaultPort(config)
 
 	candidates := make([]string, 0, len(config.Hosts)+1)
 	if len(config.Hosts) > 0 {
@@ -757,11 +813,12 @@ func (m *MySQLDB) Connect(config connection.ConnectionConfig) error {
 	if len(addresses) == 0 {
 		return fmt.Errorf("连接建立后验证失败：未找到可用的 MySQL 地址")
 	}
+	defaultPort := resolveMySQLCompatibleDefaultPort(runConfig)
 
 	var errorDetails []string
 	for index, address := range addresses {
 		candidateConfig := runConfig
-		host, port, ok := parseHostPortWithDefault(address, defaultMySQLPort)
+		host, port, ok := parseHostPortWithDefault(address, defaultPort)
 		if !ok {
 			continue
 		}

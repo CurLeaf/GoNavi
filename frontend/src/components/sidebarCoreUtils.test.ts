@@ -37,8 +37,10 @@ describe('sidebarCoreUtils', () => {
   it('normalizes driver aliases used by sidebar metadata loaders', () => {
     expect(normalizeDriverType('postgresql')).toBe('postgres');
     expect(normalizeDriverType('open-gauss')).toBe('opengauss');
+    expect(normalizeDriverType('gauss-db')).toBe('gaussdb');
     expect(normalizeDriverType('InterSystemsIRIS')).toBe('iris');
     expect(isPostgresSchemaDialect('kingbase')).toBe(true);
+    expect(isPostgresSchemaDialect('gauss-db')).toBe(true);
   });
 
   it('resolves draggable object labels by object kind', () => {

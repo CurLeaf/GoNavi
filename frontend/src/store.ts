@@ -279,6 +279,7 @@ const resolveOceanBaseProtocol = (
 };
 const SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "doris",
@@ -289,6 +290,8 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "postgres",
   "redis",
   "tdengine",
+  "iotdb",
+  "kafka",
   "oracle",
   "dameng",
   "kingbase",
@@ -299,6 +302,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "jvm",
   "sqlite",
   "duckdb",
@@ -306,6 +310,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
 ]);
 const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "diros",
@@ -320,10 +325,12 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "mongodb",
   "redis",
   "elasticsearch",
   "tdengine",
+  "kafka",
 ]);
 
 const getDefaultPortByType = (type: string): number => {
@@ -333,6 +340,8 @@ const getDefaultPortByType = (type: string): number => {
     case "mysql":
     case "mariadb":
       return 3306;
+    case "goldendb":
+      return 1523;
     case "oceanbase":
       return 2881;
     case "doris":
@@ -348,11 +357,16 @@ const getDefaultPortByType = (type: string): number => {
     case "postgres":
     case "vastbase":
     case "opengauss":
+    case "gaussdb":
       return 5432;
     case "redis":
       return 6379;
     case "tdengine":
       return 6041;
+    case "iotdb":
+      return 6667;
+    case "kafka":
+      return 9092;
     case "oracle":
       return 1521;
     case "dameng":
@@ -515,6 +529,15 @@ const normalizeConnectionType = (value: unknown): string => {
     type === "opengauss"
   ) {
     return "opengauss";
+  }
+  if (type === "gaussdb" || type === "gauss_db" || type === "gauss-db") {
+    return "gaussdb";
+  }
+  if (type === "goldendb" || type === "greatdb" || type === "gdb") {
+    return "goldendb";
+  }
+  if (type === "kafka" || type === "apache-kafka" || type === "apache_kafka") {
+    return "kafka";
   }
   if (
     type === "inter-systems" ||

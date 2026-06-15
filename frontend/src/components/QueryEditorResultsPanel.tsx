@@ -35,7 +35,6 @@ interface QueryEditorResultsPanelProps {
     currentDb: string;
     currentConnectionId: string;
     toggleShortcutLabel: string;
-    transactionToolbar?: React.ReactNode;
     onActiveResultKeyChange: (key: string) => void;
     onHide: () => void;
     onCloseResult: (key: string) => void;
@@ -61,7 +60,6 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     currentDb,
     currentConnectionId,
     toggleShortcutLabel,
-    transactionToolbar,
     onActiveResultKeyChange,
     onHide,
     onCloseResult,
@@ -138,12 +136,11 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
             />
         </Tooltip>
     );
-    const tabsExtraContent = transactionToolbar || !activeResultUsesDataGrid
+    const tabsExtraContent = !activeResultUsesDataGrid
         ? {
             right: (
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                    {transactionToolbar}
-                    {!activeResultUsesDataGrid ? tabsHideButton : null}
+                    {tabsHideButton}
                 </div>
             ),
         }

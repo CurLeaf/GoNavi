@@ -136,12 +136,14 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
         if (type === 'custom') {
             const driver = String(conn?.config?.driver || '').trim().toLowerCase();
             if (driver === 'diros' || driver === 'doris') return 'mysql';
+            if (driver === 'goldendb' || driver === 'greatdb' || driver === 'gdb') return 'mysql';
             if (driver === 'oceanbase') return normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
             if (driver === 'opengauss' || driver === 'open_gauss' || driver === 'open-gauss') return 'opengauss';
+            if (driver === 'gaussdb' || driver === 'gauss_db' || driver === 'gauss-db') return 'gaussdb';
             return driver;
         }
         if (type === 'oceanbase' && normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle') return 'oracle';
-        if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
+        if (type === 'goldendb' || type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
         if (type === 'dameng') return 'dm';
         return type;
     };
@@ -175,6 +177,7 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
             case 'highgo':
             case 'vastbase':
             case 'opengauss':
+            case 'gaussdb':
                 return [`SELECT pg_get_triggerdef(t.oid, true) AS trigger_definition
 FROM pg_trigger t
 JOIN pg_class c ON t.tgrelid = c.oid
@@ -310,7 +313,8 @@ LIMIT 1`];
             case 'kingbase':
             case 'highgo':
             case 'vastbase':
-            case 'opengauss': {
+            case 'opengauss':
+            case 'gaussdb': {
                 return row.trigger_definition || row.TRIGGER_DEFINITION || Object.values(row)[0] || '';
             }
             case 'sqlserver': {

@@ -203,6 +203,8 @@ func defaultPortByType(driverType string) int {
 	switch strings.ToLower(strings.TrimSpace(driverType)) {
 	case "mysql", "mariadb":
 		return 3306
+	case "goldendb", "greatdb", "gdb":
+		return 1523
 	case "oceanbase":
 		return 2881
 	case "diros":
@@ -211,12 +213,14 @@ func defaultPortByType(driverType string) int {
 		return 9030
 	case "sphinx":
 		return 9306
-	case "postgres", "vastbase", "opengauss":
+	case "postgres", "vastbase", "opengauss", "gaussdb":
 		return 5432
 	case "redis":
 		return 6379
 	case "tdengine":
 		return 6041
+	case "iotdb":
+		return 6667
 	case "oracle":
 		return 1521
 	case "dameng":
@@ -233,6 +237,12 @@ func defaultPortByType(driverType string) int {
 		return 5866
 	case "iris":
 		return 1972
+	case "chroma":
+		return 8000
+	case "qdrant":
+		return 6333
+	case "kafka":
+		return 9092
 	default:
 		return 0
 	}

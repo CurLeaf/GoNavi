@@ -15,8 +15,8 @@ func TestCollectMySQLDatabaseNames_FallsBackToCurrentDatabase(t *testing.T) {
 			return nil, nil, errors.New("Error 1227 (42000): Access denied; you need (at least one of) the SHOW DATABASES privilege(s) for this operation")
 		case mysqlDatabaseQueries[1]:
 			return []map[string]interface{}{
-				{"Database": "biz_app"},
-			}, nil, nil
+				{"database_name": "biz_app"},
+			}, []string{"database_name"}, nil
 		default:
 			return nil, nil, errors.New("unexpected query")
 		}
@@ -26,6 +26,33 @@ func TestCollectMySQLDatabaseNames_FallsBackToCurrentDatabase(t *testing.T) {
 	}
 
 	want := []string{"biz_app"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected database names, got=%v want=%v", got, want)
+	}
+}
+
+func TestCollectMySQLDatabaseNames_AcceptsMyCATStyleSchemaColumn(t *testing.T) {
+	t.Parallel()
+
+	got, err := collectMySQLDatabaseNames(func(query string) ([]map[string]interface{}, []string, error) {
+		switch query {
+		case mysqlDatabaseQueries[0]:
+			return []map[string]interface{}{
+				{"SCHEMA": "analytics"},
+			}, []string{"SCHEMA"}, nil
+		case mysqlDatabaseQueries[1]:
+			return []map[string]interface{}{
+				{"Database": "should_not_be_used"},
+			}, []string{"Database"}, nil
+		default:
+			return nil, nil, errors.New("unexpected query")
+		}
+	})
+	if err != nil {
+		t.Fatalf("collectMySQLDatabaseNames 返回错误: %v", err)
+	}
+
+	want := []string{"analytics"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected database names, got=%v want=%v", got, want)
 	}

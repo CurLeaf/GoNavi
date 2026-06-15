@@ -12,8 +12,19 @@ describe('connectionDriverType', () => {
     expect(normalizeDriverType('postgresql')).toBe('postgres');
     expect(normalizeDriverType('pgx')).toBe('postgres');
     expect(normalizeDriverType('elastic')).toBe('elasticsearch');
+    expect(normalizeDriverType('chromadb')).toBe('chroma');
+    expect(normalizeDriverType('chroma-db')).toBe('chroma');
+    expect(normalizeDriverType('qdrantdb')).toBe('qdrant');
+    expect(normalizeDriverType('qdrant-db')).toBe('qdrant');
+    expect(normalizeDriverType('apache-iotdb')).toBe('iotdb');
+    expect(normalizeDriverType('apache_iotdb')).toBe('iotdb');
+    expect(normalizeDriverType('apache-kafka')).toBe('kafka');
+    expect(normalizeDriverType('apache_kafka')).toBe('kafka');
     expect(normalizeDriverType('doris')).toBe('diros');
     expect(normalizeDriverType('open-gauss')).toBe('opengauss');
+    expect(normalizeDriverType('gauss-db')).toBe('gaussdb');
+    expect(normalizeDriverType('greatdb')).toBe('goldendb');
+    expect(normalizeDriverType('gdb')).toBe('goldendb');
     expect(normalizeDriverType('InterSystemsIRIS')).toBe('iris');
   });
 
@@ -21,6 +32,8 @@ describe('connectionDriverType', () => {
     expect(resolveConnectionDriverType('mysql', 'postgresql')).toBe('mysql');
     expect(resolveConnectionDriverType('custom', 'postgresql')).toBe('postgres');
     expect(resolveConnectionDriverType('custom', 'open_gauss')).toBe('opengauss');
+    expect(resolveConnectionDriverType('custom', 'gauss_db')).toBe('gaussdb');
+    expect(resolveConnectionDriverType('custom', 'goldendb')).toBe('goldendb');
     expect(resolveConnectionDriverType('custom', '')).toBe('');
   });
 
@@ -38,6 +51,7 @@ describe('connectionDriverType', () => {
     expect(isPostgresSchemaDialect('postgres')).toBe(true);
     expect(isPostgresSchemaDialect('kingbase')).toBe(true);
     expect(isPostgresSchemaDialect('open-gauss')).toBe(true);
+    expect(isPostgresSchemaDialect('gauss-db')).toBe(true);
     expect(isPostgresSchemaDialect('mysql')).toBe(false);
   });
 });

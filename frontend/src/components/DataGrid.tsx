@@ -4339,6 +4339,45 @@ const DataGrid: React.FC<DataGridProps> = ({
     setCellContextMenu(prev => ({ ...prev, visible: false }));
   }, [cellContextMenu, handleCellSave, effectiveEditLocator]);
 
+  const canUndoContextMenuCellChange = useMemo(() => {
+    const record = cellContextMenu.record;
+    const dataIndex = String(cellContextMenu.dataIndex || '').trim();
+    const rowKey = record?.[GONAVI_ROW_KEY];
+    if (!record || !dataIndex || rowKey === undefined || rowKey === null) return false;
+    const keyStr = rowKeyStr(rowKey);
+    if (addedRowKeySet.has(keyStr)) return false;
+    return !!modifiedColumns[keyStr]?.has(dataIndex);
+  }, [addedRowKeySet, cellContextMenu.dataIndex, cellContextMenu.record, modifiedColumns, rowKeyStr]);
+
+  const handleUndoContextMenuCellChange = useCallback(() => {
+    const record = cellContextMenu.record;
+    const dataIndex = String(cellContextMenu.dataIndex || '').trim();
+    const rowKey = record?.[GONAVI_ROW_KEY];
+    if (!record || !dataIndex || rowKey === undefined || rowKey === null) return;
+
+    const keyStr = rowKeyStr(rowKey);
+    if (addedRowKeySet.has(keyStr)) {
+      void message.info('新增行请使用删除选中或整表回滚撤销');
+      setCellContextMenu(prev => ({ ...prev, visible: false }));
+      return;
+    }
+    if (!modifiedColumns[keyStr]?.has(dataIndex)) {
+      setCellContextMenu(prev => ({ ...prev, visible: false }));
+      return;
+    }
+
+    const originalRow = data.find((row) => rowKeyStr(row?.[GONAVI_ROW_KEY]) === keyStr);
+    if (!originalRow) {
+      void message.error('未找到该单元格的原始数据，无法撤销');
+      setCellContextMenu(prev => ({ ...prev, visible: false }));
+      return;
+    }
+
+    handleCellSave({ ...record, [dataIndex]: originalRow[dataIndex] });
+    setCellContextMenu(prev => ({ ...prev, visible: false }));
+    void message.success('已撤销单元格修改');
+  }, [addedRowKeySet, cellContextMenu.dataIndex, cellContextMenu.record, data, handleCellSave, modifiedColumns, rowKeyStr]);
+
   const handleCellEditorSave = useCallback(() => {
       if (!cellEditorMeta) return;
       if (!isWritableResultColumn(cellEditorMeta.dataIndex, effectiveEditLocator)) {
@@ -6060,6 +6099,9 @@ const DataGrid: React.FC<DataGridProps> = ({
               handleCopyColumnData(cellContextMenu.dataIndex);
               closeMenu();
               return;
+          case 'undo-cell-change':
+              handleUndoContextMenuCellChange();
+              return;
           case 'set-null':
               handleCellSetNull();
               return;
@@ -6128,6 +6170,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       getTargets,
       handleBatchFillToSelected,
       handleCellSetNull,
+      handleUndoContextMenuCellChange,
       handleCopyContextMenuFieldName,
       handleCopyCsv,
       handleCopyDelete,
@@ -7465,6 +7508,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       setAddedRows([]);
       setModifiedRows({});
       setDeletedRowKeys(new Set());
+      setModifiedColumns({});
       setSelectedRowKeys([]);
       if (onReload) onReload();
   }, [clearAutoCommitTimer, onReload]);
@@ -7832,6 +7876,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                         rowLabel={cellContextMenu.record?.[GONAVI_ROW_KEY] === undefined ? undefined : `row ${String(cellContextMenu.record?.[GONAVI_ROW_KEY])}`}
                         selectedRowCount={selectedRowKeys.length}
                         canModifyData={canModifyData}
+                        canUndoCellChange={canUndoContextMenuCellChange}
                         copiedRowCount={copiedRowsForPaste.length}
                         canPasteCopiedColumns={!!copiedCellPatch}
                         supportsCopyInsert={supportsCopyInsert}
@@ -7851,6 +7896,7 @@ const DataGrid: React.FC<DataGridProps> = ({
             copiedRowsForPasteLength={copiedRowsForPaste.length}
             selectedRowKeysLength={selectedRowKeys.length}
             copiedCellPatchAvailable={!!copiedCellPatch}
+            canUndoCellChange={canUndoContextMenuCellChange}
             supportsCopyInsert={supportsCopyInsert}
             onClose={() => setCellContextMenu(prev => ({ ...prev, visible: false }))}
             onCopyFieldName={handleCopyContextMenuFieldName}
@@ -7867,6 +7913,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                 copyRowsForPaste([rowKey]);
             }}
             onPasteCopiedRowsAsNew={handlePasteCopiedRowsAsNew}
+            onUndoCellChange={handleUndoContextMenuCellChange}
             onSetNull={handleCellSetNull}
             onEditRow={handleOpenContextMenuRowEditor}
             onFillToSelected={() => {

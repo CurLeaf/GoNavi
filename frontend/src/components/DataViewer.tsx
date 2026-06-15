@@ -514,7 +514,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
 
     const dbType = resolveDataSourceType(config);
     const dbTypeLower = String(dbType || '').trim().toLowerCase();
-    const isMySQLFamily = dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros';
+    const isMySQLFamily = dbTypeLower === 'mysql' || dbTypeLower === 'goldendb' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros';
     const normalizedQuickWhereCondition = normalizeQuickWhereCondition(quickWhereCondition);
     const quickWhereValidation = validateQuickWhereCondition(normalizedQuickWhereCondition);
     if (!quickWhereValidation.ok) {

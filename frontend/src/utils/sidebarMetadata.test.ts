@@ -25,6 +25,7 @@ describe('sidebarMetadata', () => {
   });
 
   it('uses MySQL metadata queries for custom MySQL-compatible domestic drivers', () => {
+    expect(resolveSidebarMetadataDialect('goldendb')).toBe('mysql');
     expect(resolveSidebarMetadataDialect('custom', 'gdb')).toBe('mysql');
     expect(resolveSidebarMetadataDialect('custom', 'goldendb')).toBe('mysql');
     expect(resolveSidebarMetadataDialect('custom', 'greatdb')).toBe('mysql');

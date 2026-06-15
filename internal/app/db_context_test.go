@@ -77,7 +77,7 @@ func TestNormalizeSchemaAndTable_KingbasePureTableUsesCurrentSearchPath(t *testi
 func TestNormalizeSchemaAndTable_PGLikePureTableKeepsPublicFallback(t *testing.T) {
 	t.Parallel()
 
-	for _, dbType := range []string{"postgres", "highgo", "vastbase", "opengauss"} {
+	for _, dbType := range []string{"postgres", "highgo", "vastbase", "opengauss", "gaussdb"} {
 		t.Run(dbType, func(t *testing.T) {
 			t.Parallel()
 
@@ -95,7 +95,7 @@ func TestNormalizeSchemaAndTable_PGLikePureTableKeepsPublicFallback(t *testing.T
 func TestNormalizeMetadataSchemaAndTable_PGLikePureTableUsesSearchPath(t *testing.T) {
 	t.Parallel()
 
-	for _, dbType := range []string{"postgres", "highgo", "vastbase", "opengauss", "kingbase"} {
+	for _, dbType := range []string{"postgres", "highgo", "vastbase", "opengauss", "gaussdb", "kingbase"} {
 		t.Run(dbType, func(t *testing.T) {
 			t.Parallel()
 
@@ -173,7 +173,7 @@ func TestNormalizeSchemaAndTable_PGLikePureTableStillSplitsKingbaseSearchPathOnl
 func TestNormalizeMetadataSchemaAndTable_PGLikePreservesNormalFallbackForQuotedQualifiedTable(t *testing.T) {
 	t.Parallel()
 
-	for _, dbType := range []string{"highgo", "vastbase", "opengauss"} {
+	for _, dbType := range []string{"highgo", "vastbase", "opengauss", "gaussdb"} {
 		t.Run(dbType, func(t *testing.T) {
 			t.Parallel()
 
@@ -216,6 +216,19 @@ func TestNormalizeRunConfig_StarRocksUsesDatabaseFromTree(t *testing.T) {
 	}
 }
 
+func TestNormalizeRunConfig_GoldenDBUsesDatabaseFromTree(t *testing.T) {
+	t.Parallel()
+
+	runConfig := normalizeRunConfig(connection.ConnectionConfig{
+		Type:     "goldendb",
+		Database: "legacy_default",
+	}, "finance_core")
+
+	if runConfig.Database != "finance_core" {
+		t.Fatalf("expected GoldenDB database from tree, got %q", runConfig.Database)
+	}
+}
+
 func TestNormalizeRunConfig_IRISUsesNamespaceFromTree(t *testing.T) {
 	t.Parallel()
 
@@ -239,6 +252,19 @@ func TestNormalizeRunConfig_RedisAllowsDatabaseIndexAboveDefault(t *testing.T) {
 
 	if runConfig.Database != "31" || runConfig.RedisDB != 31 {
 		t.Fatalf("expected Redis db31 from tree, got database=%q redisDB=%d", runConfig.Database, runConfig.RedisDB)
+	}
+}
+
+func TestNormalizeRunConfig_KafkaKeepsDefaultTopic(t *testing.T) {
+	t.Parallel()
+
+	runConfig := normalizeRunConfig(connection.ConnectionConfig{
+		Type:     "kafka",
+		Database: "orders.events",
+	}, "topics")
+
+	if runConfig.Database != "orders.events" {
+		t.Fatalf("expected Kafka default topic to stay orders.events, got %q", runConfig.Database)
 	}
 }
 
@@ -291,6 +317,102 @@ func TestNormalizeSchemaAndTable_DuckDBPreservesQuotedQualifiedName(t *testing.T
 	}
 	if table != `"daily.events"."2026.06"` {
 		t.Fatalf("expected duckdb qualified table preserved, got %q", table)
+	}
+}
+
+func TestNormalizeSchemaAndTable_KafkaPreservesDottedTopicName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "kafka",
+	}, "topics", "orders.events.v1")
+
+	if schemaOrDb != "topics" || table != "orders.events.v1" {
+		t.Fatalf("expected kafka topic to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
+func TestNormalizeSchemaAndTable_MQTTPreservesTopicFilter(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "mqtt",
+	}, "topics", "devices/floor1.sensor.v1")
+
+	if schemaOrDb != "topics" || table != "devices/floor1.sensor.v1" {
+		t.Fatalf("expected mqtt topic filter to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
+func TestNormalizeSchemaAndTable_RocketMQPreservesTopicName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "rocketmq",
+	}, "topics", "orders.events.v1")
+
+	if schemaOrDb != "topics" || table != "orders.events.v1" {
+		t.Fatalf("expected rocketmq topic name to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
+func TestNormalizeSchemaAndTable_RabbitMQPreservesDottedQueueName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "rabbitmq",
+	}, "/", "orders.events.v1")
+
+	if schemaOrDb != "/" || table != "orders.events.v1" {
+		t.Fatalf("expected rabbitmq queue to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_KafkaPreservesDottedTopicName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "kafka",
+	}, "topics", "logs.app-1")
+
+	if schemaOrDb != "topics" || table != "logs.app-1" {
+		t.Fatalf("expected kafka metadata topic to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_MQTTPreservesTopicFilter(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "mqtt",
+	}, "topics", "devices/floor1.sensor.v1")
+
+	if schemaOrDb != "topics" || table != "devices/floor1.sensor.v1" {
+		t.Fatalf("expected mqtt metadata topic filter to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_RocketMQPreservesTopicName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "rocketmq",
+	}, "topics", "orders.events.v1")
+
+	if schemaOrDb != "topics" || table != "orders.events.v1" {
+		t.Fatalf("expected rocketmq metadata topic name to stay intact, got %q.%q", schemaOrDb, table)
+	}
+}
+
+func TestNormalizeMetadataSchemaAndTable_RabbitMQPreservesDottedQueueName(t *testing.T) {
+	t.Parallel()
+
+	schemaOrDb, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "rabbitmq",
+	}, "/", "logs.app-1")
+
+	if schemaOrDb != "/" || table != "logs.app-1" {
+		t.Fatalf("expected rabbitmq metadata queue to stay intact, got %q.%q", schemaOrDb, table)
 	}
 }
 

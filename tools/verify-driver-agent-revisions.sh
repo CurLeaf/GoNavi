@@ -69,8 +69,9 @@ normalize_driver() {
   case "$value" in
     doris|diros) echo "diros" ;;
     opengauss|open_gauss|open-gauss) echo "opengauss" ;;
+    gaussdb|gauss_db|gauss-db) echo "gaussdb" ;;
     elasticsearch|elastic) echo "elasticsearch" ;;
-    mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|iris|mongodb|tdengine|clickhouse)
+    mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|gaussdb|iris|mongodb|tdengine|iotdb|clickhouse)
       echo "$value"
       ;;
     *)

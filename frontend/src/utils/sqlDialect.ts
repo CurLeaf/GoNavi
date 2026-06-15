@@ -19,6 +19,7 @@ export type SqlDialect =
   | 'highgo'
   | 'vastbase'
   | 'opengauss'
+  | 'gaussdb'
   | 'oracle'
   | 'dameng'
   | 'sqlserver'
@@ -27,9 +28,16 @@ export type SqlDialect =
   | 'duckdb'
   | 'clickhouse'
   | 'tdengine'
+  | 'iotdb'
+  | 'rocketmq'
+  | 'mqtt'
+  | 'kafka'
+  | 'rabbitmq'
   | 'mongodb'
   | 'redis'
   | 'elasticsearch'
+  | 'chroma'
+  | 'qdrant'
   | 'unknown'
   | string;
 
@@ -66,6 +74,10 @@ export const resolveSqlDialect = (
     case 'open_gauss':
     case 'open-gauss':
       return 'opengauss';
+    case 'gaussdb':
+    case 'gauss_db':
+    case 'gauss-db':
+      return 'gaussdb';
     case 'mssql':
     case 'sql_server':
     case 'sql-server':
@@ -109,17 +121,48 @@ export const resolveSqlDialect = (
     case 'duckdb':
     case 'clickhouse':
     case 'tdengine':
+    case 'iotdb':
     case 'mongodb':
     case 'redis':
     case 'elasticsearch':
       return source;
     case 'elastic':
       return 'elasticsearch';
+    case 'chromadb':
+    case 'chroma-db':
+    case 'chroma':
+      return 'chroma';
+    case 'qdrantdb':
+    case 'qdrant-db':
+    case 'qdrant':
+      return 'qdrant';
+    case 'apache-iotdb':
+    case 'apache_iotdb':
+      return 'iotdb';
+    case 'rocketmq':
+    case 'rocket-mq':
+    case 'rocket_mq':
+    case 'apache-rocketmq':
+    case 'apache_rocketmq':
+    case 'rmq':
+      return 'rocketmq';
+    case 'mqtt':
+    case 'mqtts':
+      return 'mqtt';
+    case 'kafka':
+    case 'apache-kafka':
+    case 'apache_kafka':
+      return 'kafka';
+    case 'rabbitmq':
+    case 'rabbit-mq':
+    case 'rabbit_mq':
+      return 'rabbitmq';
     default:
       break;
   }
 
   if (source.includes('opengauss') || source.includes('open_gauss') || source.includes('open-gauss')) return 'opengauss';
+  if (source.includes('gaussdb') || source.includes('gauss_db') || source.includes('gauss-db')) return 'gaussdb';
   if (source.includes('postgres')) return 'postgres';
   if (source.includes('oceanbase')) return 'oceanbase';
   if (source.includes('mariadb')) return 'mariadb';
@@ -137,9 +180,16 @@ export const resolveSqlDialect = (
   if (source.includes('duckdb')) return 'duckdb';
   if (source.includes('clickhouse')) return 'clickhouse';
   if (source.includes('tdengine')) return 'tdengine';
+  if (source.includes('iotdb')) return 'iotdb';
+  if (source.includes('rocketmq') || source.includes('rocket-mq') || source.includes('rocket_mq') || source === 'rmq') return 'rocketmq';
+  if (source.includes('mqtt')) return 'mqtt';
+  if (source.includes('kafka')) return 'kafka';
+  if (source.includes('rabbitmq') || source.includes('rabbit-mq') || source.includes('rabbit_mq')) return 'rabbitmq';
   if (source.includes('sqlserver') || source.includes('mssql')) return 'sqlserver';
   if (source.includes('iris') || source.includes('intersystems')) return 'iris';
   if (source.includes('elastic')) return 'elasticsearch';
+  if (source.includes('chroma')) return 'chroma';
+  if (source.includes('qdrant')) return 'qdrant';
 
   return source;
 };
@@ -149,7 +199,7 @@ export const isMysqlFamilyDialect = (dbType: string): boolean => (
 );
 
 export const isPgLikeDialect = (dbType: string): boolean => (
-  ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss'].includes(resolveSqlDialect(dbType))
+  ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss', 'gaussdb'].includes(resolveSqlDialect(dbType))
 );
 
 export const isOracleLikeDialect = (dbType: string): boolean => (
@@ -159,7 +209,7 @@ export const isOracleLikeDialect = (dbType: string): boolean => (
 export const isSqlServerDialect = (dbType: string): boolean => resolveSqlDialect(dbType) === 'sqlserver';
 
 export const isBacktickIdentifierDialect = (dbType: string): boolean => (
-  isMysqlFamilyDialect(dbType) || ['clickhouse', 'tdengine'].includes(resolveSqlDialect(dbType))
+  isMysqlFamilyDialect(dbType) || ['clickhouse', 'tdengine', 'iotdb'].includes(resolveSqlDialect(dbType))
 );
 
 const stripIdentifierQuotes = (part: string): string => {
@@ -458,6 +508,19 @@ const TDENGINE_TYPES = optionValues([
   'GEOMETRY',
 ]);
 
+const IOTDB_TYPES = optionValues([
+  'BOOLEAN',
+  'INT32',
+  'INT64',
+  'FLOAT',
+  'DOUBLE',
+  'TEXT',
+  'STRING',
+  'BLOB',
+  'TIMESTAMP',
+  'DATE',
+]);
+
 const DUCKDB_TYPES = optionValues([
   'BOOLEAN',
   'TINYINT',
@@ -502,6 +565,7 @@ export const resolveColumnTypeOptions = (dbType: string): ColumnTypeOption[] => 
   if (dialect === 'duckdb') return DUCKDB_TYPES;
   if (dialect === 'clickhouse') return CLICKHOUSE_TYPES;
   if (dialect === 'tdengine') return TDENGINE_TYPES;
+  if (dialect === 'iotdb') return IOTDB_TYPES;
   return COMMON_TYPES;
 };
 
@@ -553,6 +617,67 @@ const STARROCKS_KEYWORDS = [
 
 const TDENGINE_KEYWORDS = ['LIMIT', 'SLIMIT', 'SOFFSET', 'TAGS', 'USING', 'INTERVAL', 'FILL', 'PARTITION BY'];
 
+const IOTDB_KEYWORDS = [
+  'LIMIT',
+  'OFFSET',
+  'ALIGN BY DEVICE',
+  'DISABLE ALIGN',
+  'GROUP BY',
+  'LEVEL',
+  'FILL',
+  'SLIMIT',
+  'SOFFSET',
+  'CREATE TIMESERIES',
+  'SHOW TIMESERIES',
+  'SHOW DEVICES',
+  'SHOW DATABASES',
+  'STORAGE GROUP',
+  'WITH DATATYPE',
+  'ENCODING',
+  'COMPRESSION',
+];
+
+const ROCKETMQ_KEYWORDS = [
+  'SHOW TOPICS',
+  'DESCRIBE TOPIC',
+  'CONSUME',
+  'FROM',
+  'LIMIT',
+  'OFFSET',
+];
+
+const MQTT_KEYWORDS = [
+  'SHOW TOPICS',
+  'DESCRIBE TOPIC',
+  'CONSUME',
+  'FROM',
+  'LIMIT',
+  'OFFSET',
+];
+
+const KAFKA_KEYWORDS = [
+  'SHOW TOPICS',
+  'SHOW TOPIC',
+  'DESCRIBE TOPIC',
+  'CONSUME',
+  'GROUP',
+  'FROM',
+  'LIMIT',
+  'OFFSET',
+];
+
+const RABBITMQ_KEYWORDS = [
+  'SHOW VHOSTS',
+  'SHOW QUEUES',
+  'SHOW EXCHANGES',
+  'DESCRIBE QUEUE',
+  'DESCRIBE EXCHANGE',
+  'CONSUME',
+  'FROM',
+  'LIMIT',
+  'OFFSET',
+];
+
 export const resolveSqlKeywords = (dbType: string): string[] => {
   const dialect = resolveSqlDialect(dbType);
   if (dialect === 'starrocks') return unique([...COMMON_KEYWORDS, ...MYSQL_KEYWORDS, ...STARROCKS_KEYWORDS]);
@@ -564,6 +689,11 @@ export const resolveSqlKeywords = (dbType: string): string[] => {
   if (dialect === 'duckdb') return unique([...COMMON_KEYWORDS, ...DUCKDB_KEYWORDS]);
   if (dialect === 'clickhouse') return unique([...COMMON_KEYWORDS, ...CLICKHOUSE_KEYWORDS]);
   if (dialect === 'tdengine') return unique([...COMMON_KEYWORDS, ...TDENGINE_KEYWORDS]);
+  if (dialect === 'iotdb') return unique([...COMMON_KEYWORDS, ...IOTDB_KEYWORDS]);
+  if (dialect === 'rocketmq') return unique([...COMMON_KEYWORDS, ...ROCKETMQ_KEYWORDS]);
+  if (dialect === 'mqtt') return unique([...COMMON_KEYWORDS, ...MQTT_KEYWORDS]);
+  if (dialect === 'kafka') return unique([...COMMON_KEYWORDS, ...KAFKA_KEYWORDS]);
+  if (dialect === 'rabbitmq') return unique([...COMMON_KEYWORDS, ...RABBITMQ_KEYWORDS]);
   return COMMON_KEYWORDS;
 };
 
@@ -781,6 +911,19 @@ const TDENGINE_FUNCTIONS = [
   fn('IRATE', 'TDengine - 瞬时变化率'),
 ];
 
+const IOTDB_FUNCTIONS = [
+  fn('NOW', 'IoTDB - 当前时间'),
+  fn('DATE_BIN', 'IoTDB - 时间分桶'),
+  fn('DIFF', 'IoTDB - 差分'),
+  fn('TIME_DIFFERENCE', 'IoTDB - 时间差'),
+  fn('DERIVATIVE', 'IoTDB - 导数'),
+  fn('NON_NEGATIVE_DERIVATIVE', 'IoTDB - 非负导数'),
+  fn('TOP_K', 'IoTDB - Top K'),
+  fn('BOTTOM_K', 'IoTDB - Bottom K'),
+  fn('M4', 'IoTDB - M4 降采样'),
+  fn('EQUAL_SIZE_BUCKET_RANDOM_SAMPLE', 'IoTDB - 等宽随机采样'),
+];
+
 const mergeFunctions = (items: SqlFunctionCompletion[]): SqlFunctionCompletion[] => {
   const seen = new Set<string>();
   const result: SqlFunctionCompletion[] = [];
@@ -804,5 +947,6 @@ export const resolveSqlFunctions = (dbType: string): SqlFunctionCompletion[] => 
   if (dialect === 'duckdb') return mergeFunctions([...COMMON_FUNCTIONS, ...DUCKDB_FUNCTIONS]);
   if (dialect === 'clickhouse') return mergeFunctions([...COMMON_FUNCTIONS, ...CLICKHOUSE_FUNCTIONS]);
   if (dialect === 'tdengine') return mergeFunctions([...COMMON_FUNCTIONS, ...TDENGINE_FUNCTIONS]);
+  if (dialect === 'iotdb') return mergeFunctions([...COMMON_FUNCTIONS, ...IOTDB_FUNCTIONS]);
   return COMMON_FUNCTIONS;
 };

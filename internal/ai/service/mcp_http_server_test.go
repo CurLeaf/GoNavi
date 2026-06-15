@@ -57,7 +57,7 @@ func TestMCPHTTPServerLifecycleFromAIService(t *testing.T) {
 	service := NewServiceWithSecretStore(secretstore.NewUnavailableStore("test"))
 	InitializeLifecycle(service, context.Background())
 	t.Cleanup(func() {
-		service.Shutdown(context.Background())
+		service.Shutdown()
 	})
 
 	initial := service.AIGetMCPHTTPServerStatus()
@@ -123,7 +123,7 @@ func TestMCPHTTPServerStartUsesCustomAddrAndToken(t *testing.T) {
 	service := NewServiceWithSecretStore(secretstore.NewUnavailableStore("test"))
 	InitializeLifecycle(service, context.Background())
 	t.Cleanup(func() {
-		service.Shutdown(context.Background())
+		service.Shutdown()
 	})
 
 	started, err := service.AIStartMCPHTTPServer(ai.MCPHTTPServerOptions{

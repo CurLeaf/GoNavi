@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"net"
 	"net/url"
@@ -15,7 +16,7 @@ import (
 	"GoNavi-Wails/internal/ssh"
 	"GoNavi-Wails/internal/utils"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 type PostgresDB struct {
@@ -23,6 +24,13 @@ type PostgresDB struct {
 	pingTimeout time.Duration
 	forwarder   *ssh.LocalForwarder // Store SSH tunnel forwarder
 }
+
+type postgresSessionExecer struct {
+	*sqlConnStatementExecer
+}
+
+var _ QueryMessageExecer = (*PostgresDB)(nil)
+var _ StatementQueryMessageExecer = (*postgresSessionExecer)(nil)
 
 func resolvePostgresConnectDatabases(config connection.ConnectionConfig) []string {
 	explicit := strings.TrimSpace(config.Database)
@@ -225,6 +233,20 @@ func (p *PostgresDB) QueryContext(ctx context.Context, query string) ([]map[stri
 	return scanRows(rows)
 }
 
+func (p *PostgresDB) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
+	if p.conn == nil {
+		return nil, nil, nil, fmt.Errorf("连接未打开")
+	}
+
+	conn, err := p.conn.Conn(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer conn.Close()
+
+	return queryPostgresConnWithMessages(ctx, conn, query)
+}
+
 func (p *PostgresDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if p.conn == nil {
 		return nil, nil, fmt.Errorf("连接未打开")
@@ -236,6 +258,10 @@ func (p *PostgresDB) Query(query string) ([]map[string]interface{}, []string, er
 	}
 	defer rows.Close()
 	return scanRows(rows)
+}
+
+func (p *PostgresDB) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	return p.QueryContextWithMessages(context.Background(), query)
 }
 
 func (p *PostgresDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
@@ -257,7 +283,7 @@ func (p *PostgresDB) OpenSessionExecer(ctx context.Context) (StatementExecer, er
 	if err != nil {
 		return nil, err
 	}
-	return NewSQLConnStatementExecer(conn), nil
+	return &postgresSessionExecer{sqlConnStatementExecer: &sqlConnStatementExecer{conn: conn}}, nil
 }
 
 func (p *PostgresDB) ExecContext(ctx context.Context, query string) (int64, error) {
@@ -280,6 +306,31 @@ func (p *PostgresDB) Exec(query string) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+func (e *postgresSessionExecer) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	return e.QueryContextWithMessages(context.Background(), query)
+}
+
+func (e *postgresSessionExecer) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
+	if e == nil || e.conn == nil {
+		return nil, nil, nil, fmt.Errorf("连接未打开")
+	}
+	return queryPostgresConnWithMessages(ctx, e.conn, query)
+}
+
+func queryPostgresConnWithMessages(ctx context.Context, conn *sql.Conn, query string) ([]map[string]interface{}, []string, []string, error) {
+	return querySQLConnWithTextNotices(ctx, conn, query, func(driverConn driver.Conn, addNotice func(string)) {
+		if addNotice == nil {
+			pq.SetNoticeHandler(driverConn, nil)
+			return
+		}
+		pq.SetNoticeHandler(driverConn, func(notice *pq.Error) {
+			if notice != nil {
+				addNotice(notice.Message)
+			}
+		})
+	})
 }
 
 func (p *PostgresDB) GetDatabases() ([]string, error) {

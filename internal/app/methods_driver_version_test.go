@@ -469,6 +469,158 @@ func TestElasticsearchDriverDefinitionUsesOptionalAgent(t *testing.T) {
 	}
 }
 
+func TestIoTDBDriverDefinitionUsesOptionalAgent(t *testing.T) {
+	definition, ok := resolveDriverDefinition("iotdb")
+	if !ok {
+		t.Fatal("expected iotdb driver definition")
+	}
+	if definition.Name != "Apache IoTDB" {
+		t.Fatalf("unexpected iotdb driver name: %q", definition.Name)
+	}
+	if definition.BuiltIn {
+		t.Fatal("expected iotdb to be an optional driver agent")
+	}
+	if driverGoModulePathMap["iotdb"] != "github.com/apache/iotdb-client-go" {
+		t.Fatalf("unexpected iotdb go module path: %q", driverGoModulePathMap["iotdb"])
+	}
+	if definition.PinnedVersion != "1.3.7" {
+		t.Fatalf("unexpected iotdb definition pinned version: %q", definition.PinnedVersion)
+	}
+	if definition.DefaultDownloadURL != "builtin://activate/iotdb" {
+		t.Fatalf("unexpected iotdb default download URL: %q", definition.DefaultDownloadURL)
+	}
+	if latestDriverVersionMap["iotdb"] != "1.3.7" {
+		t.Fatalf("unexpected iotdb pinned version: %q", latestDriverVersionMap["iotdb"])
+	}
+
+	tags, err := optionalDriverBuildTags("iotdb", "")
+	if err != nil {
+		t.Fatalf("resolve iotdb build tags failed: %v", err)
+	}
+	if tags != "gonavi_iotdb_driver" {
+		t.Fatalf("unexpected iotdb build tag: %q", tags)
+	}
+}
+
+func TestKafkaDriverDefinitionIsBuiltIn(t *testing.T) {
+	definition, ok := resolveDriverDefinition("apache-kafka")
+	if !ok {
+		t.Fatal("expected kafka driver definition")
+	}
+	if definition.Name != "Kafka" {
+		t.Fatalf("unexpected kafka driver name: %q", definition.Name)
+	}
+	if !definition.BuiltIn {
+		t.Fatal("expected kafka to be a built-in driver")
+	}
+	if definition.PinnedVersion != "" || definition.DefaultDownloadURL != "" {
+		t.Fatalf("expected kafka builtin definition to omit optional-agent metadata: %#v", definition)
+	}
+}
+
+func TestMQTTDriverDefinitionIsBuiltIn(t *testing.T) {
+	definition, ok := resolveDriverDefinition("mqtts")
+	if !ok {
+		t.Fatal("expected mqtt driver definition")
+	}
+	if definition.Name != "MQTT" {
+		t.Fatalf("unexpected mqtt driver name: %q", definition.Name)
+	}
+	if !definition.BuiltIn {
+		t.Fatal("expected mqtt to be a built-in driver")
+	}
+	if definition.PinnedVersion != "" || definition.DefaultDownloadURL != "" {
+		t.Fatalf("expected mqtt builtin definition to omit optional-agent metadata: %#v", definition)
+	}
+}
+
+func TestRocketMQDriverDefinitionIsBuiltIn(t *testing.T) {
+	definition, ok := resolveDriverDefinition("rmq")
+	if !ok {
+		t.Fatal("expected rocketmq driver definition")
+	}
+	if definition.Name != "RocketMQ" {
+		t.Fatalf("unexpected rocketmq driver name: %q", definition.Name)
+	}
+	if !definition.BuiltIn {
+		t.Fatal("expected rocketmq to be a built-in driver")
+	}
+	if definition.PinnedVersion != "" || definition.DefaultDownloadURL != "" {
+		t.Fatalf("expected rocketmq builtin definition to omit optional-agent metadata: %#v", definition)
+	}
+}
+
+func TestRabbitMQDriverDefinitionIsBuiltIn(t *testing.T) {
+	definition, ok := resolveDriverDefinition("rabbit-mq")
+	if !ok {
+		t.Fatal("expected rabbitmq driver definition")
+	}
+	if definition.Name != "RabbitMQ" {
+		t.Fatalf("unexpected rabbitmq driver name: %q", definition.Name)
+	}
+	if !definition.BuiltIn {
+		t.Fatal("expected rabbitmq to be a built-in driver")
+	}
+	if definition.PinnedVersion != "" || definition.DefaultDownloadURL != "" {
+		t.Fatalf("expected rabbitmq builtin definition to omit optional-agent metadata: %#v", definition)
+	}
+}
+
+func TestGoldenDBDriverDefinitionIsBuiltIn(t *testing.T) {
+	definition, ok := resolveDriverDefinition("greatdb")
+	if !ok {
+		t.Fatal("expected goldendb driver definition")
+	}
+	if definition.Name != "GoldenDB" {
+		t.Fatalf("unexpected goldendb driver name: %q", definition.Name)
+	}
+	if !definition.BuiltIn {
+		t.Fatal("expected goldendb to be a built-in driver")
+	}
+	if definition.PinnedVersion != "" || definition.DefaultDownloadURL != "" {
+		t.Fatalf("expected goldendb builtin definition to omit optional metadata: %#v", definition)
+	}
+	if latestDriverVersionMap["goldendb"] != "1.9.3" {
+		t.Fatalf("unexpected goldendb pinned version: %q", latestDriverVersionMap["goldendb"])
+	}
+	if driverGoModulePathMap["goldendb"] != "github.com/go-sql-driver/mysql" {
+		t.Fatalf("unexpected goldendb go module path: %q", driverGoModulePathMap["goldendb"])
+	}
+}
+
+func TestGaussDBDriverDefinitionUsesOptionalAgent(t *testing.T) {
+	definition, ok := resolveDriverDefinition("gaussdb")
+	if !ok {
+		t.Fatal("expected gaussdb driver definition")
+	}
+	if definition.Name != "GaussDB" {
+		t.Fatalf("unexpected gaussdb driver name: %q", definition.Name)
+	}
+	if definition.BuiltIn {
+		t.Fatal("expected gaussdb to be an optional driver agent")
+	}
+	if driverGoModulePathMap["gaussdb"] != "github.com/HuaweiCloudDeveloper/gaussdb-go" {
+		t.Fatalf("unexpected gaussdb go module path: %q", driverGoModulePathMap["gaussdb"])
+	}
+	if definition.PinnedVersion != "v1.0.0-rc1" {
+		t.Fatalf("unexpected gaussdb definition pinned version: %q", definition.PinnedVersion)
+	}
+	if definition.DefaultDownloadURL != "builtin://activate/gaussdb" {
+		t.Fatalf("unexpected gaussdb default download URL: %q", definition.DefaultDownloadURL)
+	}
+	if latestDriverVersionMap["gaussdb"] != "v1.0.0-rc1" {
+		t.Fatalf("unexpected gaussdb pinned version: %q", latestDriverVersionMap["gaussdb"])
+	}
+
+	tags, err := optionalDriverBuildTags("gaussdb", "")
+	if err != nil {
+		t.Fatalf("resolve gaussdb build tags failed: %v", err)
+	}
+	if tags != "gonavi_gaussdb_driver" {
+		t.Fatalf("unexpected gaussdb build tag: %q", tags)
+	}
+}
+
 func TestBuildOptionalDriverInstallPlanMessagePrefersDirectThenBundle(t *testing.T) {
 	message := buildOptionalDriverInstallPlanMessage("SQL Server", "1.9.6", false, false, false, false, 1, 2)
 	if !strings.Contains(message, "先尝试 1 个预编译直链") {

@@ -167,7 +167,7 @@ func normalizeSchemaAndTable(dbType string, dbName string, tableName string) (st
 	}
 
 	switch normalizedType {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		return "public", rawTable
 	case "duckdb":
 		return "main", rawTable
@@ -186,7 +186,7 @@ func qualifiedNameForQuery(dbType string, schema string, table string, original 
 	}
 
 	switch normalizeMigrationDBType(dbType) {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		s := strings.TrimSpace(schema)
 		if s == "" {
 			s = "public"

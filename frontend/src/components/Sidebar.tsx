@@ -25,6 +25,7 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   FileAddOutlined,
   PlusOutlined,
   ReloadOutlined,
+  SendOutlined,
   DeleteOutlined,
   DisconnectOutlined,
   CloudOutlined,
@@ -54,7 +55,7 @@ import {
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 		import { SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
 import { getDbIcon } from './DatabaseIcons';
-		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, CreateSQLFile, CreateSQLDirectory, DeleteSQLFile, DeleteSQLDirectory, RenameSQLFile, RenameSQLDirectory, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
+		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, DBReleaseConnection, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, CreateSQLFile, CreateSQLDirectory, DeleteSQLFile, DeleteSQLDirectory, RenameSQLFile, RenameSQLDirectory, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
@@ -92,6 +93,7 @@ import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQL
 import { SIDEBAR_SQL_EDITOR_DRAG_MIME, encodeSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
 import type { DriverStatusSnapshot } from '../utils/connectionDriverType';
 import JVMModeBadge from './jvm/JVMModeBadge';
+import MessagePublishModal from './MessagePublishModal';
 import {
   SEARCH_SCOPE_LABEL_MAP,
   SEARCH_SCOPE_OPTIONS,
@@ -116,11 +118,13 @@ import {
     V2DatabaseContextMenuView,
     V2ConnectionGroupContextMenuView,
     V2ConnectionContextMenuView,
+    V2SchemaContextMenuView,
     V2TableContextMenuView,
     V2TableGroupContextMenuView,
     type V2DatabaseContextMenuActionKey,
     type V2ConnectionGroupContextMenuActionKey,
     type V2ConnectionContextMenuActionKey,
+    type V2SchemaContextMenuActionKey,
     type V2TableContextMenuActionKey,
     type V2TableContextMenuStats,
     type V2TableGroupContextMenuActionKey,
@@ -204,7 +208,7 @@ type SidebarContextMenuState = {
   sourceX?: number;
   sourceY?: number;
   items: MenuProps['items'];
-  kind?: 'v2-table' | 'v2-database' | 'v2-table-group' | 'v2-connection' | 'v2-connection-group';
+  kind?: 'v2-table' | 'v2-database' | 'v2-schema' | 'v2-table-group' | 'v2-connection' | 'v2-connection-group';
   node?: any;
   rootClassName?: string;
   overlayStyle?: React.CSSProperties;
@@ -229,6 +233,11 @@ type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
 type BatchObjectType = 'table' | 'view';
 type BatchObjectFilterType = 'all' | BatchObjectType;
 type BatchSelectionScope = 'filtered' | 'all';
+type SidebarMessagePublishTarget = {
+  connection: SavedConnection;
+  executionDbName: string;
+  destination: string;
+};
 
 interface BatchObjectItem {
   title: string;
@@ -601,12 +610,16 @@ const Sidebar: React.FC<{
   const [isCreateSchemaModalOpen, setIsCreateSchemaModalOpen] = useState(false);
   const [createSchemaForm] = Form.useForm();
   const [createSchemaTarget, setCreateSchemaTarget] = useState<any>(null);
+  const [isRenameSchemaModalOpen, setIsRenameSchemaModalOpen] = useState(false);
+  const [renameSchemaForm] = Form.useForm();
+  const [renameSchemaTarget, setRenameSchemaTarget] = useState<any>(null);
   const [isRenameDbModalOpen, setIsRenameDbModalOpen] = useState(false);
   const [renameDbForm] = Form.useForm();
   const [renameDbTarget, setRenameDbTarget] = useState<any>(null);
   const [isRenameTableModalOpen, setIsRenameTableModalOpen] = useState(false);
   const [renameTableForm] = Form.useForm();
   const [renameTableTarget, setRenameTableTarget] = useState<any>(null);
+  const [messagePublishTarget, setMessagePublishTarget] = useState<SidebarMessagePublishTarget | null>(null);
   const [isRenameViewModalOpen, setIsRenameViewModalOpen] = useState(false);
   const [renameViewForm] = Form.useForm();
   const [renameViewTarget, setRenameViewTarget] = useState<any>(null);
@@ -1009,6 +1022,7 @@ const Sidebar: React.FC<{
       'highgo',
       'vastbase',
       'opengauss',
+      'gaussdb',
       'open_gauss',
       'open-gauss',
       'sqlserver',
@@ -1023,6 +1037,7 @@ const Sidebar: React.FC<{
       'highgo',
       'vastbase',
       'opengauss',
+      'gaussdb',
       'open_gauss',
       'open-gauss',
       'sqlserver',
@@ -1171,6 +1186,7 @@ const Sidebar: React.FC<{
           case 'vastbase':
           case 'highgo':
           case 'opengauss':
+          case 'gaussdb':
               return [
                   "SELECT n.nspname || '.' || c.relname AS table_name, c.reltuples::bigint AS table_rows",
                   'FROM pg_class c',
@@ -1292,6 +1308,7 @@ const Sidebar: React.FC<{
           case 'highgo':
           case 'vastbase':
           case 'opengauss':
+          case 'gaussdb':
               return [{ sql: `SELECT schemaname AS schema_name, viewname AS view_name FROM pg_catalog.pg_views WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY schemaname, viewname` }];
           case 'sqlserver': {
               const safeDb = quoteSqlServerIdentifier(dbName || 'master');
@@ -1338,6 +1355,7 @@ const Sidebar: React.FC<{
           case 'highgo':
           case 'vastbase':
           case 'opengauss':
+          case 'gaussdb':
               return [{ sql: `SELECT DISTINCT event_object_schema AS schema_name, event_object_table AS table_name, trigger_name FROM information_schema.triggers WHERE trigger_schema NOT IN ('pg_catalog', 'information_schema') AND trigger_schema NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY event_object_schema, event_object_table, trigger_name` }];
           case 'sqlserver': {
               const safeDb = quoteSqlServerIdentifier(dbName || 'master');
@@ -1387,6 +1405,7 @@ const Sidebar: React.FC<{
           case 'highgo':
           case 'vastbase':
           case 'opengauss':
+          case 'gaussdb':
               return normalizeMetadataQuerySpecs([
                   {
                       // PostgreSQL 11+ / 部分 PG-like：通过 prokind 区分 FUNCTION/PROCEDURE
@@ -2540,16 +2559,16 @@ const Sidebar: React.FC<{
     }
   };
 
-  const isNonRelationalDbType = (connectionId: string): boolean => {
+  const isStructureOnlyDbType = (connectionId: string): boolean => {
       const conn = connections.find(c => c.id === connectionId);
       if (!conn) return false;
       const dbType = resolveDataSourceType(conn.config);
-      return dbType === 'elasticsearch' || dbType === 'mongodb' || dbType === 'redis';
+      return dbType === 'elasticsearch' || dbType === 'mongodb' || dbType === 'redis' || dbType === 'iotdb';
   };
 
   const openDesign = (node: any, initialTab: string, readOnly: boolean = false) => {
       const { tableName, dbName, id } = node.dataRef;
-      const forceReadOnly = readOnly || isNonRelationalDbType(id);
+      const forceReadOnly = readOnly || isStructureOnlyDbType(id);
       addTab({
           id: `design-${id}-${dbName}-${tableName}`,
           title: `${forceReadOnly ? '表结构' : '设计表'} (${tableName})`,
@@ -2564,6 +2583,10 @@ const Sidebar: React.FC<{
 
   const openNewTableDesign = (node: any) => {
       const { dbName, id } = node.dataRef;
+      if (isStructureOnlyDbType(id)) {
+          message.warning('当前数据源暂不支持可视化新建表');
+          return;
+      }
       addTab({
           id: `new-table-${id}-${dbName}-${Date.now()}`,
           title: `新建表 - ${dbName}`,
@@ -2907,6 +2930,39 @@ const Sidebar: React.FC<{
       const hide = message.loading(includeData ? `正在备份数据库 ${dbName} (结构+数据)...` : `正在导出数据库 ${dbName} 表结构...`, 0);
       try {
           const res = await (window as any).go.app.App.ExportDatabaseSQL(normalizeConnConfig(conn.config), dbName, includeData);
+          hide();
+          if (res.success) {
+              message.success('导出成功');
+          } else if (res.message !== '已取消') {
+              message.error('导出失败: ' + res.message);
+          }
+      } catch (e: any) {
+          hide();
+          message.error('导出失败: ' + (e?.message || String(e)));
+      }
+  };
+
+  const handleExportSchemaSQL = async (node: any, includeData: boolean) => {
+      const conn = node?.dataRef;
+      const dbName = String(conn?.dbName || '').trim();
+      const schemaName = String(conn?.schemaName || '').trim();
+      if (!conn || !dbName || !schemaName) {
+          message.error('未找到目标模式，无法导出');
+          return;
+      }
+      const hide = message.loading(
+          includeData
+              ? `正在备份模式 ${schemaName} (结构+数据)...`
+              : `正在导出模式 ${schemaName} 表结构...`,
+          0,
+      );
+      try {
+          const res = await (window as any).go.app.App.ExportSchemaSQL(
+              buildRpcConnectionConfig(conn.config, { database: dbName }) as any,
+              dbName,
+              schemaName,
+              includeData,
+          );
           hide();
           if (res.success) {
               message.success('导出成功');
@@ -3970,6 +4026,89 @@ const Sidebar: React.FC<{
       }
   };
 
+  const openRenameSchemaModal = (node: any) => {
+      const dialect = getMetadataDialect(node?.dataRef as SavedConnection);
+      const schemaName = String(node?.dataRef?.schemaName || '').trim();
+      if (!isPostgresSchemaDialect(dialect) || !schemaName) {
+          message.warning('当前节点不支持通过此入口编辑模式');
+          return;
+      }
+      setRenameSchemaTarget(node);
+      renameSchemaForm.setFieldsValue({ newName: schemaName });
+      setIsRenameSchemaModalOpen(true);
+  };
+
+  const handleRenameSchema = async () => {
+      try {
+          const values = await renameSchemaForm.validateFields();
+          const node = renameSchemaTarget;
+          const conn = node?.dataRef;
+          const dbName = String(conn?.dbName || '').trim();
+          const oldSchemaName = String(conn?.schemaName || '').trim();
+          const newSchemaName = String(values?.newName || '').trim();
+          if (!conn || !dbName || !oldSchemaName || !newSchemaName) {
+              message.error('未找到目标模式，无法编辑');
+              return;
+          }
+          if (oldSchemaName === newSchemaName) {
+              message.warning('新旧模式名称相同，无需修改');
+              return;
+          }
+
+          const res = await (window as any).go.app.App.RenameSchema(
+              buildRpcConnectionConfig(conn.config, { database: dbName }) as any,
+              dbName,
+              oldSchemaName,
+              newSchemaName,
+          );
+          if (res.success) {
+              message.success('模式重命名成功');
+              const schemaKeyPrefix = `${conn.id}-${dbName}-schema-${oldSchemaName || 'default'}`;
+              setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
+              setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
+              await loadTables(getDatabaseNodeRef(conn, dbName));
+              setIsRenameSchemaModalOpen(false);
+              setRenameSchemaTarget(null);
+              renameSchemaForm.resetFields();
+          } else {
+              message.error('编辑失败: ' + res.message);
+          }
+      } catch (e) {
+          // Validate failed
+      }
+  };
+
+  const handleDeleteSchema = (node: any) => {
+      const conn = node?.dataRef;
+      const dbName = String(conn?.dbName || '').trim();
+      const schemaName = String(conn?.schemaName || '').trim();
+      if (!conn || !dbName || !schemaName) {
+          message.error('未找到目标模式，无法删除');
+          return;
+      }
+      Modal.confirm({
+          title: '确认删除模式',
+          content: `确定删除模式 "${schemaName}" 吗？这将删除该模式及其中所有对象，操作不可恢复。`,
+          okButtonProps: { danger: true },
+          onOk: async () => {
+              const res = await (window as any).go.app.App.DropSchema(
+                  buildRpcConnectionConfig(conn.config, { database: dbName }) as any,
+                  dbName,
+                  schemaName,
+              );
+              if (res.success) {
+                  message.success('模式删除成功');
+                  const schemaKeyPrefix = `${conn.id}-${dbName}-schema-${schemaName || 'default'}`;
+                  setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
+                  setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
+                  await loadTables(getDatabaseNodeRef(conn, dbName));
+              } else {
+                  message.error('删除失败: ' + res.message);
+              }
+          }
+      });
+  };
+
   const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {
       return buildRpcConnectionConfig(conn.config, {
           database: resolveSidebarRuntimeDatabase(
@@ -4295,7 +4434,7 @@ const Sidebar: React.FC<{
               case 'starrocks':
                   query = `SHOW CREATE VIEW \`${viewName.replace(/`/g, '``')}\``;
                   break;
-              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': {
+              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb': {
                   const parts = splitQualifiedName(viewName);
                   const schema = parts.schemaName || 'public';
                   const name = parts.objectName || viewName;
@@ -4352,7 +4491,7 @@ const Sidebar: React.FC<{
           case 'starrocks':
               template = `CREATE VIEW \`view_name\` AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
               break;
-          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss':
+          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb':
               template = `CREATE OR REPLACE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
               break;
           case 'sqlserver':
@@ -4579,7 +4718,7 @@ const Sidebar: React.FC<{
               case 'starrocks':
                   query = `SHOW CREATE ${routineType} \`${name.replace(/`/g, '``')}\``;
                   break;
-              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': {
+              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb': {
                   const schemaRef = schema || 'public';
                   query = `SELECT pg_get_functiondef(p.oid) AS routine_definition FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = '${escapeSQLLiteral(schemaRef)}' AND p.proname = '${escapeSQLLiteral(name)}' LIMIT 1`;
                   break;
@@ -4650,7 +4789,7 @@ const Sidebar: React.FC<{
                   ? `DELIMITER $$\nCREATE PROCEDURE proc_name(IN param1 INT)\nBEGIN\n    SELECT * FROM table_name WHERE id = param1;\nEND$$\nDELIMITER ;`
                   : `DELIMITER $$\nCREATE FUNCTION func_name(param1 INT)\nRETURNS INT\nDETERMINISTIC\nBEGIN\n    RETURN param1 * 2;\nEND$$\nDELIMITER ;`;
               break;
-          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss':
+          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb':
               template = isProc
                   ? `CREATE OR REPLACE PROCEDURE proc_name(param1 integer)\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    -- procedure body\nEND;\n$$;`
                   : `CREATE OR REPLACE FUNCTION func_name(param1 integer)\nRETURNS integer\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    RETURN param1 * 2;\nEND;\n$$;`;
@@ -4709,6 +4848,37 @@ const Sidebar: React.FC<{
       });
   };
 
+  const resolveMessagePublishTarget = (node: any): SidebarMessagePublishTarget | null => {
+      const connectionId = String(node?.dataRef?.id || '').trim();
+      const liveConnection = connections.find((item) => item.id === connectionId);
+      const sourceConnection = (liveConnection || node?.dataRef) as SavedConnection | undefined;
+      if (!sourceConnection?.config) return null;
+      const capabilities = getDataSourceCapabilities(sourceConnection.config);
+      if (!capabilities.supportsMessagePublish) return null;
+
+      return {
+          connection: sourceConnection,
+          executionDbName: String(node?.dataRef?.dbName || ''),
+          destination: String(node?.dataRef?.tableName || node?.title || '').trim(),
+      };
+  };
+
+  const openMessagePublishModal = (node: any) => {
+      const target = resolveMessagePublishTarget(node);
+      if (!target) {
+          message.warning('当前对象不支持测试发送消息');
+          return;
+      }
+      setMessagePublishTarget(target);
+  };
+
+  const handleMessagePublishSuccess = (result: { destination: string; affectedRows: number }) => {
+      const destination = String(result.destination || '').trim();
+      const suffix = result.affectedRows > 0 ? `（已提交 ${result.affectedRows} 条）` : '';
+      message.success(`测试消息已发送到 ${destination || '目标'}${suffix}`);
+      setMessagePublishTarget(null);
+  };
+
   const handleV2TableContextMenuAction = (node: any, action: V2TableContextMenuActionKey) => {
       switch (action) {
           case 'pin-table':
@@ -4736,6 +4906,9 @@ const Sidebar: React.FC<{
               });
               return;
           }
+          case 'publish-message':
+              openMessagePublishModal(node);
+              return;
           case 'view-ddl':
               openTableDdlInDesigner(node);
               return;
@@ -4922,9 +5095,18 @@ const Sidebar: React.FC<{
       loadDatabases(node);
   };
 
-  const disconnectConnectionNode = (node: any) => {
+  const releaseConnectionResources = async (conn: SavedConnection | undefined) => {
+      if (!conn?.config) return;
+      const res = await DBReleaseConnection(buildRpcConnectionConfig(conn.config, { id: conn.id }) as any);
+      if (res && res.success === false) {
+          throw new Error(res.message || '释放连接失败');
+      }
+  };
+
+  const disconnectConnectionNode = async (node: any) => {
       const connKey = String(node?.key || node?.dataRef?.id || '');
       if (!connKey) return;
+      const conn = (connections.find((item) => item.id === connKey) || node?.dataRef) as SavedConnection | undefined;
       Array.from(loadingNodesRef.current).forEach((loadingKey) => {
           if (loadingKey === `dbs-${connKey}` || loadingKey.startsWith(`tables-${connKey}-`)) {
               loadingNodesRef.current.delete(loadingKey);
@@ -4943,6 +5125,11 @@ const Sidebar: React.FC<{
       setLoadedKeys(prev => prev.filter(k => k !== connKey && !k.toString().startsWith(`${connKey}-`)));
       replaceTreeNodeChildren(connKey, undefined);
       closeTabsByConnection(connKey);
+      try {
+          await releaseConnectionResources(conn);
+      } catch (error: any) {
+          message.warning(error?.message || '连接已从侧边栏断开，但后端连接释放失败');
+      }
       message.success("已断开连接");
   };
 
@@ -5032,7 +5219,7 @@ const Sidebar: React.FC<{
               void handleDuplicateConnection(node.dataRef as SavedConnection);
               return;
           case 'disconnect':
-              disconnectConnectionNode(node);
+              void disconnectConnectionNode(node);
               return;
           case 'delete':
               deleteConnectionNode(node);
@@ -5651,6 +5838,7 @@ const Sidebar: React.FC<{
       const iconType = resolveConnectionIconType(conn);
       if (iconType === 'mysql' || iconType === 'mariadb' || iconType === 'oceanbase') return 'MY';
       if (iconType === 'postgres') return 'PG';
+      if (iconType === 'gaussdb') return 'GS';
       if (iconType === 'redis') return 'R';
       if (iconType === 'mongodb') return 'MO';
       if (iconType === 'oracle') return 'OR';
@@ -5806,7 +5994,8 @@ const Sidebar: React.FC<{
           case 'kingbase':
           case 'vastbase':
           case 'highgo':
-          case 'opengauss': {
+          case 'opengauss':
+          case 'gaussdb': {
               const schema = schemaName || 'public';
               return [
                   "SELECT c.reltuples::bigint AS table_rows, pg_total_relation_size(c.oid) AS data_length, pg_indexes_size(c.oid) AS index_length, 'heap' AS engine",
@@ -5861,6 +6050,7 @@ const Sidebar: React.FC<{
       const statsKey = getV2TableContextMenuStatsKey(node);
       const stats = v2TableContextMenuStats[statsKey];
       const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
+      const supportsMessagePublish = Boolean(resolveMessagePublishTarget(node));
       const isPinned = isSidebarTablePinned(
           pinnedSidebarTables,
           String(node?.dataRef?.id || ''),
@@ -5876,6 +6066,7 @@ const Sidebar: React.FC<{
               isPinned={isPinned}
               supportsTruncate={supportsTableTruncateAction(node.dataRef?.config?.type, node.dataRef?.config?.driver)}
               supportsStarRocksRollup={isStarRocks}
+              supportsMessagePublish={supportsMessagePublish}
               onAction={(action) => {
                   setContextMenu(null);
                   handleV2TableContextMenuAction(node, action);
@@ -5923,6 +6114,40 @@ const Sidebar: React.FC<{
       );
   };
 
+  const handleV2SchemaContextMenuAction = (node: any, action: V2SchemaContextMenuActionKey) => {
+      switch (action) {
+          case 'rename-schema':
+              openRenameSchemaModal(node);
+              return;
+          case 'refresh-schema':
+              void loadTables(getDatabaseNodeRef(node?.dataRef, String(node?.dataRef?.dbName || '').trim()));
+              return;
+          case 'export-schema':
+              void handleExportSchemaSQL(node, false);
+              return;
+          case 'backup-schema-sql':
+              void handleExportSchemaSQL(node, true);
+              return;
+          case 'drop-schema':
+              handleDeleteSchema(node);
+              return;
+          default:
+              return;
+      }
+  };
+
+  const renderV2SchemaContextMenu = (node: any) => (
+      <V2SchemaContextMenuView
+          dbName={String(node?.dataRef?.dbName || '')}
+          schemaName={String(node?.dataRef?.schemaName || node?.title || '')}
+          shortcutPlatform={activeShortcutPlatform}
+          onAction={(action) => {
+              setContextMenu(null);
+              handleV2SchemaContextMenuAction(node, action);
+          }}
+      />
+  );
+
   const renderV2ConnectionContextMenu = (node: any) => {
       const conn = node.dataRef as SavedConnection;
       const capabilities = getDataSourceCapabilities(conn?.config);
@@ -5963,6 +6188,7 @@ const Sidebar: React.FC<{
       if (!menu.node) return null;
       if (menu.kind === 'v2-table') return renderV2TableContextMenu(menu.node);
       if (menu.kind === 'v2-database') return renderV2DatabaseContextMenu(menu.node);
+      if (menu.kind === 'v2-schema') return renderV2SchemaContextMenu(menu.node);
       if (menu.kind === 'v2-table-group') return renderV2TableGroupContextMenu(menu.node);
       if (menu.kind === 'v2-connection') return renderV2ConnectionContextMenu(menu.node);
       if (menu.kind === 'v2-connection-group') return renderV2ConnectionGroupContextMenu(menu.node);
@@ -6400,19 +6626,62 @@ const Sidebar: React.FC<{
     const conn = node.dataRef as SavedConnection;
     const isRedis = conn?.config?.type === 'redis';
 
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'schema') {
+        const dialect = getMetadataDialect(node.dataRef as SavedConnection);
+        const schemaName = String(node?.dataRef?.schemaName || '').trim();
+        if (!isPostgresSchemaDialect(dialect) || !schemaName) {
+            return [];
+        }
+        return [
+            {
+                key: 'rename-schema',
+                label: '编辑模式',
+                icon: <EditOutlined />,
+                onClick: () => openRenameSchemaModal(node)
+            },
+            {
+                key: 'refresh-schema',
+                label: '刷新',
+                icon: <ReloadOutlined />,
+                onClick: () => void loadTables(getDatabaseNodeRef(node.dataRef, node.dataRef.dbName))
+            },
+            {
+                key: 'export-schema',
+                label: '导出当前模式表结构 (SQL)',
+                icon: <ExportOutlined />,
+                onClick: () => void handleExportSchemaSQL(node, false)
+            },
+            {
+                key: 'backup-schema-sql',
+                label: '备份当前模式全部表 (结构+数据 SQL)',
+                icon: <SaveOutlined />,
+                onClick: () => void handleExportSchemaSQL(node, true)
+            },
+            { type: 'divider' },
+            {
+                key: 'drop-schema',
+                label: '删除模式',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => handleDeleteSchema(node)
+            },
+        ];
+    }
+
     // 表分组节点的右键菜单
     if (node.type === 'object-group' && node.dataRef?.groupKey === 'tables') {
         const groupData = node.dataRef; // { ...conn, dbName, groupKey }
         const sortPreferenceKey = `${groupData.id}-${groupData.dbName}`;
         const currentSort = tableSortPreference[sortPreferenceKey] || 'name';
+        const canCreateTable = !isStructureOnlyDbType(String(groupData.id || ''));
 
         return [
-            {
+            ...(canCreateTable ? [{
                 key: 'new-table',
                 label: '新建表',
                 icon: <TableOutlined />,
                 onClick: () => openNewTableDesign(node)
-            },
+            }] : []),
             { type: 'divider' },
             {
                 key: 'sort-by-name',
@@ -6594,22 +6863,7 @@ const Sidebar: React.FC<{
                     key: 'disconnect',
                     label: '断开连接',
                     icon: <DisconnectOutlined />,
-                    onClick: () => {
-                        setConnectionStates(prev => {
-                            const next = { ...prev };
-                            Object.keys(next).forEach(k => {
-                                if (k === node.key || k.startsWith(`${node.key}-`)) {
-                                    delete next[k];
-                                }
-                            });
-                            return next;
-                        });
-                        setExpandedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                        setLoadedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                        replaceTreeNodeChildren(node.key, undefined);
-                        closeTabsByConnection(String(node.key));
-                        message.success("已断开连接");
-                    }
+                    onClick: () => void disconnectConnectionNode(node)
                 },
                 {
                     key: 'delete',
@@ -6734,33 +6988,7 @@ const Sidebar: React.FC<{
                  key: 'disconnect',
                  label: '断开连接',
                  icon: <DisconnectOutlined />,
-                 onClick: () => {
-                     const connId = String(node.key || '');
-                     // 强制清理该连接相关的 loading 标记，避免网络卡住后重连仍被短路。
-                     Array.from(loadingNodesRef.current).forEach((loadingKey) => {
-                         if (loadingKey === `dbs-${connId}` || loadingKey.startsWith(`tables-${connId}-`)) {
-                             loadingNodesRef.current.delete(loadingKey);
-                         }
-                     });
-                     // Reset status recursively
-                     setConnectionStates(prev => {
-                         const next = { ...prev };
-                         Object.keys(next).forEach(k => {
-                             if (k === node.key || k.startsWith(`${node.key}-`)) {
-                                 delete next[k];
-                             }
-                         });
-                         return next;
-                     });
-                     // Collapse node and children
-                     setExpandedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                     // Reset loaded state recursively
-                     setLoadedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-                     // Clear children (undefined to trigger reload)
-                     replaceTreeNodeChildren(node.key, undefined);
-                     closeTabsByConnection(String(node.key));
-                     message.success("已断开连接");
-                 }
+                 onClick: () => void disconnectConnectionNode(node)
              },
              {
                  key: 'delete',
@@ -6845,13 +7073,14 @@ const Sidebar: React.FC<{
        const capabilities = getDataSourceCapabilities(databaseConn?.config);
        const isStarRocks = dialect === 'starrocks';
        const supportsSchemaActions = isPostgresSchemaDialect(dialect);
+       const canCreateTable = !isStructureOnlyDbType(String(databaseConn?.id || ''));
        return [
-           {
+           ...(canCreateTable ? [{
                key: 'new-table',
                label: '新建表',
                icon: <TableOutlined />,
                onClick: () => openNewTableDesign(node)
-           },
+           }] : []),
            ...(supportsSchemaActions ? [
                {
                    key: 'new-schema',
@@ -7095,6 +7324,7 @@ const Sidebar: React.FC<{
         ];
     } else if (node.type === 'table') {
         const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
+        const messagePublishTarget = resolveMessagePublishTarget(node);
         return [
             {
                 key: 'new-query',
@@ -7113,10 +7343,16 @@ const Sidebar: React.FC<{
                    });
                 }
             },
+            ...(messagePublishTarget ? [{
+                key: 'publish-message',
+                label: '测试发送消息',
+                icon: <SendOutlined />,
+                onClick: () => openMessagePublishModal(node),
+            }] : []),
             { type: 'divider' },
             {
                 key: 'design-table',
-                label: '设计表',
+                label: isStructureOnlyDbType(String(node.dataRef?.id || '')) ? '表结构' : '设计表',
                 icon: <EditOutlined />,
                 onClick: () => openDesign(node, 'columns', false)
             },
@@ -7693,6 +7929,28 @@ const Sidebar: React.FC<{
               sourceY: event.clientY,
               items: [],
               kind: 'v2-database',
+              node,
+              rootClassName: 'gn-v2-table-context-menu-popup',
+              overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
+              maxHeight: position.maxHeight,
+          });
+          return;
+      }
+      if (
+          isV2Ui
+          && node?.type === 'object-group'
+          && node?.dataRef?.groupKey === 'schema'
+          && isPostgresSchemaDialect(getMetadataDialect(node.dataRef as SavedConnection))
+          && String(node?.dataRef?.schemaName || '').trim()
+      ) {
+          const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
+          setContextMenu({
+              x: position.x,
+              y: position.y,
+              sourceX: event.clientX,
+              sourceY: event.clientY,
+              items: [],
+              kind: 'v2-schema',
               node,
               rootClassName: 'gn-v2-table-context-menu-popup',
               overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
@@ -8447,6 +8705,23 @@ const Sidebar: React.FC<{
         </Modal>
 
         <Modal
+            title={`编辑模式${renameSchemaTarget?.dataRef?.dbName && renameSchemaTarget?.dataRef?.schemaName ? ` (${renameSchemaTarget.dataRef.dbName}.${renameSchemaTarget.dataRef.schemaName})` : ''}`}
+            open={isRenameSchemaModalOpen}
+            onOk={handleRenameSchema}
+            onCancel={() => {
+                setIsRenameSchemaModalOpen(false);
+                setRenameSchemaTarget(null);
+                renameSchemaForm.resetFields();
+            }}
+        >
+            <Form form={renameSchemaForm} layout="vertical">
+                <Form.Item name="newName" label="模式名称" rules={[{ required: true, message: '请输入模式名称' }]}>
+                    <Input {...noAutoCapInputProps} />
+                </Form.Item>
+            </Form>
+        </Modal>
+
+        <Modal
             title={`重命名数据库${renameDbTarget?.dataRef?.dbName ? ` (${renameDbTarget.dataRef.dbName})` : ''}`}
             open={isRenameDbModalOpen}
             onOk={handleRenameDatabase}
@@ -8913,6 +9188,14 @@ const Sidebar: React.FC<{
             onClose={() => setFindInDbContext({ open: false, connectionId: '', dbName: '' })}
             connectionId={findInDbContext.connectionId}
             dbName={findInDbContext.dbName}
+        />
+        <MessagePublishModal
+            open={Boolean(messagePublishTarget)}
+            connection={messagePublishTarget?.connection || null}
+            executionDbName={messagePublishTarget?.executionDbName || ''}
+            defaultDestination={messagePublishTarget?.destination || ''}
+            onCancel={() => setMessagePublishTarget(null)}
+            onSuccess={handleMessagePublishSuccess}
         />
     </div>
   );

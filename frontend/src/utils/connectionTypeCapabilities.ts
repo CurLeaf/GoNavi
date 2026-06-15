@@ -1,26 +1,52 @@
 export const singleHostUriSchemesByType: Record<string, string[]> = {
   postgres: ["postgresql", "postgres"],
   opengauss: ["opengauss", "jdbc:opengauss", "postgresql", "postgres"],
+  gaussdb: ["gaussdb", "postgresql", "postgres"],
   clickhouse: ["clickhouse"],
   oracle: ["oracle"],
   sqlserver: ["sqlserver"],
   iris: ["iris", "intersystems"],
   redis: ["redis"],
   tdengine: ["tdengine"],
+  iotdb: ["iotdb"],
   dameng: ["dameng", "dm"],
   kingbase: ["kingbase"],
   highgo: ["highgo"],
   vastbase: ["vastbase"],
   elasticsearch: ["http", "https"],
+  chroma: ["http", "https", "chroma"],
+  qdrant: ["http", "https", "qdrant"],
+  rocketmq: ["rocketmq", "rmq"],
+  mqtt: ["mqtt", "mqtts", "tcp", "ssl", "tls"],
+  rabbitmq: ["rabbitmq", "http", "https"],
 };
 
 const normalizeConnectionType = (type: string) =>
-  String(type || "")
-    .trim()
-    .toLowerCase();
+  {
+    const normalized = String(type || "")
+      .trim()
+      .toLowerCase();
+    switch (normalized) {
+      case "goldendb":
+      case "greatdb":
+      case "gdb":
+        return "goldendb";
+      case "rocket-mq":
+      case "rocket_mq":
+      case "apache-rocketmq":
+      case "apache_rocketmq":
+      case "rmq":
+        return "rocketmq";
+      case "mqtts":
+        return "mqtt";
+      default:
+        return normalized;
+    }
+  };
 
 const sslSupportedTypes = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "doris",
@@ -36,10 +62,16 @@ const sslSupportedTypes = new Set([
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "mongodb",
   "redis",
   "tdengine",
   "elasticsearch",
+  "chroma",
+  "qdrant",
+  "mqtt",
+  "kafka",
+  "rabbitmq",
 ]);
 
 export const supportsSSLForType = (type: string) =>
@@ -47,6 +79,7 @@ export const supportsSSLForType = (type: string) =>
 
 const sslCAPathSupportedTypes = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "diros",
@@ -59,13 +92,20 @@ const sslCAPathSupportedTypes = new Set([
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "mongodb",
   "redis",
   "elasticsearch",
+  "chroma",
+  "qdrant",
+  "mqtt",
+  "kafka",
+  "rabbitmq",
 ]);
 
 const sslClientCertificateSupportedTypes = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "diros",
@@ -78,8 +118,12 @@ const sslClientCertificateSupportedTypes = new Set([
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "mongodb",
   "redis",
+  "mqtt",
+  "kafka",
+  "rabbitmq",
 ]);
 
 export const supportsSSLCAPathForType = (type: string) =>
@@ -95,19 +139,21 @@ export const isPostgresCompatibleSSLType = (type: string) =>
     "highgo",
     "vastbase",
     "opengauss",
+    "gaussdb",
   ].includes(normalizeConnectionType(type));
 
 export const isFileDatabaseType = (type: string) =>
   type === "sqlite" || type === "duckdb";
 
 export const isMySQLCompatibleType = (type: string) =>
-  type === "mysql" ||
-  type === "mariadb" ||
-  type === "oceanbase" ||
-  type === "doris" ||
-  type === "diros" ||
-  type === "starrocks" ||
-  type === "sphinx";
+  normalizeConnectionType(type) === "mysql" ||
+  normalizeConnectionType(type) === "goldendb" ||
+  normalizeConnectionType(type) === "mariadb" ||
+  normalizeConnectionType(type) === "oceanbase" ||
+  normalizeConnectionType(type) === "doris" ||
+  normalizeConnectionType(type) === "diros" ||
+  normalizeConnectionType(type) === "starrocks" ||
+  normalizeConnectionType(type) === "sphinx";
 
 export const supportsConnectionParamsForType = (type: string) =>
   isMySQLCompatibleType(type) ||
@@ -116,6 +162,7 @@ export const supportsConnectionParamsForType = (type: string) =>
   type === "highgo" ||
   type === "vastbase" ||
   type === "opengauss" ||
+  type === "gaussdb" ||
   type === "oracle" ||
   type === "sqlserver" ||
   type === "iris" ||
@@ -123,4 +170,11 @@ export const supportsConnectionParamsForType = (type: string) =>
   type === "mongodb" ||
   type === "dameng" ||
   type === "tdengine" ||
-  type === "elasticsearch";
+  type === "iotdb" ||
+  type === "elasticsearch" ||
+  type === "chroma" ||
+  type === "qdrant" ||
+  type === "rocketmq" ||
+  type === "mqtt" ||
+  type === "kafka" ||
+  type === "rabbitmq";

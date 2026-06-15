@@ -13,31 +13,40 @@ import (
 // coreBuiltinDrivers 是始终内置可用的核心驱动，无需额外安装即可使用。
 var coreBuiltinDrivers = map[string]struct{}{
 	"mysql":    {},
+	"goldendb": {},
 	"redis":    {},
 	"oracle":   {},
 	"postgres": {},
+	"chroma":   {},
+	"qdrant":   {},
+	"rocketmq": {},
+	"mqtt":     {},
+	"kafka":    {},
+	"rabbitmq": {},
 }
 
 // optionalGoDrivers 表示需要用户“安装启用”后才能使用的纯 Go 驱动。
 // 注意：这是一种运行时门控（installed.json 标记），并不减少主二进制体积。
 var optionalGoDrivers = map[string]struct{}{
-	"mariadb":    {},
-	"oceanbase":  {},
-	"diros":      {},
-	"starrocks":  {},
-	"sphinx":     {},
-	"sqlserver":  {},
-	"sqlite":     {},
-	"duckdb":     {},
-	"dameng":     {},
-	"kingbase":   {},
-	"highgo":     {},
-	"vastbase":   {},
-	"opengauss":  {},
-	"iris":       {},
-	"mongodb":      {},
-	"tdengine":     {},
-	"clickhouse":   {},
+	"mariadb":       {},
+	"oceanbase":     {},
+	"diros":         {},
+	"starrocks":     {},
+	"sphinx":        {},
+	"sqlserver":     {},
+	"sqlite":        {},
+	"duckdb":        {},
+	"dameng":        {},
+	"kingbase":      {},
+	"highgo":        {},
+	"vastbase":      {},
+	"opengauss":     {},
+	"gaussdb":       {},
+	"iris":          {},
+	"mongodb":       {},
+	"tdengine":      {},
+	"iotdb":         {},
+	"clickhouse":    {},
 	"elasticsearch": {},
 }
 
@@ -62,10 +71,28 @@ func normalizeRuntimeDriverType(driverType string) string {
 		return "kingbase"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
+	case "gaussdb", "gauss_db", "gauss-db":
+		return "gaussdb"
+	case "goldendb", "greatdb", "gdb":
+		return "goldendb"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
 	case "elastic":
 		return "elasticsearch"
+	case "chromadb", "chroma-db":
+		return "chroma"
+	case "qdrantdb", "qdrant-db":
+		return "qdrant"
+	case "rocketmq", "rocket-mq", "rocket_mq", "apache-rocketmq", "apache_rocketmq", "rmq":
+		return "rocketmq"
+	case "mqtt", "mqtts":
+		return "mqtt"
+	case "apache-iotdb", "apache_iotdb", "iotdb":
+		return "iotdb"
+	case "kafka", "apache-kafka", "apache_kafka":
+		return "kafka"
+	case "rabbitmq", "rabbit-mq", "rabbit_mq":
+		return "rabbitmq"
 	default:
 		return normalized
 	}
@@ -75,6 +102,8 @@ func driverDisplayName(driverType string) string {
 	switch normalizeRuntimeDriverType(driverType) {
 	case "mysql":
 		return "MySQL"
+	case "goldendb":
+		return "GoldenDB"
 	case "oracle":
 		return "Oracle"
 	case "redis":
@@ -107,16 +136,32 @@ func driverDisplayName(driverType string) string {
 		return "Vastbase"
 	case "opengauss":
 		return "OpenGauss"
+	case "gaussdb":
+		return "GaussDB"
 	case "iris":
 		return "InterSystems IRIS"
 	case "mongodb":
 		return "MongoDB"
 	case "tdengine":
 		return "TDengine"
+	case "iotdb":
+		return "Apache IoTDB"
 	case "clickhouse":
 		return "ClickHouse"
 	case "elasticsearch":
 		return "Elasticsearch"
+	case "chroma":
+		return "Chroma"
+	case "qdrant":
+		return "Qdrant"
+	case "rocketmq":
+		return "RocketMQ"
+	case "mqtt":
+		return "MQTT"
+	case "kafka":
+		return "Kafka"
+	case "rabbitmq":
+		return "RabbitMQ"
 	default:
 		return strings.ToUpper(strings.TrimSpace(driverType))
 	}

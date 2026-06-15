@@ -35,7 +35,7 @@ const QueryEditorTransactionToolbar: React.FC<QueryEditorTransactionToolbarProps
     ? autoCommitRemainingSeconds !== null && autoCommitRemainingSeconds > 0
       ? `${autoCommitRemainingSeconds}s 后自动提交`
       : '自动提交中'
-    : '未提交';
+    : null;
   const commitLabel = isV2Ui
     ? (
       <>
@@ -56,9 +56,11 @@ const QueryEditorTransactionToolbar: React.FC<QueryEditorTransactionToolbarProps
         whiteSpace: 'nowrap',
       }}
     >
-      <span style={{ fontSize: 12, color: darkMode ? '#d4d4d4' : '#666' }}>
-        {statusText}
-      </span>
+      {statusText ? (
+        <span style={{ fontSize: 12, color: darkMode ? '#d4d4d4' : '#666' }}>
+          {statusText}
+        </span>
+      ) : null}
       <Button
         className={isV2Ui ? 'gn-v2-query-transaction-commit-button' : undefined}
         size="small"

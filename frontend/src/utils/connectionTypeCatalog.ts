@@ -35,6 +35,8 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
       { key: 'highgo', name: 'HighGo (瀚高)' },
       { key: 'vastbase', name: 'Vastbase (海量)' },
       { key: 'opengauss', name: 'OpenGauss' },
+      { key: 'gaussdb', name: 'GaussDB' },
+      { key: 'goldendb', name: 'GoldenDB' },
     ],
   },
   {
@@ -46,9 +48,26 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
     ],
   },
   {
+    label: '向量数据库',
+    items: [
+      { key: 'chroma', name: 'Chroma' },
+      { key: 'qdrant', name: 'Qdrant' },
+    ],
+  },
+  {
     label: '时序数据库',
     items: [
       { key: 'tdengine', name: 'TDengine' },
+      { key: 'iotdb', name: 'Apache IoTDB' },
+    ],
+  },
+  {
+    label: '消息队列',
+    items: [
+      { key: 'rocketmq', name: 'RocketMQ' },
+      { key: 'mqtt', name: 'MQTT' },
+      { key: 'kafka', name: 'Kafka' },
+      { key: 'rabbitmq', name: 'RabbitMQ' },
     ],
   },
   {
@@ -68,6 +87,8 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 3306;
     case 'oceanbase':
       return 2881;
+    case 'goldendb':
+      return 1523;
     case 'doris':
     case 'diros':
     case 'starrocks':
@@ -78,11 +99,14 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 9000;
     case 'postgres':
     case 'opengauss':
+    case 'gaussdb':
       return 5432;
     case 'redis':
       return 6379;
     case 'tdengine':
       return 6041;
+    case 'iotdb':
+      return 6667;
     case 'oracle':
       return 1521;
     case 'dameng':
@@ -97,6 +121,18 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 27017;
     case 'elasticsearch':
       return 9200;
+    case 'chroma':
+      return 8000;
+    case 'qdrant':
+      return 6333;
+    case 'rocketmq':
+      return 9876;
+    case 'mqtt':
+      return 1883;
+    case 'kafka':
+      return 9092;
+    case 'rabbitmq':
+      return 15672;
     case 'highgo':
       return 5866;
     case 'mariadb':
@@ -123,8 +159,24 @@ export const getConnectionTypeHint = (type: string): string => {
       return '单机 / 副本集';
     case 'elasticsearch':
       return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';
+    case 'chroma':
+      return 'Collection 浏览、向量检索和元数据过滤';
+    case 'qdrant':
+      return 'Collection 浏览、向量搜索和 Payload 过滤';
+    case 'iotdb':
+      return 'Storage Group / Device / Timeseries';
+    case 'rocketmq':
+      return 'NameServer / Topic / Consumer Group';
+    case 'mqtt':
+      return 'Broker / Topic Filter / QoS';
+    case 'kafka':
+      return 'Broker / Topic / Consumer Group';
+    case 'rabbitmq':
+      return 'Management API / Virtual Host / Queue';
     case 'oceanbase':
       return 'MySQL / Oracle 租户';
+    case 'goldendb':
+      return 'MySQL 兼容 / 分布式事务';
     case 'sqlite':
     case 'duckdb':
       return '本地文件连接';

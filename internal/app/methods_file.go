@@ -88,14 +88,14 @@ type SQLDirectoryEntry struct {
 }
 
 type appLogTailSnapshot struct {
-	LogPath              string            `json:"logPath"`
-	Keyword              string            `json:"keyword,omitempty"`
-	RequestedLineLimit   int               `json:"requestedLineLimit"`
-	ReturnedLineCount    int               `json:"returnedLineCount"`
-	FileWindowTruncated  bool              `json:"fileWindowTruncated"`
-	MatchedLinesTruncated bool             `json:"matchedLinesTruncated"`
-	LevelBreakdown       map[string]int    `json:"levelBreakdown"`
-	Lines                []string          `json:"lines"`
+	LogPath               string         `json:"logPath"`
+	Keyword               string         `json:"keyword,omitempty"`
+	RequestedLineLimit    int            `json:"requestedLineLimit"`
+	ReturnedLineCount     int            `json:"returnedLineCount"`
+	FileWindowTruncated   bool           `json:"fileWindowTruncated"`
+	MatchedLinesTruncated bool           `json:"matchedLinesTruncated"`
+	LevelBreakdown        map[string]int `json:"levelBreakdown"`
+	Lines                 []string       `json:"lines"`
 }
 
 func normalizeSQLFileName(rawName string) (string, error) {
@@ -806,12 +806,10 @@ func isSQLFileBatchableWriteStatement(dbType string, stmt string) bool {
 	if isPLSQLBlockStatement(stmt) {
 		return false
 	}
-	switch leadingSQLKeyword(stmt) {
-	case "insert", "update", "delete", "replace", "merge", "upsert":
-		return true
-	default:
+	if shouldTryQueryResultFirst(dbType, stmt) {
 		return false
 	}
+	return isBatchableWriteSQLStatement(dbType, stmt)
 }
 
 func sqlFileBatchTransactionSQL(dbType string) (beginSQL string, commitSQL string, rollbackSQL string, ok bool) {
@@ -820,7 +818,7 @@ func sqlFileBatchTransactionSQL(dbType string) (beginSQL string, commitSQL strin
 		return "START TRANSACTION", "COMMIT", "ROLLBACK", true
 	case "sqlserver":
 		return "BEGIN TRANSACTION", "COMMIT TRANSACTION", "ROLLBACK TRANSACTION", true
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlite", "duckdb", "iris":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlite", "duckdb", "iris":
 		return "BEGIN", "COMMIT", "ROLLBACK", true
 	default:
 		return "", "", "", false
@@ -1760,7 +1758,7 @@ func normalizeImportTemporalValue(dbType, columnType, raw string) string {
 
 func isPgLikeBooleanDBType(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "postgres", "postgresql", "pg", "pq", "pgx", "kingbase", "kingbase8", "kingbasees", "kingbasev8", "highgo", "vastbase", "opengauss", "open_gauss", "open-gauss":
+	case "postgres", "postgresql", "pg", "pq", "pgx", "kingbase", "kingbase8", "kingbasees", "kingbasev8", "highgo", "vastbase", "opengauss", "open_gauss", "open-gauss", "gaussdb", "gauss_db", "gauss-db":
 		return true
 	default:
 		return false
@@ -2213,6 +2211,74 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
+func (a *App) ExportSchemaSQL(config connection.ConnectionConfig, dbName string, schemaName string, includeData bool) connection.QueryResult {
+	safeDbName := strings.TrimSpace(dbName)
+	safeSchemaName := strings.TrimSpace(schemaName)
+	if safeDbName == "" {
+		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+	}
+	if safeSchemaName == "" {
+		return connection.QueryResult{Success: false, Message: "模式名称不能为空"}
+	}
+
+	suffix := "schema"
+	if includeData {
+		suffix = "backup"
+	}
+
+	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           fmt.Sprintf("Export %s.%s (SQL)", safeDbName, safeSchemaName),
+		DefaultFilename: fmt.Sprintf("%s_%s_%s.sql", safeDbName, safeSchemaName, suffix),
+	})
+	if err != nil || filename == "" {
+		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+
+	runConfig := normalizeRunConfig(config, dbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	tables, err := dbInst.GetTables(dbName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	viewLookup := listViewNameLookup(dbInst, runConfig, dbName)
+	filteredTables := filterExportObjectsBySchema(runConfig, dbName, tables, safeSchemaName)
+	filteredViews := filterExportViewLookupBySchema(runConfig, dbName, viewLookup, safeSchemaName)
+	objects := buildExportObjectOrder(runConfig, dbName, filteredTables, filteredViews, true)
+	if len(objects) == 0 {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("未在模式 %s 下获取到可导出的表或视图", safeSchemaName)}
+	}
+
+	f, err := os.Create(filename)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	defer f.Close()
+
+	w := bufio.NewWriterSize(f, 1024*1024)
+	defer w.Flush()
+
+	if err := writeSQLHeader(w, runConfig, dbName); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := w.WriteString(fmt.Sprintf("-- Schema: %s\n\n", safeSchemaName)); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	for _, objectName := range objects {
+		if err := dumpTableSQL(w, dbInst, runConfig, dbName, objectName, true, includeData, filteredViews); err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+	}
+	if err := writeSQLFooter(w, runConfig); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	return connection.QueryResult{Success: true, Message: "导出完成"}
+}
+
 type tableDataClearMode string
 
 const (
@@ -2222,7 +2288,7 @@ const (
 
 func supportsTruncateTableForDBType(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "iris", "oracle", "dameng", "clickhouse", "duckdb":
+	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "iris", "oracle", "dameng", "clickhouse", "duckdb":
 		return true
 	default:
 		return false
@@ -2510,6 +2576,56 @@ func buildExportObjectOrder(
 	return append(tables, views...)
 }
 
+func filterExportObjectsBySchema(
+	config connection.ConnectionConfig,
+	dbName string,
+	rawObjects []string,
+	schemaName string,
+) []string {
+	safeSchemaName := strings.TrimSpace(schemaName)
+	if safeSchemaName == "" {
+		return append([]string(nil), rawObjects...)
+	}
+
+	filtered := make([]string, 0, len(rawObjects))
+	for _, rawName := range rawObjects {
+		objectName := strings.TrimSpace(rawName)
+		if objectName == "" {
+			continue
+		}
+		objectSchemaName, _ := normalizeSchemaAndTable(config, dbName, objectName)
+		if strings.EqualFold(strings.TrimSpace(objectSchemaName), safeSchemaName) {
+			filtered = append(filtered, objectName)
+		}
+	}
+	return filtered
+}
+
+func filterExportViewLookupBySchema(
+	config connection.ConnectionConfig,
+	dbName string,
+	viewLookup map[string]string,
+	schemaName string,
+) map[string]string {
+	safeSchemaName := strings.TrimSpace(schemaName)
+	if safeSchemaName == "" {
+		cloned := make(map[string]string, len(viewLookup))
+		for key, value := range viewLookup {
+			cloned[key] = value
+		}
+		return cloned
+	}
+
+	filtered := make(map[string]string, len(viewLookup))
+	for key, objectName := range viewLookup {
+		objectSchemaName, _ := normalizeSchemaAndTable(config, dbName, objectName)
+		if strings.EqualFold(strings.TrimSpace(objectSchemaName), safeSchemaName) {
+			filtered[key] = objectName
+		}
+	}
+	return filtered
+}
+
 func mapValuesSorted(values map[string]string) []string {
 	if len(values) == 0 {
 		return nil
@@ -2587,7 +2703,7 @@ func buildListViewQueries(config connection.ConnectionConfig, dbName string) []s
 			queries = append(queries, fmt.Sprintf("SHOW FULL TABLES FROM %s WHERE Table_type = 'VIEW'", quoteIdentByType("mysql", dbName)))
 		}
 		return queries
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		return []string{
 			`SELECT table_schema AS schema_name, table_name AS object_name FROM information_schema.views WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_schema, table_name`,
 		}
@@ -2694,7 +2810,7 @@ func buildViewCreateQueries(config connection.ConnectionConfig, dbName, schemaNa
 		return []string{
 			fmt.Sprintf("SHOW CREATE VIEW %s", quoteIdentByType("mysql", safeView)),
 		}
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		if safeSchema == "" {
 			safeSchema = "public"
 		}

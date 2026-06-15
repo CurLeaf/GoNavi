@@ -114,6 +114,10 @@ export function DBQueryWithCancel(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DBQueryWithCancel'](arg1, arg2, arg3, arg4);
 }
 
+export function DBReleaseConnection(arg1) {
+  return window['go']['app']['App']['DBReleaseConnection'](arg1);
+}
+
 export function DBRollbackTransaction(arg1) {
   return window['go']['app']['App']['DBRollbackTransaction'](arg1);
 }
@@ -166,6 +170,10 @@ export function DropFunction(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DropFunction'](arg1, arg2, arg3, arg4);
 }
 
+export function DropSchema(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DropSchema'](arg1, arg2, arg3);
+}
+
 export function DropTable(arg1, arg2, arg3) {
   return window['go']['app']['App']['DropTable'](arg1, arg2, arg3);
 }
@@ -200,6 +208,10 @@ export function ExportQuery(arg1, arg2, arg3, arg4, arg5) {
 
 export function ExportSQLFile(arg1, arg2) {
   return window['go']['app']['App']['ExportSQLFile'](arg1, arg2);
+}
+
+export function ExportSchemaSQL(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExportSchemaSQL'](arg1, arg2, arg3, arg4);
 }
 
 export function ExportTable(arg1, arg2, arg3, arg4) {
@@ -522,6 +534,10 @@ export function RenameSQLFile(arg1, arg2) {
   return window['go']['app']['App']['RenameSQLFile'](arg1, arg2);
 }
 
+export function RenameSchema(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RenameSchema'](arg1, arg2, arg3, arg4);
+}
+
 export function RenameTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['RenameTable'](arg1, arg2, arg3, arg4);
 }
@@ -602,8 +618,8 @@ export function SetWindowTranslucency(arg1, arg2) {
   return window['go']['app']['App']['SetWindowTranslucency'](arg1, arg2);
 }
 
-export function Shutdown(arg1) {
-  return window['go']['app']['App']['Shutdown'](arg1);
+export function Shutdown() {
+  return window['go']['app']['App']['Shutdown']();
 }
 
 export function StartSecurityUpdate(arg1) {

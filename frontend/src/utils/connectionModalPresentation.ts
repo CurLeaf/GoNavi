@@ -40,6 +40,8 @@ export type ConnectionConfigLayoutKind =
   | 'oracle'
   | 'file'
   | 'search'
+  | 'vector'
+  | 'timeseries'
   | 'custom'
   | 'jvm'
   | 'generic-sql';
@@ -56,6 +58,7 @@ type ConnectionConfigSectionCopy = {
 
 const mysqlCompatibleTypes = new Set([
   'mysql',
+  'goldendb',
   'mariadb',
   'oceanbase',
   'doris',
@@ -69,6 +72,7 @@ const postgresCompatibleTypes = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
 ]);
 const fileDatabaseTypes = new Set(['sqlite', 'duckdb']);
 
@@ -160,6 +164,10 @@ export const getConnectionConfigLayoutKindLabel = (
       return '文件型数据库';
     case 'search':
       return '搜索引擎';
+    case 'vector':
+      return '向量数据库';
+    case 'timeseries':
+      return '时序数据库';
     case 'custom':
       return '自定义连接';
     case 'jvm':
@@ -239,6 +247,87 @@ export const resolveConnectionConfigLayout = (
   if (type === 'elasticsearch') {
     return {
       kind: 'search',
+      sections: [
+        'identity',
+        'uri',
+        'target',
+        'service',
+        'credentials',
+        'databaseScope',
+      ],
+    };
+  }
+  if (type === 'chroma' || type === 'qdrant') {
+    return {
+      kind: 'vector',
+      sections: [
+        'identity',
+        'uri',
+        'target',
+        'service',
+        'credentials',
+        'databaseScope',
+      ],
+    };
+  }
+  if (type === 'iotdb') {
+    return {
+      kind: 'timeseries',
+      sections: [
+        'identity',
+        'uri',
+        'target',
+        'service',
+        'credentials',
+        'databaseScope',
+      ],
+    };
+  }
+  if (type === 'mqtt') {
+    return {
+      kind: 'generic-sql',
+      sections: [
+        'identity',
+        'uri',
+        'target',
+        'connectionMode',
+        'replica',
+        'service',
+        'credentials',
+      ],
+    };
+  }
+  if (type === 'rocketmq') {
+    return {
+      kind: 'generic-sql',
+      sections: [
+        'identity',
+        'uri',
+        'target',
+        'connectionMode',
+        'replica',
+        'service',
+        'credentials',
+      ],
+    };
+  }
+  if (type === 'kafka') {
+    return {
+      kind: 'generic-sql',
+      sections: [
+        'identity',
+        'uri',
+        'target',
+        'connectionMode',
+        'replica',
+        'service',
+        'credentials',
+      ],
+    };
+  }
+  if (type === 'rabbitmq') {
+    return {
+      kind: 'generic-sql',
       sections: [
         'identity',
         'uri',

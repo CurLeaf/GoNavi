@@ -336,6 +336,105 @@ func isSQLKeywordByte(ch byte) bool {
 	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_'
 }
 
+func normalizeSQLClassifierDBType(dbType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(dbType))
+	switch normalized {
+	case "postgresql":
+		return "postgres"
+	case "mssql", "sql_server", "sql-server":
+		return "sqlserver"
+	case "open_gauss", "open-gauss":
+		return "opengauss"
+	case "gauss_db", "gauss-db":
+		return "gaussdb"
+	case "kingbase8", "kingbasees", "kingbasev8":
+		return "kingbase"
+	default:
+		return normalized
+	}
+}
+
+func isSQLServerDBType(dbType string) bool {
+	return normalizeSQLClassifierDBType(dbType) == "sqlserver"
+}
+
+func isOracleLikeDBType(dbType string) bool {
+	switch normalizeSQLClassifierDBType(dbType) {
+	case "oracle", "dameng":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPostgresNoticeCapableDBType(dbType string) bool {
+	switch normalizeSQLClassifierDBType(dbType) {
+	case "postgres", "opengauss":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSQLSelectIntoStatement(query string) bool {
+	keyword, _ := sqlDataOperationInfo(query)
+	return keyword == "select" && findTopLevelSQLKeyword(query, 0, "into") >= 0
+}
+
+func sqlContainsKeyword(text string, want string) bool {
+	for pos := 0; pos < len(text); {
+		if next, ok := skipSQLQuotedOrComment(text, pos); ok {
+			pos = next
+			continue
+		}
+		if isSQLKeywordByte(text[pos]) {
+			end := pos + 1
+			for end < len(text) && isSQLKeywordByte(text[end]) {
+				end++
+			}
+			if strings.EqualFold(text[pos:end], want) {
+				return true
+			}
+			pos = end
+			continue
+		}
+		pos++
+	}
+	return false
+}
+
+func sqlWriteStatementReturnsRows(dbType string, query string) bool {
+	keyword, withHasWrite := sqlDataOperationInfo(query)
+	if withHasWrite && keyword == "select" {
+		return true
+	}
+	if !isSQLDataWriteKeyword(keyword) {
+		return false
+	}
+	if !isOracleLikeDBType(dbType) && findTopLevelSQLKeyword(query, 0, "returning") >= 0 {
+		return true
+	}
+	if isSQLServerDBType(dbType) && findTopLevelSQLKeyword(query, 0, "output") >= 0 {
+		return true
+	}
+	return false
+}
+
+func sqlServerControlFlowMayReturnMessages(query string) bool {
+	switch leadingSQLKeyword(query) {
+	case "if", "begin", "while", "declare", "try", "catch":
+		return sqlContainsKeyword(query, "exec") ||
+			sqlContainsKeyword(query, "execute") ||
+			sqlContainsKeyword(query, "print") ||
+			sqlContainsKeyword(query, "raiserror") ||
+			sqlContainsKeyword(query, "throw") ||
+			sqlContainsKeyword(query, "dbcc") ||
+			sqlContainsKeyword(query, "set")
+	default:
+		return false
+	}
+}
+
 func isReadOnlySQLQuery(dbType string, query string) bool {
 	if strings.ToLower(strings.TrimSpace(dbType)) == "mongodb" && strings.HasPrefix(strings.TrimSpace(query), "{") {
 		return true
@@ -345,8 +444,11 @@ func isReadOnlySQLQuery(dbType string, query string) bool {
 	if withHasWrite {
 		return false
 	}
+	if keyword == "select" && isSQLSelectIntoStatement(query) {
+		return false
+	}
 	switch keyword {
-	case "select", "with", "show", "describe", "desc", "explain", "pragma", "values":
+	case "select", "with", "show", "describe", "desc", "explain", "pragma", "values", "consume":
 		return true
 	default:
 		return false
@@ -360,6 +462,9 @@ func isBatchableWriteSQLStatement(dbType string, query string) bool {
 
 	keyword, withHasWrite := sqlDataOperationInfo(query)
 	if withHasWrite {
+		return true
+	}
+	if keyword == "select" && isSQLSelectIntoStatement(query) {
 		return true
 	}
 	return isSQLDataWriteKeyword(keyword)
@@ -381,10 +486,12 @@ func sanitizeSQLForPgLike(dbType string, query string) string {
 		normalizedType = "postgres"
 	case "kingbase8", "kingbasees", "kingbasev8":
 		normalizedType = "kingbase"
+	case "gauss_db", "gauss-db":
+		normalizedType = "gaussdb"
 	}
 
 	switch normalizedType {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		// 有些情况下会出现多层重复引用（例如 """"schema"""" 或 ""schema"""），单次修复不一定收敛。
 		// 这里做有限次数的迭代，直到输出不再变化。
 		out := query

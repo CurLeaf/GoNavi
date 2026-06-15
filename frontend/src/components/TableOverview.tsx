@@ -4,7 +4,7 @@ import { Input, Spin, Empty, Dropdown, message, Tooltip, Modal, Button } from 'a
 import type { MenuProps } from 'antd';
 import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined, WarningOutlined } from '@ant-design/icons';
 import { buildSidebarTablePinKey, useStore } from '../store';
-import { DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
+import { DBGetTables, DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
 import type { TabData } from '../types';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
@@ -120,18 +120,25 @@ const getMetadataDialect = (connType: string, driver?: string, oceanBaseProtocol
     if (type === 'custom') {
         const d = (driver || '').trim().toLowerCase();
         if (d === 'diros' || d === 'doris') return 'mysql';
+        if (d === 'goldendb' || d === 'greatdb' || d === 'gdb') return 'mysql';
         if (d === 'oceanbase') return normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
         if (d === 'opengauss' || d === 'open_gauss' || d === 'open-gauss') return 'opengauss';
+        if (d === 'gaussdb' || d === 'gauss_db' || d === 'gauss-db') return 'gaussdb';
         return d;
     }
     if (type === 'oceanbase' && normalizeOceanBaseProtocol(oceanBaseProtocol) === 'oracle') return 'oracle';
-    if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
+    if (type === 'goldendb' || type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
     if (type === 'dameng') return 'dm';
     return type;
 };
 
 const buildTableStatusSQL = (dialect: string, dbName: string, schemaName?: string): string => {
         const escapeLiteral = (s: string) => s.replace(/'/g, "''");
+        const iotdbDevicePattern = (name: string) => {
+            const normalized = String(name || '').trim().replace(/[`"]/g, '');
+            if (!normalized) return '';
+            return normalized.endsWith('.**') ? normalized : `${normalized}.**`;
+        };
         switch (dialect) {
         case 'mysql':
         case 'starrocks':
@@ -153,7 +160,8 @@ ORDER BY table_name`;
         case 'kingbase':
         case 'vastbase':
         case 'highgo':
-        case 'opengauss': {
+        case 'opengauss':
+        case 'gaussdb': {
             const schema = schemaName || 'public';
             return `
 SELECT
@@ -190,6 +198,10 @@ ORDER BY s.name, t.name`;
             return `SELECT name AS table_name, comment AS table_comment, total_rows AS table_rows, total_bytes AS data_length, 0 AS index_length FROM system.tables WHERE database = '${escapeLiteral(dbName)}' AND engine NOT IN ('View', 'MaterializedView') ORDER BY name`;
         case 'tdengine':
             return `SHOW TABLES FROM \`${dbName.replace(/`/g, '``')}\``;
+        case 'iotdb': {
+            const pattern = iotdbDevicePattern(dbName);
+            return pattern ? `SHOW DEVICES ${pattern}` : 'SHOW DEVICES';
+        }
         case 'dm':
         case 'oracle': {
             const owner = (schemaName || dbName).toUpperCase();
@@ -219,7 +231,7 @@ const parseTableStats = (dialect: string, rows: Record<string, any>[]): TableSta
         };
 
         return {
-            name: strVal(['Name', 'name', 'table_name', 'tablename', 'TABLE_NAME']),
+            name: strVal(['Name', 'name', 'table_name', 'tablename', 'TABLE_NAME', 'Table', 'table', 'Device', 'device']),
             comment: strVal(['Comment', 'table_comment', 'TABLE_COMMENT', 'comments']),
             rows: numVal(['Rows', 'table_rows', 'TABLE_ROWS', 'num_rows', 'reltuples', 'total_rows']),
             dataSize: numVal(['Data_length', 'data_length', 'DATA_LENGTH', 'total_bytes']),
@@ -263,6 +275,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         [connection?.config?.driver, connection?.config?.oceanBaseProtocol, connection?.config?.type]
     );
     const schemaName = String((tab as any).schemaName || '').trim();
+    const supportsDesignWrite = metadataDialect !== 'iotdb';
     const autoFetchVisible = useAutoFetchVisibility();
 
     const loadData = useCallback(async () => {
@@ -277,6 +290,15 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 useSSH: connection.config.useSSH || false,
                 ssh: connection.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
             };
+            if (metadataDialect === 'tdengine') {
+                const res = await DBGetTables(buildRpcConnectionConfig(config) as any, tab.dbName || '');
+                if (res.success && Array.isArray(res.data)) {
+                    setTables(parseTableStats(metadataDialect, res.data));
+                } else {
+                    message.error('获取表信息失败: ' + (res.message || '未知错误'));
+                }
+                return;
+            }
             const sql = buildTableStatusSQL(metadataDialect, tab.dbName || '', schemaName);
             const res = await DBQuery(buildRpcConnectionConfig(config) as any, tab.dbName || '', sql);
             if (res.success && Array.isArray(res.data)) {
@@ -415,17 +437,18 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const openDesign = useCallback((tableName: string) => {
         if (!connection) return;
         setActiveContext({ connectionId: connection.id, dbName: tab.dbName || '' });
+        const structureOnly = !supportsDesignWrite;
         addTab({
             id: `design-${connection.id}-${tab.dbName}-${tableName}`,
-            title: `设计表 (${tableName})`,
+            title: `${structureOnly ? '表结构' : '设计表'} (${tableName})`,
             type: 'design',
             connectionId: connection.id,
             dbName: tab.dbName,
             tableName,
             initialTab: 'columns',
-            readOnly: false,
+            readOnly: structureOnly,
         });
-    }, [connection, tab.dbName, addTab, setActiveContext]);
+    }, [connection, tab.dbName, addTab, setActiveContext, supportsDesignWrite]);
 
     const openTableDdl = useCallback((tableName: string) => {
         if (!connection) return;
@@ -827,7 +850,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const buildLegacyTableContextMenuItems = useCallback((table: TableStatRow): MenuProps['items'] => [
         { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => openQueryForTable(table.name) },
         { type: 'divider' },
-        { key: 'design-table', label: '设计表', icon: <EditOutlined />, onClick: () => openDesign(table.name) },
+        { key: 'design-table', label: supportsDesignWrite ? '设计表' : '表结构', icon: <EditOutlined />, onClick: () => openDesign(table.name) },
         { key: 'copy-table-name', label: '复制表名', icon: <CopyOutlined />, onClick: () => handleCopyTableName(table.name) },
         { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(table.name) },
         { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(table.name, 'sql') },
@@ -855,6 +878,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         handleTableDataDangerAction,
         openDesign,
         openQueryForTable,
+        supportsDesignWrite,
     ]);
 
     const renderOverviewSectionTitle = (section: OverviewTableSection) => (

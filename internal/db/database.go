@@ -471,6 +471,9 @@ var databaseFactories = map[string]databaseFactory{
 	"mysql": func() Database {
 		return &MySQLDB{}
 	},
+	"goldendb": func() Database {
+		return &MySQLDB{}
+	},
 	"postgres": func() Database {
 		return &PostgresDB{}
 	},
@@ -479,6 +482,24 @@ var databaseFactories = map[string]databaseFactory{
 	},
 	"custom": func() Database {
 		return &CustomDB{}
+	},
+	"chroma": func() Database {
+		return &ChromaDB{}
+	},
+	"qdrant": func() Database {
+		return &QdrantDB{}
+	},
+	"rocketmq": func() Database {
+		return &RocketMQDB{}
+	},
+	"mqtt": func() Database {
+		return &MQTTDB{}
+	},
+	"kafka": func() Database {
+		return &KafkaDB{}
+	},
+	"rabbitmq": func() Database {
+		return &RabbitMQDB{}
 	},
 }
 
@@ -510,8 +531,24 @@ func normalizeDatabaseType(dbType string) string {
 		return "kingbase"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
+	case "gaussdb", "gauss_db", "gauss-db":
+		return "gaussdb"
+	case "goldendb", "greatdb", "gdb":
+		return "goldendb"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
+	case "chromadb", "chroma-db":
+		return "chroma"
+	case "qdrantdb", "qdrant-db":
+		return "qdrant"
+	case "rocketmq", "rocket-mq", "rocket_mq", "apache-rocketmq", "apache_rocketmq", "rmq":
+		return "rocketmq"
+	case "mqtt", "mqtts":
+		return "mqtt"
+	case "kafka", "apache-kafka", "apache_kafka":
+		return "kafka"
+	case "rabbitmq", "rabbit-mq", "rabbit_mq":
+		return "rabbitmq"
 	default:
 		return normalized
 	}

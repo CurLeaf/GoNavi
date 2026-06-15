@@ -105,6 +105,8 @@ func buildSchemaMigrationPlanLegacy(config SyncConfig, tableName string, sourceD
 	plan.PlannedAction = "使用已有目标表导入"
 	if targetType == "tdengine" {
 		plan.Warnings = append(plan.Warnings, "TDengine 目标端当前仅支持 INSERT 写入；若存在差异更新/删除，执行期会被拒绝，请优先使用仅插入或全量覆盖模式")
+	} else if targetType == "iotdb" {
+		plan.Warnings = append(plan.Warnings, "IoTDB 目标端当前仅支持 INSERT 写入；若存在差异更新/删除，执行期会被拒绝，请优先使用仅插入模式")
 	}
 
 	sourceCols, sourceExists, err := inspectTableColumns(sourceDB, plan.SourceSchema, plan.SourceTable)
@@ -573,7 +575,7 @@ func intFromAny(v interface{}) int {
 
 func isPGLikeSource(dbType string) bool {
 	switch normalizeMigrationDBType(dbType) {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "duckdb":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "duckdb":
 		return true
 	default:
 		return false
@@ -582,7 +584,7 @@ func isPGLikeSource(dbType string) bool {
 
 func isPGLikeSameFamilyDDLType(dbType string) bool {
 	switch normalizeMigrationDBType(dbType) {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		return true
 	default:
 		return false
@@ -1358,7 +1360,7 @@ func mapPGLikeDefaultToMySQL(col connection.ColumnDefinition, targetType string)
 
 func isPGLikeTarget(dbType string) bool {
 	switch normalizeMigrationDBType(dbType) {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "duckdb":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "duckdb":
 		return true
 	default:
 		return false

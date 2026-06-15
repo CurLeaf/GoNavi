@@ -7,6 +7,7 @@ import { SavedConnection } from '../types';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues, resolveTextInputSafeBackdropFilter } from '../utils/appearance';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
 import { formatLocalDateTimeLiteral, normalizeTemporalLiteralText } from './dataGridCopyInsert';
 import { buildDataSyncRequest, type SourceDatasetMode, validateDataSyncSelection } from './dataSyncRequest';
 const { Title, Text } = Typography;
@@ -46,26 +47,11 @@ type TableOps = {
 type WorkflowType = 'sync' | 'migration';
 
 const quoteSqlIdent = (dbType: string, ident: string): string => {
-  const raw = String(ident || '').trim();
-  if (!raw) return raw;
-  const t = String(dbType || '').toLowerCase();
-  if (t === 'mysql' || t === 'mariadb' || t === 'oceanbase' || t === 'diros' || t === 'starrocks' || t === 'sphinx' || t === 'clickhouse' || t === 'tdengine') {
-    return `\`${raw.replace(/`/g, '``')}\``;
-  }
-  if (t === 'sqlserver') {
-    return `[${raw.replace(/]/g, ']]')}]`;
-  }
-  return `"${raw.replace(/"/g, '""')}"`;
+  return quoteIdentPart(dbType, String(ident || '').trim());
 };
 
 const quoteSqlTable = (dbType: string, tableName: string): string => {
-  const raw = String(tableName || '').trim();
-  if (!raw) return raw;
-  if (!raw.includes('.')) return quoteSqlIdent(dbType, raw);
-  return raw
-    .split('.')
-    .map((part) => quoteSqlIdent(dbType, part))
-    .join('.');
+  return quoteQualifiedIdent(dbType, String(tableName || '').trim());
 };
 
 const toSqlLiteral = (value: any, dbType: string): string => {

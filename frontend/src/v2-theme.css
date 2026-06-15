@@ -4797,26 +4797,45 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar {
   padding: 8px 12px !important;
   gap: 6px 10px !important;
   align-items: center !important;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
   background: var(--gn-bg-panel) !important;
   border-bottom: 0.5px solid var(--gn-br-1) !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-main {
+  display: inline-flex;
+  width: max-content;
+  min-width: 100%;
+  gap: 6px 10px !important;
+  align-items: center !important;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-selects,
 body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
   min-width: 0;
   gap: 6px !important;
+  flex: 0 0 auto !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-selects {
-  flex: 0 1 auto !important;
   flex-wrap: nowrap;
   max-width: 760px;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
-  flex: 0 1 auto !important;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-start;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-transaction-toolbar {
+  display: inline-flex;
+  max-width: 100%;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-select {
@@ -4867,23 +4886,30 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-btn {
   font-size: 12.5px !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group {
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group {
   display: inline-flex !important;
   align-items: center;
   flex: 0 0 auto;
   gap: 6px;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group > .ant-btn {
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-pair {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group > .ant-btn {
   flex: 0 0 auto;
   border-radius: 9px !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group > .ant-btn:not(:first-child) {
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group > .ant-btn:not(:first-child) {
   margin-left: 0 !important;
 }
 
-body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group.ant-btn-group > .ant-btn::before {
+body[data-ui-version="v2"] .gn-v2-query-toolbar-action-group > .ant-btn::before {
   display: none !important;
 }
 
@@ -4895,6 +4921,17 @@ body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button {
   background: var(--gn-accent-soft) !important;
   color: var(--gn-accent-2) !important;
   font-weight: 750 !important;
+  transition: background-color 120ms ease, box-shadow 120ms ease, border-color 120ms ease !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:hover,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus-visible,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:active {
+  border-color: rgba(22, 163, 74, 0.18) !important;
+  background: color-mix(in srgb, var(--gn-accent-soft) 80%, rgba(22, 163, 74, 0.28)) !important;
+  color: var(--gn-accent-2) !important;
+  box-shadow: 0 0 0 1px rgba(22, 163, 74, 0.12), 0 6px 14px rgba(22, 163, 74, 0.12) !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button .gn-v2-toolbar-kbd {
@@ -4903,6 +4940,14 @@ body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button .gn-v2-toolbar
   justify-content: center;
   border: none;
   background: rgba(22, 163, 74, 0.18);
+  color: var(--gn-accent-2);
+}
+
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:hover .gn-v2-toolbar-kbd,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus .gn-v2-toolbar-kbd,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:focus-visible .gn-v2-toolbar-kbd,
+body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:active .gn-v2-toolbar-kbd {
+  background: rgba(22, 163, 74, 0.24);
   color: var(--gn-accent-2);
 }
 
@@ -4923,13 +4968,16 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-ai-action.ant-btn {
 }
 
 @media (max-width: 900px) {
+  body[data-ui-version="v2"] .gn-v2-query-toolbar-main {
+    width: max-content;
+    min-width: 100%;
+  }
+
   body[data-ui-version="v2"] .gn-v2-query-toolbar-selects {
-    flex: 1 1 100% !important;
     max-width: none;
   }
 
   body[data-ui-version="v2"] .gn-v2-query-toolbar-actions {
-    width: 100%;
     justify-content: flex-start;
   }
 }

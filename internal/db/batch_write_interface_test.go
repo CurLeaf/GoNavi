@@ -1,4 +1,4 @@
-//go:build gonavi_full_drivers || gonavi_sqlserver_driver || gonavi_kingbase_driver || gonavi_highgo_driver || gonavi_vastbase_driver
+//go:build gonavi_full_drivers
 
 package db
 
@@ -30,6 +30,13 @@ func TestBatchWriteDriverCoverage(t *testing.T) {
 		var driver BatchWriteExecer = (*VastbaseDB)(nil)
 		if driver == nil {
 			t.Fatal("expected VastbaseDB to implement BatchWriteExecer")
+		}
+	})
+
+	t.Run("gaussdb", func(t *testing.T) {
+		var driver BatchWriteExecer = (*GaussDB)(nil)
+		if driver == nil {
+			t.Fatal("expected GaussDB to implement BatchWriteExecer")
 		}
 	})
 }

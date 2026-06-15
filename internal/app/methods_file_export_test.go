@@ -431,3 +431,48 @@ func TestDumpTableSQL_PostgresBooleanBackupUsesBooleanLiterals(t *testing.T) {
 		t.Fatalf("PostgreSQL bool 备份不应输出数字布尔值，content=%s", content)
 	}
 }
+
+func TestFilterExportObjectsBySchema_PostgresQualifiedObjectsOnly(t *testing.T) {
+	got := filterExportObjectsBySchema(
+		connection.ConnectionConfig{Type: "postgres"},
+		"app_db",
+		[]string{"public.users", "sales.orders", "sales.v_orders", "analytics.events"},
+		"sales",
+	)
+
+	want := []string{"sales.orders", "sales.v_orders"}
+	if len(got) != len(want) {
+		t.Fatalf("filtered objects length mismatch, want=%d got=%d (%v)", len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("filtered objects mismatch at %d, want=%q got=%q", i, want[i], got[i])
+		}
+	}
+}
+
+func TestFilterExportViewLookupBySchema_PostgresQualifiedViewsOnly(t *testing.T) {
+	got := filterExportViewLookupBySchema(
+		connection.ConnectionConfig{Type: "postgres"},
+		"app_db",
+		map[string]string{
+			"public.v_users":  "public.v_users",
+			"sales.v_orders":  "sales.v_orders",
+			"sales.v_summary": "sales.v_summary",
+		},
+		"sales",
+	)
+
+	if len(got) != 2 {
+		t.Fatalf("filtered views length mismatch, want=2 got=%d (%v)", len(got), got)
+	}
+	if got["sales.v_orders"] != "sales.v_orders" {
+		t.Fatalf("expected sales.v_orders to be retained, got=%q", got["sales.v_orders"])
+	}
+	if got["sales.v_summary"] != "sales.v_summary" {
+		t.Fatalf("expected sales.v_summary to be retained, got=%q", got["sales.v_summary"])
+	}
+	if _, ok := got["public.v_users"]; ok {
+		t.Fatalf("expected public.v_users to be filtered out, got=%v", got)
+	}
+}

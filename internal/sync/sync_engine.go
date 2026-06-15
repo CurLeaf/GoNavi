@@ -214,7 +214,7 @@ func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
 			sourceQueryTable, targetQueryTable := plan.SourceQueryTable, plan.TargetQueryTable
 			applyTableName := targetTable
 			switch targetType {
-			case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver":
+			case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver":
 				applyTableName = targetQueryTable
 			}
 

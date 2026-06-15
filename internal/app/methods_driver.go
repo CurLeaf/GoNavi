@@ -338,6 +338,7 @@ const builtinDriverManifestJSON = `{
   "engine": "go",
   "drivers": {
     "mysql":     { "engine": "go", "version": "1.9.3", "checksumPolicy": "off" },
+    "goldendb":  { "engine": "go", "version": "1.9.3", "checksumPolicy": "off" },
     "mariadb":   { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mariadb" },
     "oceanbase": { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/oceanbase" },
     "doris":     { "engine": "go", "version": "1.9.3", "checksumPolicy": "off", "downloadUrl": "builtin://activate/doris" },
@@ -351,9 +352,11 @@ const builtinDriverManifestJSON = `{
     "highgo":    { "engine": "go", "version": "0.0.0-local", "checksumPolicy": "off", "downloadUrl": "builtin://activate/highgo" },
     "vastbase":  { "engine": "go", "version": "1.11.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/vastbase" },
     "opengauss": { "engine": "go", "version": "1.11.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/opengauss" },
+    "gaussdb":   { "engine": "go", "version": "v1.0.0-rc1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/gaussdb" },
     "iris":      { "engine": "go", "version": "0.2.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/iris" },
     "mongodb":   { "engine": "go", "version": "1.17.9", "checksumPolicy": "off", "downloadUrl": "builtin://activate/mongodb" },
     "tdengine":  { "engine": "go", "version": "3.7.8", "checksumPolicy": "off", "downloadUrl": "builtin://activate/tdengine" },
+    "iotdb":     { "engine": "go", "version": "1.3.7", "checksumPolicy": "off", "downloadUrl": "builtin://activate/iotdb" },
     "clickhouse": { "engine": "go", "version": "2.43.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/clickhouse" },
     "elasticsearch": { "engine": "go", "version": "8.19.6", "checksumPolicy": "off", "downloadUrl": "builtin://activate/elasticsearch" }
   }
@@ -400,6 +403,7 @@ var pinnedDriverPackageMap = map[string]pinnedDriverPackage{
 
 var latestDriverVersionMap = map[string]string{
 	"mysql":         "1.9.3",
+	"goldendb":      "1.9.3",
 	"mariadb":       "1.9.3",
 	"oceanbase":     "1.9.3",
 	"diros":         "1.9.3",
@@ -413,9 +417,11 @@ var latestDriverVersionMap = map[string]string{
 	"highgo":        "0.0.0-local",
 	"vastbase":      "1.11.2",
 	"opengauss":     "1.11.1",
+	"gaussdb":       "v1.0.0-rc1",
 	"iris":          "0.2.1",
 	"mongodb":       "2.5.0",
 	"tdengine":      "3.7.8",
+	"iotdb":         "1.3.7",
 	"clickhouse":    "2.43.1",
 	"elasticsearch": "8.19.6",
 	"oracle":        "2.9.0",
@@ -424,6 +430,7 @@ var latestDriverVersionMap = map[string]string{
 }
 
 var driverGoModulePathMap = map[string]string{
+	"goldendb":      "github.com/go-sql-driver/mysql",
 	"mariadb":       "github.com/go-sql-driver/mysql",
 	"oceanbase":     "github.com/go-sql-driver/mysql",
 	"diros":         "github.com/go-sql-driver/mysql",
@@ -437,9 +444,11 @@ var driverGoModulePathMap = map[string]string{
 	"highgo":        "github.com/highgo/pq-sm3",
 	"vastbase":      "github.com/lib/pq",
 	"opengauss":     "github.com/lib/pq",
+	"gaussdb":       "github.com/HuaweiCloudDeveloper/gaussdb-go",
 	"iris":          "github.com/caretdev/go-irisnative",
 	"mongodb":       "go.mongodb.org/mongo-driver/v2",
 	"tdengine":      "github.com/taosdata/driver-go/v3",
+	"iotdb":         "github.com/apache/iotdb-client-go",
 	"clickhouse":    "github.com/ClickHouse/clickhouse-go/v2",
 	"elasticsearch": "github.com/elastic/go-elasticsearch/v8",
 }
@@ -1419,6 +1428,18 @@ func normalizeDriverType(driverType string) string {
 		return "postgres"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
+	case "gaussdb", "gauss_db", "gauss-db":
+		return "gaussdb"
+	case "goldendb", "greatdb", "gdb":
+		return "goldendb"
+	case "rocketmq", "rocket-mq", "rocket_mq", "apache-rocketmq", "apache_rocketmq", "rmq":
+		return "rocketmq"
+	case "mqtt", "mqtts":
+		return "mqtt"
+	case "kafka", "apache-kafka", "apache_kafka":
+		return "kafka"
+	case "rabbitmq", "rabbit-mq", "rabbit_mq":
+		return "rabbitmq"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
 	default:
@@ -1484,9 +1505,14 @@ func resolveDriverDefinitionWithPackages(driverType string, packages map[string]
 func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) []driverDefinition {
 	return []driverDefinition{
 		{Type: "mysql", Name: "MySQL", Engine: driverEngineGo, BuiltIn: true},
+		{Type: "goldendb", Name: "GoldenDB", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "oracle", Name: "Oracle", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "redis", Name: "Redis", Engine: driverEngineGo, BuiltIn: true},
 		{Type: "postgres", Name: "PostgreSQL", Engine: driverEngineGo, BuiltIn: true},
+		{Type: "rocketmq", Name: "RocketMQ", Engine: driverEngineGo, BuiltIn: true},
+		{Type: "mqtt", Name: "MQTT", Engine: driverEngineGo, BuiltIn: true},
+		{Type: "kafka", Name: "Kafka", Engine: driverEngineGo, BuiltIn: true},
+		{Type: "rabbitmq", Name: "RabbitMQ", Engine: driverEngineGo, BuiltIn: true},
 
 		// 其他数据源需要先在驱动管理中“安装启用”。
 		buildOptionalGoDriverDefinition("mariadb", "MariaDB", packages),
@@ -1502,9 +1528,11 @@ func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) [
 		buildOptionalGoDriverDefinition("highgo", "HighGo", packages),
 		buildOptionalGoDriverDefinition("vastbase", "Vastbase", packages),
 		buildOptionalGoDriverDefinition("opengauss", "OpenGauss", packages),
+		buildOptionalGoDriverDefinition("gaussdb", "GaussDB", packages),
 		buildOptionalGoDriverDefinition("iris", "InterSystems IRIS", packages),
 		buildOptionalGoDriverDefinition("mongodb", "MongoDB", packages),
 		buildOptionalGoDriverDefinition("tdengine", "TDengine", packages),
+		buildOptionalGoDriverDefinition("iotdb", "Apache IoTDB", packages),
 		buildOptionalGoDriverDefinition("clickhouse", "ClickHouse", packages),
 		buildOptionalGoDriverDefinition("elasticsearch", "Elasticsearch", packages),
 	}
@@ -4072,6 +4100,8 @@ func optionalDriverBuildTag(driverType string, selectedVersion string) (string, 
 		return "gonavi_vastbase_driver", nil
 	case "opengauss":
 		return "gonavi_opengauss_driver", nil
+	case "gaussdb":
+		return "gonavi_gaussdb_driver", nil
 	case "iris":
 		return "gonavi_iris_driver", nil
 	case "mongodb":
@@ -4081,6 +4111,8 @@ func optionalDriverBuildTag(driverType string, selectedVersion string) (string, 
 		return "gonavi_mongodb_driver", nil
 	case "tdengine":
 		return "gonavi_tdengine_driver", nil
+	case "iotdb":
+		return "gonavi_iotdb_driver", nil
 	case "clickhouse":
 		return "gonavi_clickhouse_driver", nil
 	case "elasticsearch":

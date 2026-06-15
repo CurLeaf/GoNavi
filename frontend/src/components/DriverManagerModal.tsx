@@ -695,6 +695,29 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     return selectedOption?.version || row.pinnedVersion || '';
   }, [selectedVersionMap, versionMap]);
 
+  const resolveSelectedVersionOption = useCallback((row: DriverStatusRow) => {
+    const options = versionMap[row.type] || [];
+    const selectedKey = selectedVersionMap[row.type];
+    return (
+      options.find((item) => buildVersionOptionKey(item) === selectedKey) ||
+      options.find((item) => item.recommended) ||
+      options[0]
+    );
+  }, [selectedVersionMap, versionMap]);
+
+  const resolveInstalledDriverVersion = useCallback((row: DriverStatusRow) => (
+    String(row.installedVersion || '').trim() || String(row.pinnedVersion || '').trim()
+  ), []);
+
+  const isDriverVersionSwitchPending = useCallback((row: DriverStatusRow) => {
+    if (row.builtIn || (!row.packageInstalled && !row.connectable)) {
+      return false;
+    }
+    const selectedVersion = String(resolveSelectedVersionOption(row)?.version || '').trim();
+    const installedVersion = resolveInstalledDriverVersion(row);
+    return !!selectedVersion && !!installedVersion && selectedVersion !== installedVersion;
+  }, [resolveInstalledDriverVersion, resolveSelectedVersionOption]);
+
   const installDriver = useCallback(async (
     row: DriverStatusRow,
     actionOptions?: { silentToast?: boolean; skipRefresh?: boolean },
@@ -714,9 +737,9 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       }
       const selectedKey = selectedVersionMap[row.type];
       const selectedOption =
+        versionOptions.find((item) => buildVersionOptionKey(item) === selectedKey) ||
         (row.needsUpdate ? versionOptions.find((item) => item.version === row.pinnedVersion) : undefined) ||
         (row.needsUpdate ? versionOptions.find((item) => item.recommended) : undefined) ||
-        versionOptions.find((item) => buildVersionOptionKey(item) === selectedKey) ||
         versionOptions.find((item) => item.recommended) ||
         versionOptions[0];
       const selectedVersion = selectedOption?.version || row.pinnedVersion || '';
@@ -1022,20 +1045,12 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       return <Text type="secondary">内置驱动无需安装</Text>;
     }
 
-    const versionLocked = row.packageInstalled || row.connectable;
-    if (versionLocked) {
-      const installedVersion = String(row.installedVersion || '').trim();
-      const revisionHint = row.needsUpdate ? '，需重装' : '';
-      return (
-        <Text type="secondary" className="driver-manager-version-lock">
-          {installedVersion ? `${installedVersion}（已安装${revisionHint}）` : `已安装${row.needsUpdate ? '，需重装' : ''}`}
-        </Text>
-      );
-    }
-
     const options = versionMap[row.type] || [];
     const selectedKey = selectedVersionMap[row.type];
     const selectOptions = buildVersionSelectOptions(options);
+    const installedVersion = resolveInstalledDriverVersion(row);
+    const versionSwitchPending = isDriverVersionSwitchPending(row);
+    const selectedOption = resolveSelectedVersionOption(row);
     const mongoHint = row.type === 'mongodb'
       ? 'MongoDB 4.0 请使用 1.17.x 兼容驱动；2.x 驱动要求 MongoDB 4.2+。'
       : '';
@@ -1063,6 +1078,13 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             void loadVersionPackageSize(row, value);
           }}
         />
+        {(row.packageInstalled || row.connectable) ? (
+          <Text type="secondary" className="driver-manager-small-text">
+            {versionSwitchPending
+              ? `当前已安装 ${installedVersion || '当前版本'}，已选择 ${selectedOption?.version || '目标版本'}，点击“切换版本”生效`
+              : `${installedVersion ? `${installedVersion}（已安装` : '已安装'}${row.needsUpdate ? '，需重装' : ''}${installedVersion ? '）' : ''}`}
+          </Text>
+        ) : null}
         {mongoHint ? <Text type="secondary" className="driver-manager-small-text">{mongoHint}</Text> : null}
       </div>
     );
@@ -1078,6 +1100,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     const loadingLocal = actionState.driverType === row.type && actionState.kind === 'local';
     const logs = operationLogMap[row.type] || [];
     const hasLogs = logs.length > 0;
+    const versionSwitchPending = isDriverVersionSwitchPending(row);
 
     if (isSlimBuildUnavailable && !row.packageInstalled) {
       return <Text type="secondary">当前精简版不可安装，请使用 Full 版</Text>;
@@ -1086,6 +1109,10 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     const mainAction = row.needsUpdate ? (
       <Button type="primary" icon={<DownloadOutlined />} disabled={batchBusy} loading={loadingInstallOrRemove} onClick={() => installDriver(row)}>
         重装驱动
+      </Button>
+    ) : versionSwitchPending ? (
+      <Button type="primary" icon={<DownloadOutlined />} disabled={batchBusy} loading={loadingInstallOrRemove} onClick={() => installDriver(row)}>
+        切换版本
       </Button>
     ) : row.connectable ? (
       <Button danger icon={<DeleteOutlined />} disabled={batchBusy} loading={loadingInstallOrRemove} onClick={() => removeDriver(row)}>

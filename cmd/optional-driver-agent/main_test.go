@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,8 +78,8 @@ func TestHandleRequestMetadataReportsAgentRevision(t *testing.T) {
 	agentDriverType = "clickhouse"
 	agentDatabaseFactory = func() db.Database { return nil }
 
-	var inst db.Database
-	resp := handleRequest(&inst, agentRequest{ID: 7, Method: agentMethodMetadata})
+	runtimeState := &agentRuntime{sessions: make(map[string]db.StatementExecer)}
+	resp := handleRequest(runtimeState, agentRequest{ID: 7, Method: agentMethodMetadata})
 	if !resp.Success {
 		t.Fatalf("metadata request failed: %s", resp.Error)
 	}
@@ -150,6 +151,45 @@ func (f *fakeAgentTimeoutDB) GetTriggers(dbName, tableName string) ([]connection
 	return nil, nil
 }
 
+type fakeAgentSessionDB struct {
+	fakeAgentTimeoutDB
+	session *fakeAgentStatementSession
+}
+
+func (f *fakeAgentSessionDB) OpenSessionExecer(ctx context.Context) (db.StatementExecer, error) {
+	f.session = &fakeAgentStatementSession{}
+	return f.session, nil
+}
+
+type fakeAgentStatementSession struct {
+	queryCalls int
+	execCalls  int
+	closed     bool
+}
+
+func (f *fakeAgentStatementSession) Query(query string) ([]map[string]interface{}, []string, error) {
+	return f.QueryContext(context.Background(), query)
+}
+
+func (f *fakeAgentStatementSession) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	f.queryCalls++
+	return []map[string]interface{}{{"session_ok": 1}}, []string{"session_ok"}, nil
+}
+
+func (f *fakeAgentStatementSession) Exec(query string) (int64, error) {
+	return f.ExecContext(context.Background(), query)
+}
+
+func (f *fakeAgentStatementSession) ExecContext(ctx context.Context, query string) (int64, error) {
+	f.execCalls++
+	return 9, nil
+}
+
+func (f *fakeAgentStatementSession) Close() error {
+	f.closed = true
+	return nil
+}
+
 func TestQueryWithOptionalTimeout_UsesQueryContext(t *testing.T) {
 	fake := &fakeAgentTimeoutDB{}
 	data, fields, err := queryWithOptionalTimeout(fake, "SELECT 1", int64((2 * time.Second).Milliseconds()))
@@ -196,5 +236,73 @@ func TestQueryWithOptionalTimeout_ClickHouseLegacyModeUsesQueryContext(t *testin
 	}
 	if !fake.queryContextCalled || fake.queryCalled {
 		t.Fatalf("clickhouse legacy query 调用路径异常，QueryContext=%v Query=%v", fake.queryContextCalled, fake.queryCalled)
+	}
+}
+
+func TestHandleRequest_UsesPinnedSessionForSessionScopedQueryAndExec(t *testing.T) {
+	old := agentDriverType
+	defer func() { agentDriverType = old }()
+	agentDriverType = "sqlserver"
+
+	fake := &fakeAgentSessionDB{}
+	runtimeState := &agentRuntime{
+		inst:     fake,
+		sessions: make(map[string]db.StatementExecer),
+	}
+
+	openResp := handleRequest(runtimeState, agentRequest{ID: 1, Method: agentMethodOpenSession})
+	if !openResp.Success {
+		t.Fatalf("openSession failed: %s", openResp.Error)
+	}
+	sessionID, ok := openResp.Data.(string)
+	if !ok || strings.TrimSpace(sessionID) == "" {
+		t.Fatalf("unexpected session id payload: %#v", openResp.Data)
+	}
+	if fake.session == nil {
+		t.Fatal("expected OpenSessionExecer to create a pinned session")
+	}
+
+	queryResp := handleRequest(runtimeState, agentRequest{
+		ID:        2,
+		Method:    agentMethodQuery,
+		SessionID: sessionID,
+		Query:     "SELECT 1",
+	})
+	if !queryResp.Success {
+		t.Fatalf("session query failed: %s", queryResp.Error)
+	}
+	if fake.queryCalled || fake.queryContextCalled {
+		t.Fatalf("expected session query to bypass database-level query path, got Query=%v QueryContext=%v", fake.queryCalled, fake.queryContextCalled)
+	}
+	if fake.session.queryCalls != 1 {
+		t.Fatalf("expected pinned session queryCalls=1, got %d", fake.session.queryCalls)
+	}
+
+	execResp := handleRequest(runtimeState, agentRequest{
+		ID:        3,
+		Method:    agentMethodExec,
+		SessionID: sessionID,
+		Query:     "UPDATE t SET v = 1",
+	})
+	if !execResp.Success {
+		t.Fatalf("session exec failed: %s", execResp.Error)
+	}
+	if fake.execCalled || fake.execContextCalled {
+		t.Fatalf("expected session exec to bypass database-level exec path, got Exec=%v ExecContext=%v", fake.execCalled, fake.execContextCalled)
+	}
+	if fake.session.execCalls != 1 {
+		t.Fatalf("expected pinned session execCalls=1, got %d", fake.session.execCalls)
+	}
+
+	closeResp := handleRequest(runtimeState, agentRequest{
+		ID:        4,
+		Method:    agentMethodCloseSession,
+		SessionID: sessionID,
+	})
+	if !closeResp.Success {
+		t.Fatalf("closeSession failed: %s", closeResp.Error)
+	}
+	if !fake.session.closed {
+		t.Fatal("expected pinned session to close")
 	}
 }

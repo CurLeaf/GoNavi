@@ -7,7 +7,7 @@ cd "$SCRIPT_DIR"
 SCRIPT_DIR_WINDOWS="$(pwd -W 2>/dev/null || true)"
 SCRIPT_DIR_WINDOWS="${SCRIPT_DIR_WINDOWS//\\//}"
 
-DEFAULT_DRIVERS=(mariadb oceanbase doris starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss iris mongodb tdengine clickhouse elasticsearch)
+DEFAULT_DRIVERS=(mariadb oceanbase doris starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss gaussdb iris mongodb tdengine iotdb clickhouse elasticsearch)
 TARGET_PLATFORMS=(darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64)
 
 usage() {
@@ -52,8 +52,9 @@ normalize_driver() {
   case "$value" in
     doris|diros) echo "doris" ;;
     open_gauss|open-gauss) echo "opengauss" ;;
+    gaussdb|gauss_db|gauss-db) echo "gaussdb" ;;
     elastic|elasticsearch) echo "elasticsearch" ;;
-    mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|opengauss|iris|mongodb|tdengine|clickhouse)
+    mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|opengauss|gaussdb|iris|mongodb|tdengine|iotdb|clickhouse)
       echo "$value"
       ;;
     *)
@@ -157,9 +158,11 @@ driver_tokens_from_text() {
   case "$text" in *highgo*) emit_driver_token highgo ;; esac
   case "$text" in *vastbase*) emit_driver_token vastbase ;; esac
   case "$text" in *opengauss*) emit_driver_token opengauss ;; esac
+  case "$text" in *gaussdb*|*gauss_db*|*gauss-db*) emit_driver_token gaussdb ;; esac
   case "$text" in *iris*) emit_driver_token iris ;; esac
   case "$text" in *mongodb*) emit_driver_token mongodb ;; esac
   case "$text" in *tdengine*) emit_driver_token tdengine ;; esac
+  case "$text" in *iotdb*|*apache-iotdb*|*apache_iotdb*) emit_driver_token iotdb ;; esac
   case "$text" in *clickhouse*) emit_driver_token clickhouse ;; esac
   case "$text" in *elasticsearch*) emit_driver_token elasticsearch ;; esac
 
@@ -184,9 +187,11 @@ driver_tokens_from_text() {
       emit_driver_token opengauss
       ;;
   esac
+  case "$text" in *github.com/!huawei!cloud!developer/gaussdb-go*|*github.com/HuaweiCloudDeveloper/gaussdb-go*) emit_driver_token gaussdb ;; esac
   case "$text" in *github.com/caretdev/go-irisnative*|*third_party/go-irisnative*) emit_driver_token iris ;; esac
   case "$text" in *go.mongodb.org/mongo-driver*|*go.mongodb.org/mongo-driver/v2*) emit_driver_token mongodb ;; esac
   case "$text" in *github.com/taosdata/driver-go/v3*) emit_driver_token tdengine ;; esac
+  case "$text" in *github.com/apache/iotdb-client-go*) emit_driver_token iotdb ;; esac
   case "$text" in *github.com/clickhouse/clickhouse-go/v2*|*github.com/clickhouse/ch-go*) emit_driver_token clickhouse ;; esac
   case "$text" in *github.com/elastic/go-elasticsearch/v8*) emit_driver_token elasticsearch ;; esac
 }

@@ -207,7 +207,7 @@ func directImportPaginationPK(sourceType string, sourceCols []connection.ColumnD
 
 func supportsDirectImportPagination(dbType string) bool {
 	switch normalizeMigrationDBType(dbType) {
-	case "mysql", "mariadb", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "sqlite", "duckdb", "clickhouse", "tdengine", "starrocks", "diros":
+	case "mysql", "mariadb", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "sqlite", "duckdb", "clickhouse", "tdengine", "starrocks", "diros":
 		return true
 	default:
 		return false

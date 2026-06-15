@@ -29,12 +29,12 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
   if (!raw) return raw;
   const dbTypeLower = (dbType || '').toLowerCase();
 
-  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'starrocks' || dbTypeLower === 'sphinx' || dbTypeLower === 'tdengine' || dbTypeLower === 'clickhouse') {
+  if (dbTypeLower === 'mysql' || dbTypeLower === 'goldendb' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'starrocks' || dbTypeLower === 'sphinx' || dbTypeLower === 'tdengine' || dbTypeLower === 'iotdb' || dbTypeLower === 'clickhouse') {
     return `\`${raw.replace(/`/g, '``')}\``;
   }
 
   // 对于 KingBase/PostgreSQL，只在必要时加引号
-  if (dbTypeLower === 'kingbase' || dbTypeLower === 'postgres' || dbTypeLower === 'opengauss') {
+  if (dbTypeLower === 'kingbase' || dbTypeLower === 'postgres' || dbTypeLower === 'opengauss' || dbTypeLower === 'gaussdb') {
     if (needsQuote(raw)) {
       return `"${raw.replace(/"/g, '""')}"`;
     }
@@ -54,6 +54,9 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
 export const quoteQualifiedIdent = (dbType: string, ident: string) => {
   const raw = (ident || '').trim();
   if (!raw) return raw;
+  if (['rocketmq', 'mqtt', 'kafka', 'rabbitmq'].includes((dbType || '').trim().toLowerCase())) {
+    return quoteIdentPart(dbType, raw);
+  }
   const parts = splitQualifiedNameSegments(raw).filter(Boolean);
   if (parts.length === 0) return quoteIdentPart(dbType, raw);
   if (parts.length === 1 && parts[0] === normalizeIdentPart(raw)) return quoteIdentPart(dbType, raw);
@@ -146,7 +149,7 @@ export const buildOrderBySQL = (
   // 部分数据源在无显式排序需求时强制 ORDER BY（即使按主键）会显著放大大表预览成本：
   // MySQL/MariaDB 可能触发 filesort 和 sort memory 错误，DuckDB 大文件可能被排序拖到连接超时。
   // 因此仅在用户主动点击排序时下发 ORDER BY，默认分页查询不加兜底排序。
-  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'starrocks' || dbTypeLower === 'duckdb') {
+  if (dbTypeLower === 'mysql' || dbTypeLower === 'goldendb' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'starrocks' || dbTypeLower === 'duckdb') {
     return '';
   }
 

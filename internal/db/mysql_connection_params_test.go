@@ -472,3 +472,54 @@ func TestMySQLDSN_URIParamsAndExplicitParamsPrecedence(t *testing.T) {
 		t.Fatalf("internal topology parameter should not be passed to driver: %v", query)
 	}
 }
+
+func TestApplyMySQLURI_GoldenDBSchemeUsesDefaultPort(t *testing.T) {
+	t.Parallel()
+
+	config := applyMySQLURI(connection.ConnectionConfig{
+		Type: "goldendb",
+		URI:  "goldendb://glzc:secret@gdb.local/core_ledger?characterEncoding=utf8",
+	})
+
+	if config.Host != "gdb.local" {
+		t.Fatalf("expected goldendb host from URI, got %q", config.Host)
+	}
+	if config.Port != 1523 {
+		t.Fatalf("expected goldendb default port 1523, got %d", config.Port)
+	}
+	if config.Database != "core_ledger" {
+		t.Fatalf("expected goldendb database from URI, got %q", config.Database)
+	}
+	if config.User != "glzc" {
+		t.Fatalf("expected goldendb user from URI, got %q", config.User)
+	}
+	if config.Password != "secret" {
+		t.Fatalf("expected goldendb password from URI, got %q", config.Password)
+	}
+}
+
+func TestMySQLDSN_AcceptsGoldenDBURICompatibilityParams(t *testing.T) {
+	t.Parallel()
+
+	m := &MySQLDB{}
+	dsn, err := m.getDSN(connection.ConnectionConfig{
+		Type:     "goldendb",
+		Host:     "gdb.local",
+		Port:     1523,
+		User:     "glzc",
+		Password: "secret",
+		Database: "core_ledger",
+		URI:      "goldendb://glzc:secret@gdb.local/core_ledger?characterEncoding=utf8&useSSL=false",
+	})
+	if err != nil {
+		t.Fatalf("getDSN failed: %v", err)
+	}
+
+	query := parseMySQLDSNQueryForTest(t, dsn)
+	if got := query.Get("charset"); got != "utf8" {
+		t.Fatalf("goldendb URI characterEncoding should map to charset=utf8, got=%q", got)
+	}
+	if got := query.Get("tls"); got != "false" {
+		t.Fatalf("goldendb URI useSSL=false should map to tls=false, got=%q", got)
+	}
+}

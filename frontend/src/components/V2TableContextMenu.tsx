@@ -11,6 +11,7 @@ import {
   FolderOpenOutlined,
   FolderOutlined,
   SaveOutlined,
+  SendOutlined,
   LinkOutlined,
   ReloadOutlined,
   TableOutlined,
@@ -26,6 +27,7 @@ import {
   FolderAddOutlined,
   HddOutlined,
   PushpinOutlined,
+  UndoOutlined,
   SortAscendingOutlined,
   SortDescendingOutlined,
   VerticalAlignBottomOutlined,
@@ -39,6 +41,7 @@ export type V2TableContextMenuActionKey =
   | 'design-table'
   | 'open-new-tab'
   | 'new-query'
+  | 'publish-message'
   | 'view-ddl'
   | 'view-er'
   | 'copy-table-name'
@@ -159,6 +162,7 @@ export const V2TableContextMenuView: React.FC<{
   isPinned?: boolean;
   supportsTruncate?: boolean;
   supportsStarRocksRollup?: boolean;
+  supportsMessagePublish?: boolean;
   onAction?: (action: V2TableContextMenuActionKey) => void;
 }> = ({
   tableName,
@@ -167,6 +171,7 @@ export const V2TableContextMenuView: React.FC<{
   isPinned = false,
   supportsTruncate = true,
   supportsStarRocksRollup = false,
+  supportsMessagePublish = false,
   onAction,
 }) => {
   const renderItems = (items: V2TableContextMenuItemConfig[]) => renderV2ContextMenuItems(
@@ -202,6 +207,7 @@ export const V2TableContextMenuView: React.FC<{
           { action: 'design-table', icon: <EditOutlined />, title: '设计表 · 字段 / 索引 / 外键', kbd: primaryShortcut('D', shortcutPlatform) },
           { action: 'open-new-tab', icon: <FileAddOutlined />, title: '在新标签打开', kbd: primaryShortcut('Enter', shortcutPlatform) },
           { action: 'new-query', icon: <ConsoleSqlOutlined />, title: '新建查询' },
+          ...(supportsMessagePublish ? [{ action: 'publish-message' as const, icon: <SendOutlined />, title: '测试发送消息' }] : []),
         ])}
 
         <div className="gn-v2-context-menu-section-title">元信息</div>
@@ -304,6 +310,13 @@ export type V2DatabaseContextMenuActionKey =
   | 'run-sql'
   | 'drop-db';
 
+export type V2SchemaContextMenuActionKey =
+  | 'rename-schema'
+  | 'refresh-schema'
+  | 'export-schema'
+  | 'backup-schema-sql'
+  | 'drop-schema';
+
 export const V2DatabaseContextMenuView: React.FC<{
   dbName: string;
   shortcutPlatform?: ShortcutPlatform;
@@ -371,6 +384,53 @@ export const V2DatabaseContextMenuView: React.FC<{
         <div className="gn-v2-context-menu-divider" />
         {supportsDropDatabase && renderItems([
           { action: 'drop-db', icon: <DeleteOutlined />, title: '删除数据库 · DROP', tone: 'danger', kbd: '⌫' },
+        ])}
+      </div>
+    </div>
+  );
+};
+
+export const V2SchemaContextMenuView: React.FC<{
+  dbName: string;
+  schemaName: string;
+  shortcutPlatform?: ShortcutPlatform;
+  onAction?: (action: V2SchemaContextMenuActionKey) => void;
+}> = ({
+  dbName,
+  schemaName,
+  shortcutPlatform = DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM,
+  onAction,
+}) => {
+  const renderItems = (items: V2TableContextMenuItemConfig[]) => renderV2ContextMenuItems(
+    items,
+    onAction as (action: string) => void,
+  );
+
+  return (
+    <div className="gn-v2-table-context-menu gn-v2-database-context-menu" data-v2-schema-context-menu="true" role="menu">
+      <V2ContextMenuHeader
+        icon={<FolderOpenOutlined />}
+        title={schemaName}
+        meta={`${dbName || '当前数据库'} · 模式操作`}
+        pill="SCHEMA"
+      />
+
+      <div className="gn-v2-context-menu-body">
+        <div className="gn-v2-context-menu-section-title">维护</div>
+        {renderItems([
+          { action: 'rename-schema', icon: <EditOutlined />, title: '编辑模式', kbd: 'F2', featured: true },
+          { action: 'refresh-schema', icon: <ReloadOutlined />, title: '刷新对象树', kbd: primaryShortcut('R', shortcutPlatform) },
+        ])}
+
+        <div className="gn-v2-context-menu-section-title">导出与备份</div>
+        {renderItems([
+          { action: 'export-schema', icon: <ExportOutlined />, title: '导出当前模式表结构 · SQL' },
+          { action: 'backup-schema-sql', icon: <SaveOutlined />, title: '备份当前模式全部表 · 结构 + 数据' },
+        ])}
+
+        <div className="gn-v2-context-menu-divider" />
+        {renderItems([
+          { action: 'drop-schema', icon: <DeleteOutlined />, title: '删除模式 · DROP CASCADE', tone: 'danger', kbd: '⌫' },
         ])}
       </div>
     </div>
@@ -538,6 +598,7 @@ export type V2CellContextMenuActionKey =
   | 'copy-row-for-paste'
   | 'paste-row-as-new'
   | 'copy-column-data'
+  | 'undo-cell-change'
   | 'set-null'
   | 'edit-row'
   | 'fill-selected'
@@ -647,6 +708,7 @@ export const V2CellContextMenuView: React.FC<{
   rowLabel?: string;
   selectedRowCount?: number;
   canModifyData?: boolean;
+  canUndoCellChange?: boolean;
   copiedRowCount?: number;
   canPasteCopiedColumns?: boolean;
   supportsCopyInsert?: boolean;
@@ -658,6 +720,7 @@ export const V2CellContextMenuView: React.FC<{
   rowLabel,
   selectedRowCount = 0,
   canModifyData = false,
+  canUndoCellChange = false,
   copiedRowCount = 0,
   canPasteCopiedColumns = false,
   supportsCopyInsert = true,
@@ -689,6 +752,12 @@ export const V2CellContextMenuView: React.FC<{
           <>
             <div className="gn-v2-context-menu-section-title">编辑</div>
             {renderItems([
+              {
+                action: 'undo-cell-change',
+                icon: <UndoOutlined />,
+                title: '撤销此单元格修改',
+                disabled: !canUndoCellChange,
+              },
               { action: 'set-null', icon: <ClearOutlined />, title: '设置为 NULL' },
               { action: 'edit-row', icon: <EditOutlined />, title: '编辑本行', kbd: '↵' },
               { action: 'copy-row-for-paste', icon: <CopyOutlined />, title: '复制本行为新增行' },
