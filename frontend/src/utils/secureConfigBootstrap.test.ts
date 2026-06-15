@@ -8,6 +8,7 @@ import {
   startSecurityUpdateFromBootstrap,
 } from './secureConfigBootstrap';
 import { stripLegacyPersistedConnectionById } from './legacyConnectionStorage';
+import { stripLegacySavedQueries } from './savedQueryPersistence';
 
 const legacyPayload = JSON.stringify({
   state: {
@@ -534,6 +535,69 @@ describe('secureConfigBootstrap', () => {
     expect(args.replaceConnections).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'secure-1' })]),
     );
+  });
+
+  it('does not restore legacy saved queries when security cleanup runs after saved-query cleanup', async () => {
+    const args = createBaseArgs();
+    args.storage.setItem(LEGACY_PERSIST_KEY, JSON.stringify({
+      state: {
+        connections: [
+          {
+            id: 'legacy-1',
+            name: 'Legacy',
+            config: {
+              id: 'legacy-1',
+              type: 'postgres',
+              host: 'db.local',
+              port: 5432,
+              user: 'postgres',
+              password: 'secret',
+            },
+          },
+        ],
+        globalProxy: {
+          enabled: true,
+          type: 'http',
+          host: '127.0.0.1',
+          port: 8080,
+          user: 'ops',
+          password: 'proxy-secret',
+        },
+        savedQueries: [
+          {
+            id: 'saved-1',
+            name: 'Orders',
+            sql: 'select * from orders',
+            connectionId: 'legacy-1',
+            dbName: 'app',
+            createdAt: 100,
+          },
+        ],
+      },
+    }));
+
+    await startSecurityUpdateFromBootstrap({
+      ...args,
+      backend: {
+        StartSecurityUpdate: vi.fn().mockImplementation(async () => {
+          args.storage.setItem(
+            LEGACY_PERSIST_KEY,
+            stripLegacySavedQueries(args.storage.getItem(LEGACY_PERSIST_KEY)),
+          );
+          return {
+            overallStatus: 'completed',
+            summary: { total: 3, updated: 3, pending: 0, skipped: 0, failed: 0 },
+            issues: [],
+          };
+        }),
+        GetSavedConnections: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    const cleaned = JSON.parse(args.storage.getItem(LEGACY_PERSIST_KEY) || '{}');
+    expect(cleaned.state.savedQueries).toBeUndefined();
+    expect(cleaned.state.connections).toEqual([]);
+    expect(cleaned.state.globalProxy).toBeUndefined();
   });
 
   it('refreshes backend config and strips source-side secrets when a later round finishes as completed', async () => {

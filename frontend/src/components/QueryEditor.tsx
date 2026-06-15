@@ -5192,7 +5192,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return rawTitle;
   };
 
-  const persistQuery = (payload: { id: string; name: string; createdAt?: number }) => {
+  const persistQuery = async (payload: { id: string; name: string; createdAt?: number }) => {
       const sql = getCurrentQuery();
       const saved = {
           id: payload.id,
@@ -5202,16 +5202,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           dbName: currentDb || tab.dbName || '',
           createdAt: payload.createdAt ?? Date.now(),
       };
-      saveQuery(saved);
+      const persisted = await saveQuery(saved);
       addTab({
           ...tab,
-          title: payload.name,
+          title: persisted.name,
           query: sql,
           connectionId: currentConnectionId,
           dbName: currentDb || tab.dbName || '',
-          savedQueryId: payload.id,
+          savedQueryId: persisted.id,
       });
-      return saved;
+      return persisted;
   };
 
   const openSaveQueryModal = (mode: 'save' | 'rename') => {
@@ -5254,8 +5254,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           return;
       }
       const saveName = existed?.name || resolveDefaultQueryName();
-      persistQuery({ id: saveId, name: saveName, createdAt: existed?.createdAt });
-      message.success('查询已保存！');
+      try {
+          await persistQuery({ id: saveId, name: saveName, createdAt: existed?.createdAt });
+          message.success('查询已保存！');
+      } catch (error) {
+          message.error('保存查询失败: ' + (error instanceof Error ? error.message : String(error)));
+      }
   };
 
   const handleRenameQuery = () => {
@@ -5384,7 +5388,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const existed = currentSavedQuery || null;
           const fallbackSavedId = String(tab.savedQueryId || '').trim();
           const nextSavedId = existed?.id || fallbackSavedId || `saved-${Date.now()}`;
-          persistQuery({
+          await persistQuery({
               id: nextSavedId,
               name: String(values.name || '').trim() || '未命名查询',
               createdAt: existed?.createdAt,
@@ -5392,6 +5396,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           message.success(saveModalMode === 'rename' ? '查询已重命名！' : '查询已保存！');
           setIsSaveModalOpen(false);
       } catch (e) {
+          if (e instanceof Error) {
+              message.error('保存查询失败: ' + e.message);
+          }
       }
   };
 

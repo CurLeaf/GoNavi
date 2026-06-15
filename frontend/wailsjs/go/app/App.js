@@ -142,6 +142,10 @@ export function DeleteConnection(arg1) {
   return window['go']['app']['App']['DeleteConnection'](arg1);
 }
 
+export function DeleteQuery(arg1) {
+  return window['go']['app']['App']['DeleteQuery'](arg1);
+}
+
 export function DeleteSQLDirectory(arg1) {
   return window['go']['app']['App']['DeleteSQLDirectory'](arg1);
 }
@@ -262,8 +266,16 @@ export function GetSavedConnections() {
   return window['go']['app']['App']['GetSavedConnections']();
 }
 
+export function GetSavedQueries() {
+  return window['go']['app']['App']['GetSavedQueries']();
+}
+
 export function GetSecurityUpdateStatus() {
   return window['go']['app']['App']['GetSecurityUpdateStatus']();
+}
+
+export function GetUnboundSavedQueries() {
+  return window['go']['app']['App']['GetUnboundSavedQueries']();
 }
 
 export function ImportConfigFile() {
@@ -288,6 +300,10 @@ export function ImportLegacyConnections(arg1) {
 
 export function ImportLegacyGlobalProxy(arg1) {
   return window['go']['app']['App']['ImportLegacyGlobalProxy'](arg1);
+}
+
+export function ImportSavedQueries(arg1) {
+  return window['go']['app']['App']['ImportSavedQueries'](arg1);
 }
 
 export function InstallLocalDriverPackage(arg1, arg2, arg3, arg4) {
@@ -420,6 +436,10 @@ export function ReadAppLogTail(arg1, arg2) {
 
 export function ReadSQLFile(arg1) {
   return window['go']['app']['App']['ReadSQLFile'](arg1);
+}
+
+export function RebindSavedQuery(arg1, arg2) {
+  return window['go']['app']['App']['RebindSavedQuery'](arg1, arg2);
 }
 
 export function RedisConnect(arg1) {
@@ -576,6 +596,10 @@ export function SaveConnection(arg1) {
 
 export function SaveGlobalProxy(arg1) {
   return window['go']['app']['App']['SaveGlobalProxy'](arg1);
+}
+
+export function SaveQuery(arg1) {
+  return window['go']['app']['App']['SaveQuery'](arg1);
 }
 
 export function SelectCertificateFile(arg1, arg2) {

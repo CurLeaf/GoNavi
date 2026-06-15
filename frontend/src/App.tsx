@@ -58,6 +58,7 @@ import {
   mergeSecurityUpdateStatusWithLegacySource,
   startSecurityUpdateFromBootstrap,
 } from './utils/secureConfigBootstrap';
+import { bootstrapSavedQueries } from './utils/savedQueryPersistence';
 import {
   LEGACY_PERSIST_KEY,
   hasLegacyMigratableSensitiveItems,
@@ -225,6 +226,7 @@ function App() {
   const setGlobalProxy = useStore(state => state.setGlobalProxy);
   const replaceConnections = useStore(state => state.replaceConnections);
   const replaceGlobalProxy = useStore(state => state.replaceGlobalProxy);
+  const replaceSavedQueries = useStore(state => state.replaceSavedQueries);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const updateShortcut = useStore(state => state.updateShortcut);
   const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
@@ -479,6 +481,33 @@ function App() {
           unsubscribe();
       };
   }, [isStoreHydrated]);
+
+  useEffect(() => {
+      if (!isStoreHydrated) {
+          return;
+      }
+
+      let cancelled = false;
+      const loadSavedQueries = async () => {
+          try {
+              await bootstrapSavedQueries({
+                  backend: (window as any).go?.app?.App,
+                  replaceSavedQueries: (queries) => {
+                      if (!cancelled) {
+                          replaceSavedQueries(queries);
+                      }
+                  },
+              });
+          } catch (err) {
+              console.warn('Failed to bootstrap saved queries', err);
+          }
+      };
+
+      void loadSavedQueries();
+      return () => {
+          cancelled = true;
+      };
+  }, [isStoreHydrated, replaceSavedQueries]);
 
   const normalizeSecurityUpdateStatus = useCallback((status?: Partial<SecurityUpdateStatus> | null): SecurityUpdateStatus => {
       const fallback = createEmptySecurityUpdateStatus();

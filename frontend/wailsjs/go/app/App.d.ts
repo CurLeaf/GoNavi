@@ -76,6 +76,8 @@ export function DataSyncPreview(arg1:sync.SyncConfig,arg2:string,arg3:number):Pr
 
 export function DeleteConnection(arg1:string):Promise<void>;
 
+export function DeleteQuery(arg1:string):Promise<void>;
+
 export function DeleteSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function DeleteSQLFile(arg1:string):Promise<connection.QueryResult>;
@@ -136,7 +138,11 @@ export function GetGlobalProxyConfig():Promise<connection.QueryResult>;
 
 export function GetSavedConnections():Promise<Array<connection.SavedConnectionView>>;
 
+export function GetSavedQueries():Promise<Array<connection.SavedQuery>>;
+
 export function GetSecurityUpdateStatus():Promise<app.SecurityUpdateStatus>;
+
+export function GetUnboundSavedQueries():Promise<Array<connection.SavedQuery>>;
 
 export function ImportConfigFile():Promise<connection.QueryResult>;
 
@@ -149,6 +155,8 @@ export function ImportDataWithProgress(arg1:connection.ConnectionConfig,arg2:str
 export function ImportLegacyConnections(arg1:Array<connection.SavedConnectionInput>):Promise<Array<connection.SavedConnectionView>>;
 
 export function ImportLegacyGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
+
+export function ImportSavedQueries(arg1:connection.SavedQueryImportPayload):Promise<Array<connection.SavedQuery>>;
 
 export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
@@ -215,6 +223,8 @@ export function PreviewImportFile(arg1:string):Promise<connection.QueryResult>;
 export function ReadAppLogTail(arg1:number,arg2:string):Promise<connection.QueryResult>;
 
 export function ReadSQLFile(arg1:string):Promise<connection.QueryResult>;
+
+export function RebindSavedQuery(arg1:string,arg2:string):Promise<connection.SavedQuery>;
 
 export function RedisConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
@@ -293,6 +303,8 @@ export function RetrySecurityUpdateCurrentRound(arg1:app.RetrySecurityUpdateRequ
 export function SaveConnection(arg1:connection.SavedConnectionInput):Promise<connection.SavedConnectionView>;
 
 export function SaveGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
+
+export function SaveQuery(arg1:connection.SavedQuery):Promise<connection.SavedQuery>;
 
 export function SelectCertificateFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 

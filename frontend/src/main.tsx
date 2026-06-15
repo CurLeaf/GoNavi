@@ -24,6 +24,7 @@ const resolveDevHarnessMode = (): string => {
 
 if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window as any).go?.aiservice?.Service)) {
     const mockConnections: any[] = [];
+    const mockSavedQueries: any[] = [];
     const mockConnectionSecrets = new Map<string, any>();
     const mockProviders: any[] = [];
     const mockProviderSecrets = new Map<string, string>();
@@ -154,6 +155,29 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
         return cloneBrowserMockValue(view);
     };
 
+    const saveMockQuery = (input: any) => {
+        const nextId = String(input?.id || `saved-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+        const view = {
+            id: nextId,
+            name: String(input?.name || '未命名查询'),
+            sql: String(input?.sql || ''),
+            connectionId: String(input?.connectionId || ''),
+            dbName: String(input?.dbName || ''),
+            createdAt: Number.isFinite(Number(input?.createdAt)) ? Number(input.createdAt) : Date.now(),
+            connectionFingerprint: typeof input?.connectionFingerprint === 'string' ? input.connectionFingerprint : undefined,
+            fingerprintVersion: typeof input?.fingerprintVersion === 'string' ? input.fingerprintVersion : undefined,
+            bindingStatus: typeof input?.bindingStatus === 'string' ? input.bindingStatus : undefined,
+            originalConnectionId: typeof input?.originalConnectionId === 'string' ? input.originalConnectionId : undefined,
+        };
+        const index = mockSavedQueries.findIndex((item) => item.id === nextId);
+        if (index >= 0) {
+            mockSavedQueries[index] = view;
+        } else {
+            mockSavedQueries.push(view);
+        }
+        return cloneBrowserMockValue(view);
+    };
+
     const saveMockGlobalProxy = (input: any) => {
         const nextPassword = String(input?.password ?? '');
         mockGlobalProxy = {
@@ -251,9 +275,30 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                 GetTableData: async () => ({ columns: [], rows: [], total: 0 }),
                 GetTableColumns: async () => [],
                 ExecuteQuery: async () => ({ columns: [], rows: [], time: 0 }),
-                GetSavedQueries: async () => [],
-                SaveQuery: async () => null,
-                DeleteQuery: async () => null,
+                GetSavedQueries: async () => cloneBrowserMockValue(mockSavedQueries),
+                SaveQuery: async (input: any) => saveMockQuery(input),
+                ImportSavedQueries: async (payload: any) => {
+                    const items = Array.isArray(payload) ? payload : payload?.queries;
+                    (Array.isArray(items) ? items : []).forEach((item) => saveMockQuery(item));
+                    return cloneBrowserMockValue(mockSavedQueries);
+                },
+                DeleteQuery: async (id: string) => {
+                    const index = mockSavedQueries.findIndex((item) => item.id === id);
+                    if (index >= 0) {
+                        mockSavedQueries.splice(index, 1);
+                    }
+                    return null;
+                },
+                RebindSavedQuery: async (id: string, connectionId: string) => {
+                    const existing = mockSavedQueries.find((item) => item.id === id);
+                    if (!existing) throw new Error('saved query not found');
+                    return saveMockQuery({
+                        ...existing,
+                        connectionId,
+                        originalConnectionId: existing.originalConnectionId || existing.connectionId,
+                        bindingStatus: 'active',
+                    });
+                },
                 GetAppInfo: async () => ({}),
                 GetDataRootDirectoryInfo: async () => ({ success: true, data: cloneBrowserMockValue(mockDataRootInfo) }),
                 CheckForUpdates: async () => ({ success: false }),

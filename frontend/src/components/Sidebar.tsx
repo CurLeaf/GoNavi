@@ -226,7 +226,7 @@ interface TreeNode {
   children?: TreeNode[];
   icon?: React.ReactNode;
   dataRef?: any;
-  type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'db-event' | 'routine' | 'object-group' | 'v2-table-section' | 'queries-folder' | 'saved-query' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
+  type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'db-event' | 'routine' | 'object-group' | 'v2-table-section' | 'queries-folder' | 'saved-query' | 'unmatched-saved-queries' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
 }
 
 type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
@@ -423,6 +423,11 @@ const Sidebar: React.FC<{
   const contextMenuPortalRef = useRef<HTMLDivElement | null>(null);
   const [v2TableContextMenuStats, setV2TableContextMenuStats] = useState<Record<string, V2TableContextMenuStats>>({});
   const connectionIds = useMemo(() => connections.map((conn) => conn.id), [connections]);
+  const connectionIdSet = useMemo(() => new Set(connectionIds), [connectionIds]);
+  const unmatchedSavedQueries = useMemo(
+      () => savedQueries.filter((query) => query.bindingStatus === 'orphan' || !connectionIdSet.has(query.connectionId)),
+      [connectionIdSet, savedQueries],
+  );
   const v2RailConnectionGroups = useMemo(
       () => buildV2RailConnectionGroups(connections, connectionTags, sidebarRootOrder),
       [connections, connectionTags, sidebarRootOrder],
@@ -838,10 +843,28 @@ const Sidebar: React.FC<{
 
       orderedNodes.push(...Array.from(tagNodesById.values()));
       orderedNodes.push(...Array.from(ungroupedNodesById.values()));
+      if (unmatchedSavedQueries.length > 0) {
+        orderedNodes.push({
+          title: '未匹配已存查询',
+          key: 'unmatched-saved-queries',
+          icon: <FolderOpenOutlined />,
+          type: 'unmatched-saved-queries',
+          isLeaf: false,
+          selectable: false,
+          children: unmatchedSavedQueries.map((query) => ({
+            title: query.name,
+            key: query.id,
+            icon: <FileTextOutlined />,
+            type: 'saved-query',
+            dataRef: query,
+            isLeaf: true,
+          })),
+        });
+      }
       const externalSQLRootNode = prev.find((node) => node.type === 'external-sql-root');
       return externalSQLRootNode ? [...orderedNodes, externalSQLRootNode] : orderedNodes;
     });
-  }, [connections, connectionTags, sidebarRootOrder]);
+  }, [connections, connectionTags, sidebarRootOrder, unmatchedSavedQueries]);
 
   const handleDuplicateConnection = async (conn: SavedConnection) => {
     if (!conn?.id) return;
@@ -2505,7 +2528,7 @@ const Sidebar: React.FC<{
   }, []);
 
   const onLoadData = async ({ key, children, dataRef, type }: any) => {
-    if (type === 'tag') return;
+    if (type === 'tag' || type === 'unmatched-saved-queries') return;
     if (hasSidebarLazyChildren(children)) return;
 
     if (type === 'connection') {
@@ -4642,7 +4665,7 @@ const Sidebar: React.FC<{
               return;
           }
 
-          saveQuery({
+          const persisted = await saveQuery({
               ...renameSavedQueryTarget,
               name: nextName,
           });
@@ -4651,8 +4674,8 @@ const Sidebar: React.FC<{
                   if (node.key === renameSavedQueryTarget.id) {
                       return {
                           ...node,
-                          title: nextName,
-                          dataRef: { ...(node.dataRef || renameSavedQueryTarget), name: nextName },
+                          title: persisted.name,
+                          dataRef: { ...(node.dataRef || renameSavedQueryTarget), ...persisted },
                       };
                   }
                   return node.children ? { ...node, children: updateSavedQueryNode(node.children) } : node;
@@ -4662,15 +4685,50 @@ const Sidebar: React.FC<{
           setTreeData(nextTreeData);
           tabs
               .filter(tab => tab.type === 'query' && (tab.savedQueryId === renameSavedQueryTarget.id || tab.id === renameSavedQueryTarget.id))
-              .forEach(tab => updateQueryTabDraft(tab.id, { title: nextName }));
+              .forEach(tab => updateQueryTabDraft(tab.id, { title: persisted.name }));
           message.success('查询已重命名');
           setIsRenameSavedQueryModalOpen(false);
           setRenameSavedQueryTarget(null);
           renameSavedQueryForm.resetFields();
       } catch (e) {
-          // Validate failed
+          if (e instanceof Error) {
+              message.error('重命名查询失败: ' + e.message);
+          }
       }
   };
+
+  const isSavedQueryUnmatched = useCallback((query: SavedQuery): boolean => {
+      return query.bindingStatus === 'orphan' || !connectionIdSet.has(query.connectionId);
+  }, [connectionIdSet]);
+
+  const handleRebindSavedQuery = useCallback(async (query: SavedQuery, target: SavedConnection) => {
+      if (!query?.id || !target?.id) return;
+      try {
+          const backendApp = (window as any).go?.app?.App;
+          let persisted: SavedQuery;
+          if (typeof backendApp?.RebindSavedQuery === 'function') {
+              persisted = await backendApp.RebindSavedQuery(query.id, target.id);
+              await saveQuery(persisted);
+          } else {
+              persisted = await saveQuery({
+                  ...query,
+                  connectionId: target.id,
+                  originalConnectionId: query.originalConnectionId || query.connectionId,
+                  bindingStatus: 'active',
+              });
+          }
+          message.success(`查询已绑定到 ${target.name || target.id}`);
+          tabs
+              .filter(tab => tab.type === 'query' && (tab.savedQueryId === query.id || tab.id === query.id))
+              .forEach(tab => updateQueryTabDraft(tab.id, {
+                  title: persisted.name,
+                  connectionId: persisted.connectionId,
+                  dbName: persisted.dbName,
+              }));
+      } catch (error) {
+          message.error('绑定查询失败: ' + (error instanceof Error ? error.message : String(error)));
+      }
+  }, [saveQuery, tabs, updateQueryTabDraft]);
 
   // --- 函数/存储过程操作 ---
   const openRoutineDefinition = (node: any) => {
@@ -7436,7 +7494,24 @@ const Sidebar: React.FC<{
 
     // 已存查询节点的右键菜单
     if (node.type === 'saved-query') {
-        const q = node.dataRef;
+        const q = node.dataRef as SavedQuery;
+        const rebindMenuItems: MenuProps['items'] = isSavedQueryUnmatched(q)
+            ? [
+                {
+                    key: 'rebind-query',
+                    label: '绑定到连接',
+                    icon: <LinkOutlined />,
+                    disabled: connections.length === 0,
+                    children: connections.length > 0
+                        ? connections.map((conn) => ({
+                            key: `rebind-query-${conn.id}`,
+                            label: conn.name || conn.id,
+                            onClick: () => void handleRebindSavedQuery(q, conn),
+                        }))
+                        : undefined,
+                },
+            ]
+            : [];
         return [
             {
                 key: 'open-query',
@@ -7454,6 +7529,7 @@ const Sidebar: React.FC<{
                     });
                 }
             },
+            ...rebindMenuItems,
             { type: 'divider' },
             {
                 key: 'rename-query',
@@ -7471,8 +7547,13 @@ const Sidebar: React.FC<{
                         title: '确认删除',
                         content: `确定要删除已保存的查询 "${q.name}" 吗？此操作不可恢复。`,
                         okButtonProps: { danger: true },
-                        onOk: () => {
-                            deleteQuery(q.id);
+                        onOk: async () => {
+                            try {
+                                await deleteQuery(q.id);
+                            } catch (e) {
+                                message.error('删除查询失败: ' + (e instanceof Error ? e.message : String(e)));
+                                throw e;
+                            }
                             // 从树中移除节点
                             const removeNode = (list: TreeNode[]): TreeNode[] =>
                                 list

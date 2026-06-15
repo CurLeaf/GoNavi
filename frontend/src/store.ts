@@ -52,6 +52,13 @@ import {
   sanitizeTabDisplaySettings,
   type TabDisplaySettings,
 } from "./utils/tabDisplay";
+import {
+  captureLegacySavedQueriesSnapshot,
+  deleteSavedQueryFromBackend,
+  sanitizeSavedQueries,
+  saveSavedQueryToBackend,
+  type SavedQueryBackend,
+} from "./utils/savedQueryPersistence";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
@@ -111,7 +118,7 @@ const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 10;
+const PERSIST_VERSION = 11;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const PERSIST_WRITE_DEBOUNCE_MS = 160;
 const MAX_PERSISTED_QUERY_TABS = 20;
@@ -136,6 +143,13 @@ const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
 const isFrontendTestRuntime = (): boolean => {
   const env = (import.meta as unknown as { env?: Record<string, unknown> }).env || {};
   return env.MODE === "test" || env.VITEST === true || env.VITEST === "true";
+};
+
+const resolveSavedQueryBackend = (): SavedQueryBackend | undefined => {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  return (window as unknown as { go?: { app?: { App?: SavedQueryBackend } } }).go?.app?.App;
 };
 
 const createDebouncedPersistStorage = <S>(
@@ -1282,8 +1296,9 @@ interface AppState {
     context: { connectionId: string; dbName: string } | null,
   ) => void;
 
-  saveQuery: (query: SavedQuery) => void;
-  deleteQuery: (id: string) => void;
+  replaceSavedQueries: (queries: SavedQuery[]) => void;
+  saveQuery: (query: SavedQuery) => Promise<SavedQuery>;
+  deleteQuery: (id: string) => Promise<void>;
   saveExternalSQLDirectory: (directory: ExternalSQLDirectory) => void;
   deleteExternalSQLDirectory: (id: string) => void;
 
@@ -1386,33 +1401,6 @@ interface AppState {
   createNewAISession: () => void;
   setAIActiveSessionId: (sessionId: string | null) => void;
 }
-
-const sanitizeSavedQueries = (value: unknown): SavedQuery[] => {
-  if (!Array.isArray(value)) return [];
-  const result: SavedQuery[] = [];
-  value.forEach((entry, index) => {
-    if (!entry || typeof entry !== "object") return;
-    const raw = entry as Record<string, unknown>;
-    const id =
-      toTrimmedString(raw.id, `query-${index + 1}`) || `query-${index + 1}`;
-    const sql = toTrimmedString(raw.sql);
-    const connectionId = toTrimmedString(raw.connectionId);
-    const dbName = toTrimmedString(raw.dbName);
-    if (!sql || !connectionId || !dbName) return;
-    result.push({
-      id,
-      name:
-        toTrimmedString(raw.name, `查询-${index + 1}`) || `查询-${index + 1}`,
-      sql,
-      connectionId,
-      dbName,
-      createdAt: Number.isFinite(Number(raw.createdAt))
-        ? Number(raw.createdAt)
-        : Date.now(),
-    });
-  });
-  return result;
-};
 
 const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
   if (!Array.isArray(value)) return DEFAULT_SQL_SNIPPETS;
@@ -2745,24 +2733,34 @@ export const useStore = create<AppState>()(
         })),
       setActiveContext: (context) => set({ activeContext: context }),
 
-      saveQuery: (query) =>
+      replaceSavedQueries: (queries) =>
+        set({ savedQueries: sanitizeSavedQueries(queries) }),
+
+      saveQuery: async (query) => {
+        const saved = await saveSavedQueryToBackend(
+          resolveSavedQueryBackend(),
+          query,
+        );
         set((state) => {
-          // If query with same ID exists, update it
-          const existing = state.savedQueries.find((q) => q.id === query.id);
+          const existing = state.savedQueries.find((q) => q.id === saved.id);
           if (existing) {
             return {
               savedQueries: state.savedQueries.map((q) =>
-                q.id === query.id ? query : q,
+                q.id === saved.id ? saved : q,
               ),
             };
           }
-          return { savedQueries: [...state.savedQueries, query] };
-        }),
+          return { savedQueries: [...state.savedQueries, saved] };
+        });
+        return saved;
+      },
 
-      deleteQuery: (id) =>
+      deleteQuery: async (id) => {
+        await deleteSavedQueryFromBackend(resolveSavedQueryBackend(), id);
         set((state) => ({
           savedQueries: state.savedQueries.filter((q) => q.id !== id),
-        })),
+        }));
+      },
 
       saveExternalSQLDirectory: (directory) =>
         set((state) => {
@@ -3252,6 +3250,7 @@ export const useStore = create<AppState>()(
         const state = unwrapPersistedAppState(
           persistedState,
         ) as Partial<AppState>;
+        captureLegacySavedQueriesSnapshot(state.savedQueries, state.connections);
         const nextState: Partial<AppState> = { ...state };
         nextState.connections = sanitizeConnections(state.connections);
         const safeTabs = sanitizeQueryTabs(state.tabs);
@@ -3271,7 +3270,7 @@ export const useStore = create<AppState>()(
           nextState.connectionTags,
           nextState.connections,
         );
-        nextState.savedQueries = sanitizeSavedQueries(state.savedQueries);
+        delete nextState.savedQueries;
         nextState.externalSQLDirectories = sanitizeExternalSQLDirectories(
           state.externalSQLDirectories,
         );
@@ -3340,6 +3339,7 @@ export const useStore = create<AppState>()(
         const state = unwrapPersistedAppState(
           persistedState,
         ) as Partial<AppState>;
+        captureLegacySavedQueriesSnapshot(state.savedQueries, state.connections);
         const safeTabs = sanitizeQueryTabs(state.tabs);
         const persistedConnections =
           state.connections === undefined
@@ -3365,7 +3365,7 @@ export const useStore = create<AppState>()(
           sidebarRootOrder: persistedSidebarRootOrder,
           tabs: safeTabs,
           activeTabId: sanitizeActiveTabId(state.activeTabId, safeTabs),
-          savedQueries: sanitizeSavedQueries(state.savedQueries),
+          savedQueries: currentState.savedQueries,
           externalSQLDirectories: sanitizeExternalSQLDirectories(
             state.externalSQLDirectories,
           ),
@@ -3416,7 +3416,6 @@ export const useStore = create<AppState>()(
           activeTabId: sanitizeActiveTabId(state.activeTabId, tabs),
           connectionTags: state.connectionTags,
           sidebarRootOrder: state.sidebarRootOrder,
-          savedQueries: state.savedQueries,
           externalSQLDirectories: state.externalSQLDirectories,
           theme: state.theme,
           appearance: state.appearance,

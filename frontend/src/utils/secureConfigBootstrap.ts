@@ -12,6 +12,7 @@ import {
   readLegacyPersistedSecrets,
   stripLegacyPersistedSecrets,
 } from './legacyConnectionStorage';
+import { stripLegacySavedQueries } from './savedQueryPersistence';
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -312,8 +313,9 @@ const cleanupLegacySourceIfCompleted = (
   if (!storage || !rawPayload || status.overallStatus !== 'completed') {
     return;
   }
-  const sanitizedPayload = stripLegacyPersistedSecrets(rawPayload);
-  if (sanitizedPayload && sanitizedPayload !== rawPayload) {
+  const currentPayload = storage.getItem(LEGACY_PERSIST_KEY) ?? rawPayload;
+  const sanitizedPayload = stripLegacySavedQueries(stripLegacyPersistedSecrets(currentPayload));
+  if (sanitizedPayload && sanitizedPayload !== currentPayload) {
     storage.setItem(LEGACY_PERSIST_KEY, sanitizedPayload);
   }
 };

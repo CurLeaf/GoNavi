@@ -466,6 +466,10 @@ export interface SavedQuery {
   connectionId: string;
   dbName: string;
   createdAt: number;
+  connectionFingerprint?: string;
+  fingerprintVersion?: string;
+  bindingStatus?: "active" | "rebound" | "orphan" | string;
+  originalConnectionId?: string;
 }
 
 export interface SqlSnippet {

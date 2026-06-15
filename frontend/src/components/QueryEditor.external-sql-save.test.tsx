@@ -458,6 +458,7 @@ describe('QueryEditor external SQL save', () => {
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
     storeState.saveQuery.mockReset();
+    storeState.saveQuery.mockImplementation(async (query: SavedQuery) => query);
     storeState.savedQueries = [];
     storeState.activeTabId = 'tab-1';
     storeState.queryOptions = {

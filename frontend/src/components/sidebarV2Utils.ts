@@ -21,6 +21,7 @@ export type SidebarTreeNodeType =
   | 'v2-table-section'
   | 'queries-folder'
   | 'saved-query'
+  | 'unmatched-saved-queries'
   | 'external-sql-root'
   | 'external-sql-directory'
   | 'external-sql-folder'
