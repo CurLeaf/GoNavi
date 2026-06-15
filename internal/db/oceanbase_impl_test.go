@@ -3,6 +3,7 @@
 package db
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/url"
@@ -376,7 +377,8 @@ func TestProbeOceanBaseMySQLWireDetectsOceanBaseHandshake(t *testing.T) {
 func TestProbeOceanBaseMySQLWireHandshakeReturnsFalseOnUnreachable(t *testing.T) {
 	t.Parallel()
 
-	// 用一个不可达端口（监听后立即关闭），探测应返回 probed=false 让上层继续走 go-ora 路径
+	// 用一个不可达端口（监听后立即关闭），探测应返回 probed=false，
+	// 上层会直接给出网络不可达诊断，避免 OBClient/TNS 两条路径重复超时。
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen failed: %v", err)
@@ -390,7 +392,131 @@ func TestProbeOceanBaseMySQLWireHandshakeReturnsFalseOnUnreachable(t *testing.T)
 		t.Fatal("expected unreachable port not flagged as OB")
 	}
 	if probed {
-		t.Fatal("expected probed=false on unreachable port so upper layer falls back to go-ora")
+		t.Fatal("expected probed=false on unreachable port so upper layer can return network diagnosis")
+	}
+}
+
+func TestOceanBaseOracleConnectStopsOnProbeDialFailure(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	host, portStr, _ := net.SplitHostPort(ln.Addr().String())
+	port, _ := strconv.Atoi(portStr)
+	_ = ln.Close()
+
+	ob := &OceanBaseDB{}
+	err = ob.Connect(connection.ConnectionConfig{
+		Type:              "oceanbase",
+		Host:              host,
+		Port:              port,
+		User:              "SBDEV@SERVICE:srv_yhcs",
+		Password:          "secret",
+		Database:          "sbdev",
+		OceanBaseProtocol: oceanBaseProtocolOracle,
+		Timeout:           1,
+	})
+	if err == nil {
+		t.Fatal("expected connect error for unreachable OceanBase Oracle endpoint")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "TCP 不可达") {
+		t.Fatalf("expected direct TCP unreachable diagnosis, got %q", got)
+	}
+	if !strings.Contains(got, "和 OBClient/TNS 路径无关") {
+		t.Fatalf("expected error to explain protocol paths are irrelevant, got %q", got)
+	}
+	if strings.Contains(got, "两条连接路径均失败") {
+		t.Fatalf("expected no dual-path failure after probe dial failure, got %q", got)
+	}
+}
+
+func TestOceanBaseOracleConnectProbeDialFailureMentionsSSHWhenEnabled(t *testing.T) {
+	originalDial := oceanBaseProbeDialContext
+	t.Cleanup(func() { oceanBaseProbeDialContext = originalDial })
+
+	var seenConfig connection.ConnectionConfig
+	var seenAddress string
+	oceanBaseProbeDialContext = func(ctx context.Context, config connection.ConnectionConfig, address string) (net.Conn, error) {
+		seenConfig = config
+		seenAddress = address
+		return nil, errors.New("remote dial denied")
+	}
+
+	ob := &OceanBaseDB{}
+	err := ob.Connect(connection.ConnectionConfig{
+		Type:              "oceanbase",
+		Host:              "172.22.39.20",
+		Port:              12883,
+		User:              "SBDEV@SERVICE:srv_yhcs",
+		Password:          "secret",
+		Database:          "sbdev",
+		OceanBaseProtocol: oceanBaseProtocolOracle,
+		Timeout:           1,
+		UseSSH:            true,
+		SSH: connection.SSHConfig{
+			Host:     "jump.example.com",
+			Port:     22,
+			User:     "ops",
+			Password: "jump-secret",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected connect error for SSH probe dial failure")
+	}
+	got := err.Error()
+	if !seenConfig.UseSSH {
+		t.Fatalf("expected probe dialer to receive UseSSH=true, got %+v", seenConfig)
+	}
+	if seenAddress != "172.22.39.20:12883" {
+		t.Fatalf("expected probe target to remain remote inner address, got %q", seenAddress)
+	}
+	if !strings.Contains(got, "通过 SSH 跳板机访问目标地址 172.22.39.20:12883 失败") {
+		t.Fatalf("expected SSH-specific network diagnosis, got %q", got)
+	}
+	if strings.Contains(got, "VPN/内网路由") {
+		t.Fatalf("expected SSH diagnosis not direct-client VPN hint, got %q", got)
+	}
+}
+
+func TestProbeOceanBaseMySQLWireHandshakeUsesSSHConfiguredDialer(t *testing.T) {
+	originalDial := oceanBaseProbeDialContext
+	t.Cleanup(func() { oceanBaseProbeDialContext = originalDial })
+
+	var seenConfig connection.ConnectionConfig
+	var seenAddress string
+	oceanBaseProbeDialContext = func(ctx context.Context, config connection.ConnectionConfig, address string) (net.Conn, error) {
+		seenConfig = config
+		seenAddress = address
+		clientConn, serverConn := net.Pipe()
+		go func() {
+			defer serverConn.Close()
+			_, _ = serverConn.Write(buildMySQLHandshakePacket("5.7.25-OceanBase-v4.2.1.0"))
+		}()
+		return clientConn, nil
+	}
+
+	result := probeOceanBaseMySQLWireHandshakeDetail(connection.ConnectionConfig{
+		Host:   "172.22.39.20",
+		Port:   12883,
+		UseSSH: true,
+		SSH: connection.SSHConfig{
+			Host: "jump.example.com",
+			Port: 22,
+			User: "ops",
+		},
+	}, time.Second)
+
+	if !result.probeSucceeded || !result.isOBMySQLWire {
+		t.Fatalf("expected SSH-routed probe to detect OceanBase handshake, got %+v", result)
+	}
+	if !seenConfig.UseSSH {
+		t.Fatalf("expected probe dialer to receive SSH config, got %+v", seenConfig)
+	}
+	if seenAddress != "172.22.39.20:12883" {
+		t.Fatalf("expected remote target address through SSH, got %q", seenAddress)
 	}
 }
 
@@ -590,4 +716,3 @@ func TestFormatOceanBaseMySQLAttemptErrorHintsOracleProtocol(t *testing.T) {
 		t.Fatalf("expected hint to mention OBProxy Oracle protocol port, got %q", got)
 	}
 }
-
