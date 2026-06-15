@@ -1210,11 +1210,11 @@ export namespace connection {
 	    fingerprintVersion?: string;
 	    bindingStatus?: string;
 	    originalConnectionId?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SavedQuery(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
@@ -1232,17 +1232,17 @@ export namespace connection {
 	export class SavedQueryImportPayload {
 	    queries: SavedQuery[];
 	    legacyConnections?: SavedConnectionInput[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new SavedQueryImportPayload(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.queries = this.convertValues(source["queries"], SavedQuery);
 	        this.legacyConnections = this.convertValues(source["legacyConnections"], SavedConnectionInput);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -1454,3 +1454,4 @@ export namespace sync {
 	}
 
 }
+

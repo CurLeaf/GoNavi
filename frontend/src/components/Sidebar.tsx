@@ -226,7 +226,7 @@ interface TreeNode {
   children?: TreeNode[];
   icon?: React.ReactNode;
   dataRef?: any;
-  type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'db-event' | 'routine' | 'object-group' | 'v2-table-section' | 'queries-folder' | 'saved-query' | 'unmatched-saved-queries' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
+  type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'db-event' | 'routine' | 'object-group' | 'v2-table-section' | 'queries-folder' | 'saved-query' | 'all-saved-queries' | 'saved-query-group' | 'unmatched-saved-queries' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
 }
 
 type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
@@ -255,6 +255,115 @@ const SEARCH_SCOPE_ICON_MAP: Record<SearchScope, React.ReactNode> = {
   database: <DatabaseOutlined />,
   host: <CloudOutlined />,
   tag: <TagOutlined />,
+};
+
+const isSavedQueryUnmatchedForConnectionIds = (query: SavedQuery, connectionIds: Set<string>): boolean => (
+  query.bindingStatus === 'orphan' || !connectionIds.has(query.connectionId)
+);
+
+export const buildAllSavedQueriesTreeNode = (
+  savedQueries: SavedQuery[],
+  connections: SavedConnection[],
+): TreeNode | null => {
+  if (savedQueries.length === 0) {
+      return null;
+  }
+
+  const connectionIds = new Set(connections.map((conn) => conn.id));
+  const unmatchedSavedQueries = savedQueries.filter((query) => isSavedQueryUnmatchedForConnectionIds(query, connectionIds));
+  const unmatchedIds = new Set(unmatchedSavedQueries.map((query) => query.id));
+  const createQueryNode = (query: SavedQuery): TreeNode => ({
+      title: query.name || '未命名查询',
+      key: `all-saved-query-${query.id}`,
+      icon: <FileTextOutlined />,
+      type: 'saved-query',
+      dataRef: query,
+      isLeaf: true,
+  });
+  const buildDatabaseGroups = (queries: SavedQuery[], keyPrefix: string): TreeNode[] => {
+      const groupedByDatabase = new Map<string, SavedQuery[]>();
+      queries.forEach((query) => {
+          const dbName = String(query.dbName || '').trim() || '默认数据库';
+          groupedByDatabase.set(dbName, [...(groupedByDatabase.get(dbName) || []), query]);
+      });
+      return Array.from(groupedByDatabase.entries()).map(([dbName, items]) => ({
+          title: dbName,
+          key: `${keyPrefix}-db-${encodeURIComponent(dbName)}`,
+          icon: <DatabaseOutlined />,
+          type: 'saved-query-group',
+          selectable: false,
+          isLeaf: false,
+          children: items.map(createQueryNode),
+      }));
+  };
+
+  const groupedByConnection = new Map<string, SavedQuery[]>();
+  savedQueries.forEach((query) => {
+      if (unmatchedIds.has(query.id)) {
+          return;
+      }
+      groupedByConnection.set(query.connectionId, [
+          ...(groupedByConnection.get(query.connectionId) || []),
+          query,
+      ]);
+  });
+
+  const children: TreeNode[] = [];
+  connections.forEach((conn) => {
+      const connectionQueries = groupedByConnection.get(conn.id);
+      if (!connectionQueries || connectionQueries.length === 0) {
+          return;
+      }
+      const iconType = resolveConnectionIconType(conn);
+      const iconColor = resolveConnectionAccentColor(conn);
+      children.push({
+          title: conn.name || conn.id,
+          key: `all-saved-queries-connection-${conn.id}`,
+          icon: getDbIcon(iconType, iconColor, 22),
+          type: 'saved-query-group',
+          selectable: false,
+          isLeaf: false,
+          children: buildDatabaseGroups(connectionQueries, `all-saved-queries-connection-${conn.id}`),
+      });
+  });
+
+  if (unmatchedSavedQueries.length > 0) {
+      const groupedByOriginalConnection = new Map<string, SavedQuery[]>();
+      unmatchedSavedQueries.forEach((query) => {
+          const originalConnectionId = String(query.originalConnectionId || query.connectionId || '未知连接').trim() || '未知连接';
+          groupedByOriginalConnection.set(originalConnectionId, [
+              ...(groupedByOriginalConnection.get(originalConnectionId) || []),
+              query,
+          ]);
+      });
+      children.push({
+          title: '未匹配',
+          key: 'all-saved-queries-unmatched',
+          icon: <WarningOutlined />,
+          type: 'saved-query-group',
+          selectable: false,
+          isLeaf: false,
+          children: Array.from(groupedByOriginalConnection.entries()).map(([connectionLabel, items]) => ({
+              title: connectionLabel,
+              key: `all-saved-queries-unmatched-${encodeURIComponent(connectionLabel)}`,
+              icon: <FolderOpenOutlined />,
+              type: 'saved-query-group',
+              selectable: false,
+              isLeaf: false,
+              children: buildDatabaseGroups(items, `all-saved-queries-unmatched-${encodeURIComponent(connectionLabel)}`),
+          })),
+      });
+  }
+
+  return {
+      title: '全部已存查询',
+      key: 'all-saved-queries',
+      icon: <FolderOpenOutlined />,
+      type: 'all-saved-queries',
+      isLeaf: false,
+      selectable: false,
+      children,
+  };
 };
 
 const Sidebar: React.FC<{
@@ -425,9 +534,12 @@ const Sidebar: React.FC<{
   const connectionIds = useMemo(() => connections.map((conn) => conn.id), [connections]);
   const connectionIdSet = useMemo(() => new Set(connectionIds), [connectionIds]);
   const unmatchedSavedQueries = useMemo(
-      () => savedQueries.filter((query) => query.bindingStatus === 'orphan' || !connectionIdSet.has(query.connectionId)),
+      () => savedQueries.filter((query) => isSavedQueryUnmatchedForConnectionIds(query, connectionIdSet)),
       [connectionIdSet, savedQueries],
   );
+  const allSavedQueriesNode = useMemo<TreeNode | null>(() => {
+      return buildAllSavedQueriesTreeNode(savedQueries, connections);
+  }, [connections, savedQueries]);
   const v2RailConnectionGroups = useMemo(
       () => buildV2RailConnectionGroups(connections, connectionTags, sidebarRootOrder),
       [connections, connectionTags, sidebarRootOrder],
@@ -843,28 +955,13 @@ const Sidebar: React.FC<{
 
       orderedNodes.push(...Array.from(tagNodesById.values()));
       orderedNodes.push(...Array.from(ungroupedNodesById.values()));
-      if (unmatchedSavedQueries.length > 0) {
-        orderedNodes.push({
-          title: '未匹配已存查询',
-          key: 'unmatched-saved-queries',
-          icon: <FolderOpenOutlined />,
-          type: 'unmatched-saved-queries',
-          isLeaf: false,
-          selectable: false,
-          children: unmatchedSavedQueries.map((query) => ({
-            title: query.name,
-            key: query.id,
-            icon: <FileTextOutlined />,
-            type: 'saved-query',
-            dataRef: query,
-            isLeaf: true,
-          })),
-        });
+      if (allSavedQueriesNode) {
+        orderedNodes.push(allSavedQueriesNode);
       }
       const externalSQLRootNode = prev.find((node) => node.type === 'external-sql-root');
       return externalSQLRootNode ? [...orderedNodes, externalSQLRootNode] : orderedNodes;
     });
-  }, [connections, connectionTags, sidebarRootOrder, unmatchedSavedQueries]);
+  }, [connections, connectionTags, sidebarRootOrder, allSavedQueriesNode]);
 
   const handleDuplicateConnection = async (conn: SavedConnection) => {
     if (!conn?.id) return;
@@ -2528,7 +2625,7 @@ const Sidebar: React.FC<{
   }, []);
 
   const onLoadData = async ({ key, children, dataRef, type }: any) => {
-    if (type === 'tag' || type === 'unmatched-saved-queries') return;
+    if (type === 'tag' || type === 'all-saved-queries' || type === 'saved-query-group' || type === 'unmatched-saved-queries') return;
     if (hasSidebarLazyChildren(children)) return;
 
     if (type === 'connection') {
@@ -4671,7 +4768,7 @@ const Sidebar: React.FC<{
           });
           const updateSavedQueryNode = (list: TreeNode[]): TreeNode[] =>
               list.map(node => {
-                  if (node.key === renameSavedQueryTarget.id) {
+                  if (node.type === 'saved-query' && node.dataRef?.id === renameSavedQueryTarget.id) {
                       return {
                           ...node,
                           title: persisted.name,
@@ -7557,7 +7654,7 @@ const Sidebar: React.FC<{
                             // 从树中移除节点
                             const removeNode = (list: TreeNode[]): TreeNode[] =>
                                 list
-                                    .filter(n => n.key !== node.key)
+                                    .filter(n => !(n.type === 'saved-query' && n.dataRef?.id === q.id))
                                     .map(n => n.children ? { ...n, children: removeNode(n.children) } : n);
                             const nextTreeData = removeNode(treeDataRef.current);
                             treeDataRef.current = nextTreeData;

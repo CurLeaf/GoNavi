@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Sidebar, {
+  buildAllSavedQueriesTreeNode,
   buildSidebarTableChildrenForUi,
   buildV2SidebarTableSectionedChildren,
   buildV2RailConnectionGroups,
@@ -497,6 +498,67 @@ describe('Sidebar locate toolbar', () => {
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('}> = React.memo(({');
+  });
+
+  it('builds a standalone saved-query tree without loading database nodes', () => {
+    const tree = buildAllSavedQueriesTreeNode(
+      [
+        {
+          id: 'saved-1',
+          name: 'Orders',
+          sql: 'select * from orders',
+          connectionId: 'conn-1',
+          dbName: 'app',
+          createdAt: 100,
+        },
+        {
+          id: 'saved-orphan',
+          name: 'Legacy Report',
+          sql: 'select 1',
+          connectionId: 'legacy-1',
+          originalConnectionId: 'legacy-1',
+          dbName: 'legacy_db',
+          createdAt: 200,
+          bindingStatus: 'orphan',
+        },
+      ],
+      [{
+        id: 'conn-1',
+        name: 'Primary',
+        config: {
+          type: 'mysql',
+          host: 'db.local',
+          port: 3306,
+        },
+      }] as any,
+    );
+
+    expect(tree?.key).toBe('all-saved-queries');
+    expect(tree?.title).toBe('全部已存查询');
+    expect(tree?.children?.[0]).toMatchObject({
+      key: 'all-saved-queries-connection-conn-1',
+      title: 'Primary',
+      type: 'saved-query-group',
+    });
+    expect(tree?.children?.[0].children?.[0]).toMatchObject({
+      key: 'all-saved-queries-connection-conn-1-db-app',
+      title: 'app',
+    });
+    expect(tree?.children?.[0].children?.[0].children?.[0]).toMatchObject({
+      key: 'all-saved-query-saved-1',
+      title: 'Orders',
+      type: 'saved-query',
+    });
+    const unmatchedGroup = tree?.children?.find((child) => child.key === 'all-saved-queries-unmatched');
+    expect(unmatchedGroup?.title).toBe('未匹配');
+    expect(unmatchedGroup?.children?.[0]).toMatchObject({
+      key: 'all-saved-queries-unmatched-legacy-1',
+      title: 'legacy-1',
+    });
+    expect(unmatchedGroup?.children?.[0].children?.[0].children?.[0]).toMatchObject({
+      key: 'all-saved-query-saved-orphan',
+      title: 'Legacy Report',
+    });
   });
 
   it('releases backend database connections when disconnecting a sidebar connection', () => {
