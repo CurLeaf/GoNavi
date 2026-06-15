@@ -59,10 +59,11 @@ import (
 )
 
 const (
-	oceanbaseDriverName     = "oceanbase"
-	defaultOceanBasePort    = 2881
-	oceanBaseProtocolMySQL  = "mysql"
-	oceanBaseProtocolOracle = "oracle"
+	oceanbaseDriverName             = "oceanbase"
+	defaultOceanBasePort            = 2881
+	oceanBaseProtocolMySQL          = "mysql"
+	oceanBaseProtocolOracle         = "oracle"
+	oceanBaseOracleProbeReadTimeout = 3 * time.Second
 )
 
 // OceanBaseDB 支持 OceanBase MySQL/Oracle 两种租户协议。
@@ -519,18 +520,25 @@ func probeOceanBaseMySQLWireHandshake(host string, port int, timeout time.Durati
 }
 
 func probeOceanBaseMySQLWireHandshakeDetail(config connection.ConnectionConfig, timeout time.Duration) oceanBaseMySQLWireProbeResult {
-	if timeout <= 0 {
-		timeout = 2 * time.Second
+	return probeOceanBaseMySQLWireHandshakeDetailWithTimeouts(config, timeout, timeout)
+}
+
+func probeOceanBaseMySQLWireHandshakeDetailWithTimeouts(config connection.ConnectionConfig, dialTimeout time.Duration, readTimeout time.Duration) oceanBaseMySQLWireProbeResult {
+	if dialTimeout <= 0 {
+		dialTimeout = 2 * time.Second
+	}
+	if readTimeout <= 0 {
+		readTimeout = dialTimeout
 	}
 	addr := normalizeMySQLAddress(config.Host, config.Port)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
 	conn, err := oceanBaseProbeDialContext(ctx, config, addr)
 	if err != nil {
 		return oceanBaseMySQLWireProbeResult{err: err}
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(timeout))
+	_ = conn.SetDeadline(time.Now().Add(readTimeout))
 
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(conn, header); err != nil {
@@ -680,11 +688,16 @@ func (o *OceanBaseDB) Connect(config connection.ConnectionConfig) error {
 
 	if protocol == oceanBaseProtocolOracle {
 		// 预探测目标端口的实际协议，决定走哪条 Oracle 连接路径。
-		probeTimeout := getConnectTimeout(runConfig)
-		if probeTimeout > 3*time.Second {
-			probeTimeout = 3 * time.Second
+		// SSH 跳板机到内网目标的 direct-tcpip 拨号可能慢于 3 秒；只收紧握手读取超时，避免误判内网目标不可达。
+		probeDialTimeout := getConnectTimeout(runConfig)
+		if !runConfig.UseSSH && probeDialTimeout > oceanBaseOracleProbeReadTimeout {
+			probeDialTimeout = oceanBaseOracleProbeReadTimeout
 		}
-		probeResult := probeOceanBaseMySQLWireHandshakeDetail(runConfig, probeTimeout)
+		probeReadTimeout := oceanBaseOracleProbeReadTimeout
+		if probeReadTimeout > probeDialTimeout {
+			probeReadTimeout = probeDialTimeout
+		}
+		probeResult := probeOceanBaseMySQLWireHandshakeDetailWithTimeouts(runConfig, probeDialTimeout, probeReadTimeout)
 		switch {
 		case probeResult.probeSucceeded && probeResult.isOBMySQLWire:
 			// 明确识别为 OB MySQL wire 端口：直接走 OBClient capability 路径

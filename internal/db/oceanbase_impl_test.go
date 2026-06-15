@@ -520,6 +520,90 @@ func TestProbeOceanBaseMySQLWireHandshakeUsesSSHConfiguredDialer(t *testing.T) {
 	}
 }
 
+func TestOceanBaseOracleConnectUsesFullSSHTimeoutForProbeDial(t *testing.T) {
+	originalDial := oceanBaseProbeDialContext
+	t.Cleanup(func() { oceanBaseProbeDialContext = originalDial })
+
+	var observedDialTimeout time.Duration
+	oceanBaseProbeDialContext = func(ctx context.Context, config connection.ConnectionConfig, address string) (net.Conn, error) {
+		if deadline, ok := ctx.Deadline(); ok {
+			observedDialTimeout = time.Until(deadline)
+		}
+		return nil, errors.New("remote dial denied")
+	}
+
+	ob := &OceanBaseDB{}
+	err := ob.Connect(connection.ConnectionConfig{
+		Type:              "oceanbase",
+		Host:              "172.22.39.20",
+		Port:              12883,
+		User:              "SBDEV@SERVICE:srv_yhcs",
+		Password:          "secret",
+		Database:          "srv_yhcs",
+		OceanBaseProtocol: oceanBaseProtocolOracle,
+		Timeout:           12,
+		UseSSH:            true,
+		SSH: connection.SSHConfig{
+			Host: "jump.example.com",
+			Port: 22,
+			User: "ops",
+		},
+	})
+	if err == nil {
+		t.Fatal("expected connect error from mocked probe dialer")
+	}
+	if observedDialTimeout < 10*time.Second {
+		t.Fatalf("expected SSH probe dial to use the full configured timeout, got about %s", observedDialTimeout)
+	}
+}
+
+func TestProbeOceanBaseMySQLWireHandshakeSplitsDialAndReadTimeout(t *testing.T) {
+	originalDial := oceanBaseProbeDialContext
+	t.Cleanup(func() { oceanBaseProbeDialContext = originalDial })
+
+	var observedDialTimeout time.Duration
+	var serverConn net.Conn
+	oceanBaseProbeDialContext = func(ctx context.Context, config connection.ConnectionConfig, address string) (net.Conn, error) {
+		if deadline, ok := ctx.Deadline(); ok {
+			observedDialTimeout = time.Until(deadline)
+		}
+		clientConn, remoteConn := net.Pipe()
+		serverConn = remoteConn
+		return clientConn, nil
+	}
+	t.Cleanup(func() {
+		if serverConn != nil {
+			_ = serverConn.Close()
+		}
+	})
+
+	started := time.Now()
+	result := probeOceanBaseMySQLWireHandshakeDetailWithTimeouts(connection.ConnectionConfig{
+		Host:   "172.22.39.20",
+		Port:   12883,
+		UseSSH: true,
+		SSH: connection.SSHConfig{
+			Host: "jump.example.com",
+			Port: 22,
+			User: "ops",
+		},
+	}, 12*time.Second, 50*time.Millisecond)
+	elapsed := time.Since(started)
+
+	if observedDialTimeout < 10*time.Second {
+		t.Fatalf("expected probe dial context to keep the long dial timeout, got about %s", observedDialTimeout)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("expected handshake read to use short timeout, elapsed=%s", elapsed)
+	}
+	if !result.probeSucceeded || !result.tcpReachable {
+		t.Fatalf("expected short read timeout to be treated as reachable non-MySQL-wire probe, got %+v", result)
+	}
+	if result.err == nil {
+		t.Fatalf("expected read timeout error to be recorded for diagnostics")
+	}
+}
+
 // probe 放宽 protocol_version 检查后，普通 MySQL/MariaDB（server_version 不含 OB 关键字）
 // 应仍判定为非 OB MySQL wire（由 regular_mysql_is_not_flagged / mariadb_is_not_flagged 子用例
 // 覆盖）。原 IgnoresNonMySQLProtocol 测试因 probe 不再严格区分 mysql vs 非 mysql 而失效，已删除。
