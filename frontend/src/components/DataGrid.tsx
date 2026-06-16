@@ -1767,10 +1767,12 @@ const DataGrid: React.FC<DataGridProps> = ({
           columnMetaTooltipColor: darkMode ? 'rgba(255, 236, 179, 0.98)' : '#262626',
           panelFrameColor: darkMode ? 'rgba(0, 0, 0, 0.42)' : 'rgba(0, 0, 0, 0.18)',
           floatingScrollbarThumbBg: darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(0,0,0,0.44)',
+          floatingScrollbarThumbHoverBg: darkMode ? 'rgba(255,255,255,0.78)' : 'rgba(0,0,0,0.54)',
           floatingScrollbarThumbBorderColor: darkMode ? 'rgba(255,255,255,0.26)' : 'rgba(255,255,255,0.52)',
           floatingScrollbarThumbShadow: (isMacLike || isV2Ui) ? 'none' : (darkMode ? '0 4px 14px rgba(0,0,0,0.42)' : '0 4px 10px rgba(0,0,0,0.20)'),
           verticalScrollbarTrackBg: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
           horizontalScrollbarThumbBg: darkMode ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.14)',
+          horizontalScrollbarThumbHoverBg: darkMode ? 'rgba(255,255,255,0.30)' : 'rgba(0,0,0,0.24)',
           toolbarDividerColor: darkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.10)',
           paginationShellBg: darkMode
               ? `linear-gradient(135deg, rgba(17,22,34,${_glassMode ? Math.max(0.22, opacity * 0.38) : 0.82}) 0%, rgba(10,14,24,${_glassMode ? Math.max(0.28, opacity * 0.46) : 0.9}) 100%)`
@@ -1809,8 +1811,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       selectionAccentHex, selectionAccentRgb,
       columnMetaHintColor, columnMetaTooltipColor,
       panelFrameColor,
-      floatingScrollbarThumbBg, floatingScrollbarThumbBorderColor, floatingScrollbarThumbShadow,
-      verticalScrollbarTrackBg, horizontalScrollbarThumbBg,
+      floatingScrollbarThumbBg, floatingScrollbarThumbHoverBg, floatingScrollbarThumbBorderColor, floatingScrollbarThumbShadow,
+      verticalScrollbarTrackBg, horizontalScrollbarThumbBg, horizontalScrollbarThumbHoverBg,
       toolbarDividerColor,
       paginationShellBg, paginationShellBorderColor, paginationShellShadow,
       paginationChipBg, paginationChipBorderColor, paginationHoverBg,
@@ -2446,7 +2448,14 @@ const DataGrid: React.FC<DataGridProps> = ({
                 }
                 .${gridId} .data-grid-toolbar-scroll::-webkit-scrollbar-thumb {
                     background: ${darkMode ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.22)'};
+                    border: 0;
+                    background-clip: border-box;
                     border-radius: 999px;
+                }
+                .${gridId} .data-grid-toolbar-scroll::-webkit-scrollbar-thumb:hover {
+                    background: ${darkMode ? 'rgba(255,255,255,0.38)' : 'rgba(0,0,0,0.32)'};
+                    border: 0;
+                    background-clip: border-box;
                 }
                 .${gridId} .data-grid-toolbar-scroll::-webkit-scrollbar-track {
                     background: transparent;
@@ -2683,7 +2692,14 @@ const DataGrid: React.FC<DataGridProps> = ({
                 .${gridId} .ant-table-body::-webkit-scrollbar-thumb {
                     background: ${floatingScrollbarThumbBg};
                     border: 1px solid ${floatingScrollbarThumbBorderColor};
+                    background-clip: border-box;
                     border-radius: 999px;
+                    box-shadow: ${floatingScrollbarThumbShadow};
+                }
+                .${gridId} .ant-table-body::-webkit-scrollbar-thumb:hover {
+                    background: ${floatingScrollbarThumbHoverBg};
+                    border: 1px solid ${floatingScrollbarThumbBorderColor};
+                    background-clip: border-box;
                     box-shadow: ${floatingScrollbarThumbShadow};
                 }
                 .${gridId} .rc-virtual-list-holder {
@@ -2702,7 +2718,14 @@ const DataGrid: React.FC<DataGridProps> = ({
                 .${gridId} .rc-virtual-list-holder::-webkit-scrollbar-thumb {
                     background: ${floatingScrollbarThumbBg};
                     border: 1px solid ${floatingScrollbarThumbBorderColor};
+                    background-clip: border-box;
                     border-radius: 999px;
+                    box-shadow: ${floatingScrollbarThumbShadow};
+                }
+                .${gridId} .rc-virtual-list-holder::-webkit-scrollbar-thumb:hover {
+                    background: ${floatingScrollbarThumbHoverBg};
+                    border: 1px solid ${floatingScrollbarThumbBorderColor};
+                    background-clip: border-box;
                     box-shadow: ${floatingScrollbarThumbShadow};
                 }
                 .${gridId} .data-grid-external-horizontal-scroll {
@@ -2728,7 +2751,14 @@ const DataGrid: React.FC<DataGridProps> = ({
                 .${gridId} .data-grid-external-horizontal-scroll::-webkit-scrollbar-thumb {
                     background: ${horizontalScrollbarThumbBg};
                     border: 1px solid ${horizontalScrollbarThumbBorderColor};
+                    background-clip: border-box;
                     border-radius: 999px;
+                    box-shadow: ${horizontalScrollbarThumbShadow};
+                }
+                .${gridId} .data-grid-external-horizontal-scroll::-webkit-scrollbar-thumb:hover {
+                    background: ${horizontalScrollbarThumbHoverBg};
+                    border: 1px solid ${horizontalScrollbarThumbBorderColor};
+                    background-clip: border-box;
                     box-shadow: ${horizontalScrollbarThumbShadow};
                 }
                 .${gridId} .data-grid-external-horizontal-scroll-inner {

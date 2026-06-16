@@ -17,6 +17,17 @@ import (
 	mysqlDriver "github.com/go-sql-driver/mysql"
 )
 
+const (
+	testOceanBaseOracleHost     = "ob-oracle.internal.example"
+	testOceanBaseOraclePort     = 2881
+	testOceanBaseOracleUser     = "APP_USER@SERVICE:test_service"
+	testOceanBaseOraclePassword = "test-password"
+	testOceanBaseOracleDatabase = "test_service"
+	testSSHJumpHost             = "ssh-gateway.example.test"
+	testSSHJumpUser             = "test-ops"
+	testSSHJumpPassword         = "test-ssh-password"
+)
+
 func TestResolveOceanBaseProtocol(t *testing.T) {
 	t.Parallel()
 
@@ -412,9 +423,9 @@ func TestOceanBaseOracleConnectStopsOnProbeDialFailure(t *testing.T) {
 		Type:              "oceanbase",
 		Host:              host,
 		Port:              port,
-		User:              "SBDEV@SERVICE:srv_yhcs",
-		Password:          "secret",
-		Database:          "sbdev",
+		User:              testOceanBaseOracleUser,
+		Password:          testOceanBaseOraclePassword,
+		Database:          testOceanBaseOracleDatabase,
 		OceanBaseProtocol: oceanBaseProtocolOracle,
 		Timeout:           1,
 	})
@@ -448,19 +459,19 @@ func TestOceanBaseOracleConnectProbeDialFailureMentionsSSHWhenEnabled(t *testing
 	ob := &OceanBaseDB{}
 	err := ob.Connect(connection.ConnectionConfig{
 		Type:              "oceanbase",
-		Host:              "172.22.39.20",
-		Port:              12883,
-		User:              "SBDEV@SERVICE:srv_yhcs",
-		Password:          "secret",
-		Database:          "sbdev",
+		Host:              testOceanBaseOracleHost,
+		Port:              testOceanBaseOraclePort,
+		User:              testOceanBaseOracleUser,
+		Password:          testOceanBaseOraclePassword,
+		Database:          testOceanBaseOracleDatabase,
 		OceanBaseProtocol: oceanBaseProtocolOracle,
 		Timeout:           1,
 		UseSSH:            true,
 		SSH: connection.SSHConfig{
-			Host:     "jump.example.com",
+			Host:     testSSHJumpHost,
 			Port:     22,
-			User:     "ops",
-			Password: "jump-secret",
+			User:     testSSHJumpUser,
+			Password: testSSHJumpPassword,
 		},
 	})
 	if err == nil {
@@ -470,10 +481,10 @@ func TestOceanBaseOracleConnectProbeDialFailureMentionsSSHWhenEnabled(t *testing
 	if !seenConfig.UseSSH {
 		t.Fatalf("expected probe dialer to receive UseSSH=true, got %+v", seenConfig)
 	}
-	if seenAddress != "172.22.39.20:12883" {
+	if seenAddress != "ob-oracle.internal.example:2881" {
 		t.Fatalf("expected probe target to remain remote inner address, got %q", seenAddress)
 	}
-	if !strings.Contains(got, "通过 SSH 跳板机访问目标地址 172.22.39.20:12883 失败") {
+	if !strings.Contains(got, "通过 SSH 跳板机访问目标地址 ob-oracle.internal.example:2881 失败") {
 		t.Fatalf("expected SSH-specific network diagnosis, got %q", got)
 	}
 	if strings.Contains(got, "VPN/内网路由") {
@@ -499,13 +510,13 @@ func TestProbeOceanBaseMySQLWireHandshakeUsesSSHConfiguredDialer(t *testing.T) {
 	}
 
 	result := probeOceanBaseMySQLWireHandshakeDetail(connection.ConnectionConfig{
-		Host:   "172.22.39.20",
-		Port:   12883,
+		Host:   testOceanBaseOracleHost,
+		Port:   testOceanBaseOraclePort,
 		UseSSH: true,
 		SSH: connection.SSHConfig{
-			Host: "jump.example.com",
+			Host: testSSHJumpHost,
 			Port: 22,
-			User: "ops",
+			User: testSSHJumpUser,
 		},
 	}, time.Second)
 
@@ -515,7 +526,7 @@ func TestProbeOceanBaseMySQLWireHandshakeUsesSSHConfiguredDialer(t *testing.T) {
 	if !seenConfig.UseSSH {
 		t.Fatalf("expected probe dialer to receive SSH config, got %+v", seenConfig)
 	}
-	if seenAddress != "172.22.39.20:12883" {
+	if seenAddress != "ob-oracle.internal.example:2881" {
 		t.Fatalf("expected remote target address through SSH, got %q", seenAddress)
 	}
 }
@@ -535,18 +546,18 @@ func TestOceanBaseOracleConnectUsesFullSSHTimeoutForProbeDial(t *testing.T) {
 	ob := &OceanBaseDB{}
 	err := ob.Connect(connection.ConnectionConfig{
 		Type:              "oceanbase",
-		Host:              "172.22.39.20",
-		Port:              12883,
-		User:              "SBDEV@SERVICE:srv_yhcs",
-		Password:          "secret",
-		Database:          "srv_yhcs",
+		Host:              testOceanBaseOracleHost,
+		Port:              testOceanBaseOraclePort,
+		User:              testOceanBaseOracleUser,
+		Password:          testOceanBaseOraclePassword,
+		Database:          testOceanBaseOracleDatabase,
 		OceanBaseProtocol: oceanBaseProtocolOracle,
 		Timeout:           12,
 		UseSSH:            true,
 		SSH: connection.SSHConfig{
-			Host: "jump.example.com",
+			Host: testSSHJumpHost,
 			Port: 22,
-			User: "ops",
+			User: testSSHJumpUser,
 		},
 	})
 	if err == nil {
@@ -579,13 +590,13 @@ func TestProbeOceanBaseMySQLWireHandshakeSplitsDialAndReadTimeout(t *testing.T) 
 
 	started := time.Now()
 	result := probeOceanBaseMySQLWireHandshakeDetailWithTimeouts(connection.ConnectionConfig{
-		Host:   "172.22.39.20",
-		Port:   12883,
+		Host:   testOceanBaseOracleHost,
+		Port:   testOceanBaseOraclePort,
 		UseSSH: true,
 		SSH: connection.SSHConfig{
-			Host: "jump.example.com",
+			Host: testSSHJumpHost,
 			Port: 22,
-			User: "ops",
+			User: testSSHJumpUser,
 		},
 	}, 12*time.Second, 50*time.Millisecond)
 	elapsed := time.Since(started)

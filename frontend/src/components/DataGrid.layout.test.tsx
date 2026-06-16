@@ -604,6 +604,12 @@ describe('DataGrid layout', () => {
     expect(source).toContain("const useVirtualCellContentContain = false;");
     expect(source).toContain("const useVirtualEditableVisibilityHints = !isMacLike && !isV2Ui;");
     expect(source).toContain("contain: ${useVirtualRowCellContain ? 'layout paint style' : 'none'};");
+    expect(source).toContain('.${gridId} .data-grid-toolbar-scroll::-webkit-scrollbar-thumb:hover');
+    expect(source).toContain('.${gridId} .ant-table-body::-webkit-scrollbar-thumb:hover');
+    expect(source).toContain('.${gridId} .rc-virtual-list-holder::-webkit-scrollbar-thumb:hover');
+    expect(source).toContain('.${gridId} .data-grid-external-horizontal-scroll::-webkit-scrollbar-thumb:hover');
+    expect(source).toContain('background-clip: border-box;');
+    expect(source).toContain('horizontalScrollbarThumbHoverBg');
     expect(source).toContain('const handleSharedCellContextMenu = useCallback');
     expect(source).toContain('const shouldUsePlainVirtualContent = isV2Ui && !modifiedStyle;');
     expect(source).toContain('if (shouldUsePlainVirtualContent) {');
