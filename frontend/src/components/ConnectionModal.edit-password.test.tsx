@@ -163,6 +163,16 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain('type === "goldendb" ? "goldendb" : "mysql"');
     expect(source).toContain('? "goldendb"');
   });
+
+  it('keeps OceanBase Oracle service name optional for OBClient/MySQL-wire connections', () => {
+    expect(source).toContain('OceanBase Oracle 服务名 (Service Name，可选)');
+    expect(source).toContain('isOceanBaseOracle\n                          ? []');
+    expect(source).toContain('连接 OBClient/OBServer MySQL-wire 入口时可留空');
+    expect(source).toContain('只有连接 OBProxy Oracle listener/TNS 入口时才需要填写 SERVICE_NAME');
+    expect(source).toContain('createUriAwareRequiredRule("请输入 Oracle 服务名（例如 ORCLPDB1）")');
+    expect(source).not.toContain('请输入 OceanBase Oracle 服务名');
+    expect(source).not.toContain('Oracle 租户必须填写监听器注册的 SERVICE_NAME');
+  });
 });
 
 describe('ConnectionModal Redis Sentinel configuration', () => {

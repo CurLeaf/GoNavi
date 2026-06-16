@@ -55,7 +55,7 @@ import {
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 		import { SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
 import { getDbIcon } from './DatabaseIcons';
-		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, DBReleaseConnection, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, CreateSQLFile, CreateSQLDirectory, DeleteSQLFile, DeleteSQLDirectory, RenameSQLFile, RenameSQLDirectory, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
+		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, DBReleaseConnection, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, CreateSQLFile, CreateSQLDirectory, DeleteSQLFile, DeleteSQLDirectory, RenameSQLFile, RenameSQLDirectory, JVMProbeCapabilities } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
@@ -91,7 +91,6 @@ import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
 import { SIDEBAR_SQL_EDITOR_DRAG_MIME, encodeSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
-import type { DriverStatusSnapshot } from '../utils/connectionDriverType';
 import JVMModeBadge from './jvm/JVMModeBadge';
 import MessagePublishModal from './MessagePublishModal';
 import {
@@ -104,7 +103,6 @@ import {
   isExternalSQLDirectoryModalMode,
   isPostgresSchemaDialect,
   isV2SidebarObjectNode,
-  normalizeDriverType,
   normalizeMySQLViewDDLForEditing,
   resolveSavedConnectionDriverType,
   resolveSidebarContextMenuPosition,
@@ -246,8 +244,6 @@ interface BatchObjectItem {
   objectType: BatchObjectType;
   dataRef: any;
 }
-
-const DRIVER_STATUS_CACHE_TTL_MS = 30_000;
 
 const SEARCH_SCOPE_ICON_MAP: Record<SearchScope, React.ReactNode> = {
   smart: <ThunderboltOutlined />,
@@ -525,8 +521,6 @@ const Sidebar: React.FC<{
       selectedNodes: [],
       activeContext: null,
   });
-  const driverStatusCacheRef = useRef<{ fetchedAt: number; items: Record<string, DriverStatusSnapshot> } | null>(null);
-  const driverUpdateWarningKeysRef = useRef<Set<string>>(new Set());
   const connectionReloadSignaturesRef = useRef<Record<string, string>>({});
   const [contextMenu, setContextMenu] = useState<SidebarContextMenuState | null>(null);
   const contextMenuPortalRef = useRef<HTMLDivElement | null>(null);
@@ -1825,67 +1819,8 @@ const Sidebar: React.FC<{
       return { schemas, supported: hasSuccessfulQuery };
   };
 
-	  const fetchDriverStatusMap = async (): Promise<Record<string, DriverStatusSnapshot>> => {
-	      const cached = driverStatusCacheRef.current;
-	      if (cached && Date.now() - cached.fetchedAt < DRIVER_STATUS_CACHE_TTL_MS) {
-	          return cached.items;
-	      }
-	      const result: Record<string, DriverStatusSnapshot> = {};
-	      const res = await GetDriverStatusList('', '');
-	      if (!res?.success) {
-	          return result;
-	      }
-	      const data = (res.data || {}) as any;
-	      const drivers = Array.isArray(data.drivers) ? data.drivers : [];
-	      drivers.forEach((item: any) => {
-	          const type = normalizeDriverType(String(item.type || '').trim());
-	          if (!type) return;
-	          result[type] = {
-	              type,
-	              name: String(item.name || item.type || type).trim(),
-	              connectable: !!item.connectable,
-	              expectedRevision: String(item.expectedRevision || '').trim() || undefined,
-	              needsUpdate: !!item.needsUpdate,
-	              updateReason: String(item.updateReason || '').trim() || undefined,
-	              message: String(item.message || '').trim() || undefined,
-	          };
-	      });
-	      driverStatusCacheRef.current = { fetchedAt: Date.now(), items: result };
-	      return result;
-	  };
-
-	  const warnIfConnectionDriverAgentNeedsUpdate = async (conn: SavedConnection) => {
-	      try {
-	          const driverType = resolveSavedConnectionDriverType(conn);
-	          if (!driverType || driverType === 'custom') {
-	              return;
-	          }
-	          const statusMap = await fetchDriverStatusMap();
-	          const status = statusMap[driverType];
-	          if (!status?.connectable || !status.needsUpdate) {
-	              return;
-	          }
-	          const revisionKey = status.expectedRevision || status.updateReason || status.message || 'unknown';
-	          const warningKey = `${conn.id}:${driverType}:${revisionKey}`;
-	          if (driverUpdateWarningKeysRef.current.has(warningKey)) {
-	              return;
-	          }
-	          driverUpdateWarningKeysRef.current.add(warningKey);
-	          const driverName = status.name || driverType;
-	          const reason = status.message || status.updateReason || `${driverName} driver-agent 与当前 GoNavi 版本要求不一致`;
-	          message.warning({
-	              content: `${driverName} 驱动代理需要重装：${reason}`,
-	              key: `driver-agent-update-${conn.id}`,
-	              duration: 10,
-	          });
-	      } catch (error) {
-	          console.warn('检查驱动代理更新状态失败', error);
-	      }
-	  };
-
 		  const loadDatabases = async (node: any) => {
 		      const conn = node.dataRef as SavedConnection;
-		      void warnIfConnectionDriverAgentNeedsUpdate(conn);
 		      const loadKey = `dbs-${conn.id}`;
 	      if (loadingNodesRef.current.has(loadKey)) return;
 	      loadingNodesRef.current.add(loadKey);
@@ -3161,7 +3096,6 @@ const Sidebar: React.FC<{
   };
 
 	  const loadDatabasesForBatch = async (conn: SavedConnection) => {
-	      void warnIfConnectionDriverAgentNeedsUpdate(conn);
 	      const config = {
           ...conn.config,
           port: Number(conn.config.port),
@@ -3483,7 +3417,6 @@ const Sidebar: React.FC<{
 
 	  const loadDatabasesForDbBatch = async (conn: SavedConnection) => {
 	      setBatchConnContext(conn);
-	      void warnIfConnectionDriverAgentNeedsUpdate(conn);
 
 	      const config = {
           ...conn.config,

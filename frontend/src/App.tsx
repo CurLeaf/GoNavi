@@ -9,6 +9,7 @@ import ConnectionModal from './components/ConnectionModal';
 import SnippetSettingsModal from './components/SnippetSettingsModal';
 import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
 import DataSyncModal from './components/DataSyncModal';
+import { type DataSyncEntryMode } from './components/dataSyncEntryMode';
 import DriverManagerModal from './components/DriverManagerModal';
 import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';
 import LogPanel from './components/LogPanel';
@@ -208,6 +209,7 @@ function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [syncModalEntryMode, setSyncModalEntryMode] = useState<DataSyncEntryMode>('sync');
   const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SavedConnection | null>(null);
   const connectionModalWarmupDoneRef = useRef(false);
@@ -3760,12 +3762,35 @@ function App() {
                   },
                 },
                 {
+                  key: 'schema-compare',
+                  icon: <AppstoreOutlined />,
+                  title: '表结构比对',
+                  description: '对比源表与目标表结构差异，只预览不执行。',
+                  onClick: () => {
+                    setIsToolsModalOpen(false);
+                    setSyncModalEntryMode('schemaCompare');
+                    setIsSyncModalOpen(true);
+                  },
+                },
+                {
+                  key: 'data-compare',
+                  icon: <SwitcherOutlined />,
+                  title: '数据比对',
+                  description: '按主键分析新增、更新、删除和相同行。',
+                  onClick: () => {
+                    setIsToolsModalOpen(false);
+                    setSyncModalEntryMode('dataCompare');
+                    setIsSyncModalOpen(true);
+                  },
+                },
+                {
                   key: 'sync',
                   icon: <UploadOutlined rotate={90} />,
                   title: '数据同步',
-                  description: '进入跨源同步工作流。',
+                  description: '进入可执行写入的跨源同步工作流。',
                   onClick: () => {
                     setIsToolsModalOpen(false);
+                    setSyncModalEntryMode('sync');
                     setIsSyncModalOpen(true);
                   },
                 },
@@ -3976,6 +4001,7 @@ function App() {
           <DataSyncModal
             open={isSyncModalOpen}
             onClose={() => setIsSyncModalOpen(false)}
+            entryMode={syncModalEntryMode}
           />
           )}
           {isDriverModalOpen && (

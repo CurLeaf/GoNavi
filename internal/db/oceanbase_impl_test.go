@@ -300,20 +300,39 @@ func TestOceanBaseOracleDSNParsesTenantCredentials(t *testing.T) {
 	}
 }
 
-// buildMySQLHandshakePacket 构造一个最小化的 MySQL initial handshake packet（protocol v10），
+// buildMySQLHandshakePacket 构造一个完整的 MySQL initial handshake packet（protocol v10），
 // 用于 mock OceanBase / 通用 MySQL / OBProxy 各种 server_version 场景。
 // 实际字段顺序按 MySQL 协议规范：
 //
 //	4 字节 header (3 字节 payload length + 1 字节 sequence id)
 //	payload[0]       protocol_version (10)
 //	payload[1..N]    server_version (null-terminated)
-//	... (后续字段对协议探测无关，可省略)
+//	...             auth seed / capability / auth plugin
 func buildMySQLHandshakePacket(serverVersion string) []byte {
 	payload := []byte{10}
 	payload = append(payload, []byte(serverVersion)...)
 	payload = append(payload, 0)
-	// 追加几个占位字节，让 packet 看起来更像真实 handshake（探测代码并不解析这些字段）
+	// connection id
 	payload = append(payload, []byte{0x01, 0x00, 0x00, 0x00}...)
+	// auth-plugin-data-part-1 + filler
+	payload = append(payload, []byte("12345678")...)
+	payload = append(payload, 0)
+	// capability lower 2 bytes: CLIENT_LONG_PASSWORD | CLIENT_LONG_FLAG |
+	// CLIENT_PROTOCOL_41 | CLIENT_SECURE_CONNECTION
+	payload = append(payload, 0x05, 0x82)
+	// character set + status flags
+	payload = append(payload, 45, 0x00, 0x00)
+	// capability upper 2 bytes: CLIENT_MULTI_RESULTS | CLIENT_PLUGIN_AUTH |
+	// CLIENT_CONNECT_ATTRS | CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA | CLIENT_SESSION_TRACK
+	payload = append(payload, 0x1a, 0x00)
+	// auth-plugin-data length + reserved
+	payload = append(payload, 21)
+	payload = append(payload, make([]byte, 10)...)
+	// auth-plugin-data-part-2 minimum 13 bytes, last byte NUL
+	payload = append(payload, []byte("abcdefghijkl")...)
+	payload = append(payload, 0)
+	payload = append(payload, []byte("mysql_native_password")...)
+	payload = append(payload, 0)
 	payloadLen := len(payload)
 	header := []byte{byte(payloadLen), byte(payloadLen >> 8), byte(payloadLen >> 16), 0}
 	return append(header, payload...)
@@ -404,6 +423,37 @@ func TestProbeOceanBaseMySQLWireHandshakeReturnsFalseOnUnreachable(t *testing.T)
 	}
 	if probed {
 		t.Fatal("expected probed=false on unreachable port so upper layer can return network diagnosis")
+	}
+}
+
+func TestOceanBaseOracleConnectTriesOBClientWhenMySQLHandshakeIsGeneric(t *testing.T) {
+	t.Parallel()
+
+	host, port, cleanup := startMockHandshakeServer(t, buildMySQLHandshakePacket("8.0.36"))
+	defer cleanup()
+
+	ob := &OceanBaseDB{}
+	err := ob.Connect(connection.ConnectionConfig{
+		Type:              "oceanbase",
+		Host:              host,
+		Port:              port,
+		User:              testOceanBaseOracleUser,
+		Password:          testOceanBaseOraclePassword,
+		OceanBaseProtocol: oceanBaseProtocolOracle,
+		Timeout:           1,
+	})
+	if err == nil {
+		t.Fatal("expected connect error from mock generic MySQL handshake server")
+	}
+	got := err.Error()
+	if !strings.Contains(got, "OBClient/MySQL-wire 路径连接失败") {
+		t.Fatalf("expected generic MySQL handshake to try OBClient first, got %q", got)
+	}
+	if !strings.Contains(got, "已跳过 TNS 路径") {
+		t.Fatalf("expected empty Service Name to skip TNS fallback, got %q", got)
+	}
+	if strings.Contains(got, "需要填写服务名") {
+		t.Fatalf("expected empty Service Name not to surface TNS required error for MySQL-wire fallback, got %q", got)
 	}
 }
 
@@ -648,85 +698,54 @@ func TestProbeOceanBaseMySQLWireHandshakeAcceptsLargerPayload(t *testing.T) {
 	}
 }
 
-// decodeConnectionAttributesFromConnectionParams 把 connectionAttributes 从 url-encoded 的
-// ConnectionParams 中取出来并解析成 map，便于测试用解码后的值断言。
-func decodeConnectionAttributesFromConnectionParams(t *testing.T, raw string) map[string]string {
-	t.Helper()
-	values, err := url.ParseQuery(raw)
-	if err != nil {
-		t.Fatalf("ParseQuery(%q) failed: %v", raw, err)
-	}
-	return parseMySQLConnectionAttributes(values.Get("connectionAttributes"))
-}
-
-// ensureOceanBaseOBClientAttributes 必须默认注入 OBClient capability 候选 attribute，
-// 并且用户在 ConnectionParams 里已设置的 attribute 优先级更高（不被默认值覆盖）。
-func TestEnsureOceanBaseOBClientAttributesInjectsDefaults(t *testing.T) {
-	t.Parallel()
-
-	attrs := decodeConnectionAttributesFromConnectionParams(t, ensureOceanBaseOBClientAttributes(""))
-	want := map[string]string{
-		"_client_name":                          "OceanBase Connector/J",
-		"_client_version":                       "2.4.5",
-		"__ob_client_attribute_capability_flag": "1",
-		"ob_capability_flag":                    "1",
-	}
-	for k, v := range want {
-		if attrs[k] != v {
-			t.Fatalf("expected default attribute %s=%q, got %q (all=%v)", k, v, attrs[k], attrs)
-		}
-	}
-}
-
-func TestEnsureOceanBaseOBClientAttributesPreservesUserOverrides(t *testing.T) {
-	t.Parallel()
-
-	attrs := decodeConnectionAttributesFromConnectionParams(t,
-		ensureOceanBaseOBClientAttributes("connectionAttributes=_client_name:libobclient,_pid:9527"))
-
-	if attrs["_client_name"] != "libobclient" {
-		t.Fatalf("expected user-supplied _client_name preserved, got %q", attrs["_client_name"])
-	}
-	if attrs["_pid"] != "9527" {
-		t.Fatalf("expected user extra attribute _pid preserved, got %q", attrs["_pid"])
-	}
-	// 仍应补齐默认值中用户未提供的部分
-	if attrs["ob_capability_flag"] != "1" {
-		t.Fatalf("expected default ob_capability_flag still injected when user did not set it, got %q (all=%v)", attrs["ob_capability_flag"], attrs)
-	}
-}
-
-// 锁定 Oracle 协议路径下，OBClient capability attribute 会被注入到生成的 mysql DSN 中。
-func TestOceanBaseOracleOBClientDSNCarriesCapabilityAttributes(t *testing.T) {
+// 锁定 Oracle 协议 MySQL-wire 路径使用 oboracle 专用 DSN，并把用户提供的
+// connectionAttributes 映射为 obconnector-go 支持的 attr.* 参数。
+func TestOceanBaseOracleOBClientDSNUsesDedicatedDriverParams(t *testing.T) {
 	t.Parallel()
 
 	cfg := connection.ConnectionConfig{
-		Type:     "oceanbase",
-		Host:     "127.0.0.1",
-		Port:     2881,
-		User:     "SYS@oracle_tenant#cluster",
-		Password: "x",
-		Database: "ORCL",
+		Type:             "oceanbase",
+		Host:             "127.0.0.1",
+		Port:             2881,
+		User:             "SYS@oracle_tenant#cluster",
+		Password:         "p@ss",
+		Database:         "ORCL",
+		Timeout:          12,
+		ConnectionParams: "connectionAttributes=_client_name:Custom OB,_pid:9527&cap.add=0x80&init=alter+session+set+nls_date_format%3D%27YYYY-MM-DD%27",
 	}
-	cfg.ConnectionParams = ensureOceanBaseOBClientAttributes(cfg.ConnectionParams)
-	cfg.ConnectionParams = ensureOceanBaseOracleANSIQuotes(cfg.ConnectionParams)
-	ob := &OceanBaseDB{}
-	dsn, err := ob.getDSN(cfg)
+	dsn, err := buildOceanBaseOracleOBClientDSN(cfg)
 	if err != nil {
-		t.Fatalf("getDSN error: %v", err)
+		t.Fatalf("buildOceanBaseOracleOBClientDSN error: %v", err)
 	}
-	parsed, err := mysqlDriver.ParseDSN(dsn)
+	parsed, err := url.Parse(dsn)
 	if err != nil {
-		t.Fatalf("ParseDSN error: %v", err)
+		t.Fatalf("Parse DSN error: %v", err)
 	}
-	if !strings.Contains(parsed.ConnectionAttributes, "_client_name:OceanBase Connector/J") {
-		t.Fatalf("expected default _client_name in DSN, got %q", parsed.ConnectionAttributes)
+	if parsed.Scheme != "oboracle" {
+		t.Fatalf("expected oboracle scheme, got %q (dsn=%s)", parsed.Scheme, dsn)
 	}
-	if !strings.Contains(parsed.ConnectionAttributes, "ob_capability_flag:1") {
-		t.Fatalf("expected default ob_capability_flag in DSN, got %q", parsed.ConnectionAttributes)
+	if parsed.User.Username() != "SYS@oracle_tenant#cluster" {
+		t.Fatalf("unexpected user %q", parsed.User.Username())
 	}
-	if !strings.Contains(dsn, "sql_mode=%27ANSI_QUOTES%27") {
-		t.Fatalf("expected ANSI_QUOTES sys var in DSN, got %q", dsn)
+	password, _ := parsed.User.Password()
+	if password != "p@ss" {
+		t.Fatalf("unexpected password %q", password)
+	}
+	query := parsed.Query()
+	if query.Get("preset") != "oboracle" {
+		t.Fatalf("expected preset=oboracle, got query=%v", query)
+	}
+	if query.Get("timeout") != "12s" {
+		t.Fatalf("expected timeout=12s, got query=%v", query)
+	}
+	if query.Get("attr._client_name") != "Custom OB" || query.Get("attr._pid") != "9527" {
+		t.Fatalf("expected connectionAttributes mapped to attr.*, got query=%v", query)
+	}
+	if query.Get("cap.add") != "0x80" {
+		t.Fatalf("expected cap.add passthrough, got query=%v", query)
+	}
+	if got := query["init"]; len(got) != 1 || got[0] != "alter session set nls_date_format='YYYY-MM-DD'" {
+		t.Fatalf("expected init SQL passthrough, got query=%v", query)
 	}
 }
 
@@ -807,7 +826,10 @@ func TestFormatOceanBaseMySQLAttemptErrorHintsOracleProtocol(t *testing.T) {
 	if !strings.Contains(got, "切换为 Oracle") {
 		t.Fatalf("expected Oracle protocol hint, got %q", got)
 	}
-	if !strings.Contains(got, "OBProxy") {
-		t.Fatalf("expected hint to mention OBProxy Oracle protocol port, got %q", got)
+	if !strings.Contains(got, "主机和端口可保持不变") {
+		t.Fatalf("expected hint to mention OBClient/MySQL-wire host and port can be kept, got %q", got)
+	}
+	if !strings.Contains(got, "只有连接 OBProxy Oracle listener/TNS 入口时才需要填写服务名") {
+		t.Fatalf("expected hint to limit Service Name requirement to TNS path, got %q", got)
 	}
 }

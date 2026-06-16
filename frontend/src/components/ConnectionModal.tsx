@@ -2075,7 +2075,7 @@ const ConnectionModal: React.FC<{
       const scheme =
         dbType === "diros" ? "doris" : dbType === "starrocks" ? "starrocks" : dbType === "oceanbase" ? "oceanbase" : dbType === "goldendb" ? "goldendb" : "mysql";
       if (dbType === "oceanbase") {
-        return `${scheme}://sys%40oracle001:pass@127.0.0.1:${defaultPort}/SERVICE_NAME?protocol=oracle`;
+        return `${scheme}://sys%40oracle001:pass@127.0.0.1:${defaultPort}?protocol=oracle`;
       }
       return `${scheme}://user:pass@127.0.0.1:${defaultPort},127.0.0.2:${defaultPort}/db_name?topology=replica`;
     }
@@ -4227,14 +4227,6 @@ const ConnectionModal: React.FC<{
       ? currentDriverSnapshot.message ||
         `${currentDriverSnapshot.name || dbType} 驱动未安装启用`
       : "";
-  const currentDriverUpdateReason =
-    hasCurrentDriverType &&
-    currentDriverSnapshot?.connectable &&
-    currentDriverSnapshot.needsUpdate
-      ? currentDriverSnapshot.message ||
-        currentDriverSnapshot.updateReason ||
-        `${currentDriverSnapshot.name || dbType} 驱动代理需要重装后才能应用当前版本的驱动侧更新`
-      : "";
   const driverStatusChecking =
     hasCurrentDriverType && !driverStatusLoaded && step === 2;
 
@@ -5246,9 +5238,9 @@ const ConnectionModal: React.FC<{
                       label="OceanBase 协议"
                       help={
                         <span>
-                          MySQL 租户选择 MySQL；Oracle 租户选择 Oracle。GoNavi 会根据端口自动选择：OB MySQL wire 端口走 OBClient capability 注入（与 Navicat 相同路径），OBProxy Oracle listener 端口走标准 TNS。
+                          MySQL 租户选择 MySQL；Oracle 租户选择 Oracle。Oracle 协议会优先使用 OBClient/OBServer MySQL-wire 入口；只有连接 OBProxy Oracle listener/TNS 入口时才需要 Service Name。
                           <br />
-                          如果 Oracle 租户连接报「Error 1235」或 OBClient 握手失败，可在「连接参数」字段通过 <code>connectionAttributes=key1:value1,key2:value2</code> 覆盖 GoNavi 默认注入的 OBClient capability。
+                          如果 MySQL 协议连接 Oracle 租户报「Error 1235」，请切换为 Oracle 协议；通常不需要手工配置 connectionAttributes。
                         </span>
                       }
                       style={{ marginBottom: 0 }}
@@ -5356,24 +5348,22 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="database"
-                      label={isOceanBaseOracle ? "OceanBase Oracle 服务名 (Service Name)" : "服务名 (Service Name)"}
-                      rules={[
-                        createUriAwareRequiredRule(
-                          isOceanBaseOracle
-                            ? "请输入 OceanBase Oracle 服务名"
-                            : "请输入 Oracle 服务名（例如 ORCLPDB1）",
-                        ),
-                      ]}
+                      label={isOceanBaseOracle ? "OceanBase Oracle 服务名 (Service Name，可选)" : "服务名 (Service Name)"}
+                      rules={
+                        isOceanBaseOracle
+                          ? []
+                          : [createUriAwareRequiredRule("请输入 Oracle 服务名（例如 ORCLPDB1）")]
+                      }
                       help={
                         isOceanBaseOracle
-                          ? "Oracle 租户必须填写监听器注册的 SERVICE_NAME；用户名仍按 OceanBase 租户格式填写。"
+                          ? "连接 OBClient/OBServer MySQL-wire 入口时可留空；只有连接 OBProxy Oracle listener/TNS 入口时才需要填写 SERVICE_NAME。"
                           : "请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
                       }
                       style={{ marginBottom: 0 }}
                     >
                       <Input
                         {...noAutoCapInputProps}
-                        placeholder="例如：ORCLPDB1"
+                        placeholder={isOceanBaseOracle ? "TNS 入口例如 ORCLPDB1；OBClient/MySQL-wire 可留空" : "例如：ORCLPDB1"}
                       />
                     </Form.Item>
                   ),
@@ -6773,26 +6763,6 @@ const ConnectionModal: React.FC<{
                   onClick={() => onOpenDriverManager?.()}
                 >
                   去驱动管理安装
-                </Button>
-              </Space>
-            }
-          />
-        )}
-        {currentDriverUpdateReason && (
-          <Alert
-            showIcon
-            type="warning"
-            style={{ marginBottom: 12 }}
-            message="当前数据源驱动代理建议重装"
-            description={
-              <Space size={8}>
-                <span>{currentDriverUpdateReason}</span>
-                <Button
-                  type="link"
-                  size="small"
-                  onClick={() => onOpenDriverManager?.()}
-                >
-                  去驱动管理重装
                 </Button>
               </Space>
             }
