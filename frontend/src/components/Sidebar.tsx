@@ -91,6 +91,7 @@ import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
 import { SIDEBAR_SQL_EDITOR_DRAG_MIME, encodeSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
+import { buildSqlServerObjectDefinitionQueries } from '../utils/sqlServerObjectDefinition';
 import JVMModeBadge from './jvm/JVMModeBadge';
 import MessagePublishModal from './MessagePublishModal';
 import {
@@ -1257,6 +1258,19 @@ const Sidebar: React.FC<{
           }
       }
       return '';
+  };
+
+  const extractSqlServerDefinitionRows = (rows: any[], definitionKeys: string[]): string => {
+      if (!Array.isArray(rows) || rows.length === 0) return '';
+      const directDefinition = getCaseInsensitiveRawValue(rows[0] as Record<string, any>, definitionKeys);
+      if (directDefinition !== undefined && directDefinition !== null && String(directDefinition).trim() !== '') {
+          return String(directDefinition);
+      }
+      return rows
+          .map((row) => getCaseInsensitiveRawValue(row as Record<string, any>, ['Text', 'text']))
+          .filter((value) => value !== undefined && value !== null)
+          .map((value) => String(value))
+          .join('');
   };
 
   const getMySQLShowTablesName = (row: Record<string, any>): string => {
@@ -4481,44 +4495,51 @@ const Sidebar: React.FC<{
 
       try {
           const config = buildRuntimeConfig(conn, dbName);
-          let query = '';
+          let queries: string[] = [];
           switch (dialect) {
               case 'mysql':
               case 'starrocks':
-                  query = `SHOW CREATE VIEW \`${viewName.replace(/`/g, '``')}\``;
+                  queries = [`SHOW CREATE VIEW \`${viewName.replace(/`/g, '``')}\``];
                   break;
               case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb': {
                   const parts = splitQualifiedName(viewName);
                   const schema = parts.schemaName || 'public';
                   const name = parts.objectName || viewName;
-                  query = `SELECT pg_get_viewdef('${escapeSQLLiteral(schema)}.${escapeSQLLiteral(name)}'::regclass, true) AS view_definition`;
+                  queries = [`SELECT pg_get_viewdef('${escapeSQLLiteral(schema)}.${escapeSQLLiteral(name)}'::regclass, true) AS view_definition`];
                   break;
               }
               case 'sqlserver':
-                  query = `SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(viewName)}')) AS view_definition`;
+                  queries = buildSqlServerObjectDefinitionQueries('view', viewName, dbName, 'view_definition');
                   break;
               case 'sqlite':
-                  query = `SELECT sql AS view_definition FROM sqlite_master WHERE type='view' AND name='${escapeSQLLiteral(viewName)}'`;
+                  queries = [`SELECT sql AS view_definition FROM sqlite_master WHERE type='view' AND name='${escapeSQLLiteral(viewName)}'`];
                   break;
               case 'duckdb': {
                   const parts = splitQualifiedName(viewName);
                   const viewSchema = escapeSQLLiteral(parts.schemaName || 'main');
                   const viewObject = escapeSQLLiteral(parts.objectName || viewName);
-                  query = `SELECT view_definition FROM information_schema.views WHERE table_schema='${viewSchema}' AND table_name='${viewObject}' LIMIT 1`;
+                  queries = [`SELECT view_definition FROM information_schema.views WHERE table_schema='${viewSchema}' AND table_name='${viewObject}' LIMIT 1`];
                   break;
               }
           }
-          if (query) {
+          for (const query of queries) {
               const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, query);
               if (result.success && Array.isArray(result.data) && result.data.length > 0) {
                   const row = result.data[0] as Record<string, any>;
-                  const def = row.view_definition || row.VIEW_DEFINITION || Object.values(row).find(v => typeof v === 'string' && String(v).length > 10) || '';
+                  const def = dialect === 'sqlserver'
+                      ? extractSqlServerDefinitionRows(result.data, ['view_definition', 'definition'])
+                      : row.view_definition || row.VIEW_DEFINITION || Object.values(row).find(v => typeof v === 'string' && String(v).length > 10) || '';
                   if (def) {
                       if (dialect === 'mysql') {
                           template = `-- 编辑视图 ${viewName}\n${normalizeMySQLViewDDLForEditing(viewName, def)}`;
+                      } else if (dialect === 'sqlserver') {
+                          template = /^\s*create\s+view\b/i.test(String(def))
+                              ? `-- 编辑视图 ${viewName}\n${def}`
+                              : `-- 编辑视图 ${viewName}\nCREATE VIEW ${viewName} AS\n${def}`;
                       } else {
                           template = `-- 编辑视图 ${viewName}\nCREATE OR REPLACE VIEW ${viewName} AS\n${def}`;
                       }
+                      break;
                   }
               }
           }
@@ -4812,7 +4833,7 @@ const Sidebar: React.FC<{
                   break;
               }
               case 'sqlserver':
-                  query = `SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(routineName)}')) AS routine_definition`;
+                  query = '';
                   break;
               case 'oracle': case 'dm': {
                   const owner = schema ? escapeSQLLiteral(schema).toUpperCase() : '';
@@ -4829,12 +4850,18 @@ const Sidebar: React.FC<{
                   break;
               }
           }
-          if (query) {
-              const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, query);
+          const queries = dialect === 'sqlserver'
+              ? buildSqlServerObjectDefinitionQueries('routine', routineName, dbName, 'routine_definition')
+              : [query].filter(Boolean);
+          for (const queryText of queries) {
+              const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, queryText);
               if (result.success && Array.isArray(result.data) && result.data.length > 0) {
                   if (dialect === 'oracle' || dialect === 'dm') {
                       const lines = result.data.map((row: any) => row.text || row.TEXT || Object.values(row)[0] || '').join('');
-                      if (lines) template = `-- 编辑${typeLabel} ${routineName}\nCREATE OR REPLACE ${lines}`;
+                      if (lines) {
+                          template = `-- 编辑${typeLabel} ${routineName}\nCREATE OR REPLACE ${lines}`;
+                          break;
+                      }
                   } else if (dialect === 'duckdb') {
                       const row = result.data[0] as Record<string, any>;
                       const ddl = buildDuckDBMacroDDL(
@@ -4843,11 +4870,19 @@ const Sidebar: React.FC<{
                           getCaseInsensitiveRawValue(row, ['parameters']),
                           getCaseInsensitiveRawValue(row, ['macro_definition'])
                       );
-                      if (ddl) template = `-- 编辑${typeLabel} ${routineName}\n${ddl}`;
+                      if (ddl) {
+                          template = `-- 编辑${typeLabel} ${routineName}\n${ddl}`;
+                          break;
+                      }
                   } else {
                       const row = result.data[0] as Record<string, any>;
-                      const def = row.routine_definition || row.ROUTINE_DEFINITION || Object.values(row).find(v => typeof v === 'string' && String(v).length > 10) || '';
-                      if (def) template = `-- 编辑${typeLabel} ${routineName}\n${def}`;
+                      const def = dialect === 'sqlserver'
+                          ? extractSqlServerDefinitionRows(result.data, ['routine_definition', 'definition'])
+                          : row.routine_definition || row.ROUTINE_DEFINITION || Object.values(row).find(v => typeof v === 'string' && String(v).length > 10) || '';
+                      if (def) {
+                          template = `-- 编辑${typeLabel} ${routineName}\n${def}`;
+                          break;
+                      }
                   }
               }
           }

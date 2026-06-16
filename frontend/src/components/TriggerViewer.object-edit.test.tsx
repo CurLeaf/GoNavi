@@ -117,6 +117,28 @@ describe('TriggerViewer object edit entry', () => {
     }));
   });
 
+  it('uses SQL Server catalog metadata when loading trigger definitions', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [{ trigger_definition: 'CREATE TRIGGER [audit].[users_bi] ON [audit].[users] AFTER INSERT AS SELECT 1;' }],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<TriggerViewer tab={tab} />);
+      await flushPromises();
+    });
+
+    const sql = String(backendApp.DBQuery.mock.calls[0][2] || '');
+    expect(sql).toContain('FROM [main].sys.all_sql_modules AS m');
+    expect(sql).toContain("WHERE o.name = N'users_bi'");
+    expect(sql).toContain("AND s.name = N'audit'");
+    expect(sql).toContain("o.type IN ('TR', 'TA')");
+    expect(sql).not.toContain('OBJECT_DEFINITION');
+    expect(String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''))).toContain('CREATE TRIGGER [audit].[users_bi]');
+  });
+
   it('adds CREATE OR REPLACE for trigger source snippets returned without ddl prefix', async () => {
     storeState.connections[0].config.type = 'oracle';
     backendApp.DBQuery.mockResolvedValue({

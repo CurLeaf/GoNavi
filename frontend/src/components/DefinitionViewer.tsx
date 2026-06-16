@@ -8,6 +8,7 @@ import { DBQuery } from '../../wailsjs/go/app/App';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
+import { buildSqlServerObjectDefinitionQueries } from '../utils/sqlServerObjectDefinition';
 
 interface DefinitionViewerProps {
     tab: TabData;
@@ -204,7 +205,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 return [`SELECT pg_get_viewdef('${escapeSQLLiteral(schemaRef)}.${safeName}'::regclass, true) AS view_definition`];
             }
             case 'sqlserver':
-                return [`SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(viewName)}')) AS view_definition`];
+                return buildSqlServerObjectDefinitionQueries('view', viewName, dbName, 'view_definition');
             case 'oracle':
             case 'dm':
                 if (schema) {
@@ -253,7 +254,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 return [`SELECT pg_get_functiondef(p.oid) AS routine_definition FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = '${escapeSQLLiteral(schemaRef)}' AND p.proname = '${safeName}' LIMIT 1`];
             }
             case 'sqlserver':
-                return [`SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(routineName)}')) AS routine_definition`];
+                return buildSqlServerObjectDefinitionQueries('routine', routineName, dbName, 'routine_definition');
             case 'oracle':
             case 'dm': {
                 const owner = schema ? escapeSQLLiteral(schema).toUpperCase() : (safeDbName ? safeDbName.toUpperCase() : '');
@@ -381,6 +382,19 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             case 'oracle':
             case 'dm':
                 return row.view_definition || row.VIEW_DEFINITION || row.text || row.TEXT || Object.values(row)[0] || '';
+            case 'sqlserver': {
+                const directDefinition = getCaseInsensitiveRawValue(row, ['view_definition', 'definition']);
+                if (directDefinition !== undefined && directDefinition !== null && String(directDefinition).trim() !== '') {
+                    return String(directDefinition);
+                }
+                const helpTextDefinition = data
+                    .map((item) => getCaseInsensitiveRawValue(item, ['Text', 'text']))
+                    .filter((value) => value !== undefined && value !== null)
+                    .map((value) => String(value))
+                    .join('');
+                if (helpTextDefinition.trim()) return helpTextDefinition;
+                return String(Object.values(row)[0] || '');
+            }
             default:
                 return row.view_definition || row.VIEW_DEFINITION || row.sql || row.SQL || Object.values(row)[0] || '';
         }
@@ -431,6 +445,19 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                     return String(fallback);
                 }
                 return JSON.stringify(row, null, 2);
+            }
+            case 'sqlserver': {
+                const directDefinition = getCaseInsensitiveRawValue(data[0], ['routine_definition', 'definition']);
+                if (directDefinition !== undefined && directDefinition !== null && String(directDefinition).trim() !== '') {
+                    return String(directDefinition);
+                }
+                const helpTextDefinition = data
+                    .map((row) => getCaseInsensitiveRawValue(row, ['Text', 'text']))
+                    .filter((value) => value !== undefined && value !== null)
+                    .map((value) => String(value))
+                    .join('');
+                if (helpTextDefinition.trim()) return helpTextDefinition;
+                return String(Object.values(data[0])[0] || '');
             }
             default: {
                 const row = data[0];
