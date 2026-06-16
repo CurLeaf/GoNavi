@@ -2,6 +2,8 @@ import type { TabData } from '../types';
 
 const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
 
+export const SQL_FILE_NOT_FOUND_ERROR_CODE = 'file_not_found';
+
 export const getSQLFileTabPath = (tab: Pick<TabData, 'type' | 'filePath'> | null | undefined): string => {
   if (!tab || tab.type !== 'query') return '';
   return toTrimmedString(tab.filePath);
@@ -27,4 +29,36 @@ export const hasSQLFileTabUnsavedChanges = (
 ): boolean => {
   if (!isSQLFileQueryTab(tab)) return false;
   return String(tab.query ?? '') !== diskContent;
+};
+
+const SQL_FILE_MISSING_MESSAGE_PATTERNS = [
+  'no such file or directory',
+  'cannot find the file specified',
+  'system cannot find the file specified',
+  'does not exist',
+  'not exist',
+  '系统找不到指定的文件',
+  '文件不存在',
+];
+
+export const isSQLFileMissingErrorMessage = (message: unknown): boolean => {
+  const normalizedMessage = toTrimmedString(message).toLowerCase();
+  if (!normalizedMessage) return false;
+  return SQL_FILE_MISSING_MESSAGE_PATTERNS.some((pattern) => normalizedMessage.includes(pattern));
+};
+
+export const isSQLFileMissingReadResult = (result: unknown): boolean => {
+  if (!result || typeof result !== 'object') return false;
+  const payload = result as Record<string, unknown>;
+  if (payload.success === true) return false;
+
+  const data = payload.data;
+  if (data && typeof data === 'object') {
+    const errorCode = toTrimmedString((data as Record<string, unknown>).errorCode).toLowerCase();
+    if (errorCode === SQL_FILE_NOT_FOUND_ERROR_CODE) {
+      return true;
+    }
+  }
+
+  return isSQLFileMissingErrorMessage(payload.message);
 };

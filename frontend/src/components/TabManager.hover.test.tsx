@@ -208,6 +208,11 @@ describe('TabManager hover info', () => {
     const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('ReadSQLFile(filePath)');
+    expect(source).toContain('isSQLFileMissingReadResult(res)');
+    expect(source).toContain('isSQLFileMissingErrorMessage(errorMessage)');
+    expect(source).toContain("title: '关闭已丢失的 SQL 文件标签？'");
+    expect(source).toContain('关闭后将丢弃标签内的本地草稿');
+    expect(source).toContain('confirmDirtyTabsOrClose();');
     expect(source).toContain("getSQLFileTabDraft(tab.id, String(tab.query ?? ''))");
     expect(source).toContain('hasSQLFileTabUnsavedChanges({ ...tab, query: draft }, normalizeSQLFileReadContent(res.data))');
     expect(source).toContain("title: '保存 SQL 文件修改？'");

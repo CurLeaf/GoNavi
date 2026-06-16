@@ -30,6 +30,8 @@ import (
 const minExportQueryTimeout = 5 * time.Minute
 const minClickHouseExportQueryTimeout = 2 * time.Hour
 const maxSQLFileSizeBytes int64 = 50 * 1024 * 1024
+
+const sqlFileErrorCodeNotFound = "file_not_found"
 const sqlFileBatchMaxStatements = 1000
 const sqlFileBatchMaxBytes = 4 * 1024 * 1024
 const sqlFileProgressStatementInterval = 100
@@ -321,7 +323,11 @@ func readSQLFileByPath(filePath string) connection.QueryResult {
 
 	fi, err := os.Stat(selection)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+		data := map[string]interface{}{"filePath": selection}
+		if os.IsNotExist(err) {
+			data["errorCode"] = sqlFileErrorCodeNotFound
+		}
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err), Data: data}
 	}
 	if fi.IsDir() {
 		return connection.QueryResult{Success: false, Message: "所选路径不是 SQL 文件"}

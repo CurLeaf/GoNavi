@@ -34,6 +34,8 @@ import { ReadSQLFile, WriteSQLFile } from '../../wailsjs/go/app/App';
 import {
   getSQLFileTabPath,
   hasSQLFileTabUnsavedChanges,
+  isSQLFileMissingErrorMessage,
+  isSQLFileMissingReadResult,
   isSQLFileQueryTab,
   normalizeSQLFileReadContent,
 } from '../utils/sqlFileTabDirty';
@@ -450,12 +452,17 @@ const TabManager: React.FC = React.memo(() => {
     };
 
     const dirtyTabs: Array<{ tab: TabData; draft: string }> = [];
+    const missingFileTabs: Array<{ tab: TabData; filePath: string }> = [];
     for (const tab of candidateTabs) {
       const filePath = getSQLFileTabPath(tab);
       if (!filePath) continue;
       try {
         const res = await ReadSQLFile(filePath);
         if (!res.success) {
+          if (isSQLFileMissingReadResult(res)) {
+            missingFileTabs.push({ tab, filePath });
+            continue;
+          }
           message.error(`读取 SQL 文件失败，已取消关闭：${res.message || filePath}`);
           return;
         }
@@ -464,64 +471,93 @@ const TabManager: React.FC = React.memo(() => {
           dirtyTabs.push({ tab, draft });
         }
       } catch (error) {
-        message.error('读取 SQL 文件失败，已取消关闭：' + (error instanceof Error ? error.message : String(error)));
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (isSQLFileMissingErrorMessage(errorMessage)) {
+          missingFileTabs.push({ tab, filePath });
+          continue;
+        }
+        message.error('读取 SQL 文件失败，已取消关闭：' + errorMessage);
         return;
       }
     }
 
-    if (dirtyTabs.length === 0) {
-      closeConfirmedTabsAndClearDrafts();
+    const confirmDirtyTabsOrClose = () => {
+      if (dirtyTabs.length === 0) {
+        closeConfirmedTabsAndClearDrafts();
+        return;
+      }
+
+      const firstDirtyTab = dirtyTabs[0].tab;
+      const dirtyFilePath = getSQLFileTabPath(firstDirtyTab);
+      const dirtyLabel = dirtyTabs.length === 1
+        ? `“${firstDirtyTab.title || dirtyFilePath}”`
+        : `${dirtyTabs.length} 个 SQL 文件`;
+
+      let destroyConfirm: (() => void) | null = null;
+      const confirmRef = Modal.confirm({
+        title: '保存 SQL 文件修改？',
+        content: `${dirtyLabel} 有未保存修改，是否保存后再关闭？`,
+        okText: '保存并关闭',
+        cancelText: '取消',
+        closable: true,
+        maskClosable: true,
+        okButtonProps: { type: 'primary' },
+        footer: (_, { OkBtn, CancelBtn }) => (
+          <>
+            <Button
+              onClick={() => {
+                destroyConfirm?.();
+                closeConfirmedTabsAndClearDrafts();
+              }}
+            >
+              不保存
+            </Button>
+            <CancelBtn />
+            <OkBtn />
+          </>
+        ),
+        onOk: async () => {
+          try {
+            for (const { tab, draft } of dirtyTabs) {
+              const filePath = getSQLFileTabPath(tab);
+              if (!filePath) continue;
+              const res = await WriteSQLFile(filePath, draft);
+              if (!res.success) {
+                throw new Error(`保存 ${tab.title || filePath} 失败：${res.message || '未知错误'}`);
+              }
+            }
+            message.success('SQL 文件已保存');
+            closeConfirmedTabsAndClearDrafts();
+          } catch (error) {
+            message.error(error instanceof Error ? error.message : String(error));
+            throw error;
+          }
+        },
+      });
+      destroyConfirm = confirmRef.destroy;
+    };
+
+    if (missingFileTabs.length > 0) {
+      const firstMissing = missingFileTabs[0];
+      const missingLabel = missingFileTabs.length === 1
+        ? `“${firstMissing.tab.title || firstMissing.filePath}”`
+        : `${missingFileTabs.length} 个 SQL 文件标签`;
+      Modal.confirm({
+        title: '关闭已丢失的 SQL 文件标签？',
+        content: `${missingLabel} 对应的外部 SQL 文件已不存在或已被移动，关闭后将丢弃标签内的本地草稿。`,
+        okText: dirtyTabs.length > 0 ? '继续关闭' : '关闭标签',
+        cancelText: '取消',
+        closable: true,
+        maskClosable: true,
+        okButtonProps: { danger: true },
+        onOk: () => {
+          confirmDirtyTabsOrClose();
+        },
+      });
       return;
     }
 
-    const firstDirtyTab = dirtyTabs[0].tab;
-    const dirtyFilePath = getSQLFileTabPath(firstDirtyTab);
-    const dirtyLabel = dirtyTabs.length === 1
-      ? `“${firstDirtyTab.title || dirtyFilePath}”`
-      : `${dirtyTabs.length} 个 SQL 文件`;
-
-    let destroyConfirm: (() => void) | null = null;
-    const confirmRef = Modal.confirm({
-      title: '保存 SQL 文件修改？',
-      content: `${dirtyLabel} 有未保存修改，是否保存后再关闭？`,
-      okText: '保存并关闭',
-      cancelText: '取消',
-      closable: true,
-      maskClosable: true,
-      okButtonProps: { type: 'primary' },
-      footer: (_, { OkBtn, CancelBtn }) => (
-        <>
-          <Button
-            onClick={() => {
-              destroyConfirm?.();
-              closeConfirmedTabsAndClearDrafts();
-            }}
-          >
-            不保存
-          </Button>
-          <CancelBtn />
-          <OkBtn />
-        </>
-      ),
-      onOk: async () => {
-        try {
-          for (const { tab, draft } of dirtyTabs) {
-            const filePath = getSQLFileTabPath(tab);
-            if (!filePath) continue;
-            const res = await WriteSQLFile(filePath, draft);
-            if (!res.success) {
-              throw new Error(`保存 ${tab.title || filePath} 失败：${res.message || '未知错误'}`);
-            }
-          }
-          message.success('SQL 文件已保存');
-          closeConfirmedTabsAndClearDrafts();
-        } catch (error) {
-          message.error(error instanceof Error ? error.message : String(error));
-          throw error;
-        }
-      },
-    });
-    destroyConfirm = confirmRef.destroy;
+    confirmDirtyTabsOrClose();
   }, []);
 
   const closeTabsWithSQLFilePrompt = useCallback((targetIds: string[], closeConfirmedTabs: () => void) => {
