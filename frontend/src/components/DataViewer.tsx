@@ -10,6 +10,7 @@ import { buildOracleApproximateTotalSql, parseApproximateTableCountRow, resolveA
 import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { resolveDataViewerAutoFetchAction } from '../utils/dataViewerAutoFetch';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { resolveLanguage, t as translate, type I18nParams } from '../i18n';
 import {
   buildEffectiveFilterConditions,
   normalizeQuickWhereCondition,
@@ -37,6 +38,8 @@ type ViewerPaginationState = {
   totalCountLoading: boolean;
   totalCountCancelled: boolean;
 };
+
+type DataViewerTranslator = (key: string, params?: I18nParams) => string;
 
 const JS_MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 
@@ -103,6 +106,47 @@ const buildDataViewerReadOnlyLocator = (reason: string): EditRowLocator => ({
   reason,
 });
 
+const READ_ONLY_REASON_NO_SAFE_LOCATOR = '\u672a\u68c0\u6d4b\u5230\u4e3b\u952e\u6216\u53ef\u7528\u552f\u4e00\u7d22\u5f15\uff0c\u65e0\u6cd5\u5b89\u5168\u63d0\u4ea4\u4fee\u6539\u3002';
+const READ_ONLY_REASON_ORACLE_ROWID_MISSING = '\u672a\u68c0\u6d4b\u5230\u4e3b\u952e\u6216\u53ef\u7528\u552f\u4e00\u7d22\u5f15\uff0c\u4e14\u7ed3\u679c\u4e2d\u7f3a\u5c11 Oracle ROWID\uff0c\u65e0\u6cd5\u5b89\u5168\u63d0\u4ea4\u4fee\u6539\u3002';
+const READ_ONLY_REASON_PRIMARY_KEY_MISSING_PREFIX = '\u7ed3\u679c\u96c6\u4e2d\u7f3a\u5c11\u4e3b\u952e\u5217 ';
+const READ_ONLY_REASON_SAFE_SUBMIT_SUFFIX = '\uff0c\u65e0\u6cd5\u5b89\u5168\u63d0\u4ea4\u4fee\u6539\u3002';
+
+const localizeDataViewerReadOnlyReason = (reason: string | undefined, tr: DataViewerTranslator): string => {
+  const text = String(reason || '').trim();
+  if (!text) return tr('data_viewer.read_only.reason.no_safe_locator');
+  if (text === READ_ONLY_REASON_NO_SAFE_LOCATOR) {
+    return tr('data_viewer.read_only.reason.no_safe_locator');
+  }
+  if (text === READ_ONLY_REASON_ORACLE_ROWID_MISSING) {
+    return tr('data_viewer.read_only.reason.oracle_rowid_missing');
+  }
+  if (text.startsWith(READ_ONLY_REASON_PRIMARY_KEY_MISSING_PREFIX) && text.endsWith(READ_ONLY_REASON_SAFE_SUBMIT_SUFFIX)) {
+    const columns = text.slice(READ_ONLY_REASON_PRIMARY_KEY_MISSING_PREFIX.length, -READ_ONLY_REASON_SAFE_SUBMIT_SUFFIX.length);
+    return tr('data_viewer.read_only.reason.primary_key_column_missing', { columns });
+  }
+  return text;
+};
+
+const localizeDataViewerReadOnlyLocator = (locator: EditRowLocator, tr: DataViewerTranslator): EditRowLocator => {
+  if (!locator.readOnly) return locator;
+  return { ...locator, reason: localizeDataViewerReadOnlyReason(locator.reason, tr) };
+};
+
+const warnDataViewerReadOnly = (
+  kind: 'table' | 'collection',
+  target: string,
+  reason: string | undefined,
+  tr: DataViewerTranslator,
+) => {
+  const key = kind === 'table'
+    ? 'data_viewer.read_only.warning.table'
+    : 'data_viewer.read_only.warning.collection';
+  message.warning(tr(key, {
+    target,
+    reason: localizeDataViewerReadOnlyReason(reason, tr),
+  }));
+};
+
 const formatDataViewerTableName = (dbName: string, tableName: string): string => (
   dbName ? `${dbName}.${tableName}` : tableName
 );
@@ -116,13 +160,13 @@ const getTableColumnNames = (columns: ColumnDefinition[] | undefined): string[] 
 const MONGODB_ID_COLUMN = '_id';
 const MONGODB_ID_LOCATOR_COLUMN = '__gonavi_mongodb_id_locator__';
 
-const buildMongoDataViewerEditLocator = (resultColumns: string[]): EditRowLocator => {
+const buildMongoDataViewerEditLocator = (resultColumns: string[], tr: DataViewerTranslator): EditRowLocator => {
   const columns = (resultColumns || [])
     .map((column) => String(column || '').trim())
     .filter(Boolean);
   const idColumn = columns.find((column) => column.toLowerCase() === MONGODB_ID_COLUMN);
   if (!idColumn) {
-    return buildDataViewerReadOnlyLocator('MongoDB 结果集中缺少 _id，无法安全提交修改。');
+    return buildDataViewerReadOnlyLocator(tr('data_viewer.read_only.reason.mongo_id_missing'));
   }
 
   const locatorValueColumn = columns.find((column) => column === MONGODB_ID_LOCATOR_COLUMN) || idColumn;
@@ -210,16 +254,16 @@ const isDuckDBComplexColumnType = (columnType?: string): boolean => {
   return raw.includes('map') || raw.includes('struct') || raw.includes('union') || raw.includes('array') || raw.includes('list');
 };
 
-const formatDataViewerQueryError = (dbType: string, messageText: unknown): string => {
-  const rawMessage = String(messageText || '查询失败').trim() || '查询失败';
+const formatDataViewerQueryError = (dbType: string, messageText: unknown, tr: DataViewerTranslator): string => {
+  const rawMessage = String(messageText || tr('data_viewer.message.query_failed')).trim() || tr('data_viewer.message.query_failed');
   const lower = rawMessage.toLowerCase();
-  const isTimeout = lower.includes('context deadline exceeded') || lower.includes('deadline exceeded') || lower.includes('timeout') || lower.includes('timed out') || lower.includes('超时');
+  const isTimeout = lower.includes('context deadline exceeded') || lower.includes('deadline exceeded') || lower.includes('timeout') || lower.includes('timed out') || lower.includes('\u8d85\u65f6');
   const isDuckDBInterrupted = String(dbType || '').trim().toLowerCase() === 'duckdb' && (lower.includes('interrupt error') || lower.includes('interrupted'));
   if (isTimeout || isDuckDBInterrupted) {
     if (String(dbType || '').trim().toLowerCase() === 'duckdb') {
-      return 'DuckDB 查询超过连接超时时间，已中断。请调大连接超时时间，或减少排序/筛选范围后重试。';
+      return tr('data_viewer.message.duckdb_query_timeout');
     }
-    return '查询超过连接超时时间，已中断。请调大连接超时时间，或减少查询范围后重试。';
+    return tr('data_viewer.message.query_timeout');
   }
   return rawMessage;
 };
@@ -286,6 +330,9 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
   const connections = useStore(state => state.connections);
   const addSqlLog = useStore(state => state.addSqlLog);
   const appearance = useStore(state => state.appearance);
+  const languagePreference = useStore(state => state.languagePreference);
+  const language = resolveLanguage(languagePreference);
+  const tr = useCallback((key: string, params?: I18nParams) => translate(key, params, language), [language]);
   const isV2Ui = appearance?.uiVersion === 'v2';
   const fetchSeqRef = useRef(0);
   const countSeqRef = useRef(0);
@@ -433,7 +480,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
     const countKey = latestCountKeyRef.current;
 
     if (!config || !countSql || !countKey) {
-      message.warning('当前结果集尚未就绪，请先执行一次加载');
+      message.warning(tr('data_viewer.message.result_not_ready'));
       return;
     }
 
@@ -452,7 +499,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
         sql: countSql,
         status: resCount?.success ? 'success' : 'error',
         duration: countDuration,
-        message: resCount?.success ? '' : String(resCount?.message || '统计失败'),
+        message: resCount?.success ? '' : String(resCount?.message || tr('data_viewer.message.total_count_failed')),
         dbName
       });
 
@@ -461,7 +508,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
 
       if (!resCount?.success) {
         setPagination(prev => ({ ...prev, totalCountLoading: false }));
-        message.error(String(resCount?.message || '统计总数失败'));
+        message.error(String(resCount?.message || tr('data_viewer.message.total_count_failed')));
         return;
       }
       if (!Array.isArray(resCount.data) || resCount.data.length === 0) {
@@ -472,7 +519,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
       const total = parseTotalFromCountRow(resCount.data[0]);
       if (total === null) {
         setPagination(prev => ({ ...prev, totalCountLoading: false }));
-        message.error('统计结果解析失败');
+        message.error(tr('data_viewer.message.total_count_parse_failed'));
         return;
       }
 
@@ -489,9 +536,9 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
       if (manualCountSeqRef.current !== countSeq) return;
       if (manualCountKeyRef.current !== countKey) return;
       setPagination(prev => ({ ...prev, totalCountLoading: false }));
-      message.error(`统计总数失败: ${String(e?.message || e)}`);
+      message.error(tr('data_viewer.message.total_count_failed_detail', { detail: String(e?.message || e) }));
     }
-  }, [addSqlLog]);
+  }, [addSqlLog, tr]);
 
   const handleCancelManualTotalCount = useCallback(() => {
     manualCountSeqRef.current++;
@@ -503,7 +550,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
     setLoading(true);
     const conn = connections.find(c => c.id === tab.connectionId);
     if (!conn) {
-        message.error("Connection not found");
+        message.error(tr('data_viewer.message.connection_not_found'));
         if (fetchSeqRef.current === seq) setLoading(false);
         return;
     }
@@ -537,7 +584,8 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
         try {
             mongoFilter = buildMongoFilter(effectiveFilterConditions);
         } catch (e: any) {
-            message.error(`Mongo 筛选条件无效：${String(e?.message || e || '解析失败')}`);
+            const detail = String(e?.message || e || tr('data_viewer.message.mongo_filter_parse_failed'));
+            message.error(tr('data_viewer.message.mongo_filter_invalid_detail', { detail }));
             if (fetchSeqRef.current === seq) setLoading(false);
             return;
         }
@@ -561,19 +609,19 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                 const [resCols, resIndexes] = await Promise.all([
                     DBGetColumns(buildRpcConnectionConfig(config) as any, dbName, tableName),
                     DBGetIndexes(buildRpcConnectionConfig(config) as any, dbName, tableName)
-                        .catch((error: any) => ({ success: false, message: String(error?.message || error || '加载索引失败'), data: [] })),
+                        .catch((error: any) => ({ success: false, message: String(error?.message || error || 'Failed to load indexes'), data: [] })),
                 ]);
                 if (fetchSeqRef.current !== seq) return;
                 if (pkSeqRef.current !== locatorSeq) return;
                 if (pkKeyRef.current !== locatorKey) return;
 
                 if (!resCols?.success || !Array.isArray(resCols.data)) {
-                    const nextLocator = buildDataViewerReadOnlyLocator('无法加载主键/唯一索引元数据，无法安全提交修改。');
+                    const nextLocator = buildDataViewerReadOnlyLocator(tr('data_viewer.read_only.reason.metadata_unavailable'));
                     pkColumnsForQuery = [];
                     editLocatorForQuery = nextLocator;
                     setPkColumns([]);
                     setEditLocator(nextLocator);
-                    message.warning(`表 ${formatDataViewerTableName(dbName, tableName)} 保持只读：${nextLocator.reason}`);
+                    warnDataViewerReadOnly('table', formatDataViewerTableName(dbName, tableName), nextLocator.reason, tr);
                 } else {
                     const columnDefs = resCols.data as ColumnDefinition[];
                     const primaryKeys = columnDefs
@@ -587,16 +635,16 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                     const locatorColumns = isOracleLikeDialect(dbType)
                         ? [...resultColumns, ORACLE_ROWID_LOCATOR_COLUMN]
                         : resultColumns;
-                    let nextLocator = resolveEditRowLocator({
+                    let nextLocator = localizeDataViewerReadOnlyLocator(resolveEditRowLocator({
                         dbType,
                         resultColumns: locatorColumns,
                         primaryKeys,
                         indexes,
                         allowOracleRowID: true,
-                    });
+                    }), tr);
 
                     if (nextLocator.readOnly && primaryKeys.length === 0 && !resIndexes?.success && !isOracleLikeDialect(dbType)) {
-                        nextLocator = buildDataViewerReadOnlyLocator('无法加载唯一索引元数据，无法安全提交修改。');
+                        nextLocator = buildDataViewerReadOnlyLocator(tr('data_viewer.read_only.reason.index_metadata_unavailable'));
                     }
 
                     pkColumnsForQuery = primaryKeys;
@@ -604,19 +652,19 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                     setPkColumns(primaryKeys);
                     setEditLocator(nextLocator);
                     if (nextLocator.readOnly) {
-                        message.warning(`表 ${formatDataViewerTableName(dbName, tableName)} 保持只读：${nextLocator.reason || '当前结果没有可用的安全行定位方式，无法提交修改。'}`);
+                        warnDataViewerReadOnly('table', formatDataViewerTableName(dbName, tableName), nextLocator.reason, tr);
                     }
                 }
             } catch {
                 if (fetchSeqRef.current !== seq) return;
                 if (pkSeqRef.current !== locatorSeq) return;
                 if (pkKeyRef.current !== locatorKey) return;
-                const nextLocator = buildDataViewerReadOnlyLocator('无法加载主键/唯一索引元数据，无法安全提交修改。');
+                const nextLocator = buildDataViewerReadOnlyLocator(tr('data_viewer.read_only.reason.metadata_unavailable'));
                 pkColumnsForQuery = [];
                 editLocatorForQuery = nextLocator;
                 setPkColumns([]);
                 setEditLocator(nextLocator);
-                message.warning(`表 ${formatDataViewerTableName(dbName, tableName)} 保持只读：${nextLocator.reason}`);
+                warnDataViewerReadOnly('table', formatDataViewerTableName(dbName, tableName), nextLocator.reason, tr);
             }
         }
     }
@@ -660,8 +708,8 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
     } else {
         const baseSql = buildDataViewerBaseSelectSQL(dbType, tableName, whereSQL, editLocatorForQuery);
         sql = `${baseSql}${orderBySQL}`;
-        // ClickHouse 深分页在超大 OFFSET 下容易超时。对于总数已知且存在 ORDER BY 的场景，
-        // 当“尾部偏移”小于“头部偏移”时，改为反向 ORDER BY + 小 OFFSET，并在前端翻转结果。
+        // ClickHouse deep pagination with very large OFFSET can be slow. When the tail offset is smaller,
+        // query in reverse ORDER BY with a smaller OFFSET, then reverse rows in the frontend.
         if (isClickHouse && totalKnown && offset > 0 && reverseOrderSQL) {
             const pageRowCount = Math.max(0, Math.min(size, totalRows - offset));
             if (pageRowCount > 0) {
@@ -715,7 +763,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
 
         const hasSort = hasExplicitSort(sortInfo);
         const isSortMemoryErr = (msg: string) => /error\s*1038|out of sort memory/i.test(String(msg || ''));
-        let resData = await executeDataQuery(sql, '主查询');
+        let resData = await executeDataQuery(sql, tr('data_viewer.sql_log.phase.main_query'));
 
         if (!resData.success && dbTypeLower === 'duckdb' && isDuckDBUnsupportedTypeError(String(resData.message || ''))) {
             const cacheKey = `${tab.connectionId}|${dbName}|${tableName}`;
@@ -748,7 +796,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                 let fallbackSql = `SELECT ${safeSelect} FROM ${quoteQualifiedIdent(dbType, tableName)} ${whereSQL}`;
                 fallbackSql = buildPaginatedSelectSQL(dbType, fallbackSql, buildOrderBySQL(dbType, sortInfo, resolveDataViewerOrderFallbackColumns(editLocatorForQuery, pkColumnsForQuery)), size + 1, offset);
                 executedSql = fallbackSql;
-                resData = await executeDataQuery(fallbackSql, '复杂类型降级重试');
+                resData = await executeDataQuery(fallbackSql, tr('data_viewer.sql_log.phase.complex_type_fallback_retry'));
             }
         }
 
@@ -756,17 +804,17 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
             const retrySql32MB = withSortBufferTuningSQL(dbType, sql, 32 * 1024 * 1024);
             if (retrySql32MB !== sql) {
                 executedSql = retrySql32MB;
-                resData = await executeDataQuery(retrySql32MB, '重试(32MB sort_buffer)');
+                resData = await executeDataQuery(retrySql32MB, tr('data_viewer.sql_log.phase.sort_buffer_retry', { size: '32MB' }));
             }
             if (!resData.success && isSortMemoryErr(resData.message)) {
                 const retrySql128MB = withSortBufferTuningSQL(dbType, sql, 128 * 1024 * 1024);
                 if (retrySql128MB !== executedSql) {
                     executedSql = retrySql128MB;
-                    resData = await executeDataQuery(retrySql128MB, '重试(128MB sort_buffer)');
+                    resData = await executeDataQuery(retrySql128MB, tr('data_viewer.sql_log.phase.sort_buffer_retry', { size: '128MB' }));
                 }
             }
             if (resData.success) {
-                message.warning('已自动提升排序缓冲并重试成功。');
+                message.warning(tr('data_viewer.message.sort_buffer_retry_succeeded'));
             }
         }
 
@@ -788,13 +836,13 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
             }
             if (fetchSeqRef.current !== seq) return;
             if (isMongoDB && !forceReadOnly && tableName) {
-                const nextLocator = buildMongoDataViewerEditLocator(fieldNames);
+                const nextLocator = buildMongoDataViewerEditLocator(fieldNames, tr);
                 pkColumnsForQuery = nextLocator.readOnly ? [] : [MONGODB_ID_COLUMN];
                 editLocatorForQuery = nextLocator;
                 setPkColumns(pkColumnsForQuery);
                 setEditLocator(nextLocator);
                 if (nextLocator.readOnly && resultData.length > 0) {
-                    message.warning(`集合 ${formatDataViewerTableName(dbName, tableName)} 保持只读：${nextLocator.reason || '当前结果没有可用的安全行定位方式，无法提交修改。'}`);
+                    warnDataViewerReadOnly('collection', formatDataViewerTableName(dbName, tableName), nextLocator.reason, tr);
                 }
             }
             setColumnNames(fieldNames);
@@ -880,8 +928,8 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                     countKeyRef.current = countKey;
                     const countSeq = ++countSeqRef.current;
                     const countStart = Date.now();
-                    // 大表 COUNT(*) 可能非常慢，且在部分运行时环境下会影响后续操作响应；
-                    // DuckDB 大文件场景下该统计会显著拖慢翻页，已禁用后台 COUNT。
+                    // Large-table COUNT(*) can be slow and may delay later operations in some runtimes.
+                    // DuckDB large-file scenarios disable background COUNT because it can slow pagination significantly.
                     const countConfig = buildRpcConnectionConfig(config, { timeout: 5 });
 
                     DBQuery(countConfig, dbName, countSql)
@@ -920,7 +968,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                         .catch(() => {
                             if (countSeqRef.current !== countSeq) return;
                             if (countKeyRef.current !== countKey) return;
-                            // 统计失败不影响主流程，不弹窗；可在日志里查看。
+                            // Count failures do not block the main flow; details stay in the SQL log.
                         });
                 }
             }
@@ -1009,11 +1057,11 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                 }
             }
         } else {
-            message.error(formatDataViewerQueryError(dbTypeLower, resData.message));
+            message.error(formatDataViewerQueryError(dbTypeLower, resData.message, tr));
         }
     } catch (e: any) {
         if (fetchSeqRef.current !== seq) return;
-        message.error(formatDataViewerQueryError(dbTypeLower, e?.message || e));
+        message.error(formatDataViewerQueryError(dbTypeLower, e?.message || e, tr));
         addSqlLog({
             id: `log-${Date.now()}-error`,
             timestamp: Date.now(),
@@ -1025,7 +1073,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
         });
     }
     if (fetchSeqRef.current === seq) setLoading(false);
-  }, [connections, tab, sortInfo, filterConditions, quickWhereCondition, pkColumns, editLocator, forceReadOnly, pagination.total, pagination.totalKnown, pagination.totalApprox, pagination.approximateTotal, preferManualTotalCount, supportsApproximateTableCount, supportsApproximateTotalPages]);
+  }, [connections, tab, sortInfo, filterConditions, quickWhereCondition, pkColumns, editLocator, forceReadOnly, pagination.total, pagination.totalKnown, pagination.totalApprox, pagination.approximateTotal, preferManualTotalCount, supportsApproximateTableCount, supportsApproximateTotalPages, tr]);
   // 依赖定位列：在无手动排序时可回退到安全定位列稳定排序。
   // 定位信息只会在表上下文变化后重新加载，避免循环查询。
 

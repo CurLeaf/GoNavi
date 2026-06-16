@@ -4,6 +4,7 @@ import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { PreviewImportFile, ImportDataWithProgress } from '../../wailsjs/go/app/App';
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime';
 import { useStore } from '../store';
+import { useI18n } from '../i18n/provider';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 interface ImportPreviewModalProps {
     visible: boolean;
@@ -37,6 +38,7 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
     onClose,
     onSuccess
 }) => {
+    const { t } = useI18n();
     const connections = useStore(state => state.connections);
     const [loading, setLoading] = useState(true);
     const [previewData, setPreviewData] = useState<PreviewData | null>(null);
@@ -74,10 +76,10 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
                     previewRows: res.data.previewRows || []
                 });
             } else {
-                setError(res.message || '预览失败');
+                setError(res.message || t('import_preview.error.preview_failed'));
             }
         } catch (e: any) {
-            setError('预览失败: ' + e.message);
+            setError(t('import_preview.error.preview_failed_detail', { detail: String(e?.message || e) }));
         } finally {
             setLoading(false);
         }
@@ -93,7 +95,7 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
         try {
             const conn = connections.find(c => c.id === connectionId);
             if (!conn) {
-                setError('连接配置未找到');
+                setError(t('import_preview.error.connection_config_not_found'));
                 setImporting(false);
                 return;
             }
@@ -115,10 +117,10 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
                     onSuccess();
                 }
             } else {
-                setError(res.message || '导入失败');
+                setError(res.message || t('import_preview.error.import_failed'));
             }
         } catch (e: any) {
-            setError('导入失败: ' + e.message);
+            setError(t('import_preview.error.import_failed_detail', { detail: String(e?.message || e) }));
         } finally {
             setImporting(false);
         }
@@ -136,24 +138,24 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
 
     return (
         <Modal
-            title="导入数据预览"
+            title={t('import_preview.title')}
             open={visible}
             onCancel={onClose}
             width={900}
             footer={
                 importResult ? (
                     <Space>
-                        <Button onClick={onClose}>关闭</Button>
+                        <Button onClick={onClose}>{t('common.close')}</Button>
                     </Space>
                 ) : importing ? null : (
                     <Space>
-                        <Button onClick={onClose}>取消</Button>
+                        <Button onClick={onClose}>{t('common.cancel')}</Button>
                         <Button
                             type="primary"
                             onClick={handleImport}
                             disabled={!previewData || loading}
                         >
-                            开始导入
+                            {t('import_preview.action.start')}
                         </Button>
                     </Space>
                 )
@@ -161,22 +163,22 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
         >
             {error && <Alert type="error" message={error} style={{ marginBottom: 16 }} showIcon />}
 
-            {loading && <div style={{ textAlign: 'center', padding: 40 }}>加载预览数据...</div>}
+            {loading && <div style={{ textAlign: 'center', padding: 40 }}>{t('import_preview.status.loading_preview')}</div>}
 
             {!loading && previewData && !importing && !importResult && (
                 <>
                     <Alert
                         type="info"
-                        message={`共 ${previewData.totalRows} 行数据，${previewData.columns.length} 个字段`}
-                        description='以下是前 5 行预览数据，确认无误后点击“开始导入”'
+                        message={t('import_preview.preview.summary', { rows: previewData.totalRows, columns: previewData.columns.length })}
+                        description={t('import_preview.preview.description')}
                         style={{ marginBottom: 16 }}
                         showIcon
                     />
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>字段列表：</div>
+                    <div style={{ marginBottom: 8, fontWeight: 600 }}>{t('import_preview.preview.field_list')}</div>
                     <div style={{ marginBottom: 16, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
                         {previewData.columns.join(', ')}
                     </div>
-                    <div style={{ marginBottom: 8, fontWeight: 600 }}>数据预览（前 5 行）：</div>
+                    <div style={{ marginBottom: 8, fontWeight: 600 }}>{t('import_preview.preview.table_title')}</div>
                     <Table
                         dataSource={previewData.previewRows}
                         columns={columns}
@@ -191,17 +193,17 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
             {importing && progress && (
                 <div style={{ padding: '40px 20px' }}>
                     <div style={{ marginBottom: 16, fontSize: 16, fontWeight: 600, textAlign: 'center' }}>
-                        正在导入数据...
+                        {t('import_preview.status.importing')}
                     </div>
                     <Progress percent={progressPercent} status="active" />
                     <div style={{ marginTop: 16, textAlign: 'center', color: '#666' }}>
-                        已处理 {progress.current} / {progress.total} 行
+                        {t('import_preview.progress.processed_rows', { current: progress.current, total: progress.total })}
                         <span style={{ marginLeft: 16, color: '#52c41a' }}>
-                            <CheckCircleOutlined /> 成功 {progress.success}
+                            <CheckCircleOutlined /> {t('import_preview.progress.success_count', { count: progress.success })}
                         </span>
                         {progress.errors > 0 && (
                             <span style={{ marginLeft: 16, color: '#ff4d4f' }}>
-                                <CloseCircleOutlined /> 失败 {progress.errors}
+                                <CloseCircleOutlined /> {t('import_preview.progress.error_count', { count: progress.errors })}
                             </span>
                         )}
                     </div>
@@ -212,11 +214,11 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
                 <div style={{ padding: 20 }}>
                     <Alert
                         type={importResult.failed === 0 ? 'success' : 'warning'}
-                        message="导入完成"
+                        message={t('import_preview.result.completed')}
                         description={
                             <div>
-                                <div>成功导入 {importResult.success} 行</div>
-                                {importResult.failed > 0 && <div>失败 {importResult.failed} 行</div>}
+                                <div>{t('import_preview.result.success_rows', { count: importResult.success })}</div>
+                                {importResult.failed > 0 && <div>{t('import_preview.result.failed_rows', { count: importResult.failed })}</div>}
                             </div>
                         }
                         showIcon
@@ -224,7 +226,7 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
                     />
                     {importResult.errorLogs && importResult.errorLogs.length > 0 && (
                         <>
-                            <div style={{ marginBottom: 8, fontWeight: 600, color: '#ff4d4f' }}>错误日志：</div>
+                            <div style={{ marginBottom: 8, fontWeight: 600, color: '#ff4d4f' }}>{t('import_preview.result.error_logs')}</div>
                             <div style={{
                                 maxHeight: 300,
                                 overflow: 'auto',

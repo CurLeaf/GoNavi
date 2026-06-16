@@ -6,6 +6,7 @@ import { useStore } from '../store';
 import { DBQuery } from '../../wailsjs/go/app/App';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
+import { useI18n } from '../i18n/provider';
 
 interface DefinitionViewerProps {
     tab: TabData;
@@ -36,6 +37,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
     const darkMode = theme === 'dark';
+    const { t } = useI18n();
 
     const escapeSQLLiteral = (raw: string): string => String(raw || '').replace(/'/g, "''");
 
@@ -170,7 +172,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 return [`SELECT view_definition FROM information_schema.views WHERE table_schema = '${escapeSQLLiteral(schemaRef)}' AND table_name = '${safeName}' LIMIT 1`];
             }
             default:
-                return [`-- 暂不支持该数据库类型的视图定义查看`];
+                return [`-- ${t('definition_viewer.editor.unsupported_view_definition')}`];
         }
     };
 
@@ -219,9 +221,9 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 ];
             }
             case 'sqlite':
-                return [`-- SQLite 不支持函数/存储过程定义管理`];
+                return [`-- ${t('definition_viewer.editor.unsupported_sqlite_routine_definition')}`];
             default:
-                return [`-- 暂不支持该数据库类型的函数/存储过程定义查看`];
+                return [`-- ${t('definition_viewer.editor.unsupported_routine_definition')}`];
         }
     };
 
@@ -242,7 +244,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                         : '',
                 ].filter(Boolean);
             default:
-                return [`-- 暂不支持该数据库类型的事件定义查看`];
+                return [`-- ${t('definition_viewer.editor.unsupported_event_definition')}`];
         }
     };
 
@@ -305,7 +307,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     };
 
     const extractViewDefinition = (dialect: string, data: any[]): string => {
-        if (!data || data.length === 0) return '-- 未找到视图定义';
+        if (!data || data.length === 0) return `-- ${t('definition_viewer.editor.view_definition_not_found')}`;
         const row = data[0];
 
         switch (dialect) {
@@ -335,7 +337,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     };
 
     const extractRoutineDefinition = (dialect: string, data: any[]): string => {
-        if (!data || data.length === 0) return '-- 未找到函数/存储过程定义';
+        if (!data || data.length === 0) return `-- ${t('definition_viewer.editor.routine_definition_not_found')}`;
 
         switch (dialect) {
             case 'mysql':
@@ -356,7 +358,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 const routineName = String(row.Name || row.name || '').trim();
                 if (routineName) {
                     const routineType = String(row.Type || row.type || row.ROUTINE_TYPE || row.routine_type || 'FUNCTION').trim().toUpperCase();
-                    return `-- 当前数据源未返回可执行定义文本，已返回元数据\n-- 名称: ${routineName}\n-- 类型: ${routineType}\n${JSON.stringify(row, null, 2)}`;
+                    return `-- ${t('definition_viewer.editor.metadata_fallback.header')}\n-- ${t('definition_viewer.editor.metadata_fallback.name_label')}: ${routineName}\n-- ${t('definition_viewer.editor.metadata_fallback.type_label')}: ${routineType}\n${JSON.stringify(row, null, 2)}`;
                 }
                 return JSON.stringify(row, null, 2);
             }
@@ -388,7 +390,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     };
 
     const extractEventDefinition = (dialect: string, data: any[]): string => {
-        if (!data || data.length === 0) return '-- 未找到事件定义';
+        if (!data || data.length === 0) return `-- ${t('definition_viewer.editor.event_definition_not_found')}`;
 
         switch (dialect) {
             case 'mysql': {
@@ -400,7 +402,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 const definition = row.event_definition || row.EVENT_DEFINITION;
                 const eventName = row.event_name || row.EVENT_NAME || row.Name || row.name;
                 if (definition && eventName) {
-                    return `-- 当前数据源未返回完整 CREATE EVENT 语句，已返回事件定义片段\n-- 名称: ${eventName}\n${String(definition)}`;
+                    return `-- ${t('definition_viewer.editor.event_fragment_fallback.header')}\n-- ${t('definition_viewer.editor.metadata_fallback.name_label')}: ${eventName}\n${String(definition)}`;
                 }
                 return JSON.stringify(row, null, 2);
             }
@@ -418,7 +420,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
 
             const conn = connections.find(c => c.id === tab.connectionId);
             if (!conn) {
-                setError('未找到数据库连接');
+                setError(t('definition_viewer.error.connection_not_found'));
                 setLoading(false);
                 return;
             }
@@ -434,38 +436,40 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             if (tab.type === 'view-def') {
                 const viewName = tab.viewName || '';
                 if (!viewName) {
-                    setError('视图名称为空');
+                    setError(t('definition_viewer.error.view_name_empty'));
                     setLoading(false);
                     return;
                 }
                 queries = buildShowViewQueries(dialect, viewName, dbName, tab.viewKind);
                 extractFn = extractViewDefinition;
-                objectLabel = tab.viewKind === 'materialized' ? '物化视图' : '视图';
+                objectLabel = tab.viewKind === 'materialized'
+                    ? t('definition_viewer.object.materialized_view')
+                    : t('definition_viewer.object.view');
             } else if (tab.type === 'event-def') {
                 const eventName = tab.eventName || '';
                 if (!eventName) {
-                    setError('事件名称为空');
+                    setError(t('definition_viewer.error.event_name_empty'));
                     setLoading(false);
                     return;
                 }
                 queries = buildShowEventQueries(dialect, eventName, dbName);
                 extractFn = extractEventDefinition;
-                objectLabel = '事件';
+                objectLabel = t('definition_viewer.object.event');
             } else {
                 const routineName = tab.routineName || '';
                 const routineType = tab.routineType || 'FUNCTION';
                 if (!routineName) {
-                    setError('函数/存储过程名称为空');
+                    setError(t('definition_viewer.error.routine_name_empty'));
                     setLoading(false);
                     return;
                 }
                 queries = buildShowRoutineQueries(dialect, routineName, routineType, dbName);
                 extractFn = extractRoutineDefinition;
-                objectLabel = '函数/存储过程';
+                objectLabel = t('definition_viewer.object.routine');
             }
 
             if (!queries.length || String(queries[0] || '').startsWith('--')) {
-                setDefinition(String(queries[0] || '-- 暂不支持该对象定义查看'));
+                setDefinition(String(queries[0] || `-- ${t('definition_viewer.editor.unsupported_object_definition')}`));
                 setLoading(false);
                 return;
             }
@@ -491,39 +495,45 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 if (result.success) {
                     if (sphinxLike) {
                         const version = await getVersionHint(config, dbName);
-                        const versionText = version ? `（版本: ${version}）` : '';
-                        setDefinition(`-- 当前 Sphinx 实例${versionText}未返回${objectLabel}定义。\n-- 已执行多套兼容查询，可能是版本能力限制或对象类型不支持。`);
+                        const versionText = version ? t('definition_viewer.editor.sphinx.version_suffix', { version }) : '';
+                        setDefinition(`-- ${t('definition_viewer.editor.sphinx.empty_result', { version: versionText, object: objectLabel })}\n-- ${t('definition_viewer.editor.sphinx.compat_queries_hint')}`);
                         return;
                     }
-                    setDefinition(`-- 未找到${objectLabel}定义`);
+                    setDefinition(`-- ${t('definition_viewer.editor.object_definition_not_found', { object: objectLabel })}`);
                 } else if (sphinxLike) {
                     const version = await getVersionHint(config, dbName);
-                    const versionText = version ? `（版本: ${version}）` : '';
-                    setDefinition(`-- 当前 Sphinx 实例${versionText}不支持${objectLabel}定义查询。\n-- 已自动尝试兼容语句，返回失败信息: ${result.message || 'unknown error'}`);
+                    const versionText = version ? t('definition_viewer.editor.sphinx.version_suffix', { version }) : '';
+                    const failedMessage = result.message
+                        ? `${t('definition_viewer.editor.sphinx.failed_message_label')}: ${result.message}`
+                        : t('definition_viewer.editor.sphinx.failed_message_unknown');
+                    setDefinition(`-- ${t('definition_viewer.editor.sphinx.unsupported_query', { version: versionText, object: objectLabel })}\n-- ${failedMessage}`);
                 } else {
-                    setError(result.message || '查询定义失败');
+                    setError(result.message || t('definition_viewer.error.query_failed'));
                 }
             } catch (e: any) {
-                setError('查询定义失败: ' + (e?.message || String(e)));
+                setError(t('definition_viewer.error.query_failed_detail', { detail: e?.message || String(e) }));
             } finally {
                 setLoading(false);
             }
         };
 
         loadDefinition();
-    }, [tab.connectionId, tab.dbName, tab.viewName, tab.viewKind, tab.eventName, tab.routineName, tab.routineType, tab.type, connections]);
+    }, [tab.connectionId, tab.dbName, tab.viewName, tab.viewKind, tab.eventName, tab.routineName, tab.routineType, tab.type, connections, t]);
 
     const objectLabel = tab.type === 'view-def'
-        ? (tab.viewKind === 'materialized' ? '物化视图' : '视图')
-        : (tab.type === 'event-def' ? '事件' : '函数/存储过程');
+        ? (tab.viewKind === 'materialized' ? t('definition_viewer.object.materialized_view') : t('definition_viewer.object.view'))
+        : (tab.type === 'event-def' ? t('definition_viewer.object.event') : t('definition_viewer.object.routine'));
     const objectName = tab.type === 'view-def'
         ? tab.viewName
         : (tab.type === 'event-def' ? tab.eventName : tab.routineName);
+    const loadingTip = tab.type === 'view-def'
+        ? t('definition_viewer.loading.view_definition')
+        : (tab.type === 'event-def' ? t('definition_viewer.loading.event_definition') : t('definition_viewer.loading.routine_definition'));
 
     if (loading) {
         return (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <Spin tip={`加载${objectLabel}定义...`} />
+                <Spin tip={loadingTip} />
             </div>
         );
     }
@@ -531,7 +541,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     if (error) {
         return (
             <div style={{ padding: 16 }}>
-                <Alert type="error" message="加载失败" description={error} showIcon />
+                <Alert type="error" message={t('definition_viewer.error.load_failed')} description={error} showIcon />
             </div>
         );
     }
@@ -540,8 +550,8 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <div style={{ padding: '8px 16px', borderBottom: darkMode ? '1px solid #303030' : '1px solid #f0f0f0' }}>
                 <strong>{objectLabel}: </strong>{objectName}
-                {tab.dbName && <span style={{ marginLeft: 16, color: '#888' }}>数据库: {tab.dbName}</span>}
-                {tab.routineType && <span style={{ marginLeft: 16, color: '#888' }}>类型: {tab.routineType}</span>}
+                {tab.dbName && <span style={{ marginLeft: 16, color: '#888' }}>{t('definition_viewer.field.database')}: {tab.dbName}</span>}
+                {tab.routineType && <span style={{ marginLeft: 16, color: '#888' }}>{t('definition_viewer.field.type')}: {tab.routineType}</span>}
             </div>
             <div style={{ flex: 1, minHeight: 0 }}>
                 <Editor

@@ -28,6 +28,11 @@ export type ResolveRowLocatorValuesResult =
   | { ok: true; values: Record<string, any> }
   | { ok: false; error: string };
 
+export type RowLocatorMessages = {
+  noSafeLocator?: () => string;
+  emptyLocatorValue?: (column: string) => string;
+};
+
 const normalizeColumnName = (value: string): string => String(value || '').trim();
 
 const hasColumn = (columns: string[], target: string): boolean => {
@@ -103,9 +108,10 @@ export const resolveEditRowLocator = ({
 export const resolveRowLocatorValues = (
   locator: EditRowLocator | undefined,
   row: Record<string, any>,
+  messages?: RowLocatorMessages,
 ): ResolveRowLocatorValuesResult => {
   if (!locator || locator.readOnly || locator.strategy === 'none') {
-    return { ok: false, error: '当前结果没有可用的安全行定位方式，无法提交修改。' };
+    return { ok: false, error: messages?.noSafeLocator?.() || 'No safe row locator is available for this result set.' };
   }
 
   const values: Record<string, any> = {};
@@ -114,7 +120,7 @@ export const resolveRowLocatorValues = (
     const valueColumn = locator.valueColumns[index] || column;
     const value = row?.[valueColumn];
     if (value === null || value === undefined || value === '') {
-      return { ok: false, error: `定位列 ${column} 的值为空，无法安全提交修改。` };
+      return { ok: false, error: messages?.emptyLocatorValue?.(column) || `Locator column ${column} is empty, so changes cannot be submitted safely.` };
     }
     values[column] = value;
   }

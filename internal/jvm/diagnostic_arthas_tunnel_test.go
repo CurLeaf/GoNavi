@@ -3,6 +3,7 @@ package jvm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -138,6 +139,26 @@ func testArthasTunnelConfig(baseURL string) connection.ConnectionConfig {
 	}
 }
 
+func assertArthasTunnelLocalizedError(t *testing.T, err error, key string, params map[string]any) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatalf("expected localized error %q, got nil", key)
+	}
+	var localized *LocalizedError
+	if !errors.As(err, &localized) || localized == nil {
+		t.Fatalf("expected LocalizedError %q, got %T: %v", key, err, err)
+	}
+	if localized.Key != key {
+		t.Fatalf("expected localized key %q, got %q with params %#v", key, localized.Key, localized.Params)
+	}
+	for name, expected := range params {
+		if localized.Params[name] != expected {
+			t.Fatalf("expected param %s=%#v, got %#v in %#v", name, expected, localized.Params[name], localized.Params)
+		}
+	}
+}
+
 func TestDiagnosticArthasTunnelExecuteCommandStreamsUntilPrompt(t *testing.T) {
 	commandSeen := make(chan struct{}, 1)
 	server := newFakeArthasTunnelServer(t, func(conn *websocket.Conn, frame fakeArthasTTYFrame) {
@@ -234,6 +255,12 @@ func TestDiagnosticArthasTunnelExecuteCommandStreamsUntilPrompt(t *testing.T) {
 	if chunks[len(chunks)-1].Phase != "completed" {
 		t.Fatalf("expected terminal chunk completed, got %#v", chunks[len(chunks)-1])
 	}
+	if chunks[len(chunks)-1].Content != "" {
+		t.Fatalf("expected completed chunk content to be localized at app boundary, got %#v", chunks[len(chunks)-1])
+	}
+	if chunks[len(chunks)-1].Metadata["contentKey"] != "jvm.backend.diagnostic.message.arthas_command_completed" {
+		t.Fatalf("expected completed contentKey metadata, got %#v", chunks[len(chunks)-1].Metadata)
+	}
 }
 
 func TestDiagnosticArthasTunnelCancelCommandInterruptsActiveCommand(t *testing.T) {
@@ -305,15 +332,23 @@ func TestDiagnosticArthasTunnelCancelCommandInterruptsActiveCommand(t *testing.T
 
 	select {
 	case err := <-errCh:
-		if err == nil || !strings.Contains(strings.ToLower(err.Error()), "canceled") {
-			t.Fatalf("expected canceled error, got %v", err)
-		}
+		assertArthasTunnelLocalizedError(t, err, "jvm.backend.diagnostic.arthas.command_canceled", nil)
 	case <-time.After(2 * time.Second):
 		t.Fatal("expected ExecuteCommand to exit after cancellation")
 	}
 
 	if len(chunks) == 0 {
 		t.Fatal("expected cancel flow to emit chunks")
+	}
+	lastChunk := chunks[len(chunks)-1]
+	if lastChunk.Phase != "canceled" {
+		t.Fatalf("expected final chunk phase canceled, got %#v", lastChunk)
+	}
+	if lastChunk.Content != "" {
+		t.Fatalf("expected canceled chunk content to be localized at app boundary, got %#v", lastChunk)
+	}
+	if lastChunk.Metadata["contentKey"] != "jvm.backend.diagnostic.message.arthas_command_canceled" {
+		t.Fatalf("expected canceled contentKey metadata, got %#v", lastChunk.Metadata)
 	}
 }
 
@@ -358,9 +393,7 @@ func TestDiagnosticArthasTunnelRejectsSessionConfigDrift(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected config drift to reject stale Arthas Tunnel session")
 	}
-	if !strings.Contains(err.Error(), "会话配置已变化") {
-		t.Fatalf("expected config drift error, got %v", err)
-	}
+	assertArthasTunnelLocalizedError(t, err, "jvm.backend.diagnostic.arthas.session_config_changed", nil)
 }
 
 func TestArthasTunnelSessionRegistryPrunesExpiredSessions(t *testing.T) {
@@ -402,9 +435,7 @@ func TestDiagnosticArthasTunnelRequiresTargetID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing targetId to be rejected")
 	}
-	if !strings.Contains(err.Error(), "target") {
-		t.Fatalf("expected targetId error, got %v", err)
-	}
+	assertArthasTunnelLocalizedError(t, err, "jvm.backend.diagnostic.arthas.target_id_required", nil)
 }
 
 func TestDiagnosticArthasTunnelProbeCapabilitiesAndCloseSession(t *testing.T) {
@@ -442,7 +473,93 @@ func TestDiagnosticArthasTunnelProbeCapabilitiesAndCloseSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected closed synthetic session to reject command execution")
 	}
-	if !strings.Contains(err.Error(), "诊断会话不存在") {
-		t.Fatalf("expected closed-session error, got %v", err)
+	assertArthasTunnelLocalizedError(t, err, "jvm.backend.diagnostic.arthas.session_missing", nil)
+}
+
+func TestDiagnosticArthasTunnelRuntimeReturnsLocalizedValidationErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		cfg    connection.ConnectionConfig
+		key    string
+		params map[string]any
+	}{
+		{
+			name: "base URL required",
+			cfg: func() connection.ConnectionConfig {
+				cfg := testArthasTunnelConfig(" ")
+				return cfg
+			}(),
+			key: "jvm.backend.diagnostic.arthas.base_url_required",
+		},
+		{
+			name: "base URL invalid keeps raw detail",
+			cfg: func() connection.ConnectionConfig {
+				cfg := testArthasTunnelConfig("://bad-url")
+				return cfg
+			}(),
+			key:    "jvm.backend.diagnostic.arthas.base_url_invalid",
+			params: map[string]any{"detail": "://bad-url"},
+		},
+		{
+			name: "target ID required",
+			cfg: func() connection.ConnectionConfig {
+				cfg := testArthasTunnelConfig("http://127.0.0.1:7777")
+				cfg.JVM.Diagnostic.TargetID = " "
+				return cfg
+			}(),
+			key: "jvm.backend.diagnostic.arthas.target_id_required",
+		},
+		{
+			name: "scheme unsupported keeps raw scheme",
+			cfg: func() connection.ConnectionConfig {
+				cfg := testArthasTunnelConfig("ftp://127.0.0.1:7777")
+				return cfg
+			}(),
+			key:    "jvm.backend.diagnostic.arthas.scheme_unsupported",
+			params: map[string]any{"scheme": "ftp"},
+		},
 	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := newArthasTunnelRuntime(tt.cfg)
+			assertArthasTunnelLocalizedError(t, err, tt.key, tt.params)
+		})
+	}
+}
+
+func TestArthasTunnelSessionRegistryReturnsLocalizedStateErrors(t *testing.T) {
+	registry := newArthasTunnelSessionRegistry()
+	cfg := testArthasTunnelConfig("http://127.0.0.1:7777")
+	handle := registry.createSession(cfg)
+
+	_, err := registry.beginCommand("missing-session", "cmd-missing", cfg)
+	assertArthasTunnelLocalizedError(t, err, "jvm.backend.diagnostic.arthas.session_missing", nil)
+
+	if _, err := registry.beginCommand(handle.SessionID, "cmd-active", cfg); err != nil {
+		t.Fatalf("beginCommand returned error: %v", err)
+	}
+	_, err = registry.beginCommand(handle.SessionID, "cmd-second", cfg)
+	assertArthasTunnelLocalizedError(t, err, "jvm.backend.diagnostic.arthas.command_already_running", nil)
+
+	err = registry.cancelCommand(handle.SessionID, "cmd-other")
+	assertArthasTunnelLocalizedError(t, err, "jvm.backend.diagnostic.arthas.cancel_command_mismatch", nil)
+	registry.finishCommand(handle.SessionID, "cmd-active")
+
+	err = registry.cancelCommand(handle.SessionID, "cmd-active")
+	assertArthasTunnelLocalizedError(t, err, "jvm.backend.diagnostic.arthas.no_running_command", nil)
+}
+
+func TestArthasTunnelActiveCommandReturnsLocalizedConnectionNotReady(t *testing.T) {
+	activeCommand := &arthasTunnelActiveCommand{commandID: "cmd-not-ready"}
+
+	err := activeCommand.send(arthasTunnelTTYFrame{Action: "read", Data: "thread -n 1"})
+
+	assertArthasTunnelLocalizedError(t, err, "jvm.backend.diagnostic.arthas.connection_not_ready", nil)
+}
+
+func TestTranslateArthasTunnelContextErrorReturnsLocalizedCommandCanceled(t *testing.T) {
+	err := translateArthasTunnelContextError(context.Canceled, time.Second)
+
+	assertArthasTunnelLocalizedError(t, err, "jvm.backend.diagnostic.arthas.command_canceled", nil)
 }

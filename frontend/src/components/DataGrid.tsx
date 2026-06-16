@@ -106,6 +106,7 @@ import {
     resolveWritableColumnName,
     resolveRowLocatorValues,
     type EditRowLocator,
+    type RowLocatorMessages,
 } from '../utils/rowLocator';
 import {
     getColumnDefinitionComment,
@@ -883,6 +884,8 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   const scrollLockRef = useRef<{ el: HTMLElement; handler: (e: WheelEvent) => void } | null>(null);
   const form = useContext(EditableContext);
   const cellContextMenuContext = useContext(CellContextMenuContext);
+  const i18nLanguage = useDataGridI18nLanguage();
+  const dateTimePickerNowLabel = t('data_grid.datetime_picker.now', undefined, i18nLanguage);
 
   /** DatePicker 面板打开时锁定表格滚动，关闭时恢复 */
   const lockTableScroll = useCallback((lock: boolean) => {
@@ -1000,7 +1003,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
                     const fieldName = getCellFieldName(record, dataIndex);
                     setCellFieldValue(form, fieldName, dayjs());
                   }}
-                >此刻</a>
+                >{dateTimePickerNowLabel}</a>
               )}
               onOk={(value) => setTimeout(() => { void save((value as dayjs.Dayjs | null | undefined) ?? undefined); }, 0)}
               onOpenChange={(open) => {
@@ -1384,6 +1387,7 @@ export const buildDataGridCommitChangeSet = ({
     rowKeyToString,
     normalizeCommitCellValue,
     shouldCommitColumn,
+    rowLocatorMessages,
 }: {
     addedRows: any[];
     modifiedRows: Record<string, any>;
@@ -1394,9 +1398,10 @@ export const buildDataGridCommitChangeSet = ({
     rowKeyToString: (key: any) => string;
     normalizeCommitCellValue: NormalizeCommitCellValue;
     shouldCommitColumn: (columnName: string) => boolean;
+    rowLocatorMessages?: RowLocatorMessages;
 }): { ok: true; changes: DataGridCommitChangeSet } | { ok: false; error: string } => {
     if (!editLocator || editLocator.readOnly || editLocator.strategy === 'none') {
-        return { ok: false, error: editLocator?.reason || '当前结果没有可用的安全行定位方式，无法提交修改。' };
+        return { ok: false, error: editLocator?.reason || rowLocatorMessages?.noSafeLocator?.() || 'No safe row locator is available for this result set.' };
     }
 
     const normalizeValues = (values: Record<string, any>, mode: 'insert' | 'update') => {
@@ -1433,7 +1438,7 @@ export const buildDataGridCommitChangeSet = ({
     for (const keyStr of deletedRowKeys) {
         const originalRow = originalRowsByKey.get(keyStr);
         if (!originalRow) continue;
-        const locatorValues = resolveRowLocatorValues(editLocator, originalRow);
+        const locatorValues = resolveRowLocatorValues(editLocator, originalRow, rowLocatorMessages);
         if (!locatorValues.ok) return { ok: false, error: locatorValues.error };
         deletes.push(locatorValues.values);
     }
@@ -1443,7 +1448,7 @@ export const buildDataGridCommitChangeSet = ({
         const originalRow = originalRowsByKey.get(keyStr);
         if (!originalRow) continue;
 
-        const locatorValues = resolveRowLocatorValues(editLocator, originalRow);
+        const locatorValues = resolveRowLocatorValues(editLocator, originalRow, rowLocatorMessages);
         if (!locatorValues.ok) return { ok: false, error: locatorValues.error };
 
         const hasRowKey = Object.prototype.hasOwnProperty.call(newRow as any, GONAVI_ROW_KEY);
@@ -1527,6 +1532,10 @@ const DataGrid: React.FC<DataGridProps> = ({
       },
       [language]
   );
+  const rowLocatorMessages = useMemo<RowLocatorMessages>(() => ({
+      noSafeLocator: () => translateDataGrid('data_grid.message.no_safe_locator'),
+      emptyLocatorValue: (column: string) => translateDataGrid('data_grid.message.locator_column_value_empty', { column }),
+  }), [translateDataGrid]);
   
   const isMacLike = useMemo(() => isMacLikePlatform(), []);
   const isV2Ui = appearance?.uiVersion === 'v2';
@@ -5028,7 +5037,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                                       onClick={() => {
                                                           setCellFieldValue(form, getCellFieldName(record, dataIndex), dayjs());
                                                       }}
-                                                  >此刻</a>
+                                                  >{translateDataGrid('data_grid.datetime_picker.now')}</a>
                                               )}
                                               onOk={(value) => setTimeout(() => { void saveVirtualInlineEditor((value as dayjs.Dayjs | null | undefined) ?? undefined); }, 0)}
                                               onOpenChange={(open) => {
@@ -5218,6 +5227,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           rowKeyToString: rowKeyStr,
           normalizeCommitCellValue,
           shouldCommitColumn,
+          rowLocatorMessages,
       });
       if (!changeSetResult.ok) {
           void message.error(changeSetResult.error
@@ -5260,7 +5270,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
   }, [addedRows, modifiedRows, deletedRowKeys, data, effectiveEditLocator,
       visibleColumnNames, rowKeyStr, normalizeCommitCellValue, shouldCommitColumn,
-      connectionId, tableName, connections, translateDataGrid]);
+      connectionId, tableName, connections, rowLocatorMessages, translateDataGrid]);
 
   const handleCommit = async () => {
       if (!connectionId || !tableName) return;
@@ -5276,6 +5286,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           rowKeyToString: rowKeyStr,
           normalizeCommitCellValue,
           shouldCommitColumn,
+          rowLocatorMessages,
       });
       if (!changeSetResult.ok) {
           void message.error(changeSetResult.error
@@ -6777,7 +6788,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const targetColumnName = resolveColumnQuickFindTarget(effectiveQuery);
       if (!targetColumnName) {
           if (effectiveQuery.trim()) {
-              void message.warning(`未找到字段列：${effectiveQuery.trim()}`);
+              void message.warning(translateDataGrid('data_grid.message.column_quick_find_not_found', { query: effectiveQuery.trim() }));
           }
           return;
       }
@@ -6788,10 +6799,10 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (tryFocus()) return;
           requestAnimationFrame(() => {
               if (tryFocus()) return;
-              void message.warning(`字段列“${targetColumnName}”当前未渲染，无法定位`);
+              void message.warning(translateDataGrid('data_grid.message.column_quick_find_not_rendered', { column: targetColumnName }));
           });
       });
-  }, [columnQuickFindText, focusColumnQuickFindTarget, resolveColumnQuickFindTarget]);
+  }, [columnQuickFindText, focusColumnQuickFindTarget, resolveColumnQuickFindTarget, translateDataGrid]);
 
   // 外部水平滚动条的 wheel 处理（通过原生事件绑定，确保 preventDefault 生效）
   useEffect(() => {
@@ -7369,14 +7380,17 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handleRequestAiInsight = useCallback(() => {
       const sampleData = mergedDisplayData.slice(0, 10);
-      const prompt = `请帮我分析以下查询结果数据（取前 ${sampleData.length} 条示例）：\n\`\`\`json\n${JSON.stringify(sampleData, null, 2)}\n\`\`\`\n\n请分析数据特征、发现规律，或者给出一些业务上的洞察。`;
+      const prompt = translateDataGrid('data_grid.ai_insight.prompt', {
+          count: sampleData.length,
+          json: JSON.stringify(sampleData, null, 2),
+      });
       const store = useStore.getState();
       const wasClosed = !store.aiPanelVisible;
       if (wasClosed) store.setAIPanelVisible(true);
       setTimeout(() => {
           window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
       }, wasClosed ? 350 : 0);
-  }, [mergedDisplayData]);
+  }, [mergedDisplayData, translateDataGrid]);
 
   const handleToggleTotalCount = useCallback(() => {
       if (!onRequestTotalCount) return;

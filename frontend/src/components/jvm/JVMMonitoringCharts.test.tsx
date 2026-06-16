@@ -28,10 +28,11 @@ vi.mock("recharts", () => {
 });
 
 describe("JVMMonitoringCharts", () => {
-  it("renders chart titles, empty text, and legends in Chinese", () => {
+  it("renders chart titles, empty text, and legends with the requested language", () => {
     const emptyMarkup = renderToStaticMarkup(
       <JVMMonitoringCharts
         darkMode={false}
+        language="en-US"
         session={{
           connectionId: "conn-1",
           providerMode: "jmx",
@@ -44,13 +45,15 @@ describe("JVMMonitoringCharts", () => {
       />,
     );
 
-    expect(emptyMarkup).toContain("堆内存");
-    expect(emptyMarkup).toContain("暂无堆内存采样数据");
-    expect(emptyMarkup).not.toContain("暂无 Heap 采样数据");
+    expect(emptyMarkup).toContain("Heap memory");
+    expect(emptyMarkup).toContain("No heap memory samples yet.");
+    expect(emptyMarkup).not.toContain("堆内存");
+    expect(emptyMarkup).not.toContain("暂无堆内存采样数据");
 
     const dataMarkup = renderToStaticMarkup(
       <JVMMonitoringCharts
         darkMode={false}
+        language="en-US"
         session={{
           connectionId: "conn-1",
           providerMode: "jmx",
@@ -81,18 +84,17 @@ describe("JVMMonitoringCharts", () => {
       />,
     );
 
-    expect(dataMarkup).toContain("堆内存已使用");
-    expect(dataMarkup).toContain("堆内存已提交");
-    expect(dataMarkup).toContain("垃圾回收次数");
-    expect(dataMarkup).toContain("垃圾回收耗时(ms)");
-    expect(dataMarkup).toContain("线程数");
-    expect(dataMarkup).toContain("守护线程数");
-    expect(dataMarkup).toContain("线程峰值");
-    expect(dataMarkup).toContain("已加载类");
-    expect(dataMarkup).toContain("已卸载类");
-    expect(dataMarkup).not.toContain("Heap Used");
-    expect(dataMarkup).not.toContain("GC Count");
-    expect(dataMarkup).not.toContain("Threads");
+    expect(dataMarkup).toContain("Heap used");
+    expect(dataMarkup).toContain("Heap committed");
+    expect(dataMarkup).toContain("GC count");
+    expect(dataMarkup).toContain("GC time (ms)");
+    expect(dataMarkup).toContain("Thread count");
+    expect(dataMarkup).toContain("Daemon threads");
+    expect(dataMarkup).toContain("Peak threads");
+    expect(dataMarkup).toContain("Loaded classes");
+    expect(dataMarkup).toContain("Unloaded classes");
+    expect(dataMarkup).not.toContain("堆内存已使用");
+    expect(dataMarkup).not.toContain("垃圾回收次数");
     expect(dataMarkup).not.toContain("ClassLoading");
   });
 

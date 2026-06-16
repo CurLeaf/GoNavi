@@ -467,9 +467,12 @@ describe('DataGrid commit change set', () => {
       rowKeyToString,
       normalizeCommitCellValue: normalizeValue,
       shouldCommitColumn: commitColumnGuard,
-    });
+      rowLocatorMessages: {
+        noSafeLocator: () => 'No safe row locator is available for this result set.',
+      },
+    } as any);
 
-    expect(result).toEqual({ ok: false, error: '当前结果没有可用的安全行定位方式，无法提交修改。' });
+    expect(result).toEqual({ ok: false, error: 'No safe row locator is available for this result set.' });
   });
 
   it('rejects delete rows when unique locator value is null', () => {
@@ -490,7 +493,38 @@ describe('DataGrid commit change set', () => {
       shouldCommitColumn: commitColumnGuard,
     });
 
-    expect(result).toEqual({ ok: false, error: '定位列 EMAIL 的值为空，无法安全提交修改。' });
+    expect(result).toEqual({ ok: false, error: 'Locator column EMAIL is empty, so changes cannot be submitted safely.' });
+  });
+
+  it('keeps DataGrid safe locator fallback messages out of source Chinese literals', () => {
+    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const rowLocatorSource = readFileSync(new URL('../utils/rowLocator.ts', import.meta.url), 'utf8');
+
+    expect(`${dataGridSource}\n${rowLocatorSource}`).not.toMatch(/当前结果没有可用的安全行定位方式|定位列 .* 的值为空，无法安全提交修改/);
+    expect(dataGridSource).toContain('data_grid.message.no_safe_locator');
+    expect(dataGridSource).toContain('data_grid.message.locator_column_value_empty');
+  });
+
+  it('keeps DataGrid column quick-find warning messages localized', () => {
+    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    expect(dataGridSource).not.toMatch(/未找到字段列|当前未渲染，无法定位/);
+    expect(dataGridSource).toContain('data_grid.message.column_quick_find_not_found');
+    expect(dataGridSource).toContain('data_grid.message.column_quick_find_not_rendered');
+  });
+
+  it('keeps DataGrid datetime picker now footer localized', () => {
+    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    expect(dataGridSource).not.toContain('>此刻</a>');
+    expect(dataGridSource).toContain('data_grid.datetime_picker.now');
+  });
+
+  it('keeps DataGrid AI insight prompt wrapper localized', () => {
+    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    expect(dataGridSource).not.toMatch(/请帮我分析以下查询结果数据|请分析数据特征|业务上的洞察/);
+    expect(dataGridSource).toContain('data_grid.ai_insight.prompt');
   });
 
   it('marks the active virtual editing row so shouldCellUpdate can reopen inline editors', () => {

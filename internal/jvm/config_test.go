@@ -1,6 +1,7 @@
 package jvm
 
 import (
+	"errors"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -103,5 +104,15 @@ func TestResolveProviderModeRejectsDisallowedRequestedMode(t *testing.T) {
 	}, ModeJMX)
 	if err == nil {
 		t.Fatalf("expected disallowed requested mode to fail")
+	}
+	var localized *LocalizedError
+	if !errors.As(err, &localized) {
+		t.Fatalf("expected LocalizedError, got %T: %v", err, err)
+	}
+	if localized.Key != "jvm.backend.error.disallowed_mode" {
+		t.Fatalf("expected disallowed mode key, got %q", localized.Key)
+	}
+	if localized.Params["mode"] != ModeJMX {
+		t.Fatalf("expected raw mode param %q, got %#v", ModeJMX, localized.Params)
 	}
 }

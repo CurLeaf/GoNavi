@@ -65,8 +65,8 @@ func TestPreviewChangeBlocksReadOnlyConnection(t *testing.T) {
 	if preview.Allowed {
 		t.Fatalf("expected preview to be blocked, got %#v", preview)
 	}
-	if preview.BlockingReason == "" || !strings.Contains(preview.BlockingReason, "只读") {
-		t.Fatalf("expected readonly blocking reason, got %#v", preview)
+	if preview.BlockingReason != changeBlockedReadOnlyKey {
+		t.Fatalf("expected readonly blocking reason key %q, got %#v", changeBlockedReadOnlyKey, preview)
 	}
 	if strings.TrimSpace(preview.ConfirmationToken) != "" {
 		t.Fatalf("expected blocked preview to not include confirmation token, got %#v", preview)
@@ -461,7 +461,7 @@ func TestBuildChangePreviewBlockedByProviderDoesNotGenerateConfirmationToken(t *
 	}
 }
 
-func TestBuildChangePreviewFailsClosedWhenTokenMarshalFails(t *testing.T) {
+func TestBuildChangePreviewReturnsLocalizedConfirmationTokenError(t *testing.T) {
 	readOnly := false
 	_, err := BuildChangePreview(context.Background(), fakeGuardProvider{
 		preview: ChangePreview{
@@ -492,8 +492,18 @@ func TestBuildChangePreviewFailsClosedWhenTokenMarshalFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected BuildChangePreview to fail when confirmation token marshal fails")
 	}
-	if !strings.Contains(err.Error(), "确认令牌") {
-		t.Fatalf("expected error to mention confirmation token, got %v", err)
+	var localized *LocalizedError
+	if !errors.As(err, &localized) {
+		t.Fatalf("expected localized confirmation token error, got %T %v", err, err)
+	}
+	if localized.Key != changeConfirmationTokenFailedKey {
+		t.Fatalf("expected key %q, got %q", changeConfirmationTokenFailedKey, localized.Key)
+	}
+	if localized.Params["detail"] != "json: unsupported type: func()" {
+		t.Fatalf("expected raw marshal detail, got %#v", localized.Params)
+	}
+	if err.Error() != "json: unsupported type: func()" {
+		t.Fatalf("expected raw fallback error, got %q", err.Error())
 	}
 }
 
@@ -503,13 +513,21 @@ func TestValidateChangeConfirmationRejectsMissingOrMismatchedToken(t *testing.T)
 		RequiresConfirmation: true,
 		ConfirmationToken:    "token-a",
 	}
-	if err := ValidateChangeConfirmation(preview, ChangeRequest{}); err == nil {
-		t.Fatal("expected missing confirmation token to be rejected")
+	if err := ValidateChangeConfirmation(preview, ChangeRequest{}); localizedErrorKey(err) != confirmationTokenMissingKey {
+		t.Fatalf("expected missing confirmation token key %q, got %T %v", confirmationTokenMissingKey, err, err)
 	}
-	if err := ValidateChangeConfirmation(preview, ChangeRequest{ConfirmationToken: "token-b"}); err == nil {
-		t.Fatal("expected mismatched confirmation token to be rejected")
+	if err := ValidateChangeConfirmation(preview, ChangeRequest{ConfirmationToken: "token-b"}); localizedErrorKey(err) != confirmationTokenInvalidKey {
+		t.Fatalf("expected mismatched confirmation token key %q, got %T %v", confirmationTokenInvalidKey, err, err)
 	}
 	if err := ValidateChangeConfirmation(preview, ChangeRequest{ConfirmationToken: "token-a"}); err != nil {
 		t.Fatalf("expected matching confirmation token to pass, got %v", err)
 	}
+}
+
+func localizedErrorKey(err error) string {
+	var localized *LocalizedError
+	if errors.As(err, &localized) && localized != nil {
+		return localized.Key
+	}
+	return ""
 }

@@ -4,6 +4,7 @@ import type {
   JVMChangeRequest,
   JVMValueSnapshot,
 } from "../types";
+import { t as translate } from "../i18n";
 
 type JVMActionDisplay = {
   action: string;
@@ -11,51 +12,18 @@ type JVMActionDisplay = {
   description?: string;
 };
 
-const ACTION_FALLBACK_META: Record<
-  string,
-  { label: string; description?: string }
-> = {
-  set: {
-    label: "设置属性",
-    description: "更新当前资源暴露的可写属性值。",
-  },
-  invoke: {
-    label: "调用操作",
-    description: "调用当前资源暴露的管理操作。",
-  },
-  put: {
-    label: "写入资源",
-    description: "将 payload 内容写入当前 JVM 资源。",
-  },
-  clear: {
-    label: "清空资源",
-    description: "清空当前 JVM 资源里的数据或状态。",
-  },
-  evict: {
-    label: "驱逐缓存",
-    description: "将目标缓存项从当前 JVM 运行时中驱逐。",
-  },
-  remove: {
-    label: "删除条目",
-    description: "删除当前资源中的指定条目。",
-  },
-  delete: {
-    label: "删除资源",
-    description: "删除或注销当前资源。",
-  },
-  refresh: {
-    label: "刷新资源",
-    description: "刷新当前资源的运行时状态。",
-  },
-  reload: {
-    label: "重新加载",
-    description: "重新加载当前资源或其配置。",
-  },
-  reset: {
-    label: "重置状态",
-    description: "将当前资源恢复到初始或默认状态。",
-  },
-};
+const BUILTIN_JVM_ACTIONS = new Set([
+  "set",
+  "invoke",
+  "put",
+  "clear",
+  "evict",
+  "remove",
+  "delete",
+  "refresh",
+  "reload",
+  "reset",
+]);
 
 const normalizeText = (value: unknown): string => String(value || "").trim();
 
@@ -82,19 +50,33 @@ const looksLikeStructuredJSONText = (value: string): boolean => {
 
 export const resolveJVMActionDisplay = (
   value?: Partial<JVMActionDefinition> | string | null,
+  language?: string,
 ): JVMActionDisplay => {
   const action = normalizeText(
     typeof value === "string" ? value : value?.action,
   );
-  const fallback = ACTION_FALLBACK_META[action.toLowerCase()] || null;
+  const normalizedAction = action.toLowerCase();
+  const fallbackKeyPrefix = BUILTIN_JVM_ACTIONS.has(normalizedAction)
+    ? `jvm_resource.presentation.action.${normalizedAction}`
+    : "";
+  const localizedFallbackLabel = fallbackKeyPrefix
+    ? translate(`${fallbackKeyPrefix}.label`, undefined, language)
+    : "";
+  const localizedFallbackDescription = fallbackKeyPrefix
+    ? translate(`${fallbackKeyPrefix}.description`, undefined, language)
+    : "";
   const label =
     normalizeText(typeof value === "string" ? "" : value?.label) ||
-    fallback?.label ||
+    (localizedFallbackLabel !== `${fallbackKeyPrefix}.label`
+      ? localizedFallbackLabel
+      : "") ||
     action ||
-    "未命名动作";
+    translate("jvm_resource.presentation.unnamed_action", undefined, language);
   const description =
     normalizeText(typeof value === "string" ? "" : value?.description) ||
-    fallback?.description ||
+    (localizedFallbackDescription !== `${fallbackKeyPrefix}.description`
+      ? localizedFallbackDescription
+      : "") ||
     "";
 
   return {
@@ -106,8 +88,9 @@ export const resolveJVMActionDisplay = (
 
 export const formatJVMActionDisplayText = (
   value?: Partial<JVMActionDefinition> | string | null,
+  language?: string,
 ): string => {
-  const resolved = resolveJVMActionDisplay(value);
+  const resolved = resolveJVMActionDisplay(value, language);
   if (!resolved.action || resolved.label === resolved.action) {
     return resolved.label;
   }
@@ -116,28 +99,39 @@ export const formatJVMActionDisplayText = (
 
 export const formatJVMActionSummary = (
   actions?: JVMActionDefinition[] | null,
+  language?: string,
 ): string => {
   if (!Array.isArray(actions) || actions.length === 0) {
     return "-";
   }
   return actions
-    .map((item) => formatJVMActionDisplayText(item))
+    .map((item) => formatJVMActionDisplayText(item, language))
     .filter((item) => item !== "")
     .join(", ");
 };
 
-export const formatJVMRiskLevelText = (value?: string | null): string => {
+export const formatJVMRiskLevelText = (
+  value?: string | null,
+  language?: string,
+): string => {
   const normalized = normalizeText(value).toLowerCase();
   if (normalized === "low") {
-    return "低";
+    return translate("jvm_resource.presentation.risk.low", undefined, language);
   }
   if (normalized === "medium") {
-    return "中";
+    return translate(
+      "jvm_resource.presentation.risk.medium",
+      undefined,
+      language,
+    );
   }
   if (normalized === "high") {
-    return "高";
+    return translate("jvm_resource.presentation.risk.high", undefined, language);
   }
-  return normalizeText(value) || "未知";
+  return (
+    normalizeText(value) ||
+    translate("jvm_resource.presentation.risk.unknown", undefined, language)
+  );
 };
 
 export const resolveJVMAuditResultColor = (value?: string | null): string => {
@@ -165,33 +159,60 @@ export const resolveJVMAuditResultColor = (value?: string | null): string => {
   return "default";
 };
 
-export const formatJVMAuditResultLabel = (value?: string | null): string => {
+export const formatJVMAuditResultLabel = (
+  value?: string | null,
+  language?: string,
+): string => {
   const normalized = normalizeText(value).toLowerCase();
   if (!normalized) {
-    return "未知";
+    return translate(
+      "jvm_resource.presentation.audit_result.unknown",
+      undefined,
+      language,
+    );
   }
   if (normalized === "applied") {
-    return "已执行";
+    return translate(
+      "jvm_resource.presentation.audit_result.applied",
+      undefined,
+      language,
+    );
   }
   if (
     normalized.includes("success") ||
     normalized.includes("ok") ||
     normalized.includes("done")
   ) {
-    return "成功";
+    return translate(
+      "jvm_resource.presentation.audit_result.success",
+      undefined,
+      language,
+    );
   }
   if (normalized.includes("warn")) {
-    return "警告";
+    return translate(
+      "jvm_resource.presentation.audit_result.warning",
+      undefined,
+      language,
+    );
   }
   if (
     normalized.includes("block") ||
     normalized.includes("deny") ||
     normalized.includes("forbid")
   ) {
-    return "已阻断";
+    return translate(
+      "jvm_resource.presentation.audit_result.blocked",
+      undefined,
+      language,
+    );
   }
   if (normalized.includes("fail") || normalized.includes("error")) {
-    return "失败";
+    return translate(
+      "jvm_resource.presentation.audit_result.failed",
+      undefined,
+      language,
+    );
   }
   return normalizeText(value);
 };
@@ -248,10 +269,17 @@ export const buildJVMActionPayloadTemplate = (
 export const buildJVMPreviewApplyRequest = (
   previewRequest: JVMChangeRequest,
   preview: JVMChangePreview,
+  language?: string,
 ): JVMChangeRequest => {
   const confirmationToken = String(preview.confirmationToken || "").trim();
   if (preview.requiresConfirmation && !confirmationToken) {
-    throw new Error("确认令牌缺失，请重新预览后再执行");
+    throw new Error(
+      translate(
+        "jvm_resource.error.confirmation_missing",
+        undefined,
+        language || "zh-CN",
+      ),
+    );
   }
   return {
     ...previewRequest,

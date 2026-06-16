@@ -85,8 +85,40 @@ func forceAuditAppendFailureAfterPending(t *testing.T, auditDir string) {
 	}
 }
 
+func expectedAuditAppendError(t *testing.T, auditRoot string) string {
+	t.Helper()
+
+	err := jvm.NewAuditStore(filepath.Join(auditRoot, "jvm_audit.jsonl")).Append(jvm.AuditRecord{
+		Timestamp:    1,
+		ConnectionID: "conn-orders",
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "expected raw audit append error",
+		Result:       "pending",
+	})
+	if err == nil {
+		t.Fatalf("expected audit append to fail for %q", auditRoot)
+	}
+	return err.Error()
+}
+
+func assertEnglishJVMConfirmationMessage(t *testing.T, got string, want string) {
+	t.Helper()
+
+	if got != want {
+		t.Fatalf("expected English confirmation message %q, got %q", want, got)
+	}
+	for _, text := range []string{"确认", "令牌", "预览", "重新"} {
+		if strings.Contains(got, text) {
+			t.Fatalf("expected no Chinese confirmation text %q in message %q", text, got)
+		}
+	}
+}
+
 func TestTestJVMConnectionUsesPreferredProvider(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	var gotMode string
 	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
 		gotMode = mode
@@ -109,8 +141,8 @@ func TestTestJVMConnectionUsesPreferredProvider(t *testing.T) {
 	if gotMode != "endpoint" {
 		t.Fatalf("expected provider mode endpoint, got %q", gotMode)
 	}
-	if res.Message != "JVM 连接成功" {
-		t.Fatalf("expected success message %q, got %q", "JVM 连接成功", res.Message)
+	if res.Message != "JVM connection succeeded" {
+		t.Fatalf("expected success message %q, got %q", "JVM connection succeeded", res.Message)
 	}
 }
 
@@ -274,6 +306,95 @@ func TestJVMProbeCapabilitiesIncludesReasonWhenProbeFails(t *testing.T) {
 	}
 	if items[0].Reason != "probe failed" {
 		t.Fatalf("expected reason %q, got %#v", "probe failed", items[0])
+	}
+}
+
+func TestJVMProbeCapabilitiesLocalizesBuiltInReadOnlyReasons(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	restore := swapJVMProviderFactory(jvm.NewProvider)
+	defer restore()
+
+	readOnly := true
+	res := app.JVMProbeCapabilities(connection.ConnectionConfig{
+		Type:    "jvm",
+		Host:    "orders.internal",
+		Timeout: 3,
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx", "endpoint", "agent"},
+			JMX: connection.JVMJMXConfig{
+				Host: "127.0.0.1",
+				Port: 9010,
+			},
+			Endpoint: connection.JVMEndpointConfig{
+				BaseURL:        "https://orders.internal/manage/jvm",
+				TimeoutSeconds: 3,
+			},
+			Agent: connection.JVMAgentConfig{
+				BaseURL:        "https://orders.internal/agent",
+				TimeoutSeconds: 3,
+			},
+		},
+	})
+
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	items, ok := res.Data.([]jvm.Capability)
+	if !ok || len(items) != 3 {
+		t.Fatalf("expected three capabilities, got %#v", res.Data)
+	}
+	for _, item := range items {
+		if item.CanWrite {
+			t.Fatalf("expected read-only capability for %s, got %#v", item.Mode, item)
+		}
+		if item.Reason != "Current connection is read-only, so writes are blocked" {
+			t.Fatalf("expected localized read-only reason for %s, got %#v", item.Mode, item)
+		}
+		if strings.Contains(item.Reason, "jvm.backend.") || strings.Contains(item.Reason, "只读") {
+			t.Fatalf("expected no key or Chinese text in reason for %s, got %q", item.Mode, item.Reason)
+		}
+	}
+}
+
+func TestJVMProbeCapabilitiesKeepsProviderReasonThatLooksLikeCatalogKeyRaw(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	providerReason := "jvm.backend.error.change_blocked_read_only"
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			probe: []jvm.Capability{{
+				Mode:         jvm.ModeJMX,
+				CanBrowse:    true,
+				CanWrite:     false,
+				CanPreview:   true,
+				DisplayLabel: "JMX",
+				Reason:       providerReason,
+			}},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMProbeCapabilities(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	})
+
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	items, ok := res.Data.([]jvm.Capability)
+	if !ok || len(items) != 1 {
+		t.Fatalf("expected one capability, got %#v", res.Data)
+	}
+	if items[0].Reason != providerReason {
+		t.Fatalf("expected provider reason to stay raw, got %#v", items[0])
 	}
 }
 
@@ -480,6 +601,7 @@ func TestJVMGetValueReturnsProviderPayload(t *testing.T) {
 
 func TestJVMApplyChangeRequiresConfirmationTokenForHighRiskPreview(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	app.configDir = t.TempDir()
 	readOnly := false
 	var applyReq jvm.ChangeRequest
@@ -529,9 +651,7 @@ func TestJVMApplyChangeRequiresConfirmationTokenForHighRiskPreview(t *testing.T)
 	if res.Success {
 		t.Fatalf("expected missing confirmation token to fail, got %+v", res)
 	}
-	if !strings.Contains(res.Message, "确认") && !strings.Contains(res.Message, "重新预览") {
-		t.Fatalf("expected confirmation guidance message, got %q", res.Message)
-	}
+	assertEnglishJVMConfirmationMessage(t, res.Message, "Confirmation token is missing. Complete preview confirmation first.")
 	if applyReq.ResourceID != "" {
 		t.Fatalf("expected provider ApplyChange not to run, got %#v", applyReq)
 	}
@@ -598,6 +718,212 @@ func TestJVMApplyChangeReturnsProviderPayload(t *testing.T) {
 	}
 	if result.UpdatedValue.ResourceID != "/cache/orders" {
 		t.Fatalf("expected updated resource id %q, got %#v", "/cache/orders", result.UpdatedValue)
+	}
+}
+
+func TestJVMApplyChangeUsesEnglishGuardFallbackWhenBlockingReasonEmpty(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	app.configDir = t.TempDir()
+	readOnly := false
+	var applyReq jvm.ChangeRequest
+
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			value: jvm.ValueSnapshot{
+				ResourceID: "/cache/orders",
+				Kind:       "entry",
+				Format:     "json",
+			},
+			previewSet: true,
+			preview: jvm.ChangePreview{
+				Allowed: false,
+			},
+			applyReq: &applyReq,
+			apply:    jvm.ApplyResult{Status: "applied"},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMApplyChange(connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-orders",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}, jvm.ChangeRequest{
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+		Payload:      map[string]any{"status": "ready"},
+	})
+
+	if res.Success {
+		t.Fatalf("expected guard-blocked apply to fail, got %+v", res)
+	}
+	if res.Message != "The current change was blocked by Guard" {
+		t.Fatalf("expected English guard fallback message, got %q", res.Message)
+	}
+	if applyReq.ResourceID != "" {
+		t.Fatalf("expected provider ApplyChange not to run, got %#v", applyReq)
+	}
+}
+
+func TestJVMProviderBlockingReasonThatLooksLikeCatalogKeyStaysRaw(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	app.configDir = t.TempDir()
+	readOnly := false
+	providerReason := "jvm.backend.error.change_blocked_read_only"
+	var applyReq jvm.ChangeRequest
+
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			previewSet: true,
+			preview: jvm.ChangePreview{
+				Allowed:        false,
+				BlockingReason: providerReason,
+			},
+			applyReq: &applyReq,
+			apply:    jvm.ApplyResult{Status: "applied"},
+		}, nil
+	})
+	defer restore()
+
+	cfg := connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-provider-reason",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}
+	req := jvm.ChangeRequest{
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+		Payload:      map[string]any{"status": "ready"},
+	}
+
+	previewRes := app.JVMPreviewChange(cfg, req)
+	if !previewRes.Success {
+		t.Fatalf("expected blocked preview result, got %+v", previewRes)
+	}
+	preview, ok := previewRes.Data.(jvm.ChangePreview)
+	if !ok {
+		t.Fatalf("expected preview data, got %#v", previewRes.Data)
+	}
+	if preview.BlockingReason != providerReason {
+		t.Fatalf("expected provider blocking reason to stay raw, got %q", preview.BlockingReason)
+	}
+
+	applyRes := app.JVMApplyChange(cfg, req)
+	if applyRes.Success {
+		t.Fatalf("expected provider-blocked apply to fail, got %+v", applyRes)
+	}
+	if applyRes.Message != providerReason {
+		t.Fatalf("expected provider blocking message to stay raw, got %q", applyRes.Message)
+	}
+	if applyReq.ResourceID != "" {
+		t.Fatalf("expected provider ApplyChange not to run, got %#v", applyReq)
+	}
+}
+
+func TestJVMPreviewChange(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	readOnly := true
+
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{}, nil
+	})
+	defer restore()
+
+	res := app.JVMPreviewChange(connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-readonly",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}, jvm.ChangeRequest{
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+		Payload:      map[string]any{"status": "ready"},
+	})
+
+	if !res.Success {
+		t.Fatalf("expected read-only preview to return blocked preview, got %+v", res)
+	}
+	preview, ok := res.Data.(jvm.ChangePreview)
+	if !ok {
+		t.Fatalf("expected preview data, got %#v", res.Data)
+	}
+	if preview.Allowed {
+		t.Fatalf("expected preview to be blocked, got %#v", preview)
+	}
+	if preview.BlockingReason != "Current connection is read-only, so writes are blocked" {
+		t.Fatalf("expected localized read-only blocking reason, got %#v", preview)
+	}
+	if strings.Contains(preview.BlockingReason, "jvm.backend.") || strings.Contains(preview.BlockingReason, "只读") {
+		t.Fatalf("expected app boundary to localize blocking reason, got %q", preview.BlockingReason)
+	}
+}
+
+func TestJVMApplyChange(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	app.configDir = t.TempDir()
+	readOnly := true
+	var applyReq jvm.ChangeRequest
+
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			applyReq: &applyReq,
+			apply:    jvm.ApplyResult{Status: "applied"},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMApplyChange(connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-readonly",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			ReadOnly:      &readOnly,
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}, jvm.ChangeRequest{
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+		Payload:      map[string]any{"status": "ready"},
+	})
+
+	if res.Success {
+		t.Fatalf("expected read-only apply to fail, got %+v", res)
+	}
+	if res.Message != "Current connection is read-only, so writes are blocked" {
+		t.Fatalf("expected localized read-only blocking reason, got %q", res.Message)
+	}
+	if strings.Contains(res.Message, "jvm.backend.") || strings.Contains(res.Message, "只读") {
+		t.Fatalf("expected app boundary to localize blocking reason, got %q", res.Message)
+	}
+	if applyReq.ResourceID != "" {
+		t.Fatalf("expected provider ApplyChange not to run, got %#v", applyReq)
 	}
 }
 
@@ -700,8 +1026,153 @@ func TestJVMApplyChangePreviewTokenAllowsConfirmedApply(t *testing.T) {
 	}
 }
 
+func TestIssueJVMPreviewConfirmationTokenLocalizesPayloadHashError(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	readOnly := false
+
+	_, err := app.issueJVMPreviewConfirmationToken(connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-orders",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Environment:   jvm.EnvPROD,
+			ReadOnly:      &readOnly,
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}, jvm.ChangeRequest{
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+		Payload: map[string]any{
+			"callback": func() {},
+		},
+	}, jvm.ChangePreview{
+		Allowed:              true,
+		RequiresConfirmation: true,
+		ConfirmationToken:    "preview-token",
+		Summary:              "risky change",
+		RiskLevel:            "high",
+	})
+	if err == nil {
+		t.Fatalf("expected payload hash error")
+	}
+
+	got := err.Error()
+	want := "Failed to generate JVM preview payload digest: json: unsupported type: func()"
+	if got != want {
+		t.Fatalf("expected localized payload hash error %q, got %q", want, got)
+	}
+	if strings.Contains(got, "生成 JVM 预览载荷摘要失败") {
+		t.Fatalf("expected no Chinese payload hash prefix in message %q", got)
+	}
+}
+
+func TestJVMPreviewChangeLocalizesConfirmationTokenFailure(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	readOnly := false
+
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			previewSet: true,
+			preview: jvm.ChangePreview{
+				Allowed:              true,
+				RequiresConfirmation: true,
+				Summary:              "risky change",
+				RiskLevel:            "high",
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMPreviewChange(connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-orders",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Environment:   jvm.EnvPROD,
+			ReadOnly:      &readOnly,
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}, jvm.ChangeRequest{
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+		Payload: map[string]any{
+			"callback": func() {},
+		},
+	})
+	if res.Success {
+		t.Fatalf("expected preview failure, got %+v", res)
+	}
+
+	want := "Failed to generate JVM change confirmation token: json: unsupported type: func()"
+	if res.Message != want {
+		t.Fatalf("expected localized confirmation token error %q, got %q", want, res.Message)
+	}
+	if strings.Contains(res.Message, "生成 JVM 变更确认令牌失败") {
+		t.Fatalf("expected no Chinese confirmation token prefix in message %q", res.Message)
+	}
+}
+
+func TestJVMApplyChangeLocalizesConfirmationTokenFailure(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	readOnly := false
+
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			previewSet: true,
+			preview: jvm.ChangePreview{
+				Allowed:              true,
+				RequiresConfirmation: true,
+				Summary:              "risky change",
+				RiskLevel:            "high",
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMApplyChange(connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-orders",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Environment:   jvm.EnvPROD,
+			ReadOnly:      &readOnly,
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}, jvm.ChangeRequest{
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+		Payload: map[string]any{
+			"callback": func() {},
+		},
+	})
+	if res.Success {
+		t.Fatalf("expected apply preview failure, got %+v", res)
+	}
+
+	want := "Failed to generate JVM change confirmation token: json: unsupported type: func()"
+	if res.Message != want {
+		t.Fatalf("expected localized confirmation token error %q, got %q", want, res.Message)
+	}
+	if strings.Contains(res.Message, "生成 JVM 变更确认令牌失败") {
+		t.Fatalf("expected no Chinese confirmation token prefix in message %q", res.Message)
+	}
+}
+
 func TestJVMApplyChangeRejectsUnissuedDeterministicConfirmationToken(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	app.configDir = t.TempDir()
 	readOnly := false
 	var applyReq jvm.ChangeRequest
@@ -766,8 +1237,83 @@ func TestJVMApplyChangeRejectsUnissuedDeterministicConfirmationToken(t *testing.
 	if res.Success {
 		t.Fatalf("expected unissued confirmation token to fail, got %+v", res)
 	}
+	assertEnglishJVMConfirmationMessage(t, res.Message, "Confirmation token is invalid. Preview and confirm again.")
 	if applyReq.ResourceID != "" {
 		t.Fatalf("expected provider ApplyChange not to run, got %#v", applyReq)
+	}
+}
+
+func TestJVMApplyChangeRejectsMismatchedPreviewConfirmationContext(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	app.configDir = t.TempDir()
+	readOnly := false
+	applyCalls := 0
+
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{
+			value: jvm.ValueSnapshot{
+				ResourceID: "/cache/orders",
+				Kind:       "entry",
+				Format:     "json",
+				Value: map[string]any{
+					"status": "stale",
+				},
+			},
+			previewSet: true,
+			preview: jvm.ChangePreview{
+				Allowed:              true,
+				RequiresConfirmation: true,
+				Summary:              "risky change",
+				RiskLevel:            "high",
+			},
+			applyFn: func(context.Context, connection.ConnectionConfig, jvm.ChangeRequest) (jvm.ApplyResult, error) {
+				applyCalls++
+				return jvm.ApplyResult{Status: "applied"}, nil
+			},
+		}, nil
+	})
+	defer restore()
+
+	cfg := connection.ConnectionConfig{
+		Type: "jvm",
+		ID:   "conn-orders",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Environment:   jvm.EnvPROD,
+			ReadOnly:      &readOnly,
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	}
+	req := jvm.ChangeRequest{
+		ProviderMode: "jmx",
+		ResourceID:   "/cache/orders",
+		Action:       "put",
+		Reason:       "repair cache",
+		Payload: map[string]any{
+			"status": "ready",
+		},
+	}
+
+	previewRes := app.JVMPreviewChange(cfg, req)
+	if !previewRes.Success {
+		t.Fatalf("expected preview success, got %+v", previewRes)
+	}
+	preview, ok := previewRes.Data.(jvm.ChangePreview)
+	if !ok {
+		t.Fatalf("expected preview payload, got %#v", previewRes.Data)
+	}
+
+	req.ConfirmationToken = preview.ConfirmationToken
+	req.ResourceID = "/cache/customers"
+	res := app.JVMApplyChange(cfg, req)
+	if res.Success {
+		t.Fatalf("expected mismatched confirmation context to fail, got %+v", res)
+	}
+	assertEnglishJVMConfirmationMessage(t, res.Message, "Confirmation token is invalid. Preview and confirm again.")
+	if applyCalls != 0 {
+		t.Fatalf("expected provider ApplyChange not to run, got %d calls", applyCalls)
 	}
 }
 
@@ -848,6 +1394,7 @@ func TestJVMApplyChangeRejectsReplayedPreviewConfirmationToken(t *testing.T) {
 
 func TestJVMApplyChangeRejectsExpiredPreviewConfirmationToken(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	app.configDir = t.TempDir()
 	app.jvmPreviewTokenTTL = time.Nanosecond
 	readOnly := false
@@ -914,6 +1461,7 @@ func TestJVMApplyChangeRejectsExpiredPreviewConfirmationToken(t *testing.T) {
 	if res.Success {
 		t.Fatalf("expected expired confirmation token to fail, got %+v", res)
 	}
+	assertEnglishJVMConfirmationMessage(t, res.Message, "Confirmation token expired. Preview and confirm again.")
 	if applyCalls != 0 {
 		t.Fatalf("expected provider ApplyChange not to run, got %d calls", applyCalls)
 	}
@@ -1074,10 +1622,11 @@ func TestJVMApplyChangeNormalizesRequestBeforeProviderAndAudit(t *testing.T) {
 	}
 }
 
-func TestJVMPreviewChangeRejectsModeOutsideAllowedModes(t *testing.T) {
+func TestJVMPreviewChangeRejectsDisallowedProviderMode(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 
-	res := app.JVMPreviewChange(connection.ConnectionConfig{
+	cfg := connection.ConnectionConfig{
 		Type: "jvm",
 		ID:   "conn-orders",
 		Host: "orders.internal",
@@ -1085,18 +1634,33 @@ func TestJVMPreviewChangeRejectsModeOutsideAllowedModes(t *testing.T) {
 			PreferredMode: "endpoint",
 			AllowedModes:  []string{"endpoint"},
 		},
-	}, jvm.ChangeRequest{
+	}
+	req := jvm.ChangeRequest{
 		ProviderMode: "jmx",
 		ResourceID:   "/cache/orders",
 		Action:       "put",
 		Reason:       "repair cache",
-	})
+	}
+
+	res := app.JVMPreviewChange(cfg, req)
 
 	if res.Success {
 		t.Fatalf("expected preview request to be rejected, got %+v", res)
 	}
-	if !strings.Contains(res.Message, "不允许使用") {
-		t.Fatalf("expected disallowed mode error, got %+v", res)
+	want := "Current connection does not allow jmx mode"
+	if res.Message != want {
+		t.Fatalf("expected localized disallowed mode error %q, got %+v", want, res)
+	}
+	if strings.Contains(res.Message, "不允许使用") || strings.Contains(res.Message, "jvm.backend.") {
+		t.Fatalf("expected no Chinese or raw key in disallowed mode error, got %q", res.Message)
+	}
+
+	applyRes := app.JVMApplyChange(cfg, req)
+	if applyRes.Success {
+		t.Fatalf("expected apply request to be rejected, got %+v", applyRes)
+	}
+	if applyRes.Message != want {
+		t.Fatalf("expected localized apply disallowed mode error %q, got %+v", want, applyRes)
 	}
 }
 
@@ -1132,12 +1696,14 @@ func TestJVMListAuditRecordsReturnsLatestRecords(t *testing.T) {
 
 func TestJVMApplyChangeFailsClosedWhenInitialAuditWriteFails(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	tempDir := t.TempDir()
 	blockerPath := filepath.Join(tempDir, "audit-blocker")
 	if err := os.WriteFile(blockerPath, []byte("blocker"), 0o600); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
 	app.configDir = blockerPath
+	expectedDetail := expectedAuditAppendError(t, blockerPath)
 
 	readOnly := false
 	var applyReq jvm.ChangeRequest
@@ -1181,8 +1747,9 @@ func TestJVMApplyChangeFailsClosedWhenInitialAuditWriteFails(t *testing.T) {
 	if res.Success {
 		t.Fatalf("expected fail-closed when initial audit write fails, got %+v", res)
 	}
-	if !strings.Contains(res.Message, "审计") {
-		t.Fatalf("expected audit failure message, got %q", res.Message)
+	want := "Failed to write audit record, JVM change was blocked: " + expectedDetail
+	if res.Message != want {
+		t.Fatalf("expected English audit failure message %q, got %q", want, res.Message)
 	}
 	if applyReq.ResourceID != "" {
 		t.Fatalf("expected provider ApplyChange not to run, got %#v", applyReq)
@@ -1246,6 +1813,7 @@ func TestJVMApplyChangeLatestAuditRecordIsTerminal(t *testing.T) {
 
 func TestJVMApplyChangeApplySuccessKeepsSuccessWhenTerminalAuditFails(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	tempDir := t.TempDir()
 	auditDir := filepath.Join(tempDir, "audit")
 	if err := os.MkdirAll(auditDir, 0o755); err != nil {
@@ -1302,13 +1870,16 @@ func TestJVMApplyChangeApplySuccessKeepsSuccessWhenTerminalAuditFails(t *testing
 	if result.Status != "applied" {
 		t.Fatalf("expected applied status, got %#v", result)
 	}
-	if !strings.Contains(result.Message, "终态审计写入失败") {
-		t.Fatalf("expected terminal audit warning in result message, got %#v", result)
+	expectedDetail := expectedAuditAppendError(t, auditDir)
+	want := "ok; Failed to write terminal audit record: " + expectedDetail
+	if result.Message != want {
+		t.Fatalf("expected terminal audit warning %q, got %#v", want, result)
 	}
 }
 
 func TestJVMApplyChangeApplyFailureReportsFailedAuditWriteError(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	tempDir := t.TempDir()
 	auditDir := filepath.Join(tempDir, "audit")
 	if err := os.MkdirAll(auditDir, 0o755); err != nil {
@@ -1358,11 +1929,10 @@ func TestJVMApplyChangeApplyFailureReportsFailedAuditWriteError(t *testing.T) {
 	if res.Success {
 		t.Fatalf("expected failure when apply fails, got %+v", res)
 	}
-	if !strings.Contains(res.Message, "provider apply failed") {
-		t.Fatalf("expected provider failure in message, got %q", res.Message)
-	}
-	if !strings.Contains(res.Message, "失败审计写入失败") {
-		t.Fatalf("expected failed audit write failure in message, got %q", res.Message)
+	expectedDetail := expectedAuditAppendError(t, auditDir)
+	want := "provider apply failed; Failed to write failure audit record: " + expectedDetail
+	if res.Message != want {
+		t.Fatalf("expected provider failure with failed audit warning %q, got %q", want, res.Message)
 	}
 }
 
@@ -1412,6 +1982,7 @@ func TestJVMApplyChangeApplyFailureKeepsProviderErrorWhenFailedAuditSucceeds(t *
 
 func TestJVMApplyChangeUsesProviderErrorWhenFailedAuditAlsoFails(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	tempDir := t.TempDir()
 	auditDir := filepath.Join(tempDir, "audit")
 	if err := os.MkdirAll(auditDir, 0o755); err != nil {
@@ -1457,16 +2028,16 @@ func TestJVMApplyChangeUsesProviderErrorWhenFailedAuditAlsoFails(t *testing.T) {
 	if res.Success {
 		t.Fatalf("expected failure when provider apply fails, got %+v", res)
 	}
-	if !strings.HasPrefix(res.Message, "provider apply failed") {
-		t.Fatalf("expected provider error prefix, got %q", res.Message)
-	}
-	if !strings.Contains(res.Message, "失败审计写入失败") {
-		t.Fatalf("expected failed audit write failure in message, got %q", res.Message)
+	expectedDetail := expectedAuditAppendError(t, auditDir)
+	want := "provider apply failed; Failed to write failure audit record: " + expectedDetail
+	if res.Message != want {
+		t.Fatalf("expected provider error with English failed audit warning %q, got %q", want, res.Message)
 	}
 }
 
 func TestJVMApplyChangeTerminalAuditWarningAppendsToExistingResultMessage(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	tempDir := t.TempDir()
 	auditDir := filepath.Join(tempDir, "audit")
 	if err := os.MkdirAll(auditDir, 0o755); err != nil {
@@ -1509,13 +2080,16 @@ func TestJVMApplyChangeTerminalAuditWarningAppendsToExistingResultMessage(t *tes
 	if !ok {
 		t.Fatalf("expected apply result data, got %#v", res.Data)
 	}
-	if !strings.Contains(result.Message, "provider message") || !strings.Contains(result.Message, "终态审计写入失败") {
-		t.Fatalf("expected provider message with terminal audit warning, got %#v", result)
+	expectedDetail := expectedAuditAppendError(t, auditDir)
+	want := "provider message; Failed to write terminal audit record: " + expectedDetail
+	if result.Message != want {
+		t.Fatalf("expected provider message with English terminal audit warning %q, got %#v", want, result)
 	}
 }
 
 func TestJVMApplyChangeTerminalAuditWarningUsesStandaloneMessageWhenResultMessageEmpty(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	tempDir := t.TempDir()
 	auditDir := filepath.Join(tempDir, "audit")
 	if err := os.MkdirAll(auditDir, 0o755); err != nil {
@@ -1558,13 +2132,16 @@ func TestJVMApplyChangeTerminalAuditWarningUsesStandaloneMessageWhenResultMessag
 	if !ok {
 		t.Fatalf("expected apply result data, got %#v", res.Data)
 	}
-	if !strings.Contains(result.Message, "终态审计写入失败") {
-		t.Fatalf("expected standalone terminal audit warning, got %#v", result)
+	expectedDetail := expectedAuditAppendError(t, auditDir)
+	want := "Failed to write terminal audit record: " + expectedDetail
+	if result.Message != want {
+		t.Fatalf("expected standalone English terminal audit warning %q, got %#v", want, result)
 	}
 }
 
 func TestJVMApplyChangeFailedAuditFailureMessageIncludesUnderlyingError(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	tempDir := t.TempDir()
 	auditDir := filepath.Join(tempDir, "audit")
 	if err := os.MkdirAll(auditDir, 0o755); err != nil {
@@ -1599,17 +2176,15 @@ func TestJVMApplyChangeFailedAuditFailureMessageIncludesUnderlyingError(t *testi
 	if res.Success {
 		t.Fatalf("expected failure when apply fails, got %+v", res)
 	}
-	if !strings.Contains(res.Message, "失败审计写入失败") {
-		t.Fatalf("expected failed audit failure marker, got %q", res.Message)
-	}
-	lowerMessage := strings.ToLower(res.Message)
-	if !strings.Contains(lowerMessage, "not a directory") && !strings.Contains(lowerMessage, "system cannot find the path specified") {
-		t.Fatalf("expected underlying audit failure detail in message, got %q", res.Message)
+	expectedDetail := expectedAuditAppendError(t, auditDir)
+	if !strings.Contains(res.Message, "Failed to write failure audit record: "+expectedDetail) {
+		t.Fatalf("expected underlying audit failure detail %q in message, got %q", expectedDetail, res.Message)
 	}
 }
 
-func TestJVMApplyChangeFailureMessageSeparatorUsesChineseSemicolon(t *testing.T) {
+func TestJVMApplyChangeFailureMessageSeparatorUsesLocalizedEnglishSeparator(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
 	tempDir := t.TempDir()
 	auditDir := filepath.Join(tempDir, "audit")
 	if err := os.MkdirAll(auditDir, 0o755); err != nil {
@@ -1644,8 +2219,11 @@ func TestJVMApplyChangeFailureMessageSeparatorUsesChineseSemicolon(t *testing.T)
 	if res.Success {
 		t.Fatalf("expected failure when apply fails, got %+v", res)
 	}
-	if !strings.Contains(res.Message, "；失败审计写入失败") {
-		t.Fatalf("expected chinese semicolon separator in failure message, got %q", res.Message)
+	if !strings.Contains(res.Message, "; Failed to write failure audit record: ") {
+		t.Fatalf("expected English separator in failure message, got %q", res.Message)
+	}
+	if strings.Contains(res.Message, "；") {
+		t.Fatalf("expected no Chinese semicolon separator in failure message, got %q", res.Message)
 	}
 }
 

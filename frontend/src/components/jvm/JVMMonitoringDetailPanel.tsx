@@ -1,6 +1,7 @@
 import React from "react";
 import { Alert, Card, Descriptions, Empty, List, Space, Tag, Typography } from "antd";
 
+import { t, type SupportedLanguage } from "../../i18n";
 import type { JVMMonitoringPoint, JVMMonitoringSessionState } from "../../types";
 import {
   buildMonitoringAvailabilityText,
@@ -17,6 +18,7 @@ type JVMMonitoringDetailPanelProps = {
   session: JVMMonitoringSessionState;
   latestPoint?: JVMMonitoringPoint;
   darkMode: boolean;
+  language?: SupportedLanguage;
 };
 
 const buildCardStyle = (darkMode: boolean): React.CSSProperties => ({
@@ -27,42 +29,54 @@ const buildCardStyle = (darkMode: boolean): React.CSSProperties => ({
 
 const buildProcessMemoryMissingHint = (
   session: JVMMonitoringSessionState,
+  language?: SupportedLanguage,
 ): string | null => {
   if (!(session.missingMetrics || []).includes("memory.rss")) {
     return null;
   }
 
   if (session.providerMode === "jmx") {
-    return "JMX 连接未暴露进程驻留物理内存属性，当前只能读取进程虚拟内存指标；如需进程物理内存，请切换到 HTTP 端点或增强代理采集。";
+    return t("jvm_monitoring_detail_panel.memory_missing.jmx", undefined, language);
   }
 
-  return "当前监控来源未返回进程驻留物理内存指标；请确认 HTTP 端点或增强代理已采集并上报进程物理内存。";
+  return t("jvm_monitoring_detail_panel.memory_missing.default", undefined, language);
 };
 
 const JVMMonitoringDetailPanel: React.FC<JVMMonitoringDetailPanelProps> = ({
   session,
   latestPoint,
   darkMode,
+  language,
 }) => {
-  const threadRows = extractThreadStateRows(latestPoint);
+  const tr = (key: string, params?: Record<string, string | number>) =>
+    t(key, params, language);
+  const threadRows = extractThreadStateRows(latestPoint, language);
   const recentGcEvents = session.recentGcEvents || [];
   const missingMetrics = session.missingMetrics || [];
-  const processMemoryMissingHint = buildProcessMemoryMissingHint(session);
+  const processMemoryMissingHint = buildProcessMemoryMissingHint(session, language);
 
   return (
     <Space direction="vertical" size={16} style={{ width: "100%" }}>
-      <Card variant="borderless" title="排障指标" style={buildCardStyle(darkMode)}>
+      <Card
+        variant="borderless"
+        title={tr("jvm_monitoring_detail_panel.title.troubleshooting_metrics")}
+        style={buildCardStyle(darkMode)}
+      >
         <Descriptions column={1} size="small">
-          <Descriptions.Item label="进程 CPU">
+          <Descriptions.Item label={tr("jvm_monitoring_detail_panel.field.process_cpu")}>
             {formatPercent(latestPoint?.processCpuLoad)}
           </Descriptions.Item>
-          <Descriptions.Item label="系统 CPU">
+          <Descriptions.Item label={tr("jvm_monitoring_detail_panel.field.system_cpu")}>
             {formatPercent(latestPoint?.systemCpuLoad)}
           </Descriptions.Item>
-          <Descriptions.Item label="进程物理内存">
+          <Descriptions.Item
+            label={tr("jvm_monitoring_detail_panel.field.process_physical_memory")}
+          >
             {formatBytes(latestPoint?.processRssBytes)}
           </Descriptions.Item>
-          <Descriptions.Item label="进程虚拟内存">
+          <Descriptions.Item
+            label={tr("jvm_monitoring_detail_panel.field.process_virtual_memory")}
+          >
             {formatBytes(latestPoint?.committedVirtualMemoryBytes)}
           </Descriptions.Item>
         </Descriptions>
@@ -70,35 +84,46 @@ const JVMMonitoringDetailPanel: React.FC<JVMMonitoringDetailPanelProps> = ({
           <Alert
             type="info"
             showIcon
-            message="进程物理内存缺失原因"
+            message={tr("jvm_monitoring_detail_panel.memory_missing.title")}
             description={processMemoryMissingHint}
             style={{ marginTop: 12 }}
           />
         ) : null}
       </Card>
 
-      <Card variant="borderless" title="线程状态分布" style={buildCardStyle(darkMode)}>
+      <Card
+        variant="borderless"
+        title={tr("jvm_monitoring_detail_panel.title.thread_state_distribution")}
+        style={buildCardStyle(darkMode)}
+      >
         {threadRows.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无线程状态采样" />
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={tr("jvm_monitoring_detail_panel.empty.thread_states")}
+          />
         ) : (
           <Space wrap size={[8, 8]}>
             {threadRows.map((item) => (
               <Tag key={item.state} color="blue">
-                {item.label} {formatCompactNumber(item.count)}
+                {item.label} {formatCompactNumber(item.count, language)}
               </Tag>
             ))}
           </Space>
         )}
       </Card>
 
-      <Card variant="borderless" title="最近垃圾回收明细" style={buildCardStyle(darkMode)}>
+      <Card
+        variant="borderless"
+        title={tr("jvm_monitoring_detail_panel.title.recent_gc_details")}
+        style={buildCardStyle(darkMode)}
+      >
         {recentGcEvents.length === 0 ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
               missingMetrics.includes("gc.events")
-                ? "当前监控来源未提供事件级垃圾回收数据"
-                : "最近窗口暂无垃圾回收事件"
+                ? tr("jvm_monitoring_detail_panel.empty.gc_events_unavailable")
+                : tr("jvm_monitoring_detail_panel.empty.recent_gc_events")
             }
           />
         ) : (
@@ -107,17 +132,19 @@ const JVMMonitoringDetailPanel: React.FC<JVMMonitoringDetailPanelProps> = ({
             renderItem={(event) => (
               <List.Item>
                 <List.Item.Meta
-                  title={formatRecentGCLabel(event)}
+                  title={formatRecentGCLabel(event, language)}
                   description={
                     <Space size={12} wrap>
                       {typeof event.beforeUsedBytes === "number" ? (
                         <Text type="secondary">
-                          回收前 {formatBytes(event.beforeUsedBytes)}
+                          {tr("jvm_monitoring_detail_panel.gc.before")}{" "}
+                          {formatBytes(event.beforeUsedBytes)}
                         </Text>
                       ) : null}
                       {typeof event.afterUsedBytes === "number" ? (
                         <Text type="secondary">
-                          回收后 {formatBytes(event.afterUsedBytes)}
+                          {tr("jvm_monitoring_detail_panel.gc.after")}{" "}
+                          {formatBytes(event.afterUsedBytes)}
                         </Text>
                       ) : null}
                       {event.action ? <Tag>{event.action}</Tag> : null}
@@ -130,9 +157,13 @@ const JVMMonitoringDetailPanel: React.FC<JVMMonitoringDetailPanelProps> = ({
         )}
       </Card>
 
-      <Card variant="borderless" title="能力与降级" style={buildCardStyle(darkMode)}>
+      <Card
+        variant="borderless"
+        title={tr("jvm_monitoring_detail_panel.title.capabilities_and_degradation")}
+        style={buildCardStyle(darkMode)}
+      >
         <Paragraph type="secondary" style={{ whiteSpace: "pre-wrap", marginBottom: 12 }}>
-          {buildMonitoringAvailabilityText(session)}
+          {buildMonitoringAvailabilityText(session, language)}
         </Paragraph>
         <Space size={[8, 8]} wrap>
           {(session.missingMetrics || []).map((metric) => (

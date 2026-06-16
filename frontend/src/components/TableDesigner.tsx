@@ -257,15 +257,22 @@ const SQLSERVER_INDEX_TYPE_OPTIONS = [
 ];
 
 const CHARSETS = [
-    { label: 'utf8mb4 (Recommended)', value: 'utf8mb4' },
-    { label: 'utf8', value: 'utf8' },
-    { label: 'latin1', value: 'latin1' },
-    { label: 'ascii', value: 'ascii' },
+    { value: 'utf8mb4' },
+    { value: 'utf8' },
+    { value: 'latin1' },
+    { value: 'ascii' },
 ];
+
+const getCharsetOptions = (i18nLanguage: string) => CHARSETS.map(({ value }) => ({
+    label: value === 'utf8mb4'
+        ? `${value} ${t('table_designer.option.recommended_suffix', undefined, i18nLanguage)}`
+        : value,
+    value,
+}));
 
 const COLLATIONS = {
     'utf8mb4': [
-        { label: 'utf8mb4_unicode_ci (Default)', value: 'utf8mb4_unicode_ci' },
+        { label: 'utf8mb4_unicode_ci', value: 'utf8mb4_unicode_ci' },
         { label: 'utf8mb4_general_ci', value: 'utf8mb4_general_ci' },
         { label: 'utf8mb4_bin', value: 'utf8mb4_bin' },
         { label: 'utf8mb4_0900_ai_ci', value: 'utf8mb4_0900_ai_ci' },
@@ -276,6 +283,15 @@ const COLLATIONS = {
         { label: 'utf8_bin', value: 'utf8_bin' },
     ]
 };
+
+const getCollationOptions = (i18nLanguage: string) => Object.fromEntries(
+    Object.entries(COLLATIONS).map(([charset, options]) => [
+        charset,
+        options.map((option, index) => option.value === 'utf8mb4_unicode_ci' && index === 0
+            ? { ...option, label: `${option.value} (${t('table_designer.option.default', undefined, i18nLanguage)})` }
+            : option),
+    ]),
+) as typeof COLLATIONS;
 
 const useTableDesignerI18nLanguage = () => {
     const i18n = useOptionalI18n();
@@ -449,6 +465,8 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
   const designerTableTitle = tab.tableName || newTableName || t('table_designer.title.untitled_table', undefined, i18nLanguage);
   const designerDbTitle = tab.dbName || t('table_designer.title.default_database', undefined, i18nLanguage);
   const designerColumnSummary = t('table_designer.summary.columns', { count: columns.length }, i18nLanguage);
+  const charsetOptions = useMemo(() => getCharsetOptions(i18nLanguage), [i18nLanguage]);
+  const collationOptions = useMemo(() => getCollationOptions(i18nLanguage), [i18nLanguage]);
   const panelRadius = 10;
   const panelFrameColor = darkMode ? 'rgba(0, 0, 0, 0.18)' : 'rgba(0, 0, 0, 0.12)';
   const panelToolbarBorder = darkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.10)';
@@ -2432,10 +2450,10 @@ END;`;
                               value={starRocksKeyModel}
                               onChange={setStarRocksKeyModel}
                               options={[
-                                  { label: 'Duplicate Key', value: 'DUPLICATE' },
-                                  { label: 'Primary Key', value: 'PRIMARY' },
-                                  { label: 'Unique Key', value: 'UNIQUE' },
-                                  { label: 'Aggregate Key', value: 'AGGREGATE' },
+                                  { label: t('table_designer.starrocks.key_model.duplicate', undefined, i18nLanguage), value: 'DUPLICATE' },
+                                  { label: t('table_designer.column.primary_key', undefined, i18nLanguage), value: 'PRIMARY' },
+                                  { label: t('table_designer.starrocks.key_model.unique', undefined, i18nLanguage), value: 'UNIQUE' },
+                                  { label: t('table_designer.starrocks.key_model.aggregate', undefined, i18nLanguage), value: 'AGGREGATE' },
                               ]}
                               style={{ width: 180 }}
                           />
@@ -2482,7 +2500,7 @@ END;`;
                               value={starRocksBucketMode}
                               onChange={setStarRocksBucketMode}
                               options={[
-                                  { label: 'Buckets Auto', value: 'AUTO' },
+                                  { label: t('table_designer.starrocks.bucket_mode.auto', undefined, i18nLanguage), value: 'AUTO' },
                                   { label: t('table_designer.starrocks.bucket_mode.number', undefined, i18nLanguage), value: 'NUMBER' },
                               ]}
                               style={{ width: 160 }}
@@ -2492,7 +2510,7 @@ END;`;
                               disabled={starRocksBucketMode !== 'NUMBER'}
                               value={starRocksBucketCount}
                               onChange={(e) => setStarRocksBucketCount(e.target.value.replace(/[^\d]/g, ''))}
-                              placeholder="Buckets"
+                              placeholder={t('table_designer.starrocks.placeholder.bucket_count', undefined, i18nLanguage)}
                               style={{ width: 120 }}
                           />
                       </Space>
@@ -2694,7 +2712,7 @@ END;`;
         {isV2Ui && (
             <div className="gn-v2-designer-header">
                 <div className="gn-v2-designer-title">
-                    <span>SCHEMA DESIGNER</span>
+                    <span>{t('table_designer.title.schema_designer', undefined, i18nLanguage)}</span>
                     <strong>{designerTableTitle}</strong>
                 </div>
                 <div className="gn-v2-designer-meta">
@@ -2736,14 +2754,14 @@ END;`;
                             // Set default collation
                             const cols = (COLLATIONS as any)[v];
                             if (cols && cols.length > 0) setCollation(cols[0].value);
-                        }} 
-                        options={CHARSETS} 
-                        style={{ width: 120 }} 
+                        }}
+                        options={charsetOptions}
+                        style={{ width: 120 }}
                     />
                     <Select 
                         value={collation} 
                         onChange={setCollation} 
-                        options={(COLLATIONS as any)[charset] || []} 
+                        options={(collationOptions as any)[charset] || []}
                         style={{ width: 150 }} 
                     />
                 </>
@@ -3071,13 +3089,13 @@ END;`;
                             const cols = (COLLATIONS as any)[v];
                             if (cols && cols.length > 0) setCopyCollation(cols[0].value);
                         }}
-                        options={CHARSETS}
+                        options={charsetOptions}
                         style={{ width: 160 }}
                     />
                     <Select
                         value={copyCollation}
                         onChange={setCopyCollation}
-                        options={(COLLATIONS as any)[copyCharset] || []}
+                        options={(collationOptions as any)[copyCharset] || []}
                         style={{ width: 220 }}
                     />
                 </Space>

@@ -13,6 +13,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { ReloadOutlined } from "@ant-design/icons";
 
+import { useI18n } from "../i18n/provider";
 import { useStore } from "../store";
 import type { JVMAuditRecord, TabData } from "../types";
 import {
@@ -63,7 +64,7 @@ const filterAuditRecordsByMode = (
   );
 };
 
-const formatTimestamp = (timestamp: number): string => {
+const formatTimestamp = (timestamp: number, language?: string): string => {
   if (!timestamp) {
     return "-";
   }
@@ -72,10 +73,11 @@ const formatTimestamp = (timestamp: number): string => {
   if (Number.isNaN(date.getTime())) {
     return String(timestamp);
   }
-  return date.toLocaleString("zh-CN", { hour12: false });
+  return date.toLocaleString(language || "zh-CN", { hour12: false });
 };
 
 const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
+  const { t, language } = useI18n();
   const connection = useStore((state) =>
     state.connections.find((item) => item.id === tab.connectionId),
   );
@@ -86,17 +88,25 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
   const [records, setRecords] = useState<JVMAuditRecord[]>([]);
   const [error, setError] = useState("");
 
+  const formatLoadFailedError = (detail?: unknown): string => {
+    const normalizedDetail = String(detail || "").trim();
+    return t("jvm_audit.error.load_failed", {
+      separator: normalizedDetail ? ": " : "",
+      detail: normalizedDetail,
+    });
+  };
+
   const columns = useMemo<ColumnsType<JVMAuditRecord>>(
     () => [
       {
-        title: "时间",
+        title: t("jvm_audit.column.time"),
         dataIndex: "timestamp",
         key: "timestamp",
         width: 180,
-        render: (value: number) => formatTimestamp(value),
+        render: (value: number) => formatTimestamp(value, language),
       },
       {
-        title: "模式",
+        title: t("jvm_audit.column.mode"),
         dataIndex: "providerMode",
         key: "providerMode",
         width: 120,
@@ -105,28 +115,29 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
         ),
       },
       {
-        title: "动作",
+        title: t("jvm_audit.column.action"),
         dataIndex: "action",
         key: "action",
         width: 160,
-        render: (value: string) => formatJVMActionDisplayText(value) || "-",
+        render: (value: string) =>
+          formatJVMActionDisplayText(value, language) || "-",
       },
       {
-        title: "资源",
+        title: t("jvm_audit.column.resource"),
         dataIndex: "resourceId",
         key: "resourceId",
         ellipsis: true,
         render: (value: string) => value || "-",
       },
       {
-        title: "原因",
+        title: t("jvm_audit.column.reason"),
         dataIndex: "reason",
         key: "reason",
         ellipsis: true,
         render: (value: string) => value || "-",
       },
       {
-        title: "来源",
+        title: t("jvm_audit.column.source"),
         dataIndex: "source",
         key: "source",
         width: 120,
@@ -135,31 +146,31 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
             .trim()
             .toLowerCase();
           if (normalized === "ai-plan") {
-            return <Tag color="purple">AI 辅助</Tag>;
+            return <Tag color="purple">{t("jvm_audit.source.ai_plan")}</Tag>;
           }
-          return <Tag>手工</Tag>;
+          return <Tag>{t("jvm_audit.source.manual")}</Tag>;
         },
       },
       {
-        title: "结果",
+        title: t("jvm_audit.column.result"),
         dataIndex: "result",
         key: "result",
         width: 140,
         render: (value: string) => (
           <Tag color={resolveJVMAuditResultColor(value)}>
-            {formatJVMAuditResultLabel(value)}
+            {formatJVMAuditResultLabel(value, language)}
           </Tag>
         ),
       },
     ],
-    [tab.providerMode],
+    [language, tab.providerMode, t],
   );
 
   const loadRecords = async () => {
     if (!connection) {
       setLoading(false);
       setRecords([]);
-      setError("连接不存在或已被删除");
+      setError(t("jvm_audit.error.connection_missing"));
       return;
     }
 
@@ -167,7 +178,7 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
     if (typeof backendApp?.JVMListAuditRecords !== "function") {
       setLoading(false);
       setRecords([]);
-      setError("JVMListAuditRecords 后端方法不可用");
+      setError(t("jvm_audit.error.backend_unavailable"));
       return;
     }
 
@@ -177,7 +188,7 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
       const result = await backendApp.JVMListAuditRecords(connection.id, limit);
       if (result?.success === false) {
         setRecords([]);
-        setError(String(result?.message || "读取 JVM 审计记录失败"));
+        setError(formatLoadFailedError(result?.message));
         return;
       }
       setRecords(
@@ -188,7 +199,11 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
       );
     } catch (err: any) {
       setRecords([]);
-      setError(err?.message || "读取 JVM 审计记录失败");
+      setError(
+        formatLoadFailedError(
+          err?.message || (typeof err === "string" ? err : ""),
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -196,11 +211,14 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
 
   useEffect(() => {
     void loadRecords();
-  }, [connection, limit, tab.connectionId]);
+  }, [connection, limit, tab.connectionId, tab.providerMode, t]);
 
   if (!connection) {
     return (
-      <Empty description="连接不存在或已被删除" style={{ marginTop: 64 }} />
+      <Empty
+        description={t("jvm_audit.error.connection_missing")}
+        style={{ marginTop: 64 }}
+      />
     );
   }
 
@@ -212,13 +230,16 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
     <JVMWorkspaceShell darkMode={darkMode}>
       <JVMWorkspaceHero
         darkMode={darkMode}
-        eyebrow="JVM Audit"
-        title="JVM 变更审计"
+        eyebrow={t("jvm_audit.eyebrow")}
+        title={t("jvm_audit.title")}
         description={
           <>
             <Text strong>{connection.name}</Text>
             <Text type="secondary"> · {connection.id}</Text>
-            <Text type="secondary"> · 当前范围：最近 {limit} 条</Text>
+            <Text type="secondary">
+              {" · "}
+              {t("jvm_audit.description.current_range", { limit })}
+            </Text>
           </>
         }
         badges={<JVMModeBadge mode={activeMode} />}
@@ -229,7 +250,7 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
               icon={<ReloadOutlined />}
               onClick={() => void loadRecords()}
             >
-              刷新
+              {t("jvm_audit.action.refresh")}
             </Button>
             <Select
               size="small"
@@ -237,7 +258,7 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
               onChange={setLimit}
               options={LIMIT_OPTIONS.map((item) => ({
                 value: item,
-                label: `最近 ${item} 条`,
+                label: t("jvm_audit.option.last_records", { limit: item }),
               }))}
               style={{ width: 132 }}
             />
@@ -245,7 +266,11 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
         }
       />
 
-      <Card title="审计记录" variant="borderless" style={cardStyle}>
+      <Card
+        title={t("jvm_audit.card.records")}
+        variant="borderless"
+        style={cardStyle}
+      >
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
           {error ? <Alert type="error" showIcon message={error} /> : null}
           <Table<JVMAuditRecord>
@@ -257,7 +282,9 @@ const JVMAuditViewer: React.FC<JVMAuditViewerProps> = ({ tab }) => {
             dataSource={records}
             pagination={false}
             locale={{
-              emptyText: error ? "当前无法加载审计记录" : "暂无审计记录",
+              emptyText: error
+                ? t("jvm_audit.empty.load_failed")
+                : t("jvm_audit.empty.no_records"),
             }}
             scroll={{ x: 960 }}
             size="small"
