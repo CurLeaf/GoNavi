@@ -213,6 +213,45 @@ func isPostgresSchemaDDLDBType(dbType string) bool {
 	}
 }
 
+func resolvePGLikeDatabaseDDLCandidates(dbType string, user string) []string {
+	switch resolveDDLDBType(connection.ConnectionConfig{Type: dbType}) {
+	case "kingbase":
+		return []string{"test", "template1", strings.TrimSpace(user)}
+	case "vastbase":
+		return []string{"vastbase", "postgres", "template1", strings.TrimSpace(user)}
+	default:
+		return []string{"postgres", "template1", strings.TrimSpace(user)}
+	}
+}
+
+func resolvePGLikeDatabaseDDLRunConfig(config connection.ConnectionConfig, dbType string, targetDatabase string) connection.ConnectionConfig {
+	runConfig := config
+	target := strings.TrimSpace(targetDatabase)
+	current := strings.TrimSpace(runConfig.Database)
+	if current != "" && !strings.EqualFold(current, target) {
+		return runConfig
+	}
+
+	candidates := resolvePGLikeDatabaseDDLCandidates(dbType, runConfig.User)
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		name := strings.TrimSpace(candidate)
+		if name == "" || strings.EqualFold(name, target) {
+			continue
+		}
+		normalized := strings.ToLower(name)
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		runConfig.Database = name
+		return runConfig
+	}
+
+	runConfig.Database = ""
+	return runConfig
+}
+
 func buildCreateSchemaSQL(dbType string, schemaName string) (string, error) {
 	schemaName = strings.TrimSpace(schemaName)
 	if schemaName == "" {
@@ -571,10 +610,7 @@ func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string,
 	case "mysql", "mariadb", "oceanbase", "starrocks", "sphinx":
 		return connection.QueryResult{Success: false, Message: "MySQL/MariaDB/OceanBase/StarRocks/Sphinx 不支持直接重命名数据库，请新建库后迁移数据"}
 	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
-		if strings.EqualFold(strings.TrimSpace(config.Database), oldName) {
-			return connection.QueryResult{Success: false, Message: "当前连接正在使用目标数据库，请先连接到其他数据库后再重命名"}
-		}
-		runConfig := config
+		runConfig := resolvePGLikeDatabaseDDLRunConfig(config, dbType, oldName)
 		dbInst, err := a.getDatabase(runConfig)
 		if err != nil {
 			return connection.QueryResult{Success: false, Message: err.Error()}
@@ -606,10 +642,7 @@ func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) co
 		runConfig.Database = ""
 		sql = fmt.Sprintf("DROP DATABASE %s", quoteIdentByType(dbType, dbName))
 	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
-		if strings.EqualFold(strings.TrimSpace(config.Database), dbName) {
-			return connection.QueryResult{Success: false, Message: "当前连接正在使用目标数据库，请先连接到其他数据库后再删除"}
-		}
-		runConfig = config
+		runConfig = resolvePGLikeDatabaseDDLRunConfig(config, dbType, dbName)
 		sql = fmt.Sprintf("DROP DATABASE %s", quoteIdentByType(dbType, dbName))
 	default:
 		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除数据库", dbType)}
