@@ -6,12 +6,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   TAB_WORKBENCH_CLASS_NAME,
   resolveTabHoverOpen,
+  resolveTabHoverTitle,
   shouldShowV2ConnectionLabel,
   TabHoverInfo,
   stopTabHoverDragPropagation,
 } from './TabManager';
 import { setCurrentLanguage } from '../i18n';
 import type { TabData } from '../types';
+import { buildTabDisplayModel } from '../utils/tabDisplay';
 
 const stripSourceComments = (source: string): string =>
   source
@@ -128,6 +130,34 @@ describe('TabManager hover info', () => {
     expect(getTabKindLabelSource).not.toMatch(/return '(TABLE|DESIGN|DB|REDIS|JVM|TRG|MV|VIEW|EVT|FUNC|TAB)'/);
   });
 
+  it('keeps v2 hover title focused on the tab object instead of appending secondary display fields', () => {
+    const tab: TabData = {
+      id: 'overview-1',
+      title: '表概览 - front_end_sys',
+      type: 'table-overview',
+      connectionId: 'conn-1',
+      dbName: 'front_end_sys',
+    };
+    const displayModel = buildTabDisplayModel(tab, {
+      id: 'conn-1',
+      name: '开发240',
+      config: {
+        type: 'mysql',
+        host: '192.168.1.240',
+        port: 3306,
+        user: 'root',
+        database: 'front_end_sys',
+      },
+    }, {
+      layout: 'double',
+      primaryElements: ['object', 'kind'],
+      secondaryElements: ['connection', 'database'],
+    });
+
+    expect(displayModel.fullTitle).toContain('[开发240]');
+    expect(resolveTabHoverTitle(displayModel, displayModel.fullTitle)).toBe('表概览 - front_end_sys');
+  });
+
   it('stops hover card pointer events from reaching tab drag listeners without blocking text selection', () => {
     const event = {
       preventDefault: vi.fn(),
@@ -144,6 +174,13 @@ describe('TabManager hover info', () => {
     expect(resolveTabHoverOpen(true, false)).toBe(true);
     expect(resolveTabHoverOpen(true, true)).toBe(false);
     expect(resolveTabHoverOpen(false, true)).toBe(false);
+  });
+
+  it('opens tab display settings from the v2 tab context menu', () => {
+    const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("new CustomEvent('gonavi:open-tab-display-settings')");
+    expect(source).toContain("if (typeof window === 'undefined')");
   });
 
   it('hides the v2 gray connection suffix when the title already carries the same prefix', () => {
@@ -217,6 +254,29 @@ describe('TabManager hover info', () => {
     expect(source).toMatch(/const items = useMemo\([\s\S]*\), \[[^\]]*languagePreference[^\]]*\]\);/);
   });
 
+  it('renders tab labels from appearance tab display settings', () => {
+    const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('buildTabDisplayModel(tab, connection, appearance.tabDisplay)');
+    expect(source).toContain('displayModel={displayModel}');
+    expect(source).toContain('displayModel.primaryParts.map(renderV2TabDisplayPart)');
+    expect(source).toContain("if (part.key === 'kind')");
+    expect(source).toContain('className="gn-v2-tab-kind"');
+    expect(source).toContain('hasDoubleLineTabLabel');
+    expect(source).toContain('gn-v2-main-tabs-double');
+    expect(source).toContain('showSecondaryLine');
+    expect(source).toContain('gn-v2-tab-label-secondary');
+    expect(source).toContain('gn-v2-tab-label-rich');
+    expect(source).toContain('gn-v2-tab-label-double');
+    expect(source).toContain('gn-v2-tab-label-main tab-title-text');
+    expect(source).toContain("key: 'tab-display-settings'");
+    expect(source).toContain('label: \'标签设置\'');
+    expect(source).toContain('icon: <SettingOutlined />');
+    expect(source).toContain('onClick: openTabDisplaySettings');
+    expect(source).toContain("rootClassName={isV2Ui ? 'gn-v2-tab-context-menu-popup' : undefined}");
+    expect(source).not.toContain('gn-v2-main-tabs-rich');
+  });
+
   it('wires hover card tab-switch and drag-blocking handlers with selectable text styles', () => {
     const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
 
@@ -238,7 +298,31 @@ describe('TabManager hover info', () => {
     expect(source).toMatch(/\.gn-v2-tab-hover-card \{[^}]*cursor: text;[^}]*user-select: text;/s);
     expect(source).toContain("--gn-v2-tab-hover-grid-columns: 56px minmax(0, 1fr);");
     expect(source).toMatch(/\.gn-v2-tab-hover-head \{[^}]*display: grid;[^}]*grid-template-columns: var\(--gn-v2-tab-hover-grid-columns\);/s);
+    expect(source).toMatch(/\.gn-v2-tab-hover-head > strong \{[^}]*overflow-wrap: anywhere;[^}]*white-space: normal;/s);
     expect(source).toMatch(/\.gn-v2-tab-hover-row \{[^}]*grid-template-columns: var\(--gn-v2-tab-hover-grid-columns\);/s);
     expect(source).toMatch(/\.gn-v2-tab-hover-card \* \{[^}]*user-select: text;/s);
+  });
+
+  it('guards closing opened SQL file tabs with save confirmation', () => {
+    const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('ReadSQLFile(filePath)');
+    expect(source).toContain('isSQLFileMissingReadResult(res)');
+    expect(source).toContain('isSQLFileMissingErrorMessage(errorMessage)');
+    expect(source).toContain("title: '关闭已丢失的 SQL 文件标签？'");
+    expect(source).toContain('关闭后将丢弃标签内的本地草稿');
+    expect(source).toContain('confirmDirtyTabsOrClose();');
+    expect(source).toContain("getSQLFileTabDraft(tab.id, String(tab.query ?? ''))");
+    expect(source).toContain('hasSQLFileTabUnsavedChanges({ ...tab, query: draft }, normalizeSQLFileReadContent(res.data))');
+    expect(source).toContain("title: '保存 SQL 文件修改？'");
+    expect(source).toContain("okText: '保存并关闭'");
+    expect(source).toContain('不保存');
+    expect(source).toContain('WriteSQLFile(filePath, draft)');
+    expect(source).toContain('clearSQLFileTabDraft(tab.id)');
+    expect(source).toContain('closeTabsWithSQLFilePrompt([id], () => closeTab(id))');
+    expect(source).toContain('closeTabsWithSQLFilePrompt(getCloseOtherTabIds(tabs, tab.id), () => closeOtherTabs(tab.id))');
+    expect(source).toContain('closeTabsWithSQLFilePrompt(getCloseTabsToLeftIds(tabs, tab.id), () => closeTabsToLeft(tab.id))');
+    expect(source).toContain('closeTabsWithSQLFilePrompt(getCloseTabsToRightIds(tabs, tab.id), () => closeTabsToRight(tab.id))');
+    expect(source).toContain('closeTabsWithSQLFilePrompt(tabs.map((item) => item.id), () => closeAllTabs())');
   });
 });

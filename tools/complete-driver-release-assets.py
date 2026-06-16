@@ -27,9 +27,13 @@ DRIVERS = [
     "highgo",
     "vastbase",
     "opengauss",
+    "gaussdb",
+    "iris",
     "mongodb",
     "tdengine",
+    "iotdb",
     "clickhouse",
+    "elasticsearch",
 ]
 
 BUNDLE_NAME = "GoNavi-DriverAgents.zip"

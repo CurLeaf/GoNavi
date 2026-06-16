@@ -115,6 +115,20 @@ func TestResolveDDLDBType_IRISTypeAlias(t *testing.T) {
 	}
 }
 
+func TestResolveDDLDBType_GoldenDBUsesMySQLDialect(t *testing.T) {
+	t.Parallel()
+
+	if got := resolveDDLDBType(connection.ConnectionConfig{Type: "goldendb"}); got != "mysql" {
+		t.Fatalf("expected goldendb type to resolve to mysql, got %q", got)
+	}
+	if got := resolveDDLDBType(connection.ConnectionConfig{Type: "custom", Driver: "greatdb"}); got != "mysql" {
+		t.Fatalf("expected greatdb custom driver to resolve to mysql, got %q", got)
+	}
+	if got := resolveDDLDBType(connection.ConnectionConfig{Type: "custom", Driver: "gdb"}); got != "mysql" {
+		t.Fatalf("expected gdb custom driver to resolve to mysql, got %q", got)
+	}
+}
+
 func TestNormalizeSchemaAndTableByType_PGLikeQuotedQualifiedName(t *testing.T) {
 	t.Parallel()
 
@@ -140,6 +154,42 @@ func TestNormalizeSchemaAndTableByType_PGLikeQuotedQualifiedName(t *testing.T) {
 				t.Fatalf("normalizeSchemaAndTableByType(%q,%q)=(%q,%q),want=(%q,%q)", tt.dbType, tt.tableName, gotSchema, gotTable, tt.wantSchema, tt.wantTable)
 			}
 		})
+	}
+}
+
+func TestNormalizeSchemaAndTableByType_KafkaPreservesDottedTopicName(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTableByType("kafka", "topics", "orders.events.v1")
+	if schema != "topics" || table != "orders.events.v1" {
+		t.Fatalf("expected kafka topic to stay intact, got %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeSchemaAndTableByType_MQTTPreservesTopicFilter(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTableByType("mqtt", "topics", "devices/floor1.sensor.v1")
+	if schema != "topics" || table != "devices/floor1.sensor.v1" {
+		t.Fatalf("expected mqtt topic filter to stay intact, got %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeSchemaAndTableByType_RocketMQPreservesTopicName(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTableByType("rocketmq", "topics", "orders.events.v1")
+	if schema != "topics" || table != "orders.events.v1" {
+		t.Fatalf("expected rocketmq topic name to stay intact, got %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeSchemaAndTableByType_RabbitMQPreservesDottedQueueName(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTableByType("rabbitmq", "/", "orders.events.v1")
+	if schema != "/" || table != "orders.events.v1" {
+		t.Fatalf("expected rabbitmq queue to stay intact, got %q.%q", schema, table)
 	}
 }
 

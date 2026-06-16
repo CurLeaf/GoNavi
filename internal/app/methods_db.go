@@ -23,6 +23,17 @@ func normalizeTestConnectionConfig(config connection.ConnectionConfig) connectio
 	return normalized
 }
 
+func newQueryExecutionContext(config connection.ConnectionConfig) (context.Context, context.CancelFunc) {
+	if strings.EqualFold(strings.TrimSpace(config.Type), "duckdb") {
+		return context.WithCancel(context.Background())
+	}
+	timeoutSeconds := config.Timeout
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 30
+	}
+	return utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+}
+
 func validateTestConnectionInput(config connection.ConnectionConfig) error {
 	dbType := strings.ToLower(strings.TrimSpace(config.Type))
 	if dbType == "" {
@@ -50,6 +61,50 @@ func (a *App) DBConnect(config connection.ConnectionConfig) connection.QueryResu
 
 	logger.Infof("DBConnect 连接成功：%s", formatConnSummary(config))
 	return connection.QueryResult{Success: true, Message: "连接成功"}
+}
+
+func (a *App) DBReleaseConnection(config connection.ConnectionConfig) connection.QueryResult {
+	dbType := strings.ToLower(strings.TrimSpace(config.Type))
+	if dbType == "redis" {
+		closed, err := a.releaseRedisClientsForConfig(config)
+		if err != nil {
+			logger.Error(err, "DBReleaseConnection 释放 Redis 连接失败：%s", formatConnSummary(config))
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+		logger.Infof("DBReleaseConnection 已释放 Redis 连接：%s 数量=%d", formatConnSummary(config), closed)
+		return connection.QueryResult{Success: true, Message: "连接已释放", Data: map[string]int{"closed": closed}}
+	}
+
+	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	if err != nil {
+		wrapped := wrapConnectError(config, err)
+		logger.Error(wrapped, "DBReleaseConnection 解析连接密文失败：%s", formatConnSummary(config))
+		return connection.QueryResult{Success: false, Message: wrapped.Error()}
+	}
+	targetKey := getConnectionReleaseMatchKey(applyGlobalProxyToConnection(resolvedConfig))
+	closed := 0
+
+	a.mu.Lock()
+	for key, entry := range a.dbCache {
+		entryConfig := entry.config
+		if strings.TrimSpace(entryConfig.Type) == "" {
+			continue
+		}
+		if getConnectionReleaseMatchKey(entryConfig) != targetKey {
+			continue
+		}
+		if entry.inst != nil {
+			if closeErr := entry.inst.Close(); closeErr != nil {
+				logger.Error(closeErr, "DBReleaseConnection 关闭缓存连接失败：缓存Key=%s", shortCacheKey(key))
+			}
+		}
+		delete(a.dbCache, key)
+		closed++
+	}
+	a.mu.Unlock()
+
+	logger.Infof("DBReleaseConnection 已释放数据库连接：%s 数量=%d", formatConnSummary(resolvedConfig), closed)
+	return connection.QueryResult{Success: true, Message: "连接已释放", Data: map[string]int{"closed": closed}}
 }
 
 func (a *App) TestConnection(config connection.ConnectionConfig) connection.QueryResult {
@@ -122,7 +177,7 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 	escapedDbName := strings.ReplaceAll(dbName, "`", "``")
 	query := fmt.Sprintf("CREATE DATABASE `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci", escapedDbName)
 	dbType := resolveDDLDBType(runConfig)
-	if dbType == "postgres" || dbType == "kingbase" || dbType == "highgo" || dbType == "vastbase" || dbType == "opengauss" {
+	if dbType == "postgres" || dbType == "kingbase" || dbType == "highgo" || dbType == "vastbase" || dbType == "opengauss" || dbType == "gaussdb" {
 		escapedDbName = strings.ReplaceAll(dbName, `"`, `""`)
 		query = fmt.Sprintf("CREATE DATABASE \"%s\"", escapedDbName)
 	} else if dbType == "sqlserver" {
@@ -151,11 +206,50 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 
 func isPostgresSchemaDDLDBType(dbType string) bool {
 	switch resolveDDLDBType(connection.ConnectionConfig{Type: dbType}) {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		return true
 	default:
 		return false
 	}
+}
+
+func resolvePGLikeDatabaseDDLCandidates(dbType string, user string) []string {
+	switch resolveDDLDBType(connection.ConnectionConfig{Type: dbType}) {
+	case "kingbase":
+		return []string{"test", "template1", strings.TrimSpace(user)}
+	case "vastbase":
+		return []string{"vastbase", "postgres", "template1", strings.TrimSpace(user)}
+	default:
+		return []string{"postgres", "template1", strings.TrimSpace(user)}
+	}
+}
+
+func resolvePGLikeDatabaseDDLRunConfig(config connection.ConnectionConfig, dbType string, targetDatabase string) connection.ConnectionConfig {
+	runConfig := config
+	target := strings.TrimSpace(targetDatabase)
+	current := strings.TrimSpace(runConfig.Database)
+	if current != "" && !strings.EqualFold(current, target) {
+		return runConfig
+	}
+
+	candidates := resolvePGLikeDatabaseDDLCandidates(dbType, runConfig.User)
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		name := strings.TrimSpace(candidate)
+		if name == "" || strings.EqualFold(name, target) {
+			continue
+		}
+		normalized := strings.ToLower(name)
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		runConfig.Database = name
+		return runConfig
+	}
+
+	runConfig.Database = ""
+	return runConfig
 }
 
 func buildCreateSchemaSQL(dbType string, schemaName string) (string, error) {
@@ -171,14 +265,52 @@ func buildCreateSchemaSQL(dbType string, schemaName string) (string, error) {
 	return fmt.Sprintf("CREATE SCHEMA %s", quoteIdentByType(dbType, schemaName)), nil
 }
 
-func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
-	dbType := resolveDDLDBType(config)
+func buildRenameSchemaSQL(dbType string, oldSchemaName string, newSchemaName string) (string, error) {
+	oldSchemaName = strings.TrimSpace(oldSchemaName)
+	newSchemaName = strings.TrimSpace(newSchemaName)
+	if oldSchemaName == "" || newSchemaName == "" {
+		return "", fmt.Errorf("模式名称不能为空")
+	}
+	if strings.EqualFold(oldSchemaName, newSchemaName) {
+		return "", fmt.Errorf("新旧模式名称不能相同")
+	}
+	if !isPostgresSchemaDDLDBType(dbType) {
+		return "", fmt.Errorf("当前数据源（%s）暂不支持通过此入口编辑模式", dbType)
+	}
+	return fmt.Sprintf(
+		"ALTER SCHEMA %s RENAME TO %s",
+		quoteIdentByType(dbType, oldSchemaName),
+		quoteIdentByType(dbType, newSchemaName),
+	), nil
+}
+
+func buildDropSchemaSQL(dbType string, schemaName string) (string, error) {
+	schemaName = strings.TrimSpace(schemaName)
+	if schemaName == "" {
+		return "", fmt.Errorf("模式名称不能为空")
+	}
+	if !isPostgresSchemaDDLDBType(dbType) {
+		return "", fmt.Errorf("当前数据源（%s）暂不支持通过此入口删除模式", dbType)
+	}
+	return fmt.Sprintf("DROP SCHEMA %s CASCADE", quoteIdentByType(dbType, schemaName)), nil
+}
+
+func resolveSchemaDDLTargetDatabase(config connection.ConnectionConfig, dbName string) (string, error) {
 	targetDbName := strings.TrimSpace(dbName)
 	if targetDbName == "" {
 		targetDbName = strings.TrimSpace(config.Database)
 	}
 	if targetDbName == "" {
-		return connection.QueryResult{Success: false, Message: "目标数据库不能为空"}
+		return "", fmt.Errorf("目标数据库不能为空")
+	}
+	return targetDbName, nil
+}
+
+func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
+	dbType := resolveDDLDBType(config)
+	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	query, err := buildCreateSchemaSQL(dbType, schemaName)
@@ -199,6 +331,52 @@ func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, sc
 	return connection.QueryResult{Success: true, Message: "模式创建成功"}
 }
 
+func (a *App) RenameSchema(config connection.ConnectionConfig, dbName string, oldSchemaName string, newSchemaName string) connection.QueryResult {
+	dbType := resolveDDLDBType(config)
+	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	query, err := buildRenameSchemaSQL(dbType, oldSchemaName, newSchemaName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	runConfig := buildRunConfigForDDL(config, dbType, targetDbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := dbInst.Exec(query); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "模式重命名成功"}
+}
+
+func (a *App) DropSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
+	dbType := resolveDDLDBType(config)
+	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	query, err := buildDropSchemaSQL(dbType, schemaName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	runConfig := buildRunConfigForDDL(config, dbType, targetDbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := dbInst.Exec(query); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	return connection.QueryResult{Success: true, Message: "模式删除成功"}
+}
+
 func resolveDDLDBType(config connection.ConnectionConfig) string {
 	dbType := strings.ToLower(strings.TrimSpace(config.Type))
 	if dbType == "doris" {
@@ -209,6 +387,12 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 	}
 	if dbType == "postgresql" {
 		return "postgres"
+	}
+	if dbType == "gauss_db" || dbType == "gauss-db" {
+		return "gaussdb"
+	}
+	if dbType == "goldendb" || dbType == "greatdb" || dbType == "gdb" {
+		return "mysql"
 	}
 	if dbType == "kingbase8" || dbType == "kingbasees" || dbType == "kingbasev8" {
 		return "kingbase"
@@ -229,6 +413,10 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 		return "postgres"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
+	case "gaussdb", "gauss_db", "gauss-db":
+		return "gaussdb"
+	case "goldendb", "greatdb", "gdb":
+		return "mysql"
 	case "dm", "dameng", "dm8":
 		return "dameng"
 	case "sqlite3", "sqlite":
@@ -256,6 +444,10 @@ func resolveDDLDBType(config connection.ConnectionConfig) string {
 	switch {
 	case strings.Contains(driver, "opengauss"), strings.Contains(driver, "open_gauss"), strings.Contains(driver, "open-gauss"):
 		return "opengauss"
+	case strings.Contains(driver, "gaussdb"), strings.Contains(driver, "gauss_db"), strings.Contains(driver, "gauss-db"):
+		return "gaussdb"
+	case strings.Contains(driver, "goldendb"), strings.Contains(driver, "greatdb"):
+		return "mysql"
 	case strings.Contains(driver, "postgres"):
 		return "postgres"
 	case strings.Contains(driver, "kingbase"):
@@ -290,6 +482,11 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		return rawDB, rawTable
 	}
 
+	// Elasticsearch / RocketMQ / MQTT / RabbitMQ / Kafka：对象名可能含多个点或路径，不能按点分割
+	if dbType == "elasticsearch" || dbType == "rocketmq" || dbType == "mqtt" || dbType == "kafka" || dbType == "rabbitmq" {
+		return rawDB, rawTable
+	}
+
 	if dbType == "kingbase" {
 		schema, table := db.SplitKingbaseQualifiedName(rawTable)
 		if schema != "" && table != "" {
@@ -300,7 +497,7 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		}
 	}
 
-	if dbType == "postgres" || dbType == "highgo" || dbType == "vastbase" || dbType == "opengauss" {
+	if dbType == "postgres" || dbType == "highgo" || dbType == "vastbase" || dbType == "opengauss" || dbType == "gaussdb" {
 		schema, table := db.SplitSQLQualifiedName(rawTable)
 		if schema != "" && table != "" {
 			return schema, table
@@ -320,6 +517,10 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		}
 	}
 
+	if dbType == "duckdb" {
+		return rawDB, rawTable
+	}
+
 	if parts := strings.SplitN(rawTable, ".", 2); len(parts) == 2 {
 		schema := strings.TrimSpace(parts[0])
 		table := strings.TrimSpace(parts[1])
@@ -329,7 +530,7 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 	}
 
 	switch dbType {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		return "public", rawTable
 	default:
 		return rawDB, rawTable
@@ -371,7 +572,7 @@ func buildRunConfigForDDL(config connection.ConnectionConfig, dbType string, dbN
 	if strings.EqualFold(strings.TrimSpace(config.Type), "custom") {
 		// custom 连接的 dbName 语义依赖 driver，尽量在常见驱动上对齐内置类型行为。
 		switch dbType {
-		case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "dameng", "sqlserver", "clickhouse":
+		case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "dameng", "sqlserver", "clickhouse":
 			if strings.TrimSpace(dbName) != "" {
 				runConfig.Database = strings.TrimSpace(dbName)
 			}
@@ -408,11 +609,8 @@ func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string,
 		return connection.QueryResult{Success: true, Message: "数据库重命名成功"}
 	case "mysql", "mariadb", "oceanbase", "starrocks", "sphinx":
 		return connection.QueryResult{Success: false, Message: "MySQL/MariaDB/OceanBase/StarRocks/Sphinx 不支持直接重命名数据库，请新建库后迁移数据"}
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
-		if strings.EqualFold(strings.TrimSpace(config.Database), oldName) {
-			return connection.QueryResult{Success: false, Message: "当前连接正在使用目标数据库，请先连接到其他数据库后再重命名"}
-		}
-		runConfig := config
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
+		runConfig := resolvePGLikeDatabaseDDLRunConfig(config, dbType, oldName)
 		dbInst, err := a.getDatabase(runConfig)
 		if err != nil {
 			return connection.QueryResult{Success: false, Message: err.Error()}
@@ -443,11 +641,8 @@ func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) co
 		runConfig = config
 		runConfig.Database = ""
 		sql = fmt.Sprintf("DROP DATABASE %s", quoteIdentByType(dbType, dbName))
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
-		if strings.EqualFold(strings.TrimSpace(config.Database), dbName) {
-			return connection.QueryResult{Success: false, Message: "当前连接正在使用目标数据库，请先连接到其他数据库后再删除"}
-		}
-		runConfig = config
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
+		runConfig = resolvePGLikeDatabaseDDLRunConfig(config, dbType, dbName)
 		sql = fmt.Sprintf("DROP DATABASE %s", quoteIdentByType(dbType, dbName))
 	default:
 		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除数据库", dbType)}
@@ -478,7 +673,7 @@ func (a *App) RenameTable(config connection.ConnectionConfig, dbName string, old
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "sqlserver", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "clickhouse":
 	default:
 		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持重命名表", dbType)}
 	}
@@ -524,7 +719,7 @@ func (a *App) DropTable(config connection.ConnectionConfig, dbName string, table
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "sqlserver", "tdengine", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "tdengine", "clickhouse":
 	default:
 		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除表", dbType)}
 	}
@@ -591,11 +786,7 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 	}
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	timeoutSeconds := runConfig.Timeout
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 30
-	}
-	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
 	// Store cancel function for potential manual cancellation
@@ -614,6 +805,7 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 	}()
 
 	isReadQuery := isReadOnlySQLQuery(runConfig.Type, query)
+	tryQueryFirst := shouldTryQueryResultFirst(runConfig.Type, query)
 
 	runReadQuery := func(inst db.Database) ([]map[string]interface{}, []string, error) {
 		if q, ok := inst.(interface {
@@ -622,6 +814,14 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 			return q.QueryContext(ctx, query)
 		}
 		return inst.Query(query)
+	}
+
+	runReadQueryWithMessages := func(inst db.Database) ([]map[string]interface{}, []string, []string, error) {
+		if q, ok := inst.(db.QueryMessageExecer); ok {
+			return q.QueryContextWithMessages(ctx, query)
+		}
+		data, columns, err := runReadQuery(inst)
+		return data, columns, nil, err
 	}
 
 	runExecQuery := func(inst db.Database) (int64, error) {
@@ -633,8 +833,8 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 		return inst.Exec(query)
 	}
 
-	if isReadQuery {
-		data, columns, err := runReadQuery(dbInst)
+	if isReadQuery || tryQueryFirst {
+		data, columns, messages, err := runReadQueryWithMessages(dbInst)
 		if err != nil && shouldRefreshCachedConnection(err) {
 			if a.invalidateCachedDatabase(runConfig, err) {
 				retryInst, retryErr := a.getDatabaseForcePing(runConfig)
@@ -642,32 +842,34 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 					logger.Error(retryErr, "DBQuery 重建连接失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 					return connection.QueryResult{Success: false, Message: retryErr.Error()}
 				}
-				data, columns, err = runReadQuery(retryInst)
+				data, columns, messages, err = runReadQueryWithMessages(retryInst)
 			}
 		}
-		if err != nil {
+		if err == nil {
+			return connection.QueryResult{Success: true, Data: data, Fields: columns, Messages: messages, QueryID: queryID}
+		}
+		if isReadQuery {
 			logger.Error(err, "DBQuery 查询失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 		}
-		return connection.QueryResult{Success: true, Data: data, Fields: columns, QueryID: queryID}
-	} else {
-		affected, err := runExecQuery(dbInst)
-		if err != nil && shouldRefreshCachedConnection(err) {
-			if a.invalidateCachedDatabase(runConfig, err) {
-				retryInst, retryErr := a.getDatabaseForcePing(runConfig)
-				if retryErr != nil {
-					logger.Error(retryErr, "DBQuery 重建连接失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
-					return connection.QueryResult{Success: false, Message: retryErr.Error()}
-				}
-				affected, err = runExecQuery(retryInst)
-			}
-		}
-		if err != nil {
-			logger.Error(err, "DBQuery 执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
-			return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
-		}
-		return connection.QueryResult{Success: true, Data: map[string]int64{"affectedRows": affected}, QueryID: queryID}
 	}
+
+	affected, err := runExecQuery(dbInst)
+	if err != nil && shouldRefreshCachedConnection(err) {
+		if a.invalidateCachedDatabase(runConfig, err) {
+			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
+			if retryErr != nil {
+				logger.Error(retryErr, "DBQuery 重建连接失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+				return connection.QueryResult{Success: false, Message: retryErr.Error()}
+			}
+			affected, err = runExecQuery(retryInst)
+		}
+	}
+	if err != nil {
+		logger.Error(err, "DBQuery 执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]int64{"affectedRows": affected}, QueryID: queryID}
 }
 
 // DBQueryMulti 执行可能包含多条 SQL 语句的查询，返回多个结果集。
@@ -687,11 +889,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	}
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	timeoutSeconds := runConfig.Timeout
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 30
-	}
-	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
 	a.queryMu.Lock()
@@ -710,28 +908,35 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	// 注意：原生 conn.Query() 执行写操作（UPDATE/INSERT/DELETE）时，
 	// sql.Rows 不暴露 RowsAffected，导致影响行数丢失。
 	// 因此仅在全部语句皆为读操作时才使用原生路径。
+	statements := splitSQLStatements(query)
 	allReadOnly := true
-	for _, stmt := range splitSQLStatements(query) {
+	for _, stmt := range statements {
 		if strings.TrimSpace(stmt) != "" && !isReadOnlySQLQuery(runConfig.Type, stmt) {
 			allReadOnly = false
 			break
 		}
 	}
+	useNativeMultiResult := shouldUseNativeMultiResultBatch(runConfig.Type, statements, allReadOnly)
 
-	runMultiQuery := func(inst db.Database) ([]connection.ResultSetData, error) {
-		if !allReadOnly {
-			return nil, nil // 包含写操作，走逐条执行路径
+	runMultiQuery := func(inst db.Database) ([]connection.ResultSetData, []string, error) {
+		if !useNativeMultiResult {
+			return nil, nil, nil // 包含写操作，走逐条执行路径
+		}
+		if q, ok := inst.(db.MultiResultQueryMessageExecer); ok {
+			return q.QueryMultiContextWithMessages(ctx, query)
 		}
 		if q, ok := inst.(db.MultiResultQuerierContext); ok {
-			return q.QueryMultiContext(ctx, query)
+			results, err := q.QueryMultiContext(ctx, query)
+			return results, nil, err
 		}
 		if q, ok := inst.(db.MultiResultQuerier); ok {
-			return q.QueryMulti(query)
+			results, err := q.QueryMulti(query)
+			return results, nil, err
 		}
-		return nil, nil // 返回 nil 表示不支持
+		return nil, nil, nil // 返回 nil 表示不支持
 	}
 
-	results, err := runMultiQuery(dbInst)
+	results, resultMessages, err := runMultiQuery(dbInst)
 	if err != nil && shouldRefreshCachedConnection(err) {
 		if a.invalidateCachedDatabase(runConfig, err) {
 			retryInst, retryErr := a.getDatabaseForcePing(runConfig)
@@ -739,7 +944,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				logger.Error(retryErr, "DBQueryMulti 重建连接失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 				return connection.QueryResult{Success: false, Message: retryErr.Error(), QueryID: queryID}
 			}
-			results, err = runMultiQuery(retryInst)
+			results, resultMessages, err = runMultiQuery(retryInst)
 		}
 	}
 	if err != nil {
@@ -749,11 +954,10 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 
 	// 驱动支持多结果集，直接返回
 	if results != nil {
-		return connection.QueryResult{Success: true, Data: results, QueryID: queryID}
+		return connection.QueryResult{Success: true, Data: results, Messages: resultMessages, QueryID: queryID}
 	}
 
 	// 驱动不支持多结果集，回退到逐条执行
-	statements := splitSQLStatements(query)
 	if len(statements) == 0 {
 		return connection.QueryResult{
 			Success: true,
@@ -762,18 +966,73 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		}
 	}
 
-	// 全部为写操作且驱动支持批量 Exec → 一次性发送，大幅减少网络往返
-	// 适用于 MySQL/MariaDB/Doris/PostgreSQL/SQLite/DuckDB 等支持多语句 Exec 的驱动
-	if !allReadOnly {
-		allWrite := true
-		for _, stmt := range statements {
-			if strings.TrimSpace(stmt) != "" && isReadOnlySQLQuery(runConfig.Type, stmt) {
-				allWrite = false
-				break
+	var sessionQueryTarget db.StatementQueryExecer
+	var sessionQueryMessageTarget db.StatementQueryMessageExecer
+	var sessionMultiQueryTarget db.StatementMultiResultQueryExecer
+	var sessionMultiQueryMessageTarget db.StatementMultiResultQueryMessageExecer
+	var sessionExecTarget db.StatementExecer
+	var sessionBatchTarget db.BatchWriteExecer
+	closeExecTarget := func() {}
+	if provider, ok := dbInst.(db.SessionExecerProvider); ok {
+		sessionExecer, sessionErr := provider.OpenSessionExecer(ctx)
+		if sessionErr != nil {
+			logger.Warnf("DBQueryMulti 打开会话级执行器失败，将回退共享连接：%s SQL片段=%q err=%v", formatConnSummary(runConfig), sqlSnippet(query), sessionErr)
+		} else {
+			if statementQueryExecer, ok := sessionExecer.(db.StatementQueryExecer); ok {
+				sessionQueryTarget = statementQueryExecer
+			}
+			if statementQueryMessageExecer, ok := sessionExecer.(db.StatementQueryMessageExecer); ok {
+				sessionQueryMessageTarget = statementQueryMessageExecer
+			}
+			if statementMultiResultQueryExecer, ok := sessionExecer.(db.StatementMultiResultQueryExecer); ok {
+				sessionMultiQueryTarget = statementMultiResultQueryExecer
+			}
+			if statementMultiResultQueryMessageExecer, ok := sessionExecer.(db.StatementMultiResultQueryMessageExecer); ok {
+				sessionMultiQueryMessageTarget = statementMultiResultQueryMessageExecer
+			}
+			sessionExecTarget = sessionExecer
+			if batcher, ok := sessionExecer.(db.BatchWriteExecer); ok {
+				sessionBatchTarget = batcher
+			}
+			closeExecTarget = func() {
+				if err := sessionExecer.Close(); err != nil {
+					logger.Warnf("DBQueryMulti 关闭会话级执行器失败：%v", err)
+				}
 			}
 		}
-		if allWrite {
-			if batcher, ok := dbInst.(db.BatchWriteExecer); ok {
+	}
+	defer closeExecTarget()
+
+	// 单条写语句且驱动支持批量 Exec 时，可复用批量路径。
+	// 多条写语句必须逐条返回结果；部分驱动对多语句 Exec 仅暴露最后一条 RowsAffected，
+	// 会导致前面语句已成功执行但结果页只剩一个写入结果。
+	if !allReadOnly {
+		allWrite := true
+		containsPLSQLBlock := false
+		containsQueryFirstWrite := false
+		for _, stmt := range statements {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			if !isBatchableWriteSQLStatement(runConfig.Type, stmt) {
+				allWrite = false
+			}
+			if shouldTryQueryResultFirst(runConfig.Type, stmt) {
+				containsQueryFirstWrite = true
+			}
+			if isPLSQLBlockStatement(stmt) {
+				containsPLSQLBlock = true
+			}
+		}
+		if allWrite && !containsPLSQLBlock && !containsQueryFirstWrite && len(statements) == 1 {
+			batcher := sessionBatchTarget
+			if batcher == nil {
+				if fallbackBatcher, ok := dbInst.(db.BatchWriteExecer); ok {
+					batcher = fallbackBatcher
+				}
+			}
+			if batcher != nil {
 				affected, batchErr := batcher.ExecBatchContext(ctx, query)
 				if batchErr != nil && shouldRefreshCachedConnection(batchErr) {
 					if a.invalidateCachedDatabase(runConfig, batchErr) {
@@ -811,17 +1070,80 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 			continue
 		}
 
-		if isReadOnlySQLQuery(runConfig.Type, stmt) {
-			var data []map[string]interface{}
-			var columns []string
-			if q, ok := dbInst.(interface {
+		isReadStmt := isReadOnlySQLQuery(runConfig.Type, stmt)
+		tryQueryStmtFirst := shouldTryQueryResultFirst(runConfig.Type, stmt)
+		if isReadStmt || tryQueryStmtFirst {
+			var (
+				data             []map[string]interface{}
+				columns          []string
+				messages         []string
+				statementResults []connection.ResultSetData
+				usedMultiResult  bool
+			)
+			if sessionMultiQueryMessageTarget != nil {
+				statementResults, messages, err = sessionMultiQueryMessageTarget.QueryMultiContextWithMessages(ctx, stmt)
+				usedMultiResult = true
+			} else if sessionMultiQueryTarget != nil {
+				statementResults, err = sessionMultiQueryTarget.QueryMultiContext(ctx, stmt)
+				usedMultiResult = true
+			} else if q, ok := dbInst.(db.MultiResultQueryMessageExecer); ok {
+				statementResults, messages, err = q.QueryMultiContextWithMessages(ctx, stmt)
+				usedMultiResult = true
+			} else if q, ok := dbInst.(db.MultiResultQuerierContext); ok {
+				statementResults, err = q.QueryMultiContext(ctx, stmt)
+				usedMultiResult = true
+			} else if q, ok := dbInst.(db.MultiResultQuerier); ok {
+				statementResults, err = q.QueryMulti(stmt)
+				usedMultiResult = true
+			} else if sessionQueryMessageTarget != nil {
+				data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
+			} else if sessionQueryTarget != nil {
+				data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
+			} else if q, ok := dbInst.(db.QueryMessageExecer); ok {
+				data, columns, messages, err = q.QueryContextWithMessages(ctx, stmt)
+			} else if q, ok := dbInst.(interface {
 				QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
 			}); ok {
 				data, columns, err = q.QueryContext(ctx, stmt)
 			} else {
 				data, columns, err = dbInst.Query(stmt)
 			}
-			if err != nil {
+			if err == nil {
+				if usedMultiResult {
+					if len(statementResults) == 0 && len(messages) > 0 {
+						statementResults = []connection.ResultSetData{{
+							Rows:     []map[string]interface{}{},
+							Columns:  []string{},
+							Messages: append([]string(nil), messages...),
+						}}
+					}
+					for _, statementResult := range statementResults {
+						if statementResult.Rows == nil {
+							statementResult.Rows = []map[string]interface{}{}
+						}
+						if statementResult.Columns == nil {
+							statementResult.Columns = []string{}
+						}
+						statementResult.StatementIndex = idx + 1
+						resultSets = append(resultSets, statementResult)
+					}
+					continue
+				}
+				if data == nil {
+					data = make([]map[string]interface{}, 0)
+				}
+				if columns == nil {
+					columns = []string{}
+				}
+				resultSets = append(resultSets, connection.ResultSetData{
+					Rows:           data,
+					Columns:        columns,
+					Messages:       messages,
+					StatementIndex: idx + 1,
+				})
+				continue
+			}
+			if isReadStmt {
 				logger.Error(err, "DBQueryMulti 逐条查询失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
 				errMsg := fmt.Sprintf("第 %d 条语句执行失败: %v", idx+1, err)
 				if len(resultSets) > 0 {
@@ -829,35 +1151,31 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				}
 				return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
 			}
-			if data == nil {
-				data = make([]map[string]interface{}, 0)
-			}
-			if columns == nil {
-				columns = []string{}
-			}
-			resultSets = append(resultSets, connection.ResultSetData{Rows: data, Columns: columns})
-		} else {
-			var affected int64
-			if e, ok := dbInst.(interface {
-				ExecContext(context.Context, string) (int64, error)
-			}); ok {
-				affected, err = e.ExecContext(ctx, stmt)
-			} else {
-				affected, err = dbInst.Exec(stmt)
-			}
-			if err != nil {
-				logger.Error(err, "DBQueryMulti 逐条执行失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
-				errMsg := fmt.Sprintf("第 %d 条语句执行失败: %v", idx+1, err)
-				if len(resultSets) > 0 {
-					errMsg += fmt.Sprintf("（前 %d 条已执行成功）", len(resultSets))
-				}
-				return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
-			}
-			resultSets = append(resultSets, connection.ResultSetData{
-				Rows:    []map[string]interface{}{{"affectedRows": affected}},
-				Columns: []string{"affectedRows"},
-			})
 		}
+
+		var affected int64
+		if sessionExecTarget != nil {
+			affected, err = sessionExecTarget.ExecContext(ctx, stmt)
+		} else if e, ok := dbInst.(interface {
+			ExecContext(context.Context, string) (int64, error)
+		}); ok {
+			affected, err = e.ExecContext(ctx, stmt)
+		} else {
+			affected, err = dbInst.Exec(stmt)
+		}
+		if err != nil {
+			logger.Error(err, "DBQueryMulti 逐条执行失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
+			errMsg := fmt.Sprintf("第 %d 条语句执行失败: %v", idx+1, err)
+			if len(resultSets) > 0 {
+				errMsg += fmt.Sprintf("（前 %d 条已执行成功）", len(resultSets))
+			}
+			return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
+		}
+		resultSets = append(resultSets, connection.ResultSetData{
+			Rows:           []map[string]interface{}{{"affectedRows": affected}},
+			Columns:        []string{"affectedRows"},
+			StatementIndex: idx + 1,
+		})
 	}
 
 	if resultSets == nil {
@@ -869,6 +1187,99 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		fallbackMsg = fmt.Sprintf("当前数据源（%s）不支持原生多语句执行，已自动拆分为 %d 条语句逐条执行。", runConfig.Type, len(statements))
 	}
 	return connection.QueryResult{Success: true, Data: resultSets, QueryID: queryID, Message: fallbackMsg}
+}
+
+func shouldUseNativeMultiResultBatch(dbType string, statements []string, allReadOnly bool) bool {
+	if allReadOnly {
+		return true
+	}
+	if !strings.EqualFold(strings.TrimSpace(dbType), "sqlserver") {
+		return false
+	}
+	for _, stmt := range statements {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if isReadOnlySQLQuery(dbType, stmt) || shouldTryQueryResultFirst(dbType, stmt) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func shouldTryQueryResultFirst(dbType string, query string) bool {
+	isSQLServer := isSQLServerDBType(dbType)
+	if sqlWriteStatementReturnsRows(dbType, query) {
+		return true
+	}
+	keyword := leadingSQLKeyword(query)
+	switch keyword {
+	case "exec", "execute", "call":
+		return true
+	case "set", "print":
+		return isSQLServer
+	case "dbcc":
+		return isSQLServer
+	case "do":
+		return isPostgresNoticeCapableDBType(dbType) && strings.Contains(strings.ToLower(query), "raise")
+	default:
+		if isSQLServer {
+			if strings.HasPrefix(keyword, "sp_") || strings.HasPrefix(keyword, "xp_") {
+				return true
+			}
+			if sqlServerControlFlowMayReturnMessages(query) {
+				return true
+			}
+			return looksLikeSQLServerProcedureInvocation(query)
+		}
+		return false
+	}
+}
+
+func looksLikeSQLServerProcedureInvocation(query string) bool {
+	switch leadingSQLKeyword(query) {
+	case "select", "with", "insert", "update", "delete", "merge", "replace", "upsert",
+		"if", "begin", "declare", "while", "create", "alter", "drop", "truncate", "grant", "revoke",
+		"use", "set", "print", "dbcc", "commit", "rollback", "save", "return", "throw", "raiserror",
+		"waitfor", "open", "fetch", "close", "deallocate":
+		return false
+	}
+
+	pos := skipSQLTrivia(query, 0)
+	if pos >= len(query) {
+		return false
+	}
+
+	next, ok := skipSQLIdentifierToken(query, pos)
+	if !ok || next <= pos {
+		return false
+	}
+	pos = skipSQLTrivia(query, next)
+	for pos < len(query) && query[pos] == '.' {
+		pos = skipSQLTrivia(query, pos+1)
+		next, ok = skipSQLIdentifierToken(query, pos)
+		if !ok || next <= pos {
+			return false
+		}
+		pos = skipSQLTrivia(query, next)
+	}
+
+	if pos >= len(query) {
+		return true
+	}
+	switch ch := query[pos]; {
+	case ch == ';' || ch == ',' || ch == '@' || ch == '\'' || ch == '"' || ch == '[' || ch == '(':
+		return true
+	case ch == '+' || ch == '-':
+		return true
+	case ch >= '0' && ch <= '9':
+		return true
+	default:
+		keyword, _ := nextSQLKeyword(query, pos)
+		return keyword != ""
+	}
 }
 
 func (a *App) DBQueryIsolated(config connection.ConnectionConfig, dbName string, query string) connection.QueryResult {
@@ -886,30 +1297,34 @@ func (a *App) DBQueryIsolated(config connection.ConnectionConfig, dbName string,
 	}()
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	timeoutSeconds := runConfig.Timeout
-	if timeoutSeconds <= 0 {
-		timeoutSeconds = 30
-	}
-	ctx, cancel := utils.ContextWithTimeout(time.Duration(timeoutSeconds) * time.Second)
+	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
 	isReadQuery := isReadOnlySQLQuery(runConfig.Type, query)
+	tryQueryFirst := shouldTryQueryResultFirst(runConfig.Type, query)
 
-	if isReadQuery {
-		var data []map[string]interface{}
-		var columns []string
-		if q, ok := dbInst.(interface {
+	if isReadQuery || tryQueryFirst {
+		var (
+			data     []map[string]interface{}
+			columns  []string
+			messages []string
+		)
+		if q, ok := dbInst.(db.QueryMessageExecer); ok {
+			data, columns, messages, err = q.QueryContextWithMessages(ctx, query)
+		} else if q, ok := dbInst.(interface {
 			QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
 		}); ok {
 			data, columns, err = q.QueryContext(ctx, query)
 		} else {
 			data, columns, err = dbInst.Query(query)
 		}
-		if err != nil {
+		if err == nil {
+			return connection.QueryResult{Success: true, Data: data, Fields: columns, Messages: messages}
+		}
+		if isReadQuery {
 			logger.Error(err, "DBQueryIsolated 查询失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
-		return connection.QueryResult{Success: true, Data: data, Fields: columns}
 	}
 
 	var affected int64
@@ -1132,7 +1547,7 @@ func resolveCreateStatementWithFallback(dbInst db.Database, config connection.Co
 
 func supportsCreateStatementFallback(dbType string) bool {
 	switch dbType {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver":
 		return true
 	default:
 		return false
@@ -1141,7 +1556,7 @@ func supportsCreateStatementFallback(dbType string) bool {
 
 func supportsViewCreateStatementLookup(dbType string) bool {
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "oracle", "dameng", "sqlite", "duckdb", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "oracle", "dameng", "sqlite", "duckdb", "clickhouse":
 		return true
 	default:
 		return false
@@ -1289,7 +1704,7 @@ func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, ta
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
+	schemaName, pureTableName := normalizeMetadataSchemaAndTable(config, dbName, tableName)
 	columns, err := dbInst.GetColumns(schemaName, pureTableName)
 	if err != nil && shouldRefreshCachedConnection(err) {
 		if a.invalidateCachedDatabase(runConfig, err) {
@@ -1318,7 +1733,7 @@ func (a *App) DBGetIndexes(config connection.ConnectionConfig, dbName string, ta
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	schemaName, pureTableName := normalizeSchemaAndTable(config, dbName, tableName)
+	schemaName, pureTableName := normalizeMetadataSchemaAndTable(config, dbName, tableName)
 	indexes, err := dbInst.GetIndexes(schemaName, pureTableName)
 	if err != nil && shouldRefreshCachedConnection(err) {
 		if a.invalidateCachedDatabase(runConfig, err) {
@@ -1380,7 +1795,7 @@ func (a *App) DropView(config connection.ConnectionConfig, dbName string, viewNa
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "sqlserver", "clickhouse":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "clickhouse":
 	default:
 		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除视图", dbType)}
 	}
@@ -1415,7 +1830,7 @@ func (a *App) DropFunction(config connection.ConnectionConfig, dbName string, ro
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
-	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "oracle", "dameng", "highgo", "vastbase", "opengauss", "sqlserver", "duckdb":
+	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "oracle", "dameng", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "duckdb":
 	default:
 		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除函数/存储过程", dbType)}
 	}
@@ -1472,7 +1887,7 @@ func (a *App) RenameView(config connection.ConnectionConfig, dbName string, oldN
 	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "clickhouse":
 		newQualified := quoteTableIdentByType(dbType, schemaName, newName)
 		sql = fmt.Sprintf("RENAME TABLE %s TO %s", oldQualified, newQualified)
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		sql = fmt.Sprintf("ALTER VIEW %s RENAME TO %s", oldQualified, newQuoted)
 	case "sqlserver":
 		oldFullName := schemaName + "." + pureOldName

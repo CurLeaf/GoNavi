@@ -1,6 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { CopyOutlined, EditOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons';
+import { CopyOutlined, EditOutlined, UndoOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons';
 import { t } from '../i18n';
 
 interface CellContextMenuState {
@@ -20,6 +20,7 @@ interface DataGridLegacyCellContextMenuProps {
   copiedRowsForPasteLength: number;
   selectedRowKeysLength: number;
   copiedCellPatchAvailable: boolean;
+  canUndoCellChange: boolean;
   supportsCopyInsert: boolean;
   translate?: (key: string, params?: Record<string, unknown>) => string;
   onClose: () => void;
@@ -27,6 +28,7 @@ interface DataGridLegacyCellContextMenuProps {
   onCopyRowData: () => void;
   onCopyRowForPaste: () => void;
   onPasteCopiedRowsAsNew: () => void;
+  onUndoCellChange: () => void;
   onSetNull: () => void;
   onEditRow: () => void;
   onFillToSelected: () => void;
@@ -68,6 +70,7 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
   copiedRowsForPasteLength,
   selectedRowKeysLength,
   copiedCellPatchAvailable,
+  canUndoCellChange,
   supportsCopyInsert,
   translate = fallbackTranslate,
   onClose,
@@ -75,6 +78,7 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
   onCopyRowData,
   onCopyRowForPaste,
   onPasteCopiedRowsAsNew,
+  onUndoCellChange,
   onSetNull,
   onEditRow,
   onFillToSelected,
@@ -138,6 +142,22 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
       <div style={separatorStyle(darkMode)} />
       {canModifyData && (
         <>
+          <div
+            style={{
+              ...baseItemStyle,
+              cursor: canUndoCellChange ? 'pointer' : 'not-allowed',
+              opacity: canUndoCellChange ? 1 : 0.5,
+            }}
+            {...makeHoverHandlers(canUndoCellChange)}
+            onClick={() => {
+              if (canUndoCellChange) {
+                onUndoCellChange();
+              }
+            }}
+          >
+            <UndoOutlined style={{ marginRight: 8 }} />
+            撤销此单元格修改
+          </div>
           <div style={baseItemStyle} {...makeHoverHandlers()} onClick={onSetNull}>
             {translate('data_grid.batch_fill.set_null')}
           </div>

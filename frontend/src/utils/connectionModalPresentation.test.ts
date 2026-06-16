@@ -103,6 +103,7 @@ describe('connectionModalPresentation', () => {
   it('assigns card-based configuration sections to every supported data source type', () => {
     const allTypes = [
       'mysql',
+      'goldendb',
       'mariadb',
       'oceanbase',
       'doris',
@@ -120,10 +121,16 @@ describe('connectionModalPresentation', () => {
       'highgo',
       'vastbase',
       'opengauss',
+      'gaussdb',
       'iris',
       'mongodb',
+      'elasticsearch',
+      'chroma',
+      'qdrant',
       'redis',
       'tdengine',
+      'iotdb',
+      'kafka',
       'custom',
       'jvm',
     ];
@@ -139,6 +146,15 @@ describe('connectionModalPresentation', () => {
 
   it('keeps datasource-specific connection options in the layout contract', () => {
     expect(resolveConnectionConfigLayout('mysql').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'connectionMode',
+      'replica',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('goldendb').sections).toEqual([
       'identity',
       'uri',
       'target',
@@ -183,11 +199,63 @@ describe('connectionModalPresentation', () => {
       'credentials',
       'databaseScope',
     ]);
+    expect(resolveConnectionConfigLayout('elasticsearch').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'service',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('chroma').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'service',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('qdrant').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'service',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('iotdb').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'service',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('gaussdb').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'service',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('kafka').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'connectionMode',
+      'replica',
+      'service',
+      'credentials',
+    ]);
   });
 
   it('uses localized labels for layout kinds shown in the modal', () => {
     expect(getConnectionConfigLayoutKindLabel('mysql-compatible')).toBe('MySQL 兼容');
     expect(getConnectionConfigLayoutKindLabel('file')).toBe('文件型数据库');
+    expect(getConnectionConfigLayoutKindLabel('search')).toBe('搜索引擎');
+    expect(getConnectionConfigLayoutKindLabel('vector')).toBe('向量数据库');
+    expect(getConnectionConfigLayoutKindLabel('timeseries')).toBe('时序数据库');
   });
 
   it('switches section copy and failure feedback to English when the current language is en-US', () => {

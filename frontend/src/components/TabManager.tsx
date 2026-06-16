@@ -1,6 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { Button, Dropdown, Tabs, Tooltip } from 'antd';
-import { AppstoreOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { Button, Dropdown, message, Modal, Tabs, Tooltip } from 'antd';
+import { AppstoreOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, PlusOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps, TabsProps } from 'antd';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core';
@@ -24,8 +24,22 @@ import JVMDiagnosticConsole from './JVMDiagnosticConsole';
 import JVMMonitoringDashboard from './JVMMonitoringDashboard';
 import type { TabData } from '../types';
 import { t } from '../i18n';
-import { buildTabDisplayTitle } from '../utils/tabDisplay';
-import { resolveConnectionHostSummary } from '../utils/tabDisplay';
+import {
+  buildTabDisplayModel,
+  resolveConnectionHostSummary,
+  type TabDisplayPart,
+  type TabDisplayModel,
+} from '../utils/tabDisplay';
+import { ReadSQLFile, WriteSQLFile } from '../../wailsjs/go/app/App';
+import {
+  getSQLFileTabPath,
+  hasSQLFileTabUnsavedChanges,
+  isSQLFileMissingErrorMessage,
+  isSQLFileMissingReadResult,
+  isSQLFileQueryTab,
+  normalizeSQLFileReadContent,
+} from '../utils/sqlFileTabDirty';
+import { clearSQLFileTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
 
 const getTabKindLabel = (tab: TabData): string => {
   if (tab.type === 'query') return t('tab_manager.kind_badge.query');
@@ -83,12 +97,34 @@ const getTabObjectLabel = (tab: TabData): string => {
   return '';
 };
 
+const getCloseOtherTabIds = (tabs: TabData[], id: string): string[] =>
+  tabs.filter((tab) => tab.id !== id).map((tab) => tab.id);
+
+const getCloseTabsToLeftIds = (tabs: TabData[], id: string): string[] => {
+  const index = tabs.findIndex((tab) => tab.id === id);
+  if (index <= 0) return [];
+  return tabs.slice(0, index).map((tab) => tab.id);
+};
+
+const getCloseTabsToRightIds = (tabs: TabData[], id: string): string[] => {
+  const index = tabs.findIndex((tab) => tab.id === id);
+  if (index < 0 || index >= tabs.length - 1) return [];
+  return tabs.slice(index + 1).map((tab) => tab.id);
+};
+
 export const stopTabHoverDragPropagation = (event: React.SyntheticEvent<HTMLElement>) => {
   event.stopPropagation();
 };
 
 export const resolveTabHoverOpen = (isHoverInfoOpen: boolean, isTabMenuOpen: boolean) =>
   isHoverInfoOpen && !isTabMenuOpen;
+
+export const openTabDisplaySettings = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.dispatchEvent(new CustomEvent('gonavi:open-tab-display-settings'));
+};
 
 export const shouldShowV2ConnectionLabel = (displayTitle: string, connectionLabel?: string): boolean => {
   const normalizedConnectionLabel = String(connectionLabel || '').trim();
@@ -106,8 +142,28 @@ export const shouldShowV2ConnectionLabel = (displayTitle: string, connectionLabe
   return !prefixedConnectionPattern.test(normalizedDisplayTitle);
 };
 
+export const resolveTabHoverTitle = (displayModel: TabDisplayModel | undefined, fallbackTitle: string): string => {
+  if (!displayModel) {
+    return fallbackTitle;
+  }
+
+  const objectPart = [...displayModel.primaryParts, ...displayModel.secondaryParts]
+    .find((part) => part.key === 'object');
+  if (objectPart?.text) {
+    return objectPart.text;
+  }
+
+  const primaryText = displayModel.primaryParts
+    .filter((part) => part.key !== 'kind')
+    .map((part) => part.text)
+    .join(' ')
+    .trim();
+  return primaryText || displayModel.primaryText || fallbackTitle;
+};
+
 type TabHoverInfoProps = {
   tab: TabData;
+  displayModel?: TabDisplayModel;
   displayTitle: string;
   connectionLabel?: string;
   hostSummary?: string;
@@ -115,16 +171,22 @@ type TabHoverInfoProps = {
 
 export const TabHoverInfo: React.FC<TabHoverInfoProps> = ({
   tab,
+  displayModel,
   displayTitle,
   connectionLabel,
   hostSummary,
 }) => {
   const objectLabel = getTabObjectLabel(tab);
+  const hoverTitle = resolveTabHoverTitle(displayModel, displayTitle);
+  const schemaPart = displayModel
+    ? [...displayModel.primaryParts, ...displayModel.secondaryParts].find((part) => part.key === 'schema')
+    : undefined;
   const rows = [
     [t('tab_manager.hover.label.type'), getTabKindTooltipLabel(tab)],
     [t('tab_manager.hover.label.connection'), connectionLabel || t('tab_manager.hover.fallback.unbound_connection')],
     ['Host', hostSummary || t('tab_manager.hover.fallback.host_not_configured')],
     [t('tab_manager.hover.label.database'), tab.dbName || t('tab_manager.hover.fallback.database_not_specified')],
+    ['Schema', schemaPart?.value],
     [t('tab_manager.hover.label.object'), objectLabel],
   ].filter(([, value]) => Boolean(value));
 
@@ -148,7 +210,7 @@ export const TabHoverInfo: React.FC<TabHoverInfoProps> = ({
     >
       <div className="gn-v2-tab-hover-head">
         <span>{getTabKindLabel(tab)}</span>
-        <strong>{displayTitle}</strong>
+        <strong>{hoverTitle}</strong>
       </div>
       <div className="gn-v2-tab-hover-rows">
         {rows.map(([label, value]) => (
@@ -164,6 +226,7 @@ export const TabHoverInfo: React.FC<TabHoverInfoProps> = ({
 
 type SortableTabLabelProps = {
   tab: TabData;
+  displayModel: TabDisplayModel;
   displayTitle: string;
   menuItems: MenuProps['items'];
   connectionLabel?: string;
@@ -172,8 +235,24 @@ type SortableTabLabelProps = {
   onClose?: () => void;
 };
 
+const renderV2TabDisplayPart = (part: TabDisplayPart) => {
+  if (part.key === 'kind') {
+    return (
+      <span className="gn-v2-tab-kind" key={part.key}>
+        {part.text}
+      </span>
+    );
+  }
+  return (
+    <span className={`gn-v2-tab-label-part gn-v2-tab-label-part-${part.key}`} key={part.key}>
+      {part.text}
+    </span>
+  );
+};
+
 const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
   tab,
+  displayModel,
   displayTitle,
   menuItems,
   connectionLabel,
@@ -199,17 +278,30 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
     setIsHoverInfoOpen(open && !isTabMenuOpen);
   };
 
+  const tabDisplayPartCount = displayModel.primaryParts.length + displayModel.secondaryParts.length;
+  const showSecondaryLine = isV2Ui && displayModel.layout === 'double' && Boolean(displayModel.secondaryText);
   const labelNode = (
     <span
-      className={`tab-dnd-label${isV2Ui ? ' gn-v2-tab-label' : ''}`}
+      className={`tab-dnd-label${isV2Ui ? ' gn-v2-tab-label' : ''}${showSecondaryLine ? ' gn-v2-tab-label-double' : ''}${tabDisplayPartCount >= 4 ? ' gn-v2-tab-label-rich' : ''}`}
       onContextMenu={handleTabLabelContextMenu}
       title={isV2Ui ? undefined : displayTitle}
     >
-      {isV2Ui ? <span className="gn-v2-tab-kind">{getTabKindLabel(tab)}</span> : null}
-      <span className="tab-title-text">{displayTitle}</span>
-      {isV2Ui && shouldShowV2ConnectionLabel(displayTitle, connectionLabel) ? (
-        <span className="gn-v2-tab-conn">{connectionLabel}</span>
-      ) : null}
+      {isV2Ui ? (
+        <span className="gn-v2-tab-label-content">
+          <span className="gn-v2-tab-label-main tab-title-text">
+            {displayModel.primaryParts.length > 0
+              ? displayModel.primaryParts.map(renderV2TabDisplayPart)
+              : displayModel.primaryText}
+          </span>
+          {showSecondaryLine ? (
+            <span className="gn-v2-tab-label-secondary" title={displayModel.secondaryText}>
+              {displayModel.secondaryText}
+            </span>
+          ) : null}
+        </span>
+      ) : (
+        <span className="tab-title-text">{displayTitle}</span>
+      )}
       {isV2Ui && onClose ? (
         <button
           type="button"
@@ -232,6 +324,7 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
       title={(
         <TabHoverInfo
           tab={tab}
+          displayModel={displayModel}
           displayTitle={displayTitle}
           connectionLabel={connectionLabel}
           hostSummary={hostSummary}
@@ -249,7 +342,12 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
   ) : labelNode;
 
   return (
-    <Dropdown menu={{ items: menuItems }} trigger={['contextMenu']} onOpenChange={handleTabMenuOpenChange}>
+    <Dropdown
+      menu={{ items: menuItems }}
+      trigger={['contextMenu']}
+      onOpenChange={handleTabMenuOpenChange}
+      rootClassName={isV2Ui ? 'gn-v2-tab-context-menu-popup' : undefined}
+    >
       {wrappedLabel}
     </Dropdown>
   );
@@ -353,14 +451,152 @@ const TabManager: React.FC = React.memo(() => {
   );
   const isV2Ui = appearance.uiVersion === 'v2';
   const hasTabs = tabs.length > 0;
+  const pendingCloseTabIdsRef = useRef<Set<string>>(new Set());
 
   const onChange = (newActiveKey: string) => {
     setActiveTab(newActiveKey);
   };
 
+  const requestCloseSQLFileTabs = useCallback(async (
+    targetTabs: TabData[],
+    closeConfirmedTabs: () => void,
+  ) => {
+    const candidateTabs = targetTabs.filter(isSQLFileQueryTab);
+    if (candidateTabs.length === 0) {
+      closeConfirmedTabs();
+      return;
+    }
+
+    const closeConfirmedTabsAndClearDrafts = () => {
+      closeConfirmedTabs();
+      candidateTabs.forEach((tab) => clearSQLFileTabDraft(tab.id));
+    };
+
+    const dirtyTabs: Array<{ tab: TabData; draft: string }> = [];
+    const missingFileTabs: Array<{ tab: TabData; filePath: string }> = [];
+    for (const tab of candidateTabs) {
+      const filePath = getSQLFileTabPath(tab);
+      if (!filePath) continue;
+      try {
+        const res = await ReadSQLFile(filePath);
+        if (!res.success) {
+          if (isSQLFileMissingReadResult(res)) {
+            missingFileTabs.push({ tab, filePath });
+            continue;
+          }
+          message.error(`读取 SQL 文件失败，已取消关闭：${res.message || filePath}`);
+          return;
+        }
+        const draft = getSQLFileTabDraft(tab.id, String(tab.query ?? ''));
+        if (hasSQLFileTabUnsavedChanges({ ...tab, query: draft }, normalizeSQLFileReadContent(res.data))) {
+          dirtyTabs.push({ tab, draft });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (isSQLFileMissingErrorMessage(errorMessage)) {
+          missingFileTabs.push({ tab, filePath });
+          continue;
+        }
+        message.error('读取 SQL 文件失败，已取消关闭：' + errorMessage);
+        return;
+      }
+    }
+
+    const confirmDirtyTabsOrClose = () => {
+      if (dirtyTabs.length === 0) {
+        closeConfirmedTabsAndClearDrafts();
+        return;
+      }
+
+      const firstDirtyTab = dirtyTabs[0].tab;
+      const dirtyFilePath = getSQLFileTabPath(firstDirtyTab);
+      const dirtyLabel = dirtyTabs.length === 1
+        ? `“${firstDirtyTab.title || dirtyFilePath}”`
+        : `${dirtyTabs.length} 个 SQL 文件`;
+
+      let destroyConfirm: (() => void) | null = null;
+      const confirmRef = Modal.confirm({
+        title: '保存 SQL 文件修改？',
+        content: `${dirtyLabel} 有未保存修改，是否保存后再关闭？`,
+        okText: '保存并关闭',
+        cancelText: '取消',
+        closable: true,
+        maskClosable: true,
+        okButtonProps: { type: 'primary' },
+        footer: (_, { OkBtn, CancelBtn }) => (
+          <>
+            <Button
+              onClick={() => {
+                destroyConfirm?.();
+                closeConfirmedTabsAndClearDrafts();
+              }}
+            >
+              不保存
+            </Button>
+            <CancelBtn />
+            <OkBtn />
+          </>
+        ),
+        onOk: async () => {
+          try {
+            for (const { tab, draft } of dirtyTabs) {
+              const filePath = getSQLFileTabPath(tab);
+              if (!filePath) continue;
+              const res = await WriteSQLFile(filePath, draft);
+              if (!res.success) {
+                throw new Error(`保存 ${tab.title || filePath} 失败：${res.message || '未知错误'}`);
+              }
+            }
+            message.success('SQL 文件已保存');
+            closeConfirmedTabsAndClearDrafts();
+          } catch (error) {
+            message.error(error instanceof Error ? error.message : String(error));
+            throw error;
+          }
+        },
+      });
+      destroyConfirm = confirmRef.destroy;
+    };
+
+    if (missingFileTabs.length > 0) {
+      const firstMissing = missingFileTabs[0];
+      const missingLabel = missingFileTabs.length === 1
+        ? `“${firstMissing.tab.title || firstMissing.filePath}”`
+        : `${missingFileTabs.length} 个 SQL 文件标签`;
+      Modal.confirm({
+        title: '关闭已丢失的 SQL 文件标签？',
+        content: `${missingLabel} 对应的外部 SQL 文件已不存在或已被移动，关闭后将丢弃标签内的本地草稿。`,
+        okText: dirtyTabs.length > 0 ? '继续关闭' : '关闭标签',
+        cancelText: '取消',
+        closable: true,
+        maskClosable: true,
+        okButtonProps: { danger: true },
+        onOk: () => {
+          confirmDirtyTabsOrClose();
+        },
+      });
+      return;
+    }
+
+    confirmDirtyTabsOrClose();
+  }, []);
+
+  const closeTabsWithSQLFilePrompt = useCallback((targetIds: string[], closeConfirmedTabs: () => void) => {
+    const uniqueIds = Array.from(new Set(targetIds.map((id) => String(id || '').trim()).filter(Boolean)));
+    if (uniqueIds.length === 0) return;
+    const dedupeKey = uniqueIds.slice().sort().join('\n');
+    if (pendingCloseTabIdsRef.current.has(dedupeKey)) return;
+    pendingCloseTabIdsRef.current.add(dedupeKey);
+    const targetTabs = tabs.filter((tab) => uniqueIds.includes(tab.id));
+    void requestCloseSQLFileTabs(targetTabs, closeConfirmedTabs).finally(() => {
+      pendingCloseTabIdsRef.current.delete(dedupeKey);
+    });
+  }, [requestCloseSQLFileTabs, tabs]);
+
   const onEdit = (targetKey: React.MouseEvent | React.KeyboardEvent | string, action: 'add' | 'remove') => {
     if (action === 'remove') {
-      closeTab(targetKey as string);
+      const id = String(targetKey || '');
+      closeTabsWithSQLFilePrompt([id], () => closeTab(id));
     }
   };
 
@@ -438,6 +674,13 @@ const TabManager: React.FC = React.memo(() => {
   }, [tabs, activeTabId, addTab, setActiveTab, connections]);
 
   const tabIds = useMemo(() => tabs.map((tab) => tab.id), [tabs]);
+  const hasDoubleLineTabLabel = useMemo(() => (
+    tabs.some((tab) => {
+      const connection = connections.find((conn) => conn.id === tab.connectionId);
+      const displayModel = buildTabDisplayModel(tab, connection, appearance.tabDisplay);
+      return displayModel.layout === 'double' && Boolean(displayModel.secondaryText);
+    })
+  ), [appearance.tabDisplay, connections, tabs]);
 
   const renderTabBar: TabsProps['renderTabBar'] = (tabBarProps, DefaultTabBar) => (
     <DefaultTabBar {...tabBarProps}>
@@ -447,35 +690,43 @@ const TabManager: React.FC = React.memo(() => {
 
   const items = useMemo(() => tabs.map((tab, index) => {
     const connection = connections.find((conn) => conn.id === tab.connectionId);
-    const displayTitle = buildTabDisplayTitle(tab, connection);
+    const displayModel = buildTabDisplayModel(tab, connection, appearance.tabDisplay);
+    const displayTitle = displayModel.fullTitle;
     const hostSummary = resolveConnectionHostSummary(connection?.config);
     const tabIsActive = tab.id === activeTabId;
 
     const menuItems: MenuProps['items'] = [
       {
+        key: 'tab-display-settings',
+        icon: <SettingOutlined />,
+        label: '标签设置',
+        onClick: openTabDisplaySettings,
+      },
+      { type: 'divider' },
+      {
         key: 'close-other',
         label: t('tab_manager.menu.close_other'),
         disabled: tabs.length <= 1,
-        onClick: () => closeOtherTabs(tab.id),
+        onClick: () => closeTabsWithSQLFilePrompt(getCloseOtherTabIds(tabs, tab.id), () => closeOtherTabs(tab.id)),
       },
       {
         key: 'close-left',
         label: t('tab_manager.menu.close_left'),
         disabled: index === 0,
-        onClick: () => closeTabsToLeft(tab.id),
+        onClick: () => closeTabsWithSQLFilePrompt(getCloseTabsToLeftIds(tabs, tab.id), () => closeTabsToLeft(tab.id)),
       },
       {
         key: 'close-right',
         label: t('tab_manager.menu.close_right'),
         disabled: index === tabs.length - 1,
-        onClick: () => closeTabsToRight(tab.id),
+        onClick: () => closeTabsWithSQLFilePrompt(getCloseTabsToRightIds(tabs, tab.id), () => closeTabsToRight(tab.id)),
       },
       { type: 'divider' },
       {
         key: 'close-all',
         label: t('tab_manager.menu.close_all'),
         disabled: tabs.length === 0,
-        onClick: () => closeAllTabs(),
+        onClick: () => closeTabsWithSQLFilePrompt(tabs.map((item) => item.id), () => closeAllTabs()),
       },
     ];
     
@@ -483,19 +734,20 @@ const TabManager: React.FC = React.memo(() => {
       label: (
         <SortableTabLabel
           tab={tab}
+          displayModel={displayModel}
           displayTitle={displayTitle}
           menuItems={menuItems}
           connectionLabel={connection?.name}
           hostSummary={hostSummary}
           isV2Ui={isV2Ui}
-          onClose={() => closeTab(tab.id)}
+          onClose={() => closeTabsWithSQLFilePrompt([tab.id], () => closeTab(tab.id))}
         />
       ),
       key: tab.id,
       closable: !isV2Ui,
       children: <TabContent tab={tab} isActive={tabIsActive} />,
     };
-  }), [tabs, connections, activeTabId, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs, closeTab, isV2Ui, languagePreference]);
+  }), [tabs, connections, appearance.tabDisplay, activeTabId, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs, closeTab, closeTabsWithSQLFilePrompt, isV2Ui, languagePreference]);
 
   const handleOpenConnectionModal = () => {
     const target = document.querySelector<HTMLButtonElement>('[data-gonavi-create-connection-action="true"]');
@@ -703,13 +955,12 @@ body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
             }
             body[data-ui-version='v2'] .gn-v2-tab-hover-head > strong {
               min-width: 0;
-              overflow: hidden;
+              overflow-wrap: anywhere;
               color: var(--gn-fg-1);
               font-size: var(--gn-font-size-sm, 12px);
               font-weight: 700;
               line-height: 18px;
-              text-overflow: ellipsis;
-              white-space: nowrap;
+              white-space: normal;
             }
             body[data-ui-version='v2'] .gn-v2-tab-hover-rows {
               display: grid;
@@ -746,7 +997,7 @@ body[data-theme='dark'] .main-tabs .ant-tabs-tab.ant-tabs-tab-active {
         >
           <SortableContext items={tabIds} strategy={horizontalListSortingStrategy}>
             <Tabs
-                className={`main-tabs${isV2Ui ? ' gn-v2-main-tabs' : ''}`}
+                className={`main-tabs${isV2Ui ? ' gn-v2-main-tabs' : ''}${hasDoubleLineTabLabel ? ' gn-v2-main-tabs-double' : ''}`}
                 type="editable-card"
                 destroyOnHidden={false}
                 onChange={(newActiveKey) => {

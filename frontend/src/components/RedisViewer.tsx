@@ -147,6 +147,35 @@ const isRedisKeyGoneErrorMessage = (messageText: string): boolean => {
     return messageText.includes(REDIS_KEY_GONE_MESSAGE);
 };
 
+const normalizeToolbarText = (value: unknown): string => String(value || '').trim();
+
+const resolveRedisTopology = (connection?: { config?: { topology?: string; hosts?: string[] } }): 'single' | 'replica' | 'cluster' | 'sentinel' => {
+    const topology = normalizeToolbarText(connection?.config?.topology).toLowerCase();
+    if (topology === 'replica') return 'replica';
+    if (topology === 'sentinel') return 'sentinel';
+    if (topology === 'cluster') return 'cluster';
+    const extraHosts = Array.isArray(connection?.config?.hosts) ? connection.config.hosts.filter(Boolean) : [];
+    return extraHosts.length > 0 ? 'cluster' : 'single';
+};
+
+const buildRedisSeedAddresses = (connection?: { config?: { host?: string; port?: number | string; hosts?: string[] } }): string[] => {
+    if (!connection) return [];
+    const port = Number.isFinite(Number(connection.config?.port)) ? Number(connection.config?.port) : 6379;
+    const primaryHost = normalizeToolbarText(connection.config?.host);
+    const primary = primaryHost ? `${primaryHost}:${port}` : '';
+    const extraHosts = Array.isArray(connection.config?.hosts)
+        ? connection.config.hosts.map((host) => normalizeToolbarText(host)).filter(Boolean)
+        : [];
+    return [primary, ...extraHosts].filter(Boolean);
+};
+
+const getRedisTopologyTagLabel = (topology: 'single' | 'replica' | 'cluster' | 'sentinel'): string => {
+    if (topology === 'replica') return 'Replica';
+    if (topology === 'cluster') return 'Cluster';
+    if (topology === 'sentinel') return 'Sentinel';
+    return 'Single';
+};
+
 const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
@@ -174,6 +203,9 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const valueToolbarBg = workbenchTheme.panelBgStrong;
     const valueToolbarBorder = workbenchTheme.panelBorder;
     const valueToolbarText = workbenchTheme.textMuted;
+    const redisTopology = useMemo(() => resolveRedisTopology(connection), [connection]);
+    const redisSeedAddresses = useMemo(() => buildRedisSeedAddresses(connection), [connection]);
+    const redisSentinelMaster = normalizeToolbarText(connection?.config?.redisSentinelMaster);
 
     const [keys, setKeys] = useState<RedisKeyInfo[]>([]);
     const [loading, setLoading] = useState(false);
@@ -1856,7 +1888,16 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
                         <div>
                             <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.08em', color: workbenchTheme.textMuted, fontWeight: 600 }}>{tr('redis_viewer.title.key_explorer')}</div>
-                            <div style={{ fontSize: 24, fontWeight: 700, color: workbenchTheme.textPrimary, marginTop: 4 }}>db{redisDB}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                                <div style={{ fontSize: 24, fontWeight: 700, color: workbenchTheme.textPrimary }}>db{redisDB}</div>
+                                <Tag style={mutedPillTagStyle}>{getRedisTopologyTagLabel(redisTopology)}</Tag>
+                                {redisTopology !== 'single' && (
+                                    <Tag style={mutedPillTagStyle}>{Math.max(redisSeedAddresses.length, 1)} nodes</Tag>
+                                )}
+                                {redisSentinelMaster && (
+                                    <Tag style={mutedPillTagStyle}>master: {redisSentinelMaster}</Tag>
+                                )}
+                            </div>
                         </div>
                         <Tag style={mutedPillTagStyle}>{tr('redis_viewer.label.keys_count', { count: keys.length })}</Tag>
                     </div>

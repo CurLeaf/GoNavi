@@ -297,12 +297,15 @@ export interface ConnectionConfig {
   dsn?: string;
   connectionParams?: string;
   timeout?: number;
-  redisDB?: number; // Redis database index (0-15)
+  redisDB?: number; // Redis database index
   uri?: string; // Connection URI for copy/paste
   clickHouseProtocol?: "auto" | "http" | "native"; // ClickHouse connection protocol override
   oceanBaseProtocol?: "mysql" | "oracle"; // OceanBase tenant compatibility protocol
   hosts?: string[]; // Multi-host addresses: host:port
-  topology?: "single" | "replica" | "cluster";
+  topology?: "single" | "replica" | "cluster" | "sentinel";
+  redisSentinelMaster?: string;
+  redisSentinelUser?: string;
+  redisSentinelPassword?: string;
   mysqlReplicaUser?: string;
   mysqlReplicaPassword?: string;
   replicaSet?: string;
@@ -335,10 +338,11 @@ export interface SavedConnection {
   hasHttpTunnelPassword?: boolean;
   hasMySQLReplicaPassword?: boolean;
   hasMongoReplicaPassword?: boolean;
+  hasRedisSentinelPassword?: boolean;
   hasOpaqueURI?: boolean;
   hasOpaqueDSN?: boolean;
   includeDatabases?: string[];
-  includeRedisDatabases?: number[]; // Redis databases to show (0-15)
+  includeRedisDatabases?: number[]; // Redis databases to show
   iconType?: string; // 自定义图标类型（如 'mysql','postgres'），不填则取 config.type
   iconColor?: string; // 自定义图标颜色（十六进制），不填则取类型默认色
 }
@@ -412,6 +416,8 @@ export interface TabData {
   dbName?: string;
   tableName?: string;
   query?: string;
+  resultPanelVisible?: boolean;
+  queryMode?: "standard" | "object-edit";
   filePath?: string;
   initialTab?: string;
   readOnly?: boolean;
@@ -420,12 +426,20 @@ export interface TabData {
   resourceKind?: string;
   redisDB?: number; // Redis database index for redis tabs
   triggerName?: string; // Trigger name for trigger tabs
+  triggerTableName?: string; // Trigger target table for trigger tabs
   viewName?: string; // View name for view definition tabs
   viewKind?: "view" | "materialized";
   eventName?: string; // Event name for MySQL event definition tabs
   routineName?: string; // Routine name for function/procedure definition tabs
   routineType?: string; // 'FUNCTION' or 'PROCEDURE'
+  schemaName?: string; // Schema / owner name for schema-grouped objects
+  sidebarLocateKey?: string; // Precise sidebar tree key for locating an object node
   savedQueryId?: string; // Saved query identity for quick-save behavior
+  objectType?: 'table' | 'view' | 'materialized-view'; // Table-like object type for shared viewers
+  formatRestoreSnapshot?: {
+    query: string;
+    createdAt: number;
+  }; // Last SQL content before beautify, for cross-session restore
 }
 
 export interface JVMAIPlanContext {
@@ -456,6 +470,10 @@ export interface SavedQuery {
   connectionId: string;
   dbName: string;
   createdAt: number;
+  connectionFingerprint?: string;
+  fingerprintVersion?: string;
+  bindingStatus?: "active" | "rebound" | "orphan" | string;
+  originalConnectionId?: string;
 }
 
 export interface SqlSnippet {
@@ -463,6 +481,7 @@ export interface SqlSnippet {
   prefix: string;
   name: string;
   description?: string;
+  syntaxHelp?: string;
   body: string;
   isBuiltin: boolean;
   createdAt: number;
@@ -472,8 +491,8 @@ export interface ExternalSQLDirectory {
   id: string;
   name: string;
   path: string;
-  connectionId: string;
-  dbName: string;
+  connectionId?: string;
+  dbName?: string;
   createdAt: number;
 }
 
@@ -546,6 +565,86 @@ export interface AIProviderConfig {
   temperature: number;
 }
 
+export interface AIUserPromptSettings {
+  global: string;
+  database: string;
+  jvm: string;
+  jvmDiagnostic: string;
+}
+
+export type AIMCPTransport = "stdio";
+
+export interface AIMCPServerConfig {
+  id: string;
+  name: string;
+  transport: AIMCPTransport;
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  enabled: boolean;
+  timeoutSeconds: number;
+}
+
+export interface AIMCPToolDescriptor {
+  alias: string;
+  serverId: string;
+  serverName: string;
+  originalName: string;
+  title?: string;
+  description?: string;
+  inputSchema?: Record<string, any>;
+}
+
+export interface AIMCPToolCallResult {
+  alias: string;
+  serverId: string;
+  serverName: string;
+  originalName: string;
+  title?: string;
+  content: string;
+  structuredContent?: any;
+  isError: boolean;
+}
+
+export interface AIMCPClientInstallStatus {
+  client: string;
+  displayName: string;
+  installMode?: 'auto' | 'remote';
+  installed: boolean;
+  matchesCurrent: boolean;
+  clientDetected?: boolean;
+  clientCommand?: string;
+  clientPath?: string;
+  message: string;
+  configPath?: string;
+  command?: string;
+  args?: string[];
+}
+
+export interface AIMCPHTTPServerStatus {
+  running: boolean;
+  addr: string;
+  path: string;
+  url: string;
+  schemaOnly: boolean;
+  token?: string;
+  authorizationHeader?: string;
+  startedAt?: number;
+  message: string;
+}
+
+export type AISkillScope = "global" | "database" | "jvm" | "jvmDiagnostic";
+
+export interface AISkillConfig {
+  id: string;
+  name: string;
+  description?: string;
+  systemPrompt: string;
+  enabled: boolean;
+  scopes: AISkillScope[];
+  requiredTools?: string[];
+}
+
 export interface AIToolCall {
   id: string;
   type: string;
@@ -553,6 +652,20 @@ export interface AIToolCall {
     name: string;
     arguments: string;
   };
+}
+
+export type AIChatAttachmentKind = "image" | "markdown" | "text" | "pdf" | "word" | "excel" | "document";
+
+export interface AIChatAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  kind: AIChatAttachmentKind;
+  dataUrl?: string;
+  text?: string;
+  textTruncated?: boolean;
+  extractWarning?: string;
 }
 
 export type ChatPhase =
@@ -572,6 +685,7 @@ export interface AIChatMessage {
   timestamp: number;
   loading?: boolean;
   images?: string[]; // base64 encoded images with data URI prefix
+  attachments?: AIChatAttachment[];
   tool_calls?: AIToolCall[];
   tool_call_id?: string;
   tool_name?: string; // used for UI display

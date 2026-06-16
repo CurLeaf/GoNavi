@@ -69,6 +69,9 @@ describe('store appearance persistence', () => {
     expect(appearance.opacity).toBe(0.75);
     expect(appearance.blur).toBe(6);
     expect(appearance.useNativeMacWindowControls).toBe(true);
+    expect(appearance.v2SidebarSearchMode).toBe('command');
+    expect(appearance.v2CommandSearchPersistentFilterEnabled).toBe(false);
+    expect(appearance.v2SidebarPersistedFilter).toBe('');
     expect(appearance.showDataTableVerticalBorders).toBe(false);
     expect(appearance.dataTableDensity).toBe('comfortable');
     expect(appearance.dataTableFontSize).toBeNull();
@@ -77,6 +80,11 @@ describe('store appearance persistence', () => {
     expect(appearance.sidebarTreeFontSizeFollowGlobal).toBe(true);
     expect(appearance.customUIFontFamily).toBeNull();
     expect(appearance.customMonoFontFamily).toBeNull();
+    expect(appearance.tabDisplay).toEqual({
+      layout: 'single',
+      primaryElements: ['connection', 'kind', 'object'],
+      secondaryElements: [],
+    });
   });
 
   it('persists DataGrid appearance settings and restores them after reload', async () => {
@@ -158,6 +166,107 @@ describe('store appearance persistence', () => {
 
     expect(appearance.customUIFontFamily).toBe('IBM Plex Sans, PingFang SC');
     expect(appearance.customMonoFontFamily).toBeNull();
+  });
+
+  it('persists v2 sidebar search preferences and sanitizes filter text', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAppearance({
+      v2SidebarSearchMode: 'filter',
+      v2CommandSearchPersistentFilterEnabled: true,
+      v2SidebarPersistedFilter: `  ${'orders'.repeat(40)}  `,
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.appearance.v2SidebarSearchMode).toBe('filter');
+    expect(persisted.state.appearance.v2CommandSearchPersistentFilterEnabled).toBe(true);
+    expect(persisted.state.appearance.v2SidebarPersistedFilter).toHaveLength(120);
+    expect(persisted.state.appearance.v2SidebarPersistedFilter.startsWith('orders')).toBe(true);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    const appearance = reloaded.useStore.getState().appearance;
+
+    expect(appearance.v2SidebarSearchMode).toBe('filter');
+    expect(appearance.v2CommandSearchPersistentFilterEnabled).toBe(true);
+    expect(appearance.v2SidebarPersistedFilter).toHaveLength(120);
+  });
+
+  it('persists tab display appearance settings and sanitizes invalid elements', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAppearance({
+      tabDisplay: {
+        layout: 'double',
+        primaryElements: ['kind', 'object', 'invalid' as never, 'object'],
+        secondaryElements: ['connection', 'host', 'schema', 'kind'],
+      },
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.appearance.tabDisplay).toEqual({
+      layout: 'double',
+      primaryElements: ['kind', 'object'],
+      secondaryElements: ['connection', 'host', 'schema'],
+    });
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    const appearance = reloaded.useStore.getState().appearance;
+
+    expect(appearance.tabDisplay).toEqual({
+      layout: 'double',
+      primaryElements: ['kind', 'object'],
+      secondaryElements: ['connection', 'host', 'schema'],
+    });
+  });
+
+  it('persists independent single-line and double-line tab display snapshots', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAppearance({
+      tabDisplay: {
+        layout: 'double',
+        primaryElements: ['kind', 'object'],
+        secondaryElements: ['connection', 'database'],
+        single: {
+          primaryElements: ['object', 'host'],
+          secondaryElements: [],
+        },
+        double: {
+          primaryElements: ['kind', 'object'],
+          secondaryElements: ['connection', 'database'],
+        },
+      },
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.appearance.tabDisplay).toEqual({
+      layout: 'double',
+      primaryElements: ['kind', 'object'],
+      secondaryElements: ['connection', 'database'],
+      single: {
+        primaryElements: ['object', 'host'],
+        secondaryElements: [],
+      },
+      double: {
+        primaryElements: ['kind', 'object'],
+        secondaryElements: ['connection', 'database'],
+      },
+    });
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    const appearance = reloaded.useStore.getState().appearance;
+
+    expect(appearance.tabDisplay.single).toEqual({
+      primaryElements: ['object', 'host'],
+      secondaryElements: [],
+    });
+    expect(appearance.tabDisplay.double).toEqual({
+      primaryElements: ['kind', 'object'],
+      secondaryElements: ['connection', 'database'],
+    });
   });
 
   it('does not clear persisted legacy connections during hydration migration', async () => {
@@ -328,6 +437,30 @@ describe('store appearance persistence', () => {
     const config = useStore.getState().connections[0]?.config;
     expect(config?.type).toBe('starrocks');
     expect(config?.port).toBe(9030);
+  });
+
+  it('preserves Redis database indexes above the default 16 databases', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'redis-32',
+        name: 'Redis 32 DBs',
+        includeRedisDatabases: [0, 15, 16, 31, -1, 31],
+        config: {
+          id: 'redis-32',
+          type: 'redis',
+          host: 'redis.local',
+          port: 6379,
+          user: '',
+          redisDB: 31,
+        },
+      },
+    ]);
+
+    const saved = useStore.getState().connections[0];
+    expect(saved?.config.redisDB).toBe(31);
+    expect(saved?.includeRedisDatabases).toEqual([0, 15, 16, 31]);
   });
 
   it('keeps InterSystems IRIS saved connections as independent datasource type', async () => {
@@ -729,8 +862,6 @@ describe('store appearance persistence', () => {
       id: 'ext-1',
       name: 'scripts',
       path: 'D:/sql/scripts',
-      connectionId: 'conn-1',
-      dbName: 'demo',
       createdAt: 1,
     });
 
@@ -740,8 +871,6 @@ describe('store appearance persistence', () => {
         id: 'ext-1',
         name: 'scripts',
         path: 'D:/sql/scripts',
-        connectionId: 'conn-1',
-        dbName: 'demo',
         createdAt: 1,
       },
     ]);
@@ -750,6 +879,14 @@ describe('store appearance persistence', () => {
       state: {
         externalSQLDirectories: [
           persisted.state.externalSQLDirectories[0],
+          {
+            id: 'legacy-ext-1',
+            name: 'legacy duplicate',
+            path: 'D:\\sql\\scripts',
+            connectionId: 'conn-1',
+            dbName: 'demo',
+            createdAt: 2,
+          },
           { path: '', name: 'broken' },
         ],
       },
@@ -763,8 +900,6 @@ describe('store appearance persistence', () => {
         id: 'ext-1',
         name: 'scripts',
         path: 'D:/sql/scripts',
-        connectionId: 'conn-1',
-        dbName: 'demo',
         createdAt: 1,
       },
     ]);
@@ -856,6 +991,10 @@ describe('store appearance persistence', () => {
       query: 'select * from orders where status = "paid";',
       connectionId: 'conn-2',
       dbName: 'reporting',
+      formatRestoreSnapshot: {
+        query: 'select * from orders where status="paid";',
+        createdAt: 123,
+      },
     });
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
@@ -867,6 +1006,10 @@ describe('store appearance persistence', () => {
         connectionId: 'conn-2',
         dbName: 'reporting',
         query: 'select * from orders where status = "paid";',
+        formatRestoreSnapshot: {
+          query: 'select * from orders where status="paid";',
+          createdAt: 123,
+        },
       }),
     ]);
     expect(persisted.state.activeTabId).toBe('query-tab-1');
@@ -880,9 +1023,19 @@ describe('store appearance persistence', () => {
         connectionId: 'conn-2',
         dbName: 'reporting',
         query: 'select * from orders where status = "paid";',
+        formatRestoreSnapshot: {
+          query: 'select * from orders where status="paid";',
+          createdAt: 123,
+        },
       }),
     ]);
     expect(reloaded.useStore.getState().activeTabId).toBe('query-tab-1');
+
+    reloaded.useStore.getState().updateQueryTabDraft('query-tab-1', {
+      formatRestoreSnapshot: undefined,
+    });
+
+    expect(reloaded.useStore.getState().tabs[0].formatRestoreSnapshot).toBeUndefined();
   });
 
   it('updates activeContext when switching between tabs with different host or database', async () => {
@@ -1063,6 +1216,19 @@ describe('store appearance persistence', () => {
     });
   });
 
+  it('persists startup fullscreen immediately so next launch does not miss maximize preference', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setStartupFullscreen(true);
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.startupFullscreen).toBe(true);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().startupFullscreen).toBe(true);
+  });
+
   it('falls back to Enter when persisted AI chat send shortcut is invalid', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {
@@ -1158,5 +1324,42 @@ describe('store appearance persistence', () => {
       mac: { combo: 'Meta+Enter', enabled: true },
       windows: { combo: 'Enter', enabled: true },
     });
+  });
+
+  it('updates an existing custom SQL snippet by id and persists editable syntax help', async () => {
+    const { useStore } = await importStore();
+    const original = {
+      id: 'custom-merge',
+      prefix: 'mrg',
+      name: 'MERGE INTO',
+      description: 'Oracle merge 模板',
+      syntaxHelp: '旧说明',
+      body: 'MERGE INTO t USING s ON (t.id = s.id)$0',
+      isBuiltin: false,
+      createdAt: 1710000000000,
+    };
+
+    useStore.getState().saveSqlSnippet(original);
+    useStore.getState().saveSqlSnippet({
+      ...original,
+      name: 'MERGE INTO 更新',
+      syntaxHelp: '新说明：目标表、数据源、关联字段均可修改',
+      body: 'MERGE INTO ${1:目标表} t USING ${2:源表} s ON (${3:关联条件})$0',
+    });
+
+    const snippets = useStore.getState().sqlSnippets.filter((s) => s.id === original.id);
+    expect(snippets).toHaveLength(1);
+    expect(snippets[0]).toMatchObject({
+      prefix: 'mrg',
+      name: 'MERGE INTO 更新',
+      syntaxHelp: '新说明：目标表、数据源、关联字段均可修改',
+      body: 'MERGE INTO ${1:目标表} t USING ${2:源表} s ON (${3:关联条件})$0',
+      isBuiltin: false,
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    const persistedSnippets = persisted.state.sqlSnippets.filter((s: { id: string }) => s.id === original.id);
+    expect(persistedSnippets).toHaveLength(1);
+    expect(persistedSnippets[0].syntaxHelp).toBe('新说明：目标表、数据源、关联字段均可修改');
   });
 });

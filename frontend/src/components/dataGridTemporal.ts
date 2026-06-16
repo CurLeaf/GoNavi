@@ -1,4 +1,5 @@
 import dayjs from 'dayjs';
+import { isOracleLikeDialect } from '../utils/sqlDialect';
 
 export type TemporalPickerType = 'datetime' | 'date' | 'time' | 'year' | null;
 
@@ -9,20 +10,16 @@ export const TEMPORAL_FORMATS: Record<string, string> = {
   year: 'YYYY',
 };
 
-export const isTemporalColumnType = (columnType?: string): boolean => {
-  const raw = String(columnType || '').trim().toLowerCase();
-  if (!raw) return false;
-  if (raw.includes('datetime') || raw.includes('timestamp')) return true;
-  const base = raw.split(/[ (]/)[0];
-  return base === 'date' || base === 'time' || base === 'year';
+export const isTemporalColumnType = (columnType?: string, dbType?: string): boolean => {
+  return !!getTemporalPickerType(columnType, dbType);
 };
 
-export const getTemporalPickerType = (columnType?: string): TemporalPickerType => {
+export const getTemporalPickerType = (columnType?: string, dbType?: string): TemporalPickerType => {
   const raw = String(columnType || '').trim().toLowerCase();
   if (!raw) return null;
   if (raw.includes('datetime') || raw.includes('timestamp')) return 'datetime';
   const base = raw.split(/[ (]/)[0];
-  if (base === 'date') return 'date';
+  if (base === 'date') return isOracleLikeDialect(String(dbType || '')) ? 'datetime' : 'date';
   if (base === 'time') return 'time';
   if (base === 'year') return 'year';
   return null;

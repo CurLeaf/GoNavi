@@ -16,6 +16,8 @@ func normalizeMigrationDBType(dbType string) string {
 		return "kingbase"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
+	case "gaussdb", "gauss_db", "gauss-db":
+		return "gaussdb"
 	case "dm", "dm8":
 		return "dameng"
 	case "sqlite3":
@@ -37,6 +39,8 @@ func resolveMigrationDBType(config connection.ConnectionConfig) string {
 		return "postgres"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
+	case "gaussdb", "gauss_db", "gauss-db":
+		return "gaussdb"
 	case "dm", "dameng", "dm8":
 		return "dameng"
 	case "sqlite3", "sqlite":
@@ -64,6 +68,8 @@ func resolveMigrationDBType(config connection.ConnectionConfig) string {
 	switch {
 	case strings.Contains(driver, "opengauss"), strings.Contains(driver, "open_gauss"), strings.Contains(driver, "open-gauss"):
 		return "opengauss"
+	case strings.Contains(driver, "gaussdb"), strings.Contains(driver, "gauss_db"), strings.Contains(driver, "gauss-db"):
+		return "gaussdb"
 	case strings.Contains(driver, "postgres"):
 		return "postgres"
 	case strings.Contains(driver, "kingbase"):

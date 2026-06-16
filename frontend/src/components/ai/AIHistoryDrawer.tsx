@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Drawer, Button, Tooltip, Input } from 'antd';
 import { MenuFoldOutlined, PlusOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import { useStore } from '../../store';
-import { useI18n } from '../../i18n/provider';
+import { useOptionalI18n } from '../../i18n/provider';
 
 interface AIHistoryDrawerProps {
     open: boolean;
@@ -19,17 +19,36 @@ interface AIHistoryDrawerProps {
 export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
     open, onClose, bgColor, darkMode, textColor, mutedColor, borderColor, onCreateNew, sessionId
 }) => {
-    const { t } = useI18n();
+    const i18n = useOptionalI18n();
+    const t = i18n?.t ?? ((key: string) => key);
     const aiChatSessions = useStore(state => state.aiChatSessions);
     const setAIActiveSessionId = useStore(state => state.setAIActiveSessionId);
     const deleteAISession = useStore(state => state.deleteAISession);
 
     const [searchText, setSearchText] = useState('');
+    const normalizedSearchText = searchText.trim().toLowerCase();
     const defaultSessionTitle = t('ai_chat.history.default_session_title');
 
-    const filteredSessions = aiChatSessions.filter(s => 
-        !searchText || s.title.toLowerCase().includes(searchText.toLowerCase())
+    React.useEffect(() => {
+        if (!open && searchText) {
+            setSearchText('');
+        }
+    }, [open, searchText]);
+
+    const sortedSessions = React.useMemo(
+        () => [...aiChatSessions].sort((left, right) => right.updatedAt - left.updatedAt),
+        [aiChatSessions],
     );
+
+    const filteredSessions = React.useMemo(
+        () => sortedSessions.filter((session) =>
+            !normalizedSearchText || (session.title && session.title.toLowerCase().includes(normalizedSearchText))),
+        [normalizedSearchText, sortedSessions],
+    );
+
+    const emptyStateText = !i18n && aiChatSessions.length === 0
+        ? '还没有历史对话'
+        : t('ai_chat.history.empty.no_matches');
 
     return (
         <Drawer
@@ -38,9 +57,18 @@ export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
             onClose={onClose}
             open={open}
             getContainer={false}
-            style={{ position: 'absolute', background: bgColor || (darkMode ? '#1e1e1e' : '#f8f9fa') }}
+            rootStyle={{ position: 'absolute' }}
             width={260}
-            bodyStyle={{ padding: 0, display: 'flex', flexDirection: 'column' }}
+            styles={{
+                content: {
+                    background: bgColor || (darkMode ? '#1e1e1e' : '#f8f9fa'),
+                },
+                body: {
+                    padding: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                },
+            }}
         >
             <div style={{ padding: '16px 16px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 14, fontWeight: 600, color: textColor }}>{t('ai_chat.history.title')}</span>
@@ -50,10 +78,10 @@ export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
             </div>
 
             <div style={{ padding: '0 12px 12px' }}>
-                <Button 
-                    type="dashed" 
-                    block 
-                    icon={<PlusOutlined />} 
+                <Button
+                    type="dashed"
+                    block
+                    icon={<PlusOutlined />}
                     onClick={() => { onCreateNew(); onClose(); }}
                     style={{ borderColor: borderColor, color: textColor, background: 'transparent' }}
                 >
@@ -62,9 +90,10 @@ export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
             </div>
 
             <div style={{ padding: '0 12px 12px' }}>
-                <Input 
+                <Input
                     placeholder={t('ai_chat.history.search.placeholder')}
                     prefix={<SearchOutlined style={{ color: mutedColor }} />}
+                    allowClear
                     value={searchText}
                     onChange={e => setSearchText(e.target.value)}
                     variant="filled"
@@ -75,10 +104,10 @@ export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
 
             <div style={{ flex: 1, overflowY: 'auto', padding: '0 10px 16px' }} className="ai-history-list">
                 {filteredSessions.length === 0 ? (
-                    <div style={{ padding: '30px 0', textAlign: 'center', color: mutedColor, fontSize: 12 }}>{t('ai_chat.history.empty.no_matches')}</div>
+                    <div style={{ padding: '30px 0', textAlign: 'center', color: mutedColor, fontSize: 12 }}>{emptyStateText}</div>
                 ) : (
                     filteredSessions.map(session => (
-                        <div 
+                        <div
                             key={session.id}
                             className={`ai-history-item ${sessionId === session.id ? 'active' : ''}`}
                             onClick={() => { setAIActiveSessionId(session.id); onClose(); }}
@@ -103,12 +132,12 @@ export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
                                 </div>
                             </div>
                             <Tooltip title={t('ai_chat.history.tooltip.delete')}>
-                                <Button 
+                                <Button
                                     className="ai-history-delete-btn"
-                                    type="text" 
-                                    size="small" 
-                                    danger 
-                                    icon={<DeleteOutlined />} 
+                                    type="text"
+                                    size="small"
+                                    danger
+                                    icon={<DeleteOutlined />}
                                     onClick={(e) => {
                                         e.stopPropagation();
                                         deleteAISession(session.id);

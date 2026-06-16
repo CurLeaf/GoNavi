@@ -66,6 +66,32 @@ import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
 import { getCustomConnectionDriverHelp } from "../utils/driverImportGuidance";
 import { isBackendCancelledResult } from "../utils/connectionExport";
 import {
+  buildRedisUriFromValues,
+  parseRedisUriToFormValues,
+  resolveRedisConfigDraft,
+} from "../utils/redisConnectionUri";
+import {
+  CONNECTION_TYPE_GROUPS,
+  getAllConnectionTypeCatalogItems,
+  getConnectionTypeDefaultPort as getDefaultPortByType,
+  getConnectionTypeHint,
+} from "../utils/connectionTypeCatalog";
+import {
+  isFileDatabaseType,
+  isMySQLCompatibleType,
+  isPostgresCompatibleSSLType,
+  singleHostUriSchemesByType,
+  supportsConnectionParamsForType,
+  supportsSSLCAPathForType,
+  supportsSSLClientCertificateForType,
+  supportsSSLForType,
+} from "../utils/connectionTypeCapabilities";
+import {
+  normalizeDriverType,
+  resolveConnectionDriverType,
+  type DriverStatusSnapshot,
+} from "../utils/connectionDriverType";
+import {
   describeUnsupportedOceanBaseProtocol,
   normalizeOceanBaseProtocol,
   OCEANBASE_PROTOCOL_PARAM_KEYS,
@@ -92,6 +118,7 @@ import {
   MongoDiscoverMembers,
   TestConnection,
   RedisConnect,
+  RedisGetDatabases,
   SelectDatabaseFile,
   SelectCertificateFile,
   SelectSSHKeyFile,
@@ -112,8 +139,19 @@ const MAX_URI_LENGTH = 4096;
 const MAX_CONNECTION_PARAMS_LENGTH = 4096;
 const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
+const PRIMARY_USERNAME_OPTIONAL_TYPES = new Set([
+  "mongodb",
+  "elasticsearch",
+  "chroma",
+  "qdrant",
+  "rocketmq",
+  "mqtt",
+  "kafka",
+  "rabbitmq",
+]);
 const CONNECTION_MODAL_WIDTH = 960;
 const CONNECTION_MODAL_BODY_HEIGHT = 620;
+const REDIS_DEFAULT_DATABASE_COUNT = 16;
 const STEP1_SIDEBAR_DIVIDER_DARK = "rgba(255, 255, 255, 0.16)";
 const STEP1_SIDEBAR_DIVIDER_LIGHT = "rgba(0, 0, 0, 0.08)";
 const CLICKHOUSE_PROTOCOL_OPTIONS: Array<{
@@ -132,6 +170,62 @@ const OCEANBASE_PROTOCOL_OPTIONS: Array<{
   { value: "mysql", label: "MySQL" },
   { value: "oracle", label: "Oracle" },
 ];
+
+const normalizeRedisDatabaseIndex = (value: unknown): number | null => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return Math.trunc(parsed);
+};
+
+const buildRedisDatabaseList = (...values: unknown[]): number[] => {
+  const indexes = new Set<number>();
+  for (let i = 0; i < REDIS_DEFAULT_DATABASE_COUNT; i += 1) {
+    indexes.add(i);
+  }
+  const collect = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(collect);
+      return;
+    }
+    const index = normalizeRedisDatabaseIndex(value);
+    if (index !== null) {
+      indexes.add(index);
+    }
+  };
+  values.forEach(collect);
+  return Array.from(indexes).sort((a, b) => a - b);
+};
+
+const extractRedisDatabaseList = (value: unknown): number[] => {
+  if (!Array.isArray(value)) return [];
+  const indexes = new Set<number>();
+  value.forEach((row: any) => {
+    const index = normalizeRedisDatabaseIndex(row?.index ?? row?.Index);
+    if (index !== null) {
+      indexes.add(index);
+    }
+  });
+  const result = Array.from(indexes).sort((a, b) => a - b);
+  return result.length > 0 ? result : buildRedisDatabaseList();
+};
+
+const normalizeRedisDatabaseSelection = (
+  value: unknown,
+  supportedDbs: number[],
+): number[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const supported = new Set(supportedDbs);
+  const selected = Array.from(
+    new Set(
+      value
+        .map(normalizeRedisDatabaseIndex)
+        .filter((index): index is number => index !== null)
+        .filter((index) => supported.size === 0 || supported.has(index)),
+    ),
+  ).sort((a, b) => a - b);
+  return selected.length > 0 ? selected : undefined;
+};
+
 const normalizeClickHouseProtocolValue = (
   value: unknown,
 ): ClickHouseProtocolChoice => {
@@ -178,6 +272,7 @@ type ConnectionSecretKey =
   | "httpTunnelPassword"
   | "mysqlReplicaPassword"
   | "mongoReplicaPassword"
+  | "redisSentinelPassword"
   | "opaqueURI"
   | "opaqueDSN";
 
@@ -214,6 +309,7 @@ const createEmptyConnectionSecretClearState =
     httpTunnelPassword: false,
     mysqlReplicaPassword: false,
     mongoReplicaPassword: false,
+    redisSentinelPassword: false,
     opaqueURI: false,
     opaqueDSN: false,
   });
@@ -240,6 +336,8 @@ const resolveInitialSecretFieldValue = (
       return String(config.mysqlReplicaPassword || "");
     case "mongoReplicaPassword":
       return String(config.mongoReplicaPassword || "");
+    case "redisSentinelPassword":
+      return String(config.redisSentinelPassword || "");
     case "uri":
       return String(config.uri || "");
     case "dsn":
@@ -247,231 +345,6 @@ const resolveInitialSecretFieldValue = (
     default:
       return "";
   }
-};
-
-const getDefaultPortByType = (type: string) => {
-  switch (type) {
-    case "jvm":
-      return 9010;
-    case "mysql":
-      return 3306;
-    case "oceanbase":
-      return 2881;
-    case "doris":
-    case "diros":
-    case "starrocks":
-      return 9030;
-    case "sphinx":
-      return 9306;
-    case "clickhouse":
-      return 9000;
-    case "postgres":
-    case "opengauss":
-      return 5432;
-    case "redis":
-      return 6379;
-    case "tdengine":
-      return 6041;
-    case "oracle":
-      return 1521;
-    case "dameng":
-      return 5236;
-    case "kingbase":
-      return 54321;
-    case "sqlserver":
-      return 1433;
-    case "iris":
-      return 1972;
-    case "mongodb":
-      return 27017;
-    case "highgo":
-      return 5866;
-    case "mariadb":
-      return 3306;
-    case "vastbase":
-      return 5432;
-    case "sqlite":
-      return 0;
-    case "duckdb":
-      return 0;
-    default:
-      return 3306;
-  }
-};
-
-const singleHostUriSchemesByType: Record<string, string[]> = {
-  postgres: ["postgresql", "postgres"],
-  opengauss: ["opengauss", "jdbc:opengauss", "postgresql", "postgres"],
-  clickhouse: ["clickhouse"],
-  oracle: ["oracle"],
-  sqlserver: ["sqlserver"],
-  iris: ["iris", "intersystems"],
-  redis: ["redis"],
-  tdengine: ["tdengine"],
-  dameng: ["dameng", "dm"],
-  kingbase: ["kingbase"],
-  highgo: ["highgo"],
-  vastbase: ["vastbase"],
-};
-
-const sslSupportedTypes = new Set([
-  "mysql",
-  "mariadb",
-  "oceanbase",
-  "doris",
-  "diros",
-  "starrocks",
-  "sphinx",
-  "dameng",
-  "clickhouse",
-  "postgres",
-  "sqlserver",
-  "oracle",
-  "kingbase",
-  "highgo",
-  "vastbase",
-  "opengauss",
-  "mongodb",
-  "redis",
-  "tdengine",
-]);
-
-const supportsSSLForType = (type: string) =>
-  sslSupportedTypes.has(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const sslCAPathSupportedTypes = new Set([
-  "mysql",
-  "mariadb",
-  "oceanbase",
-  "diros",
-  "starrocks",
-  "sphinx",
-  "clickhouse",
-  "postgres",
-  "sqlserver",
-  "kingbase",
-  "highgo",
-  "vastbase",
-  "opengauss",
-  "mongodb",
-  "redis",
-]);
-
-const sslClientCertificateSupportedTypes = new Set([
-  "mysql",
-  "mariadb",
-  "oceanbase",
-  "diros",
-  "starrocks",
-  "sphinx",
-  "dameng",
-  "clickhouse",
-  "postgres",
-  "kingbase",
-  "highgo",
-  "vastbase",
-  "opengauss",
-  "mongodb",
-  "redis",
-]);
-
-const supportsSSLCAPathForType = (type: string) =>
-  sslCAPathSupportedTypes.has(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const supportsSSLClientCertificateForType = (type: string) =>
-  sslClientCertificateSupportedTypes.has(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const isPostgresCompatibleSSLType = (type: string) =>
-  [
-    "postgres",
-    "kingbase",
-    "highgo",
-    "vastbase",
-    "opengauss",
-  ].includes(
-    String(type || "")
-      .trim()
-      .toLowerCase(),
-  );
-
-const isFileDatabaseType = (type: string) =>
-  type === "sqlite" || type === "duckdb";
-
-const isMySQLCompatibleType = (type: string) =>
-  type === "mysql" ||
-  type === "mariadb" ||
-  type === "oceanbase" ||
-  type === "doris" ||
-  type === "diros" ||
-  type === "starrocks" ||
-  type === "sphinx";
-
-const supportsConnectionParamsForType = (type: string) =>
-  isMySQLCompatibleType(type) ||
-  type === "postgres" ||
-  type === "kingbase" ||
-  type === "highgo" ||
-  type === "vastbase" ||
-  type === "opengauss" ||
-  type === "oracle" ||
-  type === "sqlserver" ||
-  type === "iris" ||
-  type === "clickhouse" ||
-  type === "mongodb" ||
-  type === "dameng" ||
-  type === "tdengine";
-
-type DriverStatusSnapshot = {
-  type: string;
-  name: string;
-  connectable: boolean;
-  expectedRevision?: string;
-  needsUpdate?: boolean;
-  updateReason?: string;
-  affectedConnections?: number;
-  message?: string;
-};
-
-const normalizeDriverType = (value: string): string => {
-  const normalized = String(value || "")
-    .trim()
-    .toLowerCase();
-  if (normalized === "postgresql") return "postgres";
-  if (normalized === "doris") return "diros";
-  if (
-    normalized === "intersystems" ||
-    normalized === "intersystemsiris" ||
-    normalized === "inter-systems-iris" ||
-    normalized === "inter-systems"
-  )
-    return "iris";
-  if (
-    normalized === "open_gauss" ||
-    normalized === "open-gauss" ||
-    normalized === "opengauss"
-  )
-    return "opengauss";
-  return normalized;
-};
-
-const resolveConnectionDriverType = (type: string, driver?: string): string => {
-  const normalizedType = normalizeDriverType(type);
-  if (normalizedType !== "custom") {
-    return normalizedType;
-  }
-  return normalizeDriverType(driver || "");
 };
 
 const ConnectionModal: React.FC<{
@@ -505,7 +378,7 @@ const ConnectionModal: React.FC<{
   const [testResult, setTestResult] = useState<TestResultState | null>(null);
   const [testErrorLogOpen, setTestErrorLogOpen] = useState(false);
   const [dbList, setDbList] = useState<string[]>([]);
-  const [redisDbList, setRedisDbList] = useState<number[]>([]); // Redis databases 0-15
+  const [redisDbList, setRedisDbList] = useState<number[]>([]);
   const [mongoMembers, setMongoMembers] = useState<MongoMemberInfo[]>([]);
   const [discoveringMembers, setDiscoveringMembers] = useState(false);
   const [uriFeedback, setUriFeedback] = useState<UriFeedbackState | null>(null);
@@ -541,6 +414,9 @@ const ConnectionModal: React.FC<{
   );
   const disableLocalBackdropFilter = isMacLikePlatform();
   const mysqlTopology = Form.useWatch("mysqlTopology", form) || "single";
+  const rocketmqTopology = Form.useWatch("rocketmqTopology", form) || "single";
+  const mqttTopology = Form.useWatch("mqttTopology", form) || "single";
+  const kafkaTopology = Form.useWatch("kafkaTopology", form) || "single";
   const mongoTopology = Form.useWatch("mongoTopology", form) || "single";
   const mongoSrv = Form.useWatch("mongoSrv", form) || false;
   const redisTopology = Form.useWatch("redisTopology", form) || "single";
@@ -574,6 +450,10 @@ const ConnectionModal: React.FC<{
   );
   const isOceanBaseOracle = dbType === "oceanbase" && oceanBaseProtocol === "oracle";
   const isMySQLLike = isMySQLCompatibleType(dbType) && !isOceanBaseOracle;
+  const isRocketMQ = dbType === "rocketmq";
+  const isMQTT = dbType === "mqtt";
+  const isKafka = dbType === "kafka";
+  const isRabbitMQ = dbType === "rabbitmq";
   const supportsConnectionParams = supportsConnectionParamsForType(dbType);
   const isSSLType = supportsSSLForType(dbType);
   const supportsSSLCAPath = supportsSSLCAPathForType(dbType);
@@ -944,19 +824,30 @@ const ConnectionModal: React.FC<{
       setMongoMembers([]);
     }
     if (fieldName === "redisTopology") {
-      const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
+      const nextRedisTopology = String(value || "single").toLowerCase();
+      const currentRedisPort = Number(form.getFieldValue("port") || 0);
+      if (
+        nextRedisTopology === "sentinel" &&
+        (!currentRedisPort || currentRedisPort === 6379)
+      ) {
+        form.setFieldValue("port", 26379);
+      } else if (
+        nextRedisTopology !== "sentinel" &&
+        currentRedisPort === 26379
+      ) {
+        form.setFieldValue("port", 6379);
+      }
+      const supportedDbs = buildRedisDatabaseList(
+        form.getFieldValue("redisDB"),
+        form.getFieldValue("includeRedisDatabases"),
+      );
       setRedisDbList(supportedDbs);
-      const selectedDbsRaw = form.getFieldValue("includeRedisDatabases");
-      const selectedDbs = Array.isArray(selectedDbsRaw)
-        ? selectedDbsRaw.map((entry: any) => Number(entry))
-        : [];
-      const validDbs = selectedDbs
-        .filter((entry: number) => Number.isFinite(entry))
-        .map((entry: number) => Math.trunc(entry))
-        .filter((entry: number) => supportedDbs.includes(entry));
       form.setFieldValue(
         "includeRedisDatabases",
-        validDbs.length > 0 ? validDbs : undefined,
+        normalizeRedisDatabaseSelection(
+          form.getFieldValue("includeRedisDatabases"),
+          supportedDbs,
+        ),
       );
     }
     if (fieldName === "proxyType") {
@@ -1625,6 +1516,9 @@ const ConnectionModal: React.FC<{
       const mysqlDefaultPort = getDefaultPortByType(type);
       const parsed =
         parseMultiHostUri(trimmedUri, "mysql") ||
+        parseMultiHostUri(trimmedUri, "goldendb") ||
+        parseMultiHostUri(trimmedUri, "greatdb") ||
+        parseMultiHostUri(trimmedUri, "gdb") ||
         parseMultiHostUri(trimmedUri, "jdbc:mysql") ||
         parseMultiHostUri(trimmedUri, "oceanbase") ||
         parseMultiHostUri(trimmedUri, "jdbc:oceanbase") ||
@@ -1714,61 +1608,7 @@ const ConnectionModal: React.FC<{
     }
 
     if (type === "redis") {
-      const parsed =
-        parseMultiHostUri(trimmedUri, "redis") ||
-        parseMultiHostUri(trimmedUri, "rediss");
-      if (!parsed) {
-        return null;
-      }
-      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
-        return null;
-      }
-      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
-        return null;
-      }
-      const hostList = normalizeAddressList(parsed.hosts, 6379);
-      if (!hostList.length) {
-        return null;
-      }
-      const primary = parseHostPort(hostList[0] || "localhost:6379", 6379);
-      const topologyParam = String(
-        parsed.params.get("topology") || "",
-      ).toLowerCase();
-      const dbText = String(parsed.database || "")
-        .trim()
-        .replace(/^\//, "");
-      const dbIndex = Number(dbText);
-      const isRediss = trimmedUri.toLowerCase().startsWith("rediss://");
-      const skipVerifyText = String(parsed.params.get("skip_verify") || "")
-        .trim()
-        .toLowerCase();
-      const skipVerify =
-        skipVerifyText === "1" ||
-        skipVerifyText === "true" ||
-        skipVerifyText === "yes" ||
-        skipVerifyText === "on";
-      return {
-        host: primary?.host || "localhost",
-        port: primary?.port || 6379,
-        user: parsed.username || "",
-        password: parsed.password || "",
-        useSSL: isRediss,
-        sslMode: isRediss
-          ? skipVerify
-            ? "skip-verify"
-            : "required"
-          : "disable",
-        ...extractSSLPathValuesFromParams(parsed.params, type),
-        redisTopology:
-          hostList.length > 1 || topologyParam === "cluster"
-            ? "cluster"
-            : "single",
-        redisHosts: hostList.slice(1),
-        redisDB:
-          Number.isFinite(dbIndex) && dbIndex >= 0 && dbIndex <= 15
-            ? Math.trunc(dbIndex)
-            : 0,
-      };
+      return parseRedisUriToFormValues(trimmedUri);
     }
 
     if (type === "mongodb") {
@@ -1852,6 +1692,208 @@ const ConnectionModal: React.FC<{
       };
     }
 
+    if (type === "kafka") {
+      const defaultPort = getDefaultPortByType(type);
+      const parsed =
+        parseMultiHostUri(trimmedUri, "kafka") ||
+        parseMultiHostUri(trimmedUri, "apache-kafka") ||
+        parseMultiHostUri(trimmedUri, "apache_kafka");
+      if (!parsed) {
+        return null;
+      }
+      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+        return null;
+      }
+      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
+        return null;
+      }
+      const hostList = normalizeAddressList(parsed.hosts, defaultPort);
+      if (!hostList.length) {
+        return null;
+      }
+      const primary = parseHostPort(
+        hostList[0] || `localhost:${defaultPort}`,
+        defaultPort,
+      );
+      const tlsEnabled = normalizeUriBool(
+        parsed.params.get("tls") ||
+          parsed.params.get("ssl") ||
+          parsed.params.get("useSSL") ||
+          parsed.params.get("use_ssl"),
+      );
+      const skipVerify = normalizeUriBool(
+        parsed.params.get("skip_verify") || parsed.params.get("skipVerify"),
+      );
+      const topology = String(parsed.params.get("topology") || "")
+        .trim()
+        .toLowerCase();
+      const timeoutValue = Number(parsed.params.get("timeout"));
+      return {
+        host: primary?.host || "localhost",
+        port: primary?.port || defaultPort,
+        user: parsed.username,
+        password: parsed.password,
+        database: parsed.database || "",
+        useSSL: tlsEnabled,
+        sslMode: tlsEnabled ? (skipVerify ? "skip-verify" : "required") : "disable",
+        ...extractSSLPathValuesFromParams(parsed.params, type),
+        kafkaTopology:
+          topology === "cluster" || hostList.length > 1 ? "cluster" : "single",
+        kafkaHosts: hostList.slice(1),
+        connectionParams: serializeConnectionParams(parsed.params),
+        timeout:
+          Number.isFinite(timeoutValue) && timeoutValue > 0
+            ? Math.min(MAX_TIMEOUT_SECONDS, Math.trunc(timeoutValue))
+            : undefined,
+      };
+    }
+
+    if (type === "mqtt") {
+      const defaultPort = getDefaultPortByType(type);
+      const parsed =
+        parseMultiHostUri(trimmedUri, "mqtt") ||
+        parseMultiHostUri(trimmedUri, "mqtts") ||
+        parseMultiHostUri(trimmedUri, "tcp") ||
+        parseMultiHostUri(trimmedUri, "ssl") ||
+        parseMultiHostUri(trimmedUri, "tls");
+      if (!parsed) {
+        return null;
+      }
+      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+        return null;
+      }
+      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
+        return null;
+      }
+      const hostList = normalizeAddressList(parsed.hosts, defaultPort);
+      if (!hostList.length) {
+        return null;
+      }
+      const primary = parseHostPort(
+        hostList[0] || `localhost:${defaultPort}`,
+        defaultPort,
+      );
+      const lowerUri = trimmedUri.toLowerCase();
+      const tlsEnabled =
+        lowerUri.startsWith("mqtts://") ||
+        lowerUri.startsWith("ssl://") ||
+        lowerUri.startsWith("tls://") ||
+        normalizeUriBool(
+          parsed.params.get("tls") ||
+            parsed.params.get("ssl") ||
+            parsed.params.get("useSSL") ||
+            parsed.params.get("use_ssl"),
+        );
+      const skipVerify = normalizeUriBool(
+        parsed.params.get("skip_verify") || parsed.params.get("skipVerify"),
+      );
+      const topology = String(parsed.params.get("topology") || "")
+        .trim()
+        .toLowerCase();
+      const timeoutValue = Number(parsed.params.get("timeout"));
+      return {
+        host: primary?.host || "localhost",
+        port: primary?.port || defaultPort,
+        user: parsed.username,
+        password: parsed.password,
+        database: parsed.database || "",
+        useSSL: tlsEnabled,
+        sslMode: tlsEnabled ? (skipVerify ? "skip-verify" : "required") : "disable",
+        ...extractSSLPathValuesFromParams(parsed.params, type),
+        mqttTopology:
+          topology === "cluster" || hostList.length > 1 ? "cluster" : "single",
+        mqttHosts: hostList.slice(1),
+        connectionParams: serializeConnectionParams(parsed.params),
+        timeout:
+          Number.isFinite(timeoutValue) && timeoutValue > 0
+            ? Math.min(MAX_TIMEOUT_SECONDS, Math.trunc(timeoutValue))
+            : undefined,
+      };
+    }
+
+    if (type === "rocketmq") {
+      const defaultPort = getDefaultPortByType(type);
+      const parsed =
+        parseMultiHostUri(trimmedUri, "rocketmq") ||
+        parseMultiHostUri(trimmedUri, "rmq");
+      if (!parsed) {
+        return null;
+      }
+      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
+        return null;
+      }
+      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
+        return null;
+      }
+      const hostList = normalizeAddressList(parsed.hosts, defaultPort);
+      if (!hostList.length) {
+        return null;
+      }
+      const primary = parseHostPort(
+        hostList[0] || `localhost:${defaultPort}`,
+        defaultPort,
+      );
+      const topology = String(parsed.params.get("topology") || "")
+        .trim()
+        .toLowerCase();
+      const timeoutValue = Number(parsed.params.get("timeout"));
+      return {
+        host: primary?.host || "localhost",
+        port: primary?.port || defaultPort,
+        user: parsed.username,
+        password: parsed.password,
+        database: parsed.database || "",
+        rocketmqTopology:
+          topology === "cluster" || hostList.length > 1 ? "cluster" : "single",
+        rocketmqHosts: hostList.slice(1),
+        connectionParams: serializeConnectionParams(parsed.params),
+        timeout:
+          Number.isFinite(timeoutValue) && timeoutValue > 0
+            ? Math.min(MAX_TIMEOUT_SECONDS, Math.trunc(timeoutValue))
+            : undefined,
+      };
+    }
+
+    if (type === "rabbitmq") {
+      const defaultPort = getDefaultPortByType(type);
+      const parsed = parseSingleHostUri(
+        trimmedUri,
+        ["rabbitmq", "http", "https"],
+        defaultPort,
+      );
+      if (!parsed) {
+        return null;
+      }
+      const lowerUri = trimmedUri.toLowerCase();
+      const tlsEnabled =
+        lowerUri.startsWith("https://") ||
+        normalizeUriBool(
+          parsed.params.get("tls") ||
+            parsed.params.get("ssl") ||
+            parsed.params.get("useSSL") ||
+            parsed.params.get("use_ssl"),
+        );
+      const skipVerify = normalizeUriBool(
+        parsed.params.get("skip_verify") || parsed.params.get("skipVerify"),
+      );
+      const timeoutValue = Number(parsed.params.get("timeout"));
+      return {
+        host: parsed.host,
+        port: parsed.port,
+        user: parsed.username,
+        password: parsed.password,
+        database: parsed.database || "",
+        useSSL: tlsEnabled,
+        sslMode: tlsEnabled ? (skipVerify ? "skip-verify" : "required") : "disable",
+        ...extractSSLPathValuesFromParams(parsed.params, type),
+        connectionParams: serializeConnectionParams(parsed.params),
+        timeout:
+          Number.isFinite(timeoutValue) && timeoutValue > 0
+            ? Math.min(MAX_TIMEOUT_SECONDS, Math.trunc(timeoutValue))
+            : undefined,
+      };
+    }
+
     if (type === "clickhouse") {
       const httpValues = parseClickHouseHTTPUriToValues(trimmedUri);
       if (httpValues) {
@@ -1899,7 +1941,8 @@ const ConnectionModal: React.FC<{
           type === "kingbase" ||
           type === "highgo" ||
           type === "vastbase" ||
-          type === "opengauss"
+          type === "opengauss" ||
+          type === "gaussdb"
         ) {
           const sslMode = String(parsed.params.get("sslmode") || "")
             .trim()
@@ -2012,6 +2055,22 @@ const ConnectionModal: React.FC<{
             parsedValues.useSSL = false;
             parsedValues.sslMode = "disable";
           }
+        } else if (type === "chroma" || type === "qdrant") {
+          const tls = String(
+            parsed.params.get("tls") ||
+              parsed.params.get("ssl") ||
+              parsed.params.get("useSSL") ||
+              parsed.params.get("use_ssl") ||
+              "",
+          )
+            .trim()
+            .toLowerCase();
+          const skipVerify = normalizeBool(
+            parsed.params.get("skip_verify") || parsed.params.get("skipVerify"),
+          );
+          const enabled = tls ? normalizeBool(tls) : trimmedUri.toLowerCase().startsWith("https://");
+          parsedValues.useSSL = enabled;
+          parsedValues.sslMode = enabled ? (skipVerify ? "skip-verify" : "required") : "disable";
         }
       }
       return parsedValues;
@@ -2057,9 +2116,9 @@ const ConnectionModal: React.FC<{
     if (isMySQLCompatibleType(dbType)) {
       const defaultPort = getDefaultPortByType(dbType);
       const scheme =
-        dbType === "diros" ? "doris" : dbType === "starrocks" ? "starrocks" : dbType === "oceanbase" ? "oceanbase" : "mysql";
+        dbType === "diros" ? "doris" : dbType === "starrocks" ? "starrocks" : dbType === "oceanbase" ? "oceanbase" : dbType === "goldendb" ? "goldendb" : "mysql";
       if (dbType === "oceanbase") {
-        return `${scheme}://sys%40oracle001:pass@127.0.0.1:${defaultPort}/SERVICE_NAME?protocol=oracle`;
+        return `${scheme}://sys%40oracle001:pass@127.0.0.1:${defaultPort}?protocol=oracle`;
       }
       return `${scheme}://user:pass@127.0.0.1:${defaultPort},127.0.0.2:${defaultPort}/db_name?topology=replica`;
     }
@@ -2074,8 +2133,29 @@ const ConnectionModal: React.FC<{
     if (dbType === "clickhouse") {
       return "clickhouse://default:pass@127.0.0.1:9000/default";
     }
+    if (dbType === "chroma") {
+      return "http://127.0.0.1:8000/default_database?tenant=default_tenant";
+    }
+    if (dbType === "qdrant") {
+      return "http://127.0.0.1:6333";
+    }
+    if (dbType === "iotdb") {
+      return "iotdb://root:root@127.0.0.1:6667/root.sg";
+    }
+    if (dbType === "rocketmq") {
+      return "rocketmq://accessKey:secretKey@127.0.0.1:9876,127.0.0.2:9876/orders.events?topology=cluster&groupId=gonavi&namespace=prod&tag=TagA&pullBatchSize=32&startOffset=latest";
+    }
+    if (dbType === "mqtt") {
+      return "mqtt://user:pass@127.0.0.1:1883/devices%2F%2B%2Ftelemetry?topology=cluster&clientId=gonavi-desktop&qos=1";
+    }
+    if (dbType === "kafka") {
+      return "kafka://user:pass@127.0.0.1:9092,127.0.0.2:9092/orders.events?topology=cluster&groupId=analytics&mechanism=scram-sha-256";
+    }
+    if (dbType === "rabbitmq") {
+      return "rabbitmq://guest:guest@127.0.0.1:15672/%2F?defaultQueue=orders.queue&exchange=events.topic&timeout=30";
+    }
     if (dbType === "redis") {
-      return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster";
+      return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster 或 redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster";
     }
     if (dbType === "oracle") {
       return "oracle://user:pass@127.0.0.1:1521/ORCLPDB1";
@@ -2085,6 +2165,9 @@ const ConnectionModal: React.FC<{
     }
     if (dbType === "opengauss") {
       return "opengauss://user:pass@127.0.0.1:5432/db_name";
+    }
+    if (dbType === "gaussdb") {
+      return "gaussdb://user:pass@127.0.0.1:5432/db_name";
     }
     return t("connection.modal.example", {
       value: "postgres://user:pass@127.0.0.1:5432/db_name",
@@ -2106,6 +2189,7 @@ const ConnectionModal: React.FC<{
       case "highgo":
       case "vastbase":
       case "opengauss":
+      case "gaussdb":
         return "application_name=GoNavi&statement_timeout=30000";
       case "oracle":
         return "PREFETCH_ROWS=5000&TRACE FILE=/tmp/go-ora.trc";
@@ -2117,10 +2201,24 @@ const ConnectionModal: React.FC<{
         return "max_execution_time=60&compress=lz4";
       case "mongodb":
         return "retryWrites=true&readPreference=secondaryPreferred";
+      case "chroma":
+        return "tenant=default_tenant&apiKey=...";
+      case "qdrant":
+        return "apiKey=...";
       case "dameng":
         return "schema=SYSDBA";
       case "tdengine":
         return "timezone=Asia%2FShanghai";
+      case "iotdb":
+        return "fetchSize=1024&timeZone=Asia%2FShanghai";
+      case "rocketmq":
+        return "groupId=gonavi&namespace=prod&tag=TagA&pullBatchSize=32&startOffset=latest";
+      case "mqtt":
+        return "topics=devices%2F%2B%2Ftelemetry,%24SYS%2F%23&clientId=gonavi-desktop&qos=1&cleanSession=true&fetchWaitMs=4000";
+      case "kafka":
+        return "groupId=gonavi&mechanism=scram-sha-256&clientId=gonavi-desktop&startOffset=latest";
+      case "rabbitmq":
+        return "defaultQueue=orders.queue&exchange=events.topic&managementPathPrefix=/rabbitmq";
       default:
         return "key=value&another=value";
     }
@@ -2179,48 +2277,114 @@ const ConnectionModal: React.FC<{
       const dbPath = database ? `/${encodeURIComponent(database)}` : "/";
       const query = params.toString();
       const scheme =
-        type === "diros" ? "doris" : type === "starrocks" ? "starrocks" : type === "oceanbase" ? "oceanbase" : "mysql";
+        type === "diros" ? "doris" : type === "starrocks" ? "starrocks" : type === "oceanbase" ? "oceanbase" : type === "goldendb" ? "goldendb" : "mysql";
       return `${scheme}://${encodedAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
     }
 
-    if (type === "redis") {
-      const primary = toAddress(host, port, 6379);
-      const clusterHosts =
-        values.redisTopology === "cluster"
-          ? normalizeAddressList(values.redisHosts, 6379)
+    if (type === "kafka") {
+      const primary = toAddress(host, port, defaultPort);
+      const brokers =
+        values.kafkaTopology === "cluster"
+          ? normalizeAddressList(values.kafkaHosts, defaultPort)
           : [];
-      const hosts = normalizeAddressList([primary, ...clusterHosts], 6379);
+      const allBrokers = normalizeAddressList([primary, ...brokers], defaultPort);
       const params = new URLSearchParams();
-      if (hosts.length > 1 || values.redisTopology === "cluster") {
+      if (allBrokers.length > 1 || values.kafkaTopology === "cluster") {
         params.set("topology", "cluster");
       }
-      const redisUser = String(values.user || "").trim();
-      const redisPassword = String(values.password || "");
-      let redisAuth = "";
-      if (redisUser || redisPassword) {
-        const encodedPassword = redisPassword
-          ? encodeURIComponent(redisPassword)
-          : "";
-        redisAuth = redisUser
-          ? `${encodeURIComponent(redisUser)}${redisPassword ? `:${encodedPassword}` : ""}@`
-          : `:${encodedPassword}@`;
-      }
-      const redisDB = Number.isFinite(Number(values.redisDB))
-        ? Math.max(0, Math.min(15, Math.trunc(Number(values.redisDB))))
-        : 0;
-      const dbPath = `/${redisDB}`;
       if (values.useSSL) {
         const mode = String(values.sslMode || "preferred")
           .trim()
           .toLowerCase();
+        params.set("tls", "true");
         if (mode === "skip-verify" || mode === "preferred") {
           params.set("skip_verify", "true");
         }
+        appendSSLPathParamsForUri(params, type, values);
       }
-      appendSSLPathParamsForUri(params, type, values);
+      if (Number.isFinite(timeout) && timeout > 0) {
+        params.set("timeout", String(timeout));
+      }
+      mergeConnectionParams(params, values.connectionParams);
+      const topicPath = database ? `/${encodeURIComponent(database)}` : "";
       const query = params.toString();
-      const scheme = values.useSSL ? "rediss" : "redis";
-      return `${scheme}://${redisAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
+      return `kafka://${encodedAuth}${allBrokers.join(",")}${topicPath}${query ? `?${query}` : ""}`;
+    }
+
+    if (type === "mqtt") {
+      const primary = toAddress(host, port, defaultPort);
+      const brokers =
+        values.mqttTopology === "cluster"
+          ? normalizeAddressList(values.mqttHosts, defaultPort)
+          : [];
+      const allBrokers = normalizeAddressList([primary, ...brokers], defaultPort);
+      const params = new URLSearchParams();
+      if (allBrokers.length > 1 || values.mqttTopology === "cluster") {
+        params.set("topology", "cluster");
+      }
+      if (values.useSSL) {
+        const mode = String(values.sslMode || "preferred")
+          .trim()
+          .toLowerCase();
+        params.set("tls", "true");
+        if (mode === "skip-verify" || mode === "preferred") {
+          params.set("skip_verify", "true");
+        }
+        appendSSLPathParamsForUri(params, type, values);
+      }
+      if (Number.isFinite(timeout) && timeout > 0) {
+        params.set("timeout", String(timeout));
+      }
+      mergeConnectionParams(params, values.connectionParams);
+      const topicPath = database ? `/${encodeURIComponent(database)}` : "";
+      const query = params.toString();
+      return `mqtt://${encodedAuth}${allBrokers.join(",")}${topicPath}${query ? `?${query}` : ""}`;
+    }
+
+    if (type === "rocketmq") {
+      const primary = toAddress(host, port, defaultPort);
+      const nameservers =
+        values.rocketmqTopology === "cluster"
+          ? normalizeAddressList(values.rocketmqHosts, defaultPort)
+          : [];
+      const allNameServers = normalizeAddressList([primary, ...nameservers], defaultPort);
+      const params = new URLSearchParams();
+      if (allNameServers.length > 1 || values.rocketmqTopology === "cluster") {
+        params.set("topology", "cluster");
+      }
+      if (Number.isFinite(timeout) && timeout > 0) {
+        params.set("timeout", String(timeout));
+      }
+      mergeConnectionParams(params, values.connectionParams);
+      const topicPath = database ? `/${encodeURIComponent(database)}` : "";
+      const query = params.toString();
+      return `rocketmq://${encodedAuth}${allNameServers.join(",")}${topicPath}${query ? `?${query}` : ""}`;
+    }
+
+    if (type === "rabbitmq") {
+      const address = toAddress(host, port, defaultPort);
+      const params = new URLSearchParams();
+      if (values.useSSL) {
+        const mode = String(values.sslMode || "preferred")
+          .trim()
+          .toLowerCase();
+        params.set("tls", "true");
+        if (mode === "skip-verify" || mode === "preferred") {
+          params.set("skip_verify", "true");
+        }
+        appendSSLPathParamsForUri(params, type, values);
+      }
+      if (Number.isFinite(timeout) && timeout > 0) {
+        params.set("timeout", String(timeout));
+      }
+      mergeConnectionParams(params, values.connectionParams);
+      const vhostPath = database ? `/${encodeURIComponent(database)}` : "";
+      const query = params.toString();
+      return `rabbitmq://${encodedAuth}${address}${vhostPath}${query ? `?${query}` : ""}`;
+    }
+
+    if (type === "redis") {
+      return buildRedisUriFromValues(values);
     }
 
     if (isFileDatabaseType(type)) {
@@ -2292,8 +2456,14 @@ const ConnectionModal: React.FC<{
         ? normalizeClickHouseProtocolValue(values.clickHouseProtocol)
         : "auto";
     const scheme =
-      type === "postgres"
+      type === "gaussdb"
+        ? "gaussdb"
+        : type === "postgres"
         ? "postgresql"
+        : type === "chroma" || type === "qdrant"
+          ? values.useSSL
+            ? "https"
+            : "http"
         : type === "clickhouse" && clickHouseProtocol === "http"
           ? values.useSSL
             ? "https"
@@ -2344,6 +2514,11 @@ const ConnectionModal: React.FC<{
         if (mode === "skip-verify" || mode === "preferred") {
           params.set("skip_verify", "true");
         }
+      } else if (type === "chroma" || type === "qdrant") {
+        if (mode === "skip-verify" || mode === "preferred") {
+          params.set("skip_verify", "true");
+        }
+        appendSSLPathParamsForUri(params, type, values);
       }
     } else if (supportsSSLForType(type)) {
       if (isPostgresCompatibleSSLType(type)) {
@@ -2585,18 +2760,27 @@ const ConnectionModal: React.FC<{
         const defaultPort = getDefaultPortByType(configType);
         const isFileDbConfigType = isFileDatabaseType(configType);
         const jvmDefaultValues = buildDefaultJVMConnectionValues();
+        const savedPrimaryAddress = isFileDbConfigType
+          ? ""
+          : toAddress(
+              config.host || "localhost",
+              Number(config.port || defaultPort),
+              defaultPort,
+            );
         const normalizedHosts = isFileDbConfigType
           ? []
-          : normalizeAddressList(config.hosts, defaultPort);
+          : normalizeAddressList(
+              [
+                savedPrimaryAddress,
+                ...(Array.isArray(config.hosts) ? config.hosts : []),
+              ],
+              defaultPort,
+            );
         const primaryAddress = isFileDbConfigType
           ? null
           : parseHostPort(
               normalizedHosts[0] ||
-                toAddress(
-                  config.host || "localhost",
-                  Number(config.port || defaultPort),
-                  defaultPort,
-                ),
+                savedPrimaryAddress,
               defaultPort,
             );
         const primaryHost = isFileDbConfigType
@@ -2607,6 +2791,7 @@ const ConnectionModal: React.FC<{
           : primaryAddress?.port || Number(config.port || defaultPort);
         const mysqlReplicaHosts =
           configType === "mysql" ||
+          configType === "goldendb" ||
           configType === "mariadb" ||
           configType === "oceanbase" ||
           configType === "diros" ||
@@ -2614,6 +2799,12 @@ const ConnectionModal: React.FC<{
           configType === "sphinx"
             ? normalizedHosts.slice(1)
             : [];
+        const rocketmqHosts =
+          configType === "rocketmq" ? normalizedHosts.slice(1) : [];
+        const mqttHosts =
+          configType === "mqtt" ? normalizedHosts.slice(1) : [];
+        const kafkaHosts =
+          configType === "kafka" ? normalizedHosts.slice(1) : [];
         const mongoHosts =
           configType === "mongodb" ? normalizedHosts.slice(1) : [];
         const redisHosts =
@@ -2621,13 +2812,24 @@ const ConnectionModal: React.FC<{
         const mysqlIsReplica =
           String(config.topology || "").toLowerCase() === "replica" ||
           mysqlReplicaHosts.length > 0;
+        const rocketmqIsCluster =
+          String(config.topology || "").toLowerCase() === "cluster" ||
+          rocketmqHosts.length > 0;
+        const mqttIsCluster =
+          String(config.topology || "").toLowerCase() === "cluster" ||
+          mqttHosts.length > 0;
+        const kafkaIsCluster =
+          String(config.topology || "").toLowerCase() === "cluster" ||
+          kafkaHosts.length > 0;
         const mongoIsReplica =
           String(config.topology || "").toLowerCase() === "replica" ||
           mongoHosts.length > 0 ||
           !!config.replicaSet;
+        const redisTopologyValue = String(config.topology || "").toLowerCase();
+        const redisIsSentinel = redisTopologyValue === "sentinel";
         const redisIsCluster =
-          String(config.topology || "").toLowerCase() === "cluster" ||
-          redisHosts.length > 0;
+          !redisIsSentinel &&
+          (redisTopologyValue === "cluster" || redisHosts.length > 0);
         const {
           allowedModes: resolvedJvmAllowedModes,
           preferredMode: resolvedJvmPreferredMode,
@@ -2691,12 +2893,25 @@ const ConnectionModal: React.FC<{
           timeout: resolvedJvmTimeout,
           mysqlTopology: mysqlIsReplica ? "replica" : "single",
           mysqlReplicaHosts: mysqlReplicaHosts,
+          rocketmqTopology: rocketmqIsCluster ? "cluster" : "single",
+          rocketmqHosts: rocketmqHosts,
+          mqttTopology: mqttIsCluster ? "cluster" : "single",
+          mqttHosts: mqttHosts,
+          kafkaTopology: kafkaIsCluster ? "cluster" : "single",
+          kafkaHosts: kafkaHosts,
           mysqlReplicaUser: config.mysqlReplicaUser || "",
           mysqlReplicaPassword: config.mysqlReplicaPassword || "",
           mongoTopology: mongoIsReplica ? "replica" : "single",
           mongoHosts: mongoHosts,
-          redisTopology: redisIsCluster ? "cluster" : "single",
+          redisTopology: redisIsSentinel
+            ? "sentinel"
+            : redisIsCluster
+              ? "cluster"
+              : "single",
           redisHosts: redisHosts,
+          redisSentinelMaster: config.redisSentinelMaster || "",
+          redisSentinelUser: config.redisSentinelUser || "",
+          redisSentinelPassword: config.redisSentinelPassword || "",
           mongoSrv: !!config.mongoSrv,
           mongoReplicaSet: config.replicaSet || "",
           mongoAuthSource: config.authSource || "",
@@ -2816,7 +3031,12 @@ const ConnectionModal: React.FC<{
         }
         // 如果是 Redis 编辑模式，设置已保存的 Redis 数据库列表
         if (configType === "redis") {
-          setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
+          setRedisDbList(
+            buildRedisDatabaseList(
+              config.redisDB,
+              initialValues.includeRedisDatabases,
+            ),
+          );
         }
       } else {
         // Create mode: Start at step 1
@@ -2893,6 +3113,16 @@ const ConnectionModal: React.FC<{
       clearSecret: clearSecrets.mongoReplicaPassword,
       forceClear: !mongoReplicaEnabled,
     });
+    const redisSentinelEnabled =
+      config.type === "redis" &&
+      config.topology === "sentinel" &&
+      values.savePassword !== false;
+    const redisSentinelDraft = resolveConnectionSecretDraft({
+      hasSecret: initialValues?.hasRedisSentinelPassword,
+      valueInput: config.redisSentinelPassword,
+      clearSecret: clearSecrets.redisSentinelPassword,
+      forceClear: !redisSentinelEnabled,
+    });
     const opaqueUriDraft = resolveConnectionSecretDraft({
       hasSecret: initialValues?.hasOpaqueURI,
       valueInput: config.uri,
@@ -2961,6 +3191,7 @@ const ConnectionModal: React.FC<{
         dsn: opaqueDsnDraft.value,
         mysqlReplicaPassword: mysqlReplicaDraft.value,
         mongoReplicaPassword: mongoReplicaDraft.value,
+        redisSentinelPassword: redisSentinelDraft.value,
       },
       includeDatabases: values.includeDatabases,
       includeRedisDatabases: isRedisType
@@ -2974,6 +3205,7 @@ const ConnectionModal: React.FC<{
       clearHttpTunnelPassword: httpTunnelDraft.clearStoredSecret,
       clearMySQLReplicaPassword: mysqlReplicaDraft.clearStoredSecret,
       clearMongoReplicaPassword: mongoReplicaDraft.clearStoredSecret,
+      clearRedisSentinelPassword: redisSentinelDraft.clearStoredSecret,
       clearOpaqueURI: opaqueUriDraft.clearStoredSecret,
       clearOpaqueDSN: opaqueDsnDraft.clearStoredSecret,
     };
@@ -3124,6 +3356,14 @@ const ConnectionModal: React.FC<{
       return t("connection.modal.secret.blocking.mongoReplica");
     }
     if (
+      clearSecrets.redisSentinelPassword &&
+      values.type === "redis" &&
+      values.redisTopology === "sentinel" &&
+      String(values.redisSentinelPassword ?? "") === ""
+    ) {
+      return "测试连接前请填写新的 Sentinel 密码，或取消清除已保存 Sentinel 密码";
+    }
+    if (
       values.type === "mongodb" &&
       values.savePassword === false &&
       initialValues?.hasPrimaryPassword &&
@@ -3214,7 +3454,32 @@ const ConnectionModal: React.FC<{
         void message.destroy("connection-test-failure");
         setTestResult({ type: "success", message: res.message });
         if (isRedisType) {
-          setRedisDbList(Array.from({ length: 16 }, (_, i) => i));
+          const dbRes = await withClientTimeout(
+            RedisGetDatabases(config as any),
+            rpcTimeoutMs,
+            `连接成功但拉取 Redis 数据库列表超时（>${timeoutSeconds} 秒）`,
+          );
+          if (dbRes.success) {
+            const supportedDbs = extractRedisDatabaseList(dbRes.data);
+            setRedisDbList(supportedDbs);
+            form.setFieldValue(
+              "includeRedisDatabases",
+              normalizeRedisDatabaseSelection(
+                form.getFieldValue("includeRedisDatabases"),
+                supportedDbs,
+              ),
+            );
+          } else {
+            setRedisDbList(
+              buildRedisDatabaseList(
+                config.redisDB,
+                form.getFieldValue("includeRedisDatabases"),
+              ),
+            );
+            message.warning(
+              `连接成功，但获取 Redis 数据库列表失败：${normalizeConnectionSecretErrorMessage(dbRes.message, "未知错误")}`,
+            );
+          }
         } else if (!isJVMType) {
           // Other databases: fetch database list
           const dbRes = await withClientTimeout(
@@ -3582,7 +3847,7 @@ const ConnectionModal: React.FC<{
     }
 
     let hosts: string[] = [];
-    let topology: "single" | "replica" | "cluster" | undefined;
+    let topology: "single" | "replica" | "cluster" | "sentinel" | undefined;
     let replicaSet = "";
     let authSource = "";
     let readPreference = "";
@@ -3592,6 +3857,9 @@ const ConnectionModal: React.FC<{
     let mongoAuthMechanism = "";
     let mongoReplicaUser = "";
     let mongoReplicaPassword = "";
+    let redisSentinelMaster = "";
+    let redisSentinelUser = "";
+    let redisSentinelPassword = "";
     const savePassword =
       type === "mongodb" ? mergedValues.savePassword !== false : true;
 
@@ -3609,6 +3877,57 @@ const ConnectionModal: React.FC<{
         topology = "replica";
         mysqlReplicaUser = String(mergedValues.mysqlReplicaUser || "").trim();
         mysqlReplicaPassword = String(mergedValues.mysqlReplicaPassword || "");
+      } else {
+        topology = "single";
+      }
+    }
+
+    if (type === "kafka") {
+      const brokers =
+        mergedValues.kafkaTopology === "cluster"
+          ? normalizeAddressList(mergedValues.kafkaHosts, defaultPort)
+          : [];
+      const allHosts = normalizeAddressList(
+        [`${primaryHost}:${primaryPort}`, ...brokers],
+        defaultPort,
+      );
+      if (mergedValues.kafkaTopology === "cluster" || allHosts.length > 1) {
+        hosts = allHosts;
+        topology = "cluster";
+      } else {
+        topology = "single";
+      }
+    }
+
+    if (type === "mqtt") {
+      const brokers =
+        mergedValues.mqttTopology === "cluster"
+          ? normalizeAddressList(mergedValues.mqttHosts, defaultPort)
+          : [];
+      const allHosts = normalizeAddressList(
+        [`${primaryHost}:${primaryPort}`, ...brokers],
+        defaultPort,
+      );
+      if (mergedValues.mqttTopology === "cluster" || allHosts.length > 1) {
+        hosts = allHosts;
+        topology = "cluster";
+      } else {
+        topology = "single";
+      }
+    }
+
+    if (type === "rocketmq") {
+      const nameservers =
+        mergedValues.rocketmqTopology === "cluster"
+          ? normalizeAddressList(mergedValues.rocketmqHosts, defaultPort)
+          : [];
+      const allHosts = normalizeAddressList(
+        [`${primaryHost}:${primaryPort}`, ...nameservers],
+        defaultPort,
+      );
+      if (mergedValues.rocketmqTopology === "cluster" || allHosts.length > 1) {
+        hosts = allHosts;
+        topology = "cluster";
       } else {
         topology = "single";
       }
@@ -3653,23 +3972,19 @@ const ConnectionModal: React.FC<{
     }
 
     if (type === "redis") {
-      const clusterNodes =
-        mergedValues.redisTopology === "cluster"
-          ? normalizeAddressList(mergedValues.redisHosts, defaultPort)
-          : [];
-      const allHosts = normalizeAddressList(
-        [`${primaryHost}:${primaryPort}`, ...clusterNodes],
+      const redisDraft = resolveRedisConfigDraft(
+        mergedValues,
+        primaryHost,
+        primaryPort,
         defaultPort,
       );
-      if (mergedValues.redisTopology === "cluster" || allHosts.length > 1) {
-        hosts = allHosts;
-        topology = "cluster";
-      } else {
-        topology = "single";
-      }
-      mergedValues.redisDB = Number.isFinite(Number(mergedValues.redisDB))
-        ? Math.max(0, Math.min(15, Math.trunc(Number(mergedValues.redisDB))))
-        : 0;
+      primaryPort = redisDraft.primaryPort;
+      hosts = redisDraft.hosts;
+      topology = redisDraft.topology;
+      redisSentinelMaster = redisDraft.redisSentinelMaster;
+      redisSentinelUser = redisDraft.redisSentinelUser;
+      redisSentinelPassword = redisDraft.redisSentinelPassword;
+      mergedValues.redisDB = redisDraft.redisDB;
     }
 
     const sshConfig = mergedValues.useSSH
@@ -3769,8 +4084,11 @@ const ConnectionModal: React.FC<{
       connectionParams: normalizedConnectionParams,
       timeout: Number(mergedValues.timeout || 30),
       redisDB: Number.isFinite(Number(mergedValues.redisDB))
-        ? Math.max(0, Math.min(15, Math.trunc(Number(mergedValues.redisDB))))
+        ? Math.max(0, Math.trunc(Number(mergedValues.redisDB)))
         : 0,
+      redisSentinelMaster: redisSentinelMaster,
+      redisSentinelUser: redisSentinelUser,
+      redisSentinelPassword: keepPassword ? redisSentinelPassword : "",
       uri: String(mergedValues.uri || "").trim(),
       clickHouseProtocol:
         type === "clickhouse"
@@ -3853,6 +4171,9 @@ const ConnectionModal: React.FC<{
         includeDatabases: undefined,
         includeRedisDatabases: undefined,
         mysqlTopology: "single",
+        rocketmqTopology: "single",
+        mqttTopology: "single",
+        kafkaTopology: "single",
         redisTopology: "single",
         mongoTopology: "single",
         mongoSrv: false,
@@ -3862,7 +4183,13 @@ const ConnectionModal: React.FC<{
         mongoAuthMechanism: "",
         savePassword: true,
         mysqlReplicaHosts: [],
+        rocketmqHosts: [],
+        mqttHosts: [],
+        kafkaHosts: [],
         redisHosts: [],
+        redisSentinelMaster: "",
+        redisSentinelUser: "",
+        redisSentinelPassword: "",
         mongoHosts: [],
         mysqlReplicaUser: "",
         mysqlReplicaPassword: "",
@@ -3912,6 +4239,9 @@ const ConnectionModal: React.FC<{
         httpTunnelUser: "",
         httpTunnelPassword: "",
         mysqlTopology: "single",
+        rocketmqTopology: "single",
+        mqttTopology: "single",
+        kafkaTopology: "single",
         redisTopology: "single",
         mongoTopology: "single",
         mongoSrv: false,
@@ -3921,7 +4251,13 @@ const ConnectionModal: React.FC<{
         mongoAuthMechanism: "",
         savePassword: true,
         mysqlReplicaHosts: [],
+        rocketmqHosts: [],
+        mqttHosts: [],
+        kafkaHosts: [],
         redisHosts: [],
+        redisSentinelMaster: "",
+        redisSentinelUser: "",
+        redisSentinelPassword: "",
         mongoHosts: [],
         mysqlReplicaUser: "",
         mysqlReplicaPassword: "",
@@ -3932,7 +4268,7 @@ const ConnectionModal: React.FC<{
       });
     } else if (type !== "custom") {
       const defaultUser =
-        type === "clickhouse" ? "default" : type === "redis" ? "" : "root";
+        type === "clickhouse" ? "default" : (type === "redis" || type === "elasticsearch" || type === "chroma" || type === "qdrant" || type === "rocketmq" || type === "mqtt" || type === "kafka" || type === "rabbitmq") ? "" : "root";
       const sslCapableType = supportsSSLForType(type);
       setUseSSL(false);
       setUseHttpTunnel(false);
@@ -3951,6 +4287,9 @@ const ConnectionModal: React.FC<{
         httpTunnelUser: "",
         httpTunnelPassword: "",
         mysqlTopology: "single",
+        rocketmqTopology: "single",
+        mqttTopology: "single",
+        kafkaTopology: "single",
         redisTopology: "single",
         mongoTopology: "single",
         mongoSrv: false,
@@ -3960,7 +4299,13 @@ const ConnectionModal: React.FC<{
         mongoAuthMechanism: "",
         savePassword: true,
         mysqlReplicaHosts: [],
+        rocketmqHosts: [],
+        mqttHosts: [],
+        kafkaHosts: [],
         redisHosts: [],
+        redisSentinelMaster: "",
+        redisSentinelUser: "",
+        redisSentinelPassword: "",
         mongoHosts: [],
         mysqlReplicaUser: "",
         mysqlReplicaPassword: "",
@@ -4014,170 +4359,19 @@ const ConnectionModal: React.FC<{
   const driverStatusChecking =
     hasCurrentDriverType && !driverStatusLoaded && step === 2;
 
-  const dbTypeGroups = [
-    {
-      label: t("connection.modal.step1.group.relational"),
-      items: [
-        {
-          key: "mysql",
-          name: "MySQL",
-          icon: getDbIcon("mysql", undefined, 36),
-        },
-        {
-          key: "mariadb",
-          name: "MariaDB",
-          icon: getDbIcon("mariadb", undefined, 36),
-        },
-        {
-          key: "diros",
-          name: "Doris",
-          icon: getDbIcon("diros", undefined, 36),
-        },
-        {
-          key: "starrocks",
-          name: "StarRocks",
-          icon: getDbIcon("starrocks", undefined, 36),
-        },
-        {
-          key: "sphinx",
-          name: "Sphinx",
-          icon: getDbIcon("sphinx", undefined, 36),
-        },
-        {
-          key: "clickhouse",
-          name: "ClickHouse",
-          icon: getDbIcon("clickhouse", undefined, 36),
-        },
-        {
-          key: "postgres",
-          name: "PostgreSQL",
-          icon: getDbIcon("postgres", undefined, 36),
-        },
-        {
-          key: "sqlserver",
-          name: "SQL Server",
-          icon: getDbIcon("sqlserver", undefined, 36),
-        },
-        {
-          key: "iris",
-          name: "InterSystems IRIS",
-          icon: getDbIcon("iris", undefined, 36),
-        },
-        {
-          key: "sqlite",
-          name: "SQLite",
-          icon: getDbIcon("sqlite", undefined, 36),
-        },
-        {
-          key: "duckdb",
-          name: "DuckDB",
-          icon: getDbIcon("duckdb", undefined, 36),
-        },
-        {
-          key: "oracle",
-          name: "Oracle",
-          icon: getDbIcon("oracle", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: t("connection.modal.step1.group.domestic"),
-      items: [
-        {
-          key: "oceanbase",
-          name: "OceanBase",
-          icon: getDbIcon("oceanbase", undefined, 36),
-        },
-        {
-          key: "dameng",
-          name: "Dameng (达梦)",
-          icon: getDbIcon("dameng", undefined, 36),
-        },
-        {
-          key: "kingbase",
-          name: "Kingbase (人大金仓)",
-          icon: getDbIcon("kingbase", undefined, 36),
-        },
-        {
-          key: "highgo",
-          name: "HighGo (瀚高)",
-          icon: getDbIcon("highgo", undefined, 36),
-        },
-        {
-          key: "vastbase",
-          name: "Vastbase (海量)",
-          icon: getDbIcon("vastbase", undefined, 36),
-        },
-        {
-          key: "opengauss",
-          name: "OpenGauss",
-          icon: getDbIcon("opengauss", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: t("connection.modal.step1.group.nosql"),
-      items: [
-        {
-          key: "mongodb",
-          name: "MongoDB",
-          icon: getDbIcon("mongodb", undefined, 36),
-        },
-        {
-          key: "redis",
-          name: "Redis",
-          icon: getDbIcon("redis", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: t("connection.modal.step1.group.timeseries"),
-      items: [
-        {
-          key: "tdengine",
-          name: "TDengine",
-          icon: getDbIcon("tdengine", undefined, 36),
-        },
-      ],
-    },
-    {
-      label: t("connection.modal.step1.group.other"),
-      items: [
-        {
-          key: "jvm",
-          name: "JVM Runtime",
-          step1Name: t("connection_modal.config_section.jvmRuntime.title"),
-          icon: getDbIcon("jvm", undefined, 36),
-        },
-        {
-          key: "custom",
-          name: t("connection_modal.db_type.custom"),
-          icon: getDbIcon("custom", undefined, 36),
-        },
-      ],
-    },
-  ];
+  const dbTypeGroups = useMemo(
+    () =>
+      CONNECTION_TYPE_GROUPS.map((group) => ({
+        ...group,
+        items: group.items.map((item) => ({
+          ...item,
+          icon: getDbIcon(item.key, undefined, 36),
+        })),
+      })),
+    [],
+  );
 
-  const dbTypes = dbTypeGroups.flatMap((g) => g.items);
-  const getDbTypeHint = (type: string) => {
-    switch (type) {
-      case "jvm":
-        return t("connection.modal.step1.hint.jvm");
-      case "custom":
-        return t("connection.modal.step1.hint.custom");
-      case "redis":
-        return t("connection.modal.step1.hint.redis");
-      case "mongodb":
-        return t("connection.modal.step1.hint.mongodb");
-      case "oceanbase":
-        return t("connection.modal.step1.hint.oceanBase");
-      case "sqlite":
-      case "duckdb":
-        return t("connection.modal.step1.hint.file");
-      default:
-        return t("connection.modal.step1.hint.standard");
-    }
-  };
+  const dbTypes = getAllConnectionTypeCatalogItems();
 
   const renderStep1 = () => (
     <div
@@ -4333,10 +4527,10 @@ const ConnectionModal: React.FC<{
                         display: "block",
                       }}
                     >
-                      {item.step1Name || item.name}
+                      {item.name}
                     </Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      {getDbTypeHint(item.key)}
+                      {getConnectionTypeHint(item.key)}
                     </Text>
                   </div>
                 </Card>
@@ -5347,7 +5541,8 @@ const ConnectionModal: React.FC<{
                 dbType === "kingbase" ||
                 dbType === "highgo" ||
                 dbType === "vastbase" ||
-                dbType === "opengauss") &&
+                dbType === "opengauss" ||
+                dbType === "gaussdb") &&
                 renderConfigSectionCard({
                   sectionKey: "service",
                   icon: <DatabaseOutlined />,
@@ -5368,6 +5563,70 @@ const ConnectionModal: React.FC<{
                   ),
                 })}
 
+              {dbType === "kafka" &&
+                renderConfigSectionCard({
+                  sectionKey: "service",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="database"
+                      label="默认 Topic（可选）"
+                      help="留空时必须在 SQL 中显式指定 Topic；填写后可直接执行 SHOW、CONSUME 或 SELECT 预览。"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input {...noAutoCapInputProps} placeholder="例如：orders.events" />
+                    </Form.Item>
+                  ),
+                })}
+
+              {dbType === "rocketmq" &&
+                renderConfigSectionCard({
+                  sectionKey: "service",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="database"
+                      label="默认 Topic（可选）"
+                      help="留空时必须在 SQL 中显式指定 Topic；连接参数可继续补充 groupId、namespace、tag、pullBatchSize 与 startOffset。"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input {...noAutoCapInputProps} placeholder="例如：orders.events" />
+                    </Form.Item>
+                  ),
+                })}
+
+              {dbType === "mqtt" &&
+                renderConfigSectionCard({
+                  sectionKey: "service",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="database"
+                      label="默认 Topic / Filter（可选）"
+                      help="留空时必须在 SQL 中显式指定 Topic；填写后可直接执行 SHOW、CONSUME 或 SELECT 预览。支持使用 /、+、#。"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input {...noAutoCapInputProps} placeholder="例如：devices/+/telemetry" />
+                    </Form.Item>
+                  ),
+                })}
+
+              {dbType === "rabbitmq" &&
+                renderConfigSectionCard({
+                  sectionKey: "service",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="database"
+                      label="默认 Virtual Host（可选）"
+                      help="留空默认使用 /；填写后查询编辑器会以当前 vhost 作为 Queue 浏览与测试发送上下文。"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Input {...noAutoCapInputProps} placeholder="例如：/ 或 orders-vhost" />
+                    </Form.Item>
+                  ),
+                })}
+
               {(dbType === "oracle" || isOceanBaseOracle) &&
                 renderConfigSectionCard({
                   sectionKey: "service",
@@ -5382,15 +5641,15 @@ const ConnectionModal: React.FC<{
                             )
                           : t("connection.modal.field.serviceName.label")
                       }
-                      rules={[
-                        createUriAwareRequiredRule(
-                          isOceanBaseOracle
-                            ? t(
-                                "connection.modal.field.oceanBaseServiceName.required",
-                              )
-                            : t("connection.modal.field.serviceName.required"),
-                        ),
-                      ]}
+                      rules={
+                        isOceanBaseOracle
+                          ? []
+                          : [
+                              createUriAwareRequiredRule(
+                                t("connection.modal.field.serviceName.required"),
+                              ),
+                            ]
+                      }
                       help={
                         isOceanBaseOracle
                           ? t(
@@ -5436,6 +5695,132 @@ const ConnectionModal: React.FC<{
                       },
                     ],
                   }),
+                })}
+
+              {isKafka &&
+                renderConfigSectionCard({
+                  sectionKey: "connectionMode",
+                  icon: <ClusterOutlined />,
+                  children: renderChoiceCards({
+                    fieldName: "kafkaTopology",
+                    value: String(kafkaTopology),
+                    options: [
+                      {
+                        value: "single",
+                        label: "单 Broker",
+                        description: "只配置一个 bootstrap broker，适合本地或简单环境。",
+                      },
+                      {
+                        value: "cluster",
+                        label: "集群模式",
+                        description: "配置多个 bootstrap broker，提高发现与故障切换成功率。",
+                      },
+                    ],
+                  }),
+                })}
+
+              {isRocketMQ &&
+                renderConfigSectionCard({
+                  sectionKey: "connectionMode",
+                  icon: <ClusterOutlined />,
+                  children: renderChoiceCards({
+                    fieldName: "rocketmqTopology",
+                    value: String(rocketmqTopology),
+                    options: [
+                      {
+                        value: "single",
+                        label: "单 NameServer",
+                        description: "只配置一个 NameServer，适合本地或简单环境。",
+                      },
+                      {
+                        value: "cluster",
+                        label: "集群模式",
+                        description: "配置多个 NameServer，提高路由发现与故障切换成功率。",
+                      },
+                    ],
+                  }),
+                })}
+
+              {isMQTT &&
+                renderConfigSectionCard({
+                  sectionKey: "connectionMode",
+                  icon: <ClusterOutlined />,
+                  children: renderChoiceCards({
+                    fieldName: "mqttTopology",
+                    value: String(mqttTopology),
+                    options: [
+                      {
+                        value: "single",
+                        label: "单 Broker",
+                        description: "只配置一个 broker，适合本地或简单环境。",
+                      },
+                      {
+                        value: "cluster",
+                        label: "集群模式",
+                        description: "配置多个 broker，提高连接发现与故障切换成功率。",
+                      },
+                    ],
+                  }),
+                })}
+
+              {isKafka &&
+                kafkaTopology === "cluster" &&
+                renderConfigSectionCard({
+                  sectionKey: "replica",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <Form.Item
+                      name="kafkaHosts"
+                      label="额外 Broker 地址"
+                      help="可输入多个 broker 地址，格式：host:port（回车确认）"
+                    >
+                      <Select
+                        mode="tags"
+                        placeholder="例如：10.10.0.12:9092、10.10.0.13:9092"
+                        tokenSeparators={[",", ";", " "]}
+                      />
+                    </Form.Item>
+                  ),
+                })}
+
+              {isRocketMQ &&
+                rocketmqTopology === "cluster" &&
+                renderConfigSectionCard({
+                  sectionKey: "replica",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <Form.Item
+                      name="rocketmqHosts"
+                      label="额外 NameServer 地址"
+                      help="可输入多个 NameServer 地址，格式：host:port（回车确认）"
+                    >
+                      <Select
+                        mode="tags"
+                        placeholder="例如：10.10.0.12:9876、10.10.0.13:9876"
+                        tokenSeparators={[",", ";", " "]}
+                      />
+                    </Form.Item>
+                  ),
+                })}
+
+              {isMQTT &&
+                mqttTopology === "cluster" &&
+                renderConfigSectionCard({
+                  sectionKey: "replica",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <Form.Item
+                      name="mqttHosts"
+                      label="额外 Broker 地址"
+                      help="可输入多个 broker 地址，格式：host:port（回车确认）"
+                    >
+                      <Select
+                        mode="tags"
+                        placeholder="例如：10.10.0.12:1883、10.10.0.13:1883"
+                        tokenSeparators={[",", ";", " "]}
+                      />
+                    </Form.Item>
+                  ),
                 })}
 
               {isMySQLLike &&
@@ -6021,7 +6406,7 @@ const ConnectionModal: React.FC<{
                           name="user"
                           label={t("connection.modal.field.username.label")}
                           rules={
-                            dbType === "mongodb"
+                            PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)
                               ? []
                               : [
                                   createUriAwareRequiredRule(
@@ -6033,7 +6418,14 @@ const ConnectionModal: React.FC<{
                           }
                           style={{ marginBottom: 0 }}
                         >
-                          <Input {...noAutoCapInputProps} />
+                          <Input
+                            {...noAutoCapInputProps}
+                            placeholder={
+                              PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)
+                                ? "未开启认证可留空"
+                                : undefined
+                            }
+                          />
                         </Form.Item>
                         <Form.Item
                           name="password"
@@ -6131,6 +6523,7 @@ const ConnectionModal: React.FC<{
 
               {!isFileDb &&
                 !isRedis &&
+                !isKafka &&
                 renderConfigSectionCard({
                   sectionKey: "databaseScope",
                   icon: <DatabaseOutlined />,
@@ -7149,6 +7542,9 @@ const ConnectionModal: React.FC<{
           connectionParams: "",
           oceanBaseProtocol: "mysql",
           mysqlTopology: "single",
+          rocketmqTopology: "single",
+          mqttTopology: "single",
+          kafkaTopology: "single",
           redisTopology: "single",
           mongoTopology: "single",
           mongoSrv: false,
@@ -7156,7 +7552,13 @@ const ConnectionModal: React.FC<{
           mongoAuthMechanism: "",
           savePassword: true,
           mysqlReplicaHosts: [],
+          rocketmqHosts: [],
+          mqttHosts: [],
+          kafkaHosts: [],
           redisHosts: [],
+          redisSentinelMaster: "",
+          redisSentinelUser: "",
+          redisSentinelPassword: "",
           mongoHosts: [],
           mysqlReplicaUser: "",
           mysqlReplicaPassword: "",
@@ -7276,19 +7678,32 @@ const ConnectionModal: React.FC<{
             );
           }
           if (changed.redisTopology !== undefined) {
-            const supportedDbs = Array.from({ length: 16 }, (_, i) => i);
+            const nextRedisTopology = String(
+              changed.redisTopology || "single",
+            ).toLowerCase();
+            const currentRedisPort = Number(form.getFieldValue("port") || 0);
+            if (
+              nextRedisTopology === "sentinel" &&
+              (!currentRedisPort || currentRedisPort === 6379)
+            ) {
+              form.setFieldValue("port", 26379);
+            } else if (
+              nextRedisTopology !== "sentinel" &&
+              currentRedisPort === 26379
+            ) {
+              form.setFieldValue("port", 6379);
+            }
+            const supportedDbs = buildRedisDatabaseList(
+              form.getFieldValue("redisDB"),
+              form.getFieldValue("includeRedisDatabases"),
+            );
             setRedisDbList(supportedDbs);
-            const selectedDbsRaw = form.getFieldValue("includeRedisDatabases");
-            const selectedDbs = Array.isArray(selectedDbsRaw)
-              ? selectedDbsRaw.map((entry: any) => Number(entry))
-              : [];
-            const validDbs = selectedDbs
-              .filter((entry: number) => Number.isFinite(entry))
-              .map((entry: number) => Math.trunc(entry))
-              .filter((entry: number) => supportedDbs.includes(entry));
             form.setFieldValue(
               "includeRedisDatabases",
-              validDbs.length > 0 ? validDbs : undefined,
+              normalizeRedisDatabaseSelection(
+                form.getFieldValue("includeRedisDatabases"),
+                supportedDbs,
+              ),
             );
           }
           if (

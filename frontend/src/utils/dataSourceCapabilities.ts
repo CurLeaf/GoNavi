@@ -16,8 +16,46 @@ const normalizeDataSourceToken = (raw: string): string => {
     case 'open_gauss':
     case 'open-gauss':
       return 'opengauss';
+    case 'gaussdb':
+    case 'gauss_db':
+    case 'gauss-db':
+      return 'gaussdb';
+    case 'goldendb':
+    case 'greatdb':
+    case 'gdb':
+      return 'goldendb';
     case 'dm':
       return 'dameng';
+    case 'elastic':
+    case 'elasticsearch':
+      return 'elasticsearch';
+    case 'chromadb':
+    case 'chroma-db':
+      return 'chroma';
+    case 'qdrantdb':
+    case 'qdrant-db':
+      return 'qdrant';
+    case 'rocketmq':
+    case 'rocket-mq':
+    case 'rocket_mq':
+    case 'apache-rocketmq':
+    case 'apache_rocketmq':
+    case 'rmq':
+      return 'rocketmq';
+    case 'mqtt':
+    case 'mqtts':
+      return 'mqtt';
+    case 'apache-iotdb':
+    case 'apache_iotdb':
+      return 'iotdb';
+    case 'kafka':
+    case 'apache-kafka':
+    case 'apache_kafka':
+      return 'kafka';
+    case 'rabbitmq':
+    case 'rabbit-mq':
+    case 'rabbit_mq':
+      return 'rabbitmq';
     case 'intersystems':
     case 'intersystemsiris':
     case 'inter-systems':
@@ -46,6 +84,7 @@ export const resolveDataSourceType = (config: ConnectionLike): string => {
 
 const SQL_QUERY_EXPORT_TYPES = new Set([
   'mysql',
+  'goldendb',
   'mariadb',
   'oceanbase',
   'diros',
@@ -56,6 +95,7 @@ const SQL_QUERY_EXPORT_TYPES = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
   'sqlserver',
   'iris',
   'sqlite',
@@ -68,6 +108,7 @@ const SQL_QUERY_EXPORT_TYPES = new Set([
 
 const COPY_INSERT_TYPES = new Set([
   'mysql',
+  'goldendb',
   'mariadb',
   'oceanbase',
   'diros',
@@ -78,6 +119,7 @@ const COPY_INSERT_TYPES = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
   'sqlserver',
   'iris',
   'sqlite',
@@ -89,8 +131,9 @@ const COPY_INSERT_TYPES = new Set([
 ]);
 
 const QUERY_EDITOR_DISABLED_TYPES = new Set(['redis']);
-const FORCE_READ_ONLY_QUERY_TYPES = new Set(['tdengine', 'clickhouse']);
-const MANUAL_TOTAL_COUNT_TYPES = new Set(['duckdb', 'oracle']);
+const FORCE_READ_ONLY_QUERY_TYPES = new Set(['tdengine', 'iotdb', 'clickhouse', 'rocketmq', 'mqtt', 'kafka', 'rabbitmq']);
+const MESSAGE_PUBLISH_TYPES = new Set(['rocketmq', 'mqtt', 'kafka', 'rabbitmq']);
+const MANUAL_TOTAL_COUNT_TYPES = new Set(['duckdb', 'oracle', 'rocketmq', 'mqtt']);
 const APPROXIMATE_TABLE_COUNT_TYPES = new Set(['duckdb', 'oracle']);
 const APPROXIMATE_TOTAL_PAGE_TYPES = new Set(['duckdb']);
 
@@ -102,6 +145,7 @@ export type DataSourceCapabilities = {
   supportsCreateDatabase: boolean;
   supportsRenameDatabase: boolean;
   supportsDropDatabase: boolean;
+  supportsMessagePublish: boolean;
   forceReadOnlyQueryResult: boolean;
   preferManualTotalCount: boolean;
   supportsApproximateTableCount: boolean;
@@ -110,6 +154,7 @@ export type DataSourceCapabilities = {
 
 const CREATE_DATABASE_TYPES = new Set([
   'mysql',
+  'goldendb',
   'mariadb',
   'oceanbase',
   'diros',
@@ -119,6 +164,7 @@ const CREATE_DATABASE_TYPES = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
   'sqlserver',
   'tdengine',
   'clickhouse',
@@ -131,10 +177,12 @@ const RENAME_DATABASE_TYPES = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
 ]);
 
 const DROP_DATABASE_TYPES = new Set([
   'mysql',
+  'goldendb',
   'mariadb',
   'oceanbase',
   'diros',
@@ -144,6 +192,7 @@ const DROP_DATABASE_TYPES = new Set([
   'highgo',
   'vastbase',
   'opengauss',
+  'gaussdb',
   'tdengine',
   'clickhouse',
 ]);
@@ -158,6 +207,7 @@ export const getDataSourceCapabilities = (config: ConnectionLike): DataSourceCap
     supportsCreateDatabase: CREATE_DATABASE_TYPES.has(type),
     supportsRenameDatabase: RENAME_DATABASE_TYPES.has(type),
     supportsDropDatabase: DROP_DATABASE_TYPES.has(type),
+    supportsMessagePublish: MESSAGE_PUBLISH_TYPES.has(type),
     forceReadOnlyQueryResult: FORCE_READ_ONLY_QUERY_TYPES.has(type),
     preferManualTotalCount: MANUAL_TOTAL_COUNT_TYPES.has(type),
     supportsApproximateTableCount: APPROXIMATE_TABLE_COUNT_TYPES.has(type),

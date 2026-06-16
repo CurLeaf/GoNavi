@@ -6,11 +6,16 @@ const appSource = readFileSync(
   fileURLToPath(new globalThis.URL('./App.tsx', import.meta.url)),
   'utf8',
 );
+const aiPanelBoundarySource = readFileSync(
+  fileURLToPath(new globalThis.URL('./components/ai/AIPanelErrorBoundary.tsx', import.meta.url)),
+  'utf8',
+);
 
 describe('AI panel lazy-load guard', () => {
   it('keeps AI panel failures scoped to the panel area with retry support', () => {
     expect(appSource).toContain("import AIChatPanel from './components/AIChatPanel';");
-    expect(appSource).toContain('class AIPanelErrorBoundary extends React.Component');
+    expect(appSource).toContain("import AIPanelErrorBoundary from './components/ai/AIPanelErrorBoundary';");
+    expect(aiPanelBoundarySource).toContain('class AIPanelErrorBoundary extends React.Component');
     expect(appSource).toContain('<AIPanelErrorBoundary');
     expect(appSource).toContain('key={aiPanelRenderNonce}');
     expect(appSource).toContain('AI 面板加载失败');

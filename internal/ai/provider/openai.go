@@ -19,6 +19,7 @@ const (
 	defaultOpenAIMaxTokens   = 4096
 	defaultOpenAITemperature = 0.7
 	openAIHTTPTimeout        = 120 * time.Second
+	omittedImageNotice       = "【图片已省略：当前模型或上游接口不支持图片输入，请切换支持视觉的模型后重新发送图片。】"
 )
 
 // OpenAIProvider 实现 OpenAI / OpenAI 兼容 API 的 Provider
@@ -205,7 +206,8 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.Chat
 		return nil, err
 	}
 
-	messages := buildOpenAIMessages(req.Messages, p.config.Model, p.baseURL)
+	requestMessages := prepareOpenAIRequestMessages(req.Messages, p.config.Model, p.baseURL)
+	messages := buildOpenAIMessages(requestMessages, p.config.Model, p.baseURL)
 
 	temperature := req.Temperature
 	if temperature <= 0 {
@@ -222,15 +224,8 @@ func (p *OpenAIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.Chat
 
 	respBody, err := p.doRequest(ctx, body)
 	if err != nil {
-		// 当带 tools 的请求返回 400 时，自动降级为不带 tools 的纯文本请求
-		if len(req.Tools) > 0 && isHTTP400Error(err) {
-			fmt.Println("[OpenAI] 模型不支持 Function Calling，自动降级为纯文本模式")
-			body.Tools = nil
-			respBody, err = p.doRequest(ctx, body)
-			if err != nil {
-				return nil, err
-			}
-		} else {
+		respBody, err = p.retryClientRejectedChatRequest(ctx, req, body, err)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -264,7 +259,8 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, cal
 		return err
 	}
 
-	messages := buildOpenAIMessages(req.Messages, p.config.Model, p.baseURL)
+	requestMessages := prepareOpenAIRequestMessages(req.Messages, p.config.Model, p.baseURL)
+	messages := buildOpenAIMessages(requestMessages, p.config.Model, p.baseURL)
 
 	temperature := req.Temperature
 	if temperature <= 0 {
@@ -281,15 +277,8 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, cal
 
 	respBody, err := p.doRequest(ctx, body)
 	if err != nil {
-		// 当带 tools 的请求返回 400 时，自动降级为不带 tools 的纯文本请求
-		if len(req.Tools) > 0 && isHTTP400Error(err) {
-			fmt.Println("[OpenAI] 模型不支持 Function Calling，自动降级为纯文本模式")
-			body.Tools = nil
-			respBody, err = p.doRequest(ctx, body)
-			if err != nil {
-				return err
-			}
-		} else {
+		respBody, err = p.retryClientRejectedChatRequest(ctx, req, body, err)
+		if err != nil {
 			return err
 		}
 	}
@@ -395,6 +384,113 @@ func (p *OpenAIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, cal
 	return nil
 }
 
+func (p *OpenAIProvider) retryClientRejectedChatRequest(ctx context.Context, req ai.ChatRequest, body openAIChatRequest, err error) (io.ReadCloser, error) {
+	if !isHTTP400Error(err) {
+		return nil, err
+	}
+
+	if len(body.Tools) > 0 {
+		fmt.Println("[OpenAI] 模型不支持 Function Calling，自动降级为纯文本模式")
+		body.Tools = nil
+		respBody, retryErr := p.doRequest(ctx, body)
+		if retryErr == nil {
+			return respBody, nil
+		}
+		if !isHTTP400Error(retryErr) {
+			return nil, retryErr
+		}
+		err = retryErr
+	}
+
+	if requestMessagesContainImages(req.Messages) {
+		fmt.Println("[OpenAI] 模型不支持图片输入，自动移除图片后重试")
+		body.Messages = buildOpenAIMessages(stripImagesFromRequestMessages(req.Messages), p.config.Model, p.baseURL)
+		body.Tools = nil
+		respBody, retryErr := p.doRequest(ctx, body)
+		if retryErr == nil {
+			return respBody, nil
+		}
+		return nil, retryErr
+	}
+
+	return nil, err
+}
+
+func prepareOpenAIRequestMessages(messages []ai.Message, modelName string, baseURL string) []ai.Message {
+	if requestMessagesContainImages(messages) && shouldOmitImagesBeforeRequest(modelName, baseURL) {
+		fmt.Println("[OpenAI] 当前模型按文本模型处理，发送前移除图片输入")
+		return stripImagesFromRequestMessages(messages)
+	}
+	return messages
+}
+
+func shouldOmitImagesBeforeRequest(modelName string, baseURL string) bool {
+	model := strings.ToLower(strings.TrimSpace(modelName))
+	base := strings.ToLower(strings.TrimSpace(baseURL))
+	if model == "" {
+		return false
+	}
+
+	visionMarkers := []string{
+		"vision",
+		"vl",
+		"image",
+		"4v",
+		"omni",
+		"gpt-4o",
+		"gpt-4.1",
+		"gpt-5",
+		"glm-4v",
+	}
+	for _, marker := range visionMarkers {
+		if strings.Contains(model, marker) || strings.Contains(base, marker) {
+			return false
+		}
+	}
+
+	textOnlyMarkers := []string{
+		"minimax-m1",
+		"minimax-m2",
+		"kimi-k2",
+		"deepseek",
+		"moonshot-v1",
+	}
+	for _, marker := range textOnlyMarkers {
+		if strings.Contains(model, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func requestMessagesContainImages(messages []ai.Message) bool {
+	for _, message := range messages {
+		if len(message.Images) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func stripImagesFromRequestMessages(messages []ai.Message) []ai.Message {
+	stripped := make([]ai.Message, len(messages))
+	for i, message := range messages {
+		stripped[i] = message
+		if len(message.Images) == 0 {
+			continue
+		}
+
+		stripped[i].Images = nil
+		content := strings.TrimSpace(stripped[i].Content)
+		if content == "" {
+			stripped[i].Content = omittedImageNotice
+			continue
+		}
+		stripped[i].Content = content + "\n\n" + omittedImageNotice
+	}
+	return stripped
+}
+
 func (p *OpenAIProvider) doRequest(ctx context.Context, body interface{}) (io.ReadCloser, error) {
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
@@ -402,8 +498,10 @@ func (p *OpenAIProvider) doRequest(ctx context.Context, body interface{}) (io.Re
 	}
 
 	url := ResolveOpenAICompatibleEndpoint(p.baseURL, "chat/completions")
+	requestLog := logAIUpstreamRequestStart(p.Name(), http.MethodPost, url, body)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonBody))
 	if err != nil {
+		logAIUpstreamRequestFinish(requestLog, 0, err)
 		return nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
 	}
 
@@ -424,15 +522,19 @@ func (p *OpenAIProvider) doRequest(ctx context.Context, body interface{}) (io.Re
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
+		logAIUpstreamRequestFinish(requestLog, 0, err)
 		return nil, fmt.Errorf("发送请求到 %s 失败: %w", url, err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("OpenAI API 返回错误 (HTTP %d): %s", resp.StatusCode, string(bodyBytes))
+		statusErr := fmt.Errorf("OpenAI API 返回错误 (HTTP %d): %s", resp.StatusCode, string(bodyBytes))
+		logAIUpstreamRequestFinish(requestLog, resp.StatusCode, statusErr)
+		return nil, statusErr
 	}
 
+	logAIUpstreamRequestFinish(requestLog, resp.StatusCode, nil)
 	return resp.Body, nil
 }
 

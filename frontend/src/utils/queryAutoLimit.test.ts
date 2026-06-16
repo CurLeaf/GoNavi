@@ -5,6 +5,7 @@ import { applyQueryAutoLimit } from './queryAutoLimit';
 describe('applyQueryAutoLimit', () => {
   const limitDialects = [
     'mysql',
+    'goldendb',
     'mariadb',
     'oceanbase',
     'diros',
@@ -18,6 +19,7 @@ describe('applyQueryAutoLimit', () => {
     'highgo',
     'vastbase',
     'opengauss',
+    'gaussdb',
     'iris',
     'intersystemsiris',
     'sqlite',
@@ -25,6 +27,7 @@ describe('applyQueryAutoLimit', () => {
     'duckdb',
     'clickhouse',
     'tdengine',
+    'iotdb',
   ];
 
   it.each(limitDialects)('adds generic LIMIT for %s connections', (dbType) => {
@@ -62,6 +65,7 @@ describe('applyQueryAutoLimit', () => {
     ['dm8', 'SELECT * FROM (SELECT * FROM users) WHERE ROWNUM <= 500'],
     ['mssql', 'SELECT TOP 500 * FROM users'],
     ['postgresql', 'SELECT * FROM users LIMIT 500'],
+    ['gauss-db', 'SELECT * FROM users LIMIT 500'],
     ['doris', 'SELECT * FROM users LIMIT 500'],
     ['starrocks', 'SELECT * FROM users LIMIT 500'],
     ['sqlite3', 'SELECT * FROM users LIMIT 500'],

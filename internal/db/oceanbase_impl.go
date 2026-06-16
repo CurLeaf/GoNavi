@@ -7,36 +7,25 @@
 //  2. OBProxy Oracle listener —— 标准 Oracle TNS 网络协议
 //
 // Navicat 的"OceanBase"数据源经实测能在 OB MySQL wire 端口上直接连接 Oracle 租户，
-// 证明 OB 服务端识别 OBClient 客户端的关键是 CLIENT_CONNECT_ATTRS 中的特定 attribute
-// 组合，而不是 capability bit 0-31 的扩展（这些 bit 是 MySQL 协议标准定义的）。
-// go-sql-driver/mysql v1.9+ 通过 DSN 参数 connectionAttributes 透传 CLIENT_CONNECT_ATTRS，
-// 因此 **不需要 fork mysql driver** 即可复刻 Navicat 的连接路径。
+// 但本机企业版验证表明：仅通过 go-sql-driver/mysql 注入 CLIENT_CONNECT_ATTRS 不足以
+// 让 Oracle 租户放行，还需要 CLIENT_SUPPORT_ORACLE_MODE 等 OceanBase 私有 capability。
+// 因此 GoNavi 将 Oracle 租户的 MySQL-wire 路径隔离到 OB Oracle 专用 driver。
 //
 // GoNavi 当前路由（按 OceanBase 协议字段选择决定）：
 //   - 协议=MySQL：走 go-sql-driver/mysql，连 MySQL 租户。OB 服务端在 Oracle 租户上返回
 //     "Error 1235 (0A000): Oracle tenant for current client driver is not supported"
 //     时，错误信息提示用户切换到 Oracle 协议。
-//   - 协议=Oracle：先做 mysql wire 端口预探测（probeOceanBaseMySQLWireHandshake）：
-//       * 端口是 OB MySQL wire → 走 mysql wire + OBClient capability 注入路径
-//         （ensureOceanBaseOBClientAttributes + ensureOceanBaseOracleANSIQuotes），
-//         元数据查询通过 OracleDB wrapper 复用 Oracle 方言 SQL，
-//         ApplyChanges 用 applyOracleChangesMySQLWire（"?" 占位符 + 双引号引用）。
-//       * 端口非 OB MySQL wire → 走 sijms/go-ora 连接 OBProxy 的 Oracle listener。
-//
-// OBClient capability attribute 候选清单（基于 OceanBase 公开 connector-j 资料 +
-// 社区经验，**未在本仓库联调验证 Navicat 用的具体组合**）：
-//   - _client_name=OceanBase Connector/J     ← OB connector-j 标准
-//   - _client_version=2.4.5
-//   - __ob_client_attribute_capability_flag=1
-//   - ob_capability_flag=1
-//
-// 默认注入完整候选清单（mysql server 忽略未知 attribute 是安全行为）。用户/DBA 通过
-// ConnectionParams 设置 connectionAttributes 时，会与默认注入合并（用户值优先）。
+//   - 协议=Oracle：先做 mysql wire 端口预探测（probeOceanBaseMySQLWireHandshake）。
+//     识别为 OB MySQL wire 时，走 obconnector-go 的 OB Oracle 专用握手路径；
+//     元数据查询通过 OracleDB wrapper 复用 Oracle 方言 SQL，ApplyChanges 用
+//     applyOracleChangesMySQLWire（"?" 占位符 + 双引号引用）。
+//     端口非 OB MySQL wire 时，走 sijms/go-ora 连接 OBProxy 的 Oracle listener。
 //
 // 历史教训：d2dad751 / 17331ddb / 5/14 两次反转都没在真实 OB Oracle 租户集群上联调，
 // 多次方向摇摆。本次反转有 Navicat 真实工作证据（用户报告：Navicat 用 OceanBase 数据源
-// 类型连同一端口 60014 成功）。后续若收到"OBClient 默认注入仍失败"反馈，需要 Wireshark
-// 抓 Navicat 握手包对照 attribute 组合，不要再盲改方向。
+// 类型连同一端口 60014 成功）以及本机企业版 Oracle 租户验证。go-sql-driver/mysql 即使
+// 注入 connectionAttributes 也无法发出 OceanBase Oracle 租户需要的私有 capability，
+// 因此 Oracle/MySQL-wire 路径必须和普通 OceanBase MySQL 路径隔离。
 package db
 
 import (
@@ -56,13 +45,16 @@ import (
 	"GoNavi-Wails/internal/utils"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
+	_ "github.com/helingjun/obconnector-go"
 )
 
 const (
-	oceanbaseDriverName     = "oceanbase"
-	defaultOceanBasePort    = 2881
-	oceanBaseProtocolMySQL  = "mysql"
-	oceanBaseProtocolOracle = "oracle"
+	oceanbaseDriverName             = "gonavi_oceanbase_mysql"
+	oceanbaseOracleOBClientDriver   = "oboracle"
+	defaultOceanBasePort            = 2881
+	oceanBaseProtocolMySQL          = "mysql"
+	oceanBaseProtocolOracle         = "oracle"
+	oceanBaseOracleProbeReadTimeout = 3 * time.Second
 )
 
 // OceanBaseDB 支持 OceanBase MySQL/Oracle 两种租户协议。
@@ -289,39 +281,6 @@ func withoutOceanBaseProtocolParams(config connection.ConnectionConfig) connecti
 	return next
 }
 
-// ensureOceanBaseOracleANSIQuotes 在 ConnectionParams 中注入 sql_mode='ANSI_QUOTES'，
-// 让 OceanBase Oracle 租户通过 MySQL wire 连接时，把双引号识别为标识符引用（Oracle 语义），
-// 否则元数据查询的列别名 `AS "OWNER"` 和 ApplyChanges 的 `"schema"."table"` 会被当字符串字面量。
-// 用户已显式设置 sql_mode 时追加 ANSI_QUOTES，保留其它 mode。
-func ensureOceanBaseOracleANSIQuotes(raw string) string {
-	values := connectionParamsFromText(raw)
-	if values == nil {
-		values = url.Values{}
-	}
-	existing := strings.TrimSpace(values.Get("sql_mode"))
-	if existing == "" {
-		values.Set("sql_mode", "'ANSI_QUOTES'")
-		return values.Encode()
-	}
-	if strings.Contains(strings.ToUpper(existing), "ANSI_QUOTES") {
-		return values.Encode()
-	}
-	trimmed := strings.Trim(existing, "'")
-	values.Set("sql_mode", "'"+trimmed+",ANSI_QUOTES'")
-	return values.Encode()
-}
-
-// defaultOceanBaseOBClientAttributes 是 GoNavi 在 OceanBase Oracle 租户连接路径上默认注入的
-// CLIENT_CONNECT_ATTRS 列表，用于声明 OBClient 客户端身份让 OB 服务端放行 Oracle 租户。
-// 这些 key/value 基于公开 OceanBase Connector/J 资料整理，未经本仓库真实环境验证。
-// 用户通过 ConnectionParams 中的 connectionAttributes 设置的 attribute 优先级更高。
-var defaultOceanBaseOBClientAttributes = []struct{ Key, Value string }{
-	{Key: "_client_name", Value: "OceanBase Connector/J"},
-	{Key: "_client_version", Value: "2.4.5"},
-	{Key: "__ob_client_attribute_capability_flag", Value: "1"},
-	{Key: "ob_capability_flag", Value: "1"},
-}
-
 // parseMySQLConnectionAttributes 解析 "key1:value1,key2:value2" 格式的 attribute 串。
 // 兼容 mysql DSN 中 connectionAttributes 参数的格式。
 func parseMySQLConnectionAttributes(raw string) map[string]string {
@@ -349,51 +308,6 @@ func parseMySQLConnectionAttributes(raw string) map[string]string {
 	return result
 }
 
-// serializeMySQLConnectionAttributes 把 map 序列化回 mysql DSN 期望的 "key1:value1,key2:value2"。
-// 输出按 key 字典序排序以保证可重现。
-func serializeMySQLConnectionAttributes(attrs map[string]string) string {
-	if len(attrs) == 0 {
-		return ""
-	}
-	keys := make([]string, 0, len(attrs))
-	for k := range attrs {
-		keys = append(keys, k)
-	}
-	// 字典序排序：测试可重现 + 用户视角一致
-	for i := 1; i < len(keys); i++ {
-		for j := i; j > 0 && keys[j-1] > keys[j]; j-- {
-			keys[j-1], keys[j] = keys[j], keys[j-1]
-		}
-	}
-	var b strings.Builder
-	for i, k := range keys {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(k)
-		b.WriteByte(':')
-		b.WriteString(attrs[k])
-	}
-	return b.String()
-}
-
-// ensureOceanBaseOBClientAttributes 把 GoNavi 的默认 OBClient capability attribute 合并到
-// ConnectionParams 的 connectionAttributes 中。用户已设置的 attribute 优先（不覆盖）。
-func ensureOceanBaseOBClientAttributes(rawConnectionParams string) string {
-	values := connectionParamsFromText(rawConnectionParams)
-	if values == nil {
-		values = url.Values{}
-	}
-	existing := parseMySQLConnectionAttributes(values.Get("connectionAttributes"))
-	for _, attr := range defaultOceanBaseOBClientAttributes {
-		if _, ok := existing[attr.Key]; !ok {
-			existing[attr.Key] = attr.Value
-		}
-	}
-	values.Set("connectionAttributes", serializeMySQLConnectionAttributes(existing))
-	return values.Encode()
-}
-
 // promoteOceanBaseOracleURIParams 把 oceanbase:// URI 中的 Oracle 业务参数提升到 ConnectionParams，
 // 让 OracleDB.Connect 在不解析 oceanbase URI 的情况下仍能拿到 PREFETCH_ROWS 等参数。
 func promoteOceanBaseOracleURIParams(config connection.ConnectionConfig) connection.ConnectionConfig {
@@ -412,6 +326,77 @@ func promoteOceanBaseOracleURIParams(config connection.ConnectionConfig) connect
 	mergeConnectionParamValuesWithAllowlist(merged, connectionParamsFromText(config.ConnectionParams), oracleConnectionParamNames)
 	config.ConnectionParams = merged.Encode()
 	return config
+}
+
+func mergeOceanBaseOracleOBClientParams(params url.Values, values url.Values) {
+	if len(values) == 0 {
+		return
+	}
+	for key, vals := range values {
+		name := strings.TrimSpace(key)
+		if name == "" {
+			continue
+		}
+		lowerName := strings.ToLower(name)
+		if lowerName == "connectionattributes" {
+			for _, value := range vals {
+				for attrKey, attrValue := range parseMySQLConnectionAttributes(value) {
+					params.Set("attr."+attrKey, attrValue)
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(lowerName, "attr.") {
+			for _, value := range vals {
+				params.Set(name, value)
+			}
+			continue
+		}
+		switch lowerName {
+		case "timeout", "connecttimeout", "connect timeout":
+			for _, value := range vals {
+				params.Set("timeout", normalizeMySQLDurationParam(value, time.Millisecond))
+			}
+		case "trace", "preset", "cap.add", "cap.drop", "collation", "ob20", "protocol.v2",
+			"ob20.magic", "ob20.disablechecksum", "compress", "usecompression", "use_compression",
+			"tls", "tls.ca", "tls_ca", "tls.cert", "tls_cert", "tls.key", "tls_key":
+			for _, value := range vals {
+				params.Set(name, value)
+			}
+		case "init":
+			for _, value := range vals {
+				params.Add("init", value)
+			}
+		}
+	}
+}
+
+func buildOceanBaseOracleOBClientDSN(config connection.ConnectionConfig) (string, error) {
+	if strings.TrimSpace(config.User) == "" {
+		return "", fmt.Errorf("OceanBase Oracle (OBClient 路径) 缺少用户名")
+	}
+	address := normalizeMySQLAddress(config.Host, config.Port)
+	dsnURL := url.URL{
+		Scheme: "oboracle",
+		Host:   address,
+		User:   url.UserPassword(config.User, config.Password),
+	}
+	if strings.TrimSpace(config.Database) != "" {
+		dsnURL.Path = "/" + strings.TrimSpace(config.Database)
+	}
+
+	params := url.Values{}
+	params.Set("preset", "oboracle")
+	if timeout := getConnectTimeout(config); timeout > 0 {
+		params.Set("timeout", timeout.String())
+	}
+	mergeOceanBaseOracleOBClientParams(params, connectionParamsFromURI(config.URI, "oceanbase", "mysql", "oboracle"))
+	mergeOceanBaseOracleOBClientParams(params, connectionParamsFromText(config.ConnectionParams))
+	if strings.TrimSpace(params.Get("preset")) == "" {
+		params.Set("preset", "oboracle")
+	}
+	dsnURL.RawQuery = params.Encode()
+	return dsnURL.String(), nil
 }
 
 func prepareOceanBaseOracleConfig(config connection.ConnectionConfig) connection.ConnectionConfig {
@@ -435,7 +420,7 @@ func isOceanBaseOracleTenantMySQLDriverError(err error) bool {
 
 func formatOceanBaseMySQLAttemptError(address string, err error) string {
 	if isOceanBaseOracleTenantMySQLDriverError(err) {
-		return fmt.Sprintf("%s 验证失败：当前选择的是 OceanBase MySQL 协议，但服务端返回 Oracle 租户不支持 MySQL 客户端驱动（OB Error 1235）；请在连接配置中将 OceanBase 协议切换为 Oracle，并填写 OBProxy 暴露的 Oracle 协议端口与服务名（Service Name）", address)
+		return fmt.Sprintf("%s 验证失败：当前选择的是 OceanBase MySQL 协议，但服务端返回 Oracle 租户不支持 MySQL 客户端驱动（OB Error 1235）；请在连接配置中将 OceanBase 协议切换为 Oracle。若使用 OBClient/OBServer MySQL-wire 入口，主机和端口可保持不变且服务名可留空；只有连接 OBProxy Oracle listener/TNS 入口时才需要填写服务名（Service Name）", address)
 	}
 	return fmt.Sprintf("%s 验证失败：%v", address, err)
 }
@@ -458,11 +443,42 @@ func annotateOceanBaseOracleConnectError(err error) error {
 		strings.Contains(lower, "unexpected packet"),
 		strings.Contains(lower, "got packets out of order"),
 		strings.Contains(lower, "use of closed network connection"):
-		return fmt.Errorf("%w（OceanBase Oracle TNS 路径握手失败：当前端口可能是 OBServer 的 MySQL wire 协议端口而非 OBProxy 的 Oracle listener。GoNavi 已实现 OBClient capability 注入路径，路由层会优先尝试该路径；如这里仍报此错说明 OBClient 路径也未成功，详见随后的 OBClient 错误诊断）", err)
+		return fmt.Errorf("%w（OceanBase Oracle TNS 路径握手失败：当前端口可能是 OBServer 的 MySQL wire 协议端口而非 OBProxy 的 Oracle listener。GoNavi 会优先尝试 OB Oracle 专用 MySQL-wire 路径；如这里仍报此错说明该路径也未成功，详见随后的 OBClient 错误诊断）", err)
 	case strings.Contains(lower, "ora-"):
 		return fmt.Errorf("%w（OceanBase Oracle 租户认证或服务名失败：请确认服务名（Service Name）、用户名（如 SYS@oracle_tenant#cluster_name）与权限配置）", err)
 	}
 	return fmt.Errorf("%w（OceanBase Oracle 协议连接失败）", err)
+}
+
+type oceanBaseMySQLWireProbeResult struct {
+	isOBMySQLWire  bool
+	probeSucceeded bool
+	tcpReachable   bool
+	err            error
+}
+
+var oceanBaseProbeDialContext = defaultOceanBaseProbeDialContext
+
+func defaultOceanBaseProbeDialContext(ctx context.Context, config connection.ConnectionConfig, address string) (net.Conn, error) {
+	if config.UseSSH {
+		return ssh.DialContextThroughSSH(ctx, config.SSH, "tcp", address)
+	}
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, "tcp", address)
+}
+
+func formatOceanBaseOracleNetworkProbeError(config connection.ConnectionConfig, err error) error {
+	address := normalizeMySQLAddress(config.Host, config.Port)
+	if config.UseSSH {
+		if err == nil {
+			return fmt.Errorf("OceanBase Oracle 连接失败：通过 SSH 跳板机访问目标地址 %s 失败。该错误发生在协议选择之前，和 OBClient/TNS 路径无关；请确认跳板机能访问该内网地址，并检查 SSH 配置、远端防火墙以及 OBProxy/OBServer 监听端口", address)
+		}
+		return fmt.Errorf("OceanBase Oracle 连接失败：通过 SSH 跳板机访问目标地址 %s 失败：%w。该错误发生在协议选择之前，和 OBClient/TNS 路径无关；请确认跳板机能访问该内网地址，并检查 SSH 配置、远端防火墙以及 OBProxy/OBServer 监听端口", address, err)
+	}
+	if err == nil {
+		return fmt.Errorf("OceanBase Oracle 连接失败：目标地址 %s TCP 不可达。该错误发生在协议选择之前，和 OBClient/TNS 路径无关；请确认客户端机器能访问该地址，并检查 VPN/内网路由、防火墙以及 OBProxy/OBServer 监听端口", address)
+	}
+	return fmt.Errorf("OceanBase Oracle 连接失败：目标地址 %s TCP 不可达：%w。该错误发生在协议选择之前，和 OBClient/TNS 路径无关；请确认客户端机器能访问该地址，并检查 VPN/内网路由、防火墙以及 OBProxy/OBServer 监听端口", address, err)
 }
 
 // probeOceanBaseMySQLWireHandshake 通过读取目标端口的 MySQL initial handshake packet
@@ -475,57 +491,72 @@ func annotateOceanBaseOracleConnectError(err error) error {
 //  4. server_version 是从 payload[1] 开始的 null-terminated 字符串
 //  5. server_version 中包含 "oceanbase" / "ob" 关键字时判定为 OB MySQL wire
 //
-// 返回值：(isOBMySQLWire, probeSucceeded)。probeSucceeded=false 表示建连/读包失败，
-// 上层应该兜底执行真实连接尝试（OBClient 优先于 TNS）。
+// 返回值：(isOBMySQLWire, probeSucceeded)。probeSucceeded=false 表示建连或完整握手包读取失败。
+// Connect 使用 probeOceanBaseMySQLWireHandshakeDetail 区分 TCP 不可达与协议探测失败。
 //
 // 容忍度设计：
 //   - protocol_version 不严限（OB 自定义版本号也接受）
 //   - payload 上限 64KB（OB 4.x 的 handshake 可能携带额外的能力位信息）
 //   - 短超时（2s）：探测只为方向选择，主流程的真实超时由 Connect 控制
 func probeOceanBaseMySQLWireHandshake(host string, port int, timeout time.Duration) (bool, bool) {
-	if timeout <= 0 {
-		timeout = 2 * time.Second
+	result := probeOceanBaseMySQLWireHandshakeDetail(connection.ConnectionConfig{Host: host, Port: port}, timeout)
+	return result.isOBMySQLWire, result.probeSucceeded
+}
+
+func probeOceanBaseMySQLWireHandshakeDetail(config connection.ConnectionConfig, timeout time.Duration) oceanBaseMySQLWireProbeResult {
+	return probeOceanBaseMySQLWireHandshakeDetailWithTimeouts(config, timeout, timeout)
+}
+
+func probeOceanBaseMySQLWireHandshakeDetailWithTimeouts(config connection.ConnectionConfig, dialTimeout time.Duration, readTimeout time.Duration) oceanBaseMySQLWireProbeResult {
+	if dialTimeout <= 0 {
+		dialTimeout = 2 * time.Second
 	}
-	addr := normalizeMySQLAddress(host, port)
-	dialer := net.Dialer{Timeout: timeout}
-	conn, err := dialer.Dial("tcp", addr)
+	if readTimeout <= 0 {
+		readTimeout = dialTimeout
+	}
+	addr := normalizeMySQLAddress(config.Host, config.Port)
+	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	defer cancel()
+	conn, err := oceanBaseProbeDialContext(ctx, config, addr)
 	if err != nil {
-		return false, false
+		return oceanBaseMySQLWireProbeResult{err: err}
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(timeout))
+	_ = conn.SetDeadline(time.Now().Add(readTimeout))
 
 	header := make([]byte, 4)
 	if _, err := io.ReadFull(conn, header); err != nil {
-		return false, false
+		// TCP 已经连通但服务端没有主动发送 MySQL handshake，通常是 Oracle TNS listener
+		// 或其它非 MySQL wire 协议端口。此时不能归因为网络不可达。
+		return oceanBaseMySQLWireProbeResult{probeSucceeded: true, tcpReachable: true, err: err}
 	}
 	payloadLen := int(header[0]) | int(header[1])<<8 | int(header[2])<<16
 	// 放宽上限：OB 4.x handshake 可能携带额外 capability info。仍要约束以避免读取异常长度
 	if payloadLen < 1 || payloadLen > 65536 {
-		return false, true
+		return oceanBaseMySQLWireProbeResult{probeSucceeded: true, tcpReachable: true}
 	}
 	payload := make([]byte, payloadLen)
 	if _, err := io.ReadFull(conn, payload); err != nil {
-		return false, false
+		return oceanBaseMySQLWireProbeResult{tcpReachable: true, err: err}
 	}
 
 	// 不再严格检查 protocol_version。OB 自定义版本号也认作 MySQL wire 候选——
 	// 只要 server_version 字符串含 OceanBase/OBProxy 关键字就足以做方向选择。
 	nullIdx := bytes.IndexByte(payload[1:], 0)
 	if nullIdx < 0 {
-		return false, true
+		return oceanBaseMySQLWireProbeResult{probeSucceeded: true, tcpReachable: true}
 	}
 	serverVersion := strings.ToLower(string(payload[1 : 1+nullIdx]))
 	if serverVersion == "" {
-		return false, true
+		return oceanBaseMySQLWireProbeResult{probeSucceeded: true, tcpReachable: true}
 	}
 	if strings.Contains(serverVersion, "oceanbase") || strings.Contains(serverVersion, "obproxy") {
-		return true, true
+		return oceanBaseMySQLWireProbeResult{isOBMySQLWire: true, probeSucceeded: true, tcpReachable: true}
 	}
 	if strings.Contains(serverVersion, "-ob") {
-		return true, true
+		return oceanBaseMySQLWireProbeResult{isOBMySQLWire: true, probeSucceeded: true, tcpReachable: true}
 	}
-	return false, true
+	return oceanBaseMySQLWireProbeResult{probeSucceeded: true, tcpReachable: true}
 }
 
 // connectOracleViaTNS 走 sijms/go-ora，连 OBProxy 暴露的 Oracle listener 端口（标准 TNS）。
@@ -544,8 +575,8 @@ func (o *OceanBaseDB) connectOracleViaTNS(config connection.ConnectionConfig) er
 	return nil
 }
 
-// connectOracleViaOBClient 走 mysql wire + OBClient capability attribute 注入，连 OceanBase
-// MySQL wire 端口上的 Oracle 租户（复刻 Navicat OceanBase 数据源的连接路径）。
+// connectOracleViaOBClient 走 OB Oracle 专用 MySQL-wire 握手，连 OceanBase
+// MySQL wire 端口上的 Oracle 租户。
 // 用于端口预探测识别为 OB MySQL wire 的情况。
 func (o *OceanBaseDB) connectOracleViaOBClient(config connection.ConnectionConfig) error {
 	addresses := collectOceanBaseAddresses(config)
@@ -563,17 +594,29 @@ func (o *OceanBaseDB) connectOracleViaOBClient(config connection.ConnectionConfi
 		candidateConfig.Host = host
 		candidateConfig.Port = port
 		candidateConfig.User, candidateConfig.Password = resolveMySQLCredential(config, index)
-		// 注入 OBClient capability attribute，让 OB 服务端识别为 OBClient 客户端而放行 Oracle 租户。
-		// 同时确保 sql_mode='ANSI_QUOTES'，让后续 Oracle 元数据查询里的双引号被识别为标识符引用。
-		candidateConfig.ConnectionParams = ensureOceanBaseOBClientAttributes(candidateConfig.ConnectionParams)
-		candidateConfig.ConnectionParams = ensureOceanBaseOracleANSIQuotes(candidateConfig.ConnectionParams)
 
-		dsn, err := o.getDSN(candidateConfig)
+		if candidateConfig.UseSSH {
+			forwarder, err := ssh.GetOrCreateLocalForwarder(candidateConfig.SSH, host, port)
+			if err != nil {
+				errorDetails = append(errorDetails, fmt.Sprintf("%s 创建 SSH 本地转发失败：%v", address, err))
+				continue
+			}
+			localHost, localPort, ok := parseHostPortWithDefault(forwarder.LocalAddr, defaultOceanBasePort)
+			if !ok {
+				errorDetails = append(errorDetails, fmt.Sprintf("%s 解析 SSH 本地转发地址失败：%s", address, forwarder.LocalAddr))
+				continue
+			}
+			candidateConfig.Host = localHost
+			candidateConfig.Port = localPort
+			candidateConfig.UseSSH = false
+		}
+
+		dsn, err := buildOceanBaseOracleOBClientDSN(candidateConfig)
 		if err != nil {
 			errorDetails = append(errorDetails, fmt.Sprintf("%s 生成连接串失败：%v", address, err))
 			continue
 		}
-		db, err := sql.Open(oceanbaseDriverName, dsn)
+		db, err := sql.Open(oceanbaseOracleOBClientDriver, dsn)
 		if err != nil {
 			errorDetails = append(errorDetails, fmt.Sprintf("%s 打开失败：%v", address, err))
 			continue
@@ -603,10 +646,8 @@ func (o *OceanBaseDB) connectOracleViaOBClient(config connection.ConnectionConfi
 func formatOceanBaseOBClientAttemptError(address string, err error) string {
 	if isOceanBaseOracleTenantMySQLDriverError(err) {
 		return fmt.Sprintf("%s 验证失败：OceanBase 服务端仍返回 Error 1235 拒绝当前 client driver。"+
-			"GoNavi 已默认注入 OBClient capability attribute（_client_name=OceanBase Connector/J 等），"+
-			"但该组合未能让服务端放行 Oracle 租户。请用 Wireshark 抓 Navicat 连接此 OB 集群的 mysql 握手包，"+
-			"对照 Client Login Request → Connection Attributes 部分确认服务端期望的 key/value，"+
-			"然后在 GoNavi 连接配置的 ConnectionParams 里通过 connectionAttributes=key1:value1,key2:value2 覆盖。"+
+			"GoNavi 已使用 OB Oracle 专用握手路径；如仍失败，请确认该端口是 OceanBase Oracle 租户的 MySQL-wire 入口，"+
+			"并在 ConnectionParams 中通过 preset/cap.add/cap.drop 或 connectionAttributes=key1:value1 覆盖驱动握手参数。"+
 			"详细错误：%v", address, err)
 	}
 	return fmt.Sprintf("%s 验证失败：%v", address, err)
@@ -641,35 +682,36 @@ func (o *OceanBaseDB) Connect(config connection.ConnectionConfig) error {
 
 	if protocol == oceanBaseProtocolOracle {
 		// 预探测目标端口的实际协议，决定走哪条 Oracle 连接路径。
-		probeTimeout := getConnectTimeout(runConfig)
-		if probeTimeout > 3*time.Second {
-			probeTimeout = 3 * time.Second
+		// SSH 跳板机到内网目标的 direct-tcpip 拨号可能慢于 3 秒；只收紧握手读取超时，避免误判内网目标不可达。
+		probeDialTimeout := getConnectTimeout(runConfig)
+		if !runConfig.UseSSH && probeDialTimeout > oceanBaseOracleProbeReadTimeout {
+			probeDialTimeout = oceanBaseOracleProbeReadTimeout
 		}
-		isOBMySQLWire, probed := probeOceanBaseMySQLWireHandshake(runConfig.Host, runConfig.Port, probeTimeout)
+		probeReadTimeout := oceanBaseOracleProbeReadTimeout
+		if probeReadTimeout > probeDialTimeout {
+			probeReadTimeout = probeDialTimeout
+		}
+		probeResult := probeOceanBaseMySQLWireHandshakeDetailWithTimeouts(runConfig, probeDialTimeout, probeReadTimeout)
 		switch {
-		case probed && isOBMySQLWire:
-			// 明确识别为 OB MySQL wire 端口：直接走 OBClient capability 路径
-			logger.Infof("OceanBase 协议=Oracle 预探测：%s:%d 是 OB MySQL wire 端口，走 OBClient capability 注入路径连接 Oracle 租户", runConfig.Host, runConfig.Port)
+		case probeResult.probeSucceeded && probeResult.isOBMySQLWire:
+			// 明确识别为 OB MySQL wire 端口：直接走 OB Oracle 专用 MySQL-wire 路径
+			logger.Infof("OceanBase 协议=Oracle 预探测：%s:%d 是 OB MySQL wire 端口，走 OB Oracle 专用 MySQL-wire 路径连接 Oracle 租户", runConfig.Host, runConfig.Port)
 			return o.connectOracleViaOBClient(runConfig)
-		case probed:
-			// 探测成功但 server_version 不含 OceanBase 标识：可能是真正的 Oracle TNS 端口
-			logger.Infof("OceanBase 协议=Oracle 预探测：%s:%d 不是 OB MySQL wire，走标准 Oracle TNS 协议（OBProxy Oracle listener）", runConfig.Host, runConfig.Port)
-			return o.connectOracleViaTNS(runConfig)
+		case probeResult.probeSucceeded:
+			// 已收到 MySQL handshake，但 server_version 不一定包含 OceanBase 标识。
+			// 部分 OceanBase Oracle 租户会返回通用 MySQL 版本串；此时仍应优先按
+			// OBClient/MySQL-wire 路径连接，失败后再尝试 TNS。
+			logger.Infof("OceanBase 协议=Oracle 预探测：%s:%d 返回 MySQL handshake 但未识别 OceanBase 标识，优先尝试 OB Oracle 专用 MySQL-wire 路径", runConfig.Host, runConfig.Port)
+			return o.connectOracleViaOBClientThenTNS(runConfig)
+		case !probeResult.tcpReachable && probeResult.err != nil:
+			logger.Warnf("OceanBase 协议=Oracle 预探测建连失败：%s:%d，跳过 OBClient/TNS 重复尝试：%v", runConfig.Host, runConfig.Port, probeResult.err)
+			return formatOceanBaseOracleNetworkProbeError(runConfig, probeResult.err)
 		default:
-			// 探测失败（建连或读 handshake 失败）：可能是网络不通、防火墙阻断、或某些 OB 版本不主动发 handshake。
+			// 探测失败但 TCP 已建连：可能是异常截断的握手包，或某些 OB 版本不主动发完整 handshake。
 			// 不能盲选 TNS——用户填 60014/2881 这类端口大概率仍是 OB MySQL wire。
 			// 串行尝试两条真实路径：先 OBClient（命中概率更高），失败再 TNS，合并错误信息。
-			logger.Warnf("OceanBase 协议=Oracle 预探测失败：%s:%d，串行尝试 OBClient capability 与 TNS 两条路径", runConfig.Host, runConfig.Port)
-			obclientErr := o.connectOracleViaOBClient(runConfig)
-			if obclientErr == nil {
-				return nil
-			}
-			logger.Warnf("OceanBase Oracle OBClient 路径失败，继续尝试 TNS 路径：%v", obclientErr)
-			tnsErr := o.connectOracleViaTNS(runConfig)
-			if tnsErr == nil {
-				return nil
-			}
-			return fmt.Errorf("OceanBase Oracle 两条连接路径均失败；OBClient 路径错误：%v；TNS 路径错误：%w", obclientErr, tnsErr)
+			logger.Warnf("OceanBase 协议=Oracle 预探测失败：%s:%d，串行尝试 OB Oracle 专用 MySQL-wire 与 TNS 两条路径", runConfig.Host, runConfig.Port)
+			return o.connectOracleViaOBClientThenTNS(runConfig)
 		}
 	}
 
@@ -720,6 +762,22 @@ func (o *OceanBaseDB) Connect(config connection.ConnectionConfig) error {
 		return fmt.Errorf("连接建立后验证失败：未找到可用的 OceanBase 地址")
 	}
 	return fmt.Errorf("连接建立后验证失败：%s", strings.Join(errorDetails, "；"))
+}
+
+func (o *OceanBaseDB) connectOracleViaOBClientThenTNS(config connection.ConnectionConfig) error {
+	obclientErr := o.connectOracleViaOBClient(config)
+	if obclientErr == nil {
+		return nil
+	}
+	if strings.TrimSpace(config.Database) == "" {
+		return fmt.Errorf("OceanBase Oracle OBClient/MySQL-wire 路径连接失败：%v；当前未填写 Service Name，已跳过 TNS 路径。若连接的是 OBClient/OBServer MySQL-wire 入口，Service Name 可继续留空，请检查主机、端口、用户名、密码和 driver-agent 是否为当前版本；Service Name 只用于 OBProxy Oracle listener/TNS 入口", obclientErr)
+	}
+	logger.Warnf("OceanBase Oracle OBClient 路径失败，继续尝试 TNS 路径：%v", obclientErr)
+	tnsErr := o.connectOracleViaTNS(config)
+	if tnsErr == nil {
+		return nil
+	}
+	return fmt.Errorf("OceanBase Oracle 两条连接路径均失败；OBClient 路径错误：%v；TNS 路径错误：%w", obclientErr, tnsErr)
 }
 
 func (o *OceanBaseDB) activeDatabase() Database {
@@ -851,7 +909,6 @@ func (o *OceanBaseDB) ApplyChanges(tableName string, changes connection.ChangeSe
 
 // applyOracleChangesMySQLWire 在 OceanBase Oracle 租户的 mysql wire 连接上执行
 // DELETE/UPDATE/INSERT，使用 Oracle 风格双引号引用标识符 + mysql wire 风格 "?" 占位符。
-// 需要事先确保 sql_mode='ANSI_QUOTES'（由 ensureOceanBaseOracleANSIQuotes 在 DSN 中注入）。
 func (o *OceanBaseDB) applyOracleChangesMySQLWire(tableName string, changes connection.ChangeSet) error {
 	if o.oracle == nil || o.oracle.conn == nil {
 		return fmt.Errorf("连接未打开")

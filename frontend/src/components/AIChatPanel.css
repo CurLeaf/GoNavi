@@ -305,16 +305,17 @@
     gap: 8px;
     border-radius: 6px;
     border: 1px solid transparent;
-    border-bottom-color: rgba(128, 128, 128, 0.4);
+    border-color: rgba(128, 128, 128, 0.22) !important;
     padding: 6px 10px;
     transition: all 0.2s ease;
-    background: transparent !important;
+    background: rgba(128, 128, 128, 0.03) !important;
     box-shadow: none !important;
 }
 
 .ai-chat-input-wrapper:focus-within {
-    border-color: var(--ant-primary-color, #1677ff) !important;
-    background: rgba(128, 128, 128, 0.05) !important;
+    border-color: rgba(128, 128, 128, 0.28) !important;
+    background: rgba(128, 128, 128, 0.035) !important;
+    box-shadow: none !important;
 }
 
 .ai-chat-input-wrapper textarea {
@@ -334,6 +335,32 @@
 
 .ai-chat-input-wrapper textarea::placeholder {
     opacity: 0.4;
+}
+
+body[data-ui-version="v2"] .gn-v2-ai-panel .ai-chat-input-wrapper,
+body[data-ui-version="v2"] .gn-v2-ai-panel .ai-chat-input-wrapper:focus-within {
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-ai-panel .gn-v2-ai-input-surface,
+body[data-ui-version="v2"] .gn-v2-ai-panel .gn-v2-ai-input-surface:focus-within {
+    border: 0.5px solid var(--gn-br-2) !important;
+    border-radius: 10px !important;
+    background: var(--gn-bg-input) !important;
+    box-shadow: none !important;
+}
+
+body[data-ui-version="v2"] .gn-v2-ai-panel .gn-v2-ai-input-box textarea,
+body[data-ui-version="v2"] .gn-v2-ai-panel .gn-v2-ai-input-box textarea.ant-input:focus,
+body[data-ui-version="v2"] .gn-v2-ai-panel .gn-v2-ai-input-box textarea.ant-input:focus-visible {
+    border: 0 !important;
+    border-radius: 0 !important;
+    outline: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
 }
 
 .ai-chat-send-btn {
@@ -493,17 +520,26 @@
     left: 50% !important;
     transform: translateX(-50%) !important;
     right: auto !important;
-    width: min(100%, 720px);
-    max-width: calc(100% - 32px);
     z-index: 100;
 }
 
+.ai-chat-panel .ant-message {
+    width: min(100%, 720px);
+    max-width: calc(100% - 32px);
+}
+
+.ai-settings-body .ant-message {
+    width: fit-content;
+    max-width: min(520px, calc(100% - 32px));
+}
+
 .ai-settings-body .ant-message .ant-message-notice {
-    width: 100%;
+    width: auto;
 }
 
 .ai-settings-body .ant-message .ant-message-notice-content {
-    width: 100%;
+    width: fit-content;
+    max-width: 100%;
     white-space: normal;
     word-break: break-word;
     overflow-wrap: anywhere;

@@ -3,7 +3,7 @@ import { resolveSqlDialect } from './sqlDialect';
 const isWS = (ch: string) => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
 const isWord = (ch: string) => /[A-Za-z0-9_]/.test(ch);
 
-const getLeadingKeyword = (sql: string): string => {
+export const getLeadingKeyword = (sql: string): string => {
   const text = (sql || '').replace(/\r\n/g, '\n');
   let inSingle = false;
   let inDouble = false;
@@ -94,7 +94,7 @@ const getLeadingKeyword = (sql: string): string => {
   return '';
 };
 
-const splitSqlTail = (sql: string): { main: string; tail: string } => {
+export const splitSqlTail = (sql: string): { main: string; tail: string } => {
   const text = (sql || '').replace(/\r\n/g, '\n');
   let inSingle = false;
   let inDouble = false;
@@ -181,7 +181,7 @@ const splitSqlTail = (sql: string): { main: string; tail: string } => {
   return { main: text.slice(0, mainEnd), tail: text.slice(mainEnd) };
 };
 
-const findTopLevelKeyword = (sql: string, keyword: string): number => {
+export const findTopLevelKeyword = (sql: string, keyword: string): number => {
   const text = sql;
   const kw = keyword.toLowerCase();
   let inSingle = false;

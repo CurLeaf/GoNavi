@@ -37,6 +37,8 @@ type RedisClientImpl struct {
 }
 
 const (
+	redisDefaultDatabaseCount         = 16
+	redisClusterLogicalDBCount        = 16
 	redisScanDefaultTargetCount int64 = 2000
 	redisScanMaxTargetCount     int64 = 10000
 	redisScanMinStepCount       int64 = 200
@@ -48,6 +50,10 @@ const (
 	redisSearchMaxRounds              = 16
 	redisSearchMaxDuration            = 3 * time.Second
 )
+
+var redisDBSwitchConnect = func(client *RedisClientImpl, config connection.ConnectionConfig) error {
+	return client.Connect(config)
+}
 
 // NewRedisClient creates a new Redis client instance
 func NewRedisClient() RedisClient {
@@ -120,6 +126,17 @@ func buildRedisSeedAddrs(config connection.ConnectionConfig) ([]string, error) {
 		return nil, fmt.Errorf("Redis 连接地址不能为空")
 	}
 	return addrs, nil
+}
+
+func redisTopologyDisplayName(topology string) string {
+	switch strings.ToLower(strings.TrimSpace(topology)) {
+	case "sentinel":
+		return "Sentinel"
+	case "cluster":
+		return "集群"
+	default:
+		return "多节点"
+	}
 }
 
 func (r *RedisClientImpl) redisNamespacePrefixForDB(index int) string {
@@ -246,11 +263,11 @@ func sanitizeRedisPassword(password string) string {
 // Connect establishes a connection to Redis
 func (r *RedisClientImpl) Connect(config connection.ConnectionConfig) error {
 	config.Password = sanitizeRedisPassword(config.Password)
+	config.RedisSentinelPassword = sanitizeRedisPassword(config.RedisSentinelPassword)
 	r.config = config
-	if r.config.RedisDB < 0 || r.config.RedisDB > 15 {
+	if r.config.RedisDB < 0 {
 		r.config.RedisDB = 0
 	}
-	r.currentDB = r.config.RedisDB
 	r.forwarder = nil
 	r.client = nil
 	r.singleClient = nil
@@ -264,13 +281,74 @@ func (r *RedisClientImpl) Connect(config connection.ConnectionConfig) error {
 	r.seedAddrs = append([]string(nil), seedAddrs...)
 
 	topology := strings.ToLower(strings.TrimSpace(config.Topology))
-	r.isCluster = topology == "cluster" || len(seedAddrs) > 1
+	isSentinel := topology == "sentinel"
+	r.isCluster = !isSentinel && (topology == "cluster" || len(seedAddrs) > 1)
+	if r.isCluster && r.config.RedisDB >= redisClusterLogicalDBCount {
+		r.config.RedisDB = 0
+	}
+	r.currentDB = r.config.RedisDB
 
-	if r.isCluster && config.UseSSH {
-		return fmt.Errorf("Redis 集群模式暂不支持 SSH 隧道，请关闭 SSH 后重试")
+	if (r.isCluster || isSentinel) && config.UseSSH {
+		return fmt.Errorf("Redis %s模式暂不支持 SSH 隧道，请关闭 SSH 后重试", redisTopologyDisplayName(topology))
 	}
 
 	timeout := normalizeRedisTimeout(config.Timeout)
+	if isSentinel {
+		masterName := strings.TrimSpace(config.RedisSentinelMaster)
+		if masterName == "" {
+			return fmt.Errorf("Redis Sentinel 模式需要填写 master 名称")
+		}
+		attempts := []connection.ConnectionConfig{config}
+		if shouldTryRedisSSLPreferredFallback(config) {
+			attempts = append(attempts, withRedisSSLDisabled(config))
+		}
+
+		var failures []string
+		for idx, attempt := range attempts {
+			var tlsConfig *tls.Config
+			if cfg, err := resolveRedisTLSConfig(attempt); err != nil {
+				failures = append(failures, fmt.Sprintf("第%d次 TLS 配置失败: %v", idx+1, err))
+				continue
+			} else if cfg != nil {
+				if host, _, err := net.SplitHostPort(seedAddrs[0]); err == nil && host != "" {
+					cfg.ServerName = host
+				}
+				tlsConfig = cfg
+			}
+			opts := &redis.FailoverOptions{
+				MasterName:       masterName,
+				SentinelAddrs:    seedAddrs,
+				Username:         strings.TrimSpace(attempt.User),
+				Password:         attempt.Password,
+				SentinelUsername: strings.TrimSpace(attempt.RedisSentinelUser),
+				SentinelPassword: attempt.RedisSentinelPassword,
+				DB:               r.currentDB,
+				DialTimeout:      timeout,
+				ReadTimeout:      timeout,
+				WriteTimeout:     timeout,
+				TLSConfig:        tlsConfig,
+			}
+			sentinelClient := redis.NewFailoverClient(opts)
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			pingErr := sentinelClient.Ping(ctx).Err()
+			cancel()
+			if pingErr != nil {
+				sentinelClient.Close()
+				failures = append(failures, fmt.Sprintf("第%d次连接失败: %v", idx+1, pingErr))
+				continue
+			}
+			r.client = sentinelClient
+			r.singleClient = sentinelClient
+			r.config = attempt
+			if idx > 0 {
+				logger.Warnf("Redis Sentinel SSL 优先连接失败，已回退至明文连接")
+			}
+			logger.Infof("Redis Sentinel 连接成功: sentinels=%s master=%s DB=%d", strings.Join(seedAddrs, ","), masterName, r.currentDB)
+			return nil
+		}
+		return fmt.Errorf("Redis Sentinel 连接失败: %s", strings.Join(failures, "；"))
+	}
+
 	if r.isCluster {
 		attempts := []connection.ConnectionConfig{config}
 		if shouldTryRedisSSLPreferredFallback(config) {
@@ -1276,8 +1354,8 @@ func (r *RedisClientImpl) ExecuteCommand(args []string) (interface{}, error) {
 			if err != nil {
 				return nil, fmt.Errorf("无效数据库索引: %s", args[1])
 			}
-			if index < 0 || index > 15 {
-				return nil, fmt.Errorf("数据库索引必须在 0-15 之间")
+			if index < 0 || index >= redisClusterLogicalDBCount {
+				return nil, fmt.Errorf("数据库索引必须在 0-%d 之间", redisClusterLogicalDBCount-1)
 			}
 			r.currentDB = index
 			r.config.RedisDB = index
@@ -1423,6 +1501,67 @@ func (r *RedisClientImpl) GetServerInfo() (map[string]string, error) {
 	return result, nil
 }
 
+func parseRedisKeyspaceDatabaseKeys(info string) map[int]int64 {
+	dbMap := make(map[int]int64)
+	lines := strings.Split(info, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "db") {
+			// Format: db0:keys=123,expires=0,avg_ttl=0
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			dbIndex, err := strconv.Atoi(strings.TrimPrefix(parts[0], "db"))
+			if err != nil {
+				continue
+			}
+			kvPairs := strings.Split(parts[1], ",")
+			for _, kv := range kvPairs {
+				if strings.HasPrefix(kv, "keys=") {
+					keys, _ := strconv.ParseInt(strings.TrimPrefix(kv, "keys="), 10, 64)
+					dbMap[dbIndex] = keys
+					break
+				}
+			}
+		}
+	}
+	return dbMap
+}
+
+func parseRedisConfiguredDatabaseCount(config map[string]string) (int, bool) {
+	for key, value := range config {
+		if !strings.EqualFold(strings.TrimSpace(key), "databases") {
+			continue
+		}
+		count, err := strconv.Atoi(strings.TrimSpace(value))
+		if err == nil && count > 0 {
+			return count, true
+		}
+	}
+	return 0, false
+}
+
+func (r *RedisClientImpl) resolveRedisDatabaseCount(ctx context.Context, dbMap map[int]int64) int {
+	count := redisDefaultDatabaseCount
+	if r.currentDB >= count {
+		count = r.currentDB + 1
+	}
+	for index := range dbMap {
+		if index >= count {
+			count = index + 1
+		}
+	}
+	config, err := r.client.ConfigGet(ctx, "databases").Result()
+	if err != nil {
+		return count
+	}
+	if configured, ok := parseRedisConfiguredDatabaseCount(config); ok && configured > count {
+		count = configured
+	}
+	return count
+}
+
 // GetDatabases returns information about all databases
 func (r *RedisClientImpl) GetDatabases() ([]RedisDBInfo, error) {
 	if r.client == nil {
@@ -1448,8 +1587,8 @@ func (r *RedisClientImpl) GetDatabases() ([]RedisDBInfo, error) {
 			logger.Warnf("Redis 集群获取 key 数量失败，回退为 0: %v", err)
 			totalKeys = 0
 		}
-		result := make([]RedisDBInfo, 16)
-		for i := 0; i < 16; i++ {
+		result := make([]RedisDBInfo, redisClusterLogicalDBCount)
+		for i := 0; i < redisClusterLogicalDBCount; i++ {
 			result[i] = RedisDBInfo{Index: i, Keys: 0}
 		}
 		result[0].Keys = totalKeys
@@ -1462,36 +1601,10 @@ func (r *RedisClientImpl) GetDatabases() ([]RedisDBInfo, error) {
 		return nil, err
 	}
 
-	// Parse keyspace info
-	dbMap := make(map[int]int64)
-	lines := strings.Split(info, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "db") {
-			// Format: db0:keys=123,expires=0,avg_ttl=0
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) != 2 {
-				continue
-			}
-			dbIndex, err := strconv.Atoi(strings.TrimPrefix(parts[0], "db"))
-			if err != nil {
-				continue
-			}
-			// Parse keys count
-			kvPairs := strings.Split(parts[1], ",")
-			for _, kv := range kvPairs {
-				if strings.HasPrefix(kv, "keys=") {
-					keys, _ := strconv.ParseInt(strings.TrimPrefix(kv, "keys="), 10, 64)
-					dbMap[dbIndex] = keys
-					break
-				}
-			}
-		}
-	}
-
-	// Return all 16 databases (0-15)
-	result := make([]RedisDBInfo, 16)
-	for i := 0; i < 16; i++ {
+	dbMap := parseRedisKeyspaceDatabaseKeys(info)
+	databaseCount := r.resolveRedisDatabaseCount(ctx, dbMap)
+	result := make([]RedisDBInfo, databaseCount)
+	for i := 0; i < databaseCount; i++ {
 		result[i] = RedisDBInfo{
 			Index: i,
 			Keys:  dbMap[i], // Will be 0 if not in map
@@ -1508,61 +1621,30 @@ func (r *RedisClientImpl) SelectDB(index int) error {
 	}
 
 	if r.isCluster {
-		if index < 0 || index > 15 {
-			return fmt.Errorf("数据库索引必须在 0-15 之间")
+		if index < 0 || index >= redisClusterLogicalDBCount {
+			return fmt.Errorf("数据库索引必须在 0-%d 之间", redisClusterLogicalDBCount-1)
 		}
 		r.currentDB = index
 		r.config.RedisDB = index
 		return nil
 	}
 
-	if index < 0 || index > 15 {
-		return fmt.Errorf("数据库索引必须在 0-15 之间")
+	if index < 0 {
+		return fmt.Errorf("数据库索引必须大于等于 0")
 	}
 
-	// Create new client with different DB
-	addr := ""
-	if len(r.seedAddrs) > 0 {
-		addr = r.seedAddrs[0]
-	}
-	if r.forwarder != nil {
-		addr = r.forwarder.LocalAddr
-	}
-	if addr == "" {
-		addr = fmt.Sprintf("%s:%d", r.config.Host, r.config.Port)
-	}
-
-	timeout := normalizeRedisTimeout(r.config.Timeout)
-
-	opts := &redis.Options{
-		Addr:         addr,
-		Username:     strings.TrimSpace(r.config.User),
-		Password:     r.config.Password,
-		DB:           index,
-		DialTimeout:  timeout,
-		ReadTimeout:  timeout,
-		WriteTimeout: timeout,
-	}
-
-	newClient := redis.NewClient(opts)
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	if err := newClient.Ping(ctx).Err(); err != nil {
-		newClient.Close()
+	nextConfig := r.config
+	nextConfig.RedisDB = index
+	nextClient := &RedisClientImpl{}
+	if err := redisDBSwitchConnect(nextClient, nextConfig); err != nil {
 		return fmt.Errorf("切换数据库失败: %w", err)
 	}
 
-	// Close old client and replace
-	if r.client != nil {
-		_ = r.client.Close()
+	oldClient := r.client
+	*r = *nextClient
+	if oldClient != nil {
+		_ = oldClient.Close()
 	}
-	r.client = newClient
-	r.singleClient = newClient
-	r.clusterClient = nil
-	r.currentDB = index
-	r.config.RedisDB = index
 
 	logger.Infof("Redis 切换到数据库: db%d", index)
 	return nil

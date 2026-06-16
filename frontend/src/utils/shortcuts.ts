@@ -6,6 +6,7 @@ export type ShortcutAction =
   | 'runQuery'
   | 'selectCurrentStatement'
   | 'saveQuery'
+  | 'toggleQueryResultsPanel'
   | 'sendAIChatMessage'
   | 'focusSidebarSearch'
   | 'newQueryTab'
@@ -42,8 +43,10 @@ export interface ShortcutActionMeta {
 }
 
 interface ShortcutActionMetaDefinition extends Omit<ShortcutActionMeta, 'label' | 'description'> {
-  labelKey: string;
-  descriptionKey: string;
+  label?: string;
+  description?: string;
+  labelKey?: string;
+  descriptionKey?: string;
 }
 
 const MODIFIER_ORDER = ['Ctrl', 'Meta', 'Alt', 'Shift'] as const;
@@ -98,6 +101,7 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'runQuery',
   'selectCurrentStatement',
   'saveQuery',
+  'toggleQueryResultsPanel',
   'sendAIChatMessage',
   'focusSidebarSearch',
   'newQueryTab',
@@ -118,10 +122,10 @@ const createShortcutActionMeta = (
   definition: ShortcutActionMetaDefinition,
 ): ShortcutActionMeta => ({
   get label() {
-    return localizeShortcut(definition.labelKey);
+    return definition.label ?? localizeShortcut(definition.labelKey || '');
   },
   get description() {
-    return localizeShortcut(definition.descriptionKey);
+    return definition.description ?? localizeShortcut(definition.descriptionKey || '');
   },
   allowInEditable: definition.allowInEditable,
   allowWithoutModifier: definition.allowWithoutModifier,
@@ -144,6 +148,12 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
   saveQuery: {
     labelKey: 'app.shortcuts.action.saveQuery.label',
     descriptionKey: 'app.shortcuts.action.saveQuery.description',
+    scope: 'queryEditor',
+    allowInEditable: true,
+  },
+  toggleQueryResultsPanel: {
+    label: '切换结果区',
+    description: '在查询编辑器中显示或隐藏下方结果区域',
     scope: 'queryEditor',
     allowInEditable: true,
   },
@@ -228,6 +238,10 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   saveQuery: {
     mac: { combo: 'Meta+S', enabled: true },
     windows: { combo: 'Ctrl+S', enabled: true },
+  },
+  toggleQueryResultsPanel: {
+    mac: { combo: 'Meta+Shift+M', enabled: true },
+    windows: { combo: 'Ctrl+Shift+M', enabled: true },
   },
   sendAIChatMessage: {
     mac: { combo: 'Enter', enabled: true },

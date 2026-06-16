@@ -13,23 +13,29 @@ import (
 )
 
 const (
-	aiConfigSchemaVersion = 2
+	aiConfigSchemaVersion = 4
 	aiConfigFileName      = "ai_config.json"
 )
 
 type aiConfig struct {
-	SchemaVersion  int                 `json:"schemaVersion,omitempty"`
-	Providers      []ai.ProviderConfig `json:"providers"`
-	ActiveProvider string              `json:"activeProvider"`
-	SafetyLevel    string              `json:"safetyLevel"`
-	ContextLevel   string              `json:"contextLevel"`
+	SchemaVersion      int                   `json:"schemaVersion,omitempty"`
+	Providers          []ai.ProviderConfig   `json:"providers"`
+	ActiveProvider     string                `json:"activeProvider"`
+	SafetyLevel        string                `json:"safetyLevel"`
+	ContextLevel       string                `json:"contextLevel"`
+	UserPromptSettings ai.UserPromptSettings `json:"userPromptSettings,omitempty"`
+	MCPServers         []ai.MCPServerConfig  `json:"mcpServers,omitempty"`
+	Skills             []ai.SkillConfig      `json:"skills,omitempty"`
 }
 
 type ProviderConfigStoreSnapshot struct {
-	Providers      []ai.ProviderConfig
-	ActiveProvider string
-	SafetyLevel    ai.SQLPermissionLevel
-	ContextLevel   ai.ContextLevel
+	Providers          []ai.ProviderConfig
+	ActiveProvider     string
+	SafetyLevel        ai.SQLPermissionLevel
+	ContextLevel       ai.ContextLevel
+	UserPromptSettings ai.UserPromptSettings
+	MCPServers         []ai.MCPServerConfig
+	Skills             []ai.SkillConfig
 }
 
 type ProviderConfigStoreInspection struct {
@@ -157,11 +163,14 @@ func (s *ProviderConfigStore) Save(snapshot ProviderConfigStoreSnapshot) error {
 	}
 
 	cfg := aiConfig{
-		SchemaVersion:  aiConfigSchemaVersion,
-		Providers:      providers,
-		ActiveProvider: snapshot.ActiveProvider,
-		SafetyLevel:    string(snapshot.SafetyLevel),
-		ContextLevel:   string(snapshot.ContextLevel),
+		SchemaVersion:      aiConfigSchemaVersion,
+		Providers:          providers,
+		ActiveProvider:     snapshot.ActiveProvider,
+		SafetyLevel:        string(snapshot.SafetyLevel),
+		ContextLevel:       string(snapshot.ContextLevel),
+		UserPromptSettings: snapshot.UserPromptSettings,
+		MCPServers:         snapshot.MCPServers,
+		Skills:             snapshot.Skills,
 	}
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -182,6 +191,8 @@ func (s *ProviderConfigStore) readStoredSnapshot() (aiConfig, ProviderConfigStor
 		Providers:    []ai.ProviderConfig{},
 		SafetyLevel:  ai.PermissionReadOnly,
 		ContextLevel: ai.ContextSchemaOnly,
+		MCPServers:   []ai.MCPServerConfig{},
+		Skills:       []ai.SkillConfig{},
 	}
 
 	data, err := os.ReadFile(s.configPath())
@@ -206,6 +217,9 @@ func (s *ProviderConfigStore) readStoredSnapshot() (aiConfig, ProviderConfigStor
 	case ai.ContextSchemaOnly, ai.ContextWithSamples, ai.ContextWithResults:
 		snapshot.ContextLevel = ai.ContextLevel(cfg.ContextLevel)
 	}
+	snapshot.UserPromptSettings = cfg.UserPromptSettings
+	snapshot.MCPServers = append([]ai.MCPServerConfig(nil), cfg.MCPServers...)
+	snapshot.Skills = append([]ai.SkillConfig(nil), cfg.Skills...)
 
 	providers := make([]ai.ProviderConfig, 0, len(cfg.Providers))
 	for _, providerConfig := range cfg.Providers {

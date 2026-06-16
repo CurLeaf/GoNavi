@@ -8,6 +8,7 @@ import { useStore } from '../store';
 import { t } from '../i18n';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { isBackendCancelledResult } from '../utils/connectionExport';
+import { normalizeDriverProgressUpdate, type DriverProgressState } from '../utils/driverProgress';
 import { buildDriverManagerWorkbenchTheme } from '../utils/driverManagerWorkbenchTheme';
 import {
   getDriverLocalImportButtonLabel,
@@ -58,12 +59,6 @@ type DriverProgressEvent = {
   status?: 'start' | 'downloading' | 'done' | 'error';
   message?: string;
   percent?: number;
-};
-
-type ProgressState = {
-  status: 'start' | 'downloading' | 'done' | 'error';
-  message: string;
-  percent: number;
 };
 
 type DriverLocalSourceCode = 'file' | 'directory';
@@ -135,6 +130,7 @@ const buildVersionOptionKey = (option: DriverVersionOption) => `${option.version
 const buildVersionSizeLoadingKey = (driverType: string, optionKey: string) => `${driverType}@@${optionKey}`;
 const DRIVER_STATUS_CACHE_TTL_MS = 60 * 1000;
 const DRIVER_NETWORK_CACHE_TTL_MS = 5 * 60 * 1000;
+const DRIVER_INSTALL_WATCHDOG_MS = 12 * 60 * 1000;
 const normalizeDriverSearchText = (value: string) => String(value || '').trim().toLowerCase();
 const isSlimBuildInstallUnavailable = (row: DriverStatusRow) => row.reasonCode === 'slim_build_missing_driver' && !row.packageInstalled;
 const resolveDriverBatchActionLabel = (actionKind: DriverBatchActionKind) => {
@@ -482,7 +478,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   const [actionState, setActionState] = useState<{ driverType: string; kind: DriverActionKind }>({ driverType: '', kind: '' });
   const [batchAction, setBatchAction] = useState<DriverBatchActionKind>('');
   const [batchProgress, setBatchProgress] = useState<DriverBatchProgressState | null>(null);
-  const [progressMap, setProgressMap] = useState<Record<string, ProgressState>>({});
+  const [progressMap, setProgressMap] = useState<Record<string, DriverProgressState>>({});
   const [operationLogMap, setOperationLogMap] = useState<Record<string, DriverLogEntry[]>>({});
   const [logDriverType, setLogDriverType] = useState('');
   const [logModalOpen, setLogModalOpen] = useState(false);
@@ -493,7 +489,9 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   const [versionLoadingMap, setVersionLoadingMap] = useState<Record<string, boolean>>({});
   const [versionSizeLoadingMap, setVersionSizeLoadingMap] = useState<Record<string, boolean>>({});
   const downloadDirRef = useRef(downloadDir);
-  const batchBusy = batchDirectoryImporting || batchAction !== '' || actionState.kind !== '';
+  const progressMapRef = useRef<Record<string, DriverProgressState>>({});
+  const batchBusy = batchDirectoryImporting || batchAction !== '';
+  const installMutatingBusy = batchBusy || actionState.kind !== '';
 
   useEffect(() => {
     downloadDirRef.current = downloadDir;
@@ -514,6 +512,31 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       backendWrapperKeys,
     )
   ), []);
+
+  const updateDriverProgress = useCallback((driverType: string, incoming: DriverProgressState) => {
+    const normalized = String(driverType || '').trim().toLowerCase();
+    if (!normalized) {
+      return undefined;
+    }
+    const nextProgress = normalizeDriverProgressUpdate(progressMapRef.current[normalized], incoming);
+    progressMapRef.current = {
+      ...progressMapRef.current,
+      [normalized]: nextProgress,
+    };
+    setProgressMap(progressMapRef.current);
+    return nextProgress;
+  }, []);
+
+  const clearDriverProgress = useCallback((driverType: string) => {
+    const normalized = String(driverType || '').trim().toLowerCase();
+    if (!normalized) {
+      return;
+    }
+    const next = { ...progressMapRef.current };
+    delete next[normalized];
+    progressMapRef.current = next;
+    setProgressMap(next);
+  }, []);
 
   const modalBodyStyle = useMemo<React.CSSProperties>(() => ({
     maxHeight: 'calc(100vh - 220px)',
@@ -779,6 +802,8 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           return prev;
         }
         const preferred =
+          (row.needsUpdate ? options.find((option) => option.version === row.pinnedVersion) : undefined) ||
+          (row.needsUpdate ? options.find((option) => option.recommended) : undefined) ||
           options.find((option) => option.version === row.installedVersion) ||
           options.find((option) => option.version === row.pinnedVersion) ||
           options.find((option) => option.recommended) ||
@@ -912,18 +937,19 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         }
         const messageText = String(event.message || '').trim();
         const percent = Math.max(0, Math.min(100, Number(event.percent || 0)));
-        setProgressMap((prev) => ({
-          ...prev,
-          [driverType]: {
-            status,
-            message: messageText,
-            percent,
-          },
-        }));
-        const progressText = `${Math.round(percent)}%`;
-        const statusText = String(status || '').toUpperCase();
-        const lineText = `[${statusText}] ${messageText || '-'} (${progressText})`;
-        const lineSignature = `${statusText}|${messageText || '-'}`;
+        const nextProgress = updateDriverProgress(driverType, {
+          status,
+          message: messageText,
+          percent,
+        });
+        if (!nextProgress) {
+          return;
+        }
+        const progressText = `${Math.round(nextProgress.percent)}%`;
+        const statusText = String(nextProgress.status || '').toUpperCase();
+        const logMessageText = nextProgress.message || '-';
+        const lineText = `[${statusText}] ${logMessageText} (${progressText})`;
+        const lineSignature = `${statusText}|${logMessageText}`;
         appendOperationLog(driverType, lineText, lineSignature, 'update-last');
       });
     } catch (error) {
@@ -934,7 +960,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         off();
       }
     };
-  }, [appendOperationLog]);
+  }, [appendOperationLog, updateDriverProgress]);
 
   const resolveLocalImportVersion = useCallback((row: DriverStatusRow) => {
     const options = versionMap[row.type] || [];
@@ -946,20 +972,41 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     return selectedOption?.version || row.pinnedVersion || '';
   }, [selectedVersionMap, versionMap]);
 
+  const resolveSelectedVersionOption = useCallback((row: DriverStatusRow) => {
+    const options = versionMap[row.type] || [];
+    const selectedKey = selectedVersionMap[row.type];
+    return (
+      options.find((item) => buildVersionOptionKey(item) === selectedKey) ||
+      options.find((item) => item.recommended) ||
+      options[0]
+    );
+  }, [selectedVersionMap, versionMap]);
+
+  const resolveInstalledDriverVersion = useCallback((row: DriverStatusRow) => (
+    String(row.installedVersion || '').trim() || String(row.pinnedVersion || '').trim()
+  ), []);
+
+  const isDriverVersionSwitchPending = useCallback((row: DriverStatusRow) => {
+    if (row.builtIn || (!row.packageInstalled && !row.connectable)) {
+      return false;
+    }
+    const selectedVersion = String(resolveSelectedVersionOption(row)?.version || '').trim();
+    const installedVersion = resolveInstalledDriverVersion(row);
+    return !!selectedVersion && !!installedVersion && selectedVersion !== installedVersion;
+  }, [resolveInstalledDriverVersion, resolveSelectedVersionOption]);
+
   const installDriver = useCallback(async (
     row: DriverStatusRow,
     actionOptions?: { silentToast?: boolean; skipRefresh?: boolean },
   ) => {
     setActionState({ driverType: row.type, kind: 'install' });
-    setProgressMap((prev) => ({
-      ...prev,
-      [row.type]: {
-        status: 'start',
-        message: t('driver.modal.progress.install.start'),
-        percent: 0,
-      },
-    }));
+    updateDriverProgress(row.type, {
+      status: 'start',
+      message: t('driver.modal.progress.install.start'),
+      percent: 0,
+    });
     appendOperationLog(row.type, t('driver.modal.operationLog.autoInstall.start'));
+    let watchdogId: ReturnType<typeof setTimeout> | undefined;
     try {
       let versionOptions = versionMap[row.type] || [];
       if (versionOptions.length === 0) {
@@ -968,12 +1015,25 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       const selectedKey = selectedVersionMap[row.type];
       const selectedOption =
         versionOptions.find((item) => buildVersionOptionKey(item) === selectedKey) ||
+        (row.needsUpdate ? versionOptions.find((item) => item.version === row.pinnedVersion) : undefined) ||
+        (row.needsUpdate ? versionOptions.find((item) => item.recommended) : undefined) ||
         versionOptions.find((item) => item.recommended) ||
         versionOptions[0];
       const selectedVersion = selectedOption?.version || row.pinnedVersion || '';
       const selectedDownloadURL = selectedOption?.downloadUrl || row.defaultDownloadUrl || '';
 
-      const result = await DownloadDriverPackage(row.type, selectedVersion, selectedDownloadURL, downloadDir);
+      const installWatchdog = new Promise<never>((_, reject) => {
+        watchdogId = setTimeout(() => {
+          reject(new Error(`安装 ${row.name} 超过 ${Math.round(DRIVER_INSTALL_WATCHDOG_MS / 60000)} 分钟仍未完成。后台任务可能仍在下载或构建，请稍后刷新状态；如多次出现，请检查代理或改用本地驱动包导入。`));
+        }, DRIVER_INSTALL_WATCHDOG_MS);
+      });
+      const result = await Promise.race([
+        DownloadDriverPackage(row.type, selectedVersion, selectedDownloadURL, downloadDir),
+        installWatchdog,
+      ]);
+      if (watchdogId) {
+        clearTimeout(watchdogId);
+      }
       if (!result?.success) {
         const errText = resolveDriverErrorMessage(
           result?.message,
@@ -1001,10 +1061,25 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         await refreshStatus(false);
       }
       return true;
+    } catch (error) {
+      const errText = error instanceof Error ? error.message : String(error || `安装 ${row.name} 失败`);
+      appendOperationLog(row.type, `[ERROR] ${errText}`);
+      updateDriverProgress(row.type, {
+        status: 'error',
+        message: errText,
+        percent: 0,
+      });
+      if (!actionOptions?.silentToast) {
+        message.error(errText);
+      }
+      return false;
     } finally {
+      if (watchdogId) {
+        clearTimeout(watchdogId);
+      }
       setActionState({ driverType: '', kind: '' });
     }
-  }, [appendOperationLog, downloadDir, loadVersionOptions, refreshStatus, resolveDriverErrorMessage, selectedVersionMap, versionMap]);
+  }, [appendOperationLog, downloadDir, loadVersionOptions, refreshStatus, resolveDriverErrorMessage, selectedVersionMap, updateDriverProgress, versionMap]);
 
   const installDriverFromLocalPath = useCallback(async (
     row: DriverStatusRow,
@@ -1022,14 +1097,11 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     }
 
     setActionState({ driverType: row.type, kind: 'local' });
-    setProgressMap((prev) => ({
-      ...prev,
-      [row.type]: {
-        status: 'start',
-        message: t('driver.modal.progress.localImport.start'),
-        percent: 0,
-      },
-    }));
+    updateDriverProgress(row.type, {
+      status: 'start',
+      message: t('driver.modal.progress.localImport.start'),
+      percent: 0,
+    });
     const selectedVersion = resolveLocalImportVersion(row);
     const versionTip = formatDriverVersionTip(selectedVersion);
     const logVersionTip = formatDriverLogVersionTip(selectedVersion);
@@ -1068,7 +1140,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     } finally {
       setActionState({ driverType: '', kind: '' });
     }
-  }, [appendOperationLog, downloadDir, refreshStatus, resolveDriverErrorMessage, resolveLocalImportVersion]);
+  }, [appendOperationLog, downloadDir, refreshStatus, resolveDriverErrorMessage, resolveLocalImportVersion, updateDriverProgress]);
 
   const installDriverFromLocalFile = useCallback(async (row: DriverStatusRow) => {
     const fileRes = await SelectDriverPackageFile(downloadDir);
@@ -1223,11 +1295,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       if (!options?.silentToast) {
         message.success(t('driver.modal.success.removeDriver', { name: row.name }));
       }
-      setProgressMap((prev) => {
-        const next = { ...prev };
-        delete next[row.type];
-        return next;
-      });
+      clearDriverProgress(row.type);
       if (!options?.skipRefresh) {
         await refreshStatus(false);
       }
@@ -1235,7 +1303,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     } finally {
       setActionState({ driverType: '', kind: '' });
     }
-  }, [appendOperationLog, downloadDir, refreshStatus, resolveDriverErrorMessage]);
+  }, [appendOperationLog, clearDriverProgress, downloadDir, refreshStatus, resolveDriverErrorMessage]);
 
   const resolvePackageSizeText = (row: DriverStatusRow): string => {
     if (row.builtIn) {
@@ -1299,22 +1367,12 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       return <Text type="secondary">{t('driver.modal.card.noInstallNeeded')}</Text>;
     }
 
-    const versionLocked = row.packageInstalled || row.connectable;
-    if (versionLocked) {
-      const installedVersion = String(row.installedVersion || '').trim();
-      const revisionHint = row.needsUpdate ? t('driver.modal.card.versionLock.reinstallSuffix') : '';
-      return (
-        <Text type="secondary" className="driver-manager-version-lock">
-          {installedVersion
-            ? t('driver.modal.card.versionLock.installedVersion', { version: installedVersion, suffix: revisionHint })
-            : t('driver.modal.card.versionLock.installed', { suffix: revisionHint })}
-        </Text>
-      );
-    }
-
     const options = versionMap[row.type] || [];
     const selectedKey = selectedVersionMap[row.type];
     const selectOptions = buildVersionSelectOptions(options);
+    const installedVersion = resolveInstalledDriverVersion(row);
+    const versionSwitchPending = isDriverVersionSwitchPending(row);
+    const selectedOption = resolveSelectedVersionOption(row);
     const mongoHint = row.type === 'mongodb'
       ? t('driver.modal.card.mongodbVersionHint')
       : '';
@@ -1342,6 +1400,13 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             void loadVersionPackageSize(row, value);
           }}
         />
+        {(row.packageInstalled || row.connectable) ? (
+          <Text type="secondary" className="driver-manager-small-text">
+            {versionSwitchPending
+              ? `当前已安装 ${installedVersion || '当前版本'}，已选择 ${selectedOption?.version || '目标版本'}，点击“切换版本”生效`
+              : `${installedVersion ? `${installedVersion}（已安装` : '已安装'}${row.needsUpdate ? '，需重装' : ''}${installedVersion ? '）' : ''}`}
+          </Text>
+        ) : null}
         {mongoHint ? <Text type="secondary" className="driver-manager-small-text">{mongoHint}</Text> : null}
       </div>
     );
@@ -1357,6 +1422,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     const loadingLocal = actionState.driverType === row.type && actionState.kind === 'local';
     const logs = operationLogMap[row.type] || [];
     const hasLogs = logs.length > 0;
+    const versionSwitchPending = isDriverVersionSwitchPending(row);
 
     if (isSlimBuildUnavailable && !row.packageInstalled) {
       return <Text type="secondary">{t('driver.modal.card.fullOnly')}</Text>;
@@ -1365,6 +1431,10 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
     const mainAction = row.needsUpdate ? (
       <Button type="primary" icon={<DownloadOutlined />} disabled={batchBusy} loading={loadingInstallOrRemove} onClick={() => installDriver(row)}>
         {t('driver.modal.card.action.reinstall')}
+      </Button>
+    ) : versionSwitchPending ? (
+      <Button type="primary" icon={<DownloadOutlined />} disabled={batchBusy} loading={loadingInstallOrRemove} onClick={() => installDriver(row)}>
+        切换版本
       </Button>
     ) : row.connectable ? (
       <Button danger icon={<DeleteOutlined />} disabled={batchBusy} loading={loadingInstallOrRemove} onClick={() => removeDriver(row)}>
@@ -1769,7 +1839,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             {t('driver.modal.footer.networkCheck')}
           </Button>
           <Button key="close" type="primary" onClick={onClose}>
-            {batchBusy ? t('driver.modal.footer.background') : t('driver.modal.footer.close')}
+            {installMutatingBusy ? t('driver.modal.footer.background') : t('driver.modal.footer.close')}
           </Button>
         </Space>
       )}
@@ -1922,12 +1992,12 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             <Switch
               checked={forceOverwriteInstalled}
               onChange={(checked) => setForceOverwriteInstalled(checked)}
-              disabled={batchBusy}
+              disabled={batchDirectoryImporting}
             />
             <Button
               type="primary"
               icon={<DownloadOutlined />}
-              disabled={batchBusy || installableRows.length === 0}
+              disabled={installMutatingBusy || installableRows.length === 0}
               loading={batchAction === 'install-all'}
               onClick={() => void installAllDrivers()}
             >
@@ -1936,7 +2006,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             <Button
               type="primary"
               icon={<DownloadOutlined />}
-              disabled={batchBusy || reinstallableRows.length === 0}
+              disabled={installMutatingBusy || reinstallableRows.length === 0}
               loading={batchAction === 'reinstall-updates'}
               onClick={() => void reinstallNeededDrivers()}
             >
@@ -1945,7 +2015,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             <Button
               danger
               icon={<DeleteOutlined />}
-              disabled={batchBusy || removableRows.length === 0}
+              disabled={installMutatingBusy || removableRows.length === 0}
               loading={batchAction === 'remove-all'}
               onClick={() => void removeAllDrivers()}
             >
@@ -1953,7 +2023,6 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             </Button>
             <Button
               icon={<FolderOpenOutlined />}
-              disabled={batchBusy}
               onClick={() => void openDriverDirectory()}
             >
               {t('driver.modal.toolbar.openDirectory')}
@@ -1961,7 +2030,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
             <Button
               icon={<FolderOpenOutlined />}
               loading={batchDirectoryImporting}
-              disabled={batchBusy && !batchDirectoryImporting}
+              disabled={batchDirectoryImporting}
               onClick={() => void installDriversFromDirectory()}
             >
               {t('driver.modal.toolbar.importDirectory')}

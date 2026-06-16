@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -17,12 +18,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-var migratableDataRootEntries = []string{
-	"connections.json",
-	"global_proxy.json",
-	"ai_config.json",
-	"sessions",
-	"drivers",
+var dataRootMigrationExcludedEntries = map[string]struct{}{
+	"storage_root.json": {},
 }
 
 func (a *App) GetDataRootDirectoryInfo() connection.QueryResult {
@@ -122,22 +119,43 @@ func migrateDataRootContents(sourceRoot string, targetRoot string) error {
 	if sourceRoot == "" || targetRoot == "" {
 		return fmt.Errorf("数据目录不能为空")
 	}
-	if filepath.Clean(sourceRoot) == filepath.Clean(targetRoot) {
+	sourceAbs, err := filepath.Abs(sourceRoot)
+	if err != nil {
+		return fmt.Errorf("解析源数据目录失败：%w", err)
+	}
+	targetAbs, err := filepath.Abs(targetRoot)
+	if err != nil {
+		return fmt.Errorf("解析目标数据目录失败：%w", err)
+	}
+	if filepath.Clean(sourceAbs) == filepath.Clean(targetAbs) {
 		return nil
 	}
+	if rel, err := filepath.Rel(sourceAbs, targetAbs); err == nil && rel != "." && rel != "" && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
+		return fmt.Errorf("目标数据目录不能位于源目录内部")
+	}
+	sourceRoot = sourceAbs
+	targetRoot = targetAbs
 	if err := os.MkdirAll(targetRoot, 0o755); err != nil {
 		return fmt.Errorf("创建目标数据目录失败：%w", err)
 	}
-	for _, name := range migratableDataRootEntries {
+	entries, err := os.ReadDir(sourceRoot)
+	if err != nil {
+		return fmt.Errorf("读取源数据目录失败：%w", err)
+	}
+	for _, entry := range entries {
+		name := strings.TrimSpace(entry.Name())
+		if name == "" {
+			continue
+		}
+		if _, excluded := dataRootMigrationExcludedEntries[name]; excluded {
+			continue
+		}
 		sourcePath := filepath.Join(sourceRoot, name)
-		info, err := os.Stat(sourcePath)
+		targetPath := filepath.Join(targetRoot, name)
+		info, err := entry.Info()
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
 			return fmt.Errorf("读取源数据失败（%s）：%w", name, err)
 		}
-		targetPath := filepath.Join(targetRoot, name)
 		if info.IsDir() {
 			if err := copyDir(sourcePath, targetPath); err != nil {
 				return fmt.Errorf("迁移目录失败（%s）：%w", name, err)
@@ -148,6 +166,75 @@ func migrateDataRootContents(sourceRoot string, targetRoot string) error {
 			return fmt.Errorf("迁移文件失败（%s）：%w", name, err)
 		}
 	}
+	if err := rewriteMigratedDataRootState(targetRoot); err != nil {
+		return err
+	}
+	return nil
+}
+
+func rewriteMigratedDataRootState(targetRoot string) error {
+	if err := rewriteSecurityUpdateBackupPaths(targetRoot); err != nil {
+		return err
+	}
+	return nil
+}
+
+func rewriteSecurityUpdateBackupPaths(targetRoot string) error {
+	repo := newSecurityUpdateStateRepository(targetRoot)
+	marker, err := repo.readMarker()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("读取迁移后的安全更新状态失败：%w", err)
+	}
+
+	migrationID := strings.TrimSpace(marker.MigrationID)
+	if migrationID == "" {
+		return nil
+	}
+
+	targetBackupPath := repo.backupPath(migrationID)
+	marker.BackupPath = targetBackupPath
+	if err := repo.writeMarker(marker); err != nil {
+		return fmt.Errorf("写入迁移后的安全更新状态失败：%w", err)
+	}
+
+	manifestPath := repo.manifestPath(migrationID)
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("读取迁移后的安全更新备份清单失败：%w", err)
+		}
+	} else {
+		var manifest securityUpdateBackupManifest
+		if err := json.Unmarshal(manifestData, &manifest); err != nil {
+			return fmt.Errorf("解析迁移后的安全更新备份清单失败：%w", err)
+		}
+		manifest.BackupPath = targetBackupPath
+		if err := securityUpdateWriteJSONFile(manifestPath, manifest); err != nil {
+			return fmt.Errorf("写入迁移后的安全更新备份清单失败：%w", err)
+		}
+	}
+
+	resultPath := repo.resultPath(migrationID)
+	resultData, err := os.ReadFile(resultPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("读取迁移后的安全更新结果失败：%w", err)
+		}
+	} else {
+		var result SecurityUpdateStatus
+		if err := json.Unmarshal(resultData, &result); err != nil {
+			return fmt.Errorf("解析迁移后的安全更新结果失败：%w", err)
+		}
+		result.BackupPath = targetBackupPath
+		result.BackupAvailable = strings.TrimSpace(targetBackupPath) != ""
+		if err := securityUpdateWriteJSONFile(resultPath, result); err != nil {
+			return fmt.Errorf("写入迁移后的安全更新结果失败：%w", err)
+		}
+	}
+
 	return nil
 }
 

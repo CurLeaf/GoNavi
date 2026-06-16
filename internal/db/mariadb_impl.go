@@ -87,7 +87,7 @@ func (m *MariaDB) QueryMulti(query string) ([]connection.ResultSetData, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanMultiRowsForDialect(rows, "mariadb")
 }
 
 func (m *MariaDB) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
@@ -99,7 +99,7 @@ func (m *MariaDB) QueryMultiContext(ctx context.Context, query string) ([]connec
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanMultiRowsForDialect(rows, "mariadb")
 }
 
 func (m *MariaDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
@@ -113,7 +113,7 @@ func (m *MariaDB) QueryContext(ctx context.Context, query string) ([]map[string]
 	}
 	defer rows.Close()
 
-	return scanRows(rows)
+	return scanRowsForDialect(rows, "mariadb")
 }
 
 func (m *MariaDB) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -126,7 +126,7 @@ func (m *MariaDB) Query(query string) ([]map[string]interface{}, []string, error
 		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsForDialect(rows, "mariadb")
 }
 
 func (m *MariaDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
@@ -214,12 +214,7 @@ func (m *MariaDB) GetTables(dbName string) ([]string, error) {
 }
 
 func (m *MariaDB) GetCreateStatement(dbName, tableName string) (string, error) {
-	query := fmt.Sprintf("SHOW CREATE TABLE `%s`.`%s`", dbName, tableName)
-	if dbName == "" {
-		query = fmt.Sprintf("SHOW CREATE TABLE `%s`", tableName)
-	}
-
-	data, _, err := m.Query(query)
+	data, _, err := m.Query(buildMySQLShowCreateTableQuery(dbName, tableName))
 	if err != nil {
 		return "", err
 	}

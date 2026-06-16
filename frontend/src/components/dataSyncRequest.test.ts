@@ -40,6 +40,8 @@ describe('buildDataSyncRequest', () => {
     const payload = buildDataSyncRequest({
       sourceConfig: { type: 'mysql' },
       targetConfig: { type: 'mysql' },
+      sourceDatabase: ' app ',
+      targetDatabase: ' warehouse ',
       selectedTables: ['users'],
       sourceDatasetMode: 'query',
       sourceQuery: '  SELECT id, name FROM active_users  ',
@@ -61,6 +63,8 @@ describe('buildDataSyncRequest', () => {
       autoAddColumns: false,
       targetTableStrategy: 'existing_only',
       createIndexes: false,
+      sourceDatabase: 'app',
+      targetDatabase: 'warehouse',
       jobId: 'job-1',
     });
   });

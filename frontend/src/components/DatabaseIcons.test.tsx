@@ -4,11 +4,40 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import { DB_ICON_TYPES, getDbIcon, getDbIconLabel } from './DatabaseIcons';
 
+const BRAND_ICON_CASES: Array<[string, string, string]> = [
+  ['elasticsearch', 'Elasticsearch', 'elasticsearch.svg'],
+  ['oceanbase', 'OceanBase', 'oceanbase.png'],
+  ['oracle', 'Oracle', 'oracle.ico'],
+  ['starrocks', 'StarRocks', 'starrocks.png'],
+  ['kingbase', '金仓', 'kingbase.ico'],
+  ['dameng', '达梦', 'dameng.png'],
+  ['vastbase', 'VastBase', 'vastbase.svg'],
+  ['opengauss', 'OpenGauss', 'opengauss.ico'],
+  ['gaussdb', 'GaussDB', 'gaussdb.ico'],
+  ['goldendb', 'GoldenDB', 'goldendb.ico'],
+  ['highgo', '瀚高', 'highgo.ico'],
+  ['iris', 'InterSystems IRIS', 'iris.png'],
+  ['tdengine', 'TDengine', 'tdengine.ico'],
+  ['iotdb', 'Apache IoTDB', 'iotdb.svg'],
+  ['rocketmq', 'RocketMQ', 'rocketmq.png'],
+  ['mqtt', 'MQTT', 'mqtt.svg'],
+  ['kafka', 'Kafka', 'kafka.png'],
+  ['rabbitmq', 'RabbitMQ', 'rabbitmq.svg'],
+  ['chroma', 'Chroma', 'chroma.svg'],
+  ['qdrant', 'Qdrant', 'qdrant.svg'],
+  ['jvm', 'JVM', 'jvm.ico'],
+];
+
 describe('DatabaseIcons', () => {
-  it('includes InterSystems IRIS in the selectable database icons', () => {
-    expect(DB_ICON_TYPES).toContain('iris');
-    expect(getDbIconLabel('iris')).toBe('InterSystems IRIS');
-  });
+  for (const [type, label, asset] of BRAND_ICON_CASES) {
+    it(`includes ${label} in the selectable database icons`, () => {
+      expect(DB_ICON_TYPES).toContain(type);
+      expect(getDbIconLabel(type)).toBe(label);
+      const markup = renderToStaticMarkup(<>{getDbIcon(type, undefined, 22)}</>);
+      expect(markup).toContain(asset);
+      expect(markup).toContain(`alt="${type}"`);
+    });
+  }
 
   it('wraps database icons in a consistent frame for sidebar sizing', () => {
     const mysqlMarkup = renderToStaticMarkup(<>{getDbIcon('mysql', undefined, 22)}</>);

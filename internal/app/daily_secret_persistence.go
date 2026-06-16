@@ -13,40 +13,43 @@ var runtimeGOOS = func() string {
 
 func extractConnectionSecretBundle(config connection.ConnectionConfig) connectionSecretBundle {
 	return connectionSecretBundle{
-		Password:             config.Password,
-		SSHPassword:          config.SSH.Password,
-		ProxyPassword:        config.Proxy.Password,
-		HTTPTunnelPassword:   config.HTTPTunnel.Password,
-		MySQLReplicaPassword: config.MySQLReplicaPassword,
-		MongoReplicaPassword: config.MongoReplicaPassword,
-		OpaqueURI:            config.URI,
-		OpaqueDSN:            config.DSN,
+		Password:              config.Password,
+		SSHPassword:           config.SSH.Password,
+		ProxyPassword:         config.Proxy.Password,
+		HTTPTunnelPassword:    config.HTTPTunnel.Password,
+		MySQLReplicaPassword:  config.MySQLReplicaPassword,
+		MongoReplicaPassword:  config.MongoReplicaPassword,
+		RedisSentinelPassword: config.RedisSentinelPassword,
+		OpaqueURI:             config.URI,
+		OpaqueDSN:             config.DSN,
 	}
 }
 
 func toDailyConnectionBundle(bundle connectionSecretBundle) dailysecret.ConnectionBundle {
 	return dailysecret.ConnectionBundle{
-		Password:             bundle.Password,
-		SSHPassword:          bundle.SSHPassword,
-		ProxyPassword:        bundle.ProxyPassword,
-		HTTPTunnelPassword:   bundle.HTTPTunnelPassword,
-		MySQLReplicaPassword: bundle.MySQLReplicaPassword,
-		MongoReplicaPassword: bundle.MongoReplicaPassword,
-		OpaqueURI:            bundle.OpaqueURI,
-		OpaqueDSN:            bundle.OpaqueDSN,
+		Password:              bundle.Password,
+		SSHPassword:           bundle.SSHPassword,
+		ProxyPassword:         bundle.ProxyPassword,
+		HTTPTunnelPassword:    bundle.HTTPTunnelPassword,
+		MySQLReplicaPassword:  bundle.MySQLReplicaPassword,
+		MongoReplicaPassword:  bundle.MongoReplicaPassword,
+		RedisSentinelPassword: bundle.RedisSentinelPassword,
+		OpaqueURI:             bundle.OpaqueURI,
+		OpaqueDSN:             bundle.OpaqueDSN,
 	}
 }
 
 func fromDailyConnectionBundle(bundle dailysecret.ConnectionBundle) connectionSecretBundle {
 	return connectionSecretBundle{
-		Password:             bundle.Password,
-		SSHPassword:          bundle.SSHPassword,
-		ProxyPassword:        bundle.ProxyPassword,
-		HTTPTunnelPassword:   bundle.HTTPTunnelPassword,
-		MySQLReplicaPassword: bundle.MySQLReplicaPassword,
-		MongoReplicaPassword: bundle.MongoReplicaPassword,
-		OpaqueURI:            bundle.OpaqueURI,
-		OpaqueDSN:            bundle.OpaqueDSN,
+		Password:              bundle.Password,
+		SSHPassword:           bundle.SSHPassword,
+		ProxyPassword:         bundle.ProxyPassword,
+		HTTPTunnelPassword:    bundle.HTTPTunnelPassword,
+		MySQLReplicaPassword:  bundle.MySQLReplicaPassword,
+		MongoReplicaPassword:  bundle.MongoReplicaPassword,
+		RedisSentinelPassword: bundle.RedisSentinelPassword,
+		OpaqueURI:             bundle.OpaqueURI,
+		OpaqueDSN:             bundle.OpaqueDSN,
 	}
 }
 
@@ -58,6 +61,7 @@ func stripConnectionSecretFields(config connection.ConnectionConfig) connection.
 	stripped.HTTPTunnel.Password = ""
 	stripped.MySQLReplicaPassword = ""
 	stripped.MongoReplicaPassword = ""
+	stripped.RedisSentinelPassword = ""
 	stripped.URI = ""
 	stripped.DSN = ""
 	return stripped

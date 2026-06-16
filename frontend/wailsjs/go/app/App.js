@@ -46,8 +46,20 @@ export function CreateDatabase(arg1, arg2) {
   return window['go']['app']['App']['CreateDatabase'](arg1, arg2);
 }
 
+export function CreateSQLDirectory(arg1, arg2) {
+  return window['go']['app']['App']['CreateSQLDirectory'](arg1, arg2);
+}
+
+export function CreateSQLFile(arg1, arg2) {
+  return window['go']['app']['App']['CreateSQLFile'](arg1, arg2);
+}
+
 export function CreateSchema(arg1, arg2, arg3) {
   return window['go']['app']['App']['CreateSchema'](arg1, arg2, arg3);
+}
+
+export function DBCommitTransaction(arg1) {
+  return window['go']['app']['App']['DBCommitTransaction'](arg1);
 }
 
 export function DBConnect(arg1) {
@@ -94,8 +106,20 @@ export function DBQueryMulti(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DBQueryMulti'](arg1, arg2, arg3, arg4);
 }
 
+export function DBQueryMultiTransactional(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['DBQueryMultiTransactional'](arg1, arg2, arg3, arg4);
+}
+
 export function DBQueryWithCancel(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DBQueryWithCancel'](arg1, arg2, arg3, arg4);
+}
+
+export function DBReleaseConnection(arg1) {
+  return window['go']['app']['App']['DBReleaseConnection'](arg1);
+}
+
+export function DBRollbackTransaction(arg1) {
+  return window['go']['app']['App']['DBRollbackTransaction'](arg1);
 }
 
 export function DBShowCreateTable(arg1, arg2, arg3) {
@@ -118,6 +142,18 @@ export function DeleteConnection(arg1) {
   return window['go']['app']['App']['DeleteConnection'](arg1);
 }
 
+export function DeleteQuery(arg1) {
+  return window['go']['app']['App']['DeleteQuery'](arg1);
+}
+
+export function DeleteSQLDirectory(arg1) {
+  return window['go']['app']['App']['DeleteSQLDirectory'](arg1);
+}
+
+export function DeleteSQLFile(arg1) {
+  return window['go']['app']['App']['DeleteSQLFile'](arg1);
+}
+
 export function DismissSecurityUpdateReminder() {
   return window['go']['app']['App']['DismissSecurityUpdateReminder']();
 }
@@ -136,6 +172,10 @@ export function DropDatabase(arg1, arg2) {
 
 export function DropFunction(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DropFunction'](arg1, arg2, arg3, arg4);
+}
+
+export function DropSchema(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DropSchema'](arg1, arg2, arg3);
 }
 
 export function DropTable(arg1, arg2, arg3) {
@@ -172,6 +212,10 @@ export function ExportQuery(arg1, arg2, arg3, arg4, arg5) {
 
 export function ExportSQLFile(arg1, arg2) {
   return window['go']['app']['App']['ExportSQLFile'](arg1, arg2);
+}
+
+export function ExportSchemaSQL(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExportSchemaSQL'](arg1, arg2, arg3, arg4);
 }
 
 export function ExportTable(arg1, arg2, arg3, arg4) {
@@ -222,8 +266,16 @@ export function GetSavedConnections() {
   return window['go']['app']['App']['GetSavedConnections']();
 }
 
+export function GetSavedQueries() {
+  return window['go']['app']['App']['GetSavedQueries']();
+}
+
 export function GetSecurityUpdateStatus() {
   return window['go']['app']['App']['GetSecurityUpdateStatus']();
+}
+
+export function GetUnboundSavedQueries() {
+  return window['go']['app']['App']['GetUnboundSavedQueries']();
 }
 
 export function ImportConfigFile() {
@@ -248,6 +300,10 @@ export function ImportLegacyConnections(arg1) {
 
 export function ImportLegacyGlobalProxy(arg1) {
   return window['go']['app']['App']['ImportLegacyGlobalProxy'](arg1);
+}
+
+export function ImportSavedQueries(arg1) {
+  return window['go']['app']['App']['ImportSavedQueries'](arg1);
 }
 
 export function InstallLocalDriverPackage(arg1, arg2, arg3, arg4) {
@@ -374,8 +430,16 @@ export function PreviewImportFile(arg1) {
   return window['go']['app']['App']['PreviewImportFile'](arg1);
 }
 
+export function ReadAppLogTail(arg1, arg2) {
+  return window['go']['app']['App']['ReadAppLogTail'](arg1, arg2);
+}
+
 export function ReadSQLFile(arg1) {
   return window['go']['app']['App']['ReadSQLFile'](arg1);
+}
+
+export function RebindSavedQuery(arg1, arg2) {
+  return window['go']['app']['App']['RebindSavedQuery'](arg1, arg2);
 }
 
 export function RedisConnect(arg1) {
@@ -482,6 +546,18 @@ export function RenameDatabase(arg1, arg2, arg3) {
   return window['go']['app']['App']['RenameDatabase'](arg1, arg2, arg3);
 }
 
+export function RenameSQLDirectory(arg1, arg2) {
+  return window['go']['app']['App']['RenameSQLDirectory'](arg1, arg2);
+}
+
+export function RenameSQLFile(arg1, arg2) {
+  return window['go']['app']['App']['RenameSQLFile'](arg1, arg2);
+}
+
+export function RenameSchema(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['RenameSchema'](arg1, arg2, arg3, arg4);
+}
+
 export function RenameTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['RenameTable'](arg1, arg2, arg3, arg4);
 }
@@ -520,6 +596,10 @@ export function SaveConnection(arg1) {
 
 export function SaveGlobalProxy(arg1) {
   return window['go']['app']['App']['SaveGlobalProxy'](arg1);
+}
+
+export function SaveQuery(arg1) {
+  return window['go']['app']['App']['SaveQuery'](arg1);
 }
 
 export function SelectCertificateFile(arg1, arg2) {
@@ -564,6 +644,10 @@ export function SetMacNativeWindowControls(arg1) {
 
 export function SetWindowTranslucency(arg1, arg2) {
   return window['go']['app']['App']['SetWindowTranslucency'](arg1, arg2);
+}
+
+export function Shutdown() {
+  return window['go']['app']['App']['Shutdown']();
 }
 
 export function StartSecurityUpdate(arg1) {

@@ -4,7 +4,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TabData } from '../types';
-import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
+import { DUCKDB_ROWID_LOCATOR_COLUMN, ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 import DataViewer from './DataViewer';
 
 const storeState = vi.hoisted(() => ({
@@ -184,6 +184,26 @@ describe('DataViewer safe editing locator', () => {
     renderer.unmount();
   });
 
+  it('enables table preview editing when primary key metadata uses boolean aliases', async () => {
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ column_name: 'ID', isPrimary: true }, { column_name: 'NAME' }],
+    });
+
+    const renderer = await renderAndReload();
+
+    expect(dataGridState.latestProps?.pkColumns).toEqual(['ID']);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'primary-key',
+      columns: ['ID'],
+      valueColumns: ['ID'],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
   it('uses a unique index when the table has no primary key', async () => {
     backendApp.DBGetColumns.mockResolvedValue({
       success: true,
@@ -205,6 +225,65 @@ describe('DataViewer safe editing locator', () => {
     });
     expect(dataGridState.latestProps?.readOnly).toBe(false);
     expect(messageApi.warning).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
+  it('keeps DuckDB table preview writable when unique index metadata arrives as a safe locator', async () => {
+    storeState.connections[0].config.type = 'duckdb';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'slug', key: '' }, { name: 'name', key: '' }],
+    });
+    backendApp.DBGetIndexes.mockResolvedValue({
+      success: true,
+      data: [{ name: 'events_slug_key', columnName: 'slug', nonUnique: 0, seqInIndex: 1, indexType: 'UNIQUE' }],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-duckdb-unique', dbName: 'main', tableName: 'main.events', title: 'events' }));
+
+    expect(dataGridState.latestProps?.pkColumns).toEqual([]);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'unique-key',
+      columns: ['slug'],
+      valueColumns: ['slug'],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+    renderer.unmount();
+  });
+
+  it('uses hidden DuckDB rowid when no primary or unique key is available', async () => {
+    storeState.connections[0].config.type = 'duckdb';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'name', key: '' }],
+    });
+    backendApp.DBGetIndexes.mockResolvedValue({
+      success: true,
+      data: [],
+    });
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      fields: ['name', DUCKDB_ROWID_LOCATOR_COLUMN],
+      data: [{ name: 'launch', [DUCKDB_ROWID_LOCATOR_COLUMN]: 17 }],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-duckdb-rowid', dbName: 'main', tableName: 'main.events', title: 'events' }));
+
+    expect(dataGridState.latestProps?.pkColumns).toEqual([]);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'duckdb-rowid',
+      columns: ['rowid'],
+      valueColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+      hiddenColumns: [DUCKDB_ROWID_LOCATOR_COLUMN],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+    expect(backendApp.DBQuery.mock.calls.some((call: any[]) => String(call[2]).includes(`rowid AS "${DUCKDB_ROWID_LOCATOR_COLUMN}"`))).toBe(true);
     renderer.unmount();
   });
 
@@ -316,6 +395,28 @@ describe('DataViewer safe editing locator', () => {
     expect(tableQueries.length).toBeGreaterThan(0);
     expect(tableQueries.every((sql: string) => !/\border\s+by\b/i.test(sql))).toBe(true);
     expect(tableQueries[tableQueries.length - 1]).toContain('LIMIT 101 OFFSET 0');
+    renderer.unmount();
+  });
+
+  it('keeps DuckDB table preview writable when primary key metadata arrives for a qualified table name', async () => {
+    storeState.connections[0].config.type = 'duckdb';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'id', key: 'PRI' }, { name: 'name', key: '' }],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-duckdb-pri', dbName: 'main', tableName: 'main.events', title: 'events' }));
+
+    expect(dataGridState.latestProps?.pkColumns).toEqual(['id']);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'primary-key',
+      columns: ['id'],
+      valueColumns: ['id'],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
     renderer.unmount();
   });
 

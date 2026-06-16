@@ -25,6 +25,8 @@ const (
 	optionalAgentMethodClose            = "close"
 	optionalAgentMethodMetadata         = "metadata"
 	optionalAgentMethodPing             = "ping"
+	optionalAgentMethodOpenSession      = "openSession"
+	optionalAgentMethodCloseSession     = "closeSession"
 	optionalAgentMethodQuery            = "query"
 	optionalAgentMethodExec             = "exec"
 	optionalAgentMethodGetDatabases     = "getDatabases"
@@ -43,6 +45,7 @@ const (
 type optionalAgentRequest struct {
 	ID        int64                        `json:"id"`
 	Method    string                       `json:"method"`
+	SessionID string                       `json:"sessionId,omitempty"`
 	Config    *connection.ConnectionConfig `json:"config,omitempty"`
 	Query     string                       `json:"query,omitempty"`
 	TimeoutMs int64                        `json:"timeoutMs,omitempty"`
@@ -298,6 +301,14 @@ type OptionalDriverAgentDB struct {
 	client     *optionalDriverAgentClient
 }
 
+type optionalDriverAgentSession struct {
+	client    *optionalDriverAgentClient
+	driver    string
+	sessionID string
+	mu        sync.Mutex
+	closed    bool
+}
+
 func newOptionalDriverAgentDatabase(driverType string) databaseFactory {
 	normalized := normalizeRuntimeDriverType(driverType)
 	return func() Database {
@@ -418,6 +429,100 @@ func (d *OptionalDriverAgentDB) Exec(query string) (int64, error) {
 		return 0, err
 	}
 	return affected, nil
+}
+
+func (d *OptionalDriverAgentDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	client, err := d.requireClient()
+	if err != nil {
+		return nil, err
+	}
+	var sessionID string
+	if err := client.call(optionalAgentRequest{
+		Method:    optionalAgentMethodOpenSession,
+		TimeoutMs: timeoutMsFromContext(ctx),
+	}, &sessionID, nil, nil); err != nil {
+		return nil, err
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, fmt.Errorf("%s 驱动代理未返回事务会话 ID", driverDisplayName(d.driverType))
+	}
+	return &optionalDriverAgentSession{
+		client:    client,
+		driver:    d.driverType,
+		sessionID: sessionID,
+	}, nil
+}
+
+func (s *optionalDriverAgentSession) Query(query string) ([]map[string]interface{}, []string, error) {
+	return s.QueryContext(context.Background(), query)
+}
+
+func (s *optionalDriverAgentSession) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	if err := s.ensureOpen(); err != nil {
+		return nil, nil, err
+	}
+	var data []map[string]interface{}
+	var fields []string
+	if err := s.client.call(optionalAgentRequest{
+		Method:    optionalAgentMethodQuery,
+		SessionID: s.sessionID,
+		Query:     query,
+		TimeoutMs: timeoutMsFromContext(ctx),
+	}, &data, &fields, nil); err != nil {
+		return nil, nil, err
+	}
+	return data, fields, nil
+}
+
+func (s *optionalDriverAgentSession) Exec(query string) (int64, error) {
+	return s.ExecContext(context.Background(), query)
+}
+
+func (s *optionalDriverAgentSession) ExecContext(ctx context.Context, query string) (int64, error) {
+	if err := s.ensureOpen(); err != nil {
+		return 0, err
+	}
+	var affected int64
+	if err := s.client.call(optionalAgentRequest{
+		Method:    optionalAgentMethodExec,
+		SessionID: s.sessionID,
+		Query:     query,
+		TimeoutMs: timeoutMsFromContext(ctx),
+	}, nil, nil, &affected); err != nil {
+		return 0, err
+	}
+	return affected, nil
+}
+
+func (s *optionalDriverAgentSession) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil
+	}
+	s.closed = true
+	sessionID := s.sessionID
+	s.mu.Unlock()
+	return s.client.call(optionalAgentRequest{
+		Method:    optionalAgentMethodCloseSession,
+		SessionID: sessionID,
+	}, nil, nil, nil)
+}
+
+func (s *optionalDriverAgentSession) ensureOpen() error {
+	if s == nil || s.client == nil {
+		return fmt.Errorf("连接未打开")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || strings.TrimSpace(s.sessionID) == "" {
+		return fmt.Errorf("%s 事务会话已关闭", driverDisplayName(s.driver))
+	}
+	return nil
 }
 
 func (d *OptionalDriverAgentDB) GetDatabases() ([]string, error) {

@@ -11,6 +11,7 @@ import { DBGetColumns, DBGetIndexes, DBQuery, DBGetForeignKeys, DBGetTriggers, D
 import { hasIndexFormChanged, normalizeIndexFormFromRow, shouldRestoreOriginalIndex, toggleIndexSelection as getNextIndexSelection, type IndexDisplaySnapshot } from './tableDesignerIndexUtils';
 import { buildIndexCreateSqlPreview } from './tableDesignerIndexSql';
 import { buildAlterTablePreviewSql, buildCreateTablePreviewSql, hasAlterTableDraftChanges, type StarRocksCreateTableOptions, type StarRocksDistributionType, type StarRocksKeyModel, type StarRocksTableKind } from './tableDesignerSchemaSql';
+import { summarizeDuckDbPrimaryKeyChange } from './tableDesignerDuckDbPrimaryKey';
 import { normalizeSchemaStatementForExecution, parseTableCommentFromDDL, splitSchemaExecutionStatements } from './tableDesignerExecutionSql';
 import TableDesignerSqlPreview from './TableDesignerSqlPreview';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
@@ -21,6 +22,7 @@ import {
     getColumnDefinitionExtra,
     normalizeColumnDefinition,
 } from '../utils/columnDefinition';
+import { buildEditableTriggerSql } from '../utils/triggerEditSql';
 import {
     isMysqlFamilyDialect as isMysqlFamilySqlDialect,
     isOracleLikeDialect as isOracleLikeSqlDialect,
@@ -31,6 +33,7 @@ import {
     resolveColumnTypeOptions,
     resolveSqlDialect,
 } from '../utils/sqlDialect';
+import { splitQualifiedNameLast, stripIdentifierQuotes } from '../utils/qualifiedName';
 
 interface EditableColumn extends ColumnDefinition {
     _key: string;
@@ -382,7 +385,23 @@ const SortableRow = ({ children, ...props }: RowProps) => {
   );
 };
 
-const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
+const renderDesignerCellField = (content: React.ReactNode, className?: string) => (
+  <div className={`table-designer-cell-field${className ? ` ${className}` : ''}`}>
+    {content}
+  </div>
+);
+
+const renderDesignerCellCheck = (content: React.ReactNode, className?: string) => (
+  <div className={`table-designer-cell-check${className ? ` ${className}` : ''}`}>
+    {content}
+  </div>
+);
+
+const renderDesignerHeaderTitle = (title: string) => (
+  <span className="table-designer-header-title">{title}</span>
+);
+
+const TableDesigner: React.FC<{ tab: TabData; embedded?: boolean }> = ({ tab, embedded = false }) => {
   const isNewTable = !tab.tableName;
   
   const [columns, setColumns] = useState<EditableColumn[]>([]);
@@ -453,8 +472,11 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
   const [commentEditorColumnKey, setCommentEditorColumnKey] = useState('');
   const [commentEditorColumnName, setCommentEditorColumnName] = useState('');
   const [commentEditorValue, setCommentEditorValue] = useState('');
+  const [inlineCommentEditingKey, setInlineCommentEditingKey] = useState('');
   
   const connections = useStore(state => state.connections);
+  const addTab = useStore(state => state.addTab);
+  const setActiveContext = useStore(state => state.setActiveContext);
   const theme = useStore(state => state.theme);
   const appearance = useStore(state => state.appearance);
   const i18nLanguage = useTableDesignerI18nLanguage();
@@ -483,6 +505,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
 
   const openCommentEditor = useCallback((record: EditableColumn) => {
       if (!record?._key) return;
+      setInlineCommentEditingKey('');
       setCommentEditorColumnKey(record._key);
       setCommentEditorColumnName(record.name || '');
       setCommentEditorValue(record.comment || '');
@@ -544,6 +567,10 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
   }, [columns]);
 
   useEffect(() => {
+      setInlineCommentEditingKey(prev => (prev && columns.some(c => c._key === prev) ? prev : ''));
+  }, [columns]);
+
+  useEffect(() => {
       return () => {
           if (focusHighlightTimerRef.current !== null) {
               window.clearTimeout(focusHighlightTimerRef.current);
@@ -577,6 +604,15 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
       return true;
   }, [activeKey, readOnly]);
 
+  const startInlineCommentEdit = useCallback((record: EditableColumn) => {
+      if (readOnly || !record?._key) return;
+      setInlineCommentEditingKey(record._key);
+  }, [readOnly]);
+
+  const finishInlineCommentEdit = useCallback(() => {
+      setInlineCommentEditingKey('');
+  }, []);
+
   useEffect(() => {
       const pendingKey = pendingFocusColumnKeyRef.current;
       if (!pendingKey || activeKey !== 'columns') return;
@@ -603,64 +639,80 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
       const columnTypeOptions = resolveColumnTypeOptions(getDbType());
       const initialCols = [
           { 
-              title: t('table_designer.column.name', undefined, i18nLanguage),
+              title: renderDesignerHeaderTitle(t('table_designer.column.name', undefined, i18nLanguage)),
               dataIndex: 'name', 
               key: 'name', 
               width: 180,
               render: (text: string, record: EditableColumn) => readOnly ? text : (
-                  <Input {...noAutoCapInputProps} value={text} onChange={e => handleColumnChange(record._key, 'name', e.target.value)} variant="borderless" />
+                  renderDesignerCellField(
+                      <Input {...noAutoCapInputProps} value={text} onChange={e => handleColumnChange(record._key, 'name', e.target.value)} variant="borderless" />
+                  )
               )
           },
           { 
-              title: t('table_designer.column.type', undefined, i18nLanguage),
+              title: renderDesignerHeaderTitle(t('table_designer.column.type', undefined, i18nLanguage)),
               dataIndex: 'type', 
               key: 'type', 
               width: 150,
               render: (text: string, record: EditableColumn) => readOnly ? text : (
-                  <AutoComplete options={columnTypeOptions} value={text} onChange={val => handleColumnChange(record._key, 'type', val)} style={{ width: '100%' }} variant="borderless" />
+                  renderDesignerCellField(
+                      <AutoComplete options={columnTypeOptions} value={text} onChange={val => handleColumnChange(record._key, 'type', val)} style={{ width: '100%' }} variant="borderless" />,
+                      'is-compact'
+                  )
               )
           },
           { 
-              title: t('table_designer.column.primary_key', undefined, i18nLanguage),
+              title: renderDesignerHeaderTitle(t('table_designer.column.primary_key', undefined, i18nLanguage)),
               dataIndex: 'key', 
               key: 'key', 
               width: 60,
               align: 'center',
               render: (text: string, record: EditableColumn) => (
-                  <Checkbox checked={text === 'PRI'} disabled={readOnly} onChange={e => handleColumnChange(record._key, 'key', e.target.checked ? 'PRI' : '')} />
+                  renderDesignerCellCheck(
+                      <Checkbox checked={text === 'PRI'} disabled={readOnly} onChange={e => handleColumnChange(record._key, 'key', e.target.checked ? 'PRI' : '')} />,
+                      'is-left-aligned'
+                  )
               )
           },
           {
-              title: t('table_designer.column.auto_increment', undefined, i18nLanguage),
+              title: renderDesignerHeaderTitle(t('table_designer.column.auto_increment', undefined, i18nLanguage)),
               dataIndex: 'isAutoIncrement',
               key: 'isAutoIncrement',
               width: 60,
               align: 'center',
               render: (val: boolean, record: EditableColumn) => (
-                  <Checkbox checked={val} disabled={readOnly} onChange={e => handleColumnChange(record._key, 'isAutoIncrement', e.target.checked)} />
+                  renderDesignerCellCheck(
+                      <Checkbox checked={val} disabled={readOnly} onChange={e => handleColumnChange(record._key, 'isAutoIncrement', e.target.checked)} />,
+                      'is-left-aligned'
+                  )
               )
           },
           { 
-              title: t('table_designer.column.not_null', undefined, i18nLanguage),
+              title: renderDesignerHeaderTitle(t('table_designer.column.not_null', undefined, i18nLanguage)),
               dataIndex: 'nullable', 
               key: 'nullable', 
               width: 80,
               align: 'center',
               render: (text: string, record: EditableColumn) => (
-                  <Checkbox checked={text === 'NO'} disabled={readOnly || record.key === 'PRI'} onChange={e => handleColumnChange(record._key, 'nullable', e.target.checked ? 'NO' : 'YES')} />
+                  renderDesignerCellCheck(
+                      <Checkbox checked={text === 'NO'} disabled={readOnly || record.key === 'PRI'} onChange={e => handleColumnChange(record._key, 'nullable', e.target.checked ? 'NO' : 'YES')} />,
+                      'is-left-aligned'
+                  )
               )
           },
           { 
-              title: t('table_designer.column.default', undefined, i18nLanguage),
+              title: renderDesignerHeaderTitle(t('table_designer.column.default', undefined, i18nLanguage)),
               dataIndex: 'default', 
               key: 'default', 
               width: 180, // Increased default width
               render: (text: string, record: EditableColumn) => readOnly ? text : (
-                  <AutoComplete options={COMMON_DEFAULTS} value={text} onChange={val => handleColumnChange(record._key, 'default', val)} style={{ width: '100%' }} variant="borderless" placeholder="NULL" />
+                  renderDesignerCellField(
+                      <AutoComplete options={COMMON_DEFAULTS} value={text} onChange={val => handleColumnChange(record._key, 'default', val)} style={{ width: '100%' }} variant="borderless" placeholder="NULL" />
+                  )
               )
           },
           { 
-              title: t('table_designer.column.comment', undefined, i18nLanguage),
+              title: renderDesignerHeaderTitle(t('table_designer.column.comment', undefined, i18nLanguage)),
               dataIndex: 'comment', 
               key: 'comment',
               width: 200,
@@ -669,13 +721,26 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
                       <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text || ''}</div>
                   </Tooltip>
               ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <Input
-                          value={text}
-                          onChange={e => handleColumnChange(record._key, 'comment', e.target.value)}
-                          onDoubleClick={() => openCommentEditor(record)}
-                          variant="borderless"
-                      />
+                  <div className="table-designer-cell-field table-designer-comment-field">
+                      {inlineCommentEditingKey !== record._key ? (
+                          <Tooltip title={text || ''}>
+                              <div
+                                  className={`table-designer-comment-display${text ? '' : ' is-empty'}`}
+                                  onDoubleClick={() => startInlineCommentEdit(record)}
+                              >
+                                  {text || '\u00A0'}
+                              </div>
+                          </Tooltip>
+                      ) : (
+                          <Input
+                              value={text}
+                              onChange={e => handleColumnChange(record._key, 'comment', e.target.value)}
+                              onBlur={finishInlineCommentEdit}
+                              onPressEnter={finishInlineCommentEdit}
+                              autoFocus={inlineCommentEditingKey === record._key}
+                              variant="borderless"
+                          />
+                      )}
                       <Tooltip title={t('table_designer.tooltip.edit_comment_popup', undefined, i18nLanguage)}>
                           <Button
                               type="text"
@@ -688,16 +753,25 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
               )
           },
           ...(readOnly ? [] : [{
-              title: t('table_designer.column.actions', undefined, i18nLanguage),
+              title: renderDesignerHeaderTitle(t('table_designer.column.actions', undefined, i18nLanguage)),
               key: 'action',
-              width: 60,
+              width: 92,
+              className: 'table-designer-action-column',
+              onHeaderCell: () => ({ className: 'table-designer-action-column' }),
               render: (_: any, record: EditableColumn) => (
-                  <Button type="text" danger icon={<DeleteOutlined />} onClick={() => handleDeleteColumn(record._key)} />
+                  <div className="table-designer-action-cell">
+                      <Tooltip title={t('table_designer.tooltip.edit_comment_popup', undefined, i18nLanguage)}>
+                          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openCommentEditor(record)} />
+                      </Tooltip>
+                      <Tooltip title={t('table_designer.action.delete', undefined, i18nLanguage)}>
+                          <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={() => handleDeleteColumn(record._key)} />
+                      </Tooltip>
+                  </div>
               )
           }])
       ];
       setTableColumns(initialCols);
-  }, [connections, i18nLanguage, openCommentEditor, readOnly, tab.connectionId]); // Re-create when datasource dialect, language, or readonly state changes
+  }, [connections, finishInlineCommentEdit, i18nLanguage, inlineCommentEditingKey, openCommentEditor, readOnly, startInlineCommentEdit, tab.connectionId]); // Re-create when datasource dialect, language, inline comment state, or readonly state changes
 
   const flushResizeGhost = useCallback(() => {
     resizeRafRef.current = null;
@@ -885,6 +959,7 @@ const TableDesigner: React.FC<{ tab: TabData }> = ({ tab }) => {
       if (normalized === 'mssql' || normalized === 'sql_server' || normalized === 'sql-server') return 'sqlserver';
       if (normalized === 'doris') return 'diros';
       if (normalized === 'open_gauss' || normalized === 'open-gauss') return 'opengauss';
+      if (normalized === 'gauss_db' || normalized === 'gauss-db') return 'gaussdb';
       return normalized;
   };
 
@@ -936,6 +1011,7 @@ END;`;
       case 'highgo':
       case 'vastbase':
       case 'opengauss':
+      case 'gaussdb':
         return `CREATE OR REPLACE FUNCTION trigger_function_name()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -994,6 +1070,7 @@ END;`;
       case 'highgo':
       case 'vastbase':
       case 'opengauss':
+      case 'gaussdb':
         return `DROP TRIGGER IF EXISTS "${triggerName}" ON "${tblName}"`;
       case 'sqlserver':
         return `DROP TRIGGER IF EXISTS [${triggerName}]`;
@@ -1016,8 +1093,6 @@ END;`;
 
   const handleEditTrigger = () => {
     if (!selectedTrigger) return;
-    setTriggerEditMode('edit');
-    // 构建完整的 CREATE TRIGGER 语句
     const dbType = getDbType();
     const tblName = tab.tableName || '';
     let createSql = '';
@@ -1031,8 +1106,19 @@ ${selectedTrigger.statement}`;
       createSql = selectedTrigger.statement || '-- Trigger definition unavailable';
     }
 
-    setTriggerEditSql(createSql);
-    setIsTriggerEditModalOpen(true);
+    const dbName = String(tab.dbName || '').trim();
+    setActiveContext({ connectionId: tab.connectionId, dbName });
+    addTab({
+      id: `query-edit-trigger-${tab.connectionId}-${dbName}-${tab.tableName || ''}-${selectedTrigger.name}-${Date.now()}`,
+      title: `修改触发器: ${selectedTrigger.name}`,
+      type: 'query',
+      connectionId: tab.connectionId,
+      dbName,
+      query: buildEditableTriggerSql(selectedTrigger.name, createSql, {
+        dropSql: buildDropTriggerSql(selectedTrigger.name),
+      }),
+      queryMode: 'object-edit',
+    });
   };
 
   const handleDeleteTrigger = () => {
@@ -1418,26 +1504,11 @@ ${selectedTrigger.statement}`;
   const escapeDoubleQuoteIdentifier = (name: string) => String(name || '').replace(/"/g, '""');
   const escapeSqlString = (value: string) => String(value || '').replace(/'/g, "''");
 
-  const stripIdentifierQuotes = (part: string): string => {
-      const text = String(part || '').trim();
-      if (!text) return '';
-      if ((text.startsWith('`') && text.endsWith('`')) || (text.startsWith('"') && text.endsWith('"'))) {
-          return text.slice(1, -1).trim();
-      }
-      if (text.startsWith('[') && text.endsWith(']')) {
-          return text.slice(1, -1).trim();
-      }
-      return text;
-  };
-
   const splitQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
-      const raw = String(qualifiedName || '').trim();
-      if (!raw) return { schemaName: '', objectName: '' };
-      const idx = raw.lastIndexOf('.');
-      if (idx <= 0 || idx >= raw.length - 1) return { schemaName: '', objectName: raw };
+      const parsed = splitQualifiedNameLast(qualifiedName);
       return {
-          schemaName: stripIdentifierQuotes(raw.substring(0, idx)),
-          objectName: stripIdentifierQuotes(raw.substring(idx + 1)),
+          schemaName: parsed.parentPath,
+          objectName: parsed.objectName,
       };
   };
 
@@ -1445,7 +1516,7 @@ ${selectedTrigger.statement}`;
   const isOracleLikeDialect = (dbType: string): boolean => isOracleLikeSqlDialect(dbType);
   const isSqlServerDialect = (dbType: string): boolean => isSqlServerSqlDialect(dbType);
   const isMysqlLikeDialect = (dbType: string): boolean => isMysqlFamilySqlDialect(dbType);
-  const isNonRelationalDialect = (dbType: string): boolean => dbType === 'redis' || dbType === 'mongodb';
+  const isNonRelationalDialect = (dbType: string): boolean => dbType === 'redis' || dbType === 'mongodb' || dbType === 'elasticsearch';
   const lacksAlterForeignKeySupport = (dbType: string): boolean => dbType === 'sqlite' || dbType === 'duckdb' || dbType === 'tdengine';
   const lacksTableCommentSupport = (dbType: string): boolean => dbType === 'sqlite';
 
@@ -2213,6 +2284,13 @@ END;`;
           setIsPreviewOpen(true);
       } else {
           const tableInfo = resolveTableInfo();
+          if (tableInfo.dbType === 'duckdb') {
+              const pkChange = summarizeDuckDbPrimaryKeyChange(originalColumns, columns);
+              if (pkChange.isUnsupportedChange) {
+                  message.warning('DuckDB 当前仅支持为无主键表新增主键；已有主键的修改或删除需要通过重建表完成。');
+                  return;
+              }
+          }
           const sql = buildAlterTablePreviewSql({
               dbType: tableInfo.dbType,
               tableName: tableInfo.qualifiedName,
@@ -2281,29 +2359,36 @@ END;`;
 
   const columnSelectCol = useMemo(() => ({
       title: () => (
-          <Checkbox
-              checked={isAllColumnsSelected}
-              indeterminate={isColumnsIndeterminate}
-              onChange={(e: any) => setSelectedColumnRowKeys(e.target.checked ? allColumnKeys : [])}
-              style={{ margin: 0 }}
-          />
+          <div className="table-designer-select-check">
+              <Checkbox
+                  checked={isAllColumnsSelected}
+                  indeterminate={isColumnsIndeterminate}
+                  onChange={(e: any) => setSelectedColumnRowKeys(e.target.checked ? allColumnKeys : [])}
+                  style={{ margin: 0 }}
+              />
+          </div>
       ),
       dataIndex: '_select',
       key: '_select',
-      width: 48,
+      width: 44,
+      className: 'table-designer-select-column',
+      onHeaderCell: () => ({ className: 'table-designer-select-column' }),
+      onCell: () => ({ className: 'table-designer-select-column' }),
       render: (_: any, record: any) => (
-          <Checkbox
-              checked={selectedColumnRowKeys.includes(record._key)}
-              onChange={(e: any) => {
-                  e.stopPropagation();
-                  setSelectedColumnRowKeys((prev: string[]) =>
-                      e.target.checked
-                          ? [...prev, record._key]
-                          : prev.filter((k: string) => k !== record._key)
-                  );
-              }}
-              style={{ margin: 0 }}
-          />
+          <div className="table-designer-select-check">
+              <Checkbox
+                  checked={selectedColumnRowKeys.includes(record._key)}
+                  onChange={(e: any) => {
+                      e.stopPropagation();
+                      setSelectedColumnRowKeys((prev: string[]) =>
+                          e.target.checked
+                              ? [...prev, record._key]
+                              : prev.filter((k: string) => k !== record._key)
+                      );
+                  }}
+                  style={{ margin: 0 }}
+              />
+          </div>
       ),
   }), [selectedColumnRowKeys, allColumnKeys, isAllColumnsSelected, isColumnsIndeterminate]);
 
@@ -2401,6 +2486,9 @@ END;`;
       dataIndex: '_select',
       key: '_select',
       width: 48,
+      className: 'table-designer-select-column',
+      onHeaderCell: () => ({ className: 'table-designer-select-column' }),
+      onCell: () => ({ className: 'table-designer-select-column' }),
       render: (_: any, record: any) => (
           <span
               onClick={(e) => {
@@ -2618,7 +2706,11 @@ END;`;
   );
 
   return (
-    <div ref={shellRef} className={`table-designer-shell${isV2Ui ? ' gn-v2-table-designer' : ''}`} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, padding: '6px 0', position: 'relative' }}>
+    <div
+        ref={shellRef}
+        className={`table-designer-shell${isV2Ui ? ' gn-v2-table-designer' : ''}${embedded ? ' is-embedded' : ''}`}
+        style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, padding: embedded ? 0 : '6px 0', position: 'relative' }}
+    >
         <style>{`
             .table-designer-shell .ant-table,
             .table-designer-shell .ant-table-wrapper,
@@ -2650,6 +2742,116 @@ END;`;
             .table-designer-shell .ant-table-tbody td .ant-select .ant-select-selector {
                 padding-left: 0 !important;
             }
+            .table-designer-shell .table-designer-cell-field {
+                display: flex;
+                align-items: center;
+                min-height: 34px;
+                padding: 0 10px;
+                border: 1px solid ${darkMode ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.10)'};
+                border-radius: 10px;
+                background: ${darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'};
+                box-sizing: border-box;
+            }
+            .table-designer-shell .table-designer-cell-field .ant-input,
+            .table-designer-shell .table-designer-cell-field .ant-select,
+            .table-designer-shell .table-designer-cell-field .ant-select-selector,
+            .table-designer-shell .table-designer-cell-field .ant-select-selection-search,
+            .table-designer-shell .table-designer-cell-field .ant-select-selection-item {
+                background: transparent !important;
+            }
+            .table-designer-shell .table-designer-cell-field .ant-input,
+            .table-designer-shell .table-designer-cell-field .ant-select-selection-item,
+            .table-designer-shell .table-designer-cell-field input {
+                font-size: 13px;
+                line-height: 1.4;
+            }
+            .table-designer-shell .table-designer-cell-field .ant-select {
+                width: 100%;
+            }
+            .table-designer-shell .table-designer-cell-field .ant-select-selector,
+            .table-designer-shell .table-designer-cell-field .ant-input {
+                padding: 0 !important;
+                box-shadow: none !important;
+            }
+            .table-designer-shell .table-designer-cell-field.is-compact {
+                padding-right: 6px;
+            }
+            .table-designer-shell .table-designer-cell-check {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                width: 100%;
+                min-height: 34px;
+            }
+            .table-designer-shell .table-designer-cell-check .ant-checkbox-wrapper {
+                margin-inline-end: 0 !important;
+            }
+            .table-designer-shell .table-designer-cell-check.is-left-aligned {
+                justify-content: flex-start;
+            }
+            .table-designer-shell .table-designer-header-title {
+                display: inline-flex;
+                align-items: center;
+                justify-content: flex-start;
+                width: 100%;
+                line-height: 1.1;
+                white-space: nowrap;
+            }
+            .table-designer-shell .table-designer-select-check {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                width: 100%;
+                height: 100%;
+                min-height: 28px;
+            }
+            .table-designer-shell .table-designer-select-check .ant-checkbox-wrapper {
+                margin-inline-end: 0 !important;
+            }
+            .table-designer-shell .table-designer-select-column {
+                text-align: center !important;
+                vertical-align: middle !important;
+            }
+            .table-designer-shell .table-designer-action-column {
+                text-align: left !important;
+            }
+            .table-designer-shell .table-designer-comment-field {
+                gap: 4px;
+                padding-right: 4px;
+            }
+            .table-designer-shell .table-designer-comment-field .ant-input {
+                flex: 1;
+                min-width: 0;
+            }
+            .table-designer-shell .table-designer-comment-display {
+                flex: 1;
+                min-width: 0;
+                min-height: 28px;
+                display: flex;
+                align-items: center;
+                font: inherit;
+                line-height: 1.4;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                cursor: text;
+            }
+            .table-designer-shell .table-designer-comment-display.is-empty {
+                color: ${darkMode ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.28)'};
+            }
+            .table-designer-shell .table-designer-action-cell {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 6px;
+                width: 100%;
+            }
+            .table-designer-shell .table-designer-action-cell .ant-btn {
+                width: 28px;
+                height: 28px;
+                padding: 0;
+                border-radius: 8px;
+            }
             .table-designer-shell .ant-table-thead > tr > th::before {
                 display: none !important;
             }
@@ -2665,6 +2867,12 @@ END;`;
             .table-designer-shell .ant-tabs-nav {
                 margin-bottom: 8px !important;
             }
+            .table-designer-shell.gn-v2-table-designer .ant-tabs-nav {
+                margin-bottom: 0 !important;
+            }
+            .table-designer-shell.is-embedded .ant-tabs-nav {
+                margin-bottom: 0 !important;
+            }
             .table-designer-shell .ant-tabs-nav::before {
                 border-bottom-color: ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'} !important;
             }
@@ -2674,6 +2882,100 @@ END;`;
             }
             .table-designer-shell .ant-tabs-tab {
                 transition: color 0.15s ease !important;
+            }
+            .table-designer-shell.gn-v2-table-designer .ant-tabs-nav-wrap,
+            .table-designer-shell.gn-v2-table-designer .ant-tabs-nav-list {
+                width: auto !important;
+                min-height: 34px !important;
+                align-items: center !important;
+            }
+            .table-designer-shell.gn-v2-table-designer .ant-tabs-tab {
+                width: auto !important;
+                min-width: 0 !important;
+                max-width: none !important;
+                min-height: 34px !important;
+                margin: 0 !important;
+                padding: 0 12px !important;
+                border-right: 0 !important;
+                border-bottom: 0 !important;
+                white-space: nowrap !important;
+            }
+            .table-designer-shell.gn-v2-table-designer .ant-tabs-tab-btn {
+                width: auto !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+            }
+            .table-designer-shell.is-embedded .ant-tabs-nav-wrap,
+            .table-designer-shell.is-embedded .ant-tabs-nav-list {
+                width: auto !important;
+                min-height: 34px !important;
+                align-items: center !important;
+            }
+            .table-designer-shell.is-embedded .ant-tabs-tab {
+                width: auto !important;
+                min-width: 0 !important;
+                max-width: none !important;
+                min-height: 34px !important;
+                margin: 0 !important;
+                padding: 0 12px !important;
+                border-right: 0 !important;
+                border-bottom: 0 !important;
+                white-space: nowrap !important;
+            }
+            .table-designer-shell.is-embedded .ant-tabs-tab-btn {
+                width: auto !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+            }
+            .table-designer-shell.gn-v2-table-designer .table-designer-cell-field {
+                min-height: 28px;
+                padding-inline: 0;
+                border: none !important;
+                border-radius: 0;
+                background: transparent !important;
+                box-shadow: none !important;
+            }
+            .table-designer-shell.gn-v2-table-designer .table-designer-cell-field .ant-input,
+            .table-designer-shell.gn-v2-table-designer .table-designer-cell-field .ant-input:focus,
+            .table-designer-shell.gn-v2-table-designer .table-designer-cell-field .ant-input-focused,
+            .table-designer-shell.gn-v2-table-designer .table-designer-cell-field .ant-select-selector,
+            .table-designer-shell.gn-v2-table-designer .table-designer-cell-field .ant-select-focused .ant-select-selector {
+                border: none !important;
+                box-shadow: none !important;
+                background: transparent !important;
+            }
+            .table-designer-shell.gn-v2-table-designer .table-designer-comment-display,
+            .table-designer-shell.gn-v2-table-designer .table-designer-comment-field .ant-input,
+            .table-designer-shell.gn-v2-table-designer .table-designer-comment-field .ant-input input {
+                font-size: 12px !important;
+                line-height: 1.4 !important;
+                font-family: inherit !important;
+            }
+            .table-designer-shell.gn-v2-table-designer .table-designer-cell-field.is-compact {
+                padding-right: 0;
+            }
+            .table-designer-shell.gn-v2-table-designer .table-designer-comment-field {
+                padding-right: 0;
+            }
+            .table-designer-shell.gn-v2-table-designer .table-designer-cell-check {
+                min-height: 30px;
+            }
+            .table-designer-shell.gn-v2-table-designer .table-designer-select-check {
+                min-height: 22px;
+            }
+            .table-designer-shell.is-embedded .table-designer-select-check {
+                min-height: 14px !important;
+            }
+            .table-designer-shell.gn-v2-table-designer .table-designer-action-cell {
+                justify-content: flex-start;
+                gap: 4px;
+            }
+            .table-designer-shell.gn-v2-table-designer .table-designer-action-cell .ant-btn {
+                width: 26px;
+                height: 26px;
+                border-radius: 7px;
             }
             .table-designer-shell .ant-tabs-content-holder,
             .table-designer-shell .ant-tabs-content,
@@ -2727,11 +3029,11 @@ END;`;
             style={{
                 padding: '10px 12px 8px 12px',
                 borderBottom: `1px solid ${panelToolbarBorder}`,
-                borderTopLeftRadius: panelRadius,
-                borderTopRightRadius: panelRadius,
+                borderTopLeftRadius: embedded ? 0 : panelRadius,
+                borderTopRightRadius: embedded ? 0 : panelRadius,
                 borderLeft: `1px solid ${panelFrameColor}`,
                 borderRight: `1px solid ${panelFrameColor}`,
-                borderTop: `1px solid ${panelFrameColor}`,
+                borderTop: embedded ? 'none' : `1px solid ${panelFrameColor}`,
                 background: panelToolbarBg,
                 display: 'flex',
                 gap: '8px',
@@ -2801,9 +3103,9 @@ END;`;
             style={{
                 flex: 1,
                 minHeight: 0,
-                padding: '8px 10px 10px 10px',
-                borderBottomLeftRadius: panelRadius,
-                borderBottomRightRadius: panelRadius,
+                padding: embedded ? 0 : '0 10px 10px 10px',
+                borderBottomLeftRadius: embedded ? 0 : panelRadius,
+                borderBottomRightRadius: embedded ? 0 : panelRadius,
                 borderLeft: `1px solid ${panelFrameColor}`,
                 borderRight: `1px solid ${panelFrameColor}`,
                 borderBottom: `1px solid ${panelFrameColor}`,
@@ -2827,7 +3129,7 @@ END;`;
                         key: 'indexes',
                         label: t('table_designer.tab.indexes', undefined, i18nLanguage),
                         children: (
-                            <div className={`index-table-wrap${isV2Ui ? ' gn-v2-designer-tab-content' : ''}`} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div className={`index-table-wrap${isV2Ui ? ' gn-v2-designer-tab-content gn-v2-designer-index-table' : ''}`} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                                 {!readOnly && (
                                     <div className={isV2Ui ? 'gn-v2-designer-actionbar' : undefined} style={{ display: 'flex', gap: 8 }}>
                                         <Button size="small" icon={<PlusOutlined />} disabled={!supportsIndexSchemaOps()} onClick={openCreateIndexModal}>{t('table_designer.action.add', undefined, i18nLanguage)}</Button>
@@ -2955,9 +3257,13 @@ END;`;
                                     >
                                         {t('table_designer.action.view_statement', undefined, i18nLanguage)}
                                     </Button>
-                                    <Button size="small" icon={<PlusOutlined />} onClick={handleCreateTrigger}>{t('table_designer.action.add', undefined, i18nLanguage)}</Button>
-                                    <Button size="small" icon={<EditOutlined />} disabled={!selectedTrigger} onClick={handleEditTrigger}>{t('table_designer.action.edit', undefined, i18nLanguage)}</Button>
-                                    <Button size="small" icon={<DeleteOutlined />} danger disabled={!selectedTrigger} onClick={handleDeleteTrigger}>{t('table_designer.action.delete', undefined, i18nLanguage)}</Button>
+                                    {!readOnly && (
+                                        <>
+                                            <Button size="small" icon={<PlusOutlined />} onClick={handleCreateTrigger}>{t('table_designer.action.add', undefined, i18nLanguage)}</Button>
+                                            <Button size="small" icon={<EditOutlined />} disabled={!selectedTrigger} onClick={handleEditTrigger}>{t('table_designer.action.edit', undefined, i18nLanguage)}</Button>
+                                            <Button size="small" icon={<DeleteOutlined />} danger disabled={!selectedTrigger} onClick={handleDeleteTrigger}>{t('table_designer.action.delete', undefined, i18nLanguage)}</Button>
+                                        </>
+                                    )}
                                     <span style={{ marginLeft: 'auto', color: '#888', fontSize: 12, alignSelf: 'center' }}>
                                         {selectedTrigger
                                             ? t('table_designer.selection.trigger_selected', { name: selectedTrigger.name }, i18nLanguage)
@@ -3007,11 +3313,11 @@ END;`;
                     }
                 ] : []),
                 ...(!isNewTable ? [{
-                    key: 'ddl',
-                    label: 'DDL',
-                    icon: <FileTextOutlined />,
-                    children: (
-                        <div className={isV2Ui ? 'gn-v2-designer-ddl-shell' : undefined} style={{ height: 'calc(100vh - 200px)', border: `1px solid ${panelFrameColor}`, borderRadius: panelRadius, background: panelBodyBg }}>
+                        key: 'ddl',
+                        label: 'DDL',
+                        icon: <FileTextOutlined />,
+                        children: (
+                        <div className={isV2Ui ? 'gn-v2-designer-ddl-shell' : undefined} style={{ height: '100%', minHeight: 320, border: `1px solid ${panelFrameColor}`, borderRadius: panelRadius, background: panelBodyBg }}>
                             <Editor
                                 height="100%"
                                 language="sql"

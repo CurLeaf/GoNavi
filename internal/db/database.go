@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // Database 定义了统一的数据源访问接口。
@@ -67,10 +68,70 @@ type StatementExecer interface {
 	Close() error
 }
 
+// StatementQueryExecer can run queries on a pinned session/connection.
+// Drivers that return sqlConnStatementExecer automatically satisfy it.
+type StatementQueryExecer interface {
+	StatementExecer
+	Query(query string) ([]map[string]interface{}, []string, error)
+	QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error)
+}
+
+// StatementQueryMessageExecer can run queries on a pinned session and return
+// extra server messages/notices alongside rows.
+type StatementQueryMessageExecer interface {
+	StatementQueryExecer
+	QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error)
+	QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error)
+}
+
+// StatementMultiResultQueryExecer can run multi-result queries on a pinned session/connection.
+type StatementMultiResultQueryExecer interface {
+	StatementExecer
+	QueryMulti(query string) ([]connection.ResultSetData, error)
+	QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error)
+}
+
+// StatementMultiResultQueryMessageExecer can run multi-result queries on a
+// pinned session/connection and return server messages/notices.
+type StatementMultiResultQueryMessageExecer interface {
+	StatementMultiResultQueryExecer
+	QueryMultiWithMessages(query string) ([]connection.ResultSetData, []string, error)
+	QueryMultiContextWithMessages(ctx context.Context, query string) ([]connection.ResultSetData, []string, error)
+}
+
+// QueryMessageExecer is an optional database-level interface for returning
+// informational server messages alongside one result set.
+type QueryMessageExecer interface {
+	QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error)
+	QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error)
+}
+
+// MultiResultQueryMessageExecer is an optional database-level interface for
+// returning informational server messages alongside multi-result queries.
+type MultiResultQueryMessageExecer interface {
+	QueryMultiWithMessages(query string) ([]connection.ResultSetData, []string, error)
+	QueryMultiContextWithMessages(ctx context.Context, query string) ([]connection.ResultSetData, []string, error)
+}
+
 // SessionExecerProvider is implemented by database/sql based drivers that can
 // pin a long-running job to one physical connection.
 type SessionExecerProvider interface {
 	OpenSessionExecer(ctx context.Context) (StatementExecer, error)
+}
+
+// TransactionExecer is a single transaction handle backed by the database
+// driver. It is required for dialects where textual BEGIN/COMMIT is not a
+// valid transaction-control statement, such as Oracle.
+type TransactionExecer interface {
+	StatementExecer
+	Commit() error
+	Rollback() error
+}
+
+// TransactionExecerProvider is implemented by drivers that can expose a
+// long-running SQL editor managed transaction.
+type TransactionExecerProvider interface {
+	OpenTransactionExecer(ctx context.Context) (TransactionExecer, error)
 }
 
 type sqlConnStatementExecer struct {
@@ -96,6 +157,38 @@ func (e *sqlConnStatementExecer) Exec(query string) (int64, error) {
 	return e.ExecContext(context.Background(), query)
 }
 
+func (e *sqlConnStatementExecer) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	if e == nil || e.conn == nil {
+		return nil, nil, fmt.Errorf("连接未打开")
+	}
+	rows, err := e.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+func (e *sqlConnStatementExecer) Query(query string) ([]map[string]interface{}, []string, error) {
+	return e.QueryContext(context.Background(), query)
+}
+
+func (e *sqlConnStatementExecer) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	if e == nil || e.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	rows, err := e.conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMultiRows(rows)
+}
+
+func (e *sqlConnStatementExecer) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	return e.QueryMultiContext(context.Background(), query)
+}
+
 func (e *sqlConnStatementExecer) ExecBatchContext(ctx context.Context, query string) (int64, error) {
 	return e.ExecContext(ctx, query)
 }
@@ -105,6 +198,244 @@ func (e *sqlConnStatementExecer) Close() error {
 		return nil
 	}
 	return e.conn.Close()
+}
+
+type sqlConnTransactionExecer struct {
+	mu          sync.Mutex
+	conn        *sql.Conn
+	done        bool
+	commitSQL   string
+	rollbackSQL string
+}
+
+func NewSQLConnTransactionExecer(conn *sql.Conn, commitSQL string, rollbackSQL string) TransactionExecer {
+	return &sqlConnTransactionExecer{
+		conn:        conn,
+		commitSQL:   strings.TrimSpace(commitSQL),
+		rollbackSQL: strings.TrimSpace(rollbackSQL),
+	}
+}
+
+func (e *sqlConnTransactionExecer) activeConn() (*sql.Conn, error) {
+	if e == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	if e.done {
+		return nil, fmt.Errorf("事务已结束")
+	}
+	return e.conn, nil
+}
+
+func (e *sqlConnTransactionExecer) ExecContext(ctx context.Context, query string) (int64, error) {
+	conn, err := e.activeConn()
+	if err != nil {
+		return 0, err
+	}
+	res, err := conn.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *sqlConnTransactionExecer) Exec(query string) (int64, error) {
+	return e.ExecContext(context.Background(), query)
+}
+
+func (e *sqlConnTransactionExecer) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	conn, err := e.activeConn()
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+func (e *sqlConnTransactionExecer) Query(query string) ([]map[string]interface{}, []string, error) {
+	return e.QueryContext(context.Background(), query)
+}
+
+func (e *sqlConnTransactionExecer) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	conn, err := e.activeConn()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := conn.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMultiRows(rows)
+}
+
+func (e *sqlConnTransactionExecer) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	return e.QueryMultiContext(context.Background(), query)
+}
+
+func (e *sqlConnTransactionExecer) finish(sqlText string) error {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	if e.conn == nil || e.done {
+		e.mu.Unlock()
+		return nil
+	}
+	conn := e.conn
+	e.done = true
+	e.mu.Unlock()
+	if strings.TrimSpace(sqlText) == "" {
+		return nil
+	}
+	_, err := conn.ExecContext(context.Background(), sqlText)
+	return err
+}
+
+func (e *sqlConnTransactionExecer) Commit() error {
+	return e.finish(e.commitSQL)
+}
+
+func (e *sqlConnTransactionExecer) Rollback() error {
+	return e.finish(e.rollbackSQL)
+}
+
+func (e *sqlConnTransactionExecer) Close() error {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	if e.conn == nil {
+		e.mu.Unlock()
+		return nil
+	}
+	conn := e.conn
+	shouldRollback := !e.done && e.rollbackSQL != ""
+	rollbackSQL := e.rollbackSQL
+	e.conn = nil
+	e.done = true
+	e.mu.Unlock()
+
+	var rollbackErr error
+	if shouldRollback {
+		_, rollbackErr = conn.ExecContext(context.Background(), rollbackSQL)
+	}
+	closeErr := conn.Close()
+	if rollbackErr != nil {
+		return rollbackErr
+	}
+	return closeErr
+}
+
+type sqlTxStatementExecer struct {
+	mu   sync.Mutex
+	tx   *sql.Tx
+	done bool
+}
+
+func NewSQLTxStatementExecer(tx *sql.Tx) TransactionExecer {
+	return &sqlTxStatementExecer{tx: tx}
+}
+
+func (e *sqlTxStatementExecer) activeTx() (*sql.Tx, error) {
+	if e == nil || e.tx == nil {
+		return nil, fmt.Errorf("事务未打开")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.done {
+		return nil, fmt.Errorf("事务已结束")
+	}
+	return e.tx, nil
+}
+
+func (e *sqlTxStatementExecer) ExecContext(ctx context.Context, query string) (int64, error) {
+	tx, err := e.activeTx()
+	if err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (e *sqlTxStatementExecer) Exec(query string) (int64, error) {
+	return e.ExecContext(context.Background(), query)
+}
+
+func (e *sqlTxStatementExecer) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	tx, err := e.activeTx()
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	return scanRows(rows)
+}
+
+func (e *sqlTxStatementExecer) Query(query string) ([]map[string]interface{}, []string, error) {
+	return e.QueryContext(context.Background(), query)
+}
+
+func (e *sqlTxStatementExecer) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	tx, err := e.activeTx()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMultiRows(rows)
+}
+
+func (e *sqlTxStatementExecer) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	return e.QueryMultiContext(context.Background(), query)
+}
+
+func (e *sqlTxStatementExecer) finish(action func(*sql.Tx) error) error {
+	if e == nil || e.tx == nil {
+		return nil
+	}
+	e.mu.Lock()
+	if e.done {
+		e.mu.Unlock()
+		return nil
+	}
+	tx := e.tx
+	e.done = true
+	e.mu.Unlock()
+	return action(tx)
+}
+
+func (e *sqlTxStatementExecer) Commit() error {
+	return e.finish(func(tx *sql.Tx) error {
+		return tx.Commit()
+	})
+}
+
+func (e *sqlTxStatementExecer) Rollback() error {
+	return e.finish(func(tx *sql.Tx) error {
+		return tx.Rollback()
+	})
+}
+
+func (e *sqlTxStatementExecer) Close() error {
+	return e.Rollback()
 }
 
 // BatchApplier 定义了批量变更提交接口。
@@ -140,6 +471,9 @@ var databaseFactories = map[string]databaseFactory{
 	"mysql": func() Database {
 		return &MySQLDB{}
 	},
+	"goldendb": func() Database {
+		return &MySQLDB{}
+	},
 	"postgres": func() Database {
 		return &PostgresDB{}
 	},
@@ -148,6 +482,24 @@ var databaseFactories = map[string]databaseFactory{
 	},
 	"custom": func() Database {
 		return &CustomDB{}
+	},
+	"chroma": func() Database {
+		return &ChromaDB{}
+	},
+	"qdrant": func() Database {
+		return &QdrantDB{}
+	},
+	"rocketmq": func() Database {
+		return &RocketMQDB{}
+	},
+	"mqtt": func() Database {
+		return &MQTTDB{}
+	},
+	"kafka": func() Database {
+		return &KafkaDB{}
+	},
+	"rabbitmq": func() Database {
+		return &RabbitMQDB{}
 	},
 }
 
@@ -179,8 +531,24 @@ func normalizeDatabaseType(dbType string) string {
 		return "kingbase"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
+	case "gaussdb", "gauss_db", "gauss-db":
+		return "gaussdb"
+	case "goldendb", "greatdb", "gdb":
+		return "goldendb"
 	case "intersystems", "intersystemsiris", "inter-systems-iris", "inter-systems":
 		return "iris"
+	case "chromadb", "chroma-db":
+		return "chroma"
+	case "qdrantdb", "qdrant-db":
+		return "qdrant"
+	case "rocketmq", "rocket-mq", "rocket_mq", "apache-rocketmq", "apache_rocketmq", "rmq":
+		return "rocketmq"
+	case "mqtt", "mqtts":
+		return "mqtt"
+	case "kafka", "apache-kafka", "apache_kafka":
+		return "kafka"
+	case "rabbitmq", "rabbit-mq", "rabbit_mq":
+		return "rabbitmq"
 	default:
 		return normalized
 	}

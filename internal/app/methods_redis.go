@@ -19,6 +19,7 @@ import (
 // Redis client cache
 var (
 	redisCache         = make(map[string]redis.RedisClient)
+	redisCacheConfigs  = make(map[string]connection.ConnectionConfig)
 	redisCacheMu       sync.Mutex
 	newRedisClientFunc = redis.NewRedisClient
 )
@@ -60,6 +61,7 @@ func (a *App) getRedisClient(config connection.ConnectionConfig) (redis.RedisCli
 		}
 		client.Close()
 		delete(redisCache, key)
+		delete(redisCacheConfigs, key)
 	}
 
 	logger.Infof("创建 Redis 客户端实例：缓存Key=%s", shortKey)
@@ -71,6 +73,7 @@ func (a *App) getRedisClient(config connection.ConnectionConfig) (redis.RedisCli
 	}
 
 	redisCache[key] = client
+	redisCacheConfigs[key] = normalizeCacheKeyConfig(connectedConfig)
 	logger.Infof("Redis 连接成功并写入缓存：%s 缓存Key=%s", formatRedisConnSummary(connectedConfig), shortKey)
 	return client, nil
 }
@@ -140,6 +143,35 @@ func getRedisClientCacheKey(config connection.ConnectionConfig) string {
 	b, _ := json.Marshal(normalized)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+func (a *App) releaseRedisClientsForConfig(config connection.ConnectionConfig) (int, error) {
+	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	if err != nil {
+		return 0, wrapConnectError(config, err)
+	}
+	targetKey := getConnectionReleaseMatchKey(applyGlobalProxyToConnection(resolvedConfig))
+	closed := 0
+
+	redisCacheMu.Lock()
+	defer redisCacheMu.Unlock()
+
+	for key, client := range redisCache {
+		entryConfig := redisCacheConfigs[key]
+		if strings.TrimSpace(entryConfig.Type) == "" {
+			continue
+		}
+		if getConnectionReleaseMatchKey(entryConfig) != targetKey {
+			continue
+		}
+		if client != nil {
+			client.Close()
+		}
+		delete(redisCache, key)
+		delete(redisCacheConfigs, key)
+		closed++
+	}
+	return closed, nil
 }
 
 func formatRedisConnSummary(config connection.ConnectionConfig) string {
@@ -759,4 +791,5 @@ func CloseAllRedisClients() {
 		}
 	}
 	redisCache = make(map[string]redis.RedisClient)
+	redisCacheConfigs = make(map[string]connection.ConnectionConfig)
 }

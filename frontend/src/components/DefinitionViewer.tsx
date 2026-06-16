@@ -1,12 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Editor from './MonacoEditor';
-import { Spin, Alert } from 'antd';
+import { Button, Spin, Alert } from 'antd';
+import { EditOutlined } from '@ant-design/icons';
 import { TabData } from '../types';
 import { useStore } from '../store';
 import { DBQuery } from '../../wailsjs/go/app/App';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { useI18n } from '../i18n/provider';
+import { splitQualifiedNameLast } from '../utils/qualifiedName';
+import { buildSqlServerObjectDefinitionQueries } from '../utils/sqlServerObjectDefinition';
 
 interface DefinitionViewerProps {
     tab: TabData;
@@ -29,15 +32,65 @@ const normalizeMySQLViewDDL = (rawDefinition: unknown): string => {
     return `${normalized};`;
 };
 
+const ensureSqlStatementTerminator = (sql: string): string => {
+    const normalized = String(sql || '').trim();
+    if (!normalized) return '';
+    return /;\s*$/.test(normalized) ? normalized : `${normalized};`;
+};
+
+const buildEditableDefinitionSql = (tab: TabData, definition: string, objectLabel: string, objectName: string): string => {
+    const normalizedDefinition = String(definition || '').trim();
+    const header = `-- 修改${objectLabel}: ${objectName}\n-- 请确认语法兼容当前数据库后执行\n`;
+    if (!normalizedDefinition) {
+        return `${header}-- 当前对象定义为空，请补全 ${objectName} 的 DDL 后执行\n`;
+    }
+
+    if (/^\s*--\s*(未找到|暂不支持|当前)/.test(normalizedDefinition)) {
+        return `${header}${ensureSqlStatementTerminator(normalizedDefinition)}`;
+    }
+
+    if (tab.type === 'view-def' && !/^\s*create\b/i.test(normalizedDefinition)) {
+        if (/^\s*view\b/i.test(normalizedDefinition)) {
+            return `${header}${ensureSqlStatementTerminator(normalizedDefinition.replace(/^\s*view\b/i, 'CREATE OR REPLACE VIEW'))}`;
+        }
+        return `${header}CREATE OR REPLACE VIEW ${objectName} AS\n${ensureSqlStatementTerminator(normalizedDefinition)}`;
+    }
+
+    if (
+        tab.type === 'routine-def'
+        && !/^\s*create\b/i.test(normalizedDefinition)
+        && /^\s*(function|procedure)\b/i.test(normalizedDefinition)
+    ) {
+        return `${header}${ensureSqlStatementTerminator(`CREATE OR REPLACE ${normalizedDefinition}`)}`;
+    }
+
+    return `${header}${ensureSqlStatementTerminator(normalizedDefinition)}`;
+};
+
 const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [definition, setDefinition] = useState<string>('');
+    const [openingObjectEdit, setOpeningObjectEdit] = useState(false);
+    const isMountedRef = useRef(true);
+    const loadedDefinitionKeyRef = useRef('');
 
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
+    const addTab = useStore(state => state.addTab);
+    const setActiveContext = useStore(state => state.setActiveContext);
     const darkMode = theme === 'dark';
     const { t } = useI18n();
+    const objectIdentityKey = [
+        tab.connectionId,
+        tab.dbName,
+        tab.type,
+        tab.viewName,
+        tab.viewKind,
+        tab.eventName,
+        tab.routineName,
+        tab.routineType,
+    ].map((item) => String(item || '')).join('||');
 
     const escapeSQLLiteral = (raw: string): string => String(raw || '').replace(/'/g, "''");
 
@@ -46,12 +99,14 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         if (type === 'custom') {
             const driver = String(conn?.config?.driver || '').trim().toLowerCase();
             if (driver === 'diros' || driver === 'doris') return 'mysql';
+            if (driver === 'goldendb' || driver === 'greatdb' || driver === 'gdb') return 'mysql';
             if (driver === 'oceanbase') return normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle' ? 'oracle' : 'mysql';
             if (driver === 'opengauss' || driver === 'open_gauss' || driver === 'open-gauss') return 'opengauss';
+            if (driver === 'gaussdb' || driver === 'gauss_db' || driver === 'gauss-db') return 'gaussdb';
             return driver;
         }
         if (type === 'oceanbase' && normalizeOceanBaseProtocol(conn?.config?.oceanBaseProtocol) === 'oracle') return 'oracle';
-        if (type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
+        if (type === 'goldendb' || type === 'mariadb' || type === 'oceanbase' || type === 'diros' || type === 'sphinx') return 'mysql';
         if (type === 'dameng') return 'dm';
         return type;
     };
@@ -65,12 +120,8 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     };
 
     const parseSchemaAndName = (fullName: string): { schema: string; name: string } => {
-        const raw = String(fullName || '').trim();
-        const idx = raw.lastIndexOf('.');
-        if (idx > 0 && idx < raw.length - 1) {
-            return { schema: raw.substring(0, idx), name: raw.substring(idx + 1) };
-        }
-        return { schema: '', name: raw };
+        const parsed = splitQualifiedNameLast(fullName);
+        return { schema: parsed.parentPath, name: parsed.objectName };
     };
 
     const getCaseInsensitiveRawValue = (row: Record<string, any>, candidateKeys: string[]): any => {
@@ -150,12 +201,13 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             case 'kingbase':
             case 'highgo':
             case 'vastbase':
-            case 'opengauss': {
+            case 'opengauss':
+            case 'gaussdb': {
                 const schemaRef = schema || 'public';
                 return [`SELECT pg_get_viewdef('${escapeSQLLiteral(schemaRef)}.${safeName}'::regclass, true) AS view_definition`];
             }
             case 'sqlserver':
-                return [`SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(viewName)}')) AS view_definition`];
+                return buildSqlServerObjectDefinitionQueries('view', viewName, dbName, 'view_definition');
             case 'oracle':
             case 'dm':
                 if (schema) {
@@ -198,12 +250,13 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             case 'kingbase':
             case 'highgo':
             case 'vastbase':
-            case 'opengauss': {
+            case 'opengauss':
+            case 'gaussdb': {
                 const schemaRef = schema || 'public';
                 return [`SELECT pg_get_functiondef(p.oid) AS routine_definition FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = '${escapeSQLLiteral(schemaRef)}' AND p.proname = '${safeName}' LIMIT 1`];
             }
             case 'sqlserver':
-                return [`SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(routineName)}')) AS routine_definition`];
+                return buildSqlServerObjectDefinitionQueries('routine', routineName, dbName, 'routine_definition');
             case 'oracle':
             case 'dm': {
                 const owner = schema ? escapeSQLLiteral(schema).toUpperCase() : (safeDbName ? safeDbName.toUpperCase() : '');
@@ -331,6 +384,19 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             case 'oracle':
             case 'dm':
                 return row.view_definition || row.VIEW_DEFINITION || row.text || row.TEXT || Object.values(row)[0] || '';
+            case 'sqlserver': {
+                const directDefinition = getCaseInsensitiveRawValue(row, ['view_definition', 'definition']);
+                if (directDefinition !== undefined && directDefinition !== null && String(directDefinition).trim() !== '') {
+                    return String(directDefinition);
+                }
+                const helpTextDefinition = data
+                    .map((item) => getCaseInsensitiveRawValue(item, ['Text', 'text']))
+                    .filter((value) => value !== undefined && value !== null)
+                    .map((value) => String(value))
+                    .join('');
+                if (helpTextDefinition.trim()) return helpTextDefinition;
+                return String(Object.values(row)[0] || '');
+            }
             default:
                 return row.view_definition || row.VIEW_DEFINITION || row.sql || row.SQL || Object.values(row)[0] || '';
         }
@@ -382,6 +448,19 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 }
                 return JSON.stringify(row, null, 2);
             }
+            case 'sqlserver': {
+                const directDefinition = getCaseInsensitiveRawValue(data[0], ['routine_definition', 'definition']);
+                if (directDefinition !== undefined && directDefinition !== null && String(directDefinition).trim() !== '') {
+                    return String(directDefinition);
+                }
+                const helpTextDefinition = data
+                    .map((row) => getCaseInsensitiveRawValue(row, ['Text', 'text']))
+                    .filter((value) => value !== undefined && value !== null)
+                    .map((value) => String(value))
+                    .join('');
+                if (helpTextDefinition.trim()) return helpTextDefinition;
+                return String(Object.values(data[0])[0] || '');
+            }
             default: {
                 const row = data[0];
                 return row.routine_definition || row.ROUTINE_DEFINITION || Object.values(row)[0] || '';
@@ -413,112 +492,155 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         }
     };
 
+    const loadDefinition = async (): Promise<{ success: boolean; definition?: string; error?: string }> => {
+        const conn = connections.find(c => c.id === tab.connectionId);
+        if (!conn) {
+            return { success: false, error: t('definition_viewer.error.connection_not_found') };
+        }
+
+        const dbName = tab.dbName || '';
+        const dialect = getMetadataDialect(conn);
+        const sphinxLike = isSphinxConnection(conn) && dialect === 'mysql';
+
+        let queries: string[];
+        let extractFn: (dialect: string, data: any[]) => string;
+        let resolvedObjectLabel: string;
+
+        if (tab.type === 'view-def') {
+            const viewName = tab.viewName || '';
+            if (!viewName) {
+                return { success: false, error: t('definition_viewer.error.view_name_empty') };
+            }
+            queries = buildShowViewQueries(dialect, viewName, dbName, tab.viewKind);
+            extractFn = extractViewDefinition;
+            resolvedObjectLabel = tab.viewKind === 'materialized'
+                ? t('definition_viewer.object.materialized_view')
+                : t('definition_viewer.object.view');
+        } else if (tab.type === 'event-def') {
+            const eventName = tab.eventName || '';
+            if (!eventName) {
+                return { success: false, error: t('definition_viewer.error.event_name_empty') };
+            }
+            queries = buildShowEventQueries(dialect, eventName, dbName);
+            extractFn = extractEventDefinition;
+            resolvedObjectLabel = t('definition_viewer.object.event');
+        } else {
+            const routineName = tab.routineName || '';
+            const routineType = tab.routineType || 'FUNCTION';
+            if (!routineName) {
+                return { success: false, error: t('definition_viewer.error.routine_name_empty') };
+            }
+            queries = buildShowRoutineQueries(dialect, routineName, routineType, dbName);
+            extractFn = extractRoutineDefinition;
+            resolvedObjectLabel = t('definition_viewer.object.routine');
+        }
+
+        if (!queries.length || String(queries[0] || '').startsWith('--')) {
+            return {
+                success: true,
+                definition: String(
+                    queries[0] || `-- ${t('definition_viewer.editor.unsupported_object_definition')}`,
+                ),
+            };
+        }
+
+        try {
+            const config = {
+                ...conn.config,
+                port: Number(conn.config.port),
+                password: conn.config.password || '',
+                database: conn.config.database || '',
+                useSSH: conn.config.useSSH || false,
+                ssh: conn.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' }
+            };
+
+            const result = await runQueryCandidates(config, dbName, queries);
+
+            if (result.success && Array.isArray(result.data) && result.data.length > 0) {
+                return { success: true, definition: extractFn(dialect, result.data) };
+            }
+
+            if (result.success) {
+                if (sphinxLike) {
+                    const version = await getVersionHint(config, dbName);
+                    const versionText = version
+                        ? t('definition_viewer.editor.sphinx.version_suffix', { version })
+                        : '';
+                    return {
+                        success: true,
+                        definition: `-- ${t('definition_viewer.editor.sphinx.empty_result', {
+                            version: versionText,
+                            object: resolvedObjectLabel,
+                        })}\n-- ${t('definition_viewer.editor.sphinx.compat_queries_hint')}`,
+                    };
+                }
+                return {
+                    success: true,
+                    definition: `-- ${t('definition_viewer.editor.object_definition_not_found', {
+                        object: resolvedObjectLabel,
+                    })}`,
+                };
+            }
+
+            if (sphinxLike) {
+                const version = await getVersionHint(config, dbName);
+                const versionText = version
+                    ? t('definition_viewer.editor.sphinx.version_suffix', { version })
+                    : '';
+                const failedMessage = result.message
+                    ? `${t('definition_viewer.editor.sphinx.failed_message_label')}: ${result.message}`
+                    : t('definition_viewer.editor.sphinx.failed_message_unknown');
+                return {
+                    success: true,
+                    definition: `-- ${t('definition_viewer.editor.sphinx.unsupported_query', {
+                        version: versionText,
+                        object: resolvedObjectLabel,
+                    })}\n-- ${failedMessage}`,
+                };
+            }
+
+            return {
+                success: false,
+                error: result.message || t('definition_viewer.error.query_failed'),
+            };
+        } catch (e: any) {
+            return {
+                success: false,
+                error: t('definition_viewer.error.query_failed_detail', {
+                    detail: e?.message || String(e),
+                }),
+            };
+        }
+    };
+
     useEffect(() => {
-        const loadDefinition = async () => {
+        let cancelled = false;
+        const syncDefinition = async () => {
             setLoading(true);
             setError(null);
-
-            const conn = connections.find(c => c.id === tab.connectionId);
-            if (!conn) {
-                setError(t('definition_viewer.error.connection_not_found'));
-                setLoading(false);
+            const result = await loadDefinition();
+            if (cancelled) {
                 return;
             }
-
-            const dbName = tab.dbName || '';
-            const dialect = getMetadataDialect(conn);
-            const sphinxLike = isSphinxConnection(conn) && dialect === 'mysql';
-
-            let queries: string[];
-            let extractFn: (dialect: string, data: any[]) => string;
-            let objectLabel: string;
-
-            if (tab.type === 'view-def') {
-                const viewName = tab.viewName || '';
-                if (!viewName) {
-                    setError(t('definition_viewer.error.view_name_empty'));
-                    setLoading(false);
-                    return;
-                }
-                queries = buildShowViewQueries(dialect, viewName, dbName, tab.viewKind);
-                extractFn = extractViewDefinition;
-                objectLabel = tab.viewKind === 'materialized'
-                    ? t('definition_viewer.object.materialized_view')
-                    : t('definition_viewer.object.view');
-            } else if (tab.type === 'event-def') {
-                const eventName = tab.eventName || '';
-                if (!eventName) {
-                    setError(t('definition_viewer.error.event_name_empty'));
-                    setLoading(false);
-                    return;
-                }
-                queries = buildShowEventQueries(dialect, eventName, dbName);
-                extractFn = extractEventDefinition;
-                objectLabel = t('definition_viewer.object.event');
+            if (result.success) {
+                loadedDefinitionKeyRef.current = objectIdentityKey;
+                setDefinition(String(result.definition || ''));
             } else {
-                const routineName = tab.routineName || '';
-                const routineType = tab.routineType || 'FUNCTION';
-                if (!routineName) {
-                    setError(t('definition_viewer.error.routine_name_empty'));
-                    setLoading(false);
-                    return;
-                }
-                queries = buildShowRoutineQueries(dialect, routineName, routineType, dbName);
-                extractFn = extractRoutineDefinition;
-                objectLabel = t('definition_viewer.object.routine');
+                setError(result.error || t('definition_viewer.error.query_failed'));
             }
-
-            if (!queries.length || String(queries[0] || '').startsWith('--')) {
-                setDefinition(String(queries[0] || `-- ${t('definition_viewer.editor.unsupported_object_definition')}`));
-                setLoading(false);
-                return;
-            }
-
-            try {
-                const config = {
-                    ...conn.config,
-                    port: Number(conn.config.port),
-                    password: conn.config.password || '',
-                    database: conn.config.database || '',
-                    useSSH: conn.config.useSSH || false,
-                    ssh: conn.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' }
-                };
-
-                const result = await runQueryCandidates(config, dbName, queries);
-
-                if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-                    const def = extractFn(dialect, result.data);
-                    setDefinition(def);
-                    return;
-                }
-
-                if (result.success) {
-                    if (sphinxLike) {
-                        const version = await getVersionHint(config, dbName);
-                        const versionText = version ? t('definition_viewer.editor.sphinx.version_suffix', { version }) : '';
-                        setDefinition(`-- ${t('definition_viewer.editor.sphinx.empty_result', { version: versionText, object: objectLabel })}\n-- ${t('definition_viewer.editor.sphinx.compat_queries_hint')}`);
-                        return;
-                    }
-                    setDefinition(`-- ${t('definition_viewer.editor.object_definition_not_found', { object: objectLabel })}`);
-                } else if (sphinxLike) {
-                    const version = await getVersionHint(config, dbName);
-                    const versionText = version ? t('definition_viewer.editor.sphinx.version_suffix', { version }) : '';
-                    const failedMessage = result.message
-                        ? `${t('definition_viewer.editor.sphinx.failed_message_label')}: ${result.message}`
-                        : t('definition_viewer.editor.sphinx.failed_message_unknown');
-                    setDefinition(`-- ${t('definition_viewer.editor.sphinx.unsupported_query', { version: versionText, object: objectLabel })}\n-- ${failedMessage}`);
-                } else {
-                    setError(result.message || t('definition_viewer.error.query_failed'));
-                }
-            } catch (e: any) {
-                setError(t('definition_viewer.error.query_failed_detail', { detail: e?.message || String(e) }));
-            } finally {
-                setLoading(false);
-            }
+            setLoading(false);
         };
 
-        loadDefinition();
-    }, [tab.connectionId, tab.dbName, tab.viewName, tab.viewKind, tab.eventName, tab.routineName, tab.routineType, tab.type, connections, t]);
+        syncDefinition();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [tab.connectionId, tab.dbName, tab.viewName, tab.viewKind, tab.eventName, tab.routineName, tab.routineType, tab.type, connections, objectIdentityKey, t]);
+
+    useEffect(() => () => {
+        isMountedRef.current = false;
+    }, []);
 
     const objectLabel = tab.type === 'view-def'
         ? (tab.viewKind === 'materialized' ? t('definition_viewer.object.materialized_view') : t('definition_viewer.object.view'))
@@ -529,6 +651,44 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     const loadingTip = tab.type === 'view-def'
         ? t('definition_viewer.loading.view_definition')
         : (tab.type === 'event-def' ? t('definition_viewer.loading.event_definition') : t('definition_viewer.loading.routine_definition'));
+    const normalizedObjectName = String(objectName || '').trim();
+    const displayedDefinition = loadedDefinitionKeyRef.current === objectIdentityKey ? definition : '';
+    const hasDefinition = String(displayedDefinition || '').trim() !== '';
+
+    const openObjectEditQuery = async () => {
+        if (!normalizedObjectName || openingObjectEdit) return;
+        const dbName = String(tab.dbName || '').trim();
+        setOpeningObjectEdit(true);
+        setError(null);
+        try {
+            const result = await loadDefinition();
+            if (!isMountedRef.current) {
+                return;
+            }
+            if (!result.success) {
+                setError(result.error || t('definition_viewer.error.query_failed'));
+                return;
+            }
+            const latestDefinition = String(result.definition || '');
+            loadedDefinitionKeyRef.current = objectIdentityKey;
+            setDefinition(latestDefinition);
+            const query = buildEditableDefinitionSql(tab, latestDefinition, objectLabel, normalizedObjectName);
+            setActiveContext({ connectionId: tab.connectionId, dbName });
+            addTab({
+                id: `query-edit-object-${tab.connectionId}-${dbName}-${Date.now()}`,
+                title: `修改${objectLabel}: ${normalizedObjectName}`,
+                type: 'query',
+                connectionId: tab.connectionId,
+                dbName,
+                query,
+                queryMode: 'object-edit',
+            });
+        } finally {
+            if (isMountedRef.current) {
+                setOpeningObjectEdit(false);
+            }
+        }
+    };
 
     if (loading) {
         return (
@@ -538,7 +698,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         );
     }
 
-    if (error) {
+    if (error && !hasDefinition) {
         return (
             <div style={{ padding: 16 }}>
                 <Alert type="error" message={t('definition_viewer.error.load_failed')} description={error} showIcon />
@@ -548,17 +708,27 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={{ padding: '8px 16px', borderBottom: darkMode ? '1px solid #303030' : '1px solid #f0f0f0' }}>
-                <strong>{objectLabel}: </strong>{objectName}
-                {tab.dbName && <span style={{ marginLeft: 16, color: '#888' }}>{t('definition_viewer.field.database')}: {tab.dbName}</span>}
-                {tab.routineType && <span style={{ marginLeft: 16, color: '#888' }}>{t('definition_viewer.field.type')}: {tab.routineType}</span>}
+            <div style={{ padding: '8px 16px', borderBottom: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <strong>{objectLabel}: </strong>{objectName}
+                    {tab.dbName && <span style={{ marginLeft: 16, color: '#888' }}>{t('definition_viewer.field.database')}: {tab.dbName}</span>}
+                    {tab.routineType && <span style={{ marginLeft: 16, color: '#888' }}>{t('definition_viewer.field.type')}: {tab.routineType}</span>}
+                </div>
+                <Button size="small" icon={<EditOutlined />} onClick={openObjectEditQuery} disabled={!normalizedObjectName} loading={openingObjectEdit}>
+                    对象修改
+                </Button>
             </div>
+            {error && hasDefinition && (
+                <div style={{ padding: '8px 16px 0' }}>
+                    <Alert type="warning" message="刷新最新定义失败" description={error} showIcon />
+                </div>
+            )}
             <div style={{ flex: 1, minHeight: 0 }}>
                 <Editor
                     height="100%"
                     language="sql"
                     theme={darkMode ? 'transparent-dark' : 'transparent-light'}
-                    value={definition}
+                    value={displayedDefinition}
                     options={{
                         readOnly: true,
                         minimap: { enabled: false },

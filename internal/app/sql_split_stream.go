@@ -18,6 +18,9 @@ type sqlStreamSplitter struct {
 	inLineComment  bool
 	inBlockComment bool
 	dollarTag      string
+	plsqlDepth     int
+	declareSkips   int
+	closedPLSQL    bool
 }
 
 // Feed 将一个 chunk 喂入拆分器，返回在此 chunk 中完成的 SQL 语句列表。
@@ -118,6 +121,47 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 			continue
 		}
 
+		if isSQLIdentifierStart(ch) {
+			tokenStart := i
+			tokenEnd := i + 1
+			for tokenEnd < len(text) && isSQLIdentifierPart(text[tokenEnd]) {
+				tokenEnd++
+			}
+			token := strings.ToLower(text[tokenStart:tokenEnd])
+			if shouldDeferPLSQLKeywordPrefixInStream(text, tokenStart, tokenEnd, token) {
+				s.pending = text[tokenStart:]
+				break
+			}
+			if shouldDeferPLSQLKeywordInStream(text, tokenStart, tokenEnd, token) {
+				s.pending = text[tokenStart:]
+				break
+			}
+			if token == "begin" && s.declareSkips > 0 {
+				s.declareSkips--
+				s.closedPLSQL = false
+			} else if token == "begin" && shouldEnterPLSQLBlock(text, tokenEnd) {
+				s.plsqlDepth++
+				s.closedPLSQL = false
+			} else if token == "declare" && shouldEnterPLSQLDeclareBlock(text, tokenEnd) {
+				s.plsqlDepth++
+				s.declareSkips++
+				s.closedPLSQL = false
+			} else if s.plsqlDepth == 0 && shouldEnterPLSQLCreateRoutineBlock(text, s.cur.String(), token, tokenEnd) {
+				s.plsqlDepth++
+				s.declareSkips++
+				s.closedPLSQL = false
+			} else if token == "end" && s.plsqlDepth > 0 && !isPLSQLControlEnd(text, tokenEnd) {
+				s.plsqlDepth--
+				if s.declareSkips > s.plsqlDepth {
+					s.declareSkips = s.plsqlDepth
+				}
+				s.closedPLSQL = s.plsqlDepth == 0
+			}
+			s.cur.WriteString(text[tokenStart:tokenEnd])
+			i = tokenEnd - 1
+			continue
+		}
+
 		// 行注释开始
 		if ch == '-' && i+1 >= len(text) {
 			s.pending = text[i:]
@@ -162,6 +206,20 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 
 		// 分号分隔
 		if ch == ';' {
+			if s.plsqlDepth > 0 {
+				s.cur.WriteByte(ch)
+				continue
+			}
+			if s.closedPLSQL {
+				s.cur.WriteByte(ch)
+				stmt := strings.TrimSpace(s.cur.String())
+				if stmt != "" {
+					statements = append(statements, stmt)
+				}
+				s.cur.Reset()
+				s.closedPLSQL = false
+				continue
+			}
 			stmt := strings.TrimSpace(s.cur.String())
 			if stmt != "" {
 				statements = append(statements, stmt)
@@ -175,6 +233,22 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 			break
 		}
 		if ch == 0xEF && i+2 < len(text) && text[i+1] == 0xBC && text[i+2] == 0x9B {
+			if s.plsqlDepth > 0 {
+				s.cur.WriteString("；")
+				i += 2
+				continue
+			}
+			if s.closedPLSQL {
+				s.cur.WriteString("；")
+				stmt := strings.TrimSpace(s.cur.String())
+				if stmt != "" {
+					statements = append(statements, stmt)
+				}
+				s.cur.Reset()
+				s.closedPLSQL = false
+				i += 2
+				continue
+			}
 			stmt := strings.TrimSpace(s.cur.String())
 			if stmt != "" {
 				statements = append(statements, stmt)
@@ -215,6 +289,44 @@ func isIncompleteSQLDollarTag(s string) bool {
 		}
 	}
 	return true
+}
+
+func shouldDeferPLSQLKeywordInStream(text string, tokenStart int, tokenEnd int, token string) bool {
+	switch token {
+	case "begin", "declare", "end", "create", "or", "replace", "editionable", "noneditionable", "procedure", "function", "is", "as":
+	default:
+		return false
+	}
+	if tokenEnd >= len(text) {
+		return true
+	}
+	next := skipSQLWhitespaceAndComments(text, tokenEnd)
+	if next >= len(text) {
+		return true
+	}
+	if isSQLIdentifierStart(text[next]) {
+		nextEnd := next + 1
+		for nextEnd < len(text) && isSQLIdentifierPart(text[nextEnd]) {
+			nextEnd++
+		}
+		return nextEnd >= len(text)
+	}
+	return false
+}
+
+func shouldDeferPLSQLKeywordPrefixInStream(text string, tokenStart int, tokenEnd int, token string) bool {
+	if tokenEnd < len(text) {
+		return false
+	}
+	for _, keyword := range []string{"begin", "declare", "end", "create", "or", "replace", "editionable", "noneditionable", "procedure", "function", "is", "as"} {
+		if strings.HasPrefix(keyword, token) && token != keyword {
+			if tokenStart > 0 && isSQLIdentifierPart(text[tokenStart-1]) {
+				return false
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // streamSQLFile 从 reader 中流式读取 SQL 并逐条回调。

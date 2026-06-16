@@ -7,7 +7,7 @@ cd "$SCRIPT_DIR"
 SCRIPT_DIR_WINDOWS="$(pwd -W 2>/dev/null || true)"
 SCRIPT_DIR_WINDOWS="${SCRIPT_DIR_WINDOWS//\\//}"
 
-DEFAULT_DRIVERS=(mariadb oceanbase doris starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss iris mongodb tdengine clickhouse)
+DEFAULT_DRIVERS=(mariadb oceanbase doris starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss gaussdb iris mongodb tdengine iotdb clickhouse elasticsearch)
 TARGET_PLATFORMS=(darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/amd64)
 
 usage() {
@@ -21,6 +21,8 @@ usage() {
 说明：
   通过 go list -deps 计算每个 driver-agent 的真实源码依赖，再与 git diff 文件求交集。
   如果无法解析基准或依赖分析失败，会保守输出全部 driver。
+  如果 driver 构建 / 发布工作流本身发生变化，也会保守输出全部 driver，
+  避免新应用 revision 与旧 driver-assets 再次错配。
 EOF
 }
 
@@ -50,7 +52,9 @@ normalize_driver() {
   case "$value" in
     doris|diros) echo "doris" ;;
     open_gauss|open-gauss) echo "opengauss" ;;
-    mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|opengauss|iris|mongodb|tdengine|clickhouse)
+    gaussdb|gauss_db|gauss-db) echo "gaussdb" ;;
+    elastic|elasticsearch) echo "elasticsearch" ;;
+    mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|opengauss|gaussdb|iris|mongodb|tdengine|iotdb|clickhouse)
       echo "$value"
       ;;
     *)
@@ -154,10 +158,13 @@ driver_tokens_from_text() {
   case "$text" in *highgo*) emit_driver_token highgo ;; esac
   case "$text" in *vastbase*) emit_driver_token vastbase ;; esac
   case "$text" in *opengauss*) emit_driver_token opengauss ;; esac
+  case "$text" in *gaussdb*|*gauss_db*|*gauss-db*) emit_driver_token gaussdb ;; esac
   case "$text" in *iris*) emit_driver_token iris ;; esac
   case "$text" in *mongodb*) emit_driver_token mongodb ;; esac
   case "$text" in *tdengine*) emit_driver_token tdengine ;; esac
+  case "$text" in *iotdb*|*apache-iotdb*|*apache_iotdb*) emit_driver_token iotdb ;; esac
   case "$text" in *clickhouse*) emit_driver_token clickhouse ;; esac
+  case "$text" in *elasticsearch*) emit_driver_token elasticsearch ;; esac
 
   case "$text" in
     *github.com/go-sql-driver/mysql*)
@@ -180,10 +187,13 @@ driver_tokens_from_text() {
       emit_driver_token opengauss
       ;;
   esac
+  case "$text" in *github.com/!huawei!cloud!developer/gaussdb-go*|*github.com/HuaweiCloudDeveloper/gaussdb-go*) emit_driver_token gaussdb ;; esac
   case "$text" in *github.com/caretdev/go-irisnative*|*third_party/go-irisnative*) emit_driver_token iris ;; esac
   case "$text" in *go.mongodb.org/mongo-driver*|*go.mongodb.org/mongo-driver/v2*) emit_driver_token mongodb ;; esac
   case "$text" in *github.com/taosdata/driver-go/v3*) emit_driver_token tdengine ;; esac
+  case "$text" in *github.com/apache/iotdb-client-go*) emit_driver_token iotdb ;; esac
   case "$text" in *github.com/clickhouse/clickhouse-go/v2*|*github.com/clickhouse/ch-go*) emit_driver_token clickhouse ;; esac
+  case "$text" in *github.com/elastic/go-elasticsearch/v8*) emit_driver_token elasticsearch ;; esac
 }
 
 emit_driver_token() {
@@ -317,9 +327,31 @@ add_all_forced_drivers() {
   done
 }
 
+revision_file_changed_drivers() {
+  local line driver emitted_seen
+  emitted_seen="|"
+  while IFS= read -r line; do
+    case "$line" in
+      +++*|---*|@@*)
+        continue
+        ;;
+      +*|-*)
+        if [[ "$line" =~ \"([^\"]+)\"[[:space:]]*:[[:space:]]*\"src-[^\"]+\" ]]; then
+          driver="$(normalize_driver "${BASH_REMATCH[1]}")" || continue
+          if [[ "$emitted_seen" == *"|$driver|"* ]]; then
+            continue
+          fi
+          printf '%s\n' "$driver"
+          emitted_seen="${emitted_seen}${driver}|"
+        fi
+        ;;
+    esac
+  done < <(git diff --unified=0 "$base_commit" "$head_commit" -- internal/db/driver_agent_revisions_gen.go)
+}
+
 is_ignored_driver_agent_source_file() {
   case "$1" in
-    *_test.go|frontend/*|internal/app/*|internal/db/driver_agent_revisions_gen.go)
+    *_test.go|frontend/*|internal/app/*|internal/appdata/*|internal/connection/*|internal/logger/*)
       return 0
       ;;
   esac
@@ -462,10 +494,35 @@ if [[ ${#changed_file_set[@]} -eq 0 ]]; then
   exit 0
 fi
 
+has_revision_file_change=false
+only_workflow_changes=true
+for file in "${!changed_file_set[@]}"; do
+  case "$file" in
+    internal/db/driver_agent_revisions_gen.go)
+      has_revision_file_change=true
+      only_workflow_changes=false
+      ;;
+    .github/workflows/dev-build.yml|.github/workflows/release.yml)
+      ;;
+    *)
+      only_workflow_changes=false
+      ;;
+  esac
+done
+
 declare -a forced_changed_drivers=()
 forced_driver_seen="|"
 for file in "${!changed_file_set[@]}"; do
   case "$file" in
+    internal/db/driver_agent_revisions_gen.go)
+      revision_delta="$(revision_file_changed_drivers)"
+      if [[ -z "$revision_delta" ]]; then
+        echo "检测到 driver-agent revision 文件存在无法归因的变更；保守构建全部 driver-agent：$file" >&2
+        all_drivers_csv
+        exit 0
+      fi
+      add_forced_drivers_from_tokens "$revision_delta"
+      ;;
     go.mod|go.sum|build-driver-agents.sh|tools/generate-driver-agent-revisions.sh)
       set +e
       shared_delta="$(shared_file_driver_delta "$file")"
@@ -478,13 +535,33 @@ for file in "${!changed_file_set[@]}"; do
       fi
       add_forced_drivers_from_tokens "$shared_delta"
       ;;
-    tools/compress-driver-artifact.sh)
-      echo "检测到 driver-agent 压缩脚本变更；保守构建全部 driver-agent：$file" >&2
+    tools/compress-driver-artifact.sh|\
+    tools/package-driver-release-assets.py|\
+    tools/generate-driver-release-manifest.py|\
+    tools/validate-driver-release-assets.py|\
+    tools/complete-driver-release-assets.py|\
+    tools/resolve-driver-release-source.py|\
+    tools/validate-driver-release-manifest.sh|\
+    tools/should-force-global-driver-builds.sh)
+      echo "检测到 driver-agent 构建/发布链路脚本变更；保守构建全部 driver-agent：$file" >&2
+      all_drivers_csv
+      exit 0
+      ;;
+    .github/workflows/dev-build.yml|.github/workflows/release.yml)
+      if [[ "$has_revision_file_change" == "true" ]]; then
+        continue
+      fi
+      if [[ "$only_workflow_changes" == "true" && -f internal/db/driver_agent_revisions_gen.go ]]; then
+        continue
+      fi
+      echo "检测到 driver-agent 构建/发布工作流变更；保守构建全部 driver-agent：$file" >&2
       all_drivers_csv
       exit 0
       ;;
     tools/detect-changed-driver-agents.sh)
-      # This script only selects CI work; it is not embedded in driver-agent binaries.
+      echo "检测到 driver-agent 变更检测脚本更新；保守构建全部 driver-agent：$file" >&2
+      all_drivers_csv
+      exit 0
       ;;
   esac
 done

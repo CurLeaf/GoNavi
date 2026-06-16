@@ -30,10 +30,15 @@ import (
 const minExportQueryTimeout = 5 * time.Minute
 const minClickHouseExportQueryTimeout = 2 * time.Hour
 const maxSQLFileSizeBytes int64 = 50 * 1024 * 1024
+
+const sqlFileErrorCodeNotFound = "file_not_found"
 const sqlFileBatchMaxStatements = 1000
 const sqlFileBatchMaxBytes = 4 * 1024 * 1024
 const sqlFileProgressStatementInterval = 100
 const sqlFileProgressTimeInterval = time.Second
+const defaultAppLogTailLineLimit = 80
+const maxAppLogTailLineLimit = 200
+const appLogTailReadWindowBytes int64 = 256 * 1024
 
 var mysqlCreateViewPrefixPattern = regexp.MustCompile(`(?is)^\s*create\s+(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*(?:` + "`[^`]+`" + `|\S+)\s*@\s*(?:` + "`[^`]+`" + `|\S+)\s+)?(?:sql\s+security\s+(?:definer|invoker)\s+)?view\s+`)
 
@@ -84,6 +89,211 @@ type SQLDirectoryEntry struct {
 	Children []SQLDirectoryEntry `json:"children,omitempty"`
 }
 
+type appLogTailSnapshot struct {
+	LogPath               string         `json:"logPath"`
+	Keyword               string         `json:"keyword,omitempty"`
+	RequestedLineLimit    int            `json:"requestedLineLimit"`
+	ReturnedLineCount     int            `json:"returnedLineCount"`
+	FileWindowTruncated   bool           `json:"fileWindowTruncated"`
+	MatchedLinesTruncated bool           `json:"matchedLinesTruncated"`
+	LevelBreakdown        map[string]int `json:"levelBreakdown"`
+	Lines                 []string       `json:"lines"`
+}
+
+func normalizeSQLFileName(rawName string) (string, error) {
+	name := strings.TrimSpace(rawName)
+	if name == "" {
+		return "", fmt.Errorf("SQL 文件名不能为空")
+	}
+	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+		return "", fmt.Errorf("SQL 文件名不能包含路径分隔符")
+	}
+	if !strings.EqualFold(filepath.Ext(name), ".sql") {
+		name += ".sql"
+	}
+	return name, nil
+}
+
+func normalizeSQLDirectoryName(rawName string) (string, error) {
+	name := strings.TrimSpace(rawName)
+	if name == "" {
+		return "", fmt.Errorf("目录名不能为空")
+	}
+	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
+		return "", fmt.Errorf("目录名不能包含路径分隔符")
+	}
+	return name, nil
+}
+
+func normalizeSQLDirectoryPath(directoryPath string) (string, error) {
+	target := strings.TrimSpace(directoryPath)
+	if target == "" {
+		return "", fmt.Errorf("目录路径不能为空")
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return "", fmt.Errorf("无法读取目录信息: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("所选路径不是目录")
+	}
+	return target, nil
+}
+
+func normalizeExistingSQLDirectoryPath(directoryPath string) (string, os.FileInfo, error) {
+	target := strings.TrimSpace(directoryPath)
+	if target == "" {
+		return "", nil, fmt.Errorf("目录路径不能为空")
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return "", nil, fmt.Errorf("无法读取目录信息: %w", err)
+	}
+	if !info.IsDir() {
+		return "", nil, fmt.Errorf("所选路径不是目录")
+	}
+	return target, info, nil
+}
+
+func normalizeExistingSQLFilePath(filePath string) (string, os.FileInfo, error) {
+	target := strings.TrimSpace(filePath)
+	if target == "" {
+		return "", nil, fmt.Errorf("文件路径不能为空")
+	}
+	if abs, err := filepath.Abs(target); err == nil {
+		target = abs
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return "", nil, fmt.Errorf("无法读取文件信息: %w", err)
+	}
+	if info.IsDir() {
+		return "", nil, fmt.Errorf("所选路径不是 SQL 文件")
+	}
+	if !strings.EqualFold(filepath.Ext(target), ".sql") {
+		return "", nil, fmt.Errorf("仅支持 SQL 文件")
+	}
+	return target, info, nil
+}
+
+func createSQLFileInDirectory(directoryPath string, rawName string) connection.QueryResult {
+	directory, err := normalizeSQLDirectoryPath(directoryPath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	name, err := normalizeSQLFileName(rawName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	target := filepath.Join(directory, name)
+	if _, err := os.Stat(target); err == nil {
+		return connection.QueryResult{Success: false, Message: "SQL 文件已存在"}
+	} else if !os.IsNotExist(err) {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+	}
+	if err := os.WriteFile(target, []byte(""), 0o644); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法创建 SQL 文件: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target, "name": filepath.Base(target)}}
+}
+
+func createSQLDirectoryInDirectory(parentPath string, rawName string) connection.QueryResult {
+	parent, err := normalizeSQLDirectoryPath(parentPath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	name, err := normalizeSQLDirectoryName(rawName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	target := filepath.Join(parent, name)
+	if _, err := os.Stat(target); err == nil {
+		return connection.QueryResult{Success: false, Message: "目录已存在"}
+	} else if !os.IsNotExist(err) {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取目录信息: %v", err)}
+	}
+	if err := os.Mkdir(target, 0o755); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法创建目录: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target, "name": filepath.Base(target)}}
+}
+
+func deleteSQLFileByPath(filePath string) connection.QueryResult {
+	target, _, err := normalizeExistingSQLFilePath(filePath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := os.Remove(target); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法删除 SQL 文件: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target}}
+}
+
+func deleteSQLDirectoryByPath(directoryPath string) connection.QueryResult {
+	target, _, err := normalizeExistingSQLDirectoryPath(directoryPath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := os.Remove(target); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法删除目录: %v（仅支持删除空目录）", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target}}
+}
+
+func renameSQLFileByPath(filePath string, rawName string) connection.QueryResult {
+	source, _, err := normalizeExistingSQLFilePath(filePath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	name, err := normalizeSQLFileName(rawName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	target := filepath.Join(filepath.Dir(source), name)
+	if source == target {
+		return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target, "name": filepath.Base(target)}}
+	}
+	if _, err := os.Stat(target); err == nil {
+		return connection.QueryResult{Success: false, Message: "目标 SQL 文件已存在"}
+	} else if !os.IsNotExist(err) {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取目标文件信息: %v", err)}
+	}
+	if err := os.Rename(source, target); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法重命名 SQL 文件: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target, "name": filepath.Base(target)}}
+}
+
+func renameSQLDirectoryByPath(directoryPath string, rawName string) connection.QueryResult {
+	source, _, err := normalizeExistingSQLDirectoryPath(directoryPath)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	name, err := normalizeSQLDirectoryName(rawName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	target := filepath.Join(filepath.Dir(source), name)
+	if source == target {
+		return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target, "name": filepath.Base(target)}}
+	}
+	if _, err := os.Stat(target); err == nil {
+		return connection.QueryResult{Success: false, Message: "目标目录已存在"}
+	} else if !os.IsNotExist(err) {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取目标目录信息: %v", err)}
+	}
+	if err := os.Rename(source, target); err != nil {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法重命名目录: %v", err)}
+	}
+	return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target, "name": filepath.Base(target)}}
+}
+
 func normalizeDirectoryDialogPath(currentDir string) string {
 	defaultDir := strings.TrimSpace(currentDir)
 	if defaultDir == "" {
@@ -113,7 +323,11 @@ func readSQLFileByPath(filePath string) connection.QueryResult {
 
 	fi, err := os.Stat(selection)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+		data := map[string]interface{}{"filePath": selection}
+		if os.IsNotExist(err) {
+			data["errorCode"] = sqlFileErrorCodeNotFound
+		}
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err), Data: data}
 	}
 	if fi.IsDir() {
 		return connection.QueryResult{Success: false, Message: "所选路径不是 SQL 文件"}
@@ -138,6 +352,28 @@ func readSQLFileByPath(filePath string) connection.QueryResult {
 	}
 
 	return connection.QueryResult{Success: true, Data: string(content)}
+}
+
+func readSQLFileWithMetadataByPath(filePath string) connection.QueryResult {
+	result := readSQLFileByPath(filePath)
+	if !result.Success {
+		return result
+	}
+	if data, ok := result.Data.(map[string]interface{}); ok {
+		return connection.QueryResult{Success: true, Data: data}
+	}
+	selection := strings.TrimSpace(filePath)
+	if abs, err := filepath.Abs(selection); err == nil {
+		selection = abs
+	}
+	return connection.QueryResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"content":  result.Data,
+			"filePath": selection,
+			"name":     filepath.Base(selection),
+		},
+	}
 }
 
 func writeSQLFileByPath(filePath string, content string) connection.QueryResult {
@@ -238,9 +474,6 @@ func buildSQLDirectoryEntries(directory string) ([]SQLDirectoryEntry, error) {
 			if childErr != nil {
 				return nil, childErr
 			}
-			if len(children) == 0 {
-				continue
-			}
 			result = append(result, SQLDirectoryEntry{
 				Name:     entry.Name(),
 				Path:     entryPath,
@@ -291,7 +524,7 @@ func (a *App) OpenSQLFile() connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
-	return readSQLFileByPath(selection)
+	return readSQLFileWithMetadataByPath(selection)
 }
 
 func (a *App) SelectSQLDirectory(currentDir string) connection.QueryResult {
@@ -343,8 +576,159 @@ func (a *App) ReadSQLFile(filePath string) connection.QueryResult {
 	return readSQLFileByPath(filePath)
 }
 
+func (a *App) ReadAppLogTail(lineLimit int, keyword string) connection.QueryResult {
+	return readAppLogTailByPath(logger.Path(), lineLimit, keyword)
+}
+
 func (a *App) WriteSQLFile(filePath string, content string) connection.QueryResult {
 	return writeSQLFileByPath(filePath, content)
+}
+
+func normalizeAppLogTailLineLimit(input int) int {
+	if input <= 0 {
+		return defaultAppLogTailLineLimit
+	}
+	if input > maxAppLogTailLineLimit {
+		return maxAppLogTailLineLimit
+	}
+	return input
+}
+
+func readAppLogTailWindow(filePath string, maxBytes int64) ([]byte, bool, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, false, err
+	}
+	size := fi.Size()
+	if size <= 0 {
+		return []byte{}, false, nil
+	}
+
+	offset := int64(0)
+	truncated := false
+	if maxBytes > 0 && size > maxBytes {
+		offset = size - maxBytes
+		truncated = true
+	}
+
+	buf := make([]byte, size-offset)
+	if _, err := f.ReadAt(buf, offset); err != nil && err != io.EOF {
+		return nil, false, err
+	}
+	if !truncated {
+		return buf, false, nil
+	}
+
+	text := string(buf)
+	if idx := strings.IndexByte(text, '\n'); idx >= 0 && idx+1 < len(text) {
+		return []byte(text[idx+1:]), true, nil
+	}
+	return []byte{}, true, nil
+}
+
+func buildAppLogLevelBreakdown(lines []string) map[string]int {
+	breakdown := map[string]int{
+		"INFO":  0,
+		"WARN":  0,
+		"ERROR": 0,
+		"OTHER": 0,
+	}
+	for _, line := range lines {
+		switch {
+		case strings.Contains(line, "[INFO]"):
+			breakdown["INFO"]++
+		case strings.Contains(line, "[WARN]"):
+			breakdown["WARN"]++
+		case strings.Contains(line, "[ERROR]"):
+			breakdown["ERROR"]++
+		default:
+			breakdown["OTHER"]++
+		}
+	}
+	return breakdown
+}
+
+func readAppLogTailByPath(filePath string, lineLimit int, keyword string) connection.QueryResult {
+	target := strings.TrimSpace(filePath)
+	if target == "" {
+		return connection.QueryResult{Success: false, Message: "当前未找到 GoNavi 日志文件"}
+	}
+
+	if _, err := os.Stat(target); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	windowBytes, fileWindowTruncated, err := readAppLogTailWindow(target, appLogTailReadWindowBytes)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	normalizedKeyword := strings.ToLower(strings.TrimSpace(keyword))
+	normalizedLineLimit := normalizeAppLogTailLineLimit(lineLimit)
+	rawLines := strings.Split(strings.ReplaceAll(string(windowBytes), "\r\n", "\n"), "\n")
+	lines := make([]string, 0, len(rawLines))
+	for _, rawLine := range rawLines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+
+	filteredLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if normalizedKeyword != "" && !strings.Contains(strings.ToLower(line), normalizedKeyword) {
+			continue
+		}
+		filteredLines = append(filteredLines, line)
+	}
+
+	matchedLinesTruncated := len(filteredLines) > normalizedLineLimit
+	if matchedLinesTruncated {
+		filteredLines = filteredLines[len(filteredLines)-normalizedLineLimit:]
+	}
+
+	snapshot := appLogTailSnapshot{
+		LogPath:               target,
+		Keyword:               strings.TrimSpace(keyword),
+		RequestedLineLimit:    normalizedLineLimit,
+		ReturnedLineCount:     len(filteredLines),
+		FileWindowTruncated:   fileWindowTruncated,
+		MatchedLinesTruncated: matchedLinesTruncated,
+		LevelBreakdown:        buildAppLogLevelBreakdown(filteredLines),
+		Lines:                 filteredLines,
+	}
+	return connection.QueryResult{Success: true, Data: snapshot}
+}
+
+func (a *App) CreateSQLFile(directoryPath string, name string) connection.QueryResult {
+	return createSQLFileInDirectory(directoryPath, name)
+}
+
+func (a *App) CreateSQLDirectory(directoryPath string, name string) connection.QueryResult {
+	return createSQLDirectoryInDirectory(directoryPath, name)
+}
+
+func (a *App) DeleteSQLFile(filePath string) connection.QueryResult {
+	return deleteSQLFileByPath(filePath)
+}
+
+func (a *App) DeleteSQLDirectory(directoryPath string) connection.QueryResult {
+	return deleteSQLDirectoryByPath(directoryPath)
+}
+
+func (a *App) RenameSQLFile(filePath string, name string) connection.QueryResult {
+	return renameSQLFileByPath(filePath, name)
+}
+
+func (a *App) RenameSQLDirectory(directoryPath string, name string) connection.QueryResult {
+	return renameSQLDirectoryByPath(directoryPath, name)
 }
 
 func (a *App) ExportSQLFile(defaultName string, content string) connection.QueryResult {
@@ -425,12 +809,13 @@ func isSQLFileBatchableWriteStatement(dbType string, stmt string) bool {
 	if isReadOnlySQLQuery(dbType, stmt) {
 		return false
 	}
-	switch leadingSQLKeyword(stmt) {
-	case "insert", "update", "delete", "replace", "merge", "upsert":
-		return true
-	default:
+	if isPLSQLBlockStatement(stmt) {
 		return false
 	}
+	if shouldTryQueryResultFirst(dbType, stmt) {
+		return false
+	}
+	return isBatchableWriteSQLStatement(dbType, stmt)
 }
 
 func sqlFileBatchTransactionSQL(dbType string) (beginSQL string, commitSQL string, rollbackSQL string, ok bool) {
@@ -439,7 +824,7 @@ func sqlFileBatchTransactionSQL(dbType string) (beginSQL string, commitSQL strin
 		return "START TRANSACTION", "COMMIT", "ROLLBACK", true
 	case "sqlserver":
 		return "BEGIN TRANSACTION", "COMMIT TRANSACTION", "ROLLBACK TRANSACTION", true
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlite", "duckdb", "iris":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlite", "duckdb", "iris":
 		return "BEGIN", "COMMIT", "ROLLBACK", true
 	default:
 		return "", "", "", false
@@ -1379,7 +1764,7 @@ func normalizeImportTemporalValue(dbType, columnType, raw string) string {
 
 func isPgLikeBooleanDBType(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "postgres", "postgresql", "pg", "pq", "pgx", "kingbase", "kingbase8", "kingbasees", "kingbasev8", "highgo", "vastbase", "opengauss", "open_gauss", "open-gauss":
+	case "postgres", "postgresql", "pg", "pq", "pgx", "kingbase", "kingbase8", "kingbasees", "kingbasev8", "highgo", "vastbase", "opengauss", "open_gauss", "open-gauss", "gaussdb", "gauss_db", "gauss-db":
 		return true
 	default:
 		return false
@@ -1832,6 +2217,74 @@ func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName strin
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
+func (a *App) ExportSchemaSQL(config connection.ConnectionConfig, dbName string, schemaName string, includeData bool) connection.QueryResult {
+	safeDbName := strings.TrimSpace(dbName)
+	safeSchemaName := strings.TrimSpace(schemaName)
+	if safeDbName == "" {
+		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+	}
+	if safeSchemaName == "" {
+		return connection.QueryResult{Success: false, Message: "模式名称不能为空"}
+	}
+
+	suffix := "schema"
+	if includeData {
+		suffix = "backup"
+	}
+
+	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           fmt.Sprintf("Export %s.%s (SQL)", safeDbName, safeSchemaName),
+		DefaultFilename: fmt.Sprintf("%s_%s_%s.sql", safeDbName, safeSchemaName, suffix),
+	})
+	if err != nil || filename == "" {
+		return connection.QueryResult{Success: false, Message: "已取消"}
+	}
+
+	runConfig := normalizeRunConfig(config, dbName)
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	tables, err := dbInst.GetTables(dbName)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	viewLookup := listViewNameLookup(dbInst, runConfig, dbName)
+	filteredTables := filterExportObjectsBySchema(runConfig, dbName, tables, safeSchemaName)
+	filteredViews := filterExportViewLookupBySchema(runConfig, dbName, viewLookup, safeSchemaName)
+	objects := buildExportObjectOrder(runConfig, dbName, filteredTables, filteredViews, true)
+	if len(objects) == 0 {
+		return connection.QueryResult{Success: false, Message: fmt.Sprintf("未在模式 %s 下获取到可导出的表或视图", safeSchemaName)}
+	}
+
+	f, err := os.Create(filename)
+	if err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	defer f.Close()
+
+	w := bufio.NewWriterSize(f, 1024*1024)
+	defer w.Flush()
+
+	if err := writeSQLHeader(w, runConfig, dbName); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if _, err := w.WriteString(fmt.Sprintf("-- Schema: %s\n\n", safeSchemaName)); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	for _, objectName := range objects {
+		if err := dumpTableSQL(w, dbInst, runConfig, dbName, objectName, true, includeData, filteredViews); err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+	}
+	if err := writeSQLFooter(w, runConfig); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	return connection.QueryResult{Success: true, Message: "导出完成"}
+}
+
 type tableDataClearMode string
 
 const (
@@ -1841,7 +2294,7 @@ const (
 
 func supportsTruncateTableForDBType(dbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(dbType)) {
-	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "sqlserver", "iris", "oracle", "dameng", "clickhouse", "duckdb":
+	case "mysql", "mariadb", "oceanbase", "starrocks", "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "iris", "oracle", "dameng", "clickhouse", "duckdb":
 		return true
 	default:
 		return false
@@ -2129,6 +2582,56 @@ func buildExportObjectOrder(
 	return append(tables, views...)
 }
 
+func filterExportObjectsBySchema(
+	config connection.ConnectionConfig,
+	dbName string,
+	rawObjects []string,
+	schemaName string,
+) []string {
+	safeSchemaName := strings.TrimSpace(schemaName)
+	if safeSchemaName == "" {
+		return append([]string(nil), rawObjects...)
+	}
+
+	filtered := make([]string, 0, len(rawObjects))
+	for _, rawName := range rawObjects {
+		objectName := strings.TrimSpace(rawName)
+		if objectName == "" {
+			continue
+		}
+		objectSchemaName, _ := normalizeSchemaAndTable(config, dbName, objectName)
+		if strings.EqualFold(strings.TrimSpace(objectSchemaName), safeSchemaName) {
+			filtered = append(filtered, objectName)
+		}
+	}
+	return filtered
+}
+
+func filterExportViewLookupBySchema(
+	config connection.ConnectionConfig,
+	dbName string,
+	viewLookup map[string]string,
+	schemaName string,
+) map[string]string {
+	safeSchemaName := strings.TrimSpace(schemaName)
+	if safeSchemaName == "" {
+		cloned := make(map[string]string, len(viewLookup))
+		for key, value := range viewLookup {
+			cloned[key] = value
+		}
+		return cloned
+	}
+
+	filtered := make(map[string]string, len(viewLookup))
+	for key, objectName := range viewLookup {
+		objectSchemaName, _ := normalizeSchemaAndTable(config, dbName, objectName)
+		if strings.EqualFold(strings.TrimSpace(objectSchemaName), safeSchemaName) {
+			filtered[key] = objectName
+		}
+	}
+	return filtered
+}
+
 func mapValuesSorted(values map[string]string) []string {
 	if len(values) == 0 {
 		return nil
@@ -2206,7 +2709,7 @@ func buildListViewQueries(config connection.ConnectionConfig, dbName string) []s
 			queries = append(queries, fmt.Sprintf("SHOW FULL TABLES FROM %s WHERE Table_type = 'VIEW'", quoteIdentByType("mysql", dbName)))
 		}
 		return queries
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		return []string{
 			`SELECT table_schema AS schema_name, table_name AS object_name FROM information_schema.views WHERE table_schema NOT IN ('pg_catalog', 'information_schema') ORDER BY table_schema, table_name`,
 		}
@@ -2313,7 +2816,7 @@ func buildViewCreateQueries(config connection.ConnectionConfig, dbName, schemaNa
 		return []string{
 			fmt.Sprintf("SHOW CREATE VIEW %s", quoteIdentByType("mysql", safeView)),
 		}
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		if safeSchema == "" {
 			safeSchema = "public"
 		}

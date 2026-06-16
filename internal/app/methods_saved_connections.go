@@ -61,6 +61,7 @@ func (a *App) ImportLegacyConnections(items []connection.LegacySavedConnection) 
 		input.ClearHTTPTunnelPassword = strings.TrimSpace(item.Config.HTTPTunnel.Password) == ""
 		input.ClearMySQLReplicaPassword = strings.TrimSpace(item.Config.MySQLReplicaPassword) == ""
 		input.ClearMongoReplicaPassword = strings.TrimSpace(item.Config.MongoReplicaPassword) == ""
+		input.ClearRedisSentinelPassword = strings.TrimSpace(item.Config.RedisSentinelPassword) == ""
 		input.ClearOpaqueURI = strings.TrimSpace(item.Config.URI) == ""
 		input.ClearOpaqueDSN = strings.TrimSpace(item.Config.DSN) == ""
 		inputs = append(inputs, input)

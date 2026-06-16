@@ -30,6 +30,24 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats GoldenDB as an editable MySQL-family datasource with database-level DDL actions', () => {
+    expect(getDataSourceCapabilities({ type: 'goldendb' })).toMatchObject({
+      type: 'goldendb',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: true,
+      supportsCopyInsert: true,
+      supportsCreateDatabase: true,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: true,
+      forceReadOnlyQueryResult: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'greatdb' })).toMatchObject({
+      type: 'goldendb',
+      supportsQueryEditor: true,
+      supportsCopyInsert: true,
+    });
+  });
+
   it('keeps StarRocks as an independent SQL datasource capability', () => {
     expect(getDataSourceCapabilities({ type: 'starrocks' })).toMatchObject({
       type: 'starrocks',
@@ -51,6 +69,181 @@ describe('dataSourceCapabilities', () => {
     expect(getDataSourceCapabilities({ type: 'custom', driver: 'intersystemsiris' })).toMatchObject({
       type: 'iris',
       supportsQueryEditor: true,
+    });
+  });
+
+  it('treats GaussDB as an editable PostgreSQL-family datasource with database-level DDL actions', () => {
+    expect(getDataSourceCapabilities({ type: 'gaussdb' })).toMatchObject({
+      type: 'gaussdb',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: true,
+      supportsCopyInsert: true,
+      supportsCreateDatabase: true,
+      supportsRenameDatabase: true,
+      supportsDropDatabase: true,
+      forceReadOnlyQueryResult: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'gauss-db' })).toMatchObject({
+      type: 'gaussdb',
+      supportsQueryEditor: true,
+      supportsCopyInsert: true,
+      supportsRenameDatabase: true,
+    });
+  });
+
+  it('treats Elasticsearch as a queryable read-only datasource', () => {
+    expect(getDataSourceCapabilities({ type: 'elasticsearch' })).toMatchObject({
+      type: 'elasticsearch',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'elastic' })).toMatchObject({
+      type: 'elasticsearch',
+      supportsQueryEditor: true,
+      forceReadOnlyQueryResult: false,
+    });
+  });
+
+  it('treats Chroma as a queryable vector datasource without SQL export actions', () => {
+    expect(getDataSourceCapabilities({ type: 'chroma' })).toMatchObject({
+      type: 'chroma',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'chromadb' })).toMatchObject({
+      type: 'chroma',
+      supportsQueryEditor: true,
+      supportsCopyInsert: false,
+    });
+  });
+
+  it('treats Qdrant as a queryable vector datasource without SQL export actions', () => {
+    expect(getDataSourceCapabilities({ type: 'qdrant' })).toMatchObject({
+      type: 'qdrant',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'qdrantdb' })).toMatchObject({
+      type: 'qdrant',
+      supportsQueryEditor: true,
+      supportsCopyInsert: false,
+    });
+  });
+
+  it('treats Apache IoTDB as a queryable timeseries datasource with IoTDB-specific writes', () => {
+    expect(getDataSourceCapabilities({ type: 'iotdb' })).toMatchObject({
+      type: 'iotdb',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: true,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'apache-iotdb' })).toMatchObject({
+      type: 'iotdb',
+      supportsQueryEditor: true,
+      supportsCopyInsert: false,
+      forceReadOnlyQueryResult: true,
+    });
+  });
+
+  it('treats RocketMQ as a queryable messaging datasource with manual total count and publish support', () => {
+    expect(getDataSourceCapabilities({ type: 'rocketmq' })).toMatchObject({
+      type: 'rocketmq',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
+      preferManualTotalCount: true,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'rmq' })).toMatchObject({
+      type: 'rocketmq',
+      supportsQueryEditor: true,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
+      preferManualTotalCount: true,
+    });
+  });
+
+  it('treats MQTT as a queryable messaging datasource with manual total count and publish support', () => {
+    expect(getDataSourceCapabilities({ type: 'mqtt' })).toMatchObject({
+      type: 'mqtt',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
+      preferManualTotalCount: true,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'mqtts' })).toMatchObject({
+      type: 'mqtt',
+      supportsQueryEditor: true,
+      supportsMessagePublish: true,
+      preferManualTotalCount: true,
+    });
+  });
+
+  it('treats Kafka as a queryable read-only messaging datasource', () => {
+    expect(getDataSourceCapabilities({ type: 'kafka' })).toMatchObject({
+      type: 'kafka',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'apache-kafka' })).toMatchObject({
+      type: 'kafka',
+      supportsQueryEditor: true,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
+    });
+  });
+
+  it('treats RabbitMQ as a queryable messaging datasource with publish support', () => {
+    expect(getDataSourceCapabilities({ type: 'rabbitmq' })).toMatchObject({
+      type: 'rabbitmq',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: false,
+      supportsCopyInsert: false,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
+    });
+    expect(getDataSourceCapabilities({ type: 'custom', driver: 'rabbit-mq' })).toMatchObject({
+      type: 'rabbitmq',
+      supportsQueryEditor: true,
+      supportsMessagePublish: true,
+      forceReadOnlyQueryResult: true,
     });
   });
 

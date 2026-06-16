@@ -24,6 +24,9 @@ type OracleDB struct {
 	forwarder   *ssh.LocalForwarder // Store SSH tunnel forwarder
 }
 
+var _ SessionExecerProvider = (*OracleDB)(nil)
+var _ TransactionExecerProvider = (*OracleDB)(nil)
+
 func (o *OracleDB) getDSN(config connection.ConnectionConfig) string {
 	// oracle://user:pass@host:port/service_name
 	database := strings.TrimSpace(config.Database)
@@ -251,6 +254,28 @@ func (o *OracleDB) Exec(query string) (int64, error) {
 	return res.RowsAffected()
 }
 
+func (o *OracleDB) OpenTransactionExecer(ctx context.Context) (TransactionExecer, error) {
+	if o.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := o.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnTransactionExecer(conn, "COMMIT", "ROLLBACK"), nil
+}
+
+func (o *OracleDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
+	if o.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
+	}
+	conn, err := o.conn.Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return NewSQLConnStatementExecer(conn), nil
+}
+
 func (o *OracleDB) GetDatabases() ([]string, error) {
 	// Oracle treats Users/Schemas as "Databases" in this context
 	data, _, err := o.Query("SELECT username FROM all_users ORDER BY username")
@@ -325,7 +350,7 @@ func (o *OracleDB) GetCreateStatement(dbName, tableName string) (string, error) 
 func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	metadataTableName := escapeOracleMetadataLiteral(tableName)
 	metadataSchemaName := escapeOracleMetadataLiteral(dbName)
-	query := fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
+	query := fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.data_length AS "DATA_LENGTH", c.char_length AS "CHAR_LENGTH", c.data_precision AS "DATA_PRECISION", c.data_scale AS "DATA_SCALE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
 		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS "COLUMN_KEY",
 		cc.comments AS "COMMENT"
 		FROM all_tab_columns c
@@ -342,7 +367,7 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 		ORDER BY c.column_id`, metadataSchemaName, metadataTableName)
 
 	if dbName == "" {
-		query = fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
+		query = fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.data_length AS "DATA_LENGTH", c.char_length AS "CHAR_LENGTH", c.data_precision AS "DATA_PRECISION", c.data_scale AS "DATA_SCALE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
 			CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS "COLUMN_KEY",
 			cc.comments AS "COMMENT"
 			FROM user_tab_columns c
@@ -367,7 +392,7 @@ func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 	for _, row := range data {
 		col := connection.ColumnDefinition{
 			Name:     oracleRowString(row, "COLUMN_NAME"),
-			Type:     oracleRowString(row, "DATA_TYPE"),
+			Type:     formatOracleColumnType(row),
 			Nullable: oracleRowString(row, "NULLABLE"),
 			Key:      oracleRowString(row, "COLUMN_KEY"),
 			Comment:  oracleRowString(row, "COMMENT"),
@@ -402,7 +427,58 @@ func oracleRowString(row map[string]interface{}, names ...string) string {
 	if value == nil {
 		return ""
 	}
-	return fmt.Sprintf("%v", value)
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func oracleRowInt(row map[string]interface{}, names ...string) (int, bool) {
+	raw := oracleRowString(row, names...)
+	if raw == "" {
+		return 0, false
+	}
+	parsed, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
+}
+
+func isOracleLengthQualifiedType(upperType string) bool {
+	switch strings.TrimSpace(upperType) {
+	case "CHAR", "NCHAR", "VARCHAR", "VARCHAR2", "NVARCHAR", "NVARCHAR2", "RAW", "BINARY", "VARBINARY":
+		return true
+	default:
+		return strings.Contains(upperType, "CHARACTER")
+	}
+}
+
+func formatOracleColumnType(row map[string]interface{}) string {
+	dataType := oracleRowString(row, "DATA_TYPE")
+	if dataType == "" || strings.Contains(dataType, "(") {
+		return dataType
+	}
+
+	upperType := strings.ToUpper(dataType)
+	if isOracleLengthQualifiedType(upperType) {
+		if charLength, ok := oracleRowInt(row, "CHAR_LENGTH", "CHAR_COL_DECL_LENGTH"); ok && charLength > 0 {
+			return fmt.Sprintf("%s(%d)", dataType, charLength)
+		}
+		if dataLength, ok := oracleRowInt(row, "DATA_LENGTH"); ok && dataLength > 0 {
+			return fmt.Sprintf("%s(%d)", dataType, dataLength)
+		}
+	}
+
+	if strings.Contains(upperType, "NUMBER") || strings.Contains(upperType, "DECIMAL") || strings.Contains(upperType, "NUMERIC") {
+		precision, hasPrecision := oracleRowInt(row, "DATA_PRECISION", "NUMERIC_PRECISION")
+		if hasPrecision && precision > 0 {
+			scale, hasScale := oracleRowInt(row, "DATA_SCALE", "NUMERIC_SCALE")
+			if hasScale && scale > 0 {
+				return fmt.Sprintf("%s(%d,%d)", dataType, precision, scale)
+			}
+			return fmt.Sprintf("%s(%d)", dataType, precision)
+		}
+	}
+
+	return dataType
 }
 
 func (o *OracleDB) appendOracleCommentDDL(baseDDL string, dbName string, tableName string) string {
@@ -747,7 +823,7 @@ func parseOracleTemporalString(raw string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
+func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) (err error) {
 	if o.conn == nil {
 		return fmt.Errorf("连接未打开")
 	}
@@ -757,11 +833,26 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		return err
 	}
 
-	tx, err := o.conn.Begin()
+	ctx := context.Background()
+	conn, err := o.conn.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+
+	transactionFinished := false
+	defer func() {
+		if transactionFinished {
+			return
+		}
+		if _, rollbackErr := conn.ExecContext(context.Background(), "ROLLBACK"); rollbackErr != nil {
+			logger.Warnf("Oracle 表格编辑事务回滚失败：table=%s err=%v", tableName, rollbackErr)
+		}
+	}()
 
 	quoteIdent := func(name string) string {
 		n := strings.TrimSpace(name)
@@ -812,7 +903,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 			continue
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
-		res, err := tx.Exec(query, args...)
+		res, err := conn.ExecContext(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("删除失败：%v", err)
 		}
@@ -845,7 +936,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
-		res, err := tx.Exec(query, args...)
+		res, err := conn.ExecContext(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
 		}
@@ -873,7 +964,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 
 		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", qualifiedTable, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
-		res, err := tx.Exec(query, args...)
+		res, err := conn.ExecContext(ctx, query, args...)
 		if err != nil {
 			return fmt.Errorf("插入失败：%v", err)
 		}
@@ -882,7 +973,11 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 	}
 
-	return tx.Commit()
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("事务提交失败：%v", err)
+	}
+	transactionFinished = true
+	return nil
 }
 
 func (o *OracleDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {

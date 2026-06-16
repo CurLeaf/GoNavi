@@ -20,6 +20,7 @@ import { DataGridV2DdlSideWorkspace, DataGridV2DdlView } from './DataGridV2DdlWo
 import { DataGridV2ErView, DataGridV2FieldsView } from './DataGridV2MetadataViews';
 import { I18nProvider } from '../i18n/provider';
 import { getCurrentLanguage, setCurrentLanguage, type LanguagePreference } from '../i18n';
+import { V2CellContextMenuView } from './V2TableContextMenu';
 import { cloneShortcutOptions, DEFAULT_SHORTCUT_OPTIONS } from '../utils/shortcuts';
 
 const mockStoreState = vi.hoisted(() => ({
@@ -45,6 +46,11 @@ vi.mock('../store', () => ({
       showColumnType: false,
     },
     setQueryOptions: vi.fn(),
+    dataEditTransactionOptions: {
+      commitMode: 'manual',
+      autoCommitDelayMs: 5000,
+    },
+    setDataEditTransactionOptions: vi.fn(),
     addTab: vi.fn(),
     setActiveContext: vi.fn(),
     tableColumnOrders: {},
@@ -112,6 +118,8 @@ describe('DataGrid layout', () => {
         columnNames={['id', 'name']}
         loading={false}
         tableName="users"
+        dbName="main"
+        connectionId="conn-1"
         readOnly
         pagination={{
           current: 1,
@@ -128,6 +136,7 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-column-quick-find-action="true"');
     expect(markup).toContain('字段显示');
     expect(markup).toContain('跳列');
+    expect(markup).toContain('对象设计');
     expect(markup).toContain('data-grid-page-find="true"');
     expect(markup).toContain('data-grid-page-find-prev="true"');
     expect(markup).toContain('data-grid-page-find-next="true"');
@@ -776,6 +785,34 @@ describe('DataGrid layout', () => {
     expect(source).toMatch(/const\s+DataGridWithErrorBoundary:\s*React\.FC<DataGridProps>\s*=\s*\(props\)\s*=>\s*{/);
     expect(source).toMatch(/<DataGridErrorBoundary\s+i18nLanguage={language}>/);
     expect(source).not.toMatch(/<DataGridErrorBoundary\s+key={language}/);
+  });
+
+  it('keeps the v2 footer fields action labeled as field info for views', () => {
+    const markup = renderToStaticMarkup(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            id: 1,
+            name: 'alpha',
+          },
+        ]}
+        columnNames={['id', 'name']}
+        loading={false}
+        tableName="user_view"
+        objectType="view"
+        readOnly
+        pagination={{
+          current: 1,
+          pageSize: 100,
+          total: 1,
+        }}
+        onPageChange={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('字段信息');
+    expect(markup).not.toContain('对象设计');
   });
 
   it('falls back to the current i18n language when rendered outside I18nProvider', () => {
@@ -1677,6 +1714,7 @@ describe('DataGrid layout', () => {
       <DataGridSecondaryActions
         isV2Ui
         canViewDdl
+        canOpenObjectDesigner={false}
         viewMode="table"
         ddlLoading={false}
         showColumnComment={false}
@@ -1837,7 +1875,28 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('gn-v2-data-grid-table-wrap');
     expect(markup).toContain('· main');
     expect(markup).toContain('提交事务');
+    expect(markup).toContain('手动提交');
     expect(markup).toContain('AI 洞察');
+  });
+
+  it('clears modified cell markers when refreshing the grid', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    expect(source).toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setModifiedColumns\(\{\}\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}, \[clearAutoCommitTimer, onReload\]\);/);
+  });
+
+  it('renders a cell-level undo action in the v2 context menu for modified cells', () => {
+    const markup = renderToStaticMarkup(
+      <V2CellContextMenuView
+        fieldName="status"
+        tableName="orders"
+        rowLabel="row 1"
+        canModifyData
+        canUndoCellChange
+      />,
+    );
+
+    expect(markup).toContain('撤销此单元格修改');
   });
 
   it('preserves fractional seconds when rendering datetime values', () => {
@@ -1918,6 +1977,7 @@ describe('DataGrid layout', () => {
 
     expect(tableMarkup).toContain('data-grid-ddl-action="true"');
     expect(tableMarkup).toContain('查看 DDL');
+    expect(tableMarkup).toContain('对象设计');
     expect(tableMarkup).not.toContain('data-grid-locate-sidebar-action="true"');
 
     const schemaTableMarkup = renderDataGridWithI18n(
@@ -1939,6 +1999,7 @@ describe('DataGrid layout', () => {
 
     expect(schemaTableMarkup).toContain('data-grid-ddl-action="true"');
     expect(schemaTableMarkup).toContain('查看 DDL');
+    expect(schemaTableMarkup).toContain('对象设计');
     expect(schemaTableMarkup).toContain('data-grid-page-find="true"');
 
     const queryMarkup = renderDataGridWithI18n(
@@ -1960,6 +2021,8 @@ describe('DataGrid layout', () => {
     );
 
     expect(queryMarkup).not.toContain('data-grid-ddl-action="true"');
+    expect(queryMarkup).toContain('字段信息');
+    expect(queryMarkup).not.toContain('对象设计');
   });
 
   it('keeps row copy and paste as context menu actions instead of toolbar buttons', () => {
@@ -2123,6 +2186,15 @@ describe('DataGrid layout', () => {
     expect(source).toContain('.${gridId} .data-grid-inline-editor-input');
   });
 
+  it('disables browser autocapitalization for inline cell editors', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    const editorInputCount = source.match(/\{\.\.\.noAutoCapInputProps\}[\s\S]{0,180}className="data-grid-inline-editor-input"/g)?.length || 0;
+
+    expect(source).toContain("import { applyNoAutoCapAttributesWithin, noAutoCapInputProps } from '../utils/inputAutoCap';");
+    expect(editorInputCount).toBe(2);
+  });
+
   it('renders a quick WHERE condition editor when table filters are visible', () => {
     const markup = renderDataGridWithI18n(
       <DataGrid
@@ -2211,10 +2283,16 @@ describe('DataGrid layout', () => {
     expect(source).toContain('type VirtualTableScrollReference = TableReference & {');
     expect(source).toContain('const tableRef = useRef<VirtualTableScrollReference | null>(null);');
     expect(source).toContain('resolveDataGridHorizontalWheelDelta({');
+    expect(source).toContain('const virtualHorizontalAlignmentRafRef = useRef<number | null>(null);');
     expect(source).toContain('const scheduleVirtualHorizontalWheel = useCallback');
     expect(source).toContain('pendingTableHorizontalDeltaRef.current += delta;');
     expect(source).toContain('tableHorizontalWheelRafRef.current = requestAnimationFrame');
+    expect(source).toContain('const scheduleVirtualHorizontalAlignment = useCallback((preferredLeft?: number) => {');
+    expect(source).toContain('virtualHorizontalElementsRef.current = { tableContainer: null, holderEl: null, innerEl: null, headerEl: null };');
+    expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, nextLeft, { forceInternalScroll: true });');
+    expect(source).toContain('}, [horizontalScrollVisible, scheduleVirtualHorizontalAlignment, tableRenderData, tableScrollX, virtualEditingCell]);');
     expect(source).toContain('tableInstance.scrollTo({ left: clampedOffset, top: holderEl.scrollTop });');
+    expect(source).toContain('applyVirtualHorizontalOffset(tableContainer, latestExternalScroll.scrollLeft, { forceInternalScroll: true });');
     expect(source).toContain('if (externalSyncRafRef.current !== null)');
     expect(source).toContain('externalSyncRafRef.current = requestAnimationFrame');
     expect(source).toContain('const scheduleSyncExternalScrollFromTargets = useCallback');
@@ -2237,6 +2315,12 @@ describe('DataGrid layout', () => {
     expect(source).toContain("const useVirtualCellContentContain = false;");
     expect(source).toContain("const useVirtualEditableVisibilityHints = !isMacLike && !isV2Ui;");
     expect(source).toContain("contain: ${useVirtualRowCellContain ? 'layout paint style' : 'none'};");
+    expect(source).toContain('.${gridId} .data-grid-toolbar-scroll::-webkit-scrollbar-thumb:hover');
+    expect(source).toContain('.${gridId} .ant-table-body::-webkit-scrollbar-thumb:hover');
+    expect(source).toContain('.${gridId} .rc-virtual-list-holder::-webkit-scrollbar-thumb:hover');
+    expect(source).toContain('.${gridId} .data-grid-external-horizontal-scroll::-webkit-scrollbar-thumb:hover');
+    expect(source).toContain('background-clip: border-box;');
+    expect(source).toContain('horizontalScrollbarThumbHoverBg');
     expect(source).toContain('const handleSharedCellContextMenu = useCallback');
     expect(source).toContain('const shouldUsePlainVirtualContent = isV2Ui && !modifiedStyle;');
     expect(source).toContain('if (shouldUsePlainVirtualContent) {');
@@ -2259,7 +2343,13 @@ describe('DataGrid layout', () => {
     expect(css).toContain('width: 66px !important;');
     expect(css).toContain('grid-template-columns: 160px 26px 26px !important;');
     expect(css).toContain('container-name: gn-v2-data-grid-statusbar;');
-    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-status-right::-webkit-scrollbar');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-statusbar::-webkit-scrollbar');
+    expect(css).toContain('scrollbar-width: thin;');
+    expect(css).toContain('min-width: max-content;');
+    expect(css).toContain('flex: 0 0 auto;');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-status-center {');
+    expect(css).not.toContain('.gn-v2-data-grid-status-center > span:last-child {\n    display: none;');
+    expect(css).not.toContain('.gn-v2-data-grid-status-center > span:nth-child(2) {\n    display: none;');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-data-grid-pagination-wrap::-webkit-scrollbar');
     expect(css).toContain('@container gn-v2-data-grid-statusbar (max-width: 960px)');
     expect(css).toContain('@container gn-v2-data-grid-statusbar (max-width: 760px)');

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	ai "GoNavi-Wails/internal/ai"
+	"GoNavi-Wails/internal/logger"
 )
 
 var claudeLookPath = exec.LookPath
@@ -66,15 +67,29 @@ func (p *ClaudeCLIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 		return nil, err
 	}
 
+	requestLog := logAIUpstreamRequestStart(
+		p.Name(),
+		"CLI",
+		claudeCLIEndpointForLog(p.config),
+		buildClaudeCLIRequestLogBody("json", args, prompt, p.config, req),
+	)
+	var requestErr error
+	defer func() {
+		logAIUpstreamRequestFinish(requestLog, 0, requestErr)
+	}()
+
 	output, err := cmd.Output()
 	if err != nil {
 		if isClaudeCLITimeout(ctx, err) {
-			return nil, fmt.Errorf("claude CLI 执行超时（%s），当前 Base URL 或 API Key 可能没有返回有效响应", claudeCLIRequestTimeout)
+			requestErr = fmt.Errorf("claude CLI 执行超时（%s），当前 Base URL 或 API Key 可能没有返回有效响应", claudeCLIRequestTimeout)
+			return nil, requestErr
 		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("claude CLI 执行失败: %s", string(exitErr.Stderr))
+			requestErr = fmt.Errorf("claude CLI 执行失败: %s", string(exitErr.Stderr))
+			return nil, requestErr
 		}
-		return nil, fmt.Errorf("claude CLI 执行失败: %w", err)
+		requestErr = fmt.Errorf("claude CLI 执行失败: %w", err)
+		return nil, requestErr
 	}
 
 	// 解析 JSON 输出
@@ -84,7 +99,8 @@ func (p *ClaudeCLIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 		return &ai.ChatResponse{Content: strings.TrimSpace(string(output))}, nil
 	}
 	if errMsg, hasError := extractClaudeCLIEventError(result); hasError {
-		return nil, fmt.Errorf("claude CLI 返回错误: %s", errMsg)
+		requestErr = fmt.Errorf("claude CLI 返回错误: %s", errMsg)
+		return nil, requestErr
 	}
 
 	return &ai.ChatResponse{Content: result.Result}, nil
@@ -105,19 +121,29 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		args = append(args, "--model", p.config.Model)
 	}
 
-	fmt.Printf("[ClaudeCLI DEBUG] Running: claude %v\n", args)
-
 	cmd := claudeCommandContext(ctx, "claude", args...)
 	if err := p.setEnv(cmd); err != nil {
 		return err
 	}
+
+	requestLog := logAIUpstreamRequestStart(
+		p.Name(),
+		"CLI",
+		claudeCLIEndpointForLog(p.config),
+		buildClaudeCLIRequestLogBody("stream-json", args, prompt, p.config, req),
+	)
+	var requestErr error
+	defer func() {
+		logAIUpstreamRequestFinish(requestLog, 0, requestErr)
+	}()
 
 	// 关闭 stdin，防止 claude CLI 等待输入
 	cmd.Stdin = nil
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("创建 stdout 管道失败: %w", err)
+		requestErr = fmt.Errorf("创建 stdout 管道失败: %w", err)
+		return requestErr
 	}
 
 	// 捕获 stderr
@@ -125,10 +151,13 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("启动 claude CLI 失败: %w", err)
+		requestErr = fmt.Errorf("启动 claude CLI 失败: %w", err)
+		return requestErr
 	}
 
-	fmt.Printf("[ClaudeCLI DEBUG] Process started, PID: %d\n", cmd.Process.Pid)
+	if cmd.Process != nil {
+		logger.Infof("ClaudeCLI 请求进程已启动：requestId=%s pid=%d", requestLog.id, cmd.Process.Pid)
+	}
 
 	// 前端已有 loading 动画，无需在 content 中注入"正在思考"
 
@@ -142,11 +171,9 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 			continue
 		}
 
-		fmt.Printf("[ClaudeCLI DEBUG] Line: %s\n", line[:min(len(line), 200)])
-
 		var event cliStreamEvent
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			fmt.Printf("[ClaudeCLI DEBUG] Non-JSON line: %s\n", line)
+			logger.Warnf("ClaudeCLI 忽略非 JSON 输出：requestId=%s line=%s", requestLog.id, RedactAIUpstreamLogText(line))
 			continue
 		}
 
@@ -155,6 +182,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 			if isClaudeCLISystemRetryEvent(event) {
 				if errMsg, hasError := extractClaudeCLISystemRetryError(event); hasError {
 					callback(ai.StreamChunk{Error: errMsg, Done: true})
+					requestErr = fmt.Errorf("claude CLI 鉴权失败: %s", errMsg)
 					if cmd.Process != nil {
 						_ = cmd.Process.Kill()
 					}
@@ -165,6 +193,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		case "assistant":
 			if errMsg, hasError := extractClaudeCLIEventError(event); hasError {
 				callback(ai.StreamChunk{Error: errMsg, Done: true})
+				requestErr = fmt.Errorf("claude CLI 返回错误: %s", errMsg)
 				_ = cmd.Wait()
 				return nil
 			}
@@ -188,6 +217,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		case "result":
 			if errMsg, hasError := extractClaudeCLIEventError(event); hasError {
 				callback(ai.StreamChunk{Error: errMsg, Done: true})
+				requestErr = fmt.Errorf("claude CLI 返回错误: %s", errMsg)
 				_ = cmd.Wait()
 				return nil
 			}
@@ -198,6 +228,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		case "error":
 			errMsg, _ := extractClaudeCLIEventError(event)
 			callback(ai.StreamChunk{Error: errMsg, Done: true})
+			requestErr = fmt.Errorf("claude CLI 返回错误: %s", errMsg)
 			_ = cmd.Wait()
 			return nil
 		}
@@ -205,11 +236,11 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 
 	waitErr := cmd.Wait()
 	stderrStr := strings.TrimSpace(stderrBuf.String())
-	fmt.Printf("[ClaudeCLI DEBUG] Process exited. stderr: %s\n", stderrStr)
 
 	if isClaudeCLITimeout(ctx, waitErr) {
+		requestErr = fmt.Errorf("claude CLI 执行超时（%s），当前 Base URL 或 API Key 可能没有返回有效响应", claudeCLIRequestTimeout)
 		callback(ai.StreamChunk{
-			Error: fmt.Sprintf("claude CLI 执行超时（%s），当前 Base URL 或 API Key 可能没有返回有效响应", claudeCLIRequestTimeout),
+			Error: requestErr.Error(),
 			Done:  true,
 		})
 		return nil
@@ -220,6 +251,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		if stderrStr != "" {
 			errMsg = fmt.Sprintf("claude CLI 异常退出: %s", stderrStr)
 		}
+		requestErr = fmt.Errorf("%s", errMsg)
 		callback(ai.StreamChunk{Error: errMsg, Done: true})
 		return nil
 	}
@@ -240,6 +272,51 @@ func isClaudeCLITimeout(ctx context.Context, err error) bool {
 		return false
 	}
 	return errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func claudeCLIEndpointForLog(config ai.ProviderConfig) string {
+	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
+	if baseURL != "" {
+		return sanitizeAIUpstreamURL(baseURL)
+	}
+	return "claude://cli"
+}
+
+func buildClaudeCLIRequestLogBody(outputFormat string, args []string, prompt string, config ai.ProviderConfig, req ai.ChatRequest) map[string]any {
+	return map[string]any{
+		"command":       "claude",
+		"args":          claudeCLIArgsForLog(args),
+		"prompt":        prompt,
+		"output_format": outputFormat,
+		"model":         strings.TrimSpace(config.Model),
+		"base_url":      claudeCLIEndpointForLog(config),
+		"has_api_key":   strings.TrimSpace(config.APIKey) != "",
+		"message_count": len(req.Messages),
+		"tool_count":    len(req.Tools),
+		"tool_names":    claudeCLIToolNamesForLog(req.Tools),
+	}
+}
+
+func claudeCLIArgsForLog(args []string) []string {
+	result := append([]string(nil), args...)
+	for i := 0; i < len(result)-1; i++ {
+		if result[i] == "-p" {
+			result[i+1] = "[prompt logged separately]"
+			i++
+		}
+	}
+	return result
+}
+
+func claudeCLIToolNamesForLog(tools []ai.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		name := strings.TrimSpace(tool.Function.Name)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // setEnv 设置 Claude CLI 的环境变量

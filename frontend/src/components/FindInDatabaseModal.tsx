@@ -334,7 +334,7 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
                 header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
                 body: { paddingTop: 8 },
             }}
-            destroyOnClose
+            destroyOnHidden
         >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

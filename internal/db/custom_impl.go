@@ -95,7 +95,7 @@ func (c *CustomDB) QueryContext(ctx context.Context, query string) ([]map[string
 	}
 	defer rows.Close()
 
-	return scanRows(rows)
+	return scanRowsForDialect(rows, c.scanDialect())
 }
 
 func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -108,7 +108,14 @@ func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, erro
 		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsForDialect(rows, c.scanDialect())
+}
+
+func (c *CustomDB) scanDialect() string {
+	if strings.EqualFold(strings.TrimSpace(c.driver), "mysql") {
+		return "mysql"
+	}
+	return ""
 }
 
 func (c *CustomDB) ExecContext(ctx context.Context, query string) (int64, error) {
@@ -251,8 +258,8 @@ func (c *CustomDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 		schema = dbName
 	}
 
-	query := fmt.Sprintf(`SELECT column_name, data_type, is_nullable, column_default 
-		FROM information_schema.columns 
+	query := fmt.Sprintf(`SELECT column_name, data_type, character_maximum_length, numeric_precision, numeric_scale, is_nullable, column_default
+		FROM information_schema.columns
 		WHERE table_name = '%s'`, tableName)
 
 	// Adjust for schema if likely supported
@@ -272,28 +279,95 @@ func (c *CustomDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 
 	var columns []connection.ColumnDefinition
 	for _, row := range data {
-		col := connection.ColumnDefinition{}
-		// flexible mapping
-		for k, v := range row {
-			kl := strings.ToLower(k)
-			val := fmt.Sprintf("%v", v)
-			if strings.Contains(kl, "field") || strings.Contains(kl, "column_name") {
-				col.Name = val
-			} else if strings.Contains(kl, "type") {
-				col.Type = val
-			} else if strings.Contains(kl, "null") || strings.Contains(kl, "nullable") {
-				col.Nullable = val
-			} else if strings.Contains(kl, "default") {
-				col.Default = &val
-			} else if strings.Contains(kl, "key") {
-				col.Key = val
-			} else if strings.Contains(kl, "comment") {
-				col.Comment = val
-			}
-		}
-		columns = append(columns, col)
+		columns = append(columns, buildCustomColumnDefinition(row))
 	}
 	return columns, nil
+}
+
+func buildCustomColumnDefinition(row map[string]interface{}) connection.ColumnDefinition {
+	col := connection.ColumnDefinition{
+		Name:     customMetadataString(row, "Field", "field", "COLUMN_NAME", "column_name", "NAME", "name"),
+		Type:     buildCustomColumnType(row),
+		Nullable: normalizeCustomNullable(customMetadataString(row, "Null", "null", "IS_NULLABLE", "is_nullable", "NULLABLE", "nullable")),
+		Key:      customMetadataString(row, "Key", "key", "COLUMN_KEY", "column_key", "PRIMARY_KEY", "primary_key"),
+		Extra:    customMetadataString(row, "Extra", "extra", "EXTRA"),
+		Comment:  customMetadataString(row, "Comment", "comment", "COMMENTS", "comments", "COLUMN_COMMENT", "column_comment"),
+	}
+	if defaultValue, ok := customMetadataStringOK(row, "Default", "default", "COLUMN_DEFAULT", "column_default", "DATA_DEFAULT", "data_default"); ok {
+		col.Default = &defaultValue
+	}
+	return col
+}
+
+func buildCustomColumnType(row map[string]interface{}) string {
+	rawType := customMetadataString(
+		row,
+		"COLUMN_TYPE",
+		"column_type",
+		"FULL_TYPE",
+		"full_type",
+		"FULL_DATA_TYPE",
+		"full_data_type",
+		"TYPE_NAME",
+		"type_name",
+		"Type",
+		"type",
+		"DATA_TYPE",
+		"data_type",
+	)
+	if rawType == "" || strings.Contains(rawType, "(") {
+		return rawType
+	}
+
+	upperType := strings.ToUpper(rawType)
+	charLength := customMetadataInt(row, "CHARACTER_MAXIMUM_LENGTH", "character_maximum_length", "CHARACTER_MAX_LENGTH", "character_max_length", "CHAR_LENGTH", "char_length", "LENGTH", "length")
+	if charLength > 0 && strings.Contains(upperType, "CHAR") {
+		return fmt.Sprintf("%s(%d)", rawType, charLength)
+	}
+
+	precision := customMetadataInt(row, "NUMERIC_PRECISION", "numeric_precision", "DATA_PRECISION", "data_precision", "PRECISION", "precision")
+	if precision > 0 && (strings.Contains(upperType, "DECIMAL") || strings.Contains(upperType, "NUMERIC") || strings.Contains(upperType, "NUMBER")) {
+		scale := customMetadataInt(row, "NUMERIC_SCALE", "numeric_scale", "DATA_SCALE", "data_scale", "SCALE", "scale")
+		if scale > 0 {
+			return fmt.Sprintf("%s(%d,%d)", rawType, precision, scale)
+		}
+		return fmt.Sprintf("%s(%d)", rawType, precision)
+	}
+
+	return rawType
+}
+
+func customMetadataString(row map[string]interface{}, keys ...string) string {
+	value, _ := customMetadataStringOK(row, keys...)
+	return value
+}
+
+func customMetadataStringOK(row map[string]interface{}, keys ...string) (string, bool) {
+	for _, key := range keys {
+		for rowKey, raw := range row {
+			if !strings.EqualFold(rowKey, key) || raw == nil {
+				continue
+			}
+			return strings.TrimSpace(fmt.Sprintf("%v", raw)), true
+		}
+	}
+	return "", false
+}
+
+func customMetadataInt(row map[string]interface{}, keys ...string) int {
+	return parseMetadataInt(customMetadataString(row, keys...))
+}
+
+func normalizeCustomNullable(value string) string {
+	trimmed := strings.TrimSpace(value)
+	switch strings.ToLower(trimmed) {
+	case "n", "no", "false", "0":
+		return "NO"
+	case "y", "yes", "true", "1":
+		return "YES"
+	default:
+		return trimmed
+	}
 }
 
 func (c *CustomDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {

@@ -79,60 +79,68 @@ type JVMConfig struct {
 
 // ConnectionConfig 存储数据库连接的完整配置，包括 SSH、代理、SSL 等网络层设置。
 type ConnectionConfig struct {
-	ID                   string           `json:"id,omitempty"`
-	Type                 string           `json:"type"`
-	Host                 string           `json:"host"`
-	Port                 int              `json:"port"`
-	User                 string           `json:"user"`
-	Password             string           `json:"password"`
-	SavePassword         bool             `json:"savePassword,omitempty"` // Persist password in saved connection
-	Database             string           `json:"database"`
-	UseSSL               bool             `json:"useSSL,omitempty"`      // MySQL-like SSL/TLS switch
-	SSLMode              string           `json:"sslMode,omitempty"`     // preferred | required | skip-verify | disable
-	SSLCAPath            string           `json:"sslCAPath,omitempty"`   // TLS root CA / server certificate path
-	SSLCertPath          string           `json:"sslCertPath,omitempty"` // TLS client certificate path (e.g., Dameng)
-	SSLKeyPath           string           `json:"sslKeyPath,omitempty"`  // TLS client private key path (e.g., Dameng)
-	UseSSH               bool             `json:"useSSH"`
-	SSH                  SSHConfig        `json:"ssh"`
-	UseProxy             bool             `json:"useProxy,omitempty"`
-	Proxy                ProxyConfig      `json:"proxy,omitempty"`
-	UseHTTPTunnel        bool             `json:"useHttpTunnel,omitempty"`
-	HTTPTunnel           HTTPTunnelConfig `json:"httpTunnel,omitempty"`
-	Driver               string           `json:"driver,omitempty"`               // For custom connection
-	DSN                  string           `json:"dsn,omitempty"`                  // For custom connection
-	ConnectionParams     string           `json:"connectionParams,omitempty"`     // Extra URI query parameters for built-in drivers
-	Timeout              int              `json:"timeout,omitempty"`              // Connection timeout in seconds (default: 30)
-	RedisDB              int              `json:"redisDB,omitempty"`              // Redis database index (0-15)
-	URI                  string           `json:"uri,omitempty"`                  // Connection URI for copy/paste
-	ClickHouseProtocol   string           `json:"clickHouseProtocol,omitempty"`   // auto | http | native
-	OceanBaseProtocol    string           `json:"oceanBaseProtocol,omitempty"`    // OceanBase tenant compatibility protocol: mysql | oracle
-	Hosts                []string         `json:"hosts,omitempty"`                // Multi-host addresses: host:port
-	Topology             string           `json:"topology,omitempty"`             // single | replica | cluster
-	MySQLReplicaUser     string           `json:"mysqlReplicaUser,omitempty"`     // MySQL replica auth user
-	MySQLReplicaPassword string           `json:"mysqlReplicaPassword,omitempty"` // MySQL replica auth password
-	ReplicaSet           string           `json:"replicaSet,omitempty"`           // MongoDB replica set name
-	AuthSource           string           `json:"authSource,omitempty"`           // MongoDB authSource
-	ReadPreference       string           `json:"readPreference,omitempty"`       // MongoDB readPreference
-	MongoSRV             bool             `json:"mongoSrv,omitempty"`             // MongoDB use mongodb+srv URI scheme
-	MongoAuthMechanism   string           `json:"mongoAuthMechanism,omitempty"`   // MongoDB authMechanism
-	MongoReplicaUser     string           `json:"mongoReplicaUser,omitempty"`     // MongoDB replica auth user
-	MongoReplicaPassword string           `json:"mongoReplicaPassword,omitempty"` // MongoDB replica auth password
-	JVM                  JVMConfig        `json:"jvm,omitempty"`                  // JVM connector config
+	ID                    string           `json:"id,omitempty"`
+	Type                  string           `json:"type"`
+	Host                  string           `json:"host"`
+	Port                  int              `json:"port"`
+	User                  string           `json:"user"`
+	Password              string           `json:"password"`
+	SavePassword          bool             `json:"savePassword,omitempty"` // Persist password in saved connection
+	Database              string           `json:"database"`
+	UseSSL                bool             `json:"useSSL,omitempty"`      // MySQL-like SSL/TLS switch
+	SSLMode               string           `json:"sslMode,omitempty"`     // preferred | required | skip-verify | disable
+	SSLCAPath             string           `json:"sslCAPath,omitempty"`   // TLS root CA / server certificate path
+	SSLCertPath           string           `json:"sslCertPath,omitempty"` // TLS client certificate path (e.g., Dameng)
+	SSLKeyPath            string           `json:"sslKeyPath,omitempty"`  // TLS client private key path (e.g., Dameng)
+	UseSSH                bool             `json:"useSSH"`
+	SSH                   SSHConfig        `json:"ssh"`
+	UseProxy              bool             `json:"useProxy,omitempty"`
+	Proxy                 ProxyConfig      `json:"proxy,omitempty"`
+	UseHTTPTunnel         bool             `json:"useHttpTunnel,omitempty"`
+	HTTPTunnel            HTTPTunnelConfig `json:"httpTunnel,omitempty"`
+	Driver                string           `json:"driver,omitempty"`                // For custom connection
+	DSN                   string           `json:"dsn,omitempty"`                   // For custom connection
+	ConnectionParams      string           `json:"connectionParams,omitempty"`      // Extra URI query parameters for built-in drivers
+	Timeout               int              `json:"timeout,omitempty"`               // Connection timeout in seconds (default: 30)
+	RedisDB               int              `json:"redisDB,omitempty"`               // Redis database index (0-15)
+	RedisSentinelMaster   string           `json:"redisSentinelMaster,omitempty"`   // Redis Sentinel master name
+	RedisSentinelUser     string           `json:"redisSentinelUser,omitempty"`     // Redis Sentinel auth user
+	RedisSentinelPassword string           `json:"redisSentinelPassword,omitempty"` // Redis Sentinel auth password
+	URI                   string           `json:"uri,omitempty"`                   // Connection URI for copy/paste
+	ClickHouseProtocol    string           `json:"clickHouseProtocol,omitempty"`    // auto | http | native
+	OceanBaseProtocol     string           `json:"oceanBaseProtocol,omitempty"`     // OceanBase tenant compatibility protocol: mysql | oracle
+	Hosts                 []string         `json:"hosts,omitempty"`                 // Multi-host addresses: host:port
+	Topology              string           `json:"topology,omitempty"`              // single | replica | cluster | sentinel
+	MySQLReplicaUser      string           `json:"mysqlReplicaUser,omitempty"`      // MySQL replica auth user
+	MySQLReplicaPassword  string           `json:"mysqlReplicaPassword,omitempty"`  // MySQL replica auth password
+	ReplicaSet            string           `json:"replicaSet,omitempty"`            // MongoDB replica set name
+	AuthSource            string           `json:"authSource,omitempty"`            // MongoDB authSource
+	ReadPreference        string           `json:"readPreference,omitempty"`        // MongoDB readPreference
+	MongoSRV              bool             `json:"mongoSrv,omitempty"`              // MongoDB use mongodb+srv URI scheme
+	MongoAuthMechanism    string           `json:"mongoAuthMechanism,omitempty"`    // MongoDB authMechanism
+	MongoReplicaUser      string           `json:"mongoReplicaUser,omitempty"`      // MongoDB replica auth user
+	MongoReplicaPassword  string           `json:"mongoReplicaPassword,omitempty"`  // MongoDB replica auth password
+	JVM                   JVMConfig        `json:"jvm,omitempty"`                   // JVM connector config
 }
 
 // ResultSetData 表示一个查询结果集（行 + 列名），用于多结果集场景。
 type ResultSetData struct {
-	Rows    []map[string]interface{} `json:"rows"`
-	Columns []string                 `json:"columns"`
+	Rows           []map[string]interface{} `json:"rows"`
+	Columns        []string                 `json:"columns"`
+	Messages       []string                 `json:"messages,omitempty"`
+	StatementIndex int                      `json:"statementIndex,omitempty"`
 }
 
 // QueryResult 是 Wails 绑定方法的统一响应格式，前端通过此结构体接收后端结果。
 type QueryResult struct {
-	Success bool        `json:"success"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data"`
-	Fields  []string    `json:"fields,omitempty"`
-	QueryID string      `json:"queryId,omitempty"` // Unique ID for query cancellation
+	Success            bool        `json:"success"`
+	Message            string      `json:"message"`
+	Data               interface{} `json:"data"`
+	Fields             []string    `json:"fields,omitempty"`
+	Messages           []string    `json:"messages,omitempty"`
+	QueryID            string      `json:"queryId,omitempty"` // Unique ID for query cancellation
+	TransactionID      string      `json:"transactionId,omitempty"`
+	TransactionPending bool        `json:"transactionPending,omitempty"`
 }
 
 // ColumnDefinition 描述表的一个列定义。

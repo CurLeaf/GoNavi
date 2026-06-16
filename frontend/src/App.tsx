@@ -8,10 +8,13 @@ import ConnectionModal from './components/ConnectionModal';
 import SnippetSettingsModal from './components/SnippetSettingsModal';
 import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
 import DataSyncModal from './components/DataSyncModal';
+import { type DataSyncEntryMode } from './components/dataSyncEntryMode';
 import DriverManagerModal from './components/DriverManagerModal';
+import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';
 import LogPanel from './components/LogPanel';
 import AISettingsModal from './components/AISettingsModal';
 import AIChatPanel from './components/AIChatPanel';
+import AIPanelErrorBoundary from './components/ai/AIPanelErrorBoundary';
 import SecurityUpdateBanner from './components/SecurityUpdateBanner';
 import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
 import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModal';
@@ -20,13 +23,24 @@ import LanguageSettingsPanel from './components/LanguageSettingsPanel';
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
-import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
+import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, getLinuxCJKFontInstallHint, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
 import {
   DENSITY_OPTIONS,
   sanitizeDataTableDensity,
   sanitizeDataTableFontSize,
   sanitizeSidebarTreeFontSize,
 } from './utils/dataGridDisplay';
+import {
+  TAB_DISPLAY_SECONDARY_DEFAULT_KEYS,
+  TAB_DISPLAY_ELEMENT_META,
+  applyTabDisplaySettingsPatch,
+  resolveTabDisplayElementOrder,
+  sanitizeTabDisplaySettings,
+  switchTabDisplayLayout,
+  type TabDisplayElementKey,
+  type TabDisplayLayout,
+  type TabDisplaySettings,
+} from './utils/tabDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
 import { resolveAboutDisplayVersion } from './utils/appVersionDisplay';
@@ -45,6 +59,7 @@ import {
   mergeSecurityUpdateStatusWithLegacySource,
   startSecurityUpdateFromBootstrap,
 } from './utils/secureConfigBootstrap';
+import { bootstrapSavedQueries } from './utils/savedQueryPersistence';
 import {
   LEGACY_PERSIST_KEY,
   hasLegacyMigratableSensitiveItems,
@@ -192,48 +207,12 @@ const createClosedConnectionPackageDialogState = (): ConnectionPackageDialogStat
   confirmLoading: false,
 });
 
-interface AIPanelErrorBoundaryProps {
-  children: React.ReactNode;
-  fallback: (error: Error | null) => React.ReactNode;
-  onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
-}
-
-interface AIPanelErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-class AIPanelErrorBoundary extends React.Component<
-  AIPanelErrorBoundaryProps,
-  AIPanelErrorBoundaryState
-> {
-  constructor(props: AIPanelErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: Error): AIPanelErrorBoundaryState {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    this.props.onError?.(error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return this.props.fallback(this.state.error);
-    }
-
-    return this.props.children;
-  }
-}
-
 function App() {
   const { language, t } = useI18n();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [syncModalEntryMode, setSyncModalEntryMode] = useState<DataSyncEntryMode>('sync');
   const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SavedConnection | null>(null);
   const connectionModalWarmupDoneRef = useRef(false);
@@ -252,6 +231,7 @@ function App() {
   const setGlobalProxy = useStore(state => state.setGlobalProxy);
   const replaceConnections = useStore(state => state.replaceConnections);
   const replaceGlobalProxy = useStore(state => state.replaceGlobalProxy);
+  const replaceSavedQueries = useStore(state => state.replaceSavedQueries);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const updateShortcut = useStore(state => state.updateShortcut);
   const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
@@ -276,6 +256,90 @@ function App() {
   const effectiveSidebarTreeFontSize = sidebarTreeFontSizeFollowsGlobal
       ? effectiveFontSize
       : (sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize) ?? effectiveFontSize);
+  const tabDisplaySettings = useMemo(
+      () => sanitizeTabDisplaySettings(appearance.tabDisplay),
+      [appearance.tabDisplay],
+  );
+  const tabDisplayElementOrder = useMemo(
+      () => resolveTabDisplayElementOrder(tabDisplaySettings),
+      [tabDisplaySettings],
+  );
+  const visibleTabDisplayElementKeys = useMemo(
+      () => new Set<TabDisplayElementKey>([
+          ...tabDisplaySettings.primaryElements,
+          ...tabDisplaySettings.secondaryElements,
+      ]),
+      [tabDisplaySettings],
+  );
+  const setTabDisplaySettings = useCallback((settings: Partial<TabDisplaySettings>) => {
+      setAppearance({
+          tabDisplay: applyTabDisplaySettingsPatch(tabDisplaySettings, settings),
+      });
+  }, [setAppearance, tabDisplaySettings]);
+  const setTabDisplayLayout = useCallback((layout: TabDisplayLayout) => {
+      if (layout === tabDisplaySettings.layout) return;
+      setAppearance({
+          tabDisplay: switchTabDisplayLayout(tabDisplaySettings, layout),
+      });
+  }, [setAppearance, tabDisplaySettings]);
+  const updateTabDisplayElementVisibility = useCallback((key: TabDisplayElementKey, checked: boolean) => {
+      setFocusedTabDisplayElementKey(key);
+      const removeKey = (keys: TabDisplayElementKey[]) => keys.filter((item) => item !== key);
+      if (!checked) {
+          setTabDisplaySettings({
+              layout: tabDisplaySettings.layout,
+              primaryElements: removeKey(tabDisplaySettings.primaryElements),
+              secondaryElements: removeKey(tabDisplaySettings.secondaryElements),
+          });
+          return;
+      }
+
+      const primaryElements = removeKey(tabDisplaySettings.primaryElements);
+      const secondaryElements = removeKey(tabDisplaySettings.secondaryElements);
+      if (tabDisplaySettings.layout === 'double' && TAB_DISPLAY_SECONDARY_DEFAULT_KEYS.includes(key)) {
+          secondaryElements.push(key);
+      } else {
+          primaryElements.push(key);
+      }
+      setTabDisplaySettings({
+          layout: tabDisplaySettings.layout,
+          primaryElements,
+          secondaryElements,
+      });
+  }, [setTabDisplaySettings, tabDisplaySettings]);
+  const moveTabDisplayElement = useCallback((key: TabDisplayElementKey, offset: -1 | 1) => {
+      setFocusedTabDisplayElementKey(key);
+      const moveWithin = (keys: TabDisplayElementKey[]) => {
+          const index = keys.indexOf(key);
+          if (index < 0) return keys;
+          const nextIndex = index + offset;
+          if (nextIndex < 0 || nextIndex >= keys.length) return keys;
+          const next = [...keys];
+          [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+          return next;
+      };
+
+      setTabDisplaySettings({
+          layout: tabDisplaySettings.layout,
+          primaryElements: moveWithin(tabDisplaySettings.primaryElements),
+          secondaryElements: moveWithin(tabDisplaySettings.secondaryElements),
+      });
+  }, [setTabDisplaySettings, tabDisplaySettings]);
+  const setTabDisplayElementRow = useCallback((key: TabDisplayElementKey, row: 'primary' | 'secondary') => {
+      setFocusedTabDisplayElementKey(key);
+      const primaryElements = tabDisplaySettings.primaryElements.filter((item) => item !== key);
+      const secondaryElements = tabDisplaySettings.secondaryElements.filter((item) => item !== key);
+      if (row === 'primary') {
+          primaryElements.push(key);
+      } else {
+          secondaryElements.push(key);
+      }
+      setTabDisplaySettings({
+          layout: tabDisplaySettings.layout,
+          primaryElements,
+          secondaryElements,
+      });
+  }, [setTabDisplaySettings, tabDisplaySettings]);
   const resolvedUiFontFamily = resolveUIFontFamily(appearance.customUIFontFamily);
   const resolvedMonoFontFamily = resolveMonoFontFamily(appearance.customMonoFontFamily);
   const appComponentSize: 'small' | 'middle' | 'large' = effectiveUiScale <= 0.92 ? 'small' : (effectiveUiScale >= 1.12 ? 'large' : 'middle');
@@ -301,6 +365,7 @@ function App() {
       () => buildFontFamilyOptions(runtimePlatform, 'mono', installedFontFamilies),
       [installedFontFamilies, runtimePlatform],
   );
+  const linuxCJKFontInstallHint = getLinuxCJKFontInstallHint(runtimePlatform, installedFontFamilies);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
   const [hasLoadedSecureConfig, setHasLoadedSecureConfig] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth || 1280));
@@ -315,6 +380,7 @@ function App() {
   const [isSecurityUpdateProgressOpen, setIsSecurityUpdateProgressOpen] = useState(false);
   const [securityUpdateProgressStage, setSecurityUpdateProgressStage] = useState(() => t('app.security_update.stage.checking_saved_config'));
   const [securityUpdateRepairSource, setSecurityUpdateRepairSource] = useState<SecurityUpdateRepairSource | null>(null);
+  const [focusedTabDisplayElementKey, setFocusedTabDisplayElementKey] = useState<TabDisplayElementKey | null>(null);
   const [focusedAIProviderId, setFocusedAIProviderId] = useState<string | undefined>(undefined);
   const [connectionPackageDialog, setConnectionPackageDialog] = useState<ConnectionPackageDialogState>(() => createClosedConnectionPackageDialogState());
   const [pendingConnectionImportPayload, setPendingConnectionImportPayload] = useState<string | null>(null);
@@ -420,6 +486,33 @@ function App() {
           unsubscribe();
       };
   }, [isStoreHydrated]);
+
+  useEffect(() => {
+      if (!isStoreHydrated) {
+          return;
+      }
+
+      let cancelled = false;
+      const loadSavedQueries = async () => {
+          try {
+              await bootstrapSavedQueries({
+                  backend: (window as any).go?.app?.App,
+                  replaceSavedQueries: (queries) => {
+                      if (!cancelled) {
+                          replaceSavedQueries(queries);
+                      }
+                  },
+              });
+          } catch (err) {
+              console.warn('Failed to bootstrap saved queries', err);
+          }
+      };
+
+      void loadSavedQueries();
+      return () => {
+          cancelled = true;
+      };
+  }, [isStoreHydrated, replaceSavedQueries]);
 
   const normalizeSecurityUpdateStatus = useCallback((status?: Partial<SecurityUpdateStatus> | null): SecurityUpdateStatus => {
       const fallback = createEmptySecurityUpdateStatus();
@@ -698,9 +791,15 @@ function App() {
   // 定时保存窗口状态、尺寸与位置
   useEffect(() => {
       const SAVE_INTERVAL_MS = 2000;
+      let cancelled = false;
+      let hydrated = useStore.persist.hasHydrated();
+      let eventSaveTimer: number | null = null;
       let lastSaved = '';
 
       const saveWindowState = async () => {
+          if (cancelled || !hydrated) {
+              return;
+          }
           try {
               const [isFs, isMax] = await Promise.all([
                   safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
@@ -744,8 +843,67 @@ function App() {
             }
       };
 
-      const timer = window.setInterval(saveWindowState, SAVE_INTERVAL_MS);
-      return () => window.clearInterval(timer);
+      const scheduleWindowStateSave = (delayMs = 120) => {
+          if (cancelled || !hydrated) {
+              return;
+          }
+          if (eventSaveTimer !== null) {
+              window.clearTimeout(eventSaveTimer);
+          }
+          eventSaveTimer = window.setTimeout(() => {
+              eventSaveTimer = null;
+              void saveWindowState();
+          }, delayMs);
+      };
+
+      const handleWindowRuntimeChange = () => {
+          scheduleWindowStateSave();
+      };
+
+      const handleVisibilityChange = () => {
+          if (document.visibilityState === 'visible') {
+              scheduleWindowStateSave(120);
+          }
+      };
+
+      const handleWindowLifecycleFlush = () => {
+          void saveWindowState();
+      };
+
+      if (hydrated) {
+          scheduleWindowStateSave(320);
+      }
+      const unsubscribeHydration = useStore.persist.onFinishHydration(() => {
+          if (cancelled || hydrated) {
+              return;
+          }
+          hydrated = true;
+          scheduleWindowStateSave(320);
+      });
+
+      const timer = window.setInterval(() => {
+          void saveWindowState();
+      }, SAVE_INTERVAL_MS);
+      window.addEventListener('resize', handleWindowRuntimeChange);
+      window.addEventListener('focus', handleWindowRuntimeChange);
+      window.addEventListener('pageshow', handleWindowRuntimeChange);
+      window.addEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });
+      window.addEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      return () => {
+          cancelled = true;
+          if (eventSaveTimer !== null) {
+              window.clearTimeout(eventSaveTimer);
+          }
+          window.clearInterval(timer);
+          window.removeEventListener('resize', handleWindowRuntimeChange);
+          window.removeEventListener('focus', handleWindowRuntimeChange);
+          window.removeEventListener('pageshow', handleWindowRuntimeChange);
+          window.removeEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });
+          window.removeEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });
+          document.removeEventListener('visibilitychange', handleVisibilityChange);
+          unsubscribeHydration();
+      };
   }, []);
 
   useEffect(() => {
@@ -791,15 +949,28 @@ function App() {
                   devicePixelRatio: Number(window.devicePixelRatio) || 1,
                   visualViewportScale: window.visualViewport?.scale,
               });
+              const shouldResetWebViewZoom = shouldResetWebViewZoomForScaleFix(reason, hasViewportScaleDrift);
+
+              if (shouldResetWebViewZoom && !isMaximised) {
+                  try {
+                      const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();
+                      if (!res?.success) {
+                          console.warn('ResetWebViewZoom unavailable in fixWindowScaleIfNeeded:', res?.message);
+                      }
+                  } catch (e) {
+                      console.warn('ResetWebViewZoom call failed in fixWindowScaleIfNeeded', e);
+                  }
+              }
 
               if (isMaximised) {
                   if (!shouldToggleMaximisedWindowForScaleFix(reason, hasViewportScaleDrift)) {
-                      // restore + drift（任务栏点击恢复后字体异常变大）的零感知修复路径：
+                      // restore（任务栏点击恢复后字体异常变大/变糊）的零感知修复路径：
                       // 调 backend App.ResetWebViewZoom 触发 WebView2 ICoreWebView2Controller::put_ZoomFactor(1.0)，
-                      // 让 WebView2 重算 D2D/DirectWrite 字体度量。完全不动窗口、零动画。
+                      // 让 WebView2 重算 D2D/DirectWrite 字体度量。该异常不一定表现为 viewport ratio drift，
+                      // 所以 restore 场景不能依赖 hasViewportScaleDrift。完全不动窗口、零动画。
                       // backend 失败（wails 升级破坏反射 / 非 Windows）时回退到 dispatch resize 兜底；
                       // 用户仍可按 Ctrl+Shift+0 手动 toggle 修复。
-                      if (shouldResetWebViewZoomForScaleFix(reason, hasViewportScaleDrift)) {
+                      if (shouldResetWebViewZoom) {
                           try {
                               const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();
                               if (!res?.success) {
@@ -1480,12 +1651,11 @@ function App() {
       if (!isStoreHydrated || !isMacRuntime) {
           return;
       }
-
-      try {
-          void SetMacNativeWindowControls(useNativeMacWindowControls).catch(() => undefined);
-      } catch (e) {
-          console.warn('Wails API: SetMacNativeWindowControls unavailable', e);
+      const backendApp = (window as any).go?.app?.App;
+      if (typeof backendApp?.SetMacNativeWindowControls !== 'function') {
+          return;
       }
+      void safeWindowRuntimeCall(() => SetMacNativeWindowControls(useNativeMacWindowControls), undefined);
   }, [isMacRuntime, isStoreHydrated, useNativeMacWindowControls]);
 
   useEffect(() => {
@@ -2002,7 +2172,7 @@ function App() {
       try {
           setPendingConnectionImportPayload(null);
           const importedViews = await importConnectionsPayload(raw, '');
-          if (importKind === 'mysql-workbench-xml' && importedViews.some(v => !v.hasPrimaryPassword)) {
+          if ((importKind === 'mysql-workbench-xml' || importKind === 'navicat-ncx') && importedViews.some(v => !v.hasPrimaryPassword)) {
               void message.warning(t('app.connection_package.message.imported_with_missing_passwords', { count: importedViews.length }));
           } else {
               void message.success(t('app.connection_package.message.imported_connections', { count: importedViews.length }));
@@ -2139,12 +2309,17 @@ function App() {
   const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [themeModalSection, setThemeModalSection] = useState<'theme' | 'appearance'>('theme');
+  const [isLinuxCJKFontBannerDismissed, setIsLinuxCJKFontBannerDismissed] = useState(false);
   const [isAppearanceModalOpen, setIsAppearanceModalOpen] = useState(false);
   const [isShortcutModalOpen, setIsShortcutModalOpen] = useState(false);
   const [isSnippetModalOpen, setIsSnippetModalOpen] = useState(false);
   const [capturingShortcutAction, setCapturingShortcutAction] = useState<ShortcutAction | null>(null);
+  const tabDisplaySettingsPanelRef = useRef<HTMLDivElement | null>(null);
+  const [tabDisplaySettingsFocusRequest, setTabDisplaySettingsFocusRequest] = useState(0);
   useEffect(() => {
-      if (!isThemeModalOpen || themeModalSection !== 'appearance') {
+      const shouldLoadInstalledFonts =
+          runtimePlatform === 'linux' || (isThemeModalOpen && themeModalSection === 'appearance');
+      if (!shouldLoadInstalledFonts) {
           return;
       }
       if (hasLoadedInstalledFontsRef.current || isFontFamiliesLoading) {
@@ -2192,7 +2367,17 @@ function App() {
       return () => {
           cancelled = true;
       };
-  }, [isThemeModalOpen, t, themeModalSection]);
+  }, [isThemeModalOpen, runtimePlatform, t, themeModalSection]);
+
+  useEffect(() => {
+      if (!isThemeModalOpen || themeModalSection !== 'appearance' || tabDisplaySettingsFocusRequest === 0) {
+          return;
+      }
+      const timer = window.setTimeout(() => {
+          tabDisplaySettingsPanelRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }, 80);
+      return () => window.clearTimeout(timer);
+  }, [isThemeModalOpen, themeModalSection, tabDisplaySettingsFocusRequest]);
 
   const shortcutConflictMap = useMemo(() => {
       const map: Partial<Record<ShortcutAction, ConflictInfo[]>> = {};
@@ -2612,7 +2797,8 @@ function App() {
       }
   }, [securityUpdateRepairSource]);
 
-  const handleTitleBarWindowToggle = async () => {
+  const handleTitleBarWindowToggle = async (options?: { allowMacNativeFullscreen?: boolean }) => {
+      const allowMacNativeFullscreen = options?.allowMacNativeFullscreen === true;
       const syncWindowStateFromRuntime = async () => {
           try {
               const [isFullscreen, isMaximised] = await Promise.all([
@@ -2633,7 +2819,7 @@ function App() {
               void emitWindowDiagnostic('action:titlebar-toggle:after-unfullscreen');
               return;
           }
-          if (useNativeMacWindowControls && isMacRuntime) {
+          if (allowMacNativeFullscreen && useNativeMacWindowControls && isMacRuntime) {
               await WindowFullscreen();
               await syncWindowStateFromRuntime();
               void emitWindowDiagnostic('action:titlebar-toggle:after-fullscreen');
@@ -2658,7 +2844,7 @@ function App() {
       if (target?.closest('[data-no-titlebar-toggle="true"]')) {
           return;
       }
-      void handleTitleBarWindowToggle();
+      void handleTitleBarWindowToggle({ allowMacNativeFullscreen: false });
   };
 
   // handleManualResetWindowZoom 由 resetWindowZoom 快捷键（默认 Ctrl+Shift+0）触发，
@@ -2932,6 +3118,19 @@ function App() {
   }, []);
 
   useEffect(() => {
+      const handleOpenTabDisplaySettingsEvent = () => {
+          setIsSettingsModalOpen(false);
+          setThemeModalSection('appearance');
+          setIsThemeModalOpen(true);
+          setTabDisplaySettingsFocusRequest((current) => current + 1);
+      };
+      window.addEventListener('gonavi:open-tab-display-settings', handleOpenTabDisplaySettingsEvent as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:open-tab-display-settings', handleOpenTabDisplaySettingsEvent as EventListener);
+      };
+  }, []);
+
+  useEffect(() => {
       const handleCreateQueryTabEvent = () => {
           handleNewQuery();
       };
@@ -3023,7 +3222,7 @@ function App() {
                   break;
               case 'toggleMacFullscreen':
                   if (isMacRuntime && useNativeMacWindowControls) {
-                      void handleTitleBarWindowToggle();
+                      void handleTitleBarWindowToggle({ allowMacNativeFullscreen: true });
                   }
                   break;
               case 'resetWindowZoom':
@@ -3196,6 +3395,13 @@ function App() {
           </span>
       </div>
   ), [darkMode]);
+  const showLinuxCJKFontBanner = Boolean(
+      linuxCJKFontInstallHint &&
+      hasLoadedInstalledFontsRef.current &&
+      !isFontFamiliesLoading &&
+      !fontFamiliesLoadError &&
+      !isLinuxCJKFontBannerDismissed,
+  );
 
   return (
     <ConfigProvider
@@ -3268,6 +3474,18 @@ function App() {
                   </div>
               )}
           </div>
+
+          {showLinuxCJKFontBanner && (
+              <LinuxCJKFontBanner
+                darkMode={darkMode}
+                installHint={linuxCJKFontInstallHint || ''}
+                onOpenFontSettings={() => {
+                        setThemeModalSection('appearance');
+                        setIsThemeModalOpen(true);
+                }}
+                onDismiss={() => setIsLinuxCJKFontBannerDismissed(true)}
+              />
+          )}
 
           <Layout style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
           <Sider 
@@ -3608,12 +3826,35 @@ function App() {
                   },
                 },
                 {
+                  key: 'schema-compare',
+                  icon: <AppstoreOutlined />,
+                  title: '表结构比对',
+                  description: '对比源表与目标表结构差异，只预览不执行。',
+                  onClick: () => {
+                    setIsToolsModalOpen(false);
+                    setSyncModalEntryMode('schemaCompare');
+                    setIsSyncModalOpen(true);
+                  },
+                },
+                {
+                  key: 'data-compare',
+                  icon: <SwitcherOutlined />,
+                  title: '数据比对',
+                  description: '按主键分析新增、更新、删除和相同行。',
+                  onClick: () => {
+                    setIsToolsModalOpen(false);
+                    setSyncModalEntryMode('dataCompare');
+                    setIsSyncModalOpen(true);
+                  },
+                },
+                {
                   key: 'sync',
                   icon: <UploadOutlined rotate={90} />,
                   title: t('app.tools.entry.sync.title'),
                   description: t('app.tools.entry.sync.description'),
                   onClick: () => {
                     setIsToolsModalOpen(false);
+                    setSyncModalEntryMode('sync');
                     setIsSyncModalOpen(true);
                   },
                 },
@@ -3846,6 +4087,7 @@ function App() {
           <DataSyncModal
             open={isSyncModalOpen}
             onClose={() => setIsSyncModalOpen(false)}
+            entryMode={syncModalEntryMode}
           />
           )}
           {isDriverModalOpen && (
@@ -4165,6 +4407,23 @@ function App() {
                                           {t('app.theme.ui_version.beta_warning')}
                                       </div>
                                   )}
+                                  {appearance.uiVersion === 'v2' && (
+                                      <div style={{ marginTop: 14 }}>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>新版左侧搜索模式</div>
+                                          <Segmented
+                                              block
+                                              options={[
+                                                  { label: '新版命令搜索', value: 'command' },
+                                                  { label: '旧版侧栏筛选', value: 'filter' },
+                                              ]}
+                                              value={appearance.v2SidebarSearchMode ?? 'command'}
+                                              onChange={(value) => setAppearance({ v2SidebarSearchMode: value as 'command' | 'filter' })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
+                                              新版命令搜索适合跳转连接、表和动作，可在面板中开启同步开关持续过滤左侧树；旧版侧栏筛选会直接显示输入框并持久保留筛选内容。
+                                          </div>
+                                      </div>
+                                  )}
                               </div>
                               <div style={utilityPanelStyle}>
                                   <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.theme.mode_title')}</div>
@@ -4274,6 +4533,24 @@ function App() {
                                                       ? t('app.theme.font_family.loaded_ui_hint', { count: installedFontFamilies.length })
                                                       : t('app.theme.font_family.loading_ui_hint'))}
                                           </div>
+                                          {linuxCJKFontInstallHint && hasLoadedInstalledFontsRef.current && !isFontFamiliesLoading && !fontFamiliesLoadError && (
+                                              <div
+                                                  style={{
+                                                      marginTop: 8,
+                                                      padding: '9px 10px',
+                                                      borderRadius: 8,
+                                                      border: darkMode ? '1px solid rgba(250,204,21,0.28)' : '1px solid rgba(217,119,6,0.22)',
+                                                      background: darkMode ? 'rgba(250,204,21,0.08)' : 'rgba(251,191,36,0.12)',
+                                                      color: darkMode ? 'rgba(254,249,195,0.92)' : '#92400e',
+                                                      fontSize: 12,
+                                                      lineHeight: 1.7,
+                                                  }}
+                                              >
+                                                  Ubuntu/Linux 未检测到中文 CJK 字体，界面可能显示方框。请安装：
+                                                  <span style={{ fontFamily: 'var(--gn-font-mono)', marginLeft: 6 }}>{linuxCJKFontInstallHint}</span>
+                                                  ，然后重启 GoNavi。
+                                              </div>
+                                          )}
                                       </div>
                                       <div>
                                           <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.font_family.mono_title')}</div>
@@ -4306,6 +4583,181 @@ function App() {
                                                   : t('app.theme.font_family.mono_hint')}
                                           </div>
                                       </div>
+                                  </div>
+                              </div>
+                              <div ref={tabDisplaySettingsPanelRef} style={utilityPanelStyle}>
+                                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                                      <div style={{ minWidth: 0 }}>
+                                          <div style={{ fontWeight: 500 }}>Tab 标签展示</div>
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
+                                              自定义连接名、对象类型、对象名、数据库、Schema 和 Host/IP 的展示顺序；双行模式可把上下文放到副行。
+                                          </div>
+                                      </div>
+                                      <Segmented
+                                          size="small"
+                                          options={[
+                                              { label: '单行', value: 'single' },
+                                              { label: '双行', value: 'double' },
+                                          ]}
+                                          value={tabDisplaySettings.layout}
+                                          onChange={(value) => setTabDisplayLayout(value as TabDisplayLayout)}
+                                      />
+                                  </div>
+                                  <div style={{ display: 'grid', gap: 8 }}>
+                                      {tabDisplayElementOrder.map((key) => {
+                                          const meta = TAB_DISPLAY_ELEMENT_META[key];
+                                          const checked = visibleTabDisplayElementKeys.has(key);
+                                          const row = tabDisplaySettings.secondaryElements.includes(key) ? 'secondary' : 'primary';
+                                          const currentRowElements = row === 'secondary'
+                                              ? tabDisplaySettings.secondaryElements
+                                              : tabDisplaySettings.primaryElements;
+                                          const indexInRow = currentRowElements.indexOf(key);
+                                          const canMoveUp = checked && indexInRow > 0;
+                                          const canMoveDown = checked && indexInRow >= 0 && indexInRow < currentRowElements.length - 1;
+                                          const isFocused = focusedTabDisplayElementKey === key;
+                                          return (
+                                              <div
+                                                  key={key}
+                                                  role="button"
+                                                  tabIndex={0}
+                                                  onClick={() => setFocusedTabDisplayElementKey(key)}
+                                                  onKeyDown={(event) => {
+                                                      if (event.key === 'Enter' || event.key === ' ') {
+                                                          event.preventDefault();
+                                                          setFocusedTabDisplayElementKey(key);
+                                                      }
+                                                  }}
+                                                  style={{
+                                                      display: 'grid',
+                                                      gridTemplateColumns: 'minmax(0, 1fr) auto',
+                                                      gap: 10,
+                                                      alignItems: 'center',
+                                                      padding: '9px 10px',
+                                                      borderRadius: 10,
+                                                      border: `1px solid ${isFocused
+                                                          ? (darkMode ? 'rgba(255,214,102,0.54)' : 'rgba(24,144,255,0.54)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
+                                                      boxShadow: isFocused
+                                                          ? (darkMode ? '0 0 0 2px rgba(255,214,102,0.14)' : '0 0 0 2px rgba(24,144,255,0.12)')
+                                                          : 'none',
+                                                      background: isFocused
+                                                          ? (darkMode ? 'linear-gradient(90deg, rgba(255,214,102,0.12) 0%, rgba(255,255,255,0.045) 100%)' : 'linear-gradient(90deg, rgba(24,144,255,0.10) 0%, rgba(255,255,255,0.78) 100%)')
+                                                          : checked
+                                                          ? (darkMode ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.62)')
+                                                          : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(16,24,40,0.025)'),
+                                                      cursor: 'pointer',
+                                                      transition: 'border-color 140ms ease, box-shadow 140ms ease, background 140ms ease',
+                                                  }}
+                                              >
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                                      <span style={{
+                                                          width: 22,
+                                                          height: 22,
+                                                          borderRadius: 999,
+                                                          display: 'inline-flex',
+                                                          alignItems: 'center',
+                                                          justifyContent: 'center',
+                                                          flexShrink: 0,
+                                                          fontFamily: resolvedMonoFontFamily,
+                                                          fontSize: 11,
+                                                          fontWeight: 800,
+                                                          background: isFocused
+                                                              ? (darkMode ? 'rgba(255,214,102,0.22)' : 'rgba(24,144,255,0.14)')
+                                                              : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(16,24,40,0.05)'),
+                                                          color: isFocused
+                                                              ? (darkMode ? '#ffd666' : '#1677ff')
+                                                              : (darkMode ? 'rgba(255,255,255,0.56)' : 'rgba(16,24,40,0.5)'),
+                                                      }}>
+                                                          {checked && indexInRow >= 0 ? indexInRow + 1 : '-'}
+                                                      </span>
+                                                      <Switch
+                                                          size="small"
+                                                          checked={checked}
+                                                          onClick={(_, event) => event.stopPropagation()}
+                                                          onChange={(nextChecked) => updateTabDisplayElementVisibility(key, nextChecked)}
+                                                      />
+                                                      <div style={{ minWidth: 0 }}>
+                                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                                              <span style={{ fontWeight: 600 }}>{meta.label}</span>
+                                                              {isFocused ? (
+                                                                  <span style={{
+                                                                      fontSize: 10,
+                                                                      lineHeight: '16px',
+                                                                      padding: '0 6px',
+                                                                      borderRadius: 999,
+                                                                      background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)',
+                                                                      color: darkMode ? '#ffd666' : '#1677ff',
+                                                                  }}>
+                                                                      当前
+                                                                  </span>
+                                                              ) : null}
+                                                              {checked && tabDisplaySettings.layout === 'double' ? (
+                                                                  <span style={{
+                                                                      fontSize: 10,
+                                                                      lineHeight: '16px',
+                                                                      padding: '0 6px',
+                                                                      borderRadius: 999,
+                                                                      background: row === 'secondary'
+                                                                          ? (darkMode ? 'rgba(56,189,248,0.14)' : 'rgba(2,132,199,0.08)')
+                                                                          : (darkMode ? 'rgba(34,197,94,0.14)' : 'rgba(22,163,74,0.08)'),
+                                                                      color: row === 'secondary'
+                                                                          ? (darkMode ? '#7dd3fc' : '#0369a1')
+                                                                          : (darkMode ? '#86efac' : '#15803d'),
+                                                                  }}>
+                                                                      {row === 'secondary' ? '副行' : '主行'}
+                                                                  </span>
+                                                              ) : null}
+                                                          </div>
+                                                          <div style={{ ...utilityMutedTextStyle, marginTop: 2 }}>{meta.description}</div>
+                                                      </div>
+                                                  </div>
+                                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                      {tabDisplaySettings.layout === 'double' && checked ? (
+                                                          <Segmented
+                                                              size="small"
+                                                              options={[
+                                                                  { label: '主行', value: 'primary' },
+                                                                  { label: '副行', value: 'secondary' },
+                                                              ]}
+                                                              value={row}
+                                                              onChange={(value) => setTabDisplayElementRow(key, value as 'primary' | 'secondary')}
+                                                              onClick={(event) => event.stopPropagation()}
+                                                          />
+                                                      ) : null}
+                                                      <Button
+                                                          size="small"
+                                                          disabled={!canMoveUp}
+                                                          onClick={(event) => {
+                                                              event.stopPropagation();
+                                                              moveTabDisplayElement(key, -1);
+                                                          }}
+                                                      >
+                                                          上移
+                                                      </Button>
+                                                      <Button
+                                                          size="small"
+                                                          disabled={!canMoveDown}
+                                                          onClick={(event) => {
+                                                              event.stopPropagation();
+                                                              moveTabDisplayElement(key, 1);
+                                                          }}
+                                                      >
+                                                          下移
+                                                      </Button>
+                                                  </div>
+                                              </div>
+                                          );
+                                      })}
+                                  </div>
+                                  <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
+                                      当前预览：{tabDisplaySettings.layout === 'double' ? '主行 ' : ''}
+                                      {tabDisplaySettings.primaryElements.map((key) => TAB_DISPLAY_ELEMENT_META[key].label).join(' / ') || '默认标签'}
+                                      {tabDisplaySettings.layout === 'double' && tabDisplaySettings.secondaryElements.length > 0
+                                          ? `，副行 ${tabDisplaySettings.secondaryElements.map((key) => TAB_DISPLAY_ELEMENT_META[key].label).join(' / ')}`
+                                          : ''}
+                                      {focusedTabDisplayElementKey
+                                          ? `；当前选中 ${TAB_DISPLAY_ELEMENT_META[focusedTabDisplayElementKey].label}`
+                                          : ''}
                                   </div>
                               </div>
                               <div style={utilityPanelStyle}>

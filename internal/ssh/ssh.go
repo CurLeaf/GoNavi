@@ -116,6 +116,22 @@ func RegisterSSHNetwork(sshConfig connection.SSHConfig) (string, error) {
 	return netName, nil
 }
 
+// DialContextThroughSSH creates a context-aware connection through an SSH tunnel.
+func DialContextThroughSSH(ctx context.Context, config connection.SSHConfig, network, address string) (net.Conn, error) {
+	client, err := GetOrCreateSSHClient(config)
+	if err != nil {
+		return nil, fmt.Errorf("建立 SSH 连接失败：%w", err)
+	}
+
+	conn, err := dialContext(ctx, client, network, address)
+	if err != nil {
+		return nil, fmt.Errorf("通过 SSH 隧道连接到 %s 失败：%w", address, err)
+	}
+
+	logger.Infof("已通过 SSH 隧道连接到：%s", address)
+	return conn, nil
+}
+
 // sshClientCache stores SSH clients to avoid creating multiple connections
 var (
 	sshClientCache   = make(map[sshClientCacheKey]*ssh.Client)

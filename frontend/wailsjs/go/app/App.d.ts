@@ -28,7 +28,13 @@ export function ConfigureGlobalProxy(arg1:boolean,arg2:connection.ProxyConfig):P
 
 export function CreateDatabase(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
+export function CreateSQLDirectory(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function CreateSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
 export function CreateSchema(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
+export function DBCommitTransaction(arg1:string):Promise<connection.QueryResult>;
 
 export function DBConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
@@ -52,7 +58,13 @@ export function DBQueryIsolated(arg1:connection.ConnectionConfig,arg2:string,arg
 
 export function DBQueryMulti(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function DBQueryMultiTransactional(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
 export function DBQueryWithCancel(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
+export function DBReleaseConnection(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
+
+export function DBRollbackTransaction(arg1:string):Promise<connection.QueryResult>;
 
 export function DBShowCreateTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
@@ -64,6 +76,12 @@ export function DataSyncPreview(arg1:sync.SyncConfig,arg2:string,arg3:number):Pr
 
 export function DeleteConnection(arg1:string):Promise<void>;
 
+export function DeleteQuery(arg1:string):Promise<void>;
+
+export function DeleteSQLDirectory(arg1:string):Promise<connection.QueryResult>;
+
+export function DeleteSQLFile(arg1:string):Promise<connection.QueryResult>;
+
 export function DismissSecurityUpdateReminder():Promise<app.SecurityUpdateStatus>;
 
 export function DownloadDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
@@ -73,6 +91,8 @@ export function DownloadUpdate():Promise<connection.QueryResult>;
 export function DropDatabase(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function DropFunction(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
+export function DropSchema(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DropTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
@@ -91,6 +111,8 @@ export function ExportDatabaseSQL(arg1:connection.ConnectionConfig,arg2:string,a
 export function ExportQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:string):Promise<connection.QueryResult>;
 
 export function ExportSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function ExportSchemaSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:boolean):Promise<connection.QueryResult>;
 
 export function ExportTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
@@ -116,7 +138,11 @@ export function GetGlobalProxyConfig():Promise<connection.QueryResult>;
 
 export function GetSavedConnections():Promise<Array<connection.SavedConnectionView>>;
 
+export function GetSavedQueries():Promise<Array<connection.SavedQuery>>;
+
 export function GetSecurityUpdateStatus():Promise<app.SecurityUpdateStatus>;
+
+export function GetUnboundSavedQueries():Promise<Array<connection.SavedQuery>>;
 
 export function ImportConfigFile():Promise<connection.QueryResult>;
 
@@ -129,6 +155,8 @@ export function ImportDataWithProgress(arg1:connection.ConnectionConfig,arg2:str
 export function ImportLegacyConnections(arg1:Array<connection.SavedConnectionInput>):Promise<Array<connection.SavedConnectionView>>;
 
 export function ImportLegacyGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
+
+export function ImportSavedQueries(arg1:connection.SavedQueryImportPayload):Promise<Array<connection.SavedQuery>>;
 
 export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
@@ -192,7 +220,11 @@ export function PreviewChanges(arg1:connection.ConnectionConfig,arg2:string,arg3
 
 export function PreviewImportFile(arg1:string):Promise<connection.QueryResult>;
 
+export function ReadAppLogTail(arg1:number,arg2:string):Promise<connection.QueryResult>;
+
 export function ReadSQLFile(arg1:string):Promise<connection.QueryResult>;
+
+export function RebindSavedQuery(arg1:string,arg2:string):Promise<connection.SavedQuery>;
 
 export function RedisConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
@@ -246,6 +278,12 @@ export function RemoveDriverPackage(arg1:string,arg2:string):Promise<connection.
 
 export function RenameDatabase(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
+export function RenameSQLDirectory(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function RenameSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
+
+export function RenameSchema(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
 export function RenameTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
 export function RenameView(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
@@ -265,6 +303,8 @@ export function RetrySecurityUpdateCurrentRound(arg1:app.RetrySecurityUpdateRequ
 export function SaveConnection(arg1:connection.SavedConnectionInput):Promise<connection.SavedConnectionView>;
 
 export function SaveGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
+
+export function SaveQuery(arg1:connection.SavedQuery):Promise<connection.SavedQuery>;
 
 export function SelectCertificateFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
@@ -287,6 +327,8 @@ export function SetLanguage(arg1:string):Promise<void>;
 export function SetMacNativeWindowControls(arg1:boolean):Promise<void>;
 
 export function SetWindowTranslucency(arg1:number,arg2:number):Promise<void>;
+
+export function Shutdown():Promise<void>;
 
 export function StartSecurityUpdate(arg1:app.StartSecurityUpdateRequest):Promise<app.SecurityUpdateStatus>;
 

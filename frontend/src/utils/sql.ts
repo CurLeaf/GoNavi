@@ -1,3 +1,5 @@
+import { splitQualifiedNameSegments, stripIdentifierQuotes } from './qualifiedName';
+
 export type FilterCondition = {
   id?: number;
   enabled?: boolean;
@@ -8,17 +10,7 @@ export type FilterCondition = {
   value2?: string;
 };
 
-const normalizeIdentPart = (ident: string) => {
-  let raw = (ident || '').trim();
-  if (!raw) return raw;
-  const first = raw[0];
-  const last = raw[raw.length - 1];
-  if ((first === '"' && last === '"') || (first === '`' && last === '`')) {
-    raw = raw.slice(1, -1).trim();
-  }
-  raw = raw.replace(/["`]/g, '').trim();
-  return raw;
-};
+const normalizeIdentPart = (ident: string) => stripIdentifierQuotes(ident);
 
 // 检查标识符是否需要引号（包含特殊字符或是保留字）
 const needsQuote = (ident: string): boolean => {
@@ -37,12 +29,12 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
   if (!raw) return raw;
   const dbTypeLower = (dbType || '').toLowerCase();
 
-  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'starrocks' || dbTypeLower === 'sphinx' || dbTypeLower === 'tdengine' || dbTypeLower === 'clickhouse') {
+  if (dbTypeLower === 'mysql' || dbTypeLower === 'goldendb' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'starrocks' || dbTypeLower === 'sphinx' || dbTypeLower === 'tdengine' || dbTypeLower === 'iotdb' || dbTypeLower === 'clickhouse') {
     return `\`${raw.replace(/`/g, '``')}\``;
   }
 
   // 对于 KingBase/PostgreSQL，只在必要时加引号
-  if (dbTypeLower === 'kingbase' || dbTypeLower === 'postgres' || dbTypeLower === 'opengauss') {
+  if (dbTypeLower === 'kingbase' || dbTypeLower === 'postgres' || dbTypeLower === 'opengauss' || dbTypeLower === 'gaussdb') {
     if (needsQuote(raw)) {
       return `"${raw.replace(/"/g, '""')}"`;
     }
@@ -62,9 +54,13 @@ export const quoteIdentPart = (dbType: string, ident: string) => {
 export const quoteQualifiedIdent = (dbType: string, ident: string) => {
   const raw = (ident || '').trim();
   if (!raw) return raw;
-  const parts = raw.split('.').map(normalizeIdentPart).filter(Boolean);
-  if (parts.length <= 1) return quoteIdentPart(dbType, raw);
-  return parts.map(p => quoteIdentPart(dbType, p)).join('.');
+  if (['rocketmq', 'mqtt', 'kafka', 'rabbitmq'].includes((dbType || '').trim().toLowerCase())) {
+    return quoteIdentPart(dbType, raw);
+  }
+  const parts = splitQualifiedNameSegments(raw).filter(Boolean);
+  if (parts.length === 0) return quoteIdentPart(dbType, raw);
+  if (parts.length === 1 && parts[0] === normalizeIdentPart(raw)) return quoteIdentPart(dbType, raw);
+  return parts.map((part) => quoteIdentPart(dbType, part)).join('.');
 };
 
 export const escapeLiteral = (val: string) => (val || '').replace(/'/g, "''");
@@ -153,7 +149,7 @@ export const buildOrderBySQL = (
   // 部分数据源在无显式排序需求时强制 ORDER BY（即使按主键）会显著放大大表预览成本：
   // MySQL/MariaDB 可能触发 filesort 和 sort memory 错误，DuckDB 大文件可能被排序拖到连接超时。
   // 因此仅在用户主动点击排序时下发 ORDER BY，默认分页查询不加兜底排序。
-  if (dbTypeLower === 'mysql' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'starrocks' || dbTypeLower === 'duckdb') {
+  if (dbTypeLower === 'mysql' || dbTypeLower === 'goldendb' || dbTypeLower === 'mariadb' || dbTypeLower === 'oceanbase' || dbTypeLower === 'diros' || dbTypeLower === 'starrocks' || dbTypeLower === 'duckdb') {
     return '';
   }
 

@@ -3,8 +3,9 @@ import { resolveUniqueKeyGroupsFromIndexes } from '../components/dataGridCopyIns
 import { isOracleLikeDialect } from './sqlDialect';
 
 export const ORACLE_ROWID_LOCATOR_COLUMN = '__gonavi_oracle_rowid__';
+export const DUCKDB_ROWID_LOCATOR_COLUMN = '__gonavi_duckdb_rowid__';
 
-export type RowLocatorStrategy = 'primary-key' | 'unique-key' | 'oracle-rowid' | 'none';
+export type RowLocatorStrategy = 'primary-key' | 'unique-key' | 'oracle-rowid' | 'duckdb-rowid' | 'none';
 
 export type EditRowLocator = {
   strategy: RowLocatorStrategy;
@@ -22,6 +23,7 @@ export type ResolveEditRowLocatorParams = {
   primaryKeys?: string[];
   indexes?: IndexDefinition[];
   allowOracleRowID?: boolean;
+  allowDuckDBRowID?: boolean;
 };
 
 export type ResolveRowLocatorValuesResult =
@@ -59,6 +61,7 @@ export const resolveEditRowLocator = ({
   primaryKeys = [],
   indexes,
   allowOracleRowID = false,
+  allowDuckDBRowID = false,
 }: ResolveEditRowLocatorParams): EditRowLocator => {
   const columns = (resultColumns || []).map(normalizeColumnName).filter(Boolean);
   const primaryKeyColumns = (primaryKeys || []).map(normalizeColumnName).filter(Boolean);
@@ -98,8 +101,23 @@ export const resolveEditRowLocator = ({
     };
   }
 
+  if (allowDuckDBRowID && String(dbType || '').trim().toLowerCase() === 'duckdb' && hasColumn(columns, DUCKDB_ROWID_LOCATOR_COLUMN)) {
+    const rowIDColumn = findColumn(columns, DUCKDB_ROWID_LOCATOR_COLUMN);
+    return {
+      strategy: 'duckdb-rowid',
+      columns: ['rowid'],
+      valueColumns: [rowIDColumn],
+      hiddenColumns: [rowIDColumn],
+      readOnly: false,
+    };
+  }
+
   if (allowOracleRowID && isOracleLikeDialect(dbType)) {
     return buildReadOnlyLocator('未检测到主键或可用唯一索引，且结果中缺少 Oracle ROWID，无法安全提交修改。');
+  }
+
+  if (allowDuckDBRowID && String(dbType || '').trim().toLowerCase() === 'duckdb') {
+    return buildReadOnlyLocator('未检测到主键、可用唯一索引或 DuckDB rowid，无法安全提交修改。');
   }
 
   return buildReadOnlyLocator('未检测到主键或可用唯一索引，无法安全提交修改。');

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 type agentRequest struct {
 	ID        int64                        `json:"id"`
 	Method    string                       `json:"method"`
+	SessionID string                       `json:"sessionId,omitempty"`
 	Config    *connection.ConnectionConfig `json:"config,omitempty"`
 	Query     string                       `json:"query,omitempty"`
 	TimeoutMs int64                        `json:"timeoutMs,omitempty"`
@@ -39,6 +41,8 @@ const (
 	agentMethodClose         = "close"
 	agentMethodMetadata      = "metadata"
 	agentMethodPing          = "ping"
+	agentMethodOpenSession   = "openSession"
+	agentMethodCloseSession  = "closeSession"
 	agentMethodQuery         = "query"
 	agentMethodExec          = "exec"
 	agentMethodGetDatabases  = "getDatabases"
@@ -59,6 +63,12 @@ var (
 	agentDatabaseFactory func() db.Database
 )
 
+type agentRuntime struct {
+	inst          db.Database
+	sessions      map[string]db.StatementExecer
+	nextSessionID int64
+}
+
 func main() {
 	if agentDatabaseFactory == nil || strings.TrimSpace(agentDriverType) == "" {
 		fmt.Fprintf(os.Stderr, "未配置驱动代理 provider，请使用 gonavi_<driver>_driver 标签构建\n")
@@ -70,7 +80,9 @@ func main() {
 	writer := bufio.NewWriter(os.Stdout)
 	defer writer.Flush()
 
-	var inst db.Database
+	runtimeState := &agentRuntime{
+		sessions: make(map[string]db.StatementExecer),
+	}
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -87,23 +99,21 @@ func main() {
 			continue
 		}
 
-		resp := handleRequest(&inst, req)
+		resp := handleRequest(runtimeState, req)
 		if err := writeResponse(writer, resp); err != nil {
 			fmt.Fprintf(os.Stderr, "写入响应失败：%v\n", err)
 			break
 		}
 	}
 
-	if inst != nil {
-		_ = inst.Close()
-	}
+	runtimeState.close()
 
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintf(os.Stderr, "读取请求失败：%v\n", err)
 	}
 }
 
-func handleRequest(inst *db.Database, req agentRequest) agentResponse {
+func handleRequest(runtimeState *agentRuntime, req agentRequest) agentResponse {
 	resp := agentResponse{ID: req.ID, Success: true}
 	method := strings.TrimSpace(req.Method)
 
@@ -112,9 +122,7 @@ func handleRequest(inst *db.Database, req agentRequest) agentResponse {
 		if req.Config == nil {
 			return fail(resp, "连接配置为空")
 		}
-		if *inst != nil {
-			_ = (*inst).Close()
-		}
+		runtimeState.close()
 		next := agentDatabaseFactory()
 		if next == nil {
 			return fail(resp, "驱动代理初始化失败")
@@ -122,14 +130,13 @@ func handleRequest(inst *db.Database, req agentRequest) agentResponse {
 		if err := next.Connect(*req.Config); err != nil {
 			return fail(resp, err.Error())
 		}
-		*inst = next
+		runtimeState.inst = next
 		return resp
 	case agentMethodClose:
-		if *inst != nil {
-			if err := (*inst).Close(); err != nil {
+		if runtimeState.inst != nil {
+			if err := runtimeState.close(); err != nil {
 				return fail(resp, err.Error())
 			}
-			*inst = nil
 		}
 		return resp
 	case agentMethodMetadata:
@@ -139,74 +146,124 @@ func handleRequest(inst *db.Database, req agentRequest) agentResponse {
 			"protocolSchema": "json-lines-v1",
 		}
 		return resp
+	case agentMethodOpenSession:
+		if runtimeState.inst == nil {
+			return fail(resp, "connection not open")
+		}
+		provider, ok := runtimeState.inst.(db.SessionExecerProvider)
+		if !ok {
+			return fail(resp, fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", strings.TrimSpace(agentDriverType)))
+		}
+		openCtx := context.Background()
+		var cancel context.CancelFunc
+		if req.TimeoutMs > 0 {
+			openCtx, cancel = context.WithTimeout(context.Background(), time.Duration(req.TimeoutMs)*time.Millisecond)
+			defer cancel()
+		}
+		session, err := provider.OpenSessionExecer(openCtx)
+		if err != nil {
+			return fail(resp, err.Error())
+		}
+		sessionID := runtimeState.nextID()
+		runtimeState.sessions[sessionID] = session
+		resp.Data = sessionID
+		return resp
+	case agentMethodCloseSession:
+		if err := runtimeState.closeSession(req.SessionID); err != nil {
+			return fail(resp, err.Error())
+		}
+		return resp
 	}
 
-	if *inst == nil {
+	if runtimeState.inst == nil {
 		return fail(resp, "connection not open")
+	}
+
+	if session, ok, err := runtimeState.session(req.SessionID); err != nil {
+		return fail(resp, err.Error())
+	} else if ok {
+		switch method {
+		case agentMethodQuery:
+			data, fields, err := queryStatementWithOptionalTimeout(session, req.Query, req.TimeoutMs)
+			if err != nil {
+				return fail(resp, err.Error())
+			}
+			resp.Data = data
+			resp.Fields = fields
+		case agentMethodExec:
+			affected, err := execStatementWithOptionalTimeout(session, req.Query, req.TimeoutMs)
+			if err != nil {
+				return fail(resp, err.Error())
+			}
+			resp.RowsAffected = affected
+		default:
+			return fail(resp, "当前事务会话不支持该方法")
+		}
+		return resp
 	}
 
 	switch method {
 	case agentMethodPing:
-		if err := (*inst).Ping(); err != nil {
+		if err := runtimeState.inst.Ping(); err != nil {
 			return fail(resp, err.Error())
 		}
 	case agentMethodQuery:
-		data, fields, err := queryWithOptionalTimeout(*inst, req.Query, req.TimeoutMs)
+		data, fields, err := queryWithOptionalTimeout(runtimeState.inst, req.Query, req.TimeoutMs)
 		if err != nil {
 			return fail(resp, err.Error())
 		}
 		resp.Data = data
 		resp.Fields = fields
 	case agentMethodExec:
-		affected, err := execWithOptionalTimeout(*inst, req.Query, req.TimeoutMs)
+		affected, err := execWithOptionalTimeout(runtimeState.inst, req.Query, req.TimeoutMs)
 		if err != nil {
 			return fail(resp, err.Error())
 		}
 		resp.RowsAffected = affected
 	case agentMethodGetDatabases:
-		data, err := (*inst).GetDatabases()
+		data, err := runtimeState.inst.GetDatabases()
 		if err != nil {
 			return fail(resp, err.Error())
 		}
 		resp.Data = data
 	case agentMethodGetTables:
-		data, err := (*inst).GetTables(req.DBName)
+		data, err := runtimeState.inst.GetTables(req.DBName)
 		if err != nil {
 			return fail(resp, err.Error())
 		}
 		resp.Data = data
 	case agentMethodGetCreateStmt:
-		data, err := (*inst).GetCreateStatement(req.DBName, req.TableName)
+		data, err := runtimeState.inst.GetCreateStatement(req.DBName, req.TableName)
 		if err != nil {
 			return fail(resp, err.Error())
 		}
 		resp.Data = data
 	case agentMethodGetColumns:
-		data, err := (*inst).GetColumns(req.DBName, req.TableName)
+		data, err := runtimeState.inst.GetColumns(req.DBName, req.TableName)
 		if err != nil {
 			return fail(resp, err.Error())
 		}
 		resp.Data = data
 	case agentMethodGetAllColumns:
-		data, err := (*inst).GetAllColumns(req.DBName)
+		data, err := runtimeState.inst.GetAllColumns(req.DBName)
 		if err != nil {
 			return fail(resp, err.Error())
 		}
 		resp.Data = data
 	case agentMethodGetIndexes:
-		data, err := (*inst).GetIndexes(req.DBName, req.TableName)
+		data, err := runtimeState.inst.GetIndexes(req.DBName, req.TableName)
 		if err != nil {
 			return fail(resp, err.Error())
 		}
 		resp.Data = data
 	case agentMethodGetForeignKey:
-		data, err := (*inst).GetForeignKeys(req.DBName, req.TableName)
+		data, err := runtimeState.inst.GetForeignKeys(req.DBName, req.TableName)
 		if err != nil {
 			return fail(resp, err.Error())
 		}
 		resp.Data = data
 	case agentMethodGetTriggers:
-		data, err := (*inst).GetTriggers(req.DBName, req.TableName)
+		data, err := runtimeState.inst.GetTriggers(req.DBName, req.TableName)
 		if err != nil {
 			return fail(resp, err.Error())
 		}
@@ -215,7 +272,7 @@ func handleRequest(inst *db.Database, req agentRequest) agentResponse {
 		if req.Changes == nil {
 			return fail(resp, "变更集为空")
 		}
-		applier, ok := (*inst).(interface {
+		applier, ok := runtimeState.inst.(interface {
 			ApplyChanges(tableName string, changes connection.ChangeSet) error
 		})
 		if !ok {
@@ -229,6 +286,67 @@ func handleRequest(inst *db.Database, req agentRequest) agentResponse {
 	}
 
 	return resp
+}
+
+func (r *agentRuntime) nextID() string {
+	r.ensureSessionMap()
+	r.nextSessionID++
+	return "session-" + strconv.FormatInt(r.nextSessionID, 10)
+}
+
+func (r *agentRuntime) session(sessionID string) (db.StatementExecer, bool, error) {
+	r.ensureSessionMap()
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, false, nil
+	}
+	session, ok := r.sessions[sessionID]
+	if !ok || session == nil {
+		return nil, false, fmt.Errorf("事务会话不存在或已结束")
+	}
+	return session, true, nil
+}
+
+func (r *agentRuntime) closeSession(sessionID string) error {
+	r.ensureSessionMap()
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("事务会话 ID 不能为空")
+	}
+	session, ok := r.sessions[sessionID]
+	if ok {
+		delete(r.sessions, sessionID)
+	}
+	if !ok || session == nil {
+		return fmt.Errorf("事务会话不存在或已结束")
+	}
+	return session.Close()
+}
+
+func (r *agentRuntime) close() error {
+	var closeErr error
+	r.ensureSessionMap()
+	for sessionID, session := range r.sessions {
+		delete(r.sessions, sessionID)
+		if session != nil {
+			if err := session.Close(); err != nil && closeErr == nil {
+				closeErr = err
+			}
+		}
+	}
+	if r.inst != nil {
+		if err := r.inst.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+		r.inst = nil
+	}
+	return closeErr
+}
+
+func (r *agentRuntime) ensureSessionMap() {
+	if r.sessions == nil {
+		r.sessions = make(map[string]db.StatementExecer)
+	}
 }
 
 func writeResponse(writer *bufio.Writer, resp agentResponse) error {
@@ -301,7 +419,23 @@ func normalizeAgentResponseData(v interface{}) interface{} {
 	}
 }
 
-func queryWithOptionalTimeout(inst db.Database, query string, timeoutMs int64) ([]map[string]interface{}, []string, error) {
+type agentQueryRunner interface {
+	Query(string) ([]map[string]interface{}, []string, error)
+}
+
+type agentQueryContextRunner interface {
+	QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
+}
+
+type agentExecRunner interface {
+	Exec(string) (int64, error)
+}
+
+type agentExecContextRunner interface {
+	ExecContext(context.Context, string) (int64, error)
+}
+
+func queryWithOptionalTimeout(inst agentQueryRunner, query string, timeoutMs int64) ([]map[string]interface{}, []string, error) {
 	effectiveTimeoutMs := timeoutMs
 	if effectiveTimeoutMs <= 0 && strings.EqualFold(strings.TrimSpace(agentDriverType), "clickhouse") {
 		effectiveTimeoutMs = int64(legacyClickHouseDefaultTimeout / time.Millisecond)
@@ -309,9 +443,7 @@ func queryWithOptionalTimeout(inst db.Database, query string, timeoutMs int64) (
 	if effectiveTimeoutMs <= 0 {
 		return inst.Query(query)
 	}
-	if q, ok := inst.(interface {
-		QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
-	}); ok {
+	if q, ok := inst.(agentQueryContextRunner); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(effectiveTimeoutMs)*time.Millisecond)
 		defer cancel()
 		return q.QueryContext(ctx, query)
@@ -319,7 +451,15 @@ func queryWithOptionalTimeout(inst db.Database, query string, timeoutMs int64) (
 	return inst.Query(query)
 }
 
-func execWithOptionalTimeout(inst db.Database, query string, timeoutMs int64) (int64, error) {
+func queryStatementWithOptionalTimeout(inst db.StatementExecer, query string, timeoutMs int64) ([]map[string]interface{}, []string, error) {
+	queryRunner, ok := inst.(agentQueryRunner)
+	if !ok {
+		return nil, nil, fmt.Errorf("当前事务会话不支持查询语句")
+	}
+	return queryWithOptionalTimeout(queryRunner, query, timeoutMs)
+}
+
+func execWithOptionalTimeout(inst agentExecRunner, query string, timeoutMs int64) (int64, error) {
 	effectiveTimeoutMs := timeoutMs
 	if effectiveTimeoutMs <= 0 && strings.EqualFold(strings.TrimSpace(agentDriverType), "clickhouse") {
 		effectiveTimeoutMs = int64(legacyClickHouseDefaultTimeout / time.Millisecond)
@@ -327,12 +467,14 @@ func execWithOptionalTimeout(inst db.Database, query string, timeoutMs int64) (i
 	if effectiveTimeoutMs <= 0 {
 		return inst.Exec(query)
 	}
-	if e, ok := inst.(interface {
-		ExecContext(context.Context, string) (int64, error)
-	}); ok {
+	if e, ok := inst.(agentExecContextRunner); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(effectiveTimeoutMs)*time.Millisecond)
 		defer cancel()
 		return e.ExecContext(ctx, query)
 	}
 	return inst.Exec(query)
+}
+
+func execStatementWithOptionalTimeout(inst db.StatementExecer, query string, timeoutMs int64) (int64, error) {
+	return execWithOptionalTimeout(inst, query, timeoutMs)
 }

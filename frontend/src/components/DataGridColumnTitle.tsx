@@ -155,22 +155,26 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
     return titleNode;
   }
 
+  const tooltipTextColor = darkMode ? columnMetaTooltipColor : 'var(--gn-fg-1, #fff)';
+
   return (
     <Tooltip
       title={(
         <pre
+          className="gn-data-grid-column-meta-tooltip-content"
           style={{
             maxHeight: 260,
             overflow: 'auto',
             margin: 0,
             fontSize: 12,
             whiteSpace: 'pre-wrap',
-            color: darkMode ? columnMetaTooltipColor : '#fff',
+            color: tooltipTextColor,
           }}
         >
           {hoverLines.join('\n')}
         </pre>
       )}
+      rootClassName="gn-data-grid-column-meta-tooltip"
       styles={{ root: { maxWidth: 640 } }}
       {...(!darkMode ? { color: 'rgba(0, 0, 0, 0.82)' } : {})}
     >

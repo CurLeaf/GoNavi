@@ -28,27 +28,29 @@ import (
 
 // Service AI 服务，作为 Wails Binding 暴露给前端
 type Service struct {
-	ctx            context.Context
-	mu             sync.RWMutex
-	providers      []ai.ProviderConfig
-	activeProvider string // active provider ID
-	safetyLevel    ai.SQLPermissionLevel
-	contextLevel   ai.ContextLevel
-	guard          *safety.Guard
-	configDir      string // 配置存储目录
-	secretStore    secretstore.SecretStore
-	localizer      *i18n.Localizer
-	cancelFuncs    map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
+	ctx                context.Context
+	mu                 sync.RWMutex
+	providers          []ai.ProviderConfig
+	activeProvider     string // active provider ID
+	safetyLevel        ai.SQLPermissionLevel
+	contextLevel       ai.ContextLevel
+	userPromptSettings ai.UserPromptSettings
+	mcpServers         []ai.MCPServerConfig
+	skills             []ai.SkillConfig
+	guard              *safety.Guard
+	configDir          string // 配置存储目录
+	secretStore        secretstore.SecretStore
+	localizer          *i18n.Localizer
+	cancelFuncs        map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
+	mcpHTTPMu          sync.Mutex
+	mcpHTTP            *mcpHTTPServerRuntime
+	mcpHTTPLast        ai.MCPHTTPServerStatus
 }
 
 var miniMaxAnthropicModels = []string{
+	"MiniMax-M3",
 	"MiniMax-M2.7",
 	"MiniMax-M2.7-highspeed",
-	"MiniMax-M2.5",
-	"MiniMax-M2.5-highspeed",
-	"MiniMax-M2.1",
-	"MiniMax-M2.1-highspeed",
-	"MiniMax-M2",
 }
 
 var dashScopeCodingPlanModels = []string{
@@ -113,6 +115,8 @@ func NewServiceWithSecretStore(store secretstore.SecretStore) *Service {
 		providers:    make([]ai.ProviderConfig, 0),
 		safetyLevel:  ai.PermissionReadOnly,
 		contextLevel: ai.ContextSchemaOnly,
+		mcpServers:   make([]ai.MCPServerConfig, 0),
+		skills:       make([]ai.SkillConfig, 0),
 		guard:        safety.NewGuard(ai.PermissionReadOnly),
 		secretStore:  store,
 		localizer:    newServiceLocalizer(),
@@ -823,6 +827,22 @@ func (s *Service) AIGetBuiltinPrompts() map[string]string {
 	return aicontext.GetBuiltinPrompts()
 }
 
+// AIGetUserPromptSettings 获取用户级自定义提示词配置
+func (s *Service) AIGetUserPromptSettings() ai.UserPromptSettings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.userPromptSettings
+}
+
+// AISaveUserPromptSettings 保存用户级自定义提示词配置
+func (s *Service) AISaveUserPromptSettings(settings ai.UserPromptSettings) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.userPromptSettings = normalizeUserPromptSettings(settings)
+	return s.saveConfig()
+}
+
 // AIListModels 获取当前活跃 Provider 的可用模型列表
 func (s *Service) AIListModels() map[string]interface{} {
 	s.mu.RLock()
@@ -1052,13 +1072,29 @@ func (s *Service) AISetContextLevel(level string) {
 func (s *Service) AIChatSend(messages []ai.Message, tools []ai.Tool) map[string]interface{} {
 	p, err := s.getActiveProvider()
 	if err != nil {
+		logger.Error(err, "AIChatSend 获取 Provider 失败：messages=%d tools=%d", len(messages), len(tools))
 		return map[string]interface{}{"success": false, "error": err.Error()}
 	}
 
+	started := time.Now()
+	providerName := p.Name()
+	logger.Infof("AIChatSend 开始：provider=%s messages=%d tools=%d", providerName, len(messages), len(tools))
 	resp, err := p.Chat(context.Background(), ai.ChatRequest{Messages: messages, Tools: tools})
 	if err != nil {
+		logger.Warnf("AIChatSend 失败：provider=%s messages=%d tools=%d duration=%s err=%s", providerName, len(messages), len(tools), time.Since(started).Round(time.Millisecond), provider.RedactAIUpstreamLogText(err.Error()))
 		return map[string]interface{}{"success": false, "error": err.Error()}
 	}
+	logger.Infof(
+		"AIChatSend 完成：provider=%s messages=%d tools=%d toolCalls=%d promptTokens=%d completionTokens=%d totalTokens=%d duration=%s",
+		providerName,
+		len(messages),
+		len(tools),
+		len(resp.ToolCalls),
+		resp.TokensUsed.PromptTokens,
+		resp.TokensUsed.CompletionTokens,
+		resp.TokensUsed.TotalTokens,
+		time.Since(started).Round(time.Millisecond),
+	)
 
 	return map[string]interface{}{
 		"success":           true,
@@ -1090,6 +1126,7 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 
 		p, err := s.getActiveProvider()
 		if err != nil {
+			logger.Error(err, "AIChatStream 获取 Provider 失败：sessionID=%s messages=%d tools=%d", sessionID, len(messages), len(tools))
 			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
 				"error": err.Error(),
 				"done":  true,
@@ -1097,7 +1134,26 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 			return
 		}
 
+		started := time.Now()
+		providerName := p.Name()
+		contentChunks := 0
+		thinkingChunks := 0
+		toolCallChunks := 0
+		errorChunks := 0
+		logger.Infof("AIChatStream 开始：sessionID=%s provider=%s messages=%d tools=%d", sessionID, providerName, len(messages), len(tools))
 		err = p.ChatStream(streamCtx, ai.ChatRequest{Messages: messages, Tools: tools}, func(chunk ai.StreamChunk) {
+			if chunk.Content != "" {
+				contentChunks++
+			}
+			if chunk.Thinking != "" || chunk.ReasoningContent != "" {
+				thinkingChunks++
+			}
+			if len(chunk.ToolCalls) > 0 {
+				toolCallChunks++
+			}
+			if chunk.Error != "" {
+				errorChunks++
+			}
 			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
 				"content":           chunk.Content,
 				"thinking":          chunk.Thinking,
@@ -1110,11 +1166,29 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 
 		// 当 context 被主动 cancel 的时候，不把这个视为向外抛的 error
 		if err != nil && err != context.Canceled {
+			logger.Warnf("AIChatStream 失败：sessionID=%s provider=%s messages=%d tools=%d duration=%s err=%s", sessionID, providerName, len(messages), len(tools), time.Since(started).Round(time.Millisecond), provider.RedactAIUpstreamLogText(err.Error()))
 			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
 				"error": err.Error(),
 				"done":  true,
 			})
+			return
 		}
+		if err == context.Canceled {
+			logger.Infof("AIChatStream 已取消：sessionID=%s provider=%s duration=%s", sessionID, providerName, time.Since(started).Round(time.Millisecond))
+			return
+		}
+		logger.Infof(
+			"AIChatStream 完成：sessionID=%s provider=%s messages=%d tools=%d contentChunks=%d thinkingChunks=%d toolCallChunks=%d errorChunks=%d duration=%s",
+			sessionID,
+			providerName,
+			len(messages),
+			len(tools),
+			contentChunks,
+			thinkingChunks,
+			toolCallChunks,
+			errorChunks,
+			time.Since(started).Round(time.Millisecond),
+		)
 	}()
 }
 
@@ -1168,15 +1242,41 @@ func (s *Service) loadConfig() {
 	s.safetyLevel = snapshot.SafetyLevel
 	s.guard.SetPermissionLevel(s.safetyLevel)
 	s.contextLevel = snapshot.ContextLevel
+	s.userPromptSettings = snapshot.UserPromptSettings
+	s.mcpServers = normalizeMCPServerConfigs(snapshot.MCPServers)
+	s.skills = normalizeSkillConfigs(snapshot.Skills)
 }
 
 func (s *Service) saveConfig() error {
 	return NewProviderConfigStoreWithLanguage(s.configDir, s.secretStore, s.serviceLanguageLocked()).Save(ProviderConfigStoreSnapshot{
-		Providers:      s.providers,
-		ActiveProvider: s.activeProvider,
-		SafetyLevel:    s.safetyLevel,
-		ContextLevel:   s.contextLevel,
+		Providers:          s.providers,
+		ActiveProvider:     s.activeProvider,
+		SafetyLevel:        s.safetyLevel,
+		ContextLevel:       s.contextLevel,
+		UserPromptSettings: s.userPromptSettings,
+		MCPServers:         s.mcpServers,
+		Skills:             s.skills,
 	})
+}
+
+const maxUserPromptChars = 16000
+
+func normalizeUserPromptSettings(settings ai.UserPromptSettings) ai.UserPromptSettings {
+	return ai.UserPromptSettings{
+		Global:        normalizeUserPromptText(settings.Global),
+		Database:      normalizeUserPromptText(settings.Database),
+		JVM:           normalizeUserPromptText(settings.JVM),
+		JVMDiagnostic: normalizeUserPromptText(settings.JVMDiagnostic),
+	}
+}
+
+func normalizeUserPromptText(value string) string {
+	normalized := strings.ReplaceAll(value, "\r\n", "\n")
+	normalized = strings.TrimSpace(normalized)
+	if len(normalized) > maxUserPromptChars {
+		return normalized[:maxUserPromptChars]
+	}
+	return normalized
 }
 
 // --- 会话文件持久化 ---

@@ -1,0 +1,84 @@
+import type { SavedConnection, TabData } from '../../types';
+
+export const buildCurrentConnectionSnapshot = (params: {
+  activeContext?: { connectionId: string; dbName?: string } | null;
+  tabs?: TabData[];
+  activeTabId?: string | null;
+  connections: SavedConnection[];
+}) => {
+  const {
+    activeContext = null,
+    tabs = [],
+    activeTabId = null,
+    connections,
+  } = params;
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const connectionId = String(activeContext?.connectionId || activeTab?.connectionId || '').trim();
+  const activeDbName = String(activeContext?.dbName || activeTab?.dbName || '').trim();
+
+  if (!connectionId) {
+    return {
+      hasActiveConnection: false,
+      message: '当前没有活动连接',
+    };
+  }
+
+  const connection = connections.find((item) => item.id === connectionId);
+  if (!connection) {
+    return {
+      hasActiveConnection: false,
+      connectionId,
+      message: '当前活动连接在本地缓存中不存在',
+    };
+  }
+
+  const config = connection.config || {};
+  const ssh = config.useSSH ? config.ssh : undefined;
+  const proxy = config.useProxy ? config.proxy : undefined;
+  const httpTunnel = config.useHttpTunnel ? config.httpTunnel : undefined;
+  const configuredHosts = Array.isArray(config.hosts)
+    ? config.hosts.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
+
+  return {
+    hasActiveConnection: true,
+    connectionId: connection.id,
+    connectionName: connection.name,
+    connectionType: config.type || '',
+    host: config.host || '',
+    port: typeof config.port === 'number' ? config.port : null,
+    user: config.user || '',
+    activeDbName: activeDbName || config.database || '',
+    configuredDatabase: config.database || '',
+    driver: config.driver || '',
+    topology: config.topology || 'single',
+    hosts: configuredHosts,
+    useSSL: config.useSSL === true,
+    sslMode: config.sslMode || '',
+    useSSH: config.useSSH === true,
+    sshHost: ssh?.host || '',
+    sshPort: typeof ssh?.port === 'number' ? ssh.port : null,
+    sshUser: ssh?.user || '',
+    useProxy: config.useProxy === true,
+    proxyType: proxy?.type || '',
+    proxyHost: proxy?.host || '',
+    proxyPort: typeof proxy?.port === 'number' ? proxy.port : null,
+    useHttpTunnel: config.useHttpTunnel === true,
+    httpTunnelHost: httpTunnel?.host || '',
+    httpTunnelPort: typeof httpTunnel?.port === 'number' ? httpTunnel.port : null,
+    hasURI: Boolean(String(config.uri || '').trim()),
+    hasDSN: Boolean(String(config.dsn || '').trim()),
+    hasConnectionParams: Boolean(String(config.connectionParams || '').trim()),
+    clickHouseProtocol: config.clickHouseProtocol || '',
+    oceanBaseProtocol: config.oceanBaseProtocol || '',
+    replicaSet: config.replicaSet || '',
+    authSource: config.authSource || '',
+    readPreference: config.readPreference || '',
+    mongoSrv: config.mongoSrv === true,
+    redisDB: typeof config.redisDB === 'number' ? config.redisDB : null,
+    readOnly: activeTab?.readOnly === true || config.jvm?.readOnly === true,
+    activeTabId: activeTab?.id || '',
+    activeTabType: activeTab?.type || '',
+    activeTableName: activeTab?.tableName || '',
+  };
+};

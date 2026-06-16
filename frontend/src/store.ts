@@ -54,6 +54,18 @@ import {
   t as translate,
   type LanguagePreference,
 } from "./i18n";
+import {
+  DEFAULT_TAB_DISPLAY_SETTINGS,
+  sanitizeTabDisplaySettings,
+  type TabDisplaySettings,
+} from "./utils/tabDisplay";
+import {
+  captureLegacySavedQueriesSnapshot,
+  deleteSavedQueryFromBackend,
+  sanitizeSavedQueries,
+  saveSavedQueryToBackend,
+  type SavedQueryBackend,
+} from "./utils/savedQueryPersistence";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
@@ -61,8 +73,12 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   opacity: number;
   blur: number;
   useNativeMacWindowControls: boolean;
+  v2SidebarSearchMode: "command" | "filter";
+  v2CommandSearchPersistentFilterEnabled: boolean;
+  v2SidebarPersistedFilter: string;
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
+  tabDisplay: TabDisplaySettings;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -71,8 +87,12 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   opacity: 1.0,
   blur: 0,
   useNativeMacWindowControls: false,
+  v2SidebarSearchMode: "command",
+  v2CommandSearchPersistentFilterEnabled: false,
+  v2SidebarPersistedFilter: "",
   customUIFontFamily: null,
   customMonoFontFamily: null,
+  tabDisplay: DEFAULT_TAB_DISPLAY_SETTINGS,
   ...DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
 };
 const DEFAULT_UI_SCALE = 1.0;
@@ -84,6 +104,20 @@ const MAX_FONT_SIZE = 20;
 const DEFAULT_STARTUP_FULLSCREEN = false;
 const LEGACY_DEFAULT_OPACITY = 0.95;
 const OPACITY_EPSILON = 1e-6;
+const MAX_SIDEBAR_PERSISTED_FILTER_LENGTH = 120;
+
+const sanitizeV2SidebarSearchMode = (
+  value: unknown,
+): AppearanceSettings["v2SidebarSearchMode"] => {
+  return value === "filter" ? "filter" : DEFAULT_APPEARANCE.v2SidebarSearchMode;
+};
+
+const sanitizeV2SidebarPersistedFilter = (value: unknown): string => {
+  if (typeof value !== "string") {
+    return DEFAULT_APPEARANCE.v2SidebarPersistedFilter;
+  }
+  return value.trim().slice(0, MAX_SIDEBAR_PERSISTED_FILTER_LENGTH);
+};
 const MAX_URI_LENGTH = 4096;
 const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
@@ -91,7 +125,7 @@ const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 10;
+const PERSIST_VERSION = 11;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const PERSIST_WRITE_DEBOUNCE_MS = 160;
 const MAX_PERSISTED_QUERY_TABS = 20;
@@ -103,6 +137,7 @@ const MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH = 2 * 1024;
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
 const DEFAULT_LANGUAGE_PREFERENCE: LanguagePreference = "system";
+const MAX_REDIS_DATABASE_INDEX = Number.MAX_SAFE_INTEGER;
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   enabled: false,
   type: "socks5",
@@ -116,6 +151,13 @@ const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
 const isFrontendTestRuntime = (): boolean => {
   const env = (import.meta as unknown as { env?: Record<string, unknown> }).env || {};
   return env.MODE === "test" || env.VITEST === true || env.VITEST === "true";
+};
+
+const resolveSavedQueryBackend = (): SavedQueryBackend | undefined => {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  return (window as unknown as { go?: { app?: { App?: SavedQueryBackend } } }).go?.app?.App;
 };
 
 const createDebouncedPersistStorage = <S>(
@@ -206,6 +248,36 @@ const createDebouncedPersistStorage = <S>(
   };
 };
 
+const writePersistedStatePatch = (
+  patch: Record<string, unknown>,
+): void => {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    const payload = localStorage.getItem(PERSIST_STORAGE_KEY);
+    const raw =
+      payload && payload.trim() !== ""
+        ? (JSON.parse(payload) as Record<string, unknown>)
+        : {};
+    const state = unwrapPersistedAppState(raw);
+    localStorage.setItem(
+      PERSIST_STORAGE_KEY,
+      JSON.stringify({
+        ...raw,
+        state: {
+          ...state,
+          ...patch,
+        },
+        version:
+          typeof raw.version === "number" ? raw.version : PERSIST_VERSION,
+      }),
+    );
+  } catch {
+    // ignore
+  }
+};
+
 const resolveOceanBaseProtocol = (
   raw: Record<string, unknown>,
   normalizedConnectionParams: string,
@@ -229,6 +301,7 @@ const resolveOceanBaseProtocol = (
 };
 const SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "doris",
@@ -239,15 +312,19 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "postgres",
   "redis",
   "tdengine",
+  "iotdb",
+  "kafka",
   "oracle",
   "dameng",
   "kingbase",
   "sqlserver",
   "iris",
   "mongodb",
+  "elasticsearch",
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "jvm",
   "sqlite",
   "duckdb",
@@ -255,6 +332,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
 ]);
 const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "mysql",
+  "goldendb",
   "mariadb",
   "oceanbase",
   "diros",
@@ -269,9 +347,12 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "highgo",
   "vastbase",
   "opengauss",
+  "gaussdb",
   "mongodb",
   "redis",
+  "elasticsearch",
   "tdengine",
+  "kafka",
 ]);
 
 const getDefaultPortByType = (type: string): number => {
@@ -281,6 +362,8 @@ const getDefaultPortByType = (type: string): number => {
     case "mysql":
     case "mariadb":
       return 3306;
+    case "goldendb":
+      return 1523;
     case "oceanbase":
       return 2881;
     case "doris":
@@ -296,11 +379,16 @@ const getDefaultPortByType = (type: string): number => {
     case "postgres":
     case "vastbase":
     case "opengauss":
+    case "gaussdb":
       return 5432;
     case "redis":
       return 6379;
     case "tdengine":
       return 6041;
+    case "iotdb":
+      return 6667;
+    case "kafka":
+      return 9092;
     case "oracle":
       return 1521;
     case "dameng":
@@ -313,6 +401,8 @@ const getDefaultPortByType = (type: string): number => {
       return 1972;
     case "mongodb":
       return 27017;
+    case "elasticsearch":
+      return 9200;
     case "highgo":
       return 5866;
     default:
@@ -461,6 +551,15 @@ const normalizeConnectionType = (value: unknown): string => {
     type === "opengauss"
   ) {
     return "opengauss";
+  }
+  if (type === "gaussdb" || type === "gauss_db" || type === "gauss-db") {
+    return "gaussdb";
+  }
+  if (type === "goldendb" || type === "greatdb" || type === "gdb") {
+    return "goldendb";
+  }
+  if (type === "kafka" || type === "apache-kafka" || type === "apache_kafka") {
+    return "kafka";
   }
   if (
     type === "inter-systems" ||
@@ -703,6 +802,8 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
         ? "replica"
         : raw.topology === "cluster"
           ? "cluster"
+          : raw.topology === "sentinel"
+            ? "sentinel"
           : "single",
     mysqlReplicaUser: toTrimmedString(raw.mysqlReplicaUser),
     mysqlReplicaPassword: savePassword
@@ -726,7 +827,17 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
   };
 
   if (type === "redis") {
-    safeConfig.redisDB = normalizeIntegerInRange(raw.redisDB, 0, 0, 15);
+    safeConfig.redisDB = normalizeIntegerInRange(
+      raw.redisDB,
+      0,
+      0,
+      MAX_REDIS_DATABASE_INDEX,
+    );
+    safeConfig.redisSentinelMaster = toTrimmedString(raw.redisSentinelMaster);
+    safeConfig.redisSentinelUser = toTrimmedString(raw.redisSentinelUser);
+    safeConfig.redisSentinelPassword = savePassword
+      ? toTrimmedString(raw.redisSentinelPassword)
+      : "";
   }
 
   if (type === "clickhouse") {
@@ -797,7 +908,7 @@ const sanitizeSavedConnection = (
   const includeRedisDatabases = sanitizeNumberArray(
     raw.includeRedisDatabases,
     0,
-    15,
+    MAX_REDIS_DATABASE_INDEX,
   );
 
   return {
@@ -811,6 +922,7 @@ const sanitizeSavedConnection = (
     hasHttpTunnelPassword: raw.hasHttpTunnelPassword === true,
     hasMySQLReplicaPassword: raw.hasMySQLReplicaPassword === true,
     hasMongoReplicaPassword: raw.hasMongoReplicaPassword === true,
+    hasRedisSentinelPassword: raw.hasRedisSentinelPassword === true,
     hasOpaqueURI: raw.hasOpaqueURI === true,
     hasOpaqueDSN: raw.hasOpaqueDSN === true,
     includeDatabases:
@@ -1058,6 +1170,27 @@ export interface QueryOptions {
   maxRows: number;
   showColumnComment: boolean;
   showColumnType: boolean;
+  showQueryResultsPanel: boolean;
+}
+
+export interface DataEditTransactionOptions {
+  commitMode: "manual" | "auto";
+  autoCommitDelayMs: number;
+}
+
+export interface SqlEditorTransactionOptions {
+  commitMode: "manual" | "auto";
+  autoCommitDelayMs: number;
+}
+
+export interface SqlEditorPendingTransactionState {
+  id: string;
+  tabId: string;
+  commitMode: "manual" | "auto";
+  autoCommitDelayMs: number;
+  createdAt: number;
+  autoCommitDueAt?: number | null;
+  statementCount?: number;
 }
 
 interface AppState {
@@ -1078,6 +1211,9 @@ interface AppState {
   globalProxy: GlobalProxyConfig;
   sqlFormatOptions: { keywordCase: "upper" | "lower" };
   queryOptions: QueryOptions;
+  dataEditTransactionOptions: DataEditTransactionOptions;
+  sqlEditorTransactionOptions: SqlEditorTransactionOptions;
+  sqlEditorPendingTransactions: Record<string, SqlEditorPendingTransactionState>;
   shortcutOptions: ShortcutOptions;
   sqlSnippets: SqlSnippet[];
   sqlLogs: SqlLog[];
@@ -1149,7 +1285,17 @@ interface AppState {
   addTab: (tab: TabData) => void;
   updateQueryTabDraft: (
     id: string,
-    draft: Partial<Pick<TabData, "query" | "connectionId" | "dbName" | "title">>,
+    draft: Partial<
+      Pick<
+        TabData,
+        | "query"
+        | "connectionId"
+        | "dbName"
+        | "title"
+        | "resultPanelVisible"
+        | "formatRestoreSnapshot"
+      >
+    >,
   ) => void;
   closeTab: (id: string) => void;
   closeOtherTabs: (id: string) => void;
@@ -1164,8 +1310,9 @@ interface AppState {
     context: { connectionId: string; dbName: string } | null,
   ) => void;
 
-  saveQuery: (query: SavedQuery) => void;
-  deleteQuery: (id: string) => void;
+  replaceSavedQueries: (queries: SavedQuery[]) => void;
+  saveQuery: (query: SavedQuery) => Promise<SavedQuery>;
+  deleteQuery: (id: string) => Promise<void>;
   saveExternalSQLDirectory: (directory: ExternalSQLDirectory) => void;
   deleteExternalSQLDirectory: (id: string) => void;
 
@@ -1179,6 +1326,16 @@ interface AppState {
   replaceGlobalProxy: (proxy: Partial<GlobalProxyConfig>) => void;
   setSqlFormatOptions: (options: { keywordCase: "upper" | "lower" }) => void;
   setQueryOptions: (options: Partial<QueryOptions>) => void;
+  setDataEditTransactionOptions: (
+    options: Partial<DataEditTransactionOptions>,
+  ) => void;
+  setSqlEditorTransactionOptions: (
+    options: Partial<SqlEditorTransactionOptions>,
+  ) => void;
+  setSqlEditorPendingTransaction: (
+    tabId: string,
+    transaction: Omit<SqlEditorPendingTransactionState, "tabId"> | null,
+  ) => void;
   updateShortcut: (
     action: ShortcutAction,
     binding: Partial<ShortcutPlatformBinding>,
@@ -1260,33 +1417,6 @@ interface AppState {
   setAIActiveSessionId: (sessionId: string | null) => void;
 }
 
-const sanitizeSavedQueries = (value: unknown): SavedQuery[] => {
-  if (!Array.isArray(value)) return [];
-  const result: SavedQuery[] = [];
-  value.forEach((entry, index) => {
-    if (!entry || typeof entry !== "object") return;
-    const raw = entry as Record<string, unknown>;
-    const id =
-      toTrimmedString(raw.id, `query-${index + 1}`) || `query-${index + 1}`;
-    const sql = toTrimmedString(raw.sql);
-    const connectionId = toTrimmedString(raw.connectionId);
-    const dbName = toTrimmedString(raw.dbName);
-    if (!sql || !connectionId || !dbName) return;
-    result.push({
-      id,
-      name:
-        toTrimmedString(raw.name, `查询-${index + 1}`) || `查询-${index + 1}`,
-      sql,
-      connectionId,
-      dbName,
-      createdAt: Number.isFinite(Number(raw.createdAt))
-        ? Number(raw.createdAt)
-        : Date.now(),
-    });
-  });
-  return result;
-};
-
 const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
   if (!Array.isArray(value)) return DEFAULT_SQL_SNIPPETS;
   const result: SqlSnippet[] = [];
@@ -1308,6 +1438,7 @@ const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
       prefix,
       name: toTrimmedString(raw.name, `片段-${index + 1}`) || `片段-${index + 1}`,
       description: toTrimmedString(raw.description) || undefined,
+      syntaxHelp: toTrimmedString(raw.syntaxHelp) || undefined,
       body,
       isBuiltin: raw.isBuiltin === true,
       createdAt: Number.isFinite(Number(raw.createdAt))
@@ -1330,13 +1461,17 @@ const sanitizeExternalSQLDirectories = (
 ): ExternalSQLDirectory[] => {
   if (!Array.isArray(value)) return [];
   const result: ExternalSQLDirectory[] = [];
+  const seenPaths = new Set<string>();
   value.forEach((entry) => {
     if (!entry || typeof entry !== "object") return;
     const raw = entry as Record<string, unknown>;
     const path = toTrimmedString(raw.path);
+    if (!path) return;
+    const normalizedPath = path.replace(/\\/g, "/").toLowerCase();
+    if (seenPaths.has(normalizedPath)) return;
+    seenPaths.add(normalizedPath);
     const connectionId = toTrimmedString(raw.connectionId);
     const dbName = toTrimmedString(raw.dbName);
-    if (!path || !connectionId || !dbName) return;
     result.push({
       id:
         toTrimmedString(
@@ -1345,8 +1480,8 @@ const sanitizeExternalSQLDirectories = (
         ) || buildExternalSQLDirectoryId(connectionId, dbName, path),
       name: resolveExternalSQLDirectoryName(raw.name, path),
       path,
-      connectionId,
-      dbName,
+      ...(connectionId ? { connectionId } : {}),
+      ...(dbName ? { dbName } : {}),
       createdAt: Number.isFinite(Number(raw.createdAt))
         ? Number(raw.createdAt)
         : Date.now(),
@@ -1368,6 +1503,15 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
     const query = typeof raw.query === "string" ? raw.query.slice(0, MAX_PERSISTED_QUERY_LENGTH) : "";
     const filePath = toTrimmedString(raw.filePath);
     const savedQueryId = toTrimmedString(raw.savedQueryId);
+    const rawFormatRestoreSnapshot =
+      raw.formatRestoreSnapshot && typeof raw.formatRestoreSnapshot === "object"
+        ? (raw.formatRestoreSnapshot as Record<string, unknown>)
+        : null;
+    const formatRestoreQuery =
+      typeof rawFormatRestoreSnapshot?.query === "string"
+        ? rawFormatRestoreSnapshot.query.slice(0, MAX_PERSISTED_QUERY_LENGTH)
+        : "";
+    const formatRestoreCreatedAt = Number(rawFormatRestoreSnapshot?.createdAt);
     if (!query.trim() && !filePath && !savedQueryId) return;
 
     let id = toTrimmedString(raw.id, `query-${index + 1}`) || `query-${index + 1}`;
@@ -1383,9 +1527,21 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
       connectionId: toTrimmedString(raw.connectionId),
       dbName: toTrimmedString(raw.dbName),
       query,
+      resultPanelVisible:
+        typeof raw.resultPanelVisible === "boolean"
+          ? raw.resultPanelVisible
+          : undefined,
       filePath: filePath || undefined,
       savedQueryId: savedQueryId || undefined,
       readOnly: raw.readOnly === true,
+      formatRestoreSnapshot: formatRestoreQuery
+        ? {
+            query: formatRestoreQuery,
+            createdAt: Number.isFinite(formatRestoreCreatedAt)
+              ? formatRestoreCreatedAt
+              : Date.now(),
+          }
+        : undefined,
     });
   });
 
@@ -1502,6 +1658,7 @@ const hasLegacyConnectionSecrets = (
       toTrimmedString(httpTunnel.password) !== "" ||
       toTrimmedString(config.mysqlReplicaPassword) !== "" ||
       toTrimmedString(config.mongoReplicaPassword) !== "" ||
+      toTrimmedString(config.redisSentinelPassword) !== "" ||
       toTrimmedString(config.uri) !== "" ||
       toTrimmedString(config.dsn) !== ""
     );
@@ -1547,13 +1704,51 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     typeof raw.showColumnComment === "boolean" ? raw.showColumnComment : true;
   const showColumnType =
     typeof raw.showColumnType === "boolean" ? raw.showColumnType : true;
+  const showQueryResultsPanel =
+    typeof raw.showQueryResultsPanel === "boolean" ? raw.showQueryResultsPanel : false;
   if (!Number.isFinite(maxRows) || maxRows <= 0) {
-    return { maxRows: 5000, showColumnComment, showColumnType };
+    return { maxRows: 5000, showColumnComment, showColumnType, showQueryResultsPanel };
   }
   return {
     maxRows: Math.min(50000, Math.trunc(maxRows)),
     showColumnComment,
     showColumnType,
+    showQueryResultsPanel,
+  };
+};
+
+const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = new Set([3000, 5000, 10000, 30000]);
+const SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS = new Set([0, 3000, 5000, 10000, 30000]);
+
+const sanitizeDataEditTransactionOptions = (
+  value: unknown,
+): DataEditTransactionOptions => {
+  const raw =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const autoCommitDelayMs = Number(raw.autoCommitDelayMs);
+  return {
+    commitMode: raw.commitMode === "auto" ? "auto" : "manual",
+    autoCommitDelayMs: DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS.has(autoCommitDelayMs)
+      ? autoCommitDelayMs
+      : 5000,
+  };
+};
+
+const sanitizeSqlEditorTransactionOptions = (
+  value: unknown,
+): SqlEditorTransactionOptions => {
+  const raw =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const autoCommitDelayMs = Number(raw.autoCommitDelayMs);
+  return {
+    commitMode: raw.commitMode === "auto" ? "auto" : "manual",
+    autoCommitDelayMs: SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS.has(autoCommitDelayMs)
+      ? autoCommitDelayMs
+      : 0,
   };
 };
 
@@ -1657,8 +1852,19 @@ const sanitizeAppearance = (
       typeof appearance.useNativeMacWindowControls === "boolean"
         ? appearance.useNativeMacWindowControls
         : DEFAULT_APPEARANCE.useNativeMacWindowControls,
+    v2SidebarSearchMode: sanitizeV2SidebarSearchMode(
+      appearance.v2SidebarSearchMode,
+    ),
+    v2CommandSearchPersistentFilterEnabled:
+      typeof appearance.v2CommandSearchPersistentFilterEnabled === "boolean"
+        ? appearance.v2CommandSearchPersistentFilterEnabled
+        : DEFAULT_APPEARANCE.v2CommandSearchPersistentFilterEnabled,
+    v2SidebarPersistedFilter: sanitizeV2SidebarPersistedFilter(
+      appearance.v2SidebarPersistedFilter,
+    ),
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),
+    tabDisplay: sanitizeTabDisplaySettings(appearance.tabDisplay),
     showDataTableVerticalBorders:
       dataGridDisplaySettings.showDataTableVerticalBorders,
     dataTableDensity: dataGridDisplaySettings.dataTableDensity,
@@ -1931,7 +2137,17 @@ export const useStore = create<AppState>()(
         maxRows: 5000,
         showColumnComment: true,
         showColumnType: true,
+        showQueryResultsPanel: false,
       },
+      dataEditTransactionOptions: {
+        commitMode: "manual",
+        autoCommitDelayMs: 5000,
+      },
+      sqlEditorTransactionOptions: {
+        commitMode: "manual",
+        autoCommitDelayMs: 0,
+      },
+      sqlEditorPendingTransactions: {},
       shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
       sqlSnippets: DEFAULT_SQL_SNIPPETS,
       sqlLogs: [],
@@ -2259,41 +2475,48 @@ export const useStore = create<AppState>()(
 
       addTab: (tab) =>
         set((state) => {
-          const index = state.tabs.findIndex((t) => t.id === tab.id);
+          const incomingTab =
+            tab.type === "query" && tab.resultPanelVisible === undefined
+              ? {
+                  ...tab,
+                  resultPanelVisible: state.queryOptions.showQueryResultsPanel,
+                }
+              : tab;
+          const index = state.tabs.findIndex((t) => t.id === incomingTab.id);
           if (index !== -1) {
             // Update existing tab with new data (e.g. switch initialTab)
             const newTabs = [...state.tabs];
-            newTabs[index] = { ...newTabs[index], ...tab };
+            newTabs[index] = { ...newTabs[index], ...incomingTab };
             return {
               tabs: newTabs,
-              activeTabId: tab.id,
+              activeTabId: incomingTab.id,
               activeContext: resolveActiveContextForTabId(
                 newTabs,
-                tab.id,
+                incomingTab.id,
                 state.activeContext,
               ),
             };
           }
           // 语义去重：对 table/design 类型按 connectionId+dbName+tableName 匹配已有 Tab
           if (
-            (tab.type === "table" || tab.type === "design") &&
-            tab.tableName &&
-            tab.connectionId &&
-            tab.dbName
+            (incomingTab.type === "table" || incomingTab.type === "design") &&
+            incomingTab.tableName &&
+            incomingTab.connectionId &&
+            incomingTab.dbName
           ) {
             const semanticIndex = state.tabs.findIndex(
               (t) =>
-                t.type === tab.type &&
-                t.connectionId === tab.connectionId &&
-                t.dbName === tab.dbName &&
-                t.tableName === tab.tableName,
+                t.type === incomingTab.type &&
+                t.connectionId === incomingTab.connectionId &&
+                t.dbName === incomingTab.dbName &&
+                t.tableName === incomingTab.tableName,
             );
             if (semanticIndex !== -1) {
               const existingTab = state.tabs[semanticIndex];
               const newTabs = [...state.tabs];
               newTabs[semanticIndex] = {
                 ...existingTab,
-                ...tab,
+                ...incomingTab,
                 id: existingTab.id,
               };
               return {
@@ -2308,19 +2531,19 @@ export const useStore = create<AppState>()(
             }
           }
           // 语义去重：对 query 类型按 savedQueryId 匹配已有 Tab（避免保存后重复打开）
-          if (tab.type === "query" && tab.savedQueryId) {
+          if (incomingTab.type === "query" && incomingTab.savedQueryId) {
             const savedQueryIndex = state.tabs.findIndex(
               (t) =>
                 t.type === "query" &&
-                (t.savedQueryId === tab.savedQueryId ||
-                  t.id === tab.savedQueryId),
+                (t.savedQueryId === incomingTab.savedQueryId ||
+                  t.id === incomingTab.savedQueryId),
             );
             if (savedQueryIndex !== -1) {
               const existingTab = state.tabs[savedQueryIndex];
               const newTabs = [...state.tabs];
               newTabs[savedQueryIndex] = {
                 ...existingTab,
-                ...tab,
+                ...incomingTab,
                 id: existingTab.id,
               };
               return {
@@ -2334,13 +2557,13 @@ export const useStore = create<AppState>()(
               };
             }
           }
-          const nextTabs = [...state.tabs, tab];
+          const nextTabs = [...state.tabs, incomingTab];
           return {
             tabs: nextTabs,
-            activeTabId: tab.id,
+            activeTabId: incomingTab.id,
             activeContext: resolveActiveContextForTabId(
               nextTabs,
-              tab.id,
+              incomingTab.id,
               state.activeContext,
             ),
           };
@@ -2381,6 +2604,37 @@ export const useStore = create<AppState>()(
               const nextTitle = toTrimmedString(draft.title, nextTab.title) || nextTab.title;
               if (nextTab.title !== nextTitle) {
                 nextTab.title = nextTitle;
+                changed = true;
+              }
+            }
+            if (draft.resultPanelVisible !== undefined) {
+              const nextResultPanelVisible = draft.resultPanelVisible === true;
+              if (nextTab.resultPanelVisible !== nextResultPanelVisible) {
+                nextTab.resultPanelVisible = nextResultPanelVisible;
+                changed = true;
+              }
+            }
+            if (Object.prototype.hasOwnProperty.call(draft, "formatRestoreSnapshot")) {
+              const rawSnapshot = draft.formatRestoreSnapshot;
+              const nextSnapshot =
+                rawSnapshot && typeof rawSnapshot.query === "string"
+                  ? {
+                      query: rawSnapshot.query.slice(0, MAX_PERSISTED_QUERY_LENGTH),
+                      createdAt: Number.isFinite(Number(rawSnapshot.createdAt))
+                        ? Number(rawSnapshot.createdAt)
+                        : Date.now(),
+                    }
+                  : undefined;
+              const currentSnapshot = nextTab.formatRestoreSnapshot;
+              if (
+                currentSnapshot?.query !== nextSnapshot?.query ||
+                currentSnapshot?.createdAt !== nextSnapshot?.createdAt
+              ) {
+                if (nextSnapshot?.query) {
+                  nextTab.formatRestoreSnapshot = nextSnapshot;
+                } else {
+                  delete nextTab.formatRestoreSnapshot;
+                }
                 changed = true;
               }
             }
@@ -2557,33 +2811,43 @@ export const useStore = create<AppState>()(
         })),
       setActiveContext: (context) => set({ activeContext: context }),
 
-      saveQuery: (query) =>
+      replaceSavedQueries: (queries) =>
+        set({ savedQueries: sanitizeSavedQueries(queries) }),
+
+      saveQuery: async (query) => {
+        const saved = await saveSavedQueryToBackend(
+          resolveSavedQueryBackend(),
+          query,
+        );
         set((state) => {
-          // If query with same ID exists, update it
-          const existing = state.savedQueries.find((q) => q.id === query.id);
+          const existing = state.savedQueries.find((q) => q.id === saved.id);
           if (existing) {
             return {
               savedQueries: state.savedQueries.map((q) =>
-                q.id === query.id ? query : q,
+                q.id === saved.id ? saved : q,
               ),
             };
           }
-          return { savedQueries: [...state.savedQueries, query] };
-        }),
+          return { savedQueries: [...state.savedQueries, saved] };
+        });
+        return saved;
+      },
 
-      deleteQuery: (id) =>
+      deleteQuery: async (id) => {
+        await deleteSavedQueryFromBackend(resolveSavedQueryBackend(), id);
         set((state) => ({
           savedQueries: state.savedQueries.filter((q) => q.id !== id),
-        })),
+        }));
+      },
 
       saveExternalSQLDirectory: (directory) =>
         set((state) => {
           const path = toTrimmedString(directory.path);
-          const connectionId = toTrimmedString(directory.connectionId);
-          const dbName = toTrimmedString(directory.dbName);
-          if (!path || !connectionId || !dbName) {
+          if (!path) {
             return state;
           }
+          const connectionId = toTrimmedString(directory.connectionId);
+          const dbName = toTrimmedString(directory.dbName);
           const nextDirectory: ExternalSQLDirectory = {
             id:
               toTrimmedString(
@@ -2592,18 +2856,17 @@ export const useStore = create<AppState>()(
               ) || buildExternalSQLDirectoryId(connectionId, dbName, path),
             name: resolveExternalSQLDirectoryName(directory.name, path),
             path,
-            connectionId,
-            dbName,
+            ...(connectionId ? { connectionId } : {}),
+            ...(dbName ? { dbName } : {}),
             createdAt: Number.isFinite(Number(directory.createdAt))
               ? Number(directory.createdAt)
               : Date.now(),
           };
+          const nextPathKey = path.replace(/\\/g, "/").toLowerCase();
           const existingIndex = state.externalSQLDirectories.findIndex(
             (item) =>
               item.id === nextDirectory.id ||
-              (item.connectionId === nextDirectory.connectionId &&
-                item.dbName === nextDirectory.dbName &&
-                item.path === nextDirectory.path),
+              item.path.replace(/\\/g, "/").toLowerCase() === nextPathKey,
           );
           if (existingIndex === -1) {
             return {
@@ -2641,7 +2904,11 @@ export const useStore = create<AppState>()(
         })),
       setUiScale: (scale) => set({ uiScale: sanitizeUiScale(scale) }),
       setFontSize: (size) => set({ fontSize: sanitizeFontSize(size) }),
-      setStartupFullscreen: (enabled) => set({ startupFullscreen: !!enabled }),
+      setStartupFullscreen: (enabled) => {
+        const nextValue = !!enabled;
+        set({ startupFullscreen: nextValue });
+        writePersistedStatePatch({ startupFullscreen: nextValue });
+      },
       setGlobalProxy: (proxy) =>
         set((state) => ({
           globalProxy: sanitizeGlobalProxy({ ...state.globalProxy, ...proxy }),
@@ -2659,6 +2926,37 @@ export const useStore = create<AppState>()(
         set((state) => ({
           queryOptions: { ...state.queryOptions, ...options },
         })),
+      setDataEditTransactionOptions: (options) =>
+        set((state) => ({
+          dataEditTransactionOptions: sanitizeDataEditTransactionOptions({
+            ...state.dataEditTransactionOptions,
+            ...options,
+          }),
+        })),
+      setSqlEditorTransactionOptions: (options) =>
+        set((state) => ({
+          sqlEditorTransactionOptions: sanitizeSqlEditorTransactionOptions({
+            ...state.sqlEditorTransactionOptions,
+            ...options,
+          }),
+        })),
+      setSqlEditorPendingTransaction: (tabId, transaction) =>
+        set((state) => {
+          const safeTabId = String(tabId || "").trim();
+          if (!safeTabId) {
+            return {};
+          }
+          const next = { ...state.sqlEditorPendingTransactions };
+          if (!transaction) {
+            delete next[safeTabId];
+            return { sqlEditorPendingTransactions: next };
+          }
+          next[safeTabId] = {
+            ...transaction,
+            tabId: safeTabId,
+          };
+          return { sqlEditorPendingTransactions: next };
+        }),
       updateShortcut: (action, binding, platform) => {
         runWithExplicitShortcutPersistence(() => {
           const targetPlatform = platform ?? getShortcutPlatform();
@@ -3030,6 +3328,7 @@ export const useStore = create<AppState>()(
         const state = unwrapPersistedAppState(
           persistedState,
         ) as Partial<AppState>;
+        captureLegacySavedQueriesSnapshot(state.savedQueries, state.connections);
         const nextState: Partial<AppState> = { ...state };
         nextState.connections = sanitizeConnections(state.connections);
         const safeTabs = sanitizeQueryTabs(state.tabs);
@@ -3049,7 +3348,7 @@ export const useStore = create<AppState>()(
           nextState.connectionTags,
           nextState.connections,
         );
-        nextState.savedQueries = sanitizeSavedQueries(state.savedQueries);
+        delete nextState.savedQueries;
         nextState.externalSQLDirectories = sanitizeExternalSQLDirectories(
           state.externalSQLDirectories,
         );
@@ -3068,6 +3367,10 @@ export const useStore = create<AppState>()(
           state.sqlFormatOptions,
         );
         nextState.queryOptions = sanitizeQueryOptions(state.queryOptions);
+        nextState.dataEditTransactionOptions =
+          sanitizeDataEditTransactionOptions(state.dataEditTransactionOptions);
+        nextState.sqlEditorTransactionOptions =
+          sanitizeSqlEditorTransactionOptions(state.sqlEditorTransactionOptions);
         nextState.shortcutOptions = sanitizeShortcutOptions(
           state.shortcutOptions,
         );
@@ -3117,6 +3420,7 @@ export const useStore = create<AppState>()(
         const state = unwrapPersistedAppState(
           persistedState,
         ) as Partial<AppState>;
+        captureLegacySavedQueriesSnapshot(state.savedQueries, state.connections);
         const safeTabs = sanitizeQueryTabs(state.tabs);
         const persistedConnections =
           state.connections === undefined
@@ -3142,7 +3446,7 @@ export const useStore = create<AppState>()(
           sidebarRootOrder: persistedSidebarRootOrder,
           tabs: safeTabs,
           activeTabId: sanitizeActiveTabId(state.activeTabId, safeTabs),
-          savedQueries: sanitizeSavedQueries(state.savedQueries),
+          savedQueries: currentState.savedQueries,
           externalSQLDirectories: sanitizeExternalSQLDirectories(
             state.externalSQLDirectories,
           ),
@@ -3173,6 +3477,12 @@ export const useStore = create<AppState>()(
 
           sqlFormatOptions: sanitizeSqlFormatOptions(state.sqlFormatOptions),
           queryOptions: sanitizeQueryOptions(state.queryOptions),
+          dataEditTransactionOptions: sanitizeDataEditTransactionOptions(
+            state.dataEditTransactionOptions,
+          ),
+          sqlEditorTransactionOptions: sanitizeSqlEditorTransactionOptions(
+            state.sqlEditorTransactionOptions,
+          ),
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
           sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: sanitizeSqlSnippets(state.sqlSnippets),
@@ -3190,7 +3500,6 @@ export const useStore = create<AppState>()(
           activeTabId: sanitizeActiveTabId(state.activeTabId, tabs),
           connectionTags: state.connectionTags,
           sidebarRootOrder: state.sidebarRootOrder,
-          savedQueries: state.savedQueries,
           externalSQLDirectories: state.externalSQLDirectories,
           theme: state.theme,
           languagePreference: state.languagePreference,
@@ -3204,6 +3513,8 @@ export const useStore = create<AppState>()(
               : toPersistedGlobalProxy(state.globalProxy),
           sqlFormatOptions: state.sqlFormatOptions,
           queryOptions: state.queryOptions,
+          dataEditTransactionOptions: state.dataEditTransactionOptions,
+          sqlEditorTransactionOptions: state.sqlEditorTransactionOptions,
           shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
           sqlLogs: sanitizeSqlLogs(state.sqlLogs),
           sqlSnippets: state.sqlSnippets,

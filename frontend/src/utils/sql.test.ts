@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildOrderBySQL, buildPaginatedSelectSQL, reverseOrderBySQL } from './sql';
+import { buildOrderBySQL, buildPaginatedSelectSQL, quoteQualifiedIdent, reverseOrderBySQL } from './sql';
 
 describe('buildOrderBySQL', () => {
   it('does not add fallback ORDER BY for DuckDB without explicit sort', () => {
@@ -50,5 +50,47 @@ describe('reverseOrderBySQL', () => {
   it('reverses comma separated order parts without splitting function arguments', () => {
     expect(reverseOrderBySQL(' ORDER BY COALESCE([a], [b]) ASC, [id] DESC'))
       .toBe(' ORDER BY COALESCE([a], [b]) DESC, [id] ASC');
+  });
+});
+
+describe('quoteQualifiedIdent', () => {
+  it('quotes Apache IoTDB device paths with backticks per path segment', () => {
+    expect(quoteQualifiedIdent('iotdb', 'root.sg.d1'))
+      .toBe('`root`.`sg`.`d1`');
+  });
+
+  it('keeps RocketMQ topic names as one quoted identifier', () => {
+    expect(quoteQualifiedIdent('rocketmq', 'orders.events.v1'))
+      .toBe('"orders.events.v1"');
+  });
+
+  it('keeps MQTT topic filters as one quoted identifier', () => {
+    expect(quoteQualifiedIdent('mqtt', 'devices/+/telemetry.v1'))
+      .toBe('"devices/+/telemetry.v1"');
+  });
+
+  it('keeps Kafka topic names as one quoted identifier', () => {
+    expect(quoteQualifiedIdent('kafka', 'logs.app-1'))
+      .toBe('"logs.app-1"');
+  });
+
+  it('keeps RabbitMQ queue names as one quoted identifier', () => {
+    expect(quoteQualifiedIdent('rabbitmq', 'orders.events.v1'))
+      .toBe('"orders.events.v1"');
+  });
+
+  it('quotes GoldenDB identifiers with MySQL-style backticks', () => {
+    expect(quoteQualifiedIdent('goldendb', 'ledger.entries'))
+      .toBe('`ledger`.`entries`');
+  });
+
+  it('does not split dots inside quoted DuckDB identifiers', () => {
+    expect(quoteQualifiedIdent('duckdb', '"daily.events"."2026.06"'))
+      .toBe('"daily.events"."2026.06"');
+  });
+
+  it('preserves three-part DuckDB names with quoted dots', () => {
+    expect(quoteQualifiedIdent('duckdb', '"analytics.catalog"."main.schema"."daily.events"'))
+      .toBe('"analytics.catalog"."main.schema"."daily.events"');
   });
 });

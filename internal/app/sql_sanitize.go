@@ -52,13 +52,427 @@ func leadingSQLKeyword(query string) string {
 	return strings.ToLower(text)
 }
 
+func sqlDataOperationKeyword(query string) string {
+	keyword, _ := sqlDataOperationInfo(query)
+	return keyword
+}
+
+func sqlDataOperationInfo(query string) (keyword string, withHasWrite bool) {
+	keyword, keywordEnd := nextSQLKeyword(query, 0)
+	if keyword != "with" {
+		return keyword, false
+	}
+	if withKeyword, hasWrite, ok := sqlKeywordAfterLeadingWith(query, keywordEnd); ok {
+		return withKeyword, hasWrite
+	}
+	return keyword, false
+}
+
+func nextSQLKeyword(text string, start int) (string, int) {
+	pos := skipSQLTrivia(text, start)
+	if pos >= len(text) || !isSQLKeywordByte(text[pos]) {
+		return "", pos
+	}
+	end := pos + 1
+	for end < len(text) && isSQLKeywordByte(text[end]) {
+		end++
+	}
+	return strings.ToLower(text[pos:end]), end
+}
+
+func skipSQLTrivia(text string, start int) int {
+	pos := start
+	for pos < len(text) {
+		switch {
+		case text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\r' || text[pos] == '\n' || text[pos] == '\f':
+			pos++
+		case strings.HasPrefix(text[pos:], "--"):
+			next := strings.IndexByte(text[pos:], '\n')
+			if next < 0 {
+				return len(text)
+			}
+			pos += next + 1
+		case strings.HasPrefix(text[pos:], "#"):
+			next := strings.IndexByte(text[pos:], '\n')
+			if next < 0 {
+				return len(text)
+			}
+			pos += next + 1
+		case strings.HasPrefix(text[pos:], "/*"):
+			end := strings.Index(text[pos+2:], "*/")
+			if end < 0 {
+				return len(text)
+			}
+			pos += end + 4
+		default:
+			return pos
+		}
+	}
+	return pos
+}
+
+func sqlKeywordAfterLeadingWith(text string, start int) (string, bool, bool) {
+	pos := skipSQLTrivia(text, start)
+	hasWriteCTE := false
+	if keyword, end := nextSQLKeyword(text, pos); keyword == "recursive" {
+		pos = end
+	}
+
+	for {
+		pos = skipSQLTrivia(text, pos)
+		next, ok := skipSQLIdentifierToken(text, pos)
+		if !ok {
+			return "", hasWriteCTE, false
+		}
+		pos = skipSQLTrivia(text, next)
+		if pos < len(text) && text[pos] == '(' {
+			next = skipBalancedSQLParens(text, pos)
+			if next < 0 {
+				return "", hasWriteCTE, false
+			}
+			pos = skipSQLTrivia(text, next)
+		}
+
+		asEnd := findTopLevelSQLKeyword(text, pos, "as")
+		if asEnd < 0 {
+			return "", hasWriteCTE, false
+		}
+		pos = skipSQLTrivia(text, asEnd)
+		if keyword, end := nextSQLKeyword(text, pos); keyword == "not" {
+			if nextKeyword, nextEnd := nextSQLKeyword(text, end); nextKeyword == "materialized" {
+				pos = nextEnd
+			}
+		} else if keyword == "materialized" {
+			pos = end
+		}
+
+		pos = skipSQLTrivia(text, pos)
+		if pos >= len(text) || text[pos] != '(' {
+			return "", hasWriteCTE, false
+		}
+		cteBodyStart := pos + 1
+		next = skipBalancedSQLParens(text, pos)
+		if next < 0 {
+			return "", hasWriteCTE, false
+		}
+		cteBodyEnd := next - 1
+		if cteBodyEnd >= cteBodyStart {
+			bodyKeyword, bodyHasWrite := sqlDataOperationInfo(text[cteBodyStart:cteBodyEnd])
+			if bodyHasWrite || isSQLDataWriteKeyword(bodyKeyword) {
+				hasWriteCTE = true
+			}
+		}
+		pos = skipSQLTrivia(text, next)
+		if pos < len(text) && text[pos] == ',' {
+			pos++
+			continue
+		}
+
+		keyword, _ := nextSQLKeyword(text, pos)
+		return keyword, hasWriteCTE, keyword != ""
+	}
+}
+
+func findTopLevelSQLKeyword(text string, start int, want string) int {
+	depth := 0
+	for pos := start; pos < len(text); {
+		if next, ok := skipSQLQuotedOrComment(text, pos); ok {
+			pos = next
+			continue
+		}
+		switch text[pos] {
+		case '(':
+			depth++
+			pos++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			pos++
+		default:
+			if depth == 0 && isSQLKeywordByte(text[pos]) {
+				end := pos + 1
+				for end < len(text) && isSQLKeywordByte(text[end]) {
+					end++
+				}
+				if strings.EqualFold(text[pos:end], want) {
+					return end
+				}
+				pos = end
+				continue
+			}
+			pos++
+		}
+	}
+	return -1
+}
+
+func skipSQLIdentifierToken(text string, start int) (int, bool) {
+	if start >= len(text) {
+		return start, false
+	}
+	switch text[start] {
+	case '"', '`':
+		next := skipSQLDelimited(text, start, text[start])
+		return next, next > start
+	case '[':
+		next := strings.IndexByte(text[start+1:], ']')
+		if next < 0 {
+			return len(text), true
+		}
+		return start + next + 2, true
+	default:
+		if !isSQLKeywordByte(text[start]) {
+			return start, false
+		}
+		end := start + 1
+		for end < len(text) && isSQLKeywordByte(text[end]) {
+			end++
+		}
+		return end, true
+	}
+}
+
+func skipBalancedSQLParens(text string, start int) int {
+	if start >= len(text) || text[start] != '(' {
+		return -1
+	}
+	depth := 0
+	for pos := start; pos < len(text); {
+		if next, ok := skipSQLQuotedOrComment(text, pos); ok {
+			pos = next
+			continue
+		}
+		switch text[pos] {
+		case '(':
+			depth++
+			pos++
+		case ')':
+			depth--
+			pos++
+			if depth == 0 {
+				return pos
+			}
+		default:
+			pos++
+		}
+	}
+	return -1
+}
+
+func skipSQLQuotedOrComment(text string, start int) (int, bool) {
+	if start >= len(text) {
+		return start, false
+	}
+	switch {
+	case strings.HasPrefix(text[start:], "--"):
+		next := strings.IndexByte(text[start:], '\n')
+		if next < 0 {
+			return len(text), true
+		}
+		return start + next + 1, true
+	case strings.HasPrefix(text[start:], "#"):
+		next := strings.IndexByte(text[start:], '\n')
+		if next < 0 {
+			return len(text), true
+		}
+		return start + next + 1, true
+	case strings.HasPrefix(text[start:], "/*"):
+		end := strings.Index(text[start+2:], "*/")
+		if end < 0 {
+			return len(text), true
+		}
+		return start + end + 4, true
+	case text[start] == '\'' || text[start] == '"' || text[start] == '`':
+		return skipSQLDelimited(text, start, text[start]), true
+	case text[start] == '[':
+		next := strings.IndexByte(text[start+1:], ']')
+		if next < 0 {
+			return len(text), true
+		}
+		return start + next + 2, true
+	default:
+		if tag, ok := sqlDollarQuoteTag(text, start); ok {
+			end := strings.Index(text[start+len(tag):], tag)
+			if end < 0 {
+				return len(text), true
+			}
+			return start + len(tag) + end + len(tag), true
+		}
+		return start, false
+	}
+}
+
+func skipSQLDelimited(text string, start int, delimiter byte) int {
+	pos := start + 1
+	for pos < len(text) {
+		if text[pos] == delimiter {
+			if pos+1 < len(text) && text[pos+1] == delimiter {
+				pos += 2
+				continue
+			}
+			return pos + 1
+		}
+		pos++
+	}
+	return len(text)
+}
+
+func sqlDollarQuoteTag(text string, start int) (string, bool) {
+	if start >= len(text) || text[start] != '$' {
+		return "", false
+	}
+	end := start + 1
+	for end < len(text) && (isSQLKeywordByte(text[end]) || text[end] == '-') {
+		end++
+	}
+	if end < len(text) && text[end] == '$' {
+		return text[start : end+1], true
+	}
+	return "", false
+}
+
+func isSQLKeywordByte(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_'
+}
+
+func normalizeSQLClassifierDBType(dbType string) string {
+	normalized := strings.ToLower(strings.TrimSpace(dbType))
+	switch normalized {
+	case "postgresql":
+		return "postgres"
+	case "mssql", "sql_server", "sql-server":
+		return "sqlserver"
+	case "open_gauss", "open-gauss":
+		return "opengauss"
+	case "gauss_db", "gauss-db":
+		return "gaussdb"
+	case "kingbase8", "kingbasees", "kingbasev8":
+		return "kingbase"
+	default:
+		return normalized
+	}
+}
+
+func isSQLServerDBType(dbType string) bool {
+	return normalizeSQLClassifierDBType(dbType) == "sqlserver"
+}
+
+func isOracleLikeDBType(dbType string) bool {
+	switch normalizeSQLClassifierDBType(dbType) {
+	case "oracle", "dameng":
+		return true
+	default:
+		return false
+	}
+}
+
+func isPostgresNoticeCapableDBType(dbType string) bool {
+	switch normalizeSQLClassifierDBType(dbType) {
+	case "postgres", "opengauss":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSQLSelectIntoStatement(query string) bool {
+	keyword, _ := sqlDataOperationInfo(query)
+	return keyword == "select" && findTopLevelSQLKeyword(query, 0, "into") >= 0
+}
+
+func sqlContainsKeyword(text string, want string) bool {
+	for pos := 0; pos < len(text); {
+		if next, ok := skipSQLQuotedOrComment(text, pos); ok {
+			pos = next
+			continue
+		}
+		if isSQLKeywordByte(text[pos]) {
+			end := pos + 1
+			for end < len(text) && isSQLKeywordByte(text[end]) {
+				end++
+			}
+			if strings.EqualFold(text[pos:end], want) {
+				return true
+			}
+			pos = end
+			continue
+		}
+		pos++
+	}
+	return false
+}
+
+func sqlWriteStatementReturnsRows(dbType string, query string) bool {
+	keyword, withHasWrite := sqlDataOperationInfo(query)
+	if withHasWrite && keyword == "select" {
+		return true
+	}
+	if !isSQLDataWriteKeyword(keyword) {
+		return false
+	}
+	if !isOracleLikeDBType(dbType) && findTopLevelSQLKeyword(query, 0, "returning") >= 0 {
+		return true
+	}
+	if isSQLServerDBType(dbType) && findTopLevelSQLKeyword(query, 0, "output") >= 0 {
+		return true
+	}
+	return false
+}
+
+func sqlServerControlFlowMayReturnMessages(query string) bool {
+	switch leadingSQLKeyword(query) {
+	case "if", "begin", "while", "declare", "try", "catch":
+		return sqlContainsKeyword(query, "exec") ||
+			sqlContainsKeyword(query, "execute") ||
+			sqlContainsKeyword(query, "print") ||
+			sqlContainsKeyword(query, "raiserror") ||
+			sqlContainsKeyword(query, "throw") ||
+			sqlContainsKeyword(query, "dbcc") ||
+			sqlContainsKeyword(query, "set")
+	default:
+		return false
+	}
+}
+
 func isReadOnlySQLQuery(dbType string, query string) bool {
 	if strings.ToLower(strings.TrimSpace(dbType)) == "mongodb" && strings.HasPrefix(strings.TrimSpace(query), "{") {
 		return true
 	}
 
-	switch leadingSQLKeyword(query) {
-	case "select", "with", "show", "describe", "desc", "explain", "pragma", "values":
+	keyword, withHasWrite := sqlDataOperationInfo(query)
+	if withHasWrite {
+		return false
+	}
+	if keyword == "select" && isSQLSelectIntoStatement(query) {
+		return false
+	}
+	switch keyword {
+	case "select", "with", "show", "describe", "desc", "explain", "pragma", "values", "consume":
+		return true
+	default:
+		return false
+	}
+}
+
+func isBatchableWriteSQLStatement(dbType string, query string) bool {
+	if isReadOnlySQLQuery(dbType, query) {
+		return false
+	}
+
+	keyword, withHasWrite := sqlDataOperationInfo(query)
+	if withHasWrite {
+		return true
+	}
+	if keyword == "select" && isSQLSelectIntoStatement(query) {
+		return true
+	}
+	return isSQLDataWriteKeyword(keyword)
+}
+
+func isSQLDataWriteKeyword(keyword string) bool {
+	switch keyword {
+	case "insert", "update", "delete", "replace", "merge", "upsert":
 		return true
 	default:
 		return false
@@ -72,10 +486,12 @@ func sanitizeSQLForPgLike(dbType string, query string) string {
 		normalizedType = "postgres"
 	case "kingbase8", "kingbasees", "kingbasev8":
 		normalizedType = "kingbase"
+	case "gauss_db", "gauss-db":
+		normalizedType = "gaussdb"
 	}
 
 	switch normalizedType {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss":
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		// 有些情况下会出现多层重复引用（例如 """"schema"""" 或 ""schema"""），单次修复不一定收敛。
 		// 这里做有限次数的迭代，直到输出不再变化。
 		out := query

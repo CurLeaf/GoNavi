@@ -19,6 +19,7 @@ describe('sqlDialect', () => {
   it('normalizes datasource aliases without collapsing all dialects to mysql', () => {
     expect(resolveSqlDialect('postgresql')).toBe('postgres');
     expect(resolveSqlDialect('OpenGauss')).toBe('opengauss');
+    expect(resolveSqlDialect('GaussDB')).toBe('gaussdb');
     expect(resolveSqlDialect('OceanBase')).toBe('oceanbase');
     expect(resolveSqlDialect('doris')).toBe('diros');
     expect(resolveSqlDialect('StarRocks')).toBe('starrocks');
@@ -28,7 +29,27 @@ describe('sqlDialect', () => {
     expect(resolveSqlDialect('custom', 'kingbase8')).toBe('kingbase');
     expect(resolveSqlDialect('custom', 'dm8')).toBe('dameng');
     expect(resolveSqlDialect('custom', 'mariadb')).toBe('mariadb');
+    expect(resolveSqlDialect('custom', 'gdb')).toBe('mysql');
+    expect(resolveSqlDialect('custom', 'goldendb')).toBe('mysql');
+    expect(resolveSqlDialect('custom', 'greatdb')).toBe('mysql');
     expect(resolveSqlDialect('custom', 'open_gauss')).toBe('opengauss');
+    expect(resolveSqlDialect('custom', 'gauss_db')).toBe('gaussdb');
+    expect(resolveSqlDialect('Elasticsearch')).toBe('elasticsearch');
+    expect(resolveSqlDialect('custom', 'elastic')).toBe('elasticsearch');
+    expect(resolveSqlDialect('ChromaDB')).toBe('chroma');
+    expect(resolveSqlDialect('custom', 'chroma-db')).toBe('chroma');
+    expect(resolveSqlDialect('QdrantDB')).toBe('qdrant');
+    expect(resolveSqlDialect('custom', 'qdrant-db')).toBe('qdrant');
+    expect(resolveSqlDialect('Apache-IoTDB')).toBe('iotdb');
+    expect(resolveSqlDialect('custom', 'apache_iotdb')).toBe('iotdb');
+    expect(resolveSqlDialect('Rocket-MQ')).toBe('rocketmq');
+    expect(resolveSqlDialect('custom', 'rmq')).toBe('rocketmq');
+    expect(resolveSqlDialect('MQTTS')).toBe('mqtt');
+    expect(resolveSqlDialect('custom', 'mqtts')).toBe('mqtt');
+    expect(resolveSqlDialect('Apache-Kafka')).toBe('kafka');
+    expect(resolveSqlDialect('custom', 'apache_kafka')).toBe('kafka');
+    expect(resolveSqlDialect('Rabbit-MQ')).toBe('rabbitmq');
+    expect(resolveSqlDialect('custom', 'rabbit_mq')).toBe('rabbitmq');
     expect(resolveSqlDialect('OceanBase', '', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(resolveSqlDialect('custom', 'oceanbase', { oceanBaseProtocol: 'oracle' })).toBe('oracle');
     expect(isMysqlFamilyDialect('mariadb')).toBe(true);
@@ -43,6 +64,7 @@ describe('sqlDialect', () => {
     expect(values(resolveColumnTypeOptions('dameng'))).toContain('VARCHAR2(255)');
     expect(values(resolveColumnTypeOptions('kingbase'))).toContain('integer');
     expect(values(resolveColumnTypeOptions('opengauss'))).toContain('integer');
+    expect(values(resolveColumnTypeOptions('gaussdb'))).toContain('integer');
     expect(values(resolveColumnTypeOptions('oceanbase'))).toContain('varchar(255)');
     expect(values(resolveColumnTypeOptions('kingbase'))).not.toContain('tinyint(1)');
     expect(values(resolveColumnTypeOptions('diros'))).toContain('LARGEINT');
@@ -51,7 +73,40 @@ describe('sqlDialect', () => {
     expect(values(resolveColumnTypeOptions('clickhouse'))).toContain('DateTime64(3)');
     expect(values(resolveColumnTypeOptions('iris'))).toContain('varchar(255)');
     expect(values(resolveColumnTypeOptions('tdengine'))).toContain('TIMESTAMP');
+    expect(values(resolveColumnTypeOptions('iotdb'))).toContain('INT64');
     expect(values(resolveColumnTypeOptions('duckdb'))).toContain('STRUCT');
+  });
+
+  it('resolves Apache IoTDB completion keywords and functions independently', () => {
+    expect(resolveSqlKeywords('iotdb')).toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'SHOW TIMESERIES', 'WITH DATATYPE']));
+    expect(names(resolveSqlFunctions('iotdb'))).toEqual(expect.arrayContaining(['DATE_BIN', 'DIFF', 'TOP_K']));
+    expect(resolveSqlKeywords('iotdb')).not.toEqual(expect.arrayContaining(['TAGS', 'USING']));
+  });
+
+  it('resolves RocketMQ completion keywords for topic discovery and consume syntax', () => {
+    expect(resolveSqlKeywords('rocketmq')).toEqual(expect.arrayContaining(['SHOW TOPICS', 'DESCRIBE TOPIC', 'CONSUME']));
+    expect(resolveSqlKeywords('rocketmq')).not.toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'AUTO_INCREMENT']));
+  });
+
+  it('resolves MQTT completion keywords for topic discovery and consume syntax', () => {
+    expect(resolveSqlKeywords('mqtt')).toEqual(expect.arrayContaining(['SHOW TOPICS', 'DESCRIBE TOPIC', 'CONSUME']));
+    expect(resolveSqlKeywords('mqtt')).not.toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'AUTO_INCREMENT']));
+  });
+
+  it('resolves Kafka completion keywords for topic discovery and consume syntax', () => {
+    expect(resolveSqlKeywords('kafka')).toEqual(expect.arrayContaining(['SHOW TOPICS', 'DESCRIBE TOPIC', 'CONSUME']));
+    expect(resolveSqlKeywords('kafka')).not.toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'AUTO_INCREMENT']));
+  });
+
+  it('resolves RabbitMQ completion keywords for queue and exchange discovery', () => {
+    expect(resolveSqlKeywords('rabbitmq')).toEqual(expect.arrayContaining(['SHOW VHOSTS', 'SHOW QUEUES', 'SHOW EXCHANGES', 'DESCRIBE QUEUE']));
+    expect(resolveSqlKeywords('rabbitmq')).not.toEqual(expect.arrayContaining(['ALIGN BY DEVICE', 'AUTO_INCREMENT']));
+  });
+
+  it('resolves GaussDB completion keywords and functions as a PostgreSQL-like dialect', () => {
+    expect(resolveSqlKeywords('gaussdb')).toEqual(expect.arrayContaining(['RETURNING', 'SERIAL', 'JSONB']));
+    expect(names(resolveSqlFunctions('gaussdb'))).toEqual(expect.arrayContaining(['STRING_AGG', 'TO_CHAR', 'CURRENT_DATABASE']));
+    expect(resolveSqlKeywords('gaussdb')).not.toEqual(expect.arrayContaining(['AUTO_INCREMENT', 'CHANGE']));
   });
 
   it('resolves oracle completion keywords and functions without mysql-only suggestions', () => {

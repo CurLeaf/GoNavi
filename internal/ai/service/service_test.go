@@ -80,13 +80,9 @@ func TestDefaultStaticModelsForProvider_ReturnsMiniMaxAnthropicModels(t *testing
 		BaseURL: "https://api.minimaxi.com/anthropic",
 	})
 	expected := []string{
+		"MiniMax-M3",
 		"MiniMax-M2.7",
 		"MiniMax-M2.7-highspeed",
-		"MiniMax-M2.5",
-		"MiniMax-M2.5-highspeed",
-		"MiniMax-M2.1",
-		"MiniMax-M2.1-highspeed",
-		"MiniMax-M2",
 	}
 	if !reflect.DeepEqual(models, expected) {
 		t.Fatalf("expected MiniMax static models %v, got %v", expected, models)

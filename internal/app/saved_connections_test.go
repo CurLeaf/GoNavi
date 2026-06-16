@@ -42,6 +42,36 @@ func TestSplitConnectionSecretsStripsPasswordsAndOpaqueDSN(t *testing.T) {
 	}
 }
 
+func TestSplitConnectionSecretsStripsRedisSentinelPassword(t *testing.T) {
+	withTestGOOS(t, "linux")
+
+	input := connection.SavedConnectionInput{
+		ID:   "redis-sentinel",
+		Name: "Redis Sentinel",
+		Config: connection.ConnectionConfig{
+			ID:                    "redis-sentinel",
+			Type:                  "redis",
+			Host:                  "sentinel.local",
+			Port:                  26379,
+			Topology:              "sentinel",
+			RedisSentinelMaster:   "mymaster",
+			RedisSentinelUser:     "sentinel-user",
+			RedisSentinelPassword: "sentinel-secret",
+		},
+	}
+
+	view, bundle := splitConnectionSecrets(input)
+	if view.Config.RedisSentinelPassword != "" {
+		t.Fatal("metadata must not keep Redis Sentinel password")
+	}
+	if bundle.RedisSentinelPassword != "sentinel-secret" {
+		t.Fatalf("bundle should keep Redis Sentinel password, got %q", bundle.RedisSentinelPassword)
+	}
+	if !view.HasRedisSentinelPassword {
+		t.Fatal("expected view to report Redis Sentinel password")
+	}
+}
+
 type fakeAppSecretStore struct {
 	items map[string][]byte
 }

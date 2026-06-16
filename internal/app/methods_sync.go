@@ -13,17 +13,49 @@ import (
 
 func (a *App) resolveDataSyncConfigSecrets(config sync.SyncConfig) (sync.SyncConfig, error) {
 	resolved := config
-	sourceConfig, err := a.resolveConnectionSecrets(config.SourceConfig)
+	sourceConfig, sourceDatabase, err := a.resolveDataSyncEndpointConfig(config.SourceConfig, config.SourceDatabase)
 	if err != nil {
 		return resolved, fmt.Errorf("恢复源数据库连接密文失败: %w", err)
 	}
-	targetConfig, err := a.resolveConnectionSecrets(config.TargetConfig)
+	targetConfig, targetDatabase, err := a.resolveDataSyncEndpointConfig(config.TargetConfig, config.TargetDatabase)
 	if err != nil {
 		return resolved, fmt.Errorf("恢复目标数据库连接密文失败: %w", err)
 	}
 	resolved.SourceConfig = sourceConfig
 	resolved.TargetConfig = targetConfig
+	resolved.SourceDatabase = sourceDatabase
+	resolved.TargetDatabase = targetDatabase
 	return resolved, nil
+}
+
+func (a *App) resolveDataSyncEndpointConfig(raw connection.ConnectionConfig, selectedDatabase string) (connection.ConnectionConfig, string, error) {
+	resolved, err := a.resolveConnectionSecrets(raw)
+	if err != nil {
+		return resolved, selectedDatabase, err
+	}
+
+	if !strings.EqualFold(strings.TrimSpace(raw.Type), "oracle") || strings.TrimSpace(raw.ID) == "" {
+		return resolved, strings.TrimSpace(selectedDatabase), nil
+	}
+
+	repo := newSavedConnectionRepository(a.configDir, a.secretStore)
+	view, findErr := repo.Find(raw.ID)
+	if findErr != nil {
+		return resolved, strings.TrimSpace(selectedDatabase), nil
+	}
+
+	savedServiceName := strings.TrimSpace(view.Config.Database)
+	if savedServiceName == "" {
+		return resolved, strings.TrimSpace(selectedDatabase), nil
+	}
+
+	selected := strings.TrimSpace(selectedDatabase)
+	incomingDatabase := strings.TrimSpace(raw.Database)
+	if selected == "" && incomingDatabase != "" && !strings.EqualFold(incomingDatabase, savedServiceName) {
+		selected = incomingDatabase
+	}
+	resolved.Database = savedServiceName
+	return resolved, selected, nil
 }
 
 // DataSync executes a data synchronization task

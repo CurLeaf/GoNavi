@@ -17,6 +17,7 @@ export type DataGridSecondaryActionsTranslate = (key: string, params?: I18nParam
 export interface DataGridSecondaryActionsProps {
   isV2Ui: boolean;
   canViewDdl: boolean;
+  canOpenObjectDesigner: boolean;
   viewMode: GridViewMode;
   ddlLoading: boolean;
   showColumnComment: boolean;
@@ -39,6 +40,7 @@ export interface DataGridSecondaryActionsProps {
 const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
   isV2Ui,
   canViewDdl,
+  canOpenObjectDesigner,
   viewMode,
   ddlLoading,
   showColumnComment,
@@ -58,9 +60,13 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
   translate = defaultTranslate,
 }) => {
   if (isV2Ui) {
+    const fieldsActionLabel = canOpenObjectDesigner
+      ? '对象设计'
+      : translate('data_grid.column_settings.field_info');
+    const fieldsActionIcon = canOpenObjectDesigner ? <EditOutlined /> : <FileTextOutlined />;
     const viewTabItems: Array<{ key: GridViewMode; label: string; icon: React.ReactNode; disabled?: boolean }> = [
       { key: 'table', label: translate('data_grid.secondary.data_preview'), icon: <TableOutlined /> },
-      { key: 'fields', label: translate('data_grid.column_settings.field_info'), icon: <FileTextOutlined /> },
+      { key: 'fields', label: fieldsActionLabel, icon: fieldsActionIcon },
       { key: 'ddl', label: translate('data_grid.secondary.view_ddl'), icon: <ConsoleSqlOutlined />, disabled: !canViewDdl },
       { key: 'er', label: translate('data_grid.secondary.er_diagram'), icon: <LinkOutlined /> },
     ];

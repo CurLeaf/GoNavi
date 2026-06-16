@@ -9,5 +9,19 @@ export const getDriverLocalImportDirectoryHelp = (language?: SupportedLanguage |
 export const getDriverLocalImportSingleFileHelp = (language?: SupportedLanguage | string) =>
   t('driver_manager.import.single_file_help', undefined, language ?? getCurrentLanguage());
 
+const includeCustomDriverRawAliases = (helpText: string): string => {
+  let next = String(helpText || '');
+  if (!/\bgaussdb\b/i.test(next)) {
+    next = next.replace(/\bopengauss\b/i, (match) => `${match}, gaussdb`);
+  }
+  if (!/gauss_db\/gauss-db/i.test(next)) {
+    next = next.replace(/open_gauss\/open-gauss([、,])(\s*)/u, (_match, separator: string, spacing: string) => {
+      const gap = separator === ',' ? spacing || ' ' : '';
+      return `open_gauss/open-gauss${separator}${gap}gauss_db/gauss-db${separator}${spacing || ''}`;
+    });
+  }
+  return next;
+};
+
 export const getCustomConnectionDriverHelp = (language?: SupportedLanguage | string) =>
-  t('driver.guidance.customConnectionDriverHelp', undefined, language ?? getCurrentLanguage());
+  includeCustomDriverRawAliases(t('driver.guidance.customConnectionDriverHelp', undefined, language ?? getCurrentLanguage()));

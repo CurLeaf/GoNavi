@@ -220,6 +220,34 @@ func TestNormalizeQueryValueWithDBType_TimeStructToRFC3339(t *testing.T) {
 	}
 }
 
+func TestNormalizeQueryValueWithDBTypeAndDialect_MySQLDateOnly(t *testing.T) {
+	input := time.Date(2025, 10, 1, 0, 0, 0, 0, time.Local)
+
+	got := normalizeQueryValueWithDBTypeAndDialect(input, "DATE", "mysql")
+	if got != "2025-10-01" {
+		t.Fatalf("MySQL DATE 应只展示日期，实际=%v(%T)", got, got)
+	}
+
+	got = normalizeQueryValueWithDBTypeAndDialect(input, "NEWDATE", "mysql")
+	if got != "2025-10-01" {
+		t.Fatalf("MySQL NEWDATE 应只展示日期，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_DatetimeKeepsTime(t *testing.T) {
+	input := time.Date(2025, 10, 1, 13, 14, 15, 0, time.UTC)
+
+	got := normalizeQueryValueWithDBTypeAndDialect(input, "DATETIME", "mysql")
+	if got != "2025-10-01T13:14:15Z" {
+		t.Fatalf("MySQL DATETIME 应保留时间，实际=%v(%T)", got, got)
+	}
+
+	got = normalizeQueryValueWithDBTypeAndDialect(input, "DATE", "oracle")
+	if got != "2025-10-01T13:14:15Z" {
+		t.Fatalf("Oracle DATE 应保留时间语义，实际=%v(%T)", got, got)
+	}
+}
+
 func TestNormalizeQueryValueWithDBType_ZeroTemporalValues(t *testing.T) {
 	zero := time.Time{}
 	cases := []struct {

@@ -322,3 +322,87 @@ func TestStreamSQLFileHandlesSplitTokenBoundaries(t *testing.T) {
 		t.Fatalf("unexpected full-width semicolon statement: %q", statements[2])
 	}
 }
+
+func TestStreamSQLFileKeepsOracleAnonymousBlockTogether(t *testing.T) {
+	input := strings.Join([]string{
+		"BEGIN",
+		"  INSERT INTO tmp_disable_trigger (table_name) VALUES ('t_memcard_reg');",
+		"  UPDATE t_memcard_reg SET CARDLEVEL = 1 WHERE MEMCARDNO = '8032277312';",
+		"  DELETE FROM tmp_disable_trigger WHERE table_name = 't_memcard_reg';",
+		"END;",
+		"SELECT 1 FROM dual;",
+	}, "\n")
+	var statements []string
+
+	count, err := streamSQLFile(&chunkedReader{data: []byte(input), step: 3}, func(index int, stmt string) error {
+		statements = append(statements, stmt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamSQLFile returned error: %v", err)
+	}
+	if count != 2 || len(statements) != 2 {
+		t.Fatalf("expected 2 statements, got count=%d statements=%#v", count, statements)
+	}
+	if statements[0] != strings.Join([]string{
+		"BEGIN",
+		"  INSERT INTO tmp_disable_trigger (table_name) VALUES ('t_memcard_reg');",
+		"  UPDATE t_memcard_reg SET CARDLEVEL = 1 WHERE MEMCARDNO = '8032277312';",
+		"  DELETE FROM tmp_disable_trigger WHERE table_name = 't_memcard_reg';",
+		"END;",
+	}, "\n") {
+		t.Fatalf("unexpected anonymous block statement: %q", statements[0])
+	}
+	if statements[1] != "SELECT 1 FROM dual" {
+		t.Fatalf("unexpected second statement: %q", statements[1])
+	}
+}
+
+func TestStreamSQLFileKeepsOracleCreateProcedureTogether(t *testing.T) {
+	input := strings.Join([]string{
+		"CREATE OR REPLACE PROCEDURE proc_tally2accept(",
+		"  p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE,",
+		"  out_acceptno OUT t_accept_h.acceptno%TYPE",
+		") IS",
+		"  v_busno t_tally_accept_h.busno%TYPE;",
+		"  v_count PLS_INTEGER;",
+		"BEGIN",
+		"  SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;",
+		"  IF v_count > 0 THEN",
+		"    out_acceptno := p_tallyacceptno;",
+		"  END IF;",
+		"END;",
+		"SELECT 1 FROM dual;",
+	}, "\n")
+	var statements []string
+
+	count, err := streamSQLFile(&chunkedReader{data: []byte(input), step: 5}, func(index int, stmt string) error {
+		statements = append(statements, stmt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamSQLFile returned error: %v", err)
+	}
+	if count != 2 || len(statements) != 2 {
+		t.Fatalf("expected 2 statements, got count=%d statements=%#v", count, statements)
+	}
+	if statements[0] != strings.Join([]string{
+		"CREATE OR REPLACE PROCEDURE proc_tally2accept(",
+		"  p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE,",
+		"  out_acceptno OUT t_accept_h.acceptno%TYPE",
+		") IS",
+		"  v_busno t_tally_accept_h.busno%TYPE;",
+		"  v_count PLS_INTEGER;",
+		"BEGIN",
+		"  SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;",
+		"  IF v_count > 0 THEN",
+		"    out_acceptno := p_tallyacceptno;",
+		"  END IF;",
+		"END;",
+	}, "\n") {
+		t.Fatalf("unexpected create procedure statement: %q", statements[0])
+	}
+	if statements[1] != "SELECT 1 FROM dual" {
+		t.Fatalf("unexpected second statement: %q", statements[1])
+	}
+}

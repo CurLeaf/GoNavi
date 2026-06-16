@@ -62,3 +62,127 @@ func TestSanitizeSQLForPgLike_DoesNotModifyOtherDBTypes(t *testing.T) {
 		t.Fatalf("non-PG-like db should not be sanitized:\nIN:  %s\nOUT: %s", in, out)
 	}
 }
+
+func TestIsReadOnlySQLQuery_DoesNotTreatExecAsReadOnly(t *testing.T) {
+	if isReadOnlySQLQuery("sqlserver", "EXEC sp_who2") {
+		t.Fatal("EXEC should not be treated as read-only SQL")
+	}
+}
+
+func TestIsReadOnlySQLQuery_ClassifiesWithByTopLevelOperation(t *testing.T) {
+	readQuery := "WITH target AS (SELECT id FROM users WHERE active = 1) SELECT * FROM target"
+	if !isReadOnlySQLQuery("postgres", readQuery) {
+		t.Fatal("WITH ... SELECT should stay read-only")
+	}
+
+	writeQuery := "WITH target AS (SELECT id FROM users WHERE active = 1) UPDATE users SET synced = 1 WHERE id IN (SELECT id FROM target)"
+	if isReadOnlySQLQuery("postgres", writeQuery) {
+		t.Fatal("WITH ... UPDATE should not be treated as read-only")
+	}
+
+	writeCTEQuery := "WITH moved AS (DELETE FROM audit_logs WHERE created_at < NOW() RETURNING id) SELECT * FROM moved"
+	if isReadOnlySQLQuery("postgres", writeCTEQuery) {
+		t.Fatal("data-changing CTE should not be treated as read-only")
+	}
+}
+
+func TestIsReadOnlySQLQuery_TreatsSelectIntoAsWrite(t *testing.T) {
+	query := "SELECT * INTO archived_users FROM users"
+	if isReadOnlySQLQuery("postgres", query) {
+		t.Fatal("SELECT INTO should not be treated as read-only")
+	}
+}
+
+func TestIsReadOnlySQLQuery_TreatsKafkaConsumeAsReadOnly(t *testing.T) {
+	if !isReadOnlySQLQuery("kafka", `CONSUME GROUP "analytics" FROM "orders.events" LIMIT 20`) {
+		t.Fatal("Kafka CONSUME should be treated as read-only")
+	}
+}
+
+func TestIsBatchableWriteSQLStatement_OnlyMatchesRealWriteStatements(t *testing.T) {
+	if !isBatchableWriteSQLStatement("mysql", "INSERT INTO demo(id) VALUES (1)") {
+		t.Fatal("expected INSERT to be treated as batchable write")
+	}
+	if !isBatchableWriteSQLStatement("postgres", "WITH target AS (SELECT id FROM users) DELETE FROM users WHERE id IN (SELECT id FROM target)") {
+		t.Fatal("expected WITH ... DELETE to be treated as batchable write")
+	}
+	if !isBatchableWriteSQLStatement("postgres", "WITH moved AS (DELETE FROM audit_logs WHERE created_at < NOW() RETURNING id) SELECT * FROM moved") {
+		t.Fatal("expected data-changing CTE to be treated as batchable write")
+	}
+	if !isBatchableWriteSQLStatement("postgres", "SELECT * INTO archived_users FROM users") {
+		t.Fatal("expected SELECT INTO to be treated as batchable write")
+	}
+	if isBatchableWriteSQLStatement("sqlserver", "EXEC sp_who2") {
+		t.Fatal("EXEC should not be treated as batchable write")
+	}
+	if isBatchableWriteSQLStatement("sqlserver", "SET STATISTICS IO ON") {
+		t.Fatal("SET STATISTICS should not be treated as batchable write")
+	}
+}
+
+func TestShouldTryQueryResultFirst_TreatsSQLServerSetAsQueryFirst(t *testing.T) {
+	if !shouldTryQueryResultFirst("sqlserver", "SET STATISTICS IO ON") {
+		t.Fatal("expected SQL Server SET STATISTICS to try query-first for notice capture")
+	}
+	if shouldTryQueryResultFirst("mysql", "SET sql_mode = ''") {
+		t.Fatal("non-SQLServer SET should not force query-first")
+	}
+}
+
+func TestShouldTryQueryResultFirst_TreatsSQLServerSystemCommandsAsQueryFirst(t *testing.T) {
+	if !shouldTryQueryResultFirst("sqlserver", "sp_who2") {
+		t.Fatal("expected bare SQL Server system procedure to try query-first")
+	}
+	if !shouldTryQueryResultFirst("sqlserver", "DBCC INPUTBUFFER(52)") {
+		t.Fatal("expected SQL Server DBCC command to try query-first")
+	}
+	if shouldTryQueryResultFirst("mysql", "sp_who2") {
+		t.Fatal("non-SQLServer system procedure name should not force query-first")
+	}
+}
+
+func TestShouldTryQueryResultFirst_TreatsSQLServerBareProcedureCallsAsQueryFirst(t *testing.T) {
+	if !shouldTryQueryResultFirst("sqlserver", `p_get_select c_dyscript,'projectid = 1',1`) {
+		t.Fatal("expected bare SQL Server procedure call to try query-first")
+	}
+	if !shouldTryQueryResultFirst("sqlserver", `dbo.p_get_select c_dyscript,'projectid = 1',1`) {
+		t.Fatal("expected schema-qualified SQL Server procedure call to try query-first")
+	}
+	if !shouldTryQueryResultFirst("sqlserver", `[dbo].[p_get_select] c_dyscript,'projectid = 1',1`) {
+		t.Fatal("expected bracket-qualified SQL Server procedure call to try query-first")
+	}
+}
+
+func TestShouldTryQueryResultFirst_TreatsReturningAndOutputWritesAsQueryFirst(t *testing.T) {
+	if !shouldTryQueryResultFirst("postgres", "INSERT INTO audit_logs(id) VALUES (1) RETURNING id") {
+		t.Fatal("expected INSERT ... RETURNING to try query-first")
+	}
+	if !shouldTryQueryResultFirst("sqlserver", "UPDATE users SET name = 'next' OUTPUT inserted.id WHERE id = 1") {
+		t.Fatal("expected SQL Server OUTPUT DML to try query-first")
+	}
+}
+
+func TestShouldTryQueryResultFirst_TreatsWrappedMessageBlocksAsQueryFirst(t *testing.T) {
+	if !shouldTryQueryResultFirst("sqlserver", "IF 1 = 1 EXEC dbo.p_get_select @name = 'demo'") {
+		t.Fatal("expected control-flow wrapped SQL Server procedure call to try query-first")
+	}
+	if !shouldTryQueryResultFirst("sqlserver", "BEGIN PRINT 'done'; END") {
+		t.Fatal("expected SQL Server BEGIN/PRINT block to try query-first")
+	}
+	if !shouldTryQueryResultFirst("postgres", "DO $$ BEGIN RAISE NOTICE 'done'; END $$") {
+		t.Fatal("expected PostgreSQL DO/RAISE NOTICE block to try query-first")
+	}
+}
+
+func TestShouldTryQueryResultFirst_DoesNotMisclassifyPlainSQLServerDML(t *testing.T) {
+	if shouldTryQueryResultFirst("sqlserver", "UPDATE users SET name = 'next' WHERE id = 1") {
+		t.Fatal("plain SQL Server UPDATE should not try query-first")
+	}
+}
+
+func TestShouldTryQueryResultFirst_TreatsDataChangingCTESelectAsQueryFirst(t *testing.T) {
+	query := "WITH moved AS (DELETE FROM audit_logs WHERE created_at < NOW() RETURNING id) SELECT * FROM moved"
+	if !shouldTryQueryResultFirst("postgres", query) {
+		t.Fatal("data-changing CTE ending in SELECT should try query-first to preserve returned rows")
+	}
+}
