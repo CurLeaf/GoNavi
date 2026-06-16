@@ -1794,7 +1794,8 @@ const resolveQueryLocatorPlan = async ({
     };
     if (forceReadOnly) return plan;
 
-    const tableRef = extractQueryResultTableRef(statement, dbType, currentDb);
+    const defaultSchema = isOracleLikeDialect(dbType) ? String(config?.user || '').trim() : '';
+    let tableRef = extractQueryResultTableRef(statement, dbType, currentDb, defaultSchema);
     if (!tableRef) return plan;
     plan.tableRef = tableRef;
     if (isSystemMetadataQueryResult(tableRef, dbType)) {
@@ -1809,6 +1810,14 @@ const resolveQueryLocatorPlan = async ({
     }
     if (!selectInfo.selectsAll && Object.keys(selectInfo.writableColumns).length === 0) {
         return plan;
+    }
+
+    if (isOracleLikeDialect(dbType) && defaultSchema && !String(tableRef.tableName || '').includes('.')) {
+        tableRef = {
+            ...tableRef,
+            tableName: `${tableRef.metadataDbName}.${tableRef.metadataTableName}`,
+        };
+        plan.tableRef = tableRef;
     }
 
     try {

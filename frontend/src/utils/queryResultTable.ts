@@ -61,6 +61,7 @@ export const extractQueryResultTableRef = (
   sql: string,
   dialect: string,
   currentDb: string,
+  defaultSchema = '',
 ): QueryResultTableRef | undefined => {
   const text = String(sql || '').trim();
   if (!text) return undefined;
@@ -77,10 +78,16 @@ export const extractQueryResultTableRef = (
   if (!metadataTableName) return undefined;
 
   const owner = parts.length >= 2 ? parts[parts.length - 2] : '';
-  const metadataDbName = owner || normalizeCurrentDbName(currentDb, dialect);
-  const tableName = (isOracleLikeDialect(dialect) || keepsQualifiedTableNameForMetadata(dialect)) && owner
+  const defaultOracleSchema = isOracleLikeDialect(dialect)
+    ? normalizeCurrentDbName(defaultSchema, dialect)
+    : '';
+  const fallbackSchema = isOracleLikeDialect(dialect)
+    ? defaultOracleSchema || normalizeCurrentDbName(currentDb, dialect)
+    : normalizeCurrentDbName(currentDb, dialect);
+  const metadataDbName = owner || fallbackSchema;
+  const tableName = isOracleLikeDialect(dialect) && owner
     ? `${owner}.${metadataTableName}`
-    : metadataTableName;
+    : (keepsQualifiedTableNameForMetadata(dialect) && owner ? `${owner}.${metadataTableName}` : metadataTableName);
   const resolvedMetadataTableName = keepsQualifiedTableNameForMetadata(dialect) && owner
     ? `${owner}.${metadataTableName}`
     : metadataTableName;
