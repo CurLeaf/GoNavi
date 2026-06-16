@@ -8,6 +8,10 @@ import (
 )
 
 func scanRows(rows *sql.Rows) ([]map[string]interface{}, []string, error) {
+	return scanRowsForDialect(rows, "")
+}
+
+func scanRowsForDialect(rows *sql.Rows, dialect string) ([]map[string]interface{}, []string, error) {
 	columns, err := rows.Columns()
 	if err != nil {
 		return nil, nil, err
@@ -38,7 +42,7 @@ func scanRows(rows *sql.Rows) ([]map[string]interface{}, []string, error) {
 			if colTypes != nil && i < len(colTypes) && colTypes[i] != nil {
 				dbTypeName = colTypes[i].DatabaseTypeName()
 			}
-			entry[col] = normalizeQueryValueWithDBType(values[i], dbTypeName)
+			entry[col] = normalizeQueryValueWithDBTypeAndDialect(values[i], dbTypeName, dialect)
 		}
 		resultData = append(resultData, entry)
 	}
@@ -92,9 +96,13 @@ func ensureUniqueQueryColumnNames(columns []string) []string {
 // scanMultiRows 遍历 sql.Rows 中的所有结果集，将每个结果集作为 ResultSetData 返回。
 // 利用 rows.NextResultSet() 支持一次 query 返回多个结果集的场景。
 func scanMultiRows(rows *sql.Rows) ([]connection.ResultSetData, error) {
+	return scanMultiRowsForDialect(rows, "")
+}
+
+func scanMultiRowsForDialect(rows *sql.Rows, dialect string) ([]connection.ResultSetData, error) {
 	var results []connection.ResultSetData
 	for {
-		data, cols, err := scanRows(rows)
+		data, cols, err := scanRowsForDialect(rows, dialect)
 		if err != nil {
 			return results, err
 		}

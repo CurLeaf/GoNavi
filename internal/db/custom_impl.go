@@ -95,7 +95,7 @@ func (c *CustomDB) QueryContext(ctx context.Context, query string) ([]map[string
 	}
 	defer rows.Close()
 
-	return scanRows(rows)
+	return scanRowsForDialect(rows, c.scanDialect())
 }
 
 func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -108,7 +108,14 @@ func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, erro
 		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsForDialect(rows, c.scanDialect())
+}
+
+func (c *CustomDB) scanDialect() string {
+	if strings.EqualFold(strings.TrimSpace(c.driver), "mysql") {
+		return "mysql"
+	}
+	return ""
 }
 
 func (c *CustomDB) ExecContext(ctx context.Context, query string) (int64, error) {

@@ -33,8 +33,12 @@ func normalizeQueryValue(v interface{}) interface{} {
 }
 
 func normalizeQueryValueWithDBType(v interface{}, databaseTypeName string) interface{} {
+	return normalizeQueryValueWithDBTypeAndDialect(v, databaseTypeName, "")
+}
+
+func normalizeQueryValueWithDBTypeAndDialect(v interface{}, databaseTypeName, dialect string) interface{} {
 	if tm, ok := v.(time.Time); ok {
-		return normalizeTemporalValueForDisplay(tm, databaseTypeName)
+		return normalizeTemporalValueForDisplay(tm, databaseTypeName, dialect)
 	}
 	if b, ok := v.([]byte); ok {
 		return bytesToDisplayValue(b, databaseTypeName)
@@ -42,13 +46,29 @@ func normalizeQueryValueWithDBType(v interface{}, databaseTypeName string) inter
 	return normalizeCompositeQueryValue(v)
 }
 
-func normalizeTemporalValueForDisplay(value time.Time, databaseTypeName string) interface{} {
+func normalizeTemporalValueForDisplay(value time.Time, databaseTypeName, dialect string) interface{} {
 	if value.IsZero() {
 		if zeroValue, ok := zeroTemporalDisplayValue(databaseTypeName); ok {
 			return zeroValue
 		}
 	}
+	if shouldDisplayTemporalValueAsDateOnly(databaseTypeName, dialect) {
+		return value.Format("2006-01-02")
+	}
 	return value.Format(time.RFC3339Nano)
+}
+
+func shouldDisplayTemporalValueAsDateOnly(databaseTypeName, dialect string) bool {
+	typeName := strings.ToUpper(strings.TrimSpace(databaseTypeName))
+	if typeName != "DATE" && typeName != "NEWDATE" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(dialect)) {
+	case "mysql", "mariadb", "goldendb", "greatdb", "gdb", "diros", "doris", "starrocks", "sphinx":
+		return true
+	default:
+		return false
+	}
 }
 
 func zeroTemporalDisplayValue(databaseTypeName string) (string, bool) {
@@ -125,7 +145,7 @@ func normalizeCompositeQueryValue(v interface{}) interface{} {
 		// 部分驱动（如 Kingbase）会返回复杂结构体值，直接透传会导致前端渲染和比较开销激增。
 		// 统一降级为可读字符串，避免对象深层序列化触发 UI 卡顿。
 		if tm, ok := v.(time.Time); ok {
-			return normalizeTemporalValueForDisplay(tm, "")
+			return normalizeTemporalValueForDisplay(tm, "", "")
 		}
 		if stringer, ok := v.(fmt.Stringer); ok {
 			return stringer.String()
