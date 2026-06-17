@@ -7,7 +7,7 @@ import { TabData, ColumnDefinition, IndexDefinition } from '../types';
 import { useStore } from '../store';
 import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBQueryMultiTransactional, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, DBGetIndexes, CancelQuery, GenerateQueryID, WriteSQLFile, ExportSQLFile } from '../../wailsjs/go/app/App';
 import { GONAVI_ROW_KEY } from './DataGrid';
-import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
+import { getDataSourceCapabilities, shouldShowOceanBaseRowNumberColumn } from '../utils/dataSourceCapabilities';
 import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
 import { getShortcutDisplayLabel, getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, isEditableElement, isShortcutMatch, comboToMonacoKeyBinding, resolveShortcutBinding } from "../utils/shortcuts";
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
@@ -963,6 +963,172 @@ const getQueryEditorModelValueLength = (model: any): number | null => {
     }
 };
 
+type QueryIdentifierPathSegment = {
+    raw: string;
+    value: string;
+    quoted: boolean;
+};
+
+const isQuotedQueryIdentifierPart = (part: string): boolean => {
+    const text = String(part || '').trim();
+    if (!text) return false;
+    return (text.startsWith('`') && text.endsWith('`'))
+        || (text.startsWith('"') && text.endsWith('"'))
+        || (text.startsWith('[') && text.endsWith(']'));
+};
+
+const splitQueryIdentifierPathSegments = (qualifiedName: string): QueryIdentifierPathSegment[] => {
+    const text = String(qualifiedName || '').trim();
+    if (!text) return [];
+
+    const segments: QueryIdentifierPathSegment[] = [];
+    let current = '';
+    let inDouble = false;
+    let inBacktick = false;
+    let inBracket = false;
+
+    const flush = () => {
+        const raw = current.trim();
+        current = '';
+        if (!raw) return;
+        segments.push({
+            raw,
+            value: stripQueryIdentifierQuotes(raw),
+            quoted: isQuotedQueryIdentifierPart(raw),
+        });
+    };
+
+    for (let index = 0; index < text.length; index += 1) {
+        const ch = text[index];
+        const next = index + 1 < text.length ? text[index + 1] : '';
+
+        if (inDouble) {
+            current += ch;
+            if (ch === '"' && next === '"') {
+                current += next;
+                index += 1;
+                continue;
+            }
+            if (ch === '"') inDouble = false;
+            continue;
+        }
+
+        if (inBacktick) {
+            current += ch;
+            if (ch === '`' && next === '`') {
+                current += next;
+                index += 1;
+                continue;
+            }
+            if (ch === '`') inBacktick = false;
+            continue;
+        }
+
+        if (inBracket) {
+            current += ch;
+            if (ch === ']' && next === ']') {
+                current += next;
+                index += 1;
+                continue;
+            }
+            if (ch === ']') inBracket = false;
+            continue;
+        }
+
+        if (ch === '"') {
+            inDouble = true;
+            current += ch;
+            continue;
+        }
+        if (ch === '`') {
+            inBacktick = true;
+            current += ch;
+            continue;
+        }
+        if (ch === '[') {
+            inBracket = true;
+            current += ch;
+            continue;
+        }
+        if (ch === '.') {
+            flush();
+            continue;
+        }
+        current += ch;
+    }
+
+    flush();
+    return segments;
+};
+
+const matchLeadingSelectTableReference = (sql: string): { prefix: string; tableText: string; suffix: string } | null => {
+    const match = String(sql || '').match(new RegExp(`^(\\s*SELECT\\s+[\\s\\S]+?\\s+FROM\\s+)(${QUERY_EDITOR_SQL_IDENTIFIER_PATH_PATTERN})([\\s\\S]*)$`, 'i'));
+    if (!match) return null;
+    return {
+        prefix: match[1],
+        tableText: match[2],
+        suffix: match[3] || '',
+    };
+};
+
+const rewriteLeadingSelectTableReference = (sql: string, replacement: string): string | undefined => {
+    const match = matchLeadingSelectTableReference(sql);
+    if (!match || !replacement) return undefined;
+    return `${match.prefix}${replacement}${match.suffix}`;
+};
+
+const resolveOracleExactCaseTableReference = (
+    statement: string,
+    currentDb: string,
+    tables: CompletionTableMeta[],
+): string | undefined => {
+    const leadingTable = matchLeadingSelectTableReference(statement);
+    if (!leadingTable) return undefined;
+
+    const segments = splitQueryIdentifierPathSegments(leadingTable.tableText);
+    if (segments.length === 0 || segments.length > 2 || segments.some((segment) => segment.quoted)) {
+        return undefined;
+    }
+    if (!segments.some((segment) => /[a-z]/.test(segment.value))) {
+        return undefined;
+    }
+
+    const rawSchemaName = segments.length === 2 ? String(segments[0]?.value || '').trim() : '';
+    const rawObjectName = String(segments[segments.length - 1]?.value || '').trim();
+    const targetDbName = String(rawSchemaName || currentDb || '').trim();
+    if (!rawObjectName || !targetDbName) return undefined;
+
+    const normalizedTargetDbName = targetDbName.toLowerCase();
+    const matched = tables.find((table) => {
+        if (String(table.dbName || '').trim().toLowerCase() !== normalizedTargetDbName) return false;
+        const parsed = splitSidebarQualifiedName(String(table.tableName || ''));
+        const objectName = String(parsed.objectName || table.tableName || '').trim();
+        const schemaName = String(parsed.schemaName || table.dbName || '').trim();
+        if (objectName !== rawObjectName) return false;
+        if (!rawSchemaName) return true;
+        return schemaName.toLowerCase() === rawSchemaName.toLowerCase();
+    });
+    if (!matched) return undefined;
+
+    const matchedParsed = splitSidebarQualifiedName(String(matched.tableName || ''));
+    const exactObjectName = String(matchedParsed.objectName || matched.tableName || '').trim();
+    const exactSchemaName = String(matchedParsed.schemaName || matched.dbName || rawSchemaName).trim();
+    const quotedParts = rawSchemaName
+        ? [exactSchemaName, exactObjectName]
+        : [exactObjectName];
+    if (quotedParts.some((part) => !String(part || '').trim())) {
+        return undefined;
+    }
+    return quotedParts.map((part) => quoteIdentPart('oracle', part)).join('.');
+};
+
+const resolveOracleLikeDefaultSchemaName = (config: any): string => {
+    const rawUser = String(config?.user || '').trim();
+    if (!rawUser) return '';
+    const userPart = rawUser.split('@')[0] || rawUser;
+    return String(userPart || '').trim();
+};
+
 const getQueryEditorModelTextIfWithinLimit = (model: any, maxTextLength: number): string | null => {
     const modelLength = getQueryEditorModelValueLength(model);
     if (modelLength !== null && modelLength > maxTextLength) {
@@ -1776,25 +1942,27 @@ const clearQueryEditorObjectDecorations = (
 
 const resolveQueryLocatorPlan = async ({
     statement,
+    originalStatement,
     dbType,
     currentDb,
     config,
     forceReadOnly,
 }: {
     statement: string;
+    originalStatement?: string;
     dbType: string;
     currentDb: string;
     config: any;
     forceReadOnly: boolean;
 }): Promise<QueryStatementPlan> => {
     const plan: QueryStatementPlan = {
-        originalSql: statement,
+        originalSql: originalStatement || statement,
         executedSql: statement,
         pkColumns: [],
     };
     if (forceReadOnly) return plan;
 
-    const defaultSchema = isOracleLikeDialect(dbType) ? String(config?.user || '').trim() : '';
+    const defaultSchema = isOracleLikeDialect(dbType) ? resolveOracleLikeDefaultSchemaName(config) : '';
     let tableRef = extractQueryResultTableRef(statement, dbType, currentDb, defaultSchema);
     if (!tableRef) return plan;
     plan.tableRef = tableRef;
@@ -4652,10 +4820,84 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 .length || sourceStatements.length;
 
             const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;
-            const statementPlans: QueryStatementPlan[] = [];
+            const showRowNumberColumn = shouldShowOceanBaseRowNumberColumn(config);
+            const defaultOracleSchema = isOracleLikeDialect(normalizedDbType)
+                ? resolveOracleLikeDefaultSchemaName(config)
+                : '';
+            const oracleTableCache = new Map<string, CompletionTableMeta[]>();
+            const getOracleTablesForDb = async (dbName: string): Promise<CompletionTableMeta[]> => {
+                const normalizedDbName = String(dbName || '').trim();
+                if (!normalizedDbName) return [];
+                const cacheKey = normalizedDbName.toLowerCase();
+                const cached = oracleTableCache.get(cacheKey);
+                if (cached) return cached;
+
+                const existing = tablesRef.current.filter((table) => String(table.dbName || '').trim().toLowerCase() === cacheKey);
+                if (existing.length > 0) {
+                    oracleTableCache.set(cacheKey, existing);
+                    return existing;
+                }
+
+                try {
+                    const resTables = await DBGetTables(buildRpcConnectionConfig(config) as any, normalizedDbName);
+                    if (!resTables?.success || !Array.isArray(resTables.data)) {
+                        oracleTableCache.set(cacheKey, []);
+                        return [];
+                    }
+                    const fetchedTables = resTables.data
+                        .map((row: any) => {
+                            const tableName = String(Object.values(row || {})[0] || '').trim();
+                            if (!tableName) return null;
+                            return {
+                                dbName: normalizedDbName,
+                                tableName,
+                            } as CompletionTableMeta;
+                        })
+                        .filter(Boolean) as CompletionTableMeta[];
+                    if (fetchedTables.length > 0) {
+                        const knownKeys = new Set(tablesRef.current.map((table) => `${String(table.dbName || '').trim().toLowerCase()}\u0000${String(table.tableName || '').trim()}`));
+                        const missing = fetchedTables.filter((table) => !knownKeys.has(`${String(table.dbName || '').trim().toLowerCase()}\u0000${String(table.tableName || '').trim()}`));
+                        if (missing.length > 0) {
+                            tablesRef.current = [...tablesRef.current, ...missing];
+                            if (isActive) {
+                                sharedTablesData = tablesRef.current;
+                            }
+                        }
+                    }
+                    oracleTableCache.set(cacheKey, fetchedTables);
+                    return fetchedTables;
+                } catch {
+                    oracleTableCache.set(cacheKey, []);
+                    return [];
+                }
+            };
+            const executedSourceStatements: string[] = [];
             for (const statement of sourceStatements) {
+                let executableStatement = statement;
+                if (isOracleLikeDialect(normalizedDbType)) {
+                    const leadingTable = matchLeadingSelectTableReference(statement);
+                    if (leadingTable) {
+                        const leadingSegments = splitQueryIdentifierPathSegments(leadingTable.tableText);
+                        const oracleLookupDbName = String(
+                            (leadingSegments.length >= 2 ? leadingSegments[0]?.value : '')
+                            || defaultOracleSchema
+                            || currentDb
+                            || '',
+                        ).trim();
+                        const oracleTables = oracleLookupDbName ? await getOracleTablesForDb(oracleLookupDbName) : [];
+                        const exactQualifiedTable = resolveOracleExactCaseTableReference(statement, oracleLookupDbName, oracleTables);
+                        if (exactQualifiedTable) {
+                            executableStatement = rewriteLeadingSelectTableReference(statement, exactQualifiedTable) || statement;
+                        }
+                    }
+                }
+                executedSourceStatements.push(executableStatement);
+            }
+            const statementPlans: QueryStatementPlan[] = [];
+            for (let index = 0; index < sourceStatements.length; index += 1) {
                 statementPlans.push(await resolveQueryLocatorPlan({
-                    statement,
+                    statement: executedSourceStatements[index] || sourceStatements[index],
+                    originalStatement: sourceStatements[index],
                     dbType: normalizedDbType,
                     currentDb,
                     config,
@@ -4691,7 +4933,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             addSqlLog({
                 id: `log-${Date.now()}-query-multi`,
                 timestamp: Date.now(),
-                sql: fullSQL,
+                sql: sourceStatements.join(';\n'),
                 status: res.success ? 'success' : 'error',
                 duration,
                 message: res.success ? '' : res.message,
@@ -4832,6 +5074,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         pkColumns: plan?.pkColumns || [],
                         editLocator,
                         readOnly: forceReadOnlyResult || !editLocator || editLocator.readOnly,
+                        showRowNumberColumn,
                         truncated,
                         page,
                     });
