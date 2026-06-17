@@ -106,15 +106,21 @@ export function ExportConnectionsPackage(arg1:app.ConnectionExportOptions):Promi
 
 export function ExportData(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function ExportDataWithOptions(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:app.ExportFileOptions):Promise<connection.QueryResult>;
+
 export function ExportDatabaseSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:boolean):Promise<connection.QueryResult>;
 
 export function ExportQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:string):Promise<connection.QueryResult>;
+
+export function ExportQueryWithOptions(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:app.ExportFileOptions):Promise<connection.QueryResult>;
 
 export function ExportSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function ExportSchemaSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:boolean):Promise<connection.QueryResult>;
 
 export function ExportTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
+
+export function ExportTableWithOptions(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:app.ExportFileOptions):Promise<connection.QueryResult>;
 
 export function ExportTablesDataSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
 

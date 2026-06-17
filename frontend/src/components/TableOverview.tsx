@@ -4,7 +4,7 @@ import { Input, Spin, Empty, Dropdown, message, Tooltip, Modal, Button } from 'a
 import type { MenuProps } from 'antd';
 import { TableOutlined, SearchOutlined, ReloadOutlined, SortAscendingOutlined, DatabaseOutlined, ConsoleSqlOutlined, EditOutlined, CopyOutlined, SaveOutlined, DeleteOutlined, ExportOutlined, AppstoreOutlined, UnorderedListOutlined, WarningOutlined } from '@ant-design/icons';
 import { buildSidebarTablePinKey, useStore } from '../store';
-import { DBGetTables, DBQuery, DBShowCreateTable, ExportTable, DropTable, RenameTable } from '../../wailsjs/go/app/App';
+import { DBGetTables, DBQuery, DBShowCreateTable, ExportTableWithOptions, DropTable, RenameTable } from '../../wailsjs/go/app/App';
 import type { TabData } from '../types';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
@@ -24,7 +24,9 @@ import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { isMacLikePlatform } from '../utils/appearance';
 import { getShortcutPlatform } from '../utils/shortcuts';
 import { t } from '../i18n';
+import { buildTableExportTab } from '../utils/tableExportTab';
 import { V2TableContextMenuView, type V2TableContextMenuActionKey } from './V2TableContextMenu';
+import { useExportProgressDialog } from './ExportProgressModal';
 
 interface TableOverviewProps {
     tab: TabData;
@@ -264,6 +266,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
     const [viewMode, setViewMode] = useState<ViewMode>(isV2Ui ? 'card' : 'list');
     const [v2ContextMenu, setV2ContextMenu] = useState<OverviewContextMenuState | null>(null);
+    const { exportProgressModal, runExportWithProgress } = useExportProgressDialog();
     const v2ContextMenuPortalRef = useRef<HTMLDivElement | null>(null);
     const [visibleTableLimit, setVisibleTableLimit] = useState(TABLE_OVERVIEW_RENDER_BATCH_SIZE);
     const deferredSearchText = useDeferredValue(searchText);
@@ -535,21 +538,44 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         }
     }, []);
 
-    const handleExport = useCallback(async (tableName: string, format: string) => {
+    const handleExport = useCallback(async (tableName: string, options: { format: string; xlsxMaxRowsPerSheet?: number }, totalRows?: number) => {
         const config = buildConfig();
         if (!config) return;
-        const hide = message.loading(`正在导出 ${tableName} 为 ${format.toUpperCase()}...`, 0);
-        const res = await ExportTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName, format);
-        hide();
-        if (res.success) {
-            message.success('导出成功');
-        } else if (res.message !== '已取消') {
-            message.error('导出失败: ' + res.message);
-        }
-    }, [buildConfig, tab.dbName]);
+        const totalRowsKnown = Number.isFinite(totalRows) && Number(totalRows) >= 0;
+        await runExportWithProgress({
+            title: `导出 ${tableName}`,
+            targetName: tableName,
+            format: options.format,
+            totalRows: totalRowsKnown ? Number(totalRows) : undefined,
+            run: (jobId) => ExportTableWithOptions(
+                buildRpcConnectionConfig(config) as any,
+                tab.dbName || '',
+                tableName,
+                {
+                    ...options,
+                    jobId,
+                    totalRowsHint: totalRowsKnown ? Number(totalRows) : 0,
+                    totalRowsKnown,
+                } as any,
+            ),
+        });
+    }, [buildConfig, runExportWithProgress, tab.dbName]);
+
+    const openExportDialog = useCallback(async (tableName: string, totalRows?: number) => {
+        addTab(buildTableExportTab({
+            connectionId: tab.connectionId,
+            dbName: tab.dbName,
+            tableName,
+            title: `导出 ${tableName}`,
+            objectType: 'table',
+            rowCountByScope: Number.isFinite(Number(totalRows)) && Number(totalRows) >= 0
+                ? { all: Math.trunc(Number(totalRows)) }
+                : undefined,
+        }));
+    }, [addTab, tab.connectionId, tab.dbName]);
 
     const handleCopyTableAsInsert = useCallback(async (tableName: string) => {
-        await handleExport(tableName, 'sql');
+        await handleExport(tableName, { format: 'sql' });
     }, [handleExport]);
 
     const handleDeleteTable = useCallback((tableName: string) => {
@@ -813,19 +839,13 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 openCreateStarRocksRollup(tableName);
                 return;
             case 'backup-table':
-                void handleExport(tableName, 'sql');
+                void handleExport(tableName, { format: 'sql' });
                 return;
             case 'refresh-stats':
                 void loadData();
                 return;
-            case 'export-xlsx':
-                void handleExport(tableName, 'xlsx');
-                return;
-            case 'export-csv':
-                void handleExport(tableName, 'csv');
-                return;
-            case 'export-json':
-                void handleExport(tableName, 'json');
+            case 'export-data':
+                void openExportDialog(tableName, tables.find((item) => item.name === tableName)?.rows);
                 return;
             case 'ai-explain':
                 void injectTablePromptToAI(tableName, 'explain');
@@ -850,6 +870,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         handleExport,
         handleRenameTable,
         handleTableDataDangerAction,
+        openExportDialog,
         injectTablePromptToAI,
         loadData,
         openCreateStarRocksRollup,
@@ -858,6 +879,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         openTable,
         openTableDdl,
         openTableInER,
+        tables,
         toggleOverviewTablePinned,
     ]);
 
@@ -887,7 +909,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         { key: 'design-table', label: supportsDesignWrite ? '设计表' : '表结构', icon: <EditOutlined />, onClick: () => openDesign(table.name) },
         { key: 'copy-table-name', label: '复制表名', icon: <CopyOutlined />, onClick: () => handleCopyTableName(table.name) },
         { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(table.name) },
-        { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(table.name, 'sql') },
+        { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(table.name, { format: 'sql' }) },
         { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(table.name) },
         { key: 'danger-zone', label: '危险操作', icon: <WarningOutlined />, children: [
             ...(allowTruncate ? [{ key: 'truncate-table', label: '截断表', danger: true, onClick: () => handleTableDataDangerAction(table.name, 'truncate') }] : []),
@@ -895,13 +917,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(table.name) },
         ]},
         { type: 'divider' },
-        { key: 'export', label: '导出表数据', icon: <ExportOutlined />, children: [
-            { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(table.name, 'csv') },
-            { key: 'export-xlsx', label: '导出 Excel (XLSX)', onClick: () => handleExport(table.name, 'xlsx') },
-            { key: 'export-json', label: '导出 JSON', onClick: () => handleExport(table.name, 'json') },
-            { key: 'export-md', label: '导出 Markdown', onClick: () => handleExport(table.name, 'md') },
-            { key: 'export-html', label: '导出 HTML', onClick: () => handleExport(table.name, 'html') },
-        ]},
+        { key: 'export', label: '导出表数据…', icon: <ExportOutlined />, onClick: () => openExportDialog(table.name, table.rows) },
     ], [
         allowTruncate,
         handleCopyStructure,
@@ -910,6 +926,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         handleExport,
         handleRenameTable,
         handleTableDataDangerAction,
+        openExportDialog,
         openDesign,
         openQueryForTable,
         supportsDesignWrite,
@@ -1128,6 +1145,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
 
     return (
         <div className={isV2Ui ? 'gn-v2-table-overview' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%', background: containerBg, overflow: 'hidden' }}>
+            {exportProgressModal}
             {/* Toolbar */}
             <div className={isV2Ui ? 'gn-v2-table-overview-header' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', flexShrink: 0 }}>
                 <span className={isV2Ui ? 'gn-v2-table-overview-icon' : undefined}>

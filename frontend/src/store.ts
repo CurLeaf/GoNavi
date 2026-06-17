@@ -19,6 +19,7 @@ import {
   JVMDiagnosticCommandDraft,
   JVMDiagnosticEventChunk,
   SqlSnippet,
+  TableExportHistoryEntry,
 } from "./types";
 import {
   ShortcutAction,
@@ -125,7 +126,7 @@ const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 11;
+const PERSIST_VERSION = 12;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const PERSIST_WRITE_DEBOUNCE_MS = 160;
 const MAX_PERSISTED_QUERY_TABS = 20;
@@ -134,6 +135,8 @@ const MAX_SQL_LOGS = 1000;
 const MAX_PERSISTED_SQL_LOGS = 200;
 const MAX_PERSISTED_SQL_LOG_LENGTH = 100 * 1024;
 const MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH = 2 * 1024;
+const MAX_TABLE_EXPORT_HISTORY_PER_TARGET = 20;
+const MAX_TABLE_EXPORT_HISTORY_TARGETS = 200;
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
 const DEFAULT_LANGUAGE_PREFERENCE: LanguagePreference = "system";
@@ -1217,6 +1220,7 @@ interface AppState {
   shortcutOptions: ShortcutOptions;
   sqlSnippets: SqlSnippet[];
   sqlLogs: SqlLog[];
+  tableExportHistories: Record<string, TableExportHistoryEntry[]>;
   tableAccessCount: Record<string, number>;
   tableSortPreference: Record<string, "name" | "frequency">;
   tableColumnOrders: Record<string, string[]>;
@@ -1348,6 +1352,10 @@ interface AppState {
 
   addSqlLog: (log: SqlLog) => void;
   clearSqlLogs: () => void;
+  upsertTableExportHistory: (
+    historyKey: string,
+    entry: TableExportHistoryEntry,
+  ) => void;
 
   recordTableAccess: (
     connectionId: string,
@@ -1486,6 +1494,95 @@ const sanitizeExternalSQLDirectories = (
         ? Number(raw.createdAt)
         : Date.now(),
     });
+  });
+  return result;
+};
+
+const sanitizeTableExportHistoryEntry = (
+  value: unknown,
+): TableExportHistoryEntry | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  const jobId = toTrimmedString(raw.jobId);
+  if (!jobId) {
+    return null;
+  }
+  const normalizeCount = (input: unknown): number => {
+    const next = Number(input);
+    if (!Number.isFinite(next) || next < 0) {
+      return 0;
+    }
+    return Math.trunc(next);
+  };
+  const normalizeTimestamp = (input: unknown): number => {
+    const next = Number(input);
+    if (!Number.isFinite(next) || next <= 0) {
+      return 0;
+    }
+    return Math.trunc(next);
+  };
+  const statusRaw = toTrimmedString(raw.status).toLowerCase();
+  const status: TableExportHistoryEntry["status"] =
+    statusRaw === "start" ||
+    statusRaw === "running" ||
+    statusRaw === "finalizing" ||
+    statusRaw === "done" ||
+    statusRaw === "error"
+      ? statusRaw
+      : "idle";
+  return {
+    jobId,
+    targetName: toTrimmedString(raw.targetName, "未命名对象") || "未命名对象",
+    startedAt: normalizeTimestamp(raw.startedAt),
+    finishedAt: normalizeTimestamp(raw.finishedAt),
+    format: toTrimmedString(raw.format).slice(0, 32),
+    scope: toTrimmedString(raw.scope).slice(0, 64),
+    scopeLabel: toTrimmedString(raw.scopeLabel).slice(0, 128),
+    strategyLabel: toTrimmedString(raw.strategyLabel).slice(0, 128),
+    status,
+    stage: toTrimmedString(raw.stage).slice(0, 256),
+    current: normalizeCount(raw.current),
+    total: normalizeCount(raw.total),
+    totalRowsKnown: raw.totalRowsKnown === true,
+    filePath: toTrimmedString(raw.filePath).slice(0, MAX_URI_LENGTH),
+    message: toTrimmedString(raw.message).slice(0, MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH),
+  };
+};
+
+const sanitizeTableExportHistories = (
+  value: unknown,
+): Record<string, TableExportHistoryEntry[]> => {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  const raw = value as Record<string, unknown>;
+  const entries = Object.entries(raw)
+    .filter(([key, history]) => toTrimmedString(key) && Array.isArray(history))
+    .slice(0, MAX_TABLE_EXPORT_HISTORY_TARGETS);
+  const result: Record<string, TableExportHistoryEntry[]> = {};
+  entries.forEach(([key, history]) => {
+    const seenJobIds = new Set<string>();
+    const sanitizedHistory = (history as unknown[])
+      .map((entry) => sanitizeTableExportHistoryEntry(entry))
+      .filter((entry): entry is TableExportHistoryEntry => !!entry)
+      .filter((entry) => {
+        if (seenJobIds.has(entry.jobId)) {
+          return false;
+        }
+        seenJobIds.add(entry.jobId);
+        return true;
+      })
+      .sort((a, b) => {
+        const timeA = a.finishedAt || a.startedAt || 0;
+        const timeB = b.finishedAt || b.startedAt || 0;
+        return timeB - timeA;
+      })
+      .slice(0, MAX_TABLE_EXPORT_HISTORY_PER_TARGET);
+    if (sanitizedHistory.length > 0) {
+      result[toTrimmedString(key)] = sanitizedHistory;
+    }
   });
   return result;
 };
@@ -2151,6 +2248,7 @@ export const useStore = create<AppState>()(
       shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
       sqlSnippets: DEFAULT_SQL_SNIPPETS,
       sqlLogs: [],
+      tableExportHistories: {},
       tableAccessCount: {},
       tableSortPreference: {},
       tableColumnOrders: {},
@@ -2497,9 +2595,13 @@ export const useStore = create<AppState>()(
               ),
             };
           }
-          // 语义去重：对 table/design 类型按 connectionId+dbName+tableName 匹配已有 Tab
+          // 语义去重：对表相关标签页按 connectionId+dbName+tableName 匹配已有 Tab
           if (
-            (incomingTab.type === "table" || incomingTab.type === "design") &&
+            (
+              incomingTab.type === "table" ||
+              incomingTab.type === "design" ||
+              incomingTab.type === "table-export"
+            ) &&
             incomingTab.tableName &&
             incomingTab.connectionId &&
             incomingTab.dbName
@@ -3012,6 +3114,39 @@ export const useStore = create<AppState>()(
       addSqlLog: (log) =>
         set((state) => ({ sqlLogs: sanitizeSqlLogs([log, ...state.sqlLogs], MAX_SQL_LOGS) })),
       clearSqlLogs: () => set({ sqlLogs: [] }),
+      upsertTableExportHistory: (historyKey, entry) =>
+        set((state) => {
+          const safeHistoryKey = toTrimmedString(historyKey);
+          const safeEntry = sanitizeTableExportHistoryEntry(entry);
+          if (!safeHistoryKey || !safeEntry) {
+            return state;
+          }
+          const existingEntries = state.tableExportHistories[safeHistoryKey] || [];
+          const existingIndex = existingEntries.findIndex(
+            (item) => item.jobId === safeEntry.jobId,
+          );
+          const nextEntries =
+            existingIndex >= 0
+              ? existingEntries.map((item, index) =>
+                  index === existingIndex ? { ...item, ...safeEntry } : item,
+                )
+              : [safeEntry, ...existingEntries];
+          const trimmedEntries = nextEntries.slice(0, MAX_TABLE_EXPORT_HISTORY_PER_TARGET);
+          const unchanged =
+            existingEntries.length === trimmedEntries.length &&
+            existingEntries.every((item, index) =>
+              JSON.stringify(item) === JSON.stringify(trimmedEntries[index]),
+            );
+          if (unchanged) {
+            return state;
+          }
+          return {
+            tableExportHistories: {
+              ...state.tableExportHistories,
+              [safeHistoryKey]: trimmedEntries,
+            },
+          };
+        }),
 
       recordTableAccess: (connectionId, dbName, tableName) =>
         set((state) => {
@@ -3375,6 +3510,9 @@ export const useStore = create<AppState>()(
           state.shortcutOptions,
         );
         nextState.sqlLogs = sanitizeSqlLogs(state.sqlLogs);
+        nextState.tableExportHistories = sanitizeTableExportHistories(
+          state.tableExportHistories,
+        );
         const existingSnippets = sanitizeSqlSnippets(state.sqlSnippets);
         const existingSnippetIds = new Set(existingSnippets.map((s) => s.id));
         const missingSnippets = DEFAULT_SQL_SNIPPETS.filter(
@@ -3517,6 +3655,9 @@ export const useStore = create<AppState>()(
           sqlEditorTransactionOptions: state.sqlEditorTransactionOptions,
           shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
           sqlLogs: sanitizeSqlLogs(state.sqlLogs),
+          tableExportHistories: sanitizeTableExportHistories(
+            state.tableExportHistories,
+          ),
           sqlSnippets: state.sqlSnippets,
           tableAccessCount: state.tableAccessCount,
           tableSortPreference: state.tableSortPreference,

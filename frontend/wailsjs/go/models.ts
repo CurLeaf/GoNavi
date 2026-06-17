@@ -432,6 +432,26 @@ export namespace app {
 	        this.filePassword = source["filePassword"];
 	    }
 	}
+	export class ExportFileOptions {
+	    format: string;
+	    xlsxMaxRowsPerSheet?: number;
+	    jobId?: string;
+	    totalRowsHint?: number;
+	    totalRowsKnown?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportFileOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.format = source["format"];
+	        this.xlsxMaxRowsPerSheet = source["xlsxMaxRowsPerSheet"];
+	        this.jobId = source["jobId"];
+	        this.totalRowsHint = source["totalRowsHint"];
+	        this.totalRowsKnown = source["totalRowsKnown"];
+	    }
+	}
 	export class SecurityUpdateOptions {
 	    allowPartial?: boolean;
 	    writeBackup?: boolean;

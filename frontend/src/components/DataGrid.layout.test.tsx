@@ -2175,111 +2175,28 @@ describe('DataGrid layout', () => {
 
   it('keeps export and import chrome behind translateDataGrid while preserving raw details', () => {
     const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
-    const exportDataSource = source.slice(
-      source.indexOf('  const exportData = async (rows: any[], format: string) => {'),
-      source.indexOf('  const [sortInfo, setSortInfo]'),
-    );
-    const exportChromeSource = source.slice(
-      source.indexOf('  const exportByQuery = useCallback(async (sql: string, format: string, defaultName: string) => {'),
-      source.indexOf("  const queryResultCopyMenu: MenuProps['items'] ="),
-    );
-    const exportSource = `${exportDataSource}\n${exportChromeSource}`;
-    const exportChromeKeys = [
-      'data_grid.message.exporting_rows',
-      'data_grid.message.exporting',
-      'data_grid.message.export_success',
-      'data_grid.message.export_failed',
-      'data_grid.message.export_with_uncommitted_changes',
-      'data_grid.message.no_filter_applied',
-      'data_grid.message.filtered_export_not_supported',
-      'data_grid.message.filtered_export_uses_committed_data',
-      'data_grid.message.no_rows_selected',
-      'data_grid.message.select_file_failed',
-      'data_grid.message.import_done',
-      'data_grid.export.query_result_title',
-      'data_grid.export.scope_prompt',
-      'data_grid.export.selected_rows',
-      'data_grid.export.current_page_rows',
-      'data_grid.export.all_rows',
-      'data_grid.export.all_rows_requery',
-      'data_grid.export.options_title',
-      'data_grid.export.no_selection_prompt',
-      'data_grid.export.current_page',
-      'data_grid.export.all_data',
-      'data_grid.export.group_filtered_results',
-      'data_grid.export.group_full_table',
-    ];
+    const exportDialogSource = readFileSync(new URL('./DataExportDialog.tsx', import.meta.url), 'utf8');
 
-    expect(source).toContain("type QueryResultExportScope = 'selected' | 'page' | 'all';");
-    exportChromeKeys.forEach((key) => {
-      expect(exportSource).toContain(`translateDataGrid('${key}'`);
-    });
-    expect(exportChromeSource).toContain("translateDataGrid('common.cancel')");
-    expect(exportChromeSource).toContain('data-query-result-export-scope="true"');
-    expect(exportDataSource).toMatch(/message\.loading\(\s*translateDataGrid\(\s*'data_grid\.message\.exporting_rows'\s*,\s*\{\s*count:\s*rows\.length\s*\}\s*\)\s*,\s*0\s*\)/);
-    expect(exportDataSource).toMatch(/message\.success\(\s*translateDataGrid\(\s*'data_grid\.message\.export_success'\s*\)\s*\)/);
-    expect(exportDataSource).toMatch(/translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*res\.message\s*\}\s*\)/);
-    expect(exportDataSource).toMatch(/const\s+rawErrorMessage\s*=\s*e\?\.message\s*\|\|\s*String\(e\);[\s\S]*translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*rawErrorMessage\s*\}\s*\)/);
-    expect(exportChromeSource).toMatch(/translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*res\.message\s*\}\s*\)/);
-    expect(exportChromeSource).toMatch(/const\s+rawErrorMessage\s*=\s*e\?\.message\s*\|\|\s*String\(e\);[\s\S]*translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*rawErrorMessage\s*\}\s*\)/);
-    expect(exportChromeSource).toMatch(/translateDataGrid\(\s*'data_grid\.message\.select_file_failed'\s*,\s*\{\s*detail:\s*res\.message\s*\}\s*\)/);
-    expect(exportChromeSource).toMatch(/},\s*\[[\s\S]*translateDataGrid[\s\S]*\]\);/);
-    expect(source).toContain('data-query-result-export-scope="true"');
+    expect(source).toContain("type DataGridExportScope = 'selected' | 'page' | 'all' | 'filteredAll';");
+    expect(source).toContain('const handleOpenExportDialog = useCallback(async () => {');
+    expect(source).toContain('await runExportWithProgress({');
+    expect(source).toContain("title: '导出查询结果'");
+    expect(source).toContain("label: '筛选结果（全部）'");
+    expect(source).toContain("label: '全表数据'");
+    expect(source).toContain("const fallbackAllSql = String(resultSql || '').trim();");
+    expect(source).toContain("const backendExportSql = exportAllSql || fallbackAllSql;");
+    expect(source).toContain("if (backendExportSql && connectionId) {");
+    expect(source).toContain("label: allRowsLabel");
+    expect(exportDialogSource).toContain('data-export-config-modal="true"');
+    expect(exportDialogSource).toContain('label="导出格式"');
+    expect(exportDialogSource).toContain('label="每个工作表最大行数"');
+    expect(exportDialogSource).toContain('仅 XLSX 生效');
     expect(source).toContain('const queryResultCurrentPageRows = useMemo(() => {');
     expect(source).toContain('const resolveContextMenuPosition = useCallback((x: number, y: number, estimatedWidth: number, estimatedHeight: number) => {');
     expect(source).toContain('const rect = element.getBoundingClientRect();');
     expect(source).toContain('ref={cellContextMenuPortalRef}');
-    [
-      '正在导出 ${rows.length} 条数据...',
-      '正在导出...',
-      '导出成功',
-      '导出失败: ',
-      '导出失败：',
-      '当前未选中任何行',
-      '导出查询结果',
-      '请选择导出范围：',
-      '选中导出',
-      '当前页导出',
-      '全部导出',
-      '当前存在未提交修改，导出将按界面数据生成；如需完整长字段建议先提交后再导出。',
-      '导出选项',
-      '您未选中任何行，请选择导出范围：',
-      '导出当前页',
-      '导出全部数据',
-      '当前数据源不支持按筛选结果导出',
-      '当前存在未提交修改，筛选结果导出基于数据库已提交数据。',
-      '选择文件失败: ',
-      '导入完成',
-      '筛选结果',
-      '全表',
-    ].forEach((literal) => {
-      expect(exportSource).not.toContain(literal);
-    });
-
-    [
-      'zh-CN',
-      'zh-TW',
-      'en-US',
-      'ja-JP',
-      'de-DE',
-      'ru-RU',
-    ].forEach((locale) => {
-      const catalog = JSON.parse(
-        readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8'),
-      ) as Record<string, string>;
-
-      exportChromeKeys.forEach((key) => {
-        expect(catalog[key]).toEqual(expect.any(String));
-        expect(catalog[key].length).toBeGreaterThan(0);
-      });
-      expect(catalog['data_grid.message.exporting_rows']).toContain('{{count}}');
-      expect(catalog['data_grid.message.export_failed']).toContain('{{detail}}');
-      expect(catalog['data_grid.message.select_file_failed']).toContain('{{detail}}');
-      expect(catalog['data_grid.export.selected_rows']).toContain('{{count}}');
-      expect(catalog['data_grid.export.current_page_rows']).toContain('{{count}}');
-      expect(catalog['data_grid.export.all_rows']).toContain('{{count}}');
-      expect(catalog['data_grid.export.current_page']).toContain('{{count}}');
-    });
+    expect(source).not.toContain('const openQueryResultExportScopeModal = useCallback(');
+    expect(source).not.toContain('const exportMenu: MenuProps[\'items\'] =');
   });
 
   it('keeps inline cell editors stretched to the full cell width', () => {

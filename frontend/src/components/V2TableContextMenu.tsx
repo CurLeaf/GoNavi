@@ -52,9 +52,7 @@ export type V2TableContextMenuActionKey =
   | 'new-rollup'
   | 'backup-table'
   | 'refresh-stats'
-  | 'export-xlsx'
-  | 'export-csv'
-  | 'export-json'
+  | 'export-data'
   | 'ai-explain'
   | 'ai-generate-query'
   | 'truncate-table'
@@ -248,9 +246,7 @@ export const V2TableContextMenuView: React.FC<{
 
         <div className="gn-v2-context-menu-section-title">{t('sidebar.menu.export_table_data')}</div>
         {renderItems([
-          { action: 'export-xlsx', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.item_with_suffix', { label: 'Excel', suffix: '.xlsx' }) },
-          { action: 'export-csv', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.item_with_suffix', { label: 'CSV', suffix: '.csv' }) },
-          { action: 'export-json', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.item_with_suffix', { label: 'JSON', suffix: '.json' }) },
+          { action: 'export-data', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.open_export_workbench') },
         ])}
 
         <div className="gn-v2-context-menu-divider" />

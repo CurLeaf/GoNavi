@@ -1429,9 +1429,10 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('备份 · SQL Dump');
     expect(markup).toContain('刷新统计信息');
     expect(markup).toContain('导出表数据');
-    expect(markup).toContain('Excel · .xlsx');
-    expect(markup).toContain('CSV · .csv');
-    expect(markup).toContain('JSON · .json');
+    expect(markup).toContain('打开导出工作台…');
+    expect(markup).not.toContain('Excel · .xlsx');
+    expect(markup).not.toContain('CSV · .csv');
+    expect(markup).not.toContain('JSON · .json');
     expect(markup).not.toContain('Markdown · .md');
     expect(markup).not.toContain('HTML · .html');
     expect(markup).toContain('用 AI 解释这张表');
@@ -1570,19 +1571,10 @@ describe('Sidebar locate toolbar', () => {
     expect(exportSourceStart).toBeGreaterThanOrEqual(0);
     expect(exportSourceEnd).toBeGreaterThan(exportSourceStart);
     expect(exportSource).toContain("t('sidebar.menu.export_table_data')");
-    expect(exportSource).toContain("t('sidebar.v2_table_menu.item_with_suffix', { label: 'Excel', suffix: '.xlsx' })");
-    expect(exportSource).toContain("t('sidebar.v2_table_menu.item_with_suffix', { label: 'CSV', suffix: '.csv' })");
-    expect(exportSource).toContain("t('sidebar.v2_table_menu.item_with_suffix', { label: 'JSON', suffix: '.json' })");
-    expect(exportSource).toContain('Excel');
-    expect(exportSource).toContain('CSV');
-    expect(exportSource).toContain('JSON');
-    expect(exportSource).toContain('.xlsx');
-    expect(exportSource).toContain('.csv');
-    expect(exportSource).toContain('.json');
+    expect(exportSource).toContain("t('sidebar.v2_table_menu.open_export_workbench')");
+    expect(exportSource).toContain("{ action: 'export-data'");
     expect(exportSource).not.toContain('导出表数据');
-    expect(exportSource).not.toContain("'Excel · .xlsx'");
-    expect(exportSource).not.toContain("'CSV · .csv'");
-    expect(exportSource).not.toContain("'JSON · .json'");
+    expect(exportSource).not.toContain("'打开导出工作台…'");
     expect(exportSource).not.toContain('用 AI 解释这张表');
   });
 
@@ -2640,5 +2632,12 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('window.setTimeout(resolve, SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS)');
     expect(source).toContain('return !loadingNodesRef.current.has(loadKey);');
     expect(source).toContain('对象仍在加载中');
+  });
+
+  it('resolves sidebar export workbench connection ids from live tree nodes instead of only reading dataRef.connectionId', () => {
+    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("const connectionId = resolveSidebarNodeConnectionId(node, connectionIds) || String(node?.dataRef?.id || '').trim();");
+    expect(source).not.toContain("const connectionId = String(node?.dataRef?.connectionId || '').trim();");
   });
 });

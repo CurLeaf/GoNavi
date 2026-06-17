@@ -21,7 +21,7 @@ import {
     arrayMove 
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges, PreviewChanges, DBGetColumns, DBGetIndexes, DBGetForeignKeys, DBShowCreateTable } from '../../wailsjs/go/app/App';
+import { ImportData, ExportDataWithOptions, ExportQueryWithOptions, ApplyChanges, PreviewChanges, DBGetColumns, DBGetIndexes, DBGetForeignKeys, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import ImportPreviewModal from './ImportPreviewModal';
 import { useStore } from '../store';
 import { getCurrentLanguage, t } from '../i18n';
@@ -133,14 +133,24 @@ import DataGridToolbarFrame from './DataGridToolbarFrame';
 import DataGridModals from './DataGridModals';
 import DataGridLegacyCellContextMenu from './DataGridLegacyCellContextMenu';
 import DataGridPreviewPanel from './DataGridPreviewPanel';
+import {
+    DEFAULT_DATA_EXPORT_FORMAT,
+    DEFAULT_XLSX_ROWS_PER_SHEET,
+    showDataExportDialog,
+    type DataExportDialogValues,
+    type DataExportFileOptions,
+    type DataExportScopeOption,
+} from './DataExportDialog';
 import { DataGridJsonView, DataGridTextView } from './DataGridRecordViews';
 import { DataGridV2DdlSideWorkspace, DataGridV2DdlView } from './DataGridV2DdlWorkspace';
 import { DataGridV2ErView, DataGridV2FieldsView } from './DataGridV2MetadataViews';
 import TableDesigner from './TableDesigner';
+import { useExportProgressDialog } from './ExportProgressModal';
 import { useDataGridFilters } from './useDataGridFilters';
 import { useDataGridDdlView } from './useDataGridDdlView';
 import { useDataGridModalEditors } from './useDataGridModalEditors';
 import { useDataGridPreviewPanel } from './useDataGridPreviewPanel';
+import { buildTableExportTab } from '../utils/tableExportTab';
 
 // --- Error Boundary ---
 interface DataGridErrorBoundaryState {
@@ -823,7 +833,7 @@ const DataContext = React.createContext<{
     handleCopyDelete: (r: any) => void;
     handleCopyJson: (r: any) => void;
     handleCopyCsv: (r: any) => void;
-    handleExportSelected: (format: string, r: any) => Promise<void>;
+    handleExportSelected: (options: DataExportFileOptions, r: any) => Promise<void>;
     copyToClipboard: (t: string) => void;
     tableName?: string;
     enableRowContextMenu: boolean;
@@ -1253,11 +1263,11 @@ const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
             label: t('data_grid.context_menu.export_selected'),
             icon: <ExportOutlined />,
             children: [
-                { key: 'exp-csv', label: 'CSV', onClick: () => handleExportSelected('csv', record).catch(console.error) },
-                { key: 'exp-xlsx', label: 'Excel', onClick: () => handleExportSelected('xlsx', record).catch(console.error) },
-                { key: 'exp-json', label: 'JSON', onClick: () => handleExportSelected('json', record).catch(console.error) },
-                { key: 'exp-md', label: 'Markdown', onClick: () => handleExportSelected('md', record).catch(console.error) },
-                { key: 'exp-html', label: 'HTML', onClick: () => handleExportSelected('html', record).catch(console.error) },
+                { key: 'exp-csv', label: 'CSV', onClick: () => handleExportSelected({ format: 'csv' }, record).catch(console.error) },
+                { key: 'exp-xlsx', label: 'Excel', onClick: () => handleExportSelected({ format: 'xlsx' }, record).catch(console.error) },
+                { key: 'exp-json', label: 'JSON', onClick: () => handleExportSelected({ format: 'json' }, record).catch(console.error) },
+                { key: 'exp-md', label: 'Markdown', onClick: () => handleExportSelected({ format: 'md' }, record).catch(console.error) },
+                { key: 'exp-html', label: 'HTML', onClick: () => handleExportSelected({ format: 'html' }, record).catch(console.error) },
             ]
         }
     ];
@@ -1323,7 +1333,7 @@ type GridFilterCondition = FilterCondition & {
 
 type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er';
 type DdlViewLayoutMode = 'bottom' | 'side';
-type QueryResultExportScope = 'selected' | 'page' | 'all';
+type DataGridExportScope = 'selected' | 'page' | 'all' | 'filteredAll';
 type VirtualEditingCellState = {
     rowKey: string;
     dataIndex: string;
@@ -1572,6 +1582,7 @@ const VIRTUAL_EDITING_CELL_STYLE: React.CSSProperties = {
 
 const DataGrid: React.FC<DataGridProps> = ({
     data, columnNames, loading, tableName, objectType = 'table', exportScope = 'table', dbName, connectionId, pkColumns = [], editLocator, readOnly = false,
+    resultSql,
     resultExportAllSql,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
     onApplyQuickWhereCondition,
@@ -1937,6 +1948,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   
   const [form] = Form.useForm();
   const [modal, contextHolder] = Modal.useModal();
+  const { exportProgressModal, runExportWithProgress } = useExportProgressDialog();
   const gridId = useMemo(() => `grid-${generateUuid()}`, []);
   const [textRecordIndex, setTextRecordIndex] = useState(0);
   const {
@@ -2172,23 +2184,25 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [resolveContextMenuPosition]);
 
   // Helper to export specific data
-  const exportData = async (rows: any[], format: string) => {
-      const hide = message.loading(translateDataGrid('data_grid.message.exporting_rows', { count: rows.length }), 0);
-      try {
-          const cleanRows = pickDataGridOutputRows(rows, displayOutputColumnNames);
-          // Pass tableName (or 'export') as default filename
-          const res = await ExportData(cleanRows, displayOutputColumnNames, tableName || 'export', format);
-          if (res.success) {
-              void message.success(translateDataGrid('data_grid.message.export_success'));
-          } else if (res.message !== "已取消") {
-              void message.error(translateDataGrid('data_grid.message.export_failed', { detail: res.message }));
-          }
-      } catch (e: any) {
-          const rawErrorMessage = e?.message || String(e);
-          void message.error(translateDataGrid('data_grid.message.export_failed', { detail: rawErrorMessage }));
-      } finally {
-          hide();
-      }
+  const exportData = async (rows: any[], options: DataExportFileOptions) => {
+      const cleanRows = pickDataGridOutputRows(rows, displayOutputColumnNames);
+      await runExportWithProgress({
+          title: `导出 ${tableName || '数据'}`,
+          targetName: tableName || 'export',
+          format: options.format,
+          totalRows: cleanRows.length,
+          run: (jobId) => ExportDataWithOptions(
+              cleanRows,
+              displayOutputColumnNames,
+              tableName || 'export',
+              {
+                  ...options,
+                  jobId,
+                  totalRowsHint: cleanRows.length,
+                  totalRowsKnown: true,
+              } as any,
+          ),
+      });
   };
   
   const [sortInfo, setSortInfo] = useState<Array<{ columnKey: string, order: string, enabled?: boolean }>>([]);
@@ -6089,24 +6103,29 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
   }, [connections, connectionId]);
 
-  const exportByQuery = useCallback(async (sql: string, format: string, defaultName: string) => {
+  const exportByQuery = useCallback(async (sql: string, defaultName: string, options: DataExportFileOptions, totalRows?: number) => {
       const config = buildConnConfig();
       if (!config) return;
-      const hide = message.loading(translateDataGrid('data_grid.message.exporting'), 0);
-      try {
-          const res = await ExportQuery(buildRpcConnectionConfig(config) as any, dbName || '', sql, defaultName || 'export', format);
-          if (res.success) {
-              void message.success(translateDataGrid('data_grid.message.export_success'));
-          } else if (res.message !== "已取消") {
-              void message.error(translateDataGrid('data_grid.message.export_failed', { detail: res.message }));
-          }
-      } catch (e: any) {
-          const rawErrorMessage = e?.message || String(e);
-          void message.error(translateDataGrid('data_grid.message.export_failed', { detail: rawErrorMessage }));
-      } finally {
-          hide();
-      }
-  }, [buildConnConfig, dbName, translateDataGrid]);
+      const totalRowsKnown = Number.isFinite(totalRows) && Number(totalRows) >= 0;
+      await runExportWithProgress({
+          title: `导出 ${defaultName || '查询结果'}`,
+          targetName: defaultName || 'export',
+          format: options.format,
+          totalRows: totalRowsKnown ? Number(totalRows) : undefined,
+          run: (jobId) => ExportQueryWithOptions(
+              buildRpcConnectionConfig(config) as any,
+              dbName || '',
+              sql,
+              defaultName || 'export',
+              {
+                  ...options,
+                  jobId,
+                  totalRowsHint: totalRowsKnown ? Number(totalRows) : 0,
+                  totalRowsKnown,
+              } as any,
+          ),
+      });
+  }, [buildConnConfig, dbName, runExportWithProgress]);
 
   const buildPkWhereSql = useCallback((rows: any[], dbType: string) => {
       if (!tableName || pkColumns.length === 0) return '';
@@ -6191,7 +6210,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       return mergedDisplayData.slice(offset, offset + pagination.pageSize);
   }, [isQueryResultExport, mergedDisplayData, pagination]);
 
-  const exportQueryResultRows = useCallback(async (format: string, scope: QueryResultExportScope) => {
+  const exportQueryResultRows = useCallback(async (options: DataExportFileOptions, scope: Exclude<DataGridExportScope, 'filteredAll'>) => {
       if (scope === 'selected') {
           const selectedKeySet = new Set(selectedRowKeys.map((key) => rowKeyStr(key)));
           const rows = mergedDisplayData.filter((row) => {
@@ -6202,87 +6221,53 @@ const DataGrid: React.FC<DataGridProps> = ({
               void message.info(translateDataGrid('data_grid.message.no_rows_selected'));
               return;
           }
-          await exportData(rows, format);
+          await exportData(rows, options);
           return;
       }
       if (scope === 'page') {
-          await exportData(queryResultCurrentPageRows, format);
+          await exportData(queryResultCurrentPageRows, options);
           return;
       }
       const exportAllSql = String(resultExportAllSql || '').trim();
-      if (exportAllSql && connectionId) {
-          await exportByQuery(exportAllSql, format, tableName || 'query_result');
+      const fallbackAllSql = String(resultSql || '').trim();
+      const backendExportSql = exportAllSql || fallbackAllSql;
+      if (backendExportSql && connectionId) {
+          const totalRows = pagination && pagination.totalKnown !== false ? Number(pagination.total) : undefined;
+          await exportByQuery(backendExportSql, tableName || 'query_result', options, totalRows);
           return;
       }
-      await exportData(mergedDisplayData, format);
-  }, [connectionId, exportByQuery, exportData, mergedDisplayData, queryResultCurrentPageRows, resultExportAllSql, rowKeyStr, selectedRowKeys, tableName, translateDataGrid]);
-
-  const openQueryResultExportScopeModal = useCallback((format: string) => {
-      let instance: { destroy: () => void } | null = null;
-      const selectedCount = selectedRowKeys.length;
-      const runExport = async (scope: QueryResultExportScope) => {
-          instance?.destroy();
-          await exportQueryResultRows(format, scope);
-      };
-      instance = modal.info({
-          title: translateDataGrid('data_grid.export.query_result_title'),
-          content: (
-              <div data-query-result-export-scope="true">
-                  <p style={{ marginBottom: 12 }}>{translateDataGrid('data_grid.export.scope_prompt')}</p>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      <Button onClick={() => instance?.destroy()}>{translateDataGrid('common.cancel')}</Button>
-                      <Button
-                          disabled={selectedCount <= 0}
-                          onClick={() => { void runExport('selected'); }}
-                      >
-                          {translateDataGrid('data_grid.export.selected_rows', { count: selectedCount })}
-                      </Button>
-                      <Button onClick={() => { void runExport('page'); }}>
-                          {translateDataGrid('data_grid.export.current_page_rows', { count: queryResultCurrentPageRows.length })}
-                      </Button>
-                      <Button type="primary" onClick={() => { void runExport('all'); }}>
-                          {resultExportAllSql
-                              ? translateDataGrid('data_grid.export.all_rows_requery')
-                              : translateDataGrid('data_grid.export.all_rows', { count: mergedDisplayData.length })}
-                      </Button>
-                  </div>
-              </div>
-          ),
-          icon: <ExportOutlined />,
-          okButtonProps: { style: { display: 'none' } },
-          maskClosable: true,
-      });
-  }, [exportQueryResultRows, mergedDisplayData.length, modal, queryResultCurrentPageRows.length, resultExportAllSql, selectedRowKeys.length, translateDataGrid]);
+      await exportData(mergedDisplayData, options);
+  }, [connectionId, exportByQuery, exportData, mergedDisplayData, pagination, queryResultCurrentPageRows, resultExportAllSql, resultSql, rowKeyStr, selectedRowKeys, tableName]);
 
   // Context Menu Export
-  const handleExportSelected = useCallback(async (format: string, record: any) => {
+  const handleExportSelected = useCallback(async (options: DataExportFileOptions, record: any) => {
       if (isQueryResultExport) {
-          await exportData(getContextMenuTargetRows(record), format);
+          await exportData(getContextMenuTargetRows(record), options);
           return;
       }
       const records = getTargets(record);
       if (!connectionId || !tableName) {
-          await exportData(records, format);
+          await exportData(records, options);
           return;
       }
 
       // 有未提交修改时，优先按界面数据导出，避免与数据库不一致。
       if (hasChanges) {
+          await exportData(records, options);
           void message.warning(translateDataGrid('data_grid.message.export_with_uncommitted_changes'));
-          await exportData(records, format);
           return;
       }
 
       const config = buildConnConfig();
       if (!config) {
-          await exportData(records, format);
+          await exportData(records, options);
           return;
       }
 
       const dbType = resolveDataSourceType(config);
       const pkWhere = buildPkWhereSql(records, dbType);
       if (!pkWhere) {
-          await exportData(records, format);
+          await exportData(records, options);
           return;
       }
 
@@ -6292,7 +6277,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           columnNames: displayOutputColumnNames,
           whereSql: `WHERE ${pkWhere}`,
       });
-      await exportByQuery(sql, format, tableName || 'export');
+      await exportByQuery(sql, tableName || 'export', options, records.length);
   }, [getTargets, isQueryResultExport, connectionId, tableName, hasChanges, exportData, buildConnConfig, buildPkWhereSql, exportByQuery, displayOutputColumnNames, translateDataGrid]);
 
   const handleV2CellContextMenuAction = useCallback((action: V2CellContextMenuActionKey) => {
@@ -6381,8 +6366,8 @@ const DataGrid: React.FC<DataGridProps> = ({
           case 'export-json':
           case 'export-html':
               if (record) {
-                  const format = action.replace('export-', '');
-                  handleExportSelected(format, record).catch(console.error);
+                  const format = action.replace('export-', '') as DataExportDialogValues['format'];
+                  handleExportSelected({ format }, record).catch(console.error);
               }
               closeMenu();
               return;
@@ -6417,96 +6402,124 @@ const DataGrid: React.FC<DataGridProps> = ({
   ]);
 
   // Export
-  const handleExport = async (format: string) => {
+  const handleOpenExportDialog = useCallback(async () => {
+      const selectedCount = selectedRowKeys.length;
+      const allRowsLabel = (resultExportAllSql || resultSql)
+          ? '全部结果（重新查询）'
+          : `全部结果（当前缓存 ${mergedDisplayData.length} 条）`;
+      const commonInitialValues: Partial<DataExportDialogValues> = {
+          format: DEFAULT_DATA_EXPORT_FORMAT,
+          xlsxMaxRowsPerSheet: DEFAULT_XLSX_ROWS_PER_SHEET,
+      };
+
       if (isQueryResultExport) {
-          openQueryResultExportScopeModal(format);
+          const scopeOptions: DataExportScopeOption[] = [
+              {
+                  value: 'selected',
+                  label: selectedCount > 0 ? `选中行 (${selectedCount} 条)` : '选中行',
+                  description: '仅导出当前结果集中已勾选的行。',
+                  disabled: selectedCount <= 0,
+              },
+              {
+                  value: 'page',
+                  label: `当前页 (${queryResultCurrentPageRows.length} 条)`,
+                  description: '直接按当前结果页缓存导出。',
+              },
+              {
+                  value: 'all',
+                  label: allRowsLabel,
+                  description: (resultExportAllSql || resultSql)
+                      ? '后台会重新执行 SQL，避免只导出当前页或当前缓存。'
+                      : '当前查询缺少可重放 SQL 时，将导出当前缓存的全部结果。',
+              },
+          ];
+          const values = await showDataExportDialog(modal, {
+              title: '导出查询结果',
+              scopeOptions,
+              initialValues: {
+                  ...commonInitialValues,
+                  scope: (resultExportAllSql || resultSql) ? 'all' : (selectedCount > 0 ? 'selected' : 'page'),
+              },
+          });
+          if (!values) return;
+          await exportQueryResultRows(values, values.scope as Exclude<DataGridExportScope, 'filteredAll'>);
           return;
       }
+
       if (!connectionId) return;
-
-      // 1. Export Selected
-      if (selectedRowKeys.length > 0) {
-          const selectedRows = displayData.filter(d => selectedRowKeys.includes(d?.[GONAVI_ROW_KEY]));
-          await handleExportSelected(format, selectedRows[0]);
-          return;
-      }
-
-      // 2. Prompt for Current vs All
-      // Using a custom modal content with buttons to handle 3 states
-      let instance: any;
-      const handleAll = async () => {
-          instance.destroy();
-          if (!tableName) return;
-          const config = buildConnConfig();
-          if (!config) return;
-          const sql = buildAllRowsSql(resolveDataSourceType(config));
-          if (!sql) return;
-          await exportByQuery(sql, format, tableName || 'export');
-      };
-      const handlePage = async () => {
-          instance.destroy();
-          if (hasChanges) {
-              void message.warning(translateDataGrid('data_grid.message.export_with_uncommitted_changes'));
-              await exportData(displayData, format);
-              return;
-          }
-
-          const config = buildConnConfig();
-          if (!config) {
-              await exportData(displayData, format);
-              return;
-          }
-
-          const sql = buildCurrentPageSql(resolveDataSourceType(config));
-          if (!sql) {
-              await exportData(displayData, format);
-              return;
-          }
-
-          await exportByQuery(sql, format, tableName || 'export');
-      };
-
-      instance = modal.info({
-          title: translateDataGrid('data_grid.export.options_title'),
-          content: (
-              <div>
-                  <p>{translateDataGrid('data_grid.export.no_selection_prompt')}</p>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
-                      <Button onClick={() => instance.destroy()}>{translateDataGrid('common.cancel')}</Button>
-                      <Button onClick={handlePage}>{translateDataGrid('data_grid.export.current_page', { count: displayData.length })}</Button>
-                      <Button type="primary" onClick={handleAll}>{translateDataGrid('data_grid.export.all_data')}</Button>
-                  </div>
-              </div>
-          ),
-          icon: <ExportOutlined />,
-          okButtonProps: { style: { display: 'none' } }, // Hide default OK
-          maskClosable: true,
-      });
-  };
-
-  const handleExportFilteredAll = async (format: string) => {
-      if (!connectionId || !tableName) return;
-      if (!filteredExportSql) {
-          void message.warning(translateDataGrid('data_grid.message.no_filter_applied'));
-          return;
-      }
-      if (!supportsSqlQueryExport) {
-          void message.error(translateDataGrid('data_grid.message.filtered_export_not_supported'));
-          return;
-      }
       const config = buildConnConfig();
-      if (!config) return;
-      if (hasChanges) {
-          void message.warning(translateDataGrid('data_grid.message.filtered_export_uses_committed_data'));
-      }
+      const dbType = config ? resolveDataSourceType(config) : '';
+      const currentPageSql = config && !hasChanges ? buildCurrentPageSql(dbType) : '';
+      const filteredAllSql = config && supportsSqlQueryExport ? buildFilteredAllSql(dbType) : '';
+      const allRowsSql = config && objectType !== 'table' ? buildAllRowsSql(dbType) : '';
+      const hasKnownFilteredTotal = hasFilteredExportSql && pagination && pagination.totalKnown !== false;
+      const hasKnownAllTotal = !hasFilteredExportSql && pagination && pagination.totalKnown !== false;
 
-      const sql = buildFilteredAllSql(resolveDataSourceType(config));
-      if (!sql) {
-          void message.warning(translateDataGrid('data_grid.message.no_filter_applied'));
-          return;
-      }
-      await exportByQuery(sql, format, `${tableName || 'export'}_filtered`);
-  };
+      addTab(buildTableExportTab({
+          connectionId,
+          dbName,
+          tableName: tableName || 'export',
+          title: `导出 ${tableName || '数据'}`,
+          objectType,
+          scopeOptions: [
+              {
+                  value: 'page',
+                  label: `当前页 (${displayData.length} 条)`,
+                  description: currentPageSql
+                      ? '后台按当前分页条件重新查询后导出当前页。'
+                      : '当前页依赖前端临时状态，建议直接使用快捷导出。',
+                  disabled: !currentPageSql,
+              },
+              ...(hasFilteredExportSql ? [{
+                  value: 'filteredAll' as const,
+                  label: '筛选结果（全部）',
+                  description: filteredAllSql
+                      ? '按当前筛选条件重新查询数据库并导出全部筛选结果。'
+                      : '当前数据源或当前状态暂不支持在工作台重放筛选导出。',
+                  disabled: !filteredAllSql,
+              }] : []),
+              {
+                  value: 'all',
+                  label: '全表数据',
+                  description: '后台重新查询整张表并导出全部数据。',
+              },
+          ],
+          initialScope: hasFilteredExportSql && filteredAllSql ? 'filteredAll' : 'all',
+          queryByScope: {
+              ...(currentPageSql ? { page: currentPageSql } : {}),
+              ...(filteredAllSql ? { filteredAll: filteredAllSql } : {}),
+              ...(allRowsSql ? { all: allRowsSql } : {}),
+          },
+          rowCountByScope: {
+              page: displayData.length,
+              ...(hasKnownFilteredTotal ? { filteredAll: Number(pagination?.total) } : {}),
+              ...(hasKnownAllTotal ? { all: Number(pagination?.total) } : {}),
+          },
+      }));
+  }, [
+      addTab,
+      buildAllRowsSql,
+      buildConnConfig,
+      buildCurrentPageSql,
+      buildFilteredAllSql,
+      connectionId,
+      dbName,
+      displayData.length,
+      exportQueryResultRows,
+      hasFilteredExportSql,
+      objectType,
+      isQueryResultExport,
+      mergedDisplayData.length,
+      modal,
+      pagination,
+      queryResultCurrentPageRows.length,
+      resultExportAllSql,
+      resultSql,
+      selectedRowKeys.length,
+      supportsSqlQueryExport,
+      tableName,
+      hasChanges,
+  ]);
 
   const handleImport = async () => {
       if (!connectionId || !tableName) return;
@@ -6528,36 +6541,6 @@ const DataGrid: React.FC<DataGridProps> = ({
       void message.success(translateDataGrid('data_grid.message.import_done'));
       if (onReload) onReload();
   };
-
-  const exportMenu: MenuProps['items'] = isQueryResultExport ? [
-      { key: 'query-csv', label: 'CSV', onClick: () => handleExport('csv') },
-      { key: 'query-xlsx', label: 'Excel (XLSX)', onClick: () => handleExport('xlsx') },
-      { key: 'query-json', label: 'JSON', onClick: () => handleExport('json') },
-      { key: 'query-md', label: 'Markdown', onClick: () => handleExport('md') },
-      { key: 'query-html', label: 'HTML', onClick: () => handleExport('html') },
-  ] : hasFilteredExportSql ? [
-      { type: 'group', label: translateDataGrid('data_grid.export.group_filtered_results'), children: [
-          { key: 'filtered-csv', label: 'CSV', onClick: () => handleExportFilteredAll('csv') },
-          { key: 'filtered-xlsx', label: 'Excel (XLSX)', onClick: () => handleExportFilteredAll('xlsx') },
-          { key: 'filtered-json', label: 'JSON', onClick: () => handleExportFilteredAll('json') },
-          { key: 'filtered-md', label: 'Markdown', onClick: () => handleExportFilteredAll('md') },
-          { key: 'filtered-html', label: 'HTML', onClick: () => handleExportFilteredAll('html') },
-      ]},
-      { type: 'divider' },
-      { type: 'group', label: translateDataGrid('data_grid.export.group_full_table'), children: [
-          { key: 'table-csv', label: 'CSV', onClick: () => handleExport('csv') },
-          { key: 'table-xlsx', label: 'Excel (XLSX)', onClick: () => handleExport('xlsx') },
-          { key: 'table-json', label: 'JSON', onClick: () => handleExport('json') },
-          { key: 'table-md', label: 'Markdown', onClick: () => handleExport('md') },
-          { key: 'table-html', label: 'HTML', onClick: () => handleExport('html') },
-      ]},
-  ] : [
-      { key: 'csv', label: 'CSV', onClick: () => handleExport('csv') },
-      { key: 'xlsx', label: 'Excel (XLSX)', onClick: () => handleExport('xlsx') },
-      { key: 'json', label: 'JSON', onClick: () => handleExport('json') },
-      { key: 'md', label: 'Markdown', onClick: () => handleExport('md') },
-      { key: 'html', label: 'HTML', onClick: () => handleExport('html') },
-  ];
 
   const queryResultCopyMenu: MenuProps['items'] = [
       { key: 'csv', label: 'CSV', onClick: handleCopyQueryResultCsv },
@@ -7871,7 +7854,6 @@ const DataGrid: React.FC<DataGridProps> = ({
             noAutoCapInputProps={noAutoCapInputProps as Record<string, unknown>}
             filterFieldSelectStyle={FILTER_FIELD_SELECT_STYLE}
             filterFieldPopupWidth={FILTER_FIELD_POPUP_WIDTH}
-            exportMenu={exportMenu}
             queryResultCopyMenu={queryResultCopyMenu}
             dbType={dbType}
             onResetPendingChanges={handleResetPendingChanges}
@@ -7890,6 +7872,7 @@ const DataGrid: React.FC<DataGridProps> = ({
             onCommit={handleCommit}
             onPreviewChanges={handlePreviewChanges}
             onImport={handleImport}
+            onOpenExportModal={handleOpenExportDialog}
             onCopyQueryResultCsv={handleCopyQueryResultCsv}
             onRequestAiInsight={handleRequestAiInsight}
             onToggleTotalCount={handleToggleTotalCount}
@@ -7942,6 +7925,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
 	       <div ref={containerRef} style={{ flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0, display: 'flex', flexDirection: 'column', background: bgContent, borderRadius: panelRadius, border: `1px solid ${panelFrameColor}`, boxSizing: 'border-box' }}>
 	        {contextHolder}
+            {exportProgressModal}
             <DataGridModals
                 tableName={tableName}
                 darkMode={darkMode}
@@ -8214,16 +8198,16 @@ const DataGrid: React.FC<DataGridProps> = ({
                 }
             }}
             onExportCsv={() => {
-                if (cellContextMenu.record) handleExportSelected('csv', cellContextMenu.record).catch(console.error);
+                if (cellContextMenu.record) handleExportSelected({ format: 'csv' }, cellContextMenu.record).catch(console.error);
             }}
             onExportXlsx={() => {
-                if (cellContextMenu.record) handleExportSelected('xlsx', cellContextMenu.record).catch(console.error);
+                if (cellContextMenu.record) handleExportSelected({ format: 'xlsx' }, cellContextMenu.record).catch(console.error);
             }}
             onExportJson={() => {
-                if (cellContextMenu.record) handleExportSelected('json', cellContextMenu.record).catch(console.error);
+                if (cellContextMenu.record) handleExportSelected({ format: 'json' }, cellContextMenu.record).catch(console.error);
             }}
             onExportHtml={() => {
-                if (cellContextMenu.record) handleExportSelected('html', cellContextMenu.record).catch(console.error);
+                if (cellContextMenu.record) handleExportSelected({ format: 'html' }, cellContextMenu.record).catch(console.error);
             }}
         />
        </div>

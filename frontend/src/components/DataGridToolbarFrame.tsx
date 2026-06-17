@@ -93,7 +93,7 @@ export interface DataGridToolbarFrameProps {
   noAutoCapInputProps: Record<string, unknown>;
   filterFieldSelectStyle: React.CSSProperties;
   filterFieldPopupWidth: number;
-  exportMenu: MenuProps['items'];
+  onOpenExportModal: () => void;
   queryResultCopyMenu: MenuProps['items'];
   dbType: string;
   onResetPendingChanges: () => void;
@@ -194,7 +194,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
   noAutoCapInputProps,
   filterFieldSelectStyle,
   filterFieldPopupWidth,
-  exportMenu,
+  onOpenExportModal,
   queryResultCopyMenu,
   dbType,
   onResetPendingChanges,
@@ -412,7 +412,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
           <>
             {renderToolbarDivider()}
             {canImport && <Button icon={<ImportOutlined />} onClick={onImport}>{translate('data_grid.toolbar.import')}</Button>}
-            {canExport && <Dropdown menu={{ items: exportMenu }}><Button icon={<ExportOutlined />}>{translate('data_grid.toolbar.export')} <DownOutlined /></Button></Dropdown>}
+            {canExport && <Button icon={<ExportOutlined />} onClick={onOpenExportModal}>{translate('data_grid.toolbar.export')}</Button>}
           </>
         )}
 

@@ -17,6 +17,7 @@ import RedisMonitor from './RedisMonitor';
 import TriggerViewer from './TriggerViewer';
 import DefinitionViewer from './DefinitionViewer';
 import TableOverview from './TableOverview';
+import TableExportWorkbench from './TableExportWorkbench';
 import JVMOverview from './JVMOverview';
 import JVMResourceBrowser from './JVMResourceBrowser';
 import JVMAuditViewer from './JVMAuditViewer';
@@ -46,6 +47,7 @@ const getTabKindLabel = (tab: TabData): string => {
   if (tab.type === 'table') return t('tab_manager.kind_badge.table');
   if (tab.type === 'design') return t('tab_manager.kind_badge.design');
   if (tab.type === 'table-overview') return t('tab_manager.kind_badge.table_overview');
+  if (tab.type === 'table-export') return t('tab_manager.kind_badge.table_export');
   if (tab.type.startsWith('redis')) return t('tab_manager.kind_badge.redis');
   if (tab.type.startsWith('jvm')) return t('tab_manager.kind_badge.jvm');
   if (tab.type === 'trigger') return t('tab_manager.kind_badge.trigger');
@@ -66,6 +68,7 @@ const getTabKindTooltipLabel = (tab: TabData): string => {
   if (tab.type === 'table') return t('tab_manager.hover.kind.table');
   if (tab.type === 'design') return t('tab_manager.hover.kind.design');
   if (tab.type === 'table-overview') return t('tab_manager.hover.kind.table_overview');
+  if (tab.type === 'table-export') return t('tab_manager.hover.kind.table_export');
   if (tab.type === 'redis-keys') return t('tab_manager.hover.kind.redis_keys');
   if (tab.type === 'redis-command') return t('tab_manager.hover.kind.redis_command');
   if (tab.type === 'redis-monitor') return t('tab_manager.hover.kind.redis_monitor');
@@ -406,6 +409,9 @@ const TabContent: React.FC<{ tab: TabData; isActive: boolean }> = React.memo(({ 
   }
   if (tab.type === 'table-overview') {
     return <TableOverview tab={tab} />;
+  }
+  if (tab.type === 'table-export') {
+    return <TableExportWorkbench tab={tab} />;
   }
   if (tab.type === 'jvm-overview') {
     return <JVMOverview tab={tab} />;

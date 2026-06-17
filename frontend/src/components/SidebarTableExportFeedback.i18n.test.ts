@@ -3,12 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
 const locales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
-const requiredKeys = [
-  'sidebar.message.exporting_table_format',
-  'sidebar.message.export_success',
-  'sidebar.message.export_failed',
-] as const;
-
 const extractHandleExportBlock = (): string => {
   const start = source.indexOf('const handleExport = async');
   const end = source.indexOf('const handleCopyTableAsInsert', start);
@@ -22,29 +16,22 @@ const placeholders = (value: string): string[] => [...value.matchAll(/\{\{(\w+)\
   .sort();
 
 describe('Sidebar table export feedback i18n', () => {
-  it('localizes handleExport loading, success, and failure wrappers', () => {
+  it('routes handleExport through the progress runner and option-based backend export', () => {
     const block = extractHandleExportBlock();
 
-    expect(block).not.toContain('`正在导出 ${tableName} 为 ${format.toUpperCase()}...`');
-    expect(block).not.toContain("message.success('导出成功')");
-    expect(block).not.toContain("'导出失败: ' + res.message");
-    expect(block).toContain("t('sidebar.message.exporting_table_format'");
-    expect(block).toContain("t('sidebar.message.export_success')");
-    expect(block).toContain("t('sidebar.message.export_failed'");
-    expect(block).toContain('table: tableName');
-    expect(block).toContain('format: format.toUpperCase()');
-    expect(block).toContain('error: res.message');
+    expect(block).not.toContain('ExportTable(');
+    expect(block).toContain('runExportWithProgress({');
+    expect(block).toContain('ExportTableWithOptions(');
+    expect(block).toContain('jobId');
+    expect(block).toContain('totalRowsHint');
+    expect(block).toContain('totalRowsKnown');
   });
 
-  it('keeps table export feedback keys available with stable placeholders', () => {
+  it('keeps the export workbench entry key available across locales', () => {
     locales.forEach((locale) => {
       const catalog = JSON.parse(readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8')) as Record<string, string>;
-      requiredKeys.forEach((key) => {
-        expect(catalog[key], `${locale}:${key}`).toBeTruthy();
-      });
-      expect(placeholders(catalog['sidebar.message.exporting_table_format'])).toEqual(['format', 'table']);
-      expect(placeholders(catalog['sidebar.message.export_success'])).toEqual([]);
-      expect(placeholders(catalog['sidebar.message.export_failed'])).toEqual(['error']);
+      expect(catalog['sidebar.v2_table_menu.open_export_workbench'], `${locale}:sidebar.v2_table_menu.open_export_workbench`).toBeTruthy();
+      expect(placeholders(catalog['sidebar.v2_table_menu.open_export_workbench'])).toEqual([]);
     });
   });
 });

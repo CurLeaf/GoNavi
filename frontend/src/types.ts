@@ -392,6 +392,41 @@ export interface TriggerDefinition {
   statement: string;
 }
 
+export type TableExportScope = "selected" | "page" | "all" | "filteredAll";
+
+export interface TableExportScopeOption {
+  value: TableExportScope;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+}
+
+export type TableExportHistoryStatus =
+  | "idle"
+  | "start"
+  | "running"
+  | "finalizing"
+  | "done"
+  | "error";
+
+export interface TableExportHistoryEntry {
+  jobId: string;
+  targetName: string;
+  startedAt: number;
+  finishedAt: number;
+  format: string;
+  scope: string;
+  scopeLabel: string;
+  strategyLabel: string;
+  status: TableExportHistoryStatus;
+  stage: string;
+  current: number;
+  total: number;
+  totalRowsKnown: boolean;
+  filePath: string;
+  message: string;
+}
+
 export interface TabData {
   id: string;
   title: string;
@@ -407,6 +442,7 @@ export interface TabData {
     | "event-def"
     | "routine-def"
     | "table-overview"
+    | "table-export"
     | "jvm-overview"
     | "jvm-resource"
     | "jvm-audit"
@@ -436,6 +472,10 @@ export interface TabData {
   sidebarLocateKey?: string; // Precise sidebar tree key for locating an object node
   savedQueryId?: string; // Saved query identity for quick-save behavior
   objectType?: 'table' | 'view' | 'materialized-view'; // Table-like object type for shared viewers
+  tableExportScopeOptions?: TableExportScopeOption[];
+  tableExportInitialScope?: TableExportScope;
+  tableExportQueryByScope?: Partial<Record<TableExportScope, string>>;
+  tableExportRowCountByScope?: Partial<Record<TableExportScope, number>>;
   formatRestoreSnapshot?: {
     query: string;
     createdAt: number;

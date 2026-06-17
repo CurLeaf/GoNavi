@@ -75,6 +75,19 @@ describe('tabDisplay', () => {
     expect(buildTabDisplayTitle(tableTab, redisConnection)).toBe('[订单缓存] orders');
   });
 
+  it('keeps table export tabs on the same connection prefix strategy', () => {
+    const exportTab: TabData = {
+      id: 'table-export-1',
+      title: '导出 public.orders',
+      type: 'table-export',
+      connectionId: 'redis-1',
+      dbName: 'app',
+      tableName: 'public.orders',
+    };
+
+    expect(buildTabDisplayTitle(exportTab, redisConnection)).toBe('[订单缓存] 导出 orders');
+  });
+
   it('hides schema prefixes from schema-qualified table tab labels', () => {
     const connection: SavedConnection = {
       id: 'kingbase-1',

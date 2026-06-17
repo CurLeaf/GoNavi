@@ -440,6 +440,9 @@ const buildCompactObjectTabTitle = (tab: TabData): string => {
   if (tab.type === 'table-overview') {
     return stripSchemaFromTableOverviewTitle(tab.title);
   }
+  if (tab.type === 'table-export') {
+    return replaceTitleObjectLabel(tab.title, tab.tableName);
+  }
   if (tab.type === 'view-def') {
     return replaceTitleObjectLabel(tab.title, tab.viewName);
   }
@@ -460,6 +463,7 @@ export const getTabDisplayKindLabel = (tab: TabData): string => {
   if (tab.type === 'table') return 'TABLE';
   if (tab.type === 'design') return 'DESIGN';
   if (tab.type === 'table-overview') return 'DB';
+  if (tab.type === 'table-export') return 'EXPORT';
   if (tab.type.startsWith('redis')) return 'REDIS';
   if (tab.type.startsWith('jvm')) return 'JVM';
   if (tab.type === 'trigger') return 'TRG';
@@ -590,7 +594,12 @@ export const buildTabDisplayTitle = (
   }
 
   const baseTitle = buildCompactObjectTabTitle(tab);
-  if (tab.type !== 'table' && tab.type !== 'design' && tab.type !== 'table-overview') {
+  if (
+    tab.type !== 'table' &&
+    tab.type !== 'design' &&
+    tab.type !== 'table-overview' &&
+    tab.type !== 'table-export'
+  ) {
     return baseTitle;
   }
   if (!connectionName) {

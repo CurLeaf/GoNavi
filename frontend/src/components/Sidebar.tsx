@@ -56,7 +56,7 @@ import {
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 		import { ConnectionTag, SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
 import { getDbIcon } from './DatabaseIcons';
-		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, DBReleaseConnection, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, CreateSQLFile, CreateSQLDirectory, DeleteSQLFile, DeleteSQLDirectory, RenameSQLFile, RenameSQLDirectory, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
+		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, DBReleaseConnection, ExportTableWithOptions, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, CreateSQLFile, CreateSQLDirectory, DeleteSQLFile, DeleteSQLDirectory, RenameSQLFile, RenameSQLDirectory, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
@@ -89,6 +89,8 @@ import { resolveConnectionAccentColor, resolveConnectionIconType } from '../util
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
+import { buildTableExportTab } from '../utils/tableExportTab';
+import { useExportProgressDialog } from './ExportProgressModal';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
 import { getCurrentLanguage, t } from '../i18n';
@@ -1155,6 +1157,7 @@ const Sidebar: React.FC<{
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const { exportProgressModal, runExportWithProgress } = useExportProgressDialog();
   const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
@@ -1479,7 +1482,6 @@ const Sidebar: React.FC<{
   const [externalSQLFileForm] = Form.useForm();
   const [externalSQLFileModalMode, setExternalSQLFileModalMode] = useState<ExternalSQLFileModalMode>('create');
   const [externalSQLFileTarget, setExternalSQLFileTarget] = useState<any>(null);
-
   // Connection Tag Modals
   const [isCreateTagModalOpen, setIsCreateTagModalOpen] = useState(false);
   const [createTagForm] = Form.useForm();
@@ -3787,23 +3789,53 @@ const Sidebar: React.FC<{
       }
   };
 
-  const handleExport = async (node: any, format: string) => {
+  const handleExport = async (node: any, options: { format: string; xlsxMaxRowsPerSheet?: number }) => {
       const { config, dbName, tableName } = node.dataRef;
-      const hide = message.loading(t('sidebar.message.exporting_table_format', {
-          table: tableName,
-          format: format.toUpperCase(),
-      }), 0);
-      const res = await ExportTable(buildRpcConnectionConfig(config) as any, dbName, tableName, format);
-      hide();
-      if (res.success) {
-          message.success(t('sidebar.message.export_success'));
-      } else if (res.message !== '已取消') {
-          message.error(t('sidebar.message.export_failed', { error: res.message }));
+      const rowCount = Number(node?.dataRef?.rowCount);
+      const totalRowsKnown = Number.isFinite(rowCount) && rowCount >= 0;
+      await runExportWithProgress({
+          title: `导出 ${tableName}`,
+          targetName: tableName,
+          format: options.format,
+          totalRows: totalRowsKnown ? rowCount : undefined,
+          run: (jobId) => ExportTableWithOptions(
+              buildRpcConnectionConfig(config) as any,
+              dbName,
+              tableName,
+              {
+                  ...options,
+                  jobId,
+                  totalRowsHint: totalRowsKnown ? rowCount : 0,
+                  totalRowsKnown,
+              } as any,
+          ),
+      });
+  };
+
+  const openExportDialog = async (node: any) => {
+      const tableName = String(node?.dataRef?.tableName || node?.title || '').trim();
+      if (!tableName) {
+          message.warning('未识别到表名，无法导出');
+          return;
       }
+      const connectionId = resolveSidebarNodeConnectionId(node, connectionIds) || String(node?.dataRef?.id || '').trim();
+      const dbName = String(node?.dataRef?.dbName || '').trim();
+      addTab(buildTableExportTab({
+          connectionId,
+          dbName,
+          tableName,
+          title: `导出 ${tableName}`,
+          objectType: node?.type === 'view' ? 'view' : (node?.type === 'materialized-view' ? 'materialized-view' : 'table'),
+          schemaName: typeof node?.dataRef?.schemaName === 'string' ? node.dataRef.schemaName : undefined,
+          sidebarLocateKey: typeof node?.key === 'string' ? node.key : undefined,
+          rowCountByScope: Number.isFinite(Number(node?.dataRef?.rowCount)) && Number(node?.dataRef?.rowCount) >= 0
+              ? { all: Math.trunc(Number(node.dataRef.rowCount)) }
+              : undefined,
+      }));
   };
 
   const handleCopyTableAsInsert = async (node: any) => {
-      await handleExport(node, 'sql');
+      await handleExport(node, { format: 'sql' });
   };
 
   const openTableDdlInDesigner = (node: any) => {
@@ -5957,19 +5989,13 @@ const Sidebar: React.FC<{
               openCreateStarRocksRollup(node);
               return;
           case 'backup-table':
-              void handleExport(node, 'sql');
+              void handleExport(node, { format: 'sql' });
               return;
           case 'refresh-stats':
               refreshV2TableContextMenuStats(node);
               return;
-          case 'export-xlsx':
-              void handleExport(node, 'xlsx');
-              return;
-          case 'export-csv':
-              void handleExport(node, 'csv');
-              return;
-          case 'export-json':
-              void handleExport(node, 'json');
+          case 'export-data':
+              void openExportDialog(node);
               return;
           case 'ai-explain':
               void injectTablePromptToAI(node, 'explain');
@@ -8355,7 +8381,7 @@ const Sidebar: React.FC<{
                 key: 'backup-table',
                 label: '备份表 (SQL)',
                 icon: <SaveOutlined />,
-                onClick: () => handleExport(node, 'sql')
+                onClick: () => handleExport(node, { format: 'sql' })
             },
             {
                 key: 'rename-table',
@@ -8398,15 +8424,9 @@ const Sidebar: React.FC<{
             },
             {
                 key: 'export',
-                label: '导出表数据',
+                label: '导出表数据…',
                 icon: <ExportOutlined />,
-                children: [
-                    { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(node, 'csv') },
-                    { key: 'export-xlsx', label: '导出 Excel (XLSX)', onClick: () => handleExport(node, 'xlsx') },
-                    { key: 'export-json', label: '导出 JSON', onClick: () => handleExport(node, 'json') },
-                    { key: 'export-md', label: '导出 Markdown', onClick: () => handleExport(node, 'md') },
-                    { key: 'export-html', label: '导出 HTML', onClick: () => handleExport(node, 'html') },
-                ]
+                onClick: () => openExportDialog(node),
             }
         ];
     }
@@ -9279,6 +9299,7 @@ const Sidebar: React.FC<{
 
   return (
     <div className={isV2Ui ? 'gn-v2-sidebar-redesign' : undefined} style={{ display: 'flex', height: '100%', minHeight: 0 }}>
+        {exportProgressModal}
         {isV2Ui && renderV2ConnectionRail()}
         <div className={isV2Ui ? 'gn-v2-object-explorer' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, flex: 1 }}>
         {isV2Ui && (
