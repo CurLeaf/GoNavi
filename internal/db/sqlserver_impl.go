@@ -385,6 +385,23 @@ func (e *sqlServerSessionExecer) QueryContext(ctx context.Context, query string)
 	return rows, columns, err
 }
 
+func (e *sqlServerSessionExecer) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	if e == nil || e.conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+	retmsg := &sqlexp.ReturnMessage{}
+	rows, err := e.conn.QueryContext(ctx, query, retmsg)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	return streamRows(rows, consumer)
+}
+
+func (e *sqlServerSessionExecer) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return e.StreamQueryContext(context.Background(), query, consumer)
+}
+
 func (e *sqlServerSessionExecer) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
 	return e.QueryContextWithMessages(context.Background(), query)
 }

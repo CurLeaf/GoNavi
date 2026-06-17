@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/db"
+	"github.com/xuri/excelize/v2"
 )
 
 type fakeExportQueryDB struct {
@@ -22,6 +24,23 @@ type fakeExportQueryDB struct {
 	lastQuery          string
 	lastContextTimeout time.Duration
 	hasContextDeadline bool
+}
+
+type fakeStreamExportDB struct {
+	fakeExportQueryDB
+	streamData []map[string]interface{}
+	streamCols []string
+	streamHits int
+	queryHits  int
+}
+
+type fakeValueStreamExportDB struct {
+	fakeExportQueryDB
+	streamCols   []string
+	streamValues [][]interface{}
+	streamHits   int
+	queryHits    int
+	valueHits    int
 }
 
 func (f *fakeExportQueryDB) Connect(config connection.ConnectionConfig) error { return nil }
@@ -63,6 +82,77 @@ func (f *fakeExportQueryDB) GetTriggers(dbName, tableName string) ([]connection.
 	return nil, nil
 }
 
+func (f *fakeStreamExportDB) Query(query string) ([]map[string]interface{}, []string, error) {
+	f.queryHits++
+	return f.fakeExportQueryDB.Query(query)
+}
+
+func (f *fakeStreamExportDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	f.queryHits++
+	return f.fakeExportQueryDB.QueryContext(ctx, query)
+}
+
+func (f *fakeStreamExportDB) StreamQuery(query string, consumer db.QueryStreamConsumer) error {
+	return f.StreamQueryContext(context.Background(), query, consumer)
+}
+
+func (f *fakeStreamExportDB) StreamQueryContext(_ context.Context, query string, consumer db.QueryStreamConsumer) error {
+	f.streamHits++
+	f.lastQuery = query
+	if err := consumer.SetColumns(f.streamCols); err != nil {
+		return err
+	}
+	for _, row := range f.streamData {
+		if err := consumer.ConsumeRow(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *fakeValueStreamExportDB) Query(query string) ([]map[string]interface{}, []string, error) {
+	f.queryHits++
+	return f.fakeExportQueryDB.Query(query)
+}
+
+func (f *fakeValueStreamExportDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	f.queryHits++
+	return f.fakeExportQueryDB.QueryContext(ctx, query)
+}
+
+func (f *fakeValueStreamExportDB) StreamQuery(query string, consumer db.QueryStreamConsumer) error {
+	return f.StreamQueryContext(context.Background(), query, consumer)
+}
+
+func (f *fakeValueStreamExportDB) StreamQueryContext(_ context.Context, query string, consumer db.QueryStreamConsumer) error {
+	f.streamHits++
+	f.lastQuery = query
+	if err := consumer.SetColumns(f.streamCols); err != nil {
+		return err
+	}
+	if valueConsumer, ok := consumer.(db.QueryStreamValueConsumer); ok {
+		for _, row := range f.streamValues {
+			f.valueHits++
+			if err := valueConsumer.ConsumeRowValues(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, row := range f.streamValues {
+		entry := make(map[string]interface{}, len(f.streamCols))
+		for idx, column := range f.streamCols {
+			if idx < len(row) {
+				entry[column] = row[idx]
+			}
+		}
+		if err := consumer.ConsumeRow(entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func TestFormatExportCellText_FloatNoScientificNotation(t *testing.T) {
 	got := formatExportCellText(1.445663e+06)
 	if strings.Contains(strings.ToLower(got), "e+") || strings.Contains(strings.ToLower(got), "e-") {
@@ -86,7 +176,7 @@ func TestWriteRowsToFile_Markdown_NumberKeepPlainText(t *testing.T) {
 	}
 	columns := []string{"id"}
 
-	if err := writeRowsToFile(f, data, columns, "md"); err != nil {
+	if err := writeRowsToFile(f, data, columns, ExportFileOptions{Format: "md"}); err != nil {
 		t.Fatalf("写入 md 失败: %v", err)
 	}
 
@@ -116,7 +206,7 @@ func TestWriteRowsToFile_JSON_NumberKeepPlainText(t *testing.T) {
 	}
 	columns := []string{"id"}
 
-	if err := writeRowsToFile(f, data, columns, "json"); err != nil {
+	if err := writeRowsToFile(f, data, columns, ExportFileOptions{Format: "json"}); err != nil {
 		t.Fatalf("写入 json 失败: %v", err)
 	}
 
@@ -163,6 +253,24 @@ func TestFormatExportCellText_TimeValue_KeepWallClock(t *testing.T) {
 	got := formatExportCellText(utc)
 	if got != "2026-04-07 10:44:32" {
 		t.Fatalf("time.Time 导出应保持原始钟表时间，want=%q got=%q", "2026-04-07 10:44:32", got)
+	}
+}
+
+func TestFormatExportCellText_StringRFC3339_KeepWallClock(t *testing.T) {
+	originalLocal := time.Local
+	time.Local = time.FixedZone("UTC+8", 8*60*60)
+	defer func() { time.Local = originalLocal }()
+
+	got := formatExportCellText("2026-04-07T10:44:32Z")
+	if got != "2026-04-07 10:44:32" {
+		t.Fatalf("字符串时间导出应保持原始钟表时间，want=%q got=%q", "2026-04-07 10:44:32", got)
+	}
+}
+
+func TestFormatExportCellText_PlainString_Untouched(t *testing.T) {
+	got := formatExportCellText("plain export payload without timezone marker")
+	if got != "plain export payload without timezone marker" {
+		t.Fatalf("普通字符串不应被改写，got=%q", got)
 	}
 }
 
@@ -248,6 +356,105 @@ func TestQueryDataForExport_UsesLargerConfiguredTimeout(t *testing.T) {
 	}
 }
 
+func TestExportQueryResultToFile_UsesStreamQueryPath(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-stream-*.csv")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	fake := &fakeStreamExportDB{
+		fakeExportQueryDB: fakeExportQueryDB{
+			err:  context.DeadlineExceeded,
+			data: []map[string]interface{}{{"id": 999}},
+			cols: []string{"id"},
+		},
+		streamCols: []string{"id", "name"},
+		streamData: []map[string]interface{}{
+			{"id": 1, "name": "alice"},
+			{"id": 2, "name": "bob"},
+		},
+	}
+
+	rowCount, columns, err := exportQueryResultToFile(
+		f,
+		fake,
+		connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+		"SELECT id, name FROM users",
+		ExportFileOptions{Format: "csv"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("exportQueryResultToFile 返回错误: %v", err)
+	}
+	if fake.streamHits != 1 {
+		t.Fatalf("应优先使用流式查询，streamHits=%d", fake.streamHits)
+	}
+	if fake.queryHits != 0 {
+		t.Fatalf("不应回退到缓冲查询，queryHits=%d", fake.queryHits)
+	}
+	if rowCount != 2 {
+		t.Fatalf("导出行数异常，want=2 got=%d", rowCount)
+	}
+	if len(columns) != 2 || columns[0] != "id" || columns[1] != "name" {
+		t.Fatalf("导出列异常，got=%v", columns)
+	}
+
+	contentBytes, err := os.ReadFile(f.Name())
+	if err != nil {
+		t.Fatalf("读取导出文件失败: %v", err)
+	}
+	content := string(contentBytes)
+	if !strings.Contains(content, "alice") || !strings.Contains(content, "bob") {
+		t.Fatalf("流式导出内容异常: %s", content)
+	}
+}
+
+func TestExportQueryResultToFile_UsesValueStreamPathWhenAvailable(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-stream-values-*.csv")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	fake := &fakeValueStreamExportDB{
+		streamCols: []string{"id", "name"},
+		streamValues: [][]interface{}{
+			{1, "alice"},
+			{2, "bob"},
+		},
+	}
+
+	rowCount, columns, err := exportQueryResultToFile(
+		f,
+		fake,
+		connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+		"SELECT id, name FROM users",
+		ExportFileOptions{Format: "csv"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("exportQueryResultToFile 返回错误: %v", err)
+	}
+	if fake.streamHits != 1 {
+		t.Fatalf("应优先使用流式查询，streamHits=%d", fake.streamHits)
+	}
+	if fake.valueHits != 2 {
+		t.Fatalf("应走值数组流式路径，valueHits=%d", fake.valueHits)
+	}
+	if fake.queryHits != 0 {
+		t.Fatalf("不应回退到缓冲查询，queryHits=%d", fake.queryHits)
+	}
+	if rowCount != 2 {
+		t.Fatalf("导出行数异常，want=2 got=%d", rowCount)
+	}
+	if len(columns) != 2 || columns[0] != "id" || columns[1] != "name" {
+		t.Fatalf("导出列异常，got=%v", columns)
+	}
+}
+
 func TestGetExportQueryTimeout_ClickHouseUsesLongerMinimum(t *testing.T) {
 	timeout := getExportQueryTimeout(connection.ConnectionConfig{
 		Type:    "clickhouse",
@@ -300,7 +507,7 @@ func TestWriteRowsToFile_HTML_EscapeAndStyle(t *testing.T) {
 	}
 	columns := []string{"name", "note", "nullable"}
 
-	if err := writeRowsToFile(f, data, columns, "html"); err != nil {
+	if err := writeRowsToFile(f, data, columns, ExportFileOptions{Format: "html"}); err != nil {
 		t.Fatalf("写入 html 失败: %v", err)
 	}
 
@@ -343,13 +550,182 @@ func TestWriteRowsToFile_HTML_EscapeHeader(t *testing.T) {
 
 	columnName := "<b>name</b>"
 	data := []map[string]interface{}{{columnName: "ok"}}
-	if err := writeRowsToFile(f, data, []string{columnName}, "html"); err != nil {
+	if err := writeRowsToFile(f, data, []string{columnName}, ExportFileOptions{Format: "html"}); err != nil {
 		t.Fatalf("写入 html 失败: %v", err)
 	}
 	contentBytes, _ := os.ReadFile(f.Name())
 	content := string(contentBytes)
 	if !strings.Contains(content, "<th>&lt;b&gt;name&lt;/b&gt;</th>") || strings.Contains(content, "<th><b>name</b></th>") {
 		t.Fatalf("html 表头未正确转义: %s", content)
+	}
+}
+
+func TestWriteRowsToFile_XLSX_SplitsByMaxRowsPerSheet(t *testing.T) {
+	f, err := os.CreateTemp("", "gonavi-export-*.xlsx")
+	if err != nil {
+		t.Fatalf("创建临时文件失败: %v", err)
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+
+	data := []map[string]interface{}{
+		{"id": 1, "name": "alice"},
+		{"id": 2, "name": "bob"},
+		{"id": 3, "name": "carol"},
+	}
+	columns := []string{"id", "name"}
+
+	if err := writeRowsToFile(f, data, columns, ExportFileOptions{
+		Format:              "xlsx",
+		XLSXMaxRowsPerSheet: 2,
+	}); err != nil {
+		t.Fatalf("写入 xlsx 失败: %v", err)
+	}
+
+	workbook, err := excelize.OpenFile(f.Name())
+	if err != nil {
+		t.Fatalf("打开 xlsx 失败: %v", err)
+	}
+	defer workbook.Close()
+
+	sheets := workbook.GetSheetList()
+	if len(sheets) != 2 {
+		t.Fatalf("sheet 数量异常，want=2 got=%d (%v)", len(sheets), sheets)
+	}
+
+	rows1, err := workbook.GetRows("Sheet1")
+	if err != nil {
+		t.Fatalf("读取 Sheet1 失败: %v", err)
+	}
+	if len(rows1) != 3 {
+		t.Fatalf("Sheet1 行数异常，want=3 got=%d", len(rows1))
+	}
+
+	rows2, err := workbook.GetRows("Sheet2")
+	if err != nil {
+		t.Fatalf("读取 Sheet2 失败: %v", err)
+	}
+	if len(rows2) != 2 {
+		t.Fatalf("Sheet2 行数异常，want=2 got=%d", len(rows2))
+	}
+	if rows2[1][1] != "carol" {
+		t.Fatalf("Sheet2 数据异常，want=%q got=%q", "carol", rows2[1][1])
+	}
+}
+
+func benchmarkExportRows(rowCount int) ([]map[string]interface{}, []string) {
+	columns := []string{"id", "name", "note", "created_at", "status"}
+	rows := make([]map[string]interface{}, rowCount)
+	for i := 0; i < rowCount; i++ {
+		rows[i] = map[string]interface{}{
+			"id":         i + 1,
+			"name":       "benchmark-user",
+			"note":       "plain export payload without timezone marker",
+			"created_at": "2026-06-17 12:34:56",
+			"status":     "enabled",
+		}
+	}
+	return rows, columns
+}
+
+func benchmarkExportRowValues(rowCount int) ([][]interface{}, []string) {
+	columns := []string{"id", "name", "note", "created_at", "status"}
+	rows := make([][]interface{}, rowCount)
+	for i := 0; i < rowCount; i++ {
+		rows[i] = []interface{}{
+			i + 1,
+			"benchmark-user",
+			"plain export payload without timezone marker",
+			"2026-06-17 12:34:56",
+			"enabled",
+		}
+	}
+	return rows, columns
+}
+
+func BenchmarkFormatExportCellText_PlainString(b *testing.B) {
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = formatExportCellText("plain export payload without timezone marker")
+	}
+}
+
+func BenchmarkWriteRowsToFile_XLSX_20000Rows(b *testing.B) {
+	rows, columns := benchmarkExportRows(20000)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		f, err := os.CreateTemp("", "gonavi-export-bench-*.xlsx")
+		if err != nil {
+			b.Fatalf("创建临时文件失败: %v", err)
+		}
+		name := f.Name()
+		if err := writeRowsToFile(f, rows, columns, ExportFileOptions{Format: "xlsx"}); err != nil {
+			_ = os.Remove(name)
+			b.Fatalf("写入 xlsx 失败: %v", err)
+		}
+		if err := os.Remove(name); err != nil {
+			b.Fatalf("删除临时文件失败: %v", err)
+		}
+	}
+}
+
+func BenchmarkExportQueryResultToFile_XLSX_StreamMap_20000Rows(b *testing.B) {
+	rows, columns := benchmarkExportRows(20000)
+	streamDB := &fakeStreamExportDB{
+		streamCols: columns,
+		streamData: rows,
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		f, err := os.CreateTemp("", "gonavi-export-stream-map-*.xlsx")
+		if err != nil {
+			b.Fatalf("创建临时文件失败: %v", err)
+		}
+		name := f.Name()
+		if _, _, err := exportQueryResultToFile(
+			f,
+			streamDB,
+			connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+			"SELECT * FROM users",
+			ExportFileOptions{Format: "xlsx"},
+			nil,
+		); err != nil {
+			_ = os.Remove(name)
+			b.Fatalf("流式 map 导出失败: %v", err)
+		}
+		if err := os.Remove(name); err != nil {
+			b.Fatalf("删除临时文件失败: %v", err)
+		}
+	}
+}
+
+func BenchmarkExportQueryResultToFile_XLSX_StreamValues_20000Rows(b *testing.B) {
+	rows, columns := benchmarkExportRowValues(20000)
+	streamDB := &fakeValueStreamExportDB{
+		streamCols:   columns,
+		streamValues: rows,
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		f, err := os.CreateTemp("", "gonavi-export-stream-values-*.xlsx")
+		if err != nil {
+			b.Fatalf("创建临时文件失败: %v", err)
+		}
+		name := f.Name()
+		if _, _, err := exportQueryResultToFile(
+			f,
+			streamDB,
+			connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+			"SELECT * FROM users",
+			ExportFileOptions{Format: "xlsx"},
+			nil,
+		); err != nil {
+			_ = os.Remove(name)
+			b.Fatalf("流式值数组导出失败: %v", err)
+		}
+		if err := os.Remove(name); err != nil {
+			b.Fatalf("删除临时文件失败: %v", err)
+		}
 	}
 }
 

@@ -36,6 +36,9 @@ const sqlFileBatchMaxStatements = 1000
 const sqlFileBatchMaxBytes = 4 * 1024 * 1024
 const sqlFileProgressStatementInterval = 100
 const sqlFileProgressTimeInterval = time.Second
+const exportProgressEvent = "export:progress"
+const exportProgressRowInterval int64 = 1000
+const exportProgressTimeInterval = 500 * time.Millisecond
 const defaultAppLogTailLineLimit = 80
 const maxAppLogTailLineLimit = 200
 const appLogTailReadWindowBytes int64 = 256 * 1024
@@ -89,6 +92,31 @@ type SQLDirectoryEntry struct {
 	Children []SQLDirectoryEntry `json:"children,omitempty"`
 }
 
+type exportProgressPayload struct {
+	JobID          string `json:"jobId"`
+	Status         string `json:"status"`
+	Stage          string `json:"stage"`
+	Current        int64  `json:"current"`
+	Total          int64  `json:"total,omitempty"`
+	TotalRowsKnown bool   `json:"totalRowsKnown,omitempty"`
+	Format         string `json:"format,omitempty"`
+	TargetName     string `json:"targetName,omitempty"`
+	FilePath       string `json:"filePath,omitempty"`
+	Message        string `json:"message,omitempty"`
+}
+
+type exportProgressReporter struct {
+	app            *App
+	jobID          string
+	format         string
+	targetName     string
+	filePath       string
+	totalRows      int64
+	totalRowsKnown bool
+	lastRows       int64
+	lastEmittedAt  time.Time
+}
+
 type appLogTailSnapshot struct {
 	LogPath               string         `json:"logPath"`
 	Keyword               string         `json:"keyword,omitempty"`
@@ -123,6 +151,73 @@ func normalizeSQLDirectoryName(rawName string) (string, error) {
 		return "", fmt.Errorf("目录名不能包含路径分隔符")
 	}
 	return name, nil
+}
+
+func newExportProgressReporter(a *App, options ExportFileOptions, targetName string, filePath string) *exportProgressReporter {
+	jobID := strings.TrimSpace(options.JobID)
+	if a == nil || a.ctx == nil || jobID == "" {
+		return nil
+	}
+	return &exportProgressReporter{
+		app:            a,
+		jobID:          jobID,
+		format:         strings.ToLower(strings.TrimSpace(options.Format)),
+		targetName:     strings.TrimSpace(targetName),
+		filePath:       strings.TrimSpace(filePath),
+		totalRows:      normalizeExportTotalRowsHint(options.TotalRowsHint, options.TotalRowsKnown),
+		totalRowsKnown: options.TotalRowsKnown,
+	}
+}
+
+func (r *exportProgressReporter) emit(status string, stage string, current int64, message string, force bool) {
+	if r == nil || r.app == nil || r.app.ctx == nil || r.jobID == "" {
+		return
+	}
+	now := time.Now()
+	if !force && status == "running" {
+		if current-r.lastRows < exportProgressRowInterval && (!r.lastEmittedAt.IsZero() && now.Sub(r.lastEmittedAt) < exportProgressTimeInterval) {
+			return
+		}
+	}
+	payload := exportProgressPayload{
+		JobID:          r.jobID,
+		Status:         strings.TrimSpace(status),
+		Stage:          strings.TrimSpace(stage),
+		Current:        current,
+		Total:          r.totalRows,
+		TotalRowsKnown: r.totalRowsKnown,
+		Format:         r.format,
+		TargetName:     r.targetName,
+		FilePath:       r.filePath,
+		Message:        strings.TrimSpace(message),
+	}
+	runtime.EventsEmit(r.app.ctx, exportProgressEvent, payload)
+	r.lastRows = current
+	r.lastEmittedAt = now
+}
+
+func (r *exportProgressReporter) Start(stage string) {
+	r.emit("start", stage, 0, "", true)
+}
+
+func (r *exportProgressReporter) Rows(current int64, stage string) {
+	r.emit("running", stage, current, "", false)
+}
+
+func (r *exportProgressReporter) ForceRunning(current int64, stage string) {
+	r.emit("running", stage, current, "", true)
+}
+
+func (r *exportProgressReporter) Finalizing(current int64) {
+	r.emit("finalizing", "正在完成文件写入", current, "", true)
+}
+
+func (r *exportProgressReporter) Done(current int64) {
+	r.emit("done", "导出完成", current, "", true)
+}
+
+func (r *exportProgressReporter) Error(current int64, message string) {
+	r.emit("error", "导出失败", current, message, true)
 }
 
 func normalizeSQLDirectoryPath(directoryPath string) (string, error) {
@@ -1730,6 +1825,55 @@ func parseTemporalString(raw string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+func looksLikeTemporalText(raw string) bool {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return false
+	}
+
+	if len(text) >= 10 &&
+		isDigit(text[0]) &&
+		isDigit(text[1]) &&
+		isDigit(text[2]) &&
+		isDigit(text[3]) &&
+		text[4] == '-' &&
+		isDigit(text[5]) &&
+		isDigit(text[6]) &&
+		text[7] == '-' &&
+		isDigit(text[8]) &&
+		isDigit(text[9]) {
+		return true
+	}
+
+	if len(text) >= 8 &&
+		isDigit(text[0]) &&
+		isDigit(text[1]) &&
+		text[2] == ':' &&
+		isDigit(text[3]) &&
+		isDigit(text[4]) &&
+		text[5] == ':' &&
+		isDigit(text[6]) &&
+		isDigit(text[7]) {
+		return true
+	}
+
+	return false
+}
+
+func isDigit(ch byte) bool {
+	return ch >= '0' && ch <= '9'
+}
+
+func normalizeExportTemporalText(text string) string {
+	if !looksLikeTemporalText(text) {
+		return text
+	}
+	if parsed, ok := parseTemporalString(text); ok {
+		return parsed.Format("2006-01-02 15:04:05")
+	}
+	return text
+}
+
 func normalizeImportTemporalValue(dbType, columnType, raw string) string {
 	text := strings.TrimSpace(raw)
 	if text == "" {
@@ -2019,6 +2163,12 @@ func (a *App) PreviewChanges(config connection.ConnectionConfig, dbName, tableNa
 }
 
 func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tableName string, format string) connection.QueryResult {
+	return a.ExportTableWithOptions(config, dbName, tableName, ExportFileOptions{Format: format})
+}
+
+func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName string, tableName string, options ExportFileOptions) connection.QueryResult {
+	options = normalizeExportFileOptions("", options)
+	format := options.Format
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           fmt.Sprintf("Export %s", tableName),
 		DefaultFilename: fmt.Sprintf("%s.%s", tableName, format),
@@ -2028,17 +2178,21 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
+	reporter := newExportProgressReporter(a, options, tableName, filename)
+	reporter.Start("正在准备导出")
 	runConfig := normalizeRunConfig(config, dbName)
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
+		reporter.Error(0, err.Error())
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	format = strings.ToLower(format)
 	if format == "sql" {
+		reporter.Start("正在导出 SQL 文件")
 		f, err := os.Create(filename)
 		if err != nil {
+			reporter.Error(0, err.Error())
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 		defer f.Close()
@@ -2047,35 +2201,39 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 		defer w.Flush()
 
 		if err := writeSQLHeader(w, runConfig, dbName); err != nil {
+			reporter.Error(0, err.Error())
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 		viewLookup := listViewNameLookup(dbInst, runConfig, dbName)
 		if err := dumpTableSQL(w, dbInst, runConfig, dbName, tableName, true, true, viewLookup); err != nil {
+			reporter.Error(0, err.Error())
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 		if err := writeSQLFooter(w, runConfig); err != nil {
+			reporter.Error(0, err.Error())
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 
+		reporter.Finalizing(0)
+		reporter.Done(0)
 		return connection.QueryResult{Success: true, Message: "导出完成"}
 	}
 
 	dbType := resolveDDLDBType(config)
 	query := fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(dbType, tableName))
 
-	data, columns, err := queryDataForExport(dbInst, runConfig, query)
-	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
-	}
-
 	f, err := os.Create(filename)
 	if err != nil {
+		reporter.Error(0, err.Error())
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	defer f.Close()
-	if err := writeRowsToFile(f, data, columns, format); err != nil {
+	rowCount, _, err := exportQueryResultToFile(f, dbInst, runConfig, query, options, reporter)
+	if err != nil {
+		reporter.Error(rowCount, "写入失败："+err.Error())
 		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
 	}
+	reporter.Done(rowCount)
 
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
@@ -3181,35 +3339,24 @@ func dumpTableSQL(
 	qualified := qualifyTable(schemaName, pureTableName)
 	dbType := resolveDDLDBType(config)
 	selectSQL := fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(dbType, qualified))
-	data, columns, err := queryDataForExport(dbInst, config, selectSQL)
-	if err != nil {
-		return err
-	}
 	columnTypeMap := map[string]string{}
 	if defs, colErr := dbInst.GetColumns(schemaName, pureTableName); colErr == nil {
 		columnTypeMap = buildImportColumnTypeMap(defs)
 	}
-	if len(data) == 0 {
+	insertConsumer := &sqlInsertExportConsumer{
+		w:             w,
+		dbType:        dbType,
+		quotedTable:   quoteQualifiedIdentByType(dbType, qualified),
+		columnTypeMap: columnTypeMap,
+	}
+	if err := streamQueryDataForExport(dbInst, config, selectSQL, insertConsumer); err != nil {
+		return err
+	}
+	if insertConsumer.rowCount == 0 {
 		if _, err := w.WriteString("-- (0 rows)\n"); err != nil {
 			return err
 		}
 		return nil
-	}
-
-	quotedCols := make([]string, 0, len(columns))
-	for _, c := range columns {
-		quotedCols = append(quotedCols, quoteIdentByType(dbType, c))
-	}
-	quotedTable := quoteQualifiedIdentByType(dbType, qualified)
-
-	for _, row := range data {
-		values := make([]string, 0, len(columns))
-		for _, c := range columns {
-			values = append(values, formatImportSQLValue(dbType, columnTypeMap[normalizeColumnName(c)], row[c]))
-		}
-		if _, err := w.WriteString(fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);\n", quotedTable, strings.Join(quotedCols, ", "), strings.Join(values, ", "))); err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -3217,9 +3364,19 @@ func dumpTableSQL(
 
 // ExportData exports provided data to a file
 func (a *App) ExportData(data []map[string]interface{}, columns []string, defaultName string, format string) connection.QueryResult {
+	return a.ExportDataWithOptions(data, columns, defaultName, ExportFileOptions{Format: format})
+}
+
+func (a *App) ExportDataWithOptions(data []map[string]interface{}, columns []string, defaultName string, options ExportFileOptions) connection.QueryResult {
 	if defaultName == "" {
 		defaultName = "export"
 	}
+	options = normalizeExportFileOptions("", options)
+	if !options.TotalRowsKnown {
+		options.TotalRowsKnown = true
+		options.TotalRowsHint = int64(len(data))
+	}
+	format := options.Format
 	logger.Infof("ExportData 开始：rows=%d cols=%d format=%s defaultName=%s", len(data), len(columns), strings.ToLower(strings.TrimSpace(format)), strings.TrimSpace(defaultName))
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Export Data",
@@ -3231,24 +3388,34 @@ func (a *App) ExportData(data []map[string]interface{}, columns []string, defaul
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 	logger.Infof("ExportData 选定文件：%s", filename)
+	reporter := newExportProgressReporter(a, options, defaultName, filename)
+	reporter.Start("正在准备导出")
 
 	f, err := os.Create(filename)
 	if err != nil {
+		reporter.Error(0, err.Error())
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	defer f.Close()
-	if err := writeRowsToFile(f, data, columns, format); err != nil {
+	writtenRows, err := writeRowsToFileWithReporter(f, data, columns, options, reporter)
+	if err != nil {
 		logger.Warnf("ExportData 写入失败：file=%s err=%v", filename, err)
+		reporter.Error(writtenRows, "写入失败："+err.Error())
 		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
 	}
 
 	logger.Infof("ExportData 完成：file=%s rows=%d", filename, len(data))
+	reporter.Done(writtenRows)
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
 // ExportQuery exports by executing the provided SELECT query on backend side.
 // This avoids frontend IPC payload limits when exporting very large/long-text columns (e.g. base64).
 func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, query string, defaultName string, format string) connection.QueryResult {
+	return a.ExportQueryWithOptions(config, dbName, query, defaultName, ExportFileOptions{Format: format})
+}
+
+func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName string, query string, defaultName string, options ExportFileOptions) connection.QueryResult {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return connection.QueryResult{Success: false, Message: "查询语句不能为空"}
@@ -3257,6 +3424,8 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 	if defaultName == "" {
 		defaultName = "export"
 	}
+	options = normalizeExportFileOptions("", options)
+	format := options.Format
 
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Export Query Result",
@@ -3267,36 +3436,38 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 	logger.Infof("ExportQuery 开始：type=%s db=%s format=%s file=%s sql=%q", strings.TrimSpace(config.Type), strings.TrimSpace(dbName), strings.ToLower(strings.TrimSpace(format)), filename, sqlSnippet(query))
+	reporter := newExportProgressReporter(a, options, defaultName, filename)
+	reporter.Start("正在准备导出")
 
 	runConfig := normalizeRunConfig(config, dbName)
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
+		reporter.Error(0, err.Error())
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
 	if !looksLikeSelectOrWith(query) {
+		reporter.Error(0, "仅支持 SELECT/WITH 查询导出")
 		return connection.QueryResult{Success: false, Message: "仅支持 SELECT/WITH 查询导出"}
-	}
-
-	data, columns, err := queryDataForExport(dbInst, runConfig, query)
-	if err != nil {
-		logger.Warnf("ExportQuery 查询失败：type=%s db=%s err=%v sql=%q", strings.TrimSpace(config.Type), strings.TrimSpace(dbName), err, sqlSnippet(query))
-		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	f, err := os.Create(filename)
 	if err != nil {
+		reporter.Error(0, err.Error())
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	defer f.Close()
 
-	if err := writeRowsToFile(f, data, columns, format); err != nil {
-		logger.Warnf("ExportQuery 写入失败：file=%s err=%v", filename, err)
-		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
+	rowCount, columns, err := exportQueryResultToFile(f, dbInst, runConfig, query, options, reporter)
+	if err != nil {
+		logger.Warnf("ExportQuery 查询失败：type=%s db=%s err=%v sql=%q", strings.TrimSpace(config.Type), strings.TrimSpace(dbName), err, sqlSnippet(query))
+		reporter.Error(rowCount, err.Error())
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	logger.Infof("ExportQuery 完成：file=%s rows=%d cols=%d", filename, len(data), len(columns))
+	logger.Infof("ExportQuery 完成：file=%s rows=%d cols=%d", filename, rowCount, len(columns))
+	reporter.Done(rowCount)
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
@@ -3341,128 +3512,754 @@ func getExportQueryTimeout(config connection.ConnectionConfig) time.Duration {
 	return timeout
 }
 
-func writeRowsToFile(f *os.File, data []map[string]interface{}, columns []string, format string) error {
-	format = strings.ToLower(strings.TrimSpace(format))
-	if f == nil {
-		return fmt.Errorf("file required")
-	}
+type exportFileWriter interface {
+	db.QueryStreamConsumer
+	Close() error
+}
 
-	// xlsx 使用 excelize 写入真正的 Excel 格式
-	if format == "xlsx" {
-		return writeRowsToXlsx(f.Name(), data, columns)
-	}
+type exportValueStreamConsumer interface {
+	ConsumeRowValues(values []interface{}) error
+}
 
-	// html 使用内嵌 CSS 输出可直接浏览器预览的独立页面
-	if format == "html" {
-		return writeRowsToHTML(f, data, columns)
-	}
+type countingExportConsumer struct {
+	delegate db.QueryStreamConsumer
+	columns  []string
+	rowCount int64
+	reporter *exportProgressReporter
+}
 
-	// 如果列名为空但数据不为空，从所有数据行提取所有键
-	if len(columns) == 0 && len(data) > 0 {
-		keySet := make(map[string]bool)
-		for _, row := range data {
-			for key := range row {
-				keySet[key] = true
-			}
-		}
-		// 排序以确保输出一致
-		for key := range keySet {
-			columns = append(columns, key)
-		}
-		sort.Strings(columns)
-	}
-
-	var csvWriter *csv.Writer
-	var jsonEncoder *json.Encoder
-	isJsonFirstRow := true
-
-	switch format {
-	case "csv":
-		if _, err := f.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+func (c *countingExportConsumer) SetColumns(columns []string) error {
+	c.columns = append([]string(nil), columns...)
+	if c.delegate != nil {
+		if err := c.delegate.SetColumns(columns); err != nil {
 			return err
 		}
-		csvWriter = csv.NewWriter(f)
-		if err := csvWriter.Write(columns); err != nil {
-			return err
-		}
-	case "json":
-		if _, err := f.WriteString("[\n"); err != nil {
-			return err
-		}
-		jsonEncoder = json.NewEncoder(f)
-		jsonEncoder.SetIndent("  ", "  ")
-	case "md":
-		if _, err := fmt.Fprintf(f, "| %s |\n", strings.Join(columns, " | ")); err != nil {
-			return err
-		}
-		seps := make([]string, len(columns))
-		for i := range seps {
-			seps[i] = "---"
-		}
-		if _, err := fmt.Fprintf(f, "| %s |\n", strings.Join(seps, " | ")); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("unsupported format: %s", format)
 	}
+	if c.reporter != nil {
+		c.reporter.ForceRunning(c.rowCount, "正在写入文件")
+	}
+	return nil
+}
 
-	for _, rowMap := range data {
-		record := make([]string, len(columns))
-		for i, col := range columns {
-			val := rowMap[col]
-			if val == nil {
-				record[i] = "NULL"
-				continue
-			}
-
-			s := formatExportCellText(val)
-			if format == "md" {
-				s = strings.ReplaceAll(s, "|", "\\|")
-				s = strings.ReplaceAll(s, "\n", "<br>")
-			}
-			record[i] = s
+func (c *countingExportConsumer) ConsumeRow(row map[string]interface{}) error {
+	if c.delegate != nil {
+		if err := c.delegate.ConsumeRow(row); err != nil {
+			return err
 		}
+	}
+	c.rowCount++
+	if c.reporter != nil {
+		c.reporter.Rows(c.rowCount, "正在写入文件")
+	}
+	return nil
+}
 
-		switch format {
-		case "csv":
-			if err := csvWriter.Write(record); err != nil {
+func (c *countingExportConsumer) ConsumeRowValues(values []interface{}) error {
+	if c.delegate != nil {
+		if valueConsumer, ok := c.delegate.(exportValueStreamConsumer); ok {
+			if err := valueConsumer.ConsumeRowValues(values); err != nil {
 				return err
 			}
-		case "json":
-			if !isJsonFirstRow {
-				if _, err := f.WriteString(",\n"); err != nil {
-					return err
+		} else {
+			row := make(map[string]interface{}, len(c.columns))
+			for i, column := range c.columns {
+				if i < len(values) {
+					row[column] = values[i]
+				} else {
+					row[column] = nil
 				}
 			}
-			exportedRow := make(map[string]interface{}, len(columns))
-			for _, col := range columns {
-				exportedRow[col] = normalizeExportJSONValue(rowMap[col])
-			}
-			if err := jsonEncoder.Encode(exportedRow); err != nil {
-				return err
-			}
-			isJsonFirstRow = false
-		case "md":
-			if _, err := fmt.Fprintf(f, "| %s |\n", strings.Join(record, " | ")); err != nil {
+			if err := c.delegate.ConsumeRow(row); err != nil {
 				return err
 			}
 		}
 	}
-
-	if format == "csv" {
-		csvWriter.Flush()
-		if err := csvWriter.Error(); err != nil {
-			return err
-		}
+	c.rowCount++
+	if c.reporter != nil {
+		c.reporter.Rows(c.rowCount, "正在写入文件")
 	}
-
-	if format == "json" {
-		if _, err := f.WriteString("\n]"); err != nil {
-			return err
-		}
-	}
-
 	return nil
+}
+
+type csvExportFileWriter struct {
+	writer  *csv.Writer
+	columns []string
+	record  []string
+}
+
+func newCSVExportFileWriter(f *os.File) (*csvExportFileWriter, error) {
+	if _, err := f.Write([]byte{0xEF, 0xBB, 0xBF}); err != nil {
+		return nil, err
+	}
+	return &csvExportFileWriter{writer: csv.NewWriter(f)}, nil
+}
+
+func (w *csvExportFileWriter) SetColumns(columns []string) error {
+	w.columns = append([]string(nil), columns...)
+	w.record = make([]string, len(columns))
+	return w.writer.Write(columns)
+}
+
+func (w *csvExportFileWriter) ConsumeRow(row map[string]interface{}) error {
+	return w.writer.Write(fillExportRecordFromRow(w.record, row, w.columns, false))
+}
+
+func (w *csvExportFileWriter) ConsumeRowValues(values []interface{}) error {
+	return w.writer.Write(fillExportRecordFromValues(w.record, values, false))
+}
+
+func (w *csvExportFileWriter) Close() error {
+	w.writer.Flush()
+	return w.writer.Error()
+}
+
+type jsonExportFileWriter struct {
+	file    *os.File
+	encoder *json.Encoder
+	columns []string
+	rowBuf  map[string]interface{}
+	first   bool
+}
+
+func newJSONExportFileWriter(f *os.File) (*jsonExportFileWriter, error) {
+	if _, err := f.WriteString("[\n"); err != nil {
+		return nil, err
+	}
+	encoder := json.NewEncoder(f)
+	encoder.SetIndent("  ", "  ")
+	return &jsonExportFileWriter{file: f, encoder: encoder, first: true}, nil
+}
+
+func (w *jsonExportFileWriter) SetColumns(columns []string) error {
+	w.columns = append([]string(nil), columns...)
+	w.rowBuf = make(map[string]interface{}, len(columns))
+	return nil
+}
+
+func (w *jsonExportFileWriter) ConsumeRow(row map[string]interface{}) error {
+	for _, col := range w.columns {
+		w.rowBuf[col] = normalizeExportJSONValue(row[col])
+	}
+	return w.writeCurrentRow()
+}
+
+func (w *jsonExportFileWriter) ConsumeRowValues(values []interface{}) error {
+	for i, col := range w.columns {
+		if i < len(values) {
+			w.rowBuf[col] = normalizeExportJSONValue(values[i])
+		} else {
+			w.rowBuf[col] = nil
+		}
+	}
+	return w.writeCurrentRow()
+}
+
+func (w *jsonExportFileWriter) writeCurrentRow() error {
+	if !w.first {
+		if _, err := w.file.WriteString(",\n"); err != nil {
+			return err
+		}
+	}
+	if err := w.encoder.Encode(w.rowBuf); err != nil {
+		return err
+	}
+	w.first = false
+	return nil
+}
+
+func (w *jsonExportFileWriter) Close() error {
+	_, err := w.file.WriteString("\n]")
+	return err
+}
+
+type markdownExportFileWriter struct {
+	file    *os.File
+	columns []string
+	record  []string
+}
+
+func (w *markdownExportFileWriter) SetColumns(columns []string) error {
+	w.columns = append([]string(nil), columns...)
+	w.record = make([]string, len(columns))
+	if _, err := fmt.Fprintf(w.file, "| %s |\n", strings.Join(columns, " | ")); err != nil {
+		return err
+	}
+	seps := make([]string, len(columns))
+	for i := range seps {
+		seps[i] = "---"
+	}
+	_, err := fmt.Fprintf(w.file, "| %s |\n", strings.Join(seps, " | "))
+	return err
+}
+
+func (w *markdownExportFileWriter) ConsumeRow(row map[string]interface{}) error {
+	_, err := fmt.Fprintf(w.file, "| %s |\n", strings.Join(fillExportRecordFromRow(w.record, row, w.columns, true), " | "))
+	return err
+}
+
+func (w *markdownExportFileWriter) ConsumeRowValues(values []interface{}) error {
+	_, err := fmt.Fprintf(w.file, "| %s |\n", strings.Join(fillExportRecordFromValues(w.record, values, true), " | "))
+	return err
+}
+
+func (w *markdownExportFileWriter) Close() error {
+	return nil
+}
+
+type htmlExportFileWriter struct {
+	writer   *bufio.Writer
+	columns  []string
+	rowCount int64
+}
+
+func newHTMLExportFileWriter(f *os.File) *htmlExportFileWriter {
+	return &htmlExportFileWriter{writer: bufio.NewWriterSize(f, 1024*256)}
+}
+
+func (w *htmlExportFileWriter) SetColumns(columns []string) error {
+	w.columns = append([]string(nil), columns...)
+	if _, err := w.writer.WriteString(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GoNavi Export</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f8f9fa;
+      --card: #ffffff;
+      --line: #dee2e6;
+      --text: #212529;
+      --muted: #6c757d;
+      --hover: #f1f3f5;
+      --zebra: #f8f9fa;
+      --head: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+    }
+    .export-wrap {
+      max-width: 100%;
+      margin: 0 auto;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .export-head {
+      padding: 16px 20px;
+      background: var(--head);
+      border-bottom: 2px solid var(--line);
+    }
+    .export-head h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .export-meta {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .table-wrap {
+      width: 100%;
+      overflow: auto;
+      padding: 16px;
+    }
+    table {
+      border-collapse: collapse;
+      width: auto;
+      font-size: 13px;
+    }
+    thead th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: var(--head);
+      text-align: left;
+      font-weight: 600;
+      white-space: nowrap;
+      border-bottom: 2px solid var(--line);
+      color: var(--text);
+      padding: 12px 16px;
+    }
+    td {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      overflow-wrap: anywhere;
+      max-width: 500px;
+      color: var(--text);
+    }
+    tbody tr:nth-child(even) {
+      background: var(--zebra);
+    }
+    tbody tr:hover {
+      background: var(--hover);
+    }
+    td.empty {
+      text-align: center;
+      color: var(--muted);
+      font-style: italic;
+    }
+    @media (max-width: 768px) {
+      body { padding: 16px; }
+      .export-head { padding: 12px 16px; }
+      .table-wrap { padding: 12px; }
+      th, td { padding: 8px 12px; font-size: 12px; }
+    }
+    @media print {
+      body { background: white; padding: 0; }
+      .export-wrap { border: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="export-wrap">
+    <div class="export-head">
+      <h1>GoNavi Data Export</h1>
+      <div class="export-meta">`); err != nil {
+		return err
+	}
+
+	if _, err := fmt.Fprintf(w.writer, "Columns: %d · Generated: %s", len(columns), time.Now().Format("2006-01-02 15:04:05")); err != nil {
+		return err
+	}
+
+	if _, err := w.writer.WriteString(`</div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>`); err != nil {
+		return err
+	}
+
+	for _, col := range columns {
+		if _, err := fmt.Fprintf(w.writer, "<th>%s</th>", html.EscapeString(col)); err != nil {
+			return err
+		}
+	}
+
+	_, err := w.writer.WriteString(`</tr></thead><tbody>`)
+	return err
+}
+
+func (w *htmlExportFileWriter) ConsumeRow(row map[string]interface{}) error {
+	if _, err := w.writer.WriteString("<tr>"); err != nil {
+		return err
+	}
+	for _, col := range w.columns {
+		if _, err := fmt.Fprintf(w.writer, "<td>%s</td>", formatExportHTMLCell(row[col])); err != nil {
+			return err
+		}
+	}
+	if _, err := w.writer.WriteString("</tr>"); err != nil {
+		return err
+	}
+	w.rowCount++
+	return nil
+}
+
+func (w *htmlExportFileWriter) ConsumeRowValues(values []interface{}) error {
+	if _, err := w.writer.WriteString("<tr>"); err != nil {
+		return err
+	}
+	for i := range w.columns {
+		var value interface{}
+		if i < len(values) {
+			value = values[i]
+		}
+		if _, err := fmt.Fprintf(w.writer, "<td>%s</td>", formatExportHTMLCell(value)); err != nil {
+			return err
+		}
+	}
+	if _, err := w.writer.WriteString("</tr>"); err != nil {
+		return err
+	}
+	w.rowCount++
+	return nil
+}
+
+func (w *htmlExportFileWriter) Close() error {
+	if w.rowCount == 0 {
+		colspan := len(w.columns)
+		if colspan <= 0 {
+			colspan = 1
+		}
+		if _, err := fmt.Fprintf(w.writer, `<tr><td class="empty" colspan="%d">(0 rows)</td></tr>`, colspan); err != nil {
+			return err
+		}
+	}
+	if _, err := w.writer.WriteString(`</tbody></table>
+    </div>
+  </div>
+</body>
+</html>`); err != nil {
+		return err
+	}
+	return w.writer.Flush()
+}
+
+type xlsxExportFileWriter struct {
+	filename string
+	workbook *excelize.File
+	stream   *excelize.StreamWriter
+	sheet    string
+	columns  []string
+	header   []interface{}
+	rowBuf   []interface{}
+	nextRow  int
+	sheetNo  int
+	rowCount int
+	maxRows  int
+}
+
+func newXLSXExportFileWriter(filename string, maxRowsPerSheet int) (*xlsxExportFileWriter, error) {
+	workbook := excelize.NewFile()
+	sheet := workbook.GetSheetName(workbook.GetActiveSheetIndex())
+	stream, err := workbook.NewStreamWriter(sheet)
+	if err != nil {
+		_ = workbook.Close()
+		return nil, err
+	}
+	return &xlsxExportFileWriter{
+		filename: filename,
+		workbook: workbook,
+		stream:   stream,
+		sheet:    sheet,
+		sheetNo:  1,
+		nextRow:  2,
+		maxRows:  normalizeXLSXRowsPerSheet(maxRowsPerSheet),
+	}, nil
+}
+
+func (w *xlsxExportFileWriter) SetColumns(columns []string) error {
+	w.columns = append([]string(nil), columns...)
+	w.rowCount = 0
+	w.nextRow = 2
+	w.header = make([]interface{}, len(columns))
+	w.rowBuf = make([]interface{}, len(columns))
+	for i, col := range columns {
+		w.header[i] = col
+	}
+	return w.stream.SetRow("A1", w.header)
+}
+
+func (w *xlsxExportFileWriter) rotateSheet() error {
+	if err := w.stream.Flush(); err != nil {
+		return err
+	}
+	w.sheetNo++
+	w.sheet = fmt.Sprintf("Sheet%d", w.sheetNo)
+	if _, err := w.workbook.NewSheet(w.sheet); err != nil {
+		return err
+	}
+	stream, err := w.workbook.NewStreamWriter(w.sheet)
+	if err != nil {
+		return err
+	}
+	w.stream = stream
+	w.rowCount = 0
+	w.nextRow = 2
+	return w.stream.SetRow("A1", w.header)
+}
+
+func (w *xlsxExportFileWriter) ConsumeRow(row map[string]interface{}) error {
+	if w.rowCount >= w.maxRows {
+		if err := w.rotateSheet(); err != nil {
+			return err
+		}
+	}
+	values := w.rowBuf
+	for i, col := range w.columns {
+		val := row[col]
+		if val == nil {
+			values[i] = "NULL"
+			continue
+		}
+		values[i] = formatExportCellText(val)
+	}
+	cell := "A" + strconv.Itoa(w.nextRow)
+	w.nextRow++
+	w.rowCount++
+	return w.stream.SetRow(cell, values)
+}
+
+func (w *xlsxExportFileWriter) ConsumeRowValues(values []interface{}) error {
+	if w.rowCount >= w.maxRows {
+		if err := w.rotateSheet(); err != nil {
+			return err
+		}
+	}
+	rowBuf := w.rowBuf
+	for i := range w.columns {
+		var value interface{}
+		if i < len(values) {
+			value = values[i]
+		}
+		if value == nil {
+			rowBuf[i] = "NULL"
+			continue
+		}
+		rowBuf[i] = formatExportCellText(value)
+	}
+	cell := "A" + strconv.Itoa(w.nextRow)
+	w.nextRow++
+	w.rowCount++
+	return w.stream.SetRow(cell, rowBuf)
+}
+
+func (w *xlsxExportFileWriter) Close() error {
+	if err := w.stream.Flush(); err != nil {
+		_ = w.workbook.Close()
+		return err
+	}
+	saveErr := w.workbook.SaveAs(w.filename)
+	closeErr := w.workbook.Close()
+	if saveErr != nil {
+		return saveErr
+	}
+	return closeErr
+}
+
+type sqlInsertExportConsumer struct {
+	w             *bufio.Writer
+	dbType        string
+	quotedTable   string
+	columnTypeMap map[string]string
+	columns       []string
+	quotedCols    []string
+	columnTypes   []string
+	valueBuf      []string
+	rowCount      int64
+}
+
+func (c *sqlInsertExportConsumer) SetColumns(columns []string) error {
+	c.columns = append([]string(nil), columns...)
+	c.quotedCols = make([]string, 0, len(columns))
+	c.columnTypes = make([]string, len(columns))
+	c.valueBuf = make([]string, len(columns))
+	for _, column := range columns {
+		c.quotedCols = append(c.quotedCols, quoteIdentByType(c.dbType, column))
+	}
+	for i, column := range columns {
+		c.columnTypes[i] = c.columnTypeMap[normalizeColumnName(column)]
+	}
+	return nil
+}
+
+func (c *sqlInsertExportConsumer) ConsumeRow(row map[string]interface{}) error {
+	values := make([]string, 0, len(c.columns))
+	for _, column := range c.columns {
+		values = append(values, formatImportSQLValue(c.dbType, c.columnTypeMap[normalizeColumnName(column)], row[column]))
+	}
+	if _, err := c.w.WriteString(fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);\n", c.quotedTable, strings.Join(c.quotedCols, ", "), strings.Join(values, ", "))); err != nil {
+		return err
+	}
+	c.rowCount++
+	return nil
+}
+
+func (c *sqlInsertExportConsumer) ConsumeRowValues(values []interface{}) error {
+	for i := range c.columns {
+		var value interface{}
+		if i < len(values) {
+			value = values[i]
+		}
+		c.valueBuf[i] = formatImportSQLValue(c.dbType, c.columnTypes[i], value)
+	}
+	if _, err := c.w.WriteString(fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s);\n", c.quotedTable, strings.Join(c.quotedCols, ", "), strings.Join(c.valueBuf, ", "))); err != nil {
+		return err
+	}
+	c.rowCount++
+	return nil
+}
+
+func resolveExportColumns(columns []string, data []map[string]interface{}) []string {
+	if len(columns) > 0 || len(data) == 0 {
+		return columns
+	}
+	keySet := make(map[string]bool)
+	for _, row := range data {
+		for key := range row {
+			keySet[key] = true
+		}
+	}
+	derived := make([]string, 0, len(keySet))
+	for key := range keySet {
+		derived = append(derived, key)
+	}
+	sort.Strings(derived)
+	return derived
+}
+
+func newExportFileWriter(f *os.File, options ExportFileOptions) (exportFileWriter, error) {
+	options = normalizeExportFileOptions("", options)
+	switch options.Format {
+	case "csv":
+		return newCSVExportFileWriter(f)
+	case "json":
+		return newJSONExportFileWriter(f)
+	case "md":
+		return &markdownExportFileWriter{file: f}, nil
+	case "html":
+		return newHTMLExportFileWriter(f), nil
+	case "xlsx":
+		filename := f.Name()
+		if err := f.Close(); err != nil {
+			return nil, err
+		}
+		return newXLSXExportFileWriter(filename, options.XLSXMaxRowsPerSheet)
+	default:
+		return nil, fmt.Errorf("unsupported format: %s", options.Format)
+	}
+}
+
+func streamQueryDataForExport(dbInst db.Database, config connection.ConnectionConfig, query string, consumer db.QueryStreamConsumer) error {
+	if consumer == nil {
+		return fmt.Errorf("export consumer required")
+	}
+
+	timeout := getExportQueryTimeout(config)
+	ctx, cancel := utils.ContextWithTimeout(timeout)
+	defer cancel()
+
+	if streamer, ok := dbInst.(db.StreamQueryExecer); ok {
+		return streamer.StreamQueryContext(ctx, query, consumer)
+	}
+
+	if provider, ok := dbInst.(db.SessionExecerProvider); ok {
+		session, err := provider.OpenSessionExecer(ctx)
+		if err != nil {
+			logger.Warnf("导出流式会话打开失败，回退到缓冲导出：type=%s err=%v", strings.TrimSpace(config.Type), err)
+		} else {
+			defer session.Close()
+			if streamer, ok := session.(db.StreamQueryExecer); ok {
+				return streamer.StreamQueryContext(ctx, query, consumer)
+			}
+		}
+	}
+
+	logger.Warnf("导出流式查询不可用，回退到缓冲导出：type=%s", strings.TrimSpace(config.Type))
+	data, columns, err := queryDataForExport(dbInst, config, query)
+	if err != nil {
+		return err
+	}
+	columns = resolveExportColumns(columns, data)
+	if err := consumer.SetColumns(columns); err != nil {
+		return err
+	}
+	for _, row := range data {
+		if err := consumer.ConsumeRow(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func exportQueryResultToFile(f *os.File, dbInst db.Database, config connection.ConnectionConfig, query string, options ExportFileOptions, reporter *exportProgressReporter) (int64, []string, error) {
+	writer, err := newExportFileWriter(f, options)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	if reporter != nil {
+		reporter.Start("正在查询数据")
+	}
+	consumer := &countingExportConsumer{delegate: writer, reporter: reporter}
+	streamErr := streamQueryDataForExport(dbInst, config, query, consumer)
+	if reporter != nil && streamErr == nil {
+		reporter.Finalizing(consumer.rowCount)
+	}
+	closeErr := writer.Close()
+	if streamErr != nil {
+		return consumer.rowCount, consumer.columns, streamErr
+	}
+	if closeErr != nil {
+		return consumer.rowCount, consumer.columns, closeErr
+	}
+	return consumer.rowCount, consumer.columns, nil
+}
+
+func fillExportRecordFromValues(record []string, values []interface{}, markdown bool) []string {
+	if len(record) != len(values) {
+		record = make([]string, len(values))
+	}
+	for i, val := range values {
+		record[i] = formatExportRecordValue(val, markdown)
+	}
+	return record
+}
+
+func fillExportRecordFromRow(record []string, row map[string]interface{}, columns []string, markdown bool) []string {
+	if len(record) != len(columns) {
+		record = make([]string, len(columns))
+	}
+	for i, col := range columns {
+		record[i] = formatExportRecordValue(row[col], markdown)
+	}
+	return record
+}
+
+func formatExportRecordValue(val interface{}, markdown bool) string {
+	if val == nil {
+		return "NULL"
+	}
+	text := formatExportCellText(val)
+	if markdown {
+		text = strings.ReplaceAll(text, "|", "\\|")
+		text = strings.ReplaceAll(text, "\n", "<br>")
+	}
+	return text
+}
+
+func writeRowsToFile(f *os.File, data []map[string]interface{}, columns []string, options ExportFileOptions) error {
+	_, err := writeRowsToFileWithReporter(f, data, columns, options, nil)
+	return err
+}
+
+func writeRowsToFileWithReporter(f *os.File, data []map[string]interface{}, columns []string, options ExportFileOptions, reporter *exportProgressReporter) (int64, error) {
+	if f == nil {
+		return 0, fmt.Errorf("file required")
+	}
+	columns = resolveExportColumns(columns, data)
+	writer, err := newExportFileWriter(f, options)
+	if err != nil {
+		return 0, err
+	}
+	if err := writer.SetColumns(columns); err != nil {
+		_ = writer.Close()
+		return 0, err
+	}
+	if reporter != nil {
+		reporter.ForceRunning(0, "正在写入文件")
+	}
+	for index, row := range data {
+		if err := writer.ConsumeRow(row); err != nil {
+			_ = writer.Close()
+			return int64(index), err
+		}
+		if reporter != nil {
+			reporter.Rows(int64(index+1), "正在写入文件")
+		}
+	}
+	if reporter != nil {
+		reporter.Finalizing(int64(len(data)))
+	}
+	if err := writer.Close(); err != nil {
+		return int64(len(data)), err
+	}
+	return int64(len(data)), nil
 }
 
 func formatExportHTMLCell(val interface{}) string {
@@ -3677,13 +4474,11 @@ func formatExportCellText(val interface{}) string {
 			return "NULL"
 		}
 		return text
+	case string:
+		return normalizeExportTemporalText(v)
 	default:
 		text := fmt.Sprintf("%v", val)
-		// 字符串型日期时间值（如 RFC3339 "2026-03-10T17:01:55+08:00"）统一格式化为 yyyy-MM-dd HH:mm:ss
-		if parsed, ok := parseTemporalString(text); ok {
-			return parsed.Format("2006-01-02 15:04:05")
-		}
-		return text
+		return normalizeExportTemporalText(text)
 	}
 }
 
@@ -3701,10 +4496,7 @@ func normalizeExportJSONValue(val interface{}) interface{} {
 		}
 		return v.Format("2006-01-02 15:04:05")
 	case string:
-		if parsed, ok := parseTemporalString(v); ok {
-			return parsed.Format("2006-01-02 15:04:05")
-		}
-		return v
+		return normalizeExportTemporalText(v)
 	case float32:
 		f := float64(v)
 		if math.IsNaN(f) || math.IsInf(f, 0) {

@@ -168,6 +168,24 @@ func (t *TDengineDB) Query(query string) ([]map[string]interface{}, []string, er
 	return scanRows(rows)
 }
 
+func (t *TDengineDB) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	if t.conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+
+	rows, err := t.conn.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	return streamRows(rows, consumer)
+}
+
+func (t *TDengineDB) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return t.StreamQueryContext(context.Background(), query, consumer)
+}
+
 func (t *TDengineDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if t.conn == nil {
 		return 0, fmt.Errorf("连接未打开")

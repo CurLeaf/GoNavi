@@ -111,6 +111,24 @@ func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, erro
 	return scanRowsForDialect(rows, c.scanDialect())
 }
 
+func (c *CustomDB) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	if c.conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+
+	rows, err := c.conn.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	return streamRowsForDialect(rows, c.scanDialect(), consumer)
+}
+
+func (c *CustomDB) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return c.StreamQueryContext(context.Background(), query, consumer)
+}
+
 func (c *CustomDB) scanDialect() string {
 	if strings.EqualFold(strings.TrimSpace(c.driver), "mysql") {
 		return "mysql"

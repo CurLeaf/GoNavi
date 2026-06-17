@@ -777,6 +777,22 @@ func (c *ClickHouseDB) Query(query string) ([]map[string]interface{}, []string, 
 	return scanRows(rows)
 }
 
+func (c *ClickHouseDB) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	if c.conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+	rows, err := c.conn.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	return streamRows(rows, consumer)
+}
+
+func (c *ClickHouseDB) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return c.StreamQueryContext(context.Background(), query, consumer)
+}
+
 func (c *ClickHouseDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if c.conn == nil {
 		return 0, fmt.Errorf("连接未打开")

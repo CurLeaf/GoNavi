@@ -182,6 +182,24 @@ func (d *DamengDB) Query(query string) ([]map[string]interface{}, []string, erro
 	return scanRows(rows)
 }
 
+func (d *DamengDB) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	if d.conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+
+	rows, err := d.conn.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	return streamRows(rows, consumer)
+}
+
+func (d *DamengDB) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return d.StreamQueryContext(context.Background(), query, consumer)
+}
+
 func (d *DamengDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if d.conn == nil {
 		return 0, fmt.Errorf("连接未打开")
