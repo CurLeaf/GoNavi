@@ -48,6 +48,7 @@ export interface ExecuteLocalAIToolCallResult {
   content: string;
   success: boolean;
   toolName: string;
+  countsAsProbeFailure?: boolean;
 }
 
 const buildToolName = (toolCall: AIToolCall, descriptor?: AIMCPToolDescriptor) =>
@@ -106,6 +107,7 @@ export async function executeLocalAIToolCall({
         content: snapshotInspectionResult.content,
         success: snapshotInspectionResult.success,
         toolName: buildToolName(toolCall, descriptor),
+        countsAsProbeFailure: snapshotInspectionResult.countsAsProbeFailure,
       };
     }
 
@@ -121,6 +123,7 @@ export async function executeLocalAIToolCall({
         content: databaseToolResult.content,
         success: databaseToolResult.success,
         toolName: buildToolName(toolCall, descriptor),
+        countsAsProbeFailure: databaseToolResult.countsAsProbeFailure,
       };
     }
 

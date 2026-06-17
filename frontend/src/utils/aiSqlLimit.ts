@@ -20,10 +20,16 @@ const hasExistingRowLimit = (dialect: string, sql: string): boolean => {
   return (dialect === 'oracle' || dialect === 'dameng') && /\brownum\b/.test(text);
 };
 
-export const buildAIReadonlyPreviewSQL = (dbType: string, sql: string, limit = 50, driver = ''): string => {
+export const buildAIReadonlyPreviewSQL = (
+  dbType: string,
+  sql: string,
+  limit = 50,
+  driver = '',
+  options?: { oceanBaseProtocol?: unknown },
+): string => {
   const baseSQL = trimSQLStatement(sql);
   const safeLimit = Math.max(0, Math.floor(Number(limit) || 0));
-  const dialect = resolveSqlDialect(dbType, driver);
+  const dialect = resolveSqlDialect(dbType, driver, options);
   if (!baseSQL || safeLimit <= 0 || !isAIReadonlySQL(baseSQL) || hasExistingRowLimit(dialect, baseSQL)) {
     return baseSQL;
   }

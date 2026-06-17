@@ -62,4 +62,17 @@ describe('buildAISafetySnapshot', () => {
     expect(snapshot.effectiveRestrictions.join('\n')).toContain('allowMutating=true');
     expect(snapshot.effectiveRestrictions.join('\n')).toContain('当前 JVM 诊断明确禁止 mutating 命令');
   });
+
+  it('describes full safety mode as allowing other statements with confirmation', () => {
+    const snapshot = buildAISafetySnapshot({
+      safetyLevel: 'full',
+      connections: [],
+    });
+
+    expect(snapshot.safetyLevel).toBe('full');
+    expect(snapshot.permissionMatrix.allowDML).toBe(true);
+    expect(snapshot.permissionMatrix.allowDDL).toBe(true);
+    expect(snapshot.sqlRuleText).toContain('允许所有 SQL 操作');
+    expect(snapshot.effectiveRestrictions.join('\n')).toContain('高风险或未识别语句仍会要求确认');
+  });
 });

@@ -201,6 +201,86 @@ describe('aiLocalToolExecutor', () => {
     expect(query).not.toHaveBeenCalled();
   });
 
+  it('treats OceanBase Oracle SQL execution errors as recoverable and uses Oracle readonly preview SQL', async () => {
+    const query = vi.fn().mockResolvedValue({
+      success: false,
+      message: "oceanbase: error 900 (42000): ORA-00900 near '50 OFFSET 0'",
+    });
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('execute_sql', {
+        connectionId: 'conn-1',
+        dbName: 'SYS',
+        sql: 'SELECT 1 FROM DUAL',
+      }),
+      connections: [{
+        ...buildConnection(),
+        config: {
+          type: 'oceanbase',
+          host: '127.0.0.1',
+          port: 2881,
+          user: 'sys',
+          driver: 'oceanbase',
+          oceanBaseProtocol: 'oracle',
+        },
+      }],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getColumns: vi.fn(),
+        getIndexes: vi.fn(),
+        getForeignKeys: vi.fn(),
+        getTriggers: vi.fn(),
+        showCreateTable: vi.fn(),
+        query,
+        checkSQL: vi.fn().mockResolvedValue({ allowed: true, operationType: 'query' }),
+      },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.countsAsProbeFailure).toBe(false);
+    expect(query).toHaveBeenCalledWith(
+      expect.anything(),
+      'SYS',
+      'SELECT * FROM (SELECT 1 FROM DUAL) WHERE ROWNUM <= 50',
+    );
+  });
+
+  it('returns affectedRows for execute_sql write statements instead of pretending rowCount is zero', async () => {
+    const query = vi.fn().mockResolvedValue({
+      success: true,
+      data: {
+        affectedRows: 100000,
+      },
+    });
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('execute_sql', {
+        connectionId: 'conn-1',
+        dbName: 'crm',
+        sql: 'INSERT INTO orders_archive SELECT * FROM orders',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getColumns: vi.fn(),
+        getIndexes: vi.fn(),
+        getForeignKeys: vi.fn(),
+        getTriggers: vi.fn(),
+        showCreateTable: vi.fn(),
+        query,
+        checkSQL: vi.fn().mockResolvedValue({ allowed: true, operationType: 'INSERT' }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(query).toHaveBeenCalledWith(expect.anything(), 'crm', 'INSERT INTO orders_archive SELECT * FROM orders');
+    expect(JSON.parse(result.content)).toEqual({ affectedRows: 100000 });
+  });
+
   it('returns a cross-table column summary for get_all_columns', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('get_all_columns', {
