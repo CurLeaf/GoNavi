@@ -1668,21 +1668,15 @@ func (a *App) PreviewImportFile(filePath string) connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: "文件路径不能为空"}
 	}
 
-	rows, columns, err := parseImportFile(filePath)
+	preview, err := buildImportPreview(filePath, defaultImportPreviewLimit)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	totalRows := len(rows)
-	previewRows := rows
-	if len(rows) > 5 {
-		previewRows = rows[:5]
-	}
-
 	result := map[string]interface{}{
-		"columns":     columns,
-		"totalRows":   totalRows,
-		"previewRows": previewRows,
+		"columns":     preview.Columns,
+		"totalRows":   preview.TotalRows,
+		"previewRows": preview.PreviewRows,
 		"filePath":    filePath,
 	}
 
@@ -1710,98 +1704,6 @@ func (a *App) ImportData(config connection.ConnectionConfig, dbName, tableName s
 
 	// 返回文件路径供前端预览
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": selection}}
-}
-
-// parseImportFile 解析导入文件，返回数据行和列名
-func parseImportFile(filePath string) ([]map[string]interface{}, []string, error) {
-	var rows []map[string]interface{}
-	var columns []string
-	lower := strings.ToLower(filePath)
-
-	if strings.HasSuffix(lower, ".json") {
-		f, err := os.Open(filePath)
-		if err != nil {
-			return nil, nil, err
-		}
-		defer f.Close()
-		decoder := json.NewDecoder(f)
-		if err := decoder.Decode(&rows); err != nil {
-			return nil, nil, fmt.Errorf("JSON Parse Error: %w", err)
-		}
-		if len(rows) > 0 {
-			for k := range rows[0] {
-				columns = append(columns, k)
-			}
-		}
-	} else if strings.HasSuffix(lower, ".csv") {
-		f, err := os.Open(filePath)
-		if err != nil {
-			return nil, nil, err
-		}
-		defer f.Close()
-		reader := csv.NewReader(f)
-		records, err := reader.ReadAll()
-		if err != nil {
-			return nil, nil, fmt.Errorf("CSV Parse Error: %w", err)
-		}
-		if len(records) < 2 {
-			return nil, nil, fmt.Errorf("CSV empty or missing header")
-		}
-		columns = records[0]
-		for _, record := range records[1:] {
-			row := make(map[string]interface{})
-			for i, val := range record {
-				if i < len(columns) {
-					if val == "NULL" {
-						row[columns[i]] = nil
-					} else {
-						row[columns[i]] = val
-					}
-				}
-			}
-			rows = append(rows, row)
-		}
-	} else if strings.HasSuffix(lower, ".xlsx") || strings.HasSuffix(lower, ".xls") {
-		xlsx, err := excelize.OpenFile(filePath)
-		if err != nil {
-			return nil, nil, fmt.Errorf("Excel Parse Error: %w", err)
-		}
-		defer xlsx.Close()
-
-		sheetName := xlsx.GetSheetName(0)
-		if sheetName == "" {
-			return nil, nil, fmt.Errorf("Excel file has no sheets")
-		}
-
-		xlRows, err := xlsx.GetRows(sheetName)
-		if err != nil {
-			return nil, nil, fmt.Errorf("Excel Read Error: %w", err)
-		}
-		if len(xlRows) < 2 {
-			return nil, nil, fmt.Errorf("Excel empty or missing header")
-		}
-
-		columns = xlRows[0]
-		for _, record := range xlRows[1:] {
-			row := make(map[string]interface{})
-			for i, val := range record {
-				if i < len(columns) && columns[i] != "" {
-					if val == "NULL" {
-						row[columns[i]] = nil
-					} else {
-						row[columns[i]] = val
-					}
-				}
-			}
-			if len(row) > 0 {
-				rows = append(rows, row)
-			}
-		}
-	} else {
-		return nil, nil, fmt.Errorf("Unsupported file format")
-	}
-
-	return rows, columns, nil
 }
 
 func normalizeColumnName(name string) string {
@@ -2125,15 +2027,6 @@ func formatImportSQLValue(dbType, columnType string, value interface{}) string {
 
 // ImportDataWithProgress 执行导入并发送进度事件
 func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName, tableName, filePath string) connection.QueryResult {
-	rows, columns, err := parseImportFile(filePath)
-	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
-	}
-
-	if len(rows) == 0 {
-		return connection.QueryResult{Success: true, Message: "无可导入数据"}
-	}
-
 	runConfig := normalizeRunConfig(config, dbName)
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
@@ -2147,55 +2040,31 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 		columnTypeMap = buildImportColumnTypeMap(defs)
 	}
 
-	totalRows := len(rows)
-	successCount := 0
-	var errorLogs []string
-
-	quotedCols := make([]string, len(columns))
-	for i, c := range columns {
-		quotedCols[i] = quoteIdentByType(dbType, c)
+	writer := newImportDatabaseRowWriter(dbInst, dbType, tableName, columnTypeMap)
+	consumer := newImportBatchConsumer(writer, defaultImportApplyBatchSize, 0, false, func(state importProgressState) {
+		runtime.EventsEmit(a.ctx, "import:progress", state)
+	})
+	if err := streamImportFile(filePath, consumer); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if err := consumer.Flush(); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	for idx, row := range rows {
-		var values []string
-		for _, col := range columns {
-			val := row[col]
-			colType := columnTypeMap[normalizeColumnName(col)]
-			values = append(values, formatImportSQLValue(dbType, colType, val))
-		}
-
-		query := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
-			quoteQualifiedIdentByType(dbType, tableName),
-			strings.Join(quotedCols, ", "),
-			strings.Join(values, ", "))
-
-		_, err := dbInst.Exec(query)
-		if err != nil {
-			errorLogs = append(errorLogs, fmt.Sprintf("Row %d: %s", idx+1, err.Error()))
-		} else {
-			successCount++
-		}
-
-		// 每 10 行发送一次进度事件
-		if (idx+1)%10 == 0 || idx == totalRows-1 {
-			runtime.EventsEmit(a.ctx, "import:progress", map[string]interface{}{
-				"current": idx + 1,
-				"total":   totalRows,
-				"success": successCount,
-				"errors":  len(errorLogs),
-			})
-		}
+	resultData := consumer.Result()
+	if resultData.Total == 0 {
+		return connection.QueryResult{Success: true, Message: "无可导入数据"}
 	}
 
 	result := map[string]interface{}{
-		"success":      successCount,
-		"failed":       len(errorLogs),
-		"total":        totalRows,
-		"errorLogs":    errorLogs,
-		"errorSummary": fmt.Sprintf("Imported: %d, Failed: %d", successCount, len(errorLogs)),
+		"success":      resultData.Success,
+		"failed":       resultData.Failed,
+		"total":        resultData.Total,
+		"errorLogs":    resultData.ErrorLogs,
+		"errorSummary": fmt.Sprintf("Imported: %d, Failed: %d", resultData.Success, resultData.Failed),
 	}
 
-	return connection.QueryResult{Success: true, Data: result, Message: fmt.Sprintf("Imported: %d, Failed: %d", successCount, len(errorLogs))}
+	return connection.QueryResult{Success: true, Data: result, Message: fmt.Sprintf("Imported: %d, Failed: %d", resultData.Success, resultData.Failed)}
 }
 
 func (a *App) ApplyChanges(config connection.ConnectionConfig, dbName, tableName string, changes connection.ChangeSet) connection.QueryResult {
