@@ -34,7 +34,7 @@ func (a *App) GetSecurityUpdateStatus() (SecurityUpdateStatus, error) {
 				return SecurityUpdateStatus{}, inspectErr
 			}
 			if len(inspection.ProvidersNeedingMigration) > 0 {
-				return buildSecurityUpdatePendingStatusFromInspection(inspection, SecurityUpdateOverallStatusPending), nil
+				return a.buildSecurityUpdatePendingStatusFromInspection(inspection, SecurityUpdateOverallStatusPending), nil
 			}
 			return SecurityUpdateStatus{
 				SchemaVersion: securityUpdateSchemaVersion,
@@ -72,14 +72,14 @@ func (a *App) RetrySecurityUpdateCurrentRound(request RetrySecurityUpdateRequest
 
 	previewData, err := os.ReadFile(filepath.Join(status.BackupPath, securityUpdateNormalizedPreviewFileName))
 	if err != nil {
-		failed := newSecurityUpdateSystemFailureStatus(status, SecurityUpdateIssueReasonCodeEnvironmentBlocked, err)
+		failed := a.newSecurityUpdateSystemFailureStatus(status, SecurityUpdateIssueReasonCodeEnvironmentBlocked, err)
 		_ = repo.WriteResult(failed)
 		return failed, nil
 	}
 
 	var preview securityUpdateNormalizedPreview
 	if err := json.Unmarshal(previewData, &preview); err != nil {
-		failed := newSecurityUpdateSystemFailureStatus(status, SecurityUpdateIssueReasonCodeValidationFailed, err)
+		failed := a.newSecurityUpdateSystemFailureStatus(status, SecurityUpdateIssueReasonCodeValidationFailed, err)
 		_ = repo.WriteResult(failed)
 		return failed, nil
 	}
@@ -123,7 +123,7 @@ func (a *App) DismissSecurityUpdateReminder() (SecurityUpdateStatus, error) {
 			return SecurityUpdateStatus{}, inspectErr
 		}
 		if len(inspection.ProvidersNeedingMigration) > 0 {
-			status = buildSecurityUpdatePendingStatusFromInspection(inspection, SecurityUpdateOverallStatusPostponed)
+			status = a.buildSecurityUpdatePendingStatusFromInspection(inspection, SecurityUpdateOverallStatusPostponed)
 		} else {
 			status = SecurityUpdateStatus{
 				SchemaVersion: securityUpdateSchemaVersion,
@@ -158,21 +158,21 @@ func (a *App) executeSecurityUpdateRound(repo *securityUpdateStateRepository, ro
 		sourceType = SecurityUpdateSourceTypeCurrentAppSavedConfig
 	}
 	if sourceType != SecurityUpdateSourceTypeCurrentAppSavedConfig {
-		failed := newSecurityUpdateSystemFailureStatus(round, SecurityUpdateIssueReasonCodeValidationFailed, fmt.Errorf("unsupported source type: %s", sourceType))
+		failed := a.newSecurityUpdateSystemFailureStatus(round, SecurityUpdateIssueReasonCodeValidationFailed, fmt.Errorf("unsupported source type: %s", sourceType))
 		_ = repo.WriteResult(failed)
 		return failed, nil
 	}
 
 	source, rawParsed, err := parseSecurityUpdateCurrentAppSource(rawPayload)
 	if err != nil {
-		failed := newSecurityUpdateSystemFailureStatus(round, SecurityUpdateIssueReasonCodeValidationFailed, err)
+		failed := a.newSecurityUpdateSystemFailureStatus(round, SecurityUpdateIssueReasonCodeValidationFailed, err)
 		_ = repo.WriteResult(failed)
 		return failed, nil
 	}
 
 	rollbackSnapshot, err := captureSecurityUpdateCurrentAppRollbackSnapshot(a, source)
 	if err != nil {
-		failed := newSecurityUpdateSystemFailureStatus(round, securityUpdateFailureReasonForError(err), err)
+		failed := a.newSecurityUpdateSystemFailureStatus(round, securityUpdateFailureReasonForError(err), err)
 		_ = repo.WriteResult(failed)
 		return failed, nil
 	}
@@ -188,7 +188,7 @@ func (a *App) executeSecurityUpdateRound(repo *securityUpdateStateRepository, ro
 
 	if execErr != nil {
 		if rollbackErr := rollbackSnapshot.restore(a); rollbackErr != nil {
-			failed := newSecurityUpdateSystemFailureStatus(finalStatus, securityUpdateFailureReasonForError(rollbackErr), rollbackErr)
+			failed := a.newSecurityUpdateSystemFailureStatus(finalStatus, securityUpdateFailureReasonForError(rollbackErr), rollbackErr)
 			_ = repo.WriteResult(failed)
 			return failed, nil
 		}
@@ -208,12 +208,12 @@ func (a *App) rollbackSecurityUpdatePersistenceFailure(
 	cause error,
 ) (SecurityUpdateStatus, error) {
 	if rollbackErr := rollbackSnapshot.restore(a); rollbackErr != nil {
-		failed := newSecurityUpdateSystemFailureStatus(base, securityUpdateFailureReasonForError(rollbackErr), rollbackErr)
+		failed := a.newSecurityUpdateSystemFailureStatus(base, securityUpdateFailureReasonForError(rollbackErr), rollbackErr)
 		_ = repo.WriteResult(failed)
 		return failed, nil
 	}
 
-	failed := newSecurityUpdateSystemFailureStatus(base, SecurityUpdateIssueReasonCodeEnvironmentBlocked, cause)
+	failed := a.newSecurityUpdateSystemFailureStatus(base, SecurityUpdateIssueReasonCodeEnvironmentBlocked, cause)
 	_ = repo.WriteResult(failed)
 	return failed, nil
 }
@@ -233,7 +233,7 @@ func (a *App) runSecurityUpdateCurrentAppRound(round SecurityUpdateStatus, sourc
 		finalStatus.Summary.Total++
 		preview.ConnectionIDs = append(preview.ConnectionIDs, item.ID)
 		if _, err := connectionRepo.Save(connection.SavedConnectionInput(item)); err != nil {
-			failed := newSecurityUpdateSystemFailureStatus(finalStatus, SecurityUpdateIssueReasonCodeEnvironmentBlocked, err)
+			failed := a.newSecurityUpdateSystemFailureStatus(finalStatus, SecurityUpdateIssueReasonCodeEnvironmentBlocked, err)
 			return failed, preview, err
 		}
 		finalStatus.Summary.Updated++
@@ -242,7 +242,7 @@ func (a *App) runSecurityUpdateCurrentAppRound(round SecurityUpdateStatus, sourc
 	if source.GlobalProxy != nil {
 		finalStatus.Summary.Total++
 		if _, err := a.saveGlobalProxy(connection.SaveGlobalProxyInput(*source.GlobalProxy)); err != nil {
-			failed := newSecurityUpdateSystemFailureStatus(finalStatus, SecurityUpdateIssueReasonCodeEnvironmentBlocked, err)
+			failed := a.newSecurityUpdateSystemFailureStatus(finalStatus, SecurityUpdateIssueReasonCodeEnvironmentBlocked, err)
 			return failed, preview, err
 		}
 		finalStatus.Summary.Updated++
@@ -250,7 +250,7 @@ func (a *App) runSecurityUpdateCurrentAppRound(round SecurityUpdateStatus, sourc
 
 	providerSnapshot, err := aiservice.NewProviderConfigStore(a.configDir, a.secretStore).Load()
 	if err != nil {
-		failed := newSecurityUpdateSystemFailureStatus(finalStatus, securityUpdateFailureReasonForError(err), err)
+		failed := a.newSecurityUpdateSystemFailureStatus(finalStatus, securityUpdateFailureReasonForError(err), err)
 		return failed, preview, err
 	}
 
@@ -273,7 +273,7 @@ func (a *App) runSecurityUpdateCurrentAppRound(round SecurityUpdateStatus, sourc
 				Status:     SecurityUpdateItemStatusNeedsAttention,
 				ReasonCode: SecurityUpdateIssueReasonCodeSecretMissing,
 				Action:     SecurityUpdateIssueActionOpenAISettings,
-				Message:    "AI 提供商配置需要补充后才能完成安全更新",
+				Message:    a.appText("security_update.backend.issue.ai_provider.secret_missing", nil),
 			})
 			preview.AIProvidersNeedingAttention = append(preview.AIProvidersNeedingAttention, provider.ID)
 			continue
@@ -310,21 +310,21 @@ func (a *App) validateSecurityUpdateCurrentAppRound(round SecurityUpdateStatus, 
 					Status:     SecurityUpdateItemStatusNeedsAttention,
 					ReasonCode: SecurityUpdateIssueReasonCodeValidationFailed,
 					Action:     SecurityUpdateIssueActionOpenConnection,
-					Message:    "连接配置已不存在或仍需重新保存后才能完成安全更新",
+					Message:    a.appText("security_update.backend.issue.connection.missing_or_resave", nil),
 				},
 			)
 			continue
 		}
 		if _, err := a.resolveConnectionSecrets(savedConnection.Config); err != nil {
 			if secretstore.IsUnavailable(err) {
-				failed := newSecurityUpdateSystemFailureStatus(finalStatus, SecurityUpdateIssueReasonCodeEnvironmentBlocked, err)
+				failed := a.newSecurityUpdateSystemFailureStatus(finalStatus, SecurityUpdateIssueReasonCodeEnvironmentBlocked, err)
 				return failed, err
 			}
 			reason := SecurityUpdateIssueReasonCodeValidationFailed
-			message := "连接配置仍需补充后才能完成安全更新"
+			message := a.appText("security_update.backend.issue.connection.incomplete", nil)
 			if os.IsNotExist(err) {
 				reason = SecurityUpdateIssueReasonCodeSecretMissing
-				message = "连接密码已丢失，请重新保存后再继续"
+				message = a.appText("security_update.backend.issue.connection.password_missing", nil)
 			}
 			markSecurityUpdateNeedsAttention(
 				&finalStatus,
@@ -350,7 +350,7 @@ func (a *App) validateSecurityUpdateCurrentAppRound(round SecurityUpdateStatus, 
 		proxyView, err := a.loadStoredGlobalProxyView()
 		if err != nil {
 			if !os.IsNotExist(err) {
-				failed := newSecurityUpdateSystemFailureStatus(finalStatus, securityUpdateFailureReasonForError(err), err)
+				failed := a.newSecurityUpdateSystemFailureStatus(finalStatus, securityUpdateFailureReasonForError(err), err)
 				return failed, err
 			}
 			markSecurityUpdateNeedsAttention(
@@ -358,33 +358,33 @@ func (a *App) validateSecurityUpdateCurrentAppRound(round SecurityUpdateStatus, 
 				SecurityUpdateIssue{
 					ID:         "global-proxy-default",
 					Scope:      SecurityUpdateIssueScopeGlobalProxy,
-					Title:      "全局代理",
+					Title:      a.appText("security_update.backend.issue.global_proxy.title", nil),
 					Severity:   SecurityUpdateIssueSeverityMedium,
 					Status:     SecurityUpdateItemStatusNeedsAttention,
 					ReasonCode: SecurityUpdateIssueReasonCodeValidationFailed,
 					Action:     SecurityUpdateIssueActionOpenProxySettings,
-					Message:    "全局代理配置已不存在或仍需重新保存后才能完成安全更新",
+					Message:    a.appText("security_update.backend.issue.global_proxy.missing_or_resave", nil),
 				},
 			)
 		} else {
 			if proxyView.HasPassword {
 				if _, err := a.loadGlobalProxySecretBundle(proxyView); err != nil {
 					if secretstore.IsUnavailable(err) {
-						failed := newSecurityUpdateSystemFailureStatus(finalStatus, SecurityUpdateIssueReasonCodeEnvironmentBlocked, err)
+						failed := a.newSecurityUpdateSystemFailureStatus(finalStatus, SecurityUpdateIssueReasonCodeEnvironmentBlocked, err)
 						return failed, err
 					}
 					reason := SecurityUpdateIssueReasonCodeValidationFailed
-					message := "全局代理密码仍需补充后才能完成安全更新"
+					message := a.appText("security_update.backend.issue.global_proxy.password_incomplete", nil)
 					if os.IsNotExist(err) {
 						reason = SecurityUpdateIssueReasonCodeSecretMissing
-						message = "全局代理密码已丢失，请重新保存后再继续"
+						message = a.appText("security_update.backend.issue.global_proxy.password_missing", nil)
 					}
 					markSecurityUpdateNeedsAttention(
 						&finalStatus,
 						SecurityUpdateIssue{
 							ID:         "global-proxy-default",
 							Scope:      SecurityUpdateIssueScopeGlobalProxy,
-							Title:      "全局代理",
+							Title:      a.appText("security_update.backend.issue.global_proxy.title", nil),
 							Severity:   SecurityUpdateIssueSeverityMedium,
 							Status:     SecurityUpdateItemStatusNeedsAttention,
 							ReasonCode: reason,
@@ -402,7 +402,7 @@ func (a *App) validateSecurityUpdateCurrentAppRound(round SecurityUpdateStatus, 
 validateProviders:
 	providerSnapshot, err := aiservice.NewProviderConfigStore(a.configDir, a.secretStore).Load()
 	if err != nil {
-		failed := newSecurityUpdateSystemFailureStatus(finalStatus, securityUpdateFailureReasonForError(err), err)
+		failed := a.newSecurityUpdateSystemFailureStatus(finalStatus, securityUpdateFailureReasonForError(err), err)
 		return failed, err
 	}
 
@@ -426,7 +426,7 @@ validateProviders:
 					Status:     SecurityUpdateItemStatusNeedsAttention,
 					ReasonCode: SecurityUpdateIssueReasonCodeValidationFailed,
 					Action:     SecurityUpdateIssueActionOpenAISettings,
-					Message:    "AI 提供商配置已不存在或仍需重新保存后才能完成安全更新",
+					Message:    a.appText("security_update.backend.issue.ai_provider.missing_or_resave", nil),
 				},
 			)
 			continue
@@ -443,7 +443,7 @@ validateProviders:
 					Status:     SecurityUpdateItemStatusNeedsAttention,
 					ReasonCode: SecurityUpdateIssueReasonCodeSecretMissing,
 					Action:     SecurityUpdateIssueActionOpenAISettings,
-					Message:    "AI 提供商配置需要补充后才能完成安全更新",
+					Message:    a.appText("security_update.backend.issue.ai_provider.secret_missing", nil),
 				},
 			)
 			continue
@@ -461,9 +461,21 @@ func providerParticipatesInSecurityUpdate(provider ai.ProviderConfig) bool {
 	return provider.HasSecret || strings.TrimSpace(provider.APIKey) != ""
 }
 
+func (a *App) buildSecurityUpdatePendingStatusFromInspection(
+	inspection aiservice.ProviderConfigStoreInspection,
+	overallStatus SecurityUpdateOverallStatus,
+) SecurityUpdateStatus {
+	return buildSecurityUpdatePendingStatusFromInspection(
+		inspection,
+		overallStatus,
+		a.appText("security_update.backend.issue.ai_provider.migration_required", nil),
+	)
+}
+
 func buildSecurityUpdatePendingStatusFromInspection(
 	inspection aiservice.ProviderConfigStoreInspection,
 	overallStatus SecurityUpdateOverallStatus,
+	message string,
 ) SecurityUpdateStatus {
 	providersByID := make(map[string]ai.ProviderConfig, len(inspection.Snapshot.Providers))
 	for _, provider := range inspection.Snapshot.Providers {
@@ -486,7 +498,7 @@ func buildSecurityUpdatePendingStatusFromInspection(
 			Status:     SecurityUpdateItemStatusPending,
 			ReasonCode: SecurityUpdateIssueReasonCodeMigrationRequired,
 			Action:     SecurityUpdateIssueActionOpenAISettings,
-			Message:    "AI 提供商配置仍保存在当前应用配置中，完成安全更新后会迁入新的安全存储。",
+			Message:    message,
 		})
 	}
 
@@ -536,7 +548,23 @@ func securityUpdateFailureReasonForError(err error) SecurityUpdateIssueReasonCod
 	return SecurityUpdateIssueReasonCodeValidationFailed
 }
 
-func newSecurityUpdateSystemFailureStatus(base SecurityUpdateStatus, reasonCode SecurityUpdateIssueReasonCode, err error) SecurityUpdateStatus {
+func (a *App) newSecurityUpdateSystemFailureStatus(base SecurityUpdateStatus, reasonCode SecurityUpdateIssueReasonCode, err error) SecurityUpdateStatus {
+	return newSecurityUpdateSystemFailureStatus(
+		base,
+		reasonCode,
+		err,
+		a.appText("security_update.backend.issue.system.title", nil),
+		a.appText("security_update.backend.issue.system.message", nil),
+	)
+}
+
+func newSecurityUpdateSystemFailureStatus(
+	base SecurityUpdateStatus,
+	reasonCode SecurityUpdateIssueReasonCode,
+	err error,
+	title string,
+	message string,
+) SecurityUpdateStatus {
 	status := base
 	status.SchemaVersion = securityUpdateSchemaVersion
 	status.OverallStatus = SecurityUpdateOverallStatusRolledBack
@@ -549,12 +577,12 @@ func newSecurityUpdateSystemFailureStatus(base SecurityUpdateStatus, reasonCode 
 		{
 			ID:         "system-blocked",
 			Scope:      SecurityUpdateIssueScopeSystem,
-			Title:      "安全更新未完成",
+			Title:      title,
 			Severity:   SecurityUpdateIssueSeverityHigh,
 			Status:     SecurityUpdateItemStatusFailed,
 			ReasonCode: reasonCode,
 			Action:     SecurityUpdateIssueActionViewDetails,
-			Message:    "当前环境无法完成本次安全更新，请稍后重试",
+			Message:    message,
 		},
 	}
 	return status

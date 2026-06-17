@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -16,9 +17,15 @@ import {
 
 describe("jvmResourcePresentation", () => {
   it("provides a localized fallback label for built-in JVM actions", () => {
-    expect(resolveJVMActionDisplay({ action: "set" })).toMatchObject({
+    expect(resolveJVMActionDisplay({ action: "set" }, "zh-CN")).toMatchObject({
       action: "set",
       label: "设置属性",
+      description: "更新当前资源暴露的可写属性值。",
+    });
+    expect(resolveJVMActionDisplay({ action: "set" }, "en-US")).toMatchObject({
+      action: "set",
+      label: "Set property",
+      description: "Update a writable property exposed by the current resource.",
     });
   });
 
@@ -41,16 +48,43 @@ describe("jvmResourcePresentation", () => {
       formatJVMActionSummary([
         { action: "set" },
         { action: "invoke", label: "执行重置" },
-      ]),
+      ], "zh-CN"),
     ).toBe("设置属性（set）, 执行重置（invoke）");
+    expect(formatJVMActionSummary([{ action: "set" }], "en-US")).toBe(
+      "Set property（set）",
+    );
   });
 
   it("localizes risk levels and audit result states", () => {
-    expect(formatJVMRiskLevelText("medium")).toBe("中");
-    expect(formatJVMRiskLevelText("")).toBe("未知");
-    expect(formatJVMAuditResultLabel("applied")).toBe("已执行");
-    expect(formatJVMAuditResultLabel("error")).toBe("失败");
+    expect(formatJVMRiskLevelText("medium", "zh-CN")).toBe("中");
+    expect(formatJVMRiskLevelText("", "zh-CN")).toBe("未知");
+    expect(formatJVMRiskLevelText("medium", "en-US")).toBe("Medium");
+    expect(formatJVMRiskLevelText("", "en-US")).toBe("Unknown");
+    expect(formatJVMAuditResultLabel("applied", "zh-CN")).toBe("已执行");
+    expect(formatJVMAuditResultLabel("applied", "en-US")).toBe("Applied");
+    expect(formatJVMAuditResultLabel("done", "en-US")).toBe("Success");
+    expect(formatJVMAuditResultLabel("warning", "en-US")).toBe("Warning");
+    expect(formatJVMAuditResultLabel("blocked", "en-US")).toBe("Blocked");
+    expect(formatJVMAuditResultLabel("error", "en-US")).toBe("Failed");
+    expect(formatJVMAuditResultLabel("", "en-US")).toBe("Unknown");
+    expect(formatJVMAuditResultLabel("custom-state", "en-US")).toBe(
+      "custom-state",
+    );
     expect(resolveJVMAuditResultColor("warning")).toBe("gold");
+  });
+
+  it("keeps built-in action fallback copy in catalog instead of source literals", () => {
+    const source = readFileSync(
+      new URL("./jvmResourcePresentation.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain("jvm_resource.presentation.action.");
+    expect(source).not.toMatch(
+      /设置属性|更新当前资源暴露|调用操作|写入资源|清空资源|驱逐缓存|删除条目|删除资源|刷新资源|重新加载|重置状态/,
+    );
+    expect(source).toContain("jvm_resource.presentation.audit_result.");
+    expect(source).not.toMatch(/已执行|成功|警告|已阻断|失败/);
   });
 
   it("uses json mode for structured snapshots", () => {
@@ -155,7 +189,7 @@ describe("jvmResourcePresentation", () => {
     });
   });
 
-  it("rejects confirmed apply requests when preview token is missing", () => {
+  it("localizes missing confirmation token errors for apply requests", () => {
     expect(() =>
       buildJVMPreviewApplyRequest(
         {
@@ -183,8 +217,40 @@ describe("jvmResourcePresentation", () => {
             value: "warm",
           },
         },
+        "zh-CN",
       ),
     ).toThrow("确认令牌缺失");
+
+    expect(() =>
+      buildJVMPreviewApplyRequest(
+        {
+          providerMode: "jmx",
+          resourceId: "jmx:/attribute/app/Mode",
+          action: "set",
+          reason: "repair runtime mode",
+          payload: { value: "warm" },
+        },
+        {
+          allowed: true,
+          requiresConfirmation: true,
+          summary: "Set Mode",
+          riskLevel: "high",
+          before: {
+            resourceId: "jmx:/attribute/app/Mode",
+            kind: "attribute",
+            format: "string",
+            value: "cold",
+          },
+          after: {
+            resourceId: "jmx:/attribute/app/Mode",
+            kind: "attribute",
+            format: "string",
+            value: "warm",
+          },
+        },
+        "en-US",
+      ),
+    ).toThrow("Confirmation token is missing. Preview again before executing.");
   });
 
   it("caps editor height for very long payloads while keeping short content compact", () => {

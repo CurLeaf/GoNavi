@@ -39,7 +39,13 @@ func (p *JMXProvider) ProbeCapabilities(ctx context.Context, cfg connection.Conn
 		DisplayLabel: "JMX",
 		Reason: func() string {
 			if readOnly {
-				return "当前连接只读"
+				return changeBlockedReadOnlyKey
+			}
+			return ""
+		}(),
+		reasonKey: func() string {
+			if readOnly {
+				return changeBlockedReadOnlyKey
 			}
 			return ""
 		}(),

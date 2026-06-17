@@ -20,38 +20,55 @@ var currentJVMMonitoringManager jvmMonitoringService = jvm.NewMonitoringManager(
 func (a *App) JVMStartMonitoring(cfg connection.ConnectionConfig) connection.QueryResult {
 	snapshot, err := currentJVMMonitoringManager.Start(a.ctx, cfg, "")
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: a.localizeJVMError(err)}
 	}
-	return connection.QueryResult{Success: true, Data: snapshot}
+	return connection.QueryResult{Success: true, Data: a.localizeJVMMonitoringSnapshot(snapshot)}
 }
 
 func (a *App) JVMGetMonitoringHistory(cfg connection.ConnectionConfig, providerMode string) connection.QueryResult {
 	connectionID, resolvedMode, err := resolveJVMMonitoringLookup(cfg, providerMode)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: a.localizeJVMError(err)}
 	}
 
 	snapshot, err := currentJVMMonitoringManager.GetHistory(connectionID, resolvedMode)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: a.localizeJVMError(err)}
 	}
-	return connection.QueryResult{Success: true, Data: snapshot}
+	return connection.QueryResult{Success: true, Data: a.localizeJVMMonitoringSnapshot(snapshot)}
 }
 
 func (a *App) JVMStopMonitoring(cfg connection.ConnectionConfig, providerMode string) connection.QueryResult {
 	connectionID, resolvedMode, err := resolveJVMMonitoringLookup(cfg, providerMode)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: a.localizeJVMError(err)}
 	}
 
 	if err := currentJVMMonitoringManager.Stop(connectionID, resolvedMode); err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: a.localizeJVMError(err)}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]any{
 		"connectionId": connectionID,
 		"providerMode": resolvedMode,
 		"status":       "stopped",
 	}}
+}
+
+func (a *App) localizeJVMMonitoringSnapshot(snapshot jvm.MonitoringSessionSnapshot) jvm.MonitoringSessionSnapshot {
+	if len(snapshot.ProviderWarnings) == 0 {
+		return snapshot
+	}
+
+	warnings := append([]string(nil), snapshot.ProviderWarnings...)
+	for index, warning := range warnings {
+		key, params, ok := jvm.ParseMonitoringProviderWarning(warning)
+		if !ok {
+			continue
+		}
+		warnings[index] = a.appText(key, params)
+	}
+	snapshot.ProviderWarnings = warnings
+	return snapshot
 }
 
 func resolveJVMMonitoringLookup(cfg connection.ConnectionConfig, requestedMode string) (string, string, error) {

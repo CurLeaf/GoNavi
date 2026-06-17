@@ -5,7 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"path/filepath"
 	"strings"
 	"time"
@@ -37,6 +37,25 @@ type jvmPreviewConfirmationContext struct {
 	RiskLevel       string `json:"riskLevel"`
 	BeforeVersion   string `json:"beforeVersion"`
 	AfterVersion    string `json:"afterVersion"`
+}
+
+type jvmPreviewConfirmationHashError struct {
+	key string
+	err error
+}
+
+func (e *jvmPreviewConfirmationHashError) Error() string {
+	if e == nil || e.err == nil {
+		return ""
+	}
+	return e.err.Error()
+}
+
+func (e *jvmPreviewConfirmationHashError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
 }
 
 func buildJVMCapabilityError(mode string, cfg connection.ConnectionConfig, err error) jvm.Capability {
@@ -72,7 +91,7 @@ func resolveJVMProviderForMode(cfg connection.ConnectionConfig, mode string) (co
 func (a *App) issueJVMPreviewConfirmationToken(cfg connection.ConnectionConfig, req jvm.ChangeRequest, preview jvm.ChangePreview) (string, error) {
 	contextHash, err := buildJVMPreviewConfirmationContextHash(cfg, req, preview)
 	if err != nil {
-		return "", err
+		return "", a.localizeJVMPreviewConfirmationHashError(err)
 	}
 
 	token := uuid.NewString()
@@ -101,17 +120,17 @@ func (a *App) consumeJVMPreviewConfirmationToken(cfg connection.ConnectionConfig
 	}
 
 	if strings.TrimSpace(preview.ConfirmationToken) == "" {
-		return fmt.Errorf("预览确认令牌缺失，请重新预览后再提交")
+		return errors.New(a.appText("jvm.backend.error.preview_confirmation_missing", nil))
 	}
 
 	token := strings.TrimSpace(req.ConfirmationToken)
 	if token == "" {
-		return fmt.Errorf("缺少确认令牌，请先完成预览确认")
+		return errors.New(a.appText("jvm.backend.error.confirmation_token_missing", nil))
 	}
 
 	expectedHash, err := buildJVMPreviewConfirmationContextHash(cfg, req, preview)
 	if err != nil {
-		return err
+		return a.localizeJVMPreviewConfirmationHashError(err)
 	}
 
 	now := time.Now()
@@ -119,21 +138,21 @@ func (a *App) consumeJVMPreviewConfirmationToken(cfg connection.ConnectionConfig
 	if a.jvmPreviewTokens == nil {
 		a.jvmPreviewTokens = make(map[string]jvmPreviewConfirmationToken)
 	}
-	a.pruneExpiredJVMPreviewConfirmationTokensLocked(now)
 	entry, ok := a.jvmPreviewTokens[token]
 	if ok {
 		delete(a.jvmPreviewTokens, token)
 	}
+	a.pruneExpiredJVMPreviewConfirmationTokensLocked(now)
 	a.jvmPreviewTokenMu.Unlock()
 
 	if !ok {
-		return fmt.Errorf("确认令牌已失效，请重新预览并确认")
+		return errors.New(a.appText("jvm.backend.error.confirmation_token_invalid", nil))
 	}
 	if !entry.expiresAt.After(now) {
-		return fmt.Errorf("确认令牌已过期，请重新预览并确认")
+		return errors.New(a.appText("jvm.backend.error.confirmation_token_expired", nil))
 	}
 	if subtle.ConstantTimeCompare([]byte(entry.contextHash), []byte(expectedHash)) != 1 {
-		return fmt.Errorf("确认令牌不匹配，请重新预览并确认")
+		return errors.New(a.appText("jvm.backend.error.confirmation_token_invalid", nil))
 	}
 	return nil
 }
@@ -149,11 +168,17 @@ func (a *App) pruneExpiredJVMPreviewConfirmationTokensLocked(now time.Time) {
 func buildJVMPreviewConfirmationContextHash(cfg connection.ConnectionConfig, req jvm.ChangeRequest, preview jvm.ChangePreview) (string, error) {
 	configHash, err := hashJSONValue(cfg)
 	if err != nil {
-		return "", fmt.Errorf("生成 JVM 预览上下文失败: %w", err)
+		return "", &jvmPreviewConfirmationHashError{
+			key: "jvm.backend.error.preview_context_hash_failed",
+			err: err,
+		}
 	}
 	payloadHash, err := hashJSONValue(req.Payload)
 	if err != nil {
-		return "", fmt.Errorf("生成 JVM 预览载荷摘要失败: %w", err)
+		return "", &jvmPreviewConfirmationHashError{
+			key: "jvm.backend.error.preview_payload_hash_failed",
+			err: err,
+		}
 	}
 
 	input := jvmPreviewConfirmationContext{
@@ -171,6 +196,51 @@ func buildJVMPreviewConfirmationContextHash(cfg connection.ConnectionConfig, req
 		AfterVersion:    strings.TrimSpace(preview.After.Version),
 	}
 	return hashJSONValue(input)
+}
+
+func (a *App) localizeJVMPreviewConfirmationHashError(err error) error {
+	var hashErr *jvmPreviewConfirmationHashError
+	if !errors.As(err, &hashErr) || hashErr == nil {
+		return err
+	}
+	return errors.New(a.appText(hashErr.key, map[string]any{
+		"detail": hashErr.Error(),
+	}))
+}
+
+func (a *App) localizeJVMError(err error) string {
+	if err == nil {
+		return ""
+	}
+	var localized *jvm.LocalizedError
+	if errors.As(err, &localized) && localized != nil && strings.TrimSpace(localized.Key) != "" {
+		return a.appText(localized.Key, localized.Params)
+	}
+	return err.Error()
+}
+
+func (a *App) localizeJVMBlockingReason(preview jvm.ChangePreview) string {
+	reason := strings.TrimSpace(preview.BlockingReason)
+	if reason == "" {
+		return ""
+	}
+	key := strings.TrimSpace(preview.BlockingReasonLocalizationKey())
+	if key != "" && reason == key {
+		return a.appText(key, nil)
+	}
+	return reason
+}
+
+func (a *App) localizeJVMCapability(capability jvm.Capability) jvm.Capability {
+	reason := strings.TrimSpace(capability.Reason)
+	if reason == "" {
+		return capability
+	}
+	key := strings.TrimSpace(capability.ReasonLocalizationKey())
+	if key != "" && reason == key {
+		capability.Reason = a.appText(key, nil)
+	}
+	return capability
 }
 
 func hashJSONValue(value any) (string, error) {
@@ -192,7 +262,7 @@ func (a *App) TestJVMConnection(cfg connection.ConnectionConfig) connection.Quer
 		return connection.QueryResult{Success: false, Message: jvm.DescribeConnectionTestError(normalized, err)}
 	}
 
-	return connection.QueryResult{Success: true, Message: "JVM 连接成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("jvm.backend.message.connect_success", nil)}
 }
 
 func (a *App) JVMListResources(cfg connection.ConnectionConfig, parentPath string) connection.QueryResult {
@@ -232,12 +302,12 @@ func (a *App) JVMPreviewChange(cfg connection.ConnectionConfig, req jvm.ChangeRe
 
 	normalized, provider, err := resolveJVMProviderForMode(cfg, req.ProviderMode)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: a.localizeJVMError(err)}
 	}
 
 	preview, err := jvm.BuildChangePreview(a.ctx, provider, normalized, req)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: a.localizeJVMError(err)}
 	}
 	if preview.Allowed && preview.RequiresConfirmation {
 		token, err := a.issueJVMPreviewConfirmationToken(normalized, req, preview)
@@ -246,6 +316,7 @@ func (a *App) JVMPreviewChange(cfg connection.ConnectionConfig, req jvm.ChangeRe
 		}
 		preview.ConfirmationToken = token
 	}
+	preview.BlockingReason = a.localizeJVMBlockingReason(preview)
 
 	return connection.QueryResult{Success: true, Data: preview}
 }
@@ -259,17 +330,17 @@ func (a *App) JVMApplyChange(cfg connection.ConnectionConfig, req jvm.ChangeRequ
 
 	normalized, provider, err := resolveJVMProviderForMode(cfg, req.ProviderMode)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: a.localizeJVMError(err)}
 	}
 
 	preview, err := jvm.BuildChangePreview(a.ctx, provider, normalized, req)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: a.localizeJVMError(err)}
 	}
 	if !preview.Allowed {
-		message := strings.TrimSpace(preview.BlockingReason)
+		message := a.localizeJVMBlockingReason(preview)
 		if message == "" {
-			message = "当前变更被 Guard 拦截"
+			message = a.appText("jvm.backend.error.change_blocked_by_guard", nil)
 		}
 		return connection.QueryResult{Success: false, Message: message}
 	}
@@ -302,7 +373,7 @@ func (a *App) JVMApplyChange(cfg connection.ConnectionConfig, req jvm.ChangeRequ
 		if message == "" {
 			return warning
 		}
-		return message + "；" + warning
+		return message + a.appText("jvm.backend.separator.message_warning", nil) + warning
 	}
 
 	pendingTimestamp := time.Now().UnixMilli()
@@ -315,13 +386,13 @@ func (a *App) JVMApplyChange(cfg connection.ConnectionConfig, req jvm.ChangeRequ
 	}
 
 	if err := appendAudit("pending", pendingTimestamp); err != nil {
-		return connection.QueryResult{Success: false, Message: "审计记录写入失败，已阻止 JVM 变更: " + err.Error()}
+		return connection.QueryResult{Success: false, Message: a.appText("jvm.backend.error.audit_write_blocked", map[string]any{"detail": err.Error()})}
 	}
 
 	result, err := provider.ApplyChange(a.ctx, normalized, req)
 	if err != nil {
 		if auditErr := appendAudit("failed", terminalAuditTimestamp()); auditErr != nil {
-			return connection.QueryResult{Success: false, Message: err.Error() + "；失败审计写入失败: " + auditErr.Error()}
+			return connection.QueryResult{Success: false, Message: appendWarning(err.Error(), a.appText("jvm.backend.warning.failed_audit_write_failed", map[string]any{"detail": auditErr.Error()}))}
 		}
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -331,7 +402,7 @@ func (a *App) JVMApplyChange(cfg connection.ConnectionConfig, req jvm.ChangeRequ
 		terminalResult = "applied"
 	}
 	if err := appendAudit(terminalResult, terminalAuditTimestamp()); err != nil {
-		result.Message = appendWarning(result.Message, "终态审计写入失败: "+err.Error())
+		result.Message = appendWarning(result.Message, a.appText("jvm.backend.warning.terminal_audit_write_failed", map[string]any{"detail": err.Error()}))
 		return connection.QueryResult{Success: true, Message: result.Message, Data: result}
 	}
 
@@ -369,7 +440,9 @@ func (a *App) JVMProbeCapabilities(cfg connection.ConnectionConfig) connection.Q
 			continue
 		}
 
-		items = append(items, caps...)
+		for _, cap := range caps {
+			items = append(items, a.localizeJVMCapability(cap))
+		}
 	}
 
 	return connection.QueryResult{Success: true, Data: items}

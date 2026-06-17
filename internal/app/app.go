@@ -21,6 +21,7 @@ import (
 	"GoNavi-Wails/internal/logger"
 	proxytunnel "GoNavi-Wails/internal/proxy"
 	"GoNavi-Wails/internal/secretstore"
+	"GoNavi-Wails/shared/i18n"
 	"github.com/google/uuid"
 )
 
@@ -76,6 +77,8 @@ type App struct {
 	mu                 sync.RWMutex // Mutex for cache access
 	updateMu           sync.Mutex
 	updateState        updateState
+	i18nMu             sync.RWMutex
+	localizer          *i18n.Localizer
 	queryMu            sync.RWMutex
 	configDir          string
 	secretStore        secretstore.SecretStore
@@ -103,9 +106,57 @@ func NewAppWithSecretStore(store secretstore.SecretStore) *App {
 		sqlTransactions:    make(map[string]*managedSQLTransaction),
 		configDir:          resolveAppConfigDir(),
 		secretStore:        store,
+		localizer:          newAppLocalizer(),
 		jvmPreviewTokens:   make(map[string]jvmPreviewConfirmationToken),
 		jvmPreviewTokenTTL: defaultJVMPreviewConfirmationTokenTTL,
 	}
+}
+
+func newAppLocalizer() *i18n.Localizer {
+	localizer, err := i18n.NewLocalizer(i18n.LanguageEnUS)
+	if err != nil {
+		logger.Warnf("加载应用多语言目录失败：%v", err)
+		return nil
+	}
+	return localizer
+}
+
+func (a *App) SetLanguage(language string) {
+	normalized, ok := i18n.NormalizeLanguage(language)
+	if !ok {
+		return
+	}
+	a.i18nMu.Lock()
+	defer a.i18nMu.Unlock()
+	if a.localizer == nil {
+		a.localizer = newAppLocalizer()
+	}
+	if a.localizer != nil {
+		a.localizer.SetLanguage(normalized)
+	}
+}
+
+func (a *App) appText(key string, params map[string]any) string {
+	if a == nil {
+		return key
+	}
+	a.i18nMu.RLock()
+	if a.localizer != nil {
+		text := a.localizer.T(key, params)
+		a.i18nMu.RUnlock()
+		return text
+	}
+	a.i18nMu.RUnlock()
+
+	a.i18nMu.Lock()
+	defer a.i18nMu.Unlock()
+	if a.localizer == nil {
+		a.localizer = newAppLocalizer()
+	}
+	if a.localizer == nil {
+		return key
+	}
+	return a.localizer.T(key, params)
 }
 
 // InitializeLifecycle attaches runtime context without exposing lifecycle internals to Wails bindings.

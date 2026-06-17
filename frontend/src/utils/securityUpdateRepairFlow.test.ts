@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
+import { t as translate } from '../i18n';
 import type { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from '../types';
 import {
   hasSecurityUpdateRecentResult,
@@ -10,6 +12,8 @@ import {
   shouldReopenSecurityUpdateDetails,
   shouldRetrySecurityUpdateAfterRepairSave,
 } from './securityUpdateRepairFlow';
+
+const en = (key: string) => translate(key, undefined, 'en-US');
 
 const createConnection = (id: string): SavedConnection => ({
   id,
@@ -52,7 +56,7 @@ describe('securityUpdateRepairFlow', () => {
     });
   });
 
-  it('returns a user-facing warning when the target connection no longer exists', () => {
+  it('returns a stable warning key when the target connection no longer exists without a translator', () => {
     const issue: SecurityUpdateIssue = {
       id: 'issue-1',
       action: 'open_connection',
@@ -61,8 +65,35 @@ describe('securityUpdateRepairFlow', () => {
 
     expect(resolveSecurityUpdateRepairEntry(issue, [createConnection('conn-1')])).toEqual({
       type: 'warning',
-      message: '未找到对应连接，请先重新检查最新状态',
+      message: 'security_update.repair.warning.connection_not_found',
     });
+  });
+
+  it('uses the catalog warning when a repair translator is provided', () => {
+    const issue: SecurityUpdateIssue = {
+      id: 'issue-1',
+      action: 'open_connection',
+      refId: 'missing-conn',
+    };
+
+    const resolveWithTranslator = resolveSecurityUpdateRepairEntry as unknown as (
+      issue: SecurityUpdateIssue,
+      connections: SavedConnection[],
+      status: SecurityUpdateStatus | null,
+      t: (key: string) => string,
+    ) => ReturnType<typeof resolveSecurityUpdateRepairEntry>;
+
+    expect(resolveWithTranslator(issue, [createConnection('conn-1')], null, en)).toEqual({
+      type: 'warning',
+      message: 'The matching connection was not found. Check the latest status first.',
+    });
+  });
+
+  it('keeps the connection-not-found warning out of production source literals', () => {
+    const source = readFileSync(new URL('./securityUpdateRepairFlow.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('未找到对应连接，请先重新检查最新状态');
+    expect(source).toContain('security_update.repair.warning.connection_not_found');
   });
 
   it('maps proxy, ai and retry actions to the expected repair entry', () => {

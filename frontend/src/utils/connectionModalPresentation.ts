@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 type StoredSecretPlaceholderOptions = {
   hasStoredSecret?: boolean;
   emptyPlaceholder: string;
@@ -76,92 +78,52 @@ const postgresCompatibleTypes = new Set([
 ]);
 const fileDatabaseTypes = new Set(['sqlite', 'duckdb']);
 
-const CONNECTION_CONFIG_SECTION_COPY: Record<
+const connectionConfigSectionKeyMap: Record<
   ConnectionConfigSectionKey,
-  ConnectionConfigSectionCopy
+  string
 > = {
-  identity: {
-    title: '基础身份',
-    description: '连接名称和连接树中展示的基础信息。',
-  },
-  uri: {
-    title: '连接 URI',
-    description: '适合复制粘贴完整连接串，也可以和下方参数互相生成、解析。',
-  },
-  target: {
-    title: '目标地址',
-    description: '数据库服务的主机、端口或网关入口，是连通性测试的主目标。',
-  },
-  fileTarget: {
-    title: '数据库文件',
-    description: 'SQLite / DuckDB 使用本地数据库文件路径，不需要端口和网络隧道。',
-  },
-  connectionMode: {
-    title: '连接模式',
-    description: '选择单机、主从、副本集或集群等拓扑模式。',
-  },
-  oceanBaseProtocol: {
-    title: 'OceanBase 协议',
-    description: '明确选择 MySQL 或 Oracle 租户兼容协议。',
-  },
-  mongoDiscovery: {
-    title: 'MongoDB 寻址',
-    description: '选择标准 host:port 或 mongodb+srv DNS 发现方式。',
-  },
-  replica: {
-    title: '多节点配置',
-    description: '补充从库、种子节点、副本集成员或独立认证信息。',
-  },
-  service: {
-    title: '数据库服务',
-    description: '默认数据库、Oracle Service Name 等服务级定位参数。',
-  },
-  mongoPolicy: {
-    title: 'MongoDB 策略',
-    description: '认证库、读偏好等 MongoDB 专属策略。',
-  },
-  credentials: {
-    title: '认证凭据',
-    description: '用户名、密码和密文保留策略；留空会按已保存密文规则处理。',
-  },
-  databaseScope: {
-    title: '数据库范围',
-    description: '连接成功后可限制连接树展示的数据库或 Redis DB。',
-  },
-  customDriver: {
-    title: '自定义驱动',
-    description: '指定驱动名称，用于匹配已安装或可动态导入的数据库驱动。',
-  },
-  customDsn: {
-    title: '连接字符串',
-    description: '直接填写驱动要求的 DSN，适合非内置数据源或特殊参数。',
-  },
-  jvmRuntime: {
-    title: 'JVM 运行时',
-    description: 'JVM 目标、接入模式、JMX、Endpoint、Agent 与诊断增强。',
-  },
+  identity: 'identity',
+  uri: 'uri',
+  target: 'target',
+  fileTarget: 'fileTarget',
+  connectionMode: 'connectionMode',
+  oceanBaseProtocol: 'oceanBaseProtocol',
+  mongoDiscovery: 'mongoDiscovery',
+  replica: 'replica',
+  service: 'service',
+  mongoPolicy: 'mongoPolicy',
+  credentials: 'credentials',
+  databaseScope: 'databaseScope',
+  customDriver: 'customDriver',
+  customDsn: 'customDsn',
+  jvmRuntime: 'jvmRuntime',
 };
 
 export const getConnectionConfigSectionCopy = (
   key: ConnectionConfigSectionKey,
-): ConnectionConfigSectionCopy => CONNECTION_CONFIG_SECTION_COPY[key];
+): ConnectionConfigSectionCopy => ({
+  title: t(`connection.modal.section.${connectionConfigSectionKeyMap[key]}.title`),
+  description: t(
+    `connection.modal.section.${connectionConfigSectionKeyMap[key]}.description`,
+  ),
+});
 
 export const getConnectionConfigLayoutKindLabel = (
   kind: ConnectionConfigLayoutKind,
 ): string => {
   switch (kind) {
     case 'mysql-compatible':
-      return 'MySQL 兼容';
+      return t('connection.modal.layoutKind.mysqlCompatible');
     case 'mongodb':
-      return '文档数据库';
+      return t('connection.modal.layoutKind.mongodb');
     case 'redis':
-      return '键值数据库';
+      return t('connection.modal.layoutKind.redis');
     case 'postgres-compatible':
-      return 'PostgreSQL 兼容';
+      return t('connection.modal.layoutKind.postgresCompatible');
     case 'oracle':
-      return 'Oracle 服务';
+      return t('connection.modal.layoutKind.oracle');
     case 'file':
-      return '文件型数据库';
+      return t('connection.modal.layoutKind.file');
     case 'search':
       return '搜索引擎';
     case 'vector':
@@ -169,12 +131,12 @@ export const getConnectionConfigLayoutKindLabel = (
     case 'timeseries':
       return '时序数据库';
     case 'custom':
-      return '自定义连接';
+      return t('connection.modal.layoutKind.custom');
     case 'jvm':
-      return 'JVM 运行时';
+      return t('connection.modal.layoutKind.jvm');
     case 'generic-sql':
     default:
-      return '标准 SQL';
+      return t('connection.modal.layoutKind.genericSql');
   }
 };
 
@@ -385,7 +347,7 @@ export const getStoredSecretPlaceholder = ({
   retainedLabel,
 }: StoredSecretPlaceholderOptions): string => (
   hasStoredSecret
-    ? `••••••（留空表示继续沿用${retainedLabel}）`
+    ? t('connection.modal.secret.placeholder.retained', { retainedLabel })
     : emptyPlaceholder
 );
 
@@ -397,10 +359,10 @@ export const normalizeConnectionSecretErrorMessage = (
   const lower = text.toLowerCase();
 
   if (lower.includes('saved connection not found:')) {
-    return '未找到当前连接对应的已保存密文，请重新填写密码并保存后再试';
+    return t('connection.modal.error.savedConnectionNotFound');
   }
   if (lower.includes('secret store unavailable')) {
-    return '系统密文存储当前不可用，请检查系统钥匙串或凭据管理器后再试';
+    return t('connection.modal.error.secretStoreUnavailable');
   }
 
   return text;
@@ -429,13 +391,15 @@ export const resolveConnectionTestFailureFeedback = ({
 }): ConnectionTestFailureFeedback => {
   if (kind === 'validation') {
     return {
-      message: '测试失败: 请先完善必填项后再测试连接',
+      message: t('connection.modal.test.validation'),
       shouldToast: false,
     };
   }
 
   return {
-    message: `测试失败: ${normalizeConnectionSecretErrorMessage(reason, fallback)}`,
+    message: t('connection.modal.test.failure', {
+      reason: normalizeConnectionSecretErrorMessage(reason, fallback),
+    }),
     shouldToast: false,
   };
 };

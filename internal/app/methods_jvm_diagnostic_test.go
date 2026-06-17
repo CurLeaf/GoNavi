@@ -20,6 +20,7 @@ type fakeDiagnosticTransport struct {
 	startErr      error
 	executeReq    jvm.DiagnosticCommandRequest
 	executeErr    error
+	executeHook   func()
 	executeCalls  int
 	cancelSession string
 	cancelCommand string
@@ -41,6 +42,9 @@ func (f fakeDiagnosticTransport) StartSession(context.Context, connection.Connec
 }
 
 func (f fakeDiagnosticTransport) ExecuteCommand(context.Context, connection.ConnectionConfig, jvm.DiagnosticCommandRequest) error {
+	if f.executeHook != nil {
+		f.executeHook()
+	}
 	return f.executeErr
 }
 
@@ -99,6 +103,25 @@ func (f *fakeStreamingDiagnosticTransport) CancelCommand(context.Context, connec
 
 func (f *fakeStreamingDiagnosticTransport) CloseSession(context.Context, connection.ConnectionConfig, string) error {
 	return nil
+}
+
+func captureJVMDiagnosticChunks(t *testing.T, app *App) (*[]diagnosticChunkEventPayload, func()) {
+	t.Helper()
+
+	app.ctx = context.Background()
+	emitted := make([]diagnosticChunkEventPayload, 0, 2)
+	prevEmitter := emitJVMDiagnosticRuntimeEvent
+	emitJVMDiagnosticRuntimeEvent = func(ctx context.Context, eventName string, optionalData ...interface{}) {
+		if eventName != diagnosticChunkEvent {
+			return
+		}
+		payload, ok := optionalData[0].(diagnosticChunkEventPayload)
+		if !ok {
+			t.Fatalf("expected diagnostic chunk event payload, got %#v", optionalData[0])
+		}
+		emitted = append(emitted, payload)
+	}
+	return &emitted, func() { emitJVMDiagnosticRuntimeEvent = prevEmitter }
 }
 
 func TestJVMProbeDiagnosticCapabilitiesReturnsTransportPayload(t *testing.T) {
@@ -178,6 +201,365 @@ func TestJVMStartDiagnosticSessionReturnsHandle(t *testing.T) {
 	}
 }
 
+func TestJVMDiagnosticStaticMessagesUseEnglishAppText(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	app.configDir = t.TempDir()
+
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return fakeDiagnosticTransport{}, nil
+	})
+	defer restore()
+
+	disabledRes := app.JVMProbeDiagnosticCapabilities(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled: false,
+			},
+		},
+	})
+	if disabledRes.Success || disabledRes.Message != "JVM diagnostic enhancement is not enabled for this connection" {
+		t.Fatalf("expected localized disabled message, got %+v", disabledRes)
+	}
+
+	cfg := connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}
+
+	sessionRes := app.JVMExecuteDiagnosticCommand(cfg, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		Command: "thread -n 5",
+	})
+	if sessionRes.Success || sessionRes.Message != "Diagnostic session ID is required. Create a session first." {
+		t.Fatalf("expected localized session required message, got %+v", sessionRes)
+	}
+
+	commandRes := app.JVMExecuteDiagnosticCommand(cfg, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+	})
+	if commandRes.Success || commandRes.Message != "Diagnostic command cannot be empty" {
+		t.Fatalf("expected localized command required message, got %+v", commandRes)
+	}
+
+	cancelRes := app.JVMCancelDiagnosticCommand(cfg, "tab-diag-1", "sess-1", " ")
+	if cancelRes.Success || cancelRes.Message != "Cancel command requires sessionId and commandId" {
+		t.Fatalf("expected localized cancel identifiers message, got %+v", cancelRes)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandLocalizesAuditWriteBlockedWithRawDetail(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	tempDir := t.TempDir()
+	blockerPath := filepath.Join(tempDir, "audit-blocker")
+	if err := os.WriteFile(blockerPath, []byte("blocker"), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	app.configDir = blockerPath
+
+	recorder := &fakeDiagnosticTransport{}
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return diagnosticTransportRecorder{recorder: recorder}, nil
+	})
+	defer restore()
+
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-observe-audit",
+		Command:   "thread -n 5",
+		Source:    "manual",
+		Reason:    "observe threads",
+	})
+
+	expectedPrefix := "Failed to write diagnostic audit record, command execution was blocked: "
+	if res.Success || !strings.HasPrefix(res.Message, expectedPrefix) {
+		t.Fatalf("expected localized audit blocked message, got %+v", res)
+	}
+	if !strings.Contains(res.Message, blockerPath) {
+		t.Fatalf("expected raw audit error detail to include %q, got %q", blockerPath, res.Message)
+	}
+	if recorder.executeCalls != 0 {
+		t.Fatalf("expected transport ExecuteCommand not called, got %d", recorder.executeCalls)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandLocalizesAuditWarningWithEnglishSeparatorAndRawErrors(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	tempDir := t.TempDir()
+	app.configDir = filepath.Join(tempDir, "audit-root")
+
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return fakeDiagnosticTransport{
+			executeErr: errors.New("bridge exploded"),
+			executeHook: func() {
+				if err := os.RemoveAll(app.configDir); err != nil {
+					t.Fatalf("RemoveAll returned error: %v", err)
+				}
+				if err := os.WriteFile(app.configDir, []byte("terminal-blocker"), 0o600); err != nil {
+					t.Fatalf("WriteFile returned error: %v", err)
+				}
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-observe-warning",
+		Command:   "thread -n 5",
+		Source:    "manual",
+		Reason:    "observe threads",
+	})
+
+	if res.Success {
+		t.Fatalf("expected execute failure, got %+v", res)
+	}
+	if !strings.HasPrefix(res.Message, "bridge exploded; Failed to write audit record: ") {
+		t.Fatalf("expected raw execute error and localized warning joined by English separator, got %q", res.Message)
+	}
+	if !strings.Contains(res.Message, app.configDir) {
+		t.Fatalf("expected raw audit warning detail to include %q, got %q", app.configDir, res.Message)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandLocalizesTransportLocalizedError(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	app.configDir = t.TempDir()
+	emitted, restoreEmitter := captureJVMDiagnosticChunks(t, app)
+	defer restoreEmitter()
+
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return fakeDiagnosticTransport{
+			executeErr: &jvm.LocalizedError{
+				Key:    "jvm.backend.diagnostic.arthas.base_url_invalid",
+				Params: map[string]any{"detail": "://raw-bad-url"},
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-localized-error",
+		Command:   "thread -n 5",
+		Source:    "manual",
+		Reason:    "observe threads",
+	})
+
+	if res.Success {
+		t.Fatalf("expected execute failure, got %+v", res)
+	}
+	if res.Message != "Arthas Tunnel address is invalid: ://raw-bad-url" {
+		t.Fatalf("expected localized transport error with raw detail, got %q", res.Message)
+	}
+	if strings.Contains(res.Message, "jvm.backend.diagnostic.arthas.base_url_invalid") {
+		t.Fatalf("expected user message not to expose i18n key, got %q", res.Message)
+	}
+	if len(*emitted) != 1 {
+		t.Fatalf("expected one failed chunk, got %#v", *emitted)
+	}
+	if (*emitted)[0].Chunk.Content != res.Message {
+		t.Fatalf("expected failed chunk content to match localized message, got %#v", (*emitted)[0].Chunk)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandLocalizesChunkContentKeyAndKeepsRunningOutputRaw(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	app.configDir = t.TempDir()
+	emitted, restoreEmitter := captureJVMDiagnosticChunks(t, app)
+	defer restoreEmitter()
+
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return &fakeStreamingDiagnosticTransport{
+			chunks: []jvm.DiagnosticEventChunk{
+				{
+					Event:   "diagnostic",
+					Phase:   "running",
+					Content: "Arthas raw output: 中文 and targetId=orders-prod-01",
+				},
+				{
+					Event:   "diagnostic",
+					Phase:   "completed",
+					Content: "",
+					Metadata: map[string]any{
+						"transport":   jvm.DiagnosticTransportArthasTunnel,
+						"contentKey":  "jvm.backend.diagnostic.message.arthas_command_completed",
+						"rawTargetID": "orders-prod-01",
+					},
+				},
+			},
+		}, nil
+	})
+	defer restore()
+
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-content-key",
+		Command:   "thread -n 5",
+		Source:    "manual",
+		Reason:    "observe threads",
+	})
+
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	if len(*emitted) != 2 {
+		t.Fatalf("expected running and completed chunks, got %#v", *emitted)
+	}
+	if (*emitted)[0].Chunk.Content != "Arthas raw output: 中文 and targetId=orders-prod-01" {
+		t.Fatalf("expected running output to remain raw, got %#v", (*emitted)[0].Chunk)
+	}
+	completed := (*emitted)[1].Chunk
+	if completed.Content != "Arthas command completed" {
+		t.Fatalf("expected contentKey-localized completed content, got %#v", completed)
+	}
+	if completed.Metadata["contentKey"] != "jvm.backend.diagnostic.message.arthas_command_completed" {
+		t.Fatalf("expected contentKey metadata to be preserved, got %#v", completed.Metadata)
+	}
+	if completed.Metadata["rawTargetID"] != "orders-prod-01" {
+		t.Fatalf("expected raw metadata to be preserved, got %#v", completed.Metadata)
+	}
+}
+
+func TestJVMExecuteDiagnosticCommandEmitsEnglishCompletedChunk(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	app.configDir = t.TempDir()
+	emitted, restoreEmitter := captureJVMDiagnosticChunks(t, app)
+	defer restoreEmitter()
+
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return fakeDiagnosticTransport{}, nil
+	})
+	defer restore()
+
+	res := app.JVMExecuteDiagnosticCommand(connection.ConnectionConfig{
+		ID:   "conn-orders",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:              true,
+				Transport:            jvm.DiagnosticTransportAgentBridge,
+				BaseURL:              "http://127.0.0.1:19091/gonavi/diag",
+				AllowObserveCommands: true,
+			},
+		},
+	}, "tab-diag-1", jvm.DiagnosticCommandRequest{
+		SessionID: "sess-1",
+		CommandID: "cmd-completed",
+		Command:   "thread -n 5",
+		Source:    "manual",
+		Reason:    "observe threads",
+	})
+
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	if len(*emitted) != 1 {
+		t.Fatalf("expected one completed chunk, got %#v", *emitted)
+	}
+	if (*emitted)[0].Chunk.Content != "Diagnostic command completed" {
+		t.Fatalf("expected localized completed chunk content, got %#v", (*emitted)[0].Chunk)
+	}
+}
+
+func TestJVMCancelDiagnosticCommandEmitsEnglishCancelChunk(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	emitted, restoreEmitter := captureJVMDiagnosticChunks(t, app)
+	defer restoreEmitter()
+
+	restore := swapJVMDiagnosticTransportFactory(func(mode string) (jvm.DiagnosticTransport, error) {
+		return fakeDiagnosticTransport{}, nil
+	})
+	defer restore()
+
+	res := app.JVMCancelDiagnosticCommand(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			Diagnostic: connection.JVMDiagnosticConfig{
+				Enabled:   true,
+				Transport: jvm.DiagnosticTransportAgentBridge,
+				BaseURL:   "http://127.0.0.1:19091/gonavi/diag",
+			},
+		},
+	}, "tab-diag-1", "sess-1", "cmd-1")
+
+	if !res.Success {
+		t.Fatalf("expected success, got %+v", res)
+	}
+	if len(*emitted) != 1 {
+		t.Fatalf("expected one cancel chunk, got %#v", *emitted)
+	}
+	if (*emitted)[0].Chunk.Content != "Cancel request sent; waiting for the diagnostic bridge to stop the command" {
+		t.Fatalf("expected localized cancel chunk content, got %#v", (*emitted)[0].Chunk)
+	}
+}
+
 func TestJVMExecuteDiagnosticCommandReturnsAccepted(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
 	recorder := &fakeDiagnosticTransport{}
@@ -248,7 +630,7 @@ func TestJVMExecuteDiagnosticCommandBlocksTraceWhenConnectionReadOnly(t *testing
 	if res.Success {
 		t.Fatalf("expected trace command to be blocked in read-only mode, got %+v", res)
 	}
-	if !strings.Contains(res.Message, "只读") {
+	if !strings.Contains(res.Message, "read-only") {
 		t.Fatalf("expected read-only message, got %+v", res)
 	}
 	if recorder.executeCalls != 0 {
@@ -290,7 +672,7 @@ func TestJVMExecuteDiagnosticCommandBlocksMutatingWhenConnectionReadOnly(t *test
 	if res.Success {
 		t.Fatalf("expected mutating command to be blocked in read-only mode, got %+v", res)
 	}
-	if !strings.Contains(res.Message, "只读") {
+	if !strings.Contains(res.Message, "read-only") {
 		t.Fatalf("expected read-only message, got %+v", res)
 	}
 	if recorder.executeCalls != 0 {
@@ -617,7 +999,7 @@ func TestJVMExecuteDiagnosticCommandFailsClosedWhenAuditWriteFails(t *testing.T)
 	if res.Success {
 		t.Fatalf("expected command to fail closed when initial audit write fails, got %+v", res)
 	}
-	if !strings.Contains(res.Message, "审计") {
+	if !strings.Contains(res.Message, "audit") {
 		t.Fatalf("expected audit failure message, got %+v", res)
 	}
 	if recorder.executeCalls != 0 {

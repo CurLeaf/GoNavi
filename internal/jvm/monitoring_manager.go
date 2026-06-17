@@ -3,6 +3,7 @@ package jvm
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,16 @@ const (
 	defaultMonitoringEventLimit = 20
 	defaultMonitoringInterval   = 2 * time.Second
 	maxMonitoringSampleFailures = 3
+)
+
+const (
+	monitoringSnapshotUnsupportedKey = "jvm.backend.monitoring.error.snapshot_unsupported"
+	monitoringSessionNotFoundKey     = "jvm.backend.monitoring.error.session_not_found"
+)
+
+const (
+	monitoringWarningMarkerPrefix         = "__gonavi_i18n__:"
+	monitoringSampleAutoStoppedWarningKey = "jvm.backend.monitoring.warning.sample_auto_stopped"
 )
 
 var monitoringProviderFactory = NewProvider
@@ -94,7 +105,12 @@ func (m *monitoringManager) Start(ctx context.Context, raw connection.Connection
 
 	monitoringProvider, ok := provider.(MonitoringCapableProvider)
 	if !ok {
-		return MonitoringSessionSnapshot{}, fmt.Errorf("%s provider does not implement monitoring snapshot yet", ModeDisplayLabel(providerMode))
+		return MonitoringSessionSnapshot{}, &LocalizedError{
+			Key: monitoringSnapshotUnsupportedKey,
+			Params: map[string]any{
+				"provider": ModeDisplayLabel(providerMode),
+			},
+		}
 	}
 
 	generation := session.reset(connectionID, providerMode)
@@ -118,7 +134,7 @@ func (m *monitoringManager) Stop(connectionID string, providerMode string) error
 	session, ok := m.sessions[m.sessionKey(connectionID, providerMode)]
 	m.mu.Unlock()
 	if !ok {
-		return fmt.Errorf("monitoring session not found for %s %s", connectionID, providerMode)
+		return monitoringSessionNotFoundError(connectionID, providerMode)
 	}
 
 	session.stop()
@@ -130,9 +146,19 @@ func (m *monitoringManager) GetHistory(connectionID string, providerMode string)
 	session, ok := m.sessions[m.sessionKey(connectionID, providerMode)]
 	m.mu.Unlock()
 	if !ok {
-		return MonitoringSessionSnapshot{}, fmt.Errorf("monitoring session not found for %s %s", connectionID, providerMode)
+		return MonitoringSessionSnapshot{}, monitoringSessionNotFoundError(connectionID, providerMode)
 	}
 	return session.snapshot(), nil
+}
+
+func monitoringSessionNotFoundError(connectionID string, providerMode string) error {
+	return &LocalizedError{
+		Key: monitoringSessionNotFoundKey,
+		Params: map[string]any{
+			"connectionId": connectionID,
+			"providerMode": providerMode,
+		},
+	}
 }
 
 func (s *monitoringSession) appendPoint(point JVMMonitoringPoint) {
@@ -164,7 +190,7 @@ func (m *monitoringManager) runSampler(ctx context.Context, provider MonitoringC
 				consecutiveFailures++
 				session.appendWarning(err.Error())
 				if consecutiveFailures >= maxMonitoringSampleFailures {
-					session.appendWarning(fmt.Sprintf("监控采样连续失败 %d 次，已自动停止本次监控会话", consecutiveFailures))
+					session.appendWarning(FormatMonitoringSampleAutoStoppedWarning(consecutiveFailures))
 					session.markStopped(generation)
 					return
 				}
@@ -240,6 +266,30 @@ func (s *monitoringSession) applySnapshot(snapshot JVMMonitoringSnapshot, genera
 	s.missingMetrics = append([]string(nil), snapshot.MissingMetrics...)
 	s.providerWarnings = append([]string(nil), snapshot.ProviderWarnings...)
 	return true
+}
+
+func FormatMonitoringSampleAutoStoppedWarning(count int) string {
+	return fmt.Sprintf("%s%s:count=%d", monitoringWarningMarkerPrefix, monitoringSampleAutoStoppedWarningKey, count)
+}
+
+func ParseMonitoringProviderWarning(warning string) (string, map[string]any, bool) {
+	payload, ok := strings.CutPrefix(strings.TrimSpace(warning), monitoringWarningMarkerPrefix)
+	if !ok {
+		return "", nil, false
+	}
+	key, rawParams, ok := strings.Cut(payload, ":")
+	if !ok || key != monitoringSampleAutoStoppedWarningKey {
+		return "", nil, false
+	}
+	name, value, ok := strings.Cut(rawParams, "=")
+	if !ok || name != "count" {
+		return "", nil, false
+	}
+	count, err := strconv.Atoi(value)
+	if err != nil {
+		return "", nil, false
+	}
+	return key, map[string]any{"count": count}, true
 }
 
 func (s *monitoringSession) appendWarning(warning string) {

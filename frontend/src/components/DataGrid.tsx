@@ -24,6 +24,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { ImportData, ExportTable, ExportData, ExportQuery, ApplyChanges, PreviewChanges, DBGetColumns, DBGetIndexes, DBGetForeignKeys, DBShowCreateTable } from '../../wailsjs/go/app/App';
 import ImportPreviewModal from './ImportPreviewModal';
 import { useStore } from '../store';
+import { getCurrentLanguage, t } from '../i18n';
+import { useOptionalI18n } from '../i18n/provider';
 import type { ColumnDefinition, ForeignKeyDefinition, IndexDefinition } from '../types';
 import { v4 as generateUuid } from 'uuid';
 import 'react-resizable/css/styles.css';
@@ -52,6 +54,7 @@ import {
     buildCopyUpdateSQL,
     normalizeTemporalLiteralText,
     resolveUniqueKeyGroupsFromIndexes,
+    type CopySqlError,
 } from './dataGridCopyInsert';
 import { calculateAutoFitColumnWidth } from './dataGridAutoWidth';
 import { buildSelectedCellClipboardText } from './dataGridSelectionCopy';
@@ -106,6 +109,7 @@ import {
     resolveWritableColumnName,
     resolveRowLocatorValues,
     type EditRowLocator,
+    type RowLocatorMessages,
 } from '../utils/rowLocator';
 import {
     getColumnDefinitionComment,
@@ -144,11 +148,16 @@ interface DataGridErrorBoundaryState {
     error: Error | null;
 }
 
+interface DataGridErrorBoundaryProps {
+    children: React.ReactNode;
+    i18nLanguage?: string;
+}
+
 class DataGridErrorBoundary extends React.Component<
-    { children: React.ReactNode },
+    DataGridErrorBoundaryProps,
     DataGridErrorBoundaryState
 > {
-    constructor(props: { children: React.ReactNode }) {
+    constructor(props: DataGridErrorBoundaryProps) {
         super(props);
         this.state = { hasError: false, error: null };
     }
@@ -165,8 +174,8 @@ class DataGridErrorBoundary extends React.Component<
         if (this.state.hasError) {
             return (
                 <div style={{ padding: 16, color: '#ff4d4f' }}>
-                    <h4>渲染错误</h4>
-                    <p>数据表格渲染时发生错误，可能是数据格式问题。</p>
+                    <h4>{t('data_grid.error_boundary.title', undefined, this.props.i18nLanguage)}</h4>
+                    <p>{t('data_grid.error_boundary.description', undefined, this.props.i18nLanguage)}</p>
                     <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                         {this.state.error?.message}
                     </pre>
@@ -174,7 +183,7 @@ class DataGridErrorBoundary extends React.Component<
                         size="small"
                         onClick={() => this.setState({ hasError: false, error: null })}
                     >
-                        重试
+                        {t('data_grid.error_boundary.retry', undefined, this.props.i18nLanguage)}
                     </Button>
                 </div>
             );
@@ -195,16 +204,20 @@ const DATE_TIME_CACHE_LIMIT = 2000;
 const TABLE_CELL_PREVIEW_MAX_CHARS = 240;
 const ROW_NUMBER_COLUMN_WIDTH = 58;
 const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = [
-    { value: 3000, label: '3 秒' },
-    { value: 5000, label: '5 秒' },
-    { value: 10000, label: '10 秒' },
-    { value: 30000, label: '30 秒' },
+    { value: 3000, seconds: 3 },
+    { value: 5000, seconds: 5 },
+    { value: 10000, seconds: 10 },
+    { value: 30000, seconds: 30 },
 ];
 const DATA_GRID_DISPLAY_RENDER_VERSION = Symbol('DATA_GRID_DISPLAY_RENDER_VERSION');
 const DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION = Symbol('DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION');
 const DEFAULT_GRID_MONO_FONT_FAMILY = '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 const normalizedDateTimeCache = new Map<string, string>();
 const objectCellPreviewCache = new WeakMap<object, string>();
+const useDataGridI18nLanguage = () => {
+    const i18n = useOptionalI18n();
+    return i18n?.language ?? getCurrentLanguage();
+};
 const makeCellKey = (rowKey: string, colName: string) => `${rowKey}${CELL_KEY_SEP}${colName}`;
 const splitCellKey = (cellKey: string): { rowKey: string; colName: string } | null => {
     const sepIndex = cellKey.indexOf(CELL_KEY_SEP);
@@ -682,7 +695,7 @@ const ResizableTitle = React.forwardRef<HTMLTableCellElement, any>((props, ref) 
             e.stopPropagation();
         }}
         onClick={(e) => e.stopPropagation()}
-        title="拖动调整列宽，双击按内容自适应"
+        title={t('data_grid.column.resize_tooltip')}
         style={{
             position: 'absolute',
             right: 0, // Align to right edge
@@ -787,7 +800,7 @@ const SortableHeaderCell: React.FC<SortableHeaderCellProps> = React.memo((props)
             }}
         >
             <style>{sortableHeaderStaticStyles}</style>
-            <div className="sortable-header-cell-drag-handle" title="拖拽以调整列顺序">
+            <div className="sortable-header-cell-drag-handle" title={t('data_grid.column.drag_tooltip')}>
                 <div style={{ flex: 1, display: 'flex', alignItems: 'center', minWidth: 0, cursor: 'inherit' }}>
                     {children}
                 </div>
@@ -939,6 +952,8 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   const scrollLockRef = useRef<{ el: HTMLElement; handler: (e: WheelEvent) => void } | null>(null);
   const form = useContext(EditableContext);
   const cellContextMenuContext = useContext(CellContextMenuContext);
+  const i18nLanguage = useDataGridI18nLanguage();
+  const dateTimePickerNowLabel = t('data_grid.datetime_picker.now', undefined, i18nLanguage);
 
   /** DatePicker 面板打开时锁定表格滚动，关闭时恢复 */
   const lockTableScroll = useCallback((lock: boolean) => {
@@ -1056,7 +1071,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
                     const fieldName = getCellFieldName(record, dataIndex);
                     setCellFieldValue(form, fieldName, dayjs());
                   }}
-                >此刻</a>
+                >{dateTimePickerNowLabel}</a>
               )}
               onOk={(value) => setTimeout(() => { void save((value as dayjs.Dayjs | null | undefined) ?? undefined); }, 0)}
               onOpenChange={(open) => {
@@ -1199,23 +1214,23 @@ const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
     const menuItems: MenuProps['items'] = [
         ...(supportsCopyInsert ? [{
             key: 'insert',
-            label: '复制为 INSERT',
+            label: t('data_grid.context_menu.copy_as_insert'),
             icon: <ConsoleSqlOutlined />,
             onClick: () => handleCopyInsert(record),
         }, {
             key: 'update',
-            label: '复制为 UPDATE',
+            label: t('data_grid.context_menu.copy_as_update'),
             icon: <ConsoleSqlOutlined />,
             onClick: () => handleCopyUpdate(record),
         }, {
             key: 'delete',
-            label: '复制为 DELETE',
+            label: t('data_grid.context_menu.copy_as_delete'),
             icon: <ConsoleSqlOutlined />,
             onClick: () => handleCopyDelete(record),
         }] : []),
-        { key: 'json', label: '复制为 JSON', icon: <FileTextOutlined />, onClick: () => handleCopyJson(record) },
-        { key: 'csv', label: '复制为 CSV', icon: <FileTextOutlined />, onClick: () => handleCopyCsv(record) },
-        { key: 'copy', label: '复制为 Markdown', icon: <CopyOutlined />, onClick: () => { 
+        { key: 'json', label: t('data_grid.context_menu.copy_as_json'), icon: <FileTextOutlined />, onClick: () => handleCopyJson(record) },
+        { key: 'csv', label: t('data_grid.context_menu.copy_as_csv'), icon: <FileTextOutlined />, onClick: () => handleCopyCsv(record) },
+        { key: 'copy', label: t('data_grid.context_menu.copy_as_markdown'), icon: <CopyOutlined />, onClick: () => {
             const records = getTargets();
             const orderedCols = displayDataRef.current.length > 0
                 ? Object.keys(displayDataRef.current[0]).filter(c => c !== GONAVI_ROW_KEY)
@@ -1235,7 +1250,7 @@ const ContextMenuRow = React.memo(({ children, record, ...props }: any) => {
         { type: 'divider' },
         {
             key: 'export-selected',
-            label: '导出选中数据',
+            label: t('data_grid.context_menu.export_selected'),
             icon: <ExportOutlined />,
             children: [
                 { key: 'exp-csv', label: 'CSV', onClick: () => handleExportSelected('csv', record).catch(console.error) },
@@ -1445,6 +1460,7 @@ export const buildDataGridCommitChangeSet = ({
     rowKeyToString,
     normalizeCommitCellValue,
     shouldCommitColumn,
+    rowLocatorMessages,
 }: {
     addedRows: any[];
     modifiedRows: Record<string, any>;
@@ -1455,9 +1471,10 @@ export const buildDataGridCommitChangeSet = ({
     rowKeyToString: (key: any) => string;
     normalizeCommitCellValue: NormalizeCommitCellValue;
     shouldCommitColumn: (columnName: string) => boolean;
+    rowLocatorMessages?: RowLocatorMessages;
 }): { ok: true; changes: DataGridCommitChangeSet } | { ok: false; error: string } => {
     if (!editLocator || editLocator.readOnly || editLocator.strategy === 'none') {
-        return { ok: false, error: editLocator?.reason || '当前结果没有可用的安全行定位方式，无法提交修改。' };
+        return { ok: false, error: editLocator?.reason || rowLocatorMessages?.noSafeLocator?.() || 'No safe row locator is available for this result set.' };
     }
 
     const normalizeValues = (values: Record<string, any>, mode: 'insert' | 'update') => {
@@ -1494,7 +1511,7 @@ export const buildDataGridCommitChangeSet = ({
     for (const keyStr of deletedRowKeys) {
         const originalRow = originalRowsByKey.get(keyStr);
         if (!originalRow) continue;
-        const locatorValues = resolveRowLocatorValues(editLocator, originalRow);
+        const locatorValues = resolveRowLocatorValues(editLocator, originalRow, rowLocatorMessages);
         if (!locatorValues.ok) return { ok: false, error: locatorValues.error };
         deletes.push(locatorValues.values);
     }
@@ -1504,7 +1521,7 @@ export const buildDataGridCommitChangeSet = ({
         const originalRow = originalRowsByKey.get(keyStr);
         if (!originalRow) continue;
 
-        const locatorValues = resolveRowLocatorValues(editLocator, originalRow);
+        const locatorValues = resolveRowLocatorValues(editLocator, originalRow, rowLocatorMessages);
         if (!locatorValues.ok) return { ok: false, error: locatorValues.error };
 
         const hasRowKey = Object.prototype.hasOwnProperty.call(newRow as any, GONAVI_ROW_KEY);
@@ -1583,6 +1600,25 @@ const DataGrid: React.FC<DataGridProps> = ({
   const setEnableHiddenColumnMemory = useStore(state => state.setEnableHiddenColumnMemory);
   const clearTableHiddenColumns = useStore(state => state.clearTableHiddenColumns);
   const shortcutOptions = useStore(state => state.shortcutOptions);
+  const language = useDataGridI18nLanguage();
+  const translateDataGrid = useCallback(
+      (key: string, rawParams?: Record<string, unknown>) => {
+          const params = rawParams as Parameters<typeof t>[1];
+          return t(key, params, language);
+      },
+      [language]
+  );
+  const localizedDataEditAutoCommitDelayOptions = useMemo(
+      () => DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS.map((item) => ({
+          value: item.value,
+          label: translateDataGrid('data_grid.toolbar.commit_delay.seconds', { seconds: item.seconds }),
+      })),
+      [translateDataGrid]
+  );
+  const rowLocatorMessages = useMemo<RowLocatorMessages>(() => ({
+      noSafeLocator: () => translateDataGrid('data_grid.message.no_safe_locator'),
+      emptyLocatorValue: (column: string) => translateDataGrid('data_grid.message.locator_column_value_empty', { column }),
+  }), [translateDataGrid]);
   
   const isMacLike = useMemo(() => isMacLikePlatform(), []);
   const isV2Ui = appearance?.uiVersion === 'v2';
@@ -2137,18 +2173,19 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   // Helper to export specific data
   const exportData = async (rows: any[], format: string) => {
-      const hide = message.loading(`正在导出 ${rows.length} 条数据...`, 0);
+      const hide = message.loading(translateDataGrid('data_grid.message.exporting_rows', { count: rows.length }), 0);
       try {
           const cleanRows = pickDataGridOutputRows(rows, displayOutputColumnNames);
           // Pass tableName (or 'export') as default filename
           const res = await ExportData(cleanRows, displayOutputColumnNames, tableName || 'export', format);
           if (res.success) {
-              void message.success("导出成功");
+              void message.success(translateDataGrid('data_grid.message.export_success'));
           } else if (res.message !== "已取消") {
-              void message.error("导出失败: " + res.message);
+              void message.error(translateDataGrid('data_grid.message.export_failed', { detail: res.message }));
           }
       } catch (e: any) {
-          void message.error("导出失败: " + (e?.message || String(e)));
+          const rawErrorMessage = e?.message || String(e);
+          void message.error(translateDataGrid('data_grid.message.export_failed', { detail: rawErrorMessage }));
       } finally {
           hide();
       }
@@ -2456,10 +2493,11 @@ const DataGrid: React.FC<DataGridProps> = ({
               columnMetaTooltipColor={columnMetaTooltipColor}
               darkMode={darkMode}
               highlighted={highlightedColumnName === normalizedName}
+              translate={translateDataGrid}
               onOpenForeignKey={foreignKeyTarget ? () => openForeignKeyTarget(foreignKeyTarget) : undefined}
           />
       );
-  }, [columnMetaHintColor, columnMetaTooltipColor, columnMetaMap, columnMetaMapByLowerName, darkMode, densityParams.metaFontSize, foreignKeyMap, foreignKeyMapByLowerName, highlightedColumnName, openForeignKeyTarget, showColumnComment, showColumnType]);
+  }, [columnMetaHintColor, columnMetaTooltipColor, columnMetaMap, columnMetaMapByLowerName, darkMode, densityParams.metaFontSize, foreignKeyMap, foreignKeyMapByLowerName, highlightedColumnName, openForeignKeyTarget, showColumnComment, showColumnType, translateDataGrid]);
 
   const lockVirtualInlineTableScroll = useCallback((lock: boolean) => {
       if (lock) {
@@ -3274,6 +3312,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               void message.warning(content);
           },
       },
+      translate: translateDataGrid,
       getColumnFilterType,
       resolveDefaultGridFilterOperator,
       resolveNextGridFilterOperatorForColumnChange,
@@ -3439,7 +3478,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const handleBatchFillCells = useCallback(() => {
     const cellsToFill = currentSelectionRef.current;
     if (cellsToFill.size === 0) {
-      void message.info('请先选择要填充的单元格');
+      void message.info(translateDataGrid('data_grid.message.select_cells_to_fill'));
       return;
     }
 
@@ -3492,7 +3531,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     });
 
     if (updatedCount === 0) {
-      void message.info('选中的单元格无需更新');
+      void message.info(translateDataGrid('data_grid.message.selected_cells_no_update'));
       return;
     }
 
@@ -3520,7 +3559,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       return next || prev;
     });
 
-    void message.success(`已填充 ${updatedCount} 个单元格`);
+    void message.success(translateDataGrid('data_grid.message.filled_cells', { count: updatedCount }));
     closeBatchEditModal();
 
     // 清除选中状态
@@ -3534,7 +3573,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       cellSelectionAutoScrollRafRef.current = null;
     }
     updateCellSelection(new Set());
-  }, [batchEditValue, batchEditSetNull, addedRows, modifiedRows, rowKeyStr, updateCellSelection, closeBatchEditModal]);
+  }, [batchEditValue, batchEditSetNull, addedRows, modifiedRows, rowKeyStr, updateCellSelection, closeBatchEditModal, translateDataGrid]);
 
   // 事件委托：在容器级别处理单元格拖选；未开启模式时，拖拽超过阈值会自动进入单元格编辑模式。
   useEffect(() => {
@@ -3831,7 +3870,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const handleCopySelectedColumnsFromRow = useCallback(() => {
     const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
     if (activeSelection.size === 0) {
-      void message.info('请先在同一行选中要复制的单元格');
+      void message.info(translateDataGrid('data_grid.message.select_same_row_cells_to_copy'));
       return;
     }
 
@@ -3839,20 +3878,20 @@ const DataGrid: React.FC<DataGridProps> = ({
       .map((cellKey) => splitCellKey(cellKey))
       .filter((item): item is { rowKey: string; colName: string } => !!item);
     if (parsed.length === 0) {
-      void message.info('未识别到可复制的单元格');
+      void message.info(translateDataGrid('data_grid.message.no_copyable_cells'));
       return;
     }
 
     const sourceRowKeySet = new Set(parsed.map((item) => item.rowKey));
     if (sourceRowKeySet.size !== 1) {
-      void message.info('复制列值时请只选择同一行的单元格');
+      void message.info(translateDataGrid('data_grid.message.copy_columns_same_row_only'));
       return;
     }
 
     const sourceRowKey = parsed[0].rowKey;
     const selectedColumnNames = Array.from(new Set(parsed.map((item) => item.colName)));
     if (selectedColumnNames.length === 0) {
-      void message.info('未识别到可复制的列');
+      void message.info(translateDataGrid('data_grid.message.no_copyable_columns'));
       return;
     }
 
@@ -3882,12 +3921,12 @@ const DataGrid: React.FC<DataGridProps> = ({
     });
 
     setCopiedCellPatch({ sourceRowKey, values });
-    void message.success(`已复制 ${selectedColumnNames.length} 列，可粘贴到目标行`);
-  }, [selectedCells, rowKeyStr, addedRows, modifiedRows]);
+    void message.success(translateDataGrid('data_grid.message.copied_columns', { count: selectedColumnNames.length }));
+  }, [selectedCells, rowKeyStr, addedRows, modifiedRows, translateDataGrid]);
 
   const handlePasteCopiedColumnsToSelectedRows = useCallback((fallbackRowKey?: React.Key) => {
     if (!copiedCellPatch || Object.keys(copiedCellPatch.values).length === 0) {
-      void message.info('请先复制列值');
+      void message.info(translateDataGrid('data_grid.message.copy_columns_first'));
       return;
     }
 
@@ -3896,7 +3935,7 @@ const DataGrid: React.FC<DataGridProps> = ({
         .filter(([colName]) => isWritableResultColumn(colName, effectiveEditLocator))
     );
     if (Object.keys(writablePatchValues).length === 0) {
-      void message.info('没有可粘贴的可编辑字段');
+      void message.info(translateDataGrid('data_grid.message.no_pasteable_editable_fields'));
       return;
     }
 
@@ -3907,13 +3946,13 @@ const DataGrid: React.FC<DataGridProps> = ({
     } else if (fallbackRowKey !== undefined && fallbackRowKey !== null) {
       targetKeySet.add(rowKeyStr(fallbackRowKey));
     } else {
-      void message.info('请先选择目标行');
+      void message.info(translateDataGrid('data_grid.message.select_target_rows'));
       return;
     }
 
     targetKeySet.delete(copiedCellPatch.sourceRowKey);
     if (targetKeySet.size === 0) {
-      void message.info('目标行不能仅为源行，请选择其他行');
+      void message.info(translateDataGrid('data_grid.message.target_rows_cannot_only_source'));
       return;
     }
 
@@ -3964,7 +4003,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     });
 
     if (patchesByRow.size === 0 || updatedCellCount === 0) {
-      void message.info('目标行无需更新');
+      void message.info(translateDataGrid('data_grid.message.target_rows_no_update'));
       return;
     }
 
@@ -3990,21 +4029,21 @@ const DataGrid: React.FC<DataGridProps> = ({
       return next || prev;
     });
 
-    void message.success(`已粘贴到 ${patchesByRow.size} 行，共 ${updatedCellCount} 个单元格`);
+    void message.success(translateDataGrid('data_grid.message.pasted_columns_to_rows', { rows: patchesByRow.size, cells: updatedCellCount }));
     setCellContextMenu(prev => ({ ...prev, visible: false }));
-  }, [copiedCellPatch, addedRows, modifiedRows, rowKeyStr, effectiveEditLocator]);
+  }, [copiedCellPatch, addedRows, modifiedRows, rowKeyStr, effectiveEditLocator, translateDataGrid]);
 
   // 批量填充到选中行
   const handleBatchFillToSelected = useCallback((sourceRecord: Item, dataIndex: string) => {
     if (!isWritableResultColumn(dataIndex, effectiveEditLocator)) {
-      void message.info('当前字段不可编辑');
+      void message.info(translateDataGrid('data_grid.message.current_field_not_editable'));
       return;
     }
     const sourceValue = sourceRecord[dataIndex];
     const selKeys = selectedRowKeysRef.current;
 
     if (selKeys.length === 0) {
-      void message.info('请先选择要填充的行');
+      void message.info(translateDataGrid('data_grid.message.select_rows_to_fill'));
       return;
     }
 
@@ -4013,7 +4052,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     const targetKeys = selKeys.filter(k => k !== sourceKey);
 
     if (targetKeys.length === 0) {
-      void message.info('没有其他选中的行可以填充');
+      void message.info(translateDataGrid('data_grid.message.no_other_rows_to_fill'));
       return;
     }
 
@@ -4052,9 +4091,9 @@ const DataGrid: React.FC<DataGridProps> = ({
       return next || prev;
     });
 
-    void message.success(`已填充 ${updatedCount} 行`);
+    void message.success(translateDataGrid('data_grid.message.filled_rows', { count: updatedCount }));
     setCellContextMenu(prev => ({ ...prev, visible: false }));
-  }, [addedRows, rowKeyStr, effectiveEditLocator]);
+  }, [addedRows, rowKeyStr, effectiveEditLocator, translateDataGrid]);
 
   const displayData = useMemo(() => {
       return [...data, ...addedRows];
@@ -4401,32 +4440,32 @@ const DataGrid: React.FC<DataGridProps> = ({
   const handleDataPanelSave = useCallback(() => {
       if (!focusedCellInfo) return;
       if (!focusedCellWritable) {
-          void message.info('当前字段不可编辑');
+          void message.info(translateDataGrid('data_grid.message.current_field_not_editable'));
           return;
       }
       // 与 updateFocusedCell 设置的原始值比较，避免幽灵变更
       if (dataPanelValue === dataPanelOriginalRef.current) {
           dataPanelDirtyRef.current = false;
-          void message.info('数据未变更');
+          void message.info(translateDataGrid('data_grid.message.no_data_changes'));
           return;
       }
       const nextRow: any = { ...focusedCellInfo.record, [focusedCellInfo.dataIndex]: dataPanelValue };
       handleCellSave(nextRow);
       dataPanelOriginalRef.current = dataPanelValue;
       dataPanelDirtyRef.current = false;
-      void message.success('已保存');
-  }, [focusedCellInfo, focusedCellWritable, dataPanelValue, handleCellSave]);
+      void message.success(translateDataGrid('data_grid.message.saved'));
+  }, [focusedCellInfo, focusedCellWritable, dataPanelValue, handleCellSave, translateDataGrid]);
 
   const handleCellSetNull = useCallback(() => {
     if (!cellContextMenu.record) return;
     if (!isWritableResultColumn(cellContextMenu.dataIndex, effectiveEditLocator)) {
-      void message.info('当前字段不可编辑');
+      void message.info(translateDataGrid('data_grid.message.current_field_not_editable'));
       setCellContextMenu(prev => ({ ...prev, visible: false }));
       return;
     }
     handleCellSave({ ...cellContextMenu.record, [cellContextMenu.dataIndex]: null });
     setCellContextMenu(prev => ({ ...prev, visible: false }));
-  }, [cellContextMenu, handleCellSave, effectiveEditLocator]);
+  }, [cellContextMenu, handleCellSave, effectiveEditLocator, translateDataGrid]);
 
   const canUndoContextMenuCellChange = useMemo(() => {
     const record = cellContextMenu.record;
@@ -4446,7 +4485,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
     const keyStr = rowKeyStr(rowKey);
     if (addedRowKeySet.has(keyStr)) {
-      void message.info('新增行请使用删除选中或整表回滚撤销');
+      void message.info(translateDataGrid('data_grid.message.undo_added_row_hint'));
       setCellContextMenu(prev => ({ ...prev, visible: false }));
       return;
     }
@@ -4457,20 +4496,20 @@ const DataGrid: React.FC<DataGridProps> = ({
 
     const originalRow = data.find((row) => rowKeyStr(row?.[GONAVI_ROW_KEY]) === keyStr);
     if (!originalRow) {
-      void message.error('未找到该单元格的原始数据，无法撤销');
+      void message.error(translateDataGrid('data_grid.message.undo_cell_original_missing'));
       setCellContextMenu(prev => ({ ...prev, visible: false }));
       return;
     }
 
     handleCellSave({ ...record, [dataIndex]: originalRow[dataIndex] });
     setCellContextMenu(prev => ({ ...prev, visible: false }));
-    void message.success('已撤销单元格修改');
-  }, [addedRowKeySet, cellContextMenu.dataIndex, cellContextMenu.record, data, handleCellSave, modifiedColumns, rowKeyStr]);
+    void message.success(translateDataGrid('data_grid.message.undo_cell_success'));
+  }, [addedRowKeySet, cellContextMenu.dataIndex, cellContextMenu.record, data, handleCellSave, modifiedColumns, rowKeyStr, translateDataGrid]);
 
   const handleCellEditorSave = useCallback(() => {
       if (!cellEditorMeta) return;
       if (!isWritableResultColumn(cellEditorMeta.dataIndex, effectiveEditLocator)) {
-          void message.info('当前字段不可编辑');
+          void message.info(translateDataGrid('data_grid.message.current_field_not_editable'));
           closeCellEditor();
           return;
       }
@@ -4483,7 +4522,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const nextRow: any = { ...cellEditorMeta.record, [cellEditorMeta.dataIndex]: cellEditorValue };
       handleCellSave(nextRow);
       closeCellEditor();
-  }, [cellEditorMeta, cellEditorValue, handleCellSave, closeCellEditor, effectiveEditLocator]);
+  }, [cellEditorMeta, cellEditorValue, handleCellSave, closeCellEditor, effectiveEditLocator, translateDataGrid]);
 
   const handleFormatJsonInEditor = useCallback(() => {
       if (!cellEditorIsJson) return;
@@ -4491,9 +4530,10 @@ const DataGrid: React.FC<DataGridProps> = ({
           const obj = JSON.parse(cellEditorValue);
           setCellEditorValue(JSON.stringify(obj, null, 2));
       } catch (e: any) {
-          void message.error("JSON 格式无效：" + (e?.message || String(e)));
+          const rawErrorMessage = e?.message || String(e);
+          void message.error(translateDataGrid('data_grid.json_editor.invalid_format', { error: rawErrorMessage }));
       }
-  }, [cellEditorIsJson, cellEditorValue]);
+  }, [cellEditorIsJson, cellEditorValue, translateDataGrid]);
 
   const openVirtualInlineEditor = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
       if (!record || !dataIndex || !canModifyData) return;
@@ -4775,12 +4815,12 @@ const DataGrid: React.FC<DataGridProps> = ({
   const openRowEditorByKey = useCallback((keyStr?: string) => {
       if (!canModifyData) return;
       if (!keyStr) {
-          void message.info('请先定位到要编辑的记录');
+          void message.info(translateDataGrid('data_grid.message.locate_record_to_edit'));
           return;
       }
       const displayRow = mergedDisplayData.find(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr);
       if (!displayRow) {
-          void message.error('未找到目标行，请刷新后重试');
+          void message.error(translateDataGrid('data_grid.message.target_row_not_found'));
           return;
       }
 
@@ -4818,18 +4858,18 @@ const DataGrid: React.FC<DataGridProps> = ({
           nullCols,
           formValues: formMap,
       });
-  }, [addedRows, canModifyData, columnMetaMap, columnMetaMapByLowerName, currentConnConfig, data, dbType, mergedDisplayData, openRowEditor, rowKeyStr, visibleColumnNames]);
+  }, [addedRows, canModifyData, columnMetaMap, columnMetaMapByLowerName, currentConnConfig, data, dbType, mergedDisplayData, openRowEditor, rowKeyStr, translateDataGrid, visibleColumnNames]);
 
   const openCurrentViewRowEditor = useCallback(() => {
       if (!canModifyData) return;
       const currentRow = mergedDisplayData[textRecordIndex];
       const rowKey = currentRow?.[GONAVI_ROW_KEY];
       if (rowKey === undefined || rowKey === null) {
-          void message.info('当前记录不可编辑');
+          void message.info(translateDataGrid('data_grid.message.current_record_not_editable'));
           return;
       }
       openRowEditorByKey(rowKeyStr(rowKey));
-  }, [canModifyData, mergedDisplayData, textRecordIndex, rowKeyStr, openRowEditorByKey]);
+  }, [canModifyData, mergedDisplayData, textRecordIndex, rowKeyStr, openRowEditorByKey, translateDataGrid]);
 
   const handleOpenJsonEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -4849,9 +4889,10 @@ const DataGrid: React.FC<DataGridProps> = ({
           const parsed = JSON.parse(jsonEditorValue);
           setJsonEditorValue(JSON.stringify(parsed, null, 2));
       } catch (e: any) {
-          void message.error("JSON 格式无效：" + (e?.message || String(e)));
+          const rawErrorMessage = e?.message || String(e);
+          void message.error(translateDataGrid('data_grid.json_editor.invalid_format', { error: rawErrorMessage }));
       }
-  }, [jsonEditorValue]);
+  }, [jsonEditorValue, translateDataGrid]);
 
   const applyJsonEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -4859,16 +4900,17 @@ const DataGrid: React.FC<DataGridProps> = ({
       try {
           parsed = JSON.parse(jsonEditorValue);
       } catch (e: any) {
-          void message.error("JSON 解析失败：" + (e?.message || String(e)));
+          const rawErrorMessage = e?.message || String(e);
+          void message.error(translateDataGrid('data_grid.message.json_parse_failed', { detail: rawErrorMessage }));
           return;
       }
 
       if (!Array.isArray(parsed)) {
-          void message.error("JSON 视图必须是数组格式（每项对应一条记录）");
+          void message.error(translateDataGrid('data_grid.message.json_view_must_be_array'));
           return;
       }
       if (parsed.length !== mergedDisplayData.length) {
-          void message.error(`记录条数不一致：当前 ${mergedDisplayData.length} 条，JSON 中 ${parsed.length} 条。请勿在此模式增删记录。`);
+          void message.error(translateDataGrid('data_grid.message.json_record_count_mismatch', { current: mergedDisplayData.length, json: parsed.length }));
           return;
       }
 
@@ -4892,14 +4934,14 @@ const DataGrid: React.FC<DataGridProps> = ({
       for (let idx = 0; idx < parsed.length; idx += 1) {
           const nextItem = parsed[idx];
           if (!isPlainObject(nextItem)) {
-              void message.error(`第 ${idx + 1} 条记录不是对象，无法应用`);
+              void message.error(translateDataGrid('data_grid.message.json_record_not_object', { index: idx + 1 }));
               return;
           }
 
           const currentRow = mergedDisplayData[idx];
           const rowKey = currentRow?.[GONAVI_ROW_KEY];
           if (rowKey === undefined || rowKey === null) {
-              void message.error(`第 ${idx + 1} 条记录缺少行标识，无法应用`);
+              void message.error(translateDataGrid('data_grid.message.json_record_missing_row_key', { index: idx + 1 }));
               return;
           }
           const keyStr = rowKeyStr(rowKey);
@@ -4952,13 +4994,13 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       closeJsonEditor();
-      void message.success("JSON 修改已应用到当前结果集，可继续“提交事务”");
-  }, [canModifyData, jsonEditorValue, mergedDisplayData, addedRows, rowKeyStr, data, visibleColumnNames, effectiveEditLocator, closeJsonEditor]);
+      void message.success(translateDataGrid('data_grid.message.json_applied'));
+  }, [canModifyData, jsonEditorValue, mergedDisplayData, addedRows, rowKeyStr, data, visibleColumnNames, effectiveEditLocator, closeJsonEditor, translateDataGrid]);
 
   const openRowEditorFieldEditor = useCallback((dataIndex: string) => {
       if (!dataIndex) return;
       if (!isWritableResultColumn(dataIndex, effectiveEditLocator)) {
-          void message.info('当前字段不可编辑');
+          void message.info(translateDataGrid('data_grid.message.current_field_not_editable'));
           return;
       }
       const val = rowEditorForm.getFieldValue(dataIndex);
@@ -4968,7 +5010,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           dataIndex,
           (nextVal) => rowEditorForm.setFieldsValue({ [dataIndex]: nextVal }),
       );
-  }, [rowEditorForm, openCellEditor, effectiveEditLocator]);
+  }, [rowEditorForm, openCellEditor, effectiveEditLocator, translateDataGrid]);
 
   const applyRowEditor = useCallback(() => {
       const keyStr = rowEditorRowKey;
@@ -5074,6 +5116,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               id: key,
               width: column.width,
               className: `gonavi-sortable-header-cell${showColumnComment || showColumnType ? '' : ' is-single-line-title'}`,
+              'data-i18n-language': language,
               onResizeStart: handleResizeStart(key), // Only need start
               onResizeAutoFit: handleResizeAutoFit(key),
               onContextMenu: (event: React.MouseEvent<HTMLElement>) => {
@@ -5104,7 +5147,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               },
           }),
       }));
-  }, [canModifyData, columnWidths, currentConnConfig, dataTableDensity, displayColumnNames, displayColumnTypeMap, enableVirtual, handleResizeAutoFit, handleResizeStart, isV2Ui, normalizedPageFindText, onSort, renderColumnTitle, showColumnComment, showColumnHeaderContextMenu, showColumnType, sortInfo]);
+  }, [canModifyData, columnWidths, currentConnConfig, dataTableDensity, displayColumnNames, displayColumnTypeMap, enableVirtual, handleResizeAutoFit, handleResizeStart, isV2Ui, language, normalizedPageFindText, onSort, renderColumnTitle, showColumnComment, showColumnHeaderContextMenu, showColumnType, sortInfo]);
 
   const mergedColumns = useMemo(() => columns.map((col): ColumnType<any> => {
       const dataIndex = String(col.dataIndex);
@@ -5201,7 +5244,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                                       onClick={() => {
                                                           setCellFieldValue(form, getCellFieldName(record, dataIndex), dayjs());
                                                       }}
-                                                  >此刻</a>
+                                                  >{translateDataGrid('data_grid.datetime_picker.now')}</a>
                                               )}
                                               onOk={(value) => setTimeout(() => { void saveVirtualInlineEditor((value as dayjs.Dayjs | null | undefined) ?? undefined); }, 0)}
                                               onOpenChange={(open) => {
@@ -5342,7 +5385,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const copyRowsForPaste = useCallback((keys: React.Key[]) => {
       if (keys.length === 0) {
-          void message.info('请先选择要复制的行');
+          void message.info(translateDataGrid('data_grid.message.select_rows_to_copy'));
           return;
       }
       const copiedRows = buildCopiedRowsForPaste({
@@ -5353,13 +5396,13 @@ const DataGrid: React.FC<DataGridProps> = ({
           rowKeyToString: rowKeyStr,
       });
       if (copiedRows.length === 0) {
-          void message.info('未识别到可复制的行');
+          void message.info(translateDataGrid('data_grid.message.no_copyable_rows'));
           return;
       }
 
       setCopiedRowsForPaste(copiedRows);
-      void message.success(`已复制 ${copiedRows.length} 行，可粘贴为新增行`);
-  }, [mergedDisplayData, displayOutputColumnNames, rowKeyStr, effectiveEditLocator]);
+      void message.success(translateDataGrid('data_grid.message.copied_rows', { count: copiedRows.length }));
+  }, [mergedDisplayData, displayOutputColumnNames, rowKeyStr, effectiveEditLocator, translateDataGrid]);
 
   const handleCopySelectedRowsForPaste = useCallback(() => {
       copyRowsForPaste(selectedRowKeys);
@@ -5367,7 +5410,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const handlePasteCopiedRowsAsNew = useCallback(() => {
       if (copiedRowsForPaste.length === 0) {
-          void message.info('请先复制行');
+          void message.info(translateDataGrid('data_grid.message.copy_rows_first'));
           return;
       }
 
@@ -5381,15 +5424,15 @@ const DataGrid: React.FC<DataGridProps> = ({
           },
       });
       if (nextRows.length === 0) {
-          void message.info('没有可粘贴的行');
+          void message.info(translateDataGrid('data_grid.message.no_pasteable_rows'));
           return;
       }
 
       pendingScrollToBottomRef.current = true;
       setAddedRows(prev => [...prev, ...nextRows]);
       setSelectedRowKeys(nextRows.map(row => row[GONAVI_ROW_KEY]));
-      void message.success(`已粘贴 ${nextRows.length} 行为新增行，请检查后提交事务`);
-  }, [copiedRowsForPaste, displayOutputColumnNames, effectiveEditLocator]);
+      void message.success(translateDataGrid('data_grid.message.pasted_rows_as_new', { count: nextRows.length }));
+  }, [copiedRowsForPaste, displayOutputColumnNames, effectiveEditLocator, translateDataGrid]);
 
   const handleDeleteSelected = () => {
       const addedKeysToRemove: string[] = [];
@@ -5443,9 +5486,12 @@ const DataGrid: React.FC<DataGridProps> = ({
           rowKeyToString: rowKeyStr,
           normalizeCommitCellValue,
           shouldCommitColumn,
+          rowLocatorMessages,
       });
       if (!changeSetResult.ok) {
-          void message.error(changeSetResult.error || '无法构建变更集');
+          void message.error(changeSetResult.error
+              ? translateDataGrid('data_grid.message.change_set_build_failed_detail', { detail: changeSetResult.error })
+              : translateDataGrid('data_grid.message.change_set_build_failed'));
           return;
       }
       const { changes } = changeSetResult;
@@ -5473,14 +5519,17 @@ const DataGrid: React.FC<DataGridProps> = ({
               });
               setPreviewModalOpen(true);
           } else {
-              void message.error(res.message || '生成预览 SQL 失败');
+              void message.error(res.message
+                  ? translateDataGrid('data_grid.message.preview_sql_failed_detail', { detail: res.message })
+                  : translateDataGrid('data_grid.message.preview_sql_failed'));
           }
       } catch (e: any) {
-          void message.error('生成预览 SQL 失败：' + (e?.message || e));
+          const rawErrorMessage = e?.message || String(e);
+          void message.error(translateDataGrid('data_grid.message.preview_sql_failed_detail', { detail: rawErrorMessage }));
       }
   }, [addedRows, modifiedRows, deletedRowKeys, data, effectiveEditLocator,
       visibleColumnNames, rowKeyStr, normalizeCommitCellValue, shouldCommitColumn,
-      connectionId, tableName, connections]);
+      connectionId, tableName, connections, rowLocatorMessages, translateDataGrid]);
 
   const handleCommit = useCallback(async (source: 'manual' | 'auto' = 'manual') => {
       clearAutoCommitTimer();
@@ -5497,15 +5546,18 @@ const DataGrid: React.FC<DataGridProps> = ({
           rowKeyToString: rowKeyStr,
           normalizeCommitCellValue,
           shouldCommitColumn,
+          rowLocatorMessages,
       });
       if (!changeSetResult.ok) {
-          void message.error(changeSetResult.error);
+          void message.error(changeSetResult.error
+              ? translateDataGrid('data_grid.message.change_set_build_failed_detail', { detail: changeSetResult.error })
+              : translateDataGrid('data_grid.message.change_set_build_failed'));
           return;
       }
 
       const { inserts, updates, deletes } = changeSetResult.changes;
       if (inserts.length === 0 && updates.length === 0 && deletes.length === 0) {
-          void message.info("没有可提交的变更");
+          void message.info(translateDataGrid('data_grid.message.no_changes_to_commit'));
           return;
       }
 
@@ -5539,7 +5591,9 @@ const DataGrid: React.FC<DataGridProps> = ({
               message: res.message,
               dbName
           });
-          void message.success(source === 'auto' ? "自动提交成功" : "事务提交成功");
+          void message.success(source === 'auto'
+              ? translateDataGrid('data_grid.message.auto_commit_success')
+              : translateDataGrid('data_grid.message.transaction_committed'));
           setAddedRows([]);
           setModifiedRows({});
           setDeletedRowKeys(new Set());
@@ -5558,7 +5612,9 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (source === 'auto') {
               autoCommitFailedTokenRef.current = autoCommitChangeTokenRef.current;
           }
-          void message.error((source === 'auto' ? "自动提交失败: " : "提交失败: ") + res.message);
+          void message.error(source === 'auto'
+              ? translateDataGrid('data_grid.message.auto_commit_failed', { detail: res.message })
+              : translateDataGrid('data_grid.message.commit_failed', { detail: res.message }));
       }
   }, [
       clearAutoCommitTimer,
@@ -5577,6 +5633,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       dbName,
       addSqlLog,
       onReload,
+      translateDataGrid,
   ]);
 
   useEffect(() => {
@@ -5622,27 +5679,27 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const copyToClipboard = useCallback((text: string) => {
       navigator.clipboard.writeText(text).catch(console.error);
-      void message.success("已复制到剪贴板");
-  }, []);
+      void message.success(translateDataGrid('data_grid.message.copied_to_clipboard'));
+  }, [translateDataGrid]);
 
   const handleCopyContextMenuFieldName = useCallback(() => {
       const fieldName = resolveContextMenuFieldName(cellContextMenu.dataIndex, cellContextMenu.title);
       if (!fieldName) {
-          void message.info('未识别到字段名称');
+          void message.info(translateDataGrid('data_grid.message.no_field_name'));
           return;
       }
       copyToClipboard(fieldName);
       setCellContextMenu(prev => ({ ...prev, visible: false }));
-  }, [cellContextMenu.dataIndex, cellContextMenu.title, copyToClipboard]);
+  }, [cellContextMenu.dataIndex, cellContextMenu.title, copyToClipboard, translateDataGrid]);
 
   const handleCopyColumnData = useCallback((columnName: string) => {
       const normalizedColumnName = String(columnName || '').trim();
       if (!normalizedColumnName || !displayOutputColumnNames.includes(normalizedColumnName)) {
-          void message.info('未识别到可复制的列');
+          void message.info(translateDataGrid('data_grid.message.no_copyable_columns'));
           return;
       }
       if (mergedDisplayData.length === 0) {
-          void message.info('当前结果集没有可复制内容');
+          void message.info(translateDataGrid('data_grid.message.result_set_no_copyable_content'));
           return;
       }
 
@@ -5651,12 +5708,12 @@ const DataGrid: React.FC<DataGridProps> = ({
           .map((row) => normalizeClipboardTsvCell(formatClipboardCellText(row?.[normalizedColumnName], columnType, currentConnConfig)))
           .join('\n');
       copyToClipboard(text);
-  }, [columnMetaMap, columnMetaMapByLowerName, copyToClipboard, currentConnConfig, displayOutputColumnNames, mergedDisplayData]);
+  }, [columnMetaMap, columnMetaMapByLowerName, copyToClipboard, currentConnConfig, displayOutputColumnNames, mergedDisplayData, translateDataGrid]);
 
   const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeaderContextMenuActionKey) => {
       const columnName = resolveContextMenuFieldName(cellContextMenu.dataIndex, cellContextMenu.title);
       if (!columnName) {
-          void message.info('未识别到字段名称');
+          void message.info(translateDataGrid('data_grid.message.no_field_name'));
           setCellContextMenu(prev => ({ ...prev, visible: false }));
           return;
       }
@@ -5682,7 +5739,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               break;
           case 'hide-column':
               if (displayColumnNames.length <= 1) {
-                  void message.info('至少保留一个可见字段');
+                  void message.info(translateDataGrid('data_grid.message.keep_one_visible_column'));
                   break;
               }
               toggleColumnVisibility(columnName, false);
@@ -5712,6 +5769,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       displayColumnNames.length,
       handleCopyColumnData,
       setQueryOptions,
+      translateDataGrid,
       toggleColumnVisibility,
   ]);
 
@@ -5735,47 +5793,47 @@ const DataGrid: React.FC<DataGridProps> = ({
       const columns = getClipboardColumnNames(rows);
       const text = buildClipboardCsv(rows, columns);
       if (!text) {
-          void message.info('当前结果集没有可复制内容');
+          void message.info(translateDataGrid('data_grid.message.result_set_no_copyable_content'));
           return;
       }
       copyToClipboard(text);
-  }, [copyToClipboard, getClipboardColumnNames, getClipboardRows]);
+  }, [copyToClipboard, getClipboardColumnNames, getClipboardRows, translateDataGrid]);
 
   const handleCopyQueryResultJson = useCallback(() => {
       const rows = getClipboardRows();
       const text = buildClipboardJson(rows);
       if (!text) {
-          void message.info('当前结果集没有可复制内容');
+          void message.info(translateDataGrid('data_grid.message.result_set_no_copyable_content'));
           return;
       }
       copyToClipboard(text);
-  }, [copyToClipboard, getClipboardRows]);
+  }, [copyToClipboard, getClipboardRows, translateDataGrid]);
 
   const handleCopyQueryResultMarkdown = useCallback(() => {
       const rows = getClipboardRows();
       const columns = getClipboardColumnNames(rows);
       const text = buildClipboardMarkdown(rows, columns);
       if (!text) {
-          void message.info('当前结果集没有可复制内容');
+          void message.info(translateDataGrid('data_grid.message.result_set_no_copyable_content'));
           return;
       }
       copyToClipboard(text);
-  }, [copyToClipboard, getClipboardColumnNames, getClipboardRows]);
+  }, [copyToClipboard, getClipboardColumnNames, getClipboardRows, translateDataGrid]);
 
   const handleCopyDdl = useCallback(() => {
       if (!ddlText.trim()) {
-          void message.info('暂无可复制的 DDL');
+          void message.info(translateDataGrid('data_grid.message.no_ddl_to_copy'));
           return;
       }
       navigator.clipboard.writeText(ddlText)
-          .then(() => message.success('DDL 已复制到剪贴板'))
-          .catch(() => message.error('复制 DDL 失败'));
-  }, [ddlText]);
+          .then(() => message.success(translateDataGrid('data_grid.message.ddl_copied')))
+          .catch(() => message.error(translateDataGrid('data_grid.message.ddl_copy_failed')));
+  }, [ddlText, translateDataGrid]);
 
   const handleCopySelectedCellsToClipboard = useCallback(() => {
       const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
       if (activeSelection.size === 0) {
-          void message.info('请先拖选要复制的单元格');
+          void message.info(translateDataGrid('data_grid.message.drag_select_cells_to_copy'));
           return;
       }
 
@@ -5783,7 +5841,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           .map((cellKey) => splitCellKey(cellKey))
           .filter((item): item is { rowKey: string; colName: string } => !!item);
       if (parsed.length === 0) {
-          void message.info('未识别到可复制的单元格');
+          void message.info(translateDataGrid('data_grid.message.no_copyable_cells'));
           return;
       }
 
@@ -5794,12 +5852,12 @@ const DataGrid: React.FC<DataGridProps> = ({
           rowKeyField: GONAVI_ROW_KEY,
       });
       if (!text) {
-          void message.info('当前选区没有可复制内容');
+          void message.info(translateDataGrid('data_grid.message.selection_no_copyable_content'));
           return;
       }
 
       copyToClipboard(text);
-  }, [selectedCells, mergedDisplayData, displayColumnNames, copyToClipboard]);
+  }, [selectedCells, mergedDisplayData, displayColumnNames, copyToClipboard, translateDataGrid]);
 
   useEffect(() => {
       if (!cellEditMode) return;
@@ -5879,9 +5937,24 @@ const DataGrid: React.FC<DataGridProps> = ({
       return [clickedRecord];
   }, [mergedDisplayData, rowKeyStr]);
 
+  const translateCopySqlError = useCallback((error: CopySqlError): string => {
+      if (typeof error === 'string') {
+          return error;
+      }
+      switch (error.key) {
+          case 'data_grid.copy_sql.error.missing_table_name':
+              return translateDataGrid('data_grid.copy_sql.error.missing_table_name', error.params);
+          case 'data_grid.copy_sql.error.no_copyable_fields':
+              return translateDataGrid('data_grid.copy_sql.error.no_copyable_fields');
+          case 'data_grid.copy_sql.error.missing_safe_where':
+          default:
+              return translateDataGrid('data_grid.copy_sql.error.missing_safe_where');
+      }
+  }, [translateDataGrid]);
+
   const buildCopySqlBatchText = useCallback((mode: 'insert' | 'update' | 'delete', record: any): string | null => {
       if (!supportsCopyInsert) {
-          void message.warning("当前数据源不支持复制 SQL，请使用 JSON/CSV/Markdown 复制。");
+          void message.warning(translateDataGrid('data_grid.message.copy_sql_not_supported'));
           return null;
       }
       const records = getTargets(record);
@@ -5921,7 +5994,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       ));
       const failedResult = sqlResults.find((result) => result.ok === false);
       if (failedResult && failedResult.ok === false) {
-          void message.warning(failedResult.error);
+          void message.warning(translateCopySqlError(failedResult.error));
           return null;
       }
       const sqlTexts: string[] = [];
@@ -5941,6 +6014,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       pkColumns,
       uniqueKeyGroups,
       allTableColumnNames,
+      translateCopySqlError,
+      translateDataGrid,
   ]);
 
   const handleCopyInsert = useCallback((record: any) => {
@@ -5994,11 +6069,11 @@ const DataGrid: React.FC<DataGridProps> = ({
           currentConnConfig,
       );
       if (!text) {
-          void message.info('当前行没有可复制内容');
+          void message.info(translateDataGrid('data_grid.message.current_row_no_copyable_content'));
           return;
       }
       copyToClipboard(text);
-  }, [columnMetaMap, columnMetaMapByLowerName, copyToClipboard, currentConnConfig, displayOutputColumnNames, getContextMenuTargetRows]);
+  }, [columnMetaMap, columnMetaMapByLowerName, copyToClipboard, currentConnConfig, displayOutputColumnNames, getContextMenuTargetRows, translateDataGrid]);
 
   const buildConnConfig = useCallback(() => {
       if (!connectionId) return null;
@@ -6017,20 +6092,21 @@ const DataGrid: React.FC<DataGridProps> = ({
   const exportByQuery = useCallback(async (sql: string, format: string, defaultName: string) => {
       const config = buildConnConfig();
       if (!config) return;
-      const hide = message.loading(`正在导出...`, 0);
+      const hide = message.loading(translateDataGrid('data_grid.message.exporting'), 0);
       try {
           const res = await ExportQuery(buildRpcConnectionConfig(config) as any, dbName || '', sql, defaultName || 'export', format);
           if (res.success) {
-              void message.success("导出成功");
+              void message.success(translateDataGrid('data_grid.message.export_success'));
           } else if (res.message !== "已取消") {
-              void message.error("导出失败: " + res.message);
+              void message.error(translateDataGrid('data_grid.message.export_failed', { detail: res.message }));
           }
       } catch (e: any) {
-          void message.error("导出失败: " + (e?.message || String(e)));
+          const rawErrorMessage = e?.message || String(e);
+          void message.error(translateDataGrid('data_grid.message.export_failed', { detail: rawErrorMessage }));
       } finally {
           hide();
       }
-  }, [buildConnConfig, dbName]);
+  }, [buildConnConfig, dbName, translateDataGrid]);
 
   const buildPkWhereSql = useCallback((rows: any[], dbType: string) => {
       if (!tableName || pkColumns.length === 0) return '';
@@ -6123,7 +6199,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               return key !== undefined && key !== null && selectedKeySet.has(rowKeyStr(key));
           });
           if (rows.length === 0) {
-              void message.info('当前未选中任何行');
+              void message.info(translateDataGrid('data_grid.message.no_rows_selected'));
               return;
           }
           await exportData(rows, format);
@@ -6139,7 +6215,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           return;
       }
       await exportData(mergedDisplayData, format);
-  }, [connectionId, exportByQuery, exportData, mergedDisplayData, queryResultCurrentPageRows, resultExportAllSql, rowKeyStr, selectedRowKeys, tableName]);
+  }, [connectionId, exportByQuery, exportData, mergedDisplayData, queryResultCurrentPageRows, resultExportAllSql, rowKeyStr, selectedRowKeys, tableName, translateDataGrid]);
 
   const openQueryResultExportScopeModal = useCallback((format: string) => {
       let instance: { destroy: () => void } | null = null;
@@ -6149,23 +6225,25 @@ const DataGrid: React.FC<DataGridProps> = ({
           await exportQueryResultRows(format, scope);
       };
       instance = modal.info({
-          title: '导出查询结果',
+          title: translateDataGrid('data_grid.export.query_result_title'),
           content: (
               <div data-query-result-export-scope="true">
-                  <p style={{ marginBottom: 12 }}>请选择导出范围：</p>
+                  <p style={{ marginBottom: 12 }}>{translateDataGrid('data_grid.export.scope_prompt')}</p>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                      <Button onClick={() => instance?.destroy()}>取消</Button>
+                      <Button onClick={() => instance?.destroy()}>{translateDataGrid('common.cancel')}</Button>
                       <Button
                           disabled={selectedCount <= 0}
                           onClick={() => { void runExport('selected'); }}
                       >
-                          选中导出{selectedCount > 0 ? ` (${selectedCount}条)` : ''}
+                          {translateDataGrid('data_grid.export.selected_rows', { count: selectedCount })}
                       </Button>
                       <Button onClick={() => { void runExport('page'); }}>
-                          当前页导出 ({queryResultCurrentPageRows.length}条)
+                          {translateDataGrid('data_grid.export.current_page_rows', { count: queryResultCurrentPageRows.length })}
                       </Button>
                       <Button type="primary" onClick={() => { void runExport('all'); }}>
-                          {resultExportAllSql ? '全部导出（重新查询）' : `全部导出 (${mergedDisplayData.length}条)`}
+                          {resultExportAllSql
+                              ? translateDataGrid('data_grid.export.all_rows_requery')
+                              : translateDataGrid('data_grid.export.all_rows', { count: mergedDisplayData.length })}
                       </Button>
                   </div>
               </div>
@@ -6174,7 +6252,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           okButtonProps: { style: { display: 'none' } },
           maskClosable: true,
       });
-  }, [exportQueryResultRows, mergedDisplayData.length, modal, queryResultCurrentPageRows.length, resultExportAllSql, selectedRowKeys.length]);
+  }, [exportQueryResultRows, mergedDisplayData.length, modal, queryResultCurrentPageRows.length, resultExportAllSql, selectedRowKeys.length, translateDataGrid]);
 
   // Context Menu Export
   const handleExportSelected = useCallback(async (format: string, record: any) => {
@@ -6190,7 +6268,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       // 有未提交修改时，优先按界面数据导出，避免与数据库不一致。
       if (hasChanges) {
-          void message.warning("当前存在未提交修改，导出将按界面数据生成；如需完整长字段建议先提交后再导出。");
+          void message.warning(translateDataGrid('data_grid.message.export_with_uncommitted_changes'));
           await exportData(records, format);
           return;
       }
@@ -6215,7 +6293,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           whereSql: `WHERE ${pkWhere}`,
       });
       await exportByQuery(sql, format, tableName || 'export');
-  }, [getTargets, isQueryResultExport, connectionId, tableName, hasChanges, exportData, buildConnConfig, buildPkWhereSql, exportByQuery, displayOutputColumnNames]);
+  }, [getTargets, isQueryResultExport, connectionId, tableName, hasChanges, exportData, buildConnConfig, buildPkWhereSql, exportByQuery, displayOutputColumnNames, translateDataGrid]);
 
   const handleV2CellContextMenuAction = useCallback((action: V2CellContextMenuActionKey) => {
       const record = cellContextMenu.record;
@@ -6233,7 +6311,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               if (record) {
                   const rowKey = record?.[GONAVI_ROW_KEY];
                   if (rowKey === undefined || rowKey === null) {
-                      void message.info('未识别到可复制的行');
+                      void message.info(translateDataGrid('data_grid.message.no_copyable_rows'));
                   } else {
                       setSelectedRowKeys([rowKey]);
                       copyRowsForPaste([rowKey]);
@@ -6315,6 +6393,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       cellContextMenu.record,
       cellContextMenu.dataIndex,
       copiedCellPatch,
+      copyRowsForPaste,
       copyToClipboard,
       getClipboardColumnNames,
       getTargets,
@@ -6332,7 +6411,9 @@ const DataGrid: React.FC<DataGridProps> = ({
       handleExportSelected,
       handleOpenContextMenuRowEditor,
       handlePasteCopiedColumnsToSelectedRows,
+      handlePasteCopiedRowsAsNew,
       selectedRowKeys.length,
+      translateDataGrid,
   ]);
 
   // Export
@@ -6365,7 +6446,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const handlePage = async () => {
           instance.destroy();
           if (hasChanges) {
-              void message.warning("当前存在未提交修改，导出将按界面数据生成；如需完整长字段建议先提交后再导出。");
+              void message.warning(translateDataGrid('data_grid.message.export_with_uncommitted_changes'));
               await exportData(displayData, format);
               return;
           }
@@ -6386,14 +6467,14 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
 
       instance = modal.info({
-          title: '导出选项',
+          title: translateDataGrid('data_grid.export.options_title'),
           content: (
               <div>
-                  <p>您未选中任何行，请选择导出范围：</p>
+                  <p>{translateDataGrid('data_grid.export.no_selection_prompt')}</p>
                   <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
-                      <Button onClick={() => instance.destroy()}>取消</Button>
-                      <Button onClick={handlePage}>导出当前页 ({displayData.length}条)</Button>
-                      <Button type="primary" onClick={handleAll}>导出全部数据</Button>
+                      <Button onClick={() => instance.destroy()}>{translateDataGrid('common.cancel')}</Button>
+                      <Button onClick={handlePage}>{translateDataGrid('data_grid.export.current_page', { count: displayData.length })}</Button>
+                      <Button type="primary" onClick={handleAll}>{translateDataGrid('data_grid.export.all_data')}</Button>
                   </div>
               </div>
           ),
@@ -6406,22 +6487,22 @@ const DataGrid: React.FC<DataGridProps> = ({
   const handleExportFilteredAll = async (format: string) => {
       if (!connectionId || !tableName) return;
       if (!filteredExportSql) {
-          void message.warning('当前未应用筛选条件');
+          void message.warning(translateDataGrid('data_grid.message.no_filter_applied'));
           return;
       }
       if (!supportsSqlQueryExport) {
-          void message.error('当前数据源不支持按筛选结果导出');
+          void message.error(translateDataGrid('data_grid.message.filtered_export_not_supported'));
           return;
       }
       const config = buildConnConfig();
       if (!config) return;
       if (hasChanges) {
-          void message.warning("当前存在未提交修改，筛选结果导出基于数据库已提交数据。");
+          void message.warning(translateDataGrid('data_grid.message.filtered_export_uses_committed_data'));
       }
 
       const sql = buildFilteredAllSql(resolveDataSourceType(config));
       if (!sql) {
-          void message.warning('当前未应用筛选条件');
+          void message.warning(translateDataGrid('data_grid.message.no_filter_applied'));
           return;
       }
       await exportByQuery(sql, format, `${tableName || 'export'}_filtered`);
@@ -6437,14 +6518,14 @@ const DataGrid: React.FC<DataGridProps> = ({
           setImportFilePath(res.data.filePath);
           setImportPreviewVisible(true);
       } else if (res.message !== "已取消") {
-          void message.error("选择文件失败: " + res.message);
+          void message.error(translateDataGrid('data_grid.message.select_file_failed', { detail: res.message }));
       }
   };
 
   const handleImportSuccess = () => {
       setImportPreviewVisible(false);
       setImportFilePath('');
-      void message.success('导入完成');
+      void message.success(translateDataGrid('data_grid.message.import_done'));
       if (onReload) onReload();
   };
 
@@ -6455,7 +6536,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       { key: 'query-md', label: 'Markdown', onClick: () => handleExport('md') },
       { key: 'query-html', label: 'HTML', onClick: () => handleExport('html') },
   ] : hasFilteredExportSql ? [
-      { type: 'group', label: '筛选结果', children: [
+      { type: 'group', label: translateDataGrid('data_grid.export.group_filtered_results'), children: [
           { key: 'filtered-csv', label: 'CSV', onClick: () => handleExportFilteredAll('csv') },
           { key: 'filtered-xlsx', label: 'Excel (XLSX)', onClick: () => handleExportFilteredAll('xlsx') },
           { key: 'filtered-json', label: 'JSON', onClick: () => handleExportFilteredAll('json') },
@@ -6463,7 +6544,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           { key: 'filtered-html', label: 'HTML', onClick: () => handleExportFilteredAll('html') },
       ]},
       { type: 'divider' },
-      { type: 'group', label: '全表', children: [
+      { type: 'group', label: translateDataGrid('data_grid.export.group_full_table'), children: [
           { key: 'table-csv', label: 'CSV', onClick: () => handleExport('csv') },
           { key: 'table-xlsx', label: 'Excel (XLSX)', onClick: () => handleExport('xlsx') },
           { key: 'table-json', label: 'JSON', onClick: () => handleExport('json') },
@@ -6497,6 +6578,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           enableHiddenColumnMemory={enableHiddenColumnMemory}
           canResetOrder={!!connectionId && !!dbName && !!tableName && !!tableColumnOrders[`${connectionId}-${dbName}-${tableName}`]}
           canResetHidden={!!connectionId && !!dbName && !!tableName && !!tableHiddenColumns[`${connectionId}-${dbName}-${tableName}`]}
+          translate={translateDataGrid}
           onShowColumnCommentChange={(checked) => setQueryOptions({ showColumnComment: checked })}
           onShowColumnTypeChange={(checked) => setQueryOptions({ showColumnType: checked })}
           onToggleAllColumnsVisibility={toggleAllColumnsVisibility}
@@ -6507,14 +6589,14 @@ const DataGrid: React.FC<DataGridProps> = ({
           onResetOrder={() => {
               if (connectionId && dbName && tableName) {
                   clearTableColumnOrder(connectionId, dbName, tableName);
-                  void message.success('已恢复默认列排序');
+                  void message.success(translateDataGrid('data_grid.column_settings.reset_order_success'));
               }
           }}
           onResetHidden={() => {
               if (connectionId && dbName && tableName) {
                   clearTableHiddenColumns(connectionId, dbName, tableName);
                   setLocalHiddenColumns([]);
-                  void message.success('已恢复全列显示');
+                  void message.success(translateDataGrid('data_grid.column_settings.reset_hidden_success'));
               }
           }}
       />
@@ -7076,7 +7158,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       const targetColumnName = resolveColumnQuickFindTarget(effectiveQuery);
       if (!targetColumnName) {
           if (effectiveQuery.trim()) {
-              void message.warning(`未找到字段列：${effectiveQuery.trim()}`);
+              void message.warning(translateDataGrid('data_grid.message.column_quick_find_not_found', { query: effectiveQuery.trim() }));
           }
           return;
       }
@@ -7087,10 +7169,10 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (tryFocus()) return;
           requestAnimationFrame(() => {
               if (tryFocus()) return;
-              void message.warning(`字段列“${targetColumnName}”当前未渲染，无法定位`);
+              void message.warning(translateDataGrid('data_grid.message.column_quick_find_not_rendered', { column: targetColumnName }));
           });
       });
-  }, [columnQuickFindText, focusColumnQuickFindTarget, resolveColumnQuickFindTarget]);
+  }, [columnQuickFindText, focusColumnQuickFindTarget, resolveColumnQuickFindTarget, translateDataGrid]);
 
   // 外部水平滚动条的 wheel 处理（通过原生事件绑定，确保 preventDefault 生效）
   useEffect(() => {
@@ -7439,8 +7521,9 @@ const DataGrid: React.FC<DataGridProps> = ({
           pagination,
           prefersManualTotalCount,
           supportsApproximateTableCount,
+          translate: translateDataGrid,
       });
-  }, [pagination, prefersManualTotalCount, supportsApproximateTableCount]);
+  }, [pagination, prefersManualTotalCount, supportsApproximateTableCount, translateDataGrid]);
 
   const paginationControlTotal = useMemo(() => {
       if (!pagination) return 0;
@@ -7468,25 +7551,17 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const paginationV2SummaryText = useMemo(() => {
       if (!pagination) return '';
-      if (pagination.totalKnown === false) {
-          if (prefersManualTotalCount) {
-              if (pagination.totalCountLoading) return `${mergedDisplayData.length} 条 · 正在统计`;
-              if (supportsApproximateTotalPages && paginationControlTotal > 0) {
-                  return `约 ${paginationControlTotal} 条 · 共 ${paginationTotalPages} 页`;
-              }
-              if (pagination.totalCountCancelled) return `${mergedDisplayData.length} 条 · 已取消统计`;
-              return `${mergedDisplayData.length} 条 · 总数未统计`;
-          }
-          return `${mergedDisplayData.length} 条 · 正在统计`;
-      }
-      return `${Math.max(0, paginationControlTotal)} 条 · 共 ${paginationTotalPages} 页`;
+      return resolvePaginationSummaryText({
+          pagination,
+          prefersManualTotalCount,
+          supportsApproximateTableCount,
+          translate: translateDataGrid,
+      });
   }, [
-      mergedDisplayData.length,
       pagination,
-      paginationControlTotal,
-      paginationTotalPages,
       prefersManualTotalCount,
-      supportsApproximateTotalPages,
+      supportsApproximateTableCount,
+      translateDataGrid,
   ]);
 
   const paginationPageText = useMemo(() => {
@@ -7494,8 +7569,9 @@ const DataGrid: React.FC<DataGridProps> = ({
       return resolvePaginationPageText({
           pagination,
           supportsApproximateTotalPages,
+          translate: translateDataGrid,
       });
-  }, [pagination, supportsApproximateTotalPages]);
+  }, [pagination, supportsApproximateTotalPages, translateDataGrid]);
 
   const handlePageSizeChange = useCallback((value: string) => {
       if (!pagination || !onPageChange) return;
@@ -7607,6 +7683,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           onCancel={() => setPageFindText('')}
           onNavigatePrevious={() => handleNavigatePageFind('previous')}
           onNavigateNext={() => handleNavigatePageFind('next')}
+          translate={translateDataGrid}
       />
   );
   const visiblePageFindContent = viewMode === 'table' ? pageFindContent : null;
@@ -7618,6 +7695,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           value={columnQuickFindText}
           options={columnQuickFindOptions}
           hasTarget={!!resolveColumnQuickFindTarget(columnQuickFindText)}
+          translate={translateDataGrid}
           onChange={setColumnQuickFindText}
           onSubmit={handleSubmitColumnQuickFind}
       />
@@ -7628,6 +7706,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           darkMode={darkMode}
           viewMode={viewMode}
           onViewModeChange={handleViewModeChange}
+          translate={translateDataGrid}
       />
   );
   const paginationContent = (
@@ -7644,6 +7723,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           onPageChange={onPageChange}
           onPageSizeChange={handlePageSizeChange}
           onV2PageStep={handleV2PageStep}
+          translate={translateDataGrid}
       />
   );
 
@@ -7705,19 +7785,24 @@ const DataGrid: React.FC<DataGridProps> = ({
           setCellEditMode(true);
           resetCellSelection();
       }
-      void message.info(next ? '已进入单元格编辑模式，可拖拽选择多个单元格' : '已退出单元格编辑模式').then();
-  }, [cellEditMode, closeCellEditMode, resetCellSelection]);
+      void message.info(next
+          ? translateDataGrid('data_grid.message.cell_edit_mode_entered')
+          : translateDataGrid('data_grid.message.cell_edit_mode_exited')).then();
+  }, [cellEditMode, closeCellEditMode, resetCellSelection, translateDataGrid]);
 
   const handleRequestAiInsight = useCallback(() => {
       const sampleData = mergedDisplayData.slice(0, 10);
-      const prompt = `请帮我分析以下查询结果数据（取前 ${sampleData.length} 条示例）：\n\`\`\`json\n${JSON.stringify(sampleData, null, 2)}\n\`\`\`\n\n请分析数据特征、发现规律，或者给出一些业务上的洞察。`;
+      const prompt = translateDataGrid('data_grid.ai_insight.prompt', {
+          count: sampleData.length,
+          json: JSON.stringify(sampleData, null, 2),
+      });
       const store = useStore.getState();
       const wasClosed = !store.aiPanelVisible;
       if (wasClosed) store.setAIPanelVisible(true);
       setTimeout(() => {
           window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
       }, wasClosed ? 350 : 0);
-  }, [mergedDisplayData]);
+  }, [mergedDisplayData, translateDataGrid]);
 
   const handleToggleTotalCount = useCallback(() => {
       if (!onRequestTotalCount) return;
@@ -7734,6 +7819,7 @@ const DataGrid: React.FC<DataGridProps> = ({
             isV2Ui={isV2Ui}
             tableName={tableName}
             dbName={dbName}
+            translate={translateDataGrid}
             loading={loading}
             darkMode={darkMode}
             bgFilter={bgFilter}
@@ -7760,7 +7846,7 @@ const DataGrid: React.FC<DataGridProps> = ({
             pendingChangeCount={pendingChangeCount}
             dataEditCommitMode={dataEditCommitMode}
             dataEditAutoCommitDelayMs={dataEditAutoCommitDelayMs}
-            dataEditAutoCommitDelayOptions={DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS}
+            dataEditAutoCommitDelayOptions={localizedDataEditAutoCommitDelayOptions}
             autoCommitRemainingSeconds={autoCommitRemainingSeconds}
             canImport={canImport}
             canExport={canExport}
@@ -7859,6 +7945,7 @@ const DataGrid: React.FC<DataGridProps> = ({
             <DataGridModals
                 tableName={tableName}
                 darkMode={darkMode}
+                translate={translateDataGrid}
                 displayColumnNames={displayColumnNames}
                 rowEditorOpen={rowEditorOpen}
                 rowEditorRowKey={rowEditorRowKey}
@@ -7904,7 +7991,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                     embedded
                     tab={{
                         id: `embedded-design-${connectionId || ''}-${dbName || ''}-${tableName || ''}`,
-                        title: `设计表 (${tableName || ''})`,
+                        title: translateDataGrid('data_grid.embedded_designer.title', { tableName: tableName || '' }),
                         type: 'design',
                         connectionId: String(connectionId || ''),
                         dbName,
@@ -7922,11 +8009,13 @@ const DataGrid: React.FC<DataGridProps> = ({
                     locatorColumns={effectiveEditLocator?.columns}
                     columnMetaMap={columnMetaMap}
                     columnMetaMapByLowerName={columnMetaMapByLowerName}
+                    translate={translateDataGrid}
                 />
             )
         ) : isV2Ui && viewMode === 'ddl' && ddlViewLayout === 'side' ? (
             <DataGridV2DdlSideWorkspace
                 tableContent={renderDataTableView()}
+                translate={translateDataGrid}
                 tableName={tableName}
                 ddlViewLayout={ddlViewLayout}
                 ddlLoading={ddlLoading}
@@ -7944,6 +8033,7 @@ const DataGrid: React.FC<DataGridProps> = ({
         ) : isV2Ui && viewMode === 'ddl' ? (
             <DataGridV2DdlView
                 layout="bottom"
+                translate={translateDataGrid}
                 tableName={tableName}
                 ddlViewLayout={ddlViewLayout}
                 ddlLoading={ddlLoading}
@@ -7961,6 +8051,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                 displayOutputColumnNames={displayOutputColumnNames}
                 columnMetaMap={columnMetaMap}
                 columnMetaMapByLowerName={columnMetaMapByLowerName}
+                translate={translateDataGrid}
             />
         ) : viewMode === 'json' ? (
             <DataGridJsonView
@@ -7968,6 +8059,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                 rowCount={mergedDisplayData.length}
                 canModifyData={canModifyData}
                 jsonViewText={jsonViewText}
+                translate={translateDataGrid}
                 onOpenJsonEditor={handleOpenJsonEditor}
             />
 	        ) : (
@@ -7978,6 +8070,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                 canModifyData={canModifyData}
                 currentTextRow={currentTextRow}
                 displayOutputColumnNames={displayOutputColumnNames}
+                translate={translateDataGrid}
                 onPrev={() => setTextRecordIndex(i => Math.max(0, i - 1))}
                 onNext={() => setTextRecordIndex(i => Math.min(textViewRows.length - 1, i + 1))}
                 onEditCurrent={openCurrentViewRowEditor}
@@ -7995,9 +8088,10 @@ const DataGrid: React.FC<DataGridProps> = ({
             dataPanelValue={dataPanelValue}
             columnMetaMap={columnMetaMap}
             columnMetaMapByLowerName={columnMetaMapByLowerName}
+            translate={translateDataGrid}
             onFormatJson={() => {
                 handleDataPanelFormatJson((errorMessage) => {
-                    void message.error('JSON 格式无效：' + errorMessage);
+                    void message.error(translateDataGrid('data_grid.json_editor.invalid_format', { error: errorMessage }));
                 });
             }}
             onSave={handleDataPanelSave}
@@ -8066,6 +8160,7 @@ const DataGrid: React.FC<DataGridProps> = ({
             copiedCellPatchAvailable={!!copiedCellPatch}
             canUndoCellChange={canUndoContextMenuCellChange}
             supportsCopyInsert={supportsCopyInsert}
+            translate={translateDataGrid}
             onClose={() => setCellContextMenu(prev => ({ ...prev, visible: false }))}
             onCopyFieldName={handleCopyContextMenuFieldName}
             onCopyRowData={() => {
@@ -8074,7 +8169,7 @@ const DataGrid: React.FC<DataGridProps> = ({
             onCopyRowForPaste={() => {
                 const rowKey = cellContextMenu.record?.[GONAVI_ROW_KEY];
                 if (rowKey === undefined || rowKey === null) {
-                    void message.info('未识别到可复制的行');
+                    void message.info(translateDataGrid('data_grid.message.no_copyable_rows'));
                     return;
                 }
                 setSelectedRowKeys([rowKey]);
@@ -8155,6 +8250,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                 onOpenTableDdl={() => {
                     void handleOpenTableDdl();
                 }}
+                translate={translateDataGrid}
             />
 
 		        <style>{gridCssText}</style>
@@ -8178,7 +8274,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
        {/* Preview SQL Modal */}
        <Modal
-           title="变更预览"
+           title={translateDataGrid('data_grid.preview_sql.title')}
            open={previewModalOpen}
            onCancel={() => setPreviewModalOpen(false)}
            width={800}
@@ -8203,7 +8299,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                    size="small" type="text"
                                    icon={<CopyOutlined />}
                                    style={{ position: 'absolute', top: 4, right: 4 }}
-                                   onClick={() => { navigator.clipboard.writeText(sql).then(() => message.success('已复制')); }}
+                                   onClick={() => { navigator.clipboard.writeText(sql).then(() => message.success(translateDataGrid('data_grid.preview_sql.copied'))); }}
                                />
                            </div>
                        ))}
@@ -8227,7 +8323,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                    size="small" type="text"
                                    icon={<CopyOutlined />}
                                    style={{ position: 'absolute', top: 4, right: 4 }}
-                                   onClick={() => { navigator.clipboard.writeText(sql).then(() => message.success('已复制')); }}
+                                   onClick={() => { navigator.clipboard.writeText(sql).then(() => message.success(translateDataGrid('data_grid.preview_sql.copied'))); }}
                                />
                            </div>
                        ))}
@@ -8251,18 +8347,24 @@ const DataGrid: React.FC<DataGridProps> = ({
                                    size="small" type="text"
                                    icon={<CopyOutlined />}
                                    style={{ position: 'absolute', top: 4, right: 4 }}
-                                   onClick={() => { navigator.clipboard.writeText(sql).then(() => message.success('已复制')); }}
+                                   onClick={() => { navigator.clipboard.writeText(sql).then(() => message.success(translateDataGrid('data_grid.preview_sql.copied'))); }}
                                />
                            </div>
                        ))}
                    </div>
                )}
                {previewSqlData.deletes.length === 0 && previewSqlData.updates.length === 0 && previewSqlData.inserts.length === 0 && (
-                   <div style={{ color: darkMode ? '#888' : '#999', textAlign: 'center', padding: 24 }}>无变更</div>
+                   <div style={{ color: darkMode ? '#888' : '#999', textAlign: 'center', padding: 24 }}>
+                       {translateDataGrid('data_grid.preview_sql.no_changes')}
+                   </div>
                )}
            </div>
            <div style={{ color: darkMode ? '#999' : '#888', fontSize: 12, borderTop: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', paddingTop: 8 }}>
-               共 {previewSqlData.deletes.length} 条 DELETE，{previewSqlData.updates.length} 条 UPDATE，{previewSqlData.inserts.length} 条 INSERT
+               {translateDataGrid('data_grid.preview_sql.summary', {
+                   deletes: previewSqlData.deletes.length,
+                   updates: previewSqlData.updates.length,
+                   inserts: previewSqlData.inserts.length
+               })}
            </div>
        </Modal>
 
@@ -8286,10 +8388,14 @@ const DataGrid: React.FC<DataGridProps> = ({
 // 使用 ErrorBoundary 包裹 DataGrid，防止数据渲染错误导致应用崩溃
 const MemoizedDataGrid = React.memo(DataGrid);
 
-const DataGridWithErrorBoundary: React.FC<DataGridProps> = (props) => (
-    <DataGridErrorBoundary>
-        <MemoizedDataGrid {...props} />
-    </DataGridErrorBoundary>
-);
+const DataGridWithErrorBoundary: React.FC<DataGridProps> = (props) => {
+    const language = useDataGridI18nLanguage();
+
+    return (
+        <DataGridErrorBoundary i18nLanguage={language}>
+            <MemoizedDataGrid {...props} />
+        </DataGridErrorBoundary>
+    );
+};
 
 export default DataGridWithErrorBoundary;

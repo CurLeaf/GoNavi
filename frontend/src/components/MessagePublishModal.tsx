@@ -3,6 +3,7 @@ import { Alert, Checkbox, Form, Input, Modal, Select, Space, Typography, message
 
 import { DBQuery } from '../../wailsjs/go/app/App';
 import type { SavedConnection } from '../types';
+import { useI18n } from '../i18n/provider';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
   buildMessagePublishCommand,
@@ -15,7 +16,6 @@ const { Text } = Typography;
 const { TextArea } = Input;
 
 const ROCKETMQ_DELAY_LEVEL_OPTIONS = [
-  { label: '不延时', value: 0 },
   { label: '1 · 1s', value: 1 },
   { label: '2 · 5s', value: 2 },
   { label: '3 · 10s', value: 3 },
@@ -53,11 +53,12 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
   onCancel,
   onSuccess,
 }) => {
+  const { t } = useI18n();
   const [form] = Form.useForm<MessagePublishDraft>();
   const [submitting, setSubmitting] = useState(false);
   const presentation = useMemo(
-    () => getMessagePublishPresentation(connection?.config),
-    [connection],
+    () => getMessagePublishPresentation(connection?.config, t),
+    [connection, t],
   );
 
   useEffect(() => {
@@ -88,9 +89,9 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
 
     let command;
     try {
-      command = buildMessagePublishCommand(connection.config, values);
+      command = buildMessagePublishCommand(connection.config, values, t);
     } catch (error: any) {
-      void message.error(error?.message || '构造发送命令失败');
+      void message.error(error?.message || t('message_publish_modal.error.build_command_failed'));
       return;
     }
 
@@ -102,7 +103,9 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
         command.commandText,
       );
       if (!res?.success) {
-        void message.error(`发送失败: ${res?.message || '未知错误'}`);
+        void message.error(t('message_publish_modal.error.send_failed_detail', {
+          detail: res?.message || t('message_publish_modal.error.unknown_error'),
+        }));
         return;
       }
 
@@ -113,19 +116,22 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
         commandText: command.commandText,
       });
     } catch (error: any) {
-      void message.error(`发送失败: ${error?.message || String(error)}`);
+      void message.error(t('message_publish_modal.error.send_failed_detail', { detail: error?.message || String(error) }));
     } finally {
       setSubmitting(false);
     }
   };
+  const modalTitle = connection?.name
+    ? t('message_publish_modal.title_with_connection', { connectionName: connection.name })
+    : t('message_publish_modal.title');
 
   return (
     <Modal
-      title={`测试发送消息${connection?.name ? ` · ${connection.name}` : ''}`}
+      title={modalTitle}
       open={open}
       onCancel={onCancel}
       onOk={() => { void handleSubmit(); }}
-      okText="发送"
+      okText={t('message_publish_modal.action.send')}
       confirmLoading={submitting}
       width={720}
       destroyOnHidden
@@ -153,21 +159,21 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
 
           {presentation.showExchange && (
             <Form.Item
-              label="Exchange（可选）"
+              label={t('message_publish_modal.field.exchange.label')}
               name="exchange"
-              extra="留空使用默认交换机；若填写自定义交换机，请确认目标 Queue 已建立 binding。"
+              extra={t('message_publish_modal.field.exchange.extra')}
             >
-              <Input placeholder="例如：events.topic" />
+              <Input placeholder={t('message_publish_modal.field.exchange.placeholder')} />
             </Form.Item>
           )}
 
           {presentation.showRoutingKey && (
             <Form.Item
-              label="Routing Key（可选）"
+              label={t('message_publish_modal.field.routing_key.label')}
               name="routingKey"
-              extra="留空时默认使用当前 Queue 名。"
+              extra={t('message_publish_modal.field.routing_key.extra')}
             >
-              <Input placeholder="例如：orders.queue" />
+              <Input placeholder={t('message_publish_modal.field.routing_key.placeholder')} />
             </Form.Item>
           )}
 
@@ -175,7 +181,7 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
             <Form.Item
               label="QoS"
               name="qos"
-              extra="0 为至多一次，1 为至少一次，2 为仅一次。"
+              extra={t('message_publish_modal.field.qos.extra')}
             >
               <Select
                 options={[
@@ -189,15 +195,15 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
 
           {presentation.showRetain && (
             <Form.Item name="retain" valuePropName="checked" style={{ marginBottom: 16 }}>
-              <Checkbox>Retain 消息</Checkbox>
+              <Checkbox>{t('message_publish_modal.field.retain.label')}</Checkbox>
             </Form.Item>
           )}
 
           {presentation.showTag && (
             <Form.Item
-              label="Tag（可选）"
+              label={t('message_publish_modal.field.tag.label')}
               name="tag"
-              extra="留空表示不过滤或不写入 Tag。"
+              extra={t('message_publish_modal.field.tag.extra')}
             >
               <Input placeholder={presentation.tagPlaceholder} />
             </Form.Item>
@@ -205,11 +211,16 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
 
           {presentation.showDelayLevel && (
             <Form.Item
-              label="Delay Level（可选）"
+              label={t('message_publish_modal.field.delay_level.label')}
               name="delayLevel"
-              extra="RocketMQ 使用固定延时级别，0 表示立即发送。"
+              extra={t('message_publish_modal.field.delay_level.extra')}
             >
-              <Select options={ROCKETMQ_DELAY_LEVEL_OPTIONS} />
+              <Select
+                options={[
+                  { label: t('message_publish_modal.option.no_delay'), value: 0 },
+                  ...ROCKETMQ_DELAY_LEVEL_OPTIONS,
+                ]}
+              />
             </Form.Item>
           )}
 
@@ -221,7 +232,7 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
                     <Select
                       style={{ width: 120 }}
                       options={[
-                        { label: '文本', value: 'text' },
+                        { label: t('message_publish_modal.option.text'), value: 'text' },
                         { label: 'JSON', value: 'json' },
                       ]}
                     />
@@ -238,29 +249,29 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
             </Form.Item>
           )}
 
-          <Form.Item label="消息体类型" name="bodyMode">
+          <Form.Item label={t('message_publish_modal.field.body_mode.label')} name="bodyMode">
             <Select
               options={[
                 { label: 'JSON', value: 'json' },
-                { label: '文本', value: 'text' },
+                { label: t('message_publish_modal.option.text'), value: 'text' },
               ]}
             />
           </Form.Item>
 
           <Form.Item
-            label="消息体"
+            label={t('message_publish_modal.field.body.label')}
             name="body"
-            rules={[{ required: true, message: '请输入消息体' }]}
-            extra="JSON 模式下需输入合法 JSON；文本模式按原样发送。"
+            rules={[{ required: true, message: t('message_publish_modal.field.body.required') }]}
+            extra={t('message_publish_modal.field.body.extra')}
           >
-            <TextArea rows={8} placeholder="请输入消息体" />
+            <TextArea rows={8} placeholder={t('message_publish_modal.field.body.placeholder')} />
           </Form.Item>
 
           {presentation.showHeaders && (
             <Form.Item
-              label="Headers（可选）"
+              label={t('message_publish_modal.field.headers.label')}
               name="headers"
-              extra={'需为 JSON 对象，例如 {"x-source":"gonavi"}。'}
+              extra={t('message_publish_modal.field.headers.extra', { example: '{"x-source":"gonavi"}' })}
             >
               <TextArea rows={5} placeholder='{"x-source":"gonavi"}' />
             </Form.Item>
@@ -268,9 +279,9 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
 
           {presentation.showProperties && (
             <Form.Item
-              label="Properties（可选）"
+              label={t('message_publish_modal.field.properties.label')}
               name="properties"
-              extra='需为 JSON 对象，例如 {"content_type":"application/json"}。'
+              extra={t('message_publish_modal.field.properties.extra', { example: '{"content_type":"application/json"}' })}
             >
               <TextArea rows={5} placeholder='{"content_type":"application/json"}' />
             </Form.Item>
@@ -278,7 +289,7 @@ const MessagePublishModal: React.FC<MessagePublishModalProps> = ({
         </Form>
 
         <Text type="secondary">
-          {presentation.successHint} 发送成功后会返回 <Text code>affectedRows</Text>，用于确认本次测试消息是否已提交。
+          {presentation.successHint} {t('message_publish_modal.footer.success_prefix')} <Text code>affectedRows</Text>{t('message_publish_modal.footer.success_suffix')}
         </Text>
       </Space>
     </Modal>

@@ -10,6 +10,7 @@ import (
 	"GoNavi-Wails/internal/ai"
 	"GoNavi-Wails/internal/dailysecret"
 	"GoNavi-Wails/internal/secretstore"
+	"GoNavi-Wails/shared/i18n"
 )
 
 const providerSecretKind = "ai-provider"
@@ -128,6 +129,10 @@ func fromDailyProviderBundle(bundle dailysecret.ProviderBundle) providerSecretBu
 }
 
 func persistProviderSecretBundle(store *dailysecret.Store, meta ai.ProviderConfig, bundle providerSecretBundle) (ai.ProviderConfig, error) {
+	return persistProviderSecretBundleWithLocalizer(store, meta, bundle, nil)
+}
+
+func persistProviderSecretBundleWithLocalizer(store *dailysecret.Store, meta ai.ProviderConfig, bundle providerSecretBundle, localizer *i18n.Localizer) (ai.ProviderConfig, error) {
 	meta, _ = splitProviderSecrets(meta)
 	if !bundle.hasAny() {
 		meta.HasSecret = false
@@ -138,7 +143,7 @@ func persistProviderSecretBundle(store *dailysecret.Store, meta ai.ProviderConfi
 		return meta, store.DeleteAIProvider(meta.ID)
 	}
 	if store == nil {
-		return meta, fmt.Errorf("daily secret store unavailable")
+		return meta, serviceErrorFromLocalizer(localizer, "ai_service.backend.error.daily_secret_store_unavailable", nil, fmt.Errorf("daily secret store unavailable"))
 	}
 	if err := store.PutAIProvider(meta.ID, toDailyProviderBundle(bundle)); err != nil {
 		return meta, err
@@ -149,6 +154,10 @@ func persistProviderSecretBundle(store *dailysecret.Store, meta ai.ProviderConfi
 }
 
 func resolveProviderConfigSecrets(store *dailysecret.Store, cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
+	return resolveProviderConfigSecretsWithLocalizer(store, cfg, nil)
+}
+
+func resolveProviderConfigSecretsWithLocalizer(store *dailysecret.Store, cfg ai.ProviderConfig, localizer *i18n.Localizer) (ai.ProviderConfig, error) {
 	cfg = normalizeProviderConfig(cfg)
 	meta, bundle := splitProviderSecrets(cfg)
 	if bundle.hasAny() {
@@ -158,7 +167,7 @@ func resolveProviderConfigSecrets(store *dailysecret.Store, cfg ai.ProviderConfi
 		return meta, nil
 	}
 	if store == nil {
-		return meta, fmt.Errorf("daily secret store unavailable")
+		return meta, serviceErrorFromLocalizer(localizer, "ai_service.backend.error.daily_secret_store_unavailable", nil, fmt.Errorf("daily secret store unavailable"))
 	}
 	stored, ok, err := store.GetAIProvider(meta.ID)
 	if err != nil {
@@ -172,14 +181,22 @@ func resolveProviderConfigSecrets(store *dailysecret.Store, cfg ai.ProviderConfi
 }
 
 func (s *Service) persistProviderSecretBundle(meta ai.ProviderConfig, bundle providerSecretBundle) (ai.ProviderConfig, error) {
-	return persistProviderSecretBundle(s.dailySecretStore(), meta, bundle)
+	return persistProviderSecretBundleWithLocalizer(s.dailySecretStore(), meta, bundle, s.serviceLocalizerForLanguageLocked())
 }
 
 func (s *Service) resolveProviderConfigSecrets(cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
-	return resolveProviderConfigSecrets(s.dailySecretStore(), cfg)
+	return resolveProviderConfigSecretsWithLocalizer(s.dailySecretStore(), cfg, s.serviceLocalizerForLanguage())
+}
+
+func (s *Service) resolveProviderConfigSecretsLocked(cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
+	return resolveProviderConfigSecretsWithLocalizer(s.dailySecretStore(), cfg, s.serviceLocalizerForLanguageLocked())
 }
 
 func resolveProviderConfigSecretsFromStore(store secretstore.SecretStore, cfg ai.ProviderConfig) (ai.ProviderConfig, error) {
+	return resolveProviderConfigSecretsFromStoreWithLocalizer(store, cfg, nil)
+}
+
+func resolveProviderConfigSecretsFromStoreWithLocalizer(store secretstore.SecretStore, cfg ai.ProviderConfig, localizer *i18n.Localizer) (ai.ProviderConfig, error) {
 	cfg = normalizeProviderConfig(cfg)
 	meta, bundle := splitProviderSecrets(cfg)
 	if bundle.hasAny() {
@@ -189,7 +206,7 @@ func resolveProviderConfigSecretsFromStore(store secretstore.SecretStore, cfg ai
 		return meta, nil
 	}
 	if store == nil {
-		return meta, fmt.Errorf("secret store unavailable")
+		return meta, serviceErrorFromLocalizer(localizer, "ai_service.backend.error.secret_store_unavailable", nil, fmt.Errorf("secret store unavailable"))
 	}
 
 	ref := strings.TrimSpace(meta.SecretRef)
@@ -209,7 +226,7 @@ func resolveProviderConfigSecretsFromStore(store secretstore.SecretStore, cfg ai
 
 	var stored providerSecretBundle
 	if err := json.Unmarshal(payload, &stored); err != nil {
-		return meta, fmt.Errorf("解析 provider secret bundle 失败: %w", err)
+		return meta, serviceErrorFromLocalizer(localizer, "ai_service.backend.error.provider_secret_bundle_parse_failed", nil, err)
 	}
 	return mergeProviderSecrets(meta, stored), nil
 }

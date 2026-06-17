@@ -1,4 +1,5 @@
 import { resolveDataSourceType } from './dataSourceCapabilities';
+import { t as defaultTranslate, type I18nParams } from '../i18n';
 
 type ConnectionLike = {
   type?: string;
@@ -55,6 +56,8 @@ export type MessagePublishPresentation = {
   showRetain: boolean;
 };
 
+export type MessagePublishTranslate = (key: string, params?: I18nParams) => string;
+
 const normalizeMode = (value: unknown, fallback: MessagePublishValueMode): MessagePublishValueMode => {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'text') return 'text';
@@ -66,10 +69,11 @@ const parseRequiredPayload = (
   rawValue: unknown,
   mode: MessagePublishValueMode,
   fieldLabel: string,
+  translate: MessagePublishTranslate,
 ): string | number | boolean | Record<string, any> | Array<any> => {
   const text = String(rawValue ?? '');
   if (!text.trim()) {
-    throw new Error(`请输入${fieldLabel}`);
+    throw new Error(translate('message_publish.error.required_field', { field: fieldLabel }));
   }
   if (mode === 'text') {
     return text;
@@ -77,7 +81,10 @@ const parseRequiredPayload = (
   try {
     return JSON.parse(text);
   } catch (error: any) {
-    throw new Error(`${fieldLabel}不是合法 JSON：${error?.message || String(error)}`);
+    throw new Error(translate('message_publish.error.invalid_json_detail', {
+      field: fieldLabel,
+      detail: error?.message || String(error),
+    }));
   }
 };
 
@@ -85,17 +92,19 @@ const parseOptionalPayload = (
   rawValue: unknown,
   mode: MessagePublishValueMode,
   fieldLabel: string,
+  translate: MessagePublishTranslate,
 ): string | number | boolean | Record<string, any> | Array<any> | undefined => {
   const text = String(rawValue ?? '');
   if (!text.trim()) {
     return undefined;
   }
-  return parseRequiredPayload(text, mode, fieldLabel);
+  return parseRequiredPayload(text, mode, fieldLabel, translate);
 };
 
 const parseOptionalJSONObject = (
   rawValue: unknown,
   fieldLabel: string,
+  translate: MessagePublishTranslate,
 ): Record<string, any> | undefined => {
   const text = String(rawValue ?? '');
   if (!text.trim()) {
@@ -105,10 +114,13 @@ const parseOptionalJSONObject = (
   try {
     parsed = JSON.parse(text);
   } catch (error: any) {
-    throw new Error(`${fieldLabel}不是合法 JSON：${error?.message || String(error)}`);
+    throw new Error(translate('message_publish.error.invalid_json_detail', {
+      field: fieldLabel,
+      detail: error?.message || String(error),
+    }));
   }
   if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-    throw new Error(`${fieldLabel} 必须是 JSON 对象`);
+    throw new Error(translate('message_publish.error.json_object_required', { field: fieldLabel }));
   }
   return parsed as Record<string, any>;
 };
@@ -165,20 +177,22 @@ const resolveDefaultDestination = (config: ConnectionLike, explicitDestination: 
 
 export const getMessagePublishPresentation = (
   config: ConnectionLike,
+  translate: MessagePublishTranslate = defaultTranslate,
 ): MessagePublishPresentation => {
   const resolvedType = resolveDataSourceType(config as any);
+  const tr = translate;
 
   if (resolvedType === 'rabbitmq') {
     return {
       transportLabel: 'RabbitMQ Queue',
       destinationLabel: 'Queue',
-      destinationPlaceholder: '例如：orders.queue',
-      destinationRequiredMessage: '请输入 Queue',
-      alertMessage: '当前表单会自动拼装 RabbitMQ publish JSON 命令，并通过 Management API 执行测试发送。',
-      successHint: '留空 Exchange 时会使用默认交换机并按 Queue 名作为 routing key。',
+      destinationPlaceholder: tr('message_publish.presentation.rabbitmq.destination_placeholder'),
+      destinationRequiredMessage: tr('message_publish.presentation.rabbitmq.destination_required'),
+      alertMessage: tr('message_publish.presentation.rabbitmq.alert'),
+      successHint: tr('message_publish.presentation.rabbitmq.success_hint'),
       showKey: false,
       showKeyMode: false,
-      keyLabel: '消息 Key（可选）',
+      keyLabel: tr('message_publish.presentation.key_label'),
       keyPlaceholder: '',
       showExchange: true,
       showRoutingKey: true,
@@ -196,20 +210,20 @@ export const getMessagePublishPresentation = (
     return {
       transportLabel: 'RocketMQ Topic',
       destinationLabel: 'Topic',
-      destinationPlaceholder: '例如：orders.events',
-      destinationRequiredMessage: '请输入 Topic',
-      alertMessage: '当前表单会自动拼装 RocketMQ publish JSON 命令，并通过 NameServer/Broker 执行测试发送。',
-      successHint: 'Tag、Keys、Delay Level 与 Properties 会一并写入 RocketMQ 消息属性。',
+      destinationPlaceholder: tr('message_publish.presentation.rocketmq.destination_placeholder'),
+      destinationRequiredMessage: tr('message_publish.presentation.topic_required'),
+      alertMessage: tr('message_publish.presentation.rocketmq.alert'),
+      successHint: tr('message_publish.presentation.rocketmq.success_hint'),
       showKey: true,
       showKeyMode: false,
-      keyLabel: '消息 Keys（可选）',
-      keyPlaceholder: '可输入多个 Key，使用逗号分隔',
+      keyLabel: tr('message_publish.presentation.keys_label'),
+      keyPlaceholder: tr('message_publish.presentation.rocketmq.key_placeholder'),
       showExchange: false,
       showRoutingKey: false,
       showHeaders: false,
       showProperties: true,
       showTag: true,
-      tagPlaceholder: '例如：TagA',
+      tagPlaceholder: tr('message_publish.presentation.rocketmq.tag_placeholder'),
       showDelayLevel: true,
       showQos: false,
       showRetain: false,
@@ -220,13 +234,13 @@ export const getMessagePublishPresentation = (
     return {
       transportLabel: 'MQTT Topic',
       destinationLabel: 'Topic',
-      destinationPlaceholder: '例如：devices/device-001/telemetry',
-      destinationRequiredMessage: '请输入 Topic',
-      alertMessage: '当前表单会自动拼装 MQTT publish JSON 命令，并直接通过 broker 执行测试发送。',
-      successHint: 'QoS 与 retain 可单独指定；未填写时沿用当前连接中的默认参数。',
+      destinationPlaceholder: tr('message_publish.presentation.mqtt.destination_placeholder'),
+      destinationRequiredMessage: tr('message_publish.presentation.topic_required'),
+      alertMessage: tr('message_publish.presentation.mqtt.alert'),
+      successHint: tr('message_publish.presentation.mqtt.success_hint'),
       showKey: false,
       showKeyMode: false,
-      keyLabel: '消息 Key（可选）',
+      keyLabel: tr('message_publish.presentation.key_label'),
       keyPlaceholder: '',
       showExchange: false,
       showRoutingKey: false,
@@ -243,14 +257,14 @@ export const getMessagePublishPresentation = (
   return {
     transportLabel: 'Kafka Topic',
     destinationLabel: 'Topic',
-    destinationPlaceholder: '例如：orders.events',
-    destinationRequiredMessage: '请输入 Topic',
-    alertMessage: '当前表单会自动拼装 Kafka publish JSON 命令，并直接调用后端执行测试发送。',
-    successHint: 'Headers 会作为 Kafka Record Headers 一并发送。',
+    destinationPlaceholder: tr('message_publish.presentation.kafka.destination_placeholder'),
+    destinationRequiredMessage: tr('message_publish.presentation.topic_required'),
+    alertMessage: tr('message_publish.presentation.kafka.alert'),
+    successHint: tr('message_publish.presentation.kafka.success_hint'),
     showKey: true,
     showKeyMode: true,
-    keyLabel: '消息 Key（可选）',
-    keyPlaceholder: '可留空；JSON 模式请输入一行合法 JSON',
+    keyLabel: tr('message_publish.presentation.key_label'),
+    keyPlaceholder: tr('message_publish.presentation.kafka.key_placeholder'),
     showExchange: false,
     showRoutingKey: false,
     showHeaders: true,
@@ -322,23 +336,27 @@ export const createDefaultMessagePublishDraft = (
 export const buildMessagePublishCommand = (
   config: ConnectionLike,
   draft: MessagePublishDraft,
+  translate: MessagePublishTranslate = defaultTranslate,
 ): MessagePublishCommand => {
   const resolvedType = resolveDataSourceType(config as any);
+  const tr = translate;
+  const bodyFieldLabel = tr('message_publish.field.body');
+  const messageKeyFieldLabel = tr('message_publish.field.message_key');
   const destination = String(draft.destination || '').trim();
   if (!destination) {
-    throw new Error('请输入目标 Topic / Queue');
+    throw new Error(tr('message_publish.error.destination_required'));
   }
 
   if (resolvedType === 'mqtt') {
     if (/[#+]/.test(destination)) {
-      throw new Error('MQTT 发送 Topic 不能包含 + 或 # 通配符');
+      throw new Error(tr('message_publish.error.mqtt_wildcard_topic'));
     }
     const bodyMode = normalizeMode(draft.bodyMode, 'json');
     const qosValue = Number(draft.qos);
     const qos = Number.isFinite(qosValue) ? Math.min(2, Math.max(0, Math.trunc(qosValue))) : 0;
     const command: Record<string, unknown> = {
       publish: destination,
-      payload: parseRequiredPayload(draft.body, bodyMode, '消息体'),
+      payload: parseRequiredPayload(draft.body, bodyMode, bodyFieldLabel, tr),
       qos,
       retain: !!draft.retain,
     };
@@ -354,7 +372,7 @@ export const buildMessagePublishCommand = (
     const bodyMode = normalizeMode(draft.bodyMode, 'json');
     const command: Record<string, unknown> = {
       publish: destination,
-      payload: parseRequiredPayload(draft.body, bodyMode, '消息体'),
+      payload: parseRequiredPayload(draft.body, bodyMode, bodyFieldLabel, tr),
     };
 
     const keys = String(draft.key || '')
@@ -375,7 +393,7 @@ export const buildMessagePublishCommand = (
       command.delayLevel = Math.trunc(delayLevel);
     }
 
-    const properties = parseOptionalJSONObject(draft.properties, 'Properties');
+    const properties = parseOptionalJSONObject(draft.properties, 'Properties', tr);
     if (properties && Object.keys(properties).length > 0) {
       command.properties = properties;
     }
@@ -392,17 +410,17 @@ export const buildMessagePublishCommand = (
     const bodyMode = normalizeMode(draft.bodyMode, 'json');
     const command: Record<string, unknown> = {
       publish: destination,
-      payload: parseRequiredPayload(draft.body, bodyMode, '消息体'),
+      payload: parseRequiredPayload(draft.body, bodyMode, bodyFieldLabel, tr),
       exchange: normalizeRabbitMQExchange(draft.exchange || params.get('defaultExchange') || params.get('exchange') || ''),
       routing_key: String(draft.routingKey || '').trim() || destination,
     };
 
-    const headers = parseOptionalJSONObject(draft.headers, 'Headers');
+    const headers = parseOptionalJSONObject(draft.headers, 'Headers', tr);
     if (headers && Object.keys(headers).length > 0) {
       command.headers = headers;
     }
 
-    const properties = parseOptionalJSONObject(draft.properties, 'Properties');
+    const properties = parseOptionalJSONObject(draft.properties, 'Properties', tr);
     if (properties && Object.keys(properties).length > 0) {
       command.properties = properties;
     }
@@ -419,15 +437,15 @@ export const buildMessagePublishCommand = (
     const bodyMode = normalizeMode(draft.bodyMode, 'json');
     const command: Record<string, unknown> = {
       publish: destination,
-      value: parseRequiredPayload(draft.body, bodyMode, '消息体'),
+      value: parseRequiredPayload(draft.body, bodyMode, bodyFieldLabel, tr),
     };
 
-    const keyPayload = parseOptionalPayload(draft.key, keyMode, '消息 Key');
+    const keyPayload = parseOptionalPayload(draft.key, keyMode, messageKeyFieldLabel, tr);
     if (keyPayload !== undefined) {
       command.key = keyPayload;
     }
 
-    const headers = parseOptionalJSONObject(draft.headers, 'Headers');
+    const headers = parseOptionalJSONObject(draft.headers, 'Headers', tr);
     if (headers && Object.keys(headers).length > 0) {
       command.headers = headers;
     }
@@ -439,5 +457,5 @@ export const buildMessagePublishCommand = (
     };
   }
 
-  throw new Error(`当前数据源暂不支持测试发送消息：${resolvedType || 'unknown'}`);
+  throw new Error(tr('message_publish.error.unsupported_type', { type: resolvedType || 'unknown' }));
 };

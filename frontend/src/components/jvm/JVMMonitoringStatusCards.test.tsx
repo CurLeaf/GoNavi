@@ -5,10 +5,11 @@ import { describe, expect, it } from "vitest";
 import JVMMonitoringStatusCards from "./JVMMonitoringStatusCards";
 
 describe("JVMMonitoringStatusCards", () => {
-  it("renders monitoring summary labels in Chinese", () => {
+  it("renders monitoring summary labels with the requested language", () => {
     const markup = renderToStaticMarkup(
       <JVMMonitoringStatusCards
         darkMode={false}
+        language="en-US"
         session={{
           connectionId: "conn-1",
           providerMode: "jmx",
@@ -30,17 +31,17 @@ describe("JVMMonitoringStatusCards", () => {
       />,
     );
 
-    expect(markup).toContain("堆内存");
-    expect(markup).toContain("已提交");
-    expect(markup).toContain("垃圾回收压力");
-    expect(markup).toContain("累计 50ms");
-    expect(markup).toContain("线程");
-    expect(markup).toContain("峰值 44");
-    expect(markup).toContain("可运行 11");
-    expect(markup).toContain("类加载");
-    expect(markup).not.toContain("Committed");
-    expect(markup).not.toContain("Total");
-    expect(markup).not.toContain("Peak");
+    expect(markup).toContain("Heap memory");
+    expect(markup).toContain("Committed 128 MB");
+    expect(markup).toContain("Garbage collection pressure");
+    expect(markup).toContain("Total 50ms");
+    expect(markup).toContain("Threads");
+    expect(markup).toContain("Peak 44");
+    expect(markup).toContain("Runnable 11");
+    expect(markup).toContain("Class loading");
+    expect(markup).not.toContain("堆内存");
+    expect(markup).not.toContain("已提交");
+    expect(markup).not.toContain("可运行");
     expect(markup).not.toContain("RUNNABLE");
     expect(markup).not.toContain("ClassLoading");
   });

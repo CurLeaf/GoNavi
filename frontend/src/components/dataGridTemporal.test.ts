@@ -61,7 +61,14 @@ describe('dataGridTemporal helpers', () => {
     const format = getTemporalPickerFormat('datetime');
 
     expect(Array.isArray(format)).toBe(true);
-    expect(typeof format[0]).toBe('function');
-    expect((format[0] as (value: dayjs.Dayjs) => string)(parsed!)).toBe('2026-06-16 16:46:23.158844');
+    if (!Array.isArray(format)) {
+      throw new Error('Expected datetime picker format to be an array');
+    }
+    const [formatDateTime] = format;
+    expect(typeof formatDateTime).toBe('function');
+    if (typeof formatDateTime !== 'function') {
+      throw new Error('Expected datetime picker format formatter to be a function');
+    }
+    expect(formatDateTime(parsed!)).toBe('2026-06-16 16:46:23.158844');
   });
 });

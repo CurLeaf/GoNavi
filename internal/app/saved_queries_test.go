@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -136,6 +137,36 @@ func TestSavedQueryRepositoryPreservesSQLWhitespace(t *testing.T) {
 	}
 	if persisted.SQL != query.SQL {
 		t.Fatalf("expected saved SQL whitespace to be preserved, got %q", persisted.SQL)
+	}
+}
+
+func TestSavedQueryRepositoryLocalizesGeneratedName(t *testing.T) {
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	app.configDir = t.TempDir()
+	app.SetLanguage("en-US")
+
+	persisted, err := app.SaveQuery(connection.SavedQuery{
+		ID:           "saved-generated-name",
+		SQL:          "select 1",
+		ConnectionID: "conn-1",
+		DBName:       "app",
+		CreatedAt:    100,
+	})
+	if err != nil {
+		t.Fatalf("SaveQuery returned error: %v", err)
+	}
+	if persisted.Name != "Query 1" {
+		t.Fatalf("expected localized generated saved query name, got %q", persisted.Name)
+	}
+}
+
+func TestSavedQueriesDoesNotHardcodeGeneratedNameChinese(t *testing.T) {
+	source, err := os.ReadFile("saved_queries.go")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if strings.Contains(string(source), `fmt.Sprintf("查询-%d", index+1)`) {
+		t.Fatal("saved_queries.go still hardcodes generated saved query name")
 	}
 }
 

@@ -1,4 +1,5 @@
 import type { ConnectionConfig, SavedConnection } from '../types';
+import { t } from '../i18n';
 
 export type ConnectionImportKind = 'app-managed-package' | 'encrypted-package' | 'legacy-json' | 'mysql-workbench-xml' | 'navicat-ncx' | 'invalid';
 export type ConnectionPackageDialogSnapshot = {
@@ -25,7 +26,7 @@ const CONNECTION_PACKAGE_KIND = 'gonavi_connection_package';
 const CONNECTION_PACKAGE_SCHEMA_VERSION_V2 = 2;
 const CONNECTION_PACKAGE_PROTECTION_APP_MANAGED = 1;
 const CONNECTION_PACKAGE_PROTECTION_FILE_PASSWORD = 2;
-const CANCELED_MESSAGE = '已取消';
+export const BACKEND_CANCELLED_MESSAGE = '已取消';
 const CONNECTION_PACKAGE_PASSWORD_REQUIRED_MESSAGE = '恢复包密码不能为空';
 
 const isJsonObject = (value: unknown): value is JsonObject => (
@@ -164,11 +165,23 @@ export const isConnectionPackagePasswordRequiredError = (value: unknown): boolea
     && value.message.trim() === CONNECTION_PACKAGE_PASSWORD_REQUIRED_MESSAGE;
 };
 
-export const isConnectionPackageExportCanceled = (result: unknown): boolean => (
+export const isBackendCancelledResult = (result: unknown): boolean => (
   isJsonObject(result)
   && result.success === false
-  && result.message === CANCELED_MESSAGE
+  && result.message === BACKEND_CANCELLED_MESSAGE
 );
+
+export const isConnectionPackageExportCanceled = (result: unknown): boolean => (
+  isBackendCancelledResult(result)
+);
+
+const formatConnectionPackageExportFailure = (detail?: string): string => {
+  const normalizedDetail = String(detail || '').trim();
+  if (!normalizedDetail) {
+    return t('app.connection_package.message.export_failed');
+  }
+  return `${t('app.connection_package.message.export_failed')}: ${normalizedDetail}`;
+};
 
 export const resolveConnectionPackageExportResult = (
   _currentDialog: ConnectionPackageDialogSnapshot,
@@ -192,8 +205,8 @@ export const resolveConnectionPackageExportResult = (
   return {
     kind: 'failed',
     error: isJsonObject(result) && typeof result.message === 'string' && result.message.trim()
-      ? result.message
-      : '导出失败',
+      ? formatConnectionPackageExportFailure(result.message)
+      : formatConnectionPackageExportFailure(),
   };
 };
 

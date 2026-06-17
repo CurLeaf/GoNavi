@@ -68,6 +68,8 @@ export function AISetActiveProvider(arg1:string):Promise<void>;
 
 export function AISetContextLevel(arg1:string):Promise<void>;
 
+export function AISetLanguage(arg1:string):Promise<void>;
+
 export function AISetSafetyLevel(arg1:string):Promise<void>;
 
 export function AIStartMCPHTTPServer(arg1:ai.MCPHTTPServerOptions):Promise<ai.MCPHTTPServerStatus>;

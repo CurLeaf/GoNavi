@@ -4,6 +4,8 @@ import { CloseOutlined, EyeInvisibleOutlined, RobotOutlined } from '@ant-design/
 
 import type { EditRowLocator } from '../utils/rowLocator';
 import type { QueryResultPaginationState } from '../utils/queryResultPagination';
+import { t as defaultTranslate } from '../i18n';
+import { useOptionalI18n } from '../i18n/provider';
 import DataGrid from './DataGrid';
 
 export type QueryEditorResultSet = {
@@ -72,6 +74,8 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     onResultPageChange,
     onDiagnoseExecutionError,
 }) => {
+    const i18n = useOptionalI18n();
+    const t = i18n?.t ?? defaultTranslate;
     const resolvedActiveResultKey = activeResultKey || resultSets[0]?.key || '';
     const activeResultSet = resultSets.find((rs) => rs.key === resolvedActiveResultKey) || null;
     const activeResultUsesDataGrid = Boolean(
@@ -80,32 +84,32 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
         !isAffectedRowsResult(activeResultSet),
     );
     const hideTooltipTitle = toggleShortcutLabel
-        ? `隐藏结果区（${toggleShortcutLabel}）`
-        : '隐藏结果区';
+        ? t('query_editor.results_panel.tooltip.hide_with_shortcut', { shortcut: toggleShortcutLabel })
+        : t('query_editor.results_panel.tooltip.hide');
 
     const buildResultTabMenuItems = (key: string, index: number): MenuProps['items'] => [
         {
             key: 'close-other',
-            label: '关闭其他页',
+            label: t('query_editor.results_panel.menu.close_other'),
             disabled: resultSets.length <= 1,
             onClick: () => onCloseOtherResultTabs(key),
         },
         {
             key: 'close-left',
-            label: '关闭左侧',
+            label: t('query_editor.results_panel.menu.close_left'),
             disabled: index <= 0,
             onClick: () => onCloseResultTabsToLeft(key),
         },
         {
             key: 'close-right',
-            label: '关闭右侧',
+            label: t('query_editor.results_panel.menu.close_right'),
             disabled: index >= resultSets.length - 1,
             onClick: () => onCloseResultTabsToRight(key),
         },
         { type: 'divider' },
         {
             key: 'close-all',
-            label: '关闭所有',
+            label: t('query_editor.results_panel.menu.close_all'),
             disabled: resultSets.length === 0,
             onClick: onCloseAllResultTabs,
         },
@@ -120,7 +124,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                 icon={<EyeInvisibleOutlined />}
                 onClick={onHide}
             >
-                隐藏
+                {t('query_editor.results_panel.action.hide')}
             </Button>
         </Tooltip>
     );
@@ -128,7 +132,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     const tabsHideButton = (
         <Tooltip title={hideTooltipTitle}>
             <Button
-                aria-label="隐藏结果区"
+                aria-label={t('query_editor.results_panel.aria.hide')}
                 className="query-result-panel-hide query-result-panel-hide-compact"
                 type="text"
                 size="small"
@@ -154,7 +158,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                 icon={<EyeInvisibleOutlined />}
                 onClick={onHide}
             >
-                <span>隐藏</span>
+                <span>{t('query_editor.results_panel.action.hide')}</span>
                 {isV2Ui && toggleShortcutLabel && (
                     <span className="gn-v2-toolbar-kbd">{toggleShortcutLabel}</span>
                 )}
@@ -351,7 +355,11 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                                         }}
                                     >
                                         <Tooltip title={rs.sql}>
-                                            <span className="query-result-tab-text">{rs.resultType === 'message' ? `消息 ${idx + 1}` : `结果 ${idx + 1}`}</span>
+                                            <span className="query-result-tab-text">
+                                                {rs.resultType === 'message'
+                                                    ? t('query_editor.results_panel.tab.message', { index: idx + 1 })
+                                                    : t('query_editor.results_panel.tab.result', { index: idx + 1 })}
+                                            </span>
                                         </Tooltip>
                                         {(() => {
                                             if (rs.resultType === 'message') {
@@ -365,7 +373,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                                             }
                                             return <span className="query-result-tab-count">{rs.rows.length}</span>;
                                         })()}
-                                        <Tooltip title="关闭结果">
+                                        <Tooltip title={t('query_editor.result.close')}>
                                             <span
                                                 className="query-result-tab-close"
                                                 onClick={(e) => {
@@ -388,7 +396,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                                             flexDirection: 'column', gap: 12, padding: 24, color: '#666', userSelect: 'text',
                                             overflow: 'auto',
                                         }}>
-                                            <span style={{ fontSize: 14, fontWeight: 600 }}>执行消息</span>
+                                            <span style={{ fontSize: 14, fontWeight: 600 }}>{t('query_editor.results_panel.message.title')}</span>
                                             <div style={{
                                                 padding: 16,
                                                 borderRadius: 8,
@@ -412,8 +420,8 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                                             flexDirection: 'column', gap: 8, color: '#666', userSelect: 'text',
                                         }}>
                                             <span style={{ fontSize: 36, color: '#52c41a' }}>✓</span>
-                                            <span style={{ fontSize: 14, fontWeight: 500 }}>执行成功</span>
-                                            <span style={{ fontSize: 13, color: '#999' }}>影响行数：{affected}</span>
+                                            <span style={{ fontSize: 14, fontWeight: 500 }}>{t('query_editor.result.execution_success')}</span>
+                                            <span style={{ fontSize: 13, color: '#999' }}>{t('query_editor.result.affected_rows', { count: affected })}</span>
                                             {Array.isArray(rs.messages) && rs.messages.length > 0 && (
                                                 <div style={{
                                                     marginTop: 8,
@@ -490,13 +498,13 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                 ) : executionError ? (
                     <>
                         <div className={isV2Ui ? 'query-result-panel-header gn-v2-query-result-panel-header' : 'query-result-panel-header'}>
-                            <span className="query-result-panel-header-title">结果区</span>
+                            <span className="query-result-panel-header-title">{t('query_editor.results_panel.panel.title')}</span>
                             {hideButton}
                         </div>
                         <div className={isV2Ui ? 'gn-v2-query-error' : undefined} style={{ flex: 1, minHeight: 0, padding: 24, display: 'flex', flexDirection: 'column', gap: 16, background: darkMode ? '#1e1e1e' : '#fafafa', overflow: 'auto' }}>
                             <div style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <CloseOutlined />
-                                <span>执行失败</span>
+                                <span>{t('query_editor.result.execution_failed')}</span>
                             </div>
                             <div className="custom-scrollbar" style={{ padding: 16, background: darkMode ? '#2d1a1a' : '#fff2f0', border: `1px solid ${darkMode ? '#5c2020' : '#ffccc7'}`, borderRadius: 6, color: darkMode ? '#ffa39e' : '#cf1322', fontFamily: 'var(--gn-font-mono)', fontSize: 'var(--gn-font-size-mono, 13px)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '40vh', overflow: 'auto' }}>
                                 {executionError}
@@ -508,7 +516,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                                     style={{ background: '#818cf8', borderColor: '#818cf8', boxShadow: '0 2px 0 rgba(129, 140, 248, 0.2)' }}
                                     onClick={onDiagnoseExecutionError}
                                 >
-                                    一键 AI 诊断
+                                    {t('query_editor.result.ai_diagnose')}
                                 </Button>
                             </div>
                         </div>
@@ -516,14 +524,14 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                 ) : (
                     <>
                         <div className={isV2Ui ? 'query-result-panel-header gn-v2-query-result-panel-header' : 'query-result-panel-header'}>
-                            <span className="query-result-panel-header-title">结果区</span>
+                            <span className="query-result-panel-header-title">{t('query_editor.results_panel.panel.title')}</span>
                             {hideButton}
                         </div>
                         <div className={isV2Ui ? 'gn-v2-query-empty' : undefined} style={{ flex: 1, minHeight: 0 }}>
                             {isV2Ui && (
                                 <div>
-                                    <strong>等待执行 SQL</strong>
-                                    <span>运行查询后，结果会在下方以新版数据网格展示。</span>
+                                    <strong>{t('query_editor.empty_state.title')}</strong>
+                                    <span>{t('query_editor.empty_state.description')}</span>
                                 </div>
                             )}
                         </div>

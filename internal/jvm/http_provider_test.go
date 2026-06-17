@@ -233,24 +233,49 @@ func TestHTTPProviderPreviewChangeAndApplySendJSONBody(t *testing.T) {
 	}
 }
 
-func TestHTTPProviderProbeCapabilitiesReflectsReadOnlyConnection(t *testing.T) {
-	provider := NewHTTPProvider()
-	cfg := newHTTPProviderTestConfig("https://orders.internal/manage/jvm", 3)
+func TestProvidersProbeCapabilitiesUseReadOnlyReasonKey(t *testing.T) {
 	readOnly := true
-	cfg.JVM.ReadOnly = &readOnly
+	cases := []struct {
+		name     string
+		provider Provider
+		cfg      connection.ConnectionConfig
+	}{
+		{
+			name:     "jmx",
+			provider: NewJMXProvider(),
+			cfg:      newJMXProviderTestConfig(),
+		},
+		{
+			name:     "endpoint",
+			provider: NewHTTPProvider(),
+			cfg:      newHTTPProviderTestConfig("https://orders.internal/manage/jvm", 3),
+		},
+		{
+			name:     "agent",
+			provider: NewAgentProvider(),
+			cfg:      newAgentProviderTestConfig("https://orders.internal/agent", 3),
+		},
+	}
 
-	caps, err := provider.ProbeCapabilities(context.Background(), cfg)
-	if err != nil {
-		t.Fatalf("ProbeCapabilities returned error: %v", err)
-	}
-	if len(caps) != 1 {
-		t.Fatalf("expected one capability, got %#v", caps)
-	}
-	if caps[0].CanWrite {
-		t.Fatalf("expected endpoint capability to be readonly, got %#v", caps[0])
-	}
-	if caps[0].Reason != "当前连接只读" {
-		t.Fatalf("expected readonly reason, got %#v", caps[0])
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := tc.cfg
+			cfg.JVM.ReadOnly = &readOnly
+
+			caps, err := tc.provider.ProbeCapabilities(context.Background(), cfg)
+			if err != nil {
+				t.Fatalf("ProbeCapabilities returned error: %v", err)
+			}
+			if len(caps) != 1 {
+				t.Fatalf("expected one capability, got %#v", caps)
+			}
+			if caps[0].CanWrite {
+				t.Fatalf("expected capability to be readonly, got %#v", caps[0])
+			}
+			if caps[0].Reason != changeBlockedReadOnlyKey {
+				t.Fatalf("expected readonly reason key %q, got %#v", changeBlockedReadOnlyKey, caps[0])
+			}
+		})
 	}
 }
 

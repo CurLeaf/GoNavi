@@ -49,12 +49,12 @@ import {
   normalizeOpacityForPlatform,
   resolveAppearanceValues,
 } from "../utils/appearance";
+import { t } from "../i18n";
 import {
   getConnectionConfigLayoutKindLabel,
   getConnectionConfigSectionCopy,
   getStoredSecretPlaceholder,
   normalizeConnectionSecretErrorMessage,
-  resolveConnectionTestFailureFeedback,
   resolveConnectionConfigLayout,
   summarizeConnectionTestFailureMessage,
   type ConnectionConfigSectionKey,
@@ -63,6 +63,8 @@ import { resolveConnectionSecretDraft } from "../utils/connectionSecretDraft";
 import { getCustomConnectionDsnValidationMessage } from "../utils/customConnectionDsn";
 import { mergeParsedUriValuesForForm } from "../utils/connectionUriMerge";
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
+import { getCustomConnectionDriverHelp } from "../utils/driverImportGuidance";
+import { isBackendCancelledResult } from "../utils/connectionExport";
 import {
   buildRedisUriFromValues,
   parseRedisUriToFormValues,
@@ -89,7 +91,6 @@ import {
   resolveConnectionDriverType,
   type DriverStatusSnapshot,
 } from "../utils/connectionDriverType";
-import { CUSTOM_CONNECTION_DRIVER_HELP } from "../utils/driverImportGuidance";
 import {
   describeUnsupportedOceanBaseProtocol,
   normalizeOceanBaseProtocol,
@@ -124,8 +125,6 @@ import {
   TestJVMConnection,
 } from "../../wailsjs/go/app/App";
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from "../types";
-import ConnectionModalMongoSections from "./ConnectionModalMongoSections";
-import ConnectionModalRedisSections from "./ConnectionModalRedisSections";
 
 const { Text } = Typography;
 type EditableJVMMode = (typeof JVM_EDITABLE_MODES)[number];
@@ -157,9 +156,10 @@ const STEP1_SIDEBAR_DIVIDER_DARK = "rgba(255, 255, 255, 0.16)";
 const STEP1_SIDEBAR_DIVIDER_LIGHT = "rgba(0, 0, 0, 0.08)";
 const CLICKHOUSE_PROTOCOL_OPTIONS: Array<{
   value: ClickHouseProtocolChoice;
-  label: string;
+  label?: string;
+  labelKey?: string;
 }> = [
-  { value: "auto", label: "自动" },
+  { value: "auto", labelKey: "connection.modal.field.clickHouseProtocol.auto" },
   { value: "http", label: "HTTP" },
   { value: "native", label: "Native" },
 ];
@@ -278,6 +278,29 @@ type ConnectionSecretKey =
 
 type ConnectionSecretClearState = Record<ConnectionSecretKey, boolean>;
 
+type UriFeedbackState = {
+  type: "success" | "warning" | "error";
+  messageKey: string;
+};
+
+type TestFailureKind =
+  | "validation"
+  | "runtime"
+  | "driver_unavailable"
+  | "secret_blocked";
+
+type TestResultState =
+  | {
+      type: "success";
+      message: string;
+    }
+  | {
+      type: "error";
+      kind: TestFailureKind;
+      reason: string;
+      fallbackKey: string;
+    };
+
 const createEmptyConnectionSecretClearState =
   (): ConnectionSecretClearState => ({
     primaryPassword: false,
@@ -352,19 +375,13 @@ const ConnectionModal: React.FC<{
   const [activeNetworkConfig, setActiveNetworkConfig] = useState<
     "ssl" | "ssh" | "proxy" | "httpTunnel"
   >("ssl");
-  const [testResult, setTestResult] = useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
+  const [testResult, setTestResult] = useState<TestResultState | null>(null);
   const [testErrorLogOpen, setTestErrorLogOpen] = useState(false);
   const [dbList, setDbList] = useState<string[]>([]);
   const [redisDbList, setRedisDbList] = useState<number[]>([]);
   const [mongoMembers, setMongoMembers] = useState<MongoMemberInfo[]>([]);
   const [discoveringMembers, setDiscoveringMembers] = useState(false);
-  const [uriFeedback, setUriFeedback] = useState<{
-    type: "success" | "warning" | "error";
-    message: string;
-  } | null>(null);
+  const [uriFeedback, setUriFeedback] = useState<UriFeedbackState | null>(null);
   const [typeSelectWarning, setTypeSelectWarning] = useState<{
     driverName: string;
     reason: string;
@@ -388,6 +405,8 @@ const ConnectionModal: React.FC<{
   const updateConnection = useStore((state) => state.updateConnection);
   const theme = useStore((state) => state.theme);
   const appearance = useStore((state) => state.appearance);
+  const languagePreference = useStore((state) => state.languagePreference);
+  void languagePreference;
   const darkMode = theme === "dark";
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const effectiveOpacity = normalizeOpacityForPlatform(
@@ -441,20 +460,35 @@ const ConnectionModal: React.FC<{
   const supportsSSLClientCertificate =
     supportsSSLClientCertificateForType(dbType);
   const sslHintText = isMySQLLike
-    ? "MySQL 兼容数据源支持 CA 证书、客户端证书与私钥；本地自签证书场景可先用 Preferred 或 Skip Verify。"
+    ? t("connection.modal.network.ssl.hint.mysqlCompatible")
     : isOceanBaseOracle
-      ? "OceanBase Oracle 租户使用 Oracle 协议连接；如需 Wallet，请在高级参数中配置 Oracle 驱动参数。"
+      ? t("connection.modal.network.ssl.hint.oceanBaseOracle")
       : dbType === "dameng"
-      ? "达梦驱动启用 SSL 需要客户端证书与私钥路径（sslCertPath / sslKeyPath）。"
+      ? t("connection.modal.network.ssl.hint.dameng")
       : dbType === "sqlserver"
-        ? "SQL Server 可配置服务端证书/CA 文件；生产环境建议使用 Required，并关闭 TrustServerCertificate。"
+        ? t("connection.modal.network.ssl.hint.sqlserver")
         : dbType === "mongodb"
-          ? "MongoDB 支持 CA 证书、客户端证书与私钥；证书校验异常时可先用 Skip Verify 验证连通性。"
+          ? t("connection.modal.network.ssl.hint.mongodb")
           : dbType === "oracle"
-            ? "Oracle PEM 证书请优先使用 Wallet 并在高级参数中配置 WALLET；这里仅控制 SSL 开关与校验策略。"
+            ? t("connection.modal.network.ssl.hint.oracle")
             : dbType === "tdengine"
-              ? "TDengine 当前仅配置 WSS 与校验策略；证书文件请通过服务端信任链处理。"
-              : "支持的驱动可配置 CA 证书、客户端证书与私钥；仅在测试环境或自签证书场景使用 Skip Verify。";
+              ? t("connection.modal.network.ssl.hint.tdengine")
+              : t("connection.modal.network.ssl.hint.default");
+  const resolvedUriFeedbackMessage = uriFeedback
+    ? t(uriFeedback.messageKey)
+    : "";
+  const resolvedTestResultMessage = !testResult
+    ? ""
+    : testResult.type === "success"
+      ? String(testResult.message || "")
+      : testResult.kind === "validation"
+        ? t("connection.modal.test.validation")
+        : t("connection.modal.test.failure", {
+            reason: normalizeConnectionSecretErrorMessage(
+              testResult.reason,
+              t(testResult.fallbackKey),
+            ),
+          });
 
   const getSectionBg = (darkHex: string) => {
     if (!darkMode) {
@@ -599,7 +633,7 @@ const ConnectionModal: React.FC<{
                 }}
               >
                 {hasDraftValue
-                  ? "已输入新值，保存时会替换当前已保存内容。"
+                  ? t("connection.modal.secret.draftReplacement")
                   : description}
               </div>
               <Checkbox
@@ -895,7 +929,7 @@ const ConnectionModal: React.FC<{
             >
               <Space size={8} wrap>
                 <Text strong>{option.label}</Text>
-                {active ? <Tag color="blue">当前</Tag> : null}
+                {active ? <Tag color="blue">{t("connection.modal.choice.current")}</Tag> : null}
               </Space>
               {option.description ? (
                 <div style={{ ...modalMutedTextStyle, marginTop: 6 }}>
@@ -1013,19 +1047,28 @@ const ConnectionModal: React.FC<{
     }
     return (
       status.message ||
-      `${status.name || normalized} 驱动未安装启用，请先在驱动管理中安装`
+      t("connection.modal.driver.unavailableFallback", {
+        name: status.name || normalized,
+      })
     );
   };
 
   const promptInstallDriver = (driverType: string, reason: string) => {
     const normalized = normalizeDriverType(driverType);
     const snapshot = driverStatusMap[normalized];
-    const driverName = snapshot?.name || normalized || "当前";
+    const driverName =
+      snapshot?.name || normalized || t("connection.modal.driver.currentFallback");
     Modal.confirm({
-      title: `${driverName} 驱动不可用`,
-      content: reason || `${driverName} 驱动未安装启用，请先在驱动管理中安装`,
-      okText: "去驱动管理安装",
-      cancelText: "取消",
+      title: t("connection.modal.driver.unavailableTitle", {
+        name: driverName,
+      }),
+      content:
+        reason ||
+        t("connection.modal.driver.unavailableFallback", {
+          name: driverName,
+        }),
+      okText: t("connection.modal.driver.installAction"),
+      cancelText: t("common.action.cancel"),
       onOk: () => {
         onOpenDriverManager?.();
       },
@@ -2126,7 +2169,9 @@ const ConnectionModal: React.FC<{
     if (dbType === "gaussdb") {
       return "gaussdb://user:pass@127.0.0.1:5432/db_name";
     }
-    return "例如: postgres://user:pass@127.0.0.1:5432/db_name";
+    return t("connection.modal.example", {
+      value: "postgres://user:pass@127.0.0.1:5432/db_name",
+    });
   };
 
   const getConnectionParamsPlaceholder = () => {
@@ -2500,9 +2545,15 @@ const ConnectionModal: React.FC<{
       const values = form.getFieldsValue(true);
       const uri = buildUriFromValues(values);
       form.setFieldValue("uri", uri);
-      setUriFeedback({ type: "success", message: "URI 已生成" });
+      setUriFeedback({
+        type: "success",
+        messageKey: "connection.modal.uri.feedback.generated",
+      });
     } catch {
-      setUriFeedback({ type: "error", message: "生成 URI 失败" });
+      setUriFeedback({
+        type: "error",
+        messageKey: "connection.modal.uri.feedback.generateFailed",
+      });
     }
   };
 
@@ -2513,14 +2564,17 @@ const ConnectionModal: React.FC<{
         .trim()
         .toLowerCase();
       if (!uriText) {
-        setUriFeedback({ type: "warning", message: "请先输入 URI" });
+        setUriFeedback({
+          type: "warning",
+          messageKey: "connection.modal.uri.feedback.emptyInput",
+        });
         return;
       }
       const parsedValues = parseUriToValues(uriText, type);
       if (!parsedValues) {
         setUriFeedback({
           type: "error",
-          message: "当前 URI 与数据源类型不匹配，或 URI 格式不支持",
+          messageKey: "connection.modal.uri.feedback.unsupported",
         });
         return;
       }
@@ -2534,11 +2588,14 @@ const ConnectionModal: React.FC<{
       if (testResult) {
         setTestResult(null);
       }
-      setUriFeedback({ type: "success", message: "已根据 URI 回填连接参数" });
+      setUriFeedback({
+        type: "success",
+        messageKey: "connection.modal.uri.feedback.parsed",
+      });
     } catch {
       setUriFeedback({
         type: "error",
-        message: "URI 解析失败，请检查格式后重试",
+        messageKey: "connection.modal.uri.feedback.parseFailed",
       });
     }
   };
@@ -2551,14 +2608,23 @@ const ConnectionModal: React.FC<{
       form.setFieldValue("uri", uriText);
     }
     if (!uriText) {
-      setUriFeedback({ type: "warning", message: "没有可复制的 URI" });
+      setUriFeedback({
+        type: "warning",
+        messageKey: "connection.modal.uri.feedback.emptyCopy",
+      });
       return;
     }
     try {
       await navigator.clipboard.writeText(uriText);
-      setUriFeedback({ type: "success", message: "URI 已复制" });
+      setUriFeedback({
+        type: "success",
+        messageKey: "connection.modal.uri.feedback.copied",
+      });
     } catch {
-      setUriFeedback({ type: "error", message: "复制失败" });
+      setUriFeedback({
+        type: "error",
+        messageKey: "connection.modal.uri.feedback.copyFailed",
+      });
     }
   };
 
@@ -2577,11 +2643,19 @@ const ConnectionModal: React.FC<{
         if (selectedPath) {
           form.setFieldValue("sshKeyPath", selectedPath);
         }
-      } else if (res?.message !== "已取消") {
-        message.error(`选择私钥文件失败: ${res?.message || "未知错误"}`);
+      } else if (!isBackendCancelledResult(res)) {
+        message.error(
+          t("connection.modal.filePicker.sshKeyFailure", {
+            detail: res?.message || t("connection.modal.error.unknown"),
+          }),
+        );
       }
     } catch (e: any) {
-      message.error(`选择私钥文件失败: ${e?.message || String(e)}`);
+      message.error(
+        t("connection.modal.filePicker.sshKeyFailure", {
+          detail: e?.message || String(e),
+        }),
+      );
     } finally {
       setSelectingSSHKey(false);
     }
@@ -2605,11 +2679,19 @@ const ConnectionModal: React.FC<{
         if (selectedPath) {
           form.setFieldValue(fieldName, selectedPath);
         }
-      } else if (res?.message !== "已取消") {
-        message.error(`选择证书文件失败: ${res?.message || "未知错误"}`);
+      } else if (!isBackendCancelledResult(res)) {
+        message.error(
+          t("connection.modal.filePicker.certificateFailure", {
+            detail: res?.message || t("connection.modal.error.unknown"),
+          }),
+        );
       }
     } catch (e: any) {
-      message.error(`选择证书文件失败: ${e?.message || String(e)}`);
+      message.error(
+        t("connection.modal.filePicker.certificateFailure", {
+          detail: e?.message || String(e),
+        }),
+      );
     } finally {
       setSelectingCertificateField(null);
     }
@@ -2630,11 +2712,19 @@ const ConnectionModal: React.FC<{
         if (selectedPath) {
           form.setFieldValue("host", normalizeFileDbPath(selectedPath));
         }
-      } else if (res?.message !== "已取消") {
-        message.error(`选择数据库文件失败: ${res?.message || "未知错误"}`);
+      } else if (!isBackendCancelledResult(res)) {
+        message.error(
+          t("connection.modal.filePicker.databaseFailure", {
+            detail: res?.message || t("connection.modal.error.unknown"),
+          }),
+        );
       }
     } catch (e: any) {
-      message.error(`选择数据库文件失败: ${e?.message || String(e)}`);
+      message.error(
+        t("connection.modal.filePicker.databaseFailure", {
+          detail: e?.message || String(e),
+        }),
+      );
     } finally {
       setSelectingDbFile(false);
     }
@@ -3143,15 +3233,15 @@ const ConnectionModal: React.FC<{
       const backendApp = (window as any).go?.app?.App;
       const savedConnection = await backendApp?.SaveConnection?.(payload);
       if (!savedConnection) {
-        throw new Error("保存连接失败：后端接口不可用");
+        throw new Error(t("connection.modal.save.backendUnavailable"));
       }
 
       if (initialValues) {
         updateConnection(savedConnection);
-        message.success("配置已更新（未连接）");
+        message.success(t("connection.modal.save.updatedUnconnected"));
       } else {
         addConnection(savedConnection);
-        message.success("配置已保存（未连接）");
+        message.success(t("connection.modal.save.savedUnconnected"));
       }
 
       if (onSaved) {
@@ -3159,7 +3249,7 @@ const ConnectionModal: React.FC<{
           (error: unknown) => {
             console.warn("Failed to refresh post-save state", error);
             void message.warning(
-              "配置已保存，但安全更新状态暂未刷新，请稍后重新检查",
+              t("connection.modal.save.refreshWarning"),
             );
           },
         );
@@ -3176,7 +3266,10 @@ const ConnectionModal: React.FC<{
       onClose();
     } catch (e: any) {
       message.error(
-        normalizeConnectionSecretErrorMessage(e?.message || e, "保存失败"),
+        normalizeConnectionSecretErrorMessage(
+          e?.message || e,
+          t("connection.modal.save.failureFallback"),
+        ),
       );
     } finally {
       setLoading(false);
@@ -3222,14 +3315,14 @@ const ConnectionModal: React.FC<{
       !isFileDatabaseType(values.type) &&
       String(values.password ?? "") === ""
     ) {
-      return "测试连接前请填写新的密码，或取消清除已保存密码";
+      return t("connection.modal.secret.blocking.primary");
     }
     if (
       clearSecrets.sshPassword &&
       values.useSSH &&
       String(values.sshPassword ?? "") === ""
     ) {
-      return "测试连接前请填写新的 SSH 密码，或取消清除已保存 SSH 密码";
+      return t("connection.modal.secret.blocking.ssh");
     }
     if (
       clearSecrets.proxyPassword &&
@@ -3237,14 +3330,14 @@ const ConnectionModal: React.FC<{
       !values.useHttpTunnel &&
       String(values.proxyPassword ?? "") === ""
     ) {
-      return "测试连接前请填写新的代理密码，或取消清除已保存代理密码";
+      return t("connection.modal.secret.blocking.proxy");
     }
     if (
       clearSecrets.httpTunnelPassword &&
       values.useHttpTunnel &&
       String(values.httpTunnelPassword ?? "") === ""
     ) {
-      return "测试连接前请填写新的隧道密码，或取消清除已保存隧道密码";
+      return t("connection.modal.secret.blocking.httpTunnel");
     }
     if (
       clearSecrets.mysqlReplicaPassword &&
@@ -3252,7 +3345,7 @@ const ConnectionModal: React.FC<{
       values.mysqlTopology === "replica" &&
       String(values.mysqlReplicaPassword ?? "") === ""
     ) {
-      return "测试连接前请填写新的从库密码，或取消清除已保存从库密码";
+      return t("connection.modal.secret.blocking.mysqlReplica");
     }
     if (
       clearSecrets.mongoReplicaPassword &&
@@ -3260,7 +3353,7 @@ const ConnectionModal: React.FC<{
       values.mongoTopology === "replica" &&
       String(values.mongoReplicaPassword ?? "") === ""
     ) {
-      return "测试连接前请填写新的副本集密码，或取消清除已保存副本集密码";
+      return t("connection.modal.secret.blocking.mongoReplica");
     }
     if (
       clearSecrets.redisSentinelPassword &&
@@ -3268,7 +3361,7 @@ const ConnectionModal: React.FC<{
       values.redisTopology === "sentinel" &&
       String(values.redisSentinelPassword ?? "") === ""
     ) {
-      return "测试连接前请填写新的 Sentinel 密码，或取消清除已保存 Sentinel 密码";
+      return t("connection.modal.secret.blocking.redis_sentinel");
     }
     if (
       values.type === "mongodb" &&
@@ -3276,13 +3369,26 @@ const ConnectionModal: React.FC<{
       initialValues?.hasPrimaryPassword &&
       String(values.password ?? "") === ""
     ) {
-      return "测试连接前请填写新的 MongoDB 密码，或重新勾选保存密码";
+      return t("connection.modal.secret.blocking.mongoPrimary");
     }
     return null;
   };
-  const applyTestFailureFeedback = (feedback: { message: string }) => {
+  const applyTestFailureFeedback = ({
+    kind,
+    reason,
+    fallbackKey,
+  }: {
+    kind: TestFailureKind;
+    reason?: unknown;
+    fallbackKey: string;
+  }) => {
     void message.destroy("connection-test-failure");
-    setTestResult({ type: "error", message: feedback.message });
+    setTestResult({
+      type: "error",
+      kind,
+      reason: String(reason ?? ""),
+      fallbackKey,
+    });
   };
 
   const handleTest = async () => {
@@ -3296,13 +3402,11 @@ const ConnectionModal: React.FC<{
         values.driver,
       );
       if (unavailableReason) {
-        applyTestFailureFeedback(
-          resolveConnectionTestFailureFeedback({
-            kind: "driver_unavailable",
-            reason: unavailableReason,
-            fallback: "驱动未安装启用",
-          }),
-        );
+        applyTestFailureFeedback({
+          kind: "driver_unavailable",
+          reason: unavailableReason,
+          fallbackKey: "connection.modal.test.fallback.driverUnavailable",
+        });
         promptInstallDriver(
           resolveConnectionDriverType(values.type, values.driver) || values.type,
           unavailableReason,
@@ -3311,13 +3415,11 @@ const ConnectionModal: React.FC<{
       }
       const blockingSecretClearMessage = getBlockingSecretClearMessage(values);
       if (blockingSecretClearMessage) {
-        applyTestFailureFeedback(
-          resolveConnectionTestFailureFeedback({
-            kind: "secret_blocked",
-            reason: blockingSecretClearMessage,
-            fallback: "连接参数不完整",
-          }),
-        );
+        applyTestFailureFeedback({
+          kind: "secret_blocked",
+          reason: blockingSecretClearMessage,
+          fallbackKey: "connection.modal.test.fallback.incompleteParams",
+        });
         return;
       }
       setLoading(true);
@@ -3345,7 +3447,7 @@ const ConnectionModal: React.FC<{
             ? RedisConnect(config as any)
             : TestConnection(dbTestConfig as any),
         rpcTimeoutMs,
-        `连接测试超时（>${timeoutSeconds} 秒），请检查网络/代理/SSH配置后重试`,
+        t("connection.modal.test.timeout", { seconds: timeoutSeconds }),
       );
 
       if (res.success) {
@@ -3355,7 +3457,9 @@ const ConnectionModal: React.FC<{
           const dbRes = await withClientTimeout(
             RedisGetDatabases(config as any),
             rpcTimeoutMs,
-            `连接成功但拉取 Redis 数据库列表超时（>${timeoutSeconds} 秒）`,
+            t("connection.modal.test.redis_database_list_timeout", {
+              seconds: timeoutSeconds,
+            }),
           );
           if (dbRes.success) {
             const supportedDbs = extractRedisDatabaseList(dbRes.data);
@@ -3375,7 +3479,12 @@ const ConnectionModal: React.FC<{
               ),
             );
             message.warning(
-              `连接成功，但获取 Redis 数据库列表失败：${normalizeConnectionSecretErrorMessage(dbRes.message, "未知错误")}`,
+              t("connection.modal.test.redis_database_list_failure", {
+                detail: normalizeConnectionSecretErrorMessage(
+                  dbRes.message,
+                  t("connection.modal.error.unknown"),
+                ),
+              }),
             );
           }
         } else if (!isJVMType) {
@@ -3383,7 +3492,9 @@ const ConnectionModal: React.FC<{
           const dbRes = await withClientTimeout(
             DBGetDatabases(dbTestConfig as any),
             rpcTimeoutMs,
-            `连接成功但拉取数据库列表超时（>${timeoutSeconds} 秒）`,
+            t("connection.modal.test.databaseListTimeout", {
+              seconds: timeoutSeconds,
+            }),
           );
           if (dbRes.success) {
             const dbRows = Array.isArray(dbRes.data) ? dbRes.data : [];
@@ -3396,46 +3507,48 @@ const ConnectionModal: React.FC<{
             if (dbs.length === 0) {
               message.warning(
                 values.type === "dameng"
-                  ? "连接成功，但未获取到可见 schema；请检查当前账号权限或默认 schema 配置"
-                  : "连接成功，但未获取到可见数据库列表",
+                  ? t("connection.modal.test.noVisibleSchema")
+                  : t("connection.modal.test.noVisibleDatabaseList"),
               );
             }
           } else {
             setDbList([]);
             message.warning(
-              `连接成功，但获取数据库列表失败：${normalizeConnectionSecretErrorMessage(dbRes.message, "未知错误")}`,
+              t("connection.modal.test.databaseListFailure", {
+                detail: normalizeConnectionSecretErrorMessage(
+                  dbRes.message,
+                  t("connection.modal.error.unknown"),
+                ),
+              }),
             );
           }
         }
       } else {
-        applyTestFailureFeedback(
-          resolveConnectionTestFailureFeedback({
-            kind: "runtime",
-            reason: res?.message,
-            fallback: "连接被拒绝或参数无效，请检查后重试",
-          }),
-        );
+        applyTestFailureFeedback({
+          kind: "runtime",
+          reason: res?.message,
+          fallbackKey: "connection.modal.test.fallback.rejected",
+        });
       }
     } catch (e: unknown) {
       if (e && typeof e === "object" && "errorFields" in e) {
-        applyTestFailureFeedback(
-          resolveConnectionTestFailureFeedback({
-            kind: "validation",
-            reason: "",
-            fallback: "请先完善必填项后再测试连接",
-          }),
-        );
+        applyTestFailureFeedback({
+          kind: "validation",
+          fallbackKey: "connection.modal.test.fallback.validation",
+        });
         return;
       }
       const reason =
-        e instanceof Error ? e.message : typeof e === "string" ? e : "未知异常";
-      applyTestFailureFeedback(
-        resolveConnectionTestFailureFeedback({
-          kind: "runtime",
-          reason,
-          fallback: "未知异常",
-        }),
-      );
+        e instanceof Error
+          ? e.message
+          : typeof e === "string"
+            ? e
+            : t("connection.modal.test.fallback.unknownException");
+      applyTestFailureFeedback({
+        kind: "runtime",
+        reason,
+        fallbackKey: "connection.modal.test.fallback.unknownException",
+      });
     } finally {
       testInFlightRef.current = false;
       setLoading(false);
@@ -3462,7 +3575,10 @@ const ConnectionModal: React.FC<{
       const result = await MongoDiscoverMembers(config as any);
       if (!result.success) {
         message.error(
-          normalizeConnectionSecretErrorMessage(result.message, "成员发现失败"),
+          normalizeConnectionSecretErrorMessage(
+            result.message,
+            t("connection.modal.mongo.discover.failure"),
+          ),
         );
         return;
       }
@@ -3471,8 +3587,8 @@ const ConnectionModal: React.FC<{
       const members: MongoMemberInfo[] = membersRaw
         .map((item: any) => ({
           host: String(item.host || "").trim(),
-          role: String(item.role || item.state || "UNKNOWN").trim(),
-          state: String(item.state || item.role || "UNKNOWN").trim(),
+          role: String(item.role || item.state || "").trim(),
+          state: String(item.state || item.role || "").trim(),
           stateCode: Number(item.stateCode || 0),
           healthy: !!item.healthy,
           isSelf: !!item.isSelf,
@@ -3482,12 +3598,20 @@ const ConnectionModal: React.FC<{
       if (!form.getFieldValue("mongoReplicaSet") && data.replicaSet) {
         form.setFieldValue("mongoReplicaSet", String(data.replicaSet));
       }
-      message.success(result.message || `发现 ${members.length} 个成员`);
+      message.success(
+        result.message ||
+          t(
+            members.length === 1
+              ? "connection.modal.mongo.discover.successOne"
+              : "connection.modal.mongo.discover.successMany",
+            { count: members.length },
+          ),
+      );
     } catch (error: any) {
       message.error(
         normalizeConnectionSecretErrorMessage(
           error?.message || error,
-          "成员发现失败",
+          t("connection.modal.mongo.discover.failure"),
         ),
       );
     } finally {
@@ -3511,9 +3635,7 @@ const ConnectionModal: React.FC<{
           preferredMode: mergedValues.jvmPreferredMode,
         })
       ) {
-        throw new Error(
-          "当前连接包含未支持的 JVM 模式；请先调整为 JMX、Endpoint 或 Agent 后再测试或保存",
-        );
+        throw new Error(t("connection.modal.jvm.unsupportedMode.saveTest"));
       }
       if (
         hasUnsupportedJVMDiagnosticTransport(
@@ -3521,7 +3643,7 @@ const ConnectionModal: React.FC<{
         )
       ) {
         throw new Error(
-          "当前连接包含未支持的 JVM 诊断 transport；请先调整为 agent-bridge 或 arthas-tunnel 后再测试或保存",
+          t("connection.modal.jvm.unsupportedTransport.saveTest"),
         );
       }
       const existingDiagnostic = initialValues?.config?.jvm?.diagnostic;
@@ -3706,10 +3828,10 @@ const ConnectionModal: React.FC<{
       ? String(mergedValues.sslKeyPath || "").trim()
       : "";
     if (type === "dameng" && effectiveUseSSL && (!sslCertPath || !sslKeyPath)) {
-      throw new Error("达梦启用 SSL 时必须填写证书路径与私钥路径");
+      throw new Error(t("connection.modal.validation.ssl.damengRequired"));
     }
     if (effectiveUseSSL && supportsSSLClientCertificateForType(type) && (!!sslCertPath !== !!sslKeyPath)) {
-      throw new Error("TLS 客户端证书与私钥路径需要同时填写");
+      throw new Error(t("connection.modal.validation.ssl.clientPairRequired"));
     }
 
     let primaryHost = "localhost";
@@ -3924,14 +4046,14 @@ const ConnectionModal: React.FC<{
           };
     if (effectiveUseHttpTunnel) {
       if (!httpTunnelConfig.host) {
-        throw new Error("HTTP 隧道主机不能为空");
+        throw new Error(t("connection.modal.validation.httpTunnel.hostRequired"));
       }
       if (
         !Number.isFinite(httpTunnelConfig.port) ||
         httpTunnelConfig.port <= 0 ||
         httpTunnelConfig.port > 65535
       ) {
-        throw new Error("HTTP 隧道端口必须在 1-65535 之间");
+        throw new Error(t("connection.modal.validation.httpTunnel.portRange"));
       }
     }
 
@@ -4002,7 +4124,9 @@ const ConnectionModal: React.FC<{
       const driverName = snapshot.name || type;
       const reason =
         snapshot.message ||
-        `${driverName} 驱动未安装启用，请先在驱动管理中安装`;
+        t("connection.modal.driver.unavailableFallback", {
+          name: driverName,
+        });
       setTypeSelectWarning({ driverName, reason });
       return;
     }
@@ -4214,7 +4338,7 @@ const ConnectionModal: React.FC<{
   const connectionConfigLayout = resolveConnectionConfigLayout(dbType);
   const unsupportedJvmModeMessage =
     isJVM && hasUnsupportedJvmModeSelection
-      ? "当前连接包含未支持的 JVM 模式。此版本只支持 JMX / Endpoint / Agent，请先调整允许模式和首选模式后再继续。"
+      ? t("connection.modal.jvm.unsupportedMode.banner")
       : "";
   const currentDriverType = resolveConnectionDriverType(dbType, customDriver);
   const hasCurrentDriverType =
@@ -4225,7 +4349,19 @@ const ConnectionModal: React.FC<{
     currentDriverSnapshot &&
     !currentDriverSnapshot.connectable
       ? currentDriverSnapshot.message ||
-        `${currentDriverSnapshot.name || dbType} 驱动未安装启用`
+        t("connection.modal.driver.unavailableFallback", {
+          name: currentDriverSnapshot.name || dbType,
+        })
+      : "";
+  const currentDriverUpdateReason =
+    hasCurrentDriverType &&
+    currentDriverSnapshot?.connectable &&
+    currentDriverSnapshot.needsUpdate
+      ? currentDriverSnapshot.message ||
+        currentDriverSnapshot.updateReason ||
+        t("connection.modal.driver.updateFallback", {
+          name: currentDriverSnapshot.name || dbType,
+        })
       : "";
   const driverStatusChecking =
     hasCurrentDriverType && !driverStatusLoaded && step === 2;
@@ -4262,10 +4398,10 @@ const ConnectionModal: React.FC<{
             fontWeight: 700,
           }}
         >
-          选择数据源
+          {t("connection.modal.step1.sectionTitle")}
         </div>
         <div style={modalMutedTextStyle}>
-          先选择目标数据库或中间件类型，再进入详细连接参数配置。
+          {t("connection.modal.step1.sectionDescription")}
         </div>
       </div>
       {typeSelectWarning && (
@@ -4273,7 +4409,9 @@ const ConnectionModal: React.FC<{
           type="warning"
           showIcon
           closable
-          message={`${typeSelectWarning.driverName} 驱动未启用`}
+          message={t("connection.modal.typeWarning.unavailable", {
+            name: typeSelectWarning.driverName,
+          })}
           description={
             <Space size={8}>
               <span>{typeSelectWarning.reason}</span>
@@ -4282,7 +4420,7 @@ const ConnectionModal: React.FC<{
                 size="small"
                 onClick={() => onOpenDriverManager?.()}
               >
-                去驱动管理安装
+                {t("connection.modal.driver.installAction")}
               </Button>
             </Space>
           }
@@ -4422,10 +4560,10 @@ const ConnectionModal: React.FC<{
             fontWeight: 700,
           }}
         >
-          基础信息
+          {t("connection.modal.config.basic.title")}
         </div>
         <div style={{ ...modalMutedTextStyle, marginBottom: 16 }}>
-          常用参数集中在左侧，优先完成连接建立所需的最小输入。
+          {t("connection.modal.config.basic.description")}
         </div>
 
         <div style={{ display: "grid", gap: 16 }}>
@@ -4438,13 +4576,17 @@ const ConnectionModal: React.FC<{
               </Tag>
             ),
             children: (
-              <Form.Item name="name" label="连接名称" style={{ marginBottom: 0 }}>
+              <Form.Item
+                name="name"
+                label={t("connection.modal.field.name.label")}
+                style={{ marginBottom: 0 }}
+              >
                 <Input
                   {...noAutoCapInputProps}
                   placeholder={
                     isJVM
-                      ? "例如：本地 JVM / 订单服务 JVM"
-                      : "例如：本地测试库"
+                      ? t("connection.modal.field.name.placeholder.jvm")
+                      : t("connection.modal.field.name.placeholder.default")
                   }
                 />
               </Form.Item>
@@ -4460,8 +4602,8 @@ const ConnectionModal: React.FC<{
                 <>
                   <Form.Item
                     name="uri"
-                    label="连接 URI（可复制粘贴）"
-                    help="支持从参数生成、复制到剪贴板，或粘贴后一键解析回填参数"
+                    label={t("connection.modal.uri.label")}
+                    help={t("connection.modal.uri.help")}
                   >
                     <Input.TextArea
                       {...noAutoCapInputProps}
@@ -4472,8 +4614,8 @@ const ConnectionModal: React.FC<{
                   {supportsConnectionParams && (
                     <Form.Item
                       name="connectionParams"
-                      label="额外连接参数"
-                      help="按当前数据源驱动支持的 URI/DSN query 格式填写；认证密码请使用上方密码字段。"
+                      label={t("connection.modal.connectionParams.label")}
+                      help={t("connection.modal.connectionParams.help")}
                     >
                       <Input.TextArea
                         {...noAutoCapInputProps}
@@ -4487,16 +4629,22 @@ const ConnectionModal: React.FC<{
                     style={{ marginBottom: uriFeedback ? 12 : 16 }}
                     wrap
                   >
-                    <Button onClick={handleGenerateURI}>生成 URI</Button>
-                    <Button onClick={handleParseURI}>从 URI 解析</Button>
-                    <Button onClick={handleCopyURI}>复制 URI</Button>
+                    <Button onClick={handleGenerateURI}>
+                      {t("connection.modal.uri.action.generate")}
+                    </Button>
+                    <Button onClick={handleParseURI}>
+                      {t("connection.modal.uri.action.parse")}
+                    </Button>
+                    <Button onClick={handleCopyURI}>
+                      {t("connection.modal.uri.action.copy")}
+                    </Button>
                   </Space>
                   {uriFeedback && (
                     <Alert
                       showIcon
                       closable
                       type={uriFeedback.type}
-                      message={uriFeedback.message}
+                      message={resolvedUriFeedbackMessage}
                       onClose={() => setUriFeedback(null)}
                       style={{ marginBottom: 16 }}
                     />
@@ -4505,9 +4653,8 @@ const ConnectionModal: React.FC<{
                     fieldName: "uri",
                     clearKey: "opaqueURI",
                     hasStoredSecret: initialValues?.hasOpaqueURI,
-                    clearLabel: "清除已保存 URI",
-                    description:
-                      "当前已保存连接 URI。留空表示继续沿用，输入新值表示替换。",
+                    clearLabel: t("connection.modal.uri.stored.clear"),
+                    description: t("connection.modal.uri.stored.description"),
                   })}
                 </>
               ),
@@ -4521,14 +4668,19 @@ const ConnectionModal: React.FC<{
                 children: (
                   <Form.Item
                     name="driver"
-                    label="驱动名称 (Driver Name)"
-                    rules={[{ required: true, message: "请输入驱动名称" }]}
-                    help={CUSTOM_CONNECTION_DRIVER_HELP}
+                    label={t("connection.modal.field.driver.label")}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("connection.modal.field.driver.required"),
+                      },
+                    ]}
+                    help={getCustomConnectionDriverHelp()}
                     style={{ marginBottom: 0 }}
                   >
                     <Input
                       {...noAutoCapInputProps}
-                      placeholder="例如: mysql, postgres"
+                      placeholder={t("connection.modal.field.driver.placeholder")}
                     />
                   </Form.Item>
                 ),
@@ -4540,22 +4692,23 @@ const ConnectionModal: React.FC<{
                   <>
                     <Form.Item
                       name="dsn"
-                      label="连接字符串 (DSN)"
+                      label={t("connection.modal.field.dsn.label")}
                       rules={[createCustomDsnRule()]}
                     >
                       <Input.TextArea
                         {...noAutoCapInputProps}
                         rows={4}
-                        placeholder="例如: user:pass@tcp(localhost:3306)/dbname?charset=utf8"
+                        placeholder={t("connection.modal.field.dsn.placeholder")}
                       />
                     </Form.Item>
                     {renderStoredSecretControls({
                       fieldName: "dsn",
                       clearKey: "opaqueDSN",
                       hasStoredSecret: initialValues?.hasOpaqueDSN,
-                      clearLabel: "清除已保存 DSN",
-                      description:
-                        "当前已保存连接字符串。留空表示继续沿用，输入新值表示替换。",
+                      clearLabel: t("connection.modal.field.dsn.clearSaved"),
+                      description: t(
+                        "connection.modal.field.dsn.savedDescription",
+                      ),
                     })}
                   </>
                 ),
@@ -4568,7 +4721,7 @@ const ConnectionModal: React.FC<{
                 type="warning"
                 showIcon
                 style={{ marginBottom: 16 }}
-                message="检测到未支持的 JVM 模式"
+                message={t("connection.modal.jvm.unsupportedMode.alert")}
                 description={unsupportedJvmModeMessage}
               />
             )}
@@ -4576,8 +4729,8 @@ const ConnectionModal: React.FC<{
               <div style={jvmSectionCardStyle()}>
                 {renderJvmSectionHeader(
                   <GatewayOutlined />,
-                  "目标 JVM",
-                  "定义连接树中的主机入口和基础运行环境。",
+                  t("connection.modal.jvm.target.title"),
+                  t("connection.modal.jvm.target.description"),
                 )}
                 <div
                   style={{
@@ -4589,16 +4742,31 @@ const ConnectionModal: React.FC<{
                 >
                   <Form.Item
                     name="host"
-                    label="主机地址"
-                    rules={[{ required: true, message: "请输入 JVM 主机地址" }]}
+                    label={t("connection.modal.jvm.host.label")}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("connection.modal.jvm.host.required"),
+                      },
+                    ]}
                     style={{ marginBottom: 0 }}
                   >
-                    <Input {...noAutoCapInputProps} placeholder="localhost" />
+                    <Input
+                      {...noAutoCapInputProps}
+                      placeholder={t("connection.modal.example", {
+                        value: "localhost",
+                      })}
+                    />
                   </Form.Item>
                   <Form.Item
                     name="port"
-                    label="主端口"
-                    rules={[{ required: true, message: "请输入 JVM 端口号" }]}
+                    label={t("connection.modal.jvm.port.label")}
+                    rules={[
+                      {
+                        required: true,
+                        message: t("connection.modal.jvm.port.required"),
+                      },
+                    ]}
                     style={{ marginBottom: 0 }}
                   >
                     <InputNumber style={{ width: "100%" }} min={1} max={65535} />
@@ -4613,7 +4781,9 @@ const ConnectionModal: React.FC<{
                   }}
                 >
                   <div style={{ display: "grid", gap: 8 }}>
-                    <Text strong>环境</Text>
+                    <Text strong>
+                      {t("connection.modal.jvm.environment.title")}
+                    </Text>
                     {renderChoiceCards({
                       fieldName: "jvmEnvironment",
                       value: String(jvmEnvironment),
@@ -4621,31 +4791,43 @@ const ConnectionModal: React.FC<{
                       options: [
                         {
                           value: "dev",
-                          label: "开发 / 测试",
-                          description: "本地或测试环境。",
+                          label: t(
+                            "connection.modal.jvm.environment.dev.label",
+                          ),
+                          description: t(
+                            "connection.modal.jvm.environment.dev.description",
+                          ),
                         },
                         {
                           value: "uat",
-                          label: "预发 / 验收",
-                          description: "上线前验证环境。",
+                          label: t(
+                            "connection.modal.jvm.environment.staging.label",
+                          ),
+                          description: t(
+                            "connection.modal.jvm.environment.staging.description",
+                          ),
                         },
                         {
                           value: "prod",
-                          label: "生产",
-                          description: "生产 JVM，默认更谨慎。",
+                          label: t(
+                            "connection.modal.jvm.environment.prod.label",
+                          ),
+                          description: t(
+                            "connection.modal.jvm.environment.prod.description",
+                          ),
                         },
                       ],
                     })}
                   </div>
                   <Form.Item
                     name="timeout"
-                    label="连接超时（秒）"
+                    label={t("connection.modal.network.timeout.label")}
                     rules={[
                       {
                         type: "number",
                         min: 1,
                         max: 300,
-                        message: "超时时间范围: 1-300 秒",
+                        message: t("connection.modal.network.timeout.range"),
                       },
                     ]}
                     style={{ marginBottom: 0 }}
@@ -4654,16 +4836,18 @@ const ConnectionModal: React.FC<{
                       style={{ width: "100%" }}
                       min={1}
                       max={300}
-                      placeholder="30"
+                      placeholder={t("connection.modal.example", {
+                        value: "30",
+                      })}
                     />
                   </Form.Item>
                   <Form.Item
                     name="jvmReadOnly"
-                    label="安全策略"
+                    label={t("connection.modal.jvm.securityPolicy.label")}
                     valuePropName="checked"
                     style={{ marginBottom: 0 }}
                   >
-                    <Checkbox>只读优先</Checkbox>
+                    <Checkbox>{t("connection.modal.jvm.readonlyPreferred")}</Checkbox>
                   </Form.Item>
                 </div>
               </div>
@@ -4671,8 +4855,8 @@ const ConnectionModal: React.FC<{
               <div style={jvmSectionCardStyle()}>
                 {renderJvmSectionHeader(
                   <ClusterOutlined />,
-                  "接入模式",
-                  "通过卡片选择允许使用的 JVM 通道；已启用卡片再次点击会设为首选。",
+                  t("connection.modal.jvm.accessMode.title"),
+                  t("connection.modal.jvm.accessMode.description"),
                 )}
                 <Form.Item
                   name="jvmAllowedModes"
@@ -4680,7 +4864,7 @@ const ConnectionModal: React.FC<{
                   rules={[
                     {
                       required: true,
-                      message: "请至少选择一种 JVM 接入模式",
+                      message: t("connection.modal.jvm.accessMode.required"),
                     },
                   ]}
                 >
@@ -4692,7 +4876,7 @@ const ConnectionModal: React.FC<{
                   rules={[
                     {
                       required: true,
-                      message: "请选择首选 JVM 接入模式",
+                      message: t("connection.modal.jvm.preferredMode.required"),
                     },
                   ]}
                 >
@@ -4754,15 +4938,23 @@ const ConnectionModal: React.FC<{
                           <Tag color={enabled ? "blue" : "default"}>
                             {meta.label}
                           </Tag>
-                          {preferred ? <Tag color="green">首选</Tag> : null}
-                          {!enabled ? <Tag>未启用</Tag> : null}
+                          {preferred ? (
+                            <Tag color="green">
+                              {t("connection.modal.jvm.tag.preferred")}
+                            </Tag>
+                          ) : null}
+                          {!enabled ? (
+                            <Tag>{t("connection.modal.jvm.tag.notEnabled")}</Tag>
+                          ) : null}
                         </Space>
                         <div style={{ ...modalMutedTextStyle, marginTop: 8 }}>
                           {mode === "jmx"
-                            ? "标准 MBean 与线程、内存、类加载等运行时指标。"
+                            ? t("connection.modal.jvm.mode.jmx.description")
                             : mode === "endpoint"
-                              ? "通过服务端管理接口读取 JVM 资源与配置。"
-                              : "通过 GoNavi Java Agent 提供更完整的增强能力。"}
+                              ? t(
+                                  "connection.modal.jvm.mode.endpoint.description",
+                                )
+                              : t("connection.modal.jvm.mode.agent.description")}
                         </div>
                         <Button
                           size="small"
@@ -4771,16 +4963,19 @@ const ConnectionModal: React.FC<{
                           onClick={(event) => handleJvmModeToggle(mode, event)}
                           style={{ marginTop: 12, borderRadius: 999 }}
                         >
-                          {enabled ? "停用" : "启用并设为首选"}
+                          {enabled
+                            ? t("connection.modal.jvm.mode.disable")
+                            : t("connection.modal.jvm.mode.enablePreferred")}
                         </Button>
                       </div>
                     );
                   })}
                 </div>
                 <div style={{ ...modalMutedTextStyle, marginTop: 12 }}>
-                  当前首选：
-                  {resolveJVMModeMeta(String(jvmPreferredMode || "jmx")).label}
-                  。至少保留一种接入模式，停用首选模式时会自动切换到剩余模式。
+                  {t("connection.modal.jvm.preferredSummary", {
+                    mode: resolveJVMModeMeta(String(jvmPreferredMode || "jmx"))
+                      .label,
+                  })}
                 </div>
               </div>
 
@@ -4788,9 +4983,11 @@ const ConnectionModal: React.FC<{
                 {renderJvmSectionHeader(
                   <ApiOutlined />,
                   "JMX",
-                  "标准 JVM 管理通道，可覆盖主机/端口并配置认证。",
+                  t("connection.modal.jvm.jmx.description"),
                   <Tag color={normalizedJvmAllowedModes.includes("jmx") ? "green" : "default"}>
-                    {normalizedJvmAllowedModes.includes("jmx") ? "已启用" : "未启用"}
+                    {normalizedJvmAllowedModes.includes("jmx")
+                      ? t("connection.modal.jvm.tag.enabled")
+                      : t("connection.modal.jvm.tag.notEnabled")}
                   </Tag>,
                 )}
                 <div
@@ -4802,18 +4999,18 @@ const ConnectionModal: React.FC<{
                 >
                   <Form.Item
                     name="jvmJmxHost"
-                    label="JMX 主机覆盖（可选）"
+                    label={t("connection.modal.jvm.jmx.host.label")}
                     style={{ marginBottom: 0 }}
                   >
                     <Input
                       {...noAutoCapInputProps}
                       disabled={!normalizedJvmAllowedModes.includes("jmx")}
-                      placeholder="留空沿用主机地址"
+                      placeholder={t("connection.modal.jvm.jmx.host.placeholder")}
                     />
                   </Form.Item>
                   <Form.Item
                     name="jvmJmxPort"
-                    label="JMX 端口"
+                    label={t("connection.modal.jvm.jmx.port.label")}
                     style={{ marginBottom: 0 }}
                   >
                     <InputNumber
@@ -4821,7 +5018,7 @@ const ConnectionModal: React.FC<{
                       min={1}
                       max={65535}
                       disabled={!normalizedJvmAllowedModes.includes("jmx")}
-                      placeholder="沿用主端口"
+                      placeholder={t("connection.modal.jvm.jmx.port.placeholder")}
                     />
                   </Form.Item>
                 </div>
@@ -4835,24 +5032,28 @@ const ConnectionModal: React.FC<{
                 >
                   <Form.Item
                     name="jvmJmxUsername"
-                    label="JMX 用户名（可选）"
+                    label={t("connection.modal.jvm.jmx.username.label")}
                     style={{ marginBottom: 0 }}
                   >
                     <Input
                       {...noAutoCapInputProps}
                       disabled={!normalizedJvmAllowedModes.includes("jmx")}
-                      placeholder="未开启认证可留空"
+                      placeholder={t(
+                        "connection.modal.jvm.jmx.username.placeholder",
+                      )}
                     />
                   </Form.Item>
                   <Form.Item
                     name="jvmJmxPassword"
-                    label="JMX 密码（可选）"
+                    label={t("connection.modal.jvm.jmx.password.label")}
                     style={{ marginBottom: 0 }}
                   >
                     <Input.Password
                       {...noAutoCapInputProps}
                       disabled={!normalizedJvmAllowedModes.includes("jmx")}
-                      placeholder="未开启认证可留空"
+                      placeholder={t(
+                        "connection.modal.jvm.jmx.password.placeholder",
+                      )}
                     />
                   </Form.Item>
                 </div>
@@ -4862,7 +5063,7 @@ const ConnectionModal: React.FC<{
                 {renderJvmSectionHeader(
                   <CodeOutlined />,
                   "Endpoint",
-                  "连接应用暴露的 JVM 管理端点，适合已有运维 API 的服务。",
+                  t("connection.modal.jvm.endpoint.description"),
                   <Tag
                     color={
                       normalizedJvmAllowedModes.includes("endpoint")
@@ -4871,36 +5072,42 @@ const ConnectionModal: React.FC<{
                     }
                   >
                     {normalizedJvmAllowedModes.includes("endpoint")
-                      ? "已启用"
-                      : "未启用"}
+                      ? t("connection.modal.jvm.tag.enabled")
+                      : t("connection.modal.jvm.tag.notEnabled")}
                   </Tag>,
                 )}
                 <Form.Item
                   name="jvmEndpointBaseUrl"
-                  label="Endpoint 地址"
+                  label={t("connection.modal.jvm.endpoint.address.label")}
                   rules={[
                     {
                       required: jvmPreferredMode === "endpoint",
-                      message: "启用 Endpoint 模式时请输入 Endpoint 地址",
+                      message: t(
+                        "connection.modal.jvm.endpoint.address.required",
+                      ),
                     },
                   ]}
-                  help="例如 Spring Boot Actuator 或自定义管理接口地址。"
+                  help={t("connection.modal.jvm.endpoint.address.help")}
                 >
                   <Input
                     {...noAutoCapInputProps}
                     disabled={!normalizedJvmAllowedModes.includes("endpoint")}
-                    placeholder="例如：https://orders.internal/manage/jvm"
+                    placeholder={t(
+                      "connection.modal.jvm.endpoint.address.placeholder",
+                    )}
                   />
                 </Form.Item>
                 <Form.Item
                   name="jvmEndpointApiKey"
-                  label="Endpoint API Key（可选）"
+                  label={t("connection.modal.jvm.endpoint.apiKey.label")}
                   style={{ marginBottom: 0 }}
                 >
                   <Input.Password
                     {...noAutoCapInputProps}
                     disabled={!normalizedJvmAllowedModes.includes("endpoint")}
-                    placeholder="端点受 Token 保护时填写"
+                    placeholder={t(
+                      "connection.modal.jvm.endpoint.apiKey.placeholder",
+                    )}
                   />
                 </Form.Item>
               </div>
@@ -4909,37 +5116,43 @@ const ConnectionModal: React.FC<{
                 {renderJvmSectionHeader(
                   <ThunderboltOutlined />,
                   "Agent",
-                  "连接 GoNavi Java Agent 管理端口，用于增强采集和诊断链路。",
+                  t("connection.modal.jvm.agent.description"),
                   <Tag color={normalizedJvmAllowedModes.includes("agent") ? "green" : "default"}>
-                    {normalizedJvmAllowedModes.includes("agent") ? "已启用" : "未启用"}
+                    {normalizedJvmAllowedModes.includes("agent")
+                      ? t("connection.modal.jvm.tag.enabled")
+                      : t("connection.modal.jvm.tag.notEnabled")}
                   </Tag>,
                 )}
                 <Form.Item
                   name="jvmAgentBaseUrl"
-                  label="Agent 地址"
+                  label={t("connection.modal.jvm.agent.address.label")}
                   rules={[
                     {
                       required: jvmPreferredMode === "agent",
-                      message: "启用 Agent 模式时请输入 Agent 地址",
+                      message: t("connection.modal.jvm.agent.address.required"),
                     },
                   ]}
-                  help="目标 Java 服务需要以 -javaagent 方式启动 GoNavi Agent。"
+                  help={t("connection.modal.jvm.agent.address.help")}
                 >
                   <Input
                     {...noAutoCapInputProps}
                     disabled={!normalizedJvmAllowedModes.includes("agent")}
-                    placeholder="例如：http://127.0.0.1:19090/gonavi/agent/jvm"
+                    placeholder={t(
+                      "connection.modal.jvm.agent.address.placeholder",
+                    )}
                   />
                 </Form.Item>
                 <Form.Item
                   name="jvmAgentApiKey"
-                  label="Agent API Key（可选）"
+                  label={t("connection.modal.jvm.agent.apiKey.label")}
                   style={{ marginBottom: 0 }}
                 >
                   <Input.Password
                     {...noAutoCapInputProps}
                     disabled={!normalizedJvmAllowedModes.includes("agent")}
-                    placeholder="Agent 启用 Token 校验时填写"
+                    placeholder={t(
+                      "connection.modal.jvm.agent.apiKey.placeholder",
+                    )}
                   />
                 </Form.Item>
               </div>
@@ -4947,14 +5160,17 @@ const ConnectionModal: React.FC<{
               <div style={jvmSectionCardStyle()}>
                 {renderJvmSectionHeader(
                   <SafetyCertificateOutlined />,
-                  "诊断增强",
-                  "开启后可创建 JVM 诊断会话并执行受控 Arthas/诊断命令。",
+                  t("connection.modal.jvm.diagnostic.title"),
+                  t("connection.modal.jvm.diagnostic.description"),
                   <Form.Item
                     name="jvmDiagnosticEnabled"
                     valuePropName="checked"
                     style={{ marginBottom: 0 }}
                   >
-                    <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                    <Switch
+                      checkedChildren={t("connection.modal.jvm.switch.on")}
+                      unCheckedChildren={t("connection.modal.jvm.switch.off")}
+                    />
                   </Form.Item>,
                 )}
                 {jvmDiagnosticEnabled ? (
@@ -4967,20 +5183,30 @@ const ConnectionModal: React.FC<{
                       }}
                     >
                       <div style={{ display: "grid", gap: 8 }}>
-                        <Text strong>诊断传输</Text>
+                        <Text strong>
+                          {t("connection.modal.jvm.diagnostic.transport.label")}
+                        </Text>
                         {renderChoiceCards({
                           fieldName: "jvmDiagnosticTransport",
                           value: String(jvmDiagnosticTransport),
                           options: [
                             {
                               value: "agent-bridge",
-                              label: "Agent Bridge",
-                              description: "通过 GoNavi Agent 桥接诊断命令。",
+                              label: t(
+                                "connection.modal.jvm.diagnostic.transport.agent_bridge",
+                              ),
+                              description: t(
+                                "connection.modal.jvm.diagnostic.transport.agentBridge.description",
+                              ),
                             },
                             {
                               value: "arthas-tunnel",
-                              label: "Arthas Tunnel",
-                              description: "连接官方 Tunnel / Web Console。",
+                              label: t(
+                                "connection.modal.jvm.diagnostic.transport.arthas_tunnel",
+                              ),
+                              description: t(
+                                "connection.modal.jvm.diagnostic.transport.arthasTunnel.description",
+                              ),
                             },
                           ],
                         })}
@@ -4989,22 +5215,34 @@ const ConnectionModal: React.FC<{
                         name="jvmDiagnosticBaseUrl"
                         label={
                           jvmDiagnosticTransport === "arthas-tunnel"
-                            ? "Arthas Tunnel 地址"
-                            : "诊断 Bridge 地址"
+                            ? t(
+                                "connection.modal.jvm.diagnostic.arthasTunnelAddress.label",
+                              )
+                            : t(
+                                "connection.modal.jvm.diagnostic.bridgeAddress.label",
+                              )
                         }
                         rules={[
                           {
                             required: true,
                             message:
                               jvmDiagnosticTransport === "arthas-tunnel"
-                                ? "请输入 Arthas Tunnel Server 地址"
-                                : "请输入诊断 Bridge 地址",
+                                ? t(
+                                    "connection.modal.jvm.diagnostic.arthasTunnelAddress.required",
+                                  )
+                                : t(
+                                    "connection.modal.jvm.diagnostic.bridgeAddress.required",
+                                  ),
                           },
                         ]}
                         help={
                           jvmDiagnosticTransport === "arthas-tunnel"
-                            ? "例如：http://127.0.0.1:7777，支持反向代理后的访问前缀。"
-                            : "例如：http://127.0.0.1:19091/gonavi/diag"
+                            ? t(
+                                "connection.modal.jvm.diagnostic.arthasTunnelAddress.help",
+                              )
+                            : t(
+                                "connection.modal.jvm.diagnostic.bridgeAddress.help",
+                              )
                         }
                       >
                         <Input
@@ -5028,44 +5266,61 @@ const ConnectionModal: React.FC<{
                         name="jvmDiagnosticTargetId"
                         label={
                           jvmDiagnosticTransport === "arthas-tunnel"
-                            ? "目标实例标识（AgentId）"
-                            : "目标实例标识"
+                            ? t(
+                                "connection.modal.jvm.diagnostic.targetId.agentId.label",
+                              )
+                            : t(
+                                "connection.modal.jvm.diagnostic.targetId.label",
+                              )
                         }
                         rules={
                           jvmDiagnosticTransport === "arthas-tunnel"
                             ? [
                                 {
                                   required: true,
-                                  message:
-                                    "Arthas Tunnel 模式必须填写目标实例标识",
+                                  message: t(
+                                    "connection.modal.jvm.diagnostic.targetId.required",
+                                  ),
                                 },
                               ]
                             : undefined
                         }
                         help={
                           jvmDiagnosticTransport === "arthas-tunnel"
-                            ? "填写 Arthas Tunnel 中目标 JVM 的 agentId。"
-                            : "可选，用于在桥接端区分具体 JVM 实例。"
+                            ? t(
+                                "connection.modal.jvm.diagnostic.targetId.arthasHelp",
+                              )
+                            : t(
+                                "connection.modal.jvm.diagnostic.targetId.bridgeHelp",
+                              )
                         }
                       >
                         <Input
                           {...noAutoCapInputProps}
                           placeholder={
                             jvmDiagnosticTransport === "arthas-tunnel"
-                              ? "例如：orders-app_A1B2C3D4E5"
-                              : "例如：orders-prod-01"
+                              ? t("connection.modal.example", {
+                                  value: "orders-app_A1B2C3D4E5",
+                                })
+                              : t("connection.modal.example", {
+                                  value: "orders-prod-01",
+                                })
                           }
                         />
                       </Form.Item>
                       <Form.Item
                         name="jvmDiagnosticTimeoutSeconds"
-                        label="诊断超时（秒）"
+                        label={t(
+                          "connection.modal.jvm.diagnostic.timeout.label",
+                        )}
                         rules={[
                           {
                             type: "number",
                             min: 1,
                             max: 300,
-                            message: "诊断超时时间范围: 1-300 秒",
+                            message: t(
+                              "connection.modal.jvm.diagnostic.timeout.range",
+                            ),
                           },
                         ]}
                       >
@@ -5074,11 +5329,13 @@ const ConnectionModal: React.FC<{
                     </div>
                     <Form.Item
                       name="jvmDiagnosticApiKey"
-                      label="诊断 API Key（可选）"
+                      label={t("connection.modal.jvm.diagnostic.apiKey.label")}
                     >
                       <Input.Password
                         {...noAutoCapInputProps}
-                        placeholder="诊断桥接端启用 Token 校验时填写"
+                        placeholder={t(
+                          "connection.modal.jvm.diagnostic.apiKey.placeholder",
+                        )}
                       />
                     </Form.Item>
                     <div
@@ -5092,18 +5349,30 @@ const ConnectionModal: React.FC<{
                       {[
                         {
                           name: "jvmDiagnosticAllowObserveCommands",
-                          label: "观察类命令",
-                          description: "thread、dashboard、jvm 等只读排查命令。",
+                          label: t(
+                            "connection.modal.jvm.diagnostic.command.observe.label",
+                          ),
+                          description: t(
+                            "connection.modal.jvm.diagnostic.command.observe.description",
+                          ),
                         },
                         {
                           name: "jvmDiagnosticAllowTraceCommands",
-                          label: "跟踪类命令",
-                          description: "trace、watch 等对目标有额外开销的命令。",
+                          label: t(
+                            "connection.modal.jvm.diagnostic.command.trace.label",
+                          ),
+                          description: t(
+                            "connection.modal.jvm.diagnostic.command.trace.description",
+                          ),
                         },
                         {
                           name: "jvmDiagnosticAllowMutatingCommands",
-                          label: "高风险命令",
-                          description: "可能改变运行态或造成明显性能影响的命令。",
+                          label: t(
+                            "connection.modal.jvm.diagnostic.command.mutating.label",
+                          ),
+                          description: t(
+                            "connection.modal.jvm.diagnostic.command.mutating.description",
+                          ),
                         },
                       ].map((item) => (
                         <div
@@ -5141,7 +5410,7 @@ const ConnectionModal: React.FC<{
                         : "rgba(16,24,40,0.04)",
                     }}
                   >
-                    关闭时只保存 JVM 连接与监控能力，不显示诊断会话入口。
+                    {t("connection.modal.jvm.diagnostic.disabledHint")}
                   </div>
                 )}
               </div>
@@ -5164,9 +5433,15 @@ const ConnectionModal: React.FC<{
                     <Form.Item
                       name="host"
                       label={
-                        isFileDb ? "文件路径 (绝对路径)" : "主机地址 (Host)"
+                        isFileDb
+                          ? t("connection.modal.field.filePath.label")
+                          : t("connection.modal.field.host.label")
                       }
-                      rules={[createUriAwareRequiredRule("请输入地址/路径")]}
+                      rules={[
+                        createUriAwareRequiredRule(
+                          t("connection.modal.field.addressPath.required"),
+                        ),
+                      ]}
                       style={{ marginBottom: 0 }}
                     >
                       <Input
@@ -5187,16 +5462,16 @@ const ConnectionModal: React.FC<{
                           onClick={handleSelectDatabaseFile}
                           loading={selectingDbFile}
                         >
-                          浏览...
+                          {t("connection.modal.action.browse")}
                         </Button>
                       </Form.Item>
                     ) : (
                       <Form.Item
                         name="port"
-                        label="端口 (Port)"
+                        label={t("connection.modal.field.port.label")}
                         rules={[
                           createUriAwareRequiredRule(
-                            "请输入端口号",
+                            t("connection.modal.field.port.required"),
                             (value) => Number(value) > 0,
                           ),
                         ]}
@@ -5216,12 +5491,17 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="clickHouseProtocol"
-                      label="连接协议"
-                      help="自动模式按 URI scheme 和常见端口判断；非标 HTTP/Native 端口可手动指定。"
+                      label={t("connection.modal.field.protocol.label")}
+                      help={t("connection.modal.field.clickHouseProtocol.help")}
                       style={{ marginBottom: 0 }}
                     >
                       <Select
-                        options={CLICKHOUSE_PROTOCOL_OPTIONS}
+                        options={CLICKHOUSE_PROTOCOL_OPTIONS.map((option) => ({
+                          ...option,
+                          label: option.labelKey
+                            ? t(option.labelKey)
+                            : option.label,
+                        }))}
                         onChange={() => clearConnectionTestResultForChoice()}
                       />
                     </Form.Item>
@@ -5235,12 +5515,20 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="oceanBaseProtocol"
-                      label="OceanBase 协议"
+                      label={t("connection.modal.field.oceanBaseProtocol.label")}
                       help={
                         <span>
-                          MySQL 租户选择 MySQL；Oracle 租户选择 Oracle。Oracle 协议会优先使用 OBClient/OBServer MySQL-wire 入口；只有连接 OBProxy Oracle listener/TNS 入口时才需要 Service Name。
+                          {t(
+                            "connection.modal.field.oceanBaseProtocol.help.primary",
+                          )}
                           <br />
-                          如果 MySQL 协议连接 Oracle 租户报「Error 1235」，请切换为 Oracle 协议；通常不需要手工配置 connectionAttributes。
+                          {t(
+                            "connection.modal.field.oceanBaseProtocol.help.connectionAttributes",
+                            {
+                              attributes:
+                                "connectionAttributes=key1:value1,key2:value2",
+                            },
+                          )}
                         </span>
                       }
                       style={{ marginBottom: 0 }}
@@ -5268,11 +5556,16 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="database"
-                      label="默认连接数据库（可选）"
-                      help="留空会自动尝试 postgres、template1、与当前用户名同名数据库"
+                      label={t("connection.modal.field.defaultDatabase.label")}
+                      help={t("connection.modal.field.defaultDatabase.help")}
                       style={{ marginBottom: 0 }}
                     >
-                      <Input {...noAutoCapInputProps} placeholder="例如：appdb" />
+                      <Input
+                        {...noAutoCapInputProps}
+                        placeholder={t(
+                          "connection.modal.field.defaultDatabase.placeholder",
+                        )}
+                      />
                     </Form.Item>
                   ),
                 })}
@@ -5284,11 +5577,16 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="database"
-                      label="默认 Topic（可选）"
-                      help="留空时必须在 SQL 中显式指定 Topic；填写后可直接执行 SHOW、CONSUME 或 SELECT 预览。"
+                      label={t("connection.modal.messageQueue.kafka.defaultTopic.label")}
+                      help={t("connection.modal.messageQueue.kafka.defaultTopic.help")}
                       style={{ marginBottom: 0 }}
                     >
-                      <Input {...noAutoCapInputProps} placeholder="例如：orders.events" />
+                      <Input
+                        {...noAutoCapInputProps}
+                        placeholder={t(
+                          "connection.modal.messageQueue.kafka.defaultTopic.placeholder",
+                        )}
+                      />
                     </Form.Item>
                   ),
                 })}
@@ -5300,11 +5598,16 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="database"
-                      label="默认 Topic（可选）"
-                      help="留空时必须在 SQL 中显式指定 Topic；连接参数可继续补充 groupId、namespace、tag、pullBatchSize 与 startOffset。"
+                      label={t("connection.modal.messageQueue.rocketmq.defaultTopic.label")}
+                      help={t("connection.modal.messageQueue.rocketmq.defaultTopic.help")}
                       style={{ marginBottom: 0 }}
                     >
-                      <Input {...noAutoCapInputProps} placeholder="例如：orders.events" />
+                      <Input
+                        {...noAutoCapInputProps}
+                        placeholder={t(
+                          "connection.modal.messageQueue.rocketmq.defaultTopic.placeholder",
+                        )}
+                      />
                     </Form.Item>
                   ),
                 })}
@@ -5316,11 +5619,16 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="database"
-                      label="默认 Topic / Filter（可选）"
-                      help="留空时必须在 SQL 中显式指定 Topic；填写后可直接执行 SHOW、CONSUME 或 SELECT 预览。支持使用 /、+、#。"
+                      label={t("connection.modal.messageQueue.mqtt.defaultTopicFilter.label")}
+                      help={t("connection.modal.messageQueue.mqtt.defaultTopicFilter.help")}
                       style={{ marginBottom: 0 }}
                     >
-                      <Input {...noAutoCapInputProps} placeholder="例如：devices/+/telemetry" />
+                      <Input
+                        {...noAutoCapInputProps}
+                        placeholder={t(
+                          "connection.modal.messageQueue.mqtt.defaultTopicFilter.placeholder",
+                        )}
+                      />
                     </Form.Item>
                   ),
                 })}
@@ -5332,11 +5640,16 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="database"
-                      label="默认 Virtual Host（可选）"
-                      help="留空默认使用 /；填写后查询编辑器会以当前 vhost 作为 Queue 浏览与测试发送上下文。"
+                      label={t("connection.modal.messageQueue.rabbitmq.defaultVirtualHost.label")}
+                      help={t("connection.modal.messageQueue.rabbitmq.defaultVirtualHost.help")}
                       style={{ marginBottom: 0 }}
                     >
-                      <Input {...noAutoCapInputProps} placeholder="例如：/ 或 orders-vhost" />
+                      <Input
+                        {...noAutoCapInputProps}
+                        placeholder={t(
+                          "connection.modal.messageQueue.rabbitmq.defaultVirtualHost.placeholder",
+                        )}
+                      />
                     </Form.Item>
                   ),
                 })}
@@ -5348,22 +5661,36 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="database"
-                      label={isOceanBaseOracle ? "OceanBase Oracle 服务名 (Service Name，可选)" : "服务名 (Service Name)"}
+                      label={
+                        isOceanBaseOracle
+                          ? t(
+                              "connection.modal.field.oceanBaseServiceName.label",
+                            )
+                          : t("connection.modal.field.serviceName.label")
+                      }
                       rules={
                         isOceanBaseOracle
                           ? []
-                          : [createUriAwareRequiredRule("请输入 Oracle 服务名（例如 ORCLPDB1）")]
+                          : [
+                              createUriAwareRequiredRule(
+                                t("connection.modal.field.serviceName.required"),
+                              ),
+                            ]
                       }
                       help={
                         isOceanBaseOracle
-                          ? "连接 OBClient/OBServer MySQL-wire 入口时可留空；只有连接 OBProxy Oracle listener/TNS 入口时才需要填写 SERVICE_NAME。"
-                          : "请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
+                          ? t(
+                              "connection.modal.field.oceanBaseServiceName.help",
+                            )
+                          : t("connection.modal.field.serviceName.help")
                       }
                       style={{ marginBottom: 0 }}
                     >
                       <Input
                         {...noAutoCapInputProps}
-                        placeholder={isOceanBaseOracle ? "TNS 入口例如 ORCLPDB1；OBClient/MySQL-wire 可留空" : "例如：ORCLPDB1"}
+                        placeholder={t(
+                          "connection.modal.field.serviceName.placeholder",
+                        )}
                       />
                     </Form.Item>
                   ),
@@ -5379,13 +5706,19 @@ const ConnectionModal: React.FC<{
                     options: [
                       {
                         value: "single",
-                        label: "单机模式",
-                        description: "只连接一个主库地址，适合本地和单实例。",
+                        label: t("connection.modal.topology.single.label"),
+                        description: t(
+                          "connection.modal.topology.mysql.single.description",
+                        ),
                       },
                       {
                         value: "replica",
-                        label: "主从模式",
-                        description: "主库优先，可配置从库地址用于切换。",
+                        label: t(
+                          "connection.modal.topology.mysql.replica.label",
+                        ),
+                        description: t(
+                          "connection.modal.topology.mysql.replica.description",
+                        ),
                       },
                     ],
                   }),
@@ -5401,13 +5734,17 @@ const ConnectionModal: React.FC<{
                     options: [
                       {
                         value: "single",
-                        label: "单 Broker",
-                        description: "只配置一个 bootstrap broker，适合本地或简单环境。",
+                        label: t("connection.modal.messageQueue.kafka.topology.single.label"),
+                        description: t(
+                          "connection.modal.messageQueue.kafka.topology.single.description",
+                        ),
                       },
                       {
                         value: "cluster",
-                        label: "集群模式",
-                        description: "配置多个 bootstrap broker，提高发现与故障切换成功率。",
+                        label: t("connection.modal.messageQueue.topology.cluster.label"),
+                        description: t(
+                          "connection.modal.messageQueue.kafka.topology.cluster.description",
+                        ),
                       },
                     ],
                   }),
@@ -5423,13 +5760,17 @@ const ConnectionModal: React.FC<{
                     options: [
                       {
                         value: "single",
-                        label: "单 NameServer",
-                        description: "只配置一个 NameServer，适合本地或简单环境。",
+                        label: t("connection.modal.messageQueue.rocketmq.topology.single.label"),
+                        description: t(
+                          "connection.modal.messageQueue.rocketmq.topology.single.description",
+                        ),
                       },
                       {
                         value: "cluster",
-                        label: "集群模式",
-                        description: "配置多个 NameServer，提高路由发现与故障切换成功率。",
+                        label: t("connection.modal.messageQueue.topology.cluster.label"),
+                        description: t(
+                          "connection.modal.messageQueue.rocketmq.topology.cluster.description",
+                        ),
                       },
                     ],
                   }),
@@ -5445,13 +5786,17 @@ const ConnectionModal: React.FC<{
                     options: [
                       {
                         value: "single",
-                        label: "单 Broker",
-                        description: "只配置一个 broker，适合本地或简单环境。",
+                        label: t("connection.modal.messageQueue.mqtt.topology.single.label"),
+                        description: t(
+                          "connection.modal.messageQueue.mqtt.topology.single.description",
+                        ),
                       },
                       {
                         value: "cluster",
-                        label: "集群模式",
-                        description: "配置多个 broker，提高连接发现与故障切换成功率。",
+                        label: t("connection.modal.messageQueue.topology.cluster.label"),
+                        description: t(
+                          "connection.modal.messageQueue.mqtt.topology.cluster.description",
+                        ),
                       },
                     ],
                   }),
@@ -5465,12 +5810,14 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="kafkaHosts"
-                      label="额外 Broker 地址"
-                      help="可输入多个 broker 地址，格式：host:port（回车确认）"
+                      label={t("connection.modal.messageQueue.kafka.extraBrokers.label")}
+                      help={t("connection.modal.messageQueue.kafka.extraBrokers.help")}
                     >
                       <Select
                         mode="tags"
-                        placeholder="例如：10.10.0.12:9092、10.10.0.13:9092"
+                        placeholder={t(
+                          "connection.modal.messageQueue.kafka.extraBrokers.placeholder",
+                        )}
                         tokenSeparators={[",", ";", " "]}
                       />
                     </Form.Item>
@@ -5485,12 +5832,14 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="rocketmqHosts"
-                      label="额外 NameServer 地址"
-                      help="可输入多个 NameServer 地址，格式：host:port（回车确认）"
+                      label={t("connection.modal.messageQueue.rocketmq.extraNameServers.label")}
+                      help={t("connection.modal.messageQueue.rocketmq.extraNameServers.help")}
                     >
                       <Select
                         mode="tags"
-                        placeholder="例如：10.10.0.12:9876、10.10.0.13:9876"
+                        placeholder={t(
+                          "connection.modal.messageQueue.rocketmq.extraNameServers.placeholder",
+                        )}
                         tokenSeparators={[",", ";", " "]}
                       />
                     </Form.Item>
@@ -5505,12 +5854,14 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="mqttHosts"
-                      label="额外 Broker 地址"
-                      help="可输入多个 broker 地址，格式：host:port（回车确认）"
+                      label={t("connection.modal.messageQueue.mqtt.extraBrokers.label")}
+                      help={t("connection.modal.messageQueue.mqtt.extraBrokers.help")}
                     >
                       <Select
                         mode="tags"
-                        placeholder="例如：10.10.0.12:1883、10.10.0.13:1883"
+                        placeholder={t(
+                          "connection.modal.messageQueue.mqtt.extraBrokers.placeholder",
+                        )}
                         tokenSeparators={[",", ";", " "]}
                       />
                     </Form.Item>
@@ -5526,12 +5877,18 @@ const ConnectionModal: React.FC<{
                     <>
                       <Form.Item
                         name="mysqlReplicaHosts"
-                        label="从库地址列表"
-                        help="可输入多个从库地址，格式：host:port（回车确认）"
+                        label={t(
+                          "connection.modal.field.mysqlReplicaHosts.label",
+                        )}
+                        help={t(
+                          "connection.modal.field.mysqlReplicaHosts.help",
+                        )}
                       >
                         <Select
                           mode="tags"
-                          placeholder="例如：10.10.0.12:3306、10.10.0.13:3306"
+                          placeholder={t(
+                            "connection.modal.field.mysqlReplicaHosts.placeholder",
+                          )}
                           tokenSeparators={[",", ";", " "]}
                         />
                       </Form.Item>
@@ -5544,17 +5901,23 @@ const ConnectionModal: React.FC<{
                       >
                         <Form.Item
                           name="mysqlReplicaUser"
-                          label="从库用户名（可选）"
+                          label={t(
+                            "connection.modal.field.mysqlReplicaUser.label",
+                          )}
                           style={{ marginBottom: 0 }}
                         >
                           <Input
                             {...noAutoCapInputProps}
-                            placeholder="留空沿用主库用户名"
+                            placeholder={t(
+                              "connection.modal.field.mysqlReplicaUser.placeholder",
+                            )}
                           />
                         </Form.Item>
                         <Form.Item
                           name="mysqlReplicaPassword"
-                          label="从库密码（可选）"
+                          label={t(
+                            "connection.modal.field.mysqlReplicaPassword.label",
+                          )}
                           style={{ marginBottom: 0 }}
                         >
                           <Input.Password
@@ -5562,8 +5925,12 @@ const ConnectionModal: React.FC<{
                             placeholder={getStoredSecretPlaceholder({
                               hasStoredSecret:
                                 initialValues?.hasMySQLReplicaPassword,
-                              emptyPlaceholder: "留空沿用主库密码",
-                              retainedLabel: "已保存从库密码",
+                              emptyPlaceholder: t(
+                                "connection.modal.field.mysqlReplicaPassword.placeholder",
+                              ),
+                              retainedLabel: t(
+                                "connection.modal.field.mysqlReplicaPassword.retained",
+                              ),
                             })}
                           />
                         </Form.Item>
@@ -5572,46 +5939,496 @@ const ConnectionModal: React.FC<{
                         fieldName: "mysqlReplicaPassword",
                         clearKey: "mysqlReplicaPassword",
                         hasStoredSecret: initialValues?.hasMySQLReplicaPassword,
-                        clearLabel: "清除已保存从库密码",
-                        description:
-                          "当前已保存从库密码。留空表示继续沿用，输入新值表示替换。",
+                        clearLabel: t(
+                          "connection.modal.field.mysqlReplicaPassword.clear",
+                        ),
+                        description: t(
+                          "connection.modal.field.mysqlReplicaPassword.savedDescription",
+                        ),
                       })}
                     </>
                   ),
                 })}
 
-              {dbType === "mongodb" && (
-                <ConnectionModalMongoSections
-                  mongoTopology={String(mongoTopology)}
-                  mongoSrv={Boolean(mongoSrv)}
-                  useSSH={useSSH}
-                  darkMode={darkMode}
-                  modalMutedTextStyle={modalMutedTextStyle}
-                  mongoReadPreference={String(mongoReadPreference)}
-                  mongoMembers={mongoMembers}
-                  discoveringMembers={discoveringMembers}
-                  initialValues={initialValues}
-                  renderChoiceCards={renderChoiceCards}
-                  renderConfigSectionCard={renderConfigSectionCard}
-                  renderStoredSecretControls={renderStoredSecretControls}
-                  setChoiceFieldValue={setChoiceFieldValue}
-                  handleDiscoverMongoMembers={handleDiscoverMongoMembers}
-                />
-              )}
+              {dbType === "mongodb" &&
+                renderConfigSectionCard({
+                  sectionKey: "connectionMode",
+                  icon: <ClusterOutlined />,
+                  children: renderChoiceCards({
+                    fieldName: "mongoTopology",
+                    value: String(mongoTopology),
+                    options: [
+                      {
+                        value: "single",
+                        label: t("connection.modal.topology.single.label"),
+                        description: t(
+                          "connection.modal.topology.mongodb.single.description",
+                        ),
+                      },
+                      {
+                        value: "replica",
+                        label: t(
+                          "connection.modal.topology.mongodb.replica.label",
+                        ),
+                        description: t(
+                          "connection.modal.topology.mongodb.replica.description",
+                        ),
+                      },
+                    ],
+                  }),
+                })}
 
-              {isRedis && (
-                <ConnectionModalRedisSections
-                  redisTopology={String(redisTopology)}
-                  redisDbList={redisDbList}
-                  initialValues={initialValues}
-                  primaryPasswordVisible={primaryPasswordVisible}
-                  setPrimaryPasswordVisible={setPrimaryPasswordVisible}
-                  renderChoiceCards={renderChoiceCards}
-                  renderConfigSectionCard={renderConfigSectionCard}
-                  renderStoredSecretControls={renderStoredSecretControls}
-                  createUriAwareRequiredRule={createUriAwareRequiredRule}
-                />
-              )}
+              {dbType === "mongodb" &&
+                renderConfigSectionCard({
+                  sectionKey: "mongoDiscovery",
+                  icon: <ApiOutlined />,
+                  children: (
+                    <>
+                      <Form.Item name="mongoSrv" hidden valuePropName="checked">
+                        <Checkbox />
+                      </Form.Item>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fit, minmax(180px, 1fr))",
+                          gap: 10,
+                        }}
+                      >
+                        {[
+                          {
+                            value: false,
+                            label: t(
+                              "connection.modal.mongo.discovery.standard.label",
+                            ),
+                            description: t(
+                              "connection.modal.mongo.discovery.standard.description",
+                            ),
+                          },
+                          {
+                            value: true,
+                            label: t(
+                              "connection.modal.mongo.discovery.srv.label",
+                            ),
+                            description: t(
+                              "connection.modal.mongo.discovery.srv.description",
+                            ),
+                          },
+                        ].map((option) => {
+                          const active = mongoSrv === option.value;
+                          return (
+                            <button
+                              key={String(option.value)}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() =>
+                                setChoiceFieldValue("mongoSrv", option.value)
+                              }
+                              style={{
+                                textAlign: "left",
+                                padding: "12px 14px",
+                                borderRadius: 14,
+                                border: active
+                                  ? darkMode
+                                    ? "1px solid rgba(255,214,102,0.42)"
+                                    : "1px solid rgba(22,119,255,0.36)"
+                                  : darkMode
+                                    ? "1px solid rgba(255,255,255,0.08)"
+                                    : "1px solid rgba(16,24,40,0.08)",
+                                background: active
+                                  ? darkMode
+                                    ? "rgba(255,214,102,0.10)"
+                                    : "rgba(22,119,255,0.07)"
+                                  : darkMode
+                                    ? "rgba(255,255,255,0.03)"
+                                    : "rgba(16,24,40,0.03)",
+                                color: darkMode ? "#f5f7ff" : "#162033",
+                                cursor: "pointer",
+                              }}
+                            >
+                              <Space size={8} wrap>
+                                <Text strong>{option.label}</Text>
+                                {active ? (
+                                  <Tag color="blue">
+                                    {t("connection.modal.network.currentEditing")}
+                                  </Tag>
+                                ) : null}
+                              </Space>
+                              <div
+                                style={{
+                                  ...modalMutedTextStyle,
+                                  marginTop: 6,
+                                }}
+                              >
+                                {option.description}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {mongoSrv && useSSH && (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          style={{ marginTop: 12 }}
+                          message={t(
+                            "connection.modal.mongo.discovery.srvSshWarning",
+                          )}
+                        />
+                      )}
+                    </>
+                  ),
+                })}
+
+              {dbType === "mongodb" &&
+                mongoTopology === "replica" &&
+                renderConfigSectionCard({
+                  sectionKey: "replica",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <>
+                      <Form.Item
+                        name="mongoHosts"
+                        label={
+                          mongoSrv
+                            ? t("connection.modal.field.mongoSrvHosts.label")
+                            : t("connection.modal.field.mongoHosts.label")
+                        }
+                        help={
+                          mongoSrv
+                            ? t("connection.modal.field.mongoSrvHosts.help")
+                            : t("connection.modal.field.mongoHosts.help")
+                        }
+                      >
+                        <Select
+                          mode="tags"
+                          placeholder={
+                            mongoSrv
+                              ? t(
+                                  "connection.modal.field.mongoSrvHosts.placeholder",
+                                )
+                              : t(
+                                  "connection.modal.field.mongoHosts.placeholder",
+                                )
+                          }
+                          tokenSeparators={[",", ";", " "]}
+                        />
+                      </Form.Item>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                          gap: 16,
+                        }}
+                      >
+                        <Form.Item
+                          name="mongoReplicaSet"
+                          label={t(
+                            "connection.modal.field.mongoReplicaSet.label",
+                          )}
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input
+                            {...noAutoCapInputProps}
+                            placeholder={t(
+                              "connection.modal.field.mongoReplicaSet.placeholder",
+                            )}
+                          />
+                        </Form.Item>
+                        <Form.Item
+                          name="mongoReplicaUser"
+                          label={t(
+                            "connection.modal.field.mongoReplicaUser.label",
+                          )}
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Input
+                            {...noAutoCapInputProps}
+                            placeholder={t(
+                              "connection.modal.field.mongoReplicaUser.placeholder",
+                            )}
+                          />
+                        </Form.Item>
+                      </div>
+                      <Form.Item
+                        name="mongoReplicaPassword"
+                        label={t(
+                          "connection.modal.field.mongoReplicaPassword.label",
+                        )}
+                        style={{ marginTop: 16, marginBottom: 0 }}
+                      >
+                        <Input.Password
+                          {...noAutoCapInputProps}
+                          placeholder={getStoredSecretPlaceholder({
+                            hasStoredSecret:
+                              initialValues?.hasMongoReplicaPassword,
+                            emptyPlaceholder: t(
+                              "connection.modal.field.mongoReplicaPassword.placeholder",
+                            ),
+                            retainedLabel: t(
+                              "connection.modal.field.mongoReplicaPassword.retained",
+                            ),
+                          })}
+                        />
+                      </Form.Item>
+                      {renderStoredSecretControls({
+                        fieldName: "mongoReplicaPassword",
+                        clearKey: "mongoReplicaPassword",
+                        hasStoredSecret: initialValues?.hasMongoReplicaPassword,
+                        clearLabel: t(
+                          "connection.modal.field.mongoReplicaPassword.clear",
+                        ),
+                        description: t(
+                          "connection.modal.field.mongoReplicaPassword.savedDescription",
+                        ),
+                      })}
+                      <Space
+                        size={8}
+                        style={{ marginTop: 12, marginBottom: 12 }}
+                      >
+                        <Button
+                          onClick={handleDiscoverMongoMembers}
+                          loading={discoveringMembers}
+                        >
+                          {t("connection.modal.mongo.discoverMembers")}
+                        </Button>
+                      </Space>
+                      {mongoMembers.length > 0 && (
+                        <Table
+                          size="small"
+                          rowKey={(record) => record.host}
+                          pagination={false}
+                          dataSource={mongoMembers}
+                          style={{ marginBottom: 12 }}
+                          columns={[
+                            {
+                              title: t("connection.modal.field.host.label"),
+                              dataIndex: "host",
+                              width: "48%",
+                            },
+                            {
+                              title: t("connection.modal.mongo.member.role"),
+                              dataIndex: "role",
+                              width: "32%",
+                              render: (
+                                value: string,
+                                record: MongoMemberInfo,
+                              ) => (
+                                <Tag
+                                  color={record.isSelf ? "blue" : "default"}
+                                >
+                                  {value ||
+                                    record.state ||
+                                    t("common.unknown")}
+                                </Tag>
+                              ),
+                            },
+                            {
+                              title: t("connection.modal.mongo.member.health"),
+                              dataIndex: "healthy",
+                              width: "20%",
+                              render: (value: boolean) => (
+                                <Tag color={value ? "success" : "error"}>
+                                  {value
+                                    ? t("connection.modal.mongo.member.healthy")
+                                    : t(
+                                        "connection.modal.mongo.member.unhealthy",
+                                      )}
+                                </Tag>
+                              ),
+                            },
+                          ]}
+                        />
+                      )}
+                    </>
+                  ),
+                })}
+
+              {dbType === "mongodb" &&
+                renderConfigSectionCard({
+                  sectionKey: "mongoPolicy",
+                  icon: <ThunderboltOutlined />,
+                  children: (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        gap: 16,
+                      }}
+                    >
+                      <Form.Item
+                        name="mongoAuthSource"
+                        label={t(
+                          "connection.modal.field.mongoAuthSource.label",
+                        )}
+                        style={{ marginBottom: 0 }}
+                      >
+                        <Input
+                          {...noAutoCapInputProps}
+                          placeholder={t(
+                            "connection.modal.field.mongoAuthSource.placeholder",
+                          )}
+                        />
+                      </Form.Item>
+                      <div style={{ display: "grid", gap: 8 }}>
+                        <Text strong>
+                          {t("connection.modal.mongo.readPreference.label")}
+                        </Text>
+                        {renderChoiceCards({
+                          fieldName: "mongoReadPreference",
+                          value: String(mongoReadPreference),
+                          minWidth: 130,
+                          options: [
+                            {
+                              value: "primary",
+                              label: "primary",
+                              description: t(
+                                "connection.modal.mongo.readPreference.primary.description",
+                              ),
+                            },
+                            {
+                              value: "primaryPreferred",
+                              label: "primaryPreferred",
+                              description: t(
+                                "connection.modal.mongo.readPreference.primaryPreferred.description",
+                              ),
+                            },
+                            {
+                              value: "secondary",
+                              label: "secondary",
+                              description: t(
+                                "connection.modal.mongo.readPreference.secondary.description",
+                              ),
+                            },
+                            {
+                              value: "secondaryPreferred",
+                              label: "secondaryPreferred",
+                              description: t(
+                                "connection.modal.mongo.readPreference.secondaryPreferred.description",
+                              ),
+                            },
+                            {
+                              value: "nearest",
+                              label: "nearest",
+                              description: t(
+                                "connection.modal.mongo.readPreference.nearest.description",
+                              ),
+                            },
+                          ],
+                        })}
+                      </div>
+                    </div>
+                  ),
+                })}
+
+              {isRedis &&
+                renderConfigSectionCard({
+                  sectionKey: "connectionMode",
+                  icon: <ClusterOutlined />,
+                  children: (
+                    <>
+                      {renderChoiceCards({
+                        fieldName: "redisTopology",
+                        value: String(redisTopology),
+                        options: [
+                          {
+                            value: "single",
+                            label: t("connection.modal.topology.single.label"),
+                            description: t(
+                              "connection.modal.topology.redis.single.description",
+                            ),
+                          },
+                          {
+                            value: "cluster",
+                            label: t(
+                              "connection.modal.topology.redis.cluster.label",
+                            ),
+                            description: t(
+                              "connection.modal.topology.redis.cluster.description",
+                            ),
+                          },
+                        ],
+                      })}
+                      {redisTopology === "cluster" && (
+                        <Form.Item
+                          name="redisHosts"
+                          label={t("connection.modal.field.redisHosts.label")}
+                          help={t("connection.modal.field.redisHosts.help")}
+                          style={{ marginTop: 16, marginBottom: 0 }}
+                        >
+                          <Select
+                            mode="tags"
+                            placeholder={t(
+                              "connection.modal.field.redisHosts.placeholder",
+                            )}
+                            tokenSeparators={[",", ";", " "]}
+                          />
+                        </Form.Item>
+                      )}
+                    </>
+                  ),
+                })}
+
+              {isRedis &&
+                renderConfigSectionCard({
+                  sectionKey: "credentials",
+                  icon: <SafetyCertificateOutlined />,
+                  children: (
+                    <>
+                      <Form.Item
+                        name="password"
+                        label={t("connection.modal.field.redisPassword.label")}
+                      >
+                        <Input.Password
+                          {...noAutoCapInputProps}
+                          visibilityToggle={{
+                            visible: primaryPasswordVisible,
+                            onVisibleChange: setPrimaryPasswordVisible,
+                          }}
+                          placeholder={getStoredSecretPlaceholder({
+                            hasStoredSecret: initialValues?.hasPrimaryPassword,
+                            emptyPlaceholder: t(
+                              "connection.modal.field.redisPassword.placeholder",
+                            ),
+                            retainedLabel: t(
+                              "connection.modal.field.redisPassword.retained",
+                            ),
+                          })}
+                        />
+                      </Form.Item>
+                    </>
+                  ),
+                })}
+
+              {isRedis &&
+                renderConfigSectionCard({
+                  sectionKey: "databaseScope",
+                  icon: <DatabaseOutlined />,
+                  children: (
+                    <Form.Item
+                      name="includeRedisDatabases"
+                      label={t(
+                        "connection.modal.field.displayDatabases.label",
+                      )}
+                      help={t("connection.modal.field.displayDatabases.help")}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <Select
+                        mode="multiple"
+                        placeholder={t(
+                          "connection.modal.field.displayRedisDatabases.placeholder",
+                        )}
+                        allowClear
+                      >
+                        {redisDbList.map((db) => (
+                          <Select.Option key={db} value={db}>
+                            db{db}
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                  ),
+                })}
 
               {!isFileDb &&
                 !isRedis &&
@@ -5632,11 +6449,17 @@ const ConnectionModal: React.FC<{
                       >
                         <Form.Item
                           name="user"
-                          label={dbType === "rocketmq" ? "Access Key" : "用户名"}
+                          label={t("connection.modal.field.username.label")}
                           rules={
                             PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)
                               ? []
-                              : [createUriAwareRequiredRule("请输入用户名")]
+                              : [
+                                  createUriAwareRequiredRule(
+                                    t(
+                                      "connection.modal.field.username.required",
+                                    ),
+                                  ),
+                                ]
                           }
                           style={{ marginBottom: 0 }}
                         >
@@ -5644,14 +6467,14 @@ const ConnectionModal: React.FC<{
                             {...noAutoCapInputProps}
                             placeholder={
                               PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)
-                                ? "未开启认证可留空"
+                                ? t("connection.modal.field.username.optional_placeholder")
                                 : undefined
                             }
                           />
                         </Form.Item>
                         <Form.Item
                           name="password"
-                          label={dbType === "rocketmq" ? "Secret Key" : "密码"}
+                          label={t("connection.modal.field.password.label")}
                           style={{ marginBottom: 0 }}
                         >
                           <Input.Password
@@ -5663,14 +6486,22 @@ const ConnectionModal: React.FC<{
                             placeholder={getStoredSecretPlaceholder({
                               hasStoredSecret:
                                 initialValues?.hasPrimaryPassword,
-                              emptyPlaceholder: dbType === "rocketmq" ? "未开启认证可留空" : "密码",
-                              retainedLabel: dbType === "rocketmq" ? "已保存 Secret Key" : "已保存密码",
+                              emptyPlaceholder: t(
+                                "connection.modal.field.password.placeholder",
+                              ),
+                              retainedLabel: t(
+                                "connection.modal.field.password.retained",
+                              ),
                             })}
                           />
                         </Form.Item>
                         {dbType === "mongodb" && (
                           <div style={{ display: "grid", gap: 8 }}>
-                            <Text strong>验证方式</Text>
+                            <Text strong>
+                              {t(
+                                "connection.modal.mongo.authMechanism.label",
+                              )}
+                            </Text>
                             {renderChoiceCards({
                               fieldName: "mongoAuthMechanism",
                               value: String(mongoAuthMechanism),
@@ -5678,28 +6509,42 @@ const ConnectionModal: React.FC<{
                               options: [
                                 {
                                   value: "",
-                                  label: "自动协商",
-                                  description: "交给驱动按服务端能力选择。",
+                                  label: t(
+                                    "connection.modal.mongo.authMechanism.auto.label",
+                                  ),
+                                  description: t(
+                                    "connection.modal.mongo.authMechanism.auto.description",
+                                  ),
                                 },
                                 {
                                   value: "NONE",
-                                  label: "无认证",
-                                  description: "不发送认证信息。",
+                                  label: t(
+                                    "connection.modal.mongo.authMechanism.none.label",
+                                  ),
+                                  description: t(
+                                    "connection.modal.mongo.authMechanism.none.description",
+                                  ),
                                 },
                                 {
                                   value: "SCRAM-SHA-1",
                                   label: "SCRAM-SHA-1",
-                                  description: "兼容旧版本 MongoDB。",
+                                  description: t(
+                                    "connection.modal.mongo.authMechanism.scramSha1.description",
+                                  ),
                                 },
                                 {
                                   value: "SCRAM-SHA-256",
                                   label: "SCRAM-SHA-256",
-                                  description: "推荐的 SCRAM 认证。",
+                                  description: t(
+                                    "connection.modal.mongo.authMechanism.scramSha256.description",
+                                  ),
                                 },
                                 {
                                   value: "MONGODB-AWS",
                                   label: "MONGODB-AWS",
-                                  description: "AWS IAM 认证。",
+                                  description: t(
+                                    "connection.modal.mongo.authMechanism.aws.description",
+                                  ),
                                 },
                               ],
                             })}
@@ -5712,7 +6557,9 @@ const ConnectionModal: React.FC<{
                           valuePropName="checked"
                           style={{ marginTop: 12, marginBottom: 0 }}
                         >
-                          <Checkbox>保存密码</Checkbox>
+                          <Checkbox>
+                            {t("connection.modal.field.savePassword")}
+                          </Checkbox>
                         </Form.Item>
                       )}
                     </>
@@ -5728,13 +6575,17 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="includeDatabases"
-                      label="显示数据库 (留空显示全部)"
-                      help="连接测试成功后可选择"
+                      label={t(
+                        "connection.modal.field.displayDatabases.label",
+                      )}
+                      help={t("connection.modal.field.displayDatabases.help")}
                       style={{ marginBottom: 0 }}
                     >
                       <Select
                         mode="multiple"
-                        placeholder="选择显示的数据库"
+                        placeholder={t(
+                          "connection.modal.field.displayDatabases.placeholder",
+                        )}
                         allowClear
                       >
                         {dbList.map((db) => (
@@ -5755,6 +6606,14 @@ const ConnectionModal: React.FC<{
     const networkSecuritySection =
       !isFileDb && !isJVM
         ? (() => {
+            const effectiveUseSSL = useSSL || !!form.getFieldValue("useSSL");
+            const effectiveUseSSH = useSSH || !!form.getFieldValue("useSSH");
+            const effectiveUseHttpTunnel =
+              useHttpTunnel ||
+              !!form.getFieldValue("useHttpTunnel");
+            const effectiveUseProxy =
+              !effectiveUseHttpTunnel &&
+              (useProxy || !!form.getFieldValue("useProxy"));
             const networkItems: Array<{
               key: "ssl" | "ssh" | "proxy" | "httpTunnel";
               title: string;
@@ -5765,36 +6624,44 @@ const ConnectionModal: React.FC<{
                 ? [
                     {
                       key: "ssl" as const,
-                      title: "SSL/TLS",
-                      description: "加密与证书校验",
-                      enabled: useSSL,
+                      title: t("connection.modal.network.ssl_tls"),
+                      description: t(
+                        "connection.modal.network.ssl.description",
+                      ),
+                      enabled: effectiveUseSSL,
                     },
                   ]
                 : []),
               {
                 key: "ssh",
-                title: "SSH 隧道",
-                description: "跳板机 / 堡垒机转发",
-                enabled: useSSH,
+                title: t("connection.modal.network.ssh.title"),
+                description: t("connection.modal.network.ssh.description"),
+                enabled: effectiveUseSSH,
               },
               {
                 key: "proxy",
-                title: "代理",
-                description: "SOCKS5 / HTTP CONNECT",
-                enabled: useProxy,
+                title: t("connection.modal.network.proxy.title"),
+                description: t("connection.modal.network.proxy.description"),
+                enabled: effectiveUseProxy,
               },
               {
                 key: "httpTunnel",
-                title: "HTTP 隧道",
-                description: "独立 HTTP CONNECT 路由",
-                enabled: useHttpTunnel,
+                title: t("connection.modal.network.httpTunnel.title"),
+                description: t(
+                  "connection.modal.network.httpTunnel.description",
+                ),
+                enabled: effectiveUseHttpTunnel,
               },
             ];
-            const resolvedNetworkConfig = networkItems.some(
-              (item) => item.key === activeNetworkConfig,
-            )
-              ? activeNetworkConfig
-              : networkItems[0]?.key || "ssh";
+            const resolvedNetworkConfig =
+              activeNetworkConfig === "ssl" && !effectiveUseSSL
+                ? networkItems.find((item) => item.enabled)?.key ||
+                  (networkItems.some((item) => item.key === activeNetworkConfig)
+                    ? activeNetworkConfig
+                    : networkItems[0]?.key || "ssh")
+                : networkItems.some((item) => item.key === activeNetworkConfig)
+                  ? activeNetworkConfig
+                  : networkItems[0]?.key || "ssh";
             const renderNetworkPanel = () => {
               if (resolvedNetworkConfig === "ssl") {
                 return (
@@ -5807,12 +6674,12 @@ const ConnectionModal: React.FC<{
                         fontWeight: 700,
                       }}
                     >
-                      SSL/TLS
+                      {t("connection.modal.network.ssl_tls")}
                     </div>
                     <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>
-                      为连接链路增加加密与证书校验控制，适合生产或跨网络访问场景。
+                      {t("connection.modal.network.ssl.panelDescription")}
                     </div>
-                    {!useSSL ? (
+                    {!effectiveUseSSL ? (
                       <div
                         style={{
                           ...modalMutedTextStyle,
@@ -5823,30 +6690,45 @@ const ConnectionModal: React.FC<{
                             : "rgba(16,24,40,0.04)",
                         }}
                       >
-                        左侧勾选“SSL/TLS”后，可在这里配置模式、证书与校验策略。
+                        <div>{t("connection.modal.network.ssl.disabledHint")}</div>
+                        <div style={{ marginTop: 8 }}>{sslHintText}</div>
                       </div>
                     ) : (
                       <div style={tunnelSectionStyle}>
                         <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
-                          <Text strong>SSL 模式</Text>
+                          <Text strong>
+                            {t("connection.modal.network.ssl.mode")}
+                          </Text>
                           {renderChoiceCards({
                             fieldName: "sslMode",
                             value: String(sslMode),
                             options: [
                               {
                                 value: "preferred",
-                                label: "Preferred",
-                                description: "优先使用 SSL，失败后按驱动策略处理。",
+                                label: t(
+                                  "connection.modal.network.ssl_mode.preferred",
+                                ),
+                                description: t(
+                                  "connection.modal.network.ssl.preferred.description",
+                                ),
                               },
                               {
                                 value: "required",
-                                label: "Required",
-                                description: "必须使用 SSL，并进行证书校验。",
+                                label: t(
+                                  "connection.modal.network.ssl_mode.required",
+                                ),
+                                description: t(
+                                  "connection.modal.network.ssl.required.description",
+                                ),
                               },
                               {
                                 value: "skip-verify",
-                                label: "Skip Verify",
-                                description: "必须使用 SSL，但跳过证书校验。",
+                                label: t(
+                                  "connection.modal.network.ssl_mode.skip_verify",
+                                ),
+                                description: t(
+                                  "connection.modal.network.ssl.skipVerify.description",
+                                ),
                               },
                             ],
                           })}
@@ -5855,21 +6737,32 @@ const ConnectionModal: React.FC<{
                           <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
                             {supportsSSLCAPath && (
                               <Form.Item
-                                label={dbType === "sqlserver" ? "服务端证书/CA 路径" : "CA 证书路径"}
+                                label={
+                                  dbType === "sqlserver"
+                                    ? t(
+                                        "connection.modal.network.ssl.serverCaPath",
+                                      )
+                                    : t(
+                                        "connection.modal.network.ssl.caPath",
+                                      )
+                                }
                                 style={{ marginBottom: 0 }}
                               >
                                 <Space.Compact style={{ width: "100%" }}>
                                   <Form.Item name="sslCAPath" noStyle>
                                     <Input
                                       {...noAutoCapInputProps}
-                                      placeholder="例如: C:\certs\ca.pem"
+                                      placeholder={t(
+                                        "connection.modal.example",
+                                        { value: "C:\\certs\\ca.pem" },
+                                      )}
                                     />
                                   </Form.Item>
                                   <Button
                                     onClick={() => handleSelectCertificateFile("sslCAPath", "ca")}
                                     loading={selectingCertificateField === "sslCAPath"}
                                   >
-                                    浏览...
+                                    {t("connection.modal.action.browse")}
                                   </Button>
                                 </Space.Compact>
                               </Form.Item>
@@ -5877,11 +6770,21 @@ const ConnectionModal: React.FC<{
                             {supportsSSLClientCertificate && (
                               <>
                                 <Form.Item
-                                  label={dbType === "dameng" ? "客户端证书路径 (SSL_CERT_PATH)" : "客户端证书路径"}
+                                  label={
+                                    dbType === "dameng"
+                                      ? t(
+                                          "connection.modal.network.ssl.damengCertPath",
+                                        )
+                                      : t(
+                                          "connection.modal.network.ssl.certPath",
+                                        )
+                                  }
                                   rules={[
                                     {
                                       required: dbType === "dameng",
-                                      message: "达梦 SSL 需要证书路径",
+                                      message: t(
+                                        "connection.modal.network.ssl.certRequired",
+                                      ),
                                     },
                                   ]}
                                   style={{ marginBottom: 0 }}
@@ -5890,23 +6793,39 @@ const ConnectionModal: React.FC<{
                                     <Form.Item name="sslCertPath" noStyle>
                                       <Input
                                         {...noAutoCapInputProps}
-                                        placeholder="例如: C:\certs\client-cert.pem"
+                                        placeholder={t(
+                                          "connection.modal.example",
+                                          {
+                                            value:
+                                              "C:\\certs\\client-cert.pem",
+                                          },
+                                        )}
                                       />
                                     </Form.Item>
                                     <Button
                                       onClick={() => handleSelectCertificateFile("sslCertPath", "client-cert")}
                                       loading={selectingCertificateField === "sslCertPath"}
                                     >
-                                      浏览...
+                                      {t("connection.modal.action.browse")}
                                     </Button>
                                   </Space.Compact>
                                 </Form.Item>
                                 <Form.Item
-                                  label={dbType === "dameng" ? "客户端私钥路径 (SSL_KEY_PATH)" : "客户端私钥路径"}
+                                  label={
+                                    dbType === "dameng"
+                                      ? t(
+                                          "connection.modal.network.ssl.damengKeyPath",
+                                        )
+                                      : t(
+                                          "connection.modal.network.ssl.keyPath",
+                                        )
+                                  }
                                   rules={[
                                     {
                                       required: dbType === "dameng",
-                                      message: "达梦 SSL 需要私钥路径",
+                                      message: t(
+                                        "connection.modal.network.ssl.keyRequired",
+                                      ),
                                     },
                                   ]}
                                   style={{ marginBottom: 0 }}
@@ -5915,14 +6834,20 @@ const ConnectionModal: React.FC<{
                                     <Form.Item name="sslKeyPath" noStyle>
                                       <Input
                                         {...noAutoCapInputProps}
-                                        placeholder="例如: C:\certs\client-key.pem"
+                                        placeholder={t(
+                                          "connection.modal.example",
+                                          {
+                                            value:
+                                              "C:\\certs\\client-key.pem",
+                                          },
+                                        )}
                                       />
                                     </Form.Item>
                                     <Button
                                       onClick={() => handleSelectCertificateFile("sslKeyPath", "client-key")}
                                       loading={selectingCertificateField === "sslKeyPath"}
                                     >
-                                      浏览...
+                                      {t("connection.modal.action.browse")}
                                     </Button>
                                   </Space.Compact>
                                 </Form.Item>
@@ -5949,12 +6874,12 @@ const ConnectionModal: React.FC<{
                         fontWeight: 700,
                       }}
                     >
-                      SSH 隧道
+                      {t("connection.modal.network.ssh.title")}
                     </div>
                     <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>
-                      通过跳板机或堡垒机转发数据库连接，适合内网或受限网络环境。
+                      {t("connection.modal.network.ssh.panelDescription")}
                     </div>
-                    {!useSSH ? (
+                  {!effectiveUseSSH ? (
                       <div
                         style={{
                           ...modalMutedTextStyle,
@@ -5965,8 +6890,7 @@ const ConnectionModal: React.FC<{
                             : "rgba(16,24,40,0.04)",
                         }}
                       >
-                        左侧勾选“SSH
-                        隧道”后，可在这里填写主机、端口、用户名、密码和私钥路径。
+                        {t("connection.modal.network.ssh.disabledHint")}
                       </div>
                     ) : (
                       <div style={tunnelSectionStyle}>
@@ -5979,22 +6903,35 @@ const ConnectionModal: React.FC<{
                         >
                           <Form.Item
                             name="sshHost"
-                            label="SSH 主机 (域名或IP)"
+                            label={t("connection.modal.network.ssh.host")}
                             rules={[
-                              { required: useSSH, message: "请输入SSH主机" },
+                              {
+                                required: useSSH,
+                                message: t(
+                                  "connection.modal.network.ssh.hostRequired",
+                                ),
+                              },
                             ]}
                             style={{ flex: 1 }}
                           >
                             <Input
                               {...noAutoCapInputProps}
-                              placeholder="例如: ssh.example.com 或 192.168.1.100"
+                              placeholder={t("connection.modal.example.or", {
+                                first: "ssh.example.com",
+                                second: "192.168.1.100",
+                              })}
                             />
                           </Form.Item>
                           <Form.Item
                             name="sshPort"
-                            label="端口"
+                            label={t("connection.modal.field.port.label")}
                             rules={[
-                              { required: useSSH, message: "请输入SSH端口" },
+                              {
+                                required: useSSH,
+                                message: t(
+                                  "connection.modal.network.ssh.portRequired",
+                                ),
+                              },
                             ]}
                             style={{ width: 100 }}
                           >
@@ -6010,48 +6947,63 @@ const ConnectionModal: React.FC<{
                         >
                           <Form.Item
                             name="sshUser"
-                            label="SSH 用户"
+                            label={t("connection.modal.network.ssh.user")}
                             rules={[
-                              { required: useSSH, message: "请输入SSH用户" },
+                              {
+                                required: useSSH,
+                                message: t(
+                                  "connection.modal.network.ssh.userRequired",
+                                ),
+                              },
                             ]}
                             style={{ flex: 1 }}
                           >
                             <Input
                               {...noAutoCapInputProps}
-                              placeholder="root"
+                              placeholder={t("connection.modal.example", {
+                                value: "root",
+                              })}
                             />
                           </Form.Item>
                           <Form.Item
                             name="sshPassword"
-                            label="SSH 密码"
+                            label={t("connection.modal.network.ssh.password")}
                             style={{ flex: 1 }}
                           >
                             <Input.Password
                               {...noAutoCapInputProps}
                               placeholder={getStoredSecretPlaceholder({
                                 hasStoredSecret: initialValues?.hasSSHPassword,
-                                emptyPlaceholder: "密码",
-                                retainedLabel: "已保存 SSH 密码",
+                                emptyPlaceholder: t(
+                                  "connection.modal.field.password.placeholder",
+                                ),
+                                retainedLabel: t(
+                                  "connection.modal.network.ssh.retained",
+                                ),
                               })}
                             />
                           </Form.Item>
                         </div>
-                        <Form.Item
-                          label="私钥路径 (可选)"
-                          help="例如: /Users/name/.ssh/id_rsa"
-                        >
+                      <Form.Item
+                        label={t("connection.modal.network.ssh.keyPath")}
+                          help={t("connection.modal.example", {
+                            value: "/Users/name/.ssh/id_rsa",
+                          })}
+                      >
                           <Space.Compact style={{ width: "100%" }}>
                             <Form.Item name="sshKeyPath" noStyle>
                               <Input
                                 {...noAutoCapInputProps}
-                                placeholder="绝对路径"
+                                placeholder={t(
+                                  "connection.modal.network.ssh.keyPathPlaceholder",
+                                )}
                               />
                             </Form.Item>
                             <Button
                               onClick={handleSelectSSHKeyFile}
                               loading={selectingSSHKey}
                             >
-                              浏览...
+                              {t("connection.modal.action.browse")}
                             </Button>
                           </Space.Compact>
                         </Form.Item>
@@ -6059,9 +7011,12 @@ const ConnectionModal: React.FC<{
                           fieldName: "sshPassword",
                           clearKey: "sshPassword",
                           hasStoredSecret: initialValues?.hasSSHPassword,
-                          clearLabel: "清除已保存 SSH 密码",
-                          description:
-                            "当前已保存 SSH 密码。留空表示继续沿用，输入新值表示替换。",
+                          clearLabel: t(
+                            "connection.modal.network.ssh.clearPassword",
+                          ),
+                          description: t(
+                            "connection.modal.network.ssh.savedDescription",
+                          ),
                         })}
                       </div>
                     )}
@@ -6079,12 +7034,12 @@ const ConnectionModal: React.FC<{
                         fontWeight: 700,
                       }}
                     >
-                      代理
+                      {t("connection.modal.network.proxy.title")}
                     </div>
                     <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>
-                      适合借助本地代理软件或中间网关转发数据库流量。
+                      {t("connection.modal.network.proxy.panelDescription")}
                     </div>
-                    {!useProxy ? (
+                    {!effectiveUseProxy ? (
                       <div
                         style={{
                           ...modalMutedTextStyle,
@@ -6095,20 +7050,28 @@ const ConnectionModal: React.FC<{
                             : "rgba(16,24,40,0.04)",
                         }}
                       >
-                        左侧勾选“代理”后，可在这里选择代理类型并填写主机、端口与认证信息。
+                        {t("connection.modal.network.proxy.disabledHint")}
                       </div>
                     ) : (
                       <div style={tunnelSectionStyle}>
                         <Form.Item
                           name="proxyHost"
-                          label="代理主机"
+                          label={t("connection.modal.network.proxy.host")}
                           rules={[
-                            { required: useProxy, message: "请输入代理主机" },
+                            {
+                              required: useProxy,
+                              message: t(
+                                "connection.modal.network.proxy.hostRequired",
+                              ),
+                            },
                           ]}
                         >
                           <Input
                             {...noAutoCapInputProps}
-                            placeholder="例如: 127.0.0.1 或 proxy.company.com"
+                            placeholder={t("connection.modal.example.or", {
+                              first: "127.0.0.1",
+                              second: "proxy.company.com",
+                            })}
                           />
                         </Form.Item>
                         <div
@@ -6119,7 +7082,9 @@ const ConnectionModal: React.FC<{
                           }}
                         >
                           <div style={{ display: "grid", gap: 8 }}>
-                            <Text strong>代理类型</Text>
+                            <Text strong>
+                              {t("connection.modal.network.proxy.type")}
+                            </Text>
                             {renderChoiceCards({
                               fieldName: "proxyType",
                               value: String(proxyType),
@@ -6128,21 +7093,30 @@ const ConnectionModal: React.FC<{
                                 {
                                   value: "socks5",
                                   label: "SOCKS5",
-                                  description: "常见本地代理和网关代理。",
+                                  description: t(
+                                    "connection.modal.network.proxy.socks5.description",
+                                  ),
                                 },
                                 {
                                   value: "http",
                                   label: "HTTP CONNECT",
-                                  description: "通过 HTTP CONNECT 建立隧道。",
+                                  description: t(
+                                    "connection.modal.network.proxy.http.description",
+                                  ),
                                 },
                               ],
                             })}
                           </div>
                           <Form.Item
                             name="proxyPort"
-                            label="端口"
+                            label={t("connection.modal.field.port.label")}
                             rules={[
-                              { required: useProxy, message: "请输入代理端口" },
+                              {
+                                required: useProxy,
+                                message: t(
+                                  "connection.modal.network.proxy.portRequired",
+                                ),
+                              },
                             ]}
                             style={{ marginBottom: 0 }}
                           >
@@ -6162,17 +7136,21 @@ const ConnectionModal: React.FC<{
                         >
                           <Form.Item
                             name="proxyUser"
-                            label="代理用户名（可选）"
+                            label={t("connection.modal.network.proxy.user")}
                             style={{ flex: 1 }}
                           >
                             <Input
                               {...noAutoCapInputProps}
-                              placeholder="留空表示无认证"
+                              placeholder={t(
+                                "connection.modal.network.proxy.noAuth",
+                              )}
                             />
                           </Form.Item>
                           <Form.Item
                             name="proxyPassword"
-                            label="代理密码（可选）"
+                            label={t(
+                              "connection.modal.network.proxy.password",
+                            )}
                             style={{ flex: 1 }}
                           >
                             <Input.Password
@@ -6180,8 +7158,12 @@ const ConnectionModal: React.FC<{
                               placeholder={getStoredSecretPlaceholder({
                                 hasStoredSecret:
                                   initialValues?.hasProxyPassword,
-                                emptyPlaceholder: "留空表示无认证",
-                                retainedLabel: "已保存代理密码",
+                                emptyPlaceholder: t(
+                                  "connection.modal.network.proxy.noAuth",
+                                ),
+                                retainedLabel: t(
+                                  "connection.modal.network.proxy.retained",
+                                ),
                               })}
                             />
                           </Form.Item>
@@ -6190,9 +7172,12 @@ const ConnectionModal: React.FC<{
                           fieldName: "proxyPassword",
                           clearKey: "proxyPassword",
                           hasStoredSecret: initialValues?.hasProxyPassword,
-                          clearLabel: "清除已保存代理密码",
-                          description:
-                            "当前已保存代理密码。留空表示继续沿用，输入新值表示替换。",
+                          clearLabel: t(
+                            "connection.modal.network.proxy.clearPassword",
+                          ),
+                          description: t(
+                            "connection.modal.network.proxy.savedDescription",
+                          ),
                         })}
                       </div>
                     )}
@@ -6209,12 +7194,14 @@ const ConnectionModal: React.FC<{
                       fontWeight: 700,
                     }}
                   >
-                    HTTP 隧道
+                    {t("connection.modal.network.httpTunnel.title")}
                   </div>
                   <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>
-                    与代理模式互斥，适合单独指定一条 HTTP CONNECT 隧道路由。
+                    {t(
+                      "connection.modal.network.httpTunnel.panelDescription",
+                    )}
                   </div>
-                  {!useHttpTunnel ? (
+                  {!effectiveUseHttpTunnel ? (
                     <div
                       style={{
                         ...modalMutedTextStyle,
@@ -6225,7 +7212,7 @@ const ConnectionModal: React.FC<{
                           : "rgba(16,24,40,0.04)",
                       }}
                     >
-                      左侧勾选“HTTP 隧道”后，可在这里填写隧道目标与认证信息。
+                      {t("connection.modal.network.httpTunnel.disabledHint")}
                     </div>
                   ) : (
                     <div style={tunnelSectionStyle}>
@@ -6238,27 +7225,36 @@ const ConnectionModal: React.FC<{
                       >
                         <Form.Item
                           name="httpTunnelHost"
-                          label="隧道主机"
+                          label={t(
+                            "connection.modal.network.httpTunnel.host",
+                          )}
                           rules={[
                             {
                               required: useHttpTunnel,
-                              message: "请输入隧道主机",
+                              message: t(
+                                "connection.modal.network.httpTunnel.hostRequired",
+                              ),
                             },
                           ]}
                           style={{ flex: 1 }}
                         >
                           <Input
                             {...noAutoCapInputProps}
-                            placeholder="例如: tunnel.company.com 或 127.0.0.1"
+                            placeholder={t("connection.modal.example.or", {
+                              first: "tunnel.company.com",
+                              second: "127.0.0.1",
+                            })}
                           />
                         </Form.Item>
                         <Form.Item
                           name="httpTunnelPort"
-                          label="端口"
+                          label={t("connection.modal.field.port.label")}
                           rules={[
                             {
                               required: useHttpTunnel,
-                              message: "请输入隧道端口",
+                              message: t(
+                                "connection.modal.network.httpTunnel.portRequired",
+                              ),
                             },
                           ]}
                           style={{ width: 120 }}
@@ -6279,17 +7275,23 @@ const ConnectionModal: React.FC<{
                       >
                         <Form.Item
                           name="httpTunnelUser"
-                          label="隧道用户名（可选）"
+                          label={t(
+                            "connection.modal.network.httpTunnel.user",
+                          )}
                           style={{ flex: 1 }}
                         >
                           <Input
                             {...noAutoCapInputProps}
-                            placeholder="留空表示无认证"
+                            placeholder={t(
+                              "connection.modal.network.proxy.noAuth",
+                            )}
                           />
                         </Form.Item>
                         <Form.Item
                           name="httpTunnelPassword"
-                          label="隧道密码（可选）"
+                          label={t(
+                            "connection.modal.network.httpTunnel.password",
+                          )}
                           style={{ flex: 1 }}
                         >
                           <Input.Password
@@ -6297,8 +7299,12 @@ const ConnectionModal: React.FC<{
                             placeholder={getStoredSecretPlaceholder({
                               hasStoredSecret:
                                 initialValues?.hasHttpTunnelPassword,
-                              emptyPlaceholder: "留空表示无认证",
-                              retainedLabel: "已保存隧道密码",
+                              emptyPlaceholder: t(
+                                "connection.modal.network.proxy.noAuth",
+                              ),
+                              retainedLabel: t(
+                                "connection.modal.network.httpTunnel.retained",
+                              ),
                             })}
                           />
                         </Form.Item>
@@ -6307,13 +7313,17 @@ const ConnectionModal: React.FC<{
                         fieldName: "httpTunnelPassword",
                         clearKey: "httpTunnelPassword",
                         hasStoredSecret: initialValues?.hasHttpTunnelPassword,
-                        clearLabel: "清除已保存隧道密码",
-                        description:
-                          "当前已保存隧道密码。留空表示继续沿用，输入新值表示替换。",
+                        clearLabel: t(
+                          "connection.modal.network.httpTunnel.clearPassword",
+                        ),
+                        description: t(
+                          "connection.modal.network.httpTunnel.savedDescription",
+                        ),
                       })}
                       <Text type="secondary" style={{ fontSize: 12 }}>
-                        与“使用代理”互斥，启用后将通过 HTTP CONNECT
-                        建立独立隧道。
+                        {t(
+                          "connection.modal.network.httpTunnel.exclusiveHint",
+                        )}
                       </Text>
                     </div>
                   )}
@@ -6331,10 +7341,10 @@ const ConnectionModal: React.FC<{
                     fontWeight: 700,
                   }}
                 >
-                  网络与安全
+                  {t("connection.modal.network.title")}
                 </div>
                 <div style={{ ...modalMutedTextStyle, marginBottom: 16 }}>
-                  上方稳定列出所有连接方式，下方固定展示当前方式的配置详情，避免启用后页面重新排布，同时给详情区留出足够宽度。
+                  {t("connection.modal.network.description")}
                 </div>
                 <div
                   style={{
@@ -6465,7 +7475,9 @@ const ConnectionModal: React.FC<{
                                           : "rgba(24,144,255,0.12)",
                                       }}
                                     >
-                                      当前编辑
+                                      {t(
+                                        "connection.modal.network.currentEditing",
+                                      )}
                                     </span>
                                   )}
                                   <span
@@ -6479,7 +7491,11 @@ const ConnectionModal: React.FC<{
                                           : "rgba(16,24,40,0.36)",
                                     }}
                                   >
-                                    {item.enabled ? "已启用" : "未启用"}
+                                    {item.enabled
+                                      ? t("connection.modal.network.enabled")
+                                      : t(
+                                          "connection.modal.network.notEnabled",
+                                        )}
                                   </span>
                                 </div>
                               </div>
@@ -6513,18 +7529,18 @@ const ConnectionModal: React.FC<{
                       fontWeight: 700,
                     }}
                   >
-                    高级连接
+                    {t("connection.modal.network.advanced.title")}
                   </div>
                   <Form.Item
                     name="timeout"
-                    label="连接超时 (秒)"
-                    help="数据库连接超时时间，默认 30 秒"
+                    label={t("connection.modal.network.timeout.label")}
+                    help={t("connection.modal.network.timeout.help")}
                     rules={[
                       {
                         type: "number",
                         min: 1,
                         max: 300,
-                        message: "超时时间范围: 1-300 秒",
+                        message: t("connection.modal.network.timeout.range"),
                       },
                     ]}
                     style={{ marginBottom: 0 }}
@@ -6533,7 +7549,9 @@ const ConnectionModal: React.FC<{
                       style={{ width: "100%" }}
                       min={1}
                       max={300}
-                      placeholder="30"
+                      placeholder={t("connection.modal.example", {
+                        value: "30",
+                      })}
                     />
                   </Form.Item>
                 </div>
@@ -6753,7 +7771,9 @@ const ConnectionModal: React.FC<{
             showIcon
             type="warning"
             style={{ marginBottom: 12 }}
-            message="当前数据源驱动未启用"
+            message={t("connection.modal.driver.unavailableTitle", {
+              name: currentDriverSnapshot?.name || dbType,
+            })}
             description={
               <Space size={8}>
                 <span>{currentDriverUnavailableReason}</span>
@@ -6762,7 +7782,29 @@ const ConnectionModal: React.FC<{
                   size="small"
                   onClick={() => onOpenDriverManager?.()}
                 >
-                  去驱动管理安装
+                  {t("connection.modal.driver.installAction")}
+                </Button>
+              </Space>
+            }
+          />
+        )}
+        {currentDriverUpdateReason && (
+          <Alert
+            showIcon
+            type="warning"
+            style={{ marginBottom: 12 }}
+            message={t("connection.modal.driver.updateFallback", {
+              name: currentDriverSnapshot?.name || dbType,
+            })}
+            description={
+              <Space size={8}>
+                <span>{currentDriverUpdateReason}</span>
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => onOpenDriverManager?.()}
+                >
+                  {t("connection.modal.driver.reinstallAction")}
                 </Button>
               </Space>
             }
@@ -6777,26 +7819,28 @@ const ConnectionModal: React.FC<{
           }> = [
             {
               key: "basic",
-              title: "基础信息",
+              title: t("connection.modal.config.basic.title"),
               description: isJVM
-                ? "JVM 目标、接入模式、JMX、Endpoint、Agent 与诊断增强"
-                : "名称、地址、认证、URI 与数据库范围",
+                ? t("connection.modal.config.basic.jvmNavDescription")
+                : t("connection.modal.config.basic.navDescription"),
               icon: <DatabaseOutlined />,
             },
             ...(!isCustom && !isFileDb && !isJVM
               ? [
                   {
                     key: "network" as const,
-                    title: "网络与安全",
-                    description: "SSL、SSH、代理与高级连接",
+                    title: t("connection.modal.network.title"),
+                    description: t(
+                      "connection.modal.network.navDescription",
+                    ),
                     icon: <CloudOutlined />,
                   },
                 ]
               : []),
             {
               key: "appearance",
-              title: "外观",
-              description: "自定义图标与颜色",
+              title: t("connection.modal.appearance.title"),
+              description: t("connection.modal.appearance.description"),
               icon: <BgColorsOutlined />,
             },
           ];
@@ -6821,7 +7865,7 @@ const ConnectionModal: React.FC<{
                     color: darkMode ? "#f5f7ff" : "#162033",
                   }}
                 >
-                  图标
+                  {t("connection.modal.appearance.icon")}
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {DB_ICON_TYPES.map((iconKey) => {
@@ -6870,7 +7914,9 @@ const ConnectionModal: React.FC<{
                       : "rgba(0,0,0,0.35)",
                   }}
                 >
-                  当前：{getDbIconLabel(effectiveIconType)}
+                  {t("connection.modal.appearance.current", {
+                    name: getDbIconLabel(effectiveIconType),
+                  })}
                 </div>
               </div>
               <div style={{ ...modalInnerSectionStyle, padding: 16 }}>
@@ -6882,7 +7928,7 @@ const ConnectionModal: React.FC<{
                     color: darkMode ? "#f5f7ff" : "#162033",
                   }}
                 >
-                  颜色
+                  {t("connection.modal.appearance.color")}
                 </div>
                 <div
                   style={{
@@ -6932,7 +7978,7 @@ const ConnectionModal: React.FC<{
                           : e.target.value,
                       )
                     }
-                    title="自定义颜色"
+                    title={t("connection.modal.appearance.customColor")}
                     style={{
                       width: 28,
                       height: 28,
@@ -6961,7 +8007,7 @@ const ConnectionModal: React.FC<{
                     color: darkMode ? "#f5f7ff" : "#162033",
                   }}
                 >
-                  预览
+                  {t("connection.modal.appearance.preview")}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   {getDbIcon(effectiveIconType, effectiveIconColor, 24)}
@@ -6971,7 +8017,8 @@ const ConnectionModal: React.FC<{
                       color: darkMode ? "#e0e0e0" : "#333",
                     }}
                   >
-                    {form.getFieldValue("name") || "连接名称"}
+                    {form.getFieldValue("name") ||
+                      t("connection.modal.appearance.previewName")}
                   </span>
                 </div>
                 {(customIconType || customIconColor) && (
@@ -6983,7 +8030,7 @@ const ConnectionModal: React.FC<{
                       setCustomIconColor(undefined);
                     }}
                   >
-                    重置为默认
+                    {t("connection.modal.appearance.reset")}
                   </Button>
                 )}
               </div>
@@ -7027,7 +8074,7 @@ const ConnectionModal: React.FC<{
                     letterSpacing: 0.2,
                   }}
                 >
-                  配置分区
+                  {t("connection.modal.config.sections")}
                 </div>
                 <div style={{ display: "grid", gap: 10 }}>
                   {sectionItems.map((item) => {
@@ -7171,14 +8218,17 @@ const ConnectionModal: React.FC<{
     if (step === 1) {
       return [
         <Button key="cancel" onClick={onClose}>
-          取消
+          {t("common.action.cancel")}
         </Button>,
       ];
     }
     const isTestSuccess = testResult?.type === "success";
     const hasTestError = !!testResult && !isTestSuccess;
     const testFailureSummary = hasTestError
-      ? summarizeConnectionTestFailureMessage(testResult?.message, "连接失败")
+      ? summarizeConnectionTestFailureMessage(
+          resolvedTestResultMessage,
+          t("connection.status.failure"),
+        )
       : "";
     const operationBlocked =
       !!currentDriverUnavailableReason ||
@@ -7206,7 +8256,7 @@ const ConnectionModal: React.FC<{
         >
           {!initialValues && (
             <Button key="back" onClick={() => setStep(1)}>
-              上一步
+              {t("common.action.back")}
             </Button>
           )}
           {testResult ? (
@@ -7232,7 +8282,11 @@ const ConnectionModal: React.FC<{
               }}
             >
               {isTestSuccess ? <CheckCircleFilled /> : <CloseCircleFilled />}
-              <span>{isTestSuccess ? "连接成功" : "连接失败"}</span>
+              <span>
+                {isTestSuccess
+                  ? t("connection.status.success")
+                  : t("connection.status.failure")}
+              </span>
             </span>
           ) : null}
           {hasTestError && (
@@ -7267,7 +8321,7 @@ const ConnectionModal: React.FC<{
               }}
               onClick={() => setTestErrorLogOpen(true)}
             >
-              查看原因
+              {t("connection.action.viewDetails")}
             </Button>
           )}
         </div>
@@ -7278,10 +8332,10 @@ const ConnectionModal: React.FC<{
             disabled={operationBlocked}
             onClick={requestTest}
           >
-            测试连接
+            {t("connection.action.test")}
           </Button>
           <Button key="cancel" onClick={onClose}>
-            取消
+            {t("common.action.cancel")}
           </Button>
           <Button
             key="submit"
@@ -7290,7 +8344,7 @@ const ConnectionModal: React.FC<{
             disabled={operationBlocked}
             onClick={handleOk}
           >
-            保存
+            {t("common.action.save")}
           </Button>
         </Space>
       </div>
@@ -7301,21 +8355,21 @@ const ConnectionModal: React.FC<{
     if (step === 1) {
       return renderConnectionModalTitle(
         <AppstoreOutlined />,
-        "选择数据源类型",
-        "按数据库、中间件或文件类型快速进入对应的连接配置流程。",
+        t("connection.modal.title.step1"),
+        t("connection.modal.description.step1"),
       );
     }
     const typeName = dbTypes.find((t) => t.key === dbType)?.name || dbType;
     return initialValues
       ? renderConnectionModalTitle(
           <EditOutlined />,
-          "编辑连接",
-          `调整 ${typeName} 连接的参数、认证方式与网络选项。`,
+          t("connection.modal.title.edit"),
+          t("connection.modal.description.edit", { type: typeName }),
         )
       : renderConnectionModalTitle(
           <LinkOutlined />,
-          `新建 ${typeName} 连接`,
-          "填写连接参数、测试连通性，并保存到连接树中。",
+          t("connection.modal.title.create", { type: typeName }),
+          t("connection.modal.description.create"),
         );
   };
 
@@ -7359,8 +8413,8 @@ const ConnectionModal: React.FC<{
       <Modal
         title={renderConnectionModalTitle(
           <FileTextOutlined />,
-          "测试连接失败原因",
-          "查看本次测试连接的完整错误上下文，便于快速定位配置问题。",
+          t("connection.modal.failureDialog.title"),
+          t("connection.modal.failureDialog.description"),
         )}
         open={testErrorLogOpen}
         onCancel={() => setTestErrorLogOpen(false)}
@@ -7384,7 +8438,7 @@ const ConnectionModal: React.FC<{
         }}
         footer={[
           <Button key="close" onClick={() => setTestErrorLogOpen(false)}>
-            关闭
+            {t("common.action.close")}
           </Button>,
         ]}
       >
@@ -7405,7 +8459,10 @@ const ConnectionModal: React.FC<{
             fontFamily: "var(--gn-font-mono)",
           }}
         >
-          {String(testResult?.message || "暂无失败日志")}
+          {String(
+            resolvedTestResultMessage ||
+              t("connection.modal.failureDialog.emptyLog"),
+          )}
         </pre>
       </Modal>
     </>

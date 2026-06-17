@@ -134,6 +134,10 @@ export function AISetContextLevel(arg1) {
   return window['go']['aiservice']['Service']['AISetContextLevel'](arg1);
 }
 
+export function AISetLanguage(arg1) {
+  return window['go']['aiservice']['Service']['AISetLanguage'](arg1);
+}
+
 export function AISetSafetyLevel(arg1) {
   return window['go']['aiservice']['Service']['AISetSafetyLevel'](arg1);
 }

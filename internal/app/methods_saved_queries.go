@@ -1,6 +1,10 @@
 package app
 
-import "GoNavi-Wails/internal/connection"
+import (
+	"strings"
+
+	"GoNavi-Wails/internal/connection"
+)
 
 func (a *App) savedQueryRepository() *savedQueryRepository {
 	return newSavedQueryRepository(a.configDir)
@@ -22,6 +26,9 @@ func (a *App) GetSavedQueries() ([]connection.SavedQuery, error) {
 }
 
 func (a *App) SaveQuery(input connection.SavedQuery) (connection.SavedQuery, error) {
+	if strings.TrimSpace(input.Name) == "" {
+		input.Name = a.localizedSavedQueryDefaultName(0)
+	}
 	currentConnections, err := a.savedConnectionRepository().List()
 	if err == nil {
 		input = resolveSavedQueryBindings([]connection.SavedQuery{input}, currentConnections, nil)[0]
@@ -30,11 +37,24 @@ func (a *App) SaveQuery(input connection.SavedQuery) (connection.SavedQuery, err
 }
 
 func (a *App) ImportSavedQueries(payload connection.SavedQueryImportPayload) ([]connection.SavedQuery, error) {
+	if len(payload.Queries) > 0 {
+		localizedQueries := append([]connection.SavedQuery(nil), payload.Queries...)
+		for index := range localizedQueries {
+			if strings.TrimSpace(localizedQueries[index].Name) == "" {
+				localizedQueries[index].Name = a.localizedSavedQueryDefaultName(index)
+			}
+		}
+		payload.Queries = localizedQueries
+	}
 	currentConnections, err := a.savedConnectionRepository().List()
 	if err != nil {
 		currentConnections = nil
 	}
 	return a.savedQueryRepository().Import(payload, currentConnections)
+}
+
+func (a *App) localizedSavedQueryDefaultName(index int) string {
+	return a.appText("saved_query.default_name", map[string]any{"index": index + 1})
 }
 
 func (a *App) DeleteQuery(id string) error {

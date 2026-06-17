@@ -1,4 +1,5 @@
 import type { SavedConnection, SavedQuery } from '../types';
+import { t as translate } from '../i18n';
 import { LEGACY_PERSIST_KEY } from './legacyConnectionStorage';
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem'>;
@@ -50,6 +51,10 @@ const unwrapPersistedAppState = (payload: unknown): Record<string, unknown> => {
   return raw;
 };
 
+const resolveGeneratedSavedQueryName = (index: number): string => (
+  translate('saved_query.default_name', { index: index + 1 })
+);
+
 const sanitizeSavedQuery = (value: unknown, index: number): SavedQuery | null => {
   if (!value || typeof value !== 'object') {
     return null;
@@ -64,7 +69,7 @@ const sanitizeSavedQuery = (value: unknown, index: number): SavedQuery | null =>
   }
   const query: SavedQuery = {
     id,
-    name: toTrimmedString(raw.name, `查询-${index + 1}`) || `查询-${index + 1}`,
+    name: toTrimmedString(raw.name, resolveGeneratedSavedQueryName(index)) || resolveGeneratedSavedQueryName(index),
     sql,
     connectionId,
     dbName,

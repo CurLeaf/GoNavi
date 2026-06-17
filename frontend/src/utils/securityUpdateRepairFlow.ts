@@ -2,10 +2,16 @@ import type { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from 
 
 export type SecurityUpdateRepairSource = 'connection' | 'proxy' | 'ai';
 export type SecurityUpdateSettingsFocusTarget = 'recent_result' | 'status';
+export type SecurityUpdateRepairTranslator = (key: string) => string;
 export type SecurityUpdateFocusState = {
   target: SecurityUpdateSettingsFocusTarget | null;
   pulseKey: string | null;
 };
+
+const securityUpdateRepairText = (
+  key: string,
+  t?: SecurityUpdateRepairTranslator,
+): string => (t ? t(key) : key);
 
 export type SecurityUpdateRepairEntry =
   | {
@@ -66,13 +72,14 @@ export const resolveSecurityUpdateRepairEntry = (
   issue: SecurityUpdateIssue,
   connections: SavedConnection[],
   status?: Pick<SecurityUpdateStatus, 'backupPath' | 'lastError'> | null,
+  t?: SecurityUpdateRepairTranslator,
 ): SecurityUpdateRepairEntry => {
   if (issue.action === 'open_connection') {
     const target = connections.find((connection) => connection.id === issue.refId);
     if (!target) {
       return {
         type: 'warning',
-        message: '未找到对应连接，请先重新检查最新状态',
+        message: securityUpdateRepairText('security_update.repair.warning.connection_not_found', t),
       };
     }
     return {

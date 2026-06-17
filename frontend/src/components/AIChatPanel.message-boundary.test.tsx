@@ -2,111 +2,65 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('./AIChatPanel.tsx', import.meta.url), 'utf8');
+const testSource = readFileSync(new URL('./AIChatPanel.message-boundary.test.tsx', import.meta.url), 'utf8');
 const boundarySource = readFileSync(new URL('./ai/AIMessageRenderBoundary.tsx', import.meta.url), 'utf8');
 const conversationViewSource = readFileSync(new URL('./ai/AIChatPanelConversationView.tsx', import.meta.url), 'utf8');
-const derivedStateSource = readFileSync(new URL('./ai/aiChatPanelDerivedState.ts', import.meta.url), 'utf8');
-const autoContextSource = readFileSync(new URL('./ai/useAIChatAutoContext.ts', import.meta.url), 'utf8');
-const payloadDispatchSource = readFileSync(new URL('./ai/aiChatPayloadDispatch.ts', import.meta.url), 'utf8');
-const planContextSource = readFileSync(new URL('./ai/useAIChatPlanContexts.ts', import.meta.url), 'utf8');
-const resizeSource = readFileSync(new URL('./ai/useAIChatPanelResize.ts', import.meta.url), 'utf8');
-const runtimeResourcesSource = readFileSync(new URL('./ai/useAIChatRuntimeResources.ts', import.meta.url), 'utf8');
-const sessionStateSource = readFileSync(new URL('./ai/useAIChatSessionState.ts', import.meta.url), 'utf8');
-const titleGeneratorSource = readFileSync(new URL('./ai/useAIChatSessionTitleGenerator.ts', import.meta.url), 'utf8');
-const localToolsSource = readFileSync(new URL('./ai/useAIChatLocalTools.ts', import.meta.url), 'utf8');
-const streamSubscriptionSource = readFileSync(new URL('./ai/useAIChatStreamSubscription.ts', import.meta.url), 'utf8');
-const inspectionGuidanceSource = readFileSync(new URL('./ai/aiSystemInspectionGuidance.ts', import.meta.url), 'utf8');
-const systemContextSource = readFileSync(new URL('./ai/aiSystemContextMessages.ts', import.meta.url), 'utf8');
-const runtimeSource = readFileSync(new URL('../utils/aiChatRuntime.ts', import.meta.url), 'utf8');
 
-describe('AIChatPanel message render isolation', () => {
-  it('keeps per-message render failures scoped to the broken bubble', () => {
+describe('AIChatPanel merge resolution', () => {
+  it('clears conflict markers from the merged files', () => {
+    expect(source).not.toMatch(/^<{7}|^={7}|^>{7}/m);
+    expect(testSource).not.toMatch(/^<{7}|^={7}|^>{7}/m);
+  });
+
+  it('keeps dev split architecture while retaining render-boundary isolation', () => {
     expect(source).toContain("import AIChatPanelConversationView from './ai/AIChatPanelConversationView';");
-    expect(boundarySource).toContain('class AIMessageRenderBoundary extends React.Component');
-    expect(source).toContain('[AI Message Render Error]');
-    expect(conversationViewSource).toContain("import AIMessageRenderBoundary from './AIMessageRenderBoundary';");
-    expect(boundarySource).toContain('这条 AI 消息渲染失败，已自动隔离');
-    expect(source).toContain('__gonaviLastAIMessageRenderError');
-    expect(conversationViewSource).toContain('<AIMessageRenderBoundary');
-    expect(conversationViewSource).toContain('onDeleteMessage={onDeleteMessage}');
-  });
-
-  it('loads user prompt settings and appends them as system messages', () => {
     expect(source).toContain("import { useAIChatRuntimeResources } from './ai/useAIChatRuntimeResources';");
-    expect(source).toContain('useAIChatRuntimeResources({ onOpenSettings })');
-    expect(runtimeResourcesSource).toContain('AIGetUserPromptSettings');
-    expect(runtimeResourcesSource).toContain("window.addEventListener('gonavi:ai:config-changed'");
-    expect(systemContextSource).toContain('以下是当前用户的自定义补充提示词');
-    expect(systemContextSource).toContain("appendCustomPromptGroup(systemMessages, ['database']");
-  });
-
-  it('loads MCP tools and skills into the runtime tool chain', () => {
-    expect(runtimeResourcesSource).toContain('AIListMCPTools');
-    expect(runtimeResourcesSource).toContain('AIGetSkills');
-    expect(source).toContain("import { useAIChatLocalTools } from './ai/useAIChatLocalTools';");
-    expect(localToolsSource).toContain('executeLocalAIToolCall');
-    expect(systemContextSource).toContain('以下是当前启用的 Skill');
-    expect(source).toContain('buildAvailableAIChatTools');
-  });
-
-  it('teaches the runtime to use deeper schema tools when analyzing structure details', () => {
-    expect(systemContextSource).toContain('get_indexes、get_foreign_keys、get_triggers、get_table_ddl');
-    expect(systemContextSource).toContain('inspect_active_tab 读取当前活动页签上下文');
-    expect(systemContextSource).toContain('inspect_workspace_tabs 盘点当前工作区');
-    expect(inspectionGuidanceSource).toContain('inspect_current_connection');
-    expect(inspectionGuidanceSource).toContain('inspect_external_sql_directories');
-    expect(inspectionGuidanceSource).toContain('inspect_external_sql_file');
-    expect(localToolsSource).toContain('tabs: currentState.tabs');
-    expect(localToolsSource).toContain('activeTabId: currentState.activeTabId');
-    expect(localToolsSource).toContain('externalSQLDirectories: currentState.externalSQLDirectories');
-    expect(localToolsSource).toContain('toolContextMap: toolContextMapRef.current');
-    expect(localToolsSource).toContain('buildToolResultMessage');
-  });
-
-  it('extracts chat runtime helpers so context compression and error cleanup stay out of the panel file', () => {
-    expect(source).toContain("import { dispatchAIChatPayload } from './ai/aiChatPayloadDispatch';");
     expect(source).toContain("import { useAIChatStreamSubscription } from './ai/useAIChatStreamSubscription';");
-    expect(source).toContain('compressContextIfNeeded, getDynamicMaxContextChars');
-    expect(source).toContain('useAIChatStreamSubscription({');
-    expect(source).toContain('useAIChatLocalTools({');
-    expect(runtimeSource).toContain('export const getDynamicMaxContextChars');
-    expect(runtimeSource).toContain('export const compressContextIfNeeded');
-    expect(runtimeSource).toContain('export const sanitizeErrorMsg');
-    expect(payloadDispatchSource).toContain('export const dispatchAIChatPayload');
-    expect(payloadDispatchSource).toContain('sanitizeErrorMsg');
-    expect(localToolsSource).toContain('compressContextIfNeeded');
-    expect(localToolsSource).toContain('dispatchAIChatPayload');
-    expect(streamSubscriptionSource).toContain('EventsOn(eventName, handler);');
-    expect(streamSubscriptionSource).toContain('请直接使用 function call 调用工具执行操作');
-    expect(streamSubscriptionSource).toContain('executeLocalTools(existing.tool_calls!, doneAssistantId)');
-    expect(runtimeSource).toContain('⚙️ 对话已超载，正在启动记忆压缩');
-  });
-
-  it('keeps the v2 history mode sorted by the latest updated session first', () => {
-    expect(source).toContain("import { useAIChatSessionState } from './ai/useAIChatSessionState';");
-    expect(source).toContain('const panelHistorySessions = useMemo(');
-    expect(sessionStateSource).toContain('right.updatedAt - left.updatedAt');
-    expect(sessionStateSource).toContain("const sid = aiActiveSessionId || 'session-fallback';");
-    expect(source).toContain('buildAIChatInlineHistorySessions(orderedAISessions)');
-    expect(derivedStateSource).toContain('export const buildAIChatInlineHistorySessions');
-    expect(derivedStateSource).toContain('sessions.slice(0, limit)');
-    expect(source).toContain('sessions={panelHistorySessions}');
-  });
-
-  it('extracts plan-context, auto-context, title, and resize hooks so the panel file stays focused on orchestration', () => {
-    expect(source).toContain("import { useAIChatPlanContexts } from './ai/useAIChatPlanContexts';");
-    expect(source).toContain("import { useAIChatAutoContext } from './ai/useAIChatAutoContext';");
-    expect(source).toContain("import { useAIChatSessionTitleGenerator } from './ai/useAIChatSessionTitleGenerator';");
-    expect(source).toContain("import { useAIChatPanelResize } from './ai/useAIChatPanelResize';");
     expect(source).toContain("import { useAIChatLocalTools } from './ai/useAIChatLocalTools';");
-    expect(planContextSource).toContain('export const useAIChatPlanContexts');
-    expect(planContextSource).toContain('pendingJVMPlanContextRef');
-    expect(autoContextSource).toContain('export const useAIChatAutoContext');
-    expect(autoContextSource).toContain('DBShowCreateTable');
-    expect(titleGeneratorSource).toContain('export const useAIChatSessionTitleGenerator');
-    expect(titleGeneratorSource).toContain('Failed to auto-generate title');
-    expect(resizeSource).toContain('export const useAIChatPanelResize');
-    expect(resizeSource).toContain('document.body.style.pointerEvents = \'none\'');
-    expect(localToolsSource).toContain('export const useAIChatLocalTools');
-    expect(localToolsSource).toContain('MAX_TOOL_CALL_ROUNDS');
+
+    expect(boundarySource).toContain('class AIMessageRenderBoundary extends React.Component');
+    expect(conversationViewSource).toContain("import AIMessageRenderBoundary from './AIMessageRenderBoundary';");
+    expect(conversationViewSource).toContain('<AIMessageRenderBoundary');
+    expect(source).toContain('onMessageRenderError={handleMessageRenderError}');
+    expect(source).toContain('__gonaviLastAIMessageRenderError');
+    expect(source).toContain('[AI Message Render Error]');
+  });
+
+  it('restores panel-level i18n orchestration for composer notices and send lifecycle text', () => {
+    expect(source).toContain("import { useI18n } from '../i18n/provider';");
+    expect(source).toContain("import type { AIComposerNoticeDescriptor } from '../utils/aiComposerNotice';");
+    expect(source).toContain("import { buildAIComposerNotice } from '../utils/aiComposerNotice';");
+    expect(source).toContain("const { t } = useI18n();");
+    expect(source).toContain("const [composerNoticeState, setComposerNoticeState] = useState<AIComposerNoticeDescriptor | null>(null);");
+    expect(source).toContain("buildAIComposerNotice(t, composerNoticeState) ?? runtimeComposerNotice");
+    expect(source).toContain("setComposerNoticeState({ kind: 'missing_provider' });");
+    expect(source).toContain("setComposerNoticeState({ kind: 'provider_incomplete', issues: readiness.issues });");
+    expect(source).toContain("setComposerNoticeState({ kind: 'missing_model' });");
+
+    for (const key of [
+      'ai_chat.panel.status.model_connecting',
+      'ai_chat.panel.status.waking_engine',
+      'ai_chat.panel.status.waiting_response',
+      'ai_chat.panel.status.memory_summary',
+      'ai_chat.panel.message.service_not_ready',
+    ]) {
+      expect(source).toContain(`t('${key}'`);
+    }
+
+    expect(source).not.toContain('buildMissingProviderNotice');
+    expect(source).not.toContain('buildIncompleteProviderNotice');
+    expect(source).not.toContain('buildMissingModelNotice');
+  });
+
+  it('keeps translated session and insight chrome in the panel layer instead of falling back to hardcoded copy', () => {
+    expect(source).toContain("() => orderedAISessions.find((session) => session.id === sid)?.title || t('ai_chat.panel.session.default_title')");
+    expect(source).toContain("title: session.title || t('ai_chat.panel.session.default_title')");
+    expect(source).toContain("t('ai_chat.panel.insight.context.linked_title', { count: contextCount })");
+    expect(source).toContain("t('ai_chat.panel.insight.context.linked_body', { tables: tablePreview })");
+    expect(source).toContain("t('ai_chat.panel.insight.query.slowest_title', { duration: Math.round(slowest.duration).toLocaleString() })");
+    expect(source).toContain("t('ai_chat.panel.insight.status.recent_body', { count: recentLogs.length })");
+    expect(source).toContain("t('ai_chat.panel.insight.write.detected_title', { count: writeCount })");
+    expect(source).not.toContain('buildAIChatInsights({');
+    expect(source).not.toContain("|| '新对话'");
   });
 });

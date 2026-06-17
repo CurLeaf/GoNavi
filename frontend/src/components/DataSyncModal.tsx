@@ -10,6 +10,8 @@ import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
 import { formatLocalDateTimeLiteral, normalizeTemporalLiteralText } from './dataGridCopyInsert';
 import { buildDataSyncRequest, type SourceDatasetMode, validateDataSyncSelection } from './dataSyncRequest';
+import { t } from '../i18n';
+import { useOptionalI18n } from '../i18n/provider';
 import { resolveDataSyncEntryModePresentation, type DataSyncEntryMode } from './dataSyncEntryMode';
 const { Title, Text } = Typography;
 const { Step } = Steps;
@@ -190,7 +192,10 @@ const buildSqlPreview = (
 };
 
 const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: DataSyncEntryMode }> = ({ open, onClose, entryMode = 'sync' }) => {
-  const entryPresentation = resolveDataSyncEntryModePresentation(entryMode);
+  const i18n = useOptionalI18n();
+  const i18nLanguage = i18n?.language;
+  const tr = (key: string, params?: Parameters<typeof t>[1]) => t(key, params, i18nLanguage);
+  const entryPresentation = resolveDataSyncEntryModePresentation(entryMode, tr);
   const isSchemaCompareEntry = entryMode === 'schemaCompare';
   const isDataCompareEntry = entryMode === 'dataCompare';
   const isCompareEntry = entryPresentation.readOnly;
@@ -425,7 +430,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                     .map((r: any) => r?.Database || r?.database || r?.username)
                     .filter((name: any) => typeof name === 'string' && name.trim() !== ''));
             }
-          } catch(e) { message.error("Failed to fetch source databases"); }
+          } catch(e: any) {
+          message.error(tr('data_sync.message.fetch_source_databases_failed_detail', { detail: e?.message || String(e) }));
+        }
           setLoading(false);
       }
   };
@@ -444,7 +451,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                     .map((r: any) => r?.Database || r?.database || r?.username)
                     .filter((name: any) => typeof name === 'string' && name.trim() !== ''));
             }
-          } catch(e) { message.error("Failed to fetch target databases"); }
+          } catch(e: any) {
+          message.error(tr('data_sync.message.fetch_target_databases_failed_detail', { detail: e?.message || String(e) }));
+        }
           setLoading(false);
       }
   };
@@ -478,10 +487,12 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                   });
                   setCurrentStep(1);
               } else {
-                  message.error(res.message);
+                  message.error(res.message ? tr('data_sync.message.fetch_tables_failed_detail', { detail: res.message }) : tr('data_sync.message.fetch_tables_failed'));
               }
           }
-      } catch (e) { message.error("Failed to fetch tables"); }
+      } catch (e: any) {
+          message.error(tr('data_sync.message.fetch_tables_failed_detail', { detail: e?.message || String(e) }));
+      }
       setLoading(false);
   };
 
@@ -494,9 +505,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
 
   const analyzeDiff = async () => {
       const selectionError = validateDataSyncSelection({ sourceDatasetMode, selectedTables, sourceQuery, syncContent });
-      if (selectionError) return message.error(selectionError);
-      if (!sourceConnId || !targetConnId) return message.error("Select connections first");
-      if (!sourceDb || !targetDb) return message.error("Select databases first");
+      if (selectionError) return message.error(tr(selectionError));
+      if (!sourceConnId || !targetConnId) return message.error(tr('data_sync.message.select_connections_first'));
+      if (!sourceDb || !targetDb) return message.error(tr('data_sync.message.select_databases_first'));
 
       setLoading(true);
       setAnalyzing(true);
@@ -509,7 +520,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
       const jobId = `analyze-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
       jobIdRef.current = jobId;
       autoScrollRef.current = true;
-      setSyncProgress({ percent: 0, current: 0, total: selectedTables.length, table: '', stage: '差异分析' });
+      setSyncProgress({ percent: 0, current: 0, total: selectedTables.length, table: '', stage: tr('data_sync.progress.stage.analyzing_diff') });
 
       const config = buildDataSyncRequest({
           sourceConfig: normalizeConnConfig(sConn, sourceDb),
@@ -546,12 +557,12 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                   };
               });
               setTableOptions(init);
-              message.success("差异分析完成");
+              message.success(tr('data_sync.message.analysis_complete'));
           } else {
-              message.error(res.message || "差异分析失败");
+              message.error(res.message ? tr('data_sync.message.analysis_failed_detail', { detail: res.message }) : tr('data_sync.message.analysis_failed'));
           }
       } catch (e: any) {
-          message.error("差异分析失败: " + (e?.message || ""));
+          message.error(tr('data_sync.message.analysis_failed_detail', { detail: e?.message || String(e) }));
       }
 
       setLoading(false);
@@ -589,10 +600,10 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
           if (res.success) {
               setPreviewData(res.data);
           } else {
-              message.error(res.message || "加载差异预览失败");
+              message.error(res.message ? tr('data_sync.message.preview_load_failed_detail', { detail: res.message }) : tr('data_sync.message.preview_load_failed'));
           }
       } catch (e: any) {
-          message.error("加载差异预览失败: " + (e?.message || ""));
+          message.error(tr('data_sync.message.preview_load_failed_detail', { detail: e?.message || String(e) }));
       }
 
       setPreviewLoading(false);
@@ -601,20 +612,20 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
   const runSync = async () => {
       const selectionError = validateDataSyncSelection({ sourceDatasetMode, selectedTables, sourceQuery, syncContent });
       if (selectionError) {
-          message.error(selectionError);
+          message.error(tr(selectionError));
           return;
       }
       if (syncContent !== 'schema' && diffTables.length === 0) {
-          message.error("请先对比差异，再开始同步");
+          message.error(tr('data_sync.message.analyze_before_sync'));
           return;
       }
       if (syncContent !== 'schema' && syncMode === 'full_overwrite') {
           const ok = await new Promise<boolean>((resolve) => {
               Modal.confirm({
-                  title: '确认全量覆盖',
-                  content: '全量覆盖会清空目标表数据后再插入，请确认已备份目标库。',
-                  okText: '继续执行',
-                  cancelText: '取消',
+                  title: tr('data_sync.modal.full_overwrite_title'),
+                  content: tr('data_sync.modal.full_overwrite_content'),
+                  okText: tr('data_sync.modal.full_overwrite_ok'),
+                  cancelText: tr('common.cancel'),
                   onOk: () => resolve(true),
                   onCancel: () => resolve(false),
               });
@@ -639,7 +650,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
           current: 0,
           total: selectedTables.length,
           table: '',
-          stage: '准备开始',
+          stage: tr('data_sync.progress.stage.preparing'),
       });
       
       const config = buildDataSyncRequest({
@@ -668,15 +679,15 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                   if (prev.length > 0) return prev;
                   return (res.logs as string[]).map((log) => {
                       const msg = String(log || '').trim();
-                      if (msg.includes('致命错误') || msg.includes('失败')) return { level: 'error', message: msg };
-                      if (msg.includes('跳过') || msg.includes('警告')) return { level: 'warn', message: msg };
+                      if (msg.includes('致命错误') || msg.includes('失败')) return { level: 'error', message: msg }; // i18n-scan: allow-raw backend log severity markers
+                      if (msg.includes('跳过') || msg.includes('警告')) return { level: 'warn', message: msg }; // i18n-scan: allow-raw backend log severity markers
                       return { level: 'info', message: msg };
                   });
               });
           }
-      } catch (e) {
-          message.error("Sync execution failed");
-          setSyncResult({ success: false, message: "同步执行失败", logs: [] });
+      } catch (e: any) {
+          message.error(tr('data_sync.message.sync_execution_failed_detail', { detail: e?.message || String(e) }));
+          setSyncResult({ success: false, message: tr('data_sync.message.sync_execution_failed'), logs: [] });
       }
       setLoading(false);
       setSyncing(false);
@@ -685,8 +696,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
   const renderSyncLogItem = (item: SyncLogItem) => {
       const level = String(item.level || 'info').toLowerCase();
       const color = level === 'error' ? '#ff4d4f' : (level === 'warn' ? '#faad14' : '#595959');
-      const label = level === 'error' ? '错误' : (level === 'warn' ? '警告' : '信息');
-      const timeText = typeof item.ts === 'number' ? new Date(item.ts).toLocaleTimeString('zh-CN', { hour12: false }) : '';
+      const label = level === 'error' ? tr('data_sync.log.level.error') : (level === 'warn' ? tr('data_sync.log.level.warn') : tr('data_sync.log.level.info'));
+      const timeText = typeof item.ts === 'number' ? new Date(item.ts).toLocaleTimeString(i18nLanguage || undefined, { hour12: false }) : '';
       return (
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <span style={{ color, flex: '0 0 auto' }}>● {label}</span>
@@ -841,11 +852,18 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
   return (
     <>
     <Modal
-        title={renderModalTitle(isMigrationWorkflow ? '跨库迁移工作台' : entryPresentation.title, isMigrationWorkflow ? '按源库 → 目标库完成建表、导入与风险预检。' : entryPresentation.description)}
+        title={renderModalTitle(
+            isMigrationWorkflow
+                ? tr('data_sync.title.migration_workbench')
+                : (isCompareEntry ? entryPresentation.title : tr('data_sync.title.sync_workbench')),
+            isMigrationWorkflow
+                ? tr('data_sync.title.migration_description')
+                : (isCompareEntry ? entryPresentation.description : tr('data_sync.title.sync_description')),
+        )}
         open={open}
         onCancel={() => {
             if (syncing) {
-                message.warning("同步执行中，暂不支持关闭");
+                message.warning(tr('data_sync.message.close_blocked_running'));
                 return;
             }
             onClose();
@@ -874,24 +892,32 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
       <div style={heroPanelStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
               <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: darkMode ? '#f8fafc' : '#0f172a' }}>{isMigrationWorkflow ? '跨数据源迁移' : entryPresentation.heroTitle}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: darkMode ? '#f8fafc' : '#0f172a' }}>
+                      {isMigrationWorkflow
+                          ? tr('data_sync.title.migration')
+                          : (isCompareEntry ? entryPresentation.heroTitle : tr('data_sync.title.sync'))}
+                  </div>
                   <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.7, color: darkMode ? 'rgba(255,255,255,0.62)' : 'rgba(15,23,42,0.62)' }}>
                       {isMigrationWorkflow
-                          ? '适合把源表迁移到另一套数据库，可按策略自动建表、导入数据并补建可兼容索引。'
-                          : entryPresentation.heroDescription}
+                          ? tr('data_sync.title.migration_description')
+                          : (isCompareEntry ? entryPresentation.heroDescription : tr('data_sync.title.sync_description'))}
                   </div>
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  <span style={badgeStyle}>{isMigrationWorkflow ? <RocketOutlined /> : <SwapOutlined />} {isMigrationWorkflow ? '迁移模式' : entryPresentation.badgeText}</span>
-                  <span style={badgeStyle}><DatabaseOutlined /> {sourceConnId ? '已选源连接' : '待选源连接'}</span>
-                  <span style={badgeStyle}><TableOutlined /> {selectedTables.length || 0} 张表</span>
+                  <span style={badgeStyle}>
+                      {isMigrationWorkflow ? <RocketOutlined /> : <SwapOutlined />} {isMigrationWorkflow
+                          ? tr('data_sync.badge.migration_mode')
+                          : (isCompareEntry ? entryPresentation.badgeText : tr('data_sync.badge.sync_mode'))}
+                  </span>
+                  <span style={badgeStyle}><DatabaseOutlined /> {sourceConnId ? tr('data_sync.badge.source_selected') : tr('data_sync.badge.source_pending')}</span>
+                  <span style={badgeStyle}><TableOutlined /> {tr('data_sync.badge.table_count', { count: selectedTables.length || 0 })}</span>
               </div>
           </div>
       </div>
       <Steps current={currentStep} style={{ marginBottom: 24 }}>
-        <Step title="配置源与目标" />
-        <Step title="选择表" />
-        <Step title={entryPresentation.resultTitle} />
+        <Step title={tr('data_sync.step.configure')} />
+        <Step title={tr('data_sync.step.select_tables')} />
+        <Step title={isCompareEntry ? entryPresentation.resultTitle : tr('data_sync.step.result')} />
       </Steps>
       </div>
 
@@ -901,17 +927,17 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
           <div>
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 44px minmax(0, 1fr)', gap: 18, alignItems: 'stretch' }}>
                   <Card
-                      title="源数据库"
+                      title={tr('data_sync.title.source_database')}
                       style={shellCardStyle}
                       styles={{ header: { borderBottom: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.06)', fontWeight: 700 }, body: { padding: 18 } }}
                   >
                       <Form layout="vertical">
-                          <Form.Item label="连接">
+                          <Form.Item label={tr('data_sync.field.connection')}>
                               <Select value={sourceConnId} onChange={handleSourceConnChange}>
                                   {connections.map(c => <Option key={c.id} value={c.id}>{c.name} ({c.config.type})</Option>)}
                               </Select>
                           </Form.Item>
-                          <Form.Item label="数据库">
+                          <Form.Item label={tr('data_sync.field.database')}>
                               <Select value={sourceDb} onChange={setSourceDb} showSearch>
                                   {sourceDbs.map(d => <Option key={d} value={d}>{d}</Option>)}
                               </Select>
@@ -924,17 +950,17 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                       </div>
                   </div>
                   <Card
-                      title="目标数据库"
+                      title={tr('data_sync.title.target_database')}
                       style={shellCardStyle}
                       styles={{ header: { borderBottom: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.06)', fontWeight: 700 }, body: { padding: 18 } }}
                   >
                       <Form layout="vertical">
-                          <Form.Item label="连接">
+                          <Form.Item label={tr('data_sync.field.connection')}>
                               <Select value={targetConnId} onChange={handleTargetConnChange}>
                                   {connections.map(c => <Option key={c.id} value={c.id}>{c.name} ({c.config.type})</Option>)}
                               </Select>
                           </Form.Item>
-                          <Form.Item label="数据库">
+                          <Form.Item label={tr('data_sync.field.database')}>
                               <Select value={targetDb} onChange={setTargetDb} showSearch>
                                   {targetDbs.map(d => <Option key={d} value={d}>{d}</Option>)}
                               </Select>
@@ -944,92 +970,94 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
               </div>
 
               <Card
-                  title={isMigrationWorkflow ? '迁移选项' : entryPresentation.optionTitle}
+                  title={isMigrationWorkflow
+                      ? tr('data_sync.title.migration_options')
+                      : (isCompareEntry ? entryPresentation.optionTitle : tr('data_sync.title.sync_options'))}
                   style={{ ...shellCardStyle, marginTop: 18 }}
                   styles={{ header: { borderBottom: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(15,23,42,0.06)', fontWeight: 700 }, body: { padding: 18 } }}
               >
                   <div style={{ ...quietPanelStyle, marginBottom: 14 }}>
                       <Text style={{ color: darkMode ? 'rgba(255,255,255,0.72)' : 'rgba(15,23,42,0.68)', lineHeight: 1.7 }}>
                           {isCompareEntry
-                              ? '当前入口只做差异分析和预览，不会执行同步、建表、补字段或删除数据。'
-                              : '先明确当前要做的是“已有目标表同步”还是“跨库迁移”，页面会按功能类型自动给出更安全的默认策略。'}
+                              ? tr('data_sync.compare_entry.workflow_help')
+                              : tr('data_sync.help.workflow_type')}
                       </Text>
                   </div>
                   <Form layout="vertical">
                       {!isCompareEntry && (
-                          <Form.Item label="功能类型">
+                          <Form.Item label={tr('data_sync.field.workflow_type')}>
                               <Select value={workflowType} onChange={setWorkflowType}>
-                                  <Option value="sync">数据同步（基于已有目标表做差异同步）</Option>
-                                  <Option value="migration" disabled={isSourceQueryMode}>跨库迁移（可自动建表后导入）</Option>
+                                  <Option value="sync">{tr('data_sync.option.workflow.sync')}</Option>
+                                  <Option value="migration" disabled={isSourceQueryMode}>{tr('data_sync.option.workflow.migration')}</Option>
                               </Select>
                           </Form.Item>
                       )}
                       {!isSchemaCompareEntry && (
-                          <Form.Item label="源数据方式">
+                          <Form.Item label={tr('data_sync.field.source_dataset_mode')}>
                               <Select value={sourceDatasetMode} onChange={setSourceDatasetMode}>
-                                  <Option value="table">{isCompareEntry ? '按表比对' : '按表同步'}</Option>
-                                  <Option value="query">{isCompareEntry ? '按 SQL 结果集比对' : '按 SQL 结果集同步'}</Option>
+                                  <Option value="table">{isCompareEntry ? tr('data_sync.compare_entry.option.source_dataset.table') : tr('data_sync.option.source_dataset.table')}</Option>
+                                  <Option value="query">{isCompareEntry ? tr('data_sync.compare_entry.option.source_dataset.query') : tr('data_sync.option.source_dataset.query')}</Option>
                               </Select>
                           </Form.Item>
                       )}
-                      <Alert
-                          type={isMigrationWorkflow || isCompareEntry ? 'info' : 'success'}
-                          showIcon
-                          style={{ marginBottom: 12 }}
-                          message={isMigrationWorkflow
-                              ? '当前为“跨库迁移”模式：适合将表迁移到另一数据源，可自动建表并导入数据。'
-                              : isSchemaCompareEntry
-                                  ? '当前为“表结构比对”入口：固定只分析结构差异和生成可审阅 SQL，不执行变更。'
-                                  : isDataCompareEntry
-                                      ? '当前为“数据比对”入口：固定按主键分析行级差异，不执行写入。'
-                                      : '当前为“数据同步”模式：适合目标表已存在时做增量同步或覆盖导入。'}
-                      />
+                        <Alert
+                            type={isMigrationWorkflow || isCompareEntry ? 'info' : 'success'}
+                            showIcon
+                            style={{ marginBottom: 12 }}
+                            message={isMigrationWorkflow
+                                ? tr('data_sync.alert.migration_mode')
+                                : isSchemaCompareEntry
+                                    ? tr('data_sync.compare_entry.alert.schema')
+                                    : isDataCompareEntry
+                                        ? tr('data_sync.compare_entry.alert.data')
+                                        : tr('data_sync.alert.sync_mode')}
+                        />
                       {isSourceQueryMode && (
                           <Alert
                               type="info"
                               showIcon
                               style={{ marginBottom: 12 }}
-                              message="SQL 结果集同步当前只支持：源端自定义 SQL -> 单个已存在目标表；查询结果需包含目标表主键列。"
+                              message={tr('data_sync.alert.query_mode')}
                           />
                       )}
                       {!isCompareEntry && (
-                          <Form.Item label={isMigrationWorkflow ? '迁移内容' : '同步内容'}>
+                          <Form.Item label={isMigrationWorkflow ? tr('data_sync.field.migration_content') : tr('data_sync.field.sync_content')}>
                               <Select value={syncContent} onChange={setSyncContent}>
-                                  <Option value="data">仅同步数据</Option>
-                                  <Option value="schema" disabled={isSourceQueryMode}>仅同步结构</Option>
-                                  <Option value="both" disabled={isSourceQueryMode}>同步结构 + 数据</Option>
+                                  <Option value="data">{tr('data_sync.option.content.data')}</Option>
+                                  <Option value="schema" disabled={isSourceQueryMode}>{tr('data_sync.option.content.schema')}</Option>
+                                  <Option value="both" disabled={isSourceQueryMode}>{tr('data_sync.option.content.both')}</Option>
                               </Select>
                           </Form.Item>
                       )}
                       {!isCompareEntry && (
-                          <Form.Item label={isMigrationWorkflow ? '迁移模式' : '同步模式'}>
+                          <Form.Item label={isMigrationWorkflow ? tr('data_sync.field.migration_mode') : tr('data_sync.field.sync_mode')}>
                               <Select value={syncMode} onChange={setSyncMode} disabled={syncContent === 'schema'}>
-                                  <Option value="insert_update">增量同步（对比差异，按插入/更新/删除勾选执行）</Option>
-                                  <Option value="insert_only">仅插入（不对比目标；无主键表将跳过）</Option>
-                                  <Option value="full_overwrite">全量覆盖（清空目标表后插入）</Option>
+                                  <Option value="insert_update">{tr('data_sync.option.sync_mode.insert_update')}</Option>
+                                  <Option value="insert_only">{tr('data_sync.option.sync_mode.insert_only')}</Option>
+                                  <Option value="full_overwrite">{tr('data_sync.option.sync_mode.full_overwrite')}</Option>
                               </Select>
                           </Form.Item>
                       )}
                       {!isCompareEntry && (
-                          <Form.Item label={isMigrationWorkflow ? '目标表处理策略' : '目标表要求'}>
+                          <Form.Item label={isMigrationWorkflow ? tr('data_sync.field.target_table_strategy') : tr('data_sync.field.target_table_requirement')}>
                               <Select value={targetTableStrategy} onChange={setTargetTableStrategy} disabled={!isMigrationWorkflow || isSourceQueryMode}>
-                                  <Option value="existing_only">仅使用已有目标表</Option>
-                                  <Option value="auto_create_if_missing">目标表不存在时自动建表后导入</Option>
-                                  <Option value="smart">智能模式（存在则直接导入，不存在则自动建表）</Option>
+                                  <Option value="existing_only">{tr('data_sync.option.target_strategy.existing_only')}</Option>
+                                  <Option value="auto_create_if_missing">{tr('data_sync.option.target_strategy.auto_create_if_missing')}</Option>
+                                  <Option value="smart">{tr('data_sync.option.target_strategy.smart')}</Option>
                               </Select>
                           </Form.Item>
                       )}
                       {isRedisMongoKeyspaceMigration && (
                           <Form.Item
-                              label="Mongo 集合名（可选）"
+                              label={tr('data_sync.field.mongo_collection_name')}
                               extra={sourceType === 'redis'
-                                  ? '为空时沿用默认集合名；填写后本次 Redis 键空间会统一写入该 Mongo 集合。'
-                                  : 'MongoDB → Redis 场景下通常直接选择源集合；这里留空即可，未显式选集合时才会回退使用该名称。'}
+                                  ? tr('data_sync.help.mongo_collection_redis_to_mongo')
+                                  : tr('data_sync.help.mongo_collection_mongo_to_redis')}
                           >
                               <Input
                                   value={mongoCollectionName}
                                   onChange={(e) => setMongoCollectionName(e.target.value)}
-                                  placeholder={defaultMongoCollectionName || '请输入 Mongo 集合名'}
+                                  placeholder={defaultMongoCollectionName || tr('data_sync.placeholder.mongo_collection_name')}
                                   allowClear
                                   maxLength={128}
                               />
@@ -1039,15 +1067,15 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                           <Form.Item>
                               <Checkbox checked={autoAddColumns} onChange={(e) => setAutoAddColumns(e.target.checked)} disabled={isSourceQueryMode}>
                                   {isSchemaCompareEntry
-                                      ? '生成目标表缺失字段的兼容变更 SQL（仅预览，不执行）'
-                                      : '自动补齐目标表缺失字段（按源/目标数据源选择可兼容规划器；SQL 结果集模式暂不支持）'}
+                                      ? tr('data_sync.compare_entry.option.auto_add_columns')
+                                      : tr('data_sync.option.auto_add_columns')}
                               </Checkbox>
                           </Form.Item>
                       )}
                       {!isCompareEntry && (
                           <Form.Item>
                               <Checkbox checked={createIndexes} onChange={(e) => setCreateIndexes(e.target.checked)} disabled={!isMigrationWorkflow || targetTableStrategy === 'existing_only' || isSourceQueryMode}>
-                                  自动迁移可兼容的普通索引/唯一索引（仅自动建表模式生效）
+                                  {tr('data_sync.option.create_indexes')}
                               </Checkbox>
                           </Form.Item>
                       )}
@@ -1055,7 +1083,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                           <Alert
                               type="info"
                               showIcon
-                              message="自动建表模式会按源/目标数据模型选择可用规划器；当前覆盖 MySQL/PG-like/ClickHouse/TDengine/MongoDB 的可映射库对，不兼容索引和表级语义会显式提示或跳过。"
+                              message={tr('data_sync.alert.auto_create_planner_scope')}
                               style={{ marginBottom: 12 }}
                           />
                       )}
@@ -1063,7 +1091,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                           <Alert
                               type="info"
                               showIcon
-                              message="数据同步模式默认基于已有目标表执行；如需跨数据源建表导入，请切换到“跨库迁移”。"
+                              message={tr('data_sync.alert.existing_target_only')}
                               style={{ marginBottom: 12 }}
                           />
                       )}
@@ -1071,7 +1099,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                           <Alert
                               type="warning"
                               showIcon
-                              message="全量覆盖会清空目标表数据，请谨慎使用。"
+                              message={tr('data_sync.alert.full_overwrite')}
                           />
                       )}
                   </Form>
@@ -1086,19 +1114,19 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                   {!isSourceQueryMode && (
                       <>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                              <Text type="secondary">{entryPresentation.tableSelectLabel}</Text>
+                              <Text type="secondary">{isCompareEntry ? entryPresentation.tableSelectLabel : tr('data_sync.help.select_tables')}</Text>
                               <Checkbox checked={showSameTables} onChange={(e) => setShowSameTables(e.target.checked)}>
-                                  显示相同表
+                                  {tr('data_sync.option.show_same_tables')}
                               </Checkbox>
                           </div>
                           <Transfer
                               dataSource={allTables.map(t => ({ key: t, title: t }))}
-                              titles={['源表', '已选表']}
+                              titles={[tr('data_sync.transfer.source_tables'), tr('data_sync.transfer.selected_tables')]}
                               targetKeys={selectedTables}
                               onChange={(keys) => setSelectedTables(keys as string[])}
                               render={item => item.title}
                               listStyle={{ width: 390, height: 320, marginTop: 0, borderRadius: 14, overflow: 'hidden' }}
-                              locale={{ itemUnit: '项', itemsUnit: '项', searchPlaceholder: '搜索表…', notFoundContent: '暂无数据' }}
+                              locale={{ itemUnit: tr('data_sync.transfer.item_unit'), itemsUnit: tr('data_sync.transfer.items_unit'), searchPlaceholder: tr('data_sync.transfer.search_placeholder'), notFoundContent: tr('data_sync.transfer.empty') }}
                           />
                       </>
                   )}
@@ -1108,24 +1136,24 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                               type="info"
                               showIcon
                               style={{ marginBottom: 12 }}
-                              message="请输入源查询 SQL，并选择一个目标表。差异分析会直接基于该结果集与目标表对比。"
+                              message={tr('data_sync.help.source_query_mode')}
                           />
-                          <Form.Item label="源查询 SQL">
+                          <Form.Item label={tr('data_sync.field.source_query_sql')}>
                               <TextArea
                                   value={sourceQuery}
                                   onChange={(e) => setSourceQuery(e.target.value)}
                                   rows={8}
-                                  placeholder="例如：SELECT id, name, email FROM users WHERE status = 'active'"
+                                  placeholder={tr('data_sync.placeholder.source_query_sql')}
                                   spellCheck={false}
                               />
                           </Form.Item>
-                          <Form.Item label="目标表">
+                          <Form.Item label={tr('data_sync.field.target_table')}>
                               <Select
                                   value={selectedTables[0]}
                                   onChange={(value) => setSelectedTables(value ? [value] : [])}
                                   showSearch
                                   allowClear
-                                  placeholder="请选择一个目标表"
+                                  placeholder={tr('data_sync.placeholder.target_table')}
                                   optionFilterProp="children"
                               >
                                   {allTables.map((table) => <Option key={table} value={table}>{table}</Option>)}
@@ -1137,16 +1165,16 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
 
               {diffTables.length > 0 && (
                   <div style={quietPanelStyle}>
-                      <Divider orientation="left" style={{ marginTop: 0 }}>对比结果</Divider>
+                      <Divider orientation="left" style={{ marginTop: 0 }}>{tr('data_sync.title.compare_result')}</Divider>
                       {analysisWarnings.length > 0 && (
                           <Alert
                               type="warning"
                               showIcon
-                              message="预检发现风险或降级项，请在执行前确认"
+                              message={tr('data_sync.message.precheck_warnings')}
                               description={
                                   <ul style={{ margin: 0, paddingLeft: 18 }}>
                                       {analysisWarnings.slice(0, 8).map((item) => <li key={item}>{item}</li>)}
-                                      {analysisWarnings.length > 8 && <li>还有 {analysisWarnings.length - 8} 项未展开</li>}
+                                      {analysisWarnings.length > 8 && <li>{tr('data_sync.message.more_items_collapsed', { count: analysisWarnings.length - 8 })}</li>}
                                   </ul>
                               }
                               style={{ marginBottom: 12 }}
@@ -1171,15 +1199,15 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                               return ins > 0 || upd > 0 || del > 0 || same === 0;
                           })}
                           columns={[
-                              { title: '表名', dataIndex: 'table', key: 'table', ellipsis: true },
+                              { title: tr('data_sync.table.table_name'), dataIndex: 'table', key: 'table', ellipsis: true },
                               {
-                                  title: '目标表',
+                                  title: tr('data_sync.table.target_table'),
                                   key: 'targetTableExists',
                                   width: 90,
-                                  render: (_: any, r: any) => r.targetTableExists ? '已存在' : '不存在'
+                                  render: (_: any, r: any) => r.targetTableExists ? tr('data_sync.table.target_exists') : tr('data_sync.table.target_missing')
                               },
                               {
-                                  title: '计划',
+                                  title: tr('data_sync.table.plan'),
                                   dataIndex: 'plannedAction',
                                   key: 'plannedAction',
                                   width: 220,
@@ -1187,7 +1215,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                   render: (v: any) => String(v || '')
                               },
                               {
-                                  title: '插入',
+                                  title: tr('data_sync.table.insert'),
                                   key: 'inserts',
                                   width: 90,
                                   render: (_: any, r: any) => {
@@ -1201,7 +1229,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                   }
                               },
                               {
-                                  title: '更新',
+                                  title: tr('data_sync.table.update'),
                                   key: 'updates',
                                   width: 90,
                                   render: (_: any, r: any) => {
@@ -1215,7 +1243,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                   }
                               },
                               {
-                                  title: '删除',
+                                  title: tr('data_sync.table.delete'),
                                   key: 'deletes',
                                   width: 90,
                                   render: (_: any, r: any) => {
@@ -1228,9 +1256,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                       );
                                   }
                               },
-                              { title: '相同', dataIndex: 'same', key: 'same', width: 70, render: (v: any) => Number(v || 0) },
+                              { title: tr('data_sync.table.same'), dataIndex: 'same', key: 'same', width: 70, render: (v: any) => Number(v || 0) },
                               {
-                                  title: '风险',
+                                  title: tr('data_sync.table.risk'),
                                   key: 'warnings',
                                   width: 220,
                                   render: (_: any, r: any) => {
@@ -1239,13 +1267,13 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                       return (
                                           <div style={{ color: '#d48806', fontSize: 12, lineHeight: 1.5 }}>
                                               {warns.slice(0, 2).map((item: string) => <div key={item}>{item}</div>)}
-                                              {warns.length > 2 && <div>还有 {warns.length - 2} 项</div>}
+                                              {warns.length > 2 && <div>{tr('data_sync.message.more_items_collapsed', { count: warns.length - 2 })}</div>}
                                           </div>
                                       );
                                   }
                               },
                               {
-                                  title: '预览',
+                                  title: tr('data_sync.table.preview'),
                                   key: 'preview',
                                   width: 80,
                                   render: (_: any, r: any) => {
@@ -1254,7 +1282,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                       const hasSchemaDiff = Number(r.schemaDiffCount || 0) > 0;
                                       return (
                                           <Button size="small" disabled={!can || !(hasDiff || hasSchemaDiff) || analyzing} onClick={() => openPreview(r.table)}>
-                                              查看
+                                              {tr('data_sync.action.view')}
                                           </Button>
                                       );
                                   }
@@ -1271,13 +1299,31 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={quietPanelStyle}>
                   <Alert
-                      message={syncing ? (isCompareEntry ? '正在比对' : '正在同步') : (syncResult?.success ? (isCompareEntry ? '比对完成' : '同步完成') : (isCompareEntry ? '比对失败' : '同步失败'))}
+                      message={syncing
+                          ? (isCompareEntry ? tr('data_sync.compare_entry.result.running') : tr('data_sync.result.running'))
+                          : (syncResult?.success
+                              ? (isCompareEntry ? tr('data_sync.compare_entry.result.completed') : tr('data_sync.result.completed'))
+                              : (isCompareEntry ? tr('data_sync.compare_entry.result.failed') : tr('data_sync.result.failed')))}
                       description={
                           syncing
-                              ? `当前阶段：${syncProgress.stage || '执行中'}${syncProgress.table ? `，表：${syncProgress.table}` : ''}`
+                              ? (isCompareEntry
+                                  ? tr('data_sync.compare_entry.result.running_description', {
+                                      stage: syncProgress.stage || tr('data_sync.compare_entry.result.stage_fallback'),
+                                      table: syncProgress.table ? tr('data_sync.compare_entry.result.table_suffix', { table: syncProgress.table }) : '',
+                                    })
+                                  : tr('data_sync.result.running_description', {
+                                      stage: syncProgress.stage || tr('data_sync.progress.stage.executing'),
+                                      table: syncProgress.table ? tr('data_sync.result.table_suffix', { table: syncProgress.table }) : '',
+                                    }))
                               : (syncResult?.message || (isCompareEntry
-                                  ? `成功比对 ${diffTables.length || syncResult?.tablesSynced || 0} 张表。`
-                                  : `成功同步 ${syncResult?.tablesSynced || 0} 张表. 插入: ${syncResult?.rowsInserted || 0}, 更新: ${syncResult?.rowsUpdated || 0}`))
+                                  ? tr('data_sync.compare_entry.result.success_summary', {
+                                      tables: diffTables.length || syncResult?.tablesSynced || 0,
+                                    })
+                                  : tr('data_sync.result.success_summary', {
+                                      tables: syncResult?.tablesSynced || 0,
+                                      inserted: syncResult?.rowsInserted || 0,
+                                      updated: syncResult?.rowsUpdated || 0,
+                                    })))
                       }
                       type={syncing ? "info" : (syncResult?.success ? "success" : "error")}
                       showIcon
@@ -1290,10 +1336,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                           format={() => `${syncProgress.current}/${syncProgress.total}`}
                       />
                   </div>
-
               </div>
               <div style={quietPanelStyle}>
-                  <Divider orientation="left" style={{ marginTop: 0 }}>{isCompareEntry ? '分析日志' : '执行日志'}</Divider>
+                  <Divider orientation="left" style={{ marginTop: 0 }}>{isCompareEntry ? tr('data_sync.compare_entry.title.analysis_log') : tr('data_sync.title.execution_log')}</Divider>
                   <div
                       ref={logBoxRef}
                       onScroll={() => {
@@ -1322,13 +1367,18 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
 
       <div style={modalFooterBarStyle}>
           {currentStep === 0 && (
-              <Button type="primary" onClick={nextToTables} loading={loading}>下一步</Button>
+              <Button type="primary" onClick={nextToTables} loading={loading}>{tr('data_sync.action.next')}</Button>
           )}
           {currentStep === 1 && (
               <>
-                  <Button onClick={() => setCurrentStep(0)} style={{ marginRight: 8 }}>上一步</Button>
-                  <Button onClick={analyzeDiff} loading={loading} disabled={selectedTables.length === 0 || analyzing || (isSourceQueryMode && !sourceQuery.trim())} style={{ marginRight: 8 }}>
-                      {entryPresentation.analyzeButtonText}
+                  <Button onClick={() => setCurrentStep(0)} style={{ marginRight: 8 }}>{tr('data_sync.action.previous')}</Button>
+                  <Button
+                      onClick={analyzeDiff}
+                      loading={loading}
+                      disabled={(isCompareEntry ? false : syncContent === 'schema') || selectedTables.length === 0 || analyzing || (isSourceQueryMode && !sourceQuery.trim())}
+                      style={{ marginRight: 8 }}
+                  >
+                      {isCompareEntry ? entryPresentation.analyzeButtonText : tr('data_sync.action.analyze_diff')}
                   </Button>
                   {isCompareEntry && (
                       <Button onClick={onClose}>
@@ -1342,28 +1392,28 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                           loading={loading}
                           disabled={selectedTables.length === 0 || (isSourceQueryMode && !sourceQuery.trim()) || (syncContent !== 'schema' && diffTables.length === 0)}
                       >
-                          开始同步
+                          {tr('data_sync.action.start_sync')}
                       </Button>
                   )}
               </>
           )}
           {currentStep === 2 && (
               <>
-                  <Button disabled={syncing} onClick={() => setCurrentStep(1)} style={{ marginRight: 8 }}>{isCompareEntry ? '返回比对' : '继续同步'}</Button>
-                  <Button type="primary" disabled={syncing} onClick={onClose}>关闭</Button>
+                  <Button disabled={syncing} onClick={() => setCurrentStep(1)} style={{ marginRight: 8 }}>{isCompareEntry ? tr('data_sync.compare_entry.action.return_to_compare') : tr('data_sync.action.continue_sync')}</Button>
+                  <Button type="primary" disabled={syncing} onClick={onClose}>{isCompareEntry ? entryPresentation.closeButtonText : tr('data_sync.action.close')}</Button>
               </>
           )}
       </div>
       </div>
     </Modal>
     <Drawer
-        title={`差异预览：${previewTable}`}
+        title={tr('data_sync.preview.title', { table: previewTable })}
         styles={{ body: { background: darkMode ? 'rgba(9,13,20,0.98)' : '#f8fafc' } }}
         open={previewOpen}
         onClose={() => { setPreviewOpen(false); setPreviewTable(''); setPreviewData(null); }}
         width={900}
     >
-        {previewLoading && <Alert type="info" showIcon message="正在加载差异预览…" />}
+        {previewLoading && <Alert type="info" showIcon message={tr('data_sync.preview.loading')} />}
         {!previewLoading && previewData && (
             <div>
                 <Alert
@@ -1371,8 +1421,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                     showIcon
                     message={
                         previewHasDataDiff
-                            ? `插入 ${previewData.totalInserts || 0}，更新 ${previewData.totalUpdates || 0}，删除 ${previewData.totalDeletes || 0}（预览最多展示 200 条/类型）`
-                            : (previewData.schemaSummary || `检测到 ${previewSql.statementCount} 条结构变更语句`)
+                            ? tr('data_sync.preview.data_summary', { inserts: previewData.totalInserts || 0, updates: previewData.totalUpdates || 0, deletes: previewData.totalDeletes || 0 })
+                            : (previewData.schemaSummary || tr('data_sync.preview.schema_statement_count', { count: previewSql.statementCount }))
                     }
                 />
                 {previewSchemaWarnings.length > 0 && (
@@ -1380,11 +1430,11 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                         style={{ marginTop: 12 }}
                         type="warning"
                         showIcon
-                        message="结构预览包含风险或降级项"
+                        message={tr('data_sync.preview.schema_warning_title')}
                         description={
                             <ul style={{ margin: 0, paddingLeft: 18 }}>
                                 {previewSchemaWarnings.slice(0, 8).map((item) => <li key={item}>{item}</li>)}
-                                {previewSchemaWarnings.length > 8 && <li>还有 {previewSchemaWarnings.length - 8} 项未展开</li>}
+                                {previewSchemaWarnings.length > 8 && <li>{tr('data_sync.message.more_items_collapsed', { count: previewSchemaWarnings.length - 8 })}</li>}
                             </ul>
                         }
                     />
@@ -1394,11 +1444,11 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                     items={[
                         ...(previewHasSchemaStatements ? [{
                             key: 'schema',
-                            label: `结构(${Array.isArray(previewData.schemaStatements) ? previewData.schemaStatements.length : 0})`,
+                            label: tr('data_sync.preview.tab.schema', { count: Array.isArray(previewData.schemaStatements) ? previewData.schemaStatements.length : 0 }),
                             children: (
                                 <div>
                                     <Text type="secondary">
-                                        {previewData.schemaSummary || '以下为本次结构同步计划执行的语句。'}
+                                        {previewData.schemaSummary || tr('data_sync.preview.schema_plan_help')}
                                     </Text>
                                     <pre
                                         style={{
@@ -1416,17 +1466,17 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                     >
                                         {Array.isArray(previewData.schemaStatements) && previewData.schemaStatements.length > 0
                                             ? previewData.schemaStatements.join('\n')
-                                            : '-- 当前表结构无可执行变更'}
+                                            : tr('data_sync.preview.sql.no_schema_changes')}
                                     </pre>
                                 </div>
                             )
                         }] : []),
                         ...(previewHasDataDiff ? [{
                             key: 'insert',
-                            label: `插入(${previewData.totalInserts || 0})`,
+                            label: tr('data_sync.preview.tab.insert', { count: previewData.totalInserts || 0 }),
                             children: (
                                 <div>
-                                    <Text type="secondary">{isCompareEntry ? '行选择只影响 SQL 预览范围，不会执行写入。' : '未勾选任何行表示“同步全部插入差异”；如不想执行插入请在对比结果中取消勾选“插入”。'}</Text>
+                                    <Text type="secondary">{isCompareEntry ? tr('data_sync.compare_entry.preview.selection_hint') : tr('data_sync.preview.selection_hint.insert')}</Text>
                                     <Table
                                         size="small"
                                         style={{ marginTop: 8 }}
@@ -1439,8 +1489,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                             getCheckboxProps: () => ({ disabled: !tableOptions[previewTable]?.insert }),
                                         }}
                                         columns={[
-                                            { title: previewData.pkColumn || '主键', dataIndex: 'pk', key: 'pk', width: 200, ellipsis: true },
-                                            { title: '数据', dataIndex: 'row', key: 'row', render: (v: any) => <pre style={{ margin: 0, maxHeight: 140, overflow: 'auto' }}>{JSON.stringify(v, null, 2)}</pre> }
+                                            { title: previewData.pkColumn || tr('data_sync.preview.column.primary_key'), dataIndex: 'pk', key: 'pk', width: 200, ellipsis: true },
+                                            { title: tr('data_sync.preview.column.data'), dataIndex: 'row', key: 'row', render: (v: any) => <pre style={{ margin: 0, maxHeight: 140, overflow: 'auto' }}>{JSON.stringify(v, null, 2)}</pre> }
                                         ]}
                                     />
                                 </div>
@@ -1448,10 +1498,10 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                         },
                         {
                             key: 'update',
-                            label: `更新(${previewData.totalUpdates || 0})`,
+                            label: tr('data_sync.preview.tab.update', { count: previewData.totalUpdates || 0 }),
                             children: (
                                 <div>
-                                    <Text type="secondary">{isCompareEntry ? '行选择只影响 SQL 预览范围，不会执行写入。' : '未勾选任何行表示“同步全部更新差异”；如不想执行更新请在对比结果中取消勾选“更新”。'}</Text>
+                                    <Text type="secondary">{isCompareEntry ? tr('data_sync.compare_entry.preview.selection_hint') : tr('data_sync.preview.selection_hint.update')}</Text>
                                     <Table
                                         size="small"
                                         style={{ marginTop: 8 }}
@@ -1464,31 +1514,31 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                             getCheckboxProps: () => ({ disabled: !tableOptions[previewTable]?.update }),
                                         }}
                                         columns={[
-                                            { title: previewData.pkColumn || '主键', dataIndex: 'pk', key: 'pk', width: 200, ellipsis: true },
-                                            { title: '变更字段', dataIndex: 'changedColumns', key: 'changedColumns', render: (v: any) => Array.isArray(v) ? v.join(', ') : '' },
+                                            { title: previewData.pkColumn || tr('data_sync.preview.column.primary_key'), dataIndex: 'pk', key: 'pk', width: 200, ellipsis: true },
+                                            { title: tr('data_sync.preview.column.changed_columns'), dataIndex: 'changedColumns', key: 'changedColumns', render: (v: any) => Array.isArray(v) ? v.join(', ') : '' },
                                             {
-                                                title: '详情',
+                                                title: tr('data_sync.preview.column.detail'),
                                                 key: 'detail',
                                                 width: 80,
                                                 render: (_: any, r: any) => (
                                                     <Button size="small" onClick={() => {
                                                         Modal.info({
-                                                            title: `更新详情：${previewTable} / ${r.pk}`,
+                                                            title: tr('data_sync.preview.update_detail_title', { table: previewTable, pk: r.pk }),
                                                             width: 900,
                                                             content: (
                                                                 <div style={{ display: 'flex', gap: 12 }}>
                                                                     <div style={{ flex: 1 }}>
-                                                                        <Title level={5}>源</Title>
+                                                                        <Title level={5}>{tr('data_sync.preview.side.source')}</Title>
                                                                         <pre style={{ maxHeight: 360, overflow: 'auto', background: '#f5f5f5', padding: 8 }}>{JSON.stringify(r.source, null, 2)}</pre>
                                                                     </div>
                                                                     <div style={{ flex: 1 }}>
-                                                                        <Title level={5}>目标</Title>
+                                                                        <Title level={5}>{tr('data_sync.preview.side.target')}</Title>
                                                                         <pre style={{ maxHeight: 360, overflow: 'auto', background: '#f5f5f5', padding: 8 }}>{JSON.stringify(r.target, null, 2)}</pre>
                                                                     </div>
                                                                 </div>
                                                             )
                                                         });
-                                                    }}>查看</Button>
+                                                    }}>{tr('data_sync.action.view')}</Button>
                                                 )
                                             }
                                         ]}
@@ -1498,11 +1548,11 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                         },
                         {
                             key: 'delete',
-                            label: `删除(${previewData.totalDeletes || 0})`,
+                            label: tr('data_sync.preview.tab.delete', { count: previewData.totalDeletes || 0 }),
                             children: (
                                 <div>
-                                    <Alert type="warning" showIcon message="删除默认不勾选。请确认业务允许后再开启删除操作。" />
-                                    <Text type="secondary">{isCompareEntry ? '行选择只影响 SQL 预览范围，不会执行写入。' : '未勾选任何行表示“同步全部删除差异”；如不想执行删除请在对比结果中取消勾选“删除”。'}</Text>
+                                    <Alert type="warning" showIcon message={tr('data_sync.preview.delete_warning')} />
+                                    <Text type="secondary">{isCompareEntry ? tr('data_sync.compare_entry.preview.selection_hint') : tr('data_sync.preview.selection_hint.delete')}</Text>
                                     <Table
                                         size="small"
                                         style={{ marginTop: 8 }}
@@ -1515,8 +1565,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                             getCheckboxProps: () => ({ disabled: !tableOptions[previewTable]?.delete }),
                                         }}
                                         columns={[
-                                            { title: previewData.pkColumn || '主键', dataIndex: 'pk', key: 'pk', width: 200, ellipsis: true },
-                                            { title: '数据', dataIndex: 'row', key: 'row', render: (v: any) => <pre style={{ margin: 0, maxHeight: 140, overflow: 'auto' }}>{JSON.stringify(v, null, 2)}</pre> }
+                                            { title: previewData.pkColumn || tr('data_sync.preview.column.primary_key'), dataIndex: 'pk', key: 'pk', width: 200, ellipsis: true },
+                                            { title: tr('data_sync.preview.column.data'), dataIndex: 'row', key: 'row', render: (v: any) => <pre style={{ margin: 0, maxHeight: 140, overflow: 'auto' }}>{JSON.stringify(v, null, 2)}</pre> }
                                         ]}
                                     />
                                 </div>
@@ -1524,7 +1574,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                         }] : []),
                         {
                             key: 'sql',
-                            label: `SQL(${previewSql.statementCount})`,
+                            label: tr('data_sync.preview.tab.sql', { count: previewSql.statementCount }),
                             children: (
                                 <div>
                                     <Alert
@@ -1532,15 +1582,15 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                         showIcon
                                         message={
                                             previewHasDataDiff
-                                                ? (isCompareEntry ? 'SQL 预览会按当前勾选的插入/更新/删除与行选择范围生成，仅用于审核差异。' : 'SQL 预览会按当前勾选的插入/更新/删除与行选择范围生成，用于审核确认。')
-                                                : (isCompareEntry ? 'SQL 预览展示结构差异建议语句，仅用于审核差异。' : 'SQL 预览展示将执行的结构变更语句，用于审核确认。')
+                                                ? (isCompareEntry ? tr('data_sync.compare_entry.preview.sql.data_help') : tr('data_sync.preview.sql.data_help'))
+                                                : (isCompareEntry ? tr('data_sync.compare_entry.preview.sql.schema_help') : tr('data_sync.preview.sql.schema_help'))
                                         }
                                     />
                                     <div style={{ marginTop: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                         <Text type="secondary">
                                             {previewHasDataDiff
-                                                ? `共 ${previewSql.statementCount} 条语句（预览数据最多 200 条/类型）`
-                                                : `共 ${previewSql.statementCount} 条结构变更语句`}
+                                                ? tr('data_sync.preview.sql.statement_count', { count: previewSql.statementCount })
+                                                : tr('data_sync.preview.sql.schema_statement_count', { count: previewSql.statementCount })}
                                         </Text>
                                         <Button
                                             size="small"
@@ -1548,13 +1598,13 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                             onClick={async () => {
                                                 try {
                                                     await navigator.clipboard.writeText(previewSql.sqlText || '');
-                                                    message.success('SQL 已复制');
+                                                    message.success(tr('data_sync.preview.message.sql_copied'));
                                                 } catch {
-                                                    message.error('复制失败，请手动复制');
+                                                    message.error(tr('data_sync.preview.message.copy_failed'));
                                                 }
                                             }}
                                         >
-                                            复制 SQL
+                                            {tr('data_sync.preview.action.copy_sql')}
                                         </Button>
                                     </div>
                                     <pre
@@ -1570,7 +1620,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                             wordBreak: 'break-word'
                                         }}
                                     >
-                                        {previewSql.sqlText || (previewHasDataDiff ? '-- 当前勾选范围下无 SQL 可预览' : '-- 当前表结构无可执行变更')}
+                                        {previewSql.sqlText || (previewHasDataDiff ? tr('data_sync.preview.sql.no_data_sql') : tr('data_sync.preview.sql.no_schema_changes'))}
                                     </pre>
                                 </div>
                             )

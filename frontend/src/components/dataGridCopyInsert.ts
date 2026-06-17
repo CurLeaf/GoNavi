@@ -18,13 +18,25 @@ type BuildCopyMutationSQLParams = BuildCopyInsertSQLParams & {
 
 type CopySqlWhereStrategy = 'primary-key' | 'unique-key' | 'all-columns';
 
+export type CopySqlErrorKey =
+  | 'data_grid.copy_sql.error.missing_safe_where'
+  | 'data_grid.copy_sql.error.missing_table_name'
+  | 'data_grid.copy_sql.error.no_copyable_fields';
+
+export type CopySqlStructuredError = {
+  key: CopySqlErrorKey;
+  params?: Record<string, string>;
+};
+
+export type CopySqlError = string | CopySqlStructuredError;
+
 export type CopyMutationSQLResult =
   | { ok: true; sql: string; whereStrategy: CopySqlWhereStrategy }
-  | { ok: false; error: string };
+  | { ok: false; error: CopySqlError };
 
 type CopyMutationWhereClauseResult =
   | { ok: true; clause: string; whereStrategy: CopySqlWhereStrategy }
-  | { ok: false; error: string };
+  | { ok: false; error: CopySqlError };
 
 const looksLikeDateTimeText = (val: string): boolean => {
   if (!val) return false;
@@ -310,7 +322,9 @@ const resolveMutationWhereClause = ({
 
   return {
     ok: false,
-    error: '当前结果集缺少可安全定位行数据的主键/唯一键，且未覆盖表的全部字段，无法生成 WHERE 条件。',
+    error: {
+      key: 'data_grid.copy_sql.error.missing_safe_where',
+    },
   };
 };
 
@@ -349,13 +363,20 @@ const buildCopyMutationSQL = (
   if (!normalizedTableName) {
     return {
       ok: false,
-      error: `当前结果集未关联明确表名，无法生成 ${mode.toUpperCase()} SQL。`,
+      error: {
+        key: 'data_grid.copy_sql.error.missing_table_name',
+        params: {
+          mode: mode.toUpperCase(),
+        },
+      },
     };
   }
   if (normalizedOrderedCols.length === 0) {
     return {
       ok: false,
-      error: '当前结果集没有可复制的字段，无法生成 SQL。',
+      error: {
+        key: 'data_grid.copy_sql.error.no_copyable_fields',
+      },
     };
   }
 

@@ -1,6 +1,9 @@
 import React from 'react';
 import { Button } from 'antd';
 
+import { t as defaultTranslate } from '../i18n';
+import { useOptionalI18n } from '../i18n/provider';
+
 export type PendingSqlEditorTransaction = {
   id: string;
   commitMode: 'manual' | 'auto';
@@ -25,6 +28,9 @@ const QueryEditorTransactionToolbar: React.FC<QueryEditorTransactionToolbarProps
   autoCommitRemainingSeconds,
   onFinish,
 }) => {
+  const i18n = useOptionalI18n();
+  const t = i18n?.t ?? defaultTranslate;
+
   if (!transaction) {
     return null;
   }
@@ -33,17 +39,17 @@ const QueryEditorTransactionToolbar: React.FC<QueryEditorTransactionToolbarProps
   const pendingCount = statementCount > 0 ? statementCount : 1;
   const statusText = transaction.commitMode === 'auto'
     ? autoCommitRemainingSeconds !== null && autoCommitRemainingSeconds > 0
-      ? `${autoCommitRemainingSeconds}s 后自动提交`
-      : '自动提交中'
+      ? t('query_editor.transaction.status.auto_commit_countdown', { seconds: autoCommitRemainingSeconds })
+      : t('query_editor.transaction.status.auto_committing')
     : null;
   const commitLabel = isV2Ui
     ? (
       <>
-        <span>提交</span>
+        <span>{t('query_editor.transaction.action.commit')}</span>
         <span className="gn-v2-toolbar-kbd">{pendingCount}</span>
       </>
     )
-    : `提交 (${pendingCount})`;
+    : t('query_editor.transaction.action.commit_with_count', { count: pendingCount });
 
   return (
     <div
@@ -74,7 +80,7 @@ const QueryEditorTransactionToolbar: React.FC<QueryEditorTransactionToolbarProps
         danger
         onClick={() => onFinish('rollback')}
       >
-        回滚
+        {t('query_editor.transaction.action.rollback')}
       </Button>
     </div>
   );

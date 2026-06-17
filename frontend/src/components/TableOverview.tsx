@@ -23,6 +23,7 @@ import {
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { isMacLikePlatform } from '../utils/appearance';
 import { getShortcutPlatform } from '../utils/shortcuts';
+import { t } from '../i18n';
 import { V2TableContextMenuView, type V2TableContextMenuActionKey } from './V2TableContextMenu';
 
 interface TableOverviewProps {
@@ -53,7 +54,6 @@ type OverviewContextMenuState = {
 };
 type OverviewTableSection = {
     key: string;
-    title: string;
     kind: 'pinned' | 'all';
     rows: TableStatRow[];
 };
@@ -304,10 +304,14 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             if (res.success && Array.isArray(res.data)) {
                 setTables(parseTableStats(metadataDialect, res.data));
             } else {
-                message.error('获取表信息失败: ' + (res.message || '未知错误'));
+                message.error(t('table_overview.message.load_tables_failed', {
+                    detail: res.message || t('table_overview.message.unknown_error'),
+                }));
             }
         } catch (e: any) {
-            message.error('获取表信息失败: ' + (e?.message || String(e)));
+            message.error(t('table_overview.message.load_tables_failed', {
+                detail: e?.message || String(e),
+            }));
         } finally {
             setLoading(false);
         }
@@ -345,7 +349,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
 
     const visibleTableSections = useMemo<OverviewTableSection[]>(() => {
         if (pinnedOverview.pinnedRows.length === 0) {
-            return [{ key: 'all', title: '全部', kind: 'all', rows: visibleTables }];
+            return [{ key: 'all', kind: 'all', rows: visibleTables }];
         }
         const visiblePinnedNames = new Set(
             visibleTables
@@ -355,8 +359,8 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         const pinnedRows = pinnedOverview.pinnedRows.filter((table) => visiblePinnedNames.has(table.name));
         const regularRows = visibleTables.filter((table) => !visiblePinnedNames.has(table.name));
         return [
-            ...(pinnedRows.length > 0 ? [{ key: 'pinned', title: '置顶', kind: 'pinned' as const, rows: pinnedRows }] : []),
-            ...(regularRows.length > 0 ? [{ key: 'all', title: '全部', kind: 'all' as const, rows: regularRows }] : []),
+            ...(pinnedRows.length > 0 ? [{ key: 'pinned', kind: 'pinned' as const, rows: pinnedRows }] : []),
+            ...(regularRows.length > 0 ? [{ key: 'all', kind: 'all' as const, rows: regularRows }] : []),
         ];
     }, [connection?.id, pinnedOverview.pinnedRows, pinnedSidebarTables, schemaName, tab.dbName, visibleTables]);
 
@@ -618,7 +622,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 dbName: tab.dbName,
             },
         }));
-        message.success(shouldPin ? '已置顶表' : '已取消置顶');
+        message.success(shouldPin ? t('table_overview.message.pinned') : t('table_overview.message.unpinned'));
     }, [connection?.id, pinnedSidebarTables, schemaName, setSidebarTablePinned, tab.dbName]);
 
     const handleRenameTable = useCallback((tableName: string) => {
@@ -725,10 +729,15 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         }
     };
 
+    const getSortMenuLabel = (field: SortField, labelKey: string) => {
+        const suffix = sortField === field ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : '';
+        return `${t(labelKey)}${suffix}`;
+    };
+
     const sortMenuItems = [
-        { key: 'name', label: `按名称${sortField === 'name' ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : ''}`, onClick: () => toggleSort('name') },
-        { key: 'rows', label: `按行数${sortField === 'rows' ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : ''}`, onClick: () => toggleSort('rows') },
-        { key: 'dataSize', label: `按大小${sortField === 'dataSize' ? (sortOrder === 'asc' ? ' ↑' : ' ↓') : ''}`, onClick: () => toggleSort('dataSize') },
+        { key: 'name', label: getSortMenuLabel('name', 'table_overview.sort.name'), onClick: () => toggleSort('name') },
+        { key: 'rows', label: getSortMenuLabel('rows', 'table_overview.sort.rows'), onClick: () => toggleSort('rows') },
+        { key: 'dataSize', label: getSortMenuLabel('dataSize', 'table_overview.sort.size'), onClick: () => toggleSort('dataSize') },
     ];
 
     const totalRows = useMemo(() => tables.reduce((s, t) => s + t.rows, 0), [tables]);
@@ -737,6 +746,31 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         return Math.max(max, table.dataSize + table.indexSize);
     }, 0), [sortedFiltered]);
     const allowTruncate = supportsTableTruncateAction(connection?.config?.type || '', connection?.config?.driver);
+
+    const renderToolbarSummary = () => {
+        const countToken = '__COUNT__';
+        const rowsToken = '__ROWS__';
+        const sizeToken = '__SIZE__';
+        const template = t('table_overview.toolbar.summary', {
+            count: countToken,
+            rows: rowsToken,
+            size: sizeToken,
+        });
+        const parts = template.split(/(__COUNT__|__ROWS__|__SIZE__)/g);
+
+        return parts.map((part, index) => {
+            if (part === countToken) {
+                return <strong key={`count-${index}`}>{tables.length}</strong>;
+            }
+            if (part === rowsToken) {
+                return <strong key={`rows-${index}`}>{formatRows(totalRows)}</strong>;
+            }
+            if (part === sizeToken) {
+                return <strong key={`size-${index}`}>{formatSize(totalSize)}</strong>;
+            }
+            return <React.Fragment key={`text-${index}`}>{part}</React.Fragment>;
+        });
+    };
 
     const handleV2TableContextMenuAction = useCallback((table: TableStatRow, action: V2TableContextMenuActionKey) => {
         const tableName = table.name;
@@ -881,30 +915,36 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         supportsDesignWrite,
     ]);
 
-    const renderOverviewSectionTitle = (section: OverviewTableSection) => (
-        <div
-            className={isV2Ui ? 'gn-v2-table-overview-section-title' : undefined}
-            data-overview-table-section={section.kind}
-            style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                margin: section.kind === 'pinned' ? '0 0 8px' : '14px 0 8px',
-                color: textMuted,
-                fontSize: 12,
-                fontWeight: 600,
-            }}
-        >
-            <span>{section.title}</span>
-            <span>{section.rows.length}</span>
-        </div>
-    );
+    const renderOverviewSectionTitle = (section: OverviewTableSection) => {
+        const sectionTitle = section.kind === 'pinned'
+            ? t('table_overview.section.pinned')
+            : t('table_overview.section.all');
 
-    const renderCardTableContent = (t: TableStatRow) => (
+        return (
+            <div
+                className={isV2Ui ? 'gn-v2-table-overview-section-title' : undefined}
+                data-overview-table-section={section.kind}
+                style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    margin: section.kind === 'pinned' ? '0 0 8px' : '14px 0 8px',
+                    color: textMuted,
+                    fontSize: 12,
+                    fontWeight: 600,
+                }}
+            >
+                <span>{sectionTitle}</span>
+                <span>{section.rows.length}</span>
+            </div>
+        );
+    };
+
+    const renderCardTableContent = (table: TableStatRow) => (
         <div
             className={isV2Ui ? 'gn-v2-table-card' : undefined}
-            onDoubleClick={() => openTable(t.name)}
-            onContextMenu={isV2Ui ? (event) => openV2OverviewContextMenu(event, t) : undefined}
+            onDoubleClick={() => openTable(table.name)}
+            onContextMenu={isV2Ui ? (event) => openV2OverviewContextMenu(event, table) : undefined}
             style={{
                 background: cardBg,
                 border: `1px solid ${cardBorder}`,
@@ -919,59 +959,61 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         >
             <div className={isV2Ui ? 'gn-v2-table-card-name' : undefined} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <TableOutlined style={{ fontSize: 14, color: accentColor }} />
-                <Tooltip title={t.name} mouseEnterDelay={0.4}>
+                <Tooltip title={table.name} mouseEnterDelay={0.4}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: textPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, display: 'block' }}>
-                        {t.name}
+                        {table.name}
                     </span>
                 </Tooltip>
             </div>
-            {t.comment && (
-                <Tooltip title={t.comment} mouseEnterDelay={0.4}>
+            {table.comment && (
+                <Tooltip title={table.comment} mouseEnterDelay={0.4}>
                     <div style={{ fontSize: 12, color: textSecondary, marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {t.comment}
+                        {table.comment}
                     </div>
                 </Tooltip>
             )}
             <div className={isV2Ui ? 'gn-v2-table-card-meta' : undefined} style={{ display: 'flex', gap: 16, fontSize: 12, color: textMuted }}>
-                <span title="行数" style={{ minWidth: 52 }}>📊 {formatRows(t.rows)}</span>
-                <span title="数据大小" style={{ minWidth: 72 }}>💾 {formatSize(t.dataSize)}</span>
-                {t.engine && <span title="引擎" style={{ marginLeft: 'auto', opacity: 0.7 }}>{t.engine}</span>}
+                <span title={t('table_overview.sort.rows')} style={{ minWidth: 52 }}>📊 {formatRows(table.rows)}</span>
+                <span title={t('table_overview.metric.data_size')} style={{ minWidth: 72 }}>💾 {formatSize(table.dataSize)}</span>
+                {table.engine && <span title={t('table_overview.metric.engine')} style={{ marginLeft: 'auto', opacity: 0.7 }}>{table.engine}</span>}
             </div>
             {isV2Ui && (
                 <div className="gn-v2-table-size-bar">
-                    <span style={{ width: `${Math.min(100, Math.max(4, maxCombinedSize > 0 ? Math.round(((t.dataSize + t.indexSize) / maxCombinedSize) * 100) : 4))}%` }} />
+                    <span style={{ width: `${Math.min(100, Math.max(4, maxCombinedSize > 0 ? Math.round(((table.dataSize + table.indexSize) / maxCombinedSize) * 100) : 4))}%` }} />
                 </div>
             )}
         </div>
     );
 
-    const renderCardTable = (t: TableStatRow) => {
+    const renderCardTable = (table: TableStatRow) => {
         if (isV2Ui) {
-            return <React.Fragment key={t.name}>{renderCardTableContent(t)}</React.Fragment>;
+            return <React.Fragment key={table.name}>{renderCardTableContent(table)}</React.Fragment>;
         }
         return (
             <Dropdown
-                key={t.name}
+                key={table.name}
                 trigger={['contextMenu']}
-                menu={{ items: buildLegacyTableContextMenuItems(t) }}
+                menu={{ items: buildLegacyTableContextMenuItems(table) }}
             >
-                {renderCardTableContent(t)}
+                {renderCardTableContent(table)}
             </Dropdown>
         );
     };
 
-    const renderListTable = (t: TableStatRow) => {
-        const combinedSize = t.dataSize + t.indexSize;
+    const renderListTable = (table: TableStatRow) => {
+        const combinedSize = table.dataSize + table.indexSize;
         const sizeRatio = maxCombinedSize > 0 ? combinedSize / maxCombinedSize : 0;
         const fillWidth = maxCombinedSize > 0 ? `${Math.max(10, Math.round(sizeRatio * 100))}%` : '0%';
         const fillColor = darkMode ? 'rgba(22,119,255,0.18)' : 'rgba(22,119,255,0.12)';
-        const rowSecondary = t.comment || (t.engine ? `${t.engine} 表` : '双击打开数据，右键查看更多操作');
+        const rowSecondary = table.comment || (table.engine
+            ? t('table_overview.row.engine_table', { engine: table.engine })
+            : t('table_overview.row.open_hint'));
 
         const content = (
                 <div
                     className={isV2Ui ? 'gn-v2-table-row' : undefined}
-                    onDoubleClick={() => openTable(t.name)}
-                    onContextMenu={isV2Ui ? (event) => openV2OverviewContextMenu(event, t) : undefined}
+                    onDoubleClick={() => openTable(table.name)}
+                    onContextMenu={isV2Ui ? (event) => openV2OverviewContextMenu(event, table) : undefined}
                     style={{
                         position: 'relative',
                         overflow: 'hidden',
@@ -1011,12 +1053,12 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                         <div style={{ minWidth: 0, flex: '1 1 320px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                                 <TableOutlined style={{ fontSize: 13, color: accentColor, flexShrink: 0 }} />
-                                <Tooltip title={t.name} mouseEnterDelay={0.4}>
+                                <Tooltip title={table.name} mouseEnterDelay={0.4}>
                                     <span style={{ color: textPrimary, fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                        {t.name}
+                                        {table.name}
                                     </span>
                                 </Tooltip>
-                                {t.engine && (
+                                {table.engine && (
                                     <span
                                         style={{
                                             flexShrink: 0,
@@ -1027,7 +1069,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                             background: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)',
                                         }}
                                     >
-                                        {t.engine}
+                                        {table.engine}
                                     </span>
                                 )}
                             </div>
@@ -1039,19 +1081,19 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap', fontSize: 12 }}>
                             <div style={{ minWidth: 96, textAlign: 'right' }}>
-                                <div style={{ color: textMuted }}>行数</div>
-                                <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatRows(t.rows)}</div>
+                                <div style={{ color: textMuted }}>{t('table_overview.sort.rows')}</div>
+                                <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatRows(table.rows)}</div>
                             </div>
                             <div style={{ minWidth: 110, textAlign: 'right' }}>
-                                <div style={{ color: textMuted }}>数据大小</div>
-                                <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.dataSize)}</div>
+                                <div style={{ color: textMuted }}>{t('table_overview.metric.data_size')}</div>
+                                <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatSize(table.dataSize)}</div>
                             </div>
                             <div style={{ minWidth: 110, textAlign: 'right' }}>
-                                <div style={{ color: textMuted }}>索引大小</div>
-                                <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatSize(t.indexSize)}</div>
+                                <div style={{ color: textMuted }}>{t('table_overview.metric.index_size')}</div>
+                                <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{formatSize(table.indexSize)}</div>
                             </div>
                             <div style={{ minWidth: 96, textAlign: 'right' }}>
-                                <div style={{ color: textMuted }}>相对大小</div>
+                                <div style={{ color: textMuted }}>{t('table_overview.metric.relative_size')}</div>
                                 <div style={{ color: textPrimary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                                     {maxCombinedSize > 0 ? `${Math.round(sizeRatio * 100)}%` : '—'}
                                 </div>
@@ -1062,14 +1104,14 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         );
 
         if (isV2Ui) {
-            return <React.Fragment key={t.name}>{content}</React.Fragment>;
+            return <React.Fragment key={table.name}>{content}</React.Fragment>;
         }
 
         return (
             <Dropdown
-                key={t.name}
+                key={table.name}
                 trigger={['contextMenu']}
-                menu={{ items: buildLegacyTableContextMenuItems(t) }}
+                menu={{ items: buildLegacyTableContextMenuItems(table) }}
             >
                 {content}
             </Dropdown>
@@ -1079,7 +1121,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     if (loading) {
         return (
             <div className={isV2Ui ? 'gn-v2-table-overview gn-v2-table-overview-loading' : undefined} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: containerBg }}>
-                <Spin size="large" tip="加载表信息..." />
+                <Spin size="large" tip={t('table_overview.status.loading_tables')} />
             </div>
         );
     }
@@ -1093,12 +1135,12 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 </span>
                 <span className={isV2Ui ? 'gn-v2-table-overview-title' : undefined} style={{ fontSize: 14, fontWeight: 600, color: textPrimary }}>{tab.dbName}</span>
                 <span className={isV2Ui ? 'gn-v2-table-overview-summary' : undefined} style={{ fontSize: 12, color: textMuted }}>
-                    <strong>{tables.length}</strong> 张表 · <strong>{formatRows(totalRows)}</strong> 行 · <strong>{formatSize(totalSize)}</strong>
+                    {renderToolbarSummary()}
                 </span>
                 <div style={{ flex: 1 }} />
                 <Input
                     {...noAutoCapInputProps}
-                    placeholder="搜索表名或注释..."
+                    placeholder={t('table_overview.placeholder.search')}
                     prefix={<SearchOutlined style={{ color: textMuted }} />}
                     value={searchText}
                     onChange={e => setSearchText(e.target.value)}
@@ -1107,10 +1149,10 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                     size="small"
                 />
                 <Dropdown menu={{ items: sortMenuItems }} trigger={['click']}>
-                    <Tooltip title="排序"><SortAscendingOutlined style={{ fontSize: 16, color: textSecondary, cursor: 'pointer' }} /></Tooltip>
+                    <Tooltip title={t('table_overview.tooltip.sort')}><SortAscendingOutlined style={{ fontSize: 16, color: textSecondary, cursor: 'pointer' }} /></Tooltip>
                 </Dropdown>
                 <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 6, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}>
-                    <Tooltip title="卡片视图">
+                    <Tooltip title={t('table_overview.tooltip.card_view')}>
                         <div
                             onClick={() => setViewMode('card')}
                             style={{
@@ -1123,7 +1165,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                             <AppstoreOutlined style={{ fontSize: 14 }} />
                         </div>
                     </Tooltip>
-                    <Tooltip title="列表视图">
+                    <Tooltip title={t('table_overview.tooltip.list_view')}>
                         <div
                             onClick={() => setViewMode('list')}
                             style={{
@@ -1137,7 +1179,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                         </div>
                     </Tooltip>
                 </div>
-                <Tooltip title="刷新"><ReloadOutlined onClick={loadData} style={{ fontSize: 16, color: textSecondary, cursor: 'pointer' }} /></Tooltip>
+                <Tooltip title={t('table_overview.tooltip.refresh')}><ReloadOutlined onClick={loadData} style={{ fontSize: 16, color: textSecondary, cursor: 'pointer' }} /></Tooltip>
             </div>
 
             {/* Content Area */}
@@ -1159,16 +1201,19 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                     >
                         <span>
                             {isSearchPending
-                                ? '正在更新筛选结果...'
-                                : `匹配 ${sortedFiltered.length} 张表，当前渲染 ${visibleTables.length} 张`}
+                                ? t('table_overview.status.updating_filter')
+                                : t('table_overview.status.matching_rendered', {
+                                    matched: sortedFiltered.length,
+                                    rendered: visibleTables.length,
+                                })}
                         </span>
                         {visibleOverview.hiddenCount > 0 && (
-                            <span>还有 {visibleOverview.hiddenCount} 张未渲染，可继续加载或缩小搜索范围</span>
+                            <span>{t('table_overview.status.hidden_count_hint', { count: visibleOverview.hiddenCount })}</span>
                         )}
                     </div>
                 )}
                 {sortedFiltered.length === 0 ? (
-                    <Empty description={searchText ? '无匹配结果' : '暂无表'} style={{ marginTop: 80 }} />
+                    <Empty description={searchText ? t('table_overview.empty.no_matches') : t('table_overview.empty.no_tables')} style={{ marginTop: 80 }} />
                 ) : (
                     <div className={isV2Ui ? 'gn-v2-table-overview-sections' : undefined}>
                         {visibleTableSections.map((section) => (
@@ -1197,7 +1242,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                             size="small"
                             onClick={() => setVisibleTableLimit(limit => limit + TABLE_OVERVIEW_RENDER_BATCH_SIZE)}
                         >
-                            显示更多表（剩余 {visibleOverview.hiddenCount}）
+                            {t('table_overview.action.show_more', { count: visibleOverview.hiddenCount })}
                         </Button>
                     </div>
                 )}

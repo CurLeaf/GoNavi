@@ -7,6 +7,7 @@ import {
   filterBuiltinToolFlows,
   filterBuiltinTools,
 } from '../../utils/aiBuiltinToolCatalog';
+import { useI18n } from '../../i18n/provider';
 import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
@@ -23,6 +24,7 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
   cardBg,
   cardBorder,
 }) => {
+  const { t } = useI18n();
   const [searchText, setSearchText] = useState('');
   const visibleFlows = filterBuiltinToolFlows(BUILTIN_TOOL_FLOWS, searchText);
   const visibleTools = filterBuiltinTools(BUILTIN_AI_TOOL_INFO, searchText);
@@ -30,7 +32,7 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 4 }}>
-        AI 助手在处理数据库相关问题时，可以自动调用以下内置工具获取真实数据，全程无需人工干预。
+        {t('ai_settings.tools.description')}
       </div>
       <label
         style={{
@@ -45,10 +47,10 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
       >
         <SearchOutlined style={{ color: overlayTheme.mutedText }} />
         <input
-          aria-label="搜索内置工具"
+          aria-label={t('ai_settings.tools.search.aria_label')}
           value={searchText}
           onChange={(event) => setSearchText(event.target.value)}
-          placeholder="搜索工具、流程或参数，例如 mcp / lineLimit / allowMutating / 事务"
+          placeholder={t('ai_settings.tools.search.placeholder')}
           style={{
             flex: 1,
             border: 'none',
@@ -70,12 +72,17 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
               fontSize: 12,
             }}
           >
-            清除
+            {t('ai_settings.tools.search.clear')}
           </button>
         )}
       </label>
       <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>
-        当前显示 {visibleFlows.length}/{BUILTIN_TOOL_FLOWS.length} 条推荐流程，{visibleTools.length}/{BUILTIN_AI_TOOL_INFO.length} 个内置工具。
+        {t('ai_settings.tools.summary', {
+          flowVisible: visibleFlows.length,
+          flowTotal: BUILTIN_TOOL_FLOWS.length,
+          toolVisible: visibleTools.length,
+          toolTotal: BUILTIN_AI_TOOL_INFO.length,
+        })}
       </div>
       {visibleFlows.length > 0 && (
         <div style={{ display: 'grid', gap: 8 }}>
@@ -110,7 +117,7 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
             lineHeight: 1.7,
           }}
         >
-          没有匹配的内置工具。可以改搜更宽泛的关键词，例如 mcp、日志、连接、事务、快捷键、schema。
+          {t('ai_settings.tools.empty.no_matches')}
         </div>
       )}
       {visibleTools.map((tool) => {
@@ -149,14 +156,16 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
           </div>
           <div style={{ marginTop: 8, fontSize: 12, color: overlayTheme.mutedText, opacity: 0.7, display: 'flex', alignItems: 'center', gap: 6 }}>
             <ToolOutlined style={{ fontSize: 12 }} />
-            <span>参数：</span>
+            <span>{t('ai_settings.tools.params_label')}</span>
             <code style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12, padding: '1px 6px', borderRadius: 4, background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }}>
               {tool.params}
             </code>
           </div>
           {parameterDetails.length > 0 && (
             <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>参数提示</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>
+                {t('ai_settings.tools.parameters.hint_title')}
+              </div>
               <div style={{ display: 'grid', gap: 8 }}>
                 {parameterDetails.map((item) => (
                   <div
@@ -174,7 +183,7 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <code style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12 }}>{item.name}</code>
                       <span style={{ fontSize: 11, color: overlayTheme.mutedText }}>
-                        类型：{item.typeLabel}
+                        {t('ai_settings.tools.parameters.type_label', { type: item.typeLabel })}
                       </span>
                       <span
                         style={{
@@ -188,16 +197,16 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
                             : (darkMode ? 'rgba(148,163,184,0.18)' : 'rgba(148,163,184,0.12)'),
                         }}
                       >
-                        {item.required ? '必填' : '可选'}
+                        {item.required ? t('ai_settings.tools.parameters.required') : t('ai_settings.tools.parameters.optional')}
                       </span>
                       {item.enumValues.length > 0 && (
                         <span style={{ fontSize: 11, color: overlayTheme.mutedText }}>
-                          可选值：{item.enumValues.join(' / ')}
+                          {t('ai_settings.tools.parameters.enum_values', { values: item.enumValues.join(' / ') })}
                         </span>
                       )}
                       {item.defaultValue && (
                         <span style={{ fontSize: 11, color: overlayTheme.mutedText }}>
-                          默认：{item.defaultValue}
+                          {t('ai_settings.tools.parameters.default_value', { value: item.defaultValue })}
                         </span>
                       )}
                     </div>
@@ -206,7 +215,8 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
                     )}
                     {item.exampleValue && (
                       <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-                        示例：<code style={{ fontFamily: 'var(--gn-font-mono)' }}>{item.exampleValue}</code>
+                        {t('ai_settings.tools.parameters.example')}
+                        <code style={{ fontFamily: 'var(--gn-font-mono)' }}>{item.exampleValue}</code>
                       </div>
                     )}
                   </div>

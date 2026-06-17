@@ -1,10 +1,27 @@
-export const DRIVER_LOCAL_IMPORT_BUTTON_LABEL = '导入驱动包';
+import { getCurrentLanguage, t, type SupportedLanguage } from '../i18n';
 
-export const DRIVER_LOCAL_IMPORT_DIRECTORY_HELP =
-  '如果应用内下载链路失败，可先手动下载驱动包到该目录，再使用“导入驱动包”或“导入驱动目录”完成安装。';
+export const getDriverLocalImportButtonLabel = (language?: SupportedLanguage | string) =>
+  t('driver_manager.action.import_package', undefined, language ?? getCurrentLanguage());
 
-export const DRIVER_LOCAL_IMPORT_SINGLE_FILE_HELP =
-  '行内“导入驱动包”仅用于单个驱动文件/总包（如 `mariadb-driver-agent`、`mariadb-driver-agent.exe`、`GoNavi-DriverAgents.zip`），不支持直接导入 JDBC Jar；批量导入请使用上方“导入驱动目录”。';
+export const getDriverLocalImportDirectoryHelp = (language?: SupportedLanguage | string) =>
+  t('driver_manager.import.directory_help', undefined, language ?? getCurrentLanguage());
 
-export const CUSTOM_CONNECTION_DRIVER_HELP =
-  '已支持: mysql, starrocks, oceanbase, postgres, opengauss, gaussdb, sqlite, oracle, dm, kingbase；别名支持 postgresql/pgx、open_gauss/open-gauss、gauss_db/gauss-db、dm8、kingbase8/kingbasees/kingbasev8。请填写 GoNavi 已注册的 Go database/sql 驱动名，不能直接填写系统 ODBC/JDBC 驱动名或导入 JDBC Jar。';
+export const getDriverLocalImportSingleFileHelp = (language?: SupportedLanguage | string) =>
+  t('driver_manager.import.single_file_help', undefined, language ?? getCurrentLanguage());
+
+const includeCustomDriverRawAliases = (helpText: string): string => {
+  let next = String(helpText || '');
+  if (!/\bgaussdb\b/i.test(next)) {
+    next = next.replace(/\bopengauss\b/i, (match) => `${match}, gaussdb`);
+  }
+  if (!/gauss_db\/gauss-db/i.test(next)) {
+    next = next.replace(/open_gauss\/open-gauss([、,])(\s*)/u, (_match, separator: string, spacing: string) => {
+      const gap = separator === ',' ? spacing || ' ' : '';
+      return `open_gauss/open-gauss${separator}${gap}gauss_db/gauss-db${separator}${spacing || ''}`;
+    });
+  }
+  return next;
+};
+
+export const getCustomConnectionDriverHelp = (language?: SupportedLanguage | string) =>
+  includeCustomDriverRawAliases(t('driver.guidance.customConnectionDriverHelp', undefined, language ?? getCurrentLanguage()));

@@ -4,6 +4,8 @@ import type { RadioChangeEvent } from 'antd';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 
 import type { SavedConnection } from '../types';
+import { t, type I18nParams } from '../i18n';
+import { useOptionalI18n } from '../i18n/provider';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import type { RedisSearchMode } from '../utils/redisSearchPattern';
 
@@ -30,10 +32,13 @@ const buildRedisSeedAddresses = (connection?: SavedConnection): string[] => {
   return [primary, ...extraHosts].filter(Boolean);
 };
 
-const getRedisTopologyLabel = (topology: 'single' | 'cluster' | 'sentinel'): string => {
-  if (topology === 'cluster') return 'Cluster';
-  if (topology === 'sentinel') return 'Sentinel';
-  return '单机';
+const getRedisTopologyLabel = (
+  topology: 'single' | 'cluster' | 'sentinel',
+  tr: (key: string, params?: I18nParams) => string,
+): string => {
+  if (topology === 'cluster') return tr('redis_viewer.topology.cluster');
+  if (topology === 'sentinel') return tr('redis_viewer.topology.sentinel');
+  return tr('redis_viewer.topology.single');
 };
 
 type RedisViewerKeyToolbarProps = {
@@ -83,6 +88,9 @@ const RedisViewerKeyToolbar: React.FC<RedisViewerKeyToolbarProps> = ({
   onClearAllSelectedKeys,
   onDeleteSelectedKeys,
 }) => {
+  const i18n = useOptionalI18n();
+  const i18nLanguage = i18n?.language;
+  const tr = (key: string, params?: I18nParams) => t(key, params, i18nLanguage);
   const topology = normalizeRedisTopology(connection);
   const seedAddresses = buildRedisSeedAddresses(connection);
   const sentinelMaster = topology === 'sentinel'
@@ -93,19 +101,19 @@ const RedisViewerKeyToolbar: React.FC<RedisViewerKeyToolbarProps> = ({
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
         <div>
-          <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.08em', color: textMutedColor, fontWeight: 600 }}>Key Explorer</div>
+          <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.08em', color: textMutedColor, fontWeight: 600 }}>{tr('redis_viewer.title.key_explorer')}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
             <div style={{ fontSize: 24, fontWeight: 700, color: textPrimaryColor }}>db{redisDB}</div>
-            <Tag style={mutedPillTagStyle}>{getRedisTopologyLabel(topology)}</Tag>
+            <Tag style={mutedPillTagStyle}>{getRedisTopologyLabel(topology, tr)}</Tag>
             {topology !== 'single' && (
-              <Tag style={mutedPillTagStyle}>{seedAddresses.length || 1} 节点</Tag>
+              <Tag style={mutedPillTagStyle}>{tr('redis_viewer.label.node_count', { count: seedAddresses.length || 1 })}</Tag>
             )}
             {sentinelMaster && (
               <Tag style={mutedPillTagStyle}>master: {sentinelMaster}</Tag>
             )}
           </div>
         </div>
-        <Tag style={mutedPillTagStyle}>{keyCount} Keys</Tag>
+        <Tag style={mutedPillTagStyle}>{tr('redis_viewer.label.keys_count', { count: keyCount })}</Tag>
       </div>
       <Space.Compact style={{ width: '100%' }}>
         <Radio.Group
@@ -114,13 +122,13 @@ const RedisViewerKeyToolbar: React.FC<RedisViewerKeyToolbarProps> = ({
           buttonStyle="solid"
           style={{ flexShrink: 0 }}
         >
-          <Radio.Button value="fuzzy">模糊</Radio.Button>
-          <Radio.Button value="exact">精确</Radio.Button>
+          <Radio.Button value="fuzzy">{tr('redis_viewer.search.fuzzy')}</Radio.Button>
+          <Radio.Button value="exact">{tr('redis_viewer.search.exact')}</Radio.Button>
         </Radio.Group>
         <Search
           {...noAutoCapInputProps}
           style={{ flex: 1 }}
-          placeholder={searchMode === 'exact' ? '输入完整 Key / 命名空间精确搜索' : '搜索 Key（模糊匹配）'}
+          placeholder={searchMode === 'exact' ? tr('redis_viewer.placeholder.search_exact') : tr('redis_viewer.placeholder.search_fuzzy')}
           value={searchInput}
           onChange={onSearchInputChange}
           onSearch={onSearch}
@@ -130,18 +138,18 @@ const RedisViewerKeyToolbar: React.FC<RedisViewerKeyToolbarProps> = ({
       </Space.Compact>
       <div className={isV2Ui ? 'gn-v2-redis-toolbar' : undefined} style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <Space wrap size={8}>
-          <Button size="small" style={actionButtonStyle} icon={<ReloadOutlined />} onClick={onRefresh}>刷新</Button>
-          <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={onCreateKey}>新建</Button>
-          <Button size="small" style={primaryActionButtonStyle} onClick={onSelectAllLoadedKeys} disabled={keyCount === 0}>全选全部</Button>
-          <Button size="small" style={actionButtonStyle} onClick={onClearAllSelectedKeys} disabled={selectedKeyCount === 0}>取消全选</Button>
+          <Button size="small" style={actionButtonStyle} icon={<ReloadOutlined />} onClick={onRefresh}>{tr('redis_viewer.action.refresh')}</Button>
+          <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={onCreateKey}>{tr('redis_viewer.action.new_key')}</Button>
+          <Button size="small" style={primaryActionButtonStyle} onClick={onSelectAllLoadedKeys} disabled={keyCount === 0}>{tr('redis_viewer.action.select_all_loaded')}</Button>
+          <Button size="small" style={actionButtonStyle} onClick={onClearAllSelectedKeys} disabled={selectedKeyCount === 0}>{tr('redis_viewer.action.clear_selection')}</Button>
         </Space>
         <Popconfirm
-          title={`确定删除选中的 ${selectedKeyCount} 个 Key？`}
+          title={tr('redis_viewer.confirm.delete_selected', { count: selectedKeyCount })}
           onConfirm={onDeleteSelectedKeys}
           disabled={selectedKeyCount === 0}
         >
           <Button size="small" style={dangerActionButtonStyle} icon={<DeleteOutlined />} disabled={selectedKeyCount === 0}>
-            删除选中({selectedKeyCount})
+            {tr('redis_viewer.action.delete_selected', { count: selectedKeyCount })}
           </Button>
         </Popconfirm>
       </div>

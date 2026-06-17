@@ -20,6 +20,7 @@ import (
 	"GoNavi-Wails/internal/appdata"
 	"GoNavi-Wails/internal/logger"
 	"GoNavi-Wails/internal/secretstore"
+	"GoNavi-Wails/shared/i18n"
 
 	"github.com/google/uuid"
 	wailsRuntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -39,6 +40,7 @@ type Service struct {
 	guard              *safety.Guard
 	configDir          string // 配置存储目录
 	secretStore        secretstore.SecretStore
+	localizer          *i18n.Localizer
 	cancelFuncs        map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
 	mcpHTTPMu          sync.Mutex
 	mcpHTTP            *mcpHTTPServerRuntime
@@ -117,7 +119,154 @@ func NewServiceWithSecretStore(store secretstore.SecretStore) *Service {
 		skills:       make([]ai.SkillConfig, 0),
 		guard:        safety.NewGuard(ai.PermissionReadOnly),
 		secretStore:  store,
+		localizer:    newServiceLocalizer(),
 		cancelFuncs:  make(map[string]context.CancelFunc),
+	}
+}
+
+func newServiceLocalizer() *i18n.Localizer {
+	return newServiceLocalizerForLanguage(i18n.LanguageEnUS)
+}
+
+func newServiceLocalizerForLanguage(language i18n.Language) *i18n.Localizer {
+	localizer, err := i18n.NewLocalizer(language)
+	if err != nil {
+		logger.Warnf("加载 AI 多语言目录失败：%v", err)
+		return nil
+	}
+	return localizer
+}
+
+func (s *Service) AISetLanguage(language string) {
+	normalized, ok := i18n.NormalizeLanguage(language)
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.localizer == nil {
+		s.localizer = newServiceLocalizer()
+	}
+	if s.localizer != nil {
+		s.localizer.SetLanguage(normalized)
+	}
+}
+
+func (s *Service) serviceTextLocked(key string, params map[string]any) string {
+	if s.localizer == nil {
+		s.localizer = newServiceLocalizer()
+	}
+	if s.localizer == nil {
+		return key
+	}
+	return s.localizer.T(key, params)
+}
+
+func (s *Service) serviceLanguageLocked() i18n.Language {
+	if s.localizer == nil {
+		return i18n.LanguageEnUS
+	}
+	return s.localizer.Language()
+}
+
+func (s *Service) serviceLocalizerForLanguageLocked() *i18n.Localizer {
+	return newServiceLocalizerForLanguage(s.serviceLanguageLocked())
+}
+
+func (s *Service) serviceLocalizerForLanguage() *i18n.Localizer {
+	return newServiceLocalizerForLanguage(s.serviceLanguage())
+}
+
+func (s *Service) serviceLanguage() i18n.Language {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.serviceLanguageLocked()
+}
+
+func (s *Service) serviceText(key string, params map[string]any) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.serviceTextLocked(key, params)
+}
+
+type localizedAIServiceError struct {
+	message string
+	cause   error
+}
+
+func (e localizedAIServiceError) Error() string {
+	return e.message
+}
+
+func (e localizedAIServiceError) Unwrap() error {
+	return e.cause
+}
+
+func serviceTextWithDetail(params map[string]any, cause error) map[string]any {
+	result := make(map[string]any, len(params)+1)
+	for key, value := range params {
+		result[key] = value
+	}
+	if cause != nil {
+		result["detail"] = cause.Error()
+	}
+	return result
+}
+
+func serviceErrorFromText(key string, text string, cause error) error {
+	if cause == nil {
+		return nil
+	}
+	if text == key {
+		text = fmt.Sprintf("%s: %s", key, cause.Error())
+	}
+	return localizedAIServiceError{message: text, cause: cause}
+}
+
+func serviceTextFromLocalizer(localizer *i18n.Localizer, key string, params map[string]any) string {
+	if localizer == nil {
+		localizer = newServiceLocalizer()
+	}
+	if localizer == nil {
+		return key
+	}
+	return localizer.T(key, params)
+}
+
+func serviceErrorFromLocalizer(localizer *i18n.Localizer, key string, params map[string]any, cause error) error {
+	return serviceErrorFromText(key, serviceTextFromLocalizer(localizer, key, serviceTextWithDetail(params, cause)), cause)
+}
+
+func (s *Service) serviceErrorLocked(key string, params map[string]any, cause error) error {
+	return serviceErrorFromText(key, s.serviceTextLocked(key, serviceTextWithDetail(params, cause)), cause)
+}
+
+func (s *Service) serviceError(key string, params map[string]any, cause error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.serviceErrorLocked(key, params, cause)
+}
+
+func (s *Service) providerTestFailedMessage(detail string) string {
+	return s.serviceText("ai_service.backend.error.provider_test_failed", map[string]any{"detail": detail})
+}
+
+func (s *Service) localizeProviderHealthCheckRequestError(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	switch {
+	case strings.HasPrefix(message, "创建请求失败: "):
+		return fmt.Errorf("%s", s.serviceText("ai_service.backend.error.provider_request_create_failed", map[string]any{
+			"detail": strings.TrimPrefix(message, "创建请求失败: "),
+		}))
+	case strings.HasPrefix(message, "序列化请求失败: "):
+		return fmt.Errorf("%s", s.serviceText("ai_service.backend.error.provider_request_serialize_failed", map[string]any{
+			"detail": strings.TrimPrefix(message, "序列化请求失败: "),
+		}))
+	default:
+		return err
 	}
 }
 
@@ -151,20 +300,25 @@ func (s *Service) AIGetProviders() []ai.ProviderConfig {
 // AIGetEditableProvider 获取用于编辑的 Provider 配置，包含已解析的 secret
 func (s *Service) AIGetEditableProvider(id string) (ai.ProviderConfig, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+	var found ai.ProviderConfig
 	for _, providerConfig := range s.providers {
 		if providerConfig.ID != id {
 			continue
 		}
-		resolved, err := s.resolveProviderConfigSecrets(providerConfig)
+		found = providerConfig
+		break
+	}
+	s.mu.RUnlock()
+
+	if strings.TrimSpace(found.ID) != "" {
+		resolved, err := s.resolveProviderConfigSecrets(found)
 		if err != nil {
-			return ai.ProviderConfig{}, fmt.Errorf("读取 Provider secret 失败: %w", err)
+			return ai.ProviderConfig{}, s.serviceError("ai_service.backend.error.provider_secret_read_failed", nil, err)
 		}
 		return resolved, nil
 	}
 
-	return ai.ProviderConfig{}, fmt.Errorf("provider not found: %s", id)
+	return ai.ProviderConfig{}, s.serviceError("ai_service.backend.error.editable_provider_not_found", nil, fmt.Errorf("%s", id))
 }
 
 // AISaveProvider 保存/更新 Provider 配置
@@ -201,7 +355,7 @@ func (s *Service) AISaveProvider(config ai.ProviderConfig) error {
 		}
 		storedMeta, err := s.persistProviderSecretBundle(meta, mergedBundle)
 		if err != nil {
-			return fmt.Errorf("保存 Provider secret 失败: %w", err)
+			return s.serviceErrorLocked("ai_service.backend.error.provider_secret_save_failed", nil, err)
 		}
 		runtimeConfig = mergeProviderSecrets(storedMeta, mergedBundle)
 	case found && (config.HasSecret || existing.HasSecret):
@@ -211,9 +365,9 @@ func (s *Service) AISaveProvider(config ai.ProviderConfig) error {
 		if existingBundle.hasAny() {
 			runtimeConfig = mergeProviderSecrets(meta, existingBundle)
 		} else {
-			resolved, err := s.resolveProviderConfigSecrets(meta)
+			resolved, err := s.resolveProviderConfigSecretsLocked(meta)
 			if err != nil {
-				return fmt.Errorf("读取已保存 Provider secret 失败: %w", err)
+				return s.serviceErrorLocked("ai_service.backend.error.provider_secret_saved_read_failed", nil, err)
 			}
 			runtimeConfig = resolved
 		}
@@ -223,7 +377,7 @@ func (s *Service) AISaveProvider(config ai.ProviderConfig) error {
 
 	if !runtimeConfig.HasSecret && found {
 		if err := s.dailySecretStore().DeleteAIProvider(existing.ID); err != nil {
-			return fmt.Errorf("删除 Provider secret 失败: %w", err)
+			return s.serviceErrorLocked("ai_service.backend.error.provider_secret_delete_failed", nil, err)
 		}
 	}
 	if !runtimeConfig.HasSecret {
@@ -263,7 +417,7 @@ func (s *Service) AIDeleteProvider(id string) error {
 	}
 	if removedFound && strings.TrimSpace(removed.SecretRef) != "" {
 		if err := s.secretStore.Delete(removed.SecretRef); err != nil {
-			return fmt.Errorf("删除 Provider secret 失败: %w", err)
+			return s.serviceErrorLocked("ai_service.backend.error.provider_secret_delete_failed", nil, err)
 		}
 	}
 	s.providers = newProviders
@@ -316,14 +470,14 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 			} else {
 				resolved, err := s.resolveProviderConfigSecrets(config)
 				if err != nil {
-					return map[string]interface{}{"success": false, "message": fmt.Sprintf("连接测试失败: %s", err.Error())}
+					return map[string]interface{}{"success": false, "message": s.providerTestFailedMessage(err.Error())}
 				}
 				config = resolved
 			}
 		} else {
 			resolved, err := s.resolveProviderConfigSecrets(config)
 			if err != nil {
-				return map[string]interface{}{"success": false, "message": fmt.Sprintf("连接测试失败: %s", err.Error())}
+				return map[string]interface{}{"success": false, "message": s.providerTestFailedMessage(err.Error())}
 			}
 			config = resolved
 		}
@@ -340,7 +494,7 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 	case "openai", "anthropic", "gemini":
 		req, reqErr := newProviderHealthCheckRequest(config)
 		if reqErr != nil {
-			err = reqErr
+			err = s.localizeProviderHealthCheckRequestError(reqErr)
 			break
 		}
 		resp, reqErr := client.Do(req)
@@ -349,14 +503,28 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 		} else {
 			defer resp.Body.Close()
 			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-				err = fmt.Errorf("API Key 无效或请求错误 (HTTP %d)", resp.StatusCode)
+				err = fmt.Errorf("%s", s.serviceText("ai_service.backend.error.provider_auth_failed", map[string]any{
+					"status": resp.StatusCode,
+					"body":   "",
+				}))
 			} else if providerType == "gemini" && resp.StatusCode == http.StatusBadRequest {
-				err = fmt.Errorf("API Key 无效或请求错误 (HTTP %d)", resp.StatusCode)
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+				err = fmt.Errorf("%s", s.serviceText("ai_service.backend.error.provider_auth_failed", map[string]any{
+					"status": resp.StatusCode,
+					"body":   formatProviderHTTPBody(body),
+				}))
+			} else if resp.StatusCode >= 500 {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+				err = fmt.Errorf("%s", s.serviceText("ai_service.backend.error.provider_http_server_error", map[string]any{
+					"status": resp.StatusCode,
+					"body":   formatProviderHTTPBody(body),
+				}))
 			} else if resp.StatusCode >= 400 {
 				body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-				err = fmt.Errorf("接口返回异常 (HTTP %d): %s", resp.StatusCode, string(body))
-			} else if resp.StatusCode >= 500 {
-				err = fmt.Errorf("上游服务器内部错误 (HTTP %d)", resp.StatusCode)
+				err = fmt.Errorf("%s", s.serviceText("ai_service.backend.error.provider_http_status_failed", map[string]any{
+					"status": resp.StatusCode,
+					"body":   formatProviderHTTPBody(body),
+				}))
 			}
 		}
 	case "claude-cli":
@@ -378,13 +546,21 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 	}
 
 	if err != nil {
-		return map[string]interface{}{"success": false, "message": fmt.Sprintf("连接测试失败: %s", err.Error())}
+		return map[string]interface{}{"success": false, "message": s.providerTestFailedMessage(err.Error())}
 	}
 
 	return map[string]interface{}{
 		"success": true,
-		"message": "端点连通性测试成功！",
+		"message": s.serviceText("ai_service.backend.message.provider_test_success", nil),
 	}
+}
+
+func formatProviderHTTPBody(body []byte) string {
+	trimmed := strings.TrimSpace(string(body))
+	if trimmed == "" {
+		return ""
+	}
+	return ": " + trimmed
 }
 
 func normalizedProviderType(config ai.ProviderConfig) string {
@@ -1055,7 +1231,7 @@ func (s *Service) getActiveProvider() (provider.Provider, error) {
 // --- 配置持久化 ---
 
 func (s *Service) loadConfig() {
-	snapshot, err := NewProviderConfigStore(s.configDir, s.secretStore).Load()
+	snapshot, err := NewProviderConfigStoreWithLanguage(s.configDir, s.secretStore, s.serviceLanguage()).Load()
 	if err != nil {
 		logger.Error(err, "加载 AI 配置失败")
 		return
@@ -1072,7 +1248,7 @@ func (s *Service) loadConfig() {
 }
 
 func (s *Service) saveConfig() error {
-	return NewProviderConfigStore(s.configDir, s.secretStore).Save(ProviderConfigStoreSnapshot{
+	return NewProviderConfigStoreWithLanguage(s.configDir, s.secretStore, s.serviceLanguageLocked()).Save(ProviderConfigStoreSnapshot{
 		Providers:          s.providers,
 		ActiveProvider:     s.activeProvider,
 		SafetyLevel:        s.safetyLevel,

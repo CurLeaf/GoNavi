@@ -1,6 +1,9 @@
 import React from 'react';
 import { Tooltip } from 'antd';
 import { LinkOutlined } from '@ant-design/icons';
+import { t as defaultTranslate, type I18nParams } from '../i18n';
+
+export type DataGridColumnTitleTranslate = (key: string, params?: I18nParams) => string;
 
 export interface DataGridColumnTitleProps {
   columnName: string;
@@ -19,6 +22,7 @@ export interface DataGridColumnTitleProps {
   columnMetaTooltipColor: string;
   darkMode: boolean;
   highlighted?: boolean;
+  translate?: DataGridColumnTitleTranslate;
   onOpenForeignKey?: () => void;
 }
 
@@ -33,6 +37,7 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
   columnMetaTooltipColor,
   darkMode,
   highlighted = false,
+  translate = defaultTranslate,
   onOpenForeignKey,
 }) => {
   const normalizedName = String(columnName || '');
@@ -45,11 +50,11 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
   const isSingleLineColumnTitle = !shouldShowColumnType && !shouldShowColumnComment;
 
   const hoverLines: string[] = [];
-  if (columnType) hoverLines.push(`类型：${columnType}`);
-  if (columnComment) hoverLines.push(`备注：${columnComment}`);
+  if (columnType) hoverLines.push(translate('data_grid.column.type_tooltip', { type: columnType }));
+  if (columnComment) hoverLines.push(translate('data_grid.column.comment_tooltip', { comment: columnComment }));
   if (refTableName) {
     const refColumnText = refColumnName ? `.${refColumnName}` : '';
-    hoverLines.push(`外键：${refTableName}${refColumnText}`);
+    hoverLines.push(translate('data_grid.column.foreign_key_tooltip', { target: `${refTableName}${refColumnText}` }));
   }
 
   const fieldLabel = refTableName ? (
@@ -58,7 +63,7 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
       data-grid-fk-jump="true"
       data-column-name={normalizedName}
       data-ref-table-name={refTableName}
-      title={`跳转到外键表：${refTableName}`}
+      title={translate('data_grid.column.foreign_key_jump_title', { tableName: refTableName })}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();

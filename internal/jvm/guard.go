@@ -11,6 +11,38 @@ import (
 	"GoNavi-Wails/internal/connection"
 )
 
+const (
+	changeBlockedReadOnlyKey         = "jvm.backend.error.change_blocked_read_only"
+	previewConfirmationMissingKey    = "jvm.backend.error.preview_confirmation_missing"
+	confirmationTokenMissingKey      = "jvm.backend.error.confirmation_token_missing"
+	confirmationTokenInvalidKey      = "jvm.backend.error.confirmation_token_invalid"
+	changeConfirmationTokenFailedKey = "jvm.backend.error.change_confirmation_token_failed"
+)
+
+// LocalizedError marks JVM package errors that the app boundary can translate.
+type LocalizedError struct {
+	Key    string
+	Params map[string]any
+	Cause  error
+}
+
+func (e *LocalizedError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Cause != nil {
+		return e.Cause.Error()
+	}
+	return e.Key
+}
+
+func (e *LocalizedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
 // BuildChangePreview builds a guarded preview for JVM mutations.
 // It always produces a local before/after baseline and, when writes are still
 // allowed, merges provider preview details on top of that baseline.
@@ -70,7 +102,8 @@ func BuildChangePreview(
 	if normalized.JVM.ReadOnly != nil && *normalized.JVM.ReadOnly {
 		preview.Allowed = false
 		preview.RiskLevel = "high"
-		preview.BlockingReason = "当前连接为只读，禁止写入"
+		preview.BlockingReason = changeBlockedReadOnlyKey
+		preview.blockingReasonKey = changeBlockedReadOnlyKey
 	}
 	if normalized.JVM.Environment == EnvPROD {
 		preview.RequiresConfirmation = true
@@ -200,13 +233,13 @@ func ValidateChangeConfirmation(preview ChangePreview, req ChangeRequest) error 
 	previewToken := strings.TrimSpace(preview.ConfirmationToken)
 	requestToken := strings.TrimSpace(req.ConfirmationToken)
 	if previewToken == "" {
-		return fmt.Errorf("预览确认令牌缺失，请重新预览后再提交")
+		return &LocalizedError{Key: previewConfirmationMissingKey}
 	}
 	if requestToken == "" {
-		return fmt.Errorf("缺少确认令牌，请先完成预览确认")
+		return &LocalizedError{Key: confirmationTokenMissingKey}
 	}
 	if previewToken != requestToken {
-		return fmt.Errorf("确认令牌不匹配，请重新预览并确认")
+		return &LocalizedError{Key: confirmationTokenInvalidKey}
 	}
 	return nil
 }
@@ -244,7 +277,13 @@ func buildChangeConfirmationToken(cfg connection.ConnectionConfig, req ChangeReq
 
 	encoded, err := json.Marshal(input)
 	if err != nil {
-		return "", fmt.Errorf("生成 JVM 变更确认令牌失败: %w", err)
+		return "", &LocalizedError{
+			Key: changeConfirmationTokenFailedKey,
+			Params: map[string]any{
+				"detail": err.Error(),
+			},
+			Cause: err,
+		}
 	}
 
 	sum := sha256.Sum256(encoded)

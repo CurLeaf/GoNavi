@@ -13,7 +13,12 @@ type Capability struct {
 	CanWrite     bool   `json:"canWrite"`
 	CanPreview   bool   `json:"canPreview"`
 	Reason       string `json:"reason,omitempty"`
+	reasonKey    string
 	DisplayLabel string `json:"displayLabel"`
+}
+
+func (c Capability) ReasonLocalizationKey() string {
+	return c.reasonKey
 }
 
 type ResourceSummary struct {
@@ -69,14 +74,19 @@ type ChangeRequest struct {
 }
 
 type ChangePreview struct {
-	Allowed              bool          `json:"allowed"`
-	RequiresConfirmation bool          `json:"requiresConfirmation,omitempty"`
-	ConfirmationToken    string        `json:"confirmationToken,omitempty"`
-	Summary              string        `json:"summary"`
-	RiskLevel            string        `json:"riskLevel"`
-	BlockingReason       string        `json:"blockingReason,omitempty"`
+	Allowed              bool   `json:"allowed"`
+	RequiresConfirmation bool   `json:"requiresConfirmation,omitempty"`
+	ConfirmationToken    string `json:"confirmationToken,omitempty"`
+	Summary              string `json:"summary"`
+	RiskLevel            string `json:"riskLevel"`
+	BlockingReason       string `json:"blockingReason,omitempty"`
+	blockingReasonKey    string
 	Before               ValueSnapshot `json:"before"`
 	After                ValueSnapshot `json:"after"`
+}
+
+func (p ChangePreview) BlockingReasonLocalizationKey() string {
+	return p.blockingReasonKey
 }
 
 type ApplyResult struct {

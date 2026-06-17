@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom';
 import { Table, Input, Button, Space, Tag, Tree, Spin, message, Modal, Form, InputNumber, Popconfirm, Tooltip, Radio } from 'antd';
 import type { RadioChangeEvent } from 'antd';
-import { ReloadOutlined, DeleteOutlined, PlusOutlined, EditOutlined, ClockCircleOutlined, CopyOutlined, FolderOpenOutlined, KeyOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
+import { ReloadOutlined, DeleteOutlined, PlusOutlined, EditOutlined, SearchOutlined, ClockCircleOutlined, CopyOutlined, FolderOpenOutlined, KeyOutlined, RightOutlined, DownOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { RedisKeyInfo, RedisValue, StreamEntry } from '../types';
 import Editor from './MonacoEditor';
@@ -30,7 +30,10 @@ import { buildRedisWorkbenchTheme } from './redisViewerWorkbenchTheme';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import { normalizeRedisSearchDraftChange, normalizeRedisSearchInput, type RedisSearchMode } from '../utils/redisSearchPattern';
 import { decodeRedisUtf8Value, formatRedisStringValue, toHexDisplay } from '../utils/redisValueDisplay';
-import RedisViewerKeyToolbar from './RedisViewerKeyToolbar';
+import { t, type I18nParams } from '../i18n';
+import { useOptionalI18n } from '../i18n/provider';
+
+const { Search } = Input;
 
 const REDIS_TREE_KEY_TYPE_WIDTH = 92;
 const REDIS_TREE_KEY_TYPE_WIDTH_NARROW = 84;
@@ -42,19 +45,20 @@ const REDIS_KEY_SEARCH_INITIAL_LOAD_COUNT = 600;
 const REDIS_KEY_SEARCH_LOAD_MORE_COUNT = 1000;
 const REDIS_LARGE_KEYSPACE_THRESHOLD = 10000;
 const REDIS_LARGE_KEYSPACE_MAX_EXPANDED_GROUPS = 200;
-const REDIS_KEY_GONE_MESSAGE = 'Redis Key 不存在或已过期';
+const REDIS_KEY_GONE_MESSAGE = 'Redis Key 不存在或已过期'; // i18n-scan: allow-raw backend sentinel
 
 interface RedisViewerProps {
     connectionId: string;
     redisDB: number;
 }
 
-// 可拖拽分隔条组件 - 使用直接 DOM 操作避免卡顿
+// Draggable divider uses direct DOM updates to avoid resize lag.
 const ResizableDivider: React.FC<{
     onResizeEnd: (newWidth: number) => void;
     targetRef: React.RefObject<HTMLDivElement>;
     minWidth?: number;
-}> = ({ onResizeEnd, targetRef, minWidth = 300 }) => {
+    title: string;
+}> = ({ onResizeEnd, targetRef, minWidth = 300, title }) => {
     const handleMouseDown = (e: React.MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -65,9 +69,9 @@ const ResizableDivider: React.FC<{
         const startX = e.clientX;
         const startWidth = target.offsetWidth;
         const containerWidth = target.parentElement?.offsetWidth || window.innerWidth;
-        const maxWidth = containerWidth - 350; // 右侧至少留 350px
+        const maxWidth = containerWidth - 350; // Keep at least 350px for the right pane.
 
-        // 创建遮罩层防止文本选择和其他交互
+        // Add an overlay to prevent text selection and other interactions.
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;cursor:col-resize;z-index:9999;';
         document.body.appendChild(overlay);
@@ -78,7 +82,7 @@ const ResizableDivider: React.FC<{
             moveEvent.preventDefault();
             const delta = moveEvent.clientX - startX;
             currentWidth = Math.max(minWidth, Math.min(maxWidth, startWidth + delta));
-            // 直接操作 DOM，不触发 React 重渲染
+            // Update DOM directly during drag without forcing React re-renders.
             target.style.width = `${currentWidth}px`;
             target.style.flexBasis = `${currentWidth}px`;
         };
@@ -87,7 +91,7 @@ const ResizableDivider: React.FC<{
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
             document.body.removeChild(overlay);
-            // 拖拽结束时才更新 React state
+            // Commit React state only after drag ends.
             onResizeEnd(currentWidth);
         };
 
@@ -108,7 +112,7 @@ const ResizableDivider: React.FC<{
                 justifyContent: 'center',
                 zIndex: 10,
             }}
-            title="拖动调整宽度"
+            title={title}
         >
         </div>
     );
@@ -143,10 +147,42 @@ const isRedisKeyGoneErrorMessage = (messageText: string): boolean => {
     return messageText.includes(REDIS_KEY_GONE_MESSAGE);
 };
 
+const normalizeToolbarText = (value: unknown): string => String(value || '').trim();
+
+const resolveRedisTopology = (connection?: { config?: { topology?: string; hosts?: string[] } }): 'single' | 'replica' | 'cluster' | 'sentinel' => {
+    const topology = normalizeToolbarText(connection?.config?.topology).toLowerCase();
+    if (topology === 'replica') return 'replica';
+    if (topology === 'sentinel') return 'sentinel';
+    if (topology === 'cluster') return 'cluster';
+    const extraHosts = Array.isArray(connection?.config?.hosts) ? connection.config.hosts.filter(Boolean) : [];
+    return extraHosts.length > 0 ? 'cluster' : 'single';
+};
+
+const buildRedisSeedAddresses = (connection?: { config?: { host?: string; port?: number | string; hosts?: string[] } }): string[] => {
+    if (!connection) return [];
+    const port = Number.isFinite(Number(connection.config?.port)) ? Number(connection.config?.port) : 6379;
+    const primaryHost = normalizeToolbarText(connection.config?.host);
+    const primary = primaryHost ? `${primaryHost}:${port}` : '';
+    const extraHosts = Array.isArray(connection.config?.hosts)
+        ? connection.config.hosts.map((host) => normalizeToolbarText(host)).filter(Boolean)
+        : [];
+    return [primary, ...extraHosts].filter(Boolean);
+};
+
+const getRedisTopologyTagLabel = (topology: 'single' | 'replica' | 'cluster' | 'sentinel'): string => {
+    if (topology === 'replica') return 'Replica';
+    if (topology === 'cluster') return 'Cluster';
+    if (topology === 'sentinel') return 'Sentinel';
+    return 'Single';
+};
+
 const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
     const appearance = useStore(state => state.appearance);
+    const i18n = useOptionalI18n();
+    const i18nLanguage = i18n?.language;
+    const tr = useCallback((key: string, params?: I18nParams) => t(key, params, i18nLanguage), [i18nLanguage]);
     const darkMode = theme === 'dark';
     const resolvedAppearance = resolveAppearanceValues(appearance);
     const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
@@ -167,6 +203,9 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const valueToolbarBg = workbenchTheme.panelBgStrong;
     const valueToolbarBorder = workbenchTheme.panelBorder;
     const valueToolbarText = workbenchTheme.textMuted;
+    const redisTopology = useMemo(() => resolveRedisTopology(connection), [connection]);
+    const redisSeedAddresses = useMemo(() => buildRedisSeedAddresses(connection), [connection]);
+    const redisSentinelMaster = normalizeToolbarText(connection?.config?.redisSentinelMaster);
 
     const [keys, setKeys] = useState<RedisKeyInfo[]>([]);
     const [loading, setLoading] = useState(false);
@@ -190,10 +229,10 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const [editValue, setEditValue] = useState('');
     const [treeContextMenu, setTreeContextMenu] = useState<{ x: number; y: number; rawKey: string } | null>(null);
 
-    // 视图模式状态（用于所有数据类型）
+    // View mode shared by every Redis value type.
     const [viewMode, setViewMode] = useState<'auto' | 'text' | 'utf8' | 'hex'>('auto');
 
-    // JSON 编辑弹窗状态
+    // JSON edit modal state.
     const [jsonEditModalOpen, setJsonEditModalOpen] = useState(false);
     const [jsonEditConfig, setJsonEditConfig] = useState<{
         title: string;
@@ -204,7 +243,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const jsonEditValueRef = useRef<string>('');
     const latestLoadRequestIdRef = useRef(0);
 
-    // 面板宽度状态和 ref - 默认占据 50% 宽度
+    // Left pane width defaults to 50%.
     const [leftPanelWidth, setLeftPanelWidth] = useState<number | string>('50%');
     const leftPanelRef = useRef<HTMLDivElement>(null);
     const treeContainerRef = useRef<HTMLDivElement>(null);
@@ -330,19 +369,19 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 setCursor(nextCursor);
                 setHasMore(nextCursor !== '0');
             } else {
-                message.error('加载 Key 失败: ' + res.message);
+                message.error(tr('redis_viewer.message.load_keys_failed', { detail: res.message }));
             }
         } catch (e: any) {
             if (requestId !== latestLoadRequestIdRef.current) {
                 return;
             }
-            message.error('加载 Key 失败: ' + (e?.message || String(e)));
+            message.error(tr('redis_viewer.message.load_keys_failed', { detail: e?.message || String(e) }));
         } finally {
             if (requestId === latestLoadRequestIdRef.current) {
                 setLoading(false);
             }
         }
-    }, [getConfig]);
+    }, [getConfig, tr]);
 
     useEffect(() => {
         loadKeys(searchPattern, '0', false, getRedisScanLoadCount(searchPattern, false));
@@ -418,18 +457,18 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 const messageText = String(res.message || '');
                 if (isRedisKeyGoneErrorMessage(messageText)) {
                     removeMissingKeyFromView(key);
-                    message.warning('Key 已不存在或已过期，已从列表移除');
+                    message.warning(tr('redis_viewer.message.key_missing_removed'));
                 } else {
-                    message.error('获取值失败: ' + messageText);
+                    message.error(tr('redis_viewer.message.value_load_failed', { detail: messageText }));
                 }
             }
         } catch (e: any) {
             const messageText = e?.message || String(e);
             if (isRedisKeyGoneErrorMessage(messageText)) {
                 removeMissingKeyFromView(key);
-                message.warning('Key 已不存在或已过期，已从列表移除');
+                message.warning(tr('redis_viewer.message.key_missing_removed'));
             } else {
-                message.error('获取值失败: ' + messageText);
+                message.error(tr('redis_viewer.message.value_load_failed', { detail: messageText }));
             }
         } finally {
             setValueLoading(false);
@@ -443,7 +482,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         try {
             const res = await (window as any).go.app.App.RedisDeleteKeys(buildRpcConnectionConfig(config), keysToDelete);
             if (res.success) {
-                message.success(`已删除 ${res.data.deleted} 个 Key`);
+                message.success(tr('redis_viewer.message.deleted_keys', { count: res.data.deleted }));
                 setKeys(prev => prev.filter(k => !keysToDelete.includes(k.key)));
                 if (selectedKey && keysToDelete.includes(selectedKey)) {
                     setSelectedKey(null);
@@ -451,10 +490,10 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 }
                 setSelectedKeys([]);
             } else {
-                message.error('删除失败: ' + res.message);
+                message.error(tr('redis_viewer.message.delete_failed', { detail: res.message }));
             }
         } catch (e: any) {
-            message.error('删除失败: ' + (e?.message || String(e)));
+            message.error(tr('redis_viewer.message.delete_failed', { detail: e?.message || String(e) }));
         }
     };
 
@@ -471,15 +510,15 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             const values = await ttlForm.validateFields();
             const res = await (window as any).go.app.App.RedisSetTTL(buildRpcConnectionConfig(config), selectedKey, values.ttl);
             if (res.success) {
-                message.success('TTL 设置成功');
+                message.success(tr('redis_viewer.message.ttl_set_success'));
                 setTtlModalOpen(false);
                 loadKeyValue(selectedKey);
                 handleRefresh();
             } else {
-                message.error('设置失败: ' + res.message);
+                message.error(tr('redis_viewer.message.set_failed', { detail: res.message }));
             }
         } catch (e: any) {
-            message.error('设置失败: ' + (e?.message || String(e)));
+            message.error(tr('redis_viewer.message.set_failed', { detail: e?.message || String(e) }));
         }
     };
 
@@ -490,14 +529,14 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         try {
             const res = await (window as any).go.app.App.RedisSetString(buildRpcConnectionConfig(config), selectedKey, editValue, keyValue?.ttl || -1);
             if (res.success) {
-                message.success('保存成功');
+                message.success(tr('redis_viewer.message.save_success'));
                 setEditModalOpen(false);
                 loadKeyValue(selectedKey);
             } else {
-                message.error('保存失败: ' + res.message);
+                message.error(tr('redis_viewer.message.save_failed', { detail: res.message }));
             }
         } catch (e: any) {
-            message.error('保存失败: ' + (e?.message || String(e)));
+            message.error(tr('redis_viewer.message.save_failed', { detail: e?.message || String(e) }));
         }
     };
 
@@ -509,15 +548,15 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             const values = await newKeyForm.validateFields();
             const res = await (window as any).go.app.App.RedisSetString(buildRpcConnectionConfig(config), values.key, values.value, values.ttl || -1);
             if (res.success) {
-                message.success('创建成功');
+                message.success(tr('redis_viewer.message.create_success'));
                 setNewKeyModalOpen(false);
                 newKeyForm.resetFields();
                 handleRefresh();
             } else {
-                message.error('创建失败: ' + res.message);
+                message.error(tr('redis_viewer.message.create_failed', { detail: res.message }));
             }
         } catch (e: any) {
-            message.error('创建失败: ' + (e?.message || String(e)));
+            message.error(tr('redis_viewer.message.create_failed', { detail: e?.message || String(e) }));
         }
     };
 
@@ -536,21 +575,21 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             const values = await renameKeyForm.validateFields();
             const nextKey = String(values.key || '').trim();
             if (!nextKey) {
-                message.warning('请输入新的 Key 名称');
+                message.warning(tr('redis_viewer.message.new_key_name_required'));
                 return;
             }
             if (nextKey === renameTargetKey) {
-                message.warning('新的 Key 名称不能与原值相同');
+                message.warning(tr('redis_viewer.message.rename_same_key'));
                 return;
             }
 
             const existsRes = await (window as any).go.app.App.RedisKeyExists(buildRpcConnectionConfig(config), nextKey);
             if (!existsRes?.success) {
-                message.error('校验目标 Key 失败: ' + (existsRes?.message || '未知错误'));
+                message.error(tr('redis_viewer.message.key_check_failed', { detail: existsRes?.message || 'Unknown error' }));
                 return;
             }
             if (existsRes?.data?.exists) {
-                message.error(`目标 Key 已存在: ${nextKey}`);
+                message.error(tr('redis_viewer.message.target_key_exists', { key: nextKey }));
                 return;
             }
 
@@ -571,16 +610,16 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 setRenameKeyModalOpen(false);
                 setRenameTargetKey(null);
                 renameKeyForm.resetFields();
-                message.success('Key 重命名成功');
+                message.success(tr('redis_viewer.message.rename_success'));
                 if (selectedKey === renameTargetKey) {
                     void loadKeyValue(nextKey);
                 }
                 handleRefresh();
             } else {
-                message.error('重命名失败: ' + res.message);
+                message.error(tr('redis_viewer.message.rename_failed', { detail: res.message }));
             }
         } catch (e: any) {
-            message.error('重命名失败: ' + (e?.message || String(e)));
+            message.error(tr('redis_viewer.message.rename_failed', { detail: e?.message || String(e) }));
         }
     };
 
@@ -596,14 +635,14 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         }
     };
 
-    const formatTTL = (ttl: number) => {
-        if (ttl === -1) return '永久';
-        if (ttl === -2) return '已过期';
-        if (ttl < 60) return `${ttl}秒`;
-        if (ttl < 3600) return `${Math.floor(ttl / 60)}分${ttl % 60}秒`;
-        if (ttl < 86400) return `${Math.floor(ttl / 3600)}时${Math.floor((ttl % 3600) / 60)}分`;
-        return `${Math.floor(ttl / 86400)}天${Math.floor((ttl % 86400) / 3600)}时`;
-    };
+    const formatTTL = useCallback((ttl: number) => {
+        if (ttl === -1) return tr('redis_viewer.ttl.forever');
+        if (ttl === -2) return tr('redis_viewer.ttl.expired');
+        if (ttl < 60) return tr('redis_viewer.ttl.seconds', { seconds: ttl });
+        if (ttl < 3600) return tr('redis_viewer.ttl.minutes_seconds', { minutes: Math.floor(ttl / 60), seconds: ttl % 60 });
+        if (ttl < 86400) return tr('redis_viewer.ttl.hours_minutes', { hours: Math.floor(ttl / 3600), minutes: Math.floor((ttl % 3600) / 60) });
+        return tr('redis_viewer.ttl.days_hours', { days: Math.floor(ttl / 86400), hours: Math.floor((ttl % 86400) / 3600) });
+    }, [tr]);
 
     useEffect(() => {
         const target = leftPanelRef.current;
@@ -805,7 +844,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         <button
                             type="button"
                             className="redis-tree-expander-button"
-                            aria-label={isExpanded ? '折叠分组' : '展开分组'}
+                            aria-label={isExpanded ? tr('redis_viewer.aria.collapse_group') : tr('redis_viewer.aria.expand_group')}
                             onMouseDown={stopTreeTitleEvent}
                             onClick={(event) => {
                                 stopTreeTitleEvent(event);
@@ -852,7 +891,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                             handleSelectGroupDescendants(treeNode);
                         }}
                     >
-                        {groupFullyChecked ? '取消全选' : '全选'}
+                        {groupFullyChecked ? tr('redis_viewer.action.clear_group_selection') : tr('redis_viewer.action.select_group')}
                     </Button>
                 </div>
             );
@@ -942,7 +981,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 )}
             </div>
         );
-    }, [expandedGroupKeys, formatTTL, getTypeColor, handleSelectGroupDescendants, handleToggleGroupExpand, isLargeKeyspace, keyAccentColor, selectedKeys, showTreeKeyTTL, workbenchTheme]);
+    }, [expandedGroupKeys, formatTTL, getTypeColor, handleSelectGroupDescendants, handleToggleGroupExpand, isLargeKeyspace, keyAccentColor, selectedKeys, showTreeKeyTTL, tr, workbenchTheme]);
 
     const handleTreeExpand = (nextExpandedKeys: React.Key[]) => {
         const validGroupKeys = nextExpandedKeys
@@ -987,7 +1026,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         padding: 24,
                     }}
                 >
-                    选择一个 Key 查看详情
+                    {tr('redis_viewer.state.empty_selection')}
                 </div>
             );
         }
@@ -1006,7 +1045,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         alignItems: 'center'
                     }}>
                         <span style={{ fontSize: 12, color: valueToolbarText }}>
-                            {encoding && `编码: ${encoding}`}
+                            {encoding && tr('redis_viewer.label.encoding', { encoding })}
                         </span>
                     </div>
                     <Editor
@@ -1030,20 +1069,20 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         <Space>
                             <Button icon={<CopyOutlined />} onClick={() => {
                                 navigator.clipboard.writeText(strValue).then(() => {
-                                    message.success('已复制');
+                                    message.success(tr('redis_viewer.message.copied'));
                                 }).catch(() => {
-                                    message.error('复制失败');
+                                    message.error(tr('redis_viewer.message.copy_failed'));
                                 });
-                            }}>复制</Button>
+                            }}>{tr('redis_viewer.action.copy')}</Button>
                             {!isBinary && viewMode === 'auto' && (
                                 <Button icon={<EditOutlined />} onClick={() => {
                                     setEditValue(displayValue);
                                     setEditModalOpen(true);
-                                }}>编辑</Button>
+                                }}>{tr('redis_viewer.action.edit')}</Button>
                             )}
                             {(isBinary || viewMode !== 'auto') && (
                                 <span style={{ color: '#999', fontSize: 12 }}>
-                                    {viewMode !== 'auto' ? '切换到"自动"模式以编辑' : '二进制数据不支持编辑'}
+                                    {viewMode !== 'auto' ? tr('redis_viewer.hint.switch_auto_to_edit') : tr('redis_viewer.hint.binary_readonly')}
                                 </span>
                             )}
                         </Space>
@@ -1064,13 +1103,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 try {
                     const res = await (window as any).go.app.App.RedisSetHashField(buildRpcConnectionConfig(config), selectedKey, field, newValue);
                     if (res.success) {
-                        message.success('修改成功');
+                        message.success(tr('redis_viewer.message.update_success'));
                         loadKeyValue(selectedKey);
                     } else {
-                        message.error('修改失败: ' + res.message);
+                        message.error(tr('redis_viewer.message.update_failed', { detail: res.message }));
                     }
                 } catch (e: any) {
-                    message.error('修改失败: ' + (e?.message || String(e)));
+                    message.error(tr('redis_viewer.message.update_failed', { detail: e?.message || String(e) }));
                 }
             };
 
@@ -1080,13 +1119,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 try {
                     const res = await (window as any).go.app.App.RedisDeleteHashField(buildRpcConnectionConfig(config), selectedKey, [field]);
                     if (res.success) {
-                        message.success('删除成功');
+                        message.success(tr('redis_viewer.message.delete_success'));
                         loadKeyValue(selectedKey);
                     } else {
-                        message.error('删除失败: ' + res.message);
+                        message.error(tr('redis_viewer.message.delete_failed', { detail: res.message }));
                     }
                 } catch (e: any) {
-                    message.error('删除失败: ' + (e?.message || String(e)));
+                    message.error(tr('redis_viewer.message.delete_failed', { detail: e?.message || String(e) }));
                 }
             };
 
@@ -1095,13 +1134,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     <div className={isV2Ui ? 'gn-v2-redis-value-actionbar' : undefined} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => {
                             Modal.confirm({
-                                title: '添加字段',
+                                title: tr('redis_viewer.modal.add_field'),
                                 content: (
                                     <Form id="add-hash-field-form" layout="vertical">
-	                                        <Form.Item label="字段名" name="field" rules={[{ required: true }]}>
+	                                        <Form.Item label={tr('redis_viewer.field.field_name')} name="field" rules={[{ required: true }]}>
 	                                            <Input id="new-hash-field" {...noAutoCapInputProps} />
 	                                        </Form.Item>
-                                        <Form.Item label="值" name="value" rules={[{ required: true }]}>
+                                        <Form.Item label={tr('redis_viewer.field.value')} name="value" rules={[{ required: true }]}>
                                             <Input.TextArea id="new-hash-value" rows={4} />
                                         </Form.Item>
                                     </Form>
@@ -1114,14 +1153,14 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                     }
                                 }
                             });
-                        }}>添加字段</Button>
+                        }}>{tr('redis_viewer.action.add_field')}</Button>
                     </div>
                     <Table
                         dataSource={data}
                         columns={[
-                            { title: 'Field', dataIndex: 'field', key: 'field', width: 200, ellipsis: true },
+                            { title: tr('redis_viewer.table.field'), dataIndex: 'field', key: 'field', width: 200, ellipsis: true },
                             {
-                                title: 'Value',
+                                title: tr('redis_viewer.table.value'),
                                 dataIndex: 'displayValue',
                                 key: 'value',
                                 ellipsis: true,
@@ -1144,26 +1183,25 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                 }
                             },
                             {
-                                title: '操作',
+                                title: tr('redis_viewer.table.action'),
                                 key: 'action',
                                 width: 120,
                                 render: (_: any, record: any) => (
                                     <Space size="small">
-                                        <Tooltip title="复制值">
+                                        <Tooltip title={tr('redis_viewer.tooltip.copy_value')}>
                                             <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => {
                                                 navigator.clipboard.writeText(record.value).then(() => {
-                                                    message.success('已复制');
+                                                    message.success(tr('redis_viewer.message.copied'));
                                                 }).catch(() => {
-                                                    message.error('复制失败');
+                                                    message.error(tr('redis_viewer.message.copy_failed'));
                                                 });
                                             }} />
                                         </Tooltip>
                                         {!record.isBinary && (
                                             <Button type="text" size="small" icon={<EditOutlined />} onClick={() => {
-                                                // 如果是 JSON，格式化显示
                                                 const editContent = record.isJson ? record.displayValue : record.value;
                                                 setJsonEditConfig({
-                                                    title: `编辑字段: ${record.field}`,
+                                                    title: tr('redis_viewer.modal.edit_field', { field: record.field }),
                                                     value: editContent,
                                                     isJson: record.isJson,
                                                     onSave: async (newValue: string) => {
@@ -1173,7 +1211,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                                 setJsonEditModalOpen(true);
                                             }} />
                                         )}
-                                        <Popconfirm title="确定删除此字段？" onConfirm={() => handleDeleteHashField(record.field)}>
+                                        <Popconfirm title={tr('redis_viewer.confirm.delete_field')} onConfirm={() => handleDeleteHashField(record.field)}>
                                             <Button type="text" size="small" danger icon={<DeleteOutlined />} />
                                         </Popconfirm>
                                     </Space>
@@ -1202,13 +1240,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 try {
                     const res = await (window as any).go.app.App.RedisListSet(buildRpcConnectionConfig(config), selectedKey, index, newValue);
                     if (res.success) {
-                        message.success('修改成功');
+                        message.success(tr('redis_viewer.message.update_success'));
                         loadKeyValue(selectedKey);
                     } else {
-                        message.error('修改失败: ' + res.message);
+                        message.error(tr('redis_viewer.message.update_failed', { detail: res.message }));
                     }
                 } catch (e: any) {
-                    message.error('修改失败: ' + (e?.message || String(e)));
+                    message.error(tr('redis_viewer.message.update_failed', { detail: e?.message || String(e) }));
                 }
             };
 
@@ -1218,13 +1256,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 try {
                     const res = await (window as any).go.app.App.RedisListPush(buildRpcConnectionConfig(config), selectedKey, { values: [value], position });
                     if (res.success) {
-                        message.success('添加成功');
+                        message.success(tr('redis_viewer.message.add_success'));
                         loadKeyValue(selectedKey);
                     } else {
-                        message.error('添加失败: ' + res.message);
+                        message.error(tr('redis_viewer.message.add_failed', { detail: res.message }));
                     }
                 } catch (e: any) {
-                    message.error('添加失败: ' + (e?.message || String(e)));
+                    message.error(tr('redis_viewer.message.add_failed', { detail: e?.message || String(e) }));
                 }
             };
 
@@ -1234,10 +1272,10 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         <Space>
                             <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => {
                                 Modal.confirm({
-                                    title: '添加元素',
+                                    title: tr('redis_viewer.modal.add_element'),
                                     content: (
                                         <div>
-                                            <Input.TextArea id="new-list-value" rows={4} placeholder="输入新元素值" />
+                                            <Input.TextArea id="new-list-value" rows={4} placeholder={tr('redis_viewer.placeholder.new_element_value')} />
                                         </div>
                                     ),
                                     onOk: async () => {
@@ -1247,13 +1285,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                         }
                                     }
                                 });
-                            }}>添加到尾部</Button>
+                            }}>{tr('redis_viewer.action.add_list_tail')}</Button>
                             <Button size="small" style={actionButtonStyle} onClick={() => {
                                 Modal.confirm({
-                                    title: '添加元素到头部',
+                                    title: tr('redis_viewer.modal.add_element_head'),
                                     content: (
                                         <div>
-                                            <Input.TextArea id="new-list-value-left" rows={4} placeholder="输入新元素值" />
+                                            <Input.TextArea id="new-list-value-left" rows={4} placeholder={tr('redis_viewer.placeholder.new_element_value')} />
                                         </div>
                                     ),
                                     onOk: async () => {
@@ -1263,15 +1301,15 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                         }
                                     }
                                 });
-                            }}>添加到头部</Button>
+                            }}>{tr('redis_viewer.action.add_list_head')}</Button>
                         </Space>
                     </div>
                     <Table
                         dataSource={data}
                         columns={[
-                            { title: '索引', dataIndex: 'index', key: 'index', width: 80 },
+                            { title: tr('redis_viewer.table.index'), dataIndex: 'index', key: 'index', width: 80 },
                             {
-                                title: '值',
+                                title: tr('redis_viewer.table.value'),
                                 dataIndex: 'displayValue',
                                 key: 'value',
                                 ellipsis: true,
@@ -1294,26 +1332,25 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                 }
                             },
                             {
-                                title: '操作',
+                                title: tr('redis_viewer.table.action'),
                                 key: 'action',
                                 width: 80,
                                 render: (_: any, record: any) => (
                                     <Space size="small">
-                                        <Tooltip title="复制值">
+                                        <Tooltip title={tr('redis_viewer.tooltip.copy_value')}>
                                             <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => {
                                                 navigator.clipboard.writeText(record.value).then(() => {
-                                                    message.success('已复制');
+                                                    message.success(tr('redis_viewer.message.copied'));
                                                 }).catch(() => {
-                                                    message.error('复制失败');
+                                                    message.error(tr('redis_viewer.message.copy_failed'));
                                                 });
                                             }} />
                                         </Tooltip>
                                         {!record.isBinary && (
                                             <Button type="text" size="small" icon={<EditOutlined />} onClick={() => {
-                                                // 如果是 JSON，格式化显示
                                                 const editContent = record.isJson ? record.displayValue : record.value;
                                                 setJsonEditConfig({
-                                                    title: `编辑索引 ${record.index}`,
+                                                    title: tr('redis_viewer.modal.edit_index', { index: record.index }),
                                                     value: editContent,
                                                     isJson: record.isJson,
                                                     onSave: async (newValue: string) => {
@@ -1349,13 +1386,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 try {
                     const res = await (window as any).go.app.App.RedisSetAdd(buildRpcConnectionConfig(config), selectedKey, [member]);
                     if (res.success) {
-                        message.success('添加成功');
+                        message.success(tr('redis_viewer.message.add_success'));
                         loadKeyValue(selectedKey);
                     } else {
-                        message.error('添加失败: ' + res.message);
+                        message.error(tr('redis_viewer.message.add_failed', { detail: res.message }));
                     }
                 } catch (e: any) {
-                    message.error('添加失败: ' + (e?.message || String(e)));
+                    message.error(tr('redis_viewer.message.add_failed', { detail: e?.message || String(e) }));
                 }
             };
 
@@ -1365,13 +1402,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 try {
                     const res = await (window as any).go.app.App.RedisSetRemove(buildRpcConnectionConfig(config), selectedKey, [member]);
                     if (res.success) {
-                        message.success('删除成功');
+                        message.success(tr('redis_viewer.message.delete_success'));
                         loadKeyValue(selectedKey);
                     } else {
-                        message.error('删除失败: ' + res.message);
+                        message.error(tr('redis_viewer.message.delete_failed', { detail: res.message }));
                     }
                 } catch (e: any) {
-                    message.error('删除失败: ' + (e?.message || String(e)));
+                    message.error(tr('redis_viewer.message.delete_failed', { detail: e?.message || String(e) }));
                 }
             };
 
@@ -1380,9 +1417,9 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     <div className={isV2Ui ? 'gn-v2-redis-value-actionbar' : undefined} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => {
                             Modal.confirm({
-                                title: '添加成员',
+                                title: tr('redis_viewer.modal.add_member'),
                                 content: (
-                                    <Input.TextArea id="new-set-member" rows={4} placeholder="输入新成员值" />
+                                    <Input.TextArea id="new-set-member" rows={4} placeholder={tr('redis_viewer.placeholder.new_member_value')} />
                                 ),
                                 onOk: async () => {
                                     const member = (document.getElementById('new-set-member') as HTMLTextAreaElement)?.value;
@@ -1391,13 +1428,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                     }
                                 }
                             });
-                        }}>添加成员</Button>
+                        }}>{tr('redis_viewer.action.add_member')}</Button>
                     </div>
                     <Table
                         dataSource={data}
                         columns={[
                             {
-                                title: '成员',
+                                title: tr('redis_viewer.table.member'),
                                 dataIndex: 'displayValue',
                                 key: 'member',
                                 ellipsis: true,
@@ -1420,21 +1457,21 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                 }
                             },
                             {
-                                title: '操作',
+                                title: tr('redis_viewer.table.action'),
                                 key: 'action',
                                 width: 80,
                                 render: (_: any, record: any) => (
                                     <Space size="small">
-                                        <Tooltip title="复制值">
+                                        <Tooltip title={tr('redis_viewer.tooltip.copy_value')}>
                                             <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => {
                                                 navigator.clipboard.writeText(record.member).then(() => {
-                                                    message.success('已复制');
+                                                    message.success(tr('redis_viewer.message.copied'));
                                                 }).catch(() => {
-                                                    message.error('复制失败');
+                                                    message.error(tr('redis_viewer.message.copy_failed'));
                                                 });
                                             }} />
                                         </Tooltip>
-                                        <Popconfirm title="确定删除此成员？" onConfirm={() => handleRemoveSetMember(record.member)}>
+                                        <Popconfirm title={tr('redis_viewer.confirm.delete_member')} onConfirm={() => handleRemoveSetMember(record.member)}>
                                             <Button type="text" size="small" danger icon={<DeleteOutlined />} />
                                         </Popconfirm>
                                     </Space>
@@ -1463,13 +1500,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 try {
                     const res = await (window as any).go.app.App.RedisZSetAdd(buildRpcConnectionConfig(config), selectedKey, [{ member, score }]);
                     if (res.success) {
-                        message.success('添加成功');
+                        message.success(tr('redis_viewer.message.add_success'));
                         loadKeyValue(selectedKey);
                     } else {
-                        message.error('添加失败: ' + res.message);
+                        message.error(tr('redis_viewer.message.add_failed', { detail: res.message }));
                     }
                 } catch (e: any) {
-                    message.error('添加失败: ' + (e?.message || String(e)));
+                    message.error(tr('redis_viewer.message.add_failed', { detail: e?.message || String(e) }));
                 }
             };
 
@@ -1479,13 +1516,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 try {
                     const res = await (window as any).go.app.App.RedisZSetRemove(buildRpcConnectionConfig(config), selectedKey, [member]);
                     if (res.success) {
-                        message.success('删除成功');
+                        message.success(tr('redis_viewer.message.delete_success'));
                         loadKeyValue(selectedKey);
                     } else {
-                        message.error('删除失败: ' + res.message);
+                        message.error(tr('redis_viewer.message.delete_failed', { detail: res.message }));
                     }
                 } catch (e: any) {
-                    message.error('删除失败: ' + (e?.message || String(e)));
+                    message.error(tr('redis_viewer.message.delete_failed', { detail: e?.message || String(e) }));
                 }
             };
 
@@ -1494,16 +1531,16 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     <div className={isV2Ui ? 'gn-v2-redis-value-actionbar' : undefined} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => {
                             Modal.confirm({
-                                title: '添加成员',
+                                title: tr('redis_viewer.modal.add_member'),
                                 content: (
                                     <div>
                                         <div style={{ marginBottom: 8 }}>
-                                            <label>分数：</label>
+                                            <label>{tr('redis_viewer.field.score')}</label>
                                             <InputNumber id="new-zset-score" defaultValue={0} style={{ width: '100%' }} />
                                         </div>
                                         <div>
-                                            <label>成员：</label>
-                                            <Input.TextArea id="new-zset-member" rows={4} placeholder="输入成员值" />
+                                            <label>{tr('redis_viewer.field.member')}</label>
+                                            <Input.TextArea id="new-zset-member" rows={4} placeholder={tr('redis_viewer.placeholder.member_value')} />
                                         </div>
                                     </div>
                                 ),
@@ -1515,14 +1552,14 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                     }
                                 }
                             });
-                        }}>添加成员</Button>
+                        }}>{tr('redis_viewer.action.add_member')}</Button>
                     </div>
                     <Table
                         dataSource={data}
                         columns={[
-                            { title: '分数', dataIndex: 'score', key: 'score', width: 120 },
+                            { title: tr('redis_viewer.table.score'), dataIndex: 'score', key: 'score', width: 120 },
                             {
-                                title: '成员',
+                                title: tr('redis_viewer.table.member'),
                                 dataIndex: 'displayMember',
                                 key: 'member',
                                 ellipsis: true,
@@ -1545,27 +1582,27 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                 }
                             },
                             {
-                                title: '操作',
+                                title: tr('redis_viewer.table.action'),
                                 key: 'action',
                                 width: 120,
                                 render: (_: any, record: any) => (
                                     <Space size="small">
-                                        <Tooltip title="复制值">
+                                        <Tooltip title={tr('redis_viewer.tooltip.copy_value')}>
                                             <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => {
                                                 navigator.clipboard.writeText(record.member).then(() => {
-                                                    message.success('已复制');
+                                                    message.success(tr('redis_viewer.message.copied'));
                                                 }).catch(() => {
-                                                    message.error('复制失败');
+                                                    message.error(tr('redis_viewer.message.copy_failed'));
                                                 });
                                             }} />
                                         </Tooltip>
                                         {!record.isBinary && (
                                             <Button type="text" size="small" icon={<EditOutlined />} onClick={() => {
                                                 Modal.confirm({
-                                                    title: '修改分数',
+                                                    title: tr('redis_viewer.modal.update_score'),
                                                     content: (
                                                         <div>
-                                                            <label>新分数：</label>
+                                                            <label>{tr('redis_viewer.field.new_score')}</label>
                                                             <InputNumber id="edit-zset-score" defaultValue={record.score} style={{ width: '100%' }} />
                                                         </div>
                                                     ),
@@ -1576,7 +1613,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                                 });
                                             }} />
                                         )}
-                                        <Popconfirm title="确定删除此成员？" onConfirm={() => handleRemoveZSetMember(record.member)}>
+                                        <Popconfirm title={tr('redis_viewer.confirm.delete_member')} onConfirm={() => handleRemoveZSetMember(record.member)}>
                                             <Button type="text" size="small" danger icon={<DeleteOutlined />} />
                                         </Popconfirm>
                                     </Space>
@@ -1616,12 +1653,12 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 try {
                     parsed = JSON.parse(fieldsText);
                 } catch (e) {
-                    message.error('字段 JSON 格式不正确');
+                    message.error(tr('redis_viewer.message.fields_json_invalid'));
                     return;
                 }
 
                 if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                    message.error('字段必须是 JSON 对象');
+                    message.error(tr('redis_viewer.message.fields_must_be_json_object'));
                     return;
                 }
 
@@ -1631,7 +1668,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 });
 
                 if (Object.keys(fieldMap).length === 0) {
-                    message.error('至少提供一个字段');
+                    message.error(tr('redis_viewer.message.fields_required'));
                     return;
                 }
 
@@ -1639,13 +1676,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     const res = await (window as any).go.app.App.RedisStreamAdd(buildRpcConnectionConfig(config), selectedKey, fieldMap, id || '*');
                     if (res.success) {
                         const newID = res.data?.id ? ` (${res.data.id})` : '';
-                        message.success(`添加成功${newID}`);
+                        message.success(tr('redis_viewer.message.add_success_with_id', { id: newID }));
                         loadKeyValue(selectedKey);
                     } else {
-                        message.error('添加失败: ' + res.message);
+                        message.error(tr('redis_viewer.message.add_failed', { detail: res.message }));
                     }
                 } catch (e: any) {
-                    message.error('添加失败: ' + (e?.message || String(e)));
+                    message.error(tr('redis_viewer.message.add_failed', { detail: e?.message || String(e) }));
                 }
             };
 
@@ -1658,16 +1695,16 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     if (res.success) {
                         const deleted = Number(res.data?.deleted ?? 0);
                         if (deleted > 0) {
-                            message.success('删除成功');
+                            message.success(tr('redis_viewer.message.delete_success'));
                         } else {
-                            message.warning('未删除任何消息，可能已不存在');
+                            message.warning(tr('redis_viewer.message.stream_entry_not_deleted'));
                         }
                         loadKeyValue(selectedKey);
                     } else {
-                        message.error('删除失败: ' + res.message);
+                        message.error(tr('redis_viewer.message.delete_failed', { detail: res.message }));
                     }
                 } catch (e: any) {
-                    message.error('删除失败: ' + (e?.message || String(e)));
+                    message.error(tr('redis_viewer.message.delete_failed', { detail: e?.message || String(e) }));
                 }
             };
 
@@ -1676,16 +1713,16 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     <div className={isV2Ui ? 'gn-v2-redis-value-actionbar' : undefined} style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => {
                             Modal.confirm({
-                                title: '添加 Stream 消息',
+                                title: tr('redis_viewer.modal.add_stream_entry'),
                                 width: 680,
                                 content: (
                                     <div>
                                         <div style={{ marginBottom: 8 }}>
-                                            <label>ID（可选，默认 *）：</label>
-	                                            <Input id="new-stream-id" {...noAutoCapInputProps} placeholder="例如: * 或 1723110000000-0" />
+                                            <label>{tr('redis_viewer.field.stream_id')}</label>
+	                                            <Input id="new-stream-id" {...noAutoCapInputProps} placeholder={tr('redis_viewer.placeholder.stream_id')} />
                                         </div>
                                         <div>
-                                            <label>字段 JSON：</label>
+                                            <label>{tr('redis_viewer.field.fields_json')}</label>
                                             <Input.TextArea id="new-stream-fields" rows={8} defaultValue={'{\n  "field": "value"\n}'} />
                                         </div>
                                     </div>
@@ -1696,7 +1733,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                     await handleAddStreamEntry(fieldsText, id);
                                 }
                             });
-                        }}>添加消息</Button>
+                        }}>{tr('redis_viewer.action.add_stream_entry')}</Button>
                     </div>
                     <Table
                         dataSource={data}
@@ -1709,7 +1746,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                 ellipsis: true,
                             },
                             {
-                                title: '字段',
+                                title: tr('redis_viewer.table.fields'),
                                 dataIndex: 'displayFields',
                                 key: 'fields',
                                 ellipsis: true,
@@ -1732,30 +1769,30 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                 }
                             },
                             {
-                                title: '操作',
+                                title: tr('redis_viewer.table.action'),
                                 key: 'action',
                                 width: 140,
                                 render: (_: any, record: any) => (
                                     <Space size="small">
-                                        <Tooltip title="复制 ID">
+                                        <Tooltip title={tr('redis_viewer.tooltip.copy_id')}>
                                             <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => {
                                                 navigator.clipboard.writeText(record.id).then(() => {
-                                                    message.success('已复制');
+                                                    message.success(tr('redis_viewer.message.copied'));
                                                 }).catch(() => {
-                                                    message.error('复制失败');
+                                                    message.error(tr('redis_viewer.message.copy_failed'));
                                                 });
                                             }} />
                                         </Tooltip>
-                                        <Tooltip title="复制字段 JSON">
+                                        <Tooltip title={tr('redis_viewer.tooltip.copy_fields_json')}>
                                             <Button type="text" size="small" icon={<CopyOutlined />} onClick={() => {
                                                 navigator.clipboard.writeText(record.rawFieldsText).then(() => {
-                                                    message.success('已复制');
+                                                    message.success(tr('redis_viewer.message.copied'));
                                                 }).catch(() => {
-                                                    message.error('复制失败');
+                                                    message.error(tr('redis_viewer.message.copy_failed'));
                                                 });
                                             }} />
                                         </Tooltip>
-                                        <Popconfirm title="确定删除此消息？" onConfirm={() => handleDeleteStreamEntry(record.id)}>
+                                        <Popconfirm title={tr('redis_viewer.confirm.delete_stream_entry')} onConfirm={() => handleDeleteStreamEntry(record.id)}>
                                             <Button type="text" size="small" danger icon={<DeleteOutlined />} />
                                         </Popconfirm>
                                     </Space>
@@ -1777,7 +1814,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 <div className={isV2Ui ? 'gn-v2-redis-value-header' : undefined} style={{ ...workbenchCardStyle, padding: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexShrink: 0 }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
                         <span style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.08em', color: workbenchTheme.textMuted, fontWeight: 600 }}>
-                            Active Key
+                            {tr('redis_viewer.title.active_key')}
                         </span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
                             <Tooltip title={selectedKey}>
@@ -1785,7 +1822,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                     {selectedKey}
                                 </strong>
                             </Tooltip>
-                            <Tooltip title="复制 Key 名称">
+                            <Tooltip title={tr('redis_viewer.tooltip.copy_key_name')}>
                                 <Button
                                     type="text"
                                     size="small"
@@ -1793,36 +1830,36 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                                     style={{ padding: '0 4px', display: 'flex', alignItems: 'center', color: workbenchTheme.textMuted }}
                                     onClick={() => {
                                         navigator.clipboard.writeText(selectedKey).then(() => {
-                                            message.success('已复制 Key 名称');
+                                            message.success(tr('redis_viewer.message.key_name_copied'));
                                         }).catch(() => {
-                                            message.error('复制失败');
+                                            message.error(tr('redis_viewer.message.copy_failed'));
                                         });
                                     }}
                                 />
                             </Tooltip>
                             <Tag color={getTypeColor(keyValue.type)} style={pillTagStyle}>{keyValue.type}</Tag>
                             <Tag icon={<ClockCircleOutlined />} style={mutedPillTagStyle}>{formatTTL(keyValue.ttl)}</Tag>
-                            {keyValue.length > 0 && <Tag style={mutedPillTagStyle}>长度: {keyValue.length}</Tag>}
+                            {keyValue.length > 0 && <Tag style={mutedPillTagStyle}>{tr('redis_viewer.label.length', { count: keyValue.length })}</Tag>}
                         </div>
                     </div>
                     <div className={isV2Ui ? 'gn-v2-redis-value-actions' : undefined} style={{ ...workbenchSubCardStyle, padding: 4, display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         <Button size="small" style={actionButtonStyle} onClick={() => {
                             ttlForm.setFieldsValue({ ttl: keyValue.ttl > 0 ? keyValue.ttl : -1 });
                             setTtlModalOpen(true);
-                        }}>设置 TTL</Button>
-                        <Button size="small" style={actionButtonStyle} onClick={() => loadKeyValue(selectedKey)} icon={<ReloadOutlined />}>刷新</Button>
-                        <Popconfirm title={`确定删除 Key "${selectedKey}"？`} onConfirm={handleDeleteCurrentKey}>
-                            <Button size="small" style={dangerActionButtonStyle} icon={<DeleteOutlined />}>删除 Key</Button>
+                        }}>{tr('redis_viewer.action.set_ttl')}</Button>
+                        <Button size="small" style={actionButtonStyle} onClick={() => loadKeyValue(selectedKey)} icon={<ReloadOutlined />}>{tr('redis_viewer.action.refresh')}</Button>
+                        <Popconfirm title={tr('redis_viewer.confirm.delete_key', { key: selectedKey })} onConfirm={handleDeleteCurrentKey}>
+                            <Button size="small" style={dangerActionButtonStyle} icon={<DeleteOutlined />}>{tr('redis_viewer.action.delete_key')}</Button>
                         </Popconfirm>
                     </div>
                 </div>
                 <div className={isV2Ui ? 'gn-v2-redis-view-mode' : undefined} style={{ ...workbenchSubCardStyle, padding: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexShrink: 0 }}>
-                    <span style={{ paddingInline: 10, fontSize: 12, color: workbenchTheme.textMuted }}>查看模式</span>
+                    <span style={{ paddingInline: 10, fontSize: 12, color: workbenchTheme.textMuted }}>{tr('redis_viewer.view.title')}</span>
                     <Radio.Group size="small" value={viewMode} onChange={(e) => setViewMode(e.target.value)}>
-                        <Radio.Button value="auto">自动</Radio.Button>
-                        <Radio.Button value="text">原始文本</Radio.Button>
+                        <Radio.Button value="auto">{tr('redis_viewer.view.auto')}</Radio.Button>
+                        <Radio.Button value="text">{tr('redis_viewer.view.text')}</Radio.Button>
                         <Radio.Button value="utf8">UTF-8</Radio.Button>
-                        <Radio.Button value="hex">十六进制</Radio.Button>
+                        <Radio.Button value="hex">{tr('redis_viewer.view.hex')}</Radio.Button>
                     </Radio.Group>
                 </div>
                 <div className={isV2Ui ? 'gn-v2-redis-value-card' : undefined} style={{ ...workbenchCardStyle, padding: 14, flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -1840,7 +1877,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     };
 
     if (!connection) {
-        return <div style={{ padding: 20 }}>连接不存在</div>;
+        return <div style={{ padding: 20 }}>{tr('redis_viewer.state.connection_not_found')}</div>;
     }
 
     return (
@@ -1848,39 +1885,70 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
             {/* Left: Key List */}
             <div ref={leftPanelRef} className={isV2Ui ? 'gn-v2-redis-sidebar' : undefined} style={{ width: leftPanelWidth, minWidth: 300, display: 'flex', flexDirection: 'column', flexShrink: 0, gap: 12 }}>
                 <div className={isV2Ui ? 'gn-v2-redis-header' : undefined} style={{ ...workbenchCardStyle, padding: 12 }}>
-                    <RedisViewerKeyToolbar
-                        isV2Ui={isV2Ui}
-                        redisDB={redisDB}
-                        connection={connection}
-                        keyCount={keys.length}
-                        selectedKeyCount={selectedKeys.length}
-                        searchMode={searchMode}
-                        searchInput={searchInput}
-                        mutedPillTagStyle={mutedPillTagStyle}
-                        actionButtonStyle={actionButtonStyle}
-                        primaryActionButtonStyle={primaryActionButtonStyle}
-                        dangerActionButtonStyle={dangerActionButtonStyle}
-                        textMutedColor={workbenchTheme.textMuted}
-                        textPrimaryColor={workbenchTheme.textPrimary}
-                        onSearchModeChange={handleSearchModeChange}
-                        onSearchInputChange={handleSearchInputChange}
-                        onSearch={handleSearch}
-                        onRefresh={handleRefresh}
-                        onCreateKey={() => setNewKeyModalOpen(true)}
-                        onSelectAllLoadedKeys={handleSelectAllLoadedKeys}
-                        onClearAllSelectedKeys={handleClearAllSelectedKeys}
-                        onDeleteSelectedKeys={() => handleDeleteKeys(selectedKeys)}
-                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+                        <div>
+                            <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '.08em', color: workbenchTheme.textMuted, fontWeight: 600 }}>{tr('redis_viewer.title.key_explorer')}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+                                <div style={{ fontSize: 24, fontWeight: 700, color: workbenchTheme.textPrimary }}>db{redisDB}</div>
+                                <Tag style={mutedPillTagStyle}>{getRedisTopologyTagLabel(redisTopology)}</Tag>
+                                {redisTopology !== 'single' && (
+                                    <Tag style={mutedPillTagStyle}>{Math.max(redisSeedAddresses.length, 1)} nodes</Tag>
+                                )}
+                                {redisSentinelMaster && (
+                                    <Tag style={mutedPillTagStyle}>master: {redisSentinelMaster}</Tag>
+                                )}
+                            </div>
+                        </div>
+                        <Tag style={mutedPillTagStyle}>{tr('redis_viewer.label.keys_count', { count: keys.length })}</Tag>
+                    </div>
+                    <Space.Compact style={{ width: '100%' }}>
+                        <Radio.Group
+                            value={searchMode}
+                            onChange={handleSearchModeChange}
+                            buttonStyle="solid"
+                            style={{ flexShrink: 0 }}
+                        >
+                            <Radio.Button value="fuzzy">{tr('redis_viewer.search.fuzzy')}</Radio.Button>
+                            <Radio.Button value="exact">{tr('redis_viewer.search.exact')}</Radio.Button>
+                        </Radio.Group>
+                        <Search
+                            {...noAutoCapInputProps}
+                            style={{ flex: 1 }}
+                            placeholder={searchMode === 'exact' ? tr('redis_viewer.placeholder.search_exact') : tr('redis_viewer.placeholder.search_fuzzy')}
+                            value={searchInput}
+                            onChange={handleSearchInputChange}
+                            onSearch={handleSearch}
+                            allowClear
+                            enterButton={<SearchOutlined />}
+                        />
+                    </Space.Compact>
+                    <div className={isV2Ui ? 'gn-v2-redis-toolbar' : undefined} style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                        <Space wrap size={8}>
+                            <Button size="small" style={actionButtonStyle} icon={<ReloadOutlined />} onClick={handleRefresh}>{tr('redis_viewer.action.refresh')}</Button>
+                            <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => setNewKeyModalOpen(true)}>{tr('redis_viewer.action.new_key')}</Button>
+                            <Button size="small" style={primaryActionButtonStyle} onClick={handleSelectAllLoadedKeys} disabled={keys.length === 0}>{tr('redis_viewer.action.select_all_loaded')}</Button>
+                            <Button size="small" style={actionButtonStyle} onClick={handleClearAllSelectedKeys} disabled={selectedKeys.length === 0}>{tr('redis_viewer.action.clear_selection')}</Button>
+                        </Space>
+                        <Popconfirm
+                            title={tr('redis_viewer.confirm.delete_selected', { count: selectedKeys.length })}
+                            onConfirm={() => handleDeleteKeys(selectedKeys)}
+                            disabled={selectedKeys.length === 0}
+                        >
+                            <Button size="small" style={dangerActionButtonStyle} icon={<DeleteOutlined />} disabled={selectedKeys.length === 0}>
+                                {tr('redis_viewer.action.delete_selected', { count: selectedKeys.length })}
+                            </Button>
+                        </Popconfirm>
+                    </div>
                 </div>
                 <div className={isV2Ui ? 'gn-v2-redis-tree-card' : undefined} style={{ ...workbenchCardStyle, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 10 }}>
                     {isLargeKeyspace && (
                         <div style={{ padding: '8px 10px', fontSize: 12, color: workbenchTheme.textMuted, marginBottom: 8, borderRadius: 12, background: workbenchTheme.panelBgSubtle, border: workbenchTheme.panelBorder }}>
-                            已启用大数据量性能模式（简化节点渲染，最多保留 {REDIS_LARGE_KEYSPACE_MAX_EXPANDED_GROUPS} 个展开分组）
+                            {tr('redis_viewer.notice.large_keyspace_mode', { count: REDIS_LARGE_KEYSPACE_MAX_EXPANDED_GROUPS })}
                         </div>
                     )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 8px 10px 8px', color: workbenchTheme.textMuted, fontSize: 12, textTransform: 'uppercase', letterSpacing: '.06em' }}>
-                        <span>命名空间 / Key</span>
-                        <span>类型 / TTL</span>
+                        <span>{tr('redis_viewer.title.namespace_key')}</span>
+                        <span>{tr('redis_viewer.title.type_ttl')}</span>
                     </div>
                     <div ref={treeContainerRef} className={isV2Ui ? 'gn-v2-redis-tree-shell' : undefined} style={{ ...workbenchSubCardStyle, flex: 1, minHeight: 0, overflow: 'hidden', padding: 6 }}>
                         <Spin spinning={loading} size="small" style={{ width: '100%' }}>
@@ -1908,19 +1976,19 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                     </div>
                     {hasMore && (
                         <div style={{ padding: 10, textAlign: 'center' }}>
-                            <Button style={actionButtonStyle} onClick={handleLoadMore} loading={loading} disabled={!hasMore || loading}>加载更多</Button>
+                            <Button style={actionButtonStyle} onClick={handleLoadMore} loading={loading} disabled={!hasMore || loading}>{tr('redis_viewer.action.load_more')}</Button>
                         </div>
                     )}
                 </div>
             </div>
 
             {/* Resizable Divider */}
-            <ResizableDivider targetRef={leftPanelRef} onResizeEnd={setLeftPanelWidth} />
+            <ResizableDivider targetRef={leftPanelRef} onResizeEnd={setLeftPanelWidth} title={tr('redis_viewer.tooltip.resize_panels')} />
 
             {/* Right: Value Viewer */}
             <div className={isV2Ui ? 'gn-v2-redis-value-pane' : undefined} style={{ flex: 1, overflow: 'hidden', minWidth: 300 }}>
                 {valueLoading ? (
-                    <div style={{ ...workbenchCardStyle, padding: 20, textAlign: 'center', color: workbenchTheme.textMuted }}>加载中...</div>
+                    <div style={{ ...workbenchCardStyle, padding: 20, textAlign: 'center', color: workbenchTheme.textMuted }}>{tr('common.loading')}...</div>
                 ) : (
                     renderValueEditor()
                 )}
@@ -1928,7 +1996,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
             {/* Edit String Modal */}
             <Modal
-                title="编辑值"
+                title={tr('redis_viewer.modal.edit_value')}
                 open={editModalOpen}
                 onOk={handleSaveString}
                 onCancel={() => setEditModalOpen(false)}
@@ -1955,20 +2023,20 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
             {/* New Key Modal */}
             <Modal
-                title="新建 Key"
+                title={tr('redis_viewer.modal.new_key')}
                 open={newKeyModalOpen}
                 onOk={handleCreateKey}
                 onCancel={() => setNewKeyModalOpen(false)}
                 styles={{ content: redisModalContentStyle, header: { background: 'transparent', borderBottom: 'none', color: workbenchTheme.textPrimary }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none' } }}
             >
                 <Form form={newKeyForm} layout="vertical" initialValues={{ ttl: -1 }}>
-                    <Form.Item name="key" label="Key" rules={[{ required: true, message: '请输入 Key' }]}>
-                        <Input {...noAutoCapInputProps} placeholder="key name" />
+                    <Form.Item name="key" label={tr('redis_viewer.field.key')} rules={[{ required: true, message: tr('redis_viewer.validation.key_required') }]}>
+                        <Input {...noAutoCapInputProps} placeholder={tr('redis_viewer.placeholder.key_name')} />
                     </Form.Item>
-                    <Form.Item name="value" label="值" rules={[{ required: true, message: '请输入值' }]}>
-                        <Input.TextArea rows={4} placeholder="value" />
+                    <Form.Item name="value" label={tr('redis_viewer.field.value')} rules={[{ required: true, message: tr('redis_viewer.validation.value_required') }]}>
+                        <Input.TextArea rows={4} placeholder={tr('redis_viewer.placeholder.value')} />
                     </Form.Item>
-                    <Form.Item name="ttl" label="TTL (秒)" help="-1 表示永不过期">
+                    <Form.Item name="ttl" label={tr('redis_viewer.field.ttl_seconds')} help={tr('redis_viewer.help.ttl_forever')}>
                         <InputNumber style={{ width: '100%' }} min={-1} />
                     </Form.Item>
                 </Form>
@@ -1976,7 +2044,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
             {/* TTL Modal */}
             <Modal
-                title="重命名 Key"
+                title={tr('redis_viewer.modal.rename_key')}
                 open={renameKeyModalOpen}
                 onOk={handleRenameKey}
                 onCancel={() => {
@@ -1989,24 +2057,24 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 <Form form={renameKeyForm} layout="vertical">
                     <Form.Item
                         name="key"
-                        label="新的 Key 名称"
-                        rules={[{ required: true, message: '请输入新的 Key 名称' }]}
-                        extra={renameTargetKey ? `原始 Key：${renameTargetKey}` : undefined}
+                        label={tr('redis_viewer.field.new_key_name')}
+                        rules={[{ required: true, message: tr('redis_viewer.validation.new_key_name_required') }]}
+                        extra={renameTargetKey ? tr('redis_viewer.label.original_key', { key: renameTargetKey }) : undefined}
                     >
-                        <Input {...noAutoCapInputProps} placeholder="new:key:name" />
+                        <Input {...noAutoCapInputProps} placeholder={tr('redis_viewer.placeholder.new_key_name')} />
                     </Form.Item>
                 </Form>
             </Modal>
 
             <Modal
-                title="设置 TTL"
+                title={tr('redis_viewer.modal.set_ttl')}
                 open={ttlModalOpen}
                 onOk={handleSetTTL}
                 onCancel={() => setTtlModalOpen(false)}
                 styles={{ content: redisModalContentStyle, header: { background: 'transparent', borderBottom: 'none', color: workbenchTheme.textPrimary }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none' } }}
             >
                 <Form form={ttlForm} layout="vertical">
-                    <Form.Item name="ttl" label="TTL (秒)" help="-1 表示永不过期">
+                    <Form.Item name="ttl" label={tr('redis_viewer.field.ttl_seconds')} help={tr('redis_viewer.help.ttl_forever')}>
                         <InputNumber style={{ width: '100%' }} min={-1} />
                     </Form.Item>
                 </Form>
@@ -2014,7 +2082,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
             {/* JSON Edit Modal with Monaco Editor */}
             <Modal
-                title={jsonEditConfig?.title || '编辑'}
+                title={jsonEditConfig?.title || tr('redis_viewer.action.edit')}
                 open={jsonEditModalOpen}
                 onOk={async () => {
                     if (jsonEditConfig?.onSave) {
@@ -2070,7 +2138,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                         icon={<EditOutlined />}
                         onClick={() => openRenameKeyModal(treeContextMenu.rawKey)}
                     >
-                        重命名 Key
+                        {tr('redis_viewer.action.rename_key')}
                     </Button>
                     <Button
                         type="text"
@@ -2080,13 +2148,13 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                             try {
                                 await navigator.clipboard.writeText(treeContextMenu.rawKey);
                                 setTreeContextMenu(null);
-                                message.success('已复制 Key 名称');
+                                message.success(tr('redis_viewer.message.key_name_copied'));
                             } catch {
-                                message.error('复制失败');
+                                message.error(tr('redis_viewer.message.copy_failed'));
                             }
                         }}
                     >
-                        复制 Key 名称
+                        {tr('redis_viewer.action.copy_key_name')}
                     </Button>
                 </div>
             ), document.body)}

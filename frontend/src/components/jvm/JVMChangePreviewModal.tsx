@@ -2,6 +2,8 @@ import React, { useMemo } from "react";
 import { Alert, Descriptions, Modal, Space, Tag, Typography } from "antd";
 
 import type { JVMChangePreview } from "../../types";
+import { t as translate } from "../../i18n";
+import { useOptionalI18n } from "../../i18n/provider";
 import {
   formatJVMRiskLevelText,
   formatJVMValueForDisplay,
@@ -42,48 +44,75 @@ const JVMChangePreviewModal: React.FC<JVMChangePreviewModalProps> = ({
   onCancel,
   onConfirm,
 }) => {
+  const i18n = useOptionalI18n();
+  const i18nLanguage = i18n?.language;
+  const tr = (key: string, params?: Parameters<typeof translate>[1]) =>
+    translate(key, params, i18nLanguage);
+
   const summary = useMemo(() => {
     if (!preview) {
-      return "暂无预览结果";
+      return tr("jvm_change_preview_modal.status.no_preview");
     }
-    return preview.summary || "预览已生成";
-  }, [preview]);
+    return preview.summary || tr("jvm_change_preview_modal.status.generated");
+  }, [i18nLanguage, preview]);
+  const riskLevelText = formatJVMRiskLevelText(
+    preview?.riskLevel,
+    i18nLanguage,
+  );
 
   return (
     <Modal
-      title="JVM 变更预览"
+      title={tr("jvm_change_preview_modal.title")}
       open={open}
       onCancel={onCancel}
       onOk={onConfirm}
-      okText="确认执行"
-      cancelText="关闭"
+      okText={tr("jvm_change_preview_modal.action.confirm_execute")}
+      cancelText={tr("jvm_change_preview_modal.action.close")}
       okButtonProps={{ disabled: !preview?.allowed, loading: applying }}
       width={880}
       destroyOnHidden
     >
       {!preview ? (
-        <Alert type="info" showIcon message="暂无预览结果" />
+        <Alert
+          type="info"
+          showIcon
+          message={tr("jvm_change_preview_modal.status.no_preview")}
+        />
       ) : (
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
           <Descriptions column={1} size="small" styles={DESCRIPTION_STYLES}>
-            <Descriptions.Item label="变更摘要">
+            <Descriptions.Item
+              label={tr("jvm_change_preview_modal.section.summary")}
+            >
               <Space size={8} wrap>
                 <Text>{summary}</Text>
                 <Tag color={riskColorMap[preview.riskLevel] || "default"}>
-                  风险 {formatJVMRiskLevelText(preview.riskLevel)}
+                  {tr("jvm_change_preview_modal.risk.label", {
+                    level: riskLevelText,
+                  })}
                 </Tag>
                 {preview.requiresConfirmation ? (
-                  <Tag color="gold">需要确认</Tag>
+                  <Tag color="gold">
+                    {tr(
+                      "jvm_change_preview_modal.permission.requires_confirmation",
+                    )}
+                  </Tag>
                 ) : null}
                 {preview.allowed ? (
-                  <Tag color="green">允许执行</Tag>
+                  <Tag color="green">
+                    {tr("jvm_change_preview_modal.permission.allowed")}
+                  </Tag>
                 ) : (
-                  <Tag color="red">禁止执行</Tag>
+                  <Tag color="red">
+                    {tr("jvm_change_preview_modal.permission.forbidden")}
+                  </Tag>
                 )}
               </Space>
             </Descriptions.Item>
             {preview.blockingReason ? (
-              <Descriptions.Item label="阻断原因">
+              <Descriptions.Item
+                label={tr("jvm_change_preview_modal.blocking.label")}
+              >
                 <Text type="danger" style={{ whiteSpace: "pre-wrap" }}>
                   {preview.blockingReason}
                 </Text>
@@ -95,7 +124,7 @@ const JVMChangePreviewModal: React.FC<JVMChangePreviewModalProps> = ({
             <Alert
               type="error"
               showIcon
-              message="当前变更不可执行"
+              message={tr("jvm_change_preview_modal.blocking.alert_message")}
               description={
                 <span style={{ whiteSpace: "pre-wrap" }}>
                   {preview.blockingReason}
@@ -108,7 +137,7 @@ const JVMChangePreviewModal: React.FC<JVMChangePreviewModalProps> = ({
 
           <div>
             <Text strong style={{ display: "block", marginBottom: 8 }}>
-              变更前
+              {tr("jvm_change_preview_modal.section.before")}
             </Text>
             <Descriptions
               column={1}
@@ -116,13 +145,19 @@ const JVMChangePreviewModal: React.FC<JVMChangePreviewModalProps> = ({
               styles={DESCRIPTION_STYLES}
               style={{ marginBottom: 12 }}
             >
-              <Descriptions.Item label="资源 ID">
+              <Descriptions.Item
+                label={tr("jvm_change_preview_modal.field.resource_id")}
+              >
                 {preview.before?.resourceId || "-"}
               </Descriptions.Item>
-              <Descriptions.Item label="版本">
+              <Descriptions.Item
+                label={tr("jvm_change_preview_modal.field.version")}
+              >
                 {preview.before?.version || "-"}
               </Descriptions.Item>
-              <Descriptions.Item label="格式">
+              <Descriptions.Item
+                label={tr("jvm_change_preview_modal.field.format")}
+              >
                 {preview.before?.format || "-"}
               </Descriptions.Item>
             </Descriptions>
@@ -133,7 +168,7 @@ const JVMChangePreviewModal: React.FC<JVMChangePreviewModalProps> = ({
 
           <div>
             <Text strong style={{ display: "block", marginBottom: 8 }}>
-              变更后
+              {tr("jvm_change_preview_modal.section.after")}
             </Text>
             <Descriptions
               column={1}
@@ -141,13 +176,19 @@ const JVMChangePreviewModal: React.FC<JVMChangePreviewModalProps> = ({
               styles={DESCRIPTION_STYLES}
               style={{ marginBottom: 12 }}
             >
-              <Descriptions.Item label="资源 ID">
+              <Descriptions.Item
+                label={tr("jvm_change_preview_modal.field.resource_id")}
+              >
                 {preview.after?.resourceId || "-"}
               </Descriptions.Item>
-              <Descriptions.Item label="版本">
+              <Descriptions.Item
+                label={tr("jvm_change_preview_modal.field.version")}
+              >
                 {preview.after?.version || "-"}
               </Descriptions.Item>
-              <Descriptions.Item label="格式">
+              <Descriptions.Item
+                label={tr("jvm_change_preview_modal.field.format")}
+              >
                 {preview.after?.format || "-"}
               </Descriptions.Item>
             </Descriptions>

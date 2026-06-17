@@ -32,6 +32,7 @@ import {
   SortDescendingOutlined,
   VerticalAlignBottomOutlined,
 } from '@ant-design/icons';
+import { getCurrentLanguage, t } from '../i18n';
 import { getPrimaryShortcutDisplayLabel, type ShortcutPlatform } from '../utils/shortcuts';
 
 export type V2TableContextMenuActionKey =
@@ -80,8 +81,12 @@ type V2TableContextMenuItemConfig = {
 };
 
 export const formatV2TableContextMenuRows = (count?: number): string => {
-  if (count === undefined || count === null || !Number.isFinite(count) || count < 0) return '— 行';
-  return `${Math.round(count).toLocaleString()} 行`;
+  if (count === undefined || count === null || !Number.isFinite(count) || count < 0) {
+    return t('sidebar.v2_table_menu.meta.rows_empty');
+  }
+  return t('sidebar.v2_table_menu.meta.rows', {
+    count: Math.round(count).toLocaleString(getCurrentLanguage()),
+  });
 };
 
 export const formatV2TableContextMenuSize = (bytes?: number): string => {
@@ -93,10 +98,14 @@ export const formatV2TableContextMenuSize = (bytes?: number): string => {
 };
 
 const resolveV2TableContextMenuMeta = (stats?: V2TableContextMenuStats): string => {
-  if (!stats) return '点击刷新统计信息读取';
-  if (stats?.loading) return '正在读取统计信息…';
-  if (stats?.unavailable) return '统计信息不可用';
-  return `${formatV2TableContextMenuRows(stats?.rowCount)} · ${formatV2TableContextMenuSize(stats?.dataLength)} 数据 · ${formatV2TableContextMenuSize(stats?.indexLength)} 索引`;
+  if (!stats) return t('sidebar.v2_table_menu.meta.idle');
+  if (stats?.loading) return t('sidebar.v2_table_menu.meta.loading');
+  if (stats?.unavailable) return t('sidebar.v2_table_menu.meta.unavailable');
+  return t('sidebar.v2_table_menu.meta.summary', {
+    rows: formatV2TableContextMenuRows(stats?.rowCount),
+    data: formatV2TableContextMenuSize(stats?.dataLength),
+    indexes: formatV2TableContextMenuSize(stats?.indexLength),
+  });
 };
 
 const V2TableContextMenuItem: React.FC<{
@@ -180,15 +189,26 @@ export const V2TableContextMenuView: React.FC<{
   );
 
   const maintenanceItems: V2TableContextMenuItemConfig[] = [
-    { action: 'rename-table', icon: <EditOutlined />, title: '重命名…', kbd: 'F2' },
-    ...(supportsStarRocksRollup ? [{ action: 'new-rollup' as const, icon: <ThunderboltOutlined />, title: '新增 Rollup' }] : []),
-    { action: 'backup-table', icon: <ExportOutlined />, title: '备份 · SQL Dump' },
-    { action: 'refresh-stats', icon: <ReloadOutlined />, title: '刷新统计信息' },
+    { action: 'rename-table', icon: <EditOutlined />, title: t('sidebar.v2_table_menu.rename_compact'), kbd: 'F2' },
+    ...(supportsStarRocksRollup ? [{ action: 'new-rollup' as const, icon: <ThunderboltOutlined />, title: t('sidebar.v2_table_menu.new_rollup', { keyword: 'Rollup' }) }] : []),
+    { action: 'backup-table', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.backup_sql_dump', { keyword: 'SQL Dump' }) },
+    { action: 'refresh-stats', icon: <ReloadOutlined />, title: t('sidebar.v2_table_menu.refresh_stats') },
   ];
 
   const dangerItems: V2TableContextMenuItemConfig[] = [
-    ...(supportsTruncate ? [{ action: 'truncate-table' as const, icon: <DeleteOutlined />, title: '截断表 · TRUNCATE', tone: 'danger' as const }] : []),
-    { action: 'drop-table', icon: <DeleteOutlined />, title: '删除表 · DROP', kbd: '⌫', tone: 'danger' },
+    ...(supportsTruncate ? [{
+      action: 'truncate-table' as const,
+      icon: <DeleteOutlined />,
+      title: t('sidebar.v2_table_menu.item_with_suffix', { label: t('sidebar.v2_table_menu.truncate_table'), suffix: 'TRUNCATE' }),
+      tone: 'danger' as const,
+    }] : []),
+    {
+      action: 'drop-table',
+      icon: <DeleteOutlined />,
+      title: t('sidebar.v2_table_menu.item_with_suffix', { label: t('sidebar.menu.delete_table'), suffix: 'DROP' }),
+      kbd: '⌫',
+      tone: 'danger',
+    },
   ];
 
   return (
@@ -202,41 +222,41 @@ export const V2TableContextMenuView: React.FC<{
 
       <div className="gn-v2-context-menu-body">
         {renderItems([
-          { action: 'open-data', icon: <TableOutlined />, title: '查看数据', kbd: '↵', featured: true },
-          { action: isPinned ? 'unpin-table' : 'pin-table', icon: <PushpinOutlined />, title: isPinned ? '取消置顶' : '置顶表', kbd: isPinned ? '已置顶' : undefined, selected: isPinned },
-          { action: 'design-table', icon: <EditOutlined />, title: '设计表 · 字段 / 索引 / 外键', kbd: primaryShortcut('D', shortcutPlatform) },
-          { action: 'open-new-tab', icon: <FileAddOutlined />, title: '在新标签打开', kbd: primaryShortcut('Enter', shortcutPlatform) },
-          { action: 'new-query', icon: <ConsoleSqlOutlined />, title: '新建查询' },
+          { action: 'open-data', icon: <TableOutlined />, title: t('sidebar.v2_table_menu.open_data'), kbd: '↵', featured: true },
+          { action: isPinned ? 'unpin-table' : 'pin-table', icon: <PushpinOutlined />, title: isPinned ? t('sidebar.action.unpin_table') : t('sidebar.action.pin_table'), kbd: isPinned ? t('sidebar.status.pinned') : undefined, selected: isPinned },
+          { action: 'design-table', icon: <EditOutlined />, title: `${t('sidebar.menu.design_table')} · ${t('sidebar.v2_table_menu.design_table_detail')}`, kbd: primaryShortcut('D', shortcutPlatform) },
+          { action: 'open-new-tab', icon: <FileAddOutlined />, title: t('sidebar.v2_table_menu.open_in_new_tab'), kbd: primaryShortcut('Enter', shortcutPlatform) },
+          { action: 'new-query', icon: <ConsoleSqlOutlined />, title: t('sidebar.menu.new_query') },
           ...(supportsMessagePublish ? [{ action: 'publish-message' as const, icon: <SendOutlined />, title: '测试发送消息' }] : []),
         ])}
 
-        <div className="gn-v2-context-menu-section-title">元信息</div>
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_table_menu.metadata_section')}</div>
         {renderItems([
-          { action: 'view-ddl', icon: <CodeOutlined />, title: '查看 DDL · CREATE TABLE' },
-          { action: 'view-er', icon: <LinkOutlined />, title: '在 ER 图中查看' },
+          { action: 'view-ddl', icon: <CodeOutlined />, title: `${t('data_grid.ddl.view')} · CREATE TABLE` },
+          { action: 'view-er', icon: <LinkOutlined />, title: t('sidebar.v2_table_menu.view_in_er') },
         ])}
 
-        <div className="gn-v2-context-menu-section-title">复制</div>
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_table_menu.copy_section')}</div>
         {renderItems([
-          { action: 'copy-table-name', icon: <CopyOutlined />, title: '复制表名', kbd: primaryShortcut('C', shortcutPlatform) },
-          { action: 'copy-structure', icon: <CopyOutlined />, title: '复制表结构 · DDL' },
-          { action: 'copy-insert', icon: <CopyOutlined />, title: '复制全表为 INSERT' },
+          { action: 'copy-table-name', icon: <CopyOutlined />, title: t('sidebar.v2_table_menu.copy_table_name'), kbd: primaryShortcut('C', shortcutPlatform) },
+          { action: 'copy-structure', icon: <CopyOutlined />, title: `${t('sidebar.menu.copy_table_structure')} · DDL` },
+          { action: 'copy-insert', icon: <CopyOutlined />, title: t('sidebar.v2_table_menu.copy_table_as_insert', { keyword: 'INSERT' }) },
         ])}
 
-        <div className="gn-v2-context-menu-section-title">维护</div>
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_table_menu.maintenance_section')}</div>
         {renderItems(maintenanceItems)}
 
-        <div className="gn-v2-context-menu-section-title">导出表数据</div>
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.menu.export_table_data')}</div>
         {renderItems([
-          { action: 'export-xlsx', icon: <ExportOutlined />, title: 'Excel · .xlsx' },
-          { action: 'export-csv', icon: <ExportOutlined />, title: 'CSV · .csv' },
-          { action: 'export-json', icon: <ExportOutlined />, title: 'JSON · .json' },
+          { action: 'export-xlsx', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.item_with_suffix', { label: 'Excel', suffix: '.xlsx' }) },
+          { action: 'export-csv', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.item_with_suffix', { label: 'CSV', suffix: '.csv' }) },
+          { action: 'export-json', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.item_with_suffix', { label: 'JSON', suffix: '.json' }) },
         ])}
 
         <div className="gn-v2-context-menu-divider" />
         {renderItems([
-          { action: 'ai-explain', icon: <ThunderboltOutlined />, title: '用 AI 解释这张表', tone: 'ai', featured: true },
-          { action: 'ai-generate-query', icon: <ConsoleSqlOutlined />, title: '用 AI 生成查询', tone: 'ai' },
+          { action: 'ai-explain', icon: <ThunderboltOutlined />, title: t('sidebar.v2_table_menu.ai_explain_table'), tone: 'ai', featured: true },
+          { action: 'ai-generate-query', icon: <ConsoleSqlOutlined />, title: t('sidebar.v2_table_menu.ai_generate_query'), tone: 'ai' },
         ])}
 
         <div className="gn-v2-context-menu-divider" />
@@ -259,14 +279,18 @@ export const V2TableGroupContextMenuView: React.FC<{
   currentSort?: 'name' | 'frequency';
   onAction?: (action: V2TableGroupContextMenuActionKey) => void;
 }> = ({
-  title = '表 · tables',
+  title,
   shortcutPlatform = DEFAULT_V2_CONTEXT_MENU_SHORTCUT_PLATFORM,
   dbName,
   count,
   currentSort = 'name',
   onAction,
 }) => {
-  const sortLabel = currentSort === 'frequency' ? '使用频率' : '名称';
+  const sortLabel = currentSort === 'frequency'
+    ? t('sidebar.v2_table_group_menu.sort_frequency')
+    : t('sidebar.v2_table_group_menu.sort_name');
+  const databaseLabel = dbName || t('sidebar.v2_table_group_menu.current_database');
+  const tableCountLabel = Math.max(0, count ?? 0).toLocaleString(getCurrentLanguage());
   const renderItems = (items: V2TableContextMenuItemConfig[]) => renderV2ContextMenuItems(
     items,
     onAction as (action: string) => void,
@@ -276,20 +300,24 @@ export const V2TableGroupContextMenuView: React.FC<{
     <div className="gn-v2-table-context-menu gn-v2-group-context-menu" data-v2-table-group-context-menu="true" role="menu">
       <V2ContextMenuHeader
         icon={<TableOutlined />}
-        title={title}
-        meta={`${dbName || '当前数据库'} · ${count ?? 0} 张表 · 当前按${sortLabel}排序`}
+        title={title ?? t('sidebar.v2_table_group_menu.title')}
+        meta={t('sidebar.v2_table_group_menu.meta', {
+          database: databaseLabel,
+          count: tableCountLabel,
+          sort: sortLabel,
+        })}
         pill="GROUP"
       />
 
       <div className="gn-v2-context-menu-body">
         {renderItems([
-          { action: 'new-table', icon: <TableOutlined />, title: '新建表', kbd: primaryShortcut('N', shortcutPlatform), featured: true },
+          { action: 'new-table', icon: <TableOutlined />, title: t('sidebar.menu.create_table'), kbd: primaryShortcut('N', shortcutPlatform), featured: true },
         ])}
 
-        <div className="gn-v2-context-menu-section-title">排序</div>
+        <div className="gn-v2-context-menu-section-title">{t('data_grid.context_menu.sort_section')}</div>
         {renderItems([
-          { action: 'sort-by-name', icon: currentSort === 'name' ? <CheckSquareOutlined /> : <ReloadOutlined />, title: '按名称排序', kbd: currentSort === 'name' ? '当前' : undefined, selected: currentSort === 'name' },
-          { action: 'sort-by-frequency', icon: currentSort === 'frequency' ? <CheckSquareOutlined /> : <ReloadOutlined />, title: '按使用频率排序', kbd: currentSort === 'frequency' ? '当前' : undefined, selected: currentSort === 'frequency' },
+          { action: 'sort-by-name', icon: currentSort === 'name' ? <CheckSquareOutlined /> : <ReloadOutlined />, title: t('sidebar.menu.sort_by_name'), kbd: currentSort === 'name' ? t('data_grid.context_menu.current_marker') : undefined, selected: currentSort === 'name' },
+          { action: 'sort-by-frequency', icon: currentSort === 'frequency' ? <CheckSquareOutlined /> : <ReloadOutlined />, title: t('sidebar.menu.sort_by_frequency'), kbd: currentSort === 'frequency' ? t('data_grid.context_menu.current_marker') : undefined, selected: currentSort === 'frequency' },
         ])}
       </div>
     </div>
@@ -346,44 +374,44 @@ export const V2DatabaseContextMenuView: React.FC<{
       <V2ContextMenuHeader
         icon={<DatabaseOutlined />}
         title={dbName}
-        meta={`${dialect || 'database'} · 数据库操作`}
+        meta={t('sidebar.v2_database_menu.meta', { dialect: dialect || 'database' })}
         pill="DB"
       />
 
       <div className="gn-v2-context-menu-body">
         {renderItems([
-          { action: 'new-table', icon: <TableOutlined />, title: '新建表', kbd: primaryShortcut('N', shortcutPlatform), featured: true },
-          ...(supportsSchemaActions ? [{ action: 'new-schema', icon: <FolderAddOutlined />, title: '新建模式' }] : []),
-          { action: 'new-query', icon: <ConsoleSqlOutlined />, title: '新建查询' },
-          { action: 'run-sql', icon: <FileAddOutlined />, title: '运行外部 SQL 文件' },
+          { action: 'new-table', icon: <TableOutlined />, title: t('sidebar.menu.create_table'), kbd: primaryShortcut('N', shortcutPlatform), featured: true },
+          ...(supportsSchemaActions ? [{ action: 'new-schema', icon: <FolderAddOutlined />, title: t('sidebar.v2_database_menu.new_schema') }] : []),
+          { action: 'new-query', icon: <ConsoleSqlOutlined />, title: t('sidebar.menu.new_query') },
+          { action: 'run-sql', icon: <FileAddOutlined />, title: t('sidebar.sql_file_exec.title') },
         ])}
 
         {supportsStarRocksActions && (
           <>
             <div className="gn-v2-context-menu-section-title">StarRocks</div>
             {renderItems([
-              { action: 'new-materialized-view', icon: <ThunderboltOutlined />, title: '新建物化视图' },
-              { action: 'new-external-catalog', icon: <CloudOutlined />, title: '新建外部 Catalog' },
+              { action: 'new-materialized-view', icon: <ThunderboltOutlined />, title: t('sidebar.v2_database_menu.new_materialized_view') },
+              { action: 'new-external-catalog', icon: <CloudOutlined />, title: t('sidebar.v2_database_menu.new_external_catalog') },
             ])}
           </>
         )}
 
-        <div className="gn-v2-context-menu-section-title">维护</div>
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_table_menu.maintenance_section')}</div>
         {renderItems([
-          ...(supportsRenameDatabase ? [{ action: 'rename-db', icon: <EditOutlined />, title: '重命名数据库', kbd: 'F2' }] : []),
-          { action: 'refresh', icon: <ReloadOutlined />, title: '刷新对象树' },
-          { action: 'disconnect-db', icon: <DisconnectOutlined />, title: '关闭数据库' },
+          ...(supportsRenameDatabase ? [{ action: 'rename-db', icon: <EditOutlined />, title: t('sidebar.menu.rename_database'), kbd: 'F2' }] : []),
+          { action: 'refresh', icon: <ReloadOutlined />, title: t('sidebar.v2_database_menu.refresh_object_tree') },
+          { action: 'disconnect-db', icon: <DisconnectOutlined />, title: t('sidebar.menu.close_database') },
         ])}
 
-        <div className="gn-v2-context-menu-section-title">导出与备份</div>
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_database_menu.export_backup_section')}</div>
         {renderItems([
-          { action: 'export-db-schema', icon: <ExportOutlined />, title: '导出全部表结构 · SQL' },
-          { action: 'backup-db-sql', icon: <SaveOutlined />, title: '备份全部表 · 结构 + 数据' },
+          { action: 'export-db-schema', icon: <ExportOutlined />, title: t('sidebar.v2_database_menu.export_all_table_schema_sql') },
+          { action: 'backup-db-sql', icon: <SaveOutlined />, title: t('sidebar.v2_database_menu.backup_all_tables_sql') },
         ])}
 
         <div className="gn-v2-context-menu-divider" />
         {supportsDropDatabase && renderItems([
-          { action: 'drop-db', icon: <DeleteOutlined />, title: '删除数据库 · DROP', tone: 'danger', kbd: '⌫' },
+          { action: 'drop-db', icon: <DeleteOutlined />, title: t('sidebar.v2_table_menu.item_with_suffix', { label: t('sidebar.menu.delete_database'), suffix: 'DROP' }), tone: 'danger', kbd: '⌫' },
         ])}
       </div>
     </div>
@@ -486,18 +514,18 @@ export const V2ConnectionGroupContextMenuView: React.FC<{
     <div className="gn-v2-table-context-menu gn-v2-connection-group-context-menu" data-v2-connection-group-context-menu="true" role="menu">
       <V2ContextMenuHeader
         icon={<FolderOpenOutlined />}
-        title={groupName || '未命名分组'}
-        meta={`${count.toLocaleString()} 个连接 · 连接分组`}
-        pill="GROUP"
+        title={groupName || t('connection.sidebar.group.untitled')}
+        meta={t('connection.sidebar.group.meta', { count: count.toLocaleString() })}
+        pill={t('connection.sidebar.group.badge')}
       />
 
       <div className="gn-v2-context-menu-body">
         {renderItems([
-          { action: 'edit-group', icon: <EditOutlined />, title: '编辑分组', kbd: 'F2', featured: true },
+          { action: 'edit-group', icon: <EditOutlined />, title: t('connection.sidebar.group.edit'), kbd: 'F2', featured: true },
         ])}
         <div className="gn-v2-context-menu-divider" />
         {renderItems([
-          { action: 'delete-group', icon: <DeleteOutlined />, title: '删除分组', tone: 'danger', kbd: '⌫' },
+          { action: 'delete-group', icon: <DeleteOutlined />, title: t('connection.sidebar.group.delete'), tone: 'danger', kbd: '⌫' },
         ])}
       </div>
     </div>
@@ -530,7 +558,7 @@ export const V2ConnectionContextMenuView: React.FC<{
   const hasSelectedTag = tags.some((tag) => tag.selected);
   const meta = [
     driverLabel || (isRedis ? 'redis' : 'database'),
-    hostSummary || '未配置地址',
+    hostSummary || t('connection.sidebar.menu.hostFallback'),
   ].filter(Boolean).join(' · ');
 
   return (
@@ -539,44 +567,44 @@ export const V2ConnectionContextMenuView: React.FC<{
         icon={isRedis ? <HddOutlined /> : <CloudOutlined />}
         title={connectionName}
         meta={meta}
-        pill="HOST"
+        pill={t('connection.sidebar.menu.hostBadge')}
       />
 
       <div className="gn-v2-context-menu-body">
         {isRedis ? renderItems([
-          { action: 'refresh', icon: <ReloadOutlined />, title: '刷新连接', kbd: primaryShortcut('R', shortcutPlatform), featured: true },
-          { action: 'new-command', icon: <ConsoleSqlOutlined />, title: '新建命令窗口', featured: true },
-          { action: 'open-monitor', icon: <DashboardOutlined />, title: 'Redis 实例监控' },
+          { action: 'refresh', icon: <ReloadOutlined />, title: t('connection.sidebar.menu.refresh'), kbd: primaryShortcut('R', shortcutPlatform), featured: true },
+          { action: 'new-command', icon: <ConsoleSqlOutlined />, title: t('sidebar.menu.new_command_window'), featured: true },
+          { action: 'open-monitor', icon: <DashboardOutlined />, title: t('redis_monitor.title.instance') },
         ]) : renderItems([
-          ...(supportsCreateDatabase ? [{ action: 'new-db' as const, icon: <DatabaseOutlined />, title: '新建数据库', kbd: primaryShortcut('N', shortcutPlatform), featured: true }] : []),
-          { action: 'refresh', icon: <ReloadOutlined />, title: '刷新连接', kbd: primaryShortcut('R', shortcutPlatform) },
-          { action: 'new-query', icon: <ConsoleSqlOutlined />, title: '新建查询' },
-          { action: 'open-sql-file', icon: <FileAddOutlined />, title: '运行外部 SQL 文件' },
+          ...(supportsCreateDatabase ? [{ action: 'new-db' as const, icon: <DatabaseOutlined />, title: t('connection.sidebar.menu.createDatabase'), kbd: primaryShortcut('N', shortcutPlatform), featured: true }] : []),
+          { action: 'refresh', icon: <ReloadOutlined />, title: t('connection.sidebar.menu.refresh'), kbd: primaryShortcut('R', shortcutPlatform) },
+          { action: 'new-query', icon: <ConsoleSqlOutlined />, title: t('sidebar.menu.new_query') },
+          { action: 'open-sql-file', icon: <FileAddOutlined />, title: t('sidebar.sql_file_exec.title') },
         ])}
 
-        <div className="gn-v2-context-menu-section-title">连接</div>
+        <div className="gn-v2-context-menu-section-title">{t('connection.sidebar.menu.section')}</div>
         {renderItems([
-          { action: 'edit', icon: <EditOutlined />, title: '编辑连接', kbd: 'F2' },
-          { action: 'copy-connection', icon: <CopyOutlined />, title: '复制连接' },
-          { action: 'disconnect', icon: <DisconnectOutlined />, title: '断开连接' },
+          { action: 'edit', icon: <EditOutlined />, title: t('sidebar.menu.edit_connection'), kbd: 'F2' },
+          { action: 'copy-connection', icon: <CopyOutlined />, title: t('connection.sidebar.menu.copy') },
+          { action: 'disconnect', icon: <DisconnectOutlined />, title: t('connection.sidebar.menu.disconnect') },
         ])}
 
         {tags.length > 0 && (
           <>
-            <div className="gn-v2-context-menu-section-title">分组</div>
+            <div className="gn-v2-context-menu-section-title">{t('connection.sidebar.menu.groupSection')}</div>
             {renderItems([
               ...tags.map((tag): V2TableContextMenuItemConfig => ({
                 action: `move-to-tag:${tag.id}`,
                 icon: tag.selected ? <CheckSquareOutlined /> : <FolderOutlined />,
                 title: tag.name,
-                kbd: tag.selected ? '当前' : undefined,
+                kbd: tag.selected ? t('connection.sidebar.menu.current') : undefined,
                 selected: tag.selected,
               })),
               {
                 action: 'move-to-ungrouped',
                 icon: hasSelectedTag ? <FolderOpenOutlined /> : <CheckSquareOutlined />,
-                title: '移出分组',
-                kbd: hasSelectedTag ? undefined : '当前',
+                title: t('connection.sidebar.menu.moveToUngrouped'),
+                kbd: hasSelectedTag ? undefined : t('connection.sidebar.menu.current'),
                 selected: !hasSelectedTag,
               },
             ])}
@@ -585,7 +613,7 @@ export const V2ConnectionContextMenuView: React.FC<{
 
         <div className="gn-v2-context-menu-divider" />
         {renderItems([
-          { action: 'delete', icon: <DeleteOutlined />, title: '删除连接', tone: 'danger', kbd: '⌫' },
+          { action: 'delete', icon: <DeleteOutlined />, title: t('connection.sidebar.menu.delete'), tone: 'danger', kbd: '⌫' },
         ])}
       </div>
     </div>
@@ -653,46 +681,47 @@ export const V2ColumnHeaderContextMenuView: React.FC<{
   const normalizedType = String(columnType || '').trim();
   const normalizedComment = String(columnComment || '').trim();
   const meta = [
-    normalizedType || '未知类型',
-    normalizedComment || '暂无备注',
+    normalizedType || t('data_grid.context_menu.column_unknown_type'),
+    normalizedComment || t('data_grid.context_menu.column_no_comment'),
   ].join(' · ');
 
   return (
     <div className="gn-v2-table-context-menu gn-v2-column-context-menu" data-v2-column-context-menu="true" role="menu">
       <V2ContextMenuHeader
         icon={<FileTextOutlined />}
-        title={fieldName || '未命名字段'}
+        title={fieldName || t('data_grid.context_menu.column_unnamed_field')}
         meta={meta}
         pill="FIELD"
       />
 
       <div className="gn-v2-context-menu-body">
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_table_menu.copy_section')}</div>
         {renderItems([
-          { action: 'copy-field-name', icon: <CopyOutlined />, title: '复制字段名称', kbd: primaryShortcut('C', shortcutPlatform), featured: true },
-          { action: 'copy-column-data', icon: <CopyOutlined />, title: '复制列数据' },
+          { action: 'copy-field-name', icon: <CopyOutlined />, title: t('data_grid.context_menu.copy_field_name'), kbd: primaryShortcut('C', shortcutPlatform), featured: true },
+          { action: 'copy-column-data', icon: <CopyOutlined />, title: t('data_grid.context_menu.copy_column_data') },
         ])}
 
-        <div className="gn-v2-context-menu-section-title">排序</div>
+        <div className="gn-v2-context-menu-section-title">{t('data_grid.context_menu.sort_section')}</div>
         {renderItems([
-          { action: 'sort-asc', icon: <SortAscendingOutlined />, title: '升序排序', selected: sortOrder === 'ascend', kbd: sortOrder === 'ascend' ? '当前' : undefined },
-          { action: 'sort-desc', icon: <SortDescendingOutlined />, title: '降序排序', selected: sortOrder === 'descend', kbd: sortOrder === 'descend' ? '当前' : undefined },
-          { action: 'clear-sort', icon: <ClearOutlined />, title: '取消此字段排序', disabled: !sortOrder },
+          { action: 'sort-asc', icon: <SortAscendingOutlined />, title: t('data_grid.context_menu.sort_ascending'), selected: sortOrder === 'ascend', kbd: sortOrder === 'ascend' ? t('data_grid.context_menu.current_marker') : undefined },
+          { action: 'sort-desc', icon: <SortDescendingOutlined />, title: t('data_grid.context_menu.sort_descending'), selected: sortOrder === 'descend', kbd: sortOrder === 'descend' ? t('data_grid.context_menu.current_marker') : undefined },
+          { action: 'clear-sort', icon: <ClearOutlined />, title: t('data_grid.context_menu.clear_column_sort'), disabled: !sortOrder },
         ])}
 
-        <div className="gn-v2-context-menu-section-title">字段显示</div>
+        <div className="gn-v2-context-menu-section-title">{t('data_grid.context_menu.column_display_section')}</div>
         {renderItems([
-          { action: 'auto-fit-column', icon: <ColumnWidthOutlined />, title: '按内容自适应列宽' },
-          { action: 'hide-column', icon: <EyeInvisibleOutlined />, title: '隐藏此字段' },
+          { action: 'auto-fit-column', icon: <ColumnWidthOutlined />, title: t('data_grid.context_menu.auto_fit_column') },
+          { action: 'hide-column', icon: <EyeInvisibleOutlined />, title: t('data_grid.context_menu.hide_column') },
           {
             action: showColumnType ? 'hide-column-type' : 'show-column-type',
             icon: <FileTextOutlined />,
-            title: showColumnType ? '隐藏字段类型' : '显示字段类型',
+            title: showColumnType ? t('data_grid.context_menu.hide_column_type') : t('data_grid.context_menu.show_column_type'),
             selected: showColumnType,
           },
           {
             action: showColumnComment ? 'hide-column-comment' : 'show-column-comment',
             icon: <FileTextOutlined />,
-            title: showColumnComment ? '隐藏字段备注' : '显示字段备注',
+            title: showColumnComment ? t('data_grid.context_menu.hide_column_comment') : t('data_grid.context_menu.show_column_comment'),
             selected: showColumnComment,
           },
         ])}
@@ -730,9 +759,9 @@ export const V2CellContextMenuView: React.FC<{
     items,
     onAction as (action: string) => void,
   );
-  const selectedCountLabel = Math.max(0, selectedRowCount).toLocaleString();
-  const menuTitle = fieldName || '未命名字段';
-  const meta = [tableName, rowLabel || '当前行'].filter(Boolean).join(' · ') || '当前单元格';
+  const selectedCountLabel = Math.max(0, selectedRowCount).toLocaleString(getCurrentLanguage());
+  const menuTitle = fieldName || t('data_grid.context_menu.column_unnamed_field');
+  const meta = [tableName, rowLabel || t('data_grid.context_menu.current_row')].filter(Boolean).join(' · ') || t('data_grid.context_menu.current_cell');
 
   return (
     <div className="gn-v2-table-context-menu gn-v2-cell-context-menu" data-v2-cell-context-menu="true" role="menu">
@@ -745,64 +774,66 @@ export const V2CellContextMenuView: React.FC<{
 
       <div className="gn-v2-context-menu-body">
         {renderItems([
-          { action: 'copy-field-name', icon: <CopyOutlined />, title: '复制字段名称', kbd: primaryShortcut('C', shortcutPlatform), featured: true },
+          { action: 'copy-field-name', icon: <CopyOutlined />, title: t('data_grid.context_menu.copy_field_name'), kbd: primaryShortcut('C', shortcutPlatform), featured: true },
         ])}
 
         {canModifyData && (
           <>
-            <div className="gn-v2-context-menu-section-title">编辑</div>
+            <div className="gn-v2-context-menu-section-title">{t('data_grid.context_menu.edit_section')}</div>
             {renderItems([
               {
                 action: 'undo-cell-change',
                 icon: <UndoOutlined />,
-                title: '撤销此单元格修改',
+                title: t('data_grid.context_menu.undo_cell_change'),
                 disabled: !canUndoCellChange,
               },
-              { action: 'set-null', icon: <ClearOutlined />, title: '设置为 NULL' },
-              { action: 'edit-row', icon: <EditOutlined />, title: '编辑本行', kbd: '↵' },
-              { action: 'copy-row-for-paste', icon: <CopyOutlined />, title: '复制本行为新增行' },
+              { action: 'set-null', icon: <ClearOutlined />, title: t('data_grid.batch_fill.set_null') },
+              { action: 'edit-row', icon: <EditOutlined />, title: t('data_grid.context_menu.edit_row'), kbd: '↵' },
+              { action: 'copy-row-for-paste', icon: <CopyOutlined />, title: t('data_grid.context_menu.copy_row_as_new') },
               {
                 action: 'paste-row-as-new',
                 icon: <VerticalAlignBottomOutlined />,
-                title: copiedRowCount > 0 ? `粘贴为新增行 (${copiedRowCount})` : '粘贴为新增行',
+                title: copiedRowCount > 0
+                  ? t('data_grid.context_menu.paste_row_as_new_count', { count: copiedRowCount.toLocaleString(getCurrentLanguage()) })
+                  : t('data_grid.context_menu.paste_row_as_new'),
                 disabled: copiedRowCount <= 0,
               },
               {
                 action: 'fill-selected',
                 icon: <VerticalAlignBottomOutlined />,
-                title: `填充到选中行 (${selectedCountLabel})`,
+                title: t('data_grid.context_menu.fill_to_selected_rows', { count: selectedCountLabel }),
                 disabled: selectedRowCount <= 0,
               },
               {
                 action: 'paste-copied-columns',
                 icon: <VerticalAlignBottomOutlined />,
-                title: '粘贴已复制列 · 同名列',
+                title: t('data_grid.context_menu.paste_copied_columns'),
                 disabled: !canPasteCopiedColumns,
               },
             ])}
           </>
         )}
 
-        <div className="gn-v2-context-menu-section-title">复制</div>
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_table_menu.copy_section')}</div>
         {renderItems([
-          { action: 'copy-row-data', icon: <CopyOutlined />, title: '复制行数据' },
-          { action: 'copy-column-data', icon: <CopyOutlined />, title: '复制列数据' },
+          { action: 'copy-row-data', icon: <CopyOutlined />, title: t('data_grid.context_menu.copy_row_data') },
+          { action: 'copy-column-data', icon: <CopyOutlined />, title: t('data_grid.context_menu.copy_column_data') },
           ...(supportsCopyInsert ? [
-            { action: 'copy-insert' as const, icon: <ConsoleSqlOutlined />, title: '复制为 INSERT', kbd: 'SQL' },
-            { action: 'copy-update' as const, icon: <ConsoleSqlOutlined />, title: '复制为 UPDATE' },
-            { action: 'copy-delete' as const, icon: <ConsoleSqlOutlined />, title: '复制为 DELETE' },
+            { action: 'copy-insert' as const, icon: <ConsoleSqlOutlined />, title: t('data_grid.context_menu.copy_as_insert'), kbd: 'SQL' },
+            { action: 'copy-update' as const, icon: <ConsoleSqlOutlined />, title: t('data_grid.context_menu.copy_as_update') },
+            { action: 'copy-delete' as const, icon: <ConsoleSqlOutlined />, title: t('data_grid.context_menu.copy_as_delete') },
           ] : []),
-          { action: 'copy-json', icon: <FileTextOutlined />, title: '复制为 JSON' },
-          { action: 'copy-csv', icon: <FileTextOutlined />, title: '复制为 CSV' },
-          { action: 'copy-markdown', icon: <CopyOutlined />, title: '复制为 Markdown' },
+          { action: 'copy-json', icon: <FileTextOutlined />, title: t('data_grid.context_menu.copy_as_json') },
+          { action: 'copy-csv', icon: <FileTextOutlined />, title: t('data_grid.context_menu.copy_as_csv') },
+          { action: 'copy-markdown', icon: <CopyOutlined />, title: t('data_grid.context_menu.copy_as_markdown') },
         ])}
 
-        <div className="gn-v2-context-menu-section-title">导出</div>
+        <div className="gn-v2-context-menu-section-title">{t('data_grid.toolbar.export')}</div>
         {renderItems([
-          { action: 'export-csv', icon: <ExportOutlined />, title: 'CSV · .csv' },
-          { action: 'export-xlsx', icon: <ExportOutlined />, title: 'Excel · .xlsx' },
-          { action: 'export-json', icon: <ExportOutlined />, title: 'JSON · .json' },
-          { action: 'export-html', icon: <ExportOutlined />, title: 'HTML · .html' },
+          { action: 'export-csv', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.item_with_suffix', { label: 'CSV', suffix: '.csv' }) },
+          { action: 'export-xlsx', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.item_with_suffix', { label: 'Excel', suffix: '.xlsx' }) },
+          { action: 'export-json', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.item_with_suffix', { label: 'JSON', suffix: '.json' }) },
+          { action: 'export-html', icon: <ExportOutlined />, title: t('sidebar.v2_table_menu.item_with_suffix', { label: 'HTML', suffix: '.html' }) },
         ])}
       </div>
     </div>

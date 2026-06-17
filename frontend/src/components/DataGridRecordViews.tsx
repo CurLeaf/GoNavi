@@ -1,12 +1,16 @@
 import React from 'react';
 import { Button } from 'antd';
 import Editor from './MonacoEditor';
+import { t as defaultTranslate, type I18nParams } from '../i18n';
+
+export type DataGridRecordViewTranslate = (key: string, params?: I18nParams) => string;
 
 interface DataGridJsonViewProps {
   darkMode: boolean;
   rowCount: number;
   canModifyData: boolean;
   jsonViewText: string;
+  translate?: DataGridRecordViewTranslate;
   onOpenJsonEditor: () => void;
 }
 
@@ -15,16 +19,19 @@ export const DataGridJsonView: React.FC<DataGridJsonViewProps> = ({
   rowCount,
   canModifyData,
   jsonViewText,
+  translate = defaultTranslate,
   onOpenJsonEditor,
 }) => (
   <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
     <div style={{ padding: '8px 10px', borderBottom: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ fontSize: 12, color: darkMode ? '#999' : '#666' }}>
-        {rowCount === 0 ? '当前结果集无数据' : `当前结果集 ${rowCount} 条记录`}
+        {rowCount === 0
+          ? translate('data_grid.record_view.empty')
+          : translate('data_grid.record_view.json_record_count', { count: rowCount })}
       </span>
       {canModifyData && (
         <Button size="small" type="primary" onClick={onOpenJsonEditor} disabled={rowCount === 0}>
-          编辑 JSON
+          {translate('data_grid.record_view.edit_json')}
         </Button>
       )}
     </div>
@@ -56,6 +63,7 @@ interface DataGridTextViewProps {
   canModifyData: boolean;
   currentTextRow: Record<string, any> | null;
   displayOutputColumnNames: string[];
+  translate?: DataGridRecordViewTranslate;
   onPrev: () => void;
   onNext: () => void;
   onEditCurrent: () => void;
@@ -69,6 +77,7 @@ export const DataGridTextView: React.FC<DataGridTextViewProps> = ({
   canModifyData,
   currentTextRow,
   displayOutputColumnNames,
+  translate = defaultTranslate,
   onPrev,
   onNext,
   onEditCurrent,
@@ -77,17 +86,19 @@ export const DataGridTextView: React.FC<DataGridTextViewProps> = ({
   <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
     <div style={{ padding: '8px 12px', borderBottom: darkMode ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', gap: 8 }}>
       <Button size="small" onClick={onPrev} disabled={rowCount === 0 || textRecordIndex <= 0}>
-        上一条
+        {translate('data_grid.record_view.previous')}
       </Button>
       <Button size="small" onClick={onNext} disabled={rowCount === 0 || textRecordIndex >= rowCount - 1}>
-        下一条
+        {translate('data_grid.record_view.next')}
       </Button>
       <span style={{ fontSize: 12, color: darkMode ? '#999' : '#666' }}>
-        {rowCount === 0 ? '当前结果集无数据' : `记录 ${textRecordIndex + 1} / ${rowCount}`}
+        {rowCount === 0
+          ? translate('data_grid.record_view.empty')
+          : translate('data_grid.record_view.record_position', { current: textRecordIndex + 1, total: rowCount })}
       </span>
       {canModifyData && (
         <Button size="small" type="primary" onClick={onEditCurrent} disabled={rowCount === 0}>
-          编辑当前记录
+          {translate('data_grid.record_view.edit_current')}
         </Button>
       )}
     </div>
@@ -103,7 +114,7 @@ export const DataGridTextView: React.FC<DataGridTextViewProps> = ({
         </div>
       )) : (
         <div style={{ fontSize: 12, color: darkMode ? '#999' : '#666', paddingTop: 4 }}>
-          当前结果集无数据
+          {translate('data_grid.record_view.empty')}
         </div>
       )}
     </div>

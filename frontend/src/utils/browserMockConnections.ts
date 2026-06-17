@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 export const cloneBrowserMockValue = <T,>(value: T): T => {
   try {
     return JSON.parse(JSON.stringify(value));
@@ -13,8 +15,8 @@ export const resolveBrowserMockSecretFlag = (nextValue: unknown, clearFlag: bool
 };
 
 export const buildBrowserMockDuplicateName = (rawName: string, items: any[]): string => {
-  const baseName = String(rawName || '').trim() || '连接';
-  const suffix = ' - 副本';
+  const baseName = String(rawName || '').trim() || t('connection.unnamed');
+  const suffix = t('connection.copy_suffix');
   const usedNames = new Set(items.map((item) => String(item?.name || '').trim()));
   let candidate = `${baseName}${suffix}`;
   let counter = 2;

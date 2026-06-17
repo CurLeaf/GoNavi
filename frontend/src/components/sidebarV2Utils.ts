@@ -7,6 +7,7 @@ import {
   resolveSidebarRootOrderTokens,
 } from '../store';
 import type { ConnectionTag, SavedConnection } from '../types';
+import { t } from '../i18n';
 
 export type SidebarTreeNodeType =
   | 'connection'
@@ -199,7 +200,7 @@ export const buildV2RailConnectionGroups = (
     if (tagConnections.length === 0) return;
     tagGroups.set(tag.id, {
       id: tag.id,
-      name: tag.name || '未命名分组',
+      name: tag.name || t('connection.sidebar.group.untitled'),
       connections: tagConnections,
       rootToken: buildSidebarRootTagToken(tag.id),
     });
@@ -257,7 +258,7 @@ export const buildV2RailConnectionGroups = (
   return groups;
 };
 
-export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = '组'): string => {
+export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = t('connection.sidebar.group.badge')): string => {
   const trimmed = String(name ?? '').trim();
   if (!trimmed) return fallback;
   const cjkParts = trimmed.match(/[\u4e00-\u9fa5]/g);

@@ -11,6 +11,8 @@ import {
   StopOutlined,
 } from "@ant-design/icons";
 
+import { t as defaultTranslate } from '../i18n';
+import { useOptionalI18n } from '../i18n/provider';
 import type { SavedConnection } from "../types";
 import {
   getShortcutDisplayLabel,
@@ -84,37 +86,52 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   onToggleResultPanelVisibility,
   onAIAction,
 }) => {
+  const i18n = useOptionalI18n();
+  const t = i18n?.t ?? defaultTranslate;
   const baseMoreMenuItems = saveMoreMenuItems ?? [];
+  const toggleResultPanelShortcutLabel =
+    toggleQueryResultsPanelShortcutBinding.enabled &&
+    toggleQueryResultsPanelShortcutBinding.combo
+      ? getShortcutDisplayLabel(
+          toggleQueryResultsPanelShortcutBinding.combo,
+          activeShortcutPlatform,
+        )
+      : "";
   const toggleResultPanelTitle =
     toggleQueryResultsPanelShortcutBinding.enabled &&
     toggleQueryResultsPanelShortcutBinding.combo
-      ? `${isResultPanelVisible ? "隐藏结果区" : "显示结果区"}（${getShortcutDisplayLabel(toggleQueryResultsPanelShortcutBinding.combo, activeShortcutPlatform)}）`
+      ? t(
+          isResultPanelVisible
+            ? "query_editor.action.hide_results_panel_with_shortcut"
+            : "query_editor.action.show_results_panel_with_shortcut",
+          { shortcut: toggleResultPanelShortcutLabel },
+        )
       : isResultPanelVisible
-        ? "隐藏结果区"
-        : "显示结果区";
+        ? t("query_editor.action.hide_results_panel")
+        : t("query_editor.action.show_results_panel");
   const aiMenuItems: MenuProps["items"] = [
     {
       key: "ai-generate",
-      label: "生成 SQL",
+      label: t("query_editor.action.ai_generate_sql_menu"),
       icon: <RobotOutlined />,
       onClick: () => onAIAction("generate"),
     },
     {
       key: "ai-explain",
-      label: "解释 SQL",
+      label: t("query_editor.action.ai_explain_sql_menu"),
       icon: <RobotOutlined />,
       onClick: () => onAIAction("explain"),
     },
     {
       key: "ai-optimize",
-      label: "优化 SQL",
+      label: t("query_editor.action.ai_optimize_sql_menu"),
       icon: <RobotOutlined />,
       onClick: () => onAIAction("optimize"),
     },
     { type: "divider" as const },
     {
       key: "ai-schema",
-      label: "Schema 分析",
+      label: t("query_editor.action.ai_schema_analysis"),
       icon: <RobotOutlined />,
       onClick: () => onAIAction("schema"),
     },
@@ -152,7 +169,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
             : undefined
         }
         style={isV2Ui ? undefined : { width: 150 }}
-        placeholder="选择连接"
+        placeholder={t("query_editor.placeholder.connection")}
         value={currentConnectionId}
         onChange={onConnectionChange}
         options={queryCapableConnections.map((c) => ({
@@ -168,13 +185,13 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
             : undefined
         }
         style={isV2Ui ? undefined : { width: 200 }}
-        placeholder="选择数据库"
+        placeholder={t("query_editor.placeholder.database")}
         value={currentDb}
         onChange={onDatabaseChange}
         options={dbList.map((db) => ({ label: db, value: db }))}
         showSearch
       />
-      <Tooltip title="最大返回行数（会对 SELECT 自动加 LIMIT，防止大结果集卡死）">
+      <Tooltip title={t("query_editor.max_rows.tooltip")}>
         <Select
           className={
             isV2Ui
@@ -185,11 +202,11 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
           value={maxRows}
           onChange={(val) => onMaxRowsChange(Number(val))}
           options={[
-            { label: "最大行数：500", value: 500 },
-            { label: "最大行数：1000", value: 1000 },
-            { label: "最大行数：5000", value: 5000 },
-            { label: "最大行数：20000", value: 20000 },
-            { label: "最大行数：不限", value: 0 },
+            { label: t("query_editor.max_rows.option_500"), value: 500 },
+            { label: t("query_editor.max_rows.option_1000"), value: 1000 },
+            { label: t("query_editor.max_rows.option_5000"), value: 5000 },
+            { label: t("query_editor.max_rows.option_20000"), value: 20000 },
+            { label: t("query_editor.max_rows.option_unlimited"), value: 0 },
           ]}
         />
       </Tooltip>
@@ -221,8 +238,13 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
         <Tooltip
           title={
             runQueryShortcutBinding.enabled && runQueryShortcutBinding.combo
-              ? `运行（${getShortcutDisplayLabel(runQueryShortcutBinding.combo, activeShortcutPlatform)}）`
-              : "运行"
+              ? t("query_editor.action.run_with_shortcut", {
+                  shortcut: getShortcutDisplayLabel(
+                    runQueryShortcutBinding.combo,
+                    activeShortcutPlatform,
+                  ),
+                })
+              : t("query_editor.action.run")
           }
         >
           <Button
@@ -233,7 +255,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
             onClick={onRun}
             loading={loading}
           >
-            运行
+            {t("query_editor.action.run")}
           </Button>
         </Tooltip>
         {loading && (
@@ -243,7 +265,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
             icon={<StopOutlined />}
             onClick={onCancel}
           >
-            停止
+            {t("query_editor.action.stop")}
           </Button>
         )}
       </div>
@@ -255,12 +277,17 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
         <Tooltip
           title={
             saveQueryShortcutBinding.enabled && saveQueryShortcutBinding.combo
-              ? `保存（${getShortcutDisplayLabel(saveQueryShortcutBinding.combo, activeShortcutPlatform)}）`
-              : "保存"
+              ? t("query_editor.action.save_with_shortcut", {
+                  shortcut: getShortcutDisplayLabel(
+                    saveQueryShortcutBinding.combo,
+                    activeShortcutPlatform,
+                  ),
+                })
+              : t("query_editor.action.save")
           }
         >
           <Button icon={<SaveOutlined />} onClick={onQuickSave}>
-            保存
+            {t("query_editor.action.save")}
           </Button>
         </Tooltip>
         <Dropdown
@@ -281,7 +308,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
           placement="bottomRight"
           trigger={["click"]}
         >
-          <Button>更多</Button>
+          <Button>{t("query_editor.action.more")}</Button>
         </Dropdown>
       </div>
 
@@ -289,9 +316,9 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
         className={isV2Ui ? "gn-v2-query-toolbar-action-pair" : undefined}
         style={{ display: "flex", gap: "8px", alignItems: "center" }}
       >
-        <Tooltip title="美化 SQL">
+        <Tooltip title={t("query_editor.action.format_sql")}>
           <Button icon={<FormatPainterOutlined />} onClick={onFormat}>
-            美化
+            {t("query_editor.action.format")}
           </Button>
         </Tooltip>
         <Dropdown
@@ -314,7 +341,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
             }
             onClick={onToggleResultPanelVisibility}
           >
-            结果
+            {t("query_editor.action.results")}
           </Button>
         </Tooltip>
       )}

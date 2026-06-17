@@ -3,6 +3,8 @@ import { Button, Space, message } from 'antd';
 import { PlayCircleOutlined, ClearOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { t, type I18nParams } from '../i18n';
+import { useOptionalI18n } from '../i18n/provider';
 import Editor, { type OnMount } from './MonacoEditor';
 import {
     isMacLikePlatform,
@@ -109,6 +111,9 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
     const appearance = useStore(state => state.appearance);
+    const i18n = useOptionalI18n();
+    const i18nLanguage = i18n?.language;
+    const tr = (key: string, params?: I18nParams) => t(key, params, i18nLanguage);
     const connection = connections.find(c => c.id === connectionId);
     const darkMode = theme === 'dark';
     const isV2Ui = appearance.uiVersion === 'v2';
@@ -202,7 +207,7 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
                             kind: monaco.languages.CompletionItemKind.Keyword,
                             insertText: cmd,
                             range: range,
-                            detail: "Redis Command"
+                            detail: tr('redis_command.completion.detail')
                         }))
                     };
                 }
@@ -227,7 +232,7 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
 
         cmdToExecute = cmdToExecute.trim();
         if (!cmdToExecute) {
-            message.warning('请输入要执行的命令');
+            message.warning(tr('redis_command.message.command_required'));
             return;
         }
 
@@ -358,7 +363,7 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
     }, [handleDragMove]);
 
     if (!connection) {
-        return <div style={{ padding: 20 }}>连接不存在</div>;
+        return <div style={{ padding: 20 }}>{tr('redis_command.state.connection_not_found')}</div>;
     }
 
     return (
@@ -390,7 +395,7 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
             >
                 <div style={{ padding: '8px 12px', borderBottom: workbenchTheme.panelBorder, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: workbenchTheme.panelBgStrong }}>
                     <Space>
-                        <span style={{ fontWeight: 600, color: workbenchTheme.textPrimary }}>Redis Console</span>
+                        <span style={{ fontWeight: 600, color: workbenchTheme.textPrimary }}>{tr('redis_command.title.console')}</span>
                         <span style={{ color: workbenchTheme.textSecondary, fontSize: 13, background: workbenchTheme.statusTagMutedBg, border: workbenchTheme.statusTagMutedBorder, padding: '2px 8px', borderRadius: 12 }}>db{redisDB}</span>
                     </Space>
                     <Space>
@@ -400,7 +405,7 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
                             onClick={handleExecute}
                             loading={loading}
                         >
-                            执行 (Cmd+Enter)
+                            {tr('redis_command.action.execute')}
                         </Button>
                     </Space>
                 </div>
@@ -459,8 +464,8 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
                 }}
             >
                  <div style={{ padding: '4px 12px', background: darkMode ? '#1b1f27' : workbenchTheme.panelBgStrong, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: workbenchTheme.panelBorder }}>
-                    <span style={{ color: workbenchTheme.textSecondary, fontSize: 12 }}>Execution Output</span>
-                    <Button type="text" size="small" icon={<ClearOutlined />} onClick={handleClear} style={{ color: workbenchTheme.textSecondary }}>清空控制台</Button>
+                    <span style={{ color: workbenchTheme.textSecondary, fontSize: 12 }}>{tr('redis_command.output.title')}</span>
+                    <Button type="text" size="small" icon={<ClearOutlined />} onClick={handleClear} style={{ color: workbenchTheme.textSecondary }}>{tr('redis_command.action.clear_console')}</Button>
                 </div>
                 <div
                     data-redis-command-output-terminal="true"
@@ -478,9 +483,9 @@ const RedisCommandEditor: React.FC<RedisCommandEditorProps> = ({ connectionId, r
                 >
                     {results.length === 0 ? (
                         <div style={{ color: workbenchTheme.textMuted, textAlign: 'center', marginTop: 40 }}>
-                            <div>在此终端执行命令，结果会以原样输出</div>
+                            <div>{tr('redis_command.output.empty_hint')}</div>
                             <div style={{ fontSize: 12, marginTop: 12 }}>
-                                Tips: <code>选中任意行</code> 按 <code style={{ color: workbenchTheme.textSecondary }}>Ctrl + Enter</code> 仅执行选中段落
+                                {tr('redis_command.output.selection_tip')}
                             </div>
                         </div>
                     ) : (

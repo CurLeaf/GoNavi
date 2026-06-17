@@ -1,7 +1,9 @@
 package app
 
 import (
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -241,6 +243,7 @@ func TestSaveConnectionClearsRequestedSecretFields(t *testing.T) {
 func TestDuplicateConnectionClonesSecretBundle(t *testing.T) {
 	app := NewAppWithSecretStore(newFakeAppSecretStore())
 	app.configDir = t.TempDir()
+	app.SetLanguage("en-US")
 
 	_, err := app.SaveConnection(connection.SavedConnectionInput{
 		ID:                    "conn-1",
@@ -269,8 +272,8 @@ func TestDuplicateConnectionClonesSecretBundle(t *testing.T) {
 	if duplicate.ID == "conn-1" {
 		t.Fatal("duplicate should have a new id")
 	}
-	if duplicate.Name != "Primary - 副本" {
-		t.Fatalf("expected duplicate name to keep existing UX, got %q", duplicate.Name)
+	if duplicate.Name != "Primary - Copy" {
+		t.Fatalf("expected duplicate name to be localized, got %q", duplicate.Name)
 	}
 	if !reflect.DeepEqual(duplicate.IncludeDatabases, []string{"appdb"}) {
 		t.Fatalf("expected include databases to be cloned, got %#v", duplicate.IncludeDatabases)
@@ -288,6 +291,22 @@ func TestDuplicateConnectionClonesSecretBundle(t *testing.T) {
 	}
 	if resolved.Password != "postgres-secret" {
 		t.Fatalf("expected duplicated secret bundle, got %q", resolved.Password)
+	}
+}
+
+func TestSavedConnectionsDoesNotHardcodeDuplicateNameChinese(t *testing.T) {
+	source, err := os.ReadFile("saved_connections.go")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	text := string(source)
+	for _, legacy := range []string{
+		`trimmedBaseName = "连接"`,
+		`suffix := " - 副本"`,
+	} {
+		if strings.Contains(text, legacy) {
+			t.Fatalf("saved_connections.go still hardcodes duplicate connection text %s", legacy)
+		}
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -27,6 +26,40 @@ const (
 	arthasTunnelInterruptInput      = "\u0003"
 	arthasTunnelSessionTTL          = 12 * time.Hour
 	arthasTunnelMaxSessions         = 128
+)
+
+const (
+	arthasTunnelMessageCommandCompleted = "jvm.backend.diagnostic.message.arthas_command_completed"
+	arthasTunnelMessageCommandCanceled  = "jvm.backend.diagnostic.message.arthas_command_canceled"
+
+	arthasTunnelErrorBaseURLRequired             = "jvm.backend.diagnostic.arthas.base_url_required"
+	arthasTunnelErrorBaseURLInvalid              = "jvm.backend.diagnostic.arthas.base_url_invalid"
+	arthasTunnelErrorTargetIDRequired            = "jvm.backend.diagnostic.arthas.target_id_required"
+	arthasTunnelErrorSchemeUnsupported           = "jvm.backend.diagnostic.arthas.scheme_unsupported"
+	arthasTunnelErrorSessionMissing              = "jvm.backend.diagnostic.arthas.session_missing"
+	arthasTunnelErrorSessionConfigChanged        = "jvm.backend.diagnostic.arthas.session_config_changed"
+	arthasTunnelErrorCommandAlreadyRunning       = "jvm.backend.diagnostic.arthas.command_already_running"
+	arthasTunnelErrorNoRunningCommand            = "jvm.backend.diagnostic.arthas.no_running_command"
+	arthasTunnelErrorCancelCommandMismatch       = "jvm.backend.diagnostic.arthas.cancel_command_mismatch"
+	arthasTunnelErrorConnectionNotReady          = "jvm.backend.diagnostic.arthas.connection_not_ready"
+	arthasTunnelErrorHTTPFailed                  = "jvm.backend.diagnostic.arthas.http_failed"
+	arthasTunnelErrorConnectTimeout              = "jvm.backend.diagnostic.arthas.connect_timeout"
+	arthasTunnelErrorConnectCanceled             = "jvm.backend.diagnostic.arthas.connect_canceled"
+	arthasTunnelErrorConnectFailed               = "jvm.backend.diagnostic.arthas.connect_failed"
+	arthasTunnelErrorRequestEncodeFailed         = "jvm.backend.diagnostic.arthas.request_encode_failed"
+	arthasTunnelErrorWriteDeadlineFailed         = "jvm.backend.diagnostic.arthas.write_deadline_failed"
+	arthasTunnelErrorSendTimeout                 = "jvm.backend.diagnostic.arthas.send_timeout"
+	arthasTunnelErrorSendCanceled                = "jvm.backend.diagnostic.arthas.send_canceled"
+	arthasTunnelErrorSendFailed                  = "jvm.backend.diagnostic.arthas.send_failed"
+	arthasTunnelErrorReadDeadlineFailed          = "jvm.backend.diagnostic.arthas.read_deadline_failed"
+	arthasTunnelErrorReadTimeout                 = "jvm.backend.diagnostic.arthas.read_timeout"
+	arthasTunnelErrorReadCanceled                = "jvm.backend.diagnostic.arthas.read_canceled"
+	arthasTunnelErrorReadFailed                  = "jvm.backend.diagnostic.arthas.read_failed"
+	arthasTunnelErrorConnectionClosed            = "jvm.backend.diagnostic.arthas.connection_closed"
+	arthasTunnelErrorConnectionClosedCode        = "jvm.backend.diagnostic.arthas.connection_closed_code"
+	arthasTunnelErrorCommandTimeout              = "jvm.backend.diagnostic.arthas.command_timeout"
+	arthasTunnelErrorCommandCanceled             = "jvm.backend.diagnostic.arthas.command_canceled"
+	arthasTunnelErrorTerminalCommandEncodeFailed = "jvm.backend.diagnostic.arthas.terminal_command_encode_failed"
 )
 
 var arthasPromptPattern = regexp.MustCompile(`\[arthas@[^\]]+\]\$ `)
@@ -160,8 +193,8 @@ func (t *DiagnosticArthasTunnelTransport) ExecuteCommand(ctx context.Context, cf
 	defer conn.Close()
 
 	if activeCommand.isCancelRequested() {
-		t.emitChunk(req, "canceled", "Arthas 命令已取消")
-		return fmt.Errorf("arthas tunnel command canceled")
+		t.emitChunkWithContentKey(req, "canceled", arthasTunnelMessageCommandCanceled)
+		return arthasTunnelCommandCanceledError()
 	}
 
 	if err := activeCommand.send(arthasTunnelTTYFrame{
@@ -222,11 +255,11 @@ func (t *DiagnosticArthasTunnelTransport) streamCommandUntilPrompt(
 			}
 
 			if activeCommand.isCancelRequested() || strings.Contains(content, "^C") {
-				t.emitChunk(req, "canceled", "Arthas 命令已取消")
-				return fmt.Errorf("arthas tunnel command canceled")
+				t.emitChunkWithContentKey(req, "canceled", arthasTunnelMessageCommandCanceled)
+				return arthasTunnelCommandCanceledError()
 			}
 
-			t.emitChunk(req, "completed", "Arthas 命令执行完成")
+			t.emitChunkWithContentKey(req, "completed", arthasTunnelMessageCommandCompleted)
 			return nil
 		}
 
@@ -242,10 +275,24 @@ func (t *DiagnosticArthasTunnelTransport) streamCommandUntilPrompt(
 	}
 }
 
+func (t *DiagnosticArthasTunnelTransport) emitChunkWithContentKey(req DiagnosticCommandRequest, phase string, contentKey string) {
+	t.emitChunkWithMetadata(req, phase, "", map[string]any{
+		"contentKey": contentKey,
+	})
+}
+
 func (t *DiagnosticArthasTunnelTransport) emitChunk(req DiagnosticCommandRequest, phase string, content string) {
+	t.emitChunkWithMetadata(req, phase, content, nil)
+}
+
+func (t *DiagnosticArthasTunnelTransport) emitChunkWithMetadata(req DiagnosticCommandRequest, phase string, content string, metadata map[string]any) {
 	if t.eventSink == nil {
 		return
 	}
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	metadata["transport"] = DiagnosticTransportArthasTunnel
 	t.eventSink(DiagnosticEventChunk{
 		SessionID: req.SessionID,
 		CommandID: req.CommandID,
@@ -253,26 +300,26 @@ func (t *DiagnosticArthasTunnelTransport) emitChunk(req DiagnosticCommandRequest
 		Phase:     phase,
 		Content:   content,
 		Timestamp: time.Now().UnixMilli(),
-		Metadata: map[string]any{
-			"transport": DiagnosticTransportArthasTunnel,
-		},
+		Metadata:  metadata,
 	})
 }
 
 func newArthasTunnelRuntime(cfg connection.ConnectionConfig) (arthasTunnelRuntime, error) {
 	baseURLText := strings.TrimSpace(cfg.JVM.Diagnostic.BaseURL)
 	if baseURLText == "" {
-		return arthasTunnelRuntime{}, errors.New("Arthas Tunnel 地址不能为空")
+		return arthasTunnelRuntime{}, arthasTunnelLocalizedError(arthasTunnelErrorBaseURLRequired, nil, nil)
 	}
 
 	baseURL, err := url.Parse(baseURLText)
 	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
-		return arthasTunnelRuntime{}, fmt.Errorf("Arthas Tunnel 地址格式不正确：%s", baseURLText)
+		return arthasTunnelRuntime{}, arthasTunnelLocalizedError(arthasTunnelErrorBaseURLInvalid, map[string]any{
+			"detail": baseURLText,
+		}, err)
 	}
 
 	targetID := strings.TrimSpace(cfg.JVM.Diagnostic.TargetID)
 	if targetID == "" {
-		return arthasTunnelRuntime{}, errors.New("Arthas Tunnel 需要填写目标实例标识（targetId / agentId）")
+		return arthasTunnelRuntime{}, arthasTunnelLocalizedError(arthasTunnelErrorTargetIDRequired, nil, nil)
 	}
 
 	scheme := strings.ToLower(strings.TrimSpace(baseURL.Scheme))
@@ -283,7 +330,9 @@ func newArthasTunnelRuntime(cfg connection.ConnectionConfig) (arthasTunnelRuntim
 		baseURL.Scheme = "wss"
 	case "ws", "wss":
 	default:
-		return arthasTunnelRuntime{}, fmt.Errorf("Arthas Tunnel 仅支持 http/https/ws/wss 地址：%s", baseURL.Scheme)
+		return arthasTunnelRuntime{}, arthasTunnelLocalizedError(arthasTunnelErrorSchemeUnsupported, map[string]any{
+			"scheme": baseURL.Scheme,
+		}, nil)
 	}
 
 	baseURL.Path = resolveArthasTunnelWSPath(baseURL.Path)
@@ -333,9 +382,11 @@ func (r arthasTunnelRuntime) dial(ctx context.Context) (*websocket.Conn, error) 
 	if err != nil {
 		if resp != nil {
 			defer resp.Body.Close()
-			return nil, fmt.Errorf("Arthas Tunnel 连接失败：HTTP %s", resp.Status)
+			return nil, arthasTunnelLocalizedError(arthasTunnelErrorHTTPFailed, map[string]any{
+				"status": resp.Status,
+			}, err)
 		}
-		return nil, translateArthasTunnelIOError("建立 Arthas Tunnel WebSocket 连接", err, r.timeout)
+		return nil, translateArthasTunnelIOError("connect", err, r.timeout)
 	}
 	return conn, nil
 }
@@ -362,14 +413,18 @@ func (r arthasTunnelRuntime) waitForPrompt(ctx context.Context, conn *websocket.
 func (r arthasTunnelRuntime) writeFrame(conn *websocket.Conn, frame arthasTunnelTTYFrame) error {
 	payload, err := json.Marshal(frame)
 	if err != nil {
-		return fmt.Errorf("Arthas Tunnel 请求编码失败：%w", err)
+		return arthasTunnelLocalizedError(arthasTunnelErrorRequestEncodeFailed, map[string]any{
+			"detail": err.Error(),
+		}, err)
 	}
 
 	if err := conn.SetWriteDeadline(time.Now().Add(r.timeout)); err != nil {
-		return fmt.Errorf("Arthas Tunnel 写入超时设置失败：%w", err)
+		return arthasTunnelLocalizedError(arthasTunnelErrorWriteDeadlineFailed, map[string]any{
+			"detail": err.Error(),
+		}, err)
 	}
 	if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
-		return translateArthasTunnelIOError("向 Arthas Tunnel 发送终端指令", err, r.timeout)
+		return translateArthasTunnelIOError("send", err, r.timeout)
 	}
 	return nil
 }
@@ -382,7 +437,9 @@ func (r arthasTunnelRuntime) readTextFrame(ctx context.Context, conn *websocket.
 		}
 
 		if err := conn.SetReadDeadline(readDeadline); err != nil {
-			return "", fmt.Errorf("Arthas Tunnel 读取超时设置失败：%w", err)
+			return "", arthasTunnelLocalizedError(arthasTunnelErrorReadDeadlineFailed, map[string]any{
+				"detail": err.Error(),
+			}, err)
 		}
 
 		messageType, payload, err := conn.ReadMessage()
@@ -404,57 +461,77 @@ func (r arthasTunnelRuntime) readTextFrame(ctx context.Context, conn *websocket.
 }
 
 func translateArthasTunnelIOError(action string, err error, timeout time.Duration) error {
+	timeoutKey, canceledKey, failedKey := arthasTunnelIOErrorKeys(action)
 	if errors.Is(err, context.DeadlineExceeded) || isArthasTunnelTimeout(err) {
-		return fmt.Errorf("%s超时，%s 内未收到响应", action, timeout)
+		return arthasTunnelLocalizedError(timeoutKey, map[string]any{
+			"timeout": timeout.String(),
+		}, err)
 	}
 	if errors.Is(err, context.Canceled) {
-		return fmt.Errorf("%s已取消", action)
+		return arthasTunnelLocalizedError(canceledKey, nil, err)
 	}
-	return fmt.Errorf("%s失败：%w", action, err)
+	return arthasTunnelLocalizedError(failedKey, map[string]any{
+		"detail": err.Error(),
+	}, err)
 }
 
 func translateArthasTunnelReadError(err error, timeout time.Duration) error {
 	var closeErr *websocket.CloseError
 	if errors.As(err, &closeErr) {
 		if strings.TrimSpace(closeErr.Text) != "" {
-			return fmt.Errorf("Arthas Tunnel 连接已关闭：%s", translateArthasTunnelCloseReason(closeErr.Text))
+			return arthasTunnelLocalizedError(arthasTunnelErrorConnectionClosed, map[string]any{
+				"detail": strings.TrimSpace(closeErr.Text),
+			}, err)
 		}
-		return fmt.Errorf("Arthas Tunnel 连接已关闭：code=%d", closeErr.Code)
+		return arthasTunnelLocalizedError(arthasTunnelErrorConnectionClosedCode, map[string]any{
+			"code": closeErr.Code,
+		}, err)
 	}
-	return translateArthasTunnelIOError("读取 Arthas Tunnel 输出", err, timeout)
+	return translateArthasTunnelIOError("read", err, timeout)
 }
 
 func translateArthasTunnelContextError(err error, timeout time.Duration) error {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("Arthas Tunnel 命令执行超时，%s 内未完成", timeout)
+		return arthasTunnelLocalizedError(arthasTunnelErrorCommandTimeout, map[string]any{
+			"timeout": timeout.String(),
+		}, err)
 	}
 	if errors.Is(err, context.Canceled) {
-		return errors.New("Arthas Tunnel 命令已取消")
+		return arthasTunnelCommandCanceledError()
 	}
 	return err
+}
+
+func arthasTunnelIOErrorKeys(action string) (timeoutKey string, canceledKey string, failedKey string) {
+	switch action {
+	case "connect":
+		return arthasTunnelErrorConnectTimeout, arthasTunnelErrorConnectCanceled, arthasTunnelErrorConnectFailed
+	case "send":
+		return arthasTunnelErrorSendTimeout, arthasTunnelErrorSendCanceled, arthasTunnelErrorSendFailed
+	default:
+		return arthasTunnelErrorReadTimeout, arthasTunnelErrorReadCanceled, arthasTunnelErrorReadFailed
+	}
+}
+
+func arthasTunnelCommandCanceledError() error {
+	return arthasTunnelLocalizedError(
+		arthasTunnelErrorCommandCanceled,
+		nil,
+		errors.New("arthas tunnel command canceled"),
+	)
+}
+
+func arthasTunnelLocalizedError(key string, params map[string]any, cause error) error {
+	return &LocalizedError{
+		Key:    key,
+		Params: params,
+		Cause:  cause,
+	}
 }
 
 func isArthasTunnelTimeout(err error) bool {
 	var netErr net.Error
 	return errors.As(err, &netErr) && netErr.Timeout()
-}
-
-func translateArthasTunnelCloseReason(reason string) string {
-	trimmed := strings.TrimSpace(reason)
-	lowerReason := strings.ToLower(trimmed)
-
-	switch {
-	case strings.Contains(lowerReason, "can not find arthas agent by id"):
-		parts := strings.Split(trimmed, ":")
-		if len(parts) > 1 {
-			return "找不到目标实例 " + strings.TrimSpace(parts[len(parts)-1]) + "，请确认 targetId / agentId 是否填写正确，且对应 tunnel client 已在线"
-		}
-		return "找不到目标实例，请确认 targetId / agentId 是否填写正确，且对应 tunnel client 已在线"
-	case strings.Contains(lowerReason, "arthas agent id can not be null"):
-		return "缺少目标实例标识，请填写 targetId / agentId"
-	default:
-		return trimmed
-	}
 }
 
 func newArthasTunnelSessionRegistry() *arthasTunnelSessionRegistry {
@@ -491,13 +568,13 @@ func (r *arthasTunnelSessionRegistry) beginCommand(sessionID string, commandID s
 	r.pruneLocked(time.Now().UnixMilli())
 	meta, ok := r.sessions[sessionID]
 	if !ok {
-		return nil, errors.New("诊断会话不存在，请重新创建 Arthas Tunnel 会话")
+		return nil, arthasTunnelLocalizedError(arthasTunnelErrorSessionMissing, nil, nil)
 	}
 	if !meta.matchesConfig(cfg) {
-		return nil, errors.New("Arthas Tunnel 会话配置已变化，请重新创建诊断会话")
+		return nil, arthasTunnelLocalizedError(arthasTunnelErrorSessionConfigChanged, nil, nil)
 	}
 	if existing := r.active[sessionID]; existing != nil {
-		return nil, errors.New("当前 Arthas Tunnel 会话已有命令在执行，请先等待完成或取消")
+		return nil, arthasTunnelLocalizedError(arthasTunnelErrorCommandAlreadyRunning, nil, nil)
 	}
 
 	activeCommand := &arthasTunnelActiveCommand{commandID: commandID}
@@ -567,10 +644,10 @@ func (r *arthasTunnelSessionRegistry) cancelCommand(sessionID string, commandID 
 	r.mu.Unlock()
 
 	if activeCommand == nil {
-		return errors.New("当前 Arthas Tunnel 会话没有正在执行的命令")
+		return arthasTunnelLocalizedError(arthasTunnelErrorNoRunningCommand, nil, nil)
 	}
 	if activeCommand.commandID != commandID {
-		return errors.New("当前 Arthas Tunnel 会话的活动命令与待取消命令不一致")
+		return arthasTunnelLocalizedError(arthasTunnelErrorCancelCommandMismatch, nil, nil)
 	}
 	return activeCommand.requestCancel()
 }
@@ -598,22 +675,28 @@ func (c *arthasTunnelActiveCommand) send(frame arthasTunnelTTYFrame) error {
 	conn := c.conn
 	c.mu.RUnlock()
 	if conn == nil {
-		return errors.New("Arthas Tunnel 连接尚未建立完成，请稍后重试")
+		return arthasTunnelLocalizedError(arthasTunnelErrorConnectionNotReady, nil, nil)
 	}
 
 	payload, err := json.Marshal(frame)
 	if err != nil {
-		return fmt.Errorf("Arthas Tunnel 终端指令编码失败：%w", err)
+		return arthasTunnelLocalizedError(arthasTunnelErrorTerminalCommandEncodeFailed, map[string]any{
+			"detail": err.Error(),
+		}, err)
 	}
 
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 
 	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		return fmt.Errorf("Arthas Tunnel 写入超时设置失败：%w", err)
+		return arthasTunnelLocalizedError(arthasTunnelErrorWriteDeadlineFailed, map[string]any{
+			"detail": err.Error(),
+		}, err)
 	}
 	if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
-		return fmt.Errorf("向 Arthas Tunnel 发送终端指令失败：%w", err)
+		return arthasTunnelLocalizedError(arthasTunnelErrorSendFailed, map[string]any{
+			"detail": err.Error(),
+		}, err)
 	}
 	return nil
 }

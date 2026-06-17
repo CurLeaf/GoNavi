@@ -19,6 +19,79 @@ describe('AISettingsModal edit password behavior', () => {
     expect(source).toContain('<AISettingsPromptsSection');
   });
 
+  it('localizes user prompt settings toast fallbacks', () => {
+    expect(source).toContain("messageApi.success(t('ai_settings.prompts.message.saved'))");
+    expect(source).toContain("messageApi.error(e?.message || t('ai_settings.prompts.message.save_failed'))");
+    expect(source).not.toContain("'自定义提示词已保存'");
+    expect(source).not.toContain("'保存自定义提示词失败'");
+  });
+
+  it('localizes MCP server toast fallbacks', () => {
+    expect(source).toContain("messageApi.success(t('ai_settings.mcp_server.message.saved'))");
+    expect(source).toContain("messageApi.error(e?.message || t('ai_settings.mcp_server.message.save_failed'))");
+    expect(source).toContain("messageApi.success(t('ai_settings.mcp_server.message.deleted'))");
+    expect(source).toContain("messageApi.error(e?.message || t('ai_settings.mcp_server.message.delete_failed'))");
+    expect(source).toContain("messageApi.success(res?.message || t('ai_settings.mcp_server.message.test_success'))");
+    expect(source).toContain("messageApi.error(res?.message || t('ai_settings.mcp_server.message.test_failed'))");
+    expect(source).toContain("messageApi.error(e?.message || t('ai_settings.mcp_server.message.test_request_failed'))");
+    expect(source).not.toContain("'MCP 服务已保存'");
+    expect(source).not.toContain("'保存 MCP 服务失败'");
+    expect(source).not.toContain("'MCP 服务已删除'");
+    expect(source).not.toContain("'删除 MCP 服务失败'");
+    expect(source).not.toContain("'MCP 服务连接成功'");
+    expect(source).not.toContain("'MCP 服务测试失败'");
+    expect(source).not.toContain("'测试 MCP 服务失败'");
+  });
+
+  it('localizes Skill toast fallbacks', () => {
+    expect(source).toContain("messageApi.success(t('ai_settings.skill.message.saved'))");
+    expect(source).toContain("messageApi.error(e?.message || t('ai_settings.skill.message.save_failed'))");
+    expect(source).toContain("messageApi.success(t('ai_settings.skill.message.deleted'))");
+    expect(source).toContain("messageApi.error(e?.message || t('ai_settings.skill.message.delete_failed'))");
+    expect(source).not.toContain("'Skill 已保存'");
+    expect(source).not.toContain("'保存 Skill 失败'");
+    expect(source).not.toContain("'Skill 已删除'");
+    expect(source).not.toContain("'删除 Skill 失败'");
+  });
+
+  it('localizes MCP HTTP control and copy fallbacks', () => {
+    expect(source).toContain("throw new Error(t('ai_settings.clipboard.error.unsupported'))");
+    expect(source).toContain("throw new Error(t('ai_settings.mcp_http.error.control_unsupported_runtime'))");
+    expect(source).toContain("throw new Error(t('ai_settings.mcp_http.error.start_unsupported_version'))");
+    expect(source).toContain("throw new Error(t('ai_settings.mcp_http.error.stop_unsupported_version'))");
+    expect(source).toContain("messageApi.success(checked ? t('ai_settings.mcp_http.message.started') : t('ai_settings.mcp_http.message.stopped'))");
+    expect(source).toContain("messageApi.error(e?.message || t('ai_settings.mcp_http.message.toggle_failed'))");
+    expect(source).toContain("messageApi.error(t('ai_settings.mcp_http.message.url_unavailable'))");
+    expect(source).toContain("copyTextToClipboard(url, t('ai_settings.mcp_http.message.url_copied'))");
+    expect(source).toContain("messageApi.error(t('ai_settings.mcp_http.message.authorization_header_required'))");
+    expect(source).toContain("copyTextToClipboard(`Authorization: ${authorizationHeader}`, t('ai_settings.mcp_http.message.authorization_header_copied'))");
+    expect(source).not.toContain("'当前环境不支持复制到剪贴板'");
+    expect(source).not.toContain("'当前运行时暂不支持 MCP HTTP 服务控制'");
+    expect(source).not.toContain("'当前版本暂不支持启动 MCP HTTP 服务'");
+    expect(source).not.toContain("'当前版本暂不支持停止 MCP HTTP 服务'");
+    expect(source).not.toContain("'GoNavi MCP HTTP 服务已启动'");
+    expect(source).not.toContain("'GoNavi MCP HTTP 服务已停止'");
+    expect(source).not.toContain("'切换 GoNavi MCP HTTP 服务失败'");
+    expect(source).not.toContain("'当前没有可复制的 MCP HTTP URL'");
+    expect(source).not.toContain("'MCP HTTP URL 已复制'");
+    expect(source).not.toContain("'请先启动 MCP HTTP 服务生成 Authorization Header'");
+    expect(source).not.toContain("'Authorization Header 已复制'");
+  });
+
+  it('localizes MCP HTTP default status fallback', () => {
+    expect(source).toContain("const defaultMCPHTTPServerStatus = useMemo<AIMCPHTTPServerStatus>(() => ({");
+    expect(source).toContain("message: t('ai_settings.mcp_http.status.not_running')");
+    expect(source).toContain("useState<AIMCPHTTPServerStatus>(() => defaultMCPHTTPServerStatus)");
+    expect(source).not.toContain("'GoNavi MCP HTTP 服务未启动'");
+  });
+
+  it('localizes Skill required built-in tool option labels', () => {
+    expect(source).toContain("label: `${tool.name} · ${t('ai_settings.tools.builtin_tool_label')}`");
+    expect(source).toContain("]), [mcpTools, t]);");
+    expect(source).not.toContain("label: `${tool.name} · 内置工具`");
+    expect(source).not.toContain("· 内置工具");
+  });
+
   it('loads MCP servers and skills through the AI service', () => {
     expect(source).toContain('Service.AIGetMCPClientInstallStatuses?.()');
     expect(source).toContain('Service.AIGetMCPServers?.()');
@@ -78,7 +151,8 @@ describe('AISettingsModal edit password behavior', () => {
 
   it('renders in-modal test errors through the local message host', () => {
     expect(source).toContain('antdMessage.useMessage({ getContainer: () => modalBodyRef.current || document.body })');
-    expect(source).toContain("void messageApi.error(`测试失败: ${res?.message || '未知错误'}`);");
+    expect(source).toContain("void messageApi.error(res?.message || t('ai_settings.message.test_failed'))");
+    expect(source).not.toContain("`测试失败: ${res?.message || '未知错误'}`");
   });
 
   it('keeps long ai settings toast errors wrapped within the modal body', () => {

@@ -16,11 +16,8 @@ import { AIHistoryDrawer } from './ai/AIHistoryDrawer';
 import AIChatPanelConversationView from './ai/AIChatPanelConversationView';
 import { useAIChatStreamSubscription } from './ai/useAIChatStreamSubscription';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
-import {
-    buildIncompleteProviderNotice,
-    buildMissingModelNotice,
-    buildMissingProviderNotice,
-} from '../utils/aiComposerNotice';
+import type { AIComposerNoticeDescriptor } from '../utils/aiComposerNotice';
+import { buildAIComposerNotice } from '../utils/aiComposerNotice';
 import { consumeAIChatSendShortcutOnKeyDown } from '../utils/aiChatSendShortcut';
 import { toAIRequestMessage } from '../utils/aiMessagePayload';
 import { compressContextIfNeeded, getDynamicMaxContextChars } from '../utils/aiChatRuntime';
@@ -29,7 +26,6 @@ import { isMacLikePlatform } from '../utils/appearance';
 import { buildAvailableAIChatTools } from '../utils/aiToolRegistry';
 import {
     buildAIChatInlineHistorySessions,
-    buildAIChatInsights,
     calculateAIContextUsageChars,
     collectAIChatContextTableNames,
     inferAIChatConnectionContext,
@@ -45,6 +41,7 @@ import { useAIChatPlanContexts } from './ai/useAIChatPlanContexts';
 import { useAIChatSessionState } from './ai/useAIChatSessionState';
 import { useAIChatSessionTitleGenerator } from './ai/useAIChatSessionTitleGenerator';
 import { useAIChatLocalTools } from './ai/useAIChatLocalTools';
+import { useI18n } from '../i18n/provider';
 
 interface AIChatPanelProps {
     width?: number;
@@ -58,18 +55,20 @@ interface AIChatPanelProps {
 
 const genId = () => `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 
-export const AIChatPanel: React.FC<AIChatPanelProps> = ({ 
-    width = 380, darkMode, bgColor, onClose, onOpenSettings, onWidthChange, overlayTheme 
+export const AIChatPanel: React.FC<AIChatPanelProps> = ({
+    width = 380, darkMode, bgColor, onClose, onOpenSettings, onWidthChange, overlayTheme
 }) => {
+    const { t } = useI18n();
     const [input, setInput] = useState('');
     const [draftAttachments, setDraftAttachments] = useState<AIChatAttachment[]>([]);
     const [sending, setSending] = useState(false);
     const [showScrollBottom, setShowScrollBottom] = useState(false);
     const [historyOpen, setHistoryOpen] = useState(false);
     const [activePanelMode, setActivePanelMode] = useState<'chat' | 'insights' | 'history'>('chat');
+    const [composerNoticeState, setComposerNoticeState] = useState<AIComposerNoticeDescriptor | null>(null);
     const {
         activeProvider,
-        composerNotice,
+        composerNotice: runtimeComposerNotice,
         dynamicModels,
         fetchDynamicModels,
         handleComposerAction,
@@ -77,14 +76,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         handleOpenSettingsFromPanel,
         loadingModels,
         mcpTools,
-        setComposerNotice,
         skills,
         userPromptSettings,
     } = useAIChatRuntimeResources({ onOpenSettings });
-    
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const nudgeCountRef = useRef(0);    // 催促模型使用 function call 的次数
+    const nudgeCountRef = useRef(0);
     const {
         getCurrentJVMPlanContext,
         getCurrentJVMDiagnosticPlanContext,
@@ -92,7 +90,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         pendingJVMDiagnosticPlanContextRef,
     } = useAIChatPlanContexts();
 
-    const aiChatHistory = useStore(state => state.aiChatHistory);
     const aiActiveSessionId = useStore(state => state.aiActiveSessionId);
     const appearance = useStore(state => state.appearance);
     const createNewAISession = useStore(state => state.createNewAISession);
@@ -101,7 +98,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     const deleteAIChatMessage = useStore(state => state.deleteAIChatMessage);
     const truncateAIChatMessages = useStore(state => state.truncateAIChatMessages);
     const updateAISessionTitle = useStore(state => state.updateAISessionTitle);
-    
+
     const activeContext = useStore(state => state.activeContext);
     const aiContexts = useStore(state => state.aiContexts);
     const connections = useStore(state => state.connections);
@@ -125,8 +122,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         onWidthChange,
     });
     const availableTools = useMemo(
-        () => buildAvailableAIChatTools(mcpTools),
-        [mcpTools],
+        () => buildAvailableAIChatTools(mcpTools, t),
+        [mcpTools, t],
     );
     const aiChatSendShortcutBinding = useStore(state => resolveShortcutBinding(
         state.shortcutOptions,
@@ -145,23 +142,32 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         tabs,
     });
 
+    useEffect(() => {
+        if (runtimeComposerNotice) {
+            setComposerNoticeState(null);
+        }
+    }, [runtimeComposerNotice]);
+
     const getConnectionName = useCallback(() => {
         let connectionId = activeContext?.connectionId;
         if (!connectionId) {
-            const activeTab = tabs.find(t => t.id === activeTabId);
+            const activeTab = tabs.find(tab => tab.id === activeTabId);
             connectionId = activeTab?.connectionId;
         }
         if (!connectionId) return '';
-        const conn = connections.find(c => c.id === connectionId);
-        return conn ? conn.name : '';
+        const connection = connections.find(item => item.id === connectionId);
+        return connection ? connection.name : '';
     }, [activeContext, activeTabId, connections, tabs]);
 
     const activeConnName = getConnectionName();
+    const composerNotice = useMemo(
+        () => buildAIComposerNotice(t, composerNoticeState) ?? runtimeComposerNotice,
+        [composerNoticeState, runtimeComposerNotice, t],
+    );
 
     const textColor = overlayTheme.titleText;
     const mutedColor = overlayTheme.mutedText;
     const borderColor = overlayTheme.divider;
-    const assistantBubbleBg = darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)';
     const quickActionBg = darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.8)';
     const quickActionBorder = overlayTheme.sectionBorder;
 
@@ -178,15 +184,12 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
     }, []);
 
     useEffect(() => {
-        const handler = (e: Event) => {
-            const detail = (e as CustomEvent).detail;
+        const handler = (event: Event) => {
+            const detail = (event as CustomEvent).detail;
             if (detail?.prompt) {
                 setInput(detail.prompt);
                 setTimeout(() => {
-                    const el = textareaRef.current as any;
-                    if (el) {
-                        el.focus();
-                    }
+                    textareaRef.current?.focus();
                 }, 50);
             }
         };
@@ -196,8 +199,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
     const generateTitleForSession = useAIChatSessionTitleGenerator({ updateAISessionTitle });
 
-    const handleScrollMessages = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-        const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+    const handleScrollMessages = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+        const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
         const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
         setShowScrollBottom(!isNearBottom);
     }, []);
@@ -255,9 +258,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
     const handleRetryMessage = useCallback(async (msg: AIChatMessage) => {
         const historyLocal = useStore.getState().aiChatHistory[sid] || [];
-        const aiIndex = historyLocal.findIndex(m => m.id === msg.id);
+        const aiIndex = historyLocal.findIndex(message => message.id === msg.id);
         if (aiIndex <= 0) return;
-        
+
         let lastUserMsgIndex = -1;
         for (let i = aiIndex - 1; i >= 0; i--) {
             if (historyLocal[i].role === 'user') {
@@ -265,10 +268,10 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 break;
             }
         }
-        
+
         if (lastUserMsgIndex >= 0) {
             const userMsg = historyLocal[lastUserMsgIndex];
-            truncateAIChatMessages(sid, userMsg.id); 
+            truncateAIChatMessages(sid, userMsg.id);
 
             resetToolCallState();
             nudgeCountRef.current = 0;
@@ -280,10 +283,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
             setSending(true);
 
-            // 插入 connecting 过渡消息（波纹动画），与 handleSend 保持一致
             const connectingMsg: AIChatMessage = {
-                id: genId(), role: 'assistant', phase: 'connecting', content: '',
-                timestamp: Date.now(), loading: true,
+                id: genId(),
+                role: 'assistant',
+                phase: 'connecting',
+                content: '',
+                timestamp: Date.now(),
+                loading: true,
                 jvmPlanContext: retryJVMPlanContext,
                 jvmDiagnosticPlanContext: retryJVMDiagnosticPlanContext,
             };
@@ -291,7 +297,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
             const truncatedHistory = historyLocal.slice(0, lastUserMsgIndex + 1);
             const messagesPayload = truncatedHistory.map(toAIRequestMessage);
-            
+
             try {
                 const sysMessages = await buildSystemContextMessages(
                     retryJVMPlanContext,
@@ -355,23 +361,22 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             activeContextItems: aiContexts[connectionKey] || [],
         });
 
-        // 前置校验：必须配置供应商、补全基础参数并选择模型后才能发送
         if (readiness.status === 'missing_provider') {
-            setComposerNotice(buildMissingProviderNotice());
+            setComposerNoticeState({ kind: 'missing_provider' });
             return;
         }
         if (readiness.status === 'provider_incomplete') {
-            setComposerNotice(buildIncompleteProviderNotice(readiness.issues));
+            setComposerNoticeState({ kind: 'provider_incomplete', issues: readiness.issues });
             return;
         }
         if (readiness.status === 'missing_model' || readiness.status === 'loading_models') {
-            setComposerNotice(buildMissingModelNotice());
+            setComposerNoticeState({ kind: 'missing_model' });
             return;
         }
-        setComposerNotice(null);
+        setComposerNoticeState(null);
 
         resetToolCallState();
-        nudgeCountRef.current = 0;     // 重置催促计数
+        nudgeCountRef.current = 0;
         const currentJVMPlanContext = getCurrentJVMPlanContext();
         const currentJVMDiagnosticPlanContext = getCurrentJVMDiagnosticPlanContext();
         pendingJVMPlanContextRef.current = currentJVMPlanContext;
@@ -386,20 +391,25 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         setDraftAttachments([]);
         setSending(true);
 
-        if (textareaRef.current) {
-            textareaRef.current.focus();               
-        }
+        textareaRef.current?.focus();
 
         const userMsg: AIChatMessage = {
-            id: genId(), role: 'user', content: text, timestamp: Date.now(),
+            id: genId(),
+            role: 'user',
+            content: text,
+            timestamp: Date.now(),
             images: currentImages.length > 0 ? currentImages : undefined,
             attachments: currentFileAttachments.length > 0 ? currentFileAttachments : undefined,
         };
         addAIChatMessage(sid, userMsg);
-        
+
         const connectingMsg: AIChatMessage = {
-            id: genId(), role: 'assistant', phase: 'connecting', content: '', 
-            timestamp: Date.now(), loading: true,
+            id: genId(),
+            role: 'assistant',
+            phase: 'connecting',
+            content: '',
+            timestamp: Date.now(),
+            loading: true,
             jvmPlanContext: currentJVMPlanContext,
             jvmDiagnosticPlanContext: currentJVMDiagnosticPlanContext,
         };
@@ -410,8 +420,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             currentJVMDiagnosticPlanContext,
         );
 
-        // 【过渡状态 2】上下文已组装完成，即将接入模型
-        updateAIChatMessage(sid, connectingMsg.id, { content: '模型接入中' });
+        updateAIChatMessage(sid, connectingMsg.id, { content: t('ai_chat.panel.status.model_connecting') });
 
         const chatMessages = [...messages, userMsg].map(toAIRequestMessage);
 
@@ -419,9 +428,11 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         const dynamicMaxLimit = getDynamicMaxContextChars(activeProvider?.model);
         const summary = await compressContextIfNeeded(sid, chatMessages, dynamicMaxLimit);
         if (summary) {
-            // 清理原有历史，保留系统生成的总结记录和当前的 userMsg 以及 connectingMsg
             const compressedMsg: AIChatMessage = {
-                id: genId(), role: 'assistant', content: `【自动记忆重塑】已将超长历史压缩为摘要：\n\n${summary}`, timestamp: Date.now() - 1000
+                id: genId(),
+                role: 'assistant',
+                content: t('ai_chat.panel.status.memory_summary', { summary }),
+                timestamp: Date.now() - 1000,
             };
             useStore.getState().replaceAIChatHistory(sid, [compressedMsg, userMsg, connectingMsg]);
             finalMessagesPayload = [
@@ -432,11 +443,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
         const allMessages = [...systemMessages, ...finalMessagesPayload];
 
-        // 【过渡状态 3】大脑唤醒
-        updateAIChatMessage(sid, connectingMsg.id, { content: '唤醒推理引擎中' });
-
-        // 【过渡状态 4】最后一步，等待第一字节返回
-        updateAIChatMessage(sid, connectingMsg.id, { content: '等待模型响应' });
+        updateAIChatMessage(sid, connectingMsg.id, { content: t('ai_chat.panel.status.waking_engine') });
+        updateAIChatMessage(sid, connectingMsg.id, { content: t('ai_chat.panel.status.waiting_response') });
 
         await dispatchAIChatPayload({
             sid,
@@ -449,7 +457,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             pendingAssistantMessageId: connectingMsg.id,
             jvmPlanContext: currentJVMPlanContext,
             jvmDiagnosticPlanContext: currentJVMDiagnosticPlanContext,
-            unavailableContent: '❌ AI Service 未就绪',
+            unavailableContent: t('ai_chat.panel.message.service_not_ready'),
             onNonStreamSuccess: messages.length === 0
                 ? () => generateTitleForSession(sid)
                 : undefined,
@@ -471,11 +479,13 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         getCurrentJVMPlanContext,
         getCurrentJVMDiagnosticPlanContext,
         loadingModels,
+        resetToolCallState,
+        t,
         updateAIChatMessage,
     ]);
 
-    const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-        consumeAIChatSendShortcutOnKeyDown(aiChatSendShortcutBinding, e, handleSend);
+    const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
+        consumeAIChatSendShortcutOnKeyDown(aiChatSendShortcutBinding, event, handleSend);
     }, [aiChatSendShortcutBinding, handleSend]);
 
     const handleStop = useCallback(async () => {
@@ -484,8 +494,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             if (Service?.AIChatCancel) {
                 await Service.AIChatCancel(sid);
             }
-        } catch (e) {
-            console.warn('Failed to stop chat stream', e);
+        } catch (error) {
+            console.warn('Failed to stop chat stream', error);
         }
         setSending(false);
     }, [sid]);
@@ -500,7 +510,6 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         [activeContext?.connectionId, activeContext?.dbName, messages],
     );
 
-    // useMemo 缓存：避免内联闭包击穿子组件 memo
     const handleDeleteMessage = useCallback((id: string) => deleteAIChatMessage(sid, id), [sid, deleteAIChatMessage]);
     const handleMessageRenderError = useCallback((error: Error, errorInfo: React.ErrorInfo, msg: AIChatMessage) => {
         console.error('[AI Message Render Error]', msg.id, error, errorInfo);
@@ -519,12 +528,12 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         (globalThis as any).__gonaviLastAIMessageRenderError = renderErrorPayload;
     }, []);
     const currentSessionTitle = useMemo(
-        () => orderedAISessions.find((session) => session.id === sid)?.title || '新对话',
-        [orderedAISessions, sid],
+        () => orderedAISessions.find((session) => session.id === sid)?.title || t('ai_chat.panel.session.default_title'),
+        [orderedAISessions, sid, t],
     );
     const activeConnectionConfig = useMemo(() => {
         if (!inferredConnectionId) return undefined;
-        const connection = connections.find(c => c.id === inferredConnectionId);
+        const connection = connections.find(item => item.id === inferredConnectionId);
         return connection ? buildRpcConnectionConfig(connection.config) : undefined;
     }, [inferredConnectionId, connections]);
     const contextUsageChars = useMemo(
@@ -539,28 +548,86 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         }),
         [activeContext?.connectionId, activeContext?.dbName, aiContexts],
     );
-    const aiInsights = useMemo(
-        () => buildAIChatInsights({
-            contextTableNames,
-            sqlLogs,
-        }),
-        [contextTableNames, sqlLogs],
-    );
+    const aiInsights = useMemo(() => {
+        const recentLogs = sqlLogs.slice(0, 24);
+        const slowest = recentLogs
+            .filter((log) => log.status === 'success')
+            .sort((left, right) => right.duration - left.duration)[0];
+        const errors = recentLogs.filter((log) => log.status === 'error');
+        const writeCount = recentLogs.filter((log) => /\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i.test(log.sql)).length;
+        const contextCount = contextTableNames.length;
+        const tableSeparator = t('ai_chat.panel.insight.context.table_separator');
+        const tablePreview = `${contextTableNames.slice(0, 3).join(tableSeparator)}${contextCount > 3 ? t('ai_chat.panel.insight.context.more_tables_suffix') : ''}`;
+
+        return [
+            {
+                tone: 'info' as const,
+                title: contextCount > 0
+                    ? t('ai_chat.panel.insight.context.linked_title', { count: contextCount })
+                    : t('ai_chat.panel.insight.context.empty_title'),
+                body: contextCount > 0
+                    ? t('ai_chat.panel.insight.context.linked_body', { tables: tablePreview })
+                    : t('ai_chat.panel.insight.context.empty_body'),
+            },
+            {
+                tone: slowest && slowest.duration > 1000 ? 'warn' as const : 'accent' as const,
+                title: slowest
+                    ? t('ai_chat.panel.insight.query.slowest_title', { duration: Math.round(slowest.duration).toLocaleString() })
+                    : t('ai_chat.panel.insight.query.empty_title'),
+                body: slowest ? slowest.sql.slice(0, 140) : t('ai_chat.panel.insight.query.empty_body'),
+            },
+            {
+                tone: errors.length > 0 ? 'warn' as const : 'info' as const,
+                title: errors.length > 0
+                    ? t('ai_chat.panel.insight.status.failed_title', { count: errors.length })
+                    : t('ai_chat.panel.insight.status.ok_title'),
+                body: errors[0]?.message || (
+                    recentLogs.length > 0
+                        ? t('ai_chat.panel.insight.status.recent_body', { count: recentLogs.length })
+                        : t('ai_chat.panel.insight.status.empty_body')
+                ),
+            },
+            {
+                tone: writeCount > 0 ? 'warn' as const : 'accent' as const,
+                title: writeCount > 0
+                    ? t('ai_chat.panel.insight.write.detected_title', { count: writeCount })
+                    : t('ai_chat.panel.insight.write.readonly_title'),
+                body: writeCount > 0
+                    ? t('ai_chat.panel.insight.write.detected_body')
+                    : t('ai_chat.panel.insight.write.readonly_body'),
+            },
+        ];
+    }, [contextTableNames, sqlLogs, t]);
     const panelHistorySessions = useMemo(
-        () => buildAIChatInlineHistorySessions(orderedAISessions),
-        [orderedAISessions],
+        () => buildAIChatInlineHistorySessions(
+            orderedAISessions.map((session) => ({
+                ...session,
+                title: session.title || t('ai_chat.panel.session.default_title'),
+            })),
+        ),
+        [orderedAISessions, t],
     );
     const effectivePanelMode = useMemo(
         () => resolveAIChatPanelMode(isV2Ui, activePanelMode),
         [activePanelMode, isV2Ui],
     );
 
+    const handleComposerActionWithNoticeReset = useCallback((actionKey: 'open-settings' | 'reload-models') => {
+        setComposerNoticeState(null);
+        handleComposerAction(actionKey);
+    }, [handleComposerAction]);
+
+    const handleModelChangeWithNoticeReset = useCallback((model: string) => {
+        setComposerNoticeState(null);
+        void handleModelChange(model);
+    }, [handleModelChange]);
+
     return (
         <div ref={panelRef} className={`ai-chat-panel${isV2Ui ? ' gn-v2-ai-panel' : ''}`} style={{ width: panelWidth, background: bgColor || 'transparent', color: textColor, borderLeft: overlayTheme.shellBorder, position: 'relative' }}>
             <div className={`ai-resize-handle${isResizing ? ' active' : ''}`} onMouseDown={handleResizeStart} />
-            
+
             {isResizing && panelRect.current && createPortal(
-                <div 
+                <div
                     ref={ghostRef}
                     style={{
                         position: 'fixed',
@@ -662,8 +729,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                 sendShortcutBinding={aiChatSendShortcutBinding}
                 shortcutPlatform={activeShortcutPlatform}
                 composerNotice={composerNotice}
-                onComposerAction={handleComposerAction}
-                onModelChange={handleModelChange}
+                onComposerAction={handleComposerActionWithNoticeReset}
+                onModelChange={handleModelChangeWithNoticeReset}
                 onFetchModels={fetchDynamicModels}
                 textareaRef={textareaRef}
                 darkMode={darkMode}
