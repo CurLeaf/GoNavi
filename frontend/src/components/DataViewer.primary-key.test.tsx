@@ -379,6 +379,38 @@ describe('DataViewer safe editing locator', () => {
     renderer.unmount();
   });
 
+  it('uses hidden OceanBase Oracle ROWID when no primary or unique key is available', async () => {
+    storeState.connections[0].config.type = 'oceanbase';
+    (storeState.connections[0].config as any).oceanBaseProtocol = 'oracle';
+    storeState.connections[0].config.user = 'dev';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'ID', key: '' }, { name: 'NAME', key: '' }],
+    });
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      fields: ['ID', 'NAME', ORACLE_ROWID_LOCATOR_COLUMN],
+      data: [{ ID: 7, NAME: 'old-name', [ORACLE_ROWID_LOCATOR_COLUMN]: 'AAAA' }],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-ob-oracle-rowid', dbName: 'ORCLPDB1', tableName: 'EDC_LOG', title: 'EDC_LOG' }));
+
+    expect(dataGridState.latestProps?.pkColumns).toEqual([]);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'oracle-rowid',
+      columns: ['ROWID'],
+      valueColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+      hiddenColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(dataGridState.latestProps?.showRowNumberColumn).toBe(true);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+    expect(backendApp.DBQuery.mock.calls.some((call: any[]) => String(call[2]).includes(`ROWID AS "${ORACLE_ROWID_LOCATOR_COLUMN}"`))).toBe(true);
+    renderer.unmount();
+  });
+
   it('does not add fallback ORDER BY for DuckDB table preview when a primary key is available', async () => {
     storeState.connections[0].config.type = 'duckdb';
     storeState.connections[0].config.database = 'main';

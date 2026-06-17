@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getDataSourceCapabilities } from './dataSourceCapabilities';
+import { getDataSourceCapabilities, shouldShowOceanBaseRowNumberColumn } from './dataSourceCapabilities';
 
 describe('dataSourceCapabilities', () => {
   it('treats Oracle table preview totals as manual exact count plus approximate metadata count', () => {
@@ -256,6 +256,14 @@ describe('dataSourceCapabilities', () => {
       preferManualTotalCount: true,
       supportsApproximateTableCount: true,
     });
+  });
+
+  it('shows row numbers for OceanBase datasources regardless of protocol normalization', () => {
+    expect(shouldShowOceanBaseRowNumberColumn({ type: 'oceanbase' })).toBe(true);
+    expect(shouldShowOceanBaseRowNumberColumn({ type: 'oceanbase', oceanBaseProtocol: 'oracle' })).toBe(true);
+    expect(shouldShowOceanBaseRowNumberColumn({ type: 'custom', driver: 'oceanbase', oceanBaseProtocol: 'oracle' })).toBe(true);
+    expect(shouldShowOceanBaseRowNumberColumn({ type: 'oracle' })).toBe(false);
+    expect(shouldShowOceanBaseRowNumberColumn({ type: 'mysql' })).toBe(false);
   });
 
   it('treats custom OceanBase Oracle driver as Oracle capabilities', () => {

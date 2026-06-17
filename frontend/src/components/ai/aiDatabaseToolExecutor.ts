@@ -23,6 +23,7 @@ interface ExecuteDatabaseToolCallOptions {
 interface ToolExecutionResult {
   content: string;
   success: boolean;
+  countsAsProbeFailure?: boolean;
 }
 
 const findConnection = (connections: SavedConnection[], connectionId: string) =>
@@ -39,10 +40,43 @@ const resolveConnectionOrFailure = (
       failure: {
         content: 'Connection not found',
         success: false,
+        countsAsProbeFailure: true,
       },
     };
   }
   return { connection };
+};
+
+const CONNECTION_ERROR_KEYWORDS = [
+  'connection not found',
+  'invalid connection',
+  'bad connection',
+  'driver: bad connection',
+  'connection refused',
+  'connection reset',
+  'closed network connection',
+  'server has gone away',
+  'broken pipe',
+  'no such host',
+  'network is unreachable',
+  'context deadline exceeded',
+  'i/o timeout',
+  'timeout',
+  'eof',
+  '连接失败',
+  '连接异常',
+  '连接超时',
+  '连接已关闭',
+  '网络超时',
+  '网络异常',
+];
+
+const countsAsProbeFailure = (message: unknown): boolean => {
+  const text = String(message || '').trim().toLowerCase();
+  if (!text) {
+    return true;
+  }
+  return CONNECTION_ERROR_KEYWORDS.some((keyword) => text.includes(keyword));
 };
 
 export async function executeDatabaseToolCall(
@@ -75,9 +109,14 @@ export async function executeDatabaseToolCall(
           }
           return { content: JSON.stringify(databaseNames), success: true };
         }
-        return { content: result?.message || 'Failed to fetch DBs', success: false };
+        return {
+          content: result?.message || 'Failed to fetch DBs',
+          success: false,
+          countsAsProbeFailure: countsAsProbeFailure(result?.message),
+        };
       } catch (error: any) {
-        return { content: `获取数据库列表失败: ${error?.message || error}`, success: false };
+        const message = `获取数据库列表失败: ${error?.message || error}`;
+        return { content: message, success: false, countsAsProbeFailure: countsAsProbeFailure(message) };
       }
     }
     case 'get_tables': {
@@ -99,9 +138,14 @@ export async function executeDatabaseToolCall(
           });
           return { content: JSON.stringify(tableNames), success: true };
         }
-        return { content: result?.message || 'Failed to fetch Tables', success: false };
+        return {
+          content: result?.message || 'Failed to fetch Tables',
+          success: false,
+          countsAsProbeFailure: countsAsProbeFailure(result?.message),
+        };
       } catch (error: any) {
-        return { content: `获取表列表失败: ${error?.message || error}`, success: false };
+        const message = `获取表列表失败: ${error?.message || error}`;
+        return { content: message, success: false, countsAsProbeFailure: countsAsProbeFailure(message) };
       }
     }
     case 'get_all_columns': {
@@ -125,9 +169,14 @@ export async function executeDatabaseToolCall(
             success: true,
           };
         }
-        return { content: result?.message || 'Failed to fetch all columns', success: false };
+        return {
+          content: result?.message || 'Failed to fetch all columns',
+          success: false,
+          countsAsProbeFailure: countsAsProbeFailure(result?.message),
+        };
       } catch (error: any) {
-        return { content: `获取全库字段摘要失败: ${error?.message || error}`, success: false };
+        const message = `获取全库字段摘要失败: ${error?.message || error}`;
+        return { content: message, success: false, countsAsProbeFailure: countsAsProbeFailure(message) };
       }
     }
     case 'get_columns': {
@@ -145,9 +194,14 @@ export async function executeDatabaseToolCall(
             success: true,
           };
         }
-        return { content: result?.message || 'Failed to fetch columns', success: false };
+        return {
+          content: result?.message || 'Failed to fetch columns',
+          success: false,
+          countsAsProbeFailure: countsAsProbeFailure(result?.message),
+        };
       } catch (error: any) {
-        return { content: `获取字段列表失败: ${error?.message || error}`, success: false };
+        const message = `获取字段列表失败: ${error?.message || error}`;
+        return { content: message, success: false, countsAsProbeFailure: countsAsProbeFailure(message) };
       }
     }
     case 'get_indexes': {
@@ -160,9 +214,11 @@ export async function executeDatabaseToolCall(
         return {
           content: result?.success && Array.isArray(result.data) ? JSON.stringify(result.data) : (result?.message || 'Failed to fetch indexes'),
           success: !!result?.success && Array.isArray(result.data),
+          countsAsProbeFailure: result?.success ? false : countsAsProbeFailure(result?.message),
         };
       } catch (error: any) {
-        return { content: `获取索引定义失败: ${error?.message || error}`, success: false };
+        const message = `获取索引定义失败: ${error?.message || error}`;
+        return { content: message, success: false, countsAsProbeFailure: countsAsProbeFailure(message) };
       }
     }
     case 'get_foreign_keys': {
@@ -175,9 +231,11 @@ export async function executeDatabaseToolCall(
         return {
           content: result?.success && Array.isArray(result.data) ? JSON.stringify(result.data) : (result?.message || 'Failed to fetch foreign keys'),
           success: !!result?.success && Array.isArray(result.data),
+          countsAsProbeFailure: result?.success ? false : countsAsProbeFailure(result?.message),
         };
       } catch (error: any) {
-        return { content: `获取外键关系失败: ${error?.message || error}`, success: false };
+        const message = `获取外键关系失败: ${error?.message || error}`;
+        return { content: message, success: false, countsAsProbeFailure: countsAsProbeFailure(message) };
       }
     }
     case 'get_triggers': {
@@ -190,9 +248,11 @@ export async function executeDatabaseToolCall(
         return {
           content: result?.success && Array.isArray(result.data) ? JSON.stringify(result.data) : (result?.message || 'Failed to fetch triggers'),
           success: !!result?.success && Array.isArray(result.data),
+          countsAsProbeFailure: result?.success ? false : countsAsProbeFailure(result?.message),
         };
       } catch (error: any) {
-        return { content: `获取触发器定义失败: ${error?.message || error}`, success: false };
+        const message = `获取触发器定义失败: ${error?.message || error}`;
+        return { content: message, success: false, countsAsProbeFailure: countsAsProbeFailure(message) };
       }
     }
     case 'get_table_ddl': {
@@ -207,9 +267,14 @@ export async function executeDatabaseToolCall(
           fetchDDL: () => runtime.showCreateTable(rpcConfig, safeDbName, safeTable),
           fetchColumns: () => runtime.getColumns(rpcConfig, safeDbName, safeTable),
         });
-        return { content: result.content, success: result.success };
+        return {
+          content: result.content,
+          success: result.success,
+          countsAsProbeFailure: result.success ? false : countsAsProbeFailure(result.content),
+        };
       } catch (error: any) {
-        return { content: `获取建表语句失败: ${error?.message || error}`, success: false };
+        const message = `获取建表语句失败: ${error?.message || error}`;
+        return { content: message, success: false, countsAsProbeFailure: countsAsProbeFailure(message) };
       }
     }
     case 'inspect_table_bundle': {
@@ -245,9 +310,14 @@ export async function executeDatabaseToolCall(
             success: true,
           };
         }
-        return { content: result?.message || 'Failed to preview table rows', success: false };
+        return {
+          content: result?.message || 'Failed to preview table rows',
+          success: false,
+          countsAsProbeFailure: countsAsProbeFailure(result?.message),
+        };
       } catch (error: any) {
-        return { content: `预览表样例数据失败: ${error?.message || error}`, success: false };
+        const message = `预览表样例数据失败: ${error?.message || error}`;
+        return { content: message, success: false, countsAsProbeFailure: countsAsProbeFailure(message) };
       }
     }
     case 'execute_sql': {
@@ -262,6 +332,7 @@ export async function executeDatabaseToolCall(
             return {
               content: `安全策略拦截：当前安全级别不允许执行 ${checkResult.operationType} 类型的 SQL。请将 SQL 展示给用户，让用户手动执行。`,
               success: false,
+              countsAsProbeFailure: false,
             };
           }
         }
@@ -270,18 +341,31 @@ export async function executeDatabaseToolCall(
           safeSql,
           50,
           resolved.connection.config?.driver || '',
+          { oceanBaseProtocol: resolved.connection.config?.oceanBaseProtocol },
         );
         const result = await runtime.query(buildRpcConnectionConfig(resolved.connection.config) as any, safeDbName, finalSql);
         if (result?.success) {
+          const affectedRows = Number((result.data as Record<string, unknown> | null | undefined)?.affectedRows);
+          if (Number.isFinite(affectedRows)) {
+            return {
+              content: JSON.stringify({ affectedRows }),
+              success: true,
+            };
+          }
           const rows = Array.isArray(result.data) ? result.data : [];
           return {
             content: JSON.stringify({ rowCount: rows.length, data: rows.slice(0, 50) }),
             success: true,
           };
         }
-        return { content: result?.message || 'SQL 执行失败', success: false };
+        return {
+          content: result?.message || 'SQL 执行失败',
+          success: false,
+          countsAsProbeFailure: countsAsProbeFailure(result?.message),
+        };
       } catch (error: any) {
-        return { content: `SQL 执行异常: ${error?.message || error}`, success: false };
+        const message = `SQL 执行异常: ${error?.message || error}`;
+        return { content: message, success: false, countsAsProbeFailure: countsAsProbeFailure(message) };
       }
     }
     default:

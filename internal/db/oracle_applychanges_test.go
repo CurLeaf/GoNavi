@@ -25,19 +25,22 @@ var (
 )
 
 type oracleRecordingState struct {
-	mu           sync.Mutex
-	execQueries  []string
-	execArgs     [][]driver.NamedValue
-	queries      []string
-	beginCalls   int
-	rowsAffected int64
-	queryResults map[string]oracleRecordingQueryResult
-	queryError   error
+	mu                       sync.Mutex
+	execQueries              []string
+	execArgs                 [][]driver.NamedValue
+	queries                  []string
+	beginCalls               int
+	rowsAffected             int64
+	queryResults             map[string]oracleRecordingQueryResult
+	queryError               error
+	disableDefaultTabColumns bool
 }
 
 type oracleRecordingQueryResult struct {
-	columns []string
-	rows    [][]driver.Value
+	columns     []string
+	columnTypes []string
+	nullable    []bool
+	rows        [][]driver.Value
 }
 
 func (s *oracleRecordingState) snapshotExecQueries() []string {
@@ -109,6 +112,7 @@ func (c *oracleRecordingConn) ExecContext(_ context.Context, query string, args 
 func (c *oracleRecordingConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
 	c.state.mu.Lock()
 	c.state.queries = append(c.state.queries, query)
+	disableDefaultTabColumns := c.state.disableDefaultTabColumns
 	if err := c.state.queryError; err != nil {
 		c.state.mu.Unlock()
 		return nil, err
@@ -116,13 +120,15 @@ func (c *oracleRecordingConn) QueryContext(_ context.Context, query string, _ []
 	if result, ok := c.state.queryResults[query]; ok {
 		c.state.mu.Unlock()
 		return &oracleRecordingRows{
-			columns: append([]string(nil), result.columns...),
-			rows:    cloneOracleRecordingRows(result.rows),
+			columns:     append([]string(nil), result.columns...),
+			columnTypes: append([]string(nil), result.columnTypes...),
+			nullable:    append([]bool(nil), result.nullable...),
+			rows:        cloneOracleRecordingRows(result.rows),
 		}, nil
 	}
 	c.state.mu.Unlock()
 
-	if strings.Contains(strings.ToLower(query), "tab_columns") {
+	if strings.Contains(strings.ToLower(query), "tab_columns") && !disableDefaultTabColumns {
 		return &oracleRecordingRows{
 			columns: []string{"COLUMN_NAME", "DATA_TYPE", "NULLABLE", "DATA_DEFAULT", "COLUMN_KEY", "COMMENT"},
 			rows: [][]driver.Value{
@@ -151,9 +157,11 @@ func (oracleRecordingTx) Commit() error   { return nil }
 func (oracleRecordingTx) Rollback() error { return nil }
 
 type oracleRecordingRows struct {
-	columns []string
-	rows    [][]driver.Value
-	index   int
+	columns     []string
+	columnTypes []string
+	nullable    []bool
+	rows        [][]driver.Value
+	index       int
 }
 
 func (r *oracleRecordingRows) Columns() []string {
@@ -161,6 +169,20 @@ func (r *oracleRecordingRows) Columns() []string {
 }
 
 func (r *oracleRecordingRows) Close() error { return nil }
+
+func (r *oracleRecordingRows) ColumnTypeDatabaseTypeName(index int) string {
+	if index < 0 || index >= len(r.columnTypes) {
+		return ""
+	}
+	return r.columnTypes[index]
+}
+
+func (r *oracleRecordingRows) ColumnTypeNullable(index int) (nullable, ok bool) {
+	if index < 0 || index >= len(r.nullable) {
+		return false, false
+	}
+	return r.nullable[index], true
+}
 
 func (r *oracleRecordingRows) Next(dest []driver.Value) error {
 	if r.index >= len(r.rows) {

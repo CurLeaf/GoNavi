@@ -1014,7 +1014,9 @@ describe('DataGrid layout', () => {
         paginationSummaryText="当前 24 条 / 共 24 条"
         paginationControlTotal={24}
         paginationTotalPages={1}
+        paginationPageText="第 1 / 1 页"
         paginationPageSizeOptions={['100', '200']}
+        showKnownPageCount
         onPageChange={() => {}}
         onPageSizeChange={() => {}}
         onV2PageStep={() => {}}
@@ -1705,7 +1707,9 @@ describe('DataGrid layout', () => {
         paginationSummaryText="24 rows"
         paginationControlTotal={24}
         paginationTotalPages={2}
+        paginationPageText="Page 1"
         paginationPageSizeOptions={['100', '200']}
+        showKnownPageCount
         translate={translate}
         onPageChange={() => {}}
         onPageSizeChange={() => {}}
@@ -1840,6 +1844,37 @@ describe('DataGrid layout', () => {
     expect(emptyPreviewMarkup).not.toContain('data_grid.preview_panel');
   });
 
+  it('keeps unknown-total pagination in sequential mode instead of pretending total pages are known', () => {
+    const markup = renderDataGridWithI18n(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            id: 1,
+            name: 'alpha',
+          },
+        ]}
+        columnNames={['id', 'name']}
+        loading={false}
+        tableName="users"
+        dbName="main"
+        connectionId="conn-1"
+        readOnly
+        pagination={{
+          current: 3,
+          pageSize: 100,
+          total: 400,
+          totalKnown: false,
+        }}
+        onPageChange={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('第 3 页');
+    expect(markup).not.toContain('<strong>3</strong><span>/</span><span>4</span>');
+    expect(markup).not.toContain('data-grid-pagination-jump="true"');
+  });
+
   it('renders the v2 DataGrid toolbar using the redesigned topbar hooks', () => {
     const markup = renderDataGridWithI18n(
       <DataGrid
@@ -1888,10 +1923,60 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('AI 洞察');
   });
 
+  it('renders a non-data row number column when enabled', () => {
+    const markup = renderToStaticMarkup(
+      <DataGrid
+        data={[
+          {
+            __gonavi_row_key__: 'row-1',
+            id: 1,
+            name: 'alpha',
+          },
+        ]}
+        columnNames={['id', 'name']}
+        loading={false}
+        tableName="events"
+        dbName="main"
+        connectionId="conn-1"
+        readOnly
+        showRowNumberColumn
+        pagination={{
+          current: 2,
+          pageSize: 50,
+          total: 51,
+        }}
+        onPageChange={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="行号"');
+    expect(markup).toContain('<span aria-label="行号">#</span>');
+    expect(markup).not.toContain('>行号<');
+    expect(markup).toContain('data-grid-row-number-title="true"');
+    expect(markup).toContain('data-grid-column-title-single-line="true"');
+    expect(markup).toContain('justify-content:center');
+    expect(markup).toContain('align-items:center');
+    expect(markup).toContain('min-height:var(--gonavi-header-min-height, 40px)');
+    expect(markup).toContain('text-align:center');
+    expect(markup).toContain('padding-inline:0');
+    expect(markup).toContain('vertical-align:middle');
+    expect(markup).toContain('data-grid-row-number="true"');
+    expect(markup).toContain('51');
+  });
+
   it('clears modified cell markers when refreshing the grid', () => {
     const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
 
     expect(source).toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setModifiedColumns\(\{\}\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}, \[clearAutoCommitTimer, onReload\]\);/);
+  });
+
+  it('routes temporal inline editors through the current connection config', () => {
+    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('const pickerType = getTemporalPickerType(columnType, dbType, connectionConfig);');
+    expect(source).toContain('const pickerType = getTemporalPickerType(columnType, dbType, currentConnConfig);');
+    expect(source).toContain('cellProps.connectionConfig = currentConnConfig;');
+    expect(source).toContain('format={getTemporalPickerFormat(pickerType)}');
   });
 
   it('renders a cell-level undo action in the v2 context menu for modified cells', () => {
@@ -1910,6 +1995,18 @@ describe('DataGrid layout', () => {
 
   it('preserves fractional seconds when rendering datetime values', () => {
     expect(formatCellDisplayText('2026-05-10T09:12:33.456+08:00')).toBe('2026-05-10 09:12:33.456');
+  });
+
+  it('collapses OceanBase Oracle DATE midnight values to date-only text', () => {
+    const oceanBaseOracleConfig = {
+      type: 'oceanbase',
+      oceanBaseProtocol: 'oracle',
+    } as any;
+
+    expect(formatCellDisplayText('2026-06-16T00:00:00Z', 'DATE', oceanBaseOracleConfig)).toBe('2026-06-16');
+    expect(formatCellDisplayText('2026-06-16 00:00:00', 'DATE', oceanBaseOracleConfig)).toBe('2026-06-16');
+    expect(formatCellDisplayText('2026-06-16T13:14:15Z', 'DATE', oceanBaseOracleConfig)).toBe('2026-06-16 13:14:15');
+    expect(formatCellDisplayText('2026-06-16T00:00:00Z', 'DATE', { type: 'oracle' } as any)).toBe('2026-06-16 00:00:00');
   });
 
   it('renders bit column hex values as decimal flags', () => {

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -220,6 +221,154 @@ func TestNormalizeQueryValueWithDBType_TimeStructToRFC3339(t *testing.T) {
 	}
 }
 
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleBinaryTimestampString(t *testing.T) {
+	raw := buildOracleBinaryTimestamp(time.Date(2026, 6, 16, 12, 34, 56, 123456000, time.UTC))
+
+	got := normalizeQueryValueWithDBTypeAndDialect(string(raw), "TYPE_CA", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T12:34:56.123456Z" {
+		t.Fatalf("OceanBase Oracle 二进制 TIMESTAMP 字符串应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleBinaryTimestampStringWithPrecisionType(t *testing.T) {
+	raw := buildOracleBinaryTimestamp(time.Date(2026, 6, 16, 12, 34, 56, 123456000, time.UTC))
+
+	got := normalizeQueryValueWithDBTypeAndDialect(string(raw), "TIMESTAMP(6)", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T12:34:56.123456Z" {
+		t.Fatalf("OceanBase Oracle TIMESTAMP(6) 字符串应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleBinaryTimestampStringWithGenericCarrierType(t *testing.T) {
+	raw := buildOracleBinaryTimestamp(time.Date(2026, 6, 16, 12, 34, 56, 123456000, time.UTC))
+
+	got := normalizeQueryValueWithDBTypeAndDialect(string(raw), "VARCHAR2", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T12:34:56.123456Z" {
+		t.Fatalf("OceanBase Oracle 泛型载体类型的 TIMESTAMP 字符串应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleBinaryTimestampBytes(t *testing.T) {
+	raw := buildOracleBinaryTimestamp(time.Date(2026, 6, 16, 12, 34, 56, 123456000, time.UTC))
+
+	got := normalizeQueryValueWithDBTypeAndDialect(raw, "TYPE_CA", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T12:34:56.123456Z" {
+		t.Fatalf("OceanBase Oracle 二进制 TIMESTAMP 字节值应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleBinaryTimestampBytesWithGenericCarrierType(t *testing.T) {
+	raw := buildOracleBinaryTimestamp(time.Date(2026, 6, 16, 12, 34, 56, 123456000, time.UTC))
+
+	got := normalizeQueryValueWithDBTypeAndDialect(raw, "VARCHAR2", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T12:34:56.123456Z" {
+		t.Fatalf("OceanBase Oracle 泛型载体类型的 TIMESTAMP 字节值应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleBinaryTimestampBytesWithPrecisionType(t *testing.T) {
+	raw := buildOracleBinaryTimestamp(time.Date(2026, 6, 16, 12, 34, 56, 123456000, time.UTC))
+
+	got := normalizeQueryValueWithDBTypeAndDialect(raw, "TIMESTAMP(6)", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T12:34:56.123456Z" {
+		t.Fatalf("OceanBase Oracle TIMESTAMP(6) 字节值应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleBinaryTimestampStringWithoutTypeName(t *testing.T) {
+	raw := buildOracleBinaryTimestamp(time.Date(2026, 6, 16, 12, 34, 56, 123456000, time.UTC))
+
+	got := normalizeQueryValueWithDBTypeAndDialect(string(raw), "", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T12:34:56.123456Z" {
+		t.Fatalf("OceanBase Oracle 空类型名的 TIMESTAMP 字符串应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleBinaryTimestampBytesWithoutTypeName(t *testing.T) {
+	raw := buildOracleBinaryTimestamp(time.Date(2026, 6, 16, 12, 34, 56, 123456000, time.UTC))
+
+	got := normalizeQueryValueWithDBTypeAndDialect(raw, "", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T12:34:56.123456Z" {
+		t.Fatalf("OceanBase Oracle 空类型名的 TIMESTAMP 字节值应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleMySQLEncodedTimestampString(t *testing.T) {
+	raw := buildMySQLBinaryTimestamp(time.Date(2026, 6, 16, 12, 34, 56, 123456000, time.UTC))
+
+	got := normalizeQueryValueWithDBTypeAndDialect(string(raw), "TYPE_CA", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T12:34:56.123456Z" {
+		t.Fatalf("OceanBase Oracle length-encoded TIMESTAMP 字符串应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleMySQLEncodedTimestampBytes(t *testing.T) {
+	raw := buildMySQLBinaryTimestamp(time.Date(2026, 6, 16, 12, 34, 56, 123456000, time.UTC))
+
+	got := normalizeQueryValueWithDBTypeAndDialect(raw, "TYPE_CA", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T12:34:56.123456Z" {
+		t.Fatalf("OceanBase Oracle length-encoded TIMESTAMP 字节值应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleTypeCALiveTimestampString(t *testing.T) {
+	raw := []byte{20, 26, 6, 16, 16, 46, 23, 96, 196, 119, 9, 6}
+
+	got := normalizeQueryValueWithDBTypeAndDialect(string(raw), "TYPE_CA", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T16:46:23.158844Z" {
+		t.Fatalf("OceanBase Oracle TYPE_CA live TIMESTAMP 字符串应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleTypeCALiveTimestampBytes(t *testing.T) {
+	raw := []byte{20, 26, 6, 16, 16, 46, 23, 96, 196, 119, 9, 6}
+
+	got := normalizeQueryValueWithDBTypeAndDialect(raw, "TYPE_CA", oceanBaseOracleScanDialect)
+	if got != "2026-06-16T16:46:23.158844Z" {
+		t.Fatalf("OceanBase Oracle TYPE_CA live TIMESTAMP 字节值应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleTypeCALiveTimestampWithoutFraction(t *testing.T) {
+	raw := []byte{20, 26, 6, 17, 5, 0, 0, 0, 0, 0, 0, 6}
+
+	got := normalizeQueryValueWithDBTypeAndDialect(raw, "TYPE_CA", oceanBaseOracleScanDialect)
+	if got != "2026-06-17T05:00:00Z" {
+		t.Fatalf("OceanBase Oracle TYPE_CA 零小数 TIMESTAMP 字节值应解码为 RFC3339，实际=%v(%T)", got, got)
+	}
+}
+
+func buildOracleBinaryTimestamp(tm time.Time) []byte {
+	if tm.Location() != time.UTC {
+		tm = tm.In(time.UTC)
+	}
+	buf := []byte{
+		byte(tm.Year()/100 + 100),
+		byte(tm.Year()%100 + 100),
+		byte(tm.Month()),
+		byte(tm.Day()),
+		byte(tm.Hour() + 1),
+		byte(tm.Minute() + 1),
+		byte(tm.Second() + 1),
+		0,
+		0,
+		0,
+		0,
+	}
+	binary.BigEndian.PutUint32(buf[7:11], uint32(tm.Nanosecond()))
+	return buf
+}
+
+func buildMySQLBinaryTimestamp(tm time.Time) []byte {
+	if tm.Location() != time.UTC {
+		tm = tm.In(time.UTC)
+	}
+	buf := []byte{11, 0, 0, byte(tm.Month()), byte(tm.Day()), byte(tm.Hour()), byte(tm.Minute()), byte(tm.Second()), 0, 0, 0, 0}
+	binary.LittleEndian.PutUint16(buf[1:3], uint16(tm.Year()))
+	binary.LittleEndian.PutUint32(buf[8:12], uint32(tm.Nanosecond()/1000))
+	return buf
+}
+
 func TestNormalizeQueryValueWithDBTypeAndDialect_MySQLDateOnly(t *testing.T) {
 	input := time.Date(2025, 10, 1, 0, 0, 0, 0, time.Local)
 
@@ -245,6 +394,24 @@ func TestNormalizeQueryValueWithDBTypeAndDialect_DatetimeKeepsTime(t *testing.T)
 	got = normalizeQueryValueWithDBTypeAndDialect(input, "DATE", "oracle")
 	if got != "2025-10-01T13:14:15Z" {
 		t.Fatalf("Oracle DATE 应保留时间语义，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleDateMidnightDisplaysDateOnly(t *testing.T) {
+	input := time.Date(2025, 10, 1, 0, 0, 0, 0, time.UTC)
+
+	got := normalizeQueryValueWithDBTypeAndDialect(input, "DATE", oceanBaseOracleScanDialect)
+	if got != "2025-10-01" {
+		t.Fatalf("OceanBase Oracle DATE 的午夜值应只展示日期，实际=%v(%T)", got, got)
+	}
+}
+
+func TestNormalizeQueryValueWithDBTypeAndDialect_OceanBaseOracleDateKeepsNonMidnightTime(t *testing.T) {
+	input := time.Date(2025, 10, 1, 13, 14, 15, 0, time.UTC)
+
+	got := normalizeQueryValueWithDBTypeAndDialect(input, "DATE", oceanBaseOracleScanDialect)
+	if got != "2025-10-01T13:14:15Z" {
+		t.Fatalf("OceanBase Oracle DATE 非午夜值应保留时间，实际=%v(%T)", got, got)
 	}
 }
 

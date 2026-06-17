@@ -22,6 +22,7 @@ export type QueryEditorResultSet = {
     pkColumns: string[];
     editLocator?: EditRowLocator;
     readOnly: boolean;
+    showRowNumberColumn?: boolean;
     truncated?: boolean;
     pkLoading?: boolean;
     page?: QueryResultPaginationState & { loading?: boolean };
@@ -471,6 +472,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                                             connectionId={currentConnectionId}
                                             pkColumns={rs.pkColumns}
                                             editLocator={rs.editLocator}
+                                            showRowNumberColumn={rs.showRowNumberColumn}
                                             onReload={() => {
                                                 if (rs.page) {
                                                     onResultPageChange(rs.key, rs.page.current, rs.page.pageSize);

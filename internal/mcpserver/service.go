@@ -906,7 +906,7 @@ func isOperationAllowed(level ai.SQLPermissionLevel, opType ai.SQLOperationType)
 	case ai.PermissionReadWrite:
 		return opType == ai.SQLOpQuery || opType == ai.SQLOpDML
 	case ai.PermissionFull:
-		return opType == ai.SQLOpQuery || opType == ai.SQLOpDML || opType == ai.SQLOpDDL
+		return true
 	default:
 		return opType == ai.SQLOpQuery
 	}
@@ -945,7 +945,7 @@ func safetyLevelRuleText(level ai.SQLPermissionLevel) string {
 	case ai.PermissionReadWrite:
 		return "读写模式仅允许查询和 DML 语句。"
 	case ai.PermissionFull:
-		return "完全模式仅允许查询、DML 和 DDL；未识别操作仍会被阻止。"
+		return "完全模式允许所有 SQL 操作；高风险或未识别语句仍会要求确认。"
 	default:
 		return "只读模式仅允许查询语句。"
 	}

@@ -211,6 +211,7 @@ const HighlightedCodeBlock: React.FC<HighlightedCodeBlockProps> = ({
         displayText,
         50,
         activeConnectionConfig?.driver || '',
+        { oceanBaseProtocol: activeConnectionConfig?.oceanBaseProtocol },
       );
       const response = await DBQuery(activeConnectionConfig, activeDbName || '', previewSql);
       if (response.success && Array.isArray(response.data)) {

@@ -22,6 +22,11 @@ describe('buildAIReadonlyPreviewSQL', () => {
       .toBe('SELECT * FROM (SELECT 1 FROM DUAL) WHERE ROWNUM <= 50');
   });
 
+  it('treats OceanBase Oracle as Oracle dialect when building readonly preview SQL', () => {
+    expect(buildAIReadonlyPreviewSQL('oceanbase', 'SELECT 1 FROM DUAL;', 50, 'oceanbase', { oceanBaseProtocol: 'oracle' }))
+      .toBe('SELECT * FROM (SELECT 1 FROM DUAL) WHERE ROWNUM <= 50');
+  });
+
   it('keeps MySQL-family SQL on LIMIT syntax', () => {
     expect(buildAIReadonlyPreviewSQL('mysql', 'SELECT * FROM users', 50))
       .toBe('SELECT * FROM users LIMIT 50 OFFSET 0');

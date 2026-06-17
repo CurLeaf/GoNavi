@@ -4,7 +4,8 @@ import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { PreviewImportFile, ImportDataWithProgress } from '../../wailsjs/go/app/App';
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime';
 import { useStore } from '../store';
-import { useI18n } from '../i18n/provider';
+import { t as defaultTranslate } from '../i18n';
+import { useOptionalI18n } from '../i18n/provider';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 interface ImportPreviewModalProps {
     visible: boolean;
@@ -38,7 +39,8 @@ const ImportPreviewModal: React.FC<ImportPreviewModalProps> = ({
     onClose,
     onSuccess
 }) => {
-    const { t } = useI18n();
+    const i18n = useOptionalI18n();
+    const t = i18n?.t ?? defaultTranslate;
     const connections = useStore(state => state.connections);
     const [loading, setLoading] = useState(true);
     const [previewData, setPreviewData] = useState<PreviewData | null>(null);

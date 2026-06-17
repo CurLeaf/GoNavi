@@ -18,6 +18,7 @@ import { dispatchAIChatPayload } from './aiChatPayloadDispatch';
 import {
   buildToolResultMessage,
   executeLocalAIToolCall,
+  type ExecuteLocalAIToolCallResult,
   type AIToolContextEntry,
 } from './aiLocalToolExecutor';
 
@@ -96,6 +97,7 @@ export const useAIChatLocalTools = ({
     }
 
     const results: AIChatMessage[] = [];
+    const executions: ExecuteLocalAIToolCallResult[] = [];
     const currentConnections = useStore.getState().connections;
     for (const toolCall of toolCalls) {
       const currentState = useStore.getState();
@@ -119,6 +121,7 @@ export const useAIChatLocalTools = ({
         userPromptSettings,
         dynamicModels,
       });
+      executions.push(execution);
       const toolResultMsg: AIChatMessage = buildToolResultMessage({
         id: nextMessageId(),
         timestamp: Date.now(),
@@ -130,8 +133,9 @@ export const useAIChatLocalTools = ({
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
 
-    const anySuccess = results.some((message) => message.success === true);
-    if (anySuccess) {
+    const roundCountsAsFailure = executions.length > 0
+      && executions.every((execution) => execution.success !== true && execution.countsAsProbeFailure !== false);
+    if (!roundCountsAsFailure) {
       toolCallRoundRef.current = 0;
     } else {
       toolCallRoundRef.current += 1;

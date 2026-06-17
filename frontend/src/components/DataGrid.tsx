@@ -33,12 +33,13 @@ import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral,
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import {
     getDensityParams,
     resolveDataTableColumnWidth,
     resolveDataTableVerticalBorderColor,
 } from '../utils/dataGridDisplay';
-import { resolvePaginationSummaryText, resolvePaginationTotalForControl } from '../utils/dataGridPagination';
+import { resolvePaginationPageText, resolvePaginationSummaryText, resolvePaginationTotalForControl } from '../utils/dataGridPagination';
 import { resolveGridSortInfoFromTableSorter } from '../utils/dataGridSort';
 import {
     calculateExternalHorizontalScrollInnerWidth,
@@ -74,10 +75,12 @@ import { DEFAULT_SHORTCUT_OPTIONS, getShortcutPlatform, resolveShortcutDisplay }
 import {
     TEMPORAL_FORMATS,
     formatFromDayjs,
+    getTemporalPickerFormat,
     getTemporalPickerType,
     isTemporalColumnType,
     parseToDayjs,
     resolveTemporalEditorSaveValue,
+    type TemporalConnectionLike,
     type TemporalPickerType,
 } from './dataGridTemporal';
 import {
@@ -191,6 +194,7 @@ class DataGridErrorBoundary extends React.Component<
 
 // 内部行标识字段：避免与真实业务字段（如 `key` 列）冲突。
 export const GONAVI_ROW_KEY = '__gonavi_row_key__';
+export const GONAVI_ROW_NUMBER_COLUMN_KEY = '__gonavi_row_number__';
 
 // Cell key helpers for batch selection/fill.
 // Use a control character separator to avoid collisions with rowKey/columnName contents (e.g. `new-123`).
@@ -198,6 +202,7 @@ const CELL_KEY_SEP = '\u0001';
 const CELL_SELECTION_DRAG_THRESHOLD_PX = 4;
 const DATE_TIME_CACHE_LIMIT = 2000;
 const TABLE_CELL_PREVIEW_MAX_CHARS = 240;
+const ROW_NUMBER_COLUMN_WIDTH = 58;
 const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = [
     { value: 3000, seconds: 3 },
     { value: 5000, seconds: 5 },
@@ -294,7 +299,46 @@ const normalizeBitHexDisplayText = (val: any, columnType?: string): string | nul
     }
 };
 
-export const formatCellDisplayText = (val: any, columnType?: string): string => {
+type CellDisplayConnectionLike = TemporalConnectionLike;
+
+const isDateOnlyColumnType = (columnType?: string): boolean => {
+    const normalized = String(columnType || '').trim().toLowerCase();
+    if (!normalized) return false;
+    const base = normalized.split(/[ (]/)[0];
+    return base === 'date' || base === 'newdate';
+};
+
+const isOceanBaseOracleDisplayConnection = (connectionConfig?: CellDisplayConnectionLike): boolean => {
+    if (!connectionConfig) return false;
+    const type = String(connectionConfig.type || '').trim().toLowerCase();
+    const driver = String(connectionConfig.driver || '').trim().toLowerCase();
+    return (type === 'oceanbase' || driver === 'oceanbase')
+        && normalizeOceanBaseProtocol(connectionConfig.oceanBaseProtocol) === 'oracle';
+};
+
+const normalizeOceanBaseOracleDateDisplayText = (
+    val: string,
+    columnType?: string,
+    connectionConfig?: CellDisplayConnectionLike,
+): string | null => {
+    if (!isDateOnlyColumnType(columnType) || !isOceanBaseOracleDisplayConnection(connectionConfig)) {
+        return null;
+    }
+    const trimmed = String(val || '').trim();
+    if (!trimmed) return trimmed;
+    const match = trimmed.match(
+        /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}:\d{2})(\.\d+)?(?:\s*(?:Z|[+-]\d{2}:?\d{2})(?:\s+[A-Za-z_\/+-]+)?)?)?$/
+    );
+    if (!match) return null;
+    const [, datePart, timePart, fractionPart] = match;
+    if (!timePart) return datePart;
+    if (timePart === '00:00:00' && (!fractionPart || /^\.0+$/.test(fractionPart))) {
+        return datePart;
+    }
+    return null;
+};
+
+export const formatCellDisplayText = (val: any, columnType?: string, connectionConfig?: CellDisplayConnectionLike): string => {
     try {
         if (val === null) return 'NULL';
         const bitText = normalizeBitHexDisplayText(val, columnType);
@@ -323,6 +367,10 @@ export const formatCellDisplayText = (val: any, columnType?: string): string => 
             }
         }
         if (typeof val === 'string') {
+            const oceanBaseDateOnly = normalizeOceanBaseOracleDateDisplayText(val, columnType, connectionConfig);
+            if (oceanBaseDateOnly !== null) {
+                return oceanBaseDateOnly.length > TABLE_CELL_PREVIEW_MAX_CHARS ? `${oceanBaseDateOnly.slice(0, TABLE_CELL_PREVIEW_MAX_CHARS)}…` : oceanBaseDateOnly;
+            }
             const normalized = normalizeDateTimeString(val);
             return normalized.length > TABLE_CELL_PREVIEW_MAX_CHARS ? `${normalized.slice(0, TABLE_CELL_PREVIEW_MAX_CHARS)}…` : normalized;
         }
@@ -333,12 +381,16 @@ export const formatCellDisplayText = (val: any, columnType?: string): string => 
     }
 };
 
-const formatClipboardCellText = (val: any, columnType?: string): string => {
+const formatClipboardCellText = (val: any, columnType?: string, connectionConfig?: CellDisplayConnectionLike): string => {
     try {
         if (val === null || val === undefined) return 'NULL';
         const bitText = normalizeBitHexDisplayText(val, columnType);
         if (bitText !== null) return bitText;
-        if (typeof val === 'string') return normalizeDateTimeString(val);
+        if (typeof val === 'string') {
+            const oceanBaseDateOnly = normalizeOceanBaseOracleDateDisplayText(val, columnType, connectionConfig);
+            if (oceanBaseDateOnly !== null) return oceanBaseDateOnly;
+            return normalizeDateTimeString(val);
+        }
         if (typeof val === 'object') {
             try {
                 return JSON.stringify(val);
@@ -359,6 +411,7 @@ const buildClipboardTsv = (
     rows: Array<Record<string, any>>,
     columnNames: string[],
     getColumnType?: (columnName: string) => string | undefined,
+    connectionConfig?: CellDisplayConnectionLike,
 ): string => {
     if (!Array.isArray(rows) || rows.length === 0 || !Array.isArray(columnNames) || columnNames.length === 0) {
         return '';
@@ -366,7 +419,7 @@ const buildClipboardTsv = (
     const header = columnNames.map(normalizeClipboardTsvCell).join('\t');
     const lines = rows.map((row) => (
         columnNames
-            .map((columnName) => normalizeClipboardTsvCell(formatClipboardCellText(row?.[columnName], getColumnType?.(columnName))))
+            .map((columnName) => normalizeClipboardTsvCell(formatClipboardCellText(row?.[columnName], getColumnType?.(columnName), connectionConfig)))
             .join('\t')
     ));
     return [header, ...lines].join('\n');
@@ -395,8 +448,8 @@ const renderHighlightedCellText = (text: string, query: string): React.ReactNode
     return <>{nodes}</>;
 };
 
-const renderCellDisplayValue = (val: any, query: string, columnType?: string): React.ReactNode => {
-    const text = formatCellDisplayText(val, columnType);
+const renderCellDisplayValue = (val: any, query: string, columnType?: string, connectionConfig?: CellDisplayConnectionLike): React.ReactNode => {
+    const text = formatCellDisplayText(val, columnType, connectionConfig);
     const content = renderHighlightedCellText(text, query);
     if (val === null) return <span style={{ color: '#ccc' }}>{content}</span>;
     return content;
@@ -791,6 +844,7 @@ interface EditableCellProps {
   focusCell?: (record: Item, dataIndex: string, title: React.ReactNode) => void;
   columnType?: string;
   dbType?: string;
+  connectionConfig?: CellDisplayConnectionLike;
   inputCellPadding?: React.CSSProperties;
   as?: any;
   modifiedColumns?: Record<string, Set<string>>;
@@ -841,6 +895,9 @@ const areEditableCellPropsEqual = (prevProps: EditableCellProps, nextProps: Edit
   if (prevProps.title !== nextProps.title) return false;
   if (prevProps.columnType !== nextProps.columnType) return false;
   if (prevProps.dbType !== nextProps.dbType) return false;
+  if ((prevProps.connectionConfig?.type ?? null) !== (nextProps.connectionConfig?.type ?? null)) return false;
+  if ((prevProps.connectionConfig?.driver ?? null) !== (nextProps.connectionConfig?.driver ?? null)) return false;
+  if ((prevProps.connectionConfig?.oceanBaseProtocol ?? null) !== (nextProps.connectionConfig?.oceanBaseProtocol ?? null)) return false;
   if (prevProps.darkMode !== nextProps.darkMode) return false;
   if (prevProps.as !== nextProps.as) return false;
   if (prevProps.handleSave !== nextProps.handleSave) return false;
@@ -879,6 +936,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
   focusCell,
   columnType,
   dbType,
+  connectionConfig,
   inputCellPadding,
   as: Component = 'td',
   modifiedColumns,
@@ -968,7 +1026,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
 
   let childNode = children;
 
-  const pickerType = getTemporalPickerType(columnType, dbType);
+  const pickerType = getTemporalPickerType(columnType, dbType, connectionConfig);
   const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[dataIndex] || '')));
 
   const isRowDeleted = deletedRowKeys && rowKeyStr && record?.[GONAVI_ROW_KEY] !== undefined
@@ -1003,7 +1061,7 @@ const EditableCell: React.FC<EditableCellProps> = React.memo(({
               style={{ width: '100%' }}
               showTime
               showNow={false}
-              format={TEMPORAL_FORMATS[pickerType]}
+              format={getTemporalPickerFormat(pickerType)}
               renderExtraFooter={() => (
                 <a
                   style={{ padding: '0 2px' }}
@@ -1225,6 +1283,7 @@ interface DataGridProps {
     pkColumns?: string[];
     editLocator?: EditRowLocator;
     readOnly?: boolean;
+    showRowNumberColumn?: boolean;
     onReload?: () => void;
     onSort?: (field: string, order: string) => void;
     onPageChange?: (page: number, size: number) => void;
@@ -1516,7 +1575,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     resultExportAllSql,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
     onApplyQuickWhereCondition,
-    scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions
+    scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions, showRowNumberColumn = false
 }) => {
   const connections = useStore(state => state.connections);
   const addTab = useStore(state => state.addTab);
@@ -4488,7 +4547,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
 
       const columnType = (columnMetaMap[dataIndex] || columnMetaMapByLowerName[dataIndex.toLowerCase()])?.type;
-      const pickerType = getTemporalPickerType(columnType, dbType);
+      const pickerType = getTemporalPickerType(columnType, dbType, currentConnConfig);
       const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(raw || '')));
       const fieldName = getCellFieldName(record, dataIndex);
       if (isDateTimeField) {
@@ -4503,7 +4562,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           title,
           columnType,
       });
-  }, [canModifyData, columnMetaMap, columnMetaMapByLowerName, dbType, form, openCellEditor, rowKeyStr]);
+  }, [canModifyData, columnMetaMap, columnMetaMapByLowerName, currentConnConfig, dbType, form, openCellEditor, rowKeyStr]);
 
   const handleVirtualCellActivate = useCallback((record: Item, dataIndex: string, title: React.ReactNode) => {
       if (!canModifyData) return;
@@ -4633,7 +4692,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           return;
       }
 
-      const pickerType = getTemporalPickerType(editingCell.columnType, dbType);
+      const pickerType = getTemporalPickerType(editingCell.columnType, dbType, currentConnConfig);
       const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[editingCell.dataIndex] || '')));
       const fieldName = getCellFieldName(record, editingCell.dataIndex);
       try {
@@ -4652,22 +4711,30 @@ const DataGrid: React.FC<DataGridProps> = ({
               closeVirtualInlineEditor();
           }
       }
-  }, [closeVirtualInlineEditor, dbType, form, handleCellSave, virtualEditingCell]);
+  }, [closeVirtualInlineEditor, currentConnConfig, dbType, form, handleCellSave, virtualEditingCell]);
 
   const pageFindMatches = useMemo(() => collectDataGridFindMatches(
       mergedDisplayData,
       displayColumnNames,
       normalizedPageFindText,
-      (value, _row, columnName) => formatCellDisplayText(value, (columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type),
+      (value, _row, columnName) => formatCellDisplayText(
+          value,
+          (columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type,
+          currentConnConfig,
+      ),
       (row, rowIndex) => String(row?.[GONAVI_ROW_KEY] ?? `row-${rowIndex}`),
-  ), [mergedDisplayData, displayColumnNames, normalizedPageFindText, columnMetaMap, columnMetaMapByLowerName]);
+  ), [mergedDisplayData, displayColumnNames, normalizedPageFindText, columnMetaMap, columnMetaMapByLowerName, currentConnConfig]);
 
   const pageFindSummary = useMemo(() => summarizeDataGridFindMatches(
       mergedDisplayData,
       displayColumnNames,
       normalizedPageFindText,
-      (value, _row, columnName) => formatCellDisplayText(value, (columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type),
-  ), [mergedDisplayData, displayColumnNames, normalizedPageFindText, columnMetaMap, columnMetaMapByLowerName]);
+      (value, _row, columnName) => formatCellDisplayText(
+          value,
+          (columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type,
+          currentConnConfig,
+      ),
+  ), [mergedDisplayData, displayColumnNames, normalizedPageFindText, columnMetaMap, columnMetaMapByLowerName, currentConnConfig]);
 
   useEffect(() => {
       setActivePageFindMatchIndex(-1);
@@ -4774,7 +4841,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           displayMap[col] = toFormText(displayVal);
           // 日期时间类型: 将字符串值转为 dayjs 对象供 DatePicker 使用
           const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-          const rowPickerType = getTemporalPickerType(colMeta?.type, dbType);
+          const rowPickerType = getTemporalPickerType(colMeta?.type, dbType, currentConnConfig);
           if (rowPickerType && displayVal !== null && displayVal !== undefined) {
               const dVal = parseToDayjs(displayVal, rowPickerType);
               formMap[col] = dVal;
@@ -4791,7 +4858,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           nullCols,
           formValues: formMap,
       });
-  }, [canModifyData, mergedDisplayData, data, addedRows, visibleColumnNames, rowKeyStr, columnMetaMap, columnMetaMapByLowerName, dbType, openRowEditor, translateDataGrid]);
+  }, [addedRows, canModifyData, columnMetaMap, columnMetaMapByLowerName, currentConnConfig, data, dbType, mergedDisplayData, openRowEditor, rowKeyStr, translateDataGrid, visibleColumnNames]);
 
   const openCurrentViewRowEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -4958,7 +5025,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               if (!isWritableResultColumn(col, effectiveEditLocator)) return;
               if (val && dayjs.isDayjs(val)) {
                   const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-                  const rowPickerType = getTemporalPickerType(colMeta?.type, dbType);
+                  const rowPickerType = getTemporalPickerType(colMeta?.type, dbType, currentConnConfig);
                   convertedValues[col] = formatFromDayjs(val as dayjs.Dayjs, rowPickerType);
               } else {
                   convertedValues[col] = val;
@@ -4977,7 +5044,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           // 日期时间类型: 将 dayjs 对象转回格式化字符串
           if (nextVal && dayjs.isDayjs(nextVal)) {
               const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-              const rowPickerType = getTemporalPickerType(colMeta?.type, dbType);
+              const rowPickerType = getTemporalPickerType(colMeta?.type, dbType, currentConnConfig);
               nextVal = formatFromDayjs(nextVal as dayjs.Dayjs, rowPickerType);
           }
           const baseVal = baseRawMap[col];
@@ -4992,7 +5059,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       closeRowEditor();
-  }, [rowEditorRowKey, rowEditorForm, addedRows, visibleColumnNames, rowKeyStr, closeRowEditor, effectiveEditLocator, columnMetaMap, columnMetaMapByLowerName, dbType]);
+  }, [addedRows, closeRowEditor, columnMetaMap, columnMetaMapByLowerName, currentConnConfig, dbType, effectiveEditLocator, rowEditorForm, rowEditorRowKey, rowKeyStr, visibleColumnNames]);
 
 
   const enableVirtual = isTableSurfaceActive;
@@ -5027,7 +5094,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           sortOrder: (sortInfo.find(s => s.columnKey === key && s.enabled !== false)?.order || null) as SortOrder | undefined,
           editable: canModifyData && isWritableResultColumn(key, effectiveEditLocator),
           render: (text: any) => {
-              const renderedContent = renderCellDisplayValue(text, normalizedPageFindText, displayColumnTypeMap[key]);
+              const renderedContent = renderCellDisplayValue(text, normalizedPageFindText, displayColumnTypeMap[key], currentConnConfig);
               if (enableVirtual) {
                   return renderedContent;
               }
@@ -5080,7 +5147,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               },
           }),
       }));
-  }, [displayColumnNames, columnWidths, sortInfo, handleResizeStart, handleResizeAutoFit, isV2Ui, showColumnHeaderContextMenu, canModifyData, onSort, renderColumnTitle, dataTableDensity, normalizedPageFindText, displayColumnTypeMap, enableVirtual, showColumnComment, showColumnType, language]);
+  }, [canModifyData, columnWidths, currentConnConfig, dataTableDensity, displayColumnNames, displayColumnTypeMap, enableVirtual, handleResizeAutoFit, handleResizeStart, isV2Ui, language, normalizedPageFindText, onSort, renderColumnTitle, showColumnComment, showColumnHeaderContextMenu, showColumnType, sortInfo]);
 
   const mergedColumns = useMemo(() => columns.map((col): ColumnType<any> => {
       const dataIndex = String(col.dataIndex);
@@ -5110,6 +5177,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                   cellProps.focusCell = openCellEditor;
                   cellProps.columnType = displayColumnTypeMap[dataIndex];
                   cellProps.dbType = dbType;
+                  cellProps.connectionConfig = currentConnConfig;
                   cellProps.inputCellPadding = inputCellPadding;
                   cellProps.modifiedColumns = modifiedColumns;
                   cellProps.rowKeyStr = rowKeyStr;
@@ -5140,7 +5208,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                   : undefined;
               const shouldUsePlainVirtualContent = isV2Ui && !modifiedStyle;
               if (enableVirtual && enableInlineEditableCell) {
-                  const pickerType = getTemporalPickerType(columnType, dbType);
+                  const pickerType = getTemporalPickerType(columnType, dbType, currentConnConfig);
                   const isDateTimeField = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(record?.[dataIndex] || '')));
                   const virtualCellStyle = modifiedStyle ? { ...virtualCellWrapperStyle, ...modifiedStyle } : virtualCellWrapperStyle;
                   const virtualEditable = !!col.editable && !rowDeletedForRender;
@@ -5169,7 +5237,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                               style={{ width: '100%' }}
                                               showTime
                                               showNow={false}
-                                              format={TEMPORAL_FORMATS[pickerType]}
+                                              format={getTemporalPickerFormat(pickerType)}
                                               renderExtraFooter={() => (
                                                   <a
                                                       style={{ padding: '0 2px' }}
@@ -5254,7 +5322,58 @@ const DataGrid: React.FC<DataGridProps> = ({
               return originalRenderContent;
           }
       };
-  }), [columns, useInlineEditableBodyCell, enableInlineEditableCell, enableVirtual, handleCellSave, openCellEditor, handleVirtualCellActivate, handleSharedCellContextMenu, displayColumnTypeMap, dbType, inputCellPadding, virtualCellWrapperStyle, modifiedColumns, rowKeyStr, deletedRowKeys, darkMode, virtualEditingCell, form, saveVirtualInlineEditor, lockVirtualInlineTableScroll, closeVirtualInlineEditor, updateFocusedCell]);
+  }), [closeVirtualInlineEditor, columns, currentConnConfig, darkMode, dbType, deletedRowKeys, displayColumnTypeMap, enableInlineEditableCell, enableVirtual, form, handleCellSave, handleSharedCellContextMenu, handleVirtualCellActivate, inputCellPadding, lockVirtualInlineTableScroll, modifiedColumns, openCellEditor, rowKeyStr, saveVirtualInlineEditor, updateFocusedCell, useInlineEditableBodyCell, virtualCellWrapperStyle, virtualEditingCell]);
+
+  const rowNumberColumn = useMemo<ColumnType<any>>(() => ({
+      title: (
+          <div
+              className="gn-v2-column-title is-single-line"
+              data-grid-row-number-title="true"
+              data-grid-column-title-single-line="true"
+              style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 0,
+                  width: '100%',
+                  maxWidth: '100%',
+                  minHeight: 'var(--gonavi-header-min-height, 40px)',
+                  lineHeight: 1.2,
+                  textAlign: 'center',
+              }}
+          >
+              <span aria-label="行号">#</span>
+          </div>
+      ),
+      key: GONAVI_ROW_NUMBER_COLUMN_KEY,
+      dataIndex: GONAVI_ROW_NUMBER_COLUMN_KEY,
+      width: ROW_NUMBER_COLUMN_WIDTH,
+      className: 'data-grid-row-number-cell',
+      align: 'center',
+      onHeaderCell: () => ({
+          style: {
+              textAlign: 'center' as const,
+              paddingInline: 0,
+              verticalAlign: 'middle' as const,
+          },
+      }),
+      render: (_value: unknown, _record: Item, index: number) => {
+          const currentPage = Math.max(1, Number(pagination?.current) || 1);
+          const pageSize = Math.max(1, Number(pagination?.pageSize) || 0);
+          const offset = pageSize > 0 ? (currentPage - 1) * pageSize : 0;
+          return (
+              <span className="data-grid-row-number" data-grid-row-number="true">
+                  {offset + index + 1}
+              </span>
+          );
+      },
+  }), [pagination?.current, pagination?.pageSize]);
+
+  const tableColumns = useMemo(
+      () => (showRowNumberColumn ? [rowNumberColumn, ...mergedColumns] : mergedColumns),
+      [mergedColumns, rowNumberColumn, showRowNumberColumn]
+  );
 
   const handleAddRow = () => {
       const newKey = `new-${Date.now()}`;
@@ -5586,10 +5705,10 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       const columnType = (columnMetaMap[normalizedColumnName] || columnMetaMapByLowerName[normalizedColumnName.toLowerCase()])?.type;
       const text = mergedDisplayData
-          .map((row) => normalizeClipboardTsvCell(formatClipboardCellText(row?.[normalizedColumnName], columnType)))
+          .map((row) => normalizeClipboardTsvCell(formatClipboardCellText(row?.[normalizedColumnName], columnType, currentConnConfig)))
           .join('\n');
       copyToClipboard(text);
-  }, [columnMetaMap, columnMetaMapByLowerName, copyToClipboard, displayOutputColumnNames, mergedDisplayData, translateDataGrid]);
+  }, [columnMetaMap, columnMetaMapByLowerName, copyToClipboard, currentConnConfig, displayOutputColumnNames, mergedDisplayData, translateDataGrid]);
 
   const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeaderContextMenuActionKey) => {
       const columnName = resolveContextMenuFieldName(cellContextMenu.dataIndex, cellContextMenu.title);
@@ -5947,13 +6066,14 @@ const DataGrid: React.FC<DataGridProps> = ({
           rows,
           columns,
           (columnName) => (columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type,
+          currentConnConfig,
       );
       if (!text) {
           void message.info(translateDataGrid('data_grid.message.current_row_no_copyable_content'));
           return;
       }
       copyToClipboard(text);
-  }, [columnMetaMap, columnMetaMapByLowerName, copyToClipboard, displayOutputColumnNames, getContextMenuTargetRows, translateDataGrid]);
+  }, [columnMetaMap, columnMetaMapByLowerName, copyToClipboard, currentConnConfig, displayOutputColumnNames, getContextMenuTargetRows, translateDataGrid]);
 
   const buildConnConfig = useCallback(() => {
       if (!connectionId) return null;
@@ -6517,7 +6637,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
   const rowPropsFactory = useCallback((record: any) => ({ record } as any), []);
 
-  const totalWidth = columns.reduce((sum: number, col: any) => sum + (Number(col.width) || densityParams.defaultColumnWidth), 0) + selectionColumnWidth;
+  const totalWidth = tableColumns.reduce((sum: number, col: any) => sum + (Number(col.width) || densityParams.defaultColumnWidth), 0) + selectionColumnWidth;
   const useContextMenuRow = false;
   const tableScrollX = useMemo(() => {
       // rc-table 在 scroll.x 小于容器宽度时会把实际列宽按视口补齐。
@@ -7413,6 +7533,14 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
   }, [pagination, supportsApproximateTotalPages]);
 
+  const paginationHasKnownTotalPages = useMemo(() => {
+      if (!pagination) return false;
+      if (pagination.totalKnown !== false) return true;
+      if (!supportsApproximateTotalPages || !pagination.totalApprox) return false;
+      const approximateTotal = Number(pagination.approximateTotal);
+      return Number.isFinite(approximateTotal) && approximateTotal > 0;
+  }, [pagination, supportsApproximateTotalPages]);
+
   const paginationTotalPages = useMemo(() => {
       if (!pagination) return 1;
       if (!Number.isFinite(paginationControlTotal) || paginationControlTotal <= 0) {
@@ -7435,6 +7563,15 @@ const DataGrid: React.FC<DataGridProps> = ({
       supportsApproximateTableCount,
       translateDataGrid,
   ]);
+
+  const paginationPageText = useMemo(() => {
+      if (!pagination) return '';
+      return resolvePaginationPageText({
+          pagination,
+          supportsApproximateTotalPages,
+          translate: translateDataGrid,
+      });
+  }, [pagination, supportsApproximateTotalPages, translateDataGrid]);
 
   const handlePageSizeChange = useCallback((value: string) => {
       if (!pagination || !onPageChange) return;
@@ -7487,7 +7624,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                                       ref={tableRef}
                                       components={tableComponents}
                                       dataSource={tableRenderData}
-                                      columns={mergedColumns}
+                                      columns={tableColumns}
                                       {...(enableVirtual && typeof virtualListItemHeight === 'number'
                                           ? { listItemHeight: virtualListItemHeight }
                                           : {})}
@@ -7580,7 +7717,9 @@ const DataGrid: React.FC<DataGridProps> = ({
           paginationSummaryText={paginationSummaryText}
           paginationControlTotal={paginationControlTotal}
           paginationTotalPages={paginationTotalPages}
+          paginationPageText={paginationPageText}
           paginationPageSizeOptions={paginationPageSizeOptions}
+          showKnownPageCount={paginationHasKnownTotalPages}
           onPageChange={onPageChange}
           onPageSizeChange={handlePageSizeChange}
           onV2PageStep={handleV2PageStep}
@@ -7595,7 +7734,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const isJson = looksLikeJsonText(sample);
           const useTextArea = isJson || sample.includes('\n') || sample.length >= 160;
           const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
-          const pickerType = getTemporalPickerType(colMeta?.type, dbType);
+          const pickerType = getTemporalPickerType(colMeta?.type, dbType, currentConnConfig);
           const isTemporalValue = !!pickerType && !(/^0{4}-0{2}-0{2}/.test(String(sample || '')));
           const isWritable = isWritableResultColumn(col, effectiveEditLocator);
           return {
@@ -7609,7 +7748,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               isWritable,
           };
       })
-  ), [displayColumnNames, columnMetaMap, columnMetaMapByLowerName, dbType, effectiveEditLocator, rowEditorOpen, rowEditorRowKey]);
+  ), [columnMetaMap, columnMetaMapByLowerName, currentConnConfig, dbType, displayColumnNames, effectiveEditLocator, rowEditorOpen, rowEditorRowKey]);
 
   const handleRefreshGrid = useCallback(() => {
       clearAutoCommitTimer();

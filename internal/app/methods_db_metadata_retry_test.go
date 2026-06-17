@@ -28,6 +28,11 @@ type fakeMetadataRetryDB struct {
 	indexes      []connection.IndexDefinition
 	columnsErr   error
 	indexesErr   error
+	queryResults []fakeMetadataQueryResult
+	queryRows    []map[string]interface{}
+	queryFields  []string
+	queryErr     error
+	queries      []string
 	columnCalls  int
 	indexCalls   int
 	columnSchema string
@@ -36,11 +41,27 @@ type fakeMetadataRetryDB struct {
 	indexTable   string
 }
 
+type fakeMetadataQueryResult struct {
+	match  string
+	rows   []map[string]interface{}
+	fields []string
+	err    error
+}
+
 func (f *fakeMetadataRetryDB) Connect(config connection.ConnectionConfig) error { return nil }
 func (f *fakeMetadataRetryDB) Close() error                                     { return nil }
 func (f *fakeMetadataRetryDB) Ping() error                                      { return nil }
 func (f *fakeMetadataRetryDB) Query(query string) ([]map[string]interface{}, []string, error) {
-	return nil, nil, nil
+	f.queries = append(f.queries, query)
+	for _, result := range f.queryResults {
+		if result.match == "" || strings.Contains(query, result.match) {
+			return result.rows, result.fields, result.err
+		}
+	}
+	if f.queryErr != nil {
+		return nil, nil, f.queryErr
+	}
+	return f.queryRows, f.queryFields, nil
 }
 func (f *fakeMetadataRetryDB) Exec(query string) (int64, error) { return 0, nil }
 func (f *fakeMetadataRetryDB) GetDatabases() ([]string, error)  { return nil, nil }
@@ -235,6 +256,132 @@ func TestDBGetColumnsKeepsDatabaseForMySQLMetadata(t *testing.T) {
 	}
 	if dbInst.columnSchema != "demo_db" || dbInst.columnTable != "users" {
 		t.Fatalf("expected mysql metadata to pass database/table, got %q.%q", dbInst.columnSchema, dbInst.columnTable)
+	}
+}
+
+func TestDBGetColumnsInfersOceanBaseOracleFieldsWhenAgentMetadataIsEmpty(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	dbInst := &fakeMetadataRetryDB{
+		columns: []connection.ColumnDefinition{},
+		queryResults: []fakeMetadataQueryResult{
+			{
+				match: "FROM all_tab_columns c",
+				rows: []map[string]interface{}{
+					{
+						"COLUMN_NAME":    "id",
+						"DATA_TYPE":      "NUMBER",
+						"NULLABLE":       "N",
+						"DATA_DEFAULT":   "SEQUENCE.NEXTVAL",
+						"COLUMN_KEY":     "PRI",
+						"COMMENT":        "",
+						"DATA_PRECISION": nil,
+						"DATA_SCALE":     nil,
+					},
+					{
+						"COLUMN_NAME": "new_col_1",
+						"DATA_TYPE":   "VARCHAR2",
+						"CHAR_LENGTH": 255,
+						"NULLABLE":    "Y",
+						"COLUMN_KEY":  "",
+						"COMMENT":     "",
+					},
+				},
+				fields: []string{"COLUMN_NAME", "DATA_TYPE", "DATA_LENGTH", "CHAR_LENGTH", "DATA_PRECISION", "DATA_SCALE", "NULLABLE", "DATA_DEFAULT", "COLUMN_KEY", "COMMENT"},
+			},
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return dbInst, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.DBGetColumns(connection.ConnectionConfig{
+		Type:             "oceanbase",
+		Host:             "127.0.0.1",
+		Port:             12881,
+		User:             "SYS",
+		ConnectionParams: "protocol=oracle",
+	}, "SYS", "SYS.test")
+
+	if !result.Success {
+		t.Fatalf("expected DBGetColumns success, got failure: %s", result.Message)
+	}
+	if dbInst.columnSchema != "SYS" || dbInst.columnTable != "test" {
+		t.Fatalf("expected OceanBase Oracle metadata to split schema/table, got %q.%q", dbInst.columnSchema, dbInst.columnTable)
+	}
+	if len(dbInst.queries) != 1 || !strings.Contains(dbInst.queries[0], "FROM all_tab_columns c") {
+		t.Fatalf("expected dictionary metadata fallback query, got %v", dbInst.queries)
+	}
+	columns, ok := result.Data.([]connection.ColumnDefinition)
+	if !ok {
+		t.Fatalf("expected []connection.ColumnDefinition, got %T", result.Data)
+	}
+	if len(columns) != 2 || columns[0].Name != "id" || columns[1].Name != "new_col_1" {
+		t.Fatalf("unexpected inferred columns: %#v", columns)
+	}
+	if columns[0].Type != "NUMBER" || columns[0].Nullable != "NO" || columns[0].Key != "PRI" || columns[0].Extra != "auto_increment" {
+		t.Fatalf("expected id to keep type/not-null/primary-key/auto-increment metadata, got %#v", columns[0])
+	}
+	if columns[0].Default == nil || *columns[0].Default != "SEQUENCE.NEXTVAL" {
+		t.Fatalf("expected id default to keep sequence nextval, got %#v", columns[0].Default)
+	}
+	if columns[1].Type != "VARCHAR2(255)" || columns[1].Nullable != "YES" || columns[1].Key != "" {
+		t.Fatalf("expected new_col_1 to keep varchar nullable metadata, got %#v", columns[1])
+	}
+}
+
+func TestDBGetColumnsFallsBackToEmptySelectWhenOceanBaseOracleDictionaryIsEmpty(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	dbInst := &fakeMetadataRetryDB{
+		columns: []connection.ColumnDefinition{},
+		queryResults: []fakeMetadataQueryResult{
+			{match: "FROM all_tab_columns c", rows: []map[string]interface{}{}},
+			{match: `SELECT * FROM "SYS"."test" WHERE 1 = 0`, fields: []string{"id", "new_col_1"}},
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return dbInst, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.DBGetColumns(connection.ConnectionConfig{
+		Type:             "oceanbase",
+		Host:             "127.0.0.1",
+		Port:             12881,
+		User:             "SYS",
+		ConnectionParams: "protocol=oracle",
+	}, "SYS", "SYS.test")
+
+	if !result.Success {
+		t.Fatalf("expected DBGetColumns success, got failure: %s", result.Message)
+	}
+	if len(dbInst.queries) < 2 {
+		t.Fatalf("expected dictionary and empty-select fallback queries, got %v", dbInst.queries)
+	}
+	columns, ok := result.Data.([]connection.ColumnDefinition)
+	if !ok {
+		t.Fatalf("expected []connection.ColumnDefinition, got %T", result.Data)
+	}
+	if len(columns) != 2 || columns[0].Name != "id" || columns[1].Name != "new_col_1" {
+		t.Fatalf("unexpected inferred columns: %#v", columns)
 	}
 }
 

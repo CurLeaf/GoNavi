@@ -46,4 +46,5 @@ export interface AISnapshotInspectionRuntime {
 export interface SnapshotInspectionResult {
   content: string;
   success: boolean;
+  countsAsProbeFailure?: boolean;
 }

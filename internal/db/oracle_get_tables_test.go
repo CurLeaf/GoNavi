@@ -3,6 +3,7 @@ package db
 import (
 	"database/sql/driver"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -111,6 +112,59 @@ func TestOracleGetColumnsIncludesColumnComments(t *testing.T) {
 	}
 }
 
+func TestOracleGetColumnsPreservesMetadataNameCaseBeforeUppercaseFallback(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	oracleDB := &OracleDB{conn: dbConn}
+	if _, err := oracleDB.GetColumns("SYS", "test"); err != nil {
+		t.Fatalf("GetColumns 返回错误: %v", err)
+	}
+
+	queries := state.snapshotQueries()
+	if len(queries) == 0 {
+		t.Fatalf("expected metadata query")
+	}
+	if !strings.Contains(queries[0], `WHERE c.owner = 'SYS' AND c.table_name = 'test'`) {
+		t.Fatalf("expected first metadata query to preserve table case, got: %s", queries[0])
+	}
+}
+
+func TestOracleGetColumnsFallsBackToSelectMetadataWhenDictionaryIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.mu.Lock()
+	state.disableDefaultTabColumns = true
+	state.queryResults[`SELECT * FROM "SYS"."test" WHERE 1 = 0`] = oracleRecordingQueryResult{
+		columns:     []string{"id", "new_col_1"},
+		columnTypes: []string{"NUMBER", "VARCHAR2"},
+		nullable:    []bool{false, true},
+		rows:        [][]driver.Value{},
+	}
+	state.mu.Unlock()
+
+	oracleDB := &OracleDB{conn: dbConn}
+	columns, err := oracleDB.GetColumns("SYS", "test")
+	if err != nil {
+		t.Fatalf("GetColumns 返回错误: %v", err)
+	}
+	if len(columns) != 2 {
+		t.Fatalf("expected fallback columns, got %#v", columns)
+	}
+	if columns[0].Name != "id" || columns[0].Type != "NUMBER" || columns[0].Nullable != "NO" {
+		t.Fatalf("unexpected first fallback column: %#v", columns[0])
+	}
+	if columns[1].Name != "new_col_1" || columns[1].Type != "VARCHAR2" || columns[1].Nullable != "YES" {
+		t.Fatalf("unexpected second fallback column: %#v", columns[1])
+	}
+
+	queries := state.snapshotQueries()
+	if !slices.Contains(queries, `SELECT * FROM "SYS"."test" WHERE 1 = 0`) {
+		t.Fatalf("expected SELECT metadata fallback query, got: %v", queries)
+	}
+}
+
 func TestFormatOracleColumnTypeIncludesLengthAndPrecision(t *testing.T) {
 	t.Parallel()
 
@@ -154,6 +208,66 @@ func TestFormatOracleColumnTypeIncludesLengthAndPrecision(t *testing.T) {
 				t.Fatalf("expected %q, got %q", tc.want, got)
 			}
 		})
+	}
+}
+
+func TestOracleGetCreateStatementPreservesMetadataNameCase(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.mu.Lock()
+	state.queryResults[`SELECT DBMS_METADATA.GET_DDL('TABLE', 'test', 'SYS') as ddl FROM DUAL`] = oracleRecordingQueryResult{
+		columns: []string{"DDL"},
+		rows: [][]driver.Value{
+			{`CREATE TABLE "SYS"."test" ("ID" NUMBER)`},
+		},
+	}
+	state.mu.Unlock()
+
+	oracleDB := &OracleDB{conn: dbConn}
+	ddl, err := oracleDB.GetCreateStatement("SYS", "test")
+	if err != nil {
+		t.Fatalf("GetCreateStatement 返回错误: %v", err)
+	}
+	if !strings.Contains(ddl, `CREATE TABLE "SYS"."test"`) {
+		t.Fatalf("expected lowercase metadata DDL, got: %s", ddl)
+	}
+
+	queries := state.snapshotQueries()
+	if len(queries) == 0 || queries[0] != `SELECT DBMS_METADATA.GET_DDL('TABLE', 'test', 'SYS') as ddl FROM DUAL` {
+		t.Fatalf("expected first DDL query to preserve case, got: %v", queries)
+	}
+}
+
+func TestOracleGetCreateStatementFallsBackToUppercaseMetadataName(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.mu.Lock()
+	state.queryResults[`SELECT DBMS_METADATA.GET_DDL('TABLE', 'TEST', 'SYS') as ddl FROM DUAL`] = oracleRecordingQueryResult{
+		columns: []string{"DDL"},
+		rows: [][]driver.Value{
+			{`CREATE TABLE "SYS"."TEST" ("ID" NUMBER)`},
+		},
+	}
+	state.mu.Unlock()
+
+	oracleDB := &OracleDB{conn: dbConn}
+	ddl, err := oracleDB.GetCreateStatement("SYS", "test")
+	if err != nil {
+		t.Fatalf("GetCreateStatement 返回错误: %v", err)
+	}
+	if !strings.Contains(ddl, `CREATE TABLE "SYS"."TEST"`) {
+		t.Fatalf("expected uppercase fallback DDL, got: %s", ddl)
+	}
+
+	queries := state.snapshotQueries()
+	if len(queries) < 2 {
+		t.Fatalf("expected original-case query followed by uppercase fallback, got: %v", queries)
+	}
+	if queries[0] != `SELECT DBMS_METADATA.GET_DDL('TABLE', 'test', 'SYS') as ddl FROM DUAL` ||
+		queries[1] != `SELECT DBMS_METADATA.GET_DDL('TABLE', 'TEST', 'SYS') as ddl FROM DUAL` {
+		t.Fatalf("unexpected DDL fallback query order: %v", queries)
 	}
 }
 

@@ -51,7 +51,7 @@ func (g *Guard) isAllowed(opType ai.SQLOperationType) bool {
 	case ai.PermissionReadWrite:
 		return opType == ai.SQLOpQuery || opType == ai.SQLOpDML
 	case ai.PermissionFull:
-		return opType == ai.SQLOpQuery || opType == ai.SQLOpDML || opType == ai.SQLOpDDL
+		return true
 	default:
 		return opType == ai.SQLOpQuery
 	}
