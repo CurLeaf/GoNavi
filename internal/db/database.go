@@ -135,11 +135,16 @@ type TransactionExecerProvider interface {
 }
 
 type sqlConnStatementExecer struct {
-	conn *sql.Conn
+	conn        *sql.Conn
+	scanDialect string
 }
 
 func NewSQLConnStatementExecer(conn *sql.Conn) StatementExecer {
-	return &sqlConnStatementExecer{conn: conn}
+	return NewSQLConnStatementExecerWithDialect(conn, "")
+}
+
+func NewSQLConnStatementExecerWithDialect(conn *sql.Conn, scanDialect string) StatementExecer {
+	return &sqlConnStatementExecer{conn: conn, scanDialect: scanDialect}
 }
 
 func (e *sqlConnStatementExecer) ExecContext(ctx context.Context, query string) (int64, error) {
@@ -166,7 +171,7 @@ func (e *sqlConnStatementExecer) QueryContext(ctx context.Context, query string)
 		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsForDialect(rows, e.scanDialect)
 }
 
 func (e *sqlConnStatementExecer) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -182,7 +187,7 @@ func (e *sqlConnStatementExecer) QueryMultiContext(ctx context.Context, query st
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanMultiRowsForDialect(rows, e.scanDialect)
 }
 
 func (e *sqlConnStatementExecer) QueryMulti(query string) ([]connection.ResultSetData, error) {
@@ -206,13 +211,19 @@ type sqlConnTransactionExecer struct {
 	done        bool
 	commitSQL   string
 	rollbackSQL string
+	scanDialect string
 }
 
 func NewSQLConnTransactionExecer(conn *sql.Conn, commitSQL string, rollbackSQL string) TransactionExecer {
+	return NewSQLConnTransactionExecerWithDialect(conn, commitSQL, rollbackSQL, "")
+}
+
+func NewSQLConnTransactionExecerWithDialect(conn *sql.Conn, commitSQL string, rollbackSQL string, scanDialect string) TransactionExecer {
 	return &sqlConnTransactionExecer{
 		conn:        conn,
 		commitSQL:   strings.TrimSpace(commitSQL),
 		rollbackSQL: strings.TrimSpace(rollbackSQL),
+		scanDialect: scanDialect,
 	}
 }
 
@@ -257,7 +268,7 @@ func (e *sqlConnTransactionExecer) QueryContext(ctx context.Context, query strin
 		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsForDialect(rows, e.scanDialect)
 }
 
 func (e *sqlConnTransactionExecer) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -274,7 +285,7 @@ func (e *sqlConnTransactionExecer) QueryMultiContext(ctx context.Context, query 
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanMultiRowsForDialect(rows, e.scanDialect)
 }
 
 func (e *sqlConnTransactionExecer) QueryMulti(query string) ([]connection.ResultSetData, error) {

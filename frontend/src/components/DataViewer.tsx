@@ -7,7 +7,7 @@ import DataGrid, { GONAVI_ROW_KEY } from './DataGrid';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, hasExplicitSort, quoteIdentPart, quoteQualifiedIdent, reverseOrderBySQL, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { buildMongoCountCommand, buildMongoFilter, buildMongoFindCommand, buildMongoSort } from '../utils/mongodb';
 import { buildOracleApproximateTotalSql, parseApproximateTableCountRow, resolveApproximateTableCountStrategy } from '../utils/approximateTableCount';
-import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
+import { getDataSourceCapabilities, resolveDataSourceType, shouldShowOceanBaseRowNumberColumn } from '../utils/dataSourceCapabilities';
 import { resolveDataViewerAutoFetchAction } from '../utils/dataViewerAutoFetch';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import {
@@ -324,6 +324,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
   const [quickWhereCondition, setQuickWhereCondition] = useState<string>(initialViewerSnapshot.quickWhereCondition);
   const duckdbSafeSelectCacheRef = useRef<Record<string, string>>({});
   const currentConnConfig = connections.find(c => c.id === tab.connectionId)?.config;
+  const showRowNumberColumn = shouldShowOceanBaseRowNumberColumn(currentConnConfig);
   const currentConnCaps = getDataSourceCapabilities(currentConnConfig);
   const forceReadOnly = currentConnCaps.forceReadOnlyQueryResult;
   const preferManualTotalCount = currentConnCaps.preferManualTotalCount;
@@ -1110,6 +1111,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
           connectionId={tab.connectionId}
           pkColumns={pkColumns}
           editLocator={editLocator}
+          showRowNumberColumn={showRowNumberColumn}
           onReload={handleReload}
           onSort={handleSort}
           onPageChange={handlePageChange}

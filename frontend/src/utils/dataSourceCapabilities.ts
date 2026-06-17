@@ -82,6 +82,13 @@ export const resolveDataSourceType = (config: ConnectionLike): string => {
   return type;
 };
 
+export const shouldShowOceanBaseRowNumberColumn = (config: ConnectionLike): boolean => {
+  if (!config) return false;
+  const type = normalizeDataSourceToken(String(config.type || ''));
+  const driver = normalizeDataSourceToken(String(config.driver || ''));
+  return type === 'oceanbase' || driver === 'oceanbase';
+};
+
 const SQL_QUERY_EXPORT_TYPES = new Set([
   'mysql',
   'goldendb',

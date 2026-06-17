@@ -167,6 +167,14 @@ func TestFormatConnSummary_DefaultTimeout(t *testing.T) {
 }
 
 func TestDBReleaseConnectionClosesAllDatabaseCacheEntriesForSameInstance(t *testing.T) {
+	proxySnapshot := currentGlobalProxyConfig()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy)
+	})
+
 	app := NewApp()
 	mainConfig := connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, User: "root", Database: "main"}
 	analyticsConfig := mainConfig

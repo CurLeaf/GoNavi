@@ -554,6 +554,46 @@ func TestExecuteSQLAllowsDDLWhenAISafetyIsFullAndAllowMutating(t *testing.T) {
 	}
 }
 
+func TestExecuteSQLAllowsOtherStatementsWhenAISafetyIsFullAndAllowMutating(t *testing.T) {
+	backend := &fakeBackend{
+		editableConnection: connection.SavedConnectionView{
+			ID: "oracle-main",
+			Config: connection.ConnectionConfig{
+				Type:     "oracle",
+				Database: "app",
+			},
+		},
+		inspection: appcore.SQLInspection{
+			StatementCount: 1,
+			ReadOnly:       false,
+			Statements: []appcore.SQLStatementInspection{
+				{Index: 1, Keyword: "call", ReadOnly: false},
+			},
+		},
+		safetyLevel: ai.PermissionFull,
+		queryResult: connection.QueryResult{
+			Success: true,
+			Data:    []connection.ResultSetData{},
+		},
+	}
+
+	service := NewService(backend)
+	result, _, err := service.ExecuteSQL(context.Background(), nil, executeSQLArgs{
+		ConnectionID:  "oracle-main",
+		SQL:           "CALL bulk_insert_users(100000)",
+		AllowMutating: true,
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSQL returned error: %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("expected success result, got %#v", result)
+	}
+	if !backend.queryCalled {
+		t.Fatalf("expected SQL to be executed")
+	}
+}
+
 func TestExecuteSQLNormalizesAndTruncatesResultSets(t *testing.T) {
 	backend := &fakeBackend{
 		editableConnection: connection.SavedConnectionView{

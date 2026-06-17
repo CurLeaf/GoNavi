@@ -20,7 +20,9 @@ export interface DataGridPaginationBarProps {
   paginationSummaryText: string;
   paginationControlTotal: number;
   paginationTotalPages: number;
+  paginationPageText: string;
   paginationPageSizeOptions: string[];
+  showKnownPageCount: boolean;
   onPageChange?: (page: number, size: number) => void;
   onPageSizeChange: (value: string) => void;
   onV2PageStep: (direction: 'previous' | 'next') => void;
@@ -33,7 +35,9 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
   paginationSummaryText,
   paginationControlTotal,
   paginationTotalPages,
+  paginationPageText,
   paginationPageSizeOptions,
+  showKnownPageCount,
   onPageChange,
   onPageSizeChange,
   onV2PageStep,
@@ -58,7 +62,7 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
     if (normalizedJumpPage === pagination.current) return;
     onPageChange(normalizedJumpPage, pagination.pageSize);
   };
-  const jumpPageControl = (
+  const jumpPageControl = showKnownPageCount ? (
     <div className="data-grid-pagination-jump" data-grid-pagination-jump="true">
       <span className="data-grid-pagination-jump-label">跳页</span>
       <InputNumber
@@ -83,7 +87,7 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
         跳
       </Button>
     </div>
-  );
+  ) : null;
 
   return (
     <div
@@ -103,9 +107,15 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
             onClick={() => onV2PageStep('previous')}
           />
           <div className="data-grid-pagination-page-chip" data-grid-v2-page-chip="true">
-            <strong>{pagination.current}</strong>
-            <span>/</span>
-            <span>{paginationTotalPages}</span>
+            {showKnownPageCount ? (
+              <>
+                <strong>{pagination.current}</strong>
+                <span>/</span>
+                <span>{paginationTotalPages}</span>
+              </>
+            ) : (
+              <span>{paginationPageText}</span>
+            )}
           </div>
           <Button
             data-grid-v2-pagination-next="true"

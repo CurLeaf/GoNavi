@@ -4,9 +4,11 @@ package db
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"net"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -779,6 +781,81 @@ func TestOceanBaseOracleOBClientApplyChangesUsesMySQLWirePlaceholders(t *testing
 	}
 	if !strings.Contains(queries[0], `"NAME" = ?`) || !strings.Contains(queries[0], `"ID" = ?`) {
 		t.Fatalf("expected question mark placeholders + double-quoted identifiers, got %q", queries[0])
+	}
+}
+
+func TestOceanBaseOracleOBClientApplyChangesFormatsTemporalValuesExplicitly(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	oceanbaseDB := &OceanBaseDB{}
+	oceanbaseDB.bindConnectedDatabase(dbConn, 0, oceanBaseProtocolOracle)
+
+	changes := connection.ChangeSet{
+		Updates: []connection.UpdateRow{{
+			Keys: map[string]interface{}{
+				"ID": int64(7),
+			},
+			Values: map[string]interface{}{
+				"UPDATED_AT": "2026-06-16 17:37:08",
+			},
+		}},
+	}
+
+	if err := oceanbaseDB.ApplyChanges("APP.USERS", changes); err != nil {
+		t.Fatalf("ApplyChanges() unexpected error: %v", err)
+	}
+
+	queries := state.snapshotExecQueries()
+	if len(queries) != 1 {
+		t.Fatalf("expected one exec query, got %#v", queries)
+	}
+	if !strings.Contains(queries[0], `"UPDATED_AT" = TO_TIMESTAMP(?, 'YYYY-MM-DD HH24:MI:SS')`) {
+		t.Fatalf("expected explicit TO_TIMESTAMP binding for temporal update, got %q", queries[0])
+	}
+
+	executions := state.snapshotExecArgs()
+	if len(executions) != 1 || len(executions[0]) != 2 {
+		t.Fatalf("unexpected exec args: %#v", executions)
+	}
+	if got, ok := executions[0][0].Value.(string); !ok || got != "2026-06-16 17:37:08" {
+		t.Fatalf("expected temporal bind arg kept as canonical string, got %#v (%T)", executions[0][0].Value, executions[0][0].Value)
+	}
+}
+
+func TestOceanBaseOracleGetCreateStatementFallsBackToShowCreateTable(t *testing.T) {
+	t.Parallel()
+
+	dbConn, state := openOracleRecordingDB(t)
+	state.mu.Lock()
+	state.queryResults[`SHOW CREATE TABLE "SYS"."test"`] = oracleRecordingQueryResult{
+		columns: []string{"Create Table"},
+		rows: [][]driver.Value{
+			{`CREATE TABLE "SYS"."test" ("ID" NUMBER)`},
+		},
+	}
+	state.mu.Unlock()
+
+	oceanbaseDB := &OceanBaseDB{}
+	oceanbaseDB.bindConnectedDatabase(dbConn, 0, oceanBaseProtocolOracle)
+
+	ddl, err := oceanbaseDB.GetCreateStatement("SYS", "test")
+	if err != nil {
+		t.Fatalf("GetCreateStatement() unexpected error: %v", err)
+	}
+	if !strings.Contains(ddl, `CREATE TABLE "SYS"."test"`) {
+		t.Fatalf("expected SHOW CREATE TABLE DDL, got: %s", ddl)
+	}
+
+	queries := state.snapshotQueries()
+	if len(queries) < 3 {
+		t.Fatalf("expected DBMS_METADATA attempts followed by SHOW CREATE TABLE, got: %v", queries)
+	}
+	if queries[0] != `SELECT DBMS_METADATA.GET_DDL('TABLE', 'test', 'SYS') as ddl FROM DUAL` {
+		t.Fatalf("expected original-case DBMS_METADATA first, got: %v", queries)
+	}
+	if !slices.Contains(queries, `SHOW CREATE TABLE "SYS"."test"`) {
+		t.Fatalf("expected SHOW CREATE TABLE fallback, got: %v", queries)
 	}
 }
 

@@ -566,7 +566,7 @@ func (o *OceanBaseDB) connectOracleViaTNS(config connection.ConnectionConfig) er
 	if strings.TrimSpace(runConfig.Database) == "" {
 		return fmt.Errorf("OceanBase Oracle 协议（TNS 路径）需要填写服务名（Service Name），请在连接配置中填写租户监听的服务名（例如 ORCL / tenant_oracle 等）")
 	}
-	oracleDB := &OracleDB{}
+	oracleDB := &OracleDB{scanDialect: oceanBaseOracleScanDialect}
 	if err := oracleDB.Connect(runConfig); err != nil {
 		return annotateOceanBaseOracleConnectError(err)
 	}
@@ -660,7 +660,7 @@ func (o *OceanBaseDB) bindConnectedDatabase(db *sql.DB, timeout time.Duration, p
 	o.conn = nil
 	o.pingTimeout = 0
 	if protocol == oceanBaseProtocolOracle {
-		o.oracle = &OracleDB{conn: db, pingTimeout: timeout}
+		o.oracle = &OracleDB{conn: db, pingTimeout: timeout, scanDialect: oceanBaseOracleScanDialect}
 		o.protocol = oceanBaseProtocolOracle
 		return
 	}
@@ -871,7 +871,77 @@ func (o *OceanBaseDB) GetTables(dbName string) ([]string, error) {
 }
 
 func (o *OceanBaseDB) GetCreateStatement(dbName, tableName string) (string, error) {
+	if o.protocol == oceanBaseProtocolOracle && o.oracle != nil {
+		ddl, err := o.oracle.GetCreateStatement(dbName, tableName)
+		if err == nil && strings.TrimSpace(ddl) != "" {
+			return ddl, nil
+		}
+		showDDL, showErr := o.getOceanBaseOracleShowCreateStatement(dbName, tableName)
+		if showErr == nil {
+			return showDDL, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("%w；OceanBase Oracle SHOW CREATE TABLE 兜底失败：%v", err, showErr)
+		}
+		return "", showErr
+	}
 	return o.activeDatabase().GetCreateStatement(dbName, tableName)
+}
+
+func (o *OceanBaseDB) getOceanBaseOracleShowCreateStatement(dbName string, tableName string) (string, error) {
+	var firstErr error
+	for _, candidate := range oracleMetadataNamePairs(dbName, tableName) {
+		query := buildOceanBaseOracleShowCreateTableQuery(candidate.schema, candidate.table)
+		data, _, err := o.oracle.Query(query)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if ddl := extractOceanBaseOracleCreateStatement(data); ddl != "" {
+			return o.oracle.appendOracleCommentDDL(ddl, candidate.schema, candidate.table), nil
+		}
+	}
+	if firstErr != nil {
+		return "", firstErr
+	}
+	return "", fmt.Errorf("未找到建表语句")
+}
+
+func buildOceanBaseOracleShowCreateTableQuery(schema string, table string) string {
+	return "SHOW CREATE TABLE " + quoteOracleTableRef(schema, table)
+}
+
+func extractOceanBaseOracleCreateStatement(data []map[string]interface{}) string {
+	for _, row := range data {
+		for _, key := range []string{"Create Table", "CREATE TABLE", "CREATE_TABLE", "DDL", "ddl"} {
+			if val, ok := row[key]; ok {
+				text := strings.TrimSpace(fmt.Sprintf("%v", val))
+				if text != "" && !strings.EqualFold(text, "<nil>") {
+					return text
+				}
+			}
+		}
+		for _, val := range row {
+			text := strings.TrimSpace(fmt.Sprintf("%v", val))
+			lower := strings.ToLower(text)
+			if strings.HasPrefix(lower, "create table") ||
+				strings.HasPrefix(lower, "create view") ||
+				strings.HasPrefix(lower, "create or replace view") {
+				return text
+			}
+		}
+		if len(row) == 1 {
+			for _, val := range row {
+				text := strings.TrimSpace(fmt.Sprintf("%v", val))
+				if text != "" && !strings.EqualFold(text, "<nil>") {
+					return text
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func (o *OceanBaseDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
@@ -905,6 +975,60 @@ func (o *OceanBaseDB) ApplyChanges(tableName string, changes connection.ChangeSe
 		return applier.ApplyChanges(tableName, changes)
 	}
 	return fmt.Errorf("当前 OceanBase %s 协议不支持 ApplyChanges", o.protocol)
+}
+
+func buildOceanBaseOracleTemporalBind(columnType string, value interface{}) (string, interface{}, bool) {
+	if value == nil {
+		return "?", nil, false
+	}
+
+	rawType := strings.ToUpper(strings.TrimSpace(columnType))
+	if !isOracleTemporalColumnType(rawType) {
+		return "?", value, false
+	}
+
+	var parsed time.Time
+	switch typed := value.(type) {
+	case time.Time:
+		parsed = typed
+	case string:
+		text := strings.TrimSpace(typed)
+		if text == "" {
+			return "?", nil, false
+		}
+		var ok bool
+		parsed, ok = parseOracleTemporalString(text)
+		if !ok {
+			return "?", value, false
+		}
+	default:
+		return "?", value, false
+	}
+
+	if strings.Contains(rawType, "TIMESTAMP") {
+		text := parsed.Format("2006-01-02 15:04:05")
+		format := "YYYY-MM-DD HH24:MI:SS"
+		if parsed.Nanosecond() != 0 {
+			text = parsed.Format("2006-01-02 15:04:05.999999999")
+			text = strings.TrimRight(strings.TrimRight(text, "0"), ".")
+			format = "YYYY-MM-DD HH24:MI:SS.FF"
+		}
+		return fmt.Sprintf("TO_TIMESTAMP(?, '%s')", format), text, true
+	}
+
+	if parsed.Hour() == 0 && parsed.Minute() == 0 && parsed.Second() == 0 && parsed.Nanosecond() == 0 {
+		return "TO_DATE(?, 'YYYY-MM-DD')", parsed.Format("2006-01-02"), true
+	}
+	return "TO_DATE(?, 'YYYY-MM-DD HH24:MI:SS')", parsed.Format("2006-01-02 15:04:05"), true
+}
+
+func buildOceanBaseOracleAssignment(columnName string, value interface{}, columnTypeMap map[string]string) (string, []interface{}) {
+	columnType := columnTypeMap[strings.ToLower(strings.TrimSpace(columnName))]
+	normalized := normalizeOracleValueForWrite(columnName, value, columnTypeMap)
+	if expr, bind, ok := buildOceanBaseOracleTemporalBind(columnType, normalized); ok {
+		return expr, []interface{}{bind}
+	}
+	return "?", []interface{}{normalized}
 }
 
 // applyOracleChangesMySQLWire 在 OceanBase Oracle 租户的 mysql wire 连接上执行
@@ -959,8 +1083,9 @@ func (o *OceanBaseDB) applyOracleChangesMySQLWire(tableName string, changes conn
 				args = append(args, v)
 				continue
 			}
-			wheres = append(wheres, fmt.Sprintf("%s = ?", quoteIdent(k)))
-			args = append(args, normalizeOracleValueForWrite(k, v, columnTypeMap))
+			valueExpr, valueArgs := buildOceanBaseOracleAssignment(k, v, columnTypeMap)
+			wheres = append(wheres, fmt.Sprintf("%s = %s", quoteIdent(k), valueExpr))
+			args = append(args, valueArgs...)
 		}
 		return wheres, args
 	}
@@ -985,8 +1110,9 @@ func (o *OceanBaseDB) applyOracleChangesMySQLWire(tableName string, changes conn
 		var args []interface{}
 
 		for k, v := range update.Values {
-			sets = append(sets, fmt.Sprintf("%s = ?", quoteIdent(k)))
-			args = append(args, normalizeOracleValueForWrite(k, v, columnTypeMap))
+			valueExpr, valueArgs := buildOceanBaseOracleAssignment(k, v, columnTypeMap)
+			sets = append(sets, fmt.Sprintf("%s = %s", quoteIdent(k), valueExpr))
+			args = append(args, valueArgs...)
 		}
 
 		if len(sets) == 0 {
@@ -1017,8 +1143,9 @@ func (o *OceanBaseDB) applyOracleChangesMySQLWire(tableName string, changes conn
 
 		for k, v := range row {
 			cols = append(cols, quoteIdent(k))
-			placeholders = append(placeholders, "?")
-			args = append(args, normalizeOracleValueForWrite(k, v, columnTypeMap))
+			valueExpr, valueArgs := buildOceanBaseOracleAssignment(k, v, columnTypeMap)
+			placeholders = append(placeholders, valueExpr)
+			args = append(args, valueArgs...)
 		}
 
 		if len(cols) == 0 {
