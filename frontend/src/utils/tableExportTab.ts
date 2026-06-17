@@ -18,6 +18,21 @@ export const buildTableExportHistoryKey = (
   ].join('::');
 };
 
+export const buildExportWorkbenchHistoryKey = (
+  input: Pick<TabData, 'connectionId' | 'dbName' | 'tableName' | 'exportWorkbenchMode'>,
+): string => {
+  const mode = input.exportWorkbenchMode || 'single';
+  const connectionId = String(input.connectionId || '').trim();
+  const dbName = String(input.dbName || '').trim();
+  if (mode === 'batch-tables') {
+    return [connectionId, dbName, '__batch_tables__'].join('::');
+  }
+  if (mode === 'batch-databases') {
+    return [connectionId, '__batch_databases__'].join('::');
+  }
+  return buildTableExportHistoryKey(connectionId, dbName, input.tableName);
+};
+
 type BuildTableExportTabInput = {
   connectionId: string;
   dbName?: string;
@@ -30,6 +45,17 @@ type BuildTableExportTabInput = {
   initialScope?: TableExportScope;
   queryByScope?: Partial<Record<TableExportScope, string>>;
   rowCountByScope?: Partial<Record<TableExportScope, number>>;
+};
+
+type BuildBatchTableExportWorkbenchTabInput = {
+  connectionId: string;
+  dbName?: string;
+  title?: string;
+};
+
+type BuildBatchDatabaseExportWorkbenchTabInput = {
+  connectionId: string;
+  title?: string;
 };
 
 const normalizeScopeOptions = (
@@ -108,6 +134,7 @@ export const buildTableExportTab = (input: BuildTableExportTabInput): TabData =>
     id: `table-export-${connectionId}-${dbName}-${tableName}`,
     title: String(input.title || `导出 ${objectLabel}`).trim() || `导出 ${objectLabel}`,
     type: 'table-export',
+    exportWorkbenchMode: 'single',
     connectionId,
     dbName,
     tableName,
@@ -119,5 +146,36 @@ export const buildTableExportTab = (input: BuildTableExportTabInput): TabData =>
     tableExportInitialScope: initialScope,
     tableExportQueryByScope: normalizeQueryByScope(input.queryByScope),
     tableExportRowCountByScope: normalizeRowCountByScope(input.rowCountByScope),
+  };
+};
+
+export const buildBatchTableExportWorkbenchTab = (
+  input: BuildBatchTableExportWorkbenchTabInput,
+): TabData => {
+  const connectionId = String(input.connectionId || '').trim();
+  const dbName = String(input.dbName || '').trim();
+  const scopeSuffix = dbName || 'all';
+  return {
+    id: `table-export-batch-tables-${connectionId || 'none'}-${scopeSuffix}`,
+    title: String(input.title || '批量导出对象').trim() || '批量导出对象',
+    type: 'table-export',
+    exportWorkbenchMode: 'batch-tables',
+    connectionId,
+    dbName: dbName || undefined,
+    initialTab: 'config',
+  };
+};
+
+export const buildBatchDatabaseExportWorkbenchTab = (
+  input: BuildBatchDatabaseExportWorkbenchTabInput,
+): TabData => {
+  const connectionId = String(input.connectionId || '').trim();
+  return {
+    id: `table-export-batch-databases-${connectionId || 'none'}`,
+    title: String(input.title || '批量导出库').trim() || '批量导出库',
+    type: 'table-export',
+    exportWorkbenchMode: 'batch-databases',
+    connectionId,
+    initialTab: 'config',
   };
 };

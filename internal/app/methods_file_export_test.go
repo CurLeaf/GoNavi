@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -729,6 +730,60 @@ func BenchmarkExportQueryResultToFile_XLSX_StreamValues_20000Rows(b *testing.B) 
 	}
 }
 
+func BenchmarkDumpTableSQL_SQLBackup_StreamMap_20000Rows(b *testing.B) {
+	rows, columns := benchmarkExportRows(20000)
+	streamDB := &fakeStreamExportDB{
+		streamCols: columns,
+		streamData: rows,
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		writer := bufio.NewWriterSize(io.Discard, 1024*1024)
+		if err := dumpTableSQL(
+			writer,
+			streamDB,
+			connection.ConnectionConfig{Type: "mysql"},
+			"app",
+			"users",
+			false,
+			true,
+			map[string]string{},
+		); err != nil {
+			b.Fatalf("SQL 备份导出失败: %v", err)
+		}
+		if err := writer.Flush(); err != nil {
+			b.Fatalf("flush SQL 备份失败: %v", err)
+		}
+	}
+}
+
+func BenchmarkDumpTableSQL_SQLBackup_StreamValues_20000Rows(b *testing.B) {
+	rows, columns := benchmarkExportRowValues(20000)
+	streamDB := &fakeValueStreamExportDB{
+		streamCols:   columns,
+		streamValues: rows,
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		writer := bufio.NewWriterSize(io.Discard, 1024*1024)
+		if err := dumpTableSQL(
+			writer,
+			streamDB,
+			connection.ConnectionConfig{Type: "mysql"},
+			"app",
+			"users",
+			false,
+			true,
+			map[string]string{},
+		); err != nil {
+			b.Fatalf("SQL 备份导出失败: %v", err)
+		}
+		if err := writer.Flush(); err != nil {
+			b.Fatalf("flush SQL 备份失败: %v", err)
+		}
+	}
+}
+
 func TestFormatImportSQLValue_NormalizesTimestampWithoutTimezone(t *testing.T) {
 	got := formatImportSQLValue("postgres", "timestamp without time zone", "2026-01-21T18:32:26+08:00")
 	if got != "'2026-01-21 18:32:26'" {
@@ -805,6 +860,81 @@ func TestDumpTableSQL_PostgresBooleanBackupUsesBooleanLiterals(t *testing.T) {
 	}
 	if strings.Contains(content, "VALUES (1, 0)") {
 		t.Fatalf("PostgreSQL bool 备份不应输出数字布尔值，content=%s", content)
+	}
+}
+
+func TestDumpTableSQL_MySQLBackupBatchesRowsIntoMultiValueInsert(t *testing.T) {
+	fake := &fakeValueStreamExportDB{
+		streamCols: []string{"id", "name"},
+		streamValues: [][]interface{}{
+			{1, "alice"},
+			{2, "bob"},
+			{3, "carol"},
+		},
+	}
+	var buf bytes.Buffer
+	writer := bufio.NewWriter(&buf)
+
+	err := dumpTableSQL(
+		writer,
+		fake,
+		connection.ConnectionConfig{Type: "mysql"},
+		"app",
+		"users",
+		false,
+		true,
+		map[string]string{},
+	)
+	if err != nil {
+		t.Fatalf("dumpTableSQL 返回错误: %v", err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatalf("flush 导出 SQL 失败: %v", err)
+	}
+
+	content := buf.String()
+	if strings.Count(content, "INSERT INTO `app`.`users`") != 1 {
+		t.Fatalf("MySQL 备份应合并为单条批量 INSERT，content=%s", content)
+	}
+	if !strings.Contains(content, "VALUES (1, 'alice'),\n(2, 'bob'),\n(3, 'carol');") {
+		t.Fatalf("MySQL 批量 INSERT 内容异常，content=%s", content)
+	}
+}
+
+func TestDumpTableSQL_OracleBackupBatchesRowsIntoInsertAll(t *testing.T) {
+	fake := &fakeValueStreamExportDB{
+		streamCols: []string{"id", "name"},
+		streamValues: [][]interface{}{
+			{1, "alice"},
+			{2, "bob"},
+		},
+	}
+	var buf bytes.Buffer
+	writer := bufio.NewWriter(&buf)
+
+	err := dumpTableSQL(
+		writer,
+		fake,
+		connection.ConnectionConfig{Type: "oracle"},
+		"APP",
+		"USERS",
+		false,
+		true,
+		map[string]string{},
+	)
+	if err != nil {
+		t.Fatalf("dumpTableSQL 返回错误: %v", err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatalf("flush 导出 SQL 失败: %v", err)
+	}
+
+	content := buf.String()
+	if strings.Count(content, "INSERT ALL") != 1 {
+		t.Fatalf("Oracle 备份应合并为单条 INSERT ALL，content=%s", content)
+	}
+	if !strings.Contains(content, "INTO \"APP\".\"USERS\" (\"id\", \"name\") VALUES (1, 'alice')\n  INTO \"APP\".\"USERS\" (\"id\", \"name\") VALUES (2, 'bob')\nSELECT 1 FROM DUAL;") {
+		t.Fatalf("Oracle INSERT ALL 内容异常，content=%s", content)
 	}
 }
 

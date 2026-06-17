@@ -210,6 +210,10 @@ export function ExportDatabaseSQL(arg1, arg2, arg3) {
   return window['go']['app']['App']['ExportDatabaseSQL'](arg1, arg2, arg3);
 }
 
+export function ExportDatabasesSQLWithOptions(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExportDatabasesSQLWithOptions'](arg1, arg2, arg3, arg4);
+}
+
 export function ExportQuery(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['ExportQuery'](arg1, arg2, arg3, arg4, arg5);
 }
@@ -240,6 +244,10 @@ export function ExportTablesDataSQL(arg1, arg2, arg3) {
 
 export function ExportTablesSQL(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportTablesSQL'](arg1, arg2, arg3, arg4);
+}
+
+export function ExportTablesSQLWithOptions(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['app']['App']['ExportTablesSQLWithOptions'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function GenerateQueryID() {

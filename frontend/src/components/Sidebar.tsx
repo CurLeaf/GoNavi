@@ -89,7 +89,11 @@ import { resolveConnectionAccentColor, resolveConnectionIconType } from '../util
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
-import { buildTableExportTab } from '../utils/tableExportTab';
+import {
+    buildBatchDatabaseExportWorkbenchTab,
+    buildBatchTableExportWorkbenchTab,
+    buildTableExportTab,
+} from '../utils/tableExportTab';
 import { useExportProgressDialog } from './ExportProgressModal';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
 import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
@@ -4024,6 +4028,30 @@ const Sidebar: React.FC<{
       setIsBatchModalOpen(true);
   };
 
+  const openBatchTableExportWorkbench = () => {
+      let connId = '';
+      let dbName = '';
+
+      if (selectedNodesRef.current.length > 0) {
+          const node = selectedNodesRef.current[0];
+          if (node.type === 'connection' && node.dataRef?.config?.type !== 'redis') {
+              connId = node.key as string;
+          } else if (node.type === 'database') {
+              connId = node.dataRef.id;
+              dbName = node.title;
+          } else if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
+              connId = node.dataRef.id;
+              dbName = node.dataRef.dbName;
+          }
+      }
+
+      addTab(buildBatchTableExportWorkbenchTab({
+          connectionId: connId,
+          dbName: dbName || undefined,
+          title: dbName ? `批量导出 ${dbName} 对象` : '批量导出对象',
+      }));
+  };
+
 	  const loadDatabasesForBatch = async (conn: SavedConnection) => {
 	      const config = {
           ...conn.config,
@@ -4345,6 +4373,24 @@ const Sidebar: React.FC<{
       }
 
       setIsBatchDbModalOpen(true);
+  };
+
+  const openBatchDatabaseExportWorkbench = () => {
+      let connId = '';
+
+      if (selectedNodesRef.current.length > 0) {
+          const node = selectedNodesRef.current[0];
+          if (node.type === 'connection' && node.dataRef?.config?.type !== 'redis') {
+              connId = node.key as string;
+          } else if (node.type === 'database' || node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
+              connId = node.dataRef.id;
+          }
+      }
+
+      addTab(buildBatchDatabaseExportWorkbenchTab({
+          connectionId: connId,
+          title: '批量导出库',
+      }));
   };
 
 	  const loadDatabasesForDbBatch = async (conn: SavedConnection) => {
@@ -9221,7 +9267,7 @@ const Sidebar: React.FC<{
                   <button
                       type="button"
                       className="gn-v2-rail-tool gn-v2-rail-action"
-                      onClick={() => openBatchOperationModal()}
+                      onClick={() => openBatchTableExportWorkbench()}
                       aria-label={v2BatchTablesLabel}
                       data-sidebar-batch-table-action="true"
                   >
@@ -9232,7 +9278,7 @@ const Sidebar: React.FC<{
                   <button
                       type="button"
                       className="gn-v2-rail-tool gn-v2-rail-action"
-                      onClick={() => openBatchDatabaseModal()}
+                      onClick={() => openBatchDatabaseExportWorkbench()}
                       aria-label={v2BatchDatabasesLabel}
                       data-sidebar-batch-database-action="true"
                   >
@@ -9507,7 +9553,7 @@ const Sidebar: React.FC<{
                         icon={<TableOutlined />}
                         aria-label="批量操作表"
                         data-sidebar-batch-table-action="true"
-                        onClick={() => openBatchOperationModal()}
+                        onClick={() => openBatchTableExportWorkbench()}
                         style={{ color: legacyToolbarButtonColor }}
                     />
                 </Tooltip>
@@ -9520,7 +9566,7 @@ const Sidebar: React.FC<{
                         icon={<DatabaseOutlined />}
                         aria-label="批量操作库"
                         data-sidebar-batch-database-action="true"
-                        onClick={() => openBatchDatabaseModal()}
+                        onClick={() => openBatchDatabaseExportWorkbench()}
                         style={{ color: legacyToolbarButtonColor }}
                     />
                 </Tooltip>

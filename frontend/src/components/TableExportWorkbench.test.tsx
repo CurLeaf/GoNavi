@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TableExportWorkbench, { buildTableExportHistoryEntry } from './TableExportWorkbench';
+import type { ExportProgressState } from './useExportProgressRunner';
 
 const mockUpsertTableExportHistory = vi.fn();
 const createMockStoreState = () => ({
@@ -24,7 +25,7 @@ const createMockStoreState = () => ({
   tableExportHistories: {},
   upsertTableExportHistory: mockUpsertTableExportHistory,
 });
-const createMockProgressRunnerState = () => ({
+const createMockProgressRunnerState = (): ExportProgressState => ({
   open: true,
   jobId: 'job-1',
   title: '导出 SYS.test',
@@ -40,17 +41,27 @@ const createMockProgressRunnerState = () => ({
   filePath: '/Users/yangguofeng/Desktop/SYS.test.xlsx',
   message: '',
 });
+const createProgressRunnerState = (
+  overrides: Partial<ExportProgressState> = {},
+): ExportProgressState => ({
+  ...createMockProgressRunnerState(),
+  ...overrides,
+});
 
 let mockStoreState = createMockStoreState();
-let mockProgressRunnerState = createMockProgressRunnerState();
+let mockProgressRunnerState: ExportProgressState = createMockProgressRunnerState();
 
 vi.mock('../store', () => ({
   useStore: (selector: (state: any) => any) => selector(mockStoreState),
 }));
 
 vi.mock('../../wailsjs/go/app/App', () => ({
+  DBGetDatabases: vi.fn(),
+  DBGetTables: vi.fn(),
+  ExportDatabasesSQLWithOptions: vi.fn(),
   ExportQueryWithOptions: vi.fn(),
   ExportTableWithOptions: vi.fn(),
+  ExportTablesSQLWithOptions: vi.fn(),
 }));
 
 vi.mock('./useExportProgressRunner', () => ({
@@ -165,6 +176,99 @@ describe('TableExportWorkbench', () => {
     expect(markup).toContain('1 条记录');
     expect(markup).toContain('导出完成');
     expect(markup).toContain('/Users/yangguofeng/Desktop/SYS.test.xlsx');
+  });
+
+  it('renders batch table workbench copy and object progress summary', () => {
+    mockProgressRunnerState = createProgressRunnerState({
+      title: '结构 · SYS',
+      targetName: 'SYS · 8 个对象',
+      format: 'SQL',
+      current: 3,
+      total: 8,
+      totalRowsKnown: true,
+      filePath: '/Users/yangguofeng/Desktop/SYS_schema_8tables.sql',
+      stage: '正在导出 orders (4/8)',
+    });
+
+    const markup = renderToStaticMarkup(
+      <TableExportWorkbench
+        tab={{
+          id: 'table-export-batch-tables-conn-1-SYS',
+          title: '批量导出对象',
+          type: 'table-export',
+          connectionId: 'conn-1',
+          dbName: 'SYS',
+          exportWorkbenchMode: 'batch-tables',
+        }}
+      />,
+    );
+
+    expect(markup).toContain('模式 · 批量对象');
+    expect(markup).toContain('导出内容');
+    expect(markup).toContain('批量对象导出会统一生成一个 SQL 文件');
+    expect(markup).toContain('已完成 3 / 8 个对象');
+    expect(markup).toContain('/Users/yangguofeng/Desktop/SYS_schema_8tables.sql');
+  });
+
+  it('renders batch database history with directory-oriented labels', () => {
+    mockProgressRunnerState = createProgressRunnerState({
+      open: false,
+      jobId: '',
+      title: '',
+      targetName: '',
+      format: '',
+      startedAt: 0,
+      finishedAt: 0,
+      status: 'idle',
+      stage: '',
+      current: 0,
+      total: 0,
+      totalRowsKnown: false,
+      filePath: '',
+      message: '',
+    });
+    mockStoreState = {
+      ...createMockStoreState(),
+      tableExportHistories: {
+        'conn-1::__batch_databases__': [
+          {
+            jobId: 'job-batch-db-1',
+            targetName: '3 个数据库',
+            startedAt: 1_000,
+            finishedAt: 31_000,
+            format: 'SQL',
+            scope: 'selectedDatabases',
+            scopeLabel: '已选数据库（3）',
+            strategyLabel: '批量库 SQL 导出 · 导出库结构',
+            status: 'done',
+            stage: '导出完成',
+            current: 3,
+            total: 3,
+            totalRowsKnown: true,
+            filePath: '/Users/yangguofeng/Desktop/export-batch-dbs',
+            message: '',
+          },
+        ],
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <TableExportWorkbench
+        tab={{
+          id: 'table-export-batch-databases-conn-1',
+          title: '批量导出库',
+          type: 'table-export',
+          connectionId: 'conn-1',
+          exportWorkbenchMode: 'batch-databases',
+        }}
+      />,
+    );
+
+    expect(markup).toContain('模式 · 批量库');
+    expect(markup).toContain('将在开始导出时先选择输出目录');
+    expect(markup).toContain('已完成 3 / 3 个库');
+    expect(markup).toContain('/Users/yangguofeng/Desktop/export-batch-dbs');
+    expect(markup).toContain('目录');
   });
 
   it('keeps only one progress component in source and no longer uses top tabs', () => {
