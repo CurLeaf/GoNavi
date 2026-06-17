@@ -45,7 +45,8 @@ import {
   DEFAULT_SHORTCUT_OPTIONS,
   cloneShortcutOptions,
 } from '../utils/shortcuts';
-import { SUPPORTED_LANGUAGES, setCurrentLanguage, t } from '../i18n';
+import { SUPPORTED_LANGUAGES, getCurrentLanguage, setCurrentLanguage, t } from '../i18n';
+import { I18nProvider } from '../i18n/provider';
 import {
   V2ConnectionGroupContextMenuView,
   V2ConnectionContextMenuView,
@@ -210,6 +211,15 @@ vi.mock('../utils/appearance', async () => {
     isMacLikePlatform: () => true,
   };
 });
+
+const renderSidebarMarkup = (props: React.ComponentProps<typeof Sidebar> = {}) => renderToStaticMarkup(
+  <I18nProvider
+    preference={getCurrentLanguage()}
+    onPreferenceChange={() => undefined}
+  >
+    <Sidebar {...props} />
+  </I18nProvider>,
+);
 
 describe('Sidebar locate toolbar', () => {
   beforeEach(() => {
@@ -579,7 +589,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('renders the current table locate action in the sidebar toolbar', () => {
-    const markup = renderToStaticMarkup(<Sidebar />);
+    const markup = renderSidebarMarkup();
     const externalSqlActionIndex = markup.indexOf('data-sidebar-open-external-sql-file-action="true"');
     const locateActionIndex = markup.indexOf('data-sidebar-locate-current-tab-action="true"');
 
@@ -613,7 +623,7 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('DeleteSQLDirectory(directoryPath)');
     expect(source).toContain('refreshGlobalExternalSQLRootNode(false)');
     expect(source).toContain("request.objectGroup === 'externalSqlFiles'");
-    expect(source).toContain('SQL 文件未在外部 SQL 目录中找到');
+    expect(source).toContain("t('sidebar.message.locate_external_sql_file_not_found', { path: request.filePath })");
     expect(source).toContain('filePath: data.filePath || undefined');
     expect(source).toContain("key: 'add-external-sql-directory'");
     expect(source).toContain("key: 'new-external-sql-file'");
@@ -622,22 +632,20 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("key: 'new-external-sql-directory'");
     expect(source).toContain("key: 'rename-external-sql-directory'");
     expect(source).toContain("key: 'delete-external-sql-directory'");
-    expect(source).toContain('新建 SQL 文件');
-    expect(source).toContain('重命名 SQL 文件');
-    expect(source).toContain('确认删除 SQL 文件');
-    expect(source).toContain('新建目录');
-    expect(source).toContain('重命名目录');
-    expect(source).toContain('确认删除目录');
-    expect(source).toContain('仅支持删除空目录');
-    expect(source).toContain('文件名不能包含路径分隔符');
-    expect(source).toContain('目录名不能包含路径分隔符');
-    expect(loadTablesSource).not.toContain('externalSQLRootNode');
-    expect(loadTablesSource).not.toContain('dbExternalSQLDirectories');
+    expect(source).toContain("t('sidebar.external_sql_modal.title.create_file')");
+    expect(source).toContain("t('sidebar.external_sql_modal.title.rename_file')");
+    expect(source).toContain("t('sidebar.modal.confirm_delete_sql_file.title')");
+    expect(source).toContain("t('sidebar.external_sql_modal.title.create_directory')");
+    expect(source).toContain("t('sidebar.external_sql_modal.title.rename_directory')");
+    expect(source).toContain("t('sidebar.modal.confirm_delete_sql_directory.title')");
+    expect(source).toContain("t('sidebar.modal.confirm_delete_sql_directory.content', { name: directoryName })");
+    expect(source).toContain("t('sidebar.external_sql_modal.validation.sql_file_name_no_separator')");
+    expect(source).toContain("t('sidebar.external_sql_modal.validation.directory_name_no_separator')");
   });
 
   it('keeps the legacy sidebar toolbar on a stable five-column grid layout', () => {
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
-    const markup = renderToStaticMarkup(<Sidebar />);
+    const markup = renderSidebarMarkup();
 
     expect(markup).toContain('data-sidebar-legacy-toolbar="true"');
     expect(markup).toContain('data-sidebar-legacy-toolbar-item="true"');
@@ -650,7 +658,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('renders the v2 sidebar rail, command search hint, filter tabs and log footer', () => {
-    const markup = renderToStaticMarkup(<Sidebar uiVersion="v2" sqlLogCount={2341} onCreateConnection={mocks.noop} />);
+    const markup = renderSidebarMarkup({ uiVersion: 'v2', sqlLogCount: 2341, onCreateConnection: mocks.noop });
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
 
     expect(markup).toContain('gn-v2-sidebar-redesign');
@@ -729,10 +737,10 @@ describe('Sidebar locate toolbar', () => {
     mocks.state.appearance.v2SidebarSearchMode = 'filter';
     mocks.state.appearance.v2SidebarPersistedFilter = 'fs_org';
 
-    const markup = renderToStaticMarkup(<Sidebar uiVersion="v2" />);
+    const markup = renderSidebarMarkup({ uiVersion: 'v2' });
 
     expect(markup).toContain('data-v2-sidebar-search-mode="filter"');
-    expect(markup).toContain('筛选左侧表、连接、对象...');
+    expect(markup).toContain('placeholder="搜索..."');
     expect(markup).toContain('value="fs_org"');
     expect(markup).toContain('重置侧栏筛选');
   });
@@ -741,7 +749,7 @@ describe('Sidebar locate toolbar', () => {
     mocks.state.shortcutOptions = cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS);
     mocks.state.shortcutOptions.focusSidebarSearch.mac = { combo: 'Meta+F', enabled: true };
 
-    const markup = renderToStaticMarkup(<Sidebar uiVersion="v2" />);
+    const markup = renderSidebarMarkup({ uiVersion: 'v2' });
 
     expect(markup).toContain('gn-v2-search-shortcut');
     expect(markup).toContain('<kbd>⌘</kbd>');
@@ -987,7 +995,7 @@ describe('Sidebar locate toolbar', () => {
       uiVersion: 'v2',
     };
 
-    const markup = renderToStaticMarkup(<Sidebar uiVersion="v2" />);
+    const markup = renderSidebarMarkup({ uiVersion: 'v2' });
 
     expect(markup).toContain('gn-v2-connection-rail');
     expect(markup).toContain('gn-v2-active-connection-copy');
@@ -1019,7 +1027,7 @@ describe('Sidebar locate toolbar', () => {
       uiVersion: 'v2',
     };
 
-    const markup = renderToStaticMarkup(<Sidebar uiVersion="v2" />);
+    const markup = renderSidebarMarkup({ uiVersion: 'v2' });
 
     expect(markup).toContain(`<strong>${t('sidebar.active_connection.no_host_selected')}</strong>`);
     expect(markup).toContain(`<span>${t('sidebar.active_connection.no_database_selected')}</span>`);
@@ -1062,7 +1070,7 @@ describe('Sidebar locate toolbar', () => {
       uiVersion: 'v2',
     };
 
-    const markup = renderToStaticMarkup(<Sidebar uiVersion="v2" />);
+    const markup = renderSidebarMarkup({ uiVersion: 'v2' });
     const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain("if (v2ExplorerFilter === 'all') {");
@@ -1867,15 +1875,10 @@ describe('Sidebar locate toolbar', () => {
     );
 
     expect(markup).toContain('Export table data');
-    expect(markup).toContain('Excel · .xlsx');
-    expect(markup).toContain('CSV · .csv');
-    expect(markup).toContain('JSON · .json');
-    expect(markup).toContain('Excel');
-    expect(markup).toContain('CSV');
-    expect(markup).toContain('JSON');
-    expect(markup).toContain('.xlsx');
-    expect(markup).toContain('.csv');
-    expect(markup).toContain('.json');
+    expect(markup).toContain('Open export workbench...');
+    expect(markup).not.toContain('Excel · .xlsx');
+    expect(markup).not.toContain('CSV · .csv');
+    expect(markup).not.toContain('JSON · .json');
     expect(markup).not.toContain('导出表数据');
   });
 
@@ -2269,12 +2272,14 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("const buildConnectionRootQueryTabTitle = () => t('query.new');");
     expect(source).toContain("const buildConnectionRootRedisCommandTabTitle = (redisDbLabel = 'db0') =>");
     expect(source).toContain("const buildConnectionRootRedisMonitorTabTitle = (redisDbLabel = 'db0') =>");
+    expect(source).toContain("t('sidebar.tab.redis_command', { database: redisDbLabel })");
+    expect(source).toContain("t('sidebar.tab.redis_monitor', { database: redisDbLabel })");
     expect(source).toContain("title: buildConnectionRootQueryTabTitle()");
     expect(source).toContain("title: buildConnectionRootRedisCommandTabTitle()");
     expect(source).toContain("title: buildConnectionRootRedisMonitorTabTitle()");
     expect(source).toContain("title: t('sidebar.tab.new_query_database', { database: node.title })");
-    expect(source).toContain("title: `命令 - db${redisDB}`");
-    expect(source).toContain("title: `监控 - db${redisDB}`");
+    expect(source).toContain("title: buildConnectionRootRedisCommandTabTitle(`db${redisDB}`)");
+    expect(source).toContain("title: buildConnectionRootRedisMonitorTabTitle(`db${redisDB}`)");
   });
 
   it('localizes sidebar JVM probe and resource failure prompts', () => {
@@ -2355,23 +2360,21 @@ describe('Sidebar locate toolbar', () => {
     expect(loadTablesSource).not.toContain('SQL 目录读取失败');
     expect(loadTablesSource).not.toContain("'SQL目录'");
 
-    expect(externalSqlFlowSource).toContain("message.warning(t('sidebar.message.add_sql_directory_database_required'))");
     expect(externalSqlFlowSource).toContain("message.error(t('sidebar.message.select_sql_directory_failed'");
     expect(externalSqlFlowSource).toContain("message.error(t('sidebar.message.sql_directory_path_invalid'))");
     expect(externalSqlFlowSource).toContain("t('sidebar.sql_directory.default_name')");
     expect(externalSqlFlowSource).toContain("message.success(t('sidebar.message.external_sql_directory_added'))");
     expect(externalSqlFlowSource).toContain("message.error(t('sidebar.message.external_sql_directory_not_found'))");
     expect(externalSqlFlowSource).toContain("message.success(t('sidebar.message.external_sql_directory_removed'))");
-    expect(externalSqlFlowSource).toContain("message.warning(t('sidebar.message.external_sql_directory_context_missing'))");
     expect(externalSqlFlowSource).toContain("message.success(t('sidebar.message.external_sql_directory_refreshed'))");
+    expect(externalSqlFlowSource).not.toContain("sidebar.message.add_sql_directory_database_required");
+    expect(externalSqlFlowSource).not.toContain("sidebar.message.external_sql_directory_context_missing");
     [
-      '请在具体数据库下添加外部 SQL 目录',
       '选择 SQL 目录失败',
       '未获取到有效的 SQL 目录路径',
       '外部 SQL 目录已添加',
       '未找到可移除的 SQL 目录',
       '外部 SQL 目录已移除',
-      '当前目录缺少数据库上下文，无法刷新',
       '外部 SQL 目录已刷新',
     ].forEach((rawSnippet) => {
       expect(externalSqlFlowSource).not.toContain(rawSnippet);
@@ -2407,14 +2410,12 @@ describe('Sidebar locate toolbar', () => {
       'sidebar.menu.refresh_directory',
       'sidebar.menu.remove_directory',
       'sidebar.menu.open_sql_file',
-      'sidebar.message.add_sql_directory_database_required',
       'sidebar.message.select_sql_directory_failed',
       'sidebar.message.sql_directory_path_invalid',
       'sidebar.sql_directory.default_name',
       'sidebar.message.external_sql_directory_added',
       'sidebar.message.external_sql_directory_not_found',
       'sidebar.message.external_sql_directory_removed',
-      'sidebar.message.external_sql_directory_context_missing',
       'sidebar.message.external_sql_directory_refreshed',
       'sidebar.message.external_sql_directory_read_failed',
     ].forEach((key) => {
@@ -2631,7 +2632,7 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('attempt < SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS');
     expect(source).toContain('window.setTimeout(resolve, SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS)');
     expect(source).toContain('return !loadingNodesRef.current.has(loadKey);');
-    expect(source).toContain('对象仍在加载中');
+    expect(source).toContain("t('sidebar.message.locate_object_loading', {");
   });
 
   it('resolves sidebar export workbench connection ids from live tree nodes instead of only reading dataRef.connectionId', () => {
