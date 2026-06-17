@@ -199,10 +199,10 @@ const CELL_SELECTION_DRAG_THRESHOLD_PX = 4;
 const DATE_TIME_CACHE_LIMIT = 2000;
 const TABLE_CELL_PREVIEW_MAX_CHARS = 240;
 const DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS = [
-    { value: 3000, label: '3 秒' },
-    { value: 5000, label: '5 秒' },
-    { value: 10000, label: '10 秒' },
-    { value: 30000, label: '30 秒' },
+    { value: 3000, seconds: 3 },
+    { value: 5000, seconds: 5 },
+    { value: 10000, seconds: 10 },
+    { value: 30000, seconds: 30 },
 ];
 const DATA_GRID_DISPLAY_RENDER_VERSION = Symbol('DATA_GRID_DISPLAY_RENDER_VERSION');
 const DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION = Symbol('DATA_GRID_VIRTUAL_EDIT_RENDER_VERSION');
@@ -1548,6 +1548,13 @@ const DataGrid: React.FC<DataGridProps> = ({
           return t(key, params, language);
       },
       [language]
+  );
+  const localizedDataEditAutoCommitDelayOptions = useMemo(
+      () => DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS.map((item) => ({
+          value: item.value,
+          label: translateDataGrid('data_grid.toolbar.commit_delay.seconds', { seconds: item.seconds }),
+      })),
+      [translateDataGrid]
   );
   const rowLocatorMessages = useMemo<RowLocatorMessages>(() => ({
       noSafeLocator: () => translateDataGrid('data_grid.message.no_safe_locator'),
@@ -4419,7 +4426,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
     const keyStr = rowKeyStr(rowKey);
     if (addedRowKeySet.has(keyStr)) {
-      void message.info('新增行请使用删除选中或整表回滚撤销');
+      void message.info(translateDataGrid('data_grid.message.undo_added_row_hint'));
       setCellContextMenu(prev => ({ ...prev, visible: false }));
       return;
     }
@@ -4430,15 +4437,15 @@ const DataGrid: React.FC<DataGridProps> = ({
 
     const originalRow = data.find((row) => rowKeyStr(row?.[GONAVI_ROW_KEY]) === keyStr);
     if (!originalRow) {
-      void message.error('未找到该单元格的原始数据，无法撤销');
+      void message.error(translateDataGrid('data_grid.message.undo_cell_original_missing'));
       setCellContextMenu(prev => ({ ...prev, visible: false }));
       return;
     }
 
     handleCellSave({ ...record, [dataIndex]: originalRow[dataIndex] });
     setCellContextMenu(prev => ({ ...prev, visible: false }));
-    void message.success('已撤销单元格修改');
-  }, [addedRowKeySet, cellContextMenu.dataIndex, cellContextMenu.record, data, handleCellSave, modifiedColumns, rowKeyStr]);
+    void message.success(translateDataGrid('data_grid.message.undo_cell_success'));
+  }, [addedRowKeySet, cellContextMenu.dataIndex, cellContextMenu.record, data, handleCellSave, modifiedColumns, rowKeyStr, translateDataGrid]);
 
   const handleCellEditorSave = useCallback(() => {
       if (!cellEditorMeta) return;
@@ -5465,7 +5472,9 @@ const DataGrid: React.FC<DataGridProps> = ({
               message: res.message,
               dbName
           });
-          void message.success(source === 'auto' ? '自动提交成功' : translateDataGrid('data_grid.message.transaction_committed'));
+          void message.success(source === 'auto'
+              ? translateDataGrid('data_grid.message.auto_commit_success')
+              : translateDataGrid('data_grid.message.transaction_committed'));
           setAddedRows([]);
           setModifiedRows({});
           setDeletedRowKeys(new Set());
@@ -5485,7 +5494,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               autoCommitFailedTokenRef.current = autoCommitChangeTokenRef.current;
           }
           void message.error(source === 'auto'
-              ? `自动提交失败: ${res.message}`
+              ? translateDataGrid('data_grid.message.auto_commit_failed', { detail: res.message })
               : translateDataGrid('data_grid.message.commit_failed', { detail: res.message }));
       }
   }, [
@@ -6112,7 +6121,9 @@ const DataGrid: React.FC<DataGridProps> = ({
                           {translateDataGrid('data_grid.export.current_page_rows', { count: queryResultCurrentPageRows.length })}
                       </Button>
                       <Button type="primary" onClick={() => { void runExport('all'); }}>
-                          {resultExportAllSql ? '全部导出（重新查询）' : translateDataGrid('data_grid.export.all_rows', { count: mergedDisplayData.length })}
+                          {resultExportAllSql
+                              ? translateDataGrid('data_grid.export.all_rows_requery')
+                              : translateDataGrid('data_grid.export.all_rows', { count: mergedDisplayData.length })}
                       </Button>
                   </div>
               </div>
@@ -7696,7 +7707,7 @@ const DataGrid: React.FC<DataGridProps> = ({
             pendingChangeCount={pendingChangeCount}
             dataEditCommitMode={dataEditCommitMode}
             dataEditAutoCommitDelayMs={dataEditAutoCommitDelayMs}
-            dataEditAutoCommitDelayOptions={DATA_EDIT_AUTO_COMMIT_DELAY_OPTIONS}
+            dataEditAutoCommitDelayOptions={localizedDataEditAutoCommitDelayOptions}
             autoCommitRemainingSeconds={autoCommitRemainingSeconds}
             canImport={canImport}
             canExport={canExport}
@@ -7841,7 +7852,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                     embedded
                     tab={{
                         id: `embedded-design-${connectionId || ''}-${dbName || ''}-${tableName || ''}`,
-                        title: `设计表 (${tableName || ''})`,
+                        title: translateDataGrid('data_grid.embedded_designer.title', { tableName: tableName || '' }),
                         type: 'design',
                         connectionId: String(connectionId || ''),
                         dbName,

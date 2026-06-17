@@ -61,7 +61,7 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
 }) => {
   if (isV2Ui) {
     const fieldsActionLabel = canOpenObjectDesigner
-      ? '对象设计'
+      ? translate('data_grid.secondary.object_design')
       : translate('data_grid.column_settings.field_info');
     const fieldsActionIcon = canOpenObjectDesigner ? <EditOutlined /> : <FileTextOutlined />;
     const viewTabItems: Array<{ key: GridViewMode; label: string; icon: React.ReactNode; disabled?: boolean }> = [

@@ -6,6 +6,7 @@ import {
   SECURITY_UPDATE_MODAL_CLASS,
   getSecurityUpdateShellSurfaceStyle,
 } from '../utils/securityUpdateVisuals';
+import { useI18n } from '../i18n/provider';
 
 interface SecurityUpdateProgressModalProps {
   open: boolean;
@@ -22,6 +23,8 @@ const SecurityUpdateProgressModal = ({
   overlayTheme,
   surfaceOpacity = 1,
 }: SecurityUpdateProgressModalProps) => {
+  const { t } = useI18n();
+
   return (
     <Modal
       rootClassName={SECURITY_UPDATE_MODAL_CLASS}
@@ -57,7 +60,7 @@ const SecurityUpdateProgressModal = ({
           {stageText}
         </div>
         <div style={{ fontSize: 13, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          {detailText ?? '更新过程中会保留当前可用配置，请稍候。'}
+          {detailText ?? t('security_update.progress.default_detail')}
         </div>
         <Spin size="large" />
       </div>

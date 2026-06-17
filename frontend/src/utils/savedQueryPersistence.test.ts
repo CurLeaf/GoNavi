@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
+import { setCurrentLanguage } from '../i18n';
 import type { SavedQuery } from '../types';
 import { LEGACY_PERSIST_KEY } from './legacyConnectionStorage';
 import {
@@ -130,5 +132,34 @@ describe('saved query persistence', () => {
     const stripped = JSON.parse(stripLegacySavedQueries(payload));
     expect(stripped.state.savedQueries).toBeUndefined();
     expect(stripped.state.sidebarWidth).toBe(320);
+  });
+
+  it('localizes generated legacy saved query names', () => {
+    setCurrentLanguage('en-US');
+    const payload = JSON.stringify({
+      state: {
+        savedQueries: [
+          {
+            id: 'saved-generated-name',
+            sql: 'select 1;',
+            connectionId: 'conn-1',
+            dbName: 'warehouse',
+            createdAt: 200,
+          },
+        ],
+      },
+    });
+
+    expect(readLegacySavedQueriesFromPayload(payload)).toEqual([
+      expect.objectContaining({
+        id: 'saved-generated-name',
+        name: 'Query 1',
+      }),
+    ]);
+  });
+
+  it('does not hardcode Chinese generated saved query names', () => {
+    const source = readFileSync(new URL('./savedQueryPersistence.ts', import.meta.url), 'utf8');
+    expect(source).not.toContain('`查询-${index + 1}`');
   });
 });

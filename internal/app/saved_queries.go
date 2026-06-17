@@ -265,7 +265,7 @@ func sanitizeSavedQuery(input connection.SavedQuery, index int, allowGeneratedID
 
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
-		name = fmt.Sprintf("查询-%d", index+1)
+		name = defaultSavedQueryName(index)
 	}
 	createdAt := input.CreatedAt
 	if createdAt <= 0 {
@@ -284,4 +284,8 @@ func sanitizeSavedQuery(input connection.SavedQuery, index int, allowGeneratedID
 		BindingStatus:         strings.TrimSpace(input.BindingStatus),
 		OriginalConnectionID:  strings.TrimSpace(input.OriginalConnectionID),
 	}, true
+}
+
+func defaultSavedQueryName(index int) string {
+	return fmt.Sprintf("Query %d", index+1)
 }

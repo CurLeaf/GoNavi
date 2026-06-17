@@ -784,7 +784,7 @@ export const V2CellContextMenuView: React.FC<{
               {
                 action: 'undo-cell-change',
                 icon: <UndoOutlined />,
-                title: '撤销此单元格修改',
+                title: t('data_grid.context_menu.undo_cell_change'),
                 disabled: !canUndoCellChange,
               },
               { action: 'set-null', icon: <ClearOutlined />, title: t('data_grid.batch_fill.set_null') },

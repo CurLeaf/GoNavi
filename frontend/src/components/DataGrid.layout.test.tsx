@@ -104,6 +104,15 @@ const renderDataGridWithI18n = (
   );
 };
 
+const zhCnCatalog = JSON.parse(
+  readFileSync(new URL('../../../shared/i18n/zh-CN.json', import.meta.url), 'utf8'),
+) as Record<string, string>;
+const enUsCatalog = JSON.parse(
+  readFileSync(new URL('../../../shared/i18n/en-US.json', import.meta.url), 'utf8'),
+) as Record<string, string>;
+const zhObjectDesignLabel = zhCnCatalog['data_grid.secondary.object_design'];
+const enUndoCellChangeLabel = enUsCatalog['data_grid.context_menu.undo_cell_change'];
+
 describe('DataGrid layout', () => {
   it('renders a secondary action strip for view switching and auxiliary actions', () => {
     const markup = renderDataGridWithI18n(
@@ -136,7 +145,7 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-column-quick-find-action="true"');
     expect(markup).toContain('字段显示');
     expect(markup).toContain('跳列');
-    expect(markup).toContain('对象设计');
+    expect(markup).toContain(zhObjectDesignLabel);
     expect(markup).toContain('data-grid-page-find="true"');
     expect(markup).toContain('data-grid-page-find-prev="true"');
     expect(markup).toContain('data-grid-page-find-next="true"');
@@ -788,7 +797,7 @@ describe('DataGrid layout', () => {
   });
 
   it('keeps the v2 footer fields action labeled as field info for views', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderDataGridWithI18n(
       <DataGrid
         data={[
           {
@@ -812,7 +821,7 @@ describe('DataGrid layout', () => {
     );
 
     expect(markup).toContain('字段信息');
-    expect(markup).not.toContain('对象设计');
+    expect(markup).not.toContain(zhObjectDesignLabel);
   });
 
   it('falls back to the current i18n language when rendered outside I18nProvider', () => {
@@ -1896,7 +1905,7 @@ describe('DataGrid layout', () => {
       />,
     );
 
-    expect(markup).toContain('撤销此单元格修改');
+    expect(markup).toContain(enUndoCellChangeLabel);
   });
 
   it('preserves fractional seconds when rendering datetime values', () => {
@@ -1977,7 +1986,7 @@ describe('DataGrid layout', () => {
 
     expect(tableMarkup).toContain('data-grid-ddl-action="true"');
     expect(tableMarkup).toContain('查看 DDL');
-    expect(tableMarkup).toContain('对象设计');
+    expect(tableMarkup).toContain(zhObjectDesignLabel);
     expect(tableMarkup).not.toContain('data-grid-locate-sidebar-action="true"');
 
     const schemaTableMarkup = renderDataGridWithI18n(
@@ -1999,7 +2008,7 @@ describe('DataGrid layout', () => {
 
     expect(schemaTableMarkup).toContain('data-grid-ddl-action="true"');
     expect(schemaTableMarkup).toContain('查看 DDL');
-    expect(schemaTableMarkup).toContain('对象设计');
+    expect(schemaTableMarkup).toContain(zhObjectDesignLabel);
     expect(schemaTableMarkup).toContain('data-grid-page-find="true"');
 
     const queryMarkup = renderDataGridWithI18n(
@@ -2022,7 +2031,7 @@ describe('DataGrid layout', () => {
 
     expect(queryMarkup).not.toContain('data-grid-ddl-action="true"');
     expect(queryMarkup).toContain('字段信息');
-    expect(queryMarkup).not.toContain('对象设计');
+    expect(queryMarkup).not.toContain(zhObjectDesignLabel);
   });
 
   it('keeps row copy and paste as context menu actions instead of toolbar buttons', () => {
@@ -2095,6 +2104,7 @@ describe('DataGrid layout', () => {
       'data_grid.export.selected_rows',
       'data_grid.export.current_page_rows',
       'data_grid.export.all_rows',
+      'data_grid.export.all_rows_requery',
       'data_grid.export.options_title',
       'data_grid.export.no_selection_prompt',
       'data_grid.export.current_page',

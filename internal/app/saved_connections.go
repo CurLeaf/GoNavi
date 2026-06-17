@@ -382,12 +382,18 @@ func applyConnectionBundleFlags(view *connection.SavedConnectionView, bundle con
 	view.HasOpaqueDSN = strings.TrimSpace(bundle.OpaqueDSN) != ""
 }
 
-func buildDuplicateConnectionName(baseName string, existing []connection.SavedConnectionView) string {
+func buildDuplicateConnectionName(baseName string, existing []connection.SavedConnectionView, unnamedName string, copySuffix string) string {
 	trimmedBaseName := strings.TrimSpace(baseName)
 	if trimmedBaseName == "" {
-		trimmedBaseName = "连接"
+		trimmedBaseName = strings.TrimSpace(unnamedName)
 	}
-	suffix := " - 副本"
+	if trimmedBaseName == "" {
+		trimmedBaseName = "Unnamed Connection"
+	}
+	suffix := copySuffix
+	if strings.TrimSpace(suffix) == "" {
+		suffix = " - Copy"
+	}
 	usedNames := make(map[string]struct{}, len(existing))
 	for _, item := range existing {
 		usedNames[strings.TrimSpace(item.Name)] = struct{}{}
@@ -425,7 +431,7 @@ func (r *savedConnectionRepository) Delete(id string) error {
 	return r.saveAll(filtered)
 }
 
-func (r *savedConnectionRepository) Duplicate(id string) (connection.SavedConnectionView, error) {
+func (r *savedConnectionRepository) Duplicate(id string, unnamedName string, copySuffix string) (connection.SavedConnectionView, error) {
 	connections, err := r.load()
 	if err != nil {
 		return connection.SavedConnectionView{}, err
@@ -446,7 +452,7 @@ func (r *savedConnectionRepository) Duplicate(id string) (connection.SavedConnec
 	duplicate := original
 	duplicate.ID = "conn-" + uuid.New().String()[:8]
 	duplicate.Config.ID = duplicate.ID
-	duplicate.Name = buildDuplicateConnectionName(original.Name, connections)
+	duplicate.Name = buildDuplicateConnectionName(original.Name, connections, unnamedName, copySuffix)
 
 	bundle, err := r.loadSecretBundle(original)
 	if err != nil {

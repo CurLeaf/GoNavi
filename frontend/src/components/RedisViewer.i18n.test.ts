@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(new URL('./RedisViewer.tsx', import.meta.url), 'utf8');
+const keyToolbarSource = readFileSync(new URL('./RedisViewerKeyToolbar.tsx', import.meta.url), 'utf8');
 
 describe('RedisViewer i18n', () => {
   it('localizes fixed key browser chrome and feedback while preserving raw Key names', () => {
@@ -37,5 +38,33 @@ describe('RedisViewer i18n', () => {
     expect(source).toContain("tr('redis_viewer.ttl.forever'");
     expect(source).toContain("tr('redis_viewer.ttl.expired'");
     expect(source).toContain("tr('redis_viewer.table.action'");
+  });
+
+  it('localizes the standalone key toolbar chrome while preserving raw Redis identifiers', () => {
+    [
+      "return '单机'",
+      'Key Explorer',
+      '节点',
+      '模糊',
+      '精确',
+      '输入完整 Key / 命名空间精确搜索',
+      '搜索 Key（模糊匹配）',
+      '刷新',
+      '新建',
+      '全选全部',
+      '取消全选',
+      '确定删除选中的',
+      '删除选中',
+    ].forEach((snippet) => {
+      expect(keyToolbarSource).not.toContain(snippet);
+    });
+
+    expect(keyToolbarSource).toContain('useOptionalI18n()');
+    expect(keyToolbarSource).toContain("tr('redis_viewer.title.key_explorer'");
+    expect(keyToolbarSource).toContain("tr('redis_viewer.label.keys_count'");
+    expect(keyToolbarSource).toContain("tr('redis_viewer.label.node_count'");
+    expect(keyToolbarSource).toContain("tr('redis_viewer.confirm.delete_selected'");
+    expect(keyToolbarSource).toContain("tr('redis_viewer.action.delete_selected'");
+    expect(keyToolbarSource).toContain('master: {sentinelMaster}');
   });
 });

@@ -122,8 +122,8 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         onWidthChange,
     });
     const availableTools = useMemo(
-        () => buildAvailableAIChatTools(mcpTools),
-        [mcpTools],
+        () => buildAvailableAIChatTools(mcpTools, t),
+        [mcpTools, t],
     );
     const aiChatSendShortcutBinding = useStore(state => resolveShortcutBinding(
         state.shortcutOptions,

@@ -1866,7 +1866,7 @@ const resolveQueryLocatorPlan = async ({
     if (!tableRef) return plan;
     plan.tableRef = tableRef;
     if (isSystemMetadataQueryResult(tableRef, dbType)) {
-        plan.editLocator = buildQueryReadOnlyLocator('系统元数据查询结果保持只读。');
+        plan.editLocator = buildQueryReadOnlyLocator(translate('query_editor.message.read_only_system_metadata'));
         return plan;
     }
 
@@ -1883,7 +1883,7 @@ const resolveQueryLocatorPlan = async ({
         const [resCols, resIndexes] = await Promise.all([
             DBGetColumns(buildRpcConnectionConfig(config) as any, tableRef.metadataDbName, tableRef.metadataTableName),
             DBGetIndexes(buildRpcConnectionConfig(config) as any, tableRef.metadataDbName, tableRef.metadataTableName)
-                .catch((error: any) => ({ success: false, message: String(error?.message || error || '加载索引失败'), data: [] })),
+                .catch((error: any) => ({ success: false, message: String(error?.message || error || 'Failed to load indexes'), data: [] })),
         ]);
         if (!resCols?.success || !Array.isArray(resCols.data)) {
             const reason = translate('query_editor.message.read_only_table_locator_metadata_unavailable', {
@@ -4156,7 +4156,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const handleRestoreLastFormat = () => {
       const previousQuery = tab.formatRestoreSnapshot?.query;
       if (!previousQuery) {
-          void message.info('没有可还原的美化前 SQL');
+          void message.info(translate('query_editor.message.no_format_restore_snapshot'));
           return;
       }
       syncQueryToEditor(previousQuery);
@@ -4165,7 +4165,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           formatRestoreSnapshot: undefined,
       });
       refreshObjectDecorations();
-      void message.success('已还原到美化前 SQL');
+      void message.success(translate('query_editor.message.format_restore_success'));
   };
 
   const handleAIAction = (action: 'generate' | 'explain' | 'optimize' | 'schema') => {
@@ -4206,7 +4206,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       { type: 'divider' },
       {
           key: 'restore-last-format',
-          label: '还原上次美化',
+          label: translate('query_editor.format.restore_last_format'),
           disabled: !tab.formatRestoreSnapshot?.query,
           onClick: handleRestoreLastFormat,
       },
@@ -4513,14 +4513,16 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
           const res = await DBQueryMulti(buildRpcConnectionConfig(config) as any, currentDb, pageSql, queryId);
           if (!res?.success) {
-              message.error('翻页失败: ' + formatSqlExecutionError(res?.message || '未知错误'));
+              message.error(translate('query_editor.message.page_query_failed', {
+                  error: formatSqlExecutionError(res?.message || translate('common.unknown')),
+              }));
               return;
           }
 
           const resultSetDataArray = Array.isArray(res.data) ? (res.data as any[]) : [];
           const rsData = resultSetDataArray[0];
           if (!rsData) {
-              message.warning('翻页未返回结果集');
+              message.warning(translate('query_editor.message.page_query_empty'));
               return;
           }
           const rawRows = Array.isArray(rsData.rows) ? rsData.rows : [];
@@ -4559,7 +4561,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   : rs
           ));
       } catch (err: any) {
-          message.error('翻页失败: ' + formatSqlExecutionError(err?.message || err || '未知错误'));
+          message.error(translate('query_editor.message.page_query_failed', {
+              error: formatSqlExecutionError(err?.message || err || translate('common.unknown')),
+          }));
       } finally {
           setLoading(false);
           setResultSets(prev => prev.map(rs =>
@@ -4818,7 +4822,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             }
             const useManagedTransaction = shouldUseSqlEditorManagedTransaction(sourceStatements);
             if (useManagedTransaction && pendingSqlTransactionRef.current) {
-                message.warning('当前 SQL 编辑器已有未提交事务，请先提交或回滚后再执行新的增删改语句。');
+                message.warning(translate('query_editor.transaction.message.pending_managed_transaction'));
                 return;
             }
             const managedTransactionStatementCount = sourceStatements
@@ -5640,7 +5644,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           setIsSaveModalOpen(false);
       } catch (e) {
           if (e instanceof Error) {
-              message.error('保存查询失败: ' + e.message);
+              message.error(translate('query_editor.message.save_query_failed', {
+                  error: e.message,
+              }));
           }
       }
   };
@@ -5698,7 +5704,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const handleDiagnoseExecutionError = () => {
       const errSql = getCurrentQuery();
-      const prompt = `我在执行以下 SQL 时遇到了错误：\n\`\`\`sql\n${errSql}\n\`\`\`\n\n数据库报错信息如下：\n\`\`\`text\n${executionError}\n\`\`\`\n\n请帮我分析错误原因，并给出修改建议。`;
+      const prompt = translate('query_editor.ai_prompt.diagnose', {
+          sql: errSql,
+          error: executionError,
+      });
       const store = useStore.getState();
       const wasClosed = !store.aiPanelVisible;
       if (wasClosed) store.setAIPanelVisible(true);

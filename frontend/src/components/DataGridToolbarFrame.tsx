@@ -379,15 +379,15 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
               </Dropdown>
             )}
             {hasChanges && <Button icon={<UndoOutlined />} onClick={onResetPendingChanges}>{translate('data_grid.toolbar.rollback')}</Button>}
-            <Tooltip title="控制表数据编辑后的提交方式。手动提交更安全；自动提交会在最后一次修改后按所选时间提交。">
+            <Tooltip title={translate('data_grid.toolbar.commit_mode.tooltip')}>
               <Select
                 size="small"
                 value={dataEditCommitMode}
                 onChange={onDataEditCommitModeChange}
                 style={{ width: 118, flex: '0 0 auto' }}
                 options={[
-                  { value: 'manual', label: '手动提交' },
-                  { value: 'auto', label: '自动提交' },
+                  { value: 'manual', label: translate('data_grid.toolbar.commit_mode.manual') },
+                  { value: 'auto', label: translate('data_grid.toolbar.commit_mode.auto') },
                 ]}
               />
             </Tooltip>
@@ -402,7 +402,7 @@ const DataGridToolbarFrame: React.FC<DataGridToolbarFrameProps> = ({
             )}
             {dataEditCommitMode === 'auto' && hasChanges && autoCommitRemainingSeconds !== null && (
               <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>
-                {autoCommitRemainingSeconds}s 后提交
+                {translate('data_grid.toolbar.commit_mode.auto_countdown', { seconds: autoCommitRemainingSeconds })}
               </span>
             )}
           </>

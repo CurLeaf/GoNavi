@@ -17,8 +17,14 @@ export const BUILTIN_AI_TOOL_NAME_SET = new Set<string>(
   BUILTIN_AI_TOOL_INFO.map((item) => item.name),
 );
 
+type AIChatToolTranslator = (
+  key: string,
+  params?: Record<string, string>,
+) => string;
+
 export const buildMCPAIChatTools = (
   tools: AIMCPToolDescriptor[],
+  t?: AIChatToolTranslator,
 ): AIChatToolDefinition[] =>
   (tools || []).map((tool) => ({
     type: "function",
@@ -26,7 +32,12 @@ export const buildMCPAIChatTools = (
       name: tool.alias,
       description:
         tool.description ||
-        `${tool.serverName} 提供的 MCP 工具 ${tool.title || tool.originalName}`,
+        (t
+          ? t("ai_chat.tools.mcp_fallback_description", {
+              serverName: tool.serverName,
+              toolName: tool.title || tool.originalName,
+            })
+          : `MCP tool ${tool.title || tool.originalName} provided by ${tool.serverName}`),
       parameters:
         tool.inputSchema && Object.keys(tool.inputSchema).length > 0
           ? tool.inputSchema
@@ -36,4 +47,5 @@ export const buildMCPAIChatTools = (
 
 export const buildAvailableAIChatTools = (
   tools: AIMCPToolDescriptor[],
-): AIChatToolDefinition[] => [...BUILTIN_AI_TOOLS, ...buildMCPAIChatTools(tools)];
+  t?: AIChatToolTranslator,
+): AIChatToolDefinition[] => [...BUILTIN_AI_TOOLS, ...buildMCPAIChatTools(tools, t)];

@@ -36,4 +36,32 @@ describe('DataSyncModal i18n', () => {
     expect(source).toContain("tr('data_sync.message.analysis_failed_detail', { detail:");
     expect(source).toContain("tr('data_sync.message.preview_load_failed_detail', { detail:");
   });
+
+  it('localizes compare-entry only chrome without translating SQL preview or raw table names', () => {
+    [
+      '当前入口只做差异分析和预览',
+      '按表比对',
+      '按 SQL 结果集比对',
+      '当前为“表结构比对”入口',
+      '当前为“数据比对”入口',
+      '生成目标表缺失字段的兼容变更 SQL',
+      '正在比对',
+      '比对完成',
+      '比对失败',
+      '当前阶段：',
+      '成功比对 ',
+      '分析日志',
+      '返回比对',
+      '行选择只影响 SQL 预览范围',
+      'SQL 预览会按当前勾选的插入/更新/删除',
+      'SQL 预览展示结构差异建议语句',
+    ].forEach((snippet) => {
+      expect(source).not.toContain(snippet);
+    });
+
+    expect(source).toContain("tr('data_sync.compare_entry.workflow_help')");
+    expect(source).toContain("tr('data_sync.compare_entry.option.source_dataset.table')");
+    expect(source).toContain("tr('data_sync.compare_entry.result.running_description'");
+    expect(source).toContain("tr('data_sync.compare_entry.preview.sql.data_help')");
+  });
 });

@@ -3361,7 +3361,7 @@ const ConnectionModal: React.FC<{
       values.redisTopology === "sentinel" &&
       String(values.redisSentinelPassword ?? "") === ""
     ) {
-      return "测试连接前请填写新的 Sentinel 密码，或取消清除已保存 Sentinel 密码";
+      return t("connection.modal.secret.blocking.redis_sentinel");
     }
     if (
       values.type === "mongodb" &&
@@ -3457,7 +3457,9 @@ const ConnectionModal: React.FC<{
           const dbRes = await withClientTimeout(
             RedisGetDatabases(config as any),
             rpcTimeoutMs,
-            `连接成功但拉取 Redis 数据库列表超时（>${timeoutSeconds} 秒）`,
+            t("connection.modal.test.redis_database_list_timeout", {
+              seconds: timeoutSeconds,
+            }),
           );
           if (dbRes.success) {
             const supportedDbs = extractRedisDatabaseList(dbRes.data);
@@ -3477,7 +3479,12 @@ const ConnectionModal: React.FC<{
               ),
             );
             message.warning(
-              `连接成功，但获取 Redis 数据库列表失败：${normalizeConnectionSecretErrorMessage(dbRes.message, "未知错误")}`,
+              t("connection.modal.test.redis_database_list_failure", {
+                detail: normalizeConnectionSecretErrorMessage(
+                  dbRes.message,
+                  t("connection.modal.error.unknown"),
+                ),
+              }),
             );
           }
         } else if (!isJVMType) {
@@ -5570,11 +5577,16 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="database"
-                      label="默认 Topic（可选）"
-                      help="留空时必须在 SQL 中显式指定 Topic；填写后可直接执行 SHOW、CONSUME 或 SELECT 预览。"
+                      label={t("connection.modal.messageQueue.kafka.defaultTopic.label")}
+                      help={t("connection.modal.messageQueue.kafka.defaultTopic.help")}
                       style={{ marginBottom: 0 }}
                     >
-                      <Input {...noAutoCapInputProps} placeholder="例如：orders.events" />
+                      <Input
+                        {...noAutoCapInputProps}
+                        placeholder={t(
+                          "connection.modal.messageQueue.kafka.defaultTopic.placeholder",
+                        )}
+                      />
                     </Form.Item>
                   ),
                 })}
@@ -5586,11 +5598,16 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="database"
-                      label="默认 Topic（可选）"
-                      help="留空时必须在 SQL 中显式指定 Topic；连接参数可继续补充 groupId、namespace、tag、pullBatchSize 与 startOffset。"
+                      label={t("connection.modal.messageQueue.rocketmq.defaultTopic.label")}
+                      help={t("connection.modal.messageQueue.rocketmq.defaultTopic.help")}
                       style={{ marginBottom: 0 }}
                     >
-                      <Input {...noAutoCapInputProps} placeholder="例如：orders.events" />
+                      <Input
+                        {...noAutoCapInputProps}
+                        placeholder={t(
+                          "connection.modal.messageQueue.rocketmq.defaultTopic.placeholder",
+                        )}
+                      />
                     </Form.Item>
                   ),
                 })}
@@ -5602,11 +5619,16 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="database"
-                      label="默认 Topic / Filter（可选）"
-                      help="留空时必须在 SQL 中显式指定 Topic；填写后可直接执行 SHOW、CONSUME 或 SELECT 预览。支持使用 /、+、#。"
+                      label={t("connection.modal.messageQueue.mqtt.defaultTopicFilter.label")}
+                      help={t("connection.modal.messageQueue.mqtt.defaultTopicFilter.help")}
                       style={{ marginBottom: 0 }}
                     >
-                      <Input {...noAutoCapInputProps} placeholder="例如：devices/+/telemetry" />
+                      <Input
+                        {...noAutoCapInputProps}
+                        placeholder={t(
+                          "connection.modal.messageQueue.mqtt.defaultTopicFilter.placeholder",
+                        )}
+                      />
                     </Form.Item>
                   ),
                 })}
@@ -5618,11 +5640,16 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="database"
-                      label="默认 Virtual Host（可选）"
-                      help="留空默认使用 /；填写后查询编辑器会以当前 vhost 作为 Queue 浏览与测试发送上下文。"
+                      label={t("connection.modal.messageQueue.rabbitmq.defaultVirtualHost.label")}
+                      help={t("connection.modal.messageQueue.rabbitmq.defaultVirtualHost.help")}
                       style={{ marginBottom: 0 }}
                     >
-                      <Input {...noAutoCapInputProps} placeholder="例如：/ 或 orders-vhost" />
+                      <Input
+                        {...noAutoCapInputProps}
+                        placeholder={t(
+                          "connection.modal.messageQueue.rabbitmq.defaultVirtualHost.placeholder",
+                        )}
+                      />
                     </Form.Item>
                   ),
                 })}
@@ -5707,13 +5734,17 @@ const ConnectionModal: React.FC<{
                     options: [
                       {
                         value: "single",
-                        label: "单 Broker",
-                        description: "只配置一个 bootstrap broker，适合本地或简单环境。",
+                        label: t("connection.modal.messageQueue.kafka.topology.single.label"),
+                        description: t(
+                          "connection.modal.messageQueue.kafka.topology.single.description",
+                        ),
                       },
                       {
                         value: "cluster",
-                        label: "集群模式",
-                        description: "配置多个 bootstrap broker，提高发现与故障切换成功率。",
+                        label: t("connection.modal.messageQueue.topology.cluster.label"),
+                        description: t(
+                          "connection.modal.messageQueue.kafka.topology.cluster.description",
+                        ),
                       },
                     ],
                   }),
@@ -5729,13 +5760,17 @@ const ConnectionModal: React.FC<{
                     options: [
                       {
                         value: "single",
-                        label: "单 NameServer",
-                        description: "只配置一个 NameServer，适合本地或简单环境。",
+                        label: t("connection.modal.messageQueue.rocketmq.topology.single.label"),
+                        description: t(
+                          "connection.modal.messageQueue.rocketmq.topology.single.description",
+                        ),
                       },
                       {
                         value: "cluster",
-                        label: "集群模式",
-                        description: "配置多个 NameServer，提高路由发现与故障切换成功率。",
+                        label: t("connection.modal.messageQueue.topology.cluster.label"),
+                        description: t(
+                          "connection.modal.messageQueue.rocketmq.topology.cluster.description",
+                        ),
                       },
                     ],
                   }),
@@ -5751,13 +5786,17 @@ const ConnectionModal: React.FC<{
                     options: [
                       {
                         value: "single",
-                        label: "单 Broker",
-                        description: "只配置一个 broker，适合本地或简单环境。",
+                        label: t("connection.modal.messageQueue.mqtt.topology.single.label"),
+                        description: t(
+                          "connection.modal.messageQueue.mqtt.topology.single.description",
+                        ),
                       },
                       {
                         value: "cluster",
-                        label: "集群模式",
-                        description: "配置多个 broker，提高连接发现与故障切换成功率。",
+                        label: t("connection.modal.messageQueue.topology.cluster.label"),
+                        description: t(
+                          "connection.modal.messageQueue.mqtt.topology.cluster.description",
+                        ),
                       },
                     ],
                   }),
@@ -5771,12 +5810,14 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="kafkaHosts"
-                      label="额外 Broker 地址"
-                      help="可输入多个 broker 地址，格式：host:port（回车确认）"
+                      label={t("connection.modal.messageQueue.kafka.extraBrokers.label")}
+                      help={t("connection.modal.messageQueue.kafka.extraBrokers.help")}
                     >
                       <Select
                         mode="tags"
-                        placeholder="例如：10.10.0.12:9092、10.10.0.13:9092"
+                        placeholder={t(
+                          "connection.modal.messageQueue.kafka.extraBrokers.placeholder",
+                        )}
                         tokenSeparators={[",", ";", " "]}
                       />
                     </Form.Item>
@@ -5791,12 +5832,14 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="rocketmqHosts"
-                      label="额外 NameServer 地址"
-                      help="可输入多个 NameServer 地址，格式：host:port（回车确认）"
+                      label={t("connection.modal.messageQueue.rocketmq.extraNameServers.label")}
+                      help={t("connection.modal.messageQueue.rocketmq.extraNameServers.help")}
                     >
                       <Select
                         mode="tags"
-                        placeholder="例如：10.10.0.12:9876、10.10.0.13:9876"
+                        placeholder={t(
+                          "connection.modal.messageQueue.rocketmq.extraNameServers.placeholder",
+                        )}
                         tokenSeparators={[",", ";", " "]}
                       />
                     </Form.Item>
@@ -5811,12 +5854,14 @@ const ConnectionModal: React.FC<{
                   children: (
                     <Form.Item
                       name="mqttHosts"
-                      label="额外 Broker 地址"
-                      help="可输入多个 broker 地址，格式：host:port（回车确认）"
+                      label={t("connection.modal.messageQueue.mqtt.extraBrokers.label")}
+                      help={t("connection.modal.messageQueue.mqtt.extraBrokers.help")}
                     >
                       <Select
                         mode="tags"
-                        placeholder="例如：10.10.0.12:1883、10.10.0.13:1883"
+                        placeholder={t(
+                          "connection.modal.messageQueue.mqtt.extraBrokers.placeholder",
+                        )}
                         tokenSeparators={[",", ";", " "]}
                       />
                     </Form.Item>
@@ -6422,7 +6467,7 @@ const ConnectionModal: React.FC<{
                             {...noAutoCapInputProps}
                             placeholder={
                               PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)
-                                ? "未开启认证可留空"
+                                ? t("connection.modal.field.username.optional_placeholder")
                                 : undefined
                             }
                           />

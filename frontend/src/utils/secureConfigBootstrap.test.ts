@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
+import { t as translate } from '../i18n';
 import { LEGACY_PERSIST_KEY } from './legacyConnectionStorage';
 import {
   bootstrapSecureConfig,
@@ -36,6 +38,8 @@ const legacyPayload = JSON.stringify({
     },
   },
 });
+
+const en = (key: string) => translate(key, undefined, 'en-US');
 
 const createMemoryStorage = () => {
   const data = new Map<string, string>();
@@ -97,6 +101,46 @@ describe('secureConfigBootstrap', () => {
         action: 'open_proxy_settings',
       }),
     ]));
+  });
+
+  it('uses catalog text for local legacy security update issues when a translator is provided', async () => {
+    const args = createBaseArgs();
+
+    const result = await bootstrapSecureConfig({
+      ...args,
+      t: en,
+      backend: {
+        GetSecurityUpdateStatus: vi.fn().mockResolvedValue({
+          overallStatus: 'not_detected',
+          summary: { total: 0, updated: 0, pending: 0, skipped: 0, failed: 0 },
+          issues: [],
+        }),
+      },
+    });
+
+    expect(result.status.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        scope: 'connection',
+        title: 'Legacy',
+        message: "This connection is still saved in the current app's local configuration. After the security update completes, it will be moved to the new secure storage.",
+      }),
+      expect.objectContaining({
+        scope: 'global_proxy',
+        title: 'Global Proxy',
+        message: "Global proxy settings are still saved in the current app's local configuration. After the security update completes, they will be moved to the new secure storage.",
+      }),
+    ]));
+  });
+
+  it('keeps local legacy security update text out of production source literals', () => {
+    const source = readFileSync(new URL('./secureConfigBootstrap.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('该连接仍保存在当前应用的本地配置中');
+    expect(source).not.toContain('全局代理仍保存在当前应用的本地配置中');
+    expect(source).not.toContain('安全更新能力不可用');
+    expect(source).toContain('security_update.bootstrap.legacy.connection.message');
+    expect(source).toContain('security_update.bootstrap.legacy.global_proxy.message');
+    expect(source).toContain('security_update.error.capability_unavailable');
   });
 
   it('shows intro when legacy sensitive items exist and backend status is pending', async () => {

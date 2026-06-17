@@ -156,7 +156,7 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
             }}
           >
             <UndoOutlined style={{ marginRight: 8 }} />
-            撤销此单元格修改
+            {translate('data_grid.context_menu.undo_cell_change')}
           </div>
           <div style={baseItemStyle} {...makeHoverHandlers()} onClick={onSetNull}>
             {translate('data_grid.batch_fill.set_null')}

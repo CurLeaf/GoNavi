@@ -192,7 +192,10 @@ const buildSqlPreview = (
 };
 
 const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: DataSyncEntryMode }> = ({ open, onClose, entryMode = 'sync' }) => {
-  const entryPresentation = resolveDataSyncEntryModePresentation(entryMode);
+  const i18n = useOptionalI18n();
+  const i18nLanguage = i18n?.language;
+  const tr = (key: string, params?: Parameters<typeof t>[1]) => t(key, params, i18nLanguage);
+  const entryPresentation = resolveDataSyncEntryModePresentation(entryMode, tr);
   const isSchemaCompareEntry = entryMode === 'schemaCompare';
   const isDataCompareEntry = entryMode === 'dataCompare';
   const isCompareEntry = entryPresentation.readOnly;
@@ -202,9 +205,6 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const { token } = antdTheme.useToken();
-  const i18n = useOptionalI18n();
-  const i18nLanguage = i18n?.language;
-  const tr = (key: string, params?: Parameters<typeof t>[1]) => t(key, params, i18nLanguage);
   const darkMode = themeMode === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const effectiveOpacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
@@ -979,7 +979,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                   <div style={{ ...quietPanelStyle, marginBottom: 14 }}>
                       <Text style={{ color: darkMode ? 'rgba(255,255,255,0.72)' : 'rgba(15,23,42,0.68)', lineHeight: 1.7 }}>
                           {isCompareEntry
-                              ? '当前入口只做差异分析和预览，不会执行同步、建表、补字段或删除数据。'
+                              ? tr('data_sync.compare_entry.workflow_help')
                               : tr('data_sync.help.workflow_type')}
                       </Text>
                   </div>
@@ -995,8 +995,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                       {!isSchemaCompareEntry && (
                           <Form.Item label={tr('data_sync.field.source_dataset_mode')}>
                               <Select value={sourceDatasetMode} onChange={setSourceDatasetMode}>
-                                  <Option value="table">{isCompareEntry ? '按表比对' : tr('data_sync.option.source_dataset.table')}</Option>
-                                  <Option value="query">{isCompareEntry ? '按 SQL 结果集比对' : tr('data_sync.option.source_dataset.query')}</Option>
+                                  <Option value="table">{isCompareEntry ? tr('data_sync.compare_entry.option.source_dataset.table') : tr('data_sync.option.source_dataset.table')}</Option>
+                                  <Option value="query">{isCompareEntry ? tr('data_sync.compare_entry.option.source_dataset.query') : tr('data_sync.option.source_dataset.query')}</Option>
                               </Select>
                           </Form.Item>
                       )}
@@ -1007,9 +1007,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                             message={isMigrationWorkflow
                                 ? tr('data_sync.alert.migration_mode')
                                 : isSchemaCompareEntry
-                                    ? '当前为“表结构比对”入口：固定只分析结构差异和生成可审阅 SQL，不执行变更。'
+                                    ? tr('data_sync.compare_entry.alert.schema')
                                     : isDataCompareEntry
-                                        ? '当前为“数据比对”入口：固定按主键分析行级差异，不执行写入。'
+                                        ? tr('data_sync.compare_entry.alert.data')
                                         : tr('data_sync.alert.sync_mode')}
                         />
                       {isSourceQueryMode && (
@@ -1067,7 +1067,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                           <Form.Item>
                               <Checkbox checked={autoAddColumns} onChange={(e) => setAutoAddColumns(e.target.checked)} disabled={isSourceQueryMode}>
                                   {isSchemaCompareEntry
-                                      ? '生成目标表缺失字段的兼容变更 SQL（仅预览，不执行）'
+                                      ? tr('data_sync.compare_entry.option.auto_add_columns')
                                       : tr('data_sync.option.auto_add_columns')}
                               </Checkbox>
                           </Form.Item>
@@ -1300,20 +1300,25 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
               <div style={quietPanelStyle}>
                   <Alert
                       message={syncing
-                          ? (isCompareEntry ? '正在比对' : tr('data_sync.result.running'))
+                          ? (isCompareEntry ? tr('data_sync.compare_entry.result.running') : tr('data_sync.result.running'))
                           : (syncResult?.success
-                              ? (isCompareEntry ? '比对完成' : tr('data_sync.result.completed'))
-                              : (isCompareEntry ? '比对失败' : tr('data_sync.result.failed')))}
+                              ? (isCompareEntry ? tr('data_sync.compare_entry.result.completed') : tr('data_sync.result.completed'))
+                              : (isCompareEntry ? tr('data_sync.compare_entry.result.failed') : tr('data_sync.result.failed')))}
                       description={
                           syncing
                               ? (isCompareEntry
-                                  ? `当前阶段：${syncProgress.stage || '执行中'}${syncProgress.table ? `，表：${syncProgress.table}` : ''}`
+                                  ? tr('data_sync.compare_entry.result.running_description', {
+                                      stage: syncProgress.stage || tr('data_sync.compare_entry.result.stage_fallback'),
+                                      table: syncProgress.table ? tr('data_sync.compare_entry.result.table_suffix', { table: syncProgress.table }) : '',
+                                    })
                                   : tr('data_sync.result.running_description', {
                                       stage: syncProgress.stage || tr('data_sync.progress.stage.executing'),
                                       table: syncProgress.table ? tr('data_sync.result.table_suffix', { table: syncProgress.table }) : '',
                                     }))
                               : (syncResult?.message || (isCompareEntry
-                                  ? `成功比对 ${diffTables.length || syncResult?.tablesSynced || 0} 张表。`
+                                  ? tr('data_sync.compare_entry.result.success_summary', {
+                                      tables: diffTables.length || syncResult?.tablesSynced || 0,
+                                    })
                                   : tr('data_sync.result.success_summary', {
                                       tables: syncResult?.tablesSynced || 0,
                                       inserted: syncResult?.rowsInserted || 0,
@@ -1333,7 +1338,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                   </div>
               </div>
               <div style={quietPanelStyle}>
-                  <Divider orientation="left" style={{ marginTop: 0 }}>{isCompareEntry ? '分析日志' : tr('data_sync.title.execution_log')}</Divider>
+                  <Divider orientation="left" style={{ marginTop: 0 }}>{isCompareEntry ? tr('data_sync.compare_entry.title.analysis_log') : tr('data_sync.title.execution_log')}</Divider>
                   <div
                       ref={logBoxRef}
                       onScroll={() => {
@@ -1394,7 +1399,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
           )}
           {currentStep === 2 && (
               <>
-                  <Button disabled={syncing} onClick={() => setCurrentStep(1)} style={{ marginRight: 8 }}>{isCompareEntry ? '返回比对' : tr('data_sync.action.continue_sync')}</Button>
+                  <Button disabled={syncing} onClick={() => setCurrentStep(1)} style={{ marginRight: 8 }}>{isCompareEntry ? tr('data_sync.compare_entry.action.return_to_compare') : tr('data_sync.action.continue_sync')}</Button>
                   <Button type="primary" disabled={syncing} onClick={onClose}>{isCompareEntry ? entryPresentation.closeButtonText : tr('data_sync.action.close')}</Button>
               </>
           )}
@@ -1471,7 +1476,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                             label: tr('data_sync.preview.tab.insert', { count: previewData.totalInserts || 0 }),
                             children: (
                                 <div>
-                                    <Text type="secondary">{isCompareEntry ? '行选择只影响 SQL 预览范围，不会执行写入。' : tr('data_sync.preview.selection_hint.insert')}</Text>
+                                    <Text type="secondary">{isCompareEntry ? tr('data_sync.compare_entry.preview.selection_hint') : tr('data_sync.preview.selection_hint.insert')}</Text>
                                     <Table
                                         size="small"
                                         style={{ marginTop: 8 }}
@@ -1496,7 +1501,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                             label: tr('data_sync.preview.tab.update', { count: previewData.totalUpdates || 0 }),
                             children: (
                                 <div>
-                                    <Text type="secondary">{isCompareEntry ? '行选择只影响 SQL 预览范围，不会执行写入。' : tr('data_sync.preview.selection_hint.update')}</Text>
+                                    <Text type="secondary">{isCompareEntry ? tr('data_sync.compare_entry.preview.selection_hint') : tr('data_sync.preview.selection_hint.update')}</Text>
                                     <Table
                                         size="small"
                                         style={{ marginTop: 8 }}
@@ -1547,7 +1552,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                             children: (
                                 <div>
                                     <Alert type="warning" showIcon message={tr('data_sync.preview.delete_warning')} />
-                                    <Text type="secondary">{isCompareEntry ? '行选择只影响 SQL 预览范围，不会执行写入。' : tr('data_sync.preview.selection_hint.delete')}</Text>
+                                    <Text type="secondary">{isCompareEntry ? tr('data_sync.compare_entry.preview.selection_hint') : tr('data_sync.preview.selection_hint.delete')}</Text>
                                     <Table
                                         size="small"
                                         style={{ marginTop: 8 }}
@@ -1577,8 +1582,8 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                                         showIcon
                                         message={
                                             previewHasDataDiff
-                                                ? (isCompareEntry ? 'SQL 预览会按当前勾选的插入/更新/删除与行选择范围生成，仅用于审核差异。' : tr('data_sync.preview.sql.data_help'))
-                                                : (isCompareEntry ? 'SQL 预览展示结构差异建议语句，仅用于审核差异。' : tr('data_sync.preview.sql.schema_help'))
+                                                ? (isCompareEntry ? tr('data_sync.compare_entry.preview.sql.data_help') : tr('data_sync.preview.sql.data_help'))
+                                                : (isCompareEntry ? tr('data_sync.compare_entry.preview.sql.schema_help') : tr('data_sync.preview.sql.schema_help'))
                                         }
                                     />
                                     <div style={{ marginTop: 8, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

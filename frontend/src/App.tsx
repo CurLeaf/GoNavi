@@ -271,6 +271,14 @@ function App() {
       ]),
       [tabDisplaySettings],
   );
+  const getTabDisplayElementLabel = useCallback(
+      (key: TabDisplayElementKey) => t(TAB_DISPLAY_ELEMENT_META[key].labelKey),
+      [t],
+  );
+  const getTabDisplayElementDescription = useCallback(
+      (key: TabDisplayElementKey) => t(TAB_DISPLAY_ELEMENT_META[key].descriptionKey),
+      [t],
+  );
   const setTabDisplaySettings = useCallback((settings: Partial<TabDisplaySettings>) => {
       setAppearance({
           tabDisplay: applyTabDisplaySettingsPatch(tabDisplaySettings, settings),
@@ -397,8 +405,8 @@ function App() {
   const windowDiagLastAtRef = React.useRef(0);
   const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
   const securityUpdateStatusMeta = useMemo(
-      () => getSecurityUpdateStatusMeta(securityUpdateStatus),
-      [securityUpdateStatus],
+      () => getSecurityUpdateStatusMeta(securityUpdateStatus, t),
+      [securityUpdateStatus, t],
   );
   const securityUpdateEntryVisibility = useMemo(
       () => resolveSecurityUpdateEntryVisibility(securityUpdateStatus),
@@ -564,6 +572,7 @@ function App() {
                   backend: (window as any).go?.app?.App,
                   replaceConnections,
                   replaceGlobalProxy,
+                  t,
               });
               if (cancelled) {
                   return;
@@ -584,7 +593,7 @@ function App() {
       return () => {
           cancelled = true;
       };
-  }, [applySecurityUpdateStatus, isStoreHydrated, replaceConnections, replaceGlobalProxy]);
+  }, [applySecurityUpdateStatus, isStoreHydrated, replaceConnections, replaceGlobalProxy, t]);
 
   useEffect(() => {
       if (!isStoreHydrated || !hasLoadedSecureConfig) {
@@ -1348,6 +1357,7 @@ function App() {
                   backend: backendApp,
                   replaceConnections,
                   replaceGlobalProxy,
+                  t,
               });
               if (result.error) {
                   throw result.error;
@@ -1380,6 +1390,7 @@ function App() {
                   backend: backendApp,
                   replaceConnections,
                   replaceGlobalProxy,
+                  t,
               }, nextStatus);
           }
 
@@ -1445,6 +1456,7 @@ function App() {
               const nextStatus = mergeSecurityUpdateStatusWithLegacySource(
                   await backendApp.DismissSecurityUpdateReminder(),
                   securityUpdateRawPayload,
+                  { t },
               );
               applySecurityUpdateStatus(nextStatus);
               return;
@@ -1468,7 +1480,7 @@ function App() {
       t,
   ]);
   const handleSecurityUpdateIssueAction = useCallback((issue: SecurityUpdateIssue) => {
-      const repairEntry = resolveSecurityUpdateRepairEntry(issue, connections, securityUpdateStatus);
+      const repairEntry = resolveSecurityUpdateRepairEntry(issue, connections, securityUpdateStatus, t);
       if (repairEntry.type === 'warning') {
           void message.warning(repairEntry.message);
           return;
@@ -1499,7 +1511,7 @@ function App() {
       }
       setSecurityUpdateRepairSource(null);
       openSecurityUpdateSettings(repairEntry.focusTarget);
-  }, [connections, openSecurityUpdateSettings, runSecurityUpdateRound, securityUpdateStatus]);
+  }, [connections, openSecurityUpdateSettings, runSecurityUpdateRound, securityUpdateStatus, t]);
   const updateCheckInFlightRef = React.useRef(false);
   const updateDownloadInFlightRef = React.useRef(false);
   const updateUserDismissedRef = React.useRef(false);
@@ -2677,6 +2689,7 @@ function App() {
               backend: backendApp,
               replaceConnections,
               replaceGlobalProxy,
+              t,
           }, normalizeSecurityUpdateStatus(rawStatus));
 
           applySecurityUpdateStatus(nextStatus, {
@@ -2706,6 +2719,7 @@ function App() {
           : securityUpdateStatus;
       const nextStatus = mergeSecurityUpdateStatusWithLegacySource(rawStatus, nextRawPayload, {
           previousStatus: securityUpdateStatus,
+          t,
       });
       const nextHasLegacySensitiveItems = hasLegacyMigratableSensitiveItems(nextRawPayload);
 
@@ -2723,6 +2737,7 @@ function App() {
       securityUpdateRepairSource,
       securityUpdateStatus,
       securityUpdateStatus.migrationId,
+      t,
   ]);
 
   const handleCloseModal = () => {
@@ -3828,8 +3843,8 @@ function App() {
                 {
                   key: 'schema-compare',
                   icon: <AppstoreOutlined />,
-                  title: '表结构比对',
-                  description: '对比源表与目标表结构差异，只预览不执行。',
+                  title: t('app.tools.entry.schema_compare.title'),
+                  description: t('app.tools.entry.schema_compare.description'),
                   onClick: () => {
                     setIsToolsModalOpen(false);
                     setSyncModalEntryMode('schemaCompare');
@@ -3839,8 +3854,8 @@ function App() {
                 {
                   key: 'data-compare',
                   icon: <SwitcherOutlined />,
-                  title: '数据比对',
-                  description: '按主键分析新增、更新、删除和相同行。',
+                  title: t('app.tools.entry.data_compare.title'),
+                  description: t('app.tools.entry.data_compare.description'),
                   onClick: () => {
                     setIsToolsModalOpen(false);
                     setSyncModalEntryMode('dataCompare');
@@ -4409,18 +4424,18 @@ function App() {
                                   )}
                                   {appearance.uiVersion === 'v2' && (
                                       <div style={{ marginTop: 14 }}>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>新版左侧搜索模式</div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.ui_version.sidebar_search.title')}</div>
                                           <Segmented
                                               block
                                               options={[
-                                                  { label: '新版命令搜索', value: 'command' },
-                                                  { label: '旧版侧栏筛选', value: 'filter' },
+                                                  { label: t('app.theme.ui_version.sidebar_search.command'), value: 'command' },
+                                                  { label: t('app.theme.ui_version.sidebar_search.filter'), value: 'filter' },
                                               ]}
                                               value={appearance.v2SidebarSearchMode ?? 'command'}
                                               onChange={(value) => setAppearance({ v2SidebarSearchMode: value as 'command' | 'filter' })}
                                           />
                                           <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
-                                              新版命令搜索适合跳转连接、表和动作，可在面板中开启同步开关持续过滤左侧树；旧版侧栏筛选会直接显示输入框并持久保留筛选内容。
+                                              {t('app.theme.ui_version.sidebar_search.hint')}
                                           </div>
                                       </div>
                                   )}
@@ -4546,9 +4561,9 @@ function App() {
                                                       lineHeight: 1.7,
                                                   }}
                                               >
-                                                  Ubuntu/Linux 未检测到中文 CJK 字体，界面可能显示方框。请安装：
+                                                  {t('app.theme.font_family.linux_cjk_install_prefix')}
                                                   <span style={{ fontFamily: 'var(--gn-font-mono)', marginLeft: 6 }}>{linuxCJKFontInstallHint}</span>
-                                                  ，然后重启 GoNavi。
+                                                  {t('app.theme.font_family.linux_cjk_install_suffix')}
                                               </div>
                                           )}
                                       </div>
@@ -4588,16 +4603,16 @@ function App() {
                               <div ref={tabDisplaySettingsPanelRef} style={utilityPanelStyle}>
                                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
                                       <div style={{ minWidth: 0 }}>
-                                          <div style={{ fontWeight: 500 }}>Tab 标签展示</div>
+                                          <div style={{ fontWeight: 500 }}>{t('app.theme.tab_display.title')}</div>
                                           <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
-                                              自定义连接名、对象类型、对象名、数据库、Schema 和 Host/IP 的展示顺序；双行模式可把上下文放到副行。
+                                              {t('app.theme.tab_display.description')}
                                           </div>
                                       </div>
                                       <Segmented
                                           size="small"
                                           options={[
-                                              { label: '单行', value: 'single' },
-                                              { label: '双行', value: 'double' },
+                                              { label: t('app.theme.tab_display.layout.single'), value: 'single' },
+                                              { label: t('app.theme.tab_display.layout.double'), value: 'double' },
                                           ]}
                                           value={tabDisplaySettings.layout}
                                           onChange={(value) => setTabDisplayLayout(value as TabDisplayLayout)}
@@ -4605,7 +4620,6 @@ function App() {
                                   </div>
                                   <div style={{ display: 'grid', gap: 8 }}>
                                       {tabDisplayElementOrder.map((key) => {
-                                          const meta = TAB_DISPLAY_ELEMENT_META[key];
                                           const checked = visibleTabDisplayElementKeys.has(key);
                                           const row = tabDisplaySettings.secondaryElements.includes(key) ? 'secondary' : 'primary';
                                           const currentRowElements = row === 'secondary'
@@ -4678,7 +4692,7 @@ function App() {
                                                       />
                                                       <div style={{ minWidth: 0 }}>
                                                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                                                              <span style={{ fontWeight: 600 }}>{meta.label}</span>
+                                                              <span style={{ fontWeight: 600 }}>{getTabDisplayElementLabel(key)}</span>
                                                               {isFocused ? (
                                                                   <span style={{
                                                                       fontSize: 10,
@@ -4688,7 +4702,7 @@ function App() {
                                                                       background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)',
                                                                       color: darkMode ? '#ffd666' : '#1677ff',
                                                                   }}>
-                                                                      当前
+                                                                      {t('app.theme.tab_display.badge.current')}
                                                                   </span>
                                                               ) : null}
                                                               {checked && tabDisplaySettings.layout === 'double' ? (
@@ -4704,11 +4718,13 @@ function App() {
                                                                           ? (darkMode ? '#7dd3fc' : '#0369a1')
                                                                           : (darkMode ? '#86efac' : '#15803d'),
                                                                   }}>
-                                                                      {row === 'secondary' ? '副行' : '主行'}
+                                                                      {row === 'secondary'
+                                                                          ? t('app.theme.tab_display.row.secondary')
+                                                                          : t('app.theme.tab_display.row.primary')}
                                                                   </span>
                                                               ) : null}
                                                           </div>
-                                                          <div style={{ ...utilityMutedTextStyle, marginTop: 2 }}>{meta.description}</div>
+                                                          <div style={{ ...utilityMutedTextStyle, marginTop: 2 }}>{getTabDisplayElementDescription(key)}</div>
                                                       </div>
                                                   </div>
                                                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -4716,8 +4732,8 @@ function App() {
                                                           <Segmented
                                                               size="small"
                                                               options={[
-                                                                  { label: '主行', value: 'primary' },
-                                                                  { label: '副行', value: 'secondary' },
+                                                                  { label: t('app.theme.tab_display.row.primary'), value: 'primary' },
+                                                                  { label: t('app.theme.tab_display.row.secondary'), value: 'secondary' },
                                                               ]}
                                                               value={row}
                                                               onChange={(value) => setTabDisplayElementRow(key, value as 'primary' | 'secondary')}
@@ -4732,7 +4748,7 @@ function App() {
                                                               moveTabDisplayElement(key, -1);
                                                           }}
                                                       >
-                                                          上移
+                                                          {t('app.theme.tab_display.action.move_up')}
                                                       </Button>
                                                       <Button
                                                           size="small"
@@ -4742,7 +4758,7 @@ function App() {
                                                               moveTabDisplayElement(key, 1);
                                                           }}
                                                       >
-                                                          下移
+                                                          {t('app.theme.tab_display.action.move_down')}
                                                       </Button>
                                                   </div>
                                               </div>
@@ -4750,13 +4766,18 @@ function App() {
                                       })}
                                   </div>
                                   <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
-                                      当前预览：{tabDisplaySettings.layout === 'double' ? '主行 ' : ''}
-                                      {tabDisplaySettings.primaryElements.map((key) => TAB_DISPLAY_ELEMENT_META[key].label).join(' / ') || '默认标签'}
+                                      {t('app.theme.tab_display.preview.prefix')}
+                                      {tabDisplaySettings.layout === 'double' ? `${t('app.theme.tab_display.row.primary')} ` : ''}
+                                      {tabDisplaySettings.primaryElements.map(getTabDisplayElementLabel).join(' / ') || t('app.theme.tab_display.preview.default_label')}
                                       {tabDisplaySettings.layout === 'double' && tabDisplaySettings.secondaryElements.length > 0
-                                          ? `，副行 ${tabDisplaySettings.secondaryElements.map((key) => TAB_DISPLAY_ELEMENT_META[key].label).join(' / ')}`
+                                          ? t('app.theme.tab_display.preview.secondary', {
+                                              labels: tabDisplaySettings.secondaryElements.map(getTabDisplayElementLabel).join(' / '),
+                                          })
                                           : ''}
                                       {focusedTabDisplayElementKey
-                                          ? `；当前选中 ${TAB_DISPLAY_ELEMENT_META[focusedTabDisplayElementKey].label}`
+                                          ? t('app.theme.tab_display.preview.focused', {
+                                              label: getTabDisplayElementLabel(focusedTabDisplayElementKey),
+                                          })
                                           : ''}
                                   </div>
                               </div>

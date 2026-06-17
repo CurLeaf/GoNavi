@@ -42,7 +42,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
         path: '/mcp',
         url: 'http://127.0.0.1:8765/mcp',
         schemaOnly: true,
-        message: 'GoNavi MCP HTTP 服务未启动',
+        message: t('app.browser_mock.mcp_http.not_running'),
     };
     let mockMCPClientStatuses: any[] = [
         {
@@ -52,7 +52,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
             matchesCurrent: false,
             clientDetected: false,
             clientCommand: 'claude',
-            message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
+            message: t('app.browser_mock.mcp_client.claude_code.not_detected'),
             configPath: 'C:/Users/mock/.claude.json',
             command: 'C:/Program Files/GoNavi/GoNavi.exe',
             args: ['mcp-server'],
@@ -65,7 +65,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
             clientDetected: true,
             clientCommand: 'codex',
             clientPath: 'C:/Users/mock/AppData/Roaming/npm/codex.cmd',
-            message: '已检测到 Codex 中的 GoNavi MCP 记录，但与当前 GoNavi 安装路径不一致，建议更新',
+            message: t('app.browser_mock.mcp_client.codex.path_mismatch'),
             configPath: 'C:/Users/mock/.codex/config.toml',
             command: 'C:/Old/GoNavi.exe',
             args: ['mcp-server'],
@@ -155,9 +155,11 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
 
     const saveMockQuery = (input: any) => {
         const nextId = String(input?.id || `saved-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+        const index = mockSavedQueries.findIndex((item) => item.id === nextId);
+        const generatedNameIndex = index >= 0 ? index : mockSavedQueries.length;
         const view = {
             id: nextId,
-            name: String(input?.name || '未命名查询'),
+            name: String(input?.name || t('saved_query.default_name', { index: generatedNameIndex + 1 })),
             sql: String(input?.sql || ''),
             connectionId: String(input?.connectionId || ''),
             dbName: String(input?.dbName || ''),
@@ -167,7 +169,6 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
             bindingStatus: typeof input?.bindingStatus === 'string' ? input.bindingStatus : undefined,
             originalConnectionId: typeof input?.originalConnectionId === 'string' ? input.originalConnectionId : undefined,
         };
-        const index = mockSavedQueries.findIndex((item) => item.id === nextId);
         if (index >= 0) {
             mockSavedQueries[index] = view;
         } else {
@@ -374,7 +375,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                         driverPath: `${nextPath}/drivers`,
                         isDefaultPath: nextPath === mockDataRootInfo.defaultPath,
                     };
-                    return { success: true, message: '数据目录已更新', data: cloneBrowserMockValue(mockDataRootInfo) };
+                    return { success: true, message: t('app.data_root.message.updated'), data: cloneBrowserMockValue(mockDataRootInfo) };
                 },
             }
         },
@@ -436,7 +437,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                         token,
                         authorizationHeader: `Bearer ${token}`,
                         startedAt: Date.now(),
-                        message: 'GoNavi MCP HTTP 服务已启动',
+                        message: t('app.browser_mock.mcp_http.started'),
                     };
                     return cloneBrowserMockValue(mockMCPHTTPServerStatus);
                 },
@@ -444,7 +445,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                     mockMCPHTTPServerStatus = {
                         ...mockMCPHTTPServerStatus,
                         running: false,
-                        message: 'GoNavi MCP HTTP 服务已停止',
+                        message: t('app.browser_mock.mcp_http.stopped'),
                     };
                     return cloneBrowserMockValue(mockMCPHTTPServerStatus);
                 },
@@ -455,7 +456,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                             ...item,
                             installed: true,
                             matchesCurrent: true,
-                            message: '已写入 Claude Code 用户级 MCP 配置，重启 Claude CLI 后可在 /mcp 的 User MCPs 中看到 GoNavi。',
+                            message: t('app.browser_mock.mcp_client.claude_code.installed'),
                             command: 'C:/Program Files/GoNavi/GoNavi.exe',
                             args: ['mcp-server'],
                         }
@@ -463,7 +464,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                     return {
                         success: true,
                         client: 'claude-code',
-                        message: '已写入 Claude Code 用户级 MCP 配置，重启 Claude CLI 后可在 /mcp 的 User MCPs 中看到 GoNavi。',
+                        message: t('app.browser_mock.mcp_client.claude_code.installed'),
                         configPath: 'C:/Users/mock/.claude.json',
                         command: 'C:/Program Files/GoNavi/GoNavi.exe',
                         args: ['mcp-server'],
@@ -475,7 +476,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                             ...item,
                             installed: true,
                             matchesCurrent: true,
-                            message: '已写入 Codex 用户级 MCP 配置，重启 Codex CLI 或桌面端后可看到 GoNavi。',
+                            message: t('app.browser_mock.mcp_client.codex.installed'),
                             command: 'C:/Program Files/GoNavi/GoNavi.exe',
                             args: ['mcp-server'],
                         }
@@ -483,7 +484,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                     return {
                         success: true,
                         client: 'codex',
-                        message: '已写入 Codex 用户级 MCP 配置，重启 Codex CLI 或桌面端后可看到 GoNavi。',
+                        message: t('app.browser_mock.mcp_client.codex.installed'),
                         configPath: 'C:/Users/mock/.codex/config.toml',
                         command: 'C:/Program Files/GoNavi/GoNavi.exe',
                         args: ['mcp-server'],
@@ -511,7 +512,9 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                 },
                 AITestMCPServer: async (input: any) => ({
                     success: String(input?.command || '').trim() !== '',
-                    message: String(input?.command || '').trim() !== '' ? 'MCP mock 测试成功' : 'MCP 命令不能为空',
+                    message: String(input?.command || '').trim() !== ''
+                        ? t('app.browser_mock.mcp_server.test_success')
+                        : t('app.browser_mock.mcp_server.command_required'),
                     tools: [],
                 }),
                 AIListMCPTools: async () => [],
@@ -520,7 +523,7 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                     serverId: '',
                     serverName: '',
                     originalName: _alias,
-                    content: '浏览器 mock 未接入真实 MCP 服务',
+                    content: t('app.browser_mock.mcp_tool.unavailable'),
                     isError: true,
                 }),
                 AIGetSkills: async () => cloneBrowserMockValue(mockSkills),
@@ -545,7 +548,9 @@ if (typeof window !== 'undefined' && (!(window as any).go?.app?.App || !(window 
                 },
                 AITestProvider: async (input: any) => ({
                     success: String(input?.apiKey || '').trim() !== '',
-                    message: String(input?.apiKey || '').trim() !== '' ? '端点连通性测试成功！' : '连接测试失败: missing api key',
+                    message: String(input?.apiKey || '').trim() !== ''
+                        ? t('app.browser_mock.provider.test_success')
+                        : t('app.browser_mock.provider.test_failed_detail', { detail: 'missing api key' }),
                 }),
                 AISetSafetyLevel: async (level: string) => {
                     mockAISafetyLevel = String(level || 'readonly');
