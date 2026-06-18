@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -42,9 +43,16 @@ type Service struct {
 	secretStore        secretstore.SecretStore
 	localizer          *i18n.Localizer
 	cancelFuncs        map[string]context.CancelFunc // 记录每个 session 的 context 取消函数
+	sessionProviders   map[string]aiSessionProviderRuntime
 	mcpHTTPMu          sync.Mutex
 	mcpHTTP            *mcpHTTPServerRuntime
 	mcpHTTPLast        ai.MCPHTTPServerStatus
+}
+
+type aiSessionProviderRuntime struct {
+	ProviderKey string
+	State       json.RawMessage
+	Messages    []ai.Message
 }
 
 var miniMaxAnthropicModels = []string{
@@ -131,15 +139,16 @@ func NewServiceWithSecretStore(store secretstore.SecretStore) *Service {
 		store = secretstore.NewUnavailableStore("secret store unavailable")
 	}
 	return &Service{
-		providers:    make([]ai.ProviderConfig, 0),
-		safetyLevel:  ai.PermissionReadOnly,
-		contextLevel: ai.ContextSchemaOnly,
-		mcpServers:   make([]ai.MCPServerConfig, 0),
-		skills:       make([]ai.SkillConfig, 0),
-		guard:        safety.NewGuard(ai.PermissionReadOnly),
-		secretStore:  store,
-		localizer:    newServiceLocalizer(),
-		cancelFuncs:  make(map[string]context.CancelFunc),
+		providers:        make([]ai.ProviderConfig, 0),
+		safetyLevel:      ai.PermissionReadOnly,
+		contextLevel:     ai.ContextSchemaOnly,
+		mcpServers:       make([]ai.MCPServerConfig, 0),
+		skills:           make([]ai.SkillConfig, 0),
+		guard:            safety.NewGuard(ai.PermissionReadOnly),
+		secretStore:      store,
+		localizer:        newServiceLocalizer(),
+		cancelFuncs:      make(map[string]context.CancelFunc),
+		sessionProviders: make(map[string]aiSessionProviderRuntime),
 	}
 }
 
@@ -1150,7 +1159,16 @@ func (s *Service) AISetContextLevel(level string) {
 
 // AIChatSend 非流式发送 AI 对话
 func (s *Service) AIChatSend(messages []ai.Message, tools []ai.Tool) map[string]interface{} {
-	p, err := s.getActiveProvider()
+	return s.aiChatSend("", messages, tools, false)
+}
+
+// AIChatSendInSession 非流式发送 AI 对话，并在支持的 Provider 上复用会话态。
+func (s *Service) AIChatSendInSession(sessionID string, messages []ai.Message, tools []ai.Tool) map[string]interface{} {
+	return s.aiChatSend(sessionID, messages, tools, true)
+}
+
+func (s *Service) aiChatSend(sessionID string, messages []ai.Message, tools []ai.Tool, allowSessionReuse bool) map[string]interface{} {
+	p, config, err := s.getActiveProviderRuntime()
 	if err != nil {
 		logger.Error(err, "AIChatSend 获取 Provider 失败：messages=%d tools=%d", len(messages), len(tools))
 		return map[string]interface{}{"success": false, "error": err.Error()}
@@ -1158,14 +1176,62 @@ func (s *Service) AIChatSend(messages []ai.Message, tools []ai.Tool) map[string]
 
 	started := time.Now()
 	providerName := p.Name()
-	logger.Infof("AIChatSend 开始：provider=%s messages=%d tools=%d", providerName, len(messages), len(tools))
-	resp, err := p.Chat(context.Background(), ai.ChatRequest{Messages: messages, Tools: tools})
+	logger.Infof("AIChatSend 开始：sessionID=%s provider=%s messages=%d tools=%d sessionReuse=%t", sessionID, providerName, len(messages), len(tools), allowSessionReuse)
+	requestMessages := cloneAIMessages(messages)
+	var updatedProviderState json.RawMessage
+	if allowSessionReuse && strings.TrimSpace(sessionID) != "" {
+		if sessionAwareProvider, ok := p.(provider.SessionChatProvider); ok {
+			providerKey := providerSessionKey(config)
+			providerState, deltaMessages := s.resolveSessionProviderRequest(sessionID, providerKey, messages)
+			requestMessages = deltaMessages
+			resp, updatedState, err := sessionAwareProvider.ChatWithState(context.Background(), providerState, ai.ChatRequest{Messages: requestMessages, Tools: tools})
+			if err != nil {
+				logger.Warnf("AIChatSend 失败：sessionID=%s provider=%s messages=%d tools=%d duration=%s err=%s", sessionID, providerName, len(messages), len(tools), time.Since(started).Round(time.Millisecond), provider.RedactAIUpstreamLogText(err.Error()))
+				return map[string]interface{}{"success": false, "error": err.Error()}
+			}
+			updatedProviderState = updatedState
+			historyAfterSend := cloneAIMessages(messages)
+			if assistantMessage, hasAssistantMessage := buildAssistantMessageFromChatResponse(resp); hasAssistantMessage {
+				historyAfterSend = append(historyAfterSend, assistantMessage)
+			}
+			if persistErr := s.storeSessionProviderRuntime(sessionID, providerKey, updatedProviderState, historyAfterSend); persistErr != nil {
+				logger.Warnf("AIChatSend 保存会话 Provider 状态失败：sessionID=%s provider=%s err=%s", sessionID, providerName, provider.RedactAIUpstreamLogText(persistErr.Error()))
+			}
+			logger.Infof(
+				"AIChatSend 完成：sessionID=%s provider=%s messages=%d tools=%d toolCalls=%d promptTokens=%d completionTokens=%d totalTokens=%d duration=%s sessionReuse=%t",
+				sessionID,
+				providerName,
+				len(messages),
+				len(tools),
+				len(resp.ToolCalls),
+				resp.TokensUsed.PromptTokens,
+				resp.TokensUsed.CompletionTokens,
+				resp.TokensUsed.TotalTokens,
+				time.Since(started).Round(time.Millisecond),
+				true,
+			)
+			return map[string]interface{}{
+				"success":           true,
+				"content":           resp.Content,
+				"reasoning_content": resp.ReasoningContent,
+				"tool_calls":        resp.ToolCalls,
+				"tokensUsed": map[string]int{
+					"promptTokens":     resp.TokensUsed.PromptTokens,
+					"completionTokens": resp.TokensUsed.CompletionTokens,
+					"totalTokens":      resp.TokensUsed.TotalTokens,
+				},
+			}
+		}
+	}
+
+	resp, err := p.Chat(context.Background(), ai.ChatRequest{Messages: requestMessages, Tools: tools})
 	if err != nil {
-		logger.Warnf("AIChatSend 失败：provider=%s messages=%d tools=%d duration=%s err=%s", providerName, len(messages), len(tools), time.Since(started).Round(time.Millisecond), provider.RedactAIUpstreamLogText(err.Error()))
+		logger.Warnf("AIChatSend 失败：sessionID=%s provider=%s messages=%d tools=%d duration=%s err=%s", sessionID, providerName, len(messages), len(tools), time.Since(started).Round(time.Millisecond), provider.RedactAIUpstreamLogText(err.Error()))
 		return map[string]interface{}{"success": false, "error": err.Error()}
 	}
 	logger.Infof(
-		"AIChatSend 完成：provider=%s messages=%d tools=%d toolCalls=%d promptTokens=%d completionTokens=%d totalTokens=%d duration=%s",
+		"AIChatSend 完成：sessionID=%s provider=%s messages=%d tools=%d toolCalls=%d promptTokens=%d completionTokens=%d totalTokens=%d duration=%s sessionReuse=%t",
+		sessionID,
 		providerName,
 		len(messages),
 		len(tools),
@@ -1174,6 +1240,7 @@ func (s *Service) AIChatSend(messages []ai.Message, tools []ai.Tool) map[string]
 		resp.TokensUsed.CompletionTokens,
 		resp.TokensUsed.TotalTokens,
 		time.Since(started).Round(time.Millisecond),
+		false,
 	)
 
 	return map[string]interface{}{
@@ -1204,7 +1271,7 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 			cancel() // 确保释放
 		}()
 
-		p, err := s.getActiveProvider()
+		p, config, err := s.getActiveProviderRuntime()
 		if err != nil {
 			logger.Error(err, "AIChatStream 获取 Provider 失败：sessionID=%s messages=%d tools=%d", sessionID, len(messages), len(tools))
 			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
@@ -1220,29 +1287,67 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 		thinkingChunks := 0
 		toolCallChunks := 0
 		errorChunks := 0
+		var assistantContent strings.Builder
+		var assistantReasoning strings.Builder
+		var assistantToolCalls []ai.ToolCall
+		var updatedProviderState json.RawMessage
+		requestMessages := cloneAIMessages(messages)
 		logger.Infof("AIChatStream 开始：sessionID=%s provider=%s messages=%d tools=%d", sessionID, providerName, len(messages), len(tools))
-		err = p.ChatStream(streamCtx, ai.ChatRequest{Messages: messages, Tools: tools}, func(chunk ai.StreamChunk) {
-			if chunk.Content != "" {
-				contentChunks++
-			}
-			if chunk.Thinking != "" || chunk.ReasoningContent != "" {
-				thinkingChunks++
-			}
-			if len(chunk.ToolCalls) > 0 {
-				toolCallChunks++
-			}
-			if chunk.Error != "" {
-				errorChunks++
-			}
-			wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
-				"content":           chunk.Content,
-				"thinking":          chunk.Thinking,
-				"reasoning_content": chunk.ReasoningContent,
-				"tool_calls":        chunk.ToolCalls,
-				"done":              chunk.Done,
-				"error":             chunk.Error,
+		if sessionAwareProvider, ok := p.(provider.SessionStreamProvider); ok {
+			providerKey := providerSessionKey(config)
+			providerState, deltaMessages := s.resolveSessionProviderRequest(sessionID, providerKey, messages)
+			requestMessages = deltaMessages
+			updatedProviderState, err = sessionAwareProvider.ChatStreamWithState(streamCtx, providerState, ai.ChatRequest{Messages: requestMessages, Tools: tools}, func(chunk ai.StreamChunk) {
+				if chunk.Content != "" {
+					contentChunks++
+					assistantContent.WriteString(chunk.Content)
+				}
+				if chunk.Thinking != "" || chunk.ReasoningContent != "" {
+					thinkingChunks++
+					if chunk.ReasoningContent != "" {
+						assistantReasoning.WriteString(chunk.ReasoningContent)
+					}
+				}
+				if len(chunk.ToolCalls) > 0 {
+					toolCallChunks++
+					assistantToolCalls = append([]ai.ToolCall(nil), chunk.ToolCalls...)
+				}
+				if chunk.Error != "" {
+					errorChunks++
+				}
+				wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
+					"content":           chunk.Content,
+					"thinking":          chunk.Thinking,
+					"reasoning_content": chunk.ReasoningContent,
+					"tool_calls":        chunk.ToolCalls,
+					"done":              chunk.Done,
+					"error":             chunk.Error,
+				})
 			})
-		})
+		} else {
+			err = p.ChatStream(streamCtx, ai.ChatRequest{Messages: messages, Tools: tools}, func(chunk ai.StreamChunk) {
+				if chunk.Content != "" {
+					contentChunks++
+				}
+				if chunk.Thinking != "" || chunk.ReasoningContent != "" {
+					thinkingChunks++
+				}
+				if len(chunk.ToolCalls) > 0 {
+					toolCallChunks++
+				}
+				if chunk.Error != "" {
+					errorChunks++
+				}
+				wailsRuntime.EventsEmit(s.ctx, "ai:stream:"+sessionID, map[string]interface{}{
+					"content":           chunk.Content,
+					"thinking":          chunk.Thinking,
+					"reasoning_content": chunk.ReasoningContent,
+					"tool_calls":        chunk.ToolCalls,
+					"done":              chunk.Done,
+					"error":             chunk.Error,
+				})
+			})
+		}
 
 		// 当 context 被主动 cancel 的时候，不把这个视为向外抛的 error
 		if err != nil && err != context.Canceled {
@@ -1256,6 +1361,16 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 		if err == context.Canceled {
 			logger.Infof("AIChatStream 已取消：sessionID=%s provider=%s duration=%s", sessionID, providerName, time.Since(started).Round(time.Millisecond))
 			return
+		}
+		if _, ok := p.(provider.SessionStreamProvider); ok && errorChunks == 0 {
+			providerKey := providerSessionKey(config)
+			historyAfterStream := cloneAIMessages(messages)
+			if assistantMessage, hasAssistantMessage := buildAssistantMessageFromStreamResult(assistantContent.String(), assistantReasoning.String(), assistantToolCalls); hasAssistantMessage {
+				historyAfterStream = append(historyAfterStream, assistantMessage)
+			}
+			if persistErr := s.storeSessionProviderRuntime(sessionID, providerKey, updatedProviderState, historyAfterStream); persistErr != nil {
+				logger.Warnf("AIChatStream 保存会话 Provider 状态失败：sessionID=%s provider=%s err=%s", sessionID, providerName, provider.RedactAIUpstreamLogText(persistErr.Error()))
+			}
 		}
 		logger.Infof(
 			"AIChatStream 完成：sessionID=%s provider=%s messages=%d tools=%d contentChunks=%d thinkingChunks=%d toolCallChunks=%d errorChunks=%d duration=%s",
@@ -1292,6 +1407,11 @@ func (s *Service) AICheckSQL(sql string) ai.SafetyResult {
 // --- 内部方法 ---
 
 func (s *Service) getActiveProvider() (provider.Provider, error) {
+	p, _, err := s.getActiveProviderRuntime()
+	return p, err
+}
+
+func (s *Service) getActiveProviderRuntime() (provider.Provider, ai.ProviderConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -1301,11 +1421,174 @@ func (s *Service) getActiveProvider() (provider.Provider, error) {
 
 	for _, cfg := range s.providers {
 		if cfg.ID == s.activeProvider {
-			return provider.NewProvider(normalizeProviderConfig(cfg))
+			normalized := normalizeProviderConfig(cfg)
+			p, err := provider.NewProvider(normalized)
+			return p, normalized, err
 		}
 	}
 
-	return nil, fmt.Errorf("未配置 AI Provider，请先在设置中配置")
+	return nil, ai.ProviderConfig{}, fmt.Errorf("未配置 AI Provider，请先在设置中配置")
+}
+
+func providerSessionKey(config ai.ProviderConfig) string {
+	return strings.Join([]string{
+		strings.TrimSpace(config.ID),
+		strings.ToLower(strings.TrimSpace(config.Type)),
+		strings.ToLower(strings.TrimSpace(config.APIFormat)),
+		strings.TrimSpace(config.BaseURL),
+		strings.TrimSpace(config.Model),
+	}, "|")
+}
+
+func cloneAIMessages(messages []ai.Message) []ai.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	cloned := make([]ai.Message, len(messages))
+	for index, message := range messages {
+		cloned[index] = message
+		if len(message.Images) > 0 {
+			cloned[index].Images = append([]string(nil), message.Images...)
+		}
+		if len(message.ToolCalls) > 0 {
+			cloned[index].ToolCalls = append([]ai.ToolCall(nil), message.ToolCalls...)
+		}
+	}
+	return cloned
+}
+
+func buildAssistantMessageFromStreamResult(content string, reasoning string, toolCalls []ai.ToolCall) (ai.Message, bool) {
+	message := ai.Message{
+		Role:             "assistant",
+		Content:          content,
+		ReasoningContent: reasoning,
+	}
+	if len(toolCalls) > 0 {
+		message.ToolCalls = append([]ai.ToolCall(nil), toolCalls...)
+	}
+	hasPayload := strings.TrimSpace(message.Content) != "" || strings.TrimSpace(message.ReasoningContent) != "" || len(message.ToolCalls) > 0
+	return message, hasPayload
+}
+
+func buildAssistantMessageFromChatResponse(resp *ai.ChatResponse) (ai.Message, bool) {
+	if resp == nil {
+		return ai.Message{}, false
+	}
+	return buildAssistantMessageFromStreamResult(resp.Content, resp.ReasoningContent, resp.ToolCalls)
+}
+
+func messagesHavePrefix(messages []ai.Message, prefix []ai.Message) bool {
+	if len(prefix) == 0 {
+		return true
+	}
+	if len(messages) < len(prefix) {
+		return false
+	}
+	for index := range prefix {
+		if !reflect.DeepEqual(messages[index], prefix[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) resolveSessionProviderRequest(sessionID string, providerKey string, messages []ai.Message) (json.RawMessage, []ai.Message) {
+	runtimeState, ok := s.loadSessionProviderRuntime(sessionID, providerKey)
+	if !ok || len(runtimeState.State) == 0 || len(runtimeState.Messages) == 0 {
+		return nil, cloneAIMessages(messages)
+	}
+	if !messagesHavePrefix(messages, runtimeState.Messages) {
+		return nil, cloneAIMessages(messages)
+	}
+	deltaMessages := cloneAIMessages(messages[len(runtimeState.Messages):])
+	if len(deltaMessages) == 0 {
+		return nil, cloneAIMessages(messages)
+	}
+	return runtimeState.State, deltaMessages
+}
+
+func (s *Service) loadSessionProviderRuntime(sessionID string, providerKey string) (aiSessionProviderRuntime, bool) {
+	s.mu.RLock()
+	runtimeState, ok := s.sessionProviders[sessionID]
+	s.mu.RUnlock()
+	if ok && runtimeState.ProviderKey == providerKey {
+		return aiSessionProviderRuntime{
+			ProviderKey: runtimeState.ProviderKey,
+			State:       append(json.RawMessage(nil), runtimeState.State...),
+			Messages:    cloneAIMessages(runtimeState.Messages),
+		}, true
+	}
+
+	sessionData, err := s.loadSessionFile(sessionID)
+	if err != nil {
+		return aiSessionProviderRuntime{}, false
+	}
+	if strings.TrimSpace(sessionData.ProviderKey) == "" || sessionData.ProviderKey != providerKey || len(sessionData.ProviderState) == 0 {
+		return aiSessionProviderRuntime{}, false
+	}
+	var providerMessages []ai.Message
+	if len(sessionData.ProviderMessages) > 0 {
+		if err := json.Unmarshal(sessionData.ProviderMessages, &providerMessages); err != nil {
+			return aiSessionProviderRuntime{}, false
+		}
+	}
+
+	runtimeState = aiSessionProviderRuntime{
+		ProviderKey: sessionData.ProviderKey,
+		State:       append(json.RawMessage(nil), sessionData.ProviderState...),
+		Messages:    providerMessages,
+	}
+	s.mu.Lock()
+	s.sessionProviders[sessionID] = runtimeState
+	s.mu.Unlock()
+	return aiSessionProviderRuntime{
+		ProviderKey: runtimeState.ProviderKey,
+		State:       append(json.RawMessage(nil), runtimeState.State...),
+		Messages:    cloneAIMessages(runtimeState.Messages),
+	}, true
+}
+
+func (s *Service) storeSessionProviderRuntime(sessionID string, providerKey string, state json.RawMessage, messages []ai.Message) error {
+	if strings.TrimSpace(providerKey) == "" {
+		return nil
+	}
+
+	runtimeState := aiSessionProviderRuntime{
+		ProviderKey: providerKey,
+		State:       append(json.RawMessage(nil), state...),
+		Messages:    cloneAIMessages(messages),
+	}
+	s.mu.Lock()
+	if len(state) == 0 {
+		delete(s.sessionProviders, sessionID)
+	} else {
+		s.sessionProviders[sessionID] = runtimeState
+	}
+	s.mu.Unlock()
+
+	sessionData, err := s.loadOrCreateSessionFile(sessionID)
+	if err != nil {
+		return err
+	}
+	if len(state) == 0 {
+		sessionData.ProviderKey = ""
+		sessionData.ProviderState = nil
+		sessionData.ProviderMessages = nil
+		return s.saveSessionFile(sessionID, sessionData)
+	}
+
+	sessionData.ProviderKey = providerKey
+	sessionData.ProviderState = append(json.RawMessage(nil), state...)
+	if len(messages) == 0 {
+		sessionData.ProviderMessages = nil
+	} else {
+		messageBytes, err := json.Marshal(messages)
+		if err != nil {
+			return fmt.Errorf("序列化会话 Provider 消息失败: %w", err)
+		}
+		sessionData.ProviderMessages = json.RawMessage(messageBytes)
+	}
+	return s.saveSessionFile(sessionID, sessionData)
 }
 
 // --- 配置持久化 ---
@@ -1363,14 +1646,67 @@ func normalizeUserPromptText(value string) string {
 
 // sessionFileData 会话文件的 JSON 结构
 type sessionFileData struct {
-	ID        string          `json:"id"`
-	Title     string          `json:"title"`
-	UpdatedAt int64           `json:"updatedAt"`
-	Messages  json.RawMessage `json:"messages"` // 透传前端格式，后端不解析消息体
+	ID               string          `json:"id"`
+	Title            string          `json:"title"`
+	UpdatedAt        int64           `json:"updatedAt"`
+	Messages         json.RawMessage `json:"messages"` // 透传前端格式，后端不解析消息体
+	ProviderKey      string          `json:"providerKey,omitempty"`
+	ProviderState    json.RawMessage `json:"providerState,omitempty"`
+	ProviderMessages json.RawMessage `json:"providerMessages,omitempty"`
 }
 
 func (s *Service) sessionsDir() string {
 	return filepath.Join(s.configDir, "sessions")
+}
+
+func (s *Service) sessionFilePath(sessionID string) string {
+	return filepath.Join(s.sessionsDir(), sessionID+".json")
+}
+
+func (s *Service) loadSessionFile(sessionID string) (sessionFileData, error) {
+	data, err := os.ReadFile(s.sessionFilePath(sessionID))
+	if err != nil {
+		return sessionFileData{}, err
+	}
+	var sessionData sessionFileData
+	if err := json.Unmarshal(data, &sessionData); err != nil {
+		return sessionFileData{}, err
+	}
+	return sessionData, nil
+}
+
+func (s *Service) loadOrCreateSessionFile(sessionID string) (sessionFileData, error) {
+	sessionData, err := s.loadSessionFile(sessionID)
+	if err == nil {
+		return sessionData, nil
+	}
+	if !os.IsNotExist(err) {
+		return sessionFileData{}, err
+	}
+	return sessionFileData{
+		ID:        sessionID,
+		Title:     "新的对话",
+		UpdatedAt: time.Now().UnixMilli(),
+		Messages:  json.RawMessage("[]"),
+	}, nil
+}
+
+func (s *Service) saveSessionFile(sessionID string, sessionData sessionFileData) error {
+	dir := s.sessionsDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("创建 sessions 目录失败: %w", err)
+	}
+	if strings.TrimSpace(sessionData.ID) == "" {
+		sessionData.ID = sessionID
+	}
+	if len(sessionData.Messages) == 0 {
+		sessionData.Messages = json.RawMessage("[]")
+	}
+	data, err := json.Marshal(sessionData)
+	if err != nil {
+		return fmt.Errorf("序列化会话数据失败: %w", err)
+	}
+	return os.WriteFile(s.sessionFilePath(sessionID), data, 0o644)
 }
 
 // AIGetSessions 获取所有会话的元数据列表（不含消息体）
@@ -1417,53 +1753,40 @@ func (s *Service) AIGetSessions() []map[string]interface{} {
 
 // AILoadSession 加载指定会话的完整数据（含消息）
 func (s *Service) AILoadSession(sessionID string) map[string]interface{} {
-	path := filepath.Join(s.sessionsDir(), sessionID+".json")
-	data, err := os.ReadFile(path)
+	sessionData, err := s.loadSessionFile(sessionID)
 	if err != nil {
 		return map[string]interface{}{"success": false, "error": "会话不存在"}
 	}
-	var sfd sessionFileData
-	if err := json.Unmarshal(data, &sfd); err != nil {
-		return map[string]interface{}{"success": false, "error": "会话数据损坏"}
-	}
 	return map[string]interface{}{
 		"success":   true,
-		"id":        sfd.ID,
-		"title":     sfd.Title,
-		"updatedAt": sfd.UpdatedAt,
-		"messages":  sfd.Messages,
+		"id":        sessionData.ID,
+		"title":     sessionData.Title,
+		"updatedAt": sessionData.UpdatedAt,
+		"messages":  sessionData.Messages,
 	}
 }
 
 // AISaveSession 保存会话数据到文件
 func (s *Service) AISaveSession(sessionID string, title string, updatedAt float64, messagesJSON string) error {
-	dir := s.sessionsDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("创建 sessions 目录失败: %w", err)
-	}
-
-	sfd := sessionFileData{
-		ID:        sessionID,
-		Title:     title,
-		UpdatedAt: int64(updatedAt),
-		Messages:  json.RawMessage(messagesJSON),
-	}
-
-	data, err := json.Marshal(sfd)
+	sessionData, err := s.loadOrCreateSessionFile(sessionID)
 	if err != nil {
-		return fmt.Errorf("序列化会话数据失败: %w", err)
+		return err
 	}
-
-	path := filepath.Join(dir, sessionID+".json")
-	return os.WriteFile(path, data, 0o644)
+	sessionData.ID = sessionID
+	sessionData.Title = title
+	sessionData.UpdatedAt = int64(updatedAt)
+	sessionData.Messages = json.RawMessage(messagesJSON)
+	return s.saveSessionFile(sessionID, sessionData)
 }
 
 // AIDeleteSession 删除会话文件
 func (s *Service) AIDeleteSession(sessionID string) error {
-	path := filepath.Join(s.sessionsDir(), sessionID+".json")
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(s.sessionFilePath(sessionID)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("删除会话失败: %w", err)
 	}
+	s.mu.Lock()
+	delete(s.sessionProviders, sessionID)
+	s.mu.Unlock()
 	return nil
 }
 

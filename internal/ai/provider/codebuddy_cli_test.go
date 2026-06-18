@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -79,6 +80,191 @@ func TestCodeBuddyCLIProvider_ChatParsesJSONEventArray(t *testing.T) {
 	}
 }
 
+func TestCodeBuddyCLIProviderChatWithState_StartsTrackedSession(t *testing.T) {
+	fakeCodeBuddy := writeFakeCodeBuddyScript(t, "#!/bin/sh\necho '[{\"type\":\"assistant\",\"session_id\":\"session-new\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hello \"}]}},{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"hello world\",\"session_id\":\"session-new\"}]'\n")
+	var capturedArgs []string
+	restore := overrideCodeBuddyCLIForTestWithCapture(t, fakeCodeBuddy, func(args []string) {
+		capturedArgs = append([]string(nil), args...)
+	})
+	defer restore()
+
+	providerInstance, err := NewCodeBuddyCLIProvider(ai.ProviderConfig{
+		APIKey: "cb-test",
+		Model:  "deepseek-v3",
+	})
+	if err != nil {
+		t.Fatalf("unexpected provider error: %v", err)
+	}
+
+	resp, nextState, err := providerInstance.(SessionChatProvider).ChatWithState(
+		context.Background(),
+		nil,
+		ai.ChatRequest{
+			Messages: []ai.Message{{Role: "user", Content: "ping"}},
+		},
+	)
+	if err != nil {
+		t.Fatalf("expected chat with state to succeed, got %v", err)
+	}
+
+	if resp == nil || resp.Content != "hello world" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if string(nextState) != `{"sessionId":"session-new"}` {
+		t.Fatalf("expected new session state, got %s", string(nextState))
+	}
+	if !hasArg(capturedArgs, "--enable-session-tracking") {
+		t.Fatalf("expected session tracking flag, got args %#v", capturedArgs)
+	}
+	if hasArg(capturedArgs, "--no-session-persistence") {
+		t.Fatalf("did not expect no-session-persistence flag, got args %#v", capturedArgs)
+	}
+	if hasArg(capturedArgs, "--resume") {
+		t.Fatalf("did not expect resume flag for first session, got args %#v", capturedArgs)
+	}
+	if !hasArgSequence(capturedArgs, "--model", "deepseek-v3") {
+		t.Fatalf("expected model flag to be preserved, got args %#v", capturedArgs)
+	}
+}
+
+func TestCodeBuddyCLIProviderChatWithState_ResumesExistingSession(t *testing.T) {
+	fakeCodeBuddy := writeFakeCodeBuddyScript(t, "#!/bin/sh\necho '[{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"continued\"}]}}]'\n")
+	var capturedArgs []string
+	restore := overrideCodeBuddyCLIForTestWithCapture(t, fakeCodeBuddy, func(args []string) {
+		capturedArgs = append([]string(nil), args...)
+	})
+	defer restore()
+
+	providerInstance, err := NewCodeBuddyCLIProvider(ai.ProviderConfig{
+		APIKey: "cb-test",
+	})
+	if err != nil {
+		t.Fatalf("unexpected provider error: %v", err)
+	}
+
+	resp, nextState, err := providerInstance.(SessionChatProvider).ChatWithState(
+		context.Background(),
+		json.RawMessage(`{"sessionId":"session-existing"}`),
+		ai.ChatRequest{
+			Messages: []ai.Message{{Role: "user", Content: "ping again"}},
+		},
+	)
+	if err != nil {
+		t.Fatalf("expected resumed chat with state to succeed, got %v", err)
+	}
+
+	if resp == nil || resp.Content != "continued" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if string(nextState) != `{"sessionId":"session-existing"}` {
+		t.Fatalf("expected existing session state to be preserved, got %s", string(nextState))
+	}
+	if !hasArgSequence(capturedArgs, "--resume", "session-existing") {
+		t.Fatalf("expected resume args, got %#v", capturedArgs)
+	}
+	if !hasArg(capturedArgs, "--enable-session-tracking") {
+		t.Fatalf("expected session tracking flag, got args %#v", capturedArgs)
+	}
+}
+
+func TestCodeBuddyCLIProviderChatStreamWithState_StartsTrackedSession(t *testing.T) {
+	fakeCodeBuddy := writeFakeCodeBuddyScript(t, "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"system\",\"session_id\":\"session-new\"}' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hello from codebuddy\"}]}}' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"hello from codebuddy\",\"session_id\":\"session-new\"}'\n")
+	var capturedArgs []string
+	restore := overrideCodeBuddyCLIForTestWithCapture(t, fakeCodeBuddy, func(args []string) {
+		capturedArgs = append([]string(nil), args...)
+	})
+	defer restore()
+
+	providerInstance, err := NewCodeBuddyCLIProvider(ai.ProviderConfig{
+		APIKey: "cb-test",
+		Model:  "deepseek-v3",
+	})
+	if err != nil {
+		t.Fatalf("unexpected provider error: %v", err)
+	}
+
+	var chunks []ai.StreamChunk
+	nextState, err := providerInstance.(SessionStreamProvider).ChatStreamWithState(
+		context.Background(),
+		nil,
+		ai.ChatRequest{
+			Messages: []ai.Message{{Role: "user", Content: "ping"}},
+		},
+		func(chunk ai.StreamChunk) {
+			chunks = append(chunks, chunk)
+		},
+	)
+	if err != nil {
+		t.Fatalf("expected chat stream with state to succeed, got %v", err)
+	}
+
+	if string(nextState) != `{"sessionId":"session-new"}` {
+		t.Fatalf("expected new session state, got %s", string(nextState))
+	}
+	if len(chunks) < 2 || chunks[0].Content != "hello from codebuddy" || !chunks[len(chunks)-1].Done {
+		t.Fatalf("unexpected stream chunks: %#v", chunks)
+	}
+	if !hasArg(capturedArgs, "--enable-session-tracking") {
+		t.Fatalf("expected session tracking flag, got args %#v", capturedArgs)
+	}
+	if hasArg(capturedArgs, "--no-session-persistence") {
+		t.Fatalf("did not expect no-session-persistence flag, got args %#v", capturedArgs)
+	}
+	if hasArg(capturedArgs, "--resume") {
+		t.Fatalf("did not expect resume flag for first session, got args %#v", capturedArgs)
+	}
+	if !hasArgSequence(capturedArgs, "--model", "deepseek-v3") {
+		t.Fatalf("expected model flag to be preserved, got args %#v", capturedArgs)
+	}
+}
+
+func TestCodeBuddyCLIProviderChatStreamWithState_ResumesExistingSessionWithoutDroppingState(t *testing.T) {
+	fakeCodeBuddy := writeFakeCodeBuddyScript(t, "#!/bin/sh\nprintf '%s\\n' '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"continued\"}]}}' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"continued\"}'\n")
+	var capturedArgs []string
+	restore := overrideCodeBuddyCLIForTestWithCapture(t, fakeCodeBuddy, func(args []string) {
+		capturedArgs = append([]string(nil), args...)
+	})
+	defer restore()
+
+	providerInstance, err := NewCodeBuddyCLIProvider(ai.ProviderConfig{
+		APIKey: "cb-test",
+	})
+	if err != nil {
+		t.Fatalf("unexpected provider error: %v", err)
+	}
+
+	var chunks []ai.StreamChunk
+	nextState, err := providerInstance.(SessionStreamProvider).ChatStreamWithState(
+		context.Background(),
+		json.RawMessage(`{"sessionId":"session-existing"}`),
+		ai.ChatRequest{
+			Messages: []ai.Message{{Role: "user", Content: "ping again"}},
+		},
+		func(chunk ai.StreamChunk) {
+			chunks = append(chunks, chunk)
+		},
+	)
+	if err != nil {
+		t.Fatalf("expected resumed chat stream to succeed, got %v", err)
+	}
+
+	if string(nextState) != `{"sessionId":"session-existing"}` {
+		t.Fatalf("expected existing session state to be preserved, got %s", string(nextState))
+	}
+	if len(chunks) < 2 || chunks[0].Content != "continued" || !chunks[len(chunks)-1].Done {
+		t.Fatalf("unexpected stream chunks: %#v", chunks)
+	}
+	if !hasArgSequence(capturedArgs, "--resume", "session-existing") {
+		t.Fatalf("expected resume args, got %#v", capturedArgs)
+	}
+	if !hasArg(capturedArgs, "--enable-session-tracking") {
+		t.Fatalf("expected session tracking flag, got args %#v", capturedArgs)
+	}
+	if hasArg(capturedArgs, "--no-session-persistence") {
+		t.Fatalf("did not expect no-session-persistence flag, got args %#v", capturedArgs)
+	}
+}
+
 func writeFakeCodeBuddyScript(t *testing.T, content string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -137,4 +323,55 @@ func overrideCodeBuddyCLIForTest(t *testing.T, fakeCodeBuddyPath string) func() 
 		codebuddyCommandContext = originalCommandContext
 		_ = os.Setenv("PATH", originalPath)
 	}
+}
+
+func overrideCodeBuddyCLIForTestWithCapture(t *testing.T, fakeCodeBuddyPath string, capture func(args []string)) func() {
+	t.Helper()
+
+	originalLookPath := codebuddyLookPath
+	originalCommandContext := codebuddyCommandContext
+	codebuddyLookPath = func(name string) (string, error) {
+		if name == "codebuddy" || name == "cbc" {
+			return fakeCodeBuddyPath, nil
+		}
+		return originalLookPath(name)
+	}
+	codebuddyCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if name == "codebuddy" || name == "cbc" {
+			if capture != nil {
+				capture(args)
+			}
+			return exec.CommandContext(ctx, fakeCodeBuddyPath, args...)
+		}
+		return originalCommandContext(ctx, name, args...)
+	}
+
+	originalPath := os.Getenv("PATH")
+	if err := os.Setenv("PATH", filepath.Dir(fakeCodeBuddyPath)+string(os.PathListSeparator)+originalPath); err != nil {
+		t.Fatalf("failed to override PATH: %v", err)
+	}
+
+	return func() {
+		codebuddyLookPath = originalLookPath
+		codebuddyCommandContext = originalCommandContext
+		_ = os.Setenv("PATH", originalPath)
+	}
+}
+
+func hasArg(args []string, target string) bool {
+	for _, arg := range args {
+		if arg == target {
+			return true
+		}
+	}
+	return false
+}
+
+func hasArgSequence(args []string, key string, value string) bool {
+	for index := 0; index < len(args)-1; index++ {
+		if args[index] == key && args[index+1] == value {
+			return true
+		}
+	}
+	return false
 }

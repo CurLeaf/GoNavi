@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -74,4 +75,21 @@ func (p *CustomProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.Chat
 
 func (p *CustomProvider) ChatStream(ctx context.Context, req ai.ChatRequest, callback func(ai.StreamChunk)) error {
 	return p.inner.ChatStream(ctx, req, callback)
+}
+
+func (p *CustomProvider) ChatWithState(ctx context.Context, state json.RawMessage, req ai.ChatRequest) (*ai.ChatResponse, json.RawMessage, error) {
+	sessionProvider, ok := p.inner.(SessionChatProvider)
+	if !ok {
+		resp, err := p.inner.Chat(ctx, req)
+		return resp, nil, err
+	}
+	return sessionProvider.ChatWithState(ctx, state, req)
+}
+
+func (p *CustomProvider) ChatStreamWithState(ctx context.Context, state json.RawMessage, req ai.ChatRequest, callback func(ai.StreamChunk)) (json.RawMessage, error) {
+	sessionProvider, ok := p.inner.(SessionStreamProvider)
+	if !ok {
+		return nil, p.inner.ChatStream(ctx, req, callback)
+	}
+	return sessionProvider.ChatStreamWithState(ctx, state, req, callback)
 }

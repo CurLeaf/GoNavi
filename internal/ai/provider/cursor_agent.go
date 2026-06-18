@@ -22,11 +22,22 @@ const (
 )
 
 // CursorAgentProvider 通过 Cursor Cloud Agents API 发起对话。
-// 当前实现为无状态适配：每次请求都创建一个新的 agent，再消费本次 run 的结果。
+// 支持基于 session state 复用已有 agent，并对 follow-up runs 继续追加上下文。
 type CursorAgentProvider struct {
 	config  ai.ProviderConfig
 	baseURL string
 	client  *http.Client
+}
+
+type cursorSessionState struct {
+	AgentID   string `json:"agentId,omitempty"`
+	LastRunID string `json:"lastRunId,omitempty"`
+}
+
+type cursorImageInput struct {
+	Data     string `json:"data,omitempty"`
+	URL      string `json:"url,omitempty"`
+	MimeType string `json:"mimeType,omitempty"`
 }
 
 // NewCursorAgentProvider 创建 Cursor Agent Provider。
@@ -134,7 +145,8 @@ func normalizeCursorAPIPath(path string) string {
 }
 
 type cursorPrompt struct {
-	Text string `json:"text"`
+	Text   string             `json:"text"`
+	Images []cursorImageInput `json:"images,omitempty"`
 }
 
 type cursorModelSelection struct {
@@ -144,6 +156,10 @@ type cursorModelSelection struct {
 type cursorCreateAgentRequest struct {
 	Prompt cursorPrompt          `json:"prompt"`
 	Model  *cursorModelSelection `json:"model,omitempty"`
+}
+
+type cursorCreateRunRequest struct {
+	Prompt cursorPrompt `json:"prompt"`
 }
 
 type cursorCreateAgentResponse struct {
@@ -181,38 +197,85 @@ type cursorResultEvent struct {
 }
 
 func (p *CursorAgentProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.ChatResponse, error) {
+	resp, _, err := p.ChatWithState(ctx, nil, req)
+	return resp, err
+}
+
+func (p *CursorAgentProvider) ChatWithState(ctx context.Context, state json.RawMessage, req ai.ChatRequest) (*ai.ChatResponse, json.RawMessage, error) {
 	if err := p.Validate(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	agentID, runID, err := p.createAgent(ctx, req)
+	sessionState, err := parseCursorSessionState(state)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	agentID := strings.TrimSpace(sessionState.AgentID)
+	runID := ""
+	if agentID == "" {
+		agentID, runID, err = p.createAgent(ctx, req)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		runID, err = p.createRun(ctx, agentID, req)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 
 	run, err := p.waitForRun(ctx, agentID, runID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	sessionState.AgentID = agentID
+	sessionState.LastRunID = runID
+	nextState, err := json.Marshal(sessionState)
+	if err != nil {
+		return nil, nil, fmt.Errorf("序列化 Cursor 会话状态失败: %w", err)
 	}
 
 	return &ai.ChatResponse{
 		Content: strings.TrimSpace(run.Result),
-	}, nil
+	}, json.RawMessage(nextState), nil
 }
 
 func (p *CursorAgentProvider) ChatStream(ctx context.Context, req ai.ChatRequest, callback func(ai.StreamChunk)) error {
+	_, err := p.ChatStreamWithState(ctx, nil, req, callback)
+	return err
+}
+
+func (p *CursorAgentProvider) ChatStreamWithState(ctx context.Context, state json.RawMessage, req ai.ChatRequest, callback func(ai.StreamChunk)) (json.RawMessage, error) {
 	if err := p.Validate(); err != nil {
-		return err
+		return nil, err
 	}
 
-	agentID, runID, err := p.createAgent(ctx, req)
+	sessionState, err := parseCursorSessionState(state)
 	if err != nil {
-		return err
+		return nil, err
 	}
+
+	agentID := strings.TrimSpace(sessionState.AgentID)
+	runID := ""
+	if agentID == "" {
+		agentID, runID, err = p.createAgent(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		runID, err = p.createRun(ctx, agentID, req)
+		if err != nil {
+			return nil, err
+		}
+	}
+	sessionState.AgentID = agentID
+	sessionState.LastRunID = runID
 
 	stream, err := p.openRunStream(ctx, agentID, runID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer stream.Close()
 
@@ -314,10 +377,10 @@ func (p *CursorAgentProvider) ChatStream(ctx context.Context, req ai.ChatRequest
 			currentEventType = ""
 			currentDataLines = nil
 			if dispatchErr != nil {
-				return dispatchErr
+				return nil, dispatchErr
 			}
 			if done {
-				return nil
+				return marshalCursorSessionState(sessionState)
 			}
 		case strings.HasPrefix(line, "event:"):
 			currentEventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
@@ -327,27 +390,27 @@ func (p *CursorAgentProvider) ChatStream(ctx context.Context, req ai.ChatRequest
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("读取 Cursor 流式响应失败: %w", err)
+		return nil, fmt.Errorf("读取 Cursor 流式响应失败: %w", err)
 	}
 
 	if len(currentDataLines) > 0 || strings.TrimSpace(currentEventType) != "" {
 		done, dispatchErr := dispatchEvent(currentEventType, currentDataLines)
 		if dispatchErr != nil {
-			return dispatchErr
+			return nil, dispatchErr
 		}
 		if done {
-			return nil
+			return marshalCursorSessionState(sessionState)
 		}
 	}
 
 	if !completedExplicitly {
 		if !receivedAssistantText && !receivedResultText {
 			callback(ai.StreamChunk{Error: "未收到任何有效响应内容，请检查 Cursor 配置或模型权限", Done: true})
-			return nil
+			return marshalCursorSessionState(sessionState)
 		}
 		callback(ai.StreamChunk{Done: true})
 	}
-	return nil
+	return marshalCursorSessionState(sessionState)
 }
 
 func (p *CursorAgentProvider) createAgent(ctx context.Context, req ai.ChatRequest) (string, string, error) {
@@ -370,15 +433,13 @@ func (p *CursorAgentProvider) createAgent(ctx context.Context, req ai.ChatReques
 }
 
 func buildCursorCreateAgentRequest(req ai.ChatRequest, model string) (cursorCreateAgentRequest, error) {
-	prompt, err := buildCursorPrompt(req.Messages)
+	prompt, err := buildCursorPromptInput(req.Messages)
 	if err != nil {
 		return cursorCreateAgentRequest{}, err
 	}
 
 	requestBody := cursorCreateAgentRequest{
-		Prompt: cursorPrompt{
-			Text: prompt,
-		},
+		Prompt: prompt,
 	}
 
 	if trimmedModel := strings.TrimSpace(model); trimmedModel != "" {
@@ -389,16 +450,57 @@ func buildCursorCreateAgentRequest(req ai.ChatRequest, model string) (cursorCrea
 }
 
 func buildCursorPrompt(messages []ai.Message) (string, error) {
-	requestMessages := messages
-	if requestMessagesContainImages(messages) {
-		requestMessages = stripImagesFromRequestMessages(messages)
+	prompt := strings.TrimSpace(buildPrompt(messages))
+	if prompt == "" && requestMessagesContainImages(messages) {
+		return "请结合这些图片继续分析并回答。", nil
 	}
-
-	prompt := strings.TrimSpace(buildPrompt(requestMessages))
 	if prompt == "" {
 		return "", fmt.Errorf("请求内容不能为空")
 	}
 	return prompt, nil
+}
+
+func buildCursorPromptInput(messages []ai.Message) (cursorPrompt, error) {
+	text, err := buildCursorPrompt(messages)
+	if err != nil {
+		return cursorPrompt{}, err
+	}
+	images, err := buildCursorImageInputs(messages)
+	if err != nil {
+		return cursorPrompt{}, err
+	}
+	return cursorPrompt{
+		Text:   text,
+		Images: images,
+	}, nil
+}
+
+func buildCursorImageInputs(messages []ai.Message) ([]cursorImageInput, error) {
+	images := make([]cursorImageInput, 0)
+	for _, message := range messages {
+		for _, img := range message.Images {
+			trimmed := strings.TrimSpace(img)
+			if trimmed == "" {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+				images = append(images, cursorImageInput{URL: trimmed})
+				continue
+			}
+			mimeType, rawBase64, err := ParseDataURI(trimmed)
+			if err != nil {
+				return nil, fmt.Errorf("解析图片数据失败: %w", err)
+			}
+			images = append(images, cursorImageInput{
+				Data:     rawBase64,
+				MimeType: mimeType,
+			})
+		}
+	}
+	if len(images) > 5 {
+		return nil, fmt.Errorf("Cursor 最多支持 5 张图片，当前请求包含 %d 张", len(images))
+	}
+	return images, nil
 }
 
 func (p *CursorAgentProvider) waitForRun(ctx context.Context, agentID string, runID string) (*cursorRunResponse, error) {
@@ -453,6 +555,31 @@ func (p *CursorAgentProvider) getRun(ctx context.Context, agentID string, runID 
 		return nil, fmt.Errorf("解析 Cursor run 响应失败: %w", err)
 	}
 	return &responseBody, nil
+}
+
+func (p *CursorAgentProvider) createRun(ctx context.Context, agentID string, req ai.ChatRequest) (string, error) {
+	prompt, err := buildCursorPromptInput(req.Messages)
+	if err != nil {
+		return "", err
+	}
+
+	requestBody := cursorCreateRunRequest{
+		Prompt: prompt,
+	}
+
+	var responseBody struct {
+		Run struct {
+			ID string `json:"id"`
+		} `json:"run"`
+	}
+	if err := p.doJSONRequest(ctx, http.MethodPost, ResolveCursorAPIEndpoint(p.baseURL, fmt.Sprintf("agents/%s/runs", agentID)), requestBody, &responseBody, "application/json"); err != nil {
+		return "", err
+	}
+	runID := strings.TrimSpace(responseBody.Run.ID)
+	if runID == "" {
+		return "", fmt.Errorf("Cursor 创建 follow-up run 成功，但未返回有效 runId")
+	}
+	return runID, nil
 }
 
 func (p *CursorAgentProvider) openRunStream(ctx context.Context, agentID string, runID string) (io.ReadCloser, error) {
@@ -539,6 +666,28 @@ func (p *CursorAgentProvider) doJSONRequest(ctx context.Context, method string, 
 
 	logAIUpstreamRequestFinish(requestLog, resp.StatusCode, nil)
 	return nil
+}
+
+func parseCursorSessionState(state json.RawMessage) (cursorSessionState, error) {
+	if len(state) == 0 {
+		return cursorSessionState{}, nil
+	}
+	var result cursorSessionState
+	if err := json.Unmarshal(state, &result); err != nil {
+		return cursorSessionState{}, fmt.Errorf("解析 Cursor 会话状态失败: %w", err)
+	}
+	return result, nil
+}
+
+func marshalCursorSessionState(state cursorSessionState) (json.RawMessage, error) {
+	if strings.TrimSpace(state.AgentID) == "" {
+		return nil, nil
+	}
+	bytes, err := json.Marshal(state)
+	if err != nil {
+		return nil, fmt.Errorf("序列化 Cursor 会话状态失败: %w", err)
+	}
+	return json.RawMessage(bytes), nil
 }
 
 func isCursorRunTerminalStatus(status string) bool {

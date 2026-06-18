@@ -99,6 +99,85 @@ func TestCursorAgentProviderChat_PollsUntilFinished(t *testing.T) {
 	}
 }
 
+func TestCursorAgentProviderChatWithState_UsesFollowUpRunsAndPreservesAgent(t *testing.T) {
+	var (
+		createAgentCalls int32
+		createRunCalls   int32
+		receivedPrompt   string
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/agents":
+			atomic.AddInt32(&createAgentCalls, 1)
+			t.Fatalf("expected follow-up request to avoid creating a new agent")
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/agents/bc-existing/runs":
+			atomic.AddInt32(&createRunCalls, 1)
+			var body struct {
+				Prompt struct {
+					Text string `json:"text"`
+				} `json:"prompt"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode follow-up run body: %v", err)
+			}
+			receivedPrompt = body.Prompt.Text
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"run": map[string]any{"id": "run-next"},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/agents/bc-existing/runs/run-next":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":         "run-next",
+				"agentId":    "bc-existing",
+				"status":     "FINISHED",
+				"result":     "done from follow-up",
+				"durationMs": 456,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	providerInstance, err := NewCursorAgentProvider(ai.ProviderConfig{
+		Name:    "Cursor",
+		BaseURL: server.URL + "/v1",
+		APIKey:  "cursor-key",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resp, nextState, err := providerInstance.(SessionChatProvider).ChatWithState(
+		context.Background(),
+		json.RawMessage(`{"agentId":"bc-existing","lastRunId":"run-old"}`),
+		ai.ChatRequest{
+			Messages: []ai.Message{
+				{Role: "user", Content: "follow this up"},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("follow-up chat failed: %v", err)
+	}
+
+	if atomic.LoadInt32(&createAgentCalls) != 0 {
+		t.Fatalf("expected no create-agent calls, got %d", createAgentCalls)
+	}
+	if atomic.LoadInt32(&createRunCalls) != 1 {
+		t.Fatalf("expected exactly one follow-up run call, got %d", createRunCalls)
+	}
+	if !strings.Contains(receivedPrompt, "follow this up") {
+		t.Fatalf("expected follow-up prompt text, got %q", receivedPrompt)
+	}
+	if resp == nil || resp.Content != "done from follow-up" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if string(nextState) != `{"agentId":"bc-existing","lastRunId":"run-next"}` {
+		t.Fatalf("unexpected next session state: %s", string(nextState))
+	}
+}
+
 func TestCursorAgentProviderChatStream_MapsAssistantAndThinkingEvents(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -162,5 +241,111 @@ func TestCursorAgentProviderChatStream_MapsAssistantAndThinkingEvents(t *testing
 	}
 	if !chunks[len(chunks)-1].Done {
 		t.Fatalf("expected final done chunk, got %#v", chunks[len(chunks)-1])
+	}
+}
+
+func TestCursorAgentProviderChatStreamWithState_UsesFollowUpRunsAndPreservesAgent(t *testing.T) {
+	var (
+		createAgentCalls int32
+		createRunCalls   int32
+		receivedPrompt   string
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/agents":
+			atomic.AddInt32(&createAgentCalls, 1)
+			t.Fatalf("expected follow-up request to avoid creating a new agent")
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/agents/bc-existing/runs":
+			atomic.AddInt32(&createRunCalls, 1)
+			var body struct {
+				Prompt struct {
+					Text string `json:"text"`
+				} `json:"prompt"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode follow-up run body: %v", err)
+			}
+			receivedPrompt = body.Prompt.Text
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"run": map[string]any{"id": "run-next"},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/agents/bc-existing/runs/run-next/stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("event: assistant\n"))
+			_, _ = w.Write([]byte("data: {\"text\":\"done\"}\n\n"))
+			_, _ = w.Write([]byte("event: done\n"))
+			_, _ = w.Write([]byte("data: {}\n\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	providerInstance, err := NewCursorAgentProvider(ai.ProviderConfig{
+		Name:    "Cursor",
+		BaseURL: server.URL + "/v1",
+		APIKey:  "cursor-key",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sessionState := json.RawMessage(`{"agentId":"bc-existing","lastRunId":"run-old"}`)
+	var chunks []ai.StreamChunk
+	nextState, err := providerInstance.(SessionStreamProvider).ChatStreamWithState(
+		context.Background(),
+		sessionState,
+		ai.ChatRequest{
+			Messages: []ai.Message{
+				{Role: "user", Content: "follow this up"},
+			},
+		},
+		func(chunk ai.StreamChunk) {
+			chunks = append(chunks, chunk)
+		},
+	)
+	if err != nil {
+		t.Fatalf("follow-up stream failed: %v", err)
+	}
+
+	if atomic.LoadInt32(&createAgentCalls) != 0 {
+		t.Fatalf("expected no create-agent calls, got %d", createAgentCalls)
+	}
+	if atomic.LoadInt32(&createRunCalls) != 1 {
+		t.Fatalf("expected exactly one follow-up run call, got %d", createRunCalls)
+	}
+	if !strings.Contains(receivedPrompt, "follow this up") {
+		t.Fatalf("expected follow-up prompt text, got %q", receivedPrompt)
+	}
+	if string(nextState) != `{"agentId":"bc-existing","lastRunId":"run-next"}` {
+		t.Fatalf("unexpected next session state: %s", string(nextState))
+	}
+	if len(chunks) == 0 || chunks[0].Content != "done" {
+		t.Fatalf("expected streamed assistant content, got %#v", chunks)
+	}
+}
+
+func TestCursorAgentProviderCreateAgentRequest_IncludesImageInputs(t *testing.T) {
+	requestBody, err := buildCursorCreateAgentRequest(ai.ChatRequest{
+		Messages: []ai.Message{
+			{
+				Role:    "user",
+				Content: "look at this",
+				Images:  []string{"data:image/png;base64,aGVsbG8="},
+			},
+		},
+	}, "composer-latest")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(requestBody.Prompt.Images) != 1 {
+		t.Fatalf("expected one image payload, got %#v", requestBody.Prompt.Images)
+	}
+	if requestBody.Prompt.Images[0].Data != "aGVsbG8=" || requestBody.Prompt.Images[0].MimeType != "image/png" {
+		t.Fatalf("unexpected image payload: %#v", requestBody.Prompt.Images[0])
+	}
+	if requestBody.Model == nil || requestBody.Model.ID != "composer-latest" {
+		t.Fatalf("expected model selection to be preserved, got %#v", requestBody.Model)
 	}
 }
