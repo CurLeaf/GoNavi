@@ -177,4 +177,67 @@ describe('useExportProgressRunner', () => {
     expect(runner?.state.status).toBe('done');
     expect(runner?.state.totalRowsKnown).toBe(false);
   });
+
+  it('switches to exact progress when backend start events later provide total rows', async () => {
+    renderRunner();
+
+    let resolveRun!: (value: { success: boolean; message: string }) => void;
+    const pendingRun = new Promise<{ success: boolean; message: string }>((resolve) => {
+      resolveRun = resolve;
+    });
+
+    let runPromise: Promise<{ success: boolean; message: string } | null> | null = null;
+    await act(async () => {
+      runPromise = runner?.runExportWithProgress({
+        title: '导出 SYS.test',
+        targetName: 'SYS.test',
+        format: 'xlsx',
+        run: async () => pendingRun,
+      }) || null;
+      await Promise.resolve();
+    });
+
+    expect(runner?.state.totalRowsKnown).toBe(false);
+    expect(runner?.state.total).toBe(0);
+
+    const jobId = runner?.state.jobId || '';
+    now = 4_000;
+    act(() => {
+      runtimeApi.emitExportProgress({
+        jobId,
+        status: 'start',
+        stage: '正在准备导出',
+        total: 96000,
+        totalRowsKnown: true,
+        filePath: '/Users/yangguofeng/Desktop/SYS.test.xlsx',
+      });
+    });
+
+    expect(runner?.state.totalRowsKnown).toBe(true);
+    expect(runner?.state.total).toBe(96000);
+    expect(runner?.state.filePath).toBe('/Users/yangguofeng/Desktop/SYS.test.xlsx');
+
+    act(() => {
+      runtimeApi.emitExportProgress({
+        jobId,
+        status: 'running',
+        stage: '正在写入文件',
+        current: 24000,
+      });
+    });
+
+    expect(runner?.state.current).toBe(24000);
+    expect(runner?.state.total).toBe(96000);
+    expect(runner?.state.totalRowsKnown).toBe(true);
+
+    now = 8_000;
+    await act(async () => {
+      resolveRun({ success: true, message: '导出完成' });
+      await runPromise;
+    });
+
+    expect(runner?.state.status).toBe('done');
+    expect(runner?.state.total).toBe(96000);
+    expect(runner?.state.totalRowsKnown).toBe(true);
+  });
 });

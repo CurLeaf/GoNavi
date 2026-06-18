@@ -441,6 +441,40 @@ func TestQueryDataForExport_UsesLargerConfiguredTimeout(t *testing.T) {
 	}
 }
 
+func TestResolveExportTotalRowsFromRows_PrefersNamedTotalColumn(t *testing.T) {
+	total, ok := resolveExportTotalRowsFromRows([]map[string]interface{}{
+		{"COUNT": "96000", "other": 1},
+	})
+	if !ok {
+		t.Fatal("应成功解析导出总行数")
+	}
+	if total != 96000 {
+		t.Fatalf("解析导出总行数错误，want=%d got=%d", 96000, total)
+	}
+}
+
+func TestTryResolveExportTableTotalRows_UsesCountQuery(t *testing.T) {
+	fake := &fakeExportQueryDB{
+		data: []map[string]interface{}{{"total": int64(128000)}},
+		cols: []string{"total"},
+	}
+
+	total, ok := tryResolveExportTableTotalRows(
+		fake,
+		connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+		"SYS.test",
+	)
+	if !ok {
+		t.Fatal("应成功解析整表导出总行数")
+	}
+	if total != 128000 {
+		t.Fatalf("整表导出总行数错误，want=%d got=%d", 128000, total)
+	}
+	if fake.lastQuery != "SELECT COUNT(*) AS total FROM `SYS`.`test`" {
+		t.Fatalf("整表导出统计 SQL 错误，got=%q", fake.lastQuery)
+	}
+}
+
 func TestExportQueryResultToFile_UsesStreamQueryPath(t *testing.T) {
 	f, err := os.CreateTemp("", "gonavi-export-stream-*.csv")
 	if err != nil {

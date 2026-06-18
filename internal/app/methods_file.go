@@ -230,6 +230,118 @@ func (r *exportProgressReporter) Error(current int64, message string) {
 	r.emit("error", "导出失败", current, message, true)
 }
 
+func resolveExportTotalRowValue(value interface{}) (int64, bool) {
+	switch v := value.(type) {
+	case int:
+		if v < 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case int8:
+		if v < 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case int16:
+		if v < 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case int32:
+		if v < 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case int64:
+		if v < 0 {
+			return 0, false
+		}
+		return v, true
+	case uint:
+		if uint64(v) > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(v), true
+	case uint8:
+		return int64(v), true
+	case uint16:
+		return int64(v), true
+	case uint32:
+		return int64(v), true
+	case uint64:
+		if v > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(v), true
+	case float32:
+		if !isFiniteFloat64(float64(v)) || v < 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case float64:
+		if !isFiniteFloat64(v) || v < 0 {
+			return 0, false
+		}
+		return int64(v), true
+	case json.Number:
+		if i, err := v.Int64(); err == nil && i >= 0 {
+			return i, true
+		}
+		if f, err := v.Float64(); err == nil && isFiniteFloat64(f) && f >= 0 {
+			return int64(f), true
+		}
+	case []byte:
+		return resolveExportTotalRowValue(string(v))
+	case string:
+		text := strings.TrimSpace(v)
+		if text == "" {
+			return 0, false
+		}
+		if i, err := strconv.ParseInt(text, 10, 64); err == nil && i >= 0 {
+			return i, true
+		}
+		if f, err := strconv.ParseFloat(text, 64); err == nil && isFiniteFloat64(f) && f >= 0 {
+			return int64(f), true
+		}
+	}
+	return 0, false
+}
+
+func isFiniteFloat64(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func resolveExportTotalRowsFromRows(rows []map[string]interface{}) (int64, bool) {
+	if len(rows) == 0 || rows[0] == nil {
+		return 0, false
+	}
+	row := rows[0]
+	preferredKeys := []string{"total", "TOTAL", "count", "COUNT", "cnt", "CNT", "table_rows", "TABLE_ROWS"}
+	for _, key := range preferredKeys {
+		if value, ok := row[key]; ok {
+			if total, ok := resolveExportTotalRowValue(value); ok {
+				return total, true
+			}
+		}
+	}
+	for _, value := range row {
+		if total, ok := resolveExportTotalRowValue(value); ok {
+			return total, true
+		}
+	}
+	return 0, false
+}
+
+func tryResolveExportTableTotalRows(dbInst db.Database, config connection.ConnectionConfig, tableName string) (int64, bool) {
+	dbType := resolveDDLDBType(config)
+	query := fmt.Sprintf("SELECT COUNT(*) AS total FROM %s", quoteQualifiedIdentByType(dbType, tableName))
+	rows, _, err := queryDataForExport(dbInst, config, query)
+	if err != nil {
+		return 0, false
+	}
+	return resolveExportTotalRowsFromRows(rows)
+}
+
 var exportFileNameSanitizer = strings.NewReplacer(
 	"/", "_",
 	"\\", "_",
@@ -2154,6 +2266,18 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 	if err != nil {
 		reporter.Error(0, err.Error())
 		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	if format != "sql" && !options.TotalRowsKnown {
+		if totalRows, ok := tryResolveExportTableTotalRows(dbInst, runConfig, tableName); ok {
+			options.TotalRowsHint = totalRows
+			options.TotalRowsKnown = true
+			if reporter != nil {
+				reporter.totalRows = totalRows
+				reporter.totalRowsKnown = true
+				reporter.Start("正在准备导出")
+			}
+		}
 	}
 
 	if format == "sql" {
