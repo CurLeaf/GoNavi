@@ -24,7 +24,6 @@ import (
 	"GoNavi-Wails/internal/utils"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"github.com/xuri/excelize/v2"
 )
 
 const minExportQueryTimeout = 5 * time.Minute
@@ -2045,14 +2044,19 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 		runtime.EventsEmit(a.ctx, "import:progress", state)
 	})
 	if err := streamImportFile(filePath, consumer); err != nil {
+		resultData := consumer.Result()
+		maybeReleaseFileTransferMemory("import-stream-error", int64(resultData.Total), filePath)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if err := consumer.Flush(); err != nil {
+		resultData := consumer.Result()
+		maybeReleaseFileTransferMemory("import-flush-error", int64(resultData.Total), filePath)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	resultData := consumer.Result()
 	if resultData.Total == 0 {
+		maybeReleaseFileTransferMemory("import-empty", 0, filePath)
 		return connection.QueryResult{Success: true, Message: "无可导入数据"}
 	}
 
@@ -2064,6 +2068,7 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 		"errorSummary": fmt.Sprintf("Imported: %d, Failed: %d", resultData.Success, resultData.Failed),
 	}
 
+	maybeReleaseFileTransferMemory("import-finished", int64(resultData.Total), filePath)
 	return connection.QueryResult{Success: true, Data: result, Message: fmt.Sprintf("Imported: %d, Failed: %d", resultData.Success, resultData.Failed)}
 }
 
@@ -2170,6 +2175,7 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 
 		reporter.Finalizing(0)
 		reporter.Done(0)
+		maybeReleaseFileTransferMemory("export-table-sql-finished", 0, filename)
 		return connection.QueryResult{Success: true, Message: "导出完成"}
 	}
 
@@ -2185,9 +2191,11 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 	rowCount, _, err := exportQueryResultToFile(f, dbInst, runConfig, query, options, reporter)
 	if err != nil {
 		reporter.Error(rowCount, "写入失败："+err.Error())
+		maybeReleaseFileTransferMemory("export-table-error", rowCount, filename)
 		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
 	}
 	reporter.Done(rowCount)
+	maybeReleaseFileTransferMemory("export-table-finished", rowCount, filename)
 
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
@@ -3488,11 +3496,13 @@ func (a *App) ExportDataWithOptions(data []map[string]interface{}, columns []str
 	if err != nil {
 		logger.Warnf("ExportData 写入失败：file=%s err=%v", filename, err)
 		reporter.Error(writtenRows, "写入失败："+err.Error())
+		maybeReleaseFileTransferMemory("export-data-error", writtenRows, filename)
 		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
 	}
 
 	logger.Infof("ExportData 完成：file=%s rows=%d", filename, len(data))
 	reporter.Done(writtenRows)
+	maybeReleaseFileTransferMemory("export-data-finished", writtenRows, filename)
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
@@ -3550,11 +3560,13 @@ func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName 
 	if err != nil {
 		logger.Warnf("ExportQuery 查询失败：type=%s db=%s err=%v sql=%q", strings.TrimSpace(config.Type), strings.TrimSpace(dbName), err, sqlSnippet(query))
 		reporter.Error(rowCount, err.Error())
+		maybeReleaseFileTransferMemory("export-query-error", rowCount, filename)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	logger.Infof("ExportQuery 完成：file=%s rows=%d cols=%d", filename, rowCount, len(columns))
 	reporter.Done(rowCount)
+	maybeReleaseFileTransferMemory("export-query-finished", rowCount, filename)
 	return connection.QueryResult{Success: true, Message: "导出完成"}
 }
 
@@ -3997,128 +4009,6 @@ func (w *htmlExportFileWriter) Close() error {
 	return w.writer.Flush()
 }
 
-type xlsxExportFileWriter struct {
-	filename string
-	workbook *excelize.File
-	stream   *excelize.StreamWriter
-	sheet    string
-	columns  []string
-	header   []interface{}
-	rowBuf   []interface{}
-	nextRow  int
-	sheetNo  int
-	rowCount int
-	maxRows  int
-}
-
-func newXLSXExportFileWriter(filename string, maxRowsPerSheet int) (*xlsxExportFileWriter, error) {
-	workbook := excelize.NewFile()
-	sheet := workbook.GetSheetName(workbook.GetActiveSheetIndex())
-	stream, err := workbook.NewStreamWriter(sheet)
-	if err != nil {
-		_ = workbook.Close()
-		return nil, err
-	}
-	return &xlsxExportFileWriter{
-		filename: filename,
-		workbook: workbook,
-		stream:   stream,
-		sheet:    sheet,
-		sheetNo:  1,
-		nextRow:  2,
-		maxRows:  normalizeXLSXRowsPerSheet(maxRowsPerSheet),
-	}, nil
-}
-
-func (w *xlsxExportFileWriter) SetColumns(columns []string) error {
-	w.columns = append([]string(nil), columns...)
-	w.rowCount = 0
-	w.nextRow = 2
-	w.header = make([]interface{}, len(columns))
-	w.rowBuf = make([]interface{}, len(columns))
-	for i, col := range columns {
-		w.header[i] = col
-	}
-	return w.stream.SetRow("A1", w.header)
-}
-
-func (w *xlsxExportFileWriter) rotateSheet() error {
-	if err := w.stream.Flush(); err != nil {
-		return err
-	}
-	w.sheetNo++
-	w.sheet = fmt.Sprintf("Sheet%d", w.sheetNo)
-	if _, err := w.workbook.NewSheet(w.sheet); err != nil {
-		return err
-	}
-	stream, err := w.workbook.NewStreamWriter(w.sheet)
-	if err != nil {
-		return err
-	}
-	w.stream = stream
-	w.rowCount = 0
-	w.nextRow = 2
-	return w.stream.SetRow("A1", w.header)
-}
-
-func (w *xlsxExportFileWriter) ConsumeRow(row map[string]interface{}) error {
-	if w.rowCount >= w.maxRows {
-		if err := w.rotateSheet(); err != nil {
-			return err
-		}
-	}
-	values := w.rowBuf
-	for i, col := range w.columns {
-		val := row[col]
-		if val == nil {
-			values[i] = "NULL"
-			continue
-		}
-		values[i] = formatExportCellText(val)
-	}
-	cell := "A" + strconv.Itoa(w.nextRow)
-	w.nextRow++
-	w.rowCount++
-	return w.stream.SetRow(cell, values)
-}
-
-func (w *xlsxExportFileWriter) ConsumeRowValues(values []interface{}) error {
-	if w.rowCount >= w.maxRows {
-		if err := w.rotateSheet(); err != nil {
-			return err
-		}
-	}
-	rowBuf := w.rowBuf
-	for i := range w.columns {
-		var value interface{}
-		if i < len(values) {
-			value = values[i]
-		}
-		if value == nil {
-			rowBuf[i] = "NULL"
-			continue
-		}
-		rowBuf[i] = formatExportCellText(value)
-	}
-	cell := "A" + strconv.Itoa(w.nextRow)
-	w.nextRow++
-	w.rowCount++
-	return w.stream.SetRow(cell, rowBuf)
-}
-
-func (w *xlsxExportFileWriter) Close() error {
-	if err := w.stream.Flush(); err != nil {
-		_ = w.workbook.Close()
-		return err
-	}
-	saveErr := w.workbook.SaveAs(w.filename)
-	closeErr := w.workbook.Close()
-	if saveErr != nil {
-		return saveErr
-	}
-	return closeErr
-}
-
 type sqlInsertExportConsumer struct {
 	w             *bufio.Writer
 	dbType        string
@@ -4304,11 +4194,7 @@ func newExportFileWriter(f *os.File, options ExportFileOptions) (exportFileWrite
 	case "html":
 		return newHTMLExportFileWriter(f), nil
 	case "xlsx":
-		filename := f.Name()
-		if err := f.Close(); err != nil {
-			return nil, err
-		}
-		return newXLSXExportFileWriter(filename, options.XLSXMaxRowsPerSheet)
+		return newXLSXExportFileWriter(f, options.XLSXMaxRowsPerSheet)
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", options.Format)
 	}
@@ -4756,29 +4642,23 @@ func normalizeExportJSONValue(val interface{}) interface{} {
 
 // writeRowsToXlsx 使用 excelize 写入真正的 xlsx 格式文件
 func writeRowsToXlsx(filename string, data []map[string]interface{}, columns []string) error {
-	xlsx := excelize.NewFile()
-	defer xlsx.Close()
-
-	sheet := "Sheet1"
-
-	// 写入表头
-	for i, col := range columns {
-		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
-		xlsx.SetCellValue(sheet, cell, col)
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
 	}
+	defer file.Close()
 
-	// 写入数据行
-	for rowIdx, rowMap := range data {
-		for colIdx, col := range columns {
-			cell, _ := excelize.CoordinatesToCellName(colIdx+1, rowIdx+2)
-			val := rowMap[col]
-			if val == nil {
-				xlsx.SetCellValue(sheet, cell, "NULL")
-			} else {
-				xlsx.SetCellValue(sheet, cell, formatExportCellText(val))
-			}
+	writer, err := newXLSXExportFileWriter(file, 0)
+	if err != nil {
+		return err
+	}
+	if err := writer.SetColumns(columns); err != nil {
+		return err
+	}
+	for _, rowMap := range data {
+		if err := writer.ConsumeRow(rowMap); err != nil {
+			return err
 		}
 	}
-
-	return xlsx.SaveAs(filename)
+	return writer.Close()
 }

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -42,6 +43,13 @@ type fakeValueStreamExportDB struct {
 	streamHits   int
 	queryHits    int
 	valueHits    int
+}
+
+type fakeGeneratedValueStreamExportDB struct {
+	streamCols []string
+	rowCount   int
+	streamHits int
+	valueHits  int
 }
 
 func (f *fakeExportQueryDB) Connect(config connection.ConnectionConfig) error { return nil }
@@ -148,6 +156,82 @@ func (f *fakeValueStreamExportDB) StreamQueryContext(_ context.Context, query st
 			}
 		}
 		if err := consumer.ConsumeRow(entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *fakeGeneratedValueStreamExportDB) Connect(config connection.ConnectionConfig) error {
+	return nil
+}
+
+func (f *fakeGeneratedValueStreamExportDB) Close() error { return nil }
+
+func (f *fakeGeneratedValueStreamExportDB) Ping() error { return nil }
+
+func (f *fakeGeneratedValueStreamExportDB) Query(query string) ([]map[string]interface{}, []string, error) {
+	return nil, nil, context.DeadlineExceeded
+}
+
+func (f *fakeGeneratedValueStreamExportDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	return nil, nil, context.DeadlineExceeded
+}
+
+func (f *fakeGeneratedValueStreamExportDB) Exec(query string) (int64, error) { return 0, nil }
+
+func (f *fakeGeneratedValueStreamExportDB) GetDatabases() ([]string, error) { return nil, nil }
+
+func (f *fakeGeneratedValueStreamExportDB) GetTables(dbName string) ([]string, error) {
+	return nil, nil
+}
+
+func (f *fakeGeneratedValueStreamExportDB) GetCreateStatement(dbName, tableName string) (string, error) {
+	return "", nil
+}
+
+func (f *fakeGeneratedValueStreamExportDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
+	return nil, nil
+}
+
+func (f *fakeGeneratedValueStreamExportDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
+	return nil, nil
+}
+
+func (f *fakeGeneratedValueStreamExportDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
+	return nil, nil
+}
+
+func (f *fakeGeneratedValueStreamExportDB) GetForeignKeys(dbName, tableName string) ([]connection.ForeignKeyDefinition, error) {
+	return nil, nil
+}
+
+func (f *fakeGeneratedValueStreamExportDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error) {
+	return nil, nil
+}
+
+func (f *fakeGeneratedValueStreamExportDB) StreamQuery(query string, consumer db.QueryStreamConsumer) error {
+	return f.StreamQueryContext(context.Background(), query, consumer)
+}
+
+func (f *fakeGeneratedValueStreamExportDB) StreamQueryContext(_ context.Context, query string, consumer db.QueryStreamConsumer) error {
+	f.streamHits++
+	if err := consumer.SetColumns(f.streamCols); err != nil {
+		return err
+	}
+	valueConsumer, ok := consumer.(db.QueryStreamValueConsumer)
+	if !ok {
+		return fmt.Errorf("value stream consumer required")
+	}
+	for i := 0; i < f.rowCount; i++ {
+		f.valueHits++
+		if err := valueConsumer.ConsumeRowValues([]interface{}{
+			i + 1,
+			"benchmark-user",
+			"plain export payload without timezone marker",
+			"2026-06-17 12:34:56",
+			"enabled",
+		}); err != nil {
 			return err
 		}
 	}
@@ -723,6 +807,35 @@ func BenchmarkExportQueryResultToFile_XLSX_StreamValues_20000Rows(b *testing.B) 
 		); err != nil {
 			_ = os.Remove(name)
 			b.Fatalf("流式值数组导出失败: %v", err)
+		}
+		if err := os.Remove(name); err != nil {
+			b.Fatalf("删除临时文件失败: %v", err)
+		}
+	}
+}
+
+func BenchmarkExportQueryResultToFile_XLSX_StreamGenerated_50000Rows(b *testing.B) {
+	streamDB := &fakeGeneratedValueStreamExportDB{
+		streamCols: []string{"id", "name", "note", "created_at", "status"},
+		rowCount:   50000,
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		f, err := os.CreateTemp("", "gonavi-export-stream-generated-*.xlsx")
+		if err != nil {
+			b.Fatalf("创建临时文件失败: %v", err)
+		}
+		name := f.Name()
+		if _, _, err := exportQueryResultToFile(
+			f,
+			streamDB,
+			connection.ConnectionConfig{Type: "mysql", Timeout: 10},
+			"SELECT * FROM users",
+			ExportFileOptions{Format: "xlsx"},
+			nil,
+		); err != nil {
+			_ = os.Remove(name)
+			b.Fatalf("流式生成导出失败: %v", err)
 		}
 		if err := os.Remove(name); err != nil {
 			b.Fatalf("删除临时文件失败: %v", err)

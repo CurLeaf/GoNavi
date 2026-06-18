@@ -12,7 +12,6 @@ import (
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
-	"github.com/xuri/excelize/v2"
 )
 
 const (
@@ -276,8 +275,10 @@ func streamImportFile(filePath string, consumer importFileConsumer) error {
 		return streamJSONImportFile(filePath, consumer)
 	case strings.HasSuffix(lower, ".csv"):
 		return streamCSVImportFile(filePath, consumer)
-	case strings.HasSuffix(lower, ".xlsx"), strings.HasSuffix(lower, ".xls"):
-		return streamExcelImportFile(filePath, consumer)
+	case strings.HasSuffix(lower, ".xlsx"):
+		return streamXLSXImportFile(filePath, consumer)
+	case strings.HasSuffix(lower, ".xls"):
+		return streamLegacyExcelImportFile(filePath, consumer)
 	default:
 		return fmt.Errorf("Unsupported file format")
 	}
@@ -359,57 +360,6 @@ func streamCSVImportFile(filePath string, consumer importFileConsumer) error {
 			return err
 		}
 	}
-}
-
-func streamExcelImportFile(filePath string, consumer importFileConsumer) error {
-	workbook, err := excelize.OpenFile(filePath)
-	if err != nil {
-		return fmt.Errorf("Excel Parse Error: %w", err)
-	}
-	defer workbook.Close()
-
-	sheetName := workbook.GetSheetName(0)
-	if sheetName == "" {
-		return fmt.Errorf("Excel file has no sheets")
-	}
-
-	rows, err := workbook.Rows(sheetName)
-	if err != nil {
-		return fmt.Errorf("Excel Read Error: %w", err)
-	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		if err := rows.Error(); err != nil {
-			return fmt.Errorf("Excel Read Error: %w", err)
-		}
-		return fmt.Errorf("Excel empty or missing header")
-	}
-	header, err := rows.Columns()
-	if err != nil {
-		return fmt.Errorf("Excel Read Error: %w", err)
-	}
-	columns := cloneImportColumns(header)
-	if !hasImportUsableColumns(columns) {
-		return fmt.Errorf("Excel empty or missing header")
-	}
-	if err := consumer.SetColumns(columns); err != nil {
-		return err
-	}
-
-	for rows.Next() {
-		record, err := rows.Columns()
-		if err != nil {
-			return fmt.Errorf("Excel Read Error: %w", err)
-		}
-		if err := consumer.ConsumeRow(buildImportRowFromValues(columns, record)); err != nil {
-			return err
-		}
-	}
-	if err := rows.Error(); err != nil {
-		return fmt.Errorf("Excel Read Error: %w", err)
-	}
-	return nil
 }
 
 func buildImportInsertQuery(dbType, tableName string, columns []string, row map[string]interface{}, columnTypeMap map[string]string) (string, error) {

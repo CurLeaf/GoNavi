@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/xuri/excelize/v2"
 )
 
 func TestReadImportedConnectionConfigFileRejectsOversizedFiles(t *testing.T) {
@@ -79,6 +81,94 @@ func TestBuildImportRowFromValuesPreservesPositionsWhenHeaderContainsBlankColumn
 	}
 	if _, ok := row[""]; ok {
 		t.Fatal("blank header column should not be written into row map")
+	}
+}
+
+func TestBuildImportPreviewXLSXStreamSupportsInlineStrings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "inline.xlsx")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("创建 xlsx 文件失败: %v", err)
+	}
+
+	writer, err := newXLSXExportFileWriter(file, 0)
+	if err != nil {
+		t.Fatalf("创建 xlsx writer 失败: %v", err)
+	}
+	if err := writer.SetColumns([]string{"id", "name"}); err != nil {
+		t.Fatalf("SetColumns 失败: %v", err)
+	}
+	if err := writer.ConsumeRowValues([]interface{}{1, "alice"}); err != nil {
+		t.Fatalf("写入第 1 行失败: %v", err)
+	}
+	if err := writer.ConsumeRowValues([]interface{}{2, "bob"}); err != nil {
+		t.Fatalf("写入第 2 行失败: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("关闭 xlsx writer 失败: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("关闭 xlsx 文件失败: %v", err)
+	}
+
+	preview, err := buildImportPreview(path, 5)
+	if err != nil {
+		t.Fatalf("buildImportPreview 返回错误: %v", err)
+	}
+	if !reflect.DeepEqual(preview.Columns, []string{"id", "name"}) {
+		t.Fatalf("unexpected columns: %#v", preview.Columns)
+	}
+	if preview.TotalRows != 2 {
+		t.Fatalf("expected 2 rows, got %d", preview.TotalRows)
+	}
+	if got := preview.PreviewRows[1]["name"]; got != "bob" {
+		t.Fatalf("expected second row name bob, got %#v", got)
+	}
+}
+
+func TestBuildImportPreviewXLSXStreamSupportsSharedStrings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shared.xlsx")
+	workbook := excelize.NewFile()
+	if err := workbook.SetCellValue("Sheet1", "A1", "id"); err != nil {
+		t.Fatalf("设置表头失败: %v", err)
+	}
+	if err := workbook.SetCellValue("Sheet1", "B1", "name"); err != nil {
+		t.Fatalf("设置表头失败: %v", err)
+	}
+	if err := workbook.SetCellValue("Sheet1", "A2", "1"); err != nil {
+		t.Fatalf("设置数据失败: %v", err)
+	}
+	if err := workbook.SetCellValue("Sheet1", "B2", "alice"); err != nil {
+		t.Fatalf("设置数据失败: %v", err)
+	}
+	if err := workbook.SetCellValue("Sheet1", "A3", "2"); err != nil {
+		t.Fatalf("设置数据失败: %v", err)
+	}
+	if err := workbook.SetCellValue("Sheet1", "B3", "bob"); err != nil {
+		t.Fatalf("设置数据失败: %v", err)
+	}
+	if err := workbook.SaveAs(path); err != nil {
+		t.Fatalf("保存 shared-string xlsx 失败: %v", err)
+	}
+	if err := workbook.Close(); err != nil {
+		t.Fatalf("关闭 shared-string xlsx 失败: %v", err)
+	}
+
+	preview, err := buildImportPreview(path, 5)
+	if err != nil {
+		t.Fatalf("buildImportPreview 返回错误: %v", err)
+	}
+	if !reflect.DeepEqual(preview.Columns, []string{"id", "name"}) {
+		t.Fatalf("unexpected columns: %#v", preview.Columns)
+	}
+	if preview.TotalRows != 2 {
+		t.Fatalf("expected 2 rows, got %d", preview.TotalRows)
+	}
+	if got := preview.PreviewRows[0]["name"]; got != "alice" {
+		t.Fatalf("expected first row name alice, got %#v", got)
+	}
+	if got := preview.PreviewRows[1]["id"]; got != "2" {
+		t.Fatalf("expected second row id 2, got %#v", got)
 	}
 }
 
