@@ -9,7 +9,7 @@ import (
 )
 
 // CustomProvider 自定义 Provider，根据 apiFormat 选择底层协议
-// 支持 openai / anthropic / gemini 三种 API 格式
+// 支持 openai / anthropic / gemini / cursor-agent 等 API 格式
 type CustomProvider struct {
 	inner Provider
 	name  string
@@ -33,6 +33,8 @@ func NewCustomProvider(config ai.ProviderConfig) (Provider, error) {
 		innerProvider, err = NewAnthropicProvider(config)
 	case "gemini":
 		innerProvider, err = NewGeminiProvider(config)
+	case "cursor-agent":
+		innerProvider, err = NewCursorAgentProvider(config)
 	case "claude-cli":
 		innerProvider, err = NewClaudeCLIProvider(config)
 	case "codebuddy-cli":

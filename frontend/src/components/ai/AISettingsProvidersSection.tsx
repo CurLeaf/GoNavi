@@ -106,8 +106,9 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
   onSaveProvider,
 }) => {
   const presetKeyFromForm = watchedPresetKey || (editingProvider as (AIProviderConfig & { presetKey?: string }) | null)?.presetKey || 'openai';
-  const supportsAdvancedEndpoint = presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama' || presetKeyFromForm === 'codebuddy';
+  const supportsAdvancedEndpoint = presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama' || presetKeyFromForm === 'codebuddy' || presetKeyFromForm === 'cursor';
   const codeBuddyUsesOptionalSecret = presetKeyFromForm === 'codebuddy';
+  const cursorUsesOptionalModel = presetKeyFromForm === 'cursor';
   const sectionLabelColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
   const currentFieldGroupStyle = fieldGroupStyle(cardBorder, cardBg);
   const currentFieldLabelStyle = fieldLabelStyle(sectionLabelColor);
@@ -134,7 +135,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
         {providers.map((provider) => {
           const matchedPreset = resolveProviderPreset(provider);
           const isActive = provider.id === activeProviderId;
-          const modelLabel = provider.model || (provider.apiFormat === 'codebuddy-cli' ? '自动选择' : '未选择模型');
+          const modelLabel = provider.model || (provider.apiFormat === 'codebuddy-cli' || provider.apiFormat === 'cursor-agent' ? '自动选择' : '未选择模型');
           return (
             <div
               key={provider.id}
@@ -295,7 +296,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
                   borderRadius: 8,
                   gap: 4,
                 }}>
-                  {[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }, { value: 'gemini', label: 'Gemini' }, { value: 'claude-cli', label: 'Claude CLI' }].map((format) => (
+                  {[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }, { value: 'gemini', label: 'Gemini' }, { value: 'cursor-agent', label: 'Cursor Agent' }, { value: 'claude-cli', label: 'Claude CLI' }].map((format) => (
                     <div
                       key={format.value}
                       onClick={() => form.setFieldsValue({ apiFormat: format.value })}
@@ -319,7 +320,16 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
             )}
 
             <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>可用模型列表（可选配置）</span>} name="models" style={{ marginBottom: 0 }}>
-              <Select mode="tags" size="middle" placeholder={codeBuddyUsesOptionalSecret ? '可选：预填常用模型；留空则由 CodeBuddy CLI 或服务端自动选择' : '配置指定的模型ID，留空则默认去服务端拉取'} style={{ width: '100%' }} />
+              <Select
+                mode="tags"
+                size="middle"
+                placeholder={codeBuddyUsesOptionalSecret
+                  ? '可选：预填常用模型；留空则由 CodeBuddy CLI 或服务端自动选择'
+                  : cursorUsesOptionalModel
+                    ? '可选：预填常用 Cursor 模型 ID；留空则由 Cursor 默认模型自动选择'
+                    : '配置指定的模型ID，留空则默认去服务端拉取'}
+                style={{ width: '100%' }}
+              />
             </Form.Item>
           </div>
         )}

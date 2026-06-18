@@ -30,6 +30,7 @@ const PRESETS: PresetMatcher[] = [
     fixedApiFormat: 'claude-cli',
   },
   { key: 'codebuddy', backendType: 'custom', defaultBaseUrl: '', fixedApiFormat: 'codebuddy-cli' },
+  { key: 'cursor', backendType: 'custom', defaultBaseUrl: 'https://api.cursor.com/v1', fixedApiFormat: 'cursor-agent' },
   { key: 'custom', backendType: 'custom', defaultBaseUrl: '' },
 ];
 
@@ -103,6 +104,19 @@ describe('ai provider preset helpers', () => {
     });
   });
 
+  it('keeps Cursor model empty when only a suggested model list is configured', () => {
+    expect(resolvePresetModelSelection({
+      presetKey: 'cursor',
+      presetDefaultModel: '',
+      presetModels: [],
+      valuesModel: '',
+      customModels: ['composer-2', 'composer-latest'],
+    })).toEqual({
+      model: '',
+      models: ['composer-2', 'composer-latest'],
+    });
+  });
+
   it('forces built-in presets back to their standard base URL when saving or testing', () => {
     expect(resolvePresetBaseURL({
       presetKey: 'qwen-bailian',
@@ -117,6 +131,14 @@ describe('ai provider preset helpers', () => {
       presetDefaultBaseUrl: '',
       valuesBaseUrl: 'https://example-proxy.internal/v1',
     })).toBe('https://example-proxy.internal/v1');
+  });
+
+  it('keeps the user-entered base URL for the Cursor preset', () => {
+    expect(resolvePresetBaseURL({
+      presetKey: 'cursor',
+      presetDefaultBaseUrl: 'https://api.cursor.com/v1',
+      valuesBaseUrl: 'https://cursor-proxy.internal/v1',
+    })).toBe('https://cursor-proxy.internal/v1');
   });
 
   it('forces qwen coding plan to save as custom plus claude-cli', () => {
@@ -196,5 +218,19 @@ describe('resolveProviderPresetKey', () => {
     );
 
     expect(key).toBe('codebuddy');
+  });
+
+  it('能识别 Cursor Agent 预设', () => {
+    const key = resolveProviderPresetKey(
+      {
+        type: 'custom',
+        apiFormat: 'cursor-agent',
+        baseUrl: 'https://api.cursor.com/v1',
+      },
+      PRESETS,
+      'custom',
+    );
+
+    expect(key).toBe('cursor');
   });
 });

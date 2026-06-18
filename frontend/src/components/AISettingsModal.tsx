@@ -345,7 +345,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             
             // 构建 payload，处理 model/models 逻辑
             const preset = findPreset(values.presetKey);
-            const isCustomLike = values.presetKey === 'custom' || values.presetKey === 'ollama' || values.presetKey === 'codebuddy';
+            const isCustomLike = values.presetKey === 'custom' || values.presetKey === 'ollama' || values.presetKey === 'codebuddy' || values.presetKey === 'cursor';
             const { model: finalModel, models: resolvedModels } = resolvePresetModelSelection({
                 presetKey: values.presetKey,
                 presetDefaultModel: preset.defaultModel,

@@ -510,7 +510,7 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 	var err error
 
 	switch providerType {
-	case "openai", "anthropic", "gemini":
+	case "openai", "anthropic", "gemini", "cursor-agent":
 		req, reqErr := newProviderHealthCheckRequest(config)
 		if reqErr != nil {
 			err = s.localizeProviderHealthCheckRequestError(reqErr)
@@ -750,6 +750,8 @@ func resolveModelsURL(config ai.ProviderConfig) string {
 			baseURL = "https://generativelanguage.googleapis.com"
 		}
 		return baseURL + "/v1beta/models?key=" + config.APIKey
+	case "cursor-agent":
+		return provider.ResolveCursorAPIEndpoint(baseURL, "models")
 	case "codebuddy-cli":
 		return ""
 	case "openai":
@@ -779,6 +781,8 @@ func newModelsRequest(config ai.ProviderConfig) (*http.Request, error) {
 		}
 	case "gemini":
 		// Gemini 使用 query string 传递 key，无需额外鉴权头
+	case "cursor-agent":
+		req.Header.Set("Authorization", "Bearer "+config.APIKey)
 	default:
 		req.Header.Set("Authorization", "Bearer "+config.APIKey)
 	}
@@ -935,6 +939,8 @@ func fetchModels(config ai.ProviderConfig) ([]string, error) {
 		return fetchAnthropicModels(config)
 	case "gemini":
 		return fetchGeminiModels(config)
+	case "cursor-agent":
+		return fetchCursorModels(config)
 	case "codebuddy-cli":
 		return append([]string(nil), config.Models...), nil
 	default:
@@ -1053,6 +1059,42 @@ func fetchGeminiModels(config ai.ProviderConfig) ([]string, error) {
 			name = strings.TrimPrefix(name, "models/")
 		}
 		models = append(models, name)
+	}
+	return models, nil
+}
+
+func fetchCursorModels(config ai.ProviderConfig) ([]string, error) {
+	req, err := newModelsRequest(config)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("请求模型列表失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, fmt.Errorf("获取模型列表失败 (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("解析模型列表失败: %w", err)
+	}
+
+	models := make([]string, 0, len(result.Items))
+	for _, item := range result.Items {
+		if strings.TrimSpace(item.ID) != "" {
+			models = append(models, item.ID)
+		}
 	}
 	return models, nil
 }

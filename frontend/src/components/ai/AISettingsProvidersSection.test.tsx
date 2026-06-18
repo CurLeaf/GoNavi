@@ -9,6 +9,7 @@ import AISettingsProvidersSection from './AISettingsProvidersSection';
 
 const providerPresets = [
   { key: 'openai', label: 'OpenAI', icon: <span>O</span>, desc: 'GPT', defaultBaseUrl: 'https://api.openai.com/v1' },
+  { key: 'cursor', label: 'Cursor', icon: <span>R</span>, desc: 'Cursor API', defaultBaseUrl: 'https://api.cursor.com/v1' },
   { key: 'custom', label: '自定义', icon: <span>C</span>, desc: '自定义接口', defaultBaseUrl: 'https://example.com' },
 ];
 
@@ -149,5 +150,45 @@ describe('AISettingsProvidersSection', () => {
     expect(markup).toContain('API Key / Auth Token');
     expect(markup).toContain('本机 CodeBuddy CLI 已登录账号');
     expect(markup).toContain('留空则使用 CodeBuddy CLI 默认网关');
+  });
+
+  it('renders automatic-model copy for the Cursor preset', () => {
+    const Wrap = () => {
+      const [form] = Form.useForm();
+      return (
+        <AISettingsProvidersSection
+          providers={[provider]}
+          activeProviderId="provider-1"
+          editingProvider={{ ...provider, apiFormat: 'cursor-agent', baseUrl: 'https://api.cursor.com/v1' }}
+          isEditing
+          form={form}
+          providerPresets={providerPresets}
+          watchedPresetKey="cursor"
+          watchedApiFormat="cursor-agent"
+          loading={false}
+          testStatus="idle"
+          primaryPasswordVisible={false}
+          darkMode={false}
+          overlayTheme={overlayTheme}
+          cardBg="#fff"
+          cardBorder="rgba(0,0,0,0.08)"
+          inputBg="#fff"
+          onPrimaryPasswordVisibleChange={() => {}}
+          resolveProviderPreset={() => ({ label: 'Cursor', icon: <span>R</span> })}
+          resolvePresetByKey={(key) => providerPresets.find((item) => item.key === key) || providerPresets[0]}
+          onAddProvider={() => {}}
+          onEditProvider={() => {}}
+          onDeleteProvider={() => {}}
+          onSetActiveProvider={() => {}}
+          onCancelEdit={() => {}}
+          onPresetChange={() => {}}
+          onTestProvider={() => {}}
+          onSaveProvider={() => {}}
+        />
+      );
+    };
+
+    const markup = renderToStaticMarkup(<Wrap />);
+    expect(markup).toContain('可选：预填常用 Cursor 模型 ID；留空则由 Cursor 默认模型自动选择');
   });
 });

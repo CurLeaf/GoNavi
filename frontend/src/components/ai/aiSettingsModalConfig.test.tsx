@@ -35,6 +35,16 @@ describe('aiSettingsModalConfig', () => {
     expect(preset.key).toBe('codebuddy');
   });
 
+  it('matches a Cursor Agent provider back to the dedicated preset', () => {
+    const preset = matchProviderPreset({
+      type: 'custom',
+      baseUrl: 'https://api.cursor.com/v1',
+      apiFormat: 'cursor-agent',
+    });
+
+    expect(preset.key).toBe('cursor');
+  });
+
   it('creates MCP server drafts and skill drafts with stable defaults', () => {
     const server = EMPTY_MCP_SERVER({ name: 'Browser', args: ['stdio'] });
     const skill = EMPTY_SKILL();
@@ -49,6 +59,7 @@ describe('aiSettingsModalConfig', () => {
   it('keeps the provider preset list available for the settings modal', () => {
     expect(PROVIDER_PRESETS.some((item) => item.key === 'codex')).toBe(false);
     expect(PROVIDER_PRESETS.some((item) => item.key === 'codebuddy')).toBe(true);
+    expect(PROVIDER_PRESETS.some((item) => item.key === 'cursor')).toBe(true);
     expect(PROVIDER_PRESETS.some((item) => item.key === 'openai')).toBe(true);
     expect(PROVIDER_PRESETS.some((item) => item.key === 'custom')).toBe(true);
   });

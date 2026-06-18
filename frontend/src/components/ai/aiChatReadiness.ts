@@ -66,7 +66,7 @@ const isBaseURLOptionalProvider = (provider: AIProviderConfig): boolean =>
   provider.type === 'custom' && trimText(provider.apiFormat) === 'codebuddy-cli';
 
 const isModelOptionalProvider = (provider: AIProviderConfig): boolean =>
-  provider.type === 'custom' && trimText(provider.apiFormat) === 'codebuddy-cli';
+  provider.type === 'custom' && ['codebuddy-cli', 'cursor-agent'].includes(trimText(provider.apiFormat));
 
 const getSelectedProvider = (params: {
   providers?: AIProviderConfig[];

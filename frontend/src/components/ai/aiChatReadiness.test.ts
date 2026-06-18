@@ -116,4 +116,28 @@ describe('buildAIChatReadinessSnapshot', () => {
     expect(snapshot.title).toContain('CodeBuddy');
     expect(snapshot.title).toContain('自动选择');
   });
+
+  it('treats Cursor Agent as ready without an explicit model', () => {
+    const snapshot = buildAIChatReadinessSnapshot({
+      providers: [{
+        id: 'provider-1',
+        type: 'custom',
+        name: 'Cursor',
+        apiKey: '',
+        hasSecret: true,
+        baseUrl: 'https://api.cursor.com/v1',
+        model: '',
+        apiFormat: 'cursor-agent',
+        models: [],
+        maxTokens: 4096,
+        temperature: 0.2,
+      }],
+      activeProviderId: 'provider-1',
+    });
+
+    expect(snapshot.status).toBe('ready');
+    expect(snapshot.ready).toBe(true);
+    expect(snapshot.title).toContain('Cursor');
+    expect(snapshot.title).toContain('自动选择');
+  });
 });

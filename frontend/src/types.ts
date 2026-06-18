@@ -600,7 +600,7 @@ export interface AIProviderConfig {
   baseUrl: string;
   model: string;
   models?: string[];
-  apiFormat?: string; // custom 专用: openai | anthropic | gemini | claude-cli | codebuddy-cli
+  apiFormat?: string; // custom 专用: openai | anthropic | gemini | cursor-agent | claude-cli | codebuddy-cli
   headers?: Record<string, string>;
   maxTokens: number;
   temperature: number;
