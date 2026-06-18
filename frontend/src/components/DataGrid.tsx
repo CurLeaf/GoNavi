@@ -1346,6 +1346,27 @@ type ColumnMeta = {
     comment: string;
 };
 
+const buildColumnMetaMap = (columns: ColumnDefinition[]): Record<string, ColumnMeta> => {
+    const nextMap: Record<string, ColumnMeta> = {};
+    (columns || []).forEach((column: any) => {
+        const name = getColumnDefinitionName(column);
+        if (!name) return;
+        nextMap[name] = {
+            type: getColumnDefinitionType(column),
+            comment: getColumnDefinitionComment(column),
+        };
+    });
+    return nextMap;
+};
+
+const hasUsableColumnMeta = (metaMap: Record<string, ColumnMeta>): boolean => (
+    Object.values(metaMap || {}).some((meta) => {
+        const type = String(meta?.type || '').trim();
+        const comment = String(meta?.comment || '').trim();
+        return type.length > 0 || comment.length > 0;
+    })
+);
+
 type ForeignKeyTarget = {
     columnName: string;
     refTableName: string;
@@ -2210,6 +2231,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const [columnMetaMap, setColumnMetaMap] = useState<Record<string, ColumnMeta>>({});
   const [foreignKeyMap, setForeignKeyMap] = useState<Record<string, ForeignKeyTarget>>({});
   const [uniqueKeyGroups, setUniqueKeyGroups] = useState<string[][]>([]);
+  const [metadataReloadVersion, setMetadataReloadVersion] = useState(0);
   const mergedDisplayDataRef = useRef<Item[]>([]);
   const closeCellEditModeRef = useRef<() => void>(() => {});
   const formRef = useRef(form);
@@ -2269,29 +2291,37 @@ const DataGrid: React.FC<DataGridProps> = ({
       };
 
       const seq = ++columnMetaSeqRef.current;
-      DBGetColumns(buildRpcConnectionConfig(config) as any, normalizedDbName, normalizedTableName)
-          .then((res) => {
-              if (seq !== columnMetaSeqRef.current) return;
-              if (!res.success || !Array.isArray(res.data)) {
-                  setColumnMetaMap({});
-                  return;
+      const loadColumnMeta = async () => {
+          let nextMap: Record<string, ColumnMeta> | null = null;
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+              try {
+                  const res = await DBGetColumns(buildRpcConnectionConfig(config) as any, normalizedDbName, normalizedTableName);
+                  if (seq !== columnMetaSeqRef.current) return;
+                  if (!res.success || !Array.isArray(res.data)) {
+                      continue;
+                  }
+                  const candidateMap = buildColumnMetaMap(res.data as ColumnDefinition[]);
+                  if (!hasUsableColumnMeta(candidateMap)) {
+                      continue;
+                  }
+                  nextMap = candidateMap;
+                  break;
+              } catch {
+                  if (seq !== columnMetaSeqRef.current) return;
               }
-              const nextMap: Record<string, ColumnMeta> = {};
-              (res.data as ColumnDefinition[]).forEach((column: any) => {
-                  const name = getColumnDefinitionName(column);
-                  if (!name) return;
-                  const type = getColumnDefinitionType(column);
-                  const comment = getColumnDefinitionComment(column);
-                  nextMap[name] = { type, comment };
-              });
+          }
+
+          if (seq !== columnMetaSeqRef.current) return;
+          if (nextMap) {
               columnMetaCacheRef.current[cacheKey] = nextMap;
               setColumnMetaMap(nextMap);
-          })
-          .catch(() => {
-              if (seq !== columnMetaSeqRef.current) return;
-              setColumnMetaMap({});
-          });
-  }, [connections, connectionId, dbName, tableName]);
+              return;
+          }
+          setColumnMetaMap({});
+      };
+
+      void loadColumnMeta();
+  }, [connections, connectionId, dbName, tableName, metadataReloadVersion]);
 
   useEffect(() => {
       const normalizedTableName = String(tableName || '').trim();
@@ -2344,7 +2374,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               if (seq !== foreignKeySeqRef.current) return;
               setForeignKeyMap({});
           });
-  }, [connections, connectionId, dbName, tableName, exportScope]);
+  }, [connections, connectionId, dbName, tableName, exportScope, metadataReloadVersion]);
 
   useEffect(() => {
       const normalizedTableName = String(tableName || '').trim();
@@ -2385,7 +2415,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               if (seq !== uniqueKeyGroupsSeqRef.current) return;
               setUniqueKeyGroups([]);
           });
-  }, [connections, connectionId, dbName, tableName]);
+  }, [connections, connectionId, dbName, tableName, metadataReloadVersion]);
 
   const columnMetaMapByLowerName = useMemo(() => {
       const next: Record<string, ColumnMeta> = {};
@@ -7741,8 +7771,17 @@ const DataGrid: React.FC<DataGridProps> = ({
       setDeletedRowKeys(new Set());
       setModifiedColumns({});
       setSelectedRowKeys([]);
+      const normalizedTableName = String(tableName || '').trim();
+      const normalizedDbName = String(dbName || '').trim();
+      if (connectionId && normalizedTableName) {
+          const cacheKey = `${connectionId}|${normalizedDbName}|${normalizedTableName}`;
+          delete columnMetaCacheRef.current[cacheKey];
+          delete foreignKeyCacheRef.current[cacheKey];
+          delete uniqueKeyGroupsCacheRef.current[cacheKey];
+          setMetadataReloadVersion((value) => value + 1);
+      }
       if (onReload) onReload();
-  }, [clearAutoCommitTimer, onReload]);
+  }, [clearAutoCommitTimer, connectionId, dbName, onReload, tableName]);
 
   const handleResetPendingChanges = useCallback(() => {
       clearAutoCommitTimer();

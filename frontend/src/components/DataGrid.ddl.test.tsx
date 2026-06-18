@@ -9,6 +9,7 @@ import DataGrid, {
   GONAVI_ROW_KEY,
   hasDataGridVirtualEditRenderVersionChanged,
 } from './DataGrid';
+import DataGridToolbarFrame from './DataGridToolbarFrame';
 import { V2CellContextMenuView, V2ColumnHeaderContextMenuView, V2TableGroupContextMenuView } from './V2TableContextMenu';
 import { setCurrentLanguage, t } from '../i18n';
 import { DUCKDB_ROWID_LOCATOR_COLUMN, ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
@@ -96,6 +97,9 @@ vi.mock('../store', () => ({
 }));
 
 vi.mock('../../wailsjs/go/app/App', () => backendApp);
+vi.mock('../../wailsjs/runtime/runtime', () => ({
+  EventsOn: vi.fn(() => vi.fn()),
+}));
 
 vi.mock('react-dom', async () => {
   const actual = await vi.importActual<any>('react-dom');
@@ -291,6 +295,9 @@ vi.mock('antd', () => {
   const Radio: any = ({ children }: any) => <span>{children}</span>;
   Radio.Group = ({ children }: any) => <div>{children}</div>;
   Radio.Button = ({ children }: any) => <button type="button">{children}</button>;
+  const Typography: any = ({ children }: any) => <>{children}</>;
+  Typography.Text = ({ children }: any) => <span>{children}</span>;
+  Typography.Paragraph = ({ children }: any) => <p>{children}</p>;
   const Segmented = ({ value, options, onChange }: any) => (
     <div data-segmented-value={value}>
       {(options || []).map((option: any) => (
@@ -337,6 +344,12 @@ vi.mock('antd', () => {
     Space,
     Tag,
     Radio,
+    Typography,
+    Progress: ({ percent, status, format }: any) => (
+      <div data-progress-percent={String(percent)} data-progress-status={String(status)}>
+        {typeof format === 'function' ? format(percent) : null}
+      </div>
+    ),
   };
 });
 
@@ -347,6 +360,15 @@ const textContent = (node: any): string =>
 
 const findButton = (renderer: ReactTestRenderer, text: string) =>
   renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text))[0];
+
+const renderHeaderText = (columnKey: string): string => {
+  const column = testRenderState.latestColumns.find((item) => item.key === columnKey);
+  expect(column).toBeTruthy();
+  const headerRenderer = create(<>{column.title}</>);
+  const content = textContent(headerRenderer.root);
+  headerRenderer.unmount();
+  return content;
+};
 
 const waitForEffects = async () => {
   await act(async () => {
@@ -651,6 +673,8 @@ describe('DataGrid DDL interactions', () => {
     backendApp.DBQuery.mockResolvedValue({ success: true, data: [] });
     backendApp.DBShowCreateTable.mockResolvedValue({ success: true, data: 'CREATE TABLE users' });
     setCurrentLanguage('zh-CN');
+    storeState.queryOptions.showColumnComment = false;
+    storeState.queryOptions.showColumnType = false;
     storeState.appearance.uiVersion = 'legacy';
     storeState.dataEditTransactionOptions = {
       commitMode: 'manual',
@@ -733,6 +757,7 @@ describe('DataGrid DDL interactions', () => {
           dbName="main"
           connectionId="conn-1"
           pkColumns={['id']}
+          onReload={() => {}}
         />,
       );
     });
@@ -863,6 +888,88 @@ describe('DataGrid DDL interactions', () => {
     expect(textContent(renderer!.root)).toContain(t('data_grid.context_menu.hide_column_comment'));
     expect(textContent(renderer!.root)).toContain('bigint');
     expect(textContent(renderer!.root)).toContain('主键 ID');
+    renderer!.unmount();
+  });
+
+  it('retries column metadata loading when the first response has no usable type or comment', async () => {
+    storeState.queryOptions.showColumnComment = true;
+    storeState.queryOptions.showColumnType = true;
+    backendApp.DBGetColumns
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ Name: 'id', Type: '', Comment: '' }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ Name: 'id', Type: 'bigint', Comment: '主键 ID' }],
+      });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+    await waitForEffects();
+
+    expect(backendApp.DBGetColumns).toHaveBeenCalledTimes(2);
+    const headerText = renderHeaderText('id');
+    expect(headerText).toContain('bigint');
+    expect(headerText).toContain('主键 ID');
+    renderer!.unmount();
+  });
+
+  it('reloads column metadata after clicking refresh', async () => {
+    storeState.queryOptions.showColumnComment = true;
+    storeState.queryOptions.showColumnType = true;
+    backendApp.DBGetColumns
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ Name: 'id', Type: 'bigint', Comment: '旧备注' }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ Name: 'id', Type: 'varchar(64)', Comment: '新备注' }],
+      });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    expect(backendApp.DBGetColumns).toHaveBeenCalledTimes(1);
+    expect(renderHeaderText('id')).toContain('旧备注');
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onRefresh();
+    });
+    await waitForEffects();
+    await waitForEffects();
+
+    expect(backendApp.DBGetColumns).toHaveBeenCalledTimes(2);
+    const headerText = renderHeaderText('id');
+    expect(headerText).toContain('varchar(64)');
+    expect(headerText).toContain('新备注');
     renderer!.unmount();
   });
 
