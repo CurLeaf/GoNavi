@@ -345,7 +345,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             
             // 构建 payload，处理 model/models 逻辑
             const preset = findPreset(values.presetKey);
-            const isCustomLike = values.presetKey === 'custom' || values.presetKey === 'ollama';
+            const isCustomLike = values.presetKey === 'custom' || values.presetKey === 'ollama' || values.presetKey === 'codebuddy';
             const { model: finalModel, models: resolvedModels } = resolvePresetModelSelection({
                 presetKey: values.presetKey,
                 presetDefaultModel: preset.defaultModel,
@@ -630,10 +630,11 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 presetFixedApiFormat: preset.fixedApiFormat,
                 valuesApiFormat: values.apiFormat,
             });
+            const allowEmptySecret = values.presetKey === 'codebuddy';
             const secretDraft = resolveProviderSecretDraft({
                 apiKeyInput: values.apiKey,
             });
-            if (secretDraft.mode === 'clear') {
+            if (secretDraft.mode === 'clear' && !allowEmptySecret) {
                 throw new Error(t('ai_settings.message.test_requires_new_api_key'));
             }
             const res = await Service?.AITestProvider?.({

@@ -29,6 +29,7 @@ const PRESETS: PresetMatcher[] = [
     defaultBaseUrl: QWEN_CODING_PLAN_ANTHROPIC_BASE_URL,
     fixedApiFormat: 'claude-cli',
   },
+  { key: 'codebuddy', backendType: 'custom', defaultBaseUrl: '', fixedApiFormat: 'codebuddy-cli' },
   { key: 'custom', backendType: 'custom', defaultBaseUrl: '' },
 ];
 
@@ -112,7 +113,7 @@ describe('ai provider preset helpers', () => {
 
   it('keeps the user-entered base URL for custom-like presets', () => {
     expect(resolvePresetBaseURL({
-      presetKey: 'custom',
+      presetKey: 'codebuddy',
       presetDefaultBaseUrl: '',
       valuesBaseUrl: 'https://example-proxy.internal/v1',
     })).toBe('https://example-proxy.internal/v1');
@@ -181,5 +182,19 @@ describe('resolveProviderPresetKey', () => {
     );
 
     expect(key).toBe('qwen-bailian');
+  });
+
+  it('能识别没有 Base URL 的 CodeBuddy CLI 预设', () => {
+    const key = resolveProviderPresetKey(
+      {
+        type: 'custom',
+        apiFormat: 'codebuddy-cli',
+        baseUrl: '',
+      },
+      PRESETS,
+      'custom',
+    );
+
+    expect(key).toBe('codebuddy');
   });
 });

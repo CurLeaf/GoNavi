@@ -17,14 +17,13 @@ type CustomProvider struct {
 
 // NewCustomProvider 创建自定义 Provider 实例
 func NewCustomProvider(config ai.ProviderConfig) (Provider, error) {
-	if strings.TrimSpace(config.BaseURL) == "" {
-		return nil, fmt.Errorf("自定义 Provider 必须指定 Base URL")
-	}
-
 	// 根据 apiFormat 决定使用哪个底层协议，默认 openai
 	apiFormat := strings.ToLower(strings.TrimSpace(config.APIFormat))
 	if apiFormat == "" {
 		apiFormat = "openai"
+	}
+	if strings.TrimSpace(config.BaseURL) == "" && apiFormat != "claude-cli" && apiFormat != "codebuddy-cli" {
+		return nil, fmt.Errorf("自定义 Provider 必须指定 Base URL")
 	}
 
 	var innerProvider Provider
@@ -36,6 +35,8 @@ func NewCustomProvider(config ai.ProviderConfig) (Provider, error) {
 		innerProvider, err = NewGeminiProvider(config)
 	case "claude-cli":
 		innerProvider, err = NewClaudeCLIProvider(config)
+	case "codebuddy-cli":
+		innerProvider, err = NewCodeBuddyCLIProvider(config)
 	default: // "openai" 及其他
 		innerProvider, err = NewOpenAIProvider(config)
 	}

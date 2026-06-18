@@ -92,4 +92,28 @@ describe('buildAIChatReadinessSnapshot', () => {
     expect(snapshot.contextAttachedCount).toBe(1);
     expect(snapshot.title).toContain('OpenAI 主账号 / gpt-5.5');
   });
+
+  it('treats CodeBuddy CLI as ready without explicit base url or model', () => {
+    const snapshot = buildAIChatReadinessSnapshot({
+      providers: [{
+        id: 'provider-1',
+        type: 'custom',
+        name: 'CodeBuddy',
+        apiKey: '',
+        hasSecret: true,
+        baseUrl: '',
+        model: '',
+        apiFormat: 'codebuddy-cli',
+        models: [],
+        maxTokens: 4096,
+        temperature: 0.2,
+      }],
+      activeProviderId: 'provider-1',
+    });
+
+    expect(snapshot.status).toBe('ready');
+    expect(snapshot.ready).toBe(true);
+    expect(snapshot.title).toContain('CodeBuddy');
+    expect(snapshot.title).toContain('自动选择');
+  });
 });

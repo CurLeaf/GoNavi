@@ -108,4 +108,46 @@ describe('AISettingsProvidersSection', () => {
     expect(markup).toContain('API Endpoint (URL)');
     expect(markup).toContain('测试连接');
   });
+
+  it('renders CodeBuddy optional-login copy when editing the CodeBuddy preset', () => {
+    const Wrap = () => {
+      const [form] = Form.useForm();
+      return (
+        <AISettingsProvidersSection
+          providers={[provider]}
+          activeProviderId="provider-1"
+          editingProvider={{ ...provider, apiFormat: 'codebuddy-cli' }}
+          isEditing
+          form={form}
+          providerPresets={providerPresets}
+          watchedPresetKey="codebuddy"
+          watchedApiFormat="codebuddy-cli"
+          loading={false}
+          testStatus="idle"
+          primaryPasswordVisible={false}
+          darkMode={false}
+          overlayTheme={overlayTheme}
+          cardBg="#fff"
+          cardBorder="rgba(0,0,0,0.08)"
+          inputBg="#fff"
+          onPrimaryPasswordVisibleChange={() => {}}
+          resolveProviderPreset={() => ({ label: 'CodeBuddy', icon: <span>C</span> })}
+          resolvePresetByKey={(key) => providerPresets.find((item) => item.key === key) || providerPresets[0]}
+          onAddProvider={() => {}}
+          onEditProvider={() => {}}
+          onDeleteProvider={() => {}}
+          onSetActiveProvider={() => {}}
+          onCancelEdit={() => {}}
+          onPresetChange={() => {}}
+          onTestProvider={() => {}}
+          onSaveProvider={() => {}}
+        />
+      );
+    };
+
+    const markup = renderToStaticMarkup(<Wrap />);
+    expect(markup).toContain('API Key / Auth Token');
+    expect(markup).toContain('本机 CodeBuddy CLI 已登录账号');
+    expect(markup).toContain('留空则使用 CodeBuddy CLI 默认网关');
+  });
 });

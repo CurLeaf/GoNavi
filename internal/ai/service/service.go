@@ -102,6 +102,25 @@ var claudeCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
 	return err
 }
 
+var codebuddyCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cliProvider, err := provider.NewProvider(config)
+	if err != nil {
+		return err
+	}
+
+	_, err = cliProvider.Chat(ctx, ai.ChatRequest{
+		Messages: []ai.Message{
+			{Role: "user", Content: "ping"},
+		},
+		MaxTokens:   1,
+		Temperature: 0,
+	})
+	return err
+}
+
 // NewService 创建 AI Service 实例
 func NewService() *Service {
 	return NewServiceWithSecretStore(secretstore.NewKeyringStore())
@@ -533,6 +552,8 @@ func (s *Service) AITestProvider(config ai.ProviderConfig) map[string]interface{
 			testConfig.Model = dashScopeCodingPlanModels[0]
 		}
 		err = claudeCLIHealthCheckFunc(testConfig)
+	case "codebuddy-cli":
+		err = codebuddyCLIHealthCheckFunc(config)
 	default:
 		if baseURL != "" {
 			req, _ := http.NewRequest("GET", baseURL, nil)
@@ -660,6 +681,9 @@ func filterFetchedModelsForProvider(config ai.ProviderConfig, models []string) (
 }
 
 func defaultStaticModelsForProvider(config ai.ProviderConfig) []string {
+	if normalizedProviderType(config) == "codebuddy-cli" {
+		return append([]string(nil), config.Models...)
+	}
 	if isMiniMaxAnthropicProvider(config) {
 		return append([]string(nil), miniMaxAnthropicModels...)
 	}
@@ -726,6 +750,8 @@ func resolveModelsURL(config ai.ProviderConfig) string {
 			baseURL = "https://generativelanguage.googleapis.com"
 		}
 		return baseURL + "/v1beta/models?key=" + config.APIKey
+	case "codebuddy-cli":
+		return ""
 	case "openai":
 		fallthrough
 	default:
@@ -736,6 +762,9 @@ func resolveModelsURL(config ai.ProviderConfig) string {
 func newModelsRequest(config ai.ProviderConfig) (*http.Request, error) {
 	config = normalizeProviderConfig(config)
 	url := resolveModelsURL(config)
+	if strings.TrimSpace(url) == "" {
+		return nil, fmt.Errorf("当前供应商不支持远端模型列表")
+	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %w", err)
@@ -862,6 +891,13 @@ func (s *Service) AIListModels() map[string]interface{} {
 	}
 
 	config = normalizeProviderConfig(config)
+	if normalizedProviderType(config) == "codebuddy-cli" {
+		return map[string]interface{}{
+			"success": true,
+			"models":  append([]string(nil), config.Models...),
+			"source":  "static",
+		}
+	}
 	if staticModels := defaultStaticModelsForProvider(config); len(staticModels) > 0 {
 		return map[string]interface{}{"success": true, "models": staticModels, "source": "static"}
 	}
@@ -899,6 +935,8 @@ func fetchModels(config ai.ProviderConfig) ([]string, error) {
 		return fetchAnthropicModels(config)
 	case "gemini":
 		return fetchGeminiModels(config)
+	case "codebuddy-cli":
+		return append([]string(nil), config.Models...), nil
 	default:
 		return fetchOpenAIModels(config)
 	}

@@ -25,6 +25,16 @@ describe('aiSettingsModalConfig', () => {
     expect(preset.key).toBe('qwen-coding-plan');
   });
 
+  it('matches a CodeBuddy CLI provider back to the dedicated preset', () => {
+    const preset = matchProviderPreset({
+      type: 'custom',
+      baseUrl: '',
+      apiFormat: 'codebuddy-cli',
+    });
+
+    expect(preset.key).toBe('codebuddy');
+  });
+
   it('creates MCP server drafts and skill drafts with stable defaults', () => {
     const server = EMPTY_MCP_SERVER({ name: 'Browser', args: ['stdio'] });
     const skill = EMPTY_SKILL();
@@ -38,6 +48,7 @@ describe('aiSettingsModalConfig', () => {
 
   it('keeps the provider preset list available for the settings modal', () => {
     expect(PROVIDER_PRESETS.some((item) => item.key === 'codex')).toBe(false);
+    expect(PROVIDER_PRESETS.some((item) => item.key === 'codebuddy')).toBe(true);
     expect(PROVIDER_PRESETS.some((item) => item.key === 'openai')).toBe(true);
     expect(PROVIDER_PRESETS.some((item) => item.key === 'custom')).toBe(true);
   });
