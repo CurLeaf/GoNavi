@@ -1,4 +1,5 @@
-import { Modal, Spin } from 'antd';
+import Modal from './common/ResizableDraggableModal';
+import { Spin } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';

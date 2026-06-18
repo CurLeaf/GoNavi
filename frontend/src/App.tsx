@@ -1,6 +1,7 @@
-﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined } from '@ant-design/icons';
+﻿import Modal from './components/common/ResizableDraggableModal';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
@@ -186,6 +187,22 @@ const mergeSavedConnections = (current: SavedConnection[], imported: SavedConnec
 };
 
 type ConnectionPackageDialogMode = 'import' | 'export';
+type ToolCenterGroupKey = 'config' | 'workflow' | 'workspace';
+type ToolCenterPaneKey =
+  | 'connection-package'
+  | 'data-root'
+  | 'security-update'
+  | 'schema-compare'
+  | 'data-compare'
+  | 'sync'
+  | 'drivers'
+  | 'snippet-settings'
+  | 'shortcut-settings';
+
+type ToolCenterPaneState = {
+  key: ToolCenterPaneKey;
+  group: ToolCenterGroupKey;
+};
 
 type ConnectionPackageDialogState = {
   open: boolean;
@@ -1279,13 +1296,83 @@ function App() {
       border: overlayTheme.sectionBorder,
       background: overlayTheme.sectionBg,
   }), [overlayTheme]);
+  const toolCenterModalContentStyle = useMemo<React.CSSProperties>(() => ({
+      ...utilityModalShellStyle,
+      height: 'min(820px, calc(100vh - 64px))',
+      display: 'flex',
+      flexDirection: 'column',
+  }), [utilityModalShellStyle]);
+  const toolCenterModalWorkspaceStyle = useMemo<React.CSSProperties>(() => ({
+      display: 'flex',
+      flexDirection: 'column',
+      padding: '10px 0 2px',
+      height: '100%',
+      minHeight: 0,
+  }), []);
+  const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({
+      display: 'grid',
+      gridTemplateColumns: '232px minmax(0, 1fr)',
+      gap: 18,
+      flex: 1,
+      minHeight: 0,
+  }), []);
+  const toolCenterNavPanelStyle = useMemo<React.CSSProperties>(() => ({
+      padding: '4px 12px 4px 0',
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: 0,
+      borderRight: `1px solid ${overlayTheme.divider}`,
+  }), [overlayTheme.divider]);
+  const toolCenterNavScrollStyle = useMemo<React.CSSProperties>(() => ({
+      display: 'grid',
+      alignContent: 'start',
+      gap: 4,
+      minHeight: 0,
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      paddingRight: 8,
+  }), []);
+  const toolCenterContentPanelStyle = useMemo<React.CSSProperties>(() => ({
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 12,
+      minHeight: 0,
+      overflow: 'hidden',
+  }), []);
+  const toolCenterDetailPanelStyle = useMemo<React.CSSProperties>(() => ({
+      ...utilityPanelStyle,
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+  }), [utilityPanelStyle]);
+  const toolCenterDetailBodyStyle = useMemo<React.CSSProperties>(() => ({
+      flex: 1,
+      minHeight: 0,
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      paddingRight: 6,
+      overscrollBehavior: 'contain',
+  }), []);
+  const toolCenterScrollableListStyle = useMemo<React.CSSProperties>(() => ({
+      flex: 1,
+      minHeight: 0,
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      overscrollBehavior: 'contain',
+  }), []);
   const utilityMutedTextStyle = useMemo(() => ({
       color: overlayTheme.mutedText,
       fontSize: 12,
       lineHeight: 1.6,
   }), [overlayTheme]);
-  const renderUtilityModalTitle = (icon: React.ReactNode, title: string, description: string) => (
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+  const renderUtilityModalTitle = (
+      icon: React.ReactNode,
+      title: string,
+      description: string,
+  ) => (
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
           <div style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
               {icon}
           </div>
@@ -1317,6 +1404,27 @@ function App() {
       fontWeight: 400,
       marginTop: 2,
   }), [overlayTheme]);
+  const toolCenterRowStyle = useMemo(() => ({
+      width: '100%',
+      minHeight: 82,
+      borderRadius: 0,
+      color: overlayTheme.titleText,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 16,
+      paddingInline: 8,
+      boxShadow: 'none',
+      fontSize: 15,
+      fontWeight: 600,
+  }), [overlayTheme]);
+  const toolCenterRowDescriptionStyle = useMemo(() => ({
+      ...utilityActionHintStyle,
+      marginTop: 4,
+      textAlign: 'left' as const,
+      whiteSpace: 'normal' as const,
+      lineHeight: 1.55,
+  }), [utilityActionHintStyle]);
 
   const sidebarHorizontalPadding = isSidebarCompact ? 8 : 10;
   
@@ -2110,6 +2218,8 @@ function App() {
   const closeConnectionPackageDialog = useCallback(() => {
       setConnectionPackageDialog(createClosedConnectionPackageDialogState());
       setPendingConnectionImportPayload(null);
+      setToolCenterBackGroupKey(null);
+      setActiveToolCenterPane((current) => (current?.key === 'connection-package' ? null : current));
   }, []);
 
   const refreshConnectionsAfterImport = useCallback(async (importedViews: SavedConnection[]) => {
@@ -2164,7 +2274,8 @@ function App() {
       return importedViews as SavedConnection[];
   }, [refreshConnectionsAfterImport, t]);
 
-  const handleImportConnections = async () => {
+  const handleImportConnections = async (sourceGroup?: ToolCenterGroupKey) => {
+      setToolCenterBackGroupKey(sourceGroup ?? null);
       const res = await (window as any).go.app.App.ImportConfigFile();
       if (!res.success) {
           if (res.message !== "已取消") {
@@ -2191,6 +2302,10 @@ function App() {
           }
       } catch (e: any) {
           if (isConnectionPackagePasswordRequiredError(e)) {
+              if (sourceGroup) {
+                  setToolCenterBackGroupKey(sourceGroup);
+                  setActiveToolCenterPane({ key: 'connection-package', group: sourceGroup });
+              }
               setPendingConnectionImportPayload(raw);
               setConnectionPackageDialog({
                   open: true,
@@ -2207,12 +2322,16 @@ function App() {
       }
   };
 
-  const handleExportConnections = async () => {
+  const handleExportConnections = async (sourceGroup?: ToolCenterGroupKey) => {
       if (connections.length === 0) {
           void message.warning(t('app.connection_package.message.no_connections_to_export'));
           return;
       }
 
+      setToolCenterBackGroupKey(sourceGroup ?? null);
+      if (sourceGroup) {
+          setActiveToolCenterPane({ key: 'connection-package', group: sourceGroup });
+      }
       setConnectionPackageDialog({
           open: true,
           mode: 'export',
@@ -2317,6 +2436,9 @@ function App() {
   };
 
   const [isToolsModalOpen, setIsToolsModalOpen] = useState(false);
+  const [activeToolCenterGroupKey, setActiveToolCenterGroupKey] = useState<ToolCenterGroupKey>('config');
+  const [toolCenterBackGroupKey, setToolCenterBackGroupKey] = useState<ToolCenterGroupKey | null>(null);
+  const [activeToolCenterPane, setActiveToolCenterPane] = useState<ToolCenterPaneState | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
@@ -2436,30 +2558,46 @@ function App() {
           effectiveUiScale,
       })
   ), [aiPanelVisible, darkMode, effectiveUiScale]);
+  const handleOpenToolsModal = useCallback((group: ToolCenterGroupKey = 'config') => {
+      setToolCenterBackGroupKey(null);
+      setActiveToolCenterPane(null);
+      setActiveToolCenterGroupKey(group);
+      setIsToolsModalOpen(true);
+  }, []);
+  const handleOpenSettingsModal = useCallback(() => {
+      setIsSettingsModalOpen(true);
+  }, []);
+  const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {
+      setToolCenterBackGroupKey(group);
+      setActiveToolCenterGroupKey(group);
+      setActiveToolCenterPane({ key, group });
+  }, []);
+  const handleReturnToToolCenter = useCallback((closeChild?: () => void) => {
+      const returnGroup = toolCenterBackGroupKey ?? 'config';
+      closeChild?.();
+      setToolCenterBackGroupKey(null);
+      setActiveToolCenterGroupKey(returnGroup);
+      setActiveToolCenterPane(null);
+      setIsToolsModalOpen(true);
+  }, [toolCenterBackGroupKey]);
   const sidebarUtilityItems = useMemo(() => {
       const itemMap = {
           tools: {
               key: 'tools',
               title: t('app.sidebar.tools'),
               icon: <ToolOutlined />,
-              onClick: () => setIsToolsModalOpen(true),
+              onClick: () => handleOpenToolsModal(),
           },
           settings: {
               key: 'settings',
               title: t('app.sidebar.settings'),
               icon: <SettingOutlined />,
-              onClick: () => setIsSettingsModalOpen(true),
+              onClick: () => handleOpenSettingsModal(),
           },
       } as const;
 
       return SIDEBAR_UTILITY_ITEM_KEYS.map((key) => itemMap[key]);
-  }, [t]);
-  const handleOpenToolsModal = useCallback(() => {
-      setIsToolsModalOpen(true);
-  }, []);
-  const handleOpenSettingsModal = useCallback(() => {
-      setIsSettingsModalOpen(true);
-  }, []);
+  }, [handleOpenSettingsModal, handleOpenToolsModal, t]);
   const handleFocusSidebarSearch = useCallback(() => {
       window.dispatchEvent(new CustomEvent('gonavi:focus-sidebar-search'));
   }, []);
@@ -2496,11 +2634,11 @@ function App() {
   }, [t]);
 
   useEffect(() => {
-      if (!isDataRootModalOpen) {
+      if (!isDataRootModalOpen && activeToolCenterPane?.key !== 'data-root') {
           return;
       }
       void loadDataRootInfo();
-  }, [isDataRootModalOpen, loadDataRootInfo]);
+  }, [activeToolCenterPane?.key, isDataRootModalOpen, loadDataRootInfo]);
 
   const handleSelectDataRoot = useCallback(async () => {
       try {
@@ -2753,12 +2891,14 @@ function App() {
   const handleOpenDriverManagerFromConnection = () => {
       setIsModalOpen(false);
       setEditingConnection(null);
+      setToolCenterBackGroupKey(null);
       setIsDriverModalOpen(true);
   };
 
   const handleCloseDriverManager = useCallback(() => {
       const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
       setIsDriverModalOpen(false);
+      setToolCenterBackGroupKey(null);
       setSecurityUpdateRepairSource(null);
       if (reopenSecurityUpdateDetails) {
           setIsSecurityUpdateSettingsOpen(true);
@@ -3809,136 +3949,654 @@ function App() {
             onSaved={handleConnectionSaved}
           />
           )}
-          {isToolsModalOpen && (
-          <Modal
-            title={renderUtilityModalTitle(<ToolOutlined />, t('app.tools.title'), t('app.tools.description'))}
-            open={isToolsModalOpen}
-            onCancel={() => setIsToolsModalOpen(false)}
-            footer={null}
-            width={560}
-            styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
-          >
-            <div style={{ display: 'grid', gap: 12, padding: '12px 0' }}>
-              {[
-                {
-                  key: 'import',
-                  icon: <UploadOutlined />,
-                  title: t('app.tools.entry.import.title'),
-                  description: t('app.tools.entry.import.description'),
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    void handleImportConnections();
+          {isToolsModalOpen && (() => {
+            const toolCenterGroups = [
+              {
+                key: 'config',
+                icon: <SettingOutlined />,
+                title: t('app.tools.group.config.title'),
+                description: t('app.tools.group.config.description'),
+                items: [
+                  {
+                    key: 'import',
+                    icon: <UploadOutlined />,
+                    title: t('app.tools.entry.import.title'),
+                    description: t('app.tools.entry.import.description'),
+                    onClick: () => {
+                      void handleImportConnections('config');
+                    },
                   },
-                },
-                {
-                  key: 'export',
-                  icon: <DownloadOutlined />,
-                  title: t('app.tools.entry.export.title'),
-                  description: t('app.tools.entry.export.description'),
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    void handleExportConnections();
+                  {
+                    key: 'export',
+                    icon: <DownloadOutlined />,
+                    title: t('app.tools.entry.export.title'),
+                    description: t('app.tools.entry.export.description'),
+                    onClick: () => {
+                      void handleExportConnections('config');
+                    },
                   },
-                },
-                {
-                  key: 'schema-compare',
-                  icon: <AppstoreOutlined />,
-                  title: t('app.tools.entry.schema_compare.title'),
-                  description: t('app.tools.entry.schema_compare.description'),
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setSyncModalEntryMode('schemaCompare');
-                    setIsSyncModalOpen(true);
+                  {
+                    key: 'data-root',
+                    icon: <HddOutlined />,
+                    title: t('app.tools.entry.data_root.title'),
+                    description: t('app.tools.entry.data_root.description'),
+                    onClick: () => {
+                      handleOpenToolCenterPane('config', 'data-root');
+                    },
                   },
-                },
-                {
-                  key: 'data-compare',
-                  icon: <SwitcherOutlined />,
-                  title: t('app.tools.entry.data_compare.title'),
-                  description: t('app.tools.entry.data_compare.description'),
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setSyncModalEntryMode('dataCompare');
-                    setIsSyncModalOpen(true);
+                  {
+                    key: 'security-update',
+                    icon: <SafetyCertificateOutlined />,
+                    title: t('app.tools.entry.security_update.title'),
+                    description: securityUpdateEntryVisibility.showDetailEntry || securityUpdateHasLegacySensitiveItems
+                      ? t('app.tools.entry.security_update.status_description', { status: securityUpdateStatusMeta.label })
+                      : t('app.tools.entry.security_update.description'),
+                    onClick: () => {
+                      handleOpenToolCenterPane('config', 'security-update');
+                    },
                   },
-                },
-                {
-                  key: 'sync',
-                  icon: <UploadOutlined rotate={90} />,
-                  title: t('app.tools.entry.sync.title'),
-                  description: t('app.tools.entry.sync.description'),
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setSyncModalEntryMode('sync');
-                    setIsSyncModalOpen(true);
+                ],
+              },
+              {
+                key: 'workflow',
+                icon: <SwitcherOutlined />,
+                title: t('app.tools.group.workflow.title'),
+                description: t('app.tools.group.workflow.description'),
+                items: [
+                  {
+                    key: 'schema-compare',
+                    icon: <AppstoreOutlined />,
+                    title: t('app.tools.entry.schema_compare.title'),
+                    description: t('app.tools.entry.schema_compare.description'),
+                    onClick: () => {
+                      setSyncModalEntryMode('schemaCompare');
+                      handleOpenToolCenterPane('workflow', 'schema-compare');
+                    },
                   },
-                },
-                {
-                  key: 'drivers',
-                  icon: <SettingOutlined />,
-                  title: t('app.tools.entry.drivers.title'),
-                  description: t('app.tools.entry.drivers.description'),
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setIsDriverModalOpen(true);
+                  {
+                    key: 'data-compare',
+                    icon: <SwitcherOutlined />,
+                    title: t('app.tools.entry.data_compare.title'),
+                    description: t('app.tools.entry.data_compare.description'),
+                    onClick: () => {
+                      setSyncModalEntryMode('dataCompare');
+                      handleOpenToolCenterPane('workflow', 'data-compare');
+                    },
                   },
-                },
-                {
-                  key: 'data-root',
-                  icon: <HddOutlined />,
-                  title: t('app.tools.entry.data_root.title'),
-                  description: t('app.tools.entry.data_root.description'),
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setIsDataRootModalOpen(true);
+                  {
+                    key: 'sync',
+                    icon: <UploadOutlined rotate={90} />,
+                    title: t('app.tools.entry.sync.title'),
+                    description: t('app.tools.entry.sync.description'),
+                    onClick: () => {
+                      setSyncModalEntryMode('sync');
+                      handleOpenToolCenterPane('workflow', 'sync');
+                    },
                   },
-                },
-                {
-                  key: 'snippet-settings',
-                  icon: <CodeOutlined />,
-                  title: t('app.tools.entry.snippets.title'),
-                  description: t('app.tools.entry.snippets.description'),
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setIsSnippetModalOpen(true);
+                ],
+              },
+              {
+                key: 'workspace',
+                icon: <CodeOutlined />,
+                title: t('app.tools.group.workspace.title'),
+                description: t('app.tools.group.workspace.description'),
+                items: [
+                  {
+                    key: 'drivers',
+                    icon: <SettingOutlined />,
+                    title: t('app.tools.entry.drivers.title'),
+                    description: t('app.tools.entry.drivers.description'),
+                    onClick: () => {
+                      handleOpenToolCenterPane('workspace', 'drivers');
+                    },
                   },
-                },
-                {
-                  key: 'shortcut-settings',
-                  icon: <LinkOutlined />,
-                  title: t('app.tools.entry.shortcuts.title'),
-                  description: t('app.tools.entry.shortcuts.description'),
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setIsShortcutModalOpen(true);
+                  {
+                    key: 'snippet-settings',
+                    icon: <CodeOutlined />,
+                    title: t('app.tools.entry.snippets.title'),
+                    description: t('app.tools.entry.snippets.description'),
+                    onClick: () => {
+                      handleOpenToolCenterPane('workspace', 'snippet-settings');
+                    },
                   },
-                },
-                {
-                  key: 'security-update',
-                  icon: <SafetyCertificateOutlined />,
-                  title: t('app.tools.entry.security_update.title'),
-                  description: securityUpdateEntryVisibility.showDetailEntry || securityUpdateHasLegacySensitiveItems
-                    ? t('app.tools.entry.security_update.status_description', { status: securityUpdateStatusMeta.label })
-                    : t('app.tools.entry.security_update.description'),
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setIsSecurityUpdateSettingsOpen(true);
+                  {
+                    key: 'shortcut-settings',
+                    icon: <LinkOutlined />,
+                    title: t('app.tools.entry.shortcuts.title'),
+                    description: t('app.tools.entry.shortcuts.description'),
+                    onClick: () => {
+                      handleOpenToolCenterPane('workspace', 'shortcut-settings');
+                    },
                   },
-                },
-              ].map((item) => (
-                <Button key={item.key} type="text" style={utilityActionCardStyle} onClick={item.onClick}>
-                  <span style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
-                    {item.icon}
-                  </span>
-                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
-                    <span>{item.title}</span>
-                    <span style={utilityActionHintStyle}>{item.description}</span>
-                  </span>
-                </Button>
-              ))}
-            </div>
-          </Modal>
-          )}
+                ],
+              },
+            ] as const;
+            const activeToolCenterGroup = toolCenterGroups.find((group) => group.key === activeToolCenterGroupKey) ?? toolCenterGroups[0];
+            const activeToolCenterPaneItem = activeToolCenterPane
+              ? toolCenterGroups
+                  .find((group) => group.key === activeToolCenterPane.group)
+                  ?.items.find((item) => item.key === activeToolCenterPane.key)
+              : null;
+            const closeToolCenterPane = () => {
+              if (activeToolCenterPane?.key === 'connection-package') {
+                closeConnectionPackageDialog();
+                return;
+              }
+              setToolCenterBackGroupKey(null);
+              setActiveToolCenterPane(null);
+            };
+            const renderToolCenterPane = () => {
+              if (!activeToolCenterPane) {
+                return null;
+              }
+
+              if (activeToolCenterPane.key === 'connection-package') {
+                return (
+                  <ConnectionPackagePasswordModal
+                    embedded
+                    open={connectionPackageDialog.open}
+                    title={connectionPackageDialog.mode === 'export'
+                        ? t('app.connection_package.dialog.export_title')
+                        : t('app.connection_package.dialog.import_password_title')}
+                    mode={connectionPackageDialog.mode}
+                    includeSecrets={connectionPackageDialog.includeSecrets}
+                    useFilePassword={connectionPackageDialog.useFilePassword}
+                    password={connectionPackageDialog.password}
+                    error={connectionPackageDialog.error}
+                    confirmLoading={connectionPackageDialog.confirmLoading}
+                    confirmText={connectionPackageDialog.mode === 'export'
+                        ? t('app.connection_package.action.start_export')
+                        : t('app.connection_package.action.start_import')}
+                    cancelText={t('common.close')}
+                    onBack={closeToolCenterPane}
+                    onIncludeSecretsChange={(value) => {
+                        setConnectionPackageDialog((current) => ({
+                            ...current,
+                            includeSecrets: value,
+                            useFilePassword: value ? current.useFilePassword : false,
+                            password: value ? current.password : '',
+                            error: '',
+                        }));
+                    }}
+                    onUseFilePasswordChange={(value) => {
+                        setConnectionPackageDialog((current) => ({
+                            ...current,
+                            useFilePassword: value,
+                            password: value ? current.password : '',
+                            error: '',
+                        }));
+                    }}
+                    onPasswordChange={(value) => {
+                        setConnectionPackageDialog((current) => ({
+                            ...current,
+                            password: value,
+                            error: '',
+                        }));
+                    }}
+                    onConfirm={() => {
+                        void handleConfirmConnectionPackageDialog();
+                    }}
+                    onCancel={closeConnectionPackageDialog}
+                  />
+                );
+              }
+
+              if (activeToolCenterPane.key === 'data-root') {
+                return (
+                  <Modal
+                    embedded
+                    open
+                    title={renderUtilityModalTitle(
+                      <HddOutlined />,
+                      t('app.data_root.title'),
+                      t('app.data_root.description'),
+                    )}
+                    onCancel={closeToolCenterPane}
+                    footer={[
+                      <Button key="close" onClick={closeToolCenterPane}>
+                        {t('common.close')}
+                      </Button>,
+                      <Button key="back" onClick={closeToolCenterPane}>
+                        {t('common.back_to_previous')}
+                      </Button>,
+                    ]}
+                    styles={{
+                      header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
+                      body: { paddingTop: 8 },
+                      footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },
+                    }}
+                  >
+                    {dataRootLoading ? (
+                      <div style={{ padding: '16px 0', textAlign: 'center' }}>
+                        <Spin />
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
+                        <div style={utilityPanelStyle}>
+                          <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.current_directory')}</div>
+                          <div style={{ display: 'grid', gap: 10 }}>
+                            <Input readOnly value={dataRootInfo?.path || ''} />
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                              <div>
+                                <div style={{ marginBottom: 6, fontWeight: 500 }}>{t('app.data_root.default_directory')}</div>
+                                <div style={utilityMutedTextStyle}>{dataRootInfo?.defaultPath || '-'}</div>
+                              </div>
+                              <div>
+                                <div style={{ marginBottom: 6, fontWeight: 500 }}>{t('app.data_root.driver_directory')}</div>
+                                <div style={utilityMutedTextStyle}>{dataRootInfo?.driverPath || '-'}</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={utilityPanelStyle}>
+                          <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.switch_target')}</div>
+                          <div style={{ display: 'grid', gap: 10 }}>
+                            <Input
+                              readOnly
+                              value={selectedDataRootPath}
+                              placeholder={t('app.data_root.placeholder.select_new_directory')}
+                            />
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                              <Button icon={<FolderOpenOutlined />} onClick={() => void handleSelectDataRoot()}>
+                                {t('app.data_root.action.select')}
+                              </Button>
+                              <Button onClick={() => void handleOpenDataRoot()}>
+                                {t('app.data_root.action.open_current')}
+                              </Button>
+                              <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false, true)}>
+                                {t('app.data_root.action.restore_default_directory')}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={utilityPanelStyle}>
+                          <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.apply_method')}</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                            <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false)}>
+                              {t('app.data_root.action.switch_only')}
+                            </Button>
+                            <Button type="primary" loading={dataRootApplying} onClick={() => void handleApplyDataRoot(true)}>
+                              {t('app.data_root.action.migrate_and_switch')}
+                            </Button>
+                          </div>
+                          <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
+                            {t('app.data_root.restart_hint')}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </Modal>
+                );
+              }
+
+              if (activeToolCenterPane.key === 'security-update') {
+                return (
+                  <SecurityUpdateSettingsModal
+                    embedded
+                    open
+                    darkMode={darkMode}
+                    overlayTheme={overlayTheme}
+                    surfaceOpacity={effectiveOpacity}
+                    status={securityUpdateStatus}
+                    focusTarget={securityUpdateSettingsFocusTarget}
+                    focusRequest={securityUpdateSettingsFocusRequest}
+                    onClose={closeToolCenterPane}
+                    onBack={closeToolCenterPane}
+                    onStart={handleStartSecurityUpdate}
+                    onRetry={handleRetrySecurityUpdate}
+                    onRestart={handleRestartSecurityUpdate}
+                    onIssueAction={handleSecurityUpdateIssueAction}
+                  />
+                );
+              }
+
+              if (
+                activeToolCenterPane.key === 'schema-compare'
+                || activeToolCenterPane.key === 'data-compare'
+                || activeToolCenterPane.key === 'sync'
+              ) {
+                return (
+                  <DataSyncModal
+                    embedded
+                    open
+                    onClose={closeToolCenterPane}
+                    onBack={closeToolCenterPane}
+                    entryMode={syncModalEntryMode}
+                  />
+                );
+              }
+
+              if (activeToolCenterPane.key === 'drivers') {
+                return (
+                  <DriverManagerModal
+                    embedded
+                    open
+                    onClose={closeToolCenterPane}
+                    onBack={closeToolCenterPane}
+                    onOpenGlobalProxySettings={handleOpenGlobalProxySettings}
+                  />
+                );
+              }
+
+              if (activeToolCenterPane.key === 'snippet-settings') {
+                return (
+                  <SnippetSettingsModal
+                    embedded
+                    open
+                    onClose={closeToolCenterPane}
+                    onBack={closeToolCenterPane}
+                    darkMode={darkMode}
+                    overlayTheme={overlayTheme}
+                  />
+                );
+              }
+
+              if (activeToolCenterPane.key === 'shortcut-settings') {
+                return (
+                  <Modal
+                    embedded
+                    open
+                    title={renderUtilityModalTitle(
+                      <LinkOutlined />,
+                      t('app.shortcuts.title'),
+                      t('app.shortcuts.description'),
+                    )}
+                    onCancel={() => {
+                      setCapturingShortcutAction(null);
+                      closeToolCenterPane();
+                    }}
+                    footer={[
+                      <Button
+                        key="reset"
+                        onClick={() => {
+                           resetShortcutOptions();
+                           setCapturingShortcutAction(null);
+                           void message.success(t('app.shortcuts.message.restored_defaults'));
+                        }}
+                      >
+                        {t('app.shortcuts.action.restore_defaults')}
+                      </Button>,
+                      <Button
+                        key="close"
+                        type="primary"
+                        onClick={() => {
+                          setCapturingShortcutAction(null);
+                          closeToolCenterPane();
+                        }}
+                      >
+                         {t('common.close')}
+                      </Button>,
+                      <Button
+                        key="back"
+                        onClick={() => {
+                          setCapturingShortcutAction(null);
+                          closeToolCenterPane();
+                        }}
+                      >
+                        {t('common.back_to_previous')}
+                      </Button>,
+                    ]}
+                    styles={{
+                      header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
+                      body: { paddingTop: 8, overflow: 'hidden', flex: 1, minHeight: 0 },
+                      footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },
+                    }}
+                  >
+                    <div data-gonavi-shortcut-modal-scroll="true" style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8, paddingRight: 8 }}>
+                      <div style={utilityPanelStyle}>
+                        <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
+                             {t('app.shortcuts.capture_hint')}
+                        </div>
+                      </div>
+                      {SHORTCUT_ACTION_ORDER.map((action) => {
+                        const meta = SHORTCUT_ACTION_META[action];
+                        if (meta.platformOnly === 'mac' && !isMacRuntime) {
+                            return null;
+                        }
+                        const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
+                        const isCapturing = capturingShortcutAction === action;
+                        const conflicts = shortcutConflictMap[action];
+                        const conflictInfo = conflicts?.length ? splitConflictsByContext(conflicts) : null;
+                        return (
+                            <div
+                                key={action}
+                                style={{
+                                    ...utilityPanelStyle,
+                                    display: 'grid',
+                                    gridTemplateColumns: '1fr auto',
+                                    gap: 12,
+                                    alignItems: 'center',
+                                    padding: '10px 12px',
+                                }}
+                            >
+                                <div>
+                                    <div style={{ fontWeight: 500 }}>{meta.label}</div>
+                                    <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{meta.description}</div>
+                                    {conflictInfo && (
+                                        <div style={{ fontSize: 11, color: darkMode ? '#faad14' : '#d48806', marginTop: 2 }}>
+                                            {conflictInfo.hasMonaco && (
+                                                <>⚠ {t('app.shortcuts.message.reserved_conflict_info', { labels: conflictInfo.monacoLabels })}</>
+                                             )}
+                                             {conflictInfo.hasOther && (
+                                                <>⚠ {t('app.shortcuts.message.reserved_conflict_warning', { contexts: conflictInfo.otherContexts, labels: conflictInfo.otherLabels })}</>
+                                             )}
+                                        </div>
+                                    )}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <Input
+                                        readOnly
+                                        value={isCapturing ? t('app.shortcuts.capture_waiting') : getShortcutDisplayLabel(binding.combo, activeShortcutPlatform)}
+                                        style={{ width: 180, fontFamily: resolvedMonoFontFamily }}
+                                    />
+                                    <Button
+                                        size="small"
+                                        onClick={() => setCapturingShortcutAction((prev) => (prev === action ? null : action))}
+                                    >
+                                        {isCapturing ? t('common.cancel') : t('app.shortcuts.action.record')}
+                                    </Button>
+                                    <Switch
+                                        checked={binding.enabled}
+                                        onChange={(checked) => updateShortcut(action, { enabled: checked }, activeShortcutPlatform)}
+                                    />
+                                </div>
+                            </div>
+                        );
+                      })}
+                    </div>
+                  </Modal>
+                );
+              }
+
+              return null;
+            };
+
+            return (
+              <Modal
+                title={renderUtilityModalTitle(<ToolOutlined />, t('app.tools.title'), t('app.tools.description'))}
+                open={isToolsModalOpen}
+                onCancel={() => {
+                  if (activeToolCenterPane?.key === 'connection-package') {
+                    closeConnectionPackageDialog();
+                  }
+                  setActiveToolCenterPane(null);
+                  setToolCenterBackGroupKey(null);
+                  setIsToolsModalOpen(false);
+                }}
+                footer={null}
+                centered
+                width={1080}
+                styles={{
+                  content: toolCenterModalContentStyle,
+                  header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
+                  body: { paddingTop: 8, paddingBottom: 8, overflow: 'hidden', flex: 1, minHeight: 0 },
+                  footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },
+                }}
+              >
+                <div style={toolCenterModalWorkspaceStyle}>
+                  <div style={toolCenterModalSplitStyle}>
+                    <div style={toolCenterNavPanelStyle}>
+                      <div style={toolCenterNavScrollStyle} role="tablist" aria-orientation="vertical">
+                        {toolCenterGroups.map((group) => {
+                          const active = group.key === activeToolCenterGroup.key;
+                          return (
+                            <button
+                              key={group.key}
+                              type="button"
+                              role="tab"
+                              aria-selected={active}
+                              title={`${group.title} - ${group.description}`}
+                              onClick={() => {
+                                setActiveToolCenterGroupKey(group.key);
+                                setActiveToolCenterPane(null);
+                              }}
+                              style={{
+                                position: 'relative',
+                                textAlign: 'left',
+                                width: '100%',
+                                padding: '11px 10px 11px 14px',
+                                borderRadius: 8,
+                                border: 'none',
+                                background: active
+                                  ? (darkMode ? 'rgba(255,214,102,0.10)' : 'rgba(24,144,255,0.08)')
+                                  : 'transparent',
+                                color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <span
+                                aria-hidden="true"
+                                style={{
+                                  position: 'absolute',
+                                  left: 0,
+                                  top: 10,
+                                  bottom: 10,
+                                  width: 3,
+                                  borderRadius: 999,
+                                  background: active
+                                    ? (darkMode ? '#ffd666' : '#1677ff')
+                                    : 'transparent',
+                                }}
+                              />
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minWidth: 0 }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                  <span
+                                    style={{
+                                      width: 28,
+                                      height: 28,
+                                      borderRadius: 8,
+                                      display: 'grid',
+                                      placeItems: 'center',
+                                      fontSize: 15,
+                                      flexShrink: 0,
+                                      background: active
+                                        ? (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.12)')
+                                        : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)'),
+                                      color: active
+                                        ? (darkMode ? '#ffe58f' : '#1677ff')
+                                        : overlayTheme.mutedText,
+                                    }}
+                                  >
+                                    {group.icon}
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: 13,
+                                      fontWeight: active ? 700 : 600,
+                                      minWidth: 0,
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {group.title}
+                                  </span>
+                                </span>
+                                <span
+                                  style={{
+                                    minWidth: 20,
+                                    height: 20,
+                                    paddingInline: 6,
+                                    borderRadius: 999,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    background: active
+                                      ? (darkMode ? 'rgba(255,255,255,0.14)' : 'rgba(24,144,255,0.14)')
+                                      : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)'),
+                                    color: active ? (darkMode ? '#f8fafc' : '#0f172a') : overlayTheme.mutedText,
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {group.items.length}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div style={toolCenterContentPanelStyle}>
+                      {activeToolCenterPane ? (
+                        <div style={toolCenterDetailPanelStyle}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, paddingBottom: 10, borderBottom: `1px solid ${overlayTheme.divider}` }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>
+                                {activeToolCenterPaneItem?.title ?? activeToolCenterGroup.title}
+                              </div>
+                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
+                                {activeToolCenterPaneItem?.description ?? activeToolCenterGroup.description}
+                              </div>
+                            </div>
+                            <Button onClick={closeToolCenterPane}>
+                              {t('common.back_to_previous')}
+                            </Button>
+                          </div>
+                          <div style={toolCenterDetailBodyStyle}>
+                            {renderToolCenterPane()}
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ display: 'grid', gap: 4 }}>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>{activeToolCenterGroup.title}</div>
+                            <div style={utilityMutedTextStyle}>{activeToolCenterGroup.description}</div>
+                          </div>
+                          <div style={toolCenterScrollableListStyle}>
+                            {activeToolCenterGroup.items.map((item, index) => (
+                              <Button
+                                key={item.key}
+                                type="text"
+                                style={{
+                                  ...toolCenterRowStyle,
+                                  borderTop: index === 0 ? `1px solid ${overlayTheme.divider}` : 'none',
+                                  borderBottom: `1px solid ${overlayTheme.divider}`,
+                                }}
+                                onClick={item.onClick}
+                              >
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                                  <span style={{ width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
+                                    {item.icon}
+                                  </span>
+                                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+                                    <span>{item.title}</span>
+                                    <span style={toolCenterRowDescriptionStyle}>{item.description}</span>
+                                  </span>
+                                </span>
+                                <RightOutlined style={{ color: overlayTheme.mutedText, fontSize: 12, flexShrink: 0 }} />
+                              </Button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </Modal>
+            );
+          })()}
           {isSettingsModalOpen && (
           <Modal
             title={renderUtilityModalTitle(<SettingOutlined />, t('app.settings.title'), t('app.settings.description'))}
@@ -4030,10 +4688,35 @@ function App() {
           )}
           {isDataRootModalOpen && (
           <Modal
-            title={renderUtilityModalTitle(<HddOutlined />, t('app.data_root.title'), t('app.data_root.description'))}
+            title={renderUtilityModalTitle(
+              <HddOutlined />,
+              t('app.data_root.title'),
+              t('app.data_root.description'),
+            )}
             open={isDataRootModalOpen}
-            onCancel={() => setIsDataRootModalOpen(false)}
-            footer={null}
+            onCancel={() => {
+              setIsDataRootModalOpen(false);
+              setToolCenterBackGroupKey(null);
+            }}
+            footer={[
+              <Button
+                key="close"
+                onClick={() => {
+                  setIsDataRootModalOpen(false);
+                  setToolCenterBackGroupKey(null);
+                }}
+              >
+                {t('common.close')}
+              </Button>,
+              toolCenterBackGroupKey === 'config' ? (
+                <Button
+                  key="back"
+                  onClick={() => handleReturnToToolCenter(() => setIsDataRootModalOpen(false))}
+                >
+                  {t('common.back_to_previous')}
+                </Button>
+              ) : null,
+            ]}
             width={720}
             styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
           >
@@ -4101,7 +4784,11 @@ function App() {
           {isSyncModalOpen && (
           <DataSyncModal
             open={isSyncModalOpen}
-            onClose={() => setIsSyncModalOpen(false)}
+            onClose={() => {
+              setIsSyncModalOpen(false);
+              setToolCenterBackGroupKey(null);
+            }}
+            onBack={toolCenterBackGroupKey === 'workflow' ? () => handleReturnToToolCenter(() => setIsSyncModalOpen(false)) : undefined}
             entryMode={syncModalEntryMode}
           />
           )}
@@ -4109,6 +4796,7 @@ function App() {
           <DriverManagerModal
             open={isDriverModalOpen}
             onClose={handleCloseDriverManager}
+            onBack={toolCenterBackGroupKey === 'workspace' ? () => handleReturnToToolCenter(() => setIsDriverModalOpen(false)) : undefined}
             onOpenGlobalProxySettings={handleOpenGlobalProxySettings}
           />
           )}
@@ -4130,7 +4818,11 @@ function App() {
             status={securityUpdateStatus}
             focusTarget={securityUpdateSettingsFocusTarget}
             focusRequest={securityUpdateSettingsFocusRequest}
-            onClose={() => setIsSecurityUpdateSettingsOpen(false)}
+            onClose={() => {
+              setIsSecurityUpdateSettingsOpen(false);
+              setToolCenterBackGroupKey(null);
+            }}
+            onBack={toolCenterBackGroupKey === 'config' ? () => handleReturnToToolCenter(() => setIsSecurityUpdateSettingsOpen(false)) : undefined}
             onStart={handleStartSecurityUpdate}
             onRetry={handleRetrySecurityUpdate}
             onRestart={handleRestartSecurityUpdate}
@@ -4152,7 +4844,7 @@ function App() {
           />
           )}
           <ConnectionPackagePasswordModal
-            open={connectionPackageDialog.open}
+            open={connectionPackageDialog.open && !(isToolsModalOpen && activeToolCenterPane?.key === 'connection-package')}
             title={connectionPackageDialog.mode === 'export'
                 ? t('app.connection_package.dialog.export_title')
                 : t('app.connection_package.dialog.import_password_title')}
@@ -4165,6 +4857,7 @@ function App() {
             confirmText={connectionPackageDialog.mode === 'export'
                 ? t('app.connection_package.action.start_export')
                 : t('app.connection_package.action.start_import')}
+            onBack={toolCenterBackGroupKey === 'config' ? () => handleReturnToToolCenter(closeConnectionPackageDialog) : undefined}
             onIncludeSecretsChange={(value) => {
                 setConnectionPackageDialog((current) => ({
                     ...current,
@@ -4975,11 +5668,16 @@ function App() {
 
           {isShortcutModalOpen && (
           <Modal
-              title={renderUtilityModalTitle(<LinkOutlined />, t('app.shortcuts.title'), t('app.shortcuts.description'))}
+              title={renderUtilityModalTitle(
+                  <LinkOutlined />,
+                  t('app.shortcuts.title'),
+                  t('app.shortcuts.description'),
+              )}
               open={isShortcutModalOpen}
               onCancel={() => {
                   setIsShortcutModalOpen(false);
                   setCapturingShortcutAction(null);
+                  setToolCenterBackGroupKey(null);
               }}
               width={760}
               centered
@@ -5016,6 +5714,17 @@ function App() {
                   >
                        {t('common.close')}
                   </Button>,
+                  toolCenterBackGroupKey === 'workspace' ? (
+                    <Button
+                        key="back"
+                        onClick={() => handleReturnToToolCenter(() => {
+                            setIsShortcutModalOpen(false);
+                            setCapturingShortcutAction(null);
+                        })}
+                    >
+                        {t('common.back_to_previous')}
+                    </Button>
+                  ) : null,
               ]}
           >
               <div data-gonavi-shortcut-modal-scroll="true" style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8, paddingRight: 8 }}>
@@ -5085,7 +5794,11 @@ function App() {
           {isSnippetModalOpen && (
           <SnippetSettingsModal
               open={isSnippetModalOpen}
-              onClose={() => setIsSnippetModalOpen(false)}
+              onClose={() => {
+                  setIsSnippetModalOpen(false);
+                  setToolCenterBackGroupKey(null);
+              }}
+              onBack={toolCenterBackGroupKey === 'workspace' ? () => handleReturnToToolCenter(() => setIsSnippetModalOpen(false)) : undefined}
               darkMode={darkMode}
               overlayTheme={overlayTheme}
           />

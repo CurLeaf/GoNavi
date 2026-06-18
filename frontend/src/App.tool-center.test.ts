@@ -42,6 +42,56 @@ describe('tool center menu entries', () => {
     expect(shortcutIndex).toBeGreaterThan(snippetIndex);
   });
 
+  it('uses scalable side navigation for the tool center instead of horizontal segmented switching', () => {
+    expect(appSource).toContain("type ToolCenterGroupKey = 'config' | 'workflow' | 'workspace';");
+    expect(appSource).toContain("const [activeToolCenterGroupKey, setActiveToolCenterGroupKey] = useState<ToolCenterGroupKey>('config');");
+    expect(appSource).toContain("const [toolCenterBackGroupKey, setToolCenterBackGroupKey] = useState<ToolCenterGroupKey | null>(null);");
+    expect(appSource).toContain("title: t('app.tools.group.config.title')");
+    expect(appSource).toContain("title: t('app.tools.group.workflow.title')");
+    expect(appSource).toContain("title: t('app.tools.group.workspace.title')");
+    expect(appSource).toContain("toolCenterGroups.find((group) => group.key === activeToolCenterGroupKey)");
+    expect(appSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("gridTemplateColumns: '232px minmax(0, 1fr)'");
+    expect(appSource).toContain("const toolCenterNavPanelStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterNavScrollStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterContentPanelStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterDetailPanelStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterDetailBodyStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain('role="tablist" aria-orientation="vertical"');
+    expect(appSource).toContain('role="tab"');
+    expect(appSource).toContain('aria-selected={active}');
+    expect(appSource).toContain('title={`${group.title} - ${group.description}`}');
+    expect(appSource).toContain("borderRight: `1px solid ${overlayTheme.divider}`");
+    expect(appSource).toContain('setActiveToolCenterPane(null);');
+    expect(appSource).toContain('group.items.length');
+    expect(appSource).toContain("const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {");
+    expect(appSource).toContain("const [activeToolCenterPane, setActiveToolCenterPane] = useState<ToolCenterPaneState | null>(null);");
+    expect(appSource).toContain("const handleReturnToToolCenter = useCallback((closeChild?: () => void) => {");
+    expect(appSource).toContain("t('common.back_to_previous')");
+    expect(appSource).toContain("width={1080}");
+    expect(appSource).toContain('centered');
+  });
+
+  it('keeps the tool center modal height fixed across group switches and scrolls the list area internally', () => {
+    expect(appSource).toContain('const toolCenterModalContentStyle = useMemo<React.CSSProperties>(() => ({');
+    expect(appSource).toContain("height: 'min(820px, calc(100vh - 64px))'");
+    expect(appSource).toContain("const toolCenterModalWorkspaceStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterScrollableListStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("body: { paddingTop: 8, paddingBottom: 8, overflow: 'hidden', flex: 1, minHeight: 0 }");
+    expect(appSource).toContain('style={toolCenterModalWorkspaceStyle}');
+    expect(appSource).toContain('style={toolCenterModalSplitStyle}');
+    expect(appSource).toContain('style={toolCenterNavPanelStyle}');
+    expect(appSource).toContain('style={toolCenterNavScrollStyle}');
+    expect(appSource).toContain('style={toolCenterContentPanelStyle}');
+    expect(appSource).toContain('style={toolCenterDetailPanelStyle}');
+    expect(appSource).toContain('style={toolCenterDetailBodyStyle}');
+    expect(appSource).toContain('style={toolCenterScrollableListStyle}');
+    expect(appSource).toContain("overflowY: 'auto'");
+    expect(appSource).toContain("borderTop: index === 0 ? `1px solid ${overlayTheme.divider}` : 'none'");
+    expect(appSource).toContain("borderBottom: `1px solid ${overlayTheme.divider}`");
+  });
+
   it('keeps the v2 AI entry in the sidebar and the legacy AI entry on the content edge', () => {
     expect(appSource).toContain('onToggleAI={toggleAIPanel}');
     expect(appSource).toContain('renderLegacyAIEdgeHandle');

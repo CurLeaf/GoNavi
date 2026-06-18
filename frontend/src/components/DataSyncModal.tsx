@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Modal, Form, Select, Input, Button, message, Steps, Transfer, Card, Alert, Divider, Typography, Progress, Checkbox, Table, Drawer, Tabs, theme as antdTheme } from 'antd';
+import { Form, Select, Input, Button, message, Steps, Transfer, Card, Alert, Divider, Typography, Progress, Checkbox, Table, Drawer, Tabs, theme as antdTheme } from 'antd';
 import { DatabaseOutlined, RocketOutlined, SwapOutlined, TableOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { DBGetDatabases, DBGetTables, DataSync, DataSyncAnalyze, DataSyncPreview } from '../../wailsjs/go/app/App';
@@ -191,7 +192,7 @@ const buildSqlPreview = (
   };
 };
 
-const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: DataSyncEntryMode }> = ({ open, onClose, entryMode = 'sync' }) => {
+const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; onBack?: () => void; entryMode?: DataSyncEntryMode; embedded?: boolean }> = ({ open, onClose, onBack, entryMode = 'sync', embedded = false }) => {
   const i18n = useOptionalI18n();
   const i18nLanguage = i18n?.language;
   const tr = (key: string, params?: Parameters<typeof t>[1]) => t(key, params, i18nLanguage);
@@ -829,7 +830,7 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
   }), [darkMode]);
 
   const renderModalTitle = (title: string, description: string) => (
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
           <div style={{
               width: 38,
               height: 38,
@@ -849,44 +850,15 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
       </div>
   );
 
-  return (
-    <>
-    <Modal
-        title={renderModalTitle(
-            isMigrationWorkflow
-                ? tr('data_sync.title.migration_workbench')
-                : (isCompareEntry ? entryPresentation.title : tr('data_sync.title.sync_workbench')),
-            isMigrationWorkflow
-                ? tr('data_sync.title.migration_description')
-                : (isCompareEntry ? entryPresentation.description : tr('data_sync.title.sync_description')),
-        )}
-        open={open}
-        onCancel={() => {
-            if (syncing) {
-                message.warning(tr('data_sync.message.close_blocked_running'));
-                return;
-            }
-            onClose();
-        }}
-        width={920}
-        footer={null}
-        destroyOnHidden
-        closable={!syncing}
-        maskClosable={!syncing}
-        styles={{
-            content: modalPanelStyle,
-            header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 },
-            body: {
-                paddingTop: 8,
-                height: 760,
-                maxHeight: 'calc(100vh - 120px)',
-                overflow: 'hidden',
-                display: 'flex',
-                flexDirection: 'column',
-            },
-            footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 },
-        }}
-    >
+  const handleReturnToPrevious = () => {
+      if (syncing) {
+          message.warning(tr('data_sync.message.close_blocked_running'));
+          return;
+      }
+      onBack?.();
+  };
+
+  const dataSyncContent = (
       <div style={modalWorkspaceStyle}>
       <div style={{ flex: '0 0 auto' }}>
       <div style={heroPanelStyle}>
@@ -1403,9 +1375,57 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
                   <Button type="primary" disabled={syncing} onClick={onClose}>{isCompareEntry ? entryPresentation.closeButtonText : tr('data_sync.action.close')}</Button>
               </>
           )}
+          {onBack ? (
+              <Button onClick={handleReturnToPrevious}>
+                  {tr('common.back_to_previous')}
+              </Button>
+          ) : null}
       </div>
       </div>
-    </Modal>
+  );
+
+  return (
+    <>
+      {embedded ? dataSyncContent : (
+        <Modal
+          title={renderModalTitle(
+              isMigrationWorkflow
+                  ? tr('data_sync.title.migration_workbench')
+                  : (isCompareEntry ? entryPresentation.title : tr('data_sync.title.sync_workbench')),
+              isMigrationWorkflow
+                  ? tr('data_sync.title.migration_description')
+                  : (isCompareEntry ? entryPresentation.description : tr('data_sync.title.sync_description')),
+          )}
+          open={open}
+          onCancel={() => {
+              if (syncing) {
+                  message.warning(tr('data_sync.message.close_blocked_running'));
+                  return;
+              }
+              onClose();
+          }}
+          width={920}
+          footer={null}
+          destroyOnHidden
+          closable={!syncing}
+          maskClosable={!syncing}
+          styles={{
+              content: modalPanelStyle,
+              header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 },
+              body: {
+                  paddingTop: 8,
+                  height: 760,
+                  maxHeight: 'calc(100vh - 120px)',
+                  overflow: 'hidden',
+                  display: 'flex',
+                  flexDirection: 'column',
+              },
+              footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 },
+          }}
+        >
+          {dataSyncContent}
+        </Modal>
+      )}
     <Drawer
         title={tr('data_sync.preview.title', { table: previewTable })}
         styles={{ body: { background: darkMode ? 'rgba(9,13,20,0.98)' : '#f8fafc' } }}

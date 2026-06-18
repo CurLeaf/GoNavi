@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Checkbox, Form, Input, Modal, Select, Space, Typography, message } from 'antd';
+import { Alert, Checkbox, Form, Input, Select, Space, Typography, message } from 'antd';
 
 import { DBQuery } from '../../wailsjs/go/app/App';
 import type { SavedConnection } from '../types';

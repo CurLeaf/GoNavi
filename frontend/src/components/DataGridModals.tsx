@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React from 'react';
-import { Button, Checkbox, DatePicker, Form, Input, Modal, TimePicker } from 'antd';
+import { Button, Checkbox, DatePicker, Form, Input, TimePicker } from 'antd';
 import dayjs from 'dayjs';
 import { CopyOutlined } from '@ant-design/icons';
 import Editor from './MonacoEditor';

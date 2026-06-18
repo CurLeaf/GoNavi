@@ -1,4 +1,5 @@
-import { Button, Modal } from 'antd';
+import Modal from './common/ResizableDraggableModal';
+import { Button } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 import type { CSSProperties } from 'react';
 

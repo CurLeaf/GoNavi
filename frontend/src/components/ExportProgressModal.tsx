@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React from 'react';
-import { Button, Modal, Typography } from 'antd';
+import { Button, Typography } from 'antd';
 import {
   formatExportProgressRows,
 } from '../utils/exportProgress';

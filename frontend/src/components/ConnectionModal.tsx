@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import Modal from './common/ResizableDraggableModal';
 import {
-  Modal,
   Form,
   Input,
   InputNumber,

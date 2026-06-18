@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Button, Dropdown, message, Modal, Tabs, Tooltip } from 'antd';
+import { Button, Dropdown, message, Tabs, Tooltip } from 'antd';
 import { AppstoreOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, PlusOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps, TabsProps } from 'antd';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';

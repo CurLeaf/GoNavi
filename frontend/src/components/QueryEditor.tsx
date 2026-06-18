@@ -1,6 +1,7 @@
-﻿import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+﻿import Modal from './common/ResizableDraggableModal';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Editor, { type OnMount } from './MonacoEditor';
-import { message, Modal, Input, Form, MenuProps } from 'antd';
+import { message, Input, Form, MenuProps } from 'antd';
 import { format, type SqlLanguage } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition, IndexDefinition } from '../types';

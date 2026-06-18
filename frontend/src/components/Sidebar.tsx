@@ -1,6 +1,7 @@
-﻿import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
+﻿import Modal from './common/ResizableDraggableModal';
+import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
-import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress, Switch } from 'antd';
+import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress, Switch } from 'antd';
 	import {
 	  DatabaseOutlined,
 	  TableOutlined,

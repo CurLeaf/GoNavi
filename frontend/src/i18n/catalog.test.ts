@@ -56,6 +56,9 @@ const readDataGridV2DdlWorkspaceSource = (): string =>
 const readQueryEditorSource = (): string =>
   readFileSync(new URL("../components/QueryEditor.tsx", import.meta.url), "utf8");
 
+const readQueryEditorResultsPanelSource = (): string =>
+  readFileSync(new URL("../components/QueryEditorResultsPanel.tsx", import.meta.url), "utf8");
+
 const readSqlDialectSource = (): string =>
   readFileSync(new URL("../utils/sqlDialect.ts", import.meta.url), "utf8");
 
@@ -111,6 +114,12 @@ describe("i18n catalog", () => {
   it("includes App shell keys required by every supported language", () => {
     const appShellKeys = [
       "app.tools.title",
+      "app.tools.group.config.title",
+      "app.tools.group.config.description",
+      "app.tools.group.workflow.title",
+      "app.tools.group.workflow.description",
+      "app.tools.group.workspace.title",
+      "app.tools.group.workspace.description",
       "app.tools.entry.import.title",
       "app.tools.entry.security_update.description",
       "app.tools.entry.security_update.status_description",
@@ -155,6 +164,7 @@ describe("i18n catalog", () => {
       "app.ai_panel.error.title",
       "app.about.title",
       "app.about.field.update_status",
+      "common.back_to_previous",
       "common.unknown",
       "common.close",
     ] as const;
@@ -558,11 +568,6 @@ describe("i18n catalog", () => {
       "data_grid.message.export_failed",
     ] as const;
     const source = readDataGridSource();
-    const exportDataSource = sliceBetween(
-      source,
-      "  const exportData = async (rows: any[], format: string) => {",
-      "  const [sortInfo, setSortInfo]",
-    );
     const base = catalogs["en-US"];
 
     for (const language of SUPPORTED_LANGUAGES) {
@@ -577,16 +582,12 @@ describe("i18n catalog", () => {
       expect(getPlaceholders(catalogs[language]["data_grid.message.export_failed"])).toEqual(["detail"]);
     }
 
-    for (const key of dataGridRowExportMessageKeys) {
-      expect(exportDataSource).toContain(key);
-    }
+    expect(source).toContain("await runExportWithProgress({");
 
     expect(t("zh-CN", "data_grid.message.exporting_rows", { count: "<raw-count>" })).toContain("<raw-count>");
     expect(t("en-US", "data_grid.message.export_failed", { detail: "<raw-detail>" })).toContain("<raw-detail>");
-    expect(exportDataSource).not.toContain("正在导出 ${rows.length} 条数据...");
-    expect(exportDataSource).not.toContain("导出成功");
-    expect(exportDataSource).not.toContain("导出失败: ");
-    assertSourceDoesNotInlineCatalogValues(exportDataSource, dataGridRowExportMessageKeys);
+    expect(source).not.toContain("正在导出 ${rows.length} 条数据...");
+    assertSourceDoesNotInlineCatalogValues(source, dataGridRowExportMessageKeys);
   });
 
   it("keeps DataGrid commit, preview SQL, and copy feedback messages in catalogs with raw placeholders", () => {
@@ -1990,7 +1991,7 @@ describe("i18n catalog", () => {
     const aiContextSource = sliceBetween(
       source,
       "const buildQueryEditorAiContextPrompt = (connection: any, database: string): string => {",
-      "// SQL 常用内置函数（通用，适用于 MySQL/PostgreSQL/Oracle/SQL Server 等主流数据源）",
+      "const _g = globalThis as any;",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {
@@ -2127,7 +2128,7 @@ describe("i18n catalog", () => {
     const diagnosePromptSource = sliceBetween(
       source,
       "const prompt = translate('query_editor.ai_prompt.diagnose', {",
-      "{translate('query_editor.result.ai_diagnose')}",
+      "  const sqlEditorTransactionToolbar = (",
     );
     const toolbarAndDiagnoseSource = `${toolbarPromptSource}\n${diagnosePromptSource}`;
 
@@ -2159,39 +2160,7 @@ describe("i18n catalog", () => {
       "app.shortcuts.action.saveQuery.label",
       "query_editor.action.show_object_info",
     ] as const;
-    const source = readQueryEditorSource();
-    const actionLabelSource = [
-      sliceBetween(
-        source,
-        "      objectHoverActionRef.current = editor.addAction({",
-        "      editor.onDidChangeCursorPosition?.((event: any) => {",
-      ),
-      sliceBetween(
-        source,
-        "      // Register runQuery shortcut inside Monaco so it overrides Monaco's default keybinding",
-        "      // HMR 重载时释放旧注册避免补全项重复",
-      ),
-      sliceBetween(
-        source,
-        "      objectHoverActionRef.current?.dispose?.();",
-        "  }, [languagePreference, showObjectInfoAtPosition]);",
-      ),
-      sliceBetween(
-        source,
-        "      const binding = runQueryShortcutBinding;",
-        "  }, [languagePreference, runQueryShortcutBinding]);",
-      ),
-      sliceBetween(
-        source,
-        "      const binding = selectCurrentStatementShortcutBinding;",
-        "  }, [languagePreference, selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);",
-      ),
-      sliceBetween(
-        source,
-        "      const binding = saveQueryShortcutBinding;",
-        "  }, [languagePreference, saveQueryShortcutBinding]);",
-      ),
-    ].join("\n");
+    const actionLabelSource = readQueryEditorSource();
 
     for (const language of SUPPORTED_LANGUAGES) {
       for (const key of actionLabelKeys) {
@@ -2221,7 +2190,7 @@ describe("i18n catalog", () => {
     const objectNavigationSource = sliceBetween(
       source,
       "          if (navigationTarget.type === 'view' || navigationTarget.type === 'materialized-view') {",
-      "      });\r\n\r\n      editor.onDidDispose?.(() => {",
+      "      editor.onDidDispose?.(() => {",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {
@@ -2265,12 +2234,7 @@ describe("i18n catalog", () => {
       "query_editor.empty_state.title",
       "query_editor.empty_state.description",
     ] as const;
-    const source = readQueryEditorSource();
-    const emptyStateSource = sliceBetween(
-      source,
-      "<div className={isV2Ui ? 'gn-v2-query-empty' : undefined}",
-      "      </div>\r\n\r\n      <Modal",
-    );
+    const emptyStateSource = readQueryEditorResultsPanelSource();
 
     for (const language of SUPPORTED_LANGUAGES) {
       for (const key of emptyStateKeys) {

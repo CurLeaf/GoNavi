@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import { useEffect, useRef, useState } from 'react';
-import { Button, Empty, Modal, Tag } from 'antd';
+import { Button, Empty, Tag } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 
 import type { SecurityUpdateIssue, SecurityUpdateStatus } from '../types';
@@ -37,6 +38,8 @@ interface SecurityUpdateSettingsModalProps {
   focusTarget?: SecurityUpdateSettingsFocusTarget | null;
   focusRequest?: number;
   onClose: () => void;
+  onBack?: () => void;
+  embedded?: boolean;
   onStart: () => void;
   onRetry: () => void;
   onRestart: () => void;
@@ -70,6 +73,8 @@ const SecurityUpdateSettingsModal = ({
   focusTarget = null,
   focusRequest = 0,
   onClose,
+  onBack,
+  embedded = false,
   onStart,
   onRetry,
   onRestart,
@@ -126,7 +131,7 @@ const SecurityUpdateSettingsModal = ({
     <Modal
       rootClassName={SECURITY_UPDATE_MODAL_CLASS}
       title={(
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
           <div
             style={{
               width: 38,
@@ -142,7 +147,7 @@ const SecurityUpdateSettingsModal = ({
           >
             <SafetyCertificateOutlined />
           </div>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 800, color: overlayTheme.titleText }}>
               {t('security_update.settings.title')}
             </div>
@@ -153,6 +158,7 @@ const SecurityUpdateSettingsModal = ({
         </div>
       )}
       open={open}
+      embedded={embedded}
       onCancel={onClose}
       footer={[
         showRetry ? (
@@ -179,6 +185,11 @@ const SecurityUpdateSettingsModal = ({
         <Button key="close" className={SECURITY_UPDATE_ACTION_BUTTON_CLASS} style={actionButtonStyle} onClick={onClose}>
           {t('security_update.settings.action.close')}
         </Button>,
+        onBack ? (
+          <Button key="back" className={SECURITY_UPDATE_ACTION_BUTTON_CLASS} style={actionButtonStyle} onClick={onBack}>
+            {t('common.back_to_previous')}
+          </Button>
+        ) : null,
       ]}
       width={760}
       styles={{

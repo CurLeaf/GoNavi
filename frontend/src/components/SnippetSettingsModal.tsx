@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Modal, Button, Input, List, Tag, Popconfirm, message, Collapse, Typography } from 'antd';
+import Modal from './common/ResizableDraggableModal';
+import { Button, Input, List, Tag, Popconfirm, message, Collapse, Typography } from 'antd';
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -12,11 +13,14 @@ import type { SqlSnippet } from '../types';
 import { useStore } from '../store';
 import { BUILTIN_SNIPPET_MAP } from '../utils/sqlSnippetDefaults';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import { useI18n } from '../i18n/provider';
 interface SnippetSettingsModalProps {
   open: boolean;
   onClose: () => void;
+  onBack?: () => void;
   darkMode: boolean;
   overlayTheme: OverlayWorkbenchTheme;
+  embedded?: boolean;
 }
 
 type DraftSnippet = Omit<SqlSnippet, 'createdAt'> & { createdAt?: number };
@@ -34,9 +38,12 @@ const emptyDraft = (): DraftSnippet => ({
 export default function SnippetSettingsModal({
   open,
   onClose,
+  onBack,
   darkMode,
   overlayTheme,
+  embedded = false,
 }: SnippetSettingsModalProps) {
+  const { t } = useI18n();
   const sqlSnippets = useStore((s) => s.sqlSnippets);
   const saveSqlSnippet = useStore((s) => s.saveSqlSnippet);
   const deleteSqlSnippet = useStore((s) => s.deleteSqlSnippet);
@@ -210,7 +217,7 @@ export default function SnippetSettingsModal({
   return (
     <Modal
       title={
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
           <div
             style={{
               width: 36,
@@ -225,15 +232,16 @@ export default function SnippetSettingsModal({
           >
             <CodeOutlined />
           </div>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 600, color: textColor }}>代码片段管理</div>
             <div style={{ fontSize: 12, color: mutedColor, lineHeight: 1.5 }}>
               管理 SQL 代码片段，输入前缀后按 Tab 展开
             </div>
-          </div>
+            </div>
         </div>
       }
       open={open}
+      embedded={embedded}
       onCancel={onClose}
       width={820}
       styles={{
@@ -451,6 +459,11 @@ export default function SnippetSettingsModal({
         <Button size="large" style={{ minWidth: 96 }} onClick={onClose}>
           关闭
         </Button>
+        {onBack ? (
+          <Button size="large" style={{ minWidth: 124 }} onClick={onBack}>
+            {t('common.back_to_previous')}
+          </Button>
+        ) : null}
       </div>
     </Modal>
   );

@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Form, InputNumber, Modal, Select, message } from 'antd';
+import { Form, InputNumber, Select, message } from 'antd';
 import { ExportOutlined } from '@ant-design/icons';
 
 export type DataExportFormat = 'csv' | 'xlsx' | 'json' | 'md' | 'html';

@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React, { useState, useEffect } from "react";
-import { Modal, Table, Alert, Progress, Button, Space } from "antd";
+import { Table, Alert, Progress, Button, Space } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined } from "@ant-design/icons";
 import {
   PreviewImportFile,

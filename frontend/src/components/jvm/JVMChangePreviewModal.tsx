@@ -1,5 +1,6 @@
+import Modal from '../common/ResizableDraggableModal';
 import React, { useMemo } from "react";
-import { Alert, Descriptions, Modal, Space, Tag, Typography } from "antd";
+import { Alert, Descriptions, Space, Tag, Typography } from 'antd';
 
 import type { JVMChangePreview } from "../../types";
 import { t as translate } from "../../i18n";
