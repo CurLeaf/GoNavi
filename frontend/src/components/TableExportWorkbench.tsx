@@ -454,7 +454,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
   );
   const singleScopeRowCount = useMemo(() => {
     const raw = tab.tableExportRowCountByScope?.[scope];
-    return Number.isFinite(Number(raw)) && Number(raw) >= 0 ? Number(raw) : undefined;
+    return Number.isFinite(Number(raw)) && Number(raw) > 0 ? Number(raw) : undefined;
   }, [scope, tab.tableExportRowCountByScope]);
   const singleTotalRowsKnown = typeof singleScopeRowCount === 'number';
   const singleScopeLabel = activeScopeOption?.label || scope;

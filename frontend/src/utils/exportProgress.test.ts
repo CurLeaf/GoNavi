@@ -17,7 +17,14 @@ describe('exportProgress', () => {
     expect(resolveExportProgressPercent('running', 5000, 0, false)).toBe(0);
     expect(resolveExportProgressPercent('finalizing', 5000, 0, false)).toBe(0);
     expect(shouldUseExactExportProgress('running', 0, false)).toBe(false);
-    expect(shouldUseIndeterminateExportProgress('running', false)).toBe(true);
+    expect(shouldUseIndeterminateExportProgress('running', 0, false)).toBe(true);
+  });
+
+  it('falls back to indeterminate progress when total row hint is zero', () => {
+    expect(resolveExportProgressPercent('running', 754000, 0, true)).toBe(0);
+    expect(shouldUseExactExportProgress('running', 0, true)).toBe(false);
+    expect(shouldUseIndeterminateExportProgress('running', 0, true)).toBe(true);
+    expect(formatExportProgressRows(754000, 0, true)).toBe('已写入 754,000 行');
   });
 
   it('formats row summary for known and unknown totals', () => {

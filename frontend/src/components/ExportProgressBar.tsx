@@ -30,7 +30,7 @@ export const ExportProgressBar: React.FC<ExportProgressBarProps> = ({
   total,
   totalRowsKnown,
 }) => {
-  const isIndeterminate = shouldUseIndeterminateExportProgress(status, totalRowsKnown);
+  const isIndeterminate = shouldUseIndeterminateExportProgress(status, total, totalRowsKnown);
   const progressStatus = status === 'error'
     ? 'exception'
     : (status === 'done' ? 'success' : 'active');

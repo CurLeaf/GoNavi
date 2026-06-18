@@ -1,5 +1,10 @@
 export type ExportProgressStatus = 'idle' | 'start' | 'running' | 'finalizing' | 'done' | 'error';
 
+const hasUsableExportTotal = (total: number, totalRowsKnown: boolean): boolean => {
+  const normalizedTotal = Number.isFinite(total) ? Math.max(0, Math.trunc(total)) : 0;
+  return totalRowsKnown && normalizedTotal > 0;
+};
+
 const clampPercent = (value: number): number => {
   if (!Number.isFinite(value)) return 0;
   if (value <= 0) return 0;
@@ -12,11 +17,10 @@ export const shouldUseExactExportProgress = (
   total: number,
   totalRowsKnown: boolean,
 ): boolean => {
-  const normalizedTotal = Number.isFinite(total) ? Math.max(0, Math.trunc(total)) : 0;
-  if (totalRowsKnown && normalizedTotal > 0) {
+  if (hasUsableExportTotal(total, totalRowsKnown)) {
     return true;
   }
-  if ((status === 'done' || status === 'error') && totalRowsKnown) {
+  if ((status === 'done' || status === 'error') && hasUsableExportTotal(total, totalRowsKnown)) {
     return true;
   }
   return false;
@@ -24,8 +28,9 @@ export const shouldUseExactExportProgress = (
 
 export const shouldUseIndeterminateExportProgress = (
   status: ExportProgressStatus,
+  total: number,
   totalRowsKnown: boolean,
-): boolean => !totalRowsKnown && status !== 'idle' && status !== 'done' && status !== 'error';
+): boolean => !hasUsableExportTotal(total, totalRowsKnown) && status !== 'idle' && status !== 'done' && status !== 'error';
 
 export const resolveExportProgressPercent = (
   status: ExportProgressStatus,
@@ -35,7 +40,7 @@ export const resolveExportProgressPercent = (
 ): number => {
   const normalizedCurrent = Number.isFinite(current) ? Math.max(0, current) : 0;
   const normalizedTotal = Number.isFinite(total) ? Math.max(0, total) : 0;
-  if (totalRowsKnown && normalizedTotal > 0) {
+  if (hasUsableExportTotal(total, totalRowsKnown)) {
     return clampPercent((normalizedCurrent / normalizedTotal) * 100);
   }
   if ((status === 'done' || status === 'error') && (totalRowsKnown || normalizedCurrent >= 0)) {
@@ -51,7 +56,7 @@ export const formatExportProgressRows = (
 ): string => {
   const formatter = new Intl.NumberFormat('zh-CN');
   const safeCurrent = formatter.format(Math.max(0, Math.trunc(Number(current) || 0)));
-  if (!totalRowsKnown) {
+  if (!hasUsableExportTotal(total, totalRowsKnown)) {
     return `已写入 ${safeCurrent} 行`;
   }
   const safeTotal = formatter.format(Math.max(0, Math.trunc(Number(total) || 0)));

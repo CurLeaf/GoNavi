@@ -3,6 +3,7 @@ package app
 import (
 	"archive/zip"
 	"bufio"
+	"compress/flate"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -33,6 +34,11 @@ var (
 	xlsxTemplatePartsOnce sync.Once
 	xlsxTemplateParts     map[string][]byte
 	xlsxTemplatePartsErr  error
+	xlsxZipCopyBufferPool = sync.Pool{
+		New: func() interface{} {
+			return make([]byte, 1024*1024)
+		},
+	}
 )
 
 type xlsxExportTempSheet struct {
@@ -181,6 +187,9 @@ func (w *xlsxExportFileWriter) Close() error {
 	}
 
 	zw := zip.NewWriter(w.file)
+	zw.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
+		return flate.NewWriter(out, flate.BestSpeed)
+	})
 	defer w.cleanupTempSheets()
 
 	if err := writeXLSXZipFile(zw, w.sheets); err != nil {
@@ -329,7 +338,9 @@ func writeZipFileFromPath(zw *zip.Writer, name string, path string) error {
 		return err
 	}
 	defer file.Close()
-	_, err = io.Copy(writer, file)
+	buffer := xlsxZipCopyBufferPool.Get().([]byte)
+	defer xlsxZipCopyBufferPool.Put(buffer)
+	_, err = io.CopyBuffer(writer, file, buffer)
 	return err
 }
 

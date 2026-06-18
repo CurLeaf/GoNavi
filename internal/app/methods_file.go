@@ -210,7 +210,16 @@ func (r *exportProgressReporter) ForceRunning(current int64, stage string) {
 }
 
 func (r *exportProgressReporter) Finalizing(current int64) {
-	r.emit("finalizing", "正在完成文件写入", current, "", true)
+	stage := "正在完成文件写入"
+	if r != nil {
+		switch strings.ToLower(strings.TrimSpace(r.format)) {
+		case "xlsx":
+			stage = "正在封装并压缩 XLSX 文件"
+		case "csv":
+			stage = "正在完成 CSV 写入"
+		}
+	}
+	r.emit("finalizing", stage, current, "", true)
 }
 
 func (r *exportProgressReporter) Done(current int64) {

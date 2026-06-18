@@ -3796,7 +3796,7 @@ const Sidebar: React.FC<{
   const handleExport = async (node: any, options: { format: string; xlsxMaxRowsPerSheet?: number }) => {
       const { config, dbName, tableName } = node.dataRef;
       const rowCount = Number(node?.dataRef?.rowCount);
-      const totalRowsKnown = Number.isFinite(rowCount) && rowCount >= 0;
+      const totalRowsKnown = Number.isFinite(rowCount) && rowCount > 0;
       await runExportWithProgress({
           title: `导出 ${tableName}`,
           targetName: tableName,
@@ -3832,10 +3832,10 @@ const Sidebar: React.FC<{
           objectType: node?.type === 'view' ? 'view' : (node?.type === 'materialized-view' ? 'materialized-view' : 'table'),
           schemaName: typeof node?.dataRef?.schemaName === 'string' ? node.dataRef.schemaName : undefined,
           sidebarLocateKey: typeof node?.key === 'string' ? node.key : undefined,
-          rowCountByScope: Number.isFinite(Number(node?.dataRef?.rowCount)) && Number(node?.dataRef?.rowCount) >= 0
+          rowCountByScope: Number.isFinite(Number(node?.dataRef?.rowCount)) && Number(node?.dataRef?.rowCount) > 0
               ? { all: Math.trunc(Number(node.dataRef.rowCount)) }
               : undefined,
-      }));
+        }));
   };
 
   const handleCopyTableAsInsert = async (node: any) => {

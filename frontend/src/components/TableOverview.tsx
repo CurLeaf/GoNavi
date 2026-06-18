@@ -541,7 +541,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const handleExport = useCallback(async (tableName: string, options: { format: string; xlsxMaxRowsPerSheet?: number }, totalRows?: number) => {
         const config = buildConfig();
         if (!config) return;
-        const totalRowsKnown = Number.isFinite(totalRows) && Number(totalRows) >= 0;
+        const totalRowsKnown = Number.isFinite(totalRows) && Number(totalRows) > 0;
         await runExportWithProgress({
             title: `导出 ${tableName}`,
             targetName: tableName,
@@ -568,7 +568,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             tableName,
             title: `导出 ${tableName}`,
             objectType: 'table',
-            rowCountByScope: Number.isFinite(Number(totalRows)) && Number(totalRows) >= 0
+            rowCountByScope: Number.isFinite(Number(totalRows)) && Number(totalRows) > 0
                 ? { all: Math.trunc(Number(totalRows)) }
                 : undefined,
         }));

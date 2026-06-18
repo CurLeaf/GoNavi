@@ -126,4 +126,55 @@ describe('useExportProgressRunner', () => {
     expect(runner?.state.startedAt).toBe(8_000);
     expect(runner?.state.finishedAt).toBe(13_000);
   });
+
+  it('treats zero total row hints as unknown progress', async () => {
+    renderRunner();
+
+    let resolveRun!: (value: { success: boolean; message: string }) => void;
+    const pendingRun = new Promise<{ success: boolean; message: string }>((resolve) => {
+      resolveRun = resolve;
+    });
+
+    let runPromise: Promise<{ success: boolean; message: string } | null> | null = null;
+    await act(async () => {
+      runPromise = runner?.runExportWithProgress({
+        title: '导出 messages',
+        targetName: 'messages',
+        format: 'xlsx',
+        totalRows: 0,
+        run: async () => pendingRun,
+      }) || null;
+      await Promise.resolve();
+    });
+
+    expect(runner?.state.totalRowsKnown).toBe(false);
+    expect(runner?.state.total).toBe(0);
+
+    const jobId = runner?.state.jobId || '';
+    now = 5_000;
+    act(() => {
+      runtimeApi.emitExportProgress({
+        jobId,
+        status: 'running',
+        stage: '正在写入文件',
+        current: 754000,
+        total: 0,
+        totalRowsKnown: true,
+      });
+    });
+
+    expect(runner?.state.status).toBe('running');
+    expect(runner?.state.current).toBe(754000);
+    expect(runner?.state.totalRowsKnown).toBe(false);
+    expect(runner?.state.total).toBe(0);
+
+    now = 7_000;
+    await act(async () => {
+      resolveRun({ success: true, message: '导出完成' });
+      await runPromise;
+    });
+
+    expect(runner?.state.status).toBe('done');
+    expect(runner?.state.totalRowsKnown).toBe(false);
+  });
 });

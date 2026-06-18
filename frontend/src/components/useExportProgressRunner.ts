@@ -75,6 +75,13 @@ const normalizeCount = (value: unknown): number => {
   return Math.trunc(next);
 };
 
+const hasUsableTotalRows = (known: boolean, total: unknown): boolean => {
+  if (!known) {
+    return false;
+  }
+  return normalizeCount(total) > 0;
+};
+
 const buildExportJobId = (): string => `export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const isActiveExportStatus = (status: ExportProgressStatus): boolean =>
@@ -99,10 +106,10 @@ export function useExportProgressRunner(options?: UseExportProgressRunnerOptions
         const nextStartedAt = prev.startedAt > 0 || !isActiveExportStatus(nextStatus)
           ? prev.startedAt
           : Date.now();
-        const nextTotalRowsKnown = typeof event.totalRowsKnown === 'boolean' ? event.totalRowsKnown : prev.totalRowsKnown;
-        const nextTotal = nextTotalRowsKnown
-          ? normalizeCount(typeof event.total === 'number' ? event.total : prev.total)
-          : prev.total;
+        const rawNextTotal = normalizeCount(typeof event.total === 'number' ? event.total : prev.total);
+        const requestedTotalRowsKnown = typeof event.totalRowsKnown === 'boolean' ? event.totalRowsKnown : prev.totalRowsKnown;
+        const nextTotalRowsKnown = hasUsableTotalRows(requestedTotalRowsKnown, rawNextTotal);
+        const nextTotal = nextTotalRowsKnown ? rawNextTotal : 0;
         return {
           ...prev,
           open: true,
@@ -144,7 +151,11 @@ export function useExportProgressRunner(options?: UseExportProgressRunnerOptions
     }
 
     const jobId = buildExportJobId();
-    const totalRowsKnown = Number.isFinite(runOptions.totalRows) && Number(runOptions.totalRows) >= 0;
+    const requestedTotal = normalizeCount(runOptions.totalRows);
+    const totalRowsKnown = hasUsableTotalRows(
+      Number.isFinite(runOptions.totalRows) && Number(runOptions.totalRows) >= 0,
+      requestedTotal,
+    );
     activeJobIdRef.current = jobId;
     setState({
       open: true,
@@ -157,7 +168,7 @@ export function useExportProgressRunner(options?: UseExportProgressRunnerOptions
       status: 'start',
       stage: '等待选择导出文件',
       current: 0,
-      total: totalRowsKnown ? normalizeCount(runOptions.totalRows) : 0,
+      total: totalRowsKnown ? requestedTotal : 0,
       totalRowsKnown,
       filePath: '',
       message: '',
