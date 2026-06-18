@@ -348,6 +348,7 @@ func normalizeConnectionReleaseMatchConfig(config connection.ConnectionConfig) c
 	normalized := normalizeCacheKeyConfig(config)
 	normalized.Database = ""
 	normalized.RedisDB = 0
+	normalized.ConnectionParams = ""
 	return normalized
 }
 
@@ -356,6 +357,72 @@ func getConnectionReleaseMatchKey(config connection.ConnectionConfig) string {
 	b, _ := json.Marshal(normalized)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+type cachedDatabaseCloseTarget struct {
+	key  string
+	inst db.Database
+}
+
+func (a *App) releaseCachedDatabaseConnectionsForConfig(config connection.ConnectionConfig) int {
+	if a == nil {
+		return 0
+	}
+	return a.releaseCachedDatabaseConnectionsByMatchKey(getConnectionReleaseMatchKey(config))
+}
+
+func (a *App) releaseCachedDatabaseConnectionsByMatchKey(targetKey string) int {
+	if a == nil || strings.TrimSpace(targetKey) == "" {
+		return 0
+	}
+
+	targets := make([]cachedDatabaseCloseTarget, 0)
+	a.mu.Lock()
+	for key, entry := range a.dbCache {
+		entryConfig := entry.config
+		if strings.TrimSpace(entryConfig.Type) == "" {
+			continue
+		}
+		if getConnectionReleaseMatchKey(entryConfig) != targetKey {
+			continue
+		}
+		targets = append(targets, cachedDatabaseCloseTarget{key: key, inst: entry.inst})
+		delete(a.dbCache, key)
+	}
+	a.mu.Unlock()
+
+	for _, target := range targets {
+		if target.inst == nil {
+			continue
+		}
+		if closeErr := target.inst.Close(); closeErr != nil {
+			logger.Error(closeErr, "关闭缓存连接失败：缓存Key=%s", shortCacheKey(target.key))
+		}
+	}
+
+	return len(targets)
+}
+
+func isMySQLMaxUserConnectionsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(normalizeErrorMessage(err))
+	return strings.Contains(message, "max_user_connections") ||
+		(strings.Contains(message, "error 1226") && strings.Contains(message, "has exceeded"))
+}
+
+func withMySQLMaxUserConnectionsHint(err error, released int) error {
+	if err == nil {
+		return nil
+	}
+	if !isMySQLMaxUserConnectionsError(err) {
+		return err
+	}
+	if released > 0 {
+		return fmt.Errorf("%w；数据库账号连接数已达上限(max_user_connections)，GoNavi 已释放同一连接实例的 %d 个缓存连接并重试；若仍失败，请关闭 Navicat/其他客户端连接或提高数据库用户 max_user_connections", err, released)
+	}
+	return fmt.Errorf("%w；数据库账号连接数已达上限(max_user_connections)，GoNavi 未找到可释放的同实例缓存连接；请关闭 Navicat/其他客户端连接或提高数据库用户 max_user_connections", err)
 }
 
 func shortCacheKey(cacheKey string) string {
@@ -638,11 +705,10 @@ func (a *App) getDatabase(config connection.ConnectionConfig) (db.Database, erro
 }
 
 func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Database, error) {
-	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	effectiveConfig, err := a.resolveEffectiveConnectionConfig(config)
 	if err != nil {
-		return nil, wrapConnectError(config, err)
+		return nil, err
 	}
-	effectiveConfig := applyGlobalProxyToConnection(resolvedConfig)
 	if supported, reason := driverRuntimeSupportStatusFunc(effectiveConfig.Type); !supported {
 		if strings.TrimSpace(reason) == "" {
 			reason = fmt.Sprintf("%s 驱动未启用，请先在驱动管理中安装启用", strings.TrimSpace(effectiveConfig.Type))
@@ -668,6 +734,14 @@ func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Datab
 		return nil, wrapConnectError(effectiveConfig, err)
 	}
 	return dbInst, nil
+}
+
+func (a *App) resolveEffectiveConnectionConfig(config connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	if err != nil {
+		return config, wrapConnectError(config, err)
+	}
+	return applyGlobalProxyToConnection(resolvedConfig), nil
 }
 
 func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing bool) (db.Database, error) {
@@ -771,9 +845,14 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	initialKey := key
 	dbInst, connectedConfig, err := a.connectDatabaseWithStartupRetry(resolvedConfig)
 	if err != nil {
-		failedKey := getCacheKey(connectedConfig)
-		a.recordConnectFailureByKey(failedKey, err)
-		return nil, err
+		retryInst, retryConfig, retryErr := a.retryConnectAfterMySQLMaxUserConnections(resolvedConfig, connectedConfig, err)
+		if retryErr != nil {
+			failedKey := getCacheKey(retryConfig)
+			a.recordConnectFailureByKey(failedKey, retryErr)
+			return nil, retryErr
+		}
+		dbInst = retryInst
+		connectedConfig = retryConfig
 	}
 	a.clearConnectFailureByKey(initialKey)
 	effectiveConfig = connectedConfig
@@ -798,6 +877,28 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 
 	logger.Infof("数据库连接成功并写入缓存：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
 	return dbInst, nil
+}
+
+func (a *App) retryConnectAfterMySQLMaxUserConnections(rawConfig connection.ConnectionConfig, failedConfig connection.ConnectionConfig, err error) (db.Database, connection.ConnectionConfig, error) {
+	if !isMySQLMaxUserConnectionsError(err) {
+		return nil, failedConfig, err
+	}
+
+	released := a.releaseCachedDatabaseConnectionsForConfig(failedConfig)
+	logger.Warnf("检测到 MySQL 用户连接数超限，已释放同实例缓存连接：%s 数量=%d", formatConnSummary(failedConfig), released)
+	if released <= 0 {
+		return nil, failedConfig, withMySQLMaxUserConnectionsHint(err, released)
+	}
+
+	dbInst, connectedConfig, retryErr := a.connectDatabaseWithStartupRetry(rawConfig)
+	if retryErr != nil {
+		if isMySQLMaxUserConnectionsError(retryErr) {
+			return nil, connectedConfig, withMySQLMaxUserConnectionsHint(retryErr, released)
+		}
+		return nil, connectedConfig, retryErr
+	}
+	logger.Infof("MySQL 用户连接数超限释放缓存后重连成功：%s 释放数量=%d", formatConnSummary(connectedConfig), released)
+	return dbInst, connectedConfig, nil
 }
 
 func (a *App) getCachedConnectFailureByKey(key string) (cachedConnectFailure, time.Duration, bool) {

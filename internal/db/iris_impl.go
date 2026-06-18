@@ -141,9 +141,12 @@ func (i *IrisDB) Connect(config connection.ConnectionConfig) error {
 	if err != nil {
 		return fmt.Errorf("打开数据库连接失败：%w", err)
 	}
+	configureSQLConnectionPool(db, "iris")
 	i.conn = db
 	i.pingTimeout = getConnectTimeout(runConfig)
 	if err := i.Ping(); err != nil {
+		_ = db.Close()
+		i.conn = nil
 		return fmt.Errorf("连接建立后验证失败：%w", err)
 	}
 	cleanupOnFailure = false

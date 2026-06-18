@@ -94,6 +94,7 @@ func (v *VastbaseDB) Connect(config connection.ConnectionConfig) error {
 			failures = append(failures, fmt.Sprintf("第%d次连接打开失败: %v", idx+1, err))
 			continue
 		}
+		configureSQLConnectionPool(db, "vastbase")
 		v.conn = db
 		v.pingTimeout = getConnectTimeout(attempt)
 		if err := v.Ping(); err != nil {

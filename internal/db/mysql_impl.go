@@ -847,6 +847,7 @@ func (m *MySQLDB) Connect(config connection.ConnectionConfig) error {
 				}
 				continue
 			}
+			configureSQLConnectionPool(db, candidateConfig.Type)
 
 			timeout := getConnectTimeout(candidateConfig)
 			ctx, cancel := utils.ContextWithTimeout(timeout)

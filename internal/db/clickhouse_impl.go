@@ -643,6 +643,7 @@ func (c *ClickHouseDB) Connect(config connection.ConnectionConfig) error {
 					break
 				}
 				c.conn = clickhouse.OpenDB(opts)
+				configureSQLConnectionPool(c.conn, "clickhouse")
 				if err := c.Ping(); err != nil {
 					lastProtocolErr = err
 					failureMessage := clickHouseAttemptFailureMessage(protocol, err)

@@ -34,10 +34,13 @@ func (c *CustomDB) Connect(config connection.ConnectionConfig) error {
 	if err != nil {
 		return formatCustomDriverOpenError(driver, err)
 	}
+	configureSQLConnectionPool(db, driver)
 	c.conn = db
 	c.driver = driver
 	c.pingTimeout = getConnectTimeout(config)
 	if err := c.Ping(); err != nil {
+		_ = db.Close()
+		c.conn = nil
 		return fmt.Errorf("连接建立后验证失败：%w", err)
 	}
 	return nil

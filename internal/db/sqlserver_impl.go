@@ -176,10 +176,13 @@ func (s *SqlServerDB) Connect(config connection.ConnectionConfig) error {
 	if err != nil {
 		return fmt.Errorf("打开数据库连接失败：%w", err)
 	}
+	configureSQLConnectionPool(db, "sqlserver")
 	s.conn = db
 	s.pingTimeout = getConnectTimeout(config)
 
 	if err := s.Ping(); err != nil {
+		_ = db.Close()
+		s.conn = nil
 		return fmt.Errorf("连接建立后验证失败：%w", err)
 	}
 	return nil

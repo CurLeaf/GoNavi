@@ -96,6 +96,7 @@ func (t *TDengineDB) Connect(config connection.ConnectionConfig) error {
 			failures = append(failures, fmt.Sprintf("第%d次连接打开失败: %v", idx+1, err))
 			continue
 		}
+		configureSQLConnectionPool(db, "tdengine")
 		t.conn = db
 		t.pingTimeout = getConnectTimeout(attempt)
 

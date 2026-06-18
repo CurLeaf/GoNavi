@@ -81,27 +81,7 @@ func (a *App) DBReleaseConnection(config connection.ConnectionConfig) connection
 		logger.Error(wrapped, "DBReleaseConnection 解析连接密文失败：%s", formatConnSummary(config))
 		return connection.QueryResult{Success: false, Message: wrapped.Error()}
 	}
-	targetKey := getConnectionReleaseMatchKey(applyGlobalProxyToConnection(resolvedConfig))
-	closed := 0
-
-	a.mu.Lock()
-	for key, entry := range a.dbCache {
-		entryConfig := entry.config
-		if strings.TrimSpace(entryConfig.Type) == "" {
-			continue
-		}
-		if getConnectionReleaseMatchKey(entryConfig) != targetKey {
-			continue
-		}
-		if entry.inst != nil {
-			if closeErr := entry.inst.Close(); closeErr != nil {
-				logger.Error(closeErr, "DBReleaseConnection 关闭缓存连接失败：缓存Key=%s", shortCacheKey(key))
-			}
-		}
-		delete(a.dbCache, key)
-		closed++
-	}
-	a.mu.Unlock()
+	closed := a.releaseCachedDatabaseConnectionsForConfig(applyGlobalProxyToConnection(resolvedConfig))
 
 	logger.Infof("DBReleaseConnection 已释放数据库连接：%s 数量=%d", formatConnSummary(resolvedConfig), closed)
 	return connection.QueryResult{Success: true, Message: "连接已释放", Data: map[string]int{"closed": closed}}
@@ -115,14 +95,48 @@ func (a *App) TestConnection(config connection.ConnectionConfig) connection.Quer
 		logger.Warnf("TestConnection 参数校验失败：耗时=%s %s 原因=%s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig), err.Error())
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	_, err := a.getDatabaseForcePing(testConfig)
+	dbInst, err := a.openDatabaseIsolated(testConfig)
+	if err != nil {
+		dbInst, err = a.retryIsolatedTestConnectionAfterMySQLMaxUserConnections(testConfig, err)
+	}
 	if err != nil {
 		logger.Error(err, "TestConnection 连接测试失败：耗时=%s %s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig))
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
+	if dbInst != nil {
+		if closeErr := dbInst.Close(); closeErr != nil {
+			logger.Error(closeErr, "TestConnection 释放临时连接失败：耗时=%s %s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig))
+			return connection.QueryResult{Success: false, Message: fmt.Sprintf("连接成功但释放测试连接失败：%v", closeErr)}
+		}
+	}
 
 	logger.Infof("TestConnection 连接测试成功：耗时=%s %s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig))
 	return connection.QueryResult{Success: true, Message: "连接成功"}
+}
+
+func (a *App) retryIsolatedTestConnectionAfterMySQLMaxUserConnections(config connection.ConnectionConfig, err error) (db.Database, error) {
+	if !isMySQLMaxUserConnectionsError(err) {
+		return nil, err
+	}
+
+	effectiveConfig, resolveErr := a.resolveEffectiveConnectionConfig(config)
+	if resolveErr != nil {
+		return nil, err
+	}
+	released := a.releaseCachedDatabaseConnectionsForConfig(effectiveConfig)
+	logger.Warnf("测试连接检测到 MySQL 用户连接数超限，已释放同实例缓存连接：%s 数量=%d", formatConnSummary(effectiveConfig), released)
+	if released <= 0 {
+		return nil, withMySQLMaxUserConnectionsHint(err, released)
+	}
+
+	dbInst, retryErr := a.openDatabaseIsolated(config)
+	if retryErr != nil {
+		if isMySQLMaxUserConnectionsError(retryErr) {
+			return nil, withMySQLMaxUserConnectionsHint(retryErr, released)
+		}
+		return nil, retryErr
+	}
+	return dbInst, nil
 }
 
 func (a *App) MongoDiscoverMembers(config connection.ConnectionConfig) connection.QueryResult {

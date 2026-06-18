@@ -110,6 +110,7 @@ func (d *DamengDB) Connect(config connection.ConnectionConfig) error {
 			failures = append(failures, fmt.Sprintf("第%d次连接打开失败: %v", idx+1, err))
 			continue
 		}
+		configureSQLConnectionPool(db, "dameng")
 		d.conn = db
 		d.pingTimeout = getConnectTimeout(attempt)
 		if err := d.Ping(); err != nil {

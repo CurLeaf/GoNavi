@@ -179,6 +179,7 @@ func (g *GaussDB) Connect(config connection.ConnectionConfig) error {
 				failures = append(failures, fmt.Sprintf("%s 数据库=%s 打开连接失败: %v", sslLabel, dbName, err))
 				continue
 			}
+			configureSQLConnectionPool(dbConn, "gaussdb")
 			g.conn = dbConn
 
 			if err := g.Ping(); err != nil {
@@ -233,6 +234,7 @@ func (g *GaussDB) ensureSearchPath(baseDSN string) {
 
 		newDB, err := sql.Open("gaussdb", newDSN)
 		if err == nil {
+			configureSQLConnectionPool(newDB, "gaussdb")
 			newDB.SetConnMaxLifetime(5 * time.Minute)
 			oldConn := g.conn
 			g.conn = newDB
