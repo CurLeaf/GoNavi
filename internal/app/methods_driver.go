@@ -418,6 +418,7 @@ var (
 var optionalDriverSourceBuildTimeout = 8 * time.Minute
 
 var validateOptionalDriverAgentExecutableFunc = db.ValidateOptionalDriverAgentExecutable
+var resolveOptionalDriverAgentExecutablePathFunc = db.ResolveOptionalDriverAgentExecutablePath
 
 type driverVersionWarmupState struct {
 	Running     bool

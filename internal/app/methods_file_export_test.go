@@ -475,6 +475,49 @@ func TestTryResolveExportTableTotalRows_UsesCountQuery(t *testing.T) {
 	}
 }
 
+func TestVerifyOptionalDriverAgentReadyForExport_RejectsStaleAgent(t *testing.T) {
+	originalProbe := optionalDriverAgentMetadataProbe
+	originalResolvePath := resolveOptionalDriverAgentExecutablePathFunc
+	t.Cleanup(func() {
+		optionalDriverAgentMetadataProbe = originalProbe
+		resolveOptionalDriverAgentExecutablePathFunc = originalResolvePath
+	})
+
+	resolveOptionalDriverAgentExecutablePathFunc = func(downloadDir string, driverType string) (string, error) {
+		return "/tmp/oceanbase-driver-agent", nil
+	}
+	optionalDriverAgentMetadataProbe = func(driverType string, executablePath string) (db.OptionalDriverAgentMetadata, error) {
+		return db.OptionalDriverAgentMetadata{
+			DriverType:    driverType,
+			AgentRevision: "src-stale-agent",
+		}, nil
+	}
+
+	err := verifyOptionalDriverAgentReadyForExport(connection.ConnectionConfig{Type: "oceanbase"})
+	if err == nil {
+		t.Fatal("预期旧版 OceanBase driver-agent 被导出前校验拦截")
+	}
+	if !strings.Contains(err.Error(), "流式协议") {
+		t.Fatalf("错误信息应说明需要流式协议，got=%q", err.Error())
+	}
+}
+
+func TestVerifyOptionalDriverAgentReadyForExport_SkipsBuiltInDriver(t *testing.T) {
+	originalResolvePath := resolveOptionalDriverAgentExecutablePathFunc
+	t.Cleanup(func() {
+		resolveOptionalDriverAgentExecutablePathFunc = originalResolvePath
+	})
+
+	resolveOptionalDriverAgentExecutablePathFunc = func(downloadDir string, driverType string) (string, error) {
+		t.Fatalf("内置驱动导出不应探测 optional driver-agent 路径")
+		return "", nil
+	}
+
+	if err := verifyOptionalDriverAgentReadyForExport(connection.ConnectionConfig{Type: "mysql"}); err != nil {
+		t.Fatalf("内置驱动导出不应被 optional driver-agent 校验阻断: %v", err)
+	}
+}
+
 func TestExportQueryResultToFile_UsesStreamQueryPath(t *testing.T) {
 	f, err := os.CreateTemp("", "gonavi-export-stream-*.csv")
 	if err != nil {

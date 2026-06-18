@@ -342,6 +342,23 @@ func tryResolveExportTableTotalRows(dbInst db.Database, config connection.Connec
 	return resolveExportTotalRowsFromRows(rows)
 }
 
+func verifyOptionalDriverAgentReadyForExport(config connection.ConnectionConfig) error {
+	driverType := normalizeDriverType(config.Type)
+	if !db.IsOptionalGoDriver(driverType) {
+		return nil
+	}
+
+	executablePath, err := resolveOptionalDriverAgentExecutablePathFunc("", driverType)
+	if err != nil {
+		return err
+	}
+	if _, err := verifyInstalledOptionalDriverAgentRevision(driverType, executablePath); err != nil {
+		displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
+		return fmt.Errorf("当前导出依赖最新的 %s driver-agent 流式协议；为避免大结果集回退到高内存缓冲模式，请在驱动管理中重装后重试：%w", displayName, err)
+	}
+	return nil
+}
+
 var exportFileNameSanitizer = strings.NewReplacer(
 	"/", "_",
 	"\\", "_",
@@ -2249,6 +2266,11 @@ func (a *App) ExportTable(config connection.ConnectionConfig, dbName string, tab
 func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName string, tableName string, options ExportFileOptions) connection.QueryResult {
 	options = normalizeExportFileOptions("", options)
 	format := options.Format
+	if format != "sql" {
+		if err := verifyOptionalDriverAgentReadyForExport(config); err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+	}
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           fmt.Sprintf("Export %s", tableName),
 		DefaultFilename: fmt.Sprintf("%s.%s", tableName, format),
@@ -3656,6 +3678,11 @@ func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName 
 	}
 	options = normalizeExportFileOptions("", options)
 	format := options.Format
+	if format != "sql" {
+		if err := verifyOptionalDriverAgentReadyForExport(config); err != nil {
+			return connection.QueryResult{Success: false, Message: err.Error()}
+		}
+	}
 
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 		Title:           "Export Query Result",

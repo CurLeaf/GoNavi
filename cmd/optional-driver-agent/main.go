@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"GoNavi-Wails/internal/connection"
@@ -33,6 +36,7 @@ type agentResponse struct {
 	Error        string      `json:"error,omitempty"`
 	Data         interface{} `json:"data,omitempty"`
 	Fields       []string    `json:"fields,omitempty"`
+	ChunkType    string      `json:"chunkType,omitempty"`
 	RowsAffected int64       `json:"rowsAffected,omitempty"`
 }
 
@@ -44,6 +48,7 @@ const (
 	agentMethodOpenSession   = "openSession"
 	agentMethodCloseSession  = "closeSession"
 	agentMethodQuery         = "query"
+	agentMethodStreamQuery   = "streamQuery"
 	agentMethodExec          = "exec"
 	agentMethodGetDatabases  = "getDatabases"
 	agentMethodGetTables     = "getTables"
@@ -58,9 +63,27 @@ const (
 
 const legacyClickHouseDefaultTimeout = 2 * time.Hour
 
+const (
+	agentChunkColumns            = "columns"
+	agentChunkRows               = "rows"
+	agentChunkDone               = "done"
+	agentStreamBatchSize         = 256
+	agentMemoryTrimRowsThreshold = 100000
+	agentMemoryTrimMinInterval   = 3 * time.Second
+)
+
 var (
-	agentDriverType      string
-	agentDatabaseFactory func() db.Database
+	agentDriverType         string
+	agentDatabaseFactory    func() db.Database
+	agentMemoryTrimRunning  atomic.Bool
+	agentMemoryTrimLastAt   atomic.Int64
+	runAgentMemoryTrimAsync = func(fn func()) {
+		go fn()
+	}
+	agentMemoryTrimFn = func() {
+		runtime.GC()
+		debug.FreeOSMemory()
+	}
 )
 
 type agentRuntime struct {
@@ -99,10 +122,21 @@ func main() {
 			continue
 		}
 
+		if strings.TrimSpace(req.Method) == agentMethodStreamQuery {
+			if err := handleStreamRequest(runtimeState, req, writer); err != nil {
+				fmt.Fprintf(os.Stderr, "写入流式响应失败：%v\n", err)
+				break
+			}
+			continue
+		}
+
 		resp := handleRequest(runtimeState, req)
 		if err := writeResponse(writer, resp); err != nil {
 			fmt.Fprintf(os.Stderr, "写入响应失败：%v\n", err)
 			break
+		}
+		if strings.TrimSpace(req.Method) == agentMethodQuery {
+			maybeReleaseAgentMemory("query-response", countAgentResponseRows(resp.Data))
 		}
 	}
 
@@ -288,6 +322,108 @@ func handleRequest(runtimeState *agentRuntime, req agentRequest) agentResponse {
 	return resp
 }
 
+type agentStreamResponseWriter struct {
+	writer    *bufio.Writer
+	requestID int64
+	columns   []string
+	rows      [][]interface{}
+	rowCount  int64
+}
+
+func newAgentStreamResponseWriter(writer *bufio.Writer, requestID int64) *agentStreamResponseWriter {
+	return &agentStreamResponseWriter{
+		writer:    writer,
+		requestID: requestID,
+	}
+}
+
+func (w *agentStreamResponseWriter) SetColumns(columns []string) error {
+	w.columns = append([]string(nil), columns...)
+	return writeResponse(w.writer, agentResponse{
+		ID:        w.requestID,
+		Success:   true,
+		ChunkType: agentChunkColumns,
+		Fields:    w.columns,
+	})
+}
+
+func (w *agentStreamResponseWriter) ConsumeRow(row map[string]interface{}) error {
+	if len(w.columns) == 0 {
+		return fmt.Errorf("流式查询缺少列定义")
+	}
+	values := make([]interface{}, len(w.columns))
+	for idx, column := range w.columns {
+		values[idx] = row[column]
+	}
+	return w.ConsumeRowValues(values)
+}
+
+func (w *agentStreamResponseWriter) ConsumeRowValues(values []interface{}) error {
+	row := append([]interface{}(nil), values...)
+	w.rows = append(w.rows, row)
+	w.rowCount++
+	if len(w.rows) < agentStreamBatchSize {
+		return nil
+	}
+	return w.flushRows()
+}
+
+func (w *agentStreamResponseWriter) flushRows() error {
+	if len(w.rows) == 0 {
+		return nil
+	}
+	rows := w.rows
+	w.rows = nil
+	return writeResponse(w.writer, agentResponse{
+		ID:        w.requestID,
+		Success:   true,
+		ChunkType: agentChunkRows,
+		Data:      rows,
+	})
+}
+
+func (w *agentStreamResponseWriter) finish() error {
+	return w.flushRows()
+}
+
+func handleStreamRequest(runtimeState *agentRuntime, req agentRequest, writer *bufio.Writer) error {
+	resp := agentResponse{ID: req.ID, Success: true}
+	if runtimeState.inst == nil {
+		return writeResponse(writer, fail(resp, "connection not open"))
+	}
+
+	streamWriter := newAgentStreamResponseWriter(writer, req.ID)
+	if session, ok, err := runtimeState.session(req.SessionID); err != nil {
+		return writeResponse(writer, fail(resp, err.Error()))
+	} else if ok {
+		if err := streamStatementWithOptionalTimeout(session, req.Query, req.TimeoutMs, streamWriter); err != nil {
+			_ = streamWriter.finish()
+			return writeResponse(writer, fail(resp, err.Error()))
+		}
+		if err := streamWriter.finish(); err != nil {
+			return err
+		}
+		if err := writeResponse(writer, agentResponse{ID: req.ID, Success: true, ChunkType: agentChunkDone}); err != nil {
+			return err
+		}
+		maybeReleaseAgentMemory("stream-query-session", streamWriter.rowCount)
+		return nil
+	}
+
+	if err := streamDatabaseWithOptionalTimeout(runtimeState.inst, req.Query, req.TimeoutMs, streamWriter); err != nil {
+		_ = streamWriter.finish()
+		return writeResponse(writer, fail(resp, err.Error()))
+	}
+	if err := streamWriter.finish(); err != nil {
+		return err
+	}
+	if err := writeResponse(writer, agentResponse{ID: req.ID, Success: true, ChunkType: agentChunkDone}); err != nil {
+		return err
+	}
+	maybeReleaseAgentMemory("stream-query-db", streamWriter.rowCount)
+	return nil
+}
+
 func (r *agentRuntime) nextID() string {
 	r.ensureSessionMap()
 	r.nextSessionID++
@@ -459,6 +595,82 @@ func queryStatementWithOptionalTimeout(inst db.StatementExecer, query string, ti
 	return queryWithOptionalTimeout(queryRunner, query, timeoutMs)
 }
 
+func streamWithOptionalTimeout(inst db.StreamQueryExecer, query string, timeoutMs int64, consumer db.QueryStreamConsumer) error {
+	effectiveTimeoutMs := timeoutMs
+	if effectiveTimeoutMs <= 0 && strings.EqualFold(strings.TrimSpace(agentDriverType), "clickhouse") {
+		effectiveTimeoutMs = int64(legacyClickHouseDefaultTimeout / time.Millisecond)
+	}
+	if effectiveTimeoutMs <= 0 {
+		return inst.StreamQuery(query, consumer)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(effectiveTimeoutMs)*time.Millisecond)
+	defer cancel()
+	return inst.StreamQueryContext(ctx, query, consumer)
+}
+
+func streamBufferedQueryResult(fields []string, data []map[string]interface{}, consumer db.QueryStreamConsumer) error {
+	if err := consumer.SetColumns(fields); err != nil {
+		return err
+	}
+	if valueConsumer, ok := consumer.(db.QueryStreamValueConsumer); ok {
+		for _, row := range data {
+			values := make([]interface{}, len(fields))
+			for idx, field := range fields {
+				values[idx] = row[field]
+			}
+			if err := valueConsumer.ConsumeRowValues(values); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, row := range data {
+		if err := consumer.ConsumeRow(row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func streamStatementWithOptionalTimeout(inst db.StatementExecer, query string, timeoutMs int64, consumer db.QueryStreamConsumer) error {
+	if streamer, ok := inst.(db.StreamQueryExecer); ok {
+		return streamWithOptionalTimeout(streamer, query, timeoutMs, consumer)
+	}
+	data, fields, err := queryStatementWithOptionalTimeout(inst, query, timeoutMs)
+	if err != nil {
+		return err
+	}
+	return streamBufferedQueryResult(fields, data, consumer)
+}
+
+func streamDatabaseWithOptionalTimeout(inst db.Database, query string, timeoutMs int64, consumer db.QueryStreamConsumer) error {
+	if streamer, ok := inst.(db.StreamQueryExecer); ok {
+		return streamWithOptionalTimeout(streamer, query, timeoutMs, consumer)
+	}
+	if provider, ok := inst.(db.SessionExecerProvider); ok {
+		openCtx := context.Background()
+		var cancel context.CancelFunc
+		effectiveTimeoutMs := timeoutMs
+		if effectiveTimeoutMs <= 0 && strings.EqualFold(strings.TrimSpace(agentDriverType), "clickhouse") {
+			effectiveTimeoutMs = int64(legacyClickHouseDefaultTimeout / time.Millisecond)
+		}
+		if effectiveTimeoutMs > 0 {
+			openCtx, cancel = context.WithTimeout(context.Background(), time.Duration(effectiveTimeoutMs)*time.Millisecond)
+			defer cancel()
+		}
+		session, err := provider.OpenSessionExecer(openCtx)
+		if err == nil {
+			defer session.Close()
+			return streamStatementWithOptionalTimeout(session, query, timeoutMs, consumer)
+		}
+	}
+	data, fields, err := queryWithOptionalTimeout(inst, query, timeoutMs)
+	if err != nil {
+		return err
+	}
+	return streamBufferedQueryResult(fields, data, consumer)
+}
+
 func execWithOptionalTimeout(inst agentExecRunner, query string, timeoutMs int64) (int64, error) {
 	effectiveTimeoutMs := timeoutMs
 	if effectiveTimeoutMs <= 0 && strings.EqualFold(strings.TrimSpace(agentDriverType), "clickhouse") {
@@ -477,4 +689,42 @@ func execWithOptionalTimeout(inst agentExecRunner, query string, timeoutMs int64
 
 func execStatementWithOptionalTimeout(inst db.StatementExecer, query string, timeoutMs int64) (int64, error) {
 	return execWithOptionalTimeout(inst, query, timeoutMs)
+}
+
+func countAgentResponseRows(data interface{}) int64 {
+	rows, ok := data.([]map[string]interface{})
+	if !ok {
+		return 0
+	}
+	return int64(len(rows))
+}
+
+func maybeReleaseAgentMemory(reason string, rows int64) {
+	if rows < agentMemoryTrimRowsThreshold {
+		return
+	}
+	if !agentMemoryTrimRunning.CompareAndSwap(false, true) {
+		return
+	}
+
+	runAgentMemoryTrimAsync(func() {
+		defer agentMemoryTrimRunning.Store(false)
+		if delay := nextAgentMemoryTrimDelay(); delay > 0 {
+			time.Sleep(delay)
+		}
+		agentMemoryTrimFn()
+		agentMemoryTrimLastAt.Store(time.Now().UnixNano())
+	})
+}
+
+func nextAgentMemoryTrimDelay() time.Duration {
+	lastUnixNano := agentMemoryTrimLastAt.Load()
+	if lastUnixNano <= 0 {
+		return 0
+	}
+	elapsed := time.Since(time.Unix(0, lastUnixNano))
+	if elapsed >= agentMemoryTrimMinInterval {
+		return 0
+	}
+	return agentMemoryTrimMinInterval - elapsed
 }
