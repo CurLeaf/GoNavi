@@ -1,4 +1,5 @@
 ﻿import Modal from './common/ResizableDraggableModal';
+import SidebarConnectionRail from './sidebar/SidebarConnectionRail';
 import {
   V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID,
   formatSidebarRowCount,
@@ -9162,104 +9163,38 @@ const Sidebar: React.FC<{
   const v2CommandSearchLabel = t('sidebar.command_search.label');
   const v2CommandSearchPlaceholder = t('sidebar.command_search.placeholder');
 
-  const renderV2ConnectionRail = () => (
-      <div className="gn-v2-connection-rail" aria-label={v2RailSystemActionsLabel}>
-          <div className="gn-v2-rail-primary-actions" aria-label={v2RailObjectActionsLabel}>
-              <Tooltip title={v2NewGroupLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool gn-v2-rail-action"
-                      onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
-                      aria-label={v2NewGroupLabel}
-                      data-sidebar-create-group-action="true"
-                  >
-                      <FolderOpenOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={v2BatchTablesLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool gn-v2-rail-action"
-                      onClick={() => openBatchTableExportWorkbench()}
-                      aria-label={v2BatchTablesLabel}
-                      data-sidebar-batch-table-action="true"
-                  >
-                      <TableOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={v2BatchDatabasesLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool gn-v2-rail-action"
-                      onClick={() => openBatchDatabaseExportWorkbench()}
-                      aria-label={v2BatchDatabasesLabel}
-                      data-sidebar-batch-database-action="true"
-                  >
-                      <DatabaseOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={v2OpenExternalSqlFileLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool gn-v2-rail-action"
-                      onClick={handleOpenSQLFileFromToolbar}
-                      aria-label={v2OpenExternalSqlFileLabel}
-                      data-sidebar-open-external-sql-file-action="true"
-                  >
-                      <FileAddOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={canLocateActiveTab ? v2LocateCurrentTableLabel : v2LocateCurrentTableUnavailableLabel} placement="right">
-                  <span className="gn-v2-rail-action-wrap">
-                      <button
-                           type="button"
-                           className="gn-v2-rail-tool gn-v2-rail-action"
-                           onClick={handleLocateActiveTabInSidebar}
-                           aria-label={v2LocateCurrentTableLabel}
-                           data-sidebar-locate-current-tab-action="true"
-                           disabled={!canLocateActiveTab}
-                       >
-                          <AimOutlined />
-                      </button>
-                  </span>
-              </Tooltip>
-          </div>
-          <div className="gn-v2-rail-secondary-actions" aria-label={v2RailSystemActionsLabel}>
-              <Tooltip title={v2AiAssistantLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool"
-                      onClick={onToggleAI}
-                      aria-label={v2AiAssistantLabel}
-                      data-gonavi-ai-entry-action="true"
-                  >
-                      <RobotOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={v2ToolsLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool"
-                      onClick={onOpenTools}
-                      aria-label={v2ToolsLabel}
-                      data-gonavi-open-tools-action="true"
-                  >
-                      <ToolOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={v2SettingsLabel} placement="right">
-                  <button type="button" className="gn-v2-rail-tool" onClick={onOpenSettings} aria-label={v2SettingsLabel}>
-                      <SettingOutlined />
-                  </button>
-              </Tooltip>
-          </div>
-      </div>
-  );
+  // V2 Connection Rail 子组件 props（从原 renderV2ConnectionRail 抽出，保留所有原行为）
+  const v2ConnectionRailProps = {
+    labels: {
+      railSystemActions: v2RailSystemActionsLabel,
+      railObjectActions: v2RailObjectActionsLabel,
+      newGroup: v2NewGroupLabel,
+      batchTables: v2BatchTablesLabel,
+      batchDatabases: v2BatchDatabasesLabel,
+      openExternalSqlFile: v2OpenExternalSqlFileLabel,
+      locateCurrentTable: v2LocateCurrentTableLabel,
+      locateCurrentTableUnavailable: v2LocateCurrentTableUnavailableLabel,
+      aiAssistant: v2AiAssistantLabel,
+      tools: v2ToolsLabel,
+      settings: v2SettingsLabel,
+    },
+    handlers: {
+      openCreateTagModal: () => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); },
+      openBatchTableExport: () => openBatchTableExportWorkbench(),
+      openBatchDatabaseExport: () => openBatchDatabaseExportWorkbench(),
+      openExternalSqlFile: handleOpenSQLFileFromToolbar,
+      locateActiveTab: handleLocateActiveTabInSidebar,
+      toggleAI: onToggleAI ?? (() => {}),
+      openTools: onOpenTools ?? (() => {}),
+      openSettings: onOpenSettings ?? (() => {}),
+    },
+    canLocateActiveTab,
+  };
 
   return (
     <div className={isV2Ui ? 'gn-v2-sidebar-redesign' : undefined} style={{ display: 'flex', height: '100%', minHeight: 0 }}>
         {exportProgressModal}
-        {isV2Ui && renderV2ConnectionRail()}
+        {isV2Ui && <SidebarConnectionRail {...v2ConnectionRailProps} />}
         <div className={isV2Ui ? 'gn-v2-object-explorer' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, flex: 1 }}>
         {isV2Ui && (
             <div className="gn-v2-active-connection-header" data-object-count={activeConnectionObjectCount}>
