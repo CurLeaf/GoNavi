@@ -33,6 +33,8 @@ import { SIDEBAR_SQL_EDITOR_DRAG_MIME, decodeSidebarSqlEditorDragPayload, hasSid
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
 // SQL 诊断工作台：lazy 加载避免 reactflow/dagre 进入主 bundle（约 130KB gzipped 独立 chunk）
 const ExplainWorkbench = lazy(() => import('./explain/ExplainWorkbench'));
+// 慢 SQL 历史面板：lazy 加载
+const SlowQueryPanel = lazy(() => import('./explain/SlowQueryPanel'));
 import { SUPPORTED_LANGUAGES, t as translate } from '../i18n';
 import {
     DUCKDB_ROWID_LOCATOR_COLUMN,
@@ -2211,6 +2213,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   // SQL 诊断工作台：Ctrl+Shift+D 触发（Mac 为 Cmd+Shift+D）
   const [explainOpen, setExplainOpen] = useState(false);
+  // 慢 SQL 历史：Ctrl+Shift+H 触发
+  const [slowQueryOpen, setSlowQueryOpen] = useState(false);
 
   // Database Selection
   const [currentConnectionId, setCurrentConnectionId] = useState<string>(tab.connectionId);
@@ -2274,9 +2278,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   useEffect(() => {
     if (!isActive) return;
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'd') {
         e.preventDefault();
         setExplainOpen(true);
+      } else if (key === 'h') {
+        e.preventDefault();
+        setSlowQueryOpen(true);
       }
     };
     window.addEventListener('keydown', handler);
@@ -6154,6 +6163,19 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             config={explainConfig}
             dbName={currentDb}
             sql={query}
+          />
+        )}
+      </Suspense>
+
+      {/* 慢 SQL 历史：Ctrl+Shift+H 触发 */}
+      <Suspense fallback={null}>
+        {slowQueryOpen && explainConfig && (
+          <SlowQueryPanel
+            open={slowQueryOpen}
+            onClose={() => setSlowQueryOpen(false)}
+            config={explainConfig}
+            dbName={currentDb}
+            onPickQuery={(sql) => setQuery(sql)}
           />
         )}
       </Suspense>
