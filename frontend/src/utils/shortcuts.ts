@@ -18,7 +18,9 @@ export type ShortcutAction =
   | 'toggleTheme'
   | 'openShortcutManager'
   | 'toggleMacFullscreen'
-  | 'resetWindowZoom';
+  | 'resetWindowZoom'
+  | 'diagnoseQuery'
+  | 'showSlowQueries';
 
 export type ShortcutPlatform = 'mac' | 'windows';
 
@@ -111,6 +113,8 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'toggleAIPanel',
   'toggleLogPanel',
   'toggleTheme',
+  'diagnoseQuery',
+  'showSlowQueries',
   'openShortcutManager',
   'toggleMacFullscreen',
   'resetWindowZoom',
@@ -202,6 +206,18 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
     labelKey: 'app.shortcuts.action.toggleTheme.label',
     descriptionKey: 'app.shortcuts.action.toggleTheme.description',
   },
+  diagnoseQuery: {
+    labelKey: 'app.shortcuts.action.diagnoseQuery.label',
+    descriptionKey: 'app.shortcuts.action.diagnoseQuery.description',
+    scope: 'queryEditor',
+    allowInEditable: true,
+  },
+  showSlowQueries: {
+    labelKey: 'app.shortcuts.action.showSlowQueries.label',
+    descriptionKey: 'app.shortcuts.action.showSlowQueries.description',
+    scope: 'queryEditor',
+    allowInEditable: true,
+  },
   openShortcutManager: {
     labelKey: 'app.shortcuts.action.openShortcutManager.label',
     descriptionKey: 'app.shortcuts.action.openShortcutManager.description',
@@ -278,6 +294,16 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   toggleTheme: {
     mac: { combo: 'Meta+Shift+D', enabled: true },
     windows: { combo: 'Ctrl+Shift+D', enabled: true },
+  },
+  // SQL 诊断：避开 toggleTheme 的 Ctrl+Shift+D，用 Ctrl+Shift+P（P = Plan）
+  diagnoseQuery: {
+    mac: { combo: 'Meta+Shift+P', enabled: true },
+    windows: { combo: 'Ctrl+Shift+P', enabled: true },
+  },
+  // 慢查询历史：避开 toggleLogPanel 的 Ctrl+H / Meta+Shift+H，用 Ctrl+Shift+L（L = Log）
+  showSlowQueries: {
+    mac: { combo: 'Meta+Shift+L', enabled: true },
+    windows: { combo: 'Ctrl+Shift+L', enabled: true },
   },
   openShortcutManager: {
     mac: { combo: 'Meta+,', enabled: true },

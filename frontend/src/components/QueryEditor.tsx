@@ -2211,9 +2211,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const [saveModalMode, setSaveModalMode] = useState<'save' | 'rename'>('save');
   const [saveForm] = Form.useForm();
 
-  // SQL 诊断工作台：Ctrl+Shift+D 触发（Mac 为 Cmd+Shift+D）
+  // SQL 诊断工作台与慢 SQL 历史：通过快捷键管理系统注册（避免与 toggleTheme/toggleLogPanel 冲突）
   const [explainOpen, setExplainOpen] = useState(false);
-  // 慢 SQL 历史：Ctrl+Shift+H 触发
   const [slowQueryOpen, setSlowQueryOpen] = useState(false);
 
   // Database Selection
@@ -2275,23 +2274,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
     } as any;
   }, [connections, currentConnectionId]);
 
-  useEffect(() => {
-    if (!isActive) return;
-    const handler = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
-      const key = e.key.toLowerCase();
-      if (key === 'd') {
-        e.preventDefault();
-        setExplainOpen(true);
-      } else if (key === 'h') {
-        e.preventDefault();
-        setSlowQueryOpen(true);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [isActive]);
-
   const addSqlLog = useStore(state => state.addSqlLog);
   const addTab = useStore(state => state.addTab);
   const setActiveContext = useStore(state => state.setActiveContext);
@@ -2323,6 +2305,33 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       () => resolveShortcutBinding(shortcutOptions, 'runQuery', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
   );
+  // SQL 诊断 / 慢 SQL 历史的快捷键绑定（从 store 读取，用户可在快捷键管理面板自定义）
+  const diagnoseQueryShortcutBinding = useMemo(
+      () => resolveShortcutBinding(shortcutOptions, 'diagnoseQuery', activeShortcutPlatform),
+      [activeShortcutPlatform, shortcutOptions],
+  );
+  const showSlowQueriesShortcutBinding = useMemo(
+      () => resolveShortcutBinding(shortcutOptions, 'showSlowQueries', activeShortcutPlatform),
+      [activeShortcutPlatform, shortcutOptions],
+  );
+
+  // SQL 诊断 / 慢 SQL 历史的快捷键监听（必须在 binding 声明之后）
+  useEffect(() => {
+    if (!isActive) return;
+    const handler = (e: KeyboardEvent) => {
+      if (diagnoseQueryShortcutBinding?.enabled && isShortcutMatch(e, diagnoseQueryShortcutBinding.combo)) {
+        e.preventDefault();
+        setExplainOpen(true);
+        return;
+      }
+      if (showSlowQueriesShortcutBinding?.enabled && isShortcutMatch(e, showSlowQueriesShortcutBinding.combo)) {
+        e.preventDefault();
+        setSlowQueryOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isActive, diagnoseQueryShortcutBinding, showSlowQueriesShortcutBinding]);
   const selectCurrentStatementShortcutBinding = useMemo(
       () => resolveShortcutBinding(shortcutOptions, 'selectCurrentStatement', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
@@ -5839,6 +5848,35 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           key: 'export-sql-file',
           label: translate('query_editor.action.export_sql_file'),
           onClick: () => void handleExportSQLFile(),
+      },
+      { type: 'divider' },
+      {
+          key: 'diagnose-query',
+          label: (
+              <span>
+                  {translate('app.shortcuts.action.diagnoseQuery.label' as any) || 'SQL 诊断'}
+                  {diagnoseQueryShortcutBinding?.enabled && diagnoseQueryShortcutBinding.combo && (
+                      <span style={{ marginLeft: 8, color: 'var(--gn-text-muted, #6c757d)', fontSize: 11 }}>
+                          {getShortcutDisplayLabel(diagnoseQueryShortcutBinding.combo, activeShortcutPlatform)}
+                      </span>
+                  )}
+              </span>
+          ),
+          onClick: () => setExplainOpen(true),
+      },
+      {
+          key: 'show-slow-queries',
+          label: (
+              <span>
+                  {translate('app.shortcuts.action.showSlowQueries.label' as any) || '慢 SQL 历史'}
+                  {showSlowQueriesShortcutBinding?.enabled && showSlowQueriesShortcutBinding.combo && (
+                      <span style={{ marginLeft: 8, color: 'var(--gn-text-muted, #6c757d)', fontSize: 11 }}>
+                          {getShortcutDisplayLabel(showSlowQueriesShortcutBinding.combo, activeShortcutPlatform)}
+                      </span>
+                  )}
+              </span>
+          ),
+          onClick: () => setSlowQueryOpen(true),
       },
   ];
 
