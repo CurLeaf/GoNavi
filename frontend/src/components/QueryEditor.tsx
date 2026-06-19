@@ -1,5 +1,5 @@
 ﻿import Modal from './common/ResizableDraggableModal';
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from 'react';
 import Editor, { type OnMount } from './MonacoEditor';
 import { message, Input, Form, MenuProps } from 'antd';
 import { format, type SqlLanguage } from 'sql-formatter';
@@ -31,6 +31,8 @@ import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
 import { buildMySQLCompatibleViewMetadataSqls, isSidebarViewTableType, normalizeSidebarViewName } from '../utils/sidebarMetadata';
 import { SIDEBAR_SQL_EDITOR_DRAG_MIME, decodeSidebarSqlEditorDragPayload, hasSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
+// SQL 诊断工作台：lazy 加载避免 reactflow/dagre 进入主 bundle（约 130KB gzipped 独立 chunk）
+const ExplainWorkbench = lazy(() => import('./explain/ExplainWorkbench'));
 import { SUPPORTED_LANGUAGES, t as translate } from '../i18n';
 import {
     DUCKDB_ROWID_LOCATOR_COLUMN,
@@ -2206,7 +2208,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [saveModalMode, setSaveModalMode] = useState<'save' | 'rename'>('save');
   const [saveForm] = Form.useForm();
-  
+
+  // SQL 诊断工作台：Ctrl+Shift+D 触发（Mac 为 Cmd+Shift+D）
+  const [explainOpen, setExplainOpen] = useState(false);
+
   // Database Selection
   const [currentConnectionId, setCurrentConnectionId] = useState<string>(tab.connectionId);
   const [currentDb, setCurrentDb] = useState<string>(tab.dbName || '');
@@ -2250,6 +2255,34 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       () => connections.filter(c => getDataSourceCapabilities(c.config).supportsQueryEditor),
       [connections]
   );
+
+  // SQL 诊断工作台：从 currentConnectionId 解析 ConnectionConfig（复用 SavedConnection 模式）
+  const explainConfig = useMemo(() => {
+    if (!currentConnectionId) return null;
+    const conn = connections.find(c => c.id === currentConnectionId);
+    if (!conn) return null;
+    return {
+      ...conn.config,
+      port: Number(conn.config.port),
+      password: conn.config.password || '',
+      database: conn.config.database || '',
+      useSSH: conn.config.useSSH || false,
+      ssh: conn.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
+    } as any;
+  }, [connections, currentConnectionId]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+        e.preventDefault();
+        setExplainOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isActive]);
+
   const addSqlLog = useStore(state => state.addSqlLog);
   const addTab = useStore(state => state.addTab);
   const setActiveContext = useStore(state => state.setActiveContext);
@@ -6111,6 +6144,19 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               </Form.Item>
           </Form>
       </Modal>
+
+      {/* SQL 诊断工作台：Ctrl+Shift+D 触发，lazy 加载避免 reactflow 进入主 bundle */}
+      <Suspense fallback={null}>
+        {explainOpen && explainConfig && (
+          <ExplainWorkbench
+            open={explainOpen}
+            onClose={() => setExplainOpen(false)}
+            config={explainConfig}
+            dbName={currentDb}
+            sql={query}
+          />
+        )}
+      </Suspense>
     </div>
     );
 };
