@@ -106,6 +106,7 @@ export const isV2SidebarObjectNode = (
  * 让 sidebarHelpers 不依赖 Sidebar.tsx 内部的 TreeNode 定义，避免循环依赖。
  */
 export interface SidebarNodeLike {
+  key?: string;
   type?: string;
   dataRef?: any;
   title?: string;
@@ -139,4 +140,76 @@ export const resolveSidebarTableNameForCopy = (
   node: Pick<SidebarNodeLike, 'title' | 'dataRef'> | null | undefined,
 ): string => {
   return String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || node?.title || '').trim();
+};
+
+// === 命令搜索相关类型与解析（V2 Command Search）===
+
+/** 命令搜索模式：default（默认）/ object（@前缀，对象搜索）/ ai（?或？前缀，AI 提问） */
+export type V2CommandSearchMode = 'default' | 'object' | 'ai';
+
+/** 命令搜索查询解析结果 */
+export interface V2CommandSearchQuery {
+  mode: V2CommandSearchMode;
+  rawValue: string;
+  keyword: string;
+  normalizedKeyword: string;
+  aiPrompt: string;
+}
+
+/**
+ * parseV2CommandSearchQuery 解析命令搜索框的输入。
+ * - "@" 或 "＠" 前缀：对象搜索模式
+ * - "?" 或 "？" 前缀：AI 提问模式
+ * - 无前缀：默认模式
+ */
+export const parseV2CommandSearchQuery = (value: unknown): V2CommandSearchQuery => {
+  const rawValue = String(value ?? '');
+  const trimmedValue = rawValue.trim();
+  const firstChar = trimmedValue.charAt(0);
+
+  if (firstChar === '@' || firstChar === '＠') {
+    const keyword = trimmedValue.slice(1).trim();
+    return {
+      mode: 'object',
+      rawValue,
+      keyword,
+      normalizedKeyword: keyword.toLowerCase(),
+      aiPrompt: '',
+    };
+  }
+
+  if (firstChar === '?' || firstChar === '？') {
+    const aiPrompt = trimmedValue.slice(1).trim();
+    return {
+      mode: 'ai',
+      rawValue,
+      keyword: aiPrompt,
+      normalizedKeyword: aiPrompt.toLowerCase(),
+      aiPrompt,
+    };
+  }
+
+  return {
+    mode: 'default',
+    rawValue,
+    keyword: trimmedValue,
+    normalizedKeyword: trimmedValue.toLowerCase(),
+    aiPrompt: '',
+  };
+};
+
+/**
+ * shouldLoadSidebarNodeOnExpand 判断节点展开时是否需要懒加载子节点。
+ * 仅 connection/database/external-sql-root/table/jvm-mode/jvm-resource 类型且无已加载 children 时返回 true。
+ */
+export const shouldLoadSidebarNodeOnExpand = (
+  node: Pick<SidebarNodeLike, 'type' | 'children' | 'isLeaf'> | null | undefined,
+): boolean => {
+  if (!node || node.isLeaf === true || hasSidebarLazyChildren(node.children)) return false;
+  return node.type === 'connection'
+      || node.type === 'database'
+      || node.type === 'external-sql-root'
+      || node.type === 'table'
+      || node.type === 'jvm-mode'
+      || node.type === 'jvm-resource';
 };

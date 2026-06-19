@@ -4,11 +4,15 @@ import {
   formatSidebarRowCount,
   hasSidebarLazyChildren,
   shouldClearSidebarActiveContextOnEmptySelect,
+  shouldLoadSidebarNodeOnExpand,
   getV2RailConnectionGroupBadgeText,
   isV2SidebarObjectNode,
   resolveV2ObjectGroupTitle,
   resolveSidebarTableNameForCopy,
+  parseV2CommandSearchQuery,
   type V2ExplorerFilter,
+  type V2CommandSearchMode,
+  type V2CommandSearchQuery,
 } from './sidebar/sidebarHelpers';
 // 重新导出，保持外部测试文件的 `from './Sidebar'` 兼容
 export {
@@ -16,10 +20,12 @@ export {
   formatSidebarRowCount,
   hasSidebarLazyChildren,
   shouldClearSidebarActiveContextOnEmptySelect,
+  shouldLoadSidebarNodeOnExpand,
   getV2RailConnectionGroupBadgeText,
   isV2SidebarObjectNode,
   resolveV2ObjectGroupTitle,
   resolveSidebarTableNameForCopy,
+  parseV2CommandSearchQuery,
 } from './sidebar/sidebarHelpers';
 import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
@@ -290,17 +296,7 @@ export const SQLFileExecutionProgressContent: React.FC<SQLFileExecutionProgressS
   </>
 );
 
-export const shouldLoadSidebarNodeOnExpand = (
-  node: Pick<TreeNode, 'type' | 'children' | 'isLeaf'> | null | undefined,
-): boolean => {
-  if (!node || node.isLeaf === true || hasSidebarLazyChildren(node.children)) return false;
-  return node.type === 'connection'
-      || node.type === 'database'
-      || node.type === 'external-sql-root'
-      || node.type === 'table'
-      || node.type === 'jvm-mode'
-      || node.type === 'jvm-resource';
-};
+// shouldLoadSidebarNodeOnExpand 已迁移到 ./sidebar/sidebarHelpers
 
 // resolveSidebarTableNameForCopy 已迁移到 ./sidebar/sidebarHelpers
 
@@ -597,51 +593,7 @@ export type V2CommandSearchItem =
       dbName?: string;
     };
 
-export type V2CommandSearchMode = 'default' | 'object' | 'ai';
-
-export interface V2CommandSearchQuery {
-  mode: V2CommandSearchMode;
-  rawValue: string;
-  keyword: string;
-  normalizedKeyword: string;
-  aiPrompt: string;
-}
-
-export const parseV2CommandSearchQuery = (value: unknown): V2CommandSearchQuery => {
-  const rawValue = String(value ?? '');
-  const trimmedValue = rawValue.trim();
-  const firstChar = trimmedValue.charAt(0);
-
-  if (firstChar === '@' || firstChar === '＠') {
-    const keyword = trimmedValue.slice(1).trim();
-    return {
-      mode: 'object',
-      rawValue,
-      keyword,
-      normalizedKeyword: keyword.toLowerCase(),
-      aiPrompt: '',
-    };
-  }
-
-  if (firstChar === '?' || firstChar === '？') {
-    const aiPrompt = trimmedValue.slice(1).trim();
-    return {
-      mode: 'ai',
-      rawValue,
-      keyword: aiPrompt,
-      normalizedKeyword: aiPrompt.toLowerCase(),
-      aiPrompt,
-    };
-  }
-
-  return {
-    mode: 'default',
-    rawValue,
-    keyword: trimmedValue,
-    normalizedKeyword: trimmedValue.toLowerCase(),
-    aiPrompt: '',
-  };
-};
+// V2CommandSearchMode / V2CommandSearchQuery / parseV2CommandSearchQuery 已迁移到 ./sidebar/sidebarHelpers
 
 export const resolveSidebarConnectionIdFromKey = (
   key: unknown,
