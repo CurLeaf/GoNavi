@@ -98,6 +98,26 @@ type StreamQueryExecer interface {
 	StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error
 }
 
+// ExplainExecer is an optional interface for drivers that can run EXPLAIN and
+// return the dialect-native output (JSON text, table rows as JSON, or XML).
+//
+// Drivers that implement this interface own the full EXPLAIN lifecycle:
+//   - MySQL: prefer EXPLAIN FORMAT=JSON, fallback to vanilla EXPLAIN on 5.7
+//   - PostgreSQL: EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+//   - Oracle: EXPLAIN PLAN SET STATEMENT_ID ... + DBMS_XPLAN.DISPLAY + cleanup
+//   - SQLServer: SET SHOWPLAN_XML ON + sql + SET OFF (defer cleanup mandatory)
+//   - SQLite: EXPLAIN QUERY PLAN
+//   - ClickHouse: EXPLAIN JSON
+//
+// The driver decides which format to use and returns the raw payload plus the
+// detected format tag; the app layer parses via the corresponding parser.
+//
+// Drivers that do NOT implement this interface fall back to the generic path
+// in app.DiagnoseQuery: wrap the SQL as "EXPLAIN <sql>" and run via QueryMulti.
+type ExplainExecer interface {
+	Explain(ctx context.Context, query string) (raw string, format connection.ExplainFormat, err error)
+}
+
 // StatementQueryMessageExecer can run queries on a pinned session and return
 // extra server messages/notices alongside rows.
 type StatementQueryMessageExecer interface {
