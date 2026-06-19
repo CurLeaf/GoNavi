@@ -58,6 +58,16 @@ import {
   formatV2TableContextMenuSize,
 } from './V2TableContextMenu';
 
+const readSourceFile = (relativePath: string) => readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+const readSidebarSource = () => [
+  readSourceFile('./Sidebar.tsx'),
+  readSourceFile('./sidebar/sidebarHelpers.ts'),
+  readSourceFile('./sidebar/SidebarConnectionRail.tsx'),
+  readSourceFile('./sidebar/SidebarSearchPanel.tsx'),
+  readSourceFile('./sidebar/sidebarLegacyNodeMenu.tsx'),
+].join('\n');
+const readLegacyNodeMenuSource = () => readSourceFile('./sidebar/sidebarLegacyNodeMenu.tsx');
+
 const mocks = vi.hoisted(() => ({
   noop: vi.fn(),
   state: {
@@ -270,7 +280,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('wires tree expand and double-click expansion to lazy loading', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain('if (hasSidebarLazyChildren(children)) return;');
     expect(source).toContain('if (!shouldSkipSidebarLoadOnExpandWhileDragging(isTreeDragging, info))');
@@ -510,7 +520,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('keeps the sidebar memoized so parent-only button state does not repaint the tree', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain('}> = React.memo(({');
   });
@@ -577,7 +587,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('releases backend database connections when disconnecting a sidebar connection', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const disconnectSource = source.slice(
       source.indexOf('const releaseConnectionResources = async'),
       source.indexOf('const deleteConnectionNode ='),
@@ -599,7 +609,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('passes the exact tree key when locating a command-search object node', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const commandSearchRunSource = source.slice(
       source.indexOf("if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view')"),
       source.indexOf("if (node.type === 'db-trigger' || node.type === 'db-event' || node.type === 'routine')"),
@@ -609,7 +619,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('wires external SQL directory file actions to dedicated Wails APIs', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const loadTablesSource = source.slice(
       source.indexOf('const loadTables = async'),
       source.indexOf('const locateObjectInSidebarRef'),
@@ -644,7 +654,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('keeps the legacy sidebar toolbar on a stable five-column grid layout', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const markup = renderSidebarMarkup();
 
     expect(markup).toContain('data-sidebar-legacy-toolbar="true"');
@@ -659,7 +669,7 @@ describe('Sidebar locate toolbar', () => {
 
   it('renders the v2 sidebar rail, command search hint, filter tabs and log footer', () => {
     const markup = renderSidebarMarkup({ uiVersion: 'v2', sqlLogCount: 2341, onCreateConnection: mocks.noop });
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(markup).toContain('gn-v2-sidebar-redesign');
     expect(markup).toContain('gn-v2-connection-rail');
@@ -685,7 +695,8 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("const [v2ExplorerFilter, setV2ExplorerFilter] = useState<V2ExplorerFilter>('all');");
     expect(source).toContain("const v2SidebarSearchMode = appearance.v2SidebarSearchMode ?? 'command';");
     expect(source).toContain('const v2CommandSearchPersistentFilterEnabled = appearance.v2CommandSearchPersistentFilterEnabled === true;');
-    expect(source).toContain('handleV2CommandSearchValueChange(event.target.value)');
+    expect(source).toContain('onSearchValueChange: handleV2CommandSearchValueChange,');
+    expect(source).toContain('handlers.onSearchValueChange(event.target.value)');
     expect(source).toContain('toggleV2CommandSearchPersistentFilter');
     expect(source).toContain('gn-v2-command-filter-switch');
     expect(source).toContain("window.addEventListener('keydown', handleV2CommandSearchGlobalKeyDown, true)");
@@ -708,9 +719,9 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('aria-label="工具"');
     expect(markup).toContain('data-gonavi-open-tools-action="true"');
     expect(markup).toContain('aria-label="设置"');
-    expect(source).toContain('buildV2RailConnectionGroups(connections, connectionTags, sidebarRootOrder)');
-    expect(source).toContain("kind: 'v2-connection-group'");
-    expect(source).toContain('onContextMenu={(event) => openV2ConnectionContextMenu(event, conn)}');
+    expect(source).toContain('export const buildV2RailConnectionGroups = (');
+    expect(source).toContain("if (menu.kind === 'v2-connection-group') return renderV2ConnectionGroupContextMenu(menu.node);");
+    expect(source).toContain('openV2ConnectionContextMenu(event, node);');
     expect(source).toContain("kind: 'v2-connection'");
     expect(source).toContain('resolveSidebarContextMenuPosition(event.clientX, event.clientY)');
     expect(source).toContain('contextMenuPortalRef');
@@ -758,7 +769,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('localizes the v2 command search scope shell and object filters through catalog keys', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const objectKindSource = source.slice(
       source.indexOf('const V2_EXPLORER_FILTER_OPTIONS'),
       source.indexOf('const V2_EXPLORER_FILTER_GROUP_KEYS'),
@@ -863,7 +874,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('keeps the v2 command search footer hints tied to real prefix actions', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain("const v2CommandSearchObjectMode = v2CommandSearchQuery.mode === 'object';");
     expect(source).toContain("const v2CommandSearchAiMode = v2CommandSearchQuery.mode === 'ai';");
@@ -875,7 +886,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('renders v2 command action shortcuts from the shared shortcut options', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain("shortcut: resolveShortcutDisplay(shortcutOptions, 'newQueryTab', activeShortcutPlatform)");
     expect(source).toContain("shortcut: resolveShortcutDisplay(shortcutOptions, 'newConnection', activeShortcutPlatform)");
@@ -909,7 +920,7 @@ describe('Sidebar locate toolbar', () => {
 
   it('keeps v2 tree status dots circular while using virtual horizontal scroll for long labels', () => {
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const utilsSource = readFileSync(new URL('./sidebarV2Utils.ts', import.meta.url), 'utf8');
 
     expect(source).toContain('gn-v2-tree-status is-${status}');
@@ -1071,7 +1082,7 @@ describe('Sidebar locate toolbar', () => {
     };
 
     const markup = renderSidebarMarkup({ uiVersion: 'v2' });
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain("if (v2ExplorerFilter === 'all') {");
     expect(source).toContain('gn-v2-tree-connection-copy');
@@ -1079,7 +1090,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('reorders dragged connections instead of only moving them between groups', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const utilsSource = readFileSync(new URL('./sidebarV2Utils.ts', import.meta.url), 'utf8');
 
     expect(source).toContain('const reorderConnections = useStore(state => state.reorderConnections);');
@@ -1093,27 +1104,30 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('reorders dragged tags relative to grouped connections instead of always appending them', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain("connectionTags.find(t => t.connectionIds.includes(String(dropNode.key)))?.id || ''");
     expect(source).toContain('const dropTagId = dropNode.type === \'tag\'');
     expect(source).toContain('if (dropTagId) {');
   });
 
-  it('wires v2 rail root dragging through the shared sidebar root order action', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+  it('wires v2 tree root dragging through the shared sidebar root order action', () => {
+    const source = readSidebarSource();
 
     expect(source).toContain('const reorderSidebarRoot = useStore(state => state.reorderSidebarRoot);');
-    expect(source).toContain('const [draggingV2RailRootToken, setDraggingV2RailRootToken] = useState(\'\');');
     expect(source).toContain('const treeDragSelectSuppressUntilRef = useRef(0);');
     expect(source).toContain('const treeDragSelectionSnapshotRef = useRef<');
     expect(source).toContain('snapshotTreeSelectionBeforeDrag();');
     expect(source).toContain('restoreTreeSelectionAfterDrag();');
     expect(source).toContain('if (Date.now() < treeDragSelectSuppressUntilRef.current) {');
-    expect(source).toContain('handleV2RailRootDrop(');
-    expect(source).toContain('draggable');
-    expect(source).toContain('setDraggingV2RailRootToken(rootToken);');
-    expect(source).toContain('reorderSidebarRoot(sourceToken, targetToken, insertBefore);');
+    expect(source).toContain('const getDropRootToken = (node: any): string => {');
+    expect(source).toContain("return buildSidebarRootTagToken(String(node?.dataRef?.id || ''));");
+    expect(source).toContain(': buildSidebarRootConnectionToken(String(node.key));');
+    expect(source).toContain('const dragRootToken = buildSidebarRootTagToken(String(dragTagId));');
+    expect(source).toContain('reorderSidebarRoot(dragRootToken, dropRootToken, resolvedInsertBefore);');
+    expect(source).toContain('reorderSidebarRoot(dragRootToken, dropRootToken, insertBefore);');
+    expect(source).toContain('buildSidebarRootConnectionToken(String(dragNode.key))');
+    expect(source).toContain('onDrop={handleDrop}');
   });
 
   it('normalizes rc-tree absolute drop positions back to relative positions', () => {
@@ -1348,7 +1362,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('adds rename to the saved query context menu', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const renameHandlerStart = source.indexOf('const handleRenameSavedQuery = async () =>');
     const renameHandlerEnd = source.indexOf('const openRoutineDefinition', renameHandlerStart);
     const savedQueryMenuStart = source.indexOf('// 已存查询节点的右键菜单');
@@ -1668,7 +1682,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('keeps the v2 table pin action on sidebar table rows', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
 
     expect(source).toContain('data-v2-sidebar-table-pin-action="true"');
@@ -1681,7 +1695,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('splits v2 sidebar pinned tables into a dedicated table section', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const sectionBuilderSourceStart = source.indexOf('export const buildV2SidebarTableSectionedChildren = (');
     const sectionBuilderSourceEnd = source.indexOf('export const buildSidebarTableChildrenForUi = (');
     const sectionBuilderSource = source.slice(sectionBuilderSourceStart, sectionBuilderSourceEnd);
@@ -1720,7 +1734,7 @@ describe('Sidebar locate toolbar', () => {
       { title: 'orders', key: 'orders', type: 'table' as const, dataRef: { pinnedSidebarTable: true } },
       { title: 'users', key: 'users', type: 'table' as const, dataRef: { pinnedSidebarTable: false } },
     ];
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(buildSidebarTableChildrenForUi('conn-main-tables', tableNodes, false)).toBe(tableNodes);
     expect(buildSidebarTableChildrenForUi('conn-main-tables', tableNodes, true).map((node) => node.title)).toEqual([
@@ -1742,7 +1756,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('renders v2 table section labels as tree children instead of group header badges', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
 
     expect(source).toContain("node.type === 'v2-table-section'");
@@ -2019,7 +2033,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('routes v2 database context menu shell copy through i18n wrappers in Sidebar', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const createSchemaSource = source.slice(
       source.indexOf('const openCreateSchemaModal = (node: any) => {'),
       source.indexOf('const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {'),
@@ -2153,7 +2167,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('localizes v2 connection shell fallbacks and group controls without changing raw names', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const menuSource = readFileSync(new URL('./V2TableContextMenu.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain("connectionName={String(conn?.name || node.title || t('connection.unnamed'))}");
@@ -2162,9 +2176,11 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("title: String(node.title || dataRef.dbName || t('database.unnamed'))");
     expect(source).toContain("meta: conn?.name || dataRef.id || t('database.label')");
     expect(source).toContain("const activeConnectionDisplayName = String(activeConnection?.name || '').trim() || t('sidebar.active_connection.no_host_selected');");
-    expect(source).toContain("const groupTitle = group.name || t('connection.sidebar.group.untitled');");
-    expect(source).toContain("title={t('connection.sidebar.group.meta', { count: group.connections.length.toLocaleString() })}");
-    expect(source).toContain("aria-label={t(collapsed ? 'connection.sidebar.group.expandAria' : 'connection.sidebar.group.collapseAria', { name: groupTitle })}");
+    expect(source).toContain("name: tag.name || t('connection.sidebar.group.untitled'),");
+    expect(source).toContain('groupName={group.name}');
+    expect(source).toContain('count={group.connections.length}');
+    expect(menuSource).toContain("title={groupName || t('connection.sidebar.group.untitled')}");
+    expect(menuSource).toContain("meta={t('connection.sidebar.group.meta', { count: count.toLocaleString() })}");
     expect(menuSource).toContain("pill={t('connection.sidebar.group.badge')}");
     expect(menuSource).toContain("title: t('connection.sidebar.group.edit')");
     expect(menuSource).toContain("title: t('connection.sidebar.group.delete')");
@@ -2172,7 +2188,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('localizes v2 connection group modals and delete confirmation shells while keeping raw group names', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain("title: t('connection.sidebar.group.deleteConfirmTitle')");
     expect(source).toContain("content: t('connection.sidebar.group.deleteConfirmContent', { name: tag.name })");
@@ -2201,7 +2217,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('localizes legacy sidebar connection duplicate disconnect and delete copy', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain("t('connection.sidebar.menu.copy')");
     expect(source).toContain("t('connection.sidebar.menu.disconnect')");
@@ -2219,7 +2235,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('localizes the sidebar table pin action title and aria-label via i18n keys', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const tablePinActionStart = source.indexOf("const tablePinAction = node.type === 'table' ? (");
     const tablePinActionEnd = source.indexOf('aria-pressed=', tablePinActionStart);
     const tablePinActionSource = source.slice(tablePinActionStart, tablePinActionEnd);
@@ -2238,7 +2254,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('localizes legacy sidebar connection and redis menu labels', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
     const connectionMenuStart = source.indexOf('// Connection Tag Menu — must be BEFORE the connection check');
     const connectionMenuSource = source.slice(
       connectionMenuStart,
@@ -2267,7 +2283,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('localizes connection-root tab titles without changing database or redis-db tab title paths', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain("const buildConnectionRootQueryTabTitle = () => t('query.new');");
     expect(source).toContain("const buildConnectionRootRedisCommandTabTitle = (redisDbLabel = 'db0') =>");
@@ -2283,7 +2299,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('localizes sidebar JVM probe and resource failure prompts', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain("t('sidebar.message.jvm_provider_probe_failed_with_diagnostic'");
     expect(source).toContain("t('sidebar.message.jvm_provider_probe_exception_with_diagnostic'");
@@ -2307,7 +2323,8 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('localizes v2 saved-query and external SQL root shell copy', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
+    const legacyMenuSource = readLegacyNodeMenuSource();
     const loadTablesStart = source.indexOf('const loadTables = async (node: any) => {');
     const loadTablesEnd = source.indexOf('const config = {', loadTablesStart);
     const loadTablesSource = source.slice(loadTablesStart, loadTablesEnd);
@@ -2318,17 +2335,17 @@ describe('Sidebar locate toolbar', () => {
     const externalSqlFlowEnd = source.indexOf('const handleCreateDatabase = async () => {', externalSqlFlowStart);
     const externalSqlFlowSource = source.slice(externalSqlFlowStart, externalSqlFlowEnd);
     const treeTitleStart = source.indexOf('const renderV2TreeTitle = (node: any, hoverTitle: string, statusBadge: React.ReactNode) => {');
-    const treeTitleEnd = source.indexOf('const renderV2CommandSearchRow', treeTitleStart);
+    const treeTitleEnd = source.indexOf('const selectConnectionFromRail', treeTitleStart);
     const treeTitleSource = source.slice(treeTitleStart, treeTitleEnd);
-    const externalSqlMenuStart = source.indexOf("if (node.type === 'external-sql-root') {", source.indexOf('// 已存查询节点的右键菜单'));
-    const externalSqlMenuEnd = source.indexOf("if (node.type === 'external-sql-directory') {", externalSqlMenuStart);
-    const externalSqlMenuSource = source.slice(externalSqlMenuStart, externalSqlMenuEnd);
+    const externalSqlMenuStart = legacyMenuSource.indexOf("if (node.type === 'external-sql-root') {", legacyMenuSource.indexOf('// 已存查询节点的右键菜单'));
+    const externalSqlMenuEnd = legacyMenuSource.indexOf("if (node.type === 'external-sql-directory') {", externalSqlMenuStart);
+    const externalSqlMenuSource = legacyMenuSource.slice(externalSqlMenuStart, externalSqlMenuEnd);
     const externalSqlDirectoryMenuStart = externalSqlMenuEnd;
-    const externalSqlDirectoryMenuEnd = source.indexOf("if (node.type === 'external-sql-file') {", externalSqlDirectoryMenuStart);
-    const externalSqlDirectoryMenuSource = source.slice(externalSqlDirectoryMenuStart, externalSqlDirectoryMenuEnd);
+    const externalSqlDirectoryMenuEnd = legacyMenuSource.indexOf("if (node.type === 'external-sql-file') {", externalSqlDirectoryMenuStart);
+    const externalSqlDirectoryMenuSource = legacyMenuSource.slice(externalSqlDirectoryMenuStart, externalSqlDirectoryMenuEnd);
     const externalSqlFileMenuStart = externalSqlDirectoryMenuEnd;
-    const externalSqlFileMenuEnd = source.indexOf('return [];', externalSqlFileMenuStart);
-    const externalSqlFileMenuSource = source.slice(externalSqlFileMenuStart, externalSqlFileMenuEnd);
+    const externalSqlFileMenuEnd = legacyMenuSource.indexOf('return [];', externalSqlFileMenuStart);
+    const externalSqlFileMenuSource = legacyMenuSource.slice(externalSqlFileMenuStart, externalSqlFileMenuEnd);
     const titleRenderStart = source.indexOf('const titleRender = (node: any) => {');
     const titleRenderEnd = source.indexOf('const handleDrop = (info: any) => {', titleRenderStart);
     const titleRenderSource = source.slice(titleRenderStart, titleRenderEnd);
@@ -2558,7 +2575,7 @@ describe('Sidebar locate toolbar', () => {
       expect(markup).not.toContain(rawSnippet);
     });
 
-    const sidebarSource = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const sidebarSource = readSidebarSource();
     const start = sidebarSource.indexOf('const renderV2TableGroupContextMenu');
     const end = sidebarSource.indexOf('const renderV2DatabaseContextMenu', start);
     expect(start).toBeGreaterThanOrEqual(0);
@@ -2571,18 +2588,19 @@ describe('Sidebar locate toolbar', () => {
     });
 
     const treeTitleStart = sidebarSource.indexOf('const renderV2TreeTitle');
-    const treeTitleEnd = sidebarSource.indexOf('const renderV2CommandSearchRow', treeTitleStart);
+    const treeTitleEnd = sidebarSource.indexOf('const selectConnectionFromRail', treeTitleStart);
     expect(treeTitleStart).toBeGreaterThanOrEqual(0);
     expect(treeTitleEnd).toBeGreaterThan(treeTitleStart);
     const treeTitleSource = sidebarSource.slice(treeTitleStart, treeTitleEnd);
     expect(treeTitleSource).toContain('const objectGroupTitle = resolveV2ObjectGroupTitle(node);');
     expect(treeTitleSource).toContain('if (objectGroupTitle) return objectGroupTitle;');
 
-    const objectGroupTitleStart = sidebarSource.indexOf('export const resolveV2ObjectGroupTitle');
-    const objectGroupTitleEnd = sidebarSource.indexOf('export type SQLFileExecutionStatus', objectGroupTitleStart);
+    const sidebarHelpersSource = readSourceFile('./sidebar/sidebarHelpers.ts');
+    const objectGroupTitleStart = sidebarHelpersSource.indexOf('export const resolveV2ObjectGroupTitle');
+    const objectGroupTitleEnd = sidebarHelpersSource.indexOf('export type V2CommandSearchMode', objectGroupTitleStart);
     expect(objectGroupTitleStart).toBeGreaterThanOrEqual(0);
     expect(objectGroupTitleEnd).toBeGreaterThan(objectGroupTitleStart);
-    const objectGroupTitleSource = sidebarSource.slice(objectGroupTitleStart, objectGroupTitleEnd);
+    const objectGroupTitleSource = sidebarHelpersSource.slice(objectGroupTitleStart, objectGroupTitleEnd);
     [
       "if (groupKey === 'tables') return t('sidebar.v2_table_group_menu.title');",
       "if (groupKey === 'views') return t('sidebar.object_group.views');",
@@ -2616,7 +2634,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('listens for table overview pin changes to refresh the matching sidebar database node', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain("window.addEventListener('gonavi:sidebar-table-pin-changed'");
     expect(source).toContain('findTreeNodeByKeyRef.current(treeDataRef.current, `${connectionId}-${dbName}`)');
@@ -2625,7 +2643,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('waits long enough for slow object-tree loads before reporting locate misses', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain('const SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS = 50;');
     expect(source).toContain('const SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS = 160;');
@@ -2636,7 +2654,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('resolves sidebar export workbench connection ids from live tree nodes instead of only reading dataRef.connectionId', () => {
-    const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+    const source = readSidebarSource();
 
     expect(source).toContain("const connectionId = resolveSidebarNodeConnectionId(node, connectionIds) || String(node?.dataRef?.id || '').trim();");
     expect(source).not.toContain("const connectionId = String(node?.dataRef?.connectionId || '').trim();");
