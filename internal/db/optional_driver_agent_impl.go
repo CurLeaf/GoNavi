@@ -42,6 +42,13 @@ const (
 	optionalAgentMethodApplyChanges     = "applyChanges"
 	optionalAgentDefaultScannerMaxBytes = 8 << 20
 	optionalAgentMetadataProbeTimeout   = 5 * time.Second
+	// callStreamQueryGCInterval 控制 callStreamQuery 每接收多少行 driver-agent 数据触发一次 runtime.GC。
+	//
+	// 该路径不走 sql.Rows（scan_rows.go 的周期 GC 覆盖不到），但每个 chunk 解码
+	// [][]interface{} + normalizeQueryValue 转换会产生大量临时字符串，需要主动回收。
+	// 取 50000 与 scan_rows.go 的 streamRowsPeriodicGCInterval 保持一致，
+	// 让两端在相近节奏下分别 GC，避免内存峰值叠加。
+	callStreamQueryGCInterval = 50000
 )
 
 const (
@@ -305,6 +312,12 @@ func (c *optionalDriverAgentClient) callStreamQuery(req optionalAgentRequest, co
 	var columns []string
 	valueConsumer, useValueConsumer := consumer.(QueryStreamValueConsumer)
 
+	// processedRows 用于周期性触发 GC。
+	// 该路径不走 sql.Rows，scan_rows.go 的周期 GC 覆盖不到。
+	// 每个 chunk 解码会分配 [][]interface{} + normalizeQueryValue 转换副本，
+	// 88W 行场景下不主动 GC 会让主进程 RSS 单调爬升。
+	var processedRows int64
+
 	for {
 		line, err := c.reader.ReadBytes('\n')
 		if err != nil {
@@ -359,6 +372,11 @@ func (c *optionalDriverAgentClient) callStreamQuery(req optionalAgentRequest, co
 				if err := consumer.ConsumeRow(entry); err != nil {
 					return err
 				}
+			}
+			processedRows += int64(len(rows))
+			if processedRows >= callStreamQueryGCInterval {
+				runtime.GC()
+				processedRows = 0
 			}
 		case optionalAgentChunkDone:
 			return nil

@@ -67,7 +67,11 @@ const (
 	agentChunkColumns            = "columns"
 	agentChunkRows               = "rows"
 	agentChunkDone               = "done"
-	agentStreamBatchSize         = 256
+	// agentStreamBatchSize 控制 driver-agent 向主进程发送 row chunk 的批次大小。
+	// 调小到 64：单批 JSON 编码 + 主进程解码的瞬时内存峰值降为原来的 1/4，
+	// 代价是 IPC 次数变为 4 倍，但每批仅一次 stdin/stdout 行读写，整体影响可忽略。
+	// 重要：减小批次不能根除内存峰值，仍需配合 SetGCPercent + 周期 GC（见 main）。
+	agentStreamBatchSize         = 64
 	agentMemoryTrimRowsThreshold = 100000
 	agentMemoryTrimMinInterval   = 3 * time.Second
 )
@@ -97,6 +101,20 @@ func main() {
 		fmt.Fprintf(os.Stderr, "未配置驱动代理 provider，请使用 gonavi_<driver>_driver 标签构建\n")
 		os.Exit(2)
 	}
+
+	// driver-agent 是独立进程，主进程无法控制其 GC 行为。
+	// 大结果集（88W+ 行）通过 JSON-lines 跨进程传输时，每行有 5-8 倍内存副本；
+	// Go 默认 GOGC=100 + Windows MADV_FREE 不归还 RSS，会导致 driver-agent 进程
+	// 内存峰值达到数据总量的 10+ 倍（用户实测 88W 普通业务表撑到 8G+）。
+	//
+	// GC 策略组合：
+	//   - SetGCPercent(50)：堆增长 50% 即触发 GC，比默认 100 更早收敛
+	//   - InitMemorySoftLimit：起始 2GB，运行时由 MaybeGrowMemoryLimit 自适应抬升到最多 8GB
+	//     （起步保守 + 按需扩张，避免静态 2GB 限制在大表场景触发 GC 硬模式降速 15-25%）
+	//
+	// 代价：CPU 开销增加约 5-10%。导出场景是 I/O 密集型，可忽略。
+	debug.SetGCPercent(50)
+	db.InitMemorySoftLimit(db.MemorySoftLimitInitialBytes)
 
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 0, 16<<10), 8<<20)
