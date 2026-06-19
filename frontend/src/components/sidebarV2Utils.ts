@@ -149,9 +149,9 @@ export const buildV2SidebarTableSectionedChildren = (
   });
 
   return [
-    buildSectionNode('pinned', '置顶'),
+    buildSectionNode('pinned', t('table_overview.section.pinned')),
     ...pinnedTables,
-    buildSectionNode('all', '全部'),
+    buildSectionNode('all', t('table_overview.section.all')),
     ...regularTables,
   ];
 };
@@ -288,12 +288,12 @@ export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = t('c
 
 export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines' | 'events';
 
-export const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: string }> = [
-  { key: 'all', label: '全部' },
-  { key: 'tables', label: '表' },
-  { key: 'views', label: '视图' },
-  { key: 'routines', label: '函数' },
-  { key: 'events', label: '事件' },
+export const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; labelKey: string }> = [
+  { key: 'all', labelKey: 'sidebar.command_search.object_kind.all' },
+  { key: 'tables', labelKey: 'sidebar.command_search.object_kind.tables' },
+  { key: 'views', labelKey: 'sidebar.command_search.object_kind.views' },
+  { key: 'routines', labelKey: 'sidebar.command_search.object_kind.routines' },
+  { key: 'events', labelKey: 'sidebar.command_search.object_kind.events' },
 ];
 
 const V2_EXPLORER_FILTER_GROUP_KEYS: Record<Exclude<V2ExplorerFilter, 'all'>, string[]> = {
