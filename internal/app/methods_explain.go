@@ -85,7 +85,9 @@ func (a *App) DiagnoseQuery(config connection.ConnectionConfig, dbName, query st
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	report := connection.DiagnoseReport{Plan: plan}
+	suggestions := runExplainRules(plan)
+	report := connection.DiagnoseReport{Plan: plan, Suggestions: suggestions}
+	logger.Infof("DiagnoseQuery 完成：type=%s nodes=%d suggestions=%d", dbType, len(plan.Nodes), len(suggestions))
 	return connection.QueryResult{Success: true, Message: "诊断完成", Data: report}
 }
 
@@ -260,32 +262,11 @@ func parseExplainRaw(dbType, sourceSQL, raw string, format connection.ExplainFor
 	case "sqlite":
 		return parseSQLiteExplain(sourceSQL, raw, format)
 	case "clickhouse":
-		// PR2 实现
-		return connection.ExplainResult{
-			DBType:     dbType,
-			SourceSQL:  sourceSQL,
-			RawFormat:  format,
-			RawPayload: raw,
-			Warnings:   []string{"ClickHouse 解析器在 PR2 实现，先返回原文"},
-		}, nil
+		return parseClickHouseExplain(sourceSQL, raw, format)
 	case "oracle":
-		// PR2 实现
-		return connection.ExplainResult{
-			DBType:     dbType,
-			SourceSQL:  sourceSQL,
-			RawFormat:  format,
-			RawPayload: raw,
-			Warnings:   []string{"Oracle 解析器在 PR2 实现，先返回原文"},
-		}, nil
+		return parseOracleExplain(sourceSQL, raw, format)
 	case "sqlserver":
-		// PR2 实现
-		return connection.ExplainResult{
-			DBType:     dbType,
-			SourceSQL:  sourceSQL,
-			RawFormat:  format,
-			RawPayload: raw,
-			Warnings:   []string{"SQLServer 解析器在 PR2 实现，先返回原文"},
-		}, nil
+		return parseSQLServerExplain(sourceSQL, raw, format)
 	default:
 		return connection.ExplainResult{}, fmt.Errorf("不支持的 EXPLAIN 方言：%s", dbType)
 	}
