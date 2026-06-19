@@ -2,6 +2,7 @@ import React from 'react';
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readV2ThemeCss } from '../test/readV2ThemeCss';
 
 import Sidebar, {
   buildAllSavedQueriesTreeNode,
@@ -912,7 +913,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('scales the v2 rail and footer tools from global appearance tokens', () => {
-    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
 
     expect(css).toMatch(/\.gn-v2-rail-action-group,\s*body\[data-ui-version="v2"\] \.gn-v2-rail-system-actions \{[^}]*flex-direction: column;/s);
     expect(css).toMatch(/\.gn-v2-rail-action-group,\s*body\[data-ui-version="v2"\] \.gn-v2-rail-system-actions \{[^}]*flex-direction: column;/s);
@@ -932,7 +933,7 @@ describe('Sidebar locate toolbar', () => {
   });
 
   it('keeps v2 tree status dots circular while using virtual horizontal scroll for long labels', () => {
-    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
     const source = readSidebarSource();
     const utilsSource = readFileSync(new URL('./sidebarV2Utils.ts', import.meta.url), 'utf8');
 
@@ -1696,7 +1697,7 @@ describe('Sidebar locate toolbar', () => {
 
   it('keeps the v2 table pin action on sidebar table rows', () => {
     const source = readSidebarSource();
-    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
 
     expect(source).toContain('data-v2-sidebar-table-pin-action="true"');
     expect(source).toContain('node?.dataRef?.pinnedSidebarTable ? <StarFilled /> : <StarOutlined />');
@@ -1770,7 +1771,7 @@ describe('Sidebar locate toolbar', () => {
 
   it('renders v2 table section labels as tree children instead of group header badges', () => {
     const source = readSidebarSource();
-    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
 
     expect(source).toContain("node.type === 'v2-table-section'");
     expect(source).toContain('className="gn-v2-tree-section-title"');

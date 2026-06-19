@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined } from '@ant-design/icons';
-import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
+import { BrowserOpenURL, Environment, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import SlowQueryRailButton from './components/sidebar/SlowQueryRailButton';
 import TabManager from './components/TabManager';
@@ -24,7 +24,7 @@ import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModa
 import LanguageSettingsPanel from './components/LanguageSettingsPanel';
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
-import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, getLinuxCJKFontInstallHint, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
 import {
   DENSITY_OPTIONS,
@@ -45,8 +45,6 @@ import {
 } from './utils/tabDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
-import { resolveAboutDisplayVersion } from './utils/appVersionDisplay';
-import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
 import { toSaveGlobalProxyInput } from './utils/globalProxyDraft';
 import {
@@ -110,15 +108,18 @@ import {
 } from './utils/aiEntryLayout';
 import { DEFAULT_AI_PANEL_WIDTH, resolveOverlayAIPanelWidth, shouldOverlayAIPanel } from './utils/aiPanelLayout';
 import { safeWindowRuntimeCall } from './utils/wailsRuntime';
+import { useAppUpdateManager } from './hooks/useAppUpdateManager';
+import { useAppLogPanelResize } from './hooks/useAppLogPanelResize';
+import { useAppSidebarResize } from './hooks/useAppSidebarResize';
+import { useAppUtilityStyles } from './hooks/useAppUtilityStyles';
 import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import { getAntdLocale } from './i18n/frameworkLocale';
 import { useI18n } from './i18n/provider';
 import './App.css';
 import './v2-theme.css';
+import './styles/v2-theme-workbench.css';
 
 const { Sider, Content } = Layout;
-const SIDEBAR_RESIZE_MIN_WIDTH = 200;
-const SIDEBAR_RESIZE_MAX_WIDTH = 600;
 const MIN_UI_SCALE = 0.8;
 const MAX_UI_SCALE = 1.25;
 const MIN_FONT_SIZE = 12;
@@ -126,33 +127,6 @@ const MAX_FONT_SIZE = 20;
 const DEFAULT_UI_SCALE = 1.0;
 const DEFAULT_FONT_SIZE = 14;
 const EMPTY_INSTALLED_FONT_FAMILIES: InstalledFontFamily[] = [];
-type SidebarResizeBounds = { minWidth: number; maxWidth: number };
-type SidebarResizeDragState = SidebarResizeBounds & {
-  startX: number;
-  startWidth: number;
-  startGuideLeft: number;
-};
-
-const parseCssPixelValue = (value: string | null | undefined): number | null => {
-  const parsed = Number.parseFloat(String(value || ''));
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const resolveSidebarResizeBounds = (siderElement: Element | null): SidebarResizeBounds => {
-  if (typeof window === 'undefined' || !(siderElement instanceof HTMLElement)) {
-    return { minWidth: SIDEBAR_RESIZE_MIN_WIDTH, maxWidth: SIDEBAR_RESIZE_MAX_WIDTH };
-  }
-  const computed = window.getComputedStyle(siderElement);
-  const cssMinWidth = parseCssPixelValue(computed.minWidth);
-  const cssMaxWidth = parseCssPixelValue(computed.maxWidth);
-  const minWidth = Math.max(SIDEBAR_RESIZE_MIN_WIDTH, cssMinWidth && cssMinWidth > 0 ? cssMinWidth : SIDEBAR_RESIZE_MIN_WIDTH);
-  const maxWidth = Math.max(minWidth, Math.min(SIDEBAR_RESIZE_MAX_WIDTH, cssMaxWidth && cssMaxWidth > 0 ? cssMaxWidth : SIDEBAR_RESIZE_MAX_WIDTH));
-  return { minWidth, maxWidth };
-};
-
-const clampSidebarResizeWidth = (width: number, bounds: SidebarResizeBounds): number => (
-  Math.max(bounds.minWidth, Math.min(bounds.maxWidth, width))
-);
 
 const createEmptySecurityUpdateStatus = (): SecurityUpdateStatus => ({
   overallStatus: 'not_detected',
@@ -1182,252 +1156,25 @@ function App() {
       };
   }, []);
 
-  // Background Helper
-  const getBg = (darkHex: string) => {
-      if (!darkMode) return `rgba(255, 255, 255, ${effectiveOpacity})`; // Light mode usually white
-      
-      // Parse hex to rgb
-      const hex = darkHex.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-      return `rgba(${r}, ${g}, ${b}, ${effectiveOpacity})`;
-  };
-  // Specific colors
-  const bgMain = getBg('#141414');
-  const bgContent = getBg('#1d1d1d');
-  const floatingLogButtonBorderColor = darkMode ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.16)';
-  const floatingLogButtonTextColor = darkMode ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.82)';
-  const floatingLogButtonBgColor = darkMode
-      ? `rgba(34, 34, 34, ${Math.max(effectiveOpacity, 0.82)})`
-      : `rgba(255, 255, 255, ${Math.max(effectiveOpacity, 0.9)})`;
-  const floatingLogButtonShadow = darkMode
-      ? '0 8px 22px rgba(0,0,0,0.38)'
-      : '0 8px 20px rgba(0,0,0,0.16)';
-  const isOpaqueUtilityMode = resolvedAppearance.opacity >= 0.999 && resolvedAppearance.blur <= 0;
-  const utilityButtonBgAlpha = darkMode
-      ? Math.max(0.28, Math.min(0.76, effectiveOpacity * 0.72))
-      : Math.max(0.52, Math.min(0.92, effectiveOpacity * 0.9));
-  const utilityButtonBgColor = isOpaqueUtilityMode
-      ? 'transparent'
-      : (darkMode
-          ? `rgba(20, 26, 38, ${utilityButtonBgAlpha})`
-          : `rgba(255, 255, 255, ${utilityButtonBgAlpha})`);
-  const utilityButtonBorderColor = isOpaqueUtilityMode
-      ? (darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(16,24,40,0.10)')
-      : (darkMode
-          ? `rgba(255,255,255,${Math.max(0.08, Math.min(0.18, effectiveOpacity * 0.16))})`
-          : `rgba(16,24,40,${Math.max(0.06, Math.min(0.14, effectiveOpacity * 0.12))})`);
-  const utilityButtonShadow = isOpaqueUtilityMode
-      ? 'none'
-      : (darkMode
-          ? `0 8px 18px rgba(0,0,0,${Math.max(0.10, Math.min(0.22, effectiveOpacity * 0.24))})`
-          : `0 8px 18px rgba(15,23,42,${Math.max(0.04, Math.min(0.12, effectiveOpacity * 0.12))})`);
-  const isSidebarNarrow = sidebarWidth < 360;
-  const isSidebarCompact = sidebarWidth < 320;
-  const isSidebarUltraCompact = sidebarWidth < 260;
-  const utilityButtonStyle = useMemo(() => ({
-      height: Math.max(30, Math.round(32 * effectiveUiScale)),
-      width: '100%',
-      paddingInline: isSidebarCompact ? Math.max(8, Math.round(9 * effectiveUiScale)) : Math.max(10, Math.round(12 * effectiveUiScale)),
-      borderRadius: 10,
-      border: `1px solid ${utilityButtonBorderColor}`,
-      background: utilityButtonBgColor,
-      color: darkMode ? 'rgba(255,255,255,0.94)' : '#162033',
-      boxShadow: utilityButtonShadow,
-      backdropFilter: isOpaqueUtilityMode ? 'none' : blurFilter,
-      WebkitBackdropFilter: isOpaqueUtilityMode ? 'none' : blurFilter,
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: isSidebarCompact ? 4 : 6,
-      minWidth: 0,
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap',
-      fontSize: isSidebarCompact ? 13 : 14,
-  }), [blurFilter, darkMode, effectiveUiScale, isOpaqueUtilityMode, isSidebarCompact, utilityButtonBgColor, utilityButtonBorderColor, utilityButtonShadow]);
-  const disableLocalBackdropFilter = isMacLikePlatform();
-  const overlayTheme = useMemo(
-      () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
-      [darkMode, disableLocalBackdropFilter],
-  );
-
-  const sidebarQuickActionBaseStyle = useMemo(() => ({
-      height: Math.max(34, Math.round(36 * effectiveUiScale)),
-      borderRadius: 12,
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      paddingInline: Math.max(12, Math.round(14 * effectiveUiScale)),
-      fontWeight: 700,
-      boxShadow: darkMode ? '0 8px 18px rgba(0,0,0,0.16)' : '0 8px 16px rgba(15,23,42,0.08)',
-      backdropFilter: blurFilter,
-      WebkitBackdropFilter: blurFilter,
-      minWidth: 0,
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap',
-    }), [blurFilter, darkMode, effectiveUiScale]);
-  const sidebarQueryActionStyle = useMemo(() => ({
-      ...sidebarQuickActionBaseStyle,
-      flex: '1 1 0',
-      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(16,24,40,0.10)'}`,
-      background: darkMode ? `rgba(255,255,255,0.05)` : 'rgba(255,255,255,0.88)',
-      color: darkMode ? 'rgba(255,255,255,0.92)' : '#162033',
-    }), [darkMode, sidebarQuickActionBaseStyle]);
-  const sidebarCreateConnectionActionStyle = useMemo(() => ({
-      ...sidebarQuickActionBaseStyle,
-      flex: '1 1 0',
-      border: 'none',
-      background: 'linear-gradient(135deg, rgba(34,197,94,0.96) 0%, rgba(22,163,74,0.92) 100%)',
-      color: '#f3fff7',
-    }), [sidebarQuickActionBaseStyle]);
-
-  const utilityModalShellStyle = useMemo(() => ({
-      background: overlayTheme.shellBg,
-      border: overlayTheme.shellBorder,
-      boxShadow: overlayTheme.shellShadow,
-      backdropFilter: overlayTheme.shellBackdropFilter,
-  }), [overlayTheme]);
-  const utilityPanelStyle = useMemo(() => ({
-      padding: 16,
-      borderRadius: 14,
-      border: overlayTheme.sectionBorder,
-      background: overlayTheme.sectionBg,
-  }), [overlayTheme]);
-  const toolCenterModalContentStyle = useMemo<React.CSSProperties>(() => ({
-      ...utilityModalShellStyle,
-      height: 'min(820px, calc(100vh - 64px))',
-      display: 'flex',
-      flexDirection: 'column',
-  }), [utilityModalShellStyle]);
-  const toolCenterModalWorkspaceStyle = useMemo<React.CSSProperties>(() => ({
-      display: 'flex',
-      flexDirection: 'column',
-      padding: '10px 0 2px',
-      height: '100%',
-      minHeight: 0,
-  }), []);
-  const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({
-      display: 'grid',
-      gridTemplateColumns: '232px minmax(0, 1fr)',
-      gap: 18,
-      flex: 1,
-      minHeight: 0,
-  }), []);
-  const toolCenterNavPanelStyle = useMemo<React.CSSProperties>(() => ({
-      padding: '4px 12px 4px 0',
-      display: 'flex',
-      flexDirection: 'column',
-      minHeight: 0,
-      borderRight: `1px solid ${overlayTheme.divider}`,
-  }), [overlayTheme.divider]);
-  const toolCenterNavScrollStyle = useMemo<React.CSSProperties>(() => ({
-      display: 'grid',
-      alignContent: 'start',
-      gap: 4,
-      minHeight: 0,
-      overflowY: 'auto',
-      overflowX: 'hidden',
-      paddingRight: 8,
-  }), []);
-  const toolCenterContentPanelStyle = useMemo<React.CSSProperties>(() => ({
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 12,
-      minHeight: 0,
-      overflow: 'hidden',
-  }), []);
-  const toolCenterDetailPanelStyle = useMemo<React.CSSProperties>(() => ({
-      ...utilityPanelStyle,
-      flex: 1,
-      minHeight: 0,
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-  }), [utilityPanelStyle]);
-  const toolCenterDetailBodyStyle = useMemo<React.CSSProperties>(() => ({
-      flex: 1,
-      minHeight: 0,
-      overflowY: 'auto',
-      overflowX: 'hidden',
-      paddingRight: 6,
-      overscrollBehavior: 'contain',
-  }), []);
-  const toolCenterScrollableListStyle = useMemo<React.CSSProperties>(() => ({
-      flex: 1,
-      minHeight: 0,
-      overflowY: 'auto',
-      overflowX: 'hidden',
-      overscrollBehavior: 'contain',
-  }), []);
-  const utilityMutedTextStyle = useMemo(() => ({
-      color: overlayTheme.mutedText,
-      fontSize: 12,
-      lineHeight: 1.6,
-  }), [overlayTheme]);
-  const renderUtilityModalTitle = (
-      icon: React.ReactNode,
-      title: string,
-      description: string,
-  ) => (
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
-              {icon}
-          </div>
-          <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>{title}</div>
-              <div style={{ marginTop: 4, color: overlayTheme.mutedText, fontSize: 12, lineHeight: 1.6 }}>{description}</div>
-          </div>
-      </div>
-  );
-  const utilityActionCardStyle = useMemo(() => ({
-      width: '100%',
-      minHeight: 68,
-      borderRadius: 14,
-      border: overlayTheme.sectionBorder,
-      background: overlayTheme.sectionBg,
-      color: overlayTheme.titleText,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'flex-start',
-      gap: 14,
-      paddingInline: 16,
-      boxShadow: 'none',
-      fontSize: 15,
-      fontWeight: 600,
-  }), [overlayTheme]);
-  const utilityActionHintStyle = useMemo(() => ({
-      fontSize: 12,
-      color: overlayTheme.mutedText,
-      fontWeight: 400,
-      marginTop: 2,
-  }), [overlayTheme]);
-  const toolCenterRowStyle = useMemo(() => ({
-      width: '100%',
-      minHeight: 82,
-      borderRadius: 0,
-      color: overlayTheme.titleText,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 16,
-      paddingInline: 8,
-      boxShadow: 'none',
-      fontSize: 15,
-      fontWeight: 600,
-  }), [overlayTheme]);
-  const toolCenterRowDescriptionStyle = useMemo(() => ({
-      ...utilityActionHintStyle,
-      marginTop: 4,
-      textAlign: 'left' as const,
-      whiteSpace: 'normal' as const,
-      lineHeight: 1.55,
-  }), [utilityActionHintStyle]);
-
-  const sidebarHorizontalPadding = isSidebarCompact ? 8 : 10;
+  const {
+      bgContent, bgMain,
+      floatingLogButtonBgColor, floatingLogButtonBorderColor, floatingLogButtonShadow, floatingLogButtonTextColor,
+      isSidebarCompact, isSidebarNarrow, isSidebarUltraCompact,
+      overlayTheme, renderUtilityModalTitle,
+      sidebarCreateConnectionActionStyle, sidebarHorizontalPadding, sidebarQueryActionStyle,
+      toolCenterContentPanelStyle, toolCenterDetailBodyStyle, toolCenterDetailPanelStyle,
+      toolCenterModalContentStyle, toolCenterModalSplitStyle, toolCenterModalWorkspaceStyle,
+      toolCenterNavPanelStyle, toolCenterNavScrollStyle, toolCenterRowDescriptionStyle, toolCenterRowStyle,
+      toolCenterScrollableListStyle, utilityActionCardStyle, utilityActionHintStyle, utilityButtonStyle,
+      utilityModalShellStyle, utilityMutedTextStyle, utilityPanelStyle,
+  } = useAppUtilityStyles({
+      blurFilter,
+      darkMode,
+      effectiveOpacity,
+      effectiveUiScale,
+      resolvedAppearance,
+      sidebarWidth,
+  });
   
   const addTab = useStore(state => state.addTab);
   const activeContext = useStore(state => state.activeContext);
@@ -1621,84 +1368,6 @@ function App() {
       setSecurityUpdateRepairSource(null);
       openSecurityUpdateSettings(repairEntry.focusTarget);
   }, [connections, openSecurityUpdateSettings, runSecurityUpdateRound, securityUpdateStatus, t]);
-  const updateCheckInFlightRef = React.useRef(false);
-  const updateDownloadInFlightRef = React.useRef(false);
-  const updateUserDismissedRef = React.useRef(false);
-  const updateDownloadedVersionRef = React.useRef<string | null>(null);
-  const updateInstallTriggeredVersionRef = React.useRef<string | null>(null);
-  const updateDownloadMetaRef = React.useRef<UpdateDownloadResultData | null>(null);
-  const updateNotifiedVersionRef = React.useRef<string | null>(null);
-  const updateMutedVersionRef = React.useRef<string | null>(null);
-  const [isAboutOpen, setIsAboutOpen] = useState(false);
-  const isAboutOpenRef = React.useRef(false);
-  const [aboutLoading, setAboutLoading] = useState(false);
-  const [aboutInfo, setAboutInfo] = useState<{ version: string; author: string; buildTime?: string; repoUrl?: string; issueUrl?: string; releaseUrl?: string; communityUrl?: string } | null>(null);
-  const aboutDisplayVersion = resolveAboutDisplayVersion(runtimeBuildType, aboutInfo?.version);
-  const [aboutUpdateStatus, setAboutUpdateStatus] = useState<string>('');
-  const [lastUpdateInfo, setLastUpdateInfo] = useState<UpdateInfo | null>(null);
-  const [updateDownloadProgress, setUpdateDownloadProgress] = useState<{
-      open: boolean;
-      version: string;
-      status: 'idle' | 'start' | 'downloading' | 'done' | 'error';
-      percent: number;
-      downloaded: number;
-      total: number;
-      message: string;
-  }>({
-      open: false,
-      version: '',
-      status: 'idle',
-      percent: 0,
-      downloaded: 0,
-      total: 0,
-      message: ''
-  });
-
-  type UpdateInfo = {
-      hasUpdate: boolean;
-      currentVersion: string;
-      latestVersion: string;
-      releaseName?: string;
-      releaseNotesUrl?: string;
-      assetName?: string;
-      assetUrl?: string;
-      assetSize?: number;
-      sha256?: string;
-      downloaded?: boolean;
-      downloadPath?: string;
-  };
-
-  type UpdateDownloadProgressEvent = {
-      status?: 'start' | 'downloading' | 'done' | 'error';
-      percent?: number;
-      downloaded?: number;
-      total?: number;
-      message?: string;
-  };
-
-  const formatAboutUpdateStatus = useCallback((info: UpdateInfo | null): string => {
-      if (!info) {
-          return t('app.about.update_status.not_checked');
-      }
-      if (info.hasUpdate) {
-          const localDownloaded = updateDownloadedVersionRef.current === info.latestVersion;
-          const hasDownloaded = Boolean(info.downloaded) || localDownloaded;
-          return hasDownloaded
-              ? t('app.about.update_status.new_version_downloaded', { version: info.latestVersion })
-              : t('app.about.update_status.new_version_not_downloaded', { version: info.latestVersion });
-      }
-      return t('app.about.update_status.latest', { version: info.currentVersion || t('common.unknown') });
-  }, [t]);
-
-  type UpdateDownloadResultData = {
-      info?: UpdateInfo;
-      downloadPath?: string;
-      installLogPath?: string;
-      installTarget?: string;
-      platform?: string;
-      autoRelaunch?: boolean;
-  };
-
   const isMacRuntime = runtimePlatform === 'darwin'
       || (runtimePlatform === '' && /mac/i.test(detectNavigatorPlatform()));
   const isWindowsRuntime = runtimePlatform === 'windows'
@@ -1710,6 +1379,31 @@ function App() {
       import.meta.env.DEV,
       import.meta.env.VITE_GONAVI_ENABLE_MAC_WINDOW_DIAGNOSTICS,
   );
+  const {
+      aboutDisplayVersion,
+      aboutInfo,
+      aboutLoading,
+      aboutUpdateStatus,
+      canShowProgressEntry,
+      checkForUpdates,
+      downloadUpdate,
+      formatBytes,
+      handleInstallFromProgress,
+      hideUpdateDownloadProgress,
+      isAboutOpen,
+      isBackgroundProgressForLatestUpdate,
+      isLatestUpdateDownloaded,
+      lastUpdateInfo,
+      markUpdateProgressDismissed,
+      muteLatestUpdate,
+      setIsAboutOpen,
+      showUpdateDownloadProgress,
+      updateDownloadProgress,
+  } = useAppUpdateManager({
+      isMacRuntime,
+      runtimeBuildType,
+      t,
+  });
 
   const emitWindowDiagnostic = useCallback(async (stage: string, extra: Record<string, unknown> = {}) => {
       if (!macWindowDiagnosticsEnabled) {
@@ -1876,308 +1570,6 @@ function App() {
           document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
   }, [emitWindowDiagnostic, macWindowDiagnosticsEnabled]);
-
-  const formatBytes = (bytes?: number) => {
-      if (!bytes || bytes <= 0) return '0 B';
-      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-      let value = bytes;
-      let idx = 0;
-      while (value >= 1024 && idx < units.length - 1) {
-          value /= 1024;
-          idx++;
-      }
-      return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
-  };
-
-  const downloadUpdate = React.useCallback(async (info: UpdateInfo, silent: boolean) => {
-      if (updateDownloadInFlightRef.current) return;
-      if (updateDownloadedVersionRef.current === info.latestVersion) {
-          if (!silent) {
-              const cachedDownloadPath = updateDownloadMetaRef.current?.downloadPath;
-              void message.info(cachedDownloadPath
-                  ? t('app.about.message.update_package_ready_with_path', { version: info.latestVersion, path: cachedDownloadPath })
-                  : t('app.about.message.update_package_ready', { version: info.latestVersion }));
-              showUpdateDownloadProgress();
-          }
-          return;
-      }
-      updateDownloadInFlightRef.current = true;
-      updateUserDismissedRef.current = false;
-      updateDownloadMetaRef.current = null;
-      setUpdateDownloadProgress({
-          open: true,
-          version: info.latestVersion,
-          status: 'start',
-          percent: 0,
-          downloaded: 0,
-          total: info.assetSize || 0,
-          message: ''
-      });
-      let res: any = null;
-      try {
-          res = await (window as any).go.app.App.DownloadUpdate();
-      } catch (e) {
-          console.warn("Wails API: DownloadUpdate unavailable", e);
-      }
-      updateDownloadInFlightRef.current = false;
-      if (res?.success) {
-          const resultData = (res?.data || {}) as UpdateDownloadResultData;
-          updateDownloadMetaRef.current = resultData;
-          updateDownloadedVersionRef.current = info.latestVersion;
-          setUpdateDownloadProgress(prev => {
-              const total = prev.total > 0 ? prev.total : (info.assetSize || 0);
-              return { ...prev, status: 'done', percent: 100, downloaded: total, total, message: '', open: false };
-          });
-          setLastUpdateInfo((prev) => {
-              if (!prev || prev.latestVersion !== info.latestVersion) {
-                  return {
-                      ...info,
-                      downloaded: true,
-                      downloadPath: resultData?.downloadPath || info.downloadPath,
-                  };
-              }
-              return {
-                  ...prev,
-                  downloaded: true,
-                  downloadPath: resultData?.downloadPath || prev.downloadPath || info.downloadPath,
-              };
-          });
-          if (resultData?.downloadPath) {
-              void message.success({ content: t('app.about.message.download_completed_with_path', { path: resultData.downloadPath }), duration: 5 });
-          } else {
-              void message.success({ content: t('app.about.message.download_completed'), duration: 2 });
-          }
-          setAboutUpdateStatus(formatAboutUpdateStatus({ ...info, downloaded: true }));
-          // macOS：如果用户没有主动隐藏进度弹窗，则下载完成后自动打开下载目录
-          if (isMacRuntime && !updateUserDismissedRef.current) {
-              try {
-                  const openRes = await (window as any).go.app.App.OpenDownloadedUpdateDirectory();
-                  if (openRes?.success) {
-                      void message.success(openRes?.message || t('app.about.message.install_directory_opened_manual_replace'));
-                  }
-              } catch (e) {
-                  console.warn('自动打开下载目录失败', e);
-              }
-          }
-      } else {
-          setUpdateDownloadProgress(prev => ({
-              ...prev,
-              status: 'error',
-              message: res?.message || t('common.unknown')
-          }));
-          void message.error({ content: t('app.about.message.download_failed_with_error', { error: res?.message || t('common.unknown') }), duration: 4 });
-      }
-  }, [formatAboutUpdateStatus, isMacRuntime, t]);
-
-  const showUpdateDownloadProgress = React.useCallback(() => {
-      setUpdateDownloadProgress((prev) => {
-          if (prev.status === 'idle') return prev;
-          return { ...prev, open: true };
-      });
-  }, []);
-
-  const hideUpdateDownloadProgress = React.useCallback(() => {
-      setUpdateDownloadProgress((prev) => ({ ...prev, open: false }));
-  }, []);
-
-  const isLatestUpdateDownloaded = Boolean(lastUpdateInfo?.hasUpdate) && (
-      Boolean(lastUpdateInfo?.downloaded)
-      || (Boolean(lastUpdateInfo?.latestVersion) && updateDownloadedVersionRef.current === lastUpdateInfo?.latestVersion)
-  );
-  const isBackgroundProgressForLatestUpdate = Boolean(lastUpdateInfo?.hasUpdate)
-      && Boolean(lastUpdateInfo?.latestVersion)
-      && updateDownloadProgress.version === lastUpdateInfo?.latestVersion
-      && (updateDownloadProgress.status === 'start'
-          || updateDownloadProgress.status === 'downloading'
-          || updateDownloadProgress.status === 'done'
-          || updateDownloadProgress.status === 'error');
-  const canShowProgressEntry = (isLatestUpdateDownloaded || isBackgroundProgressForLatestUpdate)
-      && updateInstallTriggeredVersionRef.current !== (lastUpdateInfo?.latestVersion || null);
-
-  const handleInstallFromProgress = React.useCallback(async () => {
-      // 允许从下载进度弹窗（status=done）或关于弹窗（isLatestUpdateDownloaded=true）触发
-      const canInstall = updateDownloadProgress.status === 'done'
-          || (Boolean(lastUpdateInfo?.hasUpdate) && (Boolean(lastUpdateInfo?.downloaded) || updateDownloadedVersionRef.current === lastUpdateInfo?.latestVersion));
-      if (!canInstall) {
-          return;
-      }
-      if (isMacRuntime) {
-          const res = await (window as any).go.app.App.OpenDownloadedUpdateDirectory();
-          if (!res?.success) {
-              void message.error(t('app.about.message.open_install_directory_failed_with_error', { error: res?.message || t('common.unknown') }));
-              // 文件可能已被用户删除，清除已下载状态以允许重新下载
-              updateDownloadedVersionRef.current = null;
-              updateDownloadMetaRef.current = null;
-              setUpdateDownloadProgress(prev => ({
-                  ...prev,
-                  status: 'idle',
-                  percent: 0,
-                  downloaded: 0,
-                  open: false,
-              }));
-              setLastUpdateInfo(prev => prev ? { ...prev, downloaded: false, downloadPath: undefined } : prev);
-              setAboutUpdateStatus((prev) => lastUpdateInfo ? formatAboutUpdateStatus({ ...lastUpdateInfo, downloaded: false, downloadPath: undefined }) : prev);
-              return;
-          }
-          updateInstallTriggeredVersionRef.current = updateDownloadProgress.version || lastUpdateInfo?.latestVersion || null;
-          hideUpdateDownloadProgress();
-          void message.success(res?.message || t('app.about.message.install_directory_opened_manual_replace'));
-          return;
-      }
-      const res = await (window as any).go.app.App.InstallUpdateAndRestart();
-      if (!res?.success) {
-          void message.error(t('app.about.message.install_failed_with_error', { error: res?.message || t('common.unknown') }));
-          return;
-      }
-      updateInstallTriggeredVersionRef.current = updateDownloadProgress.version || lastUpdateInfo?.latestVersion || null;
-      hideUpdateDownloadProgress();
-  }, [formatAboutUpdateStatus, hideUpdateDownloadProgress, isMacRuntime, lastUpdateInfo, updateDownloadProgress.status, updateDownloadProgress.version, t]);
-
-  const checkForUpdates = React.useCallback(async (silent: boolean) => {
-      if (updateCheckInFlightRef.current) return;
-      updateCheckInFlightRef.current = true;
-      if (!silent) {
-          setAboutUpdateStatus(t('app.about.update_status.checking'));
-      }
-      const updateAPI = (window as any).go.app.App;
-      const checkFn = silent && typeof updateAPI.CheckForUpdatesSilently === 'function'
-          ? updateAPI.CheckForUpdatesSilently
-          : updateAPI.CheckForUpdates;
-      const res = await checkFn();
-      updateCheckInFlightRef.current = false;
-      if (!res?.success) {
-          if (!silent) {
-              const error = res?.message || t('common.unknown');
-              void message.error(t('app.about.message.check_failed_with_error', { error }));
-              setAboutUpdateStatus(t('app.about.update_status.check_failed', { error }));
-          }
-          return;
-      }
-      const info: UpdateInfo = res.data;
-      if (!info) return;
-      const aboutOpen = isAboutOpenRef.current;
-      if (info.hasUpdate) {
-          // 以后端校验为准：如果后端确认文件不存在（downloaded=false），清除本地 ref
-          if (!info.downloaded && updateDownloadedVersionRef.current === info.latestVersion) {
-              updateDownloadedVersionRef.current = null;
-              updateDownloadMetaRef.current = null;
-          }
-          const localDownloaded = updateDownloadedVersionRef.current === info.latestVersion;
-          const hasDownloaded = Boolean(info.downloaded) || localDownloaded;
-          if (hasDownloaded) {
-              const downloadPath = info.downloadPath || updateDownloadMetaRef.current?.downloadPath || '';
-              updateDownloadedVersionRef.current = info.latestVersion;
-              updateDownloadMetaRef.current = {
-                  ...(updateDownloadMetaRef.current || {}),
-                  info,
-                  downloadPath: downloadPath || undefined,
-              };
-              setUpdateDownloadProgress((prev) => {
-                  if (prev.status === 'start' || prev.status === 'downloading') {
-                      return prev;
-                  }
-                  const total = info.assetSize || prev.total || 0;
-                  return {
-                      ...prev,
-                      open: prev.open && prev.version === info.latestVersion,
-                      version: info.latestVersion,
-                      status: 'done',
-                      percent: 100,
-                      downloaded: total,
-                      total,
-                      message: '',
-                  };
-              });
-              setLastUpdateInfo({
-                  ...info,
-                  downloaded: true,
-                  downloadPath: downloadPath || undefined,
-              });
-          } else {
-              if (updateDownloadedVersionRef.current !== info.latestVersion) {
-                  updateDownloadMetaRef.current = null;
-              }
-              setUpdateDownloadProgress((prev) => {
-                  if (prev.status === 'start' || prev.status === 'downloading') {
-                      return prev;
-                  }
-                  return {
-                      ...prev,
-                      open: false,
-                      version: info.latestVersion,
-                      status: 'idle',
-                      percent: 0,
-                      downloaded: 0,
-                      total: info.assetSize || 0,
-                      message: '',
-                  };
-              });
-              setLastUpdateInfo(info);
-          }
-          const statusText = formatAboutUpdateStatus({ ...info, downloaded: hasDownloaded });
-          if (!silent) {
-              void message.info(t('app.about.message.new_version_found', { version: info.latestVersion }));
-              setAboutUpdateStatus(statusText);
-          }
-          if (silent && aboutOpen) {
-              setAboutUpdateStatus(statusText);
-          }
-          if (silent && !aboutOpen && updateMutedVersionRef.current !== info.latestVersion && updateNotifiedVersionRef.current !== info.latestVersion) {
-              updateNotifiedVersionRef.current = info.latestVersion;
-              setIsAboutOpen(true);
-          }
-      } else if (!silent) {
-          setUpdateDownloadProgress((prev) => {
-              if (prev.status === 'start' || prev.status === 'downloading') {
-                  return prev;
-              }
-              return {
-                  open: false,
-                  version: '',
-                  status: 'idle',
-                  percent: 0,
-                  downloaded: 0,
-                  total: 0,
-                  message: '',
-              };
-          });
-          setLastUpdateInfo(info);
-          const text = formatAboutUpdateStatus(info);
-          void message.success(text);
-          setAboutUpdateStatus(text);
-      } else if (silent && aboutOpen) {
-          setUpdateDownloadProgress((prev) => {
-              if (prev.status === 'start' || prev.status === 'downloading') {
-                  return prev;
-              }
-              return {
-                  open: false,
-                  version: '',
-                  status: 'idle',
-                  percent: 0,
-                  downloaded: 0,
-                  total: 0,
-                  message: '',
-              };
-          });
-          setLastUpdateInfo(info);
-          const text = formatAboutUpdateStatus(info);
-          setAboutUpdateStatus(text);
-      } else {
-          setLastUpdateInfo(info);
-      }
-  }, [formatAboutUpdateStatus, t]);
-
-  const loadAboutInfo = React.useCallback(async () => {
-      setAboutLoading(true);
-      const res = await (window as any).go.app.App.GetAppInfo();
-      if (res?.success) {
-          setAboutInfo(res.data);
-      } else {
-          void message.error(t('app.about.message.load_failed', { error: res?.message || t('common.unknown') }));
-      }
-      setAboutLoading(false);
-  }, [t]);
 
   const handleNewQuery = useCallback(() => {
       let connId = '';
@@ -2695,59 +2087,14 @@ function App() {
   }, [t]);
 
 
-  // Log Panel: 最小高度按“工具栏 + 1 条日志行（微增）”限制
-  const LOG_PANEL_TOOLBAR_HEIGHT = 32;
-  const LOG_PANEL_SINGLE_ROW_HEIGHT = 39;
-  const LOG_PANEL_MIN_VISIBLE_ROWS = 1;
-  const LOG_PANEL_MIN_HEIGHT = LOG_PANEL_TOOLBAR_HEIGHT + (LOG_PANEL_SINGLE_ROW_HEIGHT * LOG_PANEL_MIN_VISIBLE_ROWS);
-  const LOG_PANEL_MAX_HEIGHT = 800;
-  const [logPanelHeight, setLogPanelHeight] = useState(Math.max(200, LOG_PANEL_MIN_HEIGHT));
-  const [isLogPanelOpen, setIsLogPanelOpen] = useState(false);
-  const logResizeRef = React.useRef<{ startY: number, startHeight: number } | null>(null);
-  const logGhostRef = React.useRef<HTMLDivElement>(null);
-  const handleToggleLogPanel = useCallback(() => {
-      setIsLogPanelOpen((prev) => !prev);
-  }, []);
-
-  const handleLogResizeStart = (e: React.MouseEvent) => {
-      e.preventDefault();
-      logResizeRef.current = { startY: e.clientY, startHeight: logPanelHeight };
-      
-      if (logGhostRef.current) {
-          logGhostRef.current.style.top = `${e.clientY}px`;
-          logGhostRef.current.style.display = 'block';
-      }
-
-      document.addEventListener('mousemove', handleLogResizeMove);
-      document.addEventListener('mouseup', handleLogResizeUp);
-  };
-
-  const handleLogResizeMove = (e: MouseEvent) => {
-      if (!logResizeRef.current) return;
-      // Just update ghost line, no state update
-      if (logGhostRef.current) {
-          logGhostRef.current.style.top = `${e.clientY}px`;
-      }
-  };
-
-  const handleLogResizeUp = (e: MouseEvent) => {
-      if (logResizeRef.current) {
-          const delta = logResizeRef.current.startY - e.clientY; 
-          const newHeight = Math.max(
-              LOG_PANEL_MIN_HEIGHT,
-              Math.min(LOG_PANEL_MAX_HEIGHT, logResizeRef.current.startHeight + delta)
-          );
-          setLogPanelHeight(newHeight);
-      }
-      
-      if (logGhostRef.current) {
-          logGhostRef.current.style.display = 'none';
-      }
-
-      logResizeRef.current = null;
-      document.removeEventListener('mousemove', handleLogResizeMove);
-      document.removeEventListener('mouseup', handleLogResizeUp);
-  };
+  const {
+      handleCloseLogPanel,
+      handleLogResizeStart,
+      handleToggleLogPanel,
+      isLogPanelOpen,
+      logGhostRef,
+      logPanelHeight,
+  } = useAppLogPanelResize();
   
   const handleCreateConnection = useCallback(() => {
       setSecurityUpdateRepairSource(null);
@@ -3054,111 +2401,16 @@ function App() {
       }
   }, [t]);
   
-  // Sidebar Resizing
-  const sidebarDragRef = React.useRef<SidebarResizeDragState | null>(null);
-  const rafRef = React.useRef<number | null>(null);
-  const ghostRef = React.useRef<HTMLDivElement>(null);
-  const siderRef = React.useRef<HTMLDivElement | null>(null);
-  const sidebarDragBodyStyleRef = React.useRef<{ cursor: string; userSelect: string; webkitUserSelect: string } | null>(null);
-  const latestMouseX = React.useRef<number>(0); // Store latest mouse position
-  const sidebarResizeHandleWidth = Math.max(16, Math.round(16 * effectiveUiScale));
-
-  const restoreSidebarDragBodyStyles = () => {
-      if (!sidebarDragBodyStyleRef.current || typeof document === 'undefined') {
-          sidebarDragBodyStyleRef.current = null;
-          return;
-      }
-
-      const previous = sidebarDragBodyStyleRef.current;
-      document.body.style.cursor = previous.cursor;
-      document.body.style.userSelect = previous.userSelect;
-      (document.body.style as any).WebkitUserSelect = previous.webkitUserSelect;
-      sidebarDragBodyStyleRef.current = null;
-  };
-
-  const handleSidebarMouseDown = (e: React.MouseEvent) => {
-      if (e.button !== 0) {
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-      }
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (typeof document !== 'undefined') {
-          sidebarDragBodyStyleRef.current = {
-              cursor: document.body.style.cursor,
-              userSelect: document.body.style.userSelect,
-              webkitUserSelect: (document.body.style as any).WebkitUserSelect || '',
-          };
-          document.body.style.cursor = 'col-resize';
-          document.body.style.userSelect = 'none';
-          (document.body.style as any).WebkitUserSelect = 'none';
-      }
-      
-      const siderRect = siderRef.current?.getBoundingClientRect();
-      const startGuideLeft = siderRect?.right ?? sidebarWidth;
-      const startWidth = siderRect?.width ?? sidebarWidth;
-      const resizeBounds = resolveSidebarResizeBounds(siderRef.current);
-
-      if (ghostRef.current) {
-          ghostRef.current.style.left = `${startGuideLeft}px`;
-          ghostRef.current.style.display = 'block';
-      }
-
-      sidebarDragRef.current = {
-          startX: e.clientX,
-          startWidth,
-          startGuideLeft,
-          ...resizeBounds,
-      };
-      latestMouseX.current = e.clientX; // Init
-      document.addEventListener('mousemove', handleSidebarMouseMove);
-      document.addEventListener('mouseup', handleSidebarMouseUp);
-  };
-
-  const handleSidebarMouseMove = (e: MouseEvent) => {
-      if (!sidebarDragRef.current) return;
-      
-      latestMouseX.current = e.clientX; // Always update latest pos
-
-      if (rafRef.current) return; // Schedule once per frame
-
-      rafRef.current = requestAnimationFrame(() => {
-          if (!sidebarDragRef.current || !ghostRef.current) return;
-          // Use latestMouseX.current instead of stale closure 'e.clientX'
-          const { startX, startWidth, startGuideLeft, minWidth, maxWidth } = sidebarDragRef.current;
-          const delta = latestMouseX.current - startX;
-          const newWidth = clampSidebarResizeWidth(startWidth + delta, { minWidth, maxWidth });
-          ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;
-          rafRef.current = null;
-      });
-  };
-
-  const handleSidebarMouseUp = (e: MouseEvent) => {
-      if (rafRef.current) {
-          cancelAnimationFrame(rafRef.current);
-          rafRef.current = null;
-      }
-      
-      if (sidebarDragRef.current) {
-          // Use latest position for final commit too
-          const { startX, startWidth, minWidth, maxWidth } = sidebarDragRef.current;
-          const delta = e.clientX - startX;
-          const newWidth = clampSidebarResizeWidth(startWidth + delta, { minWidth, maxWidth });
-          setSidebarWidth(newWidth);
-      }
-
-      if (ghostRef.current) {
-          ghostRef.current.style.display = 'none';
-      }
-      restoreSidebarDragBodyStyles();
-      
-      sidebarDragRef.current = null;
-      document.removeEventListener('mousemove', handleSidebarMouseMove);
-      document.removeEventListener('mouseup', handleSidebarMouseUp);
-  };
+  const {
+      ghostRef,
+      handleSidebarMouseDown,
+      sidebarResizeHandleWidth,
+      siderRef,
+  } = useAppSidebarResize({
+      effectiveUiScale,
+      setSidebarWidth,
+      sidebarWidth,
+  });
 
   useEffect(() => {
     document.body.style.backgroundColor = 'transparent';
@@ -3194,64 +2446,6 @@ function App() {
     tokenControlHeight,
     tokenControlHeightSM,
   ]);
-
-  useEffect(() => {
-      isAboutOpenRef.current = isAboutOpen;
-  }, [isAboutOpen]);
-
-  useEffect(() => {
-      if (isAboutOpen) {
-          setAboutUpdateStatus(formatAboutUpdateStatus(lastUpdateInfo));
-          void loadAboutInfo();
-      }
-  }, [formatAboutUpdateStatus, isAboutOpen, lastUpdateInfo, loadAboutInfo]);
-
-  useEffect(() => {
-      const startupTimer = window.setTimeout(() => {
-          void checkForUpdates(true);
-      }, 2000);
-      const interval = window.setInterval(() => {
-          void checkForUpdates(true);
-      }, 30 * 60 * 1000);
-      return () => {
-          window.clearTimeout(startupTimer);
-          window.clearInterval(interval);
-      };
-  }, [checkForUpdates]);
-
-  useEffect(() => {
-      let offDownloadProgress: any = null;
-      try {
-          offDownloadProgress = EventsOn('update:download-progress', (event: UpdateDownloadProgressEvent) => {
-          if (!event) return;
-          const status = event.status || 'downloading';
-          const nextStatus: 'idle' | 'start' | 'downloading' | 'done' | 'error' =
-              status === 'start' || status === 'downloading' || status === 'done' || status === 'error'
-                  ? status
-                  : 'downloading';
-          const downloaded = typeof event.downloaded === 'number' ? event.downloaded : 0;
-          const total = typeof event.total === 'number' ? event.total : 0;
-          const percentRaw = typeof event.percent === 'number'
-              ? event.percent
-              : (total > 0 ? (downloaded / total) * 100 : 0);
-          const percent = Math.max(0, Math.min(100, percentRaw));
-          setUpdateDownloadProgress(prev => ({
-              open: prev.open,
-              version: prev.version,
-              status: nextStatus,
-              percent,
-              downloaded,
-              total,
-              message: String(event.message || '')
-          }));
-      });
-      } catch (e) {
-          console.warn("Wails API: EventsOn unavailable", e);
-      }
-      return () => {
-          if (offDownloadProgress) offDownloadProgress();
-      };
-  }, []);
 
   useEffect(() => {
       const handleOpenShortcutSettingsEvent = () => {
@@ -3945,9 +3139,9 @@ function App() {
                )}
              </div>
              {isLogPanelOpen && (
-                 <LogPanel 
-                    height={logPanelHeight} 
-                    onClose={() => setIsLogPanelOpen(false)} 
+                 <LogPanel
+                    height={logPanelHeight}
+                    onClose={handleCloseLogPanel}
                     onResizeStart={handleLogResizeStart} 
                 />
             )}
@@ -4910,7 +4104,7 @@ function App() {
                     <Button key="progress" icon={<DownloadOutlined />} onClick={showUpdateDownloadProgress}>{t('app.about.action.download_progress')}</Button>
                 ) : null,
                 lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded && !isBackgroundProgressForLatestUpdate ? (
-                    <Button key="mute" onClick={() => { updateMutedVersionRef.current = lastUpdateInfo.latestVersion; setIsAboutOpen(false); }}>{t('app.about.action.mute_this_version')}</Button>
+                    <Button key="mute" onClick={muteLatestUpdate}>{t('app.about.action.mute_this_version')}</Button>
                 ) : null,
                 <Button key="check" icon={<CloudDownloadOutlined />} onClick={() => checkForUpdates(false)}>{t('app.about.action.check_updates')}</Button>,
                 <Button key="close" onClick={() => setIsAboutOpen(false)}>{t('common.close')}</Button>,
@@ -5907,7 +5101,7 @@ function App() {
                   <Button
                       key="background"
                       onClick={() => {
-                          updateUserDismissedRef.current = true;
+                          markUpdateProgressDismissed();
                           hideUpdateDownloadProgress();
                       }}
                   >

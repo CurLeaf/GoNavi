@@ -1,11 +1,12 @@
 import React from 'react';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { readV2ThemeCss } from '../test/readV2ThemeCss';
 
 describe('QueryEditorToolbar layout', () => {
   it('keeps the v2 toolbar on a single scrollable row in small windows', () => {
     const toolbarSource = readFileSync(new URL('./QueryEditorToolbar.tsx', import.meta.url), 'utf8');
-    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
     const toolbarCss = css.slice(
       css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar {'),
       css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar-main {'),
@@ -30,7 +31,7 @@ describe('QueryEditorToolbar layout', () => {
 
   it('keeps run and stop buttons separated in the v2 toolbar action group', () => {
     const toolbarSource = readFileSync(new URL('./QueryEditorToolbar.tsx', import.meta.url), 'utf8');
-    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
 
     expect(toolbarSource).toContain('gn-v2-query-toolbar-action-group');
     expect(toolbarSource).not.toContain('Space.Compact');
@@ -40,7 +41,7 @@ describe('QueryEditorToolbar layout', () => {
   });
 
   it('keeps commit button hover styling in source and v2 css', () => {
-    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
     const commitBaseCss = css.slice(
       css.indexOf('body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button {'),
       css.indexOf('body[data-ui-version="v2"] .gn-v2-query-transaction-commit-button:hover,'),
