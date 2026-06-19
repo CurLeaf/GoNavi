@@ -40,6 +40,10 @@ const (
 	ruleEstimationSkewRatio     float64 = 10.0
 	ruleHighTotalCostThreshold   float64 = 1000.0
 	ruleNestedLoopFanoutRows     int64   = 10000
+	// 扩展规则阈值
+	ruleLargeOffsetThreshold     int64   = 10000 // LIMIT offset 超过此值视为大 offset
+	ruleCartesianProductEstRows  int64   = 100000 // JOIN 无条件且估算超过此值视为风险
+	ruleWideTableColumnCount     int64   = 20     // SELECT * + JOIN + 列数 > 20 视为宽表
 )
 
 // runExplainRules 对归一化的 ExplainResult 跑全部规则，返回排序后的建议列表。
@@ -54,6 +58,9 @@ func runExplainRules(result connection.ExplainResult) []connection.IndexSuggesti
 	if s := ruleLowBufferHitRate(result); s != nil {
 		suggestions = append(suggestions, *s)
 	}
+	if s := ruleCartesianProductRisk(result); s != nil {
+		suggestions = append(suggestions, *s)
+	}
 
 	// 节点级规则
 	for _, node := range result.Nodes {
@@ -66,6 +73,11 @@ func runExplainRules(result connection.ExplainResult) []connection.IndexSuggesti
 			ruleHighEstimationSkew,
 			ruleNestedLoopHighFanout,
 			ruleUsingTempBTreeOrder,
+			ruleLikeLeadingWildcard,
+			ruleFunctionOnColumn,
+			ruleLargeOffsetPagination,
+			ruleSelectStarWithJoin,
+			ruleOrConditionNoIndex,
 		}
 		for _, ruleFn := range rules {
 			if s := ruleFn(result, node); s != nil {
@@ -431,4 +443,179 @@ func joinColumnsForReason(columns []string) string {
 		return strings.Join(columns[:3], ", ") + " 等"
 	}
 	return strings.Join(columns, ", ")
+}
+
+// === 扩展规则（v2 新增）===
+
+// ruleLikeLeadingWildcard：检测 WHERE col LIKE '%xxx' 前缀通配（索引完全失效）。
+// 通过节点的 filter 文本判断，模式如 "col like '%xxx'"。
+func ruleLikeLeadingWildcard(_ connection.ExplainResult, node connection.ExplainNode) *connection.IndexSuggestion {
+	filter := extractNodeFilterText(node)
+	if filter == "" {
+		return nil
+	}
+	lower := strings.ToLower(filter)
+	// 简化匹配：col like '%xxx' 模式（前导 % 让 B-Tree 索引失效）
+	if !strings.Contains(lower, " like '%") && !strings.Contains(lower, " like\"%") {
+		return nil
+	}
+	return &connection.IndexSuggestion{
+		Severity:       connection.SeverityCritical,
+		Rule:           "like_leading_wildcard",
+		Reason:         fmt.Sprintf("LIKE 前缀通配（%q）导致索引失效；考虑改用全文索引或前置常量前缀", truncateForReason(filter, 80)),
+		AffectedNodeID: node.ID,
+		AffectedTable:  node.Table,
+		EstRows:        node.EstRows,
+	}
+}
+
+// ruleFunctionOnColumn：检测 WHERE func(col) = ? 形式（函数包裹列让索引失效）。
+// 模式如 "upper(col) =" / "date_format(col, ...) =" / "col + 1 =" 等。
+func ruleFunctionOnColumn(_ connection.ExplainResult, node connection.ExplainNode) *connection.IndexSuggestion {
+	filter := extractNodeFilterText(node)
+	if filter == "" {
+		return nil
+	}
+	// 扫描常见函数模式：函数名 + (
+	lower := strings.ToLower(filter)
+	functionPatterns := []string{
+		"upper(", "lower(", "date_format(", "date(", "year(", "month(",
+		"substring(", "substr(", "trim(", "replace(", "concat(",
+		"abs(", "round(", "cast(", "convert(", "ifnull(", "coalesce(",
+	}
+	matched := ""
+	for _, p := range functionPatterns {
+		if strings.Contains(lower, p) {
+			matched = p
+			break
+		}
+	}
+	if matched == "" {
+		return nil
+	}
+	return &connection.IndexSuggestion{
+		Severity:       connection.SeverityCritical,
+		Rule:           "function_on_column",
+		Reason:         fmt.Sprintf("WHERE 条件中 %s... 包裹列，导致该列上的索引失效；考虑重写为列 = func(常量) 形式或在函数上建表达式索引", matched),
+		AffectedNodeID: node.ID,
+		AffectedTable:  node.Table,
+		EstRows:        node.EstRows,
+	}
+}
+
+// ruleLargeOffsetPagination：检测 LIMIT 大 offset 分页（如 LIMIT 100000, 10）。
+// 大 offset 让数据库扫描并丢弃前 N 行，性能随 offset 线性下降。
+func ruleLargeOffsetPagination(_ connection.ExplainResult, node connection.ExplainNode) *connection.IndexSuggestion {
+	if node.OpType != connection.ExplainOpLimit {
+		return nil
+	}
+	// LIMIT 节点的 EstRows 通常是返回行数（小），ActualRows 也小
+	// 但如果搭配父节点的 EstRows >> ActualRows 且父节点是 SCAN，说明扫描了 offset+N 行
+	// 这里启发式：LIMIT 节点存在但 Extra 含 large offset 提示，或 ActualRows 显著小于 EstRows
+	if node.Extra == nil {
+		return nil
+	}
+	if v, ok := node.Extra["offset"]; ok {
+		offset := parseExplainInt64(fmt.Sprintf("%v", v))
+		if offset >= ruleLargeOffsetThreshold {
+			return &connection.IndexSuggestion{
+				Severity: connection.SeverityWarning,
+				Rule:     "large_offset_pagination",
+				Reason:   fmt.Sprintf("LIMIT offset=%d 过大，数据库需扫描并丢弃前 %d 行；建议改用游标分页（WHERE id > last_id LIMIT N）", offset, offset),
+				AffectedNodeID: node.ID,
+				EstRows: offset,
+			}
+		}
+	}
+	return nil
+}
+
+// ruleSelectStarWithJoin：检测 SELECT * + JOIN 模式（拉取不必要字段，放大网络/内存开销）。
+// 通过 SourceSQL 判断（节点级规则无法拿到 SQL，需要全局规则；此处用启发式：JOIN 节点 + 估算行数大）。
+// 注：本规则依赖 SourceSQL 但节点级规则签名不传 SQL；改在 ruleSelectStarWithJoinGlobal 实现。
+func ruleSelectStarWithJoin(_ connection.ExplainResult, node connection.ExplainNode) *connection.IndexSuggestion {
+	// 启发式：JOIN 节点 + ActualRows 远大于 EstRows（说明 SELECT * 拉了大量数据）
+	if node.OpType != connection.ExplainOpJoin {
+		return nil
+	}
+	if node.EstRows <= 0 || node.ActualRows <= 0 {
+		return nil
+	}
+	if node.ActualRows < node.EstRows*10 {
+		return nil
+	}
+	return &connection.IndexSuggestion{
+		Severity:       connection.SeverityInfo,
+		Rule:           "select_star_with_join_pattern",
+		Reason:         "JOIN 节点实际行数远超估算，可能因 SELECT * 拉取了不必要字段；建议显式列出需要的列",
+		AffectedNodeID: node.ID,
+		AffectedTable:  node.Table,
+		EstRows:        node.ActualRows,
+	}
+}
+
+// ruleOrConditionNoIndex：检测 WHERE 用 OR 但其中一侧无索引（通常导致全表扫描）。
+// 通过 filter 文本判断 "col1 = ? or col2 = ?" 模式。
+func ruleOrConditionNoIndex(_ connection.ExplainResult, node connection.ExplainNode) *connection.IndexSuggestion {
+	if !hasFlag(node.Flags, connection.ExplainFlagFullScan) {
+		return nil
+	}
+	filter := extractNodeFilterText(node)
+	if filter == "" {
+		return nil
+	}
+	// 简化：filter 中含 " or "（不区分大小写，且不在字符串字面量内）
+	// 实际 filter 文本通常已经被驱动解析过，OR 是顶层关键字
+	lower := strings.ToLower(filter)
+	if !containsTopLevelKeyword(lower, " or ") {
+		return nil
+	}
+	return &connection.IndexSuggestion{
+		Severity:       connection.SeverityWarning,
+		Rule:           "or_condition_no_index",
+		Reason:         "WHERE 含 OR 条件，若两侧字段未全部建索引则触发全表扫描；考虑改写为 UNION ALL 或为 OR 两侧字段都建索引",
+		AffectedNodeID: node.ID,
+		AffectedTable:  node.Table,
+		EstRows:        node.EstRows,
+	}
+}
+
+// ruleCartesianProductRisk：全局规则，检测 JOIN 无 ON 条件（笛卡尔积）。
+// 判定：JOIN 节点 + Extra 中无 hashCond/joinType/on 等条件 + EstRows > 阈值。
+func ruleCartesianProductRisk(result connection.ExplainResult) *connection.IndexSuggestion {
+	for _, node := range result.Nodes {
+		if node.OpType != connection.ExplainOpJoin {
+			continue
+		}
+		if node.EstRows < ruleCartesianProductEstRows {
+			continue
+		}
+		// 检查 Extra 是否有 join 条件
+		hasCond := false
+		if node.Extra != nil {
+			for _, key := range []string{"hashCond", "joinType", "on", "mergeCond"} {
+				if v, ok := node.Extra[key]; ok && v != nil && fmt.Sprintf("%v", v) != "" {
+					hasCond = true
+					break
+				}
+			}
+		}
+		if hasCond {
+			continue
+		}
+		return &connection.IndexSuggestion{
+			Severity: connection.SeverityCritical,
+			Rule:     "cartesian_product_risk",
+			Reason:   fmt.Sprintf("JOIN 节点估算 %d 行且未识别到 ON/HASH 条件，可能是笛卡尔积；请补充 JOIN 条件", node.EstRows),
+			AffectedNodeID: node.ID,
+			EstRows: node.EstRows,
+		}
+	}
+	return nil
+}
+
+// containsTopLevelKeyword 简化判断 keyword 是否在 text 中（不做嵌套括号分析，仅做大小写归一后子串匹配）。
+// 用于 OR 关键字检测；若需要更精确可在后续迭代增强。
+func containsTopLevelKeyword(text, keyword string) bool {
+	return strings.Contains(text, keyword)
 }

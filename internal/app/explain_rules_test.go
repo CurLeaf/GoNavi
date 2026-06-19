@@ -234,6 +234,168 @@ func TestRunExplainRules_EmptyResultNoSuggestions(t *testing.T) {
 	}
 }
 
+// === 扩展规则测试 ===
+
+func TestRunExplainRules_LikeLeadingWildcardCritical(t *testing.T) {
+	result := connection.ExplainResult{
+		DBType:   "mysql",
+		SourceSQL: "SELECT * FROM users WHERE name LIKE '%john%'",
+		Nodes: []connection.ExplainNode{
+			{
+				ID:      "n1",
+				OpType:  connection.ExplainOpScan,
+				Table:   "users",
+				EstRows: 50000,
+				Flags:   []string{connection.ExplainFlagFullScan, connection.ExplainFlagNoIndex},
+				Extra:   map[string]any{"attachedCondition": "name like '%john%'"},
+			},
+		},
+	}
+	suggestions := runExplainRules(result)
+	found := false
+	for _, s := range suggestions {
+		if s.Rule == "like_leading_wildcard" {
+			found = true
+			if s.Severity != connection.SeverityCritical {
+				t.Fatalf("LIKE 前缀通配应为 critical，got=%s", s.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("LIKE 前缀通配应触发 like_leading_wildcard 规则")
+	}
+}
+
+func TestRunExplainRules_FunctionOnColumnCritical(t *testing.T) {
+	result := connection.ExplainResult{
+		DBType:   "mysql",
+		SourceSQL: "SELECT * FROM users WHERE UPPER(name) = 'JOHN'",
+		Nodes: []connection.ExplainNode{
+			{
+				ID:      "n1",
+				OpType:  connection.ExplainOpScan,
+				Table:   "users",
+				EstRows: 20000,
+				Flags:   []string{connection.ExplainFlagFullScan, connection.ExplainFlagNoIndex},
+				Extra:   map[string]any{"attachedCondition": "upper(name) = 'JOHN'"},
+			},
+		},
+	}
+	suggestions := runExplainRules(result)
+	found := false
+	for _, s := range suggestions {
+		if s.Rule == "function_on_column" {
+			found = true
+			if s.Severity != connection.SeverityCritical {
+				t.Fatalf("函数包裹列应为 critical，got=%s", s.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("函数包裹列应触发 function_on_column 规则")
+	}
+}
+
+func TestRunExplainRules_OrConditionNoIndexWarning(t *testing.T) {
+	result := connection.ExplainResult{
+		DBType:   "mysql",
+		SourceSQL: "SELECT * FROM users WHERE id = 1 OR name = 'x'",
+		Nodes: []connection.ExplainNode{
+			{
+				ID:      "n1",
+				OpType:  connection.ExplainOpScan,
+				Table:   "users",
+				EstRows: 10000,
+				Flags:   []string{connection.ExplainFlagFullScan, connection.ExplainFlagNoIndex},
+				Extra:   map[string]any{"attachedCondition": "id = 1 or name = 'x'"},
+			},
+		},
+	}
+	suggestions := runExplainRules(result)
+	found := false
+	for _, s := range suggestions {
+		if s.Rule == "or_condition_no_index" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("全表扫描 + OR 条件应触发 or_condition_no_index 规则")
+	}
+}
+
+func TestRunExplainRules_CartesianProductRiskCritical(t *testing.T) {
+	result := connection.ExplainResult{
+		DBType:   "mysql",
+		SourceSQL: "SELECT * FROM a, b",
+		Nodes: []connection.ExplainNode{
+			{
+				ID:      "n1",
+				OpType:  connection.ExplainOpJoin,
+				EstRows: 500000, // 远超阈值 100000
+				Extra:   map[string]any{}, // 无 hashCond/joinType
+			},
+		},
+	}
+	suggestions := runExplainRules(result)
+	found := false
+	for _, s := range suggestions {
+		if s.Rule == "cartesian_product_risk" {
+			found = true
+			if s.Severity != connection.SeverityCritical {
+				t.Fatalf("笛卡尔积风险应为 critical，got=%s", s.Severity)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("无条件的 JOIN + 大估算应触发 cartesian_product_risk")
+	}
+}
+
+func TestRunExplainRules_CartesianProductSuppressedWithCondition(t *testing.T) {
+	result := connection.ExplainResult{
+		DBType:   "mysql",
+		SourceSQL: "SELECT * FROM a JOIN b ON a.id = b.aid",
+		Nodes: []connection.ExplainNode{
+			{
+				ID:      "n1",
+				OpType:  connection.ExplainOpJoin,
+				EstRows: 500000,
+				Extra:   map[string]any{"hashCond": "a.id = b.aid"}, // 有条件
+			},
+		},
+	}
+	suggestions := runExplainRules(result)
+	for _, s := range suggestions {
+		if s.Rule == "cartesian_product_risk" {
+			t.Fatal("有 JOIN 条件时不应触发 cartesian_product_risk")
+		}
+	}
+}
+
+func TestRunExplainRules_FunctionOnColumnNotTriggeredForPlainColumn(t *testing.T) {
+	// WHERE name = 'x' 不应触发 function_on_column
+	result := connection.ExplainResult{
+		DBType:   "mysql",
+		SourceSQL: "SELECT * FROM users WHERE name = 'x'",
+		Nodes: []connection.ExplainNode{
+			{
+				ID:      "n1",
+				OpType:  connection.ExplainOpScan,
+				Table:   "users",
+				EstRows: 100,
+				Flags:   []string{connection.ExplainFlagFullScan, connection.ExplainFlagNoIndex},
+				Extra:   map[string]any{"attachedCondition": "name = 'x'"},
+			},
+		},
+	}
+	suggestions := runExplainRules(result)
+	for _, s := range suggestions {
+		if s.Rule == "function_on_column" {
+			t.Fatalf("name = 'x' 不应触发 function_on_column，但触发了：%+v", s)
+		}
+	}
+}
+
 // contains 检查字符串包含（避免和 strings.Contains 冲突，这里独立实现）。
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || indexOfContains(s, substr) >= 0)
