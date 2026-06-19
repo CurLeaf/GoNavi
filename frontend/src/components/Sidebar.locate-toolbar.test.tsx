@@ -70,6 +70,7 @@ const readSidebarSource = () => [
   readSourceFile('./sidebar/SidebarExternalSqlWorkflow.tsx'),
   readSourceFile('./sidebar/useSidebarTreeLoaders.tsx'),
   readSourceFile('./sidebar/SidebarEntityModals.tsx'),
+  readSourceFile('./sidebar/SidebarTreeTitle.tsx'),
   readSourceFile('./sidebarV2Utils.ts'),
 ].join('\n');
 const readLegacyNodeMenuSource = () => readSourceFile('./sidebar/sidebarLegacyNodeMenu.tsx');
@@ -2340,9 +2341,9 @@ describe('Sidebar locate toolbar', () => {
     const externalSqlFlowStart = source.indexOf('const handleAddExternalSQLDirectory = async (node: any) => {');
     const externalSqlFlowEnd = source.indexOf('const cancelSQLFileExecution = () => {', externalSqlFlowStart);
     const externalSqlFlowSource = source.slice(externalSqlFlowStart, externalSqlFlowEnd);
-    const treeTitleStart = source.indexOf('const renderV2TreeTitle = (node: any, hoverTitle: string, statusBadge: React.ReactNode) => {');
-    const treeTitleEnd = source.indexOf('const selectConnectionFromRail', treeTitleStart);
-    const treeTitleSource = source.slice(treeTitleStart, treeTitleEnd);
+    const treeTitleSource = readSourceFile('./sidebar/SidebarTreeTitle.tsx');
+    const treeTitleStart = 0;
+    const treeTitleEnd = treeTitleSource.length;
     const externalSqlMenuStart = legacyMenuSource.indexOf("if (node.type === 'external-sql-root') {", legacyMenuSource.indexOf('// 已存查询节点的右键菜单'));
     const externalSqlMenuEnd = legacyMenuSource.indexOf("if (node.type === 'external-sql-directory') {", externalSqlMenuStart);
     const externalSqlMenuSource = legacyMenuSource.slice(externalSqlMenuStart, externalSqlMenuEnd);
@@ -2593,11 +2594,12 @@ describe('Sidebar locate toolbar', () => {
       expect(tableGroupCallSource).not.toContain(rawSnippet);
     });
 
-    const treeTitleStart = sidebarSource.indexOf('const renderV2TreeTitle');
-    const treeTitleEnd = sidebarSource.indexOf('const selectConnectionFromRail', treeTitleStart);
+    const treeTitleModuleSource = readSourceFile('./sidebar/SidebarTreeTitle.tsx');
+    const treeTitleStart = treeTitleModuleSource.indexOf('export const renderSidebarV2TreeTitle');
+    const treeTitleEnd = treeTitleModuleSource.length;
     expect(treeTitleStart).toBeGreaterThanOrEqual(0);
     expect(treeTitleEnd).toBeGreaterThan(treeTitleStart);
-    const treeTitleSource = sidebarSource.slice(treeTitleStart, treeTitleEnd);
+    const treeTitleSource = treeTitleModuleSource.slice(treeTitleStart, treeTitleEnd);
     expect(treeTitleSource).toContain('const objectGroupTitle = resolveV2ObjectGroupTitle(node);');
     expect(treeTitleSource).toContain('if (objectGroupTitle) return objectGroupTitle;');
 
