@@ -1,5 +1,6 @@
 ﻿import Modal from './common/ResizableDraggableModal';
 import SidebarConnectionRail from './sidebar/SidebarConnectionRail';
+import SidebarSearchPanel, { type SidebarSearchPanelProps } from './sidebar/SidebarSearchPanel';
 import {
   V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID,
   formatSidebarRowCount,
@@ -7527,101 +7528,6 @@ const Sidebar: React.FC<{
       }
   };
 
-  const renderV2CommandSearchRow = (item: V2CommandSearchItem, active: boolean) => (
-      <button
-          key={item.key}
-          type="button"
-          className={`gn-v2-command-row${active ? ' is-active' : ''}`}
-          onMouseEnter={() => setV2CommandActiveIndex(commandSearchFlatItems.findIndex((entry) => entry.key === item.key))}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => runCommandSearchItem(item)}
-      >
-          <span className={`gn-v2-command-row-icon is-${item.kind}`}>{item.icon}</span>
-          <span className="gn-v2-command-row-main">
-              <strong>{item.title}</strong>
-              {item.meta ? <small>{item.meta}</small> : null}
-          </span>
-          {item.kind === 'action' && item.shortcut ? <kbd>{item.shortcut}</kbd> : null}
-      </button>
-  );
-
-  const renderV2CommandSearchSection = (title: string, items: V2CommandSearchItem[]) => {
-      if (items.length === 0) return null;
-      return (
-          <section className="gn-v2-command-section">
-              <div className="gn-v2-command-section-title">{title}</div>
-              {items.map((item) => renderV2CommandSearchRow(
-                  item,
-                  commandSearchFlatItems[v2CommandActiveIndex]?.key === item.key,
-              ))}
-          </section>
-      );
-  };
-
-	  const renderV2CommandSearchOverlay = () => {
-	      if (!isV2CommandSearchOpen) return null;
-	      const emptyCopy = v2CommandSearchAiMode
-	          ? '输入「?」后加问题，按 Enter 发送到 AI 面板。'
-	          : (v2CommandSearchObjectMode
-	              ? '未找到匹配的表、视图或物化视图。'
-	              : '未找到匹配项。可输入 @表名 只搜表对象，或输入 ?问题 让 AI 回答。');
-	      return (
-	          <div className="gn-v2-command-backdrop" data-v2-command-search="true" onMouseDown={closeV2CommandSearch}>
-              <div className="gn-v2-command-palette" role="dialog" aria-modal="true" aria-label={v2CommandSearchLabel} onMouseDown={(event) => event.stopPropagation()}>
-                  <div className="gn-v2-command-searchbar">
-                      <SearchOutlined />
-                      <Input
-                          {...noAutoCapInputProps}
-                          ref={commandSearchInputRef}
-                          variant="borderless"
-                          value={v2CommandSearchValue}
-                          onChange={(event) => handleV2CommandSearchValueChange(event.target.value)}
-                          onKeyDown={handleV2CommandSearchKeyDown}
-                          placeholder={v2CommandSearchPlaceholder}
-                      />
-                      <Tooltip title={t('sidebar.command_search.sync_to_filter_tooltip')}>
-                          <span className="gn-v2-command-filter-switch" aria-label={t('sidebar.command_search.sync_to_filter_aria')}>
-                              <Switch
-                                  size="small"
-                                  checked={v2CommandSearchPersistentFilterEnabled}
-                                  onChange={toggleV2CommandSearchPersistentFilter}
-                              />
-                          </span>
-                      </Tooltip>
-                      <Tooltip title={v2PersistedSidebarFilter ? t('sidebar.command_search.reset_filter') : t('sidebar.command_search.no_synced_filter')}>
-                          <Button
-                              size="small"
-                              type="text"
-                              icon={<ReloadOutlined />}
-                              aria-label={t('sidebar.command_search.reset_filter')}
-                              disabled={!v2PersistedSidebarFilter}
-                              onClick={resetV2SidebarFilter}
-                          />
-                      </Tooltip>
-                      <kbd>esc</kbd>
-                  </div>
-                  <div className="gn-v2-command-list">
-	                      {renderV2CommandSearchSection('跳转 · GO TO', filteredCommandSearchTreeItems)}
-	                      {renderV2CommandSearchSection('AI · ASK', commandSearchAiItem)}
-	                      {renderV2CommandSearchSection('动作 · ACTIONS', filteredCommandSearchActionItems)}
-	                      {renderV2CommandSearchSection('近期查询 · RECENT', filteredCommandSearchRecentItems)}
-	                      {commandSearchFlatItems.length === 0 ? (
-	                          <div className="gn-v2-command-empty">
-	                              {emptyCopy}
-	                          </div>
-	                      ) : null}
-	                  </div>
-	                  <div className="gn-v2-command-footer">
-	                      <span><kbd>↑</kbd><kbd>↓</kbd>导航</span>
-	                      <span><kbd>↵</kbd>选择</span>
-	                      <span><TableOutlined /> <kbd>@</kbd>只搜表对象</span>
-	                      <span><RobotOutlined /> <kbd>?</kbd>发送给 AI</span>
-	                  </div>
-	              </div>
-	          </div>
-      );
-  };
-
   expandConnectionFromRailRef.current = (connectionId: string) => {
       const conn = connections.find((item) => item.id === connectionId);
       if (conn) {
@@ -9163,6 +9069,35 @@ const Sidebar: React.FC<{
   const v2CommandSearchLabel = t('sidebar.command_search.label');
   const v2CommandSearchPlaceholder = t('sidebar.command_search.placeholder');
 
+  const v2CommandSearchPanelProps: SidebarSearchPanelProps<V2CommandSearchItem> = {
+    isOpen: isV2CommandSearchOpen,
+    searchValue: v2CommandSearchValue,
+    activeIndex: v2CommandActiveIndex,
+    label: v2CommandSearchLabel,
+    placeholder: v2CommandSearchPlaceholder,
+    persistedFilter: v2PersistedSidebarFilter,
+    persistentFilterEnabled: v2CommandSearchPersistentFilterEnabled,
+    aiMode: v2CommandSearchAiMode,
+    objectMode: v2CommandSearchObjectMode,
+    flatItems: commandSearchFlatItems,
+    sections: {
+      goTo: filteredCommandSearchTreeItems,
+      ai: commandSearchAiItem,
+      actions: filteredCommandSearchActionItems,
+      recent: filteredCommandSearchRecentItems,
+    },
+    inputRef: commandSearchInputRef,
+    handlers: {
+      onSearchValueChange: handleV2CommandSearchValueChange,
+      onKeyDown: handleV2CommandSearchKeyDown,
+      onClose: closeV2CommandSearch,
+      onItemSelect: (item: V2CommandSearchItem) => runCommandSearchItem(item),
+      onItemHover: (key: string) => setV2CommandActiveIndex(commandSearchFlatItems.findIndex((entry) => entry.key === key)),
+      onTogglePersistentFilter: toggleV2CommandSearchPersistentFilter,
+      onResetFilter: resetV2SidebarFilter,
+    },
+  };
+
   // V2 Connection Rail 子组件 props（从原 renderV2ConnectionRail 抽出，保留所有原行为）
   const v2ConnectionRailProps = {
     labels: {
@@ -9511,7 +9446,7 @@ const Sidebar: React.FC<{
             </div>
         )}
         </div>
-        {renderV2CommandSearchOverlay()}
+        <SidebarSearchPanel {...v2CommandSearchPanelProps} />
 
         {contextMenu?.kind && typeof document !== 'undefined' && createPortal(
             <div
