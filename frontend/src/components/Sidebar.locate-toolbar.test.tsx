@@ -65,6 +65,7 @@ const readSidebarSource = () => [
   readSourceFile('./sidebar/SidebarConnectionRail.tsx'),
   readSourceFile('./sidebar/SidebarSearchPanel.tsx'),
   readSourceFile('./sidebar/sidebarLegacyNodeMenu.tsx'),
+  readSourceFile('./sidebar/sidebarMetadataLoaders.ts'),
   readSourceFile('./sidebarV2Utils.ts'),
 ].join('\n');
 const readLegacyNodeMenuSource = () => readSourceFile('./sidebar/sidebarLegacyNodeMenu.tsx');
