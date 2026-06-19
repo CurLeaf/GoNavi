@@ -6,6 +6,8 @@ import {
   shouldClearSidebarActiveContextOnEmptySelect,
   getV2RailConnectionGroupBadgeText,
   isV2SidebarObjectNode,
+  resolveV2ObjectGroupTitle,
+  resolveSidebarTableNameForCopy,
   type V2ExplorerFilter,
 } from './sidebar/sidebarHelpers';
 // 重新导出，保持外部测试文件的 `from './Sidebar'` 兼容
@@ -16,6 +18,8 @@ export {
   shouldClearSidebarActiveContextOnEmptySelect,
   getV2RailConnectionGroupBadgeText,
   isV2SidebarObjectNode,
+  resolveV2ObjectGroupTitle,
+  resolveSidebarTableNameForCopy,
 } from './sidebar/sidebarHelpers';
 import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
@@ -193,17 +197,7 @@ interface TreeNode {
   type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'db-event' | 'routine' | 'object-group' | 'v2-table-section' | 'queries-folder' | 'saved-query' | 'all-saved-queries' | 'saved-query-group' | 'unmatched-saved-queries' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
 }
 
-export const resolveV2ObjectGroupTitle = (node: Pick<TreeNode, 'type' | 'dataRef'> | null | undefined): string | null => {
-  if (node?.type !== 'object-group') return null;
-  const groupKey = String(node?.dataRef?.groupKey || '');
-  if (groupKey === 'tables') return t('sidebar.v2_table_group_menu.title');
-  if (groupKey === 'views') return t('sidebar.object_group.views');
-  if (groupKey === 'routines') return t('sidebar.object_group.routines');
-  if (groupKey === 'triggers') return t('sidebar.object_group.triggers');
-  if (groupKey === 'events') return t('sidebar.object_group.events');
-  if (groupKey === 'materializedViews') return t('sidebar.object_group.materialized_views');
-  return null;
-};
+// resolveV2ObjectGroupTitle 已迁移到 ./sidebar/sidebarHelpers
 
 export type SQLFileExecutionStatus = 'running' | 'done' | 'cancelled' | 'error';
 
@@ -308,9 +302,7 @@ export const shouldLoadSidebarNodeOnExpand = (
       || node.type === 'jvm-resource';
 };
 
-export const resolveSidebarTableNameForCopy = (node: Pick<TreeNode, 'title' | 'dataRef'> | null | undefined): string => {
-  return String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || node?.title || '').trim();
-};
+// resolveSidebarTableNameForCopy 已迁移到 ./sidebar/sidebarHelpers
 
 type SidebarTableSortPreference = 'name' | 'frequency';
 

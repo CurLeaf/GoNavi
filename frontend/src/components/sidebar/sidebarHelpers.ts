@@ -98,3 +98,45 @@ export const isV2SidebarObjectNode = (
       || node?.type === 'db-event'
       || node?.type === 'routine';
 };
+
+// === 第二期：依赖 i18n 但不依赖 TreeNode 内部类型的工具函数 ===
+
+/**
+ * SidebarNodeLike 是 TreeNode 的结构化子集，用于工具函数签名。
+ * 让 sidebarHelpers 不依赖 Sidebar.tsx 内部的 TreeNode 定义，避免循环依赖。
+ */
+export interface SidebarNodeLike {
+  type?: string;
+  dataRef?: any;
+  title?: string;
+  children?: SidebarNodeLike[];
+  isLeaf?: boolean;
+}
+
+/**
+ * resolveV2ObjectGroupTitle 解析 V2 资源管理器中"对象分组"节点的本地化标题。
+ * 仅对 type === 'object-group' 的节点有效，其他返回 null。
+ */
+export const resolveV2ObjectGroupTitle = (
+  node: Pick<SidebarNodeLike, 'type' | 'dataRef'> | null | undefined,
+): string | null => {
+  if (node?.type !== 'object-group') return null;
+  const groupKey = String(node?.dataRef?.groupKey || '');
+  if (groupKey === 'tables') return t('sidebar.v2_table_group_menu.title');
+  if (groupKey === 'views') return t('sidebar.object_group.views');
+  if (groupKey === 'routines') return t('sidebar.object_group.routines');
+  if (groupKey === 'triggers') return t('sidebar.object_group.triggers');
+  if (groupKey === 'events') return t('sidebar.object_group.events');
+  if (groupKey === 'materializedViews') return t('sidebar.object_group.materialized_views');
+  return null;
+};
+
+/**
+ * resolveSidebarTableNameForCopy 从节点提取用于复制的表名。
+ * 优先级：dataRef.tableName > dataRef.viewName > dataRef.eventName > title。
+ */
+export const resolveSidebarTableNameForCopy = (
+  node: Pick<SidebarNodeLike, 'title' | 'dataRef'> | null | undefined,
+): string => {
+  return String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || node?.title || '').trim();
+};
