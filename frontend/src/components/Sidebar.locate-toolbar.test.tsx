@@ -71,6 +71,7 @@ const readSidebarSource = () => [
   readSourceFile('./sidebar/useSidebarTreeLoaders.tsx'),
   readSourceFile('./sidebar/SidebarEntityModals.tsx'),
   readSourceFile('./sidebar/SidebarTreeTitle.tsx'),
+  readSourceFile('./sidebar/useSidebarV2ContextMenu.tsx'),
   readSourceFile('./sidebarV2Utils.ts'),
 ].join('\n');
 const readLegacyNodeMenuSource = () => readSourceFile('./sidebar/sidebarLegacyNodeMenu.tsx');
