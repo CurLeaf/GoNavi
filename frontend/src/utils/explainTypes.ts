@@ -1,0 +1,172 @@
+// SQL 诊断工作台前端类型定义。
+//
+// 本文件镜像后端 internal/connection/explain.go 的数据结构。
+// 当 Wails 重新生成 models.ts 后，可逐步迁移到 import { connection } from '../wailsjs/go/models'，
+// 但在过渡期保持独立类型便于前端独立开发。
+
+// 节点操作类型（与后端 ExplainOp* 常量对齐）。
+export type ExplainOpType =
+  | 'SCAN' // 全表扫描
+  | 'INDEX_SCAN' // 索引扫描
+  | 'INDEX_ONLY' // 覆盖索引
+  | 'JOIN'
+  | 'AGGREGATE'
+  | 'SORT'
+  | 'LIMIT'
+  | 'FILTER'
+  | 'SUBQUERY'
+  | 'UNION'
+  | 'WINDOW'
+  | 'MATERIALIZE'
+  | 'INSERT'
+  | 'UPDATE'
+  | 'DELETE'
+  | 'OTHER'
+
+// 节点警告标志（用于 UI 高亮 + 规则匹配）。
+export type ExplainNodeFlag =
+  | 'FULL_SCAN'
+  | 'FILESORT'
+  | 'TEMP_TABLE'
+  | 'NO_INDEX'
+  | 'HIGH_COST'
+  | 'LOW_BUFFER_HIT'
+  | 'UNCERTAIN_ROWS'
+
+// EXPLAIN 原文格式。
+export type ExplainFormat = 'json' | 'table' | 'xml' | 'text'
+
+// 建议严重度。
+export type IndexSuggestionSeverity = 'critical' | 'warning' | 'info'
+
+export interface ExplainNode {
+  id: string
+  parentId?: string
+  opType: ExplainOpType | string
+  opDetail?: string
+  table?: string
+  index?: string
+  estRows?: number
+  actualRows?: number
+  loops?: number
+  cost?: number
+  durationMs?: number
+  bufferHit?: number
+  flags?: ExplainNodeFlag[] | string[]
+  extra?: Record<string, unknown>
+}
+
+export interface ExplainEdge {
+  from: string
+  to: string
+  label?: string
+}
+
+export interface ExplainStats {
+  totalCost?: number
+  totalDurationMs?: number
+  rowsRead?: number
+  bufferHitRate?: number
+  hasFullScan: boolean
+  hasFilesort: boolean
+  hasTempTable: boolean
+  maxEstRows?: number
+}
+
+export interface ExplainResult {
+  dbType: string
+  sourceSql: string
+  nodes: ExplainNode[]
+  edges?: ExplainEdge[]
+  stats: ExplainStats
+  warnings?: string[]
+  rawFormat: ExplainFormat | string
+  rawPayload?: string
+}
+
+export interface IndexSuggestion {
+  severity: IndexSuggestionSeverity | string
+  rule: string
+  reason: string
+  suggestedIndex?: string
+  affectedNodeId?: string
+  affectedTable?: string
+  estRows?: number
+}
+
+export interface DiagnoseReport {
+  plan: ExplainResult
+  suggestions: IndexSuggestion[]
+}
+
+// severityRank 用于 UI 排序：critical 最前。
+export const severityRank: Record<string, number> = {
+  critical: 0,
+  warning: 1,
+  info: 2,
+}
+
+// opTypeTheme 按 OpType 返回主题色 token（对应 v2-theme.css 的 CSS 变量）。
+// 颜色规则：SCAN 红橙（警告）、JOIN 蓝、AGGREGATE 紫、SORT 黄、其他灰。
+export function opTypeColor(opType: string): string {
+  switch (opType) {
+    case 'SCAN':
+      return 'var(--gn-explain-scan, #e8590c)'
+    case 'INDEX_SCAN':
+      return 'var(--gn-explain-index-scan, #1971c2)'
+    case 'INDEX_ONLY':
+      return 'var(--gn-explain-index-only, #2f9e44)'
+    case 'JOIN':
+      return 'var(--gn-explain-join, #1971c2)'
+    case 'AGGREGATE':
+      return 'var(--gn-explain-aggregate, #6741d9)'
+    case 'SORT':
+      return 'var(--gn-explain-sort, #f08c00)'
+    case 'LIMIT':
+      return 'var(--gn-explain-limit, #495057)'
+    case 'FILTER':
+      return 'var(--gn-explain-filter, #495057)'
+    case 'SUBQUERY':
+      return 'var(--gn-explain-subquery, #7048e8)'
+    case 'MATERIALIZE':
+      return 'var(--gn-explain-materialize, #e8590c)'
+    default:
+      return 'var(--gn-explain-other, #868e96)'
+  }
+}
+
+// severityColor 用于建议列表的左侧色条。
+export function severityColor(severity: string): string {
+  switch (severity) {
+    case 'critical':
+      return 'var(--gn-explain-critical, #fa5252)'
+    case 'warning':
+      return 'var(--gn-explain-warning, #f08c00)'
+    case 'info':
+      return 'var(--gn-explain-info, #1c7ed6)'
+    default:
+      return 'var(--gn-explain-other, #868e96)'
+  }
+}
+
+// formatNumber 容错格式化大数字（千分位）。
+export function formatNumber(n?: number): string {
+  if (n === undefined || n === null || isNaN(n)) return '-'
+  if (Math.abs(n) >= 10000) {
+    return new Intl.NumberFormat('en-US').format(n)
+  }
+  return String(n)
+}
+
+// formatPercent 把 0-1 的小数格式化为百分比字符串。
+export function formatPercent(ratio?: number): string {
+  if (ratio === undefined || ratio === null || isNaN(ratio)) return '-'
+  return `${(ratio * 100).toFixed(1)}%`
+}
+
+// formatMs 把毫秒格式化为人类可读（>1s 显示秒）。
+export function formatMs(ms?: number): string {
+  if (ms === undefined || ms === null || isNaN(ms)) return '-'
+  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`
+  return `${ms.toFixed(1)}ms`
+}
