@@ -889,7 +889,18 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 // DBQueryMulti 执行可能包含多条 SQL 语句的查询，返回多个结果集。
 // 如果底层驱动支持 MultiResultQuerier，一次性执行所有语句；
 // 否则按分号拆分后逐条执行，模拟多结果集。
-func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult {
+func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, query string, queryID string) (result connection.QueryResult) {
+	// 慢 SQL 埋点：成功执行后异步记录（低于阈值 500ms 自动跳过），不阻塞返回。
+	// 用 named return + defer 覆盖所有 return path，避免遗漏。
+	queryStartedAt := time.Now()
+	defer func() {
+		if !result.Success {
+			return
+		}
+		durationMs := time.Since(queryStartedAt).Milliseconds()
+		a.recordQueryExecutionAsync(config, resolveDDLDBType(config), query, durationMs, 0, 0)
+	}()
+
 	runConfig := normalizeRunConfig(config, dbName)
 
 	if queryID == "" {
