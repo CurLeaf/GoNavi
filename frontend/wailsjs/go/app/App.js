@@ -154,6 +154,10 @@ export function DeleteSQLFile(arg1) {
   return window['go']['app']['App']['DeleteSQLFile'](arg1);
 }
 
+export function DiagnoseQuery(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DiagnoseQuery'](arg1, arg2, arg3);
+}
+
 export function DismissSecurityUpdateReminder() {
   return window['go']['app']['App']['DismissSecurityUpdateReminder']();
 }
