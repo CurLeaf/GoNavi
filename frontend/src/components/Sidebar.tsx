@@ -1,4 +1,22 @@
 ﻿import Modal from './common/ResizableDraggableModal';
+import {
+  V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID,
+  formatSidebarRowCount,
+  hasSidebarLazyChildren,
+  shouldClearSidebarActiveContextOnEmptySelect,
+  getV2RailConnectionGroupBadgeText,
+  isV2SidebarObjectNode,
+  type V2ExplorerFilter,
+} from './sidebar/sidebarHelpers';
+// 重新导出，保持外部测试文件的 `from './Sidebar'` 兼容
+export {
+  V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID,
+  formatSidebarRowCount,
+  hasSidebarLazyChildren,
+  shouldClearSidebarActiveContextOnEmptySelect,
+  getV2RailConnectionGroupBadgeText,
+  isV2SidebarObjectNode,
+} from './sidebar/sidebarHelpers';
 import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress, Switch } from 'antd';
@@ -278,19 +296,6 @@ export const SQLFileExecutionProgressContent: React.FC<SQLFileExecutionProgressS
   </>
 );
 
-const isV2SidebarObjectNode = (node: Pick<TreeNode, 'type'> | null | undefined): boolean => {
-  return node?.type === 'table'
-      || node?.type === 'view'
-      || node?.type === 'materialized-view'
-      || node?.type === 'db-trigger'
-      || node?.type === 'db-event'
-      || node?.type === 'routine';
-};
-
-export const hasSidebarLazyChildren = (children: unknown): boolean => {
-  return Array.isArray(children) && children.length > 0;
-};
-
 export const shouldLoadSidebarNodeOnExpand = (
   node: Pick<TreeNode, 'type' | 'children' | 'isLeaf'> | null | undefined,
 ): boolean => {
@@ -399,12 +404,6 @@ export const buildSidebarTableChildrenForUi = (
   return buildV2SidebarTableSectionedChildren(parentKey, tableNodes);
 };
 
-export const formatSidebarRowCount = (count: number): string => {
-  if (!Number.isFinite(count) || count < 0) return '';
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
-  return String(Math.round(count));
-};
 
 const buildConnectionRootQueryTabTitle = () => t('query.new');
 
@@ -418,9 +417,6 @@ type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
 type BatchObjectType = 'table' | 'view';
 type BatchObjectFilterType = 'all' | BatchObjectType;
 type BatchSelectionScope = 'filtered' | 'all';
-export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines' | 'events';
-
-export const V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID = '__gonavi-v2-ungrouped-connections__';
 
 export interface V2RailConnectionGroup {
   id: string;
@@ -508,33 +504,6 @@ export const buildV2RailConnectionGroups = (
   return groups;
 };
 
-export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = t('connection.sidebar.group.badge')): string => {
-  const trimmed = String(name ?? '').trim();
-  if (!trimmed) return fallback;
-  const cjkParts = trimmed.match(/[\u4e00-\u9fa5]/g);
-  if (cjkParts && cjkParts.length > 0) {
-    return cjkParts.slice(0, 1).join('');
-  }
-  const latinTokens = trimmed.match(/[a-z0-9]+/gi) || [];
-  if (latinTokens.length >= 2) {
-    const firstToken = latinTokens[0] || '';
-    const secondToken = latinTokens[1] || '';
-    return `${firstToken[0] || ''}${secondToken[0] || ''}`.toUpperCase();
-  }
-  if (latinTokens.length === 1) {
-    const token = latinTokens[0] || '';
-    const alphaPrefix = token.match(/^[a-z]+/i)?.[0] || '';
-    if (alphaPrefix) {
-      return alphaPrefix.slice(0, 2).toUpperCase();
-    }
-    const trailingDigits = token.match(/(\d{2,})$/)?.[1];
-    if (trailingDigits) {
-      return trailingDigits.slice(-2).toUpperCase();
-    }
-    return token.slice(0, 2).toUpperCase();
-  }
-  return trimmed.slice(0, 2);
-};
 
 const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; labelKey: string }> = [
   { key: 'all', labelKey: 'sidebar.command_search.object_kind.all' },
@@ -894,7 +863,6 @@ export const resolveV2ActiveConnectionId = ({
       || '';
 };
 
-export const shouldClearSidebarActiveContextOnEmptySelect = (isV2Ui: boolean): boolean => !isV2Ui;
 
 type DriverStatusSnapshot = {
   type: string;
