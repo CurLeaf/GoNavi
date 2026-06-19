@@ -72,6 +72,11 @@ const readSidebarSource = () => [
   readSourceFile('./sidebar/SidebarEntityModals.tsx'),
   readSourceFile('./sidebar/SidebarTreeTitle.tsx'),
   readSourceFile('./sidebar/useSidebarV2ContextMenu.tsx'),
+  readSourceFile('./sidebar/useSidebarObjectActions.tsx'),
+  readSourceFile('./sidebar/useSidebarSearchModel.tsx'),
+  readSourceFile('./sidebar/useSidebarV2ActionHandlers.tsx'),
+  readSourceFile('./sidebar/useSidebarCommandSearchRunner.ts'),
+  readSourceFile('./sidebar/useSidebarTitleRender.tsx'),
   readSourceFile('./sidebarV2Utils.ts'),
 ].join('\n');
 const readLegacyNodeMenuSource = () => readSourceFile('./sidebar/sidebarLegacyNodeMenu.tsx');
@@ -1319,17 +1324,17 @@ describe('Sidebar locate toolbar', () => {
       ],
     }];
 
-    expect(filterV2ExplorerTreeByKind(tree, 'all')[0].children?.map((node) => node.key)).toEqual([
+    expect(filterV2ExplorerTreeByKind(tree, 'all')[0].children?.map((node: { key: string }) => node.key)).toEqual([
       'conn-main-queries',
       'conn-main-tables',
       'conn-main-views',
       'conn-main-routines',
       'conn-main-events',
     ]);
-    expect(filterV2ExplorerTreeByKind(tree, 'tables')[0].children?.map((node) => node.key)).toEqual(['conn-main-tables']);
-    expect(filterV2ExplorerTreeByKind(tree, 'views')[0].children?.map((node) => node.key)).toEqual(['conn-main-views']);
-    expect(filterV2ExplorerTreeByKind(tree, 'routines')[0].children?.map((node) => node.key)).toEqual(['conn-main-routines']);
-    expect(filterV2ExplorerTreeByKind(tree, 'events')[0].children?.map((node) => node.key)).toEqual(['conn-main-events']);
+    expect(filterV2ExplorerTreeByKind(tree, 'tables')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-tables']);
+    expect(filterV2ExplorerTreeByKind(tree, 'views')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-views']);
+    expect(filterV2ExplorerTreeByKind(tree, 'routines')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-routines']);
+    expect(filterV2ExplorerTreeByKind(tree, 'events')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-events']);
   });
 
   it('hides external SQL roots from v2 object kind filters', () => {
@@ -1362,11 +1367,11 @@ describe('Sidebar locate toolbar', () => {
       },
     ];
 
-    expect(filterV2ExplorerTreeByKind(tree, 'all').map((node) => node.key)).toEqual([
+    expect(filterV2ExplorerTreeByKind(tree, 'all').map((node: { key: string }) => node.key)).toEqual([
       'conn-main',
       'external-sql-root',
     ]);
-    expect(filterV2ExplorerTreeByKind(tree, 'tables').map((node) => node.key)).toEqual(['conn-main']);
+    expect(filterV2ExplorerTreeByKind(tree, 'tables').map((node: { key: string }) => node.key)).toEqual(['conn-main']);
   });
 
   it('adds rename to the saved query context menu', () => {
@@ -2042,25 +2047,27 @@ describe('Sidebar locate toolbar', () => {
 
   it('routes v2 database context menu shell copy through i18n wrappers in Sidebar', () => {
     const source = readSidebarSource();
-    const createSchemaSource = source.slice(
-      source.indexOf('const openCreateSchemaModal = (node: any) => {'),
-      source.indexOf('const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {'),
+    const objectActionsSource = readSourceFile('./sidebar/useSidebarObjectActions.tsx');
+    const v2ActionHandlersSource = readSourceFile('./sidebar/useSidebarV2ActionHandlers.tsx');
+    const createSchemaSource = objectActionsSource.slice(
+      objectActionsSource.indexOf('const openCreateSchemaModal = (node: any) => {'),
+      objectActionsSource.indexOf('const openRenameSchemaModal = (node: any) => {'),
     );
     const runSqlSource = source.slice(
       source.indexOf('const handleRunSQLFile = async (node: any) => {'),
       source.indexOf('const handleOpenSQLFileFromToolbar = async () => {'),
     );
-    const databaseShellSource = source.slice(
-      source.indexOf('const handleRenameDatabase = async () => {'),
-      source.indexOf('const handleRenameTable = async () => {'),
+    const databaseShellSource = objectActionsSource.slice(
+      objectActionsSource.indexOf('const handleRenameDatabase = async () => {'),
+      objectActionsSource.indexOf('const handleRenameTable = async () => {'),
     );
-    const databaseActionSource = source.slice(
-      source.indexOf('const closeDatabaseNode = (node: any) => {'),
-      source.indexOf('const refreshConnectionNode = (node: any) => {'),
+    const databaseActionSource = v2ActionHandlersSource.slice(
+      v2ActionHandlersSource.indexOf('const closeDatabaseNode = (node: any) => {'),
+      v2ActionHandlersSource.indexOf('const openDatabaseQuery = (node: any) => {'),
     );
-    const starRocksSource = source.slice(
-      source.indexOf('const openCreateStarRocksMaterializedView = (node: any) => {'),
-      source.indexOf('const openCreateStarRocksRollup = (node: any) => {'),
+    const starRocksSource = objectActionsSource.slice(
+      objectActionsSource.indexOf('const openCreateStarRocksMaterializedView = (node: any) => {'),
+      objectActionsSource.indexOf('const openCreateStarRocksRollup = (node: any) => {'),
     );
 
     expect(createSchemaSource).toContain("message.warning(t('sidebar.message.schema_create_unsupported'))");
@@ -2354,9 +2361,9 @@ describe('Sidebar locate toolbar', () => {
     const externalSqlFileMenuStart = externalSqlDirectoryMenuEnd;
     const externalSqlFileMenuEnd = legacyMenuSource.indexOf('return [];', externalSqlFileMenuStart);
     const externalSqlFileMenuSource = legacyMenuSource.slice(externalSqlFileMenuStart, externalSqlFileMenuEnd);
-    const titleRenderStart = source.indexOf('const titleRender = (node: any) => {');
-    const titleRenderEnd = source.indexOf('const handleDrop = (info: any) => {', titleRenderStart);
-    const titleRenderSource = source.slice(titleRenderStart, titleRenderEnd);
+    const titleRenderSource = readSourceFile('./sidebar/useSidebarTitleRender.tsx');
+    const titleRenderStart = titleRenderSource.indexOf('export const useSidebarTitleRender =');
+    const titleRenderEnd = titleRenderSource.length;
 
     [
       loadTablesStart,
@@ -2621,11 +2628,11 @@ describe('Sidebar locate toolbar', () => {
       expect(objectGroupTitleSource).toContain(catalogLookup);
     });
 
-    const titleRenderStart = sidebarSource.indexOf('const titleRender = (node: any) => {');
-    const titleRenderEnd = sidebarSource.indexOf('const handleDrop = (info: any) => {', titleRenderStart);
+    const titleRenderSource = readSourceFile('./sidebar/useSidebarTitleRender.tsx');
+    const titleRenderStart = titleRenderSource.indexOf('export const useSidebarTitleRender =');
+    const titleRenderEnd = titleRenderSource.length;
     expect(titleRenderStart).toBeGreaterThanOrEqual(0);
     expect(titleRenderEnd).toBeGreaterThan(titleRenderStart);
-    const titleRenderSource = sidebarSource.slice(titleRenderStart, titleRenderEnd);
     expect(titleRenderSource).toContain("} else if (node.type === 'object-group') {");
     expect(titleRenderSource).toContain('const objectGroupTitle = resolveV2ObjectGroupTitle(node);');
     expect(titleRenderSource).toContain('hoverTitle = objectGroupTitle;');

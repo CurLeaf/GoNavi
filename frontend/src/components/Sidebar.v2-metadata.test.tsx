@@ -7,7 +7,7 @@ import {
   formatSidebarRowCount,
 } from './Sidebar';
 
-const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+const source = readFileSync(new URL('./sidebar/useSidebarV2ActionHandlers.tsx', import.meta.url), 'utf8');
 const toggleSidebarTablePinnedSource = source.slice(
   source.indexOf('const toggleSidebarTablePinned = (node: any, pinned?: boolean) => {'),
   source.indexOf("const handleTableGroupSortAction = (node: any, sortBy: 'name' | 'frequency') => {"),
