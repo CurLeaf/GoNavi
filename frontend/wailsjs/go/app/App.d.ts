@@ -20,6 +20,8 @@ export function CheckForUpdates():Promise<connection.QueryResult>;
 
 export function CheckForUpdatesSilently():Promise<connection.QueryResult>;
 
+export function ClearSlowQueries(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
+
 export function ClearTables(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
 
 export function ConfigureDriverRuntimeDirectory(arg1:string):Promise<connection.QueryResult>;
@@ -83,10 +85,6 @@ export function DeleteSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 export function DeleteSQLFile(arg1:string):Promise<connection.QueryResult>;
 
 export function DiagnoseQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
-
-export function GetSlowQueries(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:number):Promise<connection.QueryResult>;
-
-export function ClearSlowQueries(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function DismissSecurityUpdateReminder():Promise<app.SecurityUpdateStatus>;
 
@@ -157,6 +155,8 @@ export function GetSavedConnections():Promise<Array<connection.SavedConnectionVi
 export function GetSavedQueries():Promise<Array<connection.SavedQuery>>;
 
 export function GetSecurityUpdateStatus():Promise<app.SecurityUpdateStatus>;
+
+export function GetSlowQueries(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:number):Promise<connection.QueryResult>;
 
 export function GetUnboundSavedQueries():Promise<Array<connection.SavedQuery>>;
 
