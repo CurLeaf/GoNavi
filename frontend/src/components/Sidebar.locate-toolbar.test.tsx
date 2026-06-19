@@ -67,6 +67,7 @@ const readSidebarSource = () => [
   readSourceFile('./sidebar/sidebarLegacyNodeMenu.tsx'),
   readSourceFile('./sidebar/sidebarMetadataLoaders.ts'),
   readSourceFile('./sidebar/useSidebarBatchExport.ts'),
+  readSourceFile('./sidebar/SidebarExternalSqlWorkflow.tsx'),
   readSourceFile('./sidebarV2Utils.ts'),
 ].join('\n');
 const readLegacyNodeMenuSource = () => readSourceFile('./sidebar/sidebarLegacyNodeMenu.tsx');
@@ -2335,7 +2336,7 @@ describe('Sidebar locate toolbar', () => {
     const externalSqlReadEnd = source.indexOf('const externalSQLTrees = externalSQLDirectoryResults.reduce', externalSqlReadStart);
     const externalSqlReadSource = source.slice(externalSqlReadStart, externalSqlReadEnd);
     const externalSqlFlowStart = source.indexOf('const handleAddExternalSQLDirectory = async (node: any) => {');
-    const externalSqlFlowEnd = source.indexOf('const handleCreateDatabase = async () => {', externalSqlFlowStart);
+    const externalSqlFlowEnd = source.indexOf('const cancelSQLFileExecution = () => {', externalSqlFlowStart);
     const externalSqlFlowSource = source.slice(externalSqlFlowStart, externalSqlFlowEnd);
     const treeTitleStart = source.indexOf('const renderV2TreeTitle = (node: any, hoverTitle: string, statusBadge: React.ReactNode) => {');
     const treeTitleEnd = source.indexOf('const selectConnectionFromRail', treeTitleStart);
