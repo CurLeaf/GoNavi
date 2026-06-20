@@ -92,6 +92,7 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     columnQuickFindOptions,
     columnQuickFindText,
     connectionId,
+    connections,
     containerRef,
     contextHolder,
     copiedCellPatch,
@@ -213,6 +214,7 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     noAutoCapInputProps,
     normalizedPageFindText,
     onCancelTotalCount,
+    onOpenErTable,
     onPageChange,
     onReload,
     onRequestTotalCount,
@@ -782,10 +784,14 @@ const renderDataTableView = () => (
             />
         ) : isV2Ui && viewMode === 'er' ? (
             <DataGridV2ErView
+                connections={connections}
+                connectionId={connectionId}
+                dbName={dbName}
                 tableName={tableName}
                 displayOutputColumnNames={displayOutputColumnNames}
                 columnMetaMap={columnMetaMap}
                 columnMetaMapByLowerName={columnMetaMapByLowerName}
+                onOpenTable={onOpenErTable}
                 translate={translateDataGrid}
             />
         ) : viewMode === 'json' ? (

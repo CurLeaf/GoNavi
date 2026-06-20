@@ -69,8 +69,11 @@ const backendApp = vi.hoisted(() => ({
   ImportData: vi.fn(),
   ExportTable: vi.fn(),
   ExportData: vi.fn(),
+  ExportDataWithOptions: vi.fn(),
   ExportQuery: vi.fn(),
+  ExportQueryWithOptions: vi.fn(),
   ApplyChanges: vi.fn(),
+  PreviewChanges: vi.fn(),
   DBGetColumns: vi.fn(),
   DBGetIndexes: vi.fn(),
   DBGetForeignKeys: vi.fn(),
@@ -249,6 +252,7 @@ vi.mock('antd', () => {
   );
   Modal.useModal = () => {
     const [infoConfig, setInfoConfig] = React.useState<any>(null);
+    const [confirmConfig, setConfirmConfig] = React.useState<any>(null);
     return [{
       info: vi.fn((config: any) => {
         setInfoConfig(config);
@@ -256,9 +260,53 @@ vi.mock('antd', () => {
           destroy: vi.fn(() => {
             setInfoConfig(null);
           }),
+          update: vi.fn(),
         };
       }),
-    }, infoConfig ? <section data-modal-use-holder="true">{infoConfig.content}</section> : null];
+      confirm: vi.fn((config: any) => {
+        setConfirmConfig(config);
+        return {
+          destroy: vi.fn(() => {
+            setConfirmConfig(null);
+          }),
+          update: vi.fn(),
+        };
+      }),
+    }, (
+      <>
+        {infoConfig ? <section data-modal-use-holder="true">{infoConfig.content}</section> : null}
+        {confirmConfig ? (
+          <section data-modal-confirm-holder="true">
+            <h2>{confirmConfig.title}</h2>
+            {confirmConfig.content}
+            <div>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await confirmConfig.onOk?.();
+                    setConfirmConfig(null);
+                  } catch {
+                    // keep dialog open when validation fails
+                  }
+                }}
+              >
+                {confirmConfig.okText || 'OK'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  confirmConfig.onCancel?.();
+                  setConfirmConfig(null);
+                }}
+              >
+                {confirmConfig.cancelText || 'Cancel'}
+              </button>
+            </div>
+          </section>
+        ) : null}
+      </>
+    )];
   };
 
   const passthrough = ({ children }: any) => <>{children}</>;
@@ -330,7 +378,31 @@ vi.mock('antd', () => {
     Dropdown,
     Form,
     Pagination: () => null,
-    Select: ({ children }: any) => <div>{children}</div>,
+    Select: ({ children, options, onChange, disabled, value }: any) => (
+      <div data-select-value={String(value ?? '')}>
+        {children}
+        {(options || []).map((option: any) => (
+          <button
+            key={String(option.value)}
+            type="button"
+            data-select-option={String(option.value)}
+            disabled={disabled || option.disabled}
+            onClick={() => onChange?.(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    ),
+    InputNumber: ({ value, onChange, min, max }: any) => (
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        onChange={(event) => onChange?.(Number(event.target.value))}
+      />
+    ),
     Modal,
     Checkbox: ({ checked, onChange }: any) => <input type="checkbox" checked={checked} onChange={onChange} />,
     Segmented,
@@ -644,9 +716,10 @@ describe('DataGrid commit change set', () => {
 
   it('keeps DataGrid AI insight prompt wrapper localized', () => {
     const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const dataGridShellSource = readFileSync(new URL('./DataGridShell.tsx', import.meta.url), 'utf8');
 
-    expect(dataGridSource).not.toMatch(/请帮我分析以下查询结果数据|请分析数据特征|业务上的洞察/);
-    expect(dataGridSource).toContain('data_grid.ai_insight.prompt');
+    expect(`${dataGridSource}\n${dataGridShellSource}`).not.toMatch(/请帮我分析以下查询结果数据|请分析数据特征|业务上的洞察/);
+    expect(dataGridShellSource).toContain('data_grid.ai_insight.prompt');
   });
 
   it('marks the active virtual editing row so shouldCellUpdate can reopen inline editors', () => {
@@ -729,8 +802,11 @@ describe('DataGrid DDL interactions', () => {
     backendApp.ImportData.mockReset();
     backendApp.ExportTable.mockReset();
     backendApp.ExportData.mockReset();
+    backendApp.ExportDataWithOptions.mockReset();
     backendApp.ExportQuery.mockReset();
+    backendApp.ExportQueryWithOptions.mockReset();
     backendApp.ApplyChanges.mockReset();
+    backendApp.PreviewChanges.mockReset();
     backendApp.DBGetColumns.mockReset();
     backendApp.DBGetIndexes.mockReset();
     backendApp.DBGetForeignKeys.mockReset();
@@ -1264,8 +1340,8 @@ describe('DataGrid DDL interactions', () => {
   });
 
   it('exports query-result rows from in-memory data without rerunning ExportQuery', async () => {
-    backendApp.ExportData.mockResolvedValue({ success: true });
-    backendApp.ExportQuery.mockResolvedValue({ success: true });
+    backendApp.ExportDataWithOptions.mockResolvedValue({ success: true });
+    backendApp.ExportQueryWithOptions.mockResolvedValue({ success: true });
 
     let renderer: ReactTestRenderer;
     await act(async () => {
@@ -1286,24 +1362,34 @@ describe('DataGrid DDL interactions', () => {
     });
     await waitForEffects();
 
-    await act(async () => {
-      await findButton(renderer!, 'HTML').props.onClick();
-    });
-
-    const exportAllButton = findButton(renderer!, t('data_grid.export.all_rows', { count: 2 }));
-    await act(async () => {
-      await exportAllButton.props.onClick();
+    act(() => {
+      findButton(renderer!, t('data_grid.toolbar.export')).props.onClick();
     });
     await waitForEffects();
 
-    expect(backendApp.ExportData).toHaveBeenCalledTimes(1);
-    expect(backendApp.ExportData).toHaveBeenCalledWith(
+    await act(async () => {
+      await renderer!.root.findByProps({ 'data-select-option': 'html' }).props.onClick();
+    });
+    await act(async () => {
+      await renderer!.root.findByProps({ 'data-select-option': 'page' }).props.onClick();
+    });
+    await act(async () => {
+      await findButton(renderer!, '开始导出').props.onClick();
+    });
+    await waitForEffects();
+
+    expect(backendApp.ExportDataWithOptions).toHaveBeenCalledTimes(1);
+    expect(backendApp.ExportDataWithOptions).toHaveBeenCalledWith(
       [{ owner: 'sa' }, { owner: 'dbo' }],
       ['owner'],
       'export',
-      'html',
+      expect.objectContaining({
+        format: 'html',
+        totalRowsHint: 2,
+        totalRowsKnown: true,
+      }),
     );
-    expect(backendApp.ExportQuery).not.toHaveBeenCalled();
+    expect(backendApp.ExportQueryWithOptions).not.toHaveBeenCalled();
   });
 
   it('copies loaded column data from the v2 column header context menu', async () => {

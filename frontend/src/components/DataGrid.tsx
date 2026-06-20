@@ -980,22 +980,26 @@ const DataGrid: React.FC<DataGridProps> = ({
       [columnMetaMap, columnMetaMapByLowerName, dbType]
   );
 
-  const openForeignKeyTarget = useCallback((target: ForeignKeyTarget) => {
-      const refTableName = String(target?.refTableName || '').trim();
-      if (!connectionId || !refTableName || refTableName === '-') return;
+  const openTableByName = useCallback((nextTableName: string) => {
+      const normalizedTableName = String(nextTableName || '').trim();
+      if (!connectionId || !normalizedTableName || normalizedTableName === '-') return;
       const targetDbName = String(dbName || '').trim();
-      const tabId = `${connectionId}-${targetDbName}-table-${refTableName}`;
+      const tabId = `${connectionId}-${targetDbName}-table-${normalizedTableName}`;
       setActiveContext({ connectionId, dbName: targetDbName });
       addTab({
           id: tabId,
-          title: refTableName,
+          title: normalizedTableName,
           type: 'table',
           connectionId,
           dbName: targetDbName,
-          tableName: refTableName,
+          tableName: normalizedTableName,
           objectType: 'table',
       });
   }, [addTab, connectionId, dbName, setActiveContext]);
+
+  const openForeignKeyTarget = useCallback((target: ForeignKeyTarget) => {
+      openTableByName(String(target?.refTableName || '').trim());
+  }, [openTableByName]);
 
   const renderColumnTitle = useCallback((name: string): React.ReactNode => {
       const normalizedName = String(name || '');
@@ -4123,6 +4127,7 @@ const DataGrid: React.FC<DataGridProps> = ({
         columnQuickFindOptions,
         columnQuickFindText,
         connectionId,
+        connections,
         containerRef,
         contextHolder,
         copiedCellPatch,
@@ -4244,6 +4249,7 @@ const DataGrid: React.FC<DataGridProps> = ({
         noAutoCapInputProps,
         normalizedPageFindText,
         onCancelTotalCount,
+        onOpenErTable: openTableByName,
         onPageChange,
         onReload,
         onRequestTotalCount,
