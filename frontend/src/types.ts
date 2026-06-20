@@ -436,6 +436,7 @@ export interface TabData {
     | "query"
     | "table"
     | "design"
+    | "sql-analysis"
     | "redis-keys"
     | "redis-command"
     | "redis-monitor"
@@ -479,6 +480,8 @@ export interface TabData {
   tableExportInitialScope?: TableExportScope;
   tableExportQueryByScope?: Partial<Record<TableExportScope, string>>;
   tableExportRowCountByScope?: Partial<Record<TableExportScope, number>>;
+  sqlAnalysisView?: "diagnose" | "slow-query";
+  sqlAnalysisRequestKey?: string;
   formatRestoreSnapshot?: {
     query: string;
     createdAt: number;

@@ -82,15 +82,16 @@ vi.mock("@ant-design/icons", async () => {
     ClearOutlined: Icon,
     CloseOutlined: Icon,
     ClockCircleOutlined: Icon,
+    RobotOutlined: Icon,
   };
 });
 
-const renderLogPanel = () => {
+const renderLogPanel = (props: Partial<React.ComponentProps<typeof LogPanel>> = {}) => {
   let renderer!: ReactTestRenderer;
   act(() => {
     renderer = create(
       <I18nProvider preference="en-US" onPreferenceChange={() => undefined}>
-        <LogPanel height={260} onClose={vi.fn()} onResizeStart={vi.fn()} />
+        <LogPanel height={260} onClose={vi.fn()} onResizeStart={vi.fn()} {...props} />
       </I18nProvider>,
     );
   });
@@ -142,6 +143,36 @@ describe("LogPanel i18n", () => {
     expect(renderedText).toContain("Affected: 7");
     expect(renderedText).toContain("42ms");
     expect(renderedText).toContain("OK");
+  });
+
+  it("renders the current execution error summary inside the embedded log tab", () => {
+    storeState.sqlLogs = [
+      {
+        id: "log-err",
+        timestamp: Date.UTC(2026, 5, 20, 5, 40, 0),
+        sql: "SELECT * FROM message;",
+        status: "error",
+        duration: 18,
+        message: "driver exploded",
+      },
+    ];
+    const onDiagnoseExecutionError = vi.fn();
+    const renderer = renderLogPanel({
+      variant: "embedded",
+      executionError: "Table 'missav_bot.message' doesn't exist",
+      onDiagnoseExecutionError,
+    });
+    const renderedText = textContent(renderer.toJSON());
+
+    expect(renderedText).toContain("Execution failed");
+    expect(renderedText).toContain("Table 'missav_bot.message' doesn't exist");
+    expect(renderedText).toContain("AI diagnose");
+
+    const diagnoseButton = renderer.root.findAll((node) => node.type === "button" && textContent(node).includes("AI diagnose"))[0];
+    act(() => {
+      diagnoseButton.props.onClick?.();
+    });
+    expect(onDiagnoseExecutionError).toHaveBeenCalledTimes(1);
   });
 
   it("does not keep migrated Chinese UI literals in LogPanel source", () => {

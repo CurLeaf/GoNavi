@@ -4,7 +4,6 @@ import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress,
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined } from '@ant-design/icons';
 import { BrowserOpenURL, Environment, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
-import SlowQueryRailButton from './components/sidebar/SlowQueryRailButton';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
 import SnippetSettingsModal from './components/SnippetSettingsModal';
@@ -2088,13 +2087,23 @@ function App() {
 
 
   const {
-      handleCloseLogPanel,
+      handleCloseLogPanel: handleCloseLegacyLogPanel,
       handleLogResizeStart,
-      handleToggleLogPanel,
+      handleToggleLogPanel: toggleLegacyLogPanel,
       isLogPanelOpen,
       logGhostRef,
       logPanelHeight,
   } = useAppLogPanelResize();
+  const handleToggleLogPanel = useCallback(() => {
+      if (isV2Ui) {
+          window.dispatchEvent(new CustomEvent('gonavi:show-sql-execution-log'));
+          return;
+      }
+      toggleLegacyLogPanel();
+  }, [isV2Ui, toggleLegacyLogPanel]);
+  const handleCloseLogPanel = useCallback(() => {
+      handleCloseLegacyLogPanel();
+  }, [handleCloseLegacyLogPanel]);
   
   const handleCreateConnection = useCallback(() => {
       setSecurityUpdateRepairSource(null);
@@ -2887,18 +2896,6 @@ function App() {
                             onFocusCommandSearch={handleFocusSidebarSearch}
                         />
                     </div>
-                    {/* 慢 SQL 历史入口：浮动在 Sidebar 右下角，独立组件不依赖 Sidebar 内部 state */}
-                    <SlowQueryRailButton
-                        style={{
-                            position: 'absolute',
-                            right: 8,
-                            bottom: isV2Ui ? 8 : 66,
-                            zIndex: 10,
-                            background: 'var(--gn-card-bg, rgba(255,255,255,0.9))',
-                            borderRadius: 6,
-                            boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
-                        }}
-                    />
                     {!connectionWorkbenchState.ready && (
                         <div
                             style={{
@@ -3138,10 +3135,10 @@ function App() {
                   </div>
                )}
              </div>
-             {isLogPanelOpen && (
-                 <LogPanel
-                    height={logPanelHeight}
-                    onClose={handleCloseLogPanel}
+             {!isV2Ui && isLogPanelOpen && (
+                  <LogPanel
+                     height={logPanelHeight}
+                     onClose={handleCloseLogPanel}
                     onResizeStart={handleLogResizeStart} 
                 />
             )}

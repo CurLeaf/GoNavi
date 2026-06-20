@@ -24,6 +24,7 @@ import JVMResourceBrowser from './JVMResourceBrowser';
 import JVMAuditViewer from './JVMAuditViewer';
 import JVMDiagnosticConsole from './JVMDiagnosticConsole';
 import JVMMonitoringDashboard from './JVMMonitoringDashboard';
+import SqlAnalysisWorkbench from './explain/SqlAnalysisWorkbench';
 import type { TabData } from '../types';
 import { t } from '../i18n';
 import {
@@ -49,6 +50,7 @@ const getTabKindLabel = (tab: TabData): string => {
   if (tab.type === 'design') return t('tab_manager.kind_badge.design');
   if (tab.type === 'table-overview') return t('tab_manager.kind_badge.table_overview');
   if (tab.type === 'table-export') return t('tab_manager.kind_badge.table_export');
+  if (tab.type === 'sql-analysis') return t('tab_manager.kind_badge.sql_analysis');
   if (tab.type.startsWith('redis')) return t('tab_manager.kind_badge.redis');
   if (tab.type.startsWith('jvm')) return t('tab_manager.kind_badge.jvm');
   if (tab.type === 'trigger') return t('tab_manager.kind_badge.trigger');
@@ -70,6 +72,7 @@ const getTabKindTooltipLabel = (tab: TabData): string => {
   if (tab.type === 'design') return t('tab_manager.hover.kind.design');
   if (tab.type === 'table-overview') return t('tab_manager.hover.kind.table_overview');
   if (tab.type === 'table-export') return t('tab_manager.hover.kind.table_export');
+  if (tab.type === 'sql-analysis') return t('tab_manager.hover.kind.sql_analysis');
   if (tab.type === 'redis-keys') return t('tab_manager.hover.kind.redis_keys');
   if (tab.type === 'redis-command') return t('tab_manager.hover.kind.redis_command');
   if (tab.type === 'redis-monitor') return t('tab_manager.hover.kind.redis_monitor');
@@ -97,6 +100,7 @@ const getTabObjectLabel = (tab: TabData): string => {
   if (tab.triggerName) return tab.triggerName;
   if (tab.resourcePath) return tab.resourcePath;
   if (tab.filePath) return tab.filePath;
+  if (tab.type === 'sql-analysis') return tab.title;
   if (tab.type.startsWith('redis')) return `db${tab.redisDB ?? 0}`;
   return '';
 };
@@ -413,6 +417,9 @@ const TabContent: React.FC<{ tab: TabData; isActive: boolean }> = React.memo(({ 
   }
   if (tab.type === 'table-export') {
     return <TableExportWorkbench tab={tab} />;
+  }
+  if (tab.type === 'sql-analysis') {
+    return <SqlAnalysisWorkbench tab={tab} />;
   }
   if (tab.type === 'jvm-overview') {
     return <JVMOverview tab={tab} />;

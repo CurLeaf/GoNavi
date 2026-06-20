@@ -123,6 +123,7 @@ describe('TabManager hover info', () => {
       'view',
       'event',
       'routine',
+      'sql_analysis',
       'fallback',
     ].forEach((name) => {
       expect(getTabKindLabelSource).toContain(`t('tab_manager.kind_badge.${name}')`);

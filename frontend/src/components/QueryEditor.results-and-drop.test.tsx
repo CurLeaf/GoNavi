@@ -29,6 +29,14 @@ const storeState = vi.hoisted(() => ({
       },
     },
   ],
+  sqlLogs: [] as Array<{
+    id: string;
+    timestamp: number;
+    sql: string;
+    status: 'success' | 'error';
+    duration: number;
+  }>,
+  clearSqlLogs: vi.fn(),
   addSqlLog: vi.fn(),
   addTab: vi.fn(),
   setActiveContext: vi.fn(),
@@ -351,6 +359,8 @@ vi.mock('./DataGrid', () => ({
 vi.mock('@ant-design/icons', () => {
   const Icon = () => <span />;
   return {
+    BugOutlined: Icon,
+    ClearOutlined: Icon,
     PlayCircleOutlined: Icon,
     SaveOutlined: Icon,
     FormatPainterOutlined: Icon,
@@ -377,10 +387,30 @@ vi.mock('antd', () => {
   const Form: any = ({ children }: any) => <form>{children}</form>;
   Form.Item = ({ children }: any) => <>{children}</>;
   Form.useForm = () => [{ setFieldsValue: vi.fn(), validateFields: vi.fn(() => Promise.resolve({ name: '查询' })) }];
+  const Table = ({ dataSource, columns }: { dataSource: any[]; columns: any[] }) => (
+    <div>
+      {dataSource.map((record) => (
+        <div key={record.id}>
+          {columns.map((column) => (
+            <div key={column.dataIndex || column.title}>
+              {column.render
+                ? column.render(record[column.dataIndex], record)
+                : record[column.dataIndex]}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+  const Empty = ({ description }: { description?: React.ReactNode }) => <div>{description}</div>;
+  (Empty as any).PRESENTED_IMAGE_SIMPLE = 'simple';
 
   return {
     Button,
     Space,
+    Table,
+    Tag: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
+    Empty,
     message: messageApi,
     Modal: ({ children, open, onOk, okText = '确认' }: any) => (open ? (
       <section>
@@ -609,6 +639,8 @@ describe('QueryEditor external SQL save', () => {
     backendApp.DBGetTables.mockResolvedValue({ success: true, data: [] });
     backendApp.GenerateQueryID.mockResolvedValue('query-1');
     storeState.connections = createDefaultConnections();
+    storeState.sqlLogs = [];
+    storeState.clearSqlLogs.mockReset();
     storeState.connections[0].config.type = 'mysql';
     storeState.connections[0].config.database = 'main';
     storeState.appearance.uiVersion = 'legacy';
@@ -2301,6 +2333,20 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-results .query-result-tabs > .ant-tabs-nav .ant-tabs-tab-btn {');
     expect(css).toContain('user-select: none;');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-results .query-result-tab-text {');
+  });
+
+  it('embeds the sql execution log as a result tab instead of a standalone workspace panel in v2', () => {
+    const panelSource = readFileSync(new URL('./QueryEditorResultsPanel.tsx', import.meta.url), 'utf8');
+    const editorSource = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+
+    expect(panelSource).toContain('QUERY_EDITOR_SQL_LOG_TAB_KEY');
+    expect(panelSource).toContain('<LogPanel');
+    expect(panelSource).toContain('variant="embedded"');
+    expect(panelSource).toContain('executionError={executionError}');
+    expect(panelSource).toContain("t('log_panel.short_title')");
+    expect(panelSource).toContain('[logTabItem, ...resultTabItems]');
+    expect(editorSource).toContain("window.addEventListener('gonavi:show-sql-execution-log'");
+    expect(editorSource).toContain('setActiveResultKey(QUERY_EDITOR_SQL_LOG_TAB_KEY)');
   });
 
   it('keeps the v2 query editor toolbar grouped and compact', () => {

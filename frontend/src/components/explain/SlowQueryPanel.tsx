@@ -8,7 +8,7 @@ import { formatMs, formatNumber } from '../../utils/explainTypes'
 
 // 慢 SQL 历史面板。
 // 从 GetSlowQueries 加载 TopN，按 duration / rowsRead / recent 切换排序。
-// 点击条目可触发 onPickQuery 把 SQL 回填到 QueryEditor。
+// 点击条目可触发 onPickQuery，把 SQL 带到外部工作台或编辑器。
 //
 // 设计要点：
 //   - 独立 Modal，不依赖 Sidebar 内部布局（Sidebar.tsx 已经 9000+ 行，避免污染）
@@ -40,7 +40,19 @@ interface SlowQueryPanelProps {
   onPickQuery?: (sql: string) => void
 }
 
-export default function SlowQueryPanel({ open, onClose, config, dbName, onPickQuery }: SlowQueryPanelProps) {
+interface SlowQueryPanelContentProps {
+  config: ConnectionConfig
+  dbName: string
+  onPickQuery?: (sql: string) => void
+  activeToken?: string | number | null
+}
+
+export function SlowQueryPanelContent({
+  config,
+  dbName,
+  onPickQuery,
+  activeToken,
+}: SlowQueryPanelContentProps) {
   const [loading, setLoading] = useState(false)
   const [records, setRecords] = useState<SlowQueryRecord[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -65,10 +77,11 @@ export default function SlowQueryPanel({ open, onClose, config, dbName, onPickQu
   }, [config, dbName, sortBy])
 
   useEffect(() => {
-    if (open) {
-      void reload()
+    if (activeToken === null || activeToken === undefined || activeToken === '') {
+      return
     }
-  }, [open, reload])
+    void reload()
+  }, [activeToken, reload])
 
   const handleClear = useCallback(async () => {
     const result = await ClearSlowQueries(buildRpcConnectionConfig(config), dbName)
@@ -84,32 +97,15 @@ export default function SlowQueryPanel({ open, onClose, config, dbName, onPickQu
     (record: SlowQueryRecord) => {
       if (record.sqlPreview && onPickQuery) {
         onPickQuery(record.sqlPreview)
-        onClose()
       }
     },
-    [onPickQuery, onClose],
+    [onPickQuery],
   )
 
   const sorted = useMemo(() => records, [records]) // 后端已排序，前端不再排
 
   return (
-    <Modal
-      open={open}
-      onCancel={onClose}
-      footer={null}
-      width="70%"
-      style={{ top: 40 }}
-      title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <ThunderboltOutlined style={{ color: '#fa5252' }} />
-          <Title level={5} style={{ margin: 0 }}>慢 SQL 历史</Title>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {dbName || '(当前连接)'}
-          </Text>
-        </div>
-      }
-      destroyOnClose
-    >
+    <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <Segmented
           value={sortBy}
@@ -148,12 +144,46 @@ export default function SlowQueryPanel({ open, onClose, config, dbName, onPickQu
       )}
 
       {!loading && !error && sorted.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '60vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0, overflowY: 'auto' }}>
           {sorted.map((r, idx) => (
             <SlowQueryCard key={r.id ?? idx} record={r} onPick={() => handlePick(r)} />
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+export default function SlowQueryPanel({ open, onClose, config, dbName, onPickQuery }: SlowQueryPanelProps) {
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      width="70%"
+      style={{ top: 40 }}
+      title={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <ThunderboltOutlined style={{ color: '#fa5252' }} />
+          <Title level={5} style={{ margin: 0 }}>慢 SQL 历史</Title>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {dbName || '(当前连接)'}
+          </Text>
+        </div>
+      }
+      destroyOnClose
+    >
+      <div style={{ minHeight: 480, height: '60vh' }}>
+        <SlowQueryPanelContent
+          config={config}
+          dbName={dbName}
+          activeToken={open ? `${dbName}:open` : null}
+          onPickQuery={(sql) => {
+            onPickQuery?.(sql)
+            onClose()
+          }}
+        />
+      </div>
     </Modal>
   )
 }

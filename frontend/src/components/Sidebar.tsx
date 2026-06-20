@@ -1,5 +1,6 @@
 ﻿import SidebarConnectionRail from './sidebar/SidebarConnectionRail';
 import SidebarSearchPanel, { type SidebarSearchPanelProps } from './sidebar/SidebarSearchPanel';
+import SlowQueryRailButton from './sidebar/SlowQueryRailButton';
 import { buildSidebarLegacyNodeMenuItems } from './sidebar/sidebarLegacyNodeMenu';
 import {
   getMetadataDialect,
@@ -2782,6 +2783,10 @@ const Sidebar: React.FC<{
                     <span>SQL 执行日志</span>
                     <small>{sqlLogCount.toLocaleString()}</small>
                 </button>
+                <SlowQueryRailButton
+                    className="gn-v2-sidebar-slow-query-button"
+                    tooltipPlacement="top"
+                />
             </div>
         )}
         </div>

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readV2ThemeCss } from '../test/readV2ThemeCss';
 
 import { setCurrentLanguage } from '../i18n';
+import { I18nProvider } from '../i18n/provider';
 import type { SavedQuery, TabData } from '../types';
 import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 import { clearQueryTabDraft, clearSQLFileTabDraft, getQueryTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
@@ -29,6 +30,14 @@ const storeState = vi.hoisted(() => ({
       },
     },
   ],
+  sqlLogs: [] as Array<{
+    id: string;
+    timestamp: number;
+    sql: string;
+    status: 'success' | 'error';
+    duration: number;
+  }>,
+  clearSqlLogs: vi.fn(),
   addSqlLog: vi.fn(),
   addTab: vi.fn(),
   setActiveContext: vi.fn(),
@@ -348,9 +357,20 @@ vi.mock('./DataGrid', () => ({
   GONAVI_ROW_KEY: '__gonavi_row_key__',
 }));
 
+vi.mock('./LogPanel', () => ({
+  default: ({ variant, executionError }: { variant?: string; executionError?: string }) => (
+    <div data-log-panel={variant}>
+      SQL 执行日志
+      {executionError ? ` ${executionError}` : ''}
+    </div>
+  ),
+}));
+
 vi.mock('@ant-design/icons', () => {
   const Icon = () => <span />;
   return {
+    BugOutlined: Icon,
+    ClearOutlined: Icon,
     PlayCircleOutlined: Icon,
     SaveOutlined: Icon,
     FormatPainterOutlined: Icon,
@@ -377,10 +397,30 @@ vi.mock('antd', () => {
   const Form: any = ({ children }: any) => <form>{children}</form>;
   Form.Item = ({ children }: any) => <>{children}</>;
   Form.useForm = () => [{ setFieldsValue: vi.fn(), validateFields: vi.fn(() => Promise.resolve({ name: '查询' })) }];
+  const Table = ({ dataSource, columns }: { dataSource: any[]; columns: any[] }) => (
+    <div>
+      {dataSource.map((record) => (
+        <div key={record.id}>
+          {columns.map((column) => (
+            <div key={column.dataIndex || column.title}>
+              {column.render
+                ? column.render(record[column.dataIndex], record)
+                : record[column.dataIndex]}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+  const Empty = ({ description }: { description?: React.ReactNode }) => <div>{description}</div>;
+  (Empty as any).PRESENTED_IMAGE_SIMPLE = 'simple';
 
   return {
     Button,
     Space,
+    Table,
+    Tag: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
+    Empty,
     message: messageApi,
     Modal: ({ children, open, onOk, okText = '确认' }: any) => (open ? (
       <section>
@@ -609,6 +649,8 @@ describe('QueryEditor external SQL save', () => {
     backendApp.DBGetTables.mockResolvedValue({ success: true, data: [] });
     backendApp.GenerateQueryID.mockResolvedValue('query-1');
     storeState.connections = createDefaultConnections();
+    storeState.sqlLogs = [];
+    storeState.clearSqlLogs.mockReset();
     storeState.connections[0].config.type = 'mysql';
     storeState.connections[0].config.database = 'main';
     storeState.appearance.uiVersion = 'legacy';
@@ -667,7 +709,11 @@ describe('QueryEditor external SQL save', () => {
 
     let renderer!: ReactTestRenderer;
     await act(async () => {
-      renderer = create(<QueryEditor tab={createTab()} />);
+      renderer = create(
+        <I18nProvider preference="zh-CN" onPreferenceChange={() => undefined}>
+          <QueryEditor tab={createTab()} />
+        </I18nProvider>,
+      );
     });
 
     expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
@@ -678,7 +724,11 @@ describe('QueryEditor external SQL save', () => {
 
     let renderer!: ReactTestRenderer;
     await act(async () => {
-      renderer = create(<QueryEditor tab={createTab()} />);
+      renderer = create(
+        <I18nProvider preference="zh-CN" onPreferenceChange={() => undefined}>
+          <QueryEditor tab={createTab()} />
+        </I18nProvider>,
+      );
     });
 
     await act(async () => {
@@ -898,6 +948,90 @@ describe('QueryEditor external SQL save', () => {
     expect(storeState.updateQueryTabDraft).toHaveBeenLastCalledWith('tab-1', {
       resultPanelVisible: true,
     });
+
+    renderer.unmount();
+  });
+
+  it('opens the embedded sql execution log tab from the shared log toggle event in v2', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.sqlLogs = [{
+      id: 'log-1',
+      timestamp: Date.now(),
+      sql: 'select 1',
+      status: 'success',
+      duration: 12,
+    }];
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    expect(textContent(renderer.toJSON())).not.toContain('SQL 执行日志');
+
+    await act(async () => {
+      windowListeners['gonavi:show-sql-execution-log']?.forEach((listener) => listener());
+    });
+
+    expect(textContent(renderer.toJSON())).toContain('SQL 执行日志');
+    expect(storeState.updateQueryTabDraft).toHaveBeenCalledWith('tab-1', {
+      resultPanelVisible: true,
+    });
+
+    await act(async () => {
+      windowListeners['gonavi:show-sql-execution-log']?.forEach((listener) => listener());
+    });
+
+    expect(textContent(renderer.toJSON())).not.toContain('SQL 执行日志');
+    expect(storeState.updateQueryTabDraft).toHaveBeenLastCalledWith('tab-1', {
+      resultPanelVisible: false,
+    });
+
+    renderer.unmount();
+  });
+
+  it('shows execution failures inside the embedded sql log tab in v2', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: false,
+      message: 'driver exploded',
+      data: [],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'select 1;' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const rendered = textContent(renderer.toJSON());
+    expect(rendered).toContain('SQL 执行日志');
+    expect(rendered).toContain('driver exploded');
+    expect(renderer.root.findAll((node) => node.props?.['data-log-panel'] === 'embedded')).toHaveLength(1);
+    expect(renderer.root.findAll((node) => node.props?.['data-tab-key'] === '__gonavi_sql_execution_log__')).toHaveLength(1);
 
     renderer.unmount();
   });

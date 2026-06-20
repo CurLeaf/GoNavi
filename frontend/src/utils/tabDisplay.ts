@@ -464,6 +464,7 @@ export const getTabDisplayKindLabel = (tab: TabData): string => {
   if (tab.type === 'design') return 'DESIGN';
   if (tab.type === 'table-overview') return 'DB';
   if (tab.type === 'table-export') return 'EXPORT';
+  if (tab.type === 'sql-analysis') return 'ANALYZE';
   if (tab.type.startsWith('redis')) return 'REDIS';
   if (tab.type.startsWith('jvm')) return 'JVM';
   if (tab.type === 'trigger') return 'TRG';
