@@ -6,6 +6,9 @@ import { getStoredSecretPlaceholder } from "../../utils/connectionModalPresentat
 import { noAutoCapInputProps } from "../../utils/inputAutoCap";
 
 const { Text } = Typography;
+const DEFAULT_KEEPALIVE_INTERVAL_MINUTES = 240;
+const MIN_KEEPALIVE_INTERVAL_MINUTES = 1;
+const MAX_KEEPALIVE_INTERVAL_MINUTES = 1440;
 
 type ConnectionModalNetworkSecuritySectionProps = Record<string, any>;
 
@@ -53,6 +56,7 @@ const ConnectionModalNetworkSecuritySection: React.FC<ConnectionModalNetworkSecu
   const effectiveUseProxy =
     !effectiveUseHttpTunnel &&
     (useProxy || !!form.getFieldValue("useProxy"));
+  const keepAliveEnabled = !!Form.useWatch("keepAliveEnabled", form);
   const networkItems: Array<{
     key: "ssl" | "ssh" | "proxy" | "httpTunnel";
     title: string;
@@ -990,6 +994,40 @@ const ConnectionModalNetworkSecuritySection: React.FC<ConnectionModalNetworkSecu
             max={300}
             placeholder={t("connection.modal.example", {
               value: "30",
+            })}
+          />
+        </Form.Item>
+        <Form.Item
+          name="keepAliveEnabled"
+          valuePropName="checked"
+          help={t("connection.modal.network.keepAliveEnabled.help")}
+          style={{ marginTop: 12, marginBottom: 12 }}
+        >
+          <Checkbox>
+            {t("connection.modal.network.keepAliveEnabled.checkbox")}
+          </Checkbox>
+        </Form.Item>
+        <Form.Item
+          name="keepAliveIntervalMinutes"
+          label={t("connection.modal.network.keepAliveInterval.label")}
+          help={t("connection.modal.network.keepAliveInterval.help")}
+          rules={[
+            {
+              type: "number",
+              min: MIN_KEEPALIVE_INTERVAL_MINUTES,
+              max: MAX_KEEPALIVE_INTERVAL_MINUTES,
+              message: t("connection.modal.network.keepAliveInterval.range"),
+            },
+          ]}
+          style={{ marginBottom: 0 }}
+        >
+          <InputNumber
+            style={{ width: "100%" }}
+            min={MIN_KEEPALIVE_INTERVAL_MINUTES}
+            max={MAX_KEEPALIVE_INTERVAL_MINUTES}
+            disabled={!keepAliveEnabled}
+            placeholder={t("connection.modal.example", {
+              value: String(DEFAULT_KEEPALIVE_INTERVAL_MINUTES),
             })}
           />
         </Form.Item>

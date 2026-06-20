@@ -2301,6 +2301,8 @@ const renderStep2 = () => {
         useHttpTunnel: false,
         httpTunnelPort: 8080,
         timeout: 30,
+        keepAliveEnabled: false,
+        keepAliveIntervalMinutes: 240,
         uri: "",
         connectionParams: "",
         oceanBaseProtocol: "mysql",

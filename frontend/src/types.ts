@@ -297,6 +297,8 @@ export interface ConnectionConfig {
   dsn?: string;
   connectionParams?: string;
   timeout?: number;
+  keepAliveEnabled?: boolean;
+  keepAliveIntervalMinutes?: number;
   redisDB?: number; // Redis database index
   uri?: string; // Connection URI for copy/paste
   clickHouseProtocol?: "auto" | "http" | "native"; // ClickHouse connection protocol override

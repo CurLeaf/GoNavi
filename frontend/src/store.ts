@@ -124,6 +124,9 @@ const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
+const DEFAULT_KEEPALIVE_INTERVAL_MINUTES = 240;
+const MIN_KEEPALIVE_INTERVAL_MINUTES = 1;
+const MAX_KEEPALIVE_INTERVAL_MINUTES = 1440;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
 const PERSIST_VERSION = 12;
@@ -826,6 +829,13 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
       DEFAULT_TIMEOUT_SECONDS,
       1,
       MAX_TIMEOUT_SECONDS,
+    ),
+    keepAliveEnabled: Boolean(raw.keepAliveEnabled),
+    keepAliveIntervalMinutes: normalizeIntegerInRange(
+      raw.keepAliveIntervalMinutes,
+      DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
+      MIN_KEEPALIVE_INTERVAL_MINUTES,
+      MAX_KEEPALIVE_INTERVAL_MINUTES,
     ),
   };
 

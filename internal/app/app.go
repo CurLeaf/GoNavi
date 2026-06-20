@@ -42,9 +42,12 @@ var (
 )
 
 type cachedDatabase struct {
-	inst     db.Database
-	lastPing time.Time
-	config   connection.ConnectionConfig
+	inst              db.Database
+	lastPing          time.Time
+	config            connection.ConnectionConfig
+	keepAliveEnabled  bool
+	keepAliveInterval time.Duration
+	keepAliveInFlight bool
 }
 
 type cachedConnectFailure struct {
@@ -88,6 +91,8 @@ type App struct {
 	jvmPreviewTokenMu  sync.Mutex
 	jvmPreviewTokens   map[string]jvmPreviewConfirmationToken
 	jvmPreviewTokenTTL time.Duration
+	keepAliveCancel    context.CancelFunc
+	keepAliveDone      chan struct{}
 }
 
 // NewApp creates a new App application struct
@@ -185,6 +190,7 @@ func (a *App) startup(ctx context.Context) {
 		installMacNativeWindowDiagnostics(logger.Path())
 	}
 	applyMacWindowTranslucencyFix()
+	a.startConnectionKeepAliveLoop()
 	logger.Infof("应用启动完成（首次连接保护窗口=%s，最多重试=%d 次）", startupConnectRetryWindow, startupConnectRetryAttempts)
 }
 
@@ -233,6 +239,7 @@ func (a *App) LogWindowDiagnostic(stage string, payload string) {
 // Shutdown is called when the app terminates.
 func (a *App) Shutdown() {
 	logger.Infof("应用开始关闭，准备释放资源")
+	a.stopConnectionKeepAliveLoop()
 	a.rollbackPendingSQLTransactionsOnShutdown()
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -275,6 +282,9 @@ func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.Conn
 	}
 	// timeout 仅用于 Query/Ping 控制，不应作为物理连接复用键的一部分。
 	normalized.Timeout = 0
+	// keepalive 仅影响后台保活策略，不应参与物理连接复用键。
+	normalized.KeepAliveEnabled = false
+	normalized.KeepAliveIntervalMinutes = 0
 	normalized.SavePassword = false
 
 	if !normalized.UseSSH {
@@ -779,6 +789,20 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	entry, ok := a.dbCache[key]
 	a.mu.RUnlock()
 	if ok {
+		keepAliveEnabled, keepAliveInterval := resolveConnectionKeepAliveSettings(effectiveConfig)
+		if entry.keepAliveEnabled != keepAliveEnabled || entry.keepAliveInterval != keepAliveInterval {
+			a.mu.Lock()
+			if cur, exists := a.dbCache[key]; exists && cur.inst == entry.inst {
+				cur.keepAliveEnabled = keepAliveEnabled
+				cur.keepAliveInterval = keepAliveInterval
+				if !keepAliveEnabled {
+					cur.keepAliveInFlight = false
+				}
+				a.dbCache[key] = cur
+				entry = cur
+			}
+			a.mu.Unlock()
+		}
 		if isFileDB {
 			logger.Infof("命中文件库连接缓存：类型=%s 缓存Key=%s", strings.TrimSpace(effectiveConfig.Type), shortKey)
 		}
@@ -861,6 +885,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	a.clearConnectFailureByKey(key)
 
 	now := time.Now()
+	keepAliveEnabled, keepAliveInterval := resolveConnectionKeepAliveSettings(effectiveConfig)
 
 	a.mu.Lock()
 	if existing, exists := a.dbCache[key]; exists && existing.inst != nil {
@@ -872,7 +897,13 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 		}
 		return existing.inst, nil
 	}
-	a.dbCache[key] = cachedDatabase{inst: dbInst, lastPing: now, config: normalizeCacheKeyConfig(effectiveConfig)}
+	a.dbCache[key] = cachedDatabase{
+		inst:              dbInst,
+		lastPing:          now,
+		config:            normalizeCacheKeyConfig(effectiveConfig),
+		keepAliveEnabled:  keepAliveEnabled,
+		keepAliveInterval: keepAliveInterval,
+	}
 	a.mu.Unlock()
 
 	logger.Infof("数据库连接成功并写入缓存：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)

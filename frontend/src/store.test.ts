@@ -417,6 +417,30 @@ describe('store appearance persistence', () => {
     );
   });
 
+  it('normalizes keepalive settings when replacing saved connections', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'postgres-keepalive',
+        name: 'Postgres KeepAlive',
+        config: {
+          id: 'postgres-keepalive',
+          type: 'postgres',
+          host: 'db.local',
+          port: 5432,
+          user: 'postgres',
+          keepAliveEnabled: true,
+          keepAliveIntervalMinutes: 0,
+        },
+      },
+    ]);
+
+    const config = useStore.getState().connections[0]?.config;
+    expect(config?.keepAliveEnabled).toBe(true);
+    expect(config?.keepAliveIntervalMinutes).toBe(240);
+  });
+
   it('keeps StarRocks saved connections as independent datasource type', async () => {
     const { useStore } = await importStore();
 

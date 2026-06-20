@@ -148,6 +148,7 @@ type ChoiceCardOption = {
   description?: string;
 };
 const MAX_TIMEOUT_SECONDS = 3600;
+const DEFAULT_KEEPALIVE_INTERVAL_MINUTES = 240;
 const PRIMARY_USERNAME_OPTIONAL_TYPES = new Set([
   "mongodb",
   "elasticsearch",
@@ -1427,6 +1428,11 @@ const ConnectionModal: React.FC<{
           driver: config.driver,
           dsn: config.dsn,
           timeout: resolvedJvmTimeout,
+          keepAliveEnabled: !!config.keepAliveEnabled,
+          keepAliveIntervalMinutes:
+            Number(config.keepAliveIntervalMinutes) > 0
+              ? Number(config.keepAliveIntervalMinutes)
+              : DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
           mysqlTopology: mysqlIsReplica ? "replica" : "single",
           mysqlReplicaHosts: mysqlReplicaHosts,
           rocketmqTopology: rocketmqIsCluster ? "cluster" : "single",
@@ -2033,6 +2039,8 @@ const ConnectionModal: React.FC<{
         httpTunnelUser: "",
         httpTunnelPassword: "",
         timeout: 30,
+        keepAliveEnabled: false,
+        keepAliveIntervalMinutes: DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
         uri: "",
         connectionParams: "",
         includeDatabases: undefined,
@@ -2105,6 +2113,8 @@ const ConnectionModal: React.FC<{
         httpTunnelPort: 8080,
         httpTunnelUser: "",
         httpTunnelPassword: "",
+        keepAliveEnabled: false,
+        keepAliveIntervalMinutes: DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
         mysqlTopology: "single",
         rocketmqTopology: "single",
         mqttTopology: "single",
@@ -2153,6 +2163,8 @@ const ConnectionModal: React.FC<{
         httpTunnelPort: 8080,
         httpTunnelUser: "",
         httpTunnelPassword: "",
+        keepAliveEnabled: false,
+        keepAliveIntervalMinutes: DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
         mysqlTopology: "single",
         rocketmqTopology: "single",
         mqttTopology: "single",

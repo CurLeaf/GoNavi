@@ -644,6 +644,14 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
     "connection.modal.network.timeout.label": "连接超时 (秒)",
     "connection.modal.network.timeout.help": "数据库连接超时时间，默认 30 秒",
     "connection.modal.network.timeout.range": "超时时间范围: 1-300 秒",
+    "connection.modal.network.keepAliveEnabled.checkbox": "启用后台定时探活保活",
+    "connection.modal.network.keepAliveEnabled.help":
+      "仅在跳板机 token 或长连接会话需要定期续期时开启。",
+    "connection.modal.network.keepAliveInterval.label": "探活间隔 (分钟)",
+    "connection.modal.network.keepAliveInterval.help":
+      "后台会按这个间隔对已建立的缓存连接执行 Ping，默认 240 分钟。",
+    "connection.modal.network.keepAliveInterval.range":
+      "探活间隔范围: 1-1440 分钟",
     "connection.modal.appearance.title": "外观",
     "connection.modal.appearance.description": "自定义图标与颜色",
     "connection.modal.appearance.icon": "图标",
@@ -1534,6 +1542,16 @@ export const messages: Record<SupportedLanguage, Record<MessageKey, string>> = {
       "Database connection timeout. Default is 30 seconds.",
     "connection.modal.network.timeout.range":
       "Timeout must be between 1 and 300 seconds.",
+    "connection.modal.network.keepAliveEnabled.checkbox":
+      "Enable background keep-alive ping",
+    "connection.modal.network.keepAliveEnabled.help":
+      "Enable this only when a jump-host token or long-lived session needs periodic renewal.",
+    "connection.modal.network.keepAliveInterval.label":
+      "Keep-alive interval (minutes)",
+    "connection.modal.network.keepAliveInterval.help":
+      "GoNavi pings established cached connections at this interval. Default is 240 minutes.",
+    "connection.modal.network.keepAliveInterval.range":
+      "Keep-alive interval must be between 1 and 1440 minutes.",
     "connection.modal.appearance.title": "Appearance",
     "connection.modal.appearance.description": "Custom icon and color",
     "connection.modal.appearance.icon": "Icon",

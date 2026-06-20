@@ -34,30 +34,56 @@ import {
 
 type Translate = (key: string, params?: any) => string;
 
-export type ConnectionSecretKey =
-  | "primaryPassword"
-  | "sshPassword"
-  | "proxyPassword"
-  | "httpTunnelPassword"
-  | "mysqlReplicaPassword"
-  | "mongoReplicaPassword"
-  | "redisSentinelPassword"
-  | "opaqueURI"
-  | "opaqueDSN";
-
+const DEFAULT_KEEPALIVE_INTERVAL_MINUTES = 240;
+const MIN_KEEPALIVE_INTERVAL_MINUTES = 1;
+const MAX_KEEPALIVE_INTERVAL_MINUTES = 1440;
+
+export type ConnectionSecretKey =
+
+  | "primaryPassword"
+
+  | "sshPassword"
+
+  | "proxyPassword"
+
+  | "httpTunnelPassword"
+
+  | "mysqlReplicaPassword"
+
+  | "mongoReplicaPassword"
+
+  | "redisSentinelPassword"
+
+  | "opaqueURI"
+
+  | "opaqueDSN";
+
+
+
 export type ConnectionSecretClearState = Record<ConnectionSecretKey, boolean>;
 
-export const createEmptyConnectionSecretClearState =
-  (): ConnectionSecretClearState => ({
-    primaryPassword: false,
-    sshPassword: false,
-    proxyPassword: false,
-    httpTunnelPassword: false,
-    mysqlReplicaPassword: false,
-    mongoReplicaPassword: false,
-    redisSentinelPassword: false,
-    opaqueURI: false,
-    opaqueDSN: false,
+export const createEmptyConnectionSecretClearState =
+
+  (): ConnectionSecretClearState => ({
+
+    primaryPassword: false,
+
+    sshPassword: false,
+
+    proxyPassword: false,
+
+    httpTunnelPassword: false,
+
+    mysqlReplicaPassword: false,
+
+    mongoReplicaPassword: false,
+
+    redisSentinelPassword: false,
+
+    opaqueURI: false,
+
+    opaqueDSN: false,
+
   });
 type BuildSavedConnectionInputParams = {
   config: ConnectionConfig;
@@ -747,6 +773,21 @@ export const buildConnectionConfig = async ({
   }
 
   const keepPassword = !forPersist || savePassword;
+  const keepAliveEnabled =
+    !isFileDatabaseType(type) &&
+    type !== "jvm" &&
+    !!mergedValues.keepAliveEnabled;
+  const keepAliveIntervalMinutesRaw = Number(
+    mergedValues.keepAliveIntervalMinutes,
+  );
+  const keepAliveIntervalMinutes =
+    Number.isFinite(keepAliveIntervalMinutesRaw) &&
+    keepAliveIntervalMinutesRaw >= MIN_KEEPALIVE_INTERVAL_MINUTES
+      ? Math.min(
+          Math.trunc(keepAliveIntervalMinutesRaw),
+          MAX_KEEPALIVE_INTERVAL_MINUTES,
+        )
+      : DEFAULT_KEEPALIVE_INTERVAL_MINUTES;
   const normalizedConnectionParams = supportsConnectionParamsForType(type)
     ? type === "oceanbase"
       ? normalizeOceanBaseConnectionParamsText(
@@ -779,6 +820,8 @@ export const buildConnectionConfig = async ({
     dsn: mergedValues.dsn,
     connectionParams: normalizedConnectionParams,
     timeout: Number(mergedValues.timeout || 30),
+    keepAliveEnabled: keepAliveEnabled,
+    keepAliveIntervalMinutes: keepAliveIntervalMinutes,
     redisDB: Number.isFinite(Number(mergedValues.redisDB))
       ? Math.max(0, Math.trunc(Number(mergedValues.redisDB)))
       : 0,

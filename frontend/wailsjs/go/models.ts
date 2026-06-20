@@ -927,6 +927,8 @@ export namespace connection {
 	    dsn?: string;
 	    connectionParams?: string;
 	    timeout?: number;
+	    keepAliveEnabled?: boolean;
+	    keepAliveIntervalMinutes?: number;
 	    redisDB?: number;
 	    redisSentinelMaster?: string;
 	    redisSentinelUser?: string;
@@ -976,6 +978,8 @@ export namespace connection {
 	        this.dsn = source["dsn"];
 	        this.connectionParams = source["connectionParams"];
 	        this.timeout = source["timeout"];
+	        this.keepAliveEnabled = source["keepAliveEnabled"];
+	        this.keepAliveIntervalMinutes = source["keepAliveIntervalMinutes"];
 	        this.redisDB = source["redisDB"];
 	        this.redisSentinelMaster = source["redisSentinelMaster"];
 	        this.redisSentinelUser = source["redisSentinelUser"];
