@@ -81,7 +81,9 @@ func finalizeExplainStats(result *connection.ExplainResult) {
 			}
 		}
 	}
-	result.Stats.TotalCost = totalCost
+	if result.Stats.TotalCost == 0 {
+		result.Stats.TotalCost = totalCost
+	}
 	if result.Stats.TotalDurationMs == 0 && accumulatedDuration > 0 {
 		result.Stats.TotalDurationMs = accumulatedDuration
 	}

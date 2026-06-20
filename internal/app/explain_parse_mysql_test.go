@@ -155,6 +155,88 @@ func TestParseMySQLExplain_WithOrderingOperation(t *testing.T) {
 	}
 }
 
+const mySQLFormatJSONV2FilterWithCoveringIndex = `{
+  "query": "/* select#1 */ select ` + "`f1`" + ` from ` + "`t1`" + ` where (` + "`f2`" + ` > 3)",
+  "operation": "Filter: (` + "`t1`" + `. ` + "`f2`" + ` > 3)",
+  "access_type": "filter",
+  "estimated_rows": 2,
+  "estimated_total_cost": 2.65,
+  "condition": "(` + "`t1`" + `. ` + "`f2`" + ` > 3)",
+  "inputs": [
+    {
+      "operation": "Covering index scan on t1 using f1",
+      "access_type": "index",
+      "index_access_type": "index_scan",
+      "table_name": "t1",
+      "index_name": "f1",
+      "covering": true,
+      "estimated_rows": 3,
+      "estimated_total_cost": 1.56
+    }
+  ]
+}`
+
+func TestParseMySQLExplain_JSONV2FilterWithCoveringIndex(t *testing.T) {
+	result, err := parseMySQLExplain("mysql", "SELECT f1 FROM t1 WHERE f2 > 3", mySQLFormatJSONV2FilterWithCoveringIndex, connection.ExplainFormatJSON)
+	if err != nil {
+		t.Fatalf("解析新版 JSON 失败：%v", err)
+	}
+	if len(result.Nodes) != 2 {
+		t.Fatalf("应有 2 个节点，got=%d", len(result.Nodes))
+	}
+	if result.Nodes[0].OpType != connection.ExplainOpFilter {
+		t.Fatalf("根节点应为 FILTER，got=%s", result.Nodes[0].OpType)
+	}
+	if result.Nodes[1].OpType != connection.ExplainOpIndexOnly {
+		t.Fatalf("covering index scan 应为 INDEX_ONLY，got=%s", result.Nodes[1].OpType)
+	}
+	if result.Nodes[1].Table != "t1" {
+		t.Fatalf("子节点表名应为 t1，got=%s", result.Nodes[1].Table)
+	}
+	if result.Nodes[1].Index != "f1" {
+		t.Fatalf("子节点索引应为 f1，got=%s", result.Nodes[1].Index)
+	}
+	if len(result.Edges) != 1 || result.Edges[0].From != result.Nodes[0].ID || result.Edges[0].To != result.Nodes[1].ID {
+		t.Fatalf("应建立 FILTER -> INDEX_ONLY 边，got=%v", result.Edges)
+	}
+	if result.Stats.TotalCost != 2.65 {
+		t.Fatalf("TotalCost got=%v want=2.65", result.Stats.TotalCost)
+	}
+}
+
+const mySQLFormatJSONV2WrappedTableScan = `{
+  "query_plan": {
+    "operation": "Table scan on messages",
+    "access_type": "table",
+    "table_name": "messages",
+    "estimated_rows": 958400,
+    "estimated_total_cost": 49827.15
+  }
+}`
+
+func TestParseMySQLExplain_JSONV2WrappedTableScan(t *testing.T) {
+	result, err := parseMySQLExplain("mysql", "SELECT * FROM messages", mySQLFormatJSONV2WrappedTableScan, connection.ExplainFormatJSON)
+	if err != nil {
+		t.Fatalf("解析 query_plan 包装的新版 JSON 失败：%v", err)
+	}
+	if len(result.Nodes) != 1 {
+		t.Fatalf("应有 1 个节点，got=%d", len(result.Nodes))
+	}
+	node := result.Nodes[0]
+	if node.OpType != connection.ExplainOpScan {
+		t.Fatalf("table access 应为 SCAN，got=%s", node.OpType)
+	}
+	if node.Table != "messages" {
+		t.Fatalf("table got=%q want=messages", node.Table)
+	}
+	if !containsFlag(node.Flags, connection.ExplainFlagFullScan) || !containsFlag(node.Flags, connection.ExplainFlagNoIndex) {
+		t.Fatalf("table scan 应标记 FULL_SCAN/NO_INDEX，got=%v", node.Flags)
+	}
+	if result.Stats.TotalCost != 49827.15 {
+		t.Fatalf("TotalCost got=%v want=49827.15", result.Stats.TotalCost)
+	}
+}
+
 // MySQL 5.7 表格模式 fallback。
 const mySQLTableExplainOutput = `id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	SIMPLE	users	ALL	NULL	NULL	NULL	NULL	10000	Using where

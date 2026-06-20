@@ -82,36 +82,36 @@ func parseMySQLExplain(dbType, sourceSQL, raw string, format connection.ExplainF
 
 // mysqlQueryBlock 对应 MySQL FORMAT=JSON 顶层 query_block。
 type mysqlQueryBlock struct {
-	SelectID           json.Number            `json:"select_id"`
-	CostInfo           map[string]string      `json:"cost_info"`
-	Table              *mysqlTableNode        `json:"table"`
-	NestedLoop         []map[string]json.RawMessage `json:"nested_loop"`
-	OrderingOperation  *map[string]any        `json:"ordering_operation"`
-	GroupingOperation  *map[string]any        `json:"grouping_operation"`
-	DuplicatesRemoval  *map[string]any        `json:"duplicates_removal"`
-	Windowing          *map[string]any        `json:"windowing"`
-	Distinct           *map[string]any        `json:"distinct"`
-	Message            string                 `json:"message"`
+	SelectID          json.Number                  `json:"select_id"`
+	CostInfo          map[string]string            `json:"cost_info"`
+	Table             *mysqlTableNode              `json:"table"`
+	NestedLoop        []map[string]json.RawMessage `json:"nested_loop"`
+	OrderingOperation *map[string]any              `json:"ordering_operation"`
+	GroupingOperation *map[string]any              `json:"grouping_operation"`
+	DuplicatesRemoval *map[string]any              `json:"duplicates_removal"`
+	Windowing         *map[string]any              `json:"windowing"`
+	Distinct          *map[string]any              `json:"distinct"`
+	Message           string                       `json:"message"`
 }
 
 type mysqlTableNode struct {
-	TableName             string            `json:"table_name"`
-	Alias                 string            `json:"alias"`
-	AccessType            string            `json:"access_type"`
-	RowsExaminedPerScan   json.Number       `json:"rows_examined_per_scan"`
-	RowsProducedPerJoin   json.Number       `json:"rows_produced_per_join"`
-	Filtered              string            `json:"filtered"`
-	PossibleKeys          []string          `json:"possible_keys"`
-	Key                   string            `json:"key"`
-	UsedKeyParts          []string          `json:"used_key_parts"`
-	KeyLength             json.Number       `json:"key_length"`
-	Ref                   []string          `json:"ref"`
-	RowsExaminedPerJoin   json.Number       `json:"rows_examined_per_join"`
-	CostInfo              map[string]string `json:"cost_info"`
-	AttachedCondition    string            `json:"attached_condition"`
-	AttachedSubqueries    []map[string]any  `json:"attached_subqueries"`
-	UsingIntersection     []map[string]any  `json:"using_intersect"`
-	Message               string            `json:"message"`
+	TableName           string            `json:"table_name"`
+	Alias               string            `json:"alias"`
+	AccessType          string            `json:"access_type"`
+	RowsExaminedPerScan json.Number       `json:"rows_examined_per_scan"`
+	RowsProducedPerJoin json.Number       `json:"rows_produced_per_join"`
+	Filtered            string            `json:"filtered"`
+	PossibleKeys        []string          `json:"possible_keys"`
+	Key                 string            `json:"key"`
+	UsedKeyParts        []string          `json:"used_key_parts"`
+	KeyLength           json.Number       `json:"key_length"`
+	Ref                 []string          `json:"ref"`
+	RowsExaminedPerJoin json.Number       `json:"rows_examined_per_join"`
+	CostInfo            map[string]string `json:"cost_info"`
+	AttachedCondition   string            `json:"attached_condition"`
+	AttachedSubqueries  []map[string]any  `json:"attached_subqueries"`
+	UsingIntersection   []map[string]any  `json:"using_intersect"`
+	Message             string            `json:"message"`
 }
 
 // parseMySQLJSONExplain 递归解析 MySQL FORMAT=JSON 输出。
@@ -122,29 +122,103 @@ func parseMySQLJSONExplain(raw string) (*connection.ExplainResult, []string, err
 		return nil, nil, fmt.Errorf("顶层 JSON 解析失败：%w", err)
 	}
 
-	result := &connection.ExplainResult{}
-	var warnings []string
-
 	qbRaw, ok := top["query_block"]
-	if !ok {
-		return nil, nil, fmt.Errorf("缺少 query_block 字段")
+	if ok {
+		result := &connection.ExplainResult{}
+		var warnings []string
+
+		// query_block 总成本
+		var qb map[string]json.RawMessage
+		if err := json.Unmarshal(qbRaw, &qb); err != nil {
+			return nil, nil, fmt.Errorf("query_block 解析失败：%w", err)
+		}
+		if costRaw, ok := qb["cost_info"]; ok {
+			var ci map[string]string
+			if err := json.Unmarshal(costRaw, &ci); err == nil {
+				result.Stats.TotalCost = parseExplainFloat64(ci["query_cost"])
+			}
+		}
+
+		// 递归 query_block（可能套 ordering/grouping/distinct 等操作层）
+		parseMySQLQueryBlock(qbRaw, "", result, &warnings)
+
+		return result, warnings, nil
 	}
 
-	// query_block 总成本
-	var qb map[string]json.RawMessage
-	if err := json.Unmarshal(qbRaw, &qb); err != nil {
-		return nil, nil, fmt.Errorf("query_block 解析失败：%w", err)
+	if rootRaw, ok := resolveMySQLJSONV2Root(top, raw); ok {
+		return parseMySQLJSONExplainV2(rootRaw)
 	}
-	if costRaw, ok := qb["cost_info"]; ok {
-		var ci map[string]string
-		if err := json.Unmarshal(costRaw, &ci); err == nil {
-			result.Stats.TotalCost = parseExplainFloat64(ci["query_cost"])
+
+	return nil, nil, fmt.Errorf("缺少 query_block 字段")
+}
+
+type mysqlJSONV2Node struct {
+	Query              string            `json:"query"`
+	Operation          string            `json:"operation"`
+	AccessType         string            `json:"access_type"`
+	TableName          string            `json:"table_name"`
+	Alias              string            `json:"alias"`
+	SchemaName         string            `json:"schema_name"`
+	IndexName          string            `json:"index_name"`
+	IndexAccessType    string            `json:"index_access_type"`
+	Condition          string            `json:"condition"`
+	LookupCondition    string            `json:"lookup_condition"`
+	JoinType           string            `json:"join_type"`
+	JoinAlgorithm      string            `json:"join_algorithm"`
+	EstimatedRows      json.Number       `json:"estimated_rows"`
+	EstimatedTotalCost json.Number       `json:"estimated_total_cost"`
+	ActualRows         json.Number       `json:"actual_rows"`
+	ActualLoops        json.Number       `json:"actual_loops"`
+	ActualFirstRowMs   json.Number       `json:"actual_first_row_ms"`
+	ActualLastRowMs    json.Number       `json:"actual_last_row_ms"`
+	Covering           *bool             `json:"covering"`
+	UsedColumns        []string          `json:"used_columns"`
+	KeyColumns         []string          `json:"key_columns"`
+	Ranges             []string          `json:"ranges"`
+	Inputs             []json.RawMessage `json:"inputs"`
+}
+
+func resolveMySQLJSONV2Root(top map[string]json.RawMessage, raw string) (json.RawMessage, bool) {
+	if queryPlanRaw, ok := top["query_plan"]; ok && len(strings.TrimSpace(string(queryPlanRaw))) > 0 {
+		return queryPlanRaw, true
+	}
+	if isMySQLJSONV2Root(top) {
+		return json.RawMessage(raw), true
+	}
+	return nil, false
+}
+
+func isMySQLJSONV2Root(top map[string]json.RawMessage) bool {
+	if len(top) == 0 {
+		return false
+	}
+	for _, key := range []string{"operation", "inputs", "access_type", "table_name", "estimated_total_cost"} {
+		if _, ok := top[key]; ok {
+			return true
 		}
 	}
+	return false
+}
 
-	// 递归 query_block（可能套 ordering/grouping/distinct 等操作层）
-	parseMySQLQueryBlock(qbRaw, "", result, &warnings)
+func parseMySQLJSONExplainV2(rootRaw json.RawMessage) (*connection.ExplainResult, []string, error) {
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(rootRaw, &rawMap); err != nil {
+		return nil, nil, fmt.Errorf("新版根节点解析失败：%w", err)
+	}
+	var root mysqlJSONV2Node
+	if err := json.Unmarshal(rootRaw, &root); err != nil {
+		return nil, nil, fmt.Errorf("新版根节点反序列化失败：%w", err)
+	}
 
+	result := &connection.ExplainResult{}
+	var warnings []string
+	if root.EstimatedTotalCost != "" {
+		result.Stats.TotalCost = parseExplainFloat64(root.EstimatedTotalCost.String())
+	}
+	parseMySQLJSONV2Node(rootRaw, "", result, &warnings, true)
+	if len(result.Nodes) == 0 {
+		return nil, nil, fmt.Errorf("新版 JSON 结构未解析出有效节点")
+	}
 	return result, warnings, nil
 }
 
@@ -209,6 +283,221 @@ func parseMySQLQueryBlock(qbRaw json.RawMessage, parentID string, result *connec
 		layerID := appendExplainChild(result, parentID, layerNode)
 		// 递归：操作层可能含 table、nested_loop、子操作层
 		parseMySQLQueryBlock(layer.raw, layerID, result, warnings)
+	}
+}
+
+func parseMySQLJSONV2Node(raw json.RawMessage, parentID string, result *connection.ExplainResult, warnings *[]string, isRoot bool) {
+	var node mysqlJSONV2Node
+	if err := json.Unmarshal(raw, &node); err != nil {
+		*warnings = append(*warnings, fmt.Sprintf("新版 JSON 节点反序列化失败：%v", err))
+		return
+	}
+
+	nextParentID := parentID
+	if shouldAppendMySQLJSONV2Node(&node, isRoot) {
+		nextParentID = appendExplainChild(result, parentID, buildMySQLJSONV2ExplainNode(&node, isRoot))
+	}
+
+	for _, child := range node.Inputs {
+		parseMySQLJSONV2Node(child, nextParentID, result, warnings, false)
+	}
+}
+
+func shouldAppendMySQLJSONV2Node(node *mysqlJSONV2Node, isRoot bool) bool {
+	if node == nil {
+		return false
+	}
+	if strings.TrimSpace(node.Operation) != "" {
+		return true
+	}
+	if strings.TrimSpace(node.AccessType) != "" {
+		return true
+	}
+	if strings.TrimSpace(node.TableName) != "" || strings.TrimSpace(node.IndexName) != "" {
+		return true
+	}
+	if len(node.Inputs) == 0 && isRoot {
+		return true
+	}
+	return false
+}
+
+func buildMySQLJSONV2ExplainNode(node *mysqlJSONV2Node, isRoot bool) connection.ExplainNode {
+	if node == nil {
+		return connection.ExplainNode{OpType: connection.ExplainOpOther}
+	}
+
+	lowerOperation := strings.ToLower(strings.TrimSpace(node.Operation))
+	explainNode := connection.ExplainNode{
+		OpType:     classifyMySQLJSONV2OpType(node.AccessType, node.Operation, node.Covering),
+		OpDetail:   strings.TrimSpace(node.Operation),
+		Table:      strings.TrimSpace(node.TableName),
+		Index:      strings.TrimSpace(node.IndexName),
+		EstRows:    parseExplainInt64(node.EstimatedRows.String()),
+		ActualRows: parseExplainInt64(node.ActualRows.String()),
+		Loops:      parseExplainInt64(node.ActualLoops.String()),
+		DurationMs: parseExplainFloat64(node.ActualLastRowMs.String()),
+	}
+	if explainNode.DurationMs == 0 {
+		explainNode.DurationMs = parseExplainFloat64(node.ActualFirstRowMs.String())
+	}
+	if cost := parseExplainFloat64(node.EstimatedTotalCost.String()); cost > 0 {
+		if isRoot {
+			explainNode.Cost = cost
+		} else {
+			if explainNode.Extra == nil {
+				explainNode.Extra = map[string]any{}
+			}
+			explainNode.Extra["estimatedTotalCost"] = cost
+		}
+	}
+
+	if strings.TrimSpace(node.Alias) != "" && node.Alias != node.TableName {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["alias"] = node.Alias
+	}
+	if strings.TrimSpace(node.SchemaName) != "" {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["schemaName"] = node.SchemaName
+	}
+	if strings.TrimSpace(node.Query) != "" {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["query"] = node.Query
+	}
+	if strings.TrimSpace(node.Condition) != "" {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["condition"] = node.Condition
+	}
+	if strings.TrimSpace(node.LookupCondition) != "" {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["lookupCondition"] = node.LookupCondition
+	}
+	if strings.TrimSpace(node.JoinType) != "" {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["joinType"] = node.JoinType
+	}
+	if strings.TrimSpace(node.JoinAlgorithm) != "" {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["joinAlgorithm"] = node.JoinAlgorithm
+	}
+	if strings.TrimSpace(node.IndexAccessType) != "" {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["indexAccessType"] = node.IndexAccessType
+	}
+	if node.Covering != nil {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["covering"] = *node.Covering
+	}
+	if len(node.UsedColumns) > 0 {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["usedColumns"] = node.UsedColumns
+	}
+	if len(node.KeyColumns) > 0 {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["keyColumns"] = node.KeyColumns
+	}
+	if len(node.Ranges) > 0 {
+		if explainNode.Extra == nil {
+			explainNode.Extra = map[string]any{}
+		}
+		explainNode.Extra["ranges"] = node.Ranges
+	}
+
+	if explainNode.OpType == connection.ExplainOpScan || strings.Contains(lowerOperation, "table scan") {
+		explainNode.Flags = append(explainNode.Flags, connection.ExplainFlagFullScan, connection.ExplainFlagNoIndex)
+	}
+	if explainNode.OpType == connection.ExplainOpSort || strings.Contains(lowerOperation, "filesort") {
+		explainNode.Flags = append(explainNode.Flags, connection.ExplainFlagFilesort)
+	}
+	if strings.Contains(lowerOperation, "temporary") || strings.Contains(lowerOperation, "temp table") || strings.Contains(lowerOperation, "materialize") {
+		explainNode.Flags = append(explainNode.Flags, connection.ExplainFlagTempTable)
+	}
+
+	return explainNode
+}
+
+func classifyMySQLJSONV2OpType(accessType, operation string, covering *bool) string {
+	switch strings.ToLower(strings.TrimSpace(accessType)) {
+	case "table":
+		return connection.ExplainOpScan
+	case "index":
+		if covering != nil && *covering {
+			return connection.ExplainOpIndexOnly
+		}
+		return connection.ExplainOpIndexScan
+	case "filter":
+		return connection.ExplainOpFilter
+	case "join":
+		return connection.ExplainOpJoin
+	case "sort":
+		return connection.ExplainOpSort
+	case "aggregate":
+		return connection.ExplainOpAggregate
+	case "limit":
+		return connection.ExplainOpLimit
+	case "materialize":
+		return connection.ExplainOpMaterialize
+	case "window":
+		return connection.ExplainOpWindow
+	case "union":
+		return connection.ExplainOpUnion
+	case "subquery":
+		return connection.ExplainOpSubquery
+	}
+
+	lowerOperation := strings.ToLower(strings.TrimSpace(operation))
+	switch {
+	case strings.Contains(lowerOperation, "table scan"):
+		return connection.ExplainOpScan
+	case strings.Contains(lowerOperation, "covering index"):
+		return connection.ExplainOpIndexOnly
+	case strings.Contains(lowerOperation, "index lookup"),
+		strings.Contains(lowerOperation, "index range"),
+		strings.Contains(lowerOperation, "index scan"):
+		return connection.ExplainOpIndexScan
+	case strings.Contains(lowerOperation, "filter"):
+		return connection.ExplainOpFilter
+	case strings.Contains(lowerOperation, "join"):
+		return connection.ExplainOpJoin
+	case strings.Contains(lowerOperation, "sort"):
+		return connection.ExplainOpSort
+	case strings.Contains(lowerOperation, "aggregate"),
+		strings.Contains(lowerOperation, "group"):
+		return connection.ExplainOpAggregate
+	case strings.Contains(lowerOperation, "limit"):
+		return connection.ExplainOpLimit
+	case strings.Contains(lowerOperation, "materialize"):
+		return connection.ExplainOpMaterialize
+	case strings.Contains(lowerOperation, "window"):
+		return connection.ExplainOpWindow
+	case strings.Contains(lowerOperation, "union"):
+		return connection.ExplainOpUnion
+	case strings.Contains(lowerOperation, "subquery"):
+		return connection.ExplainOpSubquery
+	default:
+		return connection.ExplainOpOther
 	}
 }
 
@@ -298,7 +587,7 @@ func parseMySQLTableExplain(raw string) (*connection.ExplainResult, error) {
 			accessType = strings.TrimSpace(row[colType])
 		}
 		node := connection.ExplainNode{
-			OpType: classifyMySQLAccessType(accessType),
+			OpType:   classifyMySQLAccessType(accessType),
 			OpDetail: fmt.Sprintf("id=%s type=%s", idStr, strings.ToLower(accessType)),
 		}
 		if colTable >= 0 && colTable < len(row) {
