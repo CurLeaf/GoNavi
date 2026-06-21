@@ -2850,6 +2850,20 @@ func quoteQualifiedIdentByType(dbType string, ident string) string {
 	}
 
 	dbType = resolveDDLDBType(connection.ConnectionConfig{Type: dbType})
+	if dbType == "trino" {
+		parts := strings.Split(raw, ".")
+		switch {
+		case len(parts) >= 3:
+			catalog := strings.TrimSpace(parts[0])
+			schema := strings.TrimSpace(parts[1])
+			table := strings.TrimSpace(strings.Join(parts[2:], "."))
+			if catalog != "" && schema != "" && table != "" {
+				return quoteIdentByType(dbType, catalog) + "." + quoteIdentByType(dbType, schema) + "." + quoteIdentByType(dbType, table)
+			}
+		case len(parts) <= 2:
+			return quoteIdentByType(dbType, raw)
+		}
+	}
 	if dbType == "kingbase" {
 		schema, table := db.SplitKingbaseQualifiedName(raw)
 		if table == "" {

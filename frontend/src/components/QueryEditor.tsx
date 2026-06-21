@@ -24,7 +24,7 @@ import {
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
 import { quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
 import { formatSqlExecutionError } from '../utils/sqlErrorSemantics';
-import { shouldUseSqlEditorManagedTransaction } from '../utils/sqlEditorTransaction';
+import { shouldUseSqlEditorManagedTransactionForType } from '../utils/sqlEditorTransaction';
 import { findSqlStatementRanges, resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/sqlStatementSelection';
 import { isMacLikePlatform } from '../utils/appearance';
 import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
@@ -3205,13 +3205,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 setActiveResultKey('');
                 return;
             }
-            const useManagedTransaction = shouldUseSqlEditorManagedTransaction(sourceStatements);
+            const useManagedTransaction = shouldUseSqlEditorManagedTransactionForType(connCaps.type, sourceStatements);
             if (useManagedTransaction && pendingSqlTransactionRef.current) {
                 message.warning(translate('query_editor.transaction.message.pending_managed_transaction'));
                 return;
             }
             const managedTransactionStatementCount = sourceStatements
-                .filter((statement) => shouldUseSqlEditorManagedTransaction([statement]))
+                .filter((statement) => shouldUseSqlEditorManagedTransactionForType(connCaps.type, [statement]))
                 .length || sourceStatements.length;
 
             const forceReadOnlyResult = connCaps.forceReadOnlyQueryResult;

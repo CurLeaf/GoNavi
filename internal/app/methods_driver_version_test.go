@@ -504,6 +504,39 @@ func TestElasticsearchDriverDefinitionUsesOptionalAgent(t *testing.T) {
 	}
 }
 
+func TestTrinoDriverDefinitionUsesOptionalAgent(t *testing.T) {
+	definition, ok := resolveDriverDefinition("trino")
+	if !ok {
+		t.Fatal("expected trino driver definition")
+	}
+	if definition.Name != "Trino" {
+		t.Fatalf("unexpected trino driver name: %q", definition.Name)
+	}
+	if definition.BuiltIn {
+		t.Fatal("expected trino to be an optional driver agent")
+	}
+	if driverGoModulePathMap["trino"] != "github.com/trinodb/trino-go-client" {
+		t.Fatalf("unexpected trino go module path: %q", driverGoModulePathMap["trino"])
+	}
+	if definition.PinnedVersion != "0.333.0" {
+		t.Fatalf("unexpected trino definition pinned version: %q", definition.PinnedVersion)
+	}
+	if definition.DefaultDownloadURL != "builtin://activate/trino" {
+		t.Fatalf("unexpected trino default download URL: %q", definition.DefaultDownloadURL)
+	}
+	if latestDriverVersionMap["trino"] != "0.333.0" {
+		t.Fatalf("unexpected trino pinned version: %q", latestDriverVersionMap["trino"])
+	}
+
+	tags, err := optionalDriverBuildTags("trino", "")
+	if err != nil {
+		t.Fatalf("resolve trino build tags failed: %v", err)
+	}
+	if tags != "gonavi_trino_driver" {
+		t.Fatalf("unexpected trino build tag: %q", tags)
+	}
+}
+
 func TestIoTDBDriverDefinitionUsesOptionalAgent(t *testing.T) {
 	definition, ok := resolveDriverDefinition("iotdb")
 	if !ok {

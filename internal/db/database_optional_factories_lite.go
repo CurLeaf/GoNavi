@@ -23,4 +23,5 @@ func registerOptionalDatabaseFactories() {
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("iotdb"), "iotdb", "apache-iotdb", "apache_iotdb")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("clickhouse"), "clickhouse")
 	registerDatabaseFactory(newOptionalDriverAgentDatabase("elasticsearch"), "elasticsearch", "elastic")
+	registerDatabaseFactory(newOptionalDriverAgentDatabase("trino"), "trino")
 }

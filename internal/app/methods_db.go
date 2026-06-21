@@ -496,8 +496,8 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		return rawDB, rawTable
 	}
 
-	// Elasticsearch / RocketMQ / MQTT / RabbitMQ / Kafka：对象名可能含多个点或路径，不能按点分割
-	if dbType == "elasticsearch" || dbType == "rocketmq" || dbType == "mqtt" || dbType == "kafka" || dbType == "rabbitmq" {
+	// Elasticsearch / RocketMQ / MQTT / RabbitMQ / Kafka / Trino：对象名可能含多个点或路径，不能按点分割
+	if dbType == "elasticsearch" || dbType == "rocketmq" || dbType == "mqtt" || dbType == "kafka" || dbType == "rabbitmq" || dbType == "trino" {
 		return rawDB, rawTable
 	}
 
@@ -575,10 +575,33 @@ func resolveCreateStatementTargets(config connection.ConnectionConfig, dbType st
 func quoteTableIdentByType(dbType string, schema string, table string) string {
 	s := strings.TrimSpace(schema)
 	t := strings.TrimSpace(table)
+	if dbType == "trino" {
+		catalog, namespace := splitTrinoNamespace(s)
+		switch {
+		case catalog == "" && namespace == "":
+			return quoteIdentByType(dbType, t)
+		case namespace == "":
+			return fmt.Sprintf("%s.%s", quoteIdentByType(dbType, catalog), quoteIdentByType(dbType, t))
+		default:
+			return fmt.Sprintf("%s.%s.%s", quoteIdentByType(dbType, catalog), quoteIdentByType(dbType, namespace), quoteIdentByType(dbType, t))
+		}
+	}
 	if s == "" {
 		return quoteIdentByType(dbType, t)
 	}
 	return fmt.Sprintf("%s.%s", quoteIdentByType(dbType, s), quoteIdentByType(dbType, t))
+}
+
+func splitTrinoNamespace(raw string) (string, string) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(text, ".", 2)
+	if len(parts) == 1 {
+		return strings.TrimSpace(parts[0]), ""
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 }
 
 func buildRunConfigForDDL(config connection.ConnectionConfig, dbType string, dbName string) connection.ConnectionConfig {

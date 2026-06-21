@@ -315,6 +315,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "starrocks",
   "sphinx",
   "clickhouse",
+  "trino",
   "postgres",
   "redis",
   "tdengine",
@@ -346,6 +347,7 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "sphinx",
   "dameng",
   "clickhouse",
+  "trino",
   "postgres",
   "sqlserver",
   "oracle",
@@ -382,6 +384,8 @@ const getDefaultPortByType = (type: string): number => {
       return 9306;
     case "clickhouse":
       return 9000;
+    case "trino":
+      return 8080;
     case "postgres":
     case "vastbase":
     case "opengauss":

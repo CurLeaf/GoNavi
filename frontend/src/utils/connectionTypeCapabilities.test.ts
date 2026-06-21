@@ -16,6 +16,7 @@ describe('connectionTypeCapabilities', () => {
     expect(singleHostUriSchemesByType.postgres).toEqual(['postgresql', 'postgres']);
     expect(singleHostUriSchemesByType.opengauss).toContain('jdbc:opengauss');
     expect(singleHostUriSchemesByType.gaussdb).toEqual(['gaussdb', 'postgresql', 'postgres']);
+    expect(singleHostUriSchemesByType.trino).toEqual(['trino', 'http', 'https']);
     expect(singleHostUriSchemesByType.dameng).toEqual(['dameng', 'dm']);
     expect(singleHostUriSchemesByType.elasticsearch).toEqual(['http', 'https']);
     expect(singleHostUriSchemesByType.chroma).toEqual(['http', 'https', 'chroma']);
@@ -28,6 +29,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsSSLForType('redis')).toBe(true);
     expect(supportsSSLForType('MongoDB')).toBe(true);
     expect(supportsSSLForType('elasticsearch')).toBe(true);
+    expect(supportsSSLForType('trino')).toBe(true);
     expect(supportsSSLForType('gaussdb')).toBe(true);
     expect(supportsSSLForType('greatdb')).toBe(true);
     expect(supportsSSLForType('chroma')).toBe(true);
@@ -45,7 +47,9 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsSSLCAPathForType('gaussdb')).toBe(true);
     expect(supportsSSLClientCertificateForType('gaussdb')).toBe(true);
     expect(supportsSSLCAPathForType('sqlserver')).toBe(true);
+    expect(supportsSSLCAPathForType('trino')).toBe(true);
     expect(supportsSSLClientCertificateForType('sqlserver')).toBe(false);
+    expect(supportsSSLClientCertificateForType('trino')).toBe(true);
     expect(supportsSSLCAPathForType('redis')).toBe(true);
     expect(supportsSSLClientCertificateForType('redis')).toBe(true);
     expect(supportsSSLCAPathForType('chroma')).toBe(true);
@@ -80,6 +84,7 @@ describe('connectionTypeCapabilities', () => {
     expect(supportsConnectionParamsForType('gdb')).toBe(true);
     expect(supportsConnectionParamsForType('postgres')).toBe(true);
     expect(supportsConnectionParamsForType('gaussdb')).toBe(true);
+    expect(supportsConnectionParamsForType('trino')).toBe(true);
     expect(supportsConnectionParamsForType('oracle')).toBe(true);
     expect(supportsConnectionParamsForType('mongodb')).toBe(true);
     expect(supportsConnectionParamsForType('dameng')).toBe(true);

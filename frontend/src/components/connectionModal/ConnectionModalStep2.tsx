@@ -1191,7 +1191,8 @@ const renderStep2 = () => {
               dbType === "highgo" ||
               dbType === "vastbase" ||
               dbType === "opengauss" ||
-              dbType === "gaussdb") &&
+              dbType === "gaussdb" ||
+              dbType === "trino") &&
               renderConfigSectionCard({
                 sectionKey: "service",
                 icon: <DatabaseOutlined />,

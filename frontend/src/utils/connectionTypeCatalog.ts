@@ -18,6 +18,7 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
       { key: 'starrocks', name: 'StarRocks' },
       { key: 'sphinx', name: 'Sphinx' },
       { key: 'clickhouse', name: 'ClickHouse' },
+      { key: 'trino', name: 'Trino' },
       { key: 'postgres', name: 'PostgreSQL' },
       { key: 'sqlserver', name: 'SQL Server' },
       { key: 'iris', name: 'InterSystems IRIS' },
@@ -97,6 +98,8 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
       return 9306;
     case 'clickhouse':
       return 9000;
+    case 'trino':
+      return 8080;
     case 'postgres':
     case 'opengauss':
     case 'gaussdb':
@@ -180,6 +183,8 @@ export const getConnectionTypeHint = (type: string): string => {
     case 'sqlite':
     case 'duckdb':
       return '本地文件连接';
+    case 'trino':
+      return 'HTTP / HTTPS / catalog.schema';
     default:
       return '标准连接配置';
   }

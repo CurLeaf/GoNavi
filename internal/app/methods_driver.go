@@ -395,7 +395,8 @@ const builtinDriverManifestJSON = `{
     "tdengine":  { "engine": "go", "version": "3.7.8", "checksumPolicy": "off", "downloadUrl": "builtin://activate/tdengine" },
     "iotdb":     { "engine": "go", "version": "1.3.7", "checksumPolicy": "off", "downloadUrl": "builtin://activate/iotdb" },
     "clickhouse": { "engine": "go", "version": "2.43.1", "checksumPolicy": "off", "downloadUrl": "builtin://activate/clickhouse" },
-    "elasticsearch": { "engine": "go", "version": "8.19.6", "checksumPolicy": "off", "downloadUrl": "builtin://activate/elasticsearch" }
+    "elasticsearch": { "engine": "go", "version": "8.19.6", "checksumPolicy": "off", "downloadUrl": "builtin://activate/elasticsearch" },
+    "trino": { "engine": "go", "version": "0.333.0", "checksumPolicy": "off", "downloadUrl": "builtin://activate/trino" }
   }
 }`
 
@@ -462,6 +463,7 @@ var latestDriverVersionMap = map[string]string{
 	"iotdb":         "1.3.7",
 	"clickhouse":    "2.43.1",
 	"elasticsearch": "8.19.6",
+	"trino":         "0.333.0",
 	"oracle":        "2.9.0",
 	"postgres":      "1.11.2",
 	"redis":         "9.17.3",
@@ -489,6 +491,7 @@ var driverGoModulePathMap = map[string]string{
 	"iotdb":         "github.com/apache/iotdb-client-go",
 	"clickhouse":    "github.com/ClickHouse/clickhouse-go/v2",
 	"elasticsearch": "github.com/elastic/go-elasticsearch/v8",
+	"trino":         "github.com/trinodb/trino-go-client",
 }
 
 var driverGoModuleAliasPathMap = map[string][]string{
@@ -1745,6 +1748,7 @@ func allDriverDefinitionsWithPackages(packages map[string]pinnedDriverPackage) [
 		buildOptionalGoDriverDefinition("iotdb", "Apache IoTDB", packages),
 		buildOptionalGoDriverDefinition("clickhouse", "ClickHouse", packages),
 		buildOptionalGoDriverDefinition("elasticsearch", "Elasticsearch", packages),
+		buildOptionalGoDriverDefinition("trino", "Trino", packages),
 	}
 }
 
@@ -4330,6 +4334,8 @@ func optionalDriverBuildTag(driverType string, selectedVersion string) (string, 
 		return "gonavi_clickhouse_driver", nil
 	case "elasticsearch":
 		return "gonavi_elasticsearch_driver", nil
+	case "trino":
+		return "gonavi_trino_driver", nil
 	default:
 		return "", fmt.Errorf("未配置驱动构建标签：%s", driverType)
 	}

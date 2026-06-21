@@ -7,7 +7,7 @@ cd "$SCRIPT_DIR"
 SCRIPT_DIR_WINDOWS="$(pwd -W 2>/dev/null || true)"
 SCRIPT_DIR_WINDOWS="${SCRIPT_DIR_WINDOWS//\\//}"
 
-DEFAULT_DRIVERS=(mariadb oceanbase diros starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss gaussdb iris mongodb tdengine iotdb clickhouse elasticsearch)
+DEFAULT_DRIVERS=(mariadb oceanbase diros starrocks sphinx sqlserver sqlite duckdb dameng kingbase highgo vastbase opengauss gaussdb iris mongodb tdengine iotdb clickhouse elasticsearch trino)
 OUTPUT_FILE="internal/db/driver_agent_revisions_gen.go"
 
 usage() {
@@ -31,7 +31,7 @@ normalize_driver() {
     opengauss|open_gauss|open-gauss) echo "opengauss" ;;
     gaussdb|gauss_db|gauss-db) echo "gaussdb" ;;
     elasticsearch|elastic) echo "elasticsearch" ;;
-    mariadb|diros|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|gaussdb|iris|mongodb|tdengine|iotdb|clickhouse)
+    mariadb|diros|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|gaussdb|iris|mongodb|tdengine|iotdb|clickhouse|trino)
       echo "$value"
       ;;
     *)
@@ -139,7 +139,8 @@ tdengine:internal/db/tdengine_impl.go|\
 iotdb:internal/db/iotdb_impl.go|\
 clickhouse:internal/db/clickhouse_impl.go|\
 elasticsearch:internal/db/elasticsearch_impl.go|\
-elasticsearch:internal/db/elasticsearch_helpers.go)
+elasticsearch:internal/db/elasticsearch_helpers.go|\
+trino:internal/db/trino_impl.go)
       return 0
       ;;
   esac

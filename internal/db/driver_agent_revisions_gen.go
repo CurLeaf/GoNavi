@@ -24,5 +24,6 @@ func init() {
 		"iotdb":         "src-5ba9da13c6a272f9",
 		"clickhouse":    "src-99c8babfefdf142c",
 		"elasticsearch": "src-36b2e2b5f49db9d1",
+		"trino":         "src-d264ceca132c185c",
 	}
 }

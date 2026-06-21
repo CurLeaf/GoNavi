@@ -382,6 +382,69 @@ export const parseClickHouseHTTPUriToValues = (
   };
 };
 
+const splitTrinoNamespace = (
+  raw: unknown,
+): { catalog: string; schema: string } => {
+  const text = String(raw || "").trim();
+  if (!text) {
+    return { catalog: "", schema: "" };
+  }
+  const [catalog, schema = ""] = text.split(".", 2);
+  return {
+    catalog: String(catalog || "").trim(),
+    schema: String(schema || "").trim(),
+  };
+};
+
+const joinTrinoNamespace = (catalog: string, schema: string) => {
+  const safeCatalog = String(catalog || "").trim();
+  const safeSchema = String(schema || "").trim();
+  if (!safeCatalog) return safeSchema;
+  if (!safeSchema) return safeCatalog;
+  return `${safeCatalog}.${safeSchema}`;
+};
+
+export const parseTrinoUriToValues = (
+  uriText: string,
+): Record<string, any> | null => {
+  const trimmed = String(uriText || "").trim();
+  const parsed = parseSingleHostUri(
+    trimmed,
+    ["trino", "http", "https"],
+    getDefaultPortByType("trino"),
+  );
+  if (!parsed) {
+    return null;
+  }
+  const params = new URLSearchParams(parsed.params);
+  const catalog = String(params.get("catalog") || "").trim();
+  const schema = String(params.get("schema") || "").trim();
+  params.delete("catalog");
+  params.delete("schema");
+
+  const skipVerify = normalizeUriBool(
+    params.get("skip_verify") || params.get("skipVerify"),
+  );
+  params.delete("skip_verify");
+  params.delete("skipVerify");
+
+  const namespace =
+    joinTrinoNamespace(catalog, schema) || String(parsed.database || "").trim();
+  return {
+    host: parsed.host,
+    port: parsed.port,
+    user: parsed.username,
+    password: parsed.password,
+    database: namespace,
+    useSSL: trimmed.toLowerCase().startsWith("https://"),
+    sslMode: trimmed.toLowerCase().startsWith("https://")
+      ? (skipVerify ? "skip-verify" : "required")
+      : "disable",
+    ...extractSSLPathValuesFromParams(params, "trino"),
+    connectionParams: serializeConnectionParams(params),
+  };
+};
+
 const firstConnectionParamValue = (
   params: URLSearchParams,
   names: string[],
@@ -867,6 +930,10 @@ export const parseUriToValues = (
     };
   }
 
+  if (type === "trino") {
+    return parseTrinoUriToValues(trimmedUri);
+  }
+
   if (type === "clickhouse") {
     const httpValues = parseClickHouseHTTPUriToValues(trimmedUri);
     if (httpValues) {
@@ -1073,6 +1140,9 @@ export const getUriPlaceholder = (dbType: string) => {
   if (dbType === "clickhouse") {
     return "clickhouse://default:pass@127.0.0.1:9000/default";
   }
+  if (dbType === "trino") {
+    return "http://user@127.0.0.1:8080?catalog=hive&schema=default&source=GoNavi";
+  }
   if (dbType === "chroma") {
     return "http://127.0.0.1:8000/default_database?tenant=default_tenant";
   }
@@ -1142,6 +1212,8 @@ export const getConnectionParamsPlaceholder = (
       return "timeout=30";
     case "clickhouse":
       return "max_execution_time=60&compress=lz4";
+    case "trino":
+      return "session_properties=query_max_execution_time:30m&query_timeout=30s";
     case "mongodb":
       return "retryWrites=true&readPreference=secondaryPreferred";
     case "chroma":
@@ -1181,6 +1253,44 @@ export const buildUriFromValues = (values: any) => {
   const encodedAuth = user
     ? `${encodeURIComponent(user)}${password ? `:${encodeURIComponent(password)}` : ""}@`
     : "";
+
+  if (type === "trino") {
+    const params = new URLSearchParams();
+    mergeConnectionParams(params, values.connectionParams);
+
+    const { catalog, schema } = splitTrinoNamespace(values.database);
+    if (catalog) {
+      params.set("catalog", catalog);
+    } else {
+      params.delete("catalog");
+    }
+    if (schema) {
+      params.set("schema", schema);
+    } else {
+      params.delete("schema");
+    }
+    if (!String(params.get("source") || "").trim()) {
+      params.set("source", "GoNavi");
+    }
+
+    if (values.useSSL) {
+      const mode = String(values.sslMode || "required")
+        .trim()
+        .toLowerCase();
+      if (mode === "skip-verify" || mode === "preferred") {
+        params.set("skip_verify", "true");
+      } else {
+        params.delete("skip_verify");
+      }
+      appendSSLPathParamsForUri(params, type, values);
+    } else {
+      params.delete("skip_verify");
+    }
+
+    const query = params.toString();
+    const scheme = values.useSSL ? "https" : "http";
+    return `${scheme}://${encodedAuth}${toAddress(host, port, defaultPort)}${query ? `?${query}` : ""}`;
+  }
 
   if (isMySQLCompatibleType(type)) {
     const selectedOceanBaseProtocol =

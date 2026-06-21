@@ -249,7 +249,13 @@ const isSqlEditorTransactionControlStatement = (statement: string): boolean => {
     return keyword === 'start' && /\btransaction\b/i.test(statement);
 };
 
-export const shouldUseSqlEditorManagedTransaction = (statements: string[]): boolean => {
+export const shouldUseSqlEditorManagedTransactionForType = (
+    type: string,
+    statements: string[],
+): boolean => {
+    if (String(type || '').trim().toLowerCase() === 'trino') {
+        return false;
+    }
     let hasManagedWrite = false;
     for (const statement of statements) {
         const trimmed = String(statement || '').trim();
@@ -265,3 +271,6 @@ export const shouldUseSqlEditorManagedTransaction = (statements: string[]): bool
     }
     return hasManagedWrite;
 };
+
+export const shouldUseSqlEditorManagedTransaction = (statements: string[]): boolean =>
+    shouldUseSqlEditorManagedTransactionForType('', statements);

@@ -111,6 +111,7 @@ const SQL_QUERY_EXPORT_TYPES = new Set([
   'dameng',
   'tdengine',
   'clickhouse',
+  'trino',
 ]);
 
 const COPY_INSERT_TYPES = new Set([
@@ -135,6 +136,7 @@ const COPY_INSERT_TYPES = new Set([
   'dameng',
   'tdengine',
   'clickhouse',
+  'trino',
 ]);
 
 const QUERY_EDITOR_DISABLED_TYPES = new Set(['redis']);
