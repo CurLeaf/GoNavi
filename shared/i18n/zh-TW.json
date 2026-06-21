@@ -1,5 +1,8 @@
 {
   "common.cancel": "取消",
+  "redis.db_alias.menu.set": "設定別名",
+  "redis.db_alias.modal.title": "{{db}} 的別名",
+  "redis.db_alias.modal.placeholder": "例如：快取、工作階段（留空則清除）",
   "common.back_to_previous": "返回上一步",
   "common.close": "關閉",
   "common.confirm": "確認",

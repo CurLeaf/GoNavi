@@ -61,6 +61,12 @@ import {
   type TabDisplaySettings,
 } from "./utils/tabDisplay";
 import {
+  DEFAULT_REDIS_DB_ALIASES,
+  sanitizeRedisDbAliases,
+  setRedisDbAlias as applyRedisDbAlias,
+  type RedisDbAliasMap,
+} from "./utils/redisDbAlias";
+import {
   captureLegacySavedQueriesSnapshot,
   deleteSavedQueryFromBackend,
   sanitizeSavedQueries,
@@ -80,6 +86,7 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
   tabDisplay: TabDisplaySettings;
+  redisDbAliases: RedisDbAliasMap;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -94,6 +101,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   customUIFontFamily: null,
   customMonoFontFamily: null,
   tabDisplay: DEFAULT_TAB_DISPLAY_SETTINGS,
+  redisDbAliases: DEFAULT_REDIS_DB_ALIASES,
   ...DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
 };
 const DEFAULT_UI_SCALE = 1.0;
@@ -1337,6 +1345,11 @@ interface AppState {
   setTheme: (theme: "light" | "dark") => void;
   setLanguagePreference: (languagePreference: LanguagePreference) => void;
   setAppearance: (appearance: Partial<AppearanceSettings>) => void;
+  setRedisDbAlias: (
+    connectionId: string,
+    dbIndex: number,
+    alias: string,
+  ) => void;
   setUiScale: (scale: number) => void;
   setFontSize: (size: number) => void;
   setStartupFullscreen: (enabled: boolean) => void;
@@ -1976,6 +1989,7 @@ const sanitizeAppearance = (
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),
     tabDisplay: sanitizeTabDisplaySettings(appearance.tabDisplay),
+    redisDbAliases: sanitizeRedisDbAliases(appearance.redisDbAliases),
     showDataTableVerticalBorders:
       dataGridDisplaySettings.showDataTableVerticalBorders,
     dataTableDensity: dataGridDisplaySettings.dataTableDensity,
@@ -3015,6 +3029,21 @@ export const useStore = create<AppState>()(
         set((state) => ({
           appearance: sanitizeAppearance(
             { ...state.appearance, ...appearance },
+            PERSIST_VERSION,
+          ),
+        })),
+      setRedisDbAlias: (connectionId, dbIndex, alias) =>
+        set((state) => ({
+          appearance: sanitizeAppearance(
+            {
+              ...state.appearance,
+              redisDbAliases: applyRedisDbAlias(
+                state.appearance.redisDbAliases,
+                connectionId,
+                dbIndex,
+                alias,
+              ),
+            },
             PERSIST_VERSION,
           ),
         })),

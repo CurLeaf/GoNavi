@@ -169,7 +169,13 @@ export const useSidebarV2ContextMenu = ({
           return count > 0 ? count.toLocaleString() : '';
       }
       if (node.type === 'redis-db') {
-          const match = String(node.title || '').match(/\((\d+)\)/);
+          const keyCount = Number(node?.dataRef?.redisKeyCount);
+          if (Number.isFinite(keyCount) && keyCount > 0) {
+              return keyCount.toLocaleString();
+          }
+          // Fallback for nodes built before redisKeyCount was tracked; avoid
+          // matching an alias by only reading a trailing count suffix.
+          const match = String(node.title || '').match(/\((\d+)\)\s*$/);
           return match?.[1] || '';
       }
       if (node.type === 'table') {

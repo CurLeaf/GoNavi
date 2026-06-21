@@ -1,5 +1,8 @@
 {
   "common.cancel": "取消",
+  "redis.db_alias.menu.set": "设置别名",
+  "redis.db_alias.modal.title": "{{db}} 的别名",
+  "redis.db_alias.modal.placeholder": "例如：缓存、会话（留空则清除）",
   "common.back_to_previous": "返回上一步",
   "common.close": "关闭",
   "common.confirm": "确认",
