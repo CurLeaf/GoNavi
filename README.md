@@ -51,6 +51,7 @@ GoNavi is designed for developers and DBAs who need a unified desktop experience
 | Document | MongoDB | Optional driver agent | Document query, collection browsing, connection management |
 | Time-series | TDengine | Optional driver agent | Time-series schema browsing and querying |
 | Columnar Analytics | ClickHouse | Optional driver agent | Analytical query, object browsing, SQL execution |
+| Federated Query | Trino | Optional driver agent | Cross-source SQL via multiple catalogs, `catalog.schema` browsing, SQL execution |
 | Search | Elasticsearch | Optional driver agent | Index browsing, mapping inspection, JSON DSL / query_string search |
 | Extensibility | Custom Driver/DSN | Custom | Extend to more data sources via Driver + DSN |
 
