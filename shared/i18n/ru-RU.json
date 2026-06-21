@@ -4847,5 +4847,8 @@
   "sidebar.v2_database_menu.export_backup_section": "Экспорт и резервное копирование",
   "sidebar.v2_database_menu.export_all_table_schema_sql": "Экспортировать схемы всех таблиц · SQL",
   "sidebar.v2_database_menu.backup_all_tables_sql": "Резервная копия всех таблиц · схема + данные SQL",
-  "ai_settings.message.load_provider_failed": "Не удалось прочитать конфигурацию поставщика"
+  "ai_settings.message.load_provider_failed": "Не удалось прочитать конфигурацию поставщика",
+  "data_sync.field.schema": "Схема",
+  "data_sync.message.fetch_target_schemas_failed_detail": "Не удалось получить целевые схемы: {{detail}}",
+  "data_sync.message.select_target_schema": "Выберите целевую схему"
 }

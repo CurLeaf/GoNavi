@@ -4847,5 +4847,8 @@
   "sidebar.v2_database_menu.export_backup_section": "エクスポートとバックアップ",
   "sidebar.v2_database_menu.export_all_table_schema_sql": "すべてのテーブル構造をエクスポート · SQL",
   "sidebar.v2_database_menu.backup_all_tables_sql": "すべてのテーブルをバックアップ · スキーマ + データ SQL",
-  "ai_settings.message.load_provider_failed": "プロバイダー設定の読み込みに失敗しました"
+  "ai_settings.message.load_provider_failed": "プロバイダー設定の読み込みに失敗しました",
+  "data_sync.field.schema": "スキーマ",
+  "data_sync.message.fetch_target_schemas_failed_detail": "ターゲットスキーマの取得に失敗しました: {{detail}}",
+  "data_sync.message.select_target_schema": "ターゲットスキーマを選択してください"
 }

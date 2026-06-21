@@ -4847,5 +4847,8 @@
   "app.theme.data_table.font_size": "Data Table Font Size",
   "app.theme.data_table.sidebar_tree_font_size": "Sidebar Schema Tree Font Size",
   "app.theme.data_table.follow_global": "Follow Global",
-  "ai_settings.message.load_provider_failed": "Failed to read provider configuration"
+  "ai_settings.message.load_provider_failed": "Failed to read provider configuration",
+  "data_sync.field.schema": "Schema",
+  "data_sync.message.fetch_target_schemas_failed_detail": "Failed to fetch target schemas: {{detail}}",
+  "data_sync.message.select_target_schema": "Select target schema"
 }

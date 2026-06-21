@@ -47,7 +47,7 @@ func validateSourceQuerySyncConfig(config SyncConfig) (string, error) {
 
 func resolveTargetQueryTable(config SyncConfig, tableName string) (string, string, string, string) {
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	targetSchema, targetTable := normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
+	targetSchema, targetTable := normalizeSyncTargetSchemaAndTable(config, tableName)
 	targetQueryTable := qualifiedNameForQuery(targetType, targetSchema, targetTable, tableName)
 	return targetType, targetSchema, targetTable, targetQueryTable
 }
@@ -504,8 +504,7 @@ func (s *SyncEngine) runSourceQuerySync(config SyncConfig) SyncResult {
 	updates := make([]connection.UpdateRow, 0)
 	deletes := make([]map[string]interface{}, 0)
 	applyTableName := ctx.TargetTable
-	switch ctx.TargetType {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver":
+	if shouldUseQualifiedSyncApplyTable(config.TargetConfig) {
 		applyTableName = ctx.TargetQueryTable
 	}
 

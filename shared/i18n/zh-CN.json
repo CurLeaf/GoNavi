@@ -4847,5 +4847,8 @@
   "app.theme.data_table.font_size": "数据表字体大小",
   "app.theme.data_table.sidebar_tree_font_size": "左侧库表字体大小",
   "app.theme.data_table.follow_global": "跟随全局",
-  "ai_settings.message.load_provider_failed": "读取供应商配置失败"
+  "ai_settings.message.load_provider_failed": "读取供应商配置失败",
+  "data_sync.field.schema": "模式",
+  "data_sync.message.fetch_target_schemas_failed_detail": "获取目标模式失败: {{detail}}",
+  "data_sync.message.select_target_schema": "请选择目标模式"
 }

@@ -19,6 +19,7 @@ type SyncConfig struct {
 	TargetConfig        connection.ConnectionConfig `json:"targetConfig"`
 	SourceDatabase      string                      `json:"sourceDatabase,omitempty"`
 	TargetDatabase      string                      `json:"targetDatabase,omitempty"`
+	TargetSchema        string                      `json:"targetSchema,omitempty"`
 	Tables              []string                    `json:"tables"`
 	SourceQuery         string                      `json:"sourceQuery,omitempty"`
 	Content             string                      `json:"content,omitempty"` // "data", "schema", "both"
@@ -213,8 +214,7 @@ func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
 			targetTable := plan.TargetTable
 			sourceQueryTable, targetQueryTable := plan.SourceQueryTable, plan.TargetQueryTable
 			applyTableName := targetTable
-			switch targetType {
-			case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver":
+			if shouldUseQualifiedSyncApplyTable(config.TargetConfig) {
 				applyTableName = targetQueryTable
 			}
 

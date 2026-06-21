@@ -4847,5 +4847,8 @@
   "sidebar.v2_database_menu.export_backup_section": "匯出與備份",
   "sidebar.v2_database_menu.export_all_table_schema_sql": "匯出全部資料表結構 · SQL",
   "sidebar.v2_database_menu.backup_all_tables_sql": "備份全部資料表 · 結構 + 資料 SQL",
-  "ai_settings.message.load_provider_failed": "讀取供應商設定失敗"
+  "ai_settings.message.load_provider_failed": "讀取供應商設定失敗",
+  "data_sync.field.schema": "模式",
+  "data_sync.message.fetch_target_schemas_failed_detail": "取得目標模式失敗: {{detail}}",
+  "data_sync.message.select_target_schema": "請選擇目標模式"
 }

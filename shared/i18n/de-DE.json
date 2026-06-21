@@ -4847,5 +4847,8 @@
   "sidebar.v2_database_menu.export_backup_section": "Export und Sicherung",
   "sidebar.v2_database_menu.export_all_table_schema_sql": "Schemas aller Tabellen exportieren · SQL",
   "sidebar.v2_database_menu.backup_all_tables_sql": "Alle Tabellen sichern · Schema + Daten SQL",
-  "ai_settings.message.load_provider_failed": "Anbieterkonfiguration konnte nicht gelesen werden"
+  "ai_settings.message.load_provider_failed": "Anbieterkonfiguration konnte nicht gelesen werden",
+  "data_sync.field.schema": "Schema",
+  "data_sync.message.fetch_target_schemas_failed_detail": "Zielschemas konnten nicht geladen werden: {{detail}}",
+  "data_sync.message.select_target_schema": "Zielschema auswählen"
 }

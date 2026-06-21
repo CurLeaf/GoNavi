@@ -8,6 +8,7 @@ type BuildDataSyncRequestParams = {
   targetConfig: any;
   sourceDatabase?: string;
   targetDatabase?: string;
+  targetSchema?: string;
   selectedTables: string[];
   sourceDatasetMode: SourceDatasetMode;
   sourceQuery: string;
@@ -64,6 +65,7 @@ export const buildDataSyncRequest = ({
   targetConfig,
   sourceDatabase,
   targetDatabase,
+  targetSchema,
   selectedTables,
   sourceDatasetMode,
   sourceQuery,
@@ -83,6 +85,7 @@ export const buildDataSyncRequest = ({
     targetConfig,
     sourceDatabase: String(sourceDatabase || '').trim(),
     targetDatabase: String(targetDatabase || '').trim(),
+    targetSchema: String(targetSchema || '').trim(),
     tables: selectedTables,
     sourceQuery: isQueryMode ? String(sourceQuery || '').trim() : undefined,
     content: isQueryMode ? 'data' : syncContent,
