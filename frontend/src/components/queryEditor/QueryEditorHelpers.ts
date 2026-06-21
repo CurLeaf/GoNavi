@@ -604,6 +604,20 @@ export const getNormalizedOffsetAtPosition = (
     return Math.max(0, Math.min(text.length, offset + Math.max(0, position.column - 1)));
 };
 
+export const getNormalizedPositionAtOffset = (
+    sqlText: string,
+    offset: number,
+): { lineNumber: number; column: number } => {
+    const text = String(sqlText || '').replace(/\r\n/g, '\n');
+    const safeOffset = Math.max(0, Math.min(text.length, Number.isFinite(offset) ? Math.trunc(offset) : 0));
+    const prefix = text.slice(0, safeOffset);
+    const lines = prefix.split('\n');
+    return {
+        lineNumber: Math.max(1, lines.length),
+        column: (lines[lines.length - 1]?.length || 0) + 1,
+    };
+};
+
 export const getFirstRowValue = (row: Record<string, any>): string => {
     for (const value of Object.values(row || {})) {
         if (value !== undefined && value !== null) {

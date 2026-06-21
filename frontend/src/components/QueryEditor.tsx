@@ -85,6 +85,7 @@ import {
     dispatchQueryEditorSidebarLocate,
     getCaseInsensitiveValue,
     getFirstRowValue,
+    getNormalizedPositionAtOffset,
     getInitialEditorQuery,
     getMySQLShowTablesName,
     getNormalizedOffsetAtPosition,
@@ -752,16 +753,21 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
 
       const fullSQL = String(model.getValue?.() || '');
-      const cursorOffset = model.getOffsetAt?.(position);
-      const range = resolveCurrentSqlStatementRange(fullSQL, Number(cursorOffset));
+      const normalizedPosition = normalizeEditorPosition(position);
+      if (!normalizedPosition) {
+          return;
+      }
+      const cursorOffset = getNormalizedOffsetAtPosition(fullSQL, normalizedPosition);
+      const range = resolveCurrentSqlStatementRange(fullSQL, cursorOffset);
       if (!range) {
           void message.info(translate('query_editor.message.no_selectable_sql'));
           return;
       }
 
-      const start = model.getPositionAt(range.start);
-      const end = model.getPositionAt(range.end);
+      const start = getNormalizedPositionAtOffset(fullSQL, range.start);
+      const end = getNormalizedPositionAtOffset(fullSQL, range.end);
       const selection = new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column);
+      editor.setSelections?.([selection]);
       editor.setSelection(selection);
       editor.revealRangeInCenterIfOutsideViewport?.(selection);
       editor.focus?.();

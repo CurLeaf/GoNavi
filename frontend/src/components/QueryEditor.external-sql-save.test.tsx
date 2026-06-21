@@ -224,6 +224,9 @@ const editorState = vi.hoisted(() => {
     setSelection: vi.fn((selection: any) => {
       state.selection = selection;
     }),
+    setSelections: vi.fn((selections: any[]) => {
+      state.selection = Array.isArray(selections) ? selections[0] ?? null : null;
+    }),
     executeEdits: vi.fn((_source: string, edits: any[]) => {
       edits.forEach((edit) => {
         const start = offsetAt({ lineNumber: edit.range.startLineNumber, column: edit.range.startColumn });
@@ -2268,6 +2271,37 @@ describe('QueryEditor external SQL save', () => {
 
     expect(messageApi.info).toHaveBeenCalledWith('No selectable SQL statement.');
     expect(messageApi.info).not.toHaveBeenCalledWith('没有可选择的 SQL 语句。');
+  });
+
+  it('selects only the current SQL statement when the editor content uses CRLF line endings', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
+    const sql = [
+      'SELECT * FROM first_table;',
+      '',
+      'SELECT * FROM second_table;',
+      '',
+      'SELECT a.id, a.name FROM third_table a ORDER BY a.id;',
+    ].join('\r\n');
+    editorState.position = { lineNumber: 5, column: 18 };
+    editorState.selection = null;
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: sql, readOnly: true })} />);
+    });
+
+    const selectCurrentStatementAction = findEditorAction('gonavi.selectCurrentStatement');
+    expect(selectCurrentStatementAction).toBeTruthy();
+
+    await act(async () => {
+      await selectCurrentStatementAction.run();
+    });
+
+    expect(editorState.selection).toMatchObject({
+      startLineNumber: 5,
+      startColumn: 1,
+      endLineNumber: 5,
+      endColumn: 'SELECT a.id, a.name FROM third_table a ORDER BY a.id;'.length,
+    });
   });
 
   it('shows the object info miss toast in English when the cursor is not on a recognized table or column', async () => {
