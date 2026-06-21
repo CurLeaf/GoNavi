@@ -8,6 +8,7 @@ import { setCurrentLanguage } from '../i18n';
 import { I18nProvider } from '../i18n/provider';
 import type { SavedQuery, TabData } from '../types';
 import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
+import { setGlobalImeCompositionActive } from '../utils/shortcuts';
 import { clearQueryTabDraft, clearSQLFileTabDraft, getQueryTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
 import QueryEditor, {
   collectQueryEditorObjectDecorationCandidates,
@@ -689,6 +690,7 @@ describe('QueryEditor external SQL save', () => {
     clearQueryTabDraft('tab-2');
     clearSQLFileTabDraft('tab-1');
     clearSQLFileTabDraft('tab-2');
+    setGlobalImeCompositionActive(false);
   });
 
   afterEach(() => {
@@ -3357,6 +3359,97 @@ describe('QueryEditor external SQL save', () => {
     expect(lastDecorationCall?.[1]?.[0]?.options?.inlineClassName).toBe('gonavi-query-editor-link-hint');
   });
 
+  it('ignores IME candidate keydown events when syncing modifier hover state', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    editorState.value = 'select 1';
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value })} />);
+    });
+
+    editorState.editor.updateOptions.mockClear();
+    editorState.editor.deltaDecorations.mockClear();
+
+    await act(async () => {
+      const imeEvent = {
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        key: 'Process',
+        keyCode: 229,
+        which: 229,
+        isComposing: true,
+        nativeEvent: {
+          isComposing: true,
+          keyCode: 229,
+          which: 229,
+        },
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        target: null,
+      };
+      windowListeners.keydown?.forEach((listener) => listener(imeEvent));
+    });
+
+    expect(editorState.editor.updateOptions).not.toHaveBeenCalledWith({ mouseStyle: 'text' });
+    expect(editorState.editor.deltaDecorations).not.toHaveBeenCalled();
+  });
+
+  it('ignores candidate number keys while a composition session is active', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    editorState.value = 'select 1';
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value })} />);
+    });
+
+    setGlobalImeCompositionActive(true);
+    editorState.editor.updateOptions.mockClear();
+    editorState.editor.deltaDecorations.mockClear();
+
+    await act(async () => {
+      const candidateSelectEvent = {
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        key: '1',
+        keyCode: 49,
+        which: 49,
+        isComposing: false,
+        nativeEvent: {
+          isComposing: false,
+        },
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        target: null,
+      };
+      windowListeners.keydown?.forEach((listener) => listener(candidateSelectEvent));
+    });
+
+    expect(editorState.editor.updateOptions).not.toHaveBeenCalled();
+    expect(editorState.editor.deltaDecorations).not.toHaveBeenCalled();
+  });
+
   it('keeps query editor hyperlink decorations blue with a solid underline', () => {
     const css = readFileSync(new URL('../App.css', import.meta.url), 'utf8');
 
@@ -3837,6 +3930,183 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.editor.deltaDecorations).not.toHaveBeenCalled();
     expect(editorState.editor.getModel().getValueLength).not.toHaveBeenCalled();
     expect(editorState.editor.getModel().getValue).not.toHaveBeenCalled();
+  });
+
+  it('ignores focused local tab query echoes so IME candidate commits are not overwritten', async () => {
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    editorState.value = '';
+    editorState.hasTextFocus = true;
+    editorState.editor.setValue.mockClear();
+
+    await act(async () => {
+      editorState.latestOnChange?.('我');
+    });
+
+    editorState.editor.getValue.mockImplementationOnce(() => '');
+    await act(async () => {
+      renderer.update(<QueryEditor tab={createTab({ query: '我' })} />);
+    });
+
+    expect(getQueryTabDraft('tab-1')).toBe('我');
+    expect(editorState.editor.setValue).not.toHaveBeenCalled();
+  });
+
+  it('still applies true external tab query changes while the editor is focused', async () => {
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    editorState.value = '';
+    editorState.hasTextFocus = true;
+    editorState.editor.setValue.mockClear();
+
+    await act(async () => {
+      editorState.latestOnChange?.('我');
+    });
+
+    editorState.editor.getValue.mockImplementationOnce(() => '');
+    await act(async () => {
+      renderer.update(<QueryEditor tab={createTab({ query: 'SELECT 2;' })} />);
+    });
+
+    expect(editorState.editor.setValue).toHaveBeenCalledWith('SELECT 2;');
+  });
+
+  it('recovers committed IME text when Monaco composition end leaves the model unchanged', async () => {
+    vi.useFakeTimers();
+    const domListeners: Record<string, ((event?: any) => void)[]> = {};
+    editorState.domNode.addEventListener.mockImplementation((type: string, listener: (event?: any) => void) => {
+      domListeners[type] ||= [];
+      domListeners[type].push(listener);
+    });
+    editorState.editor.getValue.mockReset();
+    editorState.editor.getValue.mockImplementation(() => editorState.value);
+
+    try {
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: "select '';" })} />);
+      });
+
+      editorState.position = { lineNumber: 1, column: 9 };
+      editorState.selection = null;
+      editorState.editor.executeEdits.mockClear();
+
+      await act(async () => {
+        domListeners.compositionstart?.forEach((listener) => listener({ data: '' }));
+        domListeners.compositionend?.forEach((listener) => listener({ data: '我' }));
+      });
+
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+        'gonavi-ime-composition-fallback',
+        [{
+          range: expect.objectContaining({
+            startLineNumber: 1,
+            startColumn: 9,
+            endLineNumber: 1,
+            endColumn: 9,
+          }),
+          text: '我',
+          forceMoveMarkers: true,
+        }],
+      );
+      expect(editorState.value).toBe("select '我';");
+      expect(getQueryTabDraft('tab-1')).toBe("select '我';");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not duplicate IME text when Monaco already applied the composition commit', async () => {
+    vi.useFakeTimers();
+    const domListeners: Record<string, ((event?: any) => void)[]> = {};
+    editorState.domNode.addEventListener.mockImplementation((type: string, listener: (event?: any) => void) => {
+      domListeners[type] ||= [];
+      domListeners[type].push(listener);
+    });
+    editorState.editor.getValue.mockReset();
+    editorState.editor.getValue.mockImplementation(() => editorState.value);
+
+    try {
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: "select '';" })} />);
+      });
+
+      editorState.position = { lineNumber: 1, column: 9 };
+      editorState.selection = null;
+      editorState.editor.executeEdits.mockClear();
+
+      await act(async () => {
+        domListeners.compositionstart?.forEach((listener) => listener({ data: '' }));
+        editorState.value = "select '我';";
+        domListeners.compositionend?.forEach((listener) => listener({ data: '我' }));
+      });
+
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(editorState.editor.executeEdits).not.toHaveBeenCalledWith(
+        'gonavi-ime-composition-fallback',
+        expect.anything(),
+      );
+      expect(editorState.value).toBe("select '我';");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses beforeinput data as the IME fallback text when composition end data is empty', async () => {
+    vi.useFakeTimers();
+    const domListeners: Record<string, ((event?: any) => void)[]> = {};
+    editorState.domNode.addEventListener.mockImplementation((type: string, listener: (event?: any) => void) => {
+      domListeners[type] ||= [];
+      domListeners[type].push(listener);
+    });
+    editorState.editor.getValue.mockReset();
+    editorState.editor.getValue.mockImplementation(() => editorState.value);
+
+    try {
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: "select '';" })} />);
+      });
+
+      editorState.position = { lineNumber: 1, column: 9 };
+      editorState.selection = null;
+      editorState.editor.executeEdits.mockClear();
+
+      await act(async () => {
+        domListeners.compositionstart?.forEach((listener) => listener({ data: '' }));
+        domListeners.beforeinput?.forEach((listener) => listener({
+          data: '我',
+          inputType: 'insertCompositionText',
+          isComposing: true,
+        }));
+        domListeners.compositionend?.forEach((listener) => listener({ data: '' }));
+      });
+
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+        'gonavi-ime-composition-fallback',
+        [expect.objectContaining({ text: '我' })],
+      );
+      expect(editorState.value).toBe("select '我';");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps short regular query typing on the Monaco fast path without rerender side effects', async () => {

@@ -89,6 +89,7 @@ import {
   getShortcutDisplay,
   getShortcutDisplayLabel,
   getShortcutPlatform,
+  installGlobalImeCompositionTracking,
   isEditableElement,
   isShortcutMatch,
   normalizeShortcutCombo,
@@ -1378,6 +1379,9 @@ function App() {
       import.meta.env.DEV,
       import.meta.env.VITE_GONAVI_ENABLE_MAC_WINDOW_DIAGNOSTICS,
   );
+  useEffect(() => {
+      return installGlobalImeCompositionTracking(window, document);
+  }, []);
   const {
       aboutDisplayVersion,
       aboutInfo,

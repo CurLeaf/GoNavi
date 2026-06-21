@@ -10,7 +10,7 @@ import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBQueryMultiTransactional, DB
 import { GONAVI_ROW_KEY } from './DataGrid';
 import { getDataSourceCapabilities, shouldShowOceanBaseRowNumberColumn } from '../utils/dataSourceCapabilities';
 import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
-import { getShortcutDisplayLabel, getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, isEditableElement, isShortcutMatch, comboToMonacoKeyBinding, resolveShortcutBinding } from "../utils/shortcuts";
+import { getShortcutDisplayLabel, getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, isEditableElement, isImeComposingKeyEvent, isShortcutMatch, comboToMonacoKeyBinding, resolveShortcutBinding } from "../utils/shortcuts";
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { isPostgresSchemaDialect } from '../utils/connectionDriverType';
@@ -246,6 +246,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const aiContextMenuActionDisposablesRef = useRef<any[]>([]);
   const toggleQueryResultsPanelActionRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(getTabQueryValue(tab));
+  const lastLocalQueryRef = useRef<string>(query);
+  const imeCompositionFallbackRef = useRef<{
+      editor: any;
+      valueBefore: string;
+      selectionBefore: any;
+      positionBefore: { lineNumber: number; column: number } | null;
+      committedText: string;
+  } | null>(null);
+  const imeCompositionFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastEditorCursorPositionRef = useRef<any>(null);
   const lastHoverTargetPositionRef = useRef<{ lineNumber: number; column: number } | null>(null);
   const lastExecutedEditorQueryRef = useRef<string>('');
@@ -441,6 +450,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const syncQueryDraft = useCallback((nextQuery: string) => {
       const next = String(nextQuery ?? '');
+      lastLocalQueryRef.current = next;
       if (isExternalSQLFileTab) {
           setSQLFileTabDraft(tab.id, next);
           return;
@@ -881,6 +891,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           return;
       }
       lastExternalQueryRef.current = incoming;
+      const editorHasFocus = editorRef.current?.hasTextFocus?.() === true;
+      if (editorHasFocus && incoming === lastLocalQueryRef.current) {
+          setQuery(incoming);
+          return;
+      }
       syncQueryToEditor(incoming);
   }, [tab.id, tab.query]);
 
@@ -1347,16 +1362,23 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       const syncModifierState = (keyboardEvent?: KeyboardEvent | MouseEvent | null) => {
           const wasPressed = ctrlMetaPressedRef.current;
-          ctrlMetaPressedRef.current = !!(keyboardEvent?.ctrlKey || keyboardEvent?.metaKey);
-          if (!ctrlMetaPressedRef.current) {
+          const isKeyboardLikeEvent = keyboardEvent
+              && typeof keyboardEvent === 'object'
+              && ('key' in keyboardEvent || 'code' in keyboardEvent || 'repeat' in keyboardEvent);
+          if (isKeyboardLikeEvent && isImeComposingKeyEvent(keyboardEvent as KeyboardEvent)) {
+              return;
+          }
+          const nextPressed = !!(keyboardEvent?.ctrlKey || keyboardEvent?.metaKey);
+          ctrlMetaPressedRef.current = nextPressed;
+          if (!nextPressed && !wasPressed) {
+              return;
+          }
+          if (!nextPressed) {
               clearQueryEditorLinkDecorations(editor, linkDecorationIdsRef);
               editor.updateOptions?.({ mouseStyle: 'text' });
               setQueryEditorMouseCursor(editor, '');
               return;
           }
-          const isKeyboardLikeEvent = keyboardEvent
-              && typeof keyboardEvent === 'object'
-              && ('key' in keyboardEvent || 'code' in keyboardEvent || 'repeat' in keyboardEvent);
           if (!wasPressed || isKeyboardLikeEvent) {
               applyNavigationHoverStateAtPosition(lastHoverTargetPositionRef.current);
           }
@@ -1368,6 +1390,103 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           setQueryEditorMouseCursor(editor, '');
       };
       const editorDomNode = editor.getDomNode?.();
+      const clearImeCompositionFallbackTimer = () => {
+          if (imeCompositionFallbackTimerRef.current !== null) {
+              clearTimeout(imeCompositionFallbackTimerRef.current);
+              imeCompositionFallbackTimerRef.current = null;
+          }
+      };
+      const getEditorText = () => String(
+          editor.getValue?.()
+          ?? editor.getModel?.()?.getValue?.()
+          ?? '',
+      );
+      const buildImeFallbackRange = (snapshot: NonNullable<typeof imeCompositionFallbackRef.current>) => {
+          const selection = snapshot.selectionBefore;
+          const startFromSelection = typeof selection?.getStartPosition === 'function'
+              ? normalizeEditorPosition(selection.getStartPosition())
+              : null;
+          const endFromSelection = typeof selection?.getEndPosition === 'function'
+              ? normalizeEditorPosition(selection.getEndPosition())
+              : null;
+          const startPosition = startFromSelection || normalizeEditorPosition({
+              lineNumber: selection?.startLineNumber ?? selection?.selectionStartLineNumber,
+              column: selection?.startColumn ?? selection?.selectionStartColumn,
+          }) || snapshot.positionBefore || lastEditorCursorPositionRef.current || { lineNumber: 1, column: 1 };
+          const endPosition = endFromSelection || normalizeEditorPosition({
+              lineNumber: selection?.endLineNumber ?? selection?.positionLineNumber,
+              column: selection?.endColumn ?? selection?.positionColumn,
+          }) || startPosition;
+          return new monaco.Range(
+              startPosition.lineNumber,
+              startPosition.column,
+              endPosition.lineNumber,
+              endPosition.column,
+          );
+      };
+      const handleImeCompositionStart = () => {
+          clearImeCompositionFallbackTimer();
+          imeCompositionFallbackRef.current = {
+              editor,
+              valueBefore: getEditorText(),
+              selectionBefore: editor.getSelection?.() || null,
+              positionBefore: normalizeEditorPosition(editor.getPosition?.()) || lastEditorCursorPositionRef.current || null,
+              committedText: '',
+          };
+      };
+      const handleImeBeforeInput = (rawEvent: Event) => {
+          const snapshot = imeCompositionFallbackRef.current;
+          if (!snapshot || snapshot.editor !== editor) {
+              return;
+          }
+          const inputEvent = rawEvent as InputEvent;
+          const nextText = String(inputEvent.data ?? '');
+          if (nextText && (inputEvent.isComposing || String(inputEvent.inputType || '').includes('Composition'))) {
+              snapshot.committedText = nextText;
+          }
+      };
+      const handleImeCompositionEnd = (rawEvent: Event) => {
+          const snapshot = imeCompositionFallbackRef.current;
+          imeCompositionFallbackRef.current = null;
+          const committedText = String((rawEvent as CompositionEvent).data ?? '') || snapshot?.committedText || '';
+          if (!committedText || !snapshot || snapshot.editor !== editor) {
+              return;
+          }
+
+          const fallbackRange = buildImeFallbackRange(snapshot);
+          clearImeCompositionFallbackTimer();
+          imeCompositionFallbackTimerRef.current = setTimeout(() => {
+              imeCompositionFallbackTimerRef.current = null;
+              if (editorRef.current !== editor) {
+                  return;
+              }
+              const currentValue = getEditorText();
+              if (currentValue !== snapshot.valueBefore) {
+                  syncQueryDraft(currentValue);
+                  return;
+              }
+
+              editor.executeEdits?.('gonavi-ime-composition-fallback', [{
+                  range: fallbackRange,
+                  text: committedText,
+                  forceMoveMarkers: true,
+              }]);
+              const nextValue = getEditorText();
+              syncQueryDraft(nextValue);
+
+              const model = editor.getModel?.();
+              const startOffset = Number(model?.getOffsetAt?.({
+                  lineNumber: fallbackRange.startLineNumber,
+                  column: fallbackRange.startColumn,
+              }));
+              const nextPosition = Number.isFinite(startOffset)
+                  ? normalizeEditorPosition(model?.getPositionAt?.(startOffset + committedText.length))
+                  : null;
+              if (nextPosition) {
+                  editor.setPosition?.(nextPosition);
+              }
+          }, 0);
+      };
       const handleEditorDragOver = (rawEvent: Event) => {
           const event = rawEvent as DragEvent;
           if (!hasSidebarSqlEditorDragPayload(event.dataTransfer)) return;
@@ -1432,6 +1551,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       window.addEventListener('keydown', syncModifierState);
       window.addEventListener('keyup', syncModifierState);
       window.addEventListener('blur', handleWindowBlur);
+      editorDomNode?.addEventListener('beforeinput', handleImeBeforeInput, true);
+      editorDomNode?.addEventListener('compositionstart', handleImeCompositionStart, true);
+      editorDomNode?.addEventListener('compositionend', handleImeCompositionEnd, true);
       editorDomNode?.addEventListener('dragover', handleEditorDragOver, true);
       editorDomNode?.addEventListener('drop', handleEditorDrop, true);
 
@@ -1618,6 +1740,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           window.removeEventListener('keydown', syncModifierState);
           window.removeEventListener('keyup', syncModifierState);
           window.removeEventListener('blur', handleWindowBlur);
+          clearImeCompositionFallbackTimer();
+          editorDomNode?.removeEventListener('beforeinput', handleImeBeforeInput, true);
+          editorDomNode?.removeEventListener('compositionstart', handleImeCompositionStart, true);
+          editorDomNode?.removeEventListener('compositionend', handleImeCompositionEnd, true);
           editorDomNode?.removeEventListener('dragover', handleEditorDragOver, true);
           editorDomNode?.removeEventListener('drop', handleEditorDrop, true);
       });
