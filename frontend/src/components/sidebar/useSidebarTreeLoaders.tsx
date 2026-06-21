@@ -17,6 +17,7 @@ import type { SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTree
 import { useStore } from '../../store';
 import { t } from '../../i18n';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
+import { buildRedisDbNodeLabel, getRedisDbAlias } from '../../utils/redisDbAlias';
 import { buildJVMMonitoringActionDescriptors } from '../../utils/jvmSidebarActions';
 import { type SidebarViewMetadataEntry } from '../../utils/sidebarMetadata';
 import { buildExternalSQLRootNode, type ExternalSQLTreeNode } from '../../utils/externalSqlTree';
@@ -308,15 +309,23 @@ export const useSidebarTreeLoaders = ({
                   if (res.success) {
                       setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
                       const redisRows: any[] = Array.isArray(res.data) ? res.data : [];
-                      let dbs = redisRows.map((db: any) => ({
-                          title: `db${db.index}${db.keys > 0 ? ` (${db.keys})` : ''}`,
-                          key: `${conn.id}-db${db.index}`,
-                          icon: <DatabaseOutlined style={{ color: '#DC382D' }} />,
-                          type: 'redis-db' as const,
-                          dataRef: { ...conn, redisDB: db.index },
-                          isLeaf: true,
-                          dbIndex: db.index,
-                      }));
+                      const redisDbAliases = useStore.getState().appearance.redisDbAliases;
+                      let dbs = redisRows.map((db: any) => {
+                          const keyCount = Number(db.keys) > 0 ? Number(db.keys) : 0;
+                          return {
+                              title: buildRedisDbNodeLabel(
+                                  db.index,
+                                  getRedisDbAlias(redisDbAliases, conn.id, db.index),
+                                  keyCount > 0 ? ` (${keyCount})` : '',
+                              ),
+                              key: `${conn.id}-db${db.index}`,
+                              icon: <DatabaseOutlined style={{ color: '#DC382D' }} />,
+                              type: 'redis-db' as const,
+                              dataRef: { ...conn, redisDB: db.index, redisKeyCount: keyCount },
+                              isLeaf: true,
+                              dbIndex: db.index,
+                          };
+                      });
                       // Filter Redis databases if configured
                       if (conn.includeRedisDatabases && conn.includeRedisDatabases.length > 0) {
                           dbs = dbs.filter(db => conn.includeRedisDatabases!.includes(db.dbIndex));

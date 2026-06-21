@@ -1,5 +1,8 @@
 {
   "common.cancel": "キャンセル",
+  "redis.db_alias.menu.set": "エイリアスを設定",
+  "redis.db_alias.modal.title": "{{db}} のエイリアス",
+  "redis.db_alias.modal.placeholder": "例: cache、sessions（空欄で解除）",
   "common.back_to_previous": "前に戻る",
   "common.close": "閉じる",
   "common.confirm": "確認",

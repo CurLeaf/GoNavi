@@ -1,5 +1,8 @@
 {
   "common.cancel": "Cancel",
+  "redis.db_alias.menu.set": "Set alias",
+  "redis.db_alias.modal.title": "Alias for {{db}}",
+  "redis.db_alias.modal.placeholder": "e.g. cache, sessions (leave empty to clear)",
   "common.back_to_previous": "Back",
   "common.close": "Close",
   "common.confirm": "Confirm",

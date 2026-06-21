@@ -1,5 +1,8 @@
 {
   "common.cancel": "Отмена",
+  "redis.db_alias.menu.set": "Задать псевдоним",
+  "redis.db_alias.modal.title": "Псевдоним для {{db}}",
+  "redis.db_alias.modal.placeholder": "напр. cache, sessions (оставьте пустым для сброса)",
   "common.back_to_previous": "Назад",
   "common.close": "Закрыть",
   "common.confirm": "Подтвердить",

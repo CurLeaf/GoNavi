@@ -1,4 +1,4 @@
-import { Modal, message, type MenuProps } from 'antd';
+import { Input, Modal, message, type MenuProps } from 'antd';
 import {
   CheckSquareOutlined,
   CloudOutlined,
@@ -27,10 +27,80 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { t } from '../../i18n';
+import { useStore } from '../../store';
 import type { SavedConnection, SavedQuery } from '../../types';
 import { getDataSourceCapabilities } from '../../utils/dataSourceCapabilities';
 import { buildTableSelectQuery } from '../../utils/objectQueryTemplates';
+import {
+  MAX_REDIS_DB_ALIAS_LENGTH,
+  buildRedisDbNodeLabel,
+  getRedisDbAlias,
+} from '../../utils/redisDbAlias';
 import { supportsTableTruncateAction } from '../tableDataDangerActions';
+
+const updateTreeNodeTitle = (
+  nodes: any[],
+  targetKey: string,
+  title: string,
+): any[] =>
+  nodes.map((node) => {
+    if (node.key === targetKey) {
+      return { ...node, title };
+    }
+    if (Array.isArray(node.children)) {
+      return { ...node, children: updateTreeNodeTitle(node.children, targetKey, title) };
+    }
+    return node;
+  });
+
+const openRedisDbAliasModal = (
+  node: any,
+  context: SidebarLegacyNodeMenuContext,
+): void => {
+  const { id, redisDB, redisKeyCount } = node.dataRef;
+  const { treeDataRef, setTreeData } = context;
+  const currentAlias = getRedisDbAlias(
+    useStore.getState().appearance.redisDbAliases,
+    id,
+    redisDB,
+  );
+  let draft = currentAlias;
+  Modal.confirm({
+    title: t('redis.db_alias.modal.title', { db: `db${redisDB}` }),
+    icon: null,
+    content: (
+      <Input
+        defaultValue={currentAlias}
+        maxLength={MAX_REDIS_DB_ALIAS_LENGTH}
+        placeholder={t('redis.db_alias.modal.placeholder')}
+        onChange={(event) => {
+          draft = event.target.value;
+        }}
+        onPressEnter={(event) => {
+          draft = (event.target as HTMLInputElement).value;
+        }}
+      />
+    ),
+    okText: t('common.confirm'),
+    cancelText: t('common.cancel'),
+    onOk: () => {
+      useStore.getState().setRedisDbAlias(id, redisDB, draft);
+      if (treeDataRef?.current && typeof setTreeData === 'function') {
+        const nextAlias = getRedisDbAlias(
+          useStore.getState().appearance.redisDbAliases,
+          id,
+          redisDB,
+        );
+        const keyCount = Number(redisKeyCount);
+        const suffix = Number.isFinite(keyCount) && keyCount > 0 ? ` (${keyCount})` : '';
+        const nextTitle = buildRedisDbNodeLabel(redisDB, nextAlias, suffix);
+        const nextTree = updateTreeNodeTitle(treeDataRef.current, node.key, nextTitle);
+        treeDataRef.current = nextTree;
+        setTreeData(nextTree);
+      }
+    },
+  });
+};
 
 type TreeNode = {
   type?: string;
@@ -526,6 +596,12 @@ export const buildSidebarLegacyNodeMenuItems = (
                         redisDB: redisDB
                     });
                 }
+            },
+            {
+                key: 'set-db-alias',
+                label: t('redis.db_alias.menu.set'),
+                icon: <EditOutlined />,
+                onClick: () => openRedisDbAliasModal(node, context)
             }
         ];
     } else if (node.type === 'database') {
