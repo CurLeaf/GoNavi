@@ -3,9 +3,13 @@ import { Alert, Button, Spin, Tooltip } from 'antd';
 import {
   ApartmentOutlined,
   ArrowRightOutlined,
+  CompressOutlined,
   DatabaseOutlined,
+  ExpandOutlined,
   LinkOutlined,
+  PlusOutlined,
   ReloadOutlined,
+  UndoOutlined,
 } from '@ant-design/icons';
 import dagre from 'dagre';
 import ReactFlow, {
@@ -41,14 +45,17 @@ export interface DataGridErDiagramProps {
 type ErDiagramNodeData = {
   node: ErDiagramNode;
   selected: boolean;
+  expanded: boolean;
   translate: DataGridMetadataTranslate;
+  onToggleExpanded?: (nodeId: string) => void;
   onOpenTable?: (tableName: string) => void;
 };
 
 const NODE_WIDTH = 320;
 const NODE_BASE_HEIGHT = 108;
 const NODE_ROW_HEIGHT = 28;
-const NODE_FOOTER_HEIGHT = 28;
+const NODE_FOOTER_HEIGHT = 36;
+const NODE_EXPANDED_MAX_VISIBLE_ROWS = 14;
 
 const getRoleBadgeKey = (role: ErDiagramNode['role']): string => {
   switch (role) {
@@ -63,9 +70,22 @@ const getRoleBadgeKey = (role: ErDiagramNode['role']): string => {
   }
 };
 
-const estimateNodeHeight = (node: ErDiagramNode): number => (
+const getVisibleNodeColumns = (node: ErDiagramNode, expanded: boolean) => (
+  expanded ? node.columns : node.columns.slice(0, node.previewColumnCount)
+);
+
+const getVisibleNodeRowCount = (node: ErDiagramNode, expanded: boolean): number => Math.min(
+  getVisibleNodeColumns(node, expanded).length,
+  expanded ? NODE_EXPANDED_MAX_VISIBLE_ROWS : node.previewColumnCount,
+);
+
+const getNodeColumnViewportHeight = (node: ErDiagramNode, expanded: boolean): number => (
+  getVisibleNodeRowCount(node, expanded) * NODE_ROW_HEIGHT
+);
+
+const estimateNodeHeight = (node: ErDiagramNode, expanded: boolean): number => (
   NODE_BASE_HEIGHT +
-  (node.columns.length * NODE_ROW_HEIGHT) +
+  getNodeColumnViewportHeight(node, expanded) +
   (node.hiddenColumnCount > 0 ? NODE_FOOTER_HEIGHT : 0)
 );
 
@@ -78,6 +98,8 @@ const edgeColorByDirection: Record<ErDiagramEdge['direction'], string> = {
 const layoutGraph = (
   graph: BuildErDiagramGraphResult,
   translate: DataGridMetadataTranslate,
+  expandedNodeIds: Set<string>,
+  onToggleExpanded?: (nodeId: string) => void,
   onOpenTable?: (tableName: string) => void,
 ): { nodes: Node<ErDiagramNodeData>[]; edges: Edge[] } => {
   const dagreGraph = new dagre.graphlib.Graph();
@@ -91,9 +113,10 @@ const layoutGraph = (
   dagreGraph.setDefaultEdgeLabel(() => ({}));
 
   graph.nodes.forEach((node) => {
+    const expanded = expandedNodeIds.has(node.id);
     dagreGraph.setNode(node.id, {
       width: NODE_WIDTH,
-      height: estimateNodeHeight(node),
+      height: estimateNodeHeight(node, expanded),
     });
   });
   graph.edges.forEach((edge) => {
@@ -103,7 +126,8 @@ const layoutGraph = (
 
   return {
     nodes: graph.nodes.map((node) => {
-      const height = estimateNodeHeight(node);
+      const expanded = expandedNodeIds.has(node.id);
+      const height = estimateNodeHeight(node, expanded);
       const position = dagreGraph.node(node.id);
       return {
         id: node.id,
@@ -115,7 +139,9 @@ const layoutGraph = (
         data: {
           node,
           selected: false,
+          expanded,
           translate,
+          onToggleExpanded,
           onOpenTable,
         },
         draggable: true,
@@ -159,14 +185,20 @@ const layoutGraph = (
 };
 
 const ErTableNode = memo(function ErTableNode({ data }: { data: ErDiagramNodeData }) {
-  const { node, selected, translate, onOpenTable } = data;
+  const { node, selected, expanded, translate, onToggleExpanded, onOpenTable } = data;
   const roleBadgeKey = getRoleBadgeKey(node.role);
   const canOpen = !node.isCurrent && typeof onOpenTable === 'function';
+  const visibleColumns = getVisibleNodeColumns(node, expanded);
+  const footerLabel = expanded
+    ? translate('data_grid.metadata_view.er_collapse_fields')
+    : translate('data_grid.metadata_view.er_expand_hidden_columns', { count: node.hiddenColumnCount });
+  const columnsScrollable = expanded && visibleColumns.length > NODE_EXPANDED_MAX_VISIBLE_ROWS;
 
   return (
     <div
       className={`gn-er-node-card${selected ? ' is-selected' : ''}${node.isCurrent ? ' is-current' : ''}`}
       data-role={node.role}
+      data-er-node-table={node.tableName}
     >
       <div className="gn-er-node-header">
         <div className="gn-er-node-title">
@@ -178,7 +210,7 @@ const ErTableNode = memo(function ErTableNode({ data }: { data: ErDiagramNodeDat
             <Button
               size="small"
               type="text"
-              className="gn-er-node-open"
+              className="gn-er-node-open nodrag nopan"
               icon={<ArrowRightOutlined />}
               onClick={(event) => {
                 event.preventDefault();
@@ -205,11 +237,15 @@ const ErTableNode = memo(function ErTableNode({ data }: { data: ErDiagramNodeDat
         </Tooltip>
       </div>
 
-      <div className="gn-er-node-columns">
-        {node.columns.map((column) => (
+      <div
+        className={`gn-er-node-columns nodrag nopan${columnsScrollable ? ' is-scrollable' : ''}`}
+        style={{ '--er-node-columns-max-height': `${getNodeColumnViewportHeight(node, expanded)}px` } as React.CSSProperties}
+      >
+        {visibleColumns.map((column) => (
           <div
             key={column.name}
             className={`gn-er-node-column${column.isRelationField ? ' is-relation' : ''}`}
+            data-er-node-column={column.name}
           >
             <div className="gn-er-node-column-name">
               {column.isPrimary && <em className="is-pk">PK</em>}
@@ -223,7 +259,19 @@ const ErTableNode = memo(function ErTableNode({ data }: { data: ErDiagramNodeDat
 
       {node.hiddenColumnCount > 0 && (
         <div className="gn-er-node-footer">
-          {translate('data_grid.metadata_view.er_hidden_columns', { count: node.hiddenColumnCount })}
+          <button
+            type="button"
+            className="gn-er-node-footer-toggle nodrag nopan"
+            data-er-node-toggle={node.id}
+            title={footerLabel}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onToggleExpanded?.(node.id);
+            }}
+          >
+            {footerLabel}
+          </button>
         </div>
       )}
     </div>
@@ -233,10 +281,14 @@ const ErTableNode = memo(function ErTableNode({ data }: { data: ErDiagramNodeDat
 const DataGridErDiagramCanvasInner: React.FC<{
   graph: BuildErDiagramGraphResult;
   translate: DataGridMetadataTranslate;
+  expandedNodeIds: Set<string>;
+  onToggleNodeExpanded: (nodeId: string) => void;
   onOpenTable?: (tableName: string) => void;
 }> = ({
   graph,
   translate,
+  expandedNodeIds,
+  onToggleNodeExpanded,
   onOpenTable,
 }) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(graph.nodes[0]?.id || null);
@@ -247,8 +299,8 @@ const DataGridErDiagramCanvasInner: React.FC<{
   }, [graph.nodes]);
 
   const layout = useMemo(
-    () => layoutGraph(graph, translate, onOpenTable),
-    [graph, onOpenTable, translate],
+    () => layoutGraph(graph, translate, expandedNodeIds, onToggleNodeExpanded, onOpenTable),
+    [expandedNodeIds, graph, onOpenTable, onToggleNodeExpanded, translate],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layout.nodes);
@@ -281,11 +333,11 @@ const DataGridErDiagramCanvasInner: React.FC<{
   }, [selectedNodeId, setNodes]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    const timer = globalThis.setTimeout(() => {
       void fitView({ padding: 0.18, duration: 220 });
     }, 0);
     return () => {
-      window.clearTimeout(timer);
+      globalThis.clearTimeout(timer);
     };
   }, [fitView, layout.edges, layout.nodes]);
 
@@ -326,6 +378,8 @@ const DataGridErDiagramCanvasInner: React.FC<{
 const DataGridErDiagramCanvas: React.FC<{
   graph: BuildErDiagramGraphResult;
   translate: DataGridMetadataTranslate;
+  expandedNodeIds: Set<string>;
+  onToggleNodeExpanded: (nodeId: string) => void;
   onOpenTable?: (tableName: string) => void;
 }> = (props) => (
   <ReactFlowProvider>
@@ -341,6 +395,8 @@ const DataGridErDiagram: React.FC<DataGridErDiagramProps> = ({
   translate = defaultTranslate,
   onOpenTable,
 }) => {
+  const [relationDepth, setRelationDepth] = useState(1);
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
   const {
     graph,
     loading,
@@ -348,12 +404,63 @@ const DataGridErDiagram: React.FC<DataGridErDiagramProps> = ({
     error,
     partial,
     reload,
+    canExpandRelations,
   } = useDataGridErDiagram({
     connections,
     connectionId,
     dbName,
     tableName,
+    relationDepth,
   });
+
+  useEffect(() => {
+    setRelationDepth(1);
+    setExpandedNodeIds(new Set());
+  }, [connectionId, dbName, tableName]);
+
+  const expandableNodeIds = useMemo(
+    () => graph?.nodes.filter((node) => node.hiddenColumnCount > 0).map((node) => node.id) || [],
+    [graph],
+  );
+
+  useEffect(() => {
+    const nextExpandableIds = new Set(expandableNodeIds);
+    setExpandedNodeIds((current) => new Set(Array.from(current).filter((nodeId) => nextExpandableIds.has(nodeId))));
+  }, [expandableNodeIds]);
+
+  const expandedFieldCount = useMemo(
+    () => expandableNodeIds.filter((nodeId) => expandedNodeIds.has(nodeId)).length,
+    [expandableNodeIds, expandedNodeIds],
+  );
+  const allFieldsExpanded = expandableNodeIds.length > 0 && expandedFieldCount === expandableNodeIds.length;
+
+  const handleToggleNodeExpanded = useCallback((nodeId: string) => {
+    setExpandedNodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleExpandAllFields = useCallback(() => {
+    setExpandedNodeIds(new Set(expandableNodeIds));
+  }, [expandableNodeIds]);
+
+  const handleCollapseAllFields = useCallback(() => {
+    setExpandedNodeIds(new Set());
+  }, []);
+
+  const handleExpandRelations = useCallback(() => {
+    setRelationDepth((currentDepth) => currentDepth + 1);
+  }, []);
+
+  const handleResetRelationDepth = useCallback(() => {
+    setRelationDepth(1);
+  }, []);
 
   return (
     <div className="gn-v2-data-grid-er-diagram">
@@ -362,22 +469,68 @@ const DataGridErDiagram: React.FC<DataGridErDiagramProps> = ({
           <span>{translate('data_grid.metadata_view.er_table_badge')}</span>
           <strong>{tableName || translate('data_grid.table_fallback.query_result')}</strong>
         </div>
-        <div className="gn-v2-data-grid-er-summary">
-          <span className="gn-v2-data-grid-er-chip">
-            <DatabaseOutlined />
-            {translate('data_grid.metadata_view.er_related_table_count', { count: graph?.relatedTableCount ?? 0 })}
-          </span>
-          <span className="gn-v2-data-grid-er-chip">
-            <ApartmentOutlined />
-            {translate('data_grid.metadata_view.er_relation_count', { count: graph?.relationCount ?? 0 })}
-          </span>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={reload}
-            loading={reloading}
-          >
-            {translate('common.refresh')}
-          </Button>
+        <div>
+          <div className="gn-v2-data-grid-er-summary">
+            <span className="gn-v2-data-grid-er-chip">
+              <DatabaseOutlined />
+              {translate('data_grid.metadata_view.er_related_table_count', { count: graph?.relatedTableCount ?? 0 })}
+            </span>
+            <span className="gn-v2-data-grid-er-chip">
+              <ApartmentOutlined />
+              {translate('data_grid.metadata_view.er_relation_count', { count: graph?.relationCount ?? 0 })}
+            </span>
+            <span className="gn-v2-data-grid-er-chip">
+              <LinkOutlined />
+              {translate('data_grid.metadata_view.er_relation_depth', { count: relationDepth })}
+            </span>
+          </div>
+          <div className="gn-v2-data-grid-er-actions">
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              data-er-action="expand-relations"
+              onClick={handleExpandRelations}
+              disabled={!graph || loading || reloading || !canExpandRelations}
+            >
+              {translate('data_grid.metadata_view.er_expand_relations')}
+            </Button>
+            <Button
+              size="small"
+              icon={<UndoOutlined />}
+              data-er-action="reset-relations"
+              onClick={handleResetRelationDepth}
+              disabled={relationDepth <= 1}
+            >
+              {translate('data_grid.metadata_view.er_reset_relations')}
+            </Button>
+            <Button
+              size="small"
+              icon={<ExpandOutlined />}
+              data-er-action="expand-fields"
+              onClick={handleExpandAllFields}
+              disabled={expandableNodeIds.length === 0 || allFieldsExpanded}
+            >
+              {translate('data_grid.metadata_view.er_expand_fields')}
+            </Button>
+            <Button
+              size="small"
+              icon={<CompressOutlined />}
+              data-er-action="collapse-fields"
+              onClick={handleCollapseAllFields}
+              disabled={expandedFieldCount === 0}
+            >
+              {translate('data_grid.metadata_view.er_collapse_fields')}
+            </Button>
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              data-er-action="refresh"
+              onClick={reload}
+              loading={reloading}
+            >
+              {translate('common.refresh')}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -409,6 +562,8 @@ const DataGridErDiagram: React.FC<DataGridErDiagramProps> = ({
               <DataGridErDiagramCanvas
                 graph={graph}
                 translate={translate}
+                expandedNodeIds={expandedNodeIds}
+                onToggleNodeExpanded={handleToggleNodeExpanded}
                 onOpenTable={onOpenTable}
               />
             </>

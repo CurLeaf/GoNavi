@@ -37,6 +37,7 @@ export interface ErDiagramNode {
   outgoingCount: number;
   relationCount: number;
   columns: ErDiagramNodeField[];
+  previewColumnCount: number;
   hiddenColumnCount: number;
 }
 
@@ -337,11 +338,10 @@ export const buildErDiagramGraph = (params: {
       }
     });
 
-    const visibleColumns = [...prioritized, ...remainder]
+    const allColumns = [...prioritized, ...remainder]
       .filter((column, index, allColumns) => (
         allColumns.findIndex((candidate) => matchColumnName(candidate.name, column.name)) === index
       ))
-      .slice(0, maxColumnsPerNode)
       .map<ErDiagramNodeField>((column) => {
         const normalizedColumn = normalizeColumnName(column.name);
         return {
@@ -354,6 +354,7 @@ export const buildErDiagramGraph = (params: {
           isRelationField: relationFields.has(normalizedColumn),
         };
       });
+    const previewColumnCount = Math.min(allColumns.length, maxColumnsPerNode);
 
     let role: ErDiagramNode['role'] = 'related';
     if (tableNamesMatch(tableName, currentTableName)) {
@@ -372,8 +373,9 @@ export const buildErDiagramGraph = (params: {
       incomingCount,
       outgoingCount,
       relationCount: incomingCount + outgoingCount,
-      columns: visibleColumns,
-      hiddenColumnCount: Math.max(0, snapshot.columns.length - visibleColumns.length),
+      columns: allColumns,
+      previewColumnCount,
+      hiddenColumnCount: Math.max(0, allColumns.length - previewColumnCount),
     };
   });
 

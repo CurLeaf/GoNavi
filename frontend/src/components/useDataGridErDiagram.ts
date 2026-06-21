@@ -10,7 +10,6 @@ import {
   normalizeErQualifiedName,
   normalizeForeignKeyDefinitions,
   resolveErActualTableName,
-  tableNamesMatch,
   type BuildErDiagramGraphResult,
   type ErDiagramRelation,
   type ErDiagramTableSnapshot,
@@ -21,6 +20,7 @@ type DataGridErDiagramParams = {
   connectionId?: string;
   dbName?: string;
   tableName?: string;
+  relationDepth?: number;
 };
 
 type DataGridErDiagramState = {
@@ -30,6 +30,7 @@ type DataGridErDiagramState = {
   error: string;
   partial: boolean;
   warningCount: number;
+  canExpandRelations: boolean;
 };
 
 type CacheValue<T> = T | Promise<T>;
@@ -46,6 +47,7 @@ const DEFAULT_EMPTY_STATE: DataGridErDiagramState = {
   error: '',
   partial: false,
   warningCount: 0,
+  canExpandRelations: false,
 };
 
 const normalizeConnectionConfig = (connection: any) => ({
@@ -237,12 +239,256 @@ const dedupeTableNames = (tableNames: string[]): string[] => {
   return result;
 };
 
+const createEmptySnapshot = (tableName: string): ErDiagramTableSnapshot => ({
+  tableName,
+  columns: [],
+  foreignKeys: [],
+  uniqueKeyGroups: [],
+});
+
+type CollectErDiagramNeighborhoodParams = {
+  currentSnapshot: ErDiagramTableSnapshot;
+  schemaTableNames: string[];
+  relationDepth: number;
+  loadSnapshot: (tableName: string) => Promise<ErDiagramTableSnapshot>;
+  loadForeignKeys: (tableName: string) => Promise<ForeignKeyDefinition[]>;
+  resolveTableName: (tableName: string) => string;
+};
+
+type CollectErDiagramNeighborhoodResult = {
+  relatedSnapshots: ErDiagramTableSnapshot[];
+  relations: ErDiagramRelation[];
+  warningCount: number;
+  canExpandRelations: boolean;
+};
+
+export const collectErDiagramNeighborhood = async (
+  params: CollectErDiagramNeighborhoodParams,
+): Promise<CollectErDiagramNeighborhoodResult> => {
+  const maxDepth = Math.max(1, Math.floor(Number(params.relationDepth) || 1));
+  const currentTableName = String(params.currentSnapshot.tableName || '').trim();
+  const currentKey = normalizeErQualifiedName(currentTableName);
+  const tableNameByKey = new Map<string, string>();
+  const snapshotByKey = new Map<string, ErDiagramTableSnapshot>();
+  const foreignKeysByKey = new Map<string, ForeignKeyDefinition[]>();
+  const visitedKeys = new Set<string>();
+  const relations: ErDiagramRelation[] = [];
+  let warningCount = 0;
+
+  const registerTableName = (tableName: string): string => {
+    const actualTableName = String(tableName || '').trim();
+    const normalized = normalizeErQualifiedName(actualTableName);
+    if (!normalized) {
+      return actualTableName;
+    }
+    if (!tableNameByKey.has(normalized)) {
+      tableNameByKey.set(normalized, actualTableName);
+    }
+    return tableNameByKey.get(normalized) || actualTableName;
+  };
+
+  const registerRelationTarget = (tableName: string): string => registerTableName(params.resolveTableName(tableName));
+
+  registerTableName(currentTableName);
+  params.schemaTableNames.forEach(registerTableName);
+  params.currentSnapshot.foreignKeys.forEach((foreignKey) => {
+    registerRelationTarget(foreignKey.refTableName);
+  });
+  snapshotByKey.set(currentKey, {
+    ...params.currentSnapshot,
+    tableName: registerTableName(params.currentSnapshot.tableName),
+  });
+  foreignKeysByKey.set(currentKey, params.currentSnapshot.foreignKeys || []);
+  visitedKeys.add(currentKey);
+
+  const loadSnapshotByKey = async (tableKey: string): Promise<ErDiagramTableSnapshot> => {
+    const cached = snapshotByKey.get(tableKey);
+    if (cached) {
+      return cached;
+    }
+
+    const tableName = tableNameByKey.get(tableKey) || tableKey;
+    try {
+      const snapshot = await params.loadSnapshot(tableName);
+      const actualTableName = registerTableName(snapshot.tableName || tableName);
+      const normalizedActualTableName = normalizeErQualifiedName(actualTableName);
+      const nextSnapshot = {
+        ...snapshot,
+        tableName: actualTableName,
+      };
+      snapshotByKey.set(tableKey, nextSnapshot);
+      foreignKeysByKey.set(tableKey, nextSnapshot.foreignKeys || []);
+      snapshotByKey.set(normalizedActualTableName, nextSnapshot);
+      foreignKeysByKey.set(normalizedActualTableName, nextSnapshot.foreignKeys || []);
+      return nextSnapshot;
+    } catch {
+      warningCount += 1;
+      const emptySnapshot = createEmptySnapshot(tableName);
+      snapshotByKey.set(tableKey, emptySnapshot);
+      foreignKeysByKey.set(tableKey, []);
+      return emptySnapshot;
+    }
+  };
+
+  const loadForeignKeysByKey = async (tableKey: string): Promise<ForeignKeyDefinition[]> => {
+    const cached = foreignKeysByKey.get(tableKey);
+    if (cached) {
+      return cached;
+    }
+
+    const tableName = tableNameByKey.get(tableKey) || tableKey;
+    try {
+      const foreignKeys = await params.loadForeignKeys(tableName);
+      foreignKeysByKey.set(tableKey, foreignKeys);
+      return foreignKeys;
+    } catch {
+      warningCount += 1;
+      foreignKeysByKey.set(tableKey, []);
+      return [];
+    }
+  };
+
+  const frontierHasUndiscoveredNeighbors = async (frontierKeys: string[]): Promise<boolean> => {
+    if (frontierKeys.length === 0) {
+      return false;
+    }
+
+    const frontierSet = new Set(frontierKeys);
+    await runWithConcurrency(frontierKeys, 4, async (frontierKey) => {
+      await loadSnapshotByKey(frontierKey);
+      return frontierKey;
+    });
+
+    for (const frontierKey of frontierKeys) {
+      const snapshot = snapshotByKey.get(frontierKey) || createEmptySnapshot(tableNameByKey.get(frontierKey) || frontierKey);
+      for (const foreignKey of snapshot.foreignKeys) {
+        const targetTableName = registerRelationTarget(foreignKey.refTableName);
+        const targetKey = normalizeErQualifiedName(targetTableName);
+        if (targetKey && targetKey !== frontierKey && !visitedKeys.has(targetKey)) {
+          return true;
+        }
+      }
+    }
+
+    const candidateKeys = Array.from(tableNameByKey.keys()).filter(
+      (candidateKey) => !visitedKeys.has(candidateKey) && !frontierSet.has(candidateKey),
+    );
+    const incomingResults = await runWithConcurrency(candidateKeys, 6, async (candidateKey) => ({
+      candidateKey,
+      foreignKeys: await loadForeignKeysByKey(candidateKey),
+    }));
+    return incomingResults.some((result) => {
+      if (result.status !== 'fulfilled') {
+        return false;
+      }
+      return result.value.foreignKeys.some((foreignKey) => {
+        const targetTableName = registerRelationTarget(foreignKey.refTableName);
+        const targetKey = normalizeErQualifiedName(targetTableName);
+        return Boolean(targetKey) && frontierSet.has(targetKey);
+      });
+    });
+  };
+
+  let frontierKeys = [currentKey];
+
+  for (let depth = 0; depth < maxDepth; depth += 1) {
+    if (frontierKeys.length === 0) {
+      break;
+    }
+
+    const frontierSet = new Set(frontierKeys);
+    await runWithConcurrency(frontierKeys, 4, async (frontierKey) => {
+      await loadSnapshotByKey(frontierKey);
+      return frontierKey;
+    });
+
+    const nextFrontierKeys = new Set<string>();
+
+    frontierKeys.forEach((frontierKey) => {
+      const snapshot = snapshotByKey.get(frontierKey) || createEmptySnapshot(tableNameByKey.get(frontierKey) || frontierKey);
+      snapshot.foreignKeys.forEach((foreignKey) => {
+        const targetTableName = registerRelationTarget(foreignKey.refTableName);
+        const targetKey = normalizeErQualifiedName(targetTableName);
+        if (!targetKey) {
+          return;
+        }
+        relations.push({
+          sourceTableName: snapshot.tableName,
+          targetTableName,
+          columnName: foreignKey.columnName,
+          refColumnName: foreignKey.refColumnName,
+          constraintName: foreignKey.constraintName || foreignKey.name || '',
+          direction: targetKey === frontierKey ? 'self' : 'outgoing',
+        });
+        if (targetKey !== frontierKey && !visitedKeys.has(targetKey)) {
+          visitedKeys.add(targetKey);
+          nextFrontierKeys.add(targetKey);
+        }
+      });
+    });
+
+    const incomingResults = await runWithConcurrency(
+      Array.from(tableNameByKey.keys()).filter((candidateKey) => !frontierSet.has(candidateKey)),
+      6,
+      async (candidateKey) => ({
+        candidateKey,
+        foreignKeys: await loadForeignKeysByKey(candidateKey),
+      }),
+    );
+
+    incomingResults.forEach((result) => {
+      if (result.status !== 'fulfilled') {
+        return;
+      }
+
+      const sourceTableName = tableNameByKey.get(result.value.candidateKey) || result.value.candidateKey;
+      result.value.foreignKeys.forEach((foreignKey) => {
+        const targetTableName = registerRelationTarget(foreignKey.refTableName);
+        const targetKey = normalizeErQualifiedName(targetTableName);
+        if (!targetKey || !frontierSet.has(targetKey)) {
+          return;
+        }
+        relations.push({
+          sourceTableName,
+          targetTableName: tableNameByKey.get(targetKey) || targetTableName,
+          columnName: foreignKey.columnName,
+          refColumnName: foreignKey.refColumnName,
+          constraintName: foreignKey.constraintName || foreignKey.name || '',
+          direction: result.value.candidateKey === targetKey ? 'self' : 'incoming',
+        });
+        if (result.value.candidateKey !== targetKey && !visitedKeys.has(result.value.candidateKey)) {
+          visitedKeys.add(result.value.candidateKey);
+          nextFrontierKeys.add(result.value.candidateKey);
+        }
+      });
+    });
+
+    frontierKeys = Array.from(nextFrontierKeys);
+  }
+
+  const relatedKeys = Array.from(visitedKeys).filter((tableKey) => tableKey !== currentKey);
+  await runWithConcurrency(relatedKeys, 4, async (relatedKey) => {
+    await loadSnapshotByKey(relatedKey);
+    return relatedKey;
+  });
+
+  return {
+    relatedSnapshots: relatedKeys.map((relatedKey) => (
+      snapshotByKey.get(relatedKey) || createEmptySnapshot(tableNameByKey.get(relatedKey) || relatedKey)
+    )),
+    relations: dedupeRelations(relations),
+    warningCount,
+    canExpandRelations: await frontierHasUndiscoveredNeighbors(frontierKeys),
+  };
+};
+
 export const useDataGridErDiagram = (params: DataGridErDiagramParams) => {
   const {
     connections,
     connectionId,
     dbName,
     tableName,
+    relationDepth = 1,
   } = params;
 
   const [state, setState] = useState<DataGridErDiagramState>(DEFAULT_EMPTY_STATE);
@@ -297,6 +543,7 @@ export const useDataGridErDiagram = (params: DataGridErDiagramParams) => {
       error: '',
       partial: false,
       warningCount: 0,
+      canExpandRelations: false,
     }));
 
     const loadGraph = async () => {
@@ -318,84 +565,32 @@ export const useDataGridErDiagram = (params: DataGridErDiagramParams) => {
 
       const resolveTableName = (name: string) => resolveErActualTableName(name, resolvedSchemaTableNames);
 
-      const outgoingRelations: ErDiagramRelation[] = currentSnapshot.foreignKeys.map((foreignKey) => {
-        const targetTableName = resolveTableName(foreignKey.refTableName);
-        return {
-          sourceTableName: currentSnapshot.tableName,
-          targetTableName,
-          columnName: foreignKey.columnName,
-          refColumnName: foreignKey.refColumnName,
-          constraintName: foreignKey.constraintName || foreignKey.name || '',
-          direction: tableNamesMatch(targetTableName, currentSnapshot.tableName) ? 'self' : 'outgoing',
-        };
+      const neighborhood = await collectErDiagramNeighborhood({
+        currentSnapshot,
+        schemaTableNames: resolvedSchemaTableNames,
+        relationDepth,
+        loadSnapshot: async (relatedTableName) => {
+          const tableCacheKey = `${cachePrefix}${relatedTableName}`;
+          return loadTableSnapshot(config, normalizedDbName, relatedTableName, tableCacheKey);
+        },
+        loadForeignKeys: async (relatedTableName) => {
+          const tableCacheKey = `${cachePrefix}${relatedTableName}`;
+          return loadTableForeignKeys(config, normalizedDbName, relatedTableName, `${tableCacheKey}|foreignKeys`);
+        },
+        resolveTableName,
       });
-
-      const scanCandidates = resolvedSchemaTableNames.filter((candidate) => !tableNamesMatch(candidate, currentSnapshot.tableName));
-      const incomingScanResults = await runWithConcurrency(scanCandidates, 6, async (candidateTableName) => {
-        const tableCacheKey = `${cachePrefix}${candidateTableName}`;
-        const foreignKeys = await loadTableForeignKeys(
-          config,
-          normalizedDbName,
-          candidateTableName,
-          `${tableCacheKey}|foreignKeys`,
-        );
-        return { tableName: candidateTableName, foreignKeys };
-      });
-
-      const incomingRelations: ErDiagramRelation[] = [];
-      incomingScanResults.forEach((result) => {
-        if (result.status === 'rejected') {
-          warningCount += 1;
-          return;
-        }
-        result.value.foreignKeys.forEach((foreignKey) => {
-          const targetTableName = resolveTableName(foreignKey.refTableName);
-          if (!tableNamesMatch(targetTableName, currentSnapshot.tableName)) {
-            return;
-          }
-          incomingRelations.push({
-            sourceTableName: result.value.tableName,
-            targetTableName: currentSnapshot.tableName,
-            columnName: foreignKey.columnName,
-            refColumnName: foreignKey.refColumnName,
-            constraintName: foreignKey.constraintName || foreignKey.name || '',
-            direction: 'incoming',
-          });
-        });
-      });
-
-      const relations = dedupeRelations([...outgoingRelations, ...incomingRelations]);
-      const relatedTableNames = dedupeTableNames(
-        relations.flatMap((relation) => [relation.sourceTableName, relation.targetTableName]),
-      ).filter((candidate) => !tableNamesMatch(candidate, currentSnapshot.tableName));
-
-      const relatedSnapshotResults = await runWithConcurrency(relatedTableNames, 4, async (relatedTableName) => {
-        const tableCacheKey = `${cachePrefix}${relatedTableName}`;
-        return loadTableSnapshot(config, normalizedDbName, relatedTableName, tableCacheKey);
-      });
-
-      const relatedSnapshots: ErDiagramTableSnapshot[] = relatedSnapshotResults.map((result, index) => {
-        if (result.status === 'fulfilled') {
-          return result.value;
-        }
-        warningCount += 1;
-        return {
-          tableName: relatedTableNames[index],
-          columns: [],
-          foreignKeys: [],
-          uniqueKeyGroups: [],
-        };
-      });
+      warningCount += neighborhood.warningCount;
 
       return {
         graph: buildErDiagramGraph({
           currentTableName: currentSnapshot.tableName,
           currentSnapshot,
-          relatedSnapshots,
-          relations,
+          relatedSnapshots: neighborhood.relatedSnapshots,
+          relations: neighborhood.relations,
         }),
         partial: warningCount > 0,
         warningCount,
+        canExpandRelations: neighborhood.canExpandRelations,
       };
     };
 
@@ -411,6 +606,7 @@ export const useDataGridErDiagram = (params: DataGridErDiagramParams) => {
           error: '',
           partial: result.partial,
           warningCount: result.warningCount,
+          canExpandRelations: result.canExpandRelations,
         });
       })
       .catch((error) => {
@@ -424,9 +620,10 @@ export const useDataGridErDiagram = (params: DataGridErDiagramParams) => {
           error: error instanceof Error ? error.message : String(error || 'Failed to load ER diagram'),
           partial: false,
           warningCount: 0,
+          canExpandRelations: false,
         });
       });
-  }, [cachePrefix, connectionId, connections, normalizedDbName, normalizedTableName, reloadVersion]);
+  }, [cachePrefix, connectionId, connections, normalizedDbName, normalizedTableName, relationDepth, reloadVersion]);
 
   return {
     ...state,

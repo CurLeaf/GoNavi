@@ -971,6 +971,18 @@ body[data-ui-version="v2"] .gn-v2-data-grid-er-toolbar strong {
 }
 
 body[data-ui-version="v2"] .gn-v2-data-grid-er-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-er-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   justify-content: flex-end;
 }
 
@@ -1123,6 +1135,14 @@ body[data-ui-version="v2"] .gn-er-node-stats span {
 
 body[data-ui-version="v2"] .gn-er-node-columns {
   padding: 8px 0 6px;
+  max-height: var(--er-node-columns-max-height);
+  overflow: hidden;
+}
+
+body[data-ui-version="v2"] .gn-er-node-columns.is-scrollable {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 body[data-ui-version="v2"] .gn-er-node-column {
@@ -1194,9 +1214,23 @@ body[data-ui-version="v2"] .gn-er-node-column-type {
 }
 
 body[data-ui-version="v2"] .gn-er-node-footer {
-  padding: 8px 12px 12px;
+  padding: 6px 12px 12px;
   color: var(--gn-fg-5);
   font-size: 11px;
+}
+
+body[data-ui-version="v2"] .gn-er-node-footer-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--gn-accent);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+body[data-ui-version="v2"] .gn-er-node-footer-toggle:hover {
+  text-decoration: underline;
 }
 
 /* ─── AI Chat Panel hooks (project's class names) ──────── */

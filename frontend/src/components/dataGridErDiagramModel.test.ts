@@ -130,4 +130,32 @@ describe('dataGridErDiagramModel', () => {
       },
     ]);
   });
+
+  it('keeps all fields in the node model while exposing a collapsed preview count', () => {
+    const currentSnapshot: ErDiagramTableSnapshot = {
+      tableName: 'messages',
+      columns: Array.from({ length: 12 }, (_, index) => ({
+        name: `col_${index + 1}`,
+        type: 'varchar(32)',
+        nullable: index === 0 ? 'NO' : 'YES',
+        key: index === 0 ? 'PRI' : '',
+        extra: '',
+        comment: '',
+      })),
+      foreignKeys: [],
+      uniqueKeyGroups: [['col_1']],
+    };
+
+    const graph = buildErDiagramGraph({
+      currentTableName: 'messages',
+      currentSnapshot,
+      relatedSnapshots: [],
+      relations: [],
+    });
+
+    expect(graph.nodes).toHaveLength(1);
+    expect(graph.nodes[0]?.columns).toHaveLength(12);
+    expect(graph.nodes[0]?.previewColumnCount).toBe(10);
+    expect(graph.nodes[0]?.hiddenColumnCount).toBe(2);
+  });
 });
