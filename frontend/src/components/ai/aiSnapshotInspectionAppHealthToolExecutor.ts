@@ -7,7 +7,8 @@ import type {
   SavedConnection,
   TabData,
 } from '../../types';
-import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
+import type { I18nParams } from '../../i18n';
+import { BUILTIN_AI_TOOL_INFO, localizeBuiltinAIToolInfo } from '../../utils/aiToolRegistry';
 import { buildAIAppHealthSnapshot } from './aiAppHealthInsights';
 import { buildAILastRenderErrorSnapshot } from './aiLastRenderErrorInsights';
 import { buildAISupportBundleSnapshot } from './aiSupportBundleInsights';
@@ -36,6 +37,7 @@ interface ExecuteAppHealthSnapshotToolCallOptions {
   skills?: AISkillConfig[];
   userPromptSettings?: AIUserPromptSettings;
   dynamicModels?: string[];
+  translate?: (key: string, params?: I18nParams) => string;
   runtime?: AISnapshotInspectionRuntime;
 }
 
@@ -58,9 +60,14 @@ const readLogTail = async (
   runtime: AISnapshotInspectionRuntime | undefined,
   lineLimit: number,
   keyword: string,
+  translate: ((key: string, params?: I18nParams) => string) | undefined,
 ) => {
   if (typeof runtime?.readAppLogTail !== 'function') {
-    return { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
+    return {
+      success: false,
+      message: translate?.('ai_chat.inspection.app_health.log_reading_unavailable')
+        || 'The current runtime does not support reading GoNavi application logs',
+    };
   }
   return runtime.readAppLogTail(lineLimit, keyword);
 };
@@ -90,6 +97,7 @@ export async function executeAppHealthSnapshotToolCall(
     skills = [],
     userPromptSettings,
     dynamicModels = [],
+    translate,
     runtime,
   } = options;
 
@@ -104,8 +112,8 @@ export async function executeAppHealthSnapshotToolCall(
     const [runtimeState, mcpState, appLogReadResult, connectionFailureReadResult] = await Promise.all([
       loadRuntimeState(runtime),
       loadMCPSetupState(runtime),
-      readLogTail(runtime, lineLimit, keyword),
-      readLogTail(runtime, lineLimit, connectionKeyword),
+      readLogTail(runtime, lineLimit, keyword, translate),
+      readLogTail(runtime, lineLimit, connectionKeyword, translate),
     ]);
     const [mcpServers, mcpClientInstallStatuses] = mcpState;
 
@@ -121,7 +129,7 @@ export async function executeAppHealthSnapshotToolCall(
           mcpClientStatuses: Array.isArray(mcpClientInstallStatuses) ? mcpClientInstallStatuses : [],
           mcpTools,
           dynamicModels,
-          builtinTools: BUILTIN_AI_TOOL_INFO,
+          builtinTools: localizeBuiltinAIToolInfo(translate),
           builtinToolNames: BUILTIN_AI_TOOL_NAMES,
           userPromptSettings,
           activeContext,
@@ -135,7 +143,7 @@ export async function executeAppHealthSnapshotToolCall(
           activeTabId,
           appLogReadResult,
           connectionFailureReadResult,
-          lastRenderErrorSnapshot: buildAILastRenderErrorSnapshot(),
+          lastRenderErrorSnapshot: buildAILastRenderErrorSnapshot(translate),
           keyword,
           connectionKeyword,
           lineLimit,
@@ -147,6 +155,7 @@ export async function executeAppHealthSnapshotToolCall(
           path: args.path,
           exposeStrategy: args.exposeStrategy,
           tokenConfigured: args.tokenConfigured,
+          translate,
         })),
         success: true,
       };
@@ -172,17 +181,25 @@ export async function executeAppHealthSnapshotToolCall(
         activeTabId,
         appLogReadResult,
         connectionFailureReadResult,
-        lastRenderErrorSnapshot: buildAILastRenderErrorSnapshot(),
+        lastRenderErrorSnapshot: buildAILastRenderErrorSnapshot(translate),
         keyword,
         connectionKeyword,
         lineLimit,
         includeLogLines: args.includeLogLines === true,
+        translate,
       })),
       success: true,
     };
   } catch (error: any) {
+    const errorLabel = translate?.(
+      toolName === 'inspect_ai_support_bundle'
+        ? 'ai_chat.inspection.app_health.error.support_bundle_failed'
+        : 'ai_chat.inspection.app_health.error.app_health_failed',
+    ) || (toolName === 'inspect_ai_support_bundle'
+      ? 'Failed to generate AI support bundle'
+      : 'Failed to read AI application health overview');
     return {
-      content: `${toolName === 'inspect_ai_support_bundle' ? '生成 AI 支持包失败' : '读取 AI 应用健康总览失败'}: ${error?.message || error}`,
+      content: `${errorLabel}: ${error?.message || error}`,
       success: false,
     };
   }

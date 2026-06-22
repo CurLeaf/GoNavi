@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AIToolCall } from '../../types';
+import { setCurrentLanguage } from '../../i18n';
 import { executeLocalAIToolCall } from './aiLocalToolExecutor';
 import {
   cloneShortcutOptions,
@@ -21,6 +22,8 @@ const buildToolCall = (
 
 describe('aiLocalToolExecutor inspect_shortcuts', () => {
   it('returns the real shortcut snapshot so the model can answer Win/Mac shortcut questions from state', async () => {
+    setCurrentLanguage('en-US');
+
     const shortcutOptions = cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS);
     shortcutOptions.toggleQueryResultsPanel.windows = {
       combo: 'Ctrl+Shift+Y',

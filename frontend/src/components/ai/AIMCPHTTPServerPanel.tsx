@@ -2,6 +2,8 @@ import React from 'react';
 import { Button, Input, Switch, Tag } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { AIMCPHTTPServerStatus } from '../../types';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
@@ -38,6 +40,8 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
   onCopyURL,
   onCopyAuthorization,
 }) => {
+  const i18n = useOptionalI18n();
+  const copy = (key: string) => (i18n?.t ?? ((catalogKey) => catalogTranslate('en-US', catalogKey)))(key);
   const running = status?.running === true;
   const url = String(status?.url || '').trim();
   const authorizationHeader = String(status?.authorizationHeader || '').trim();
@@ -61,24 +65,26 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: overlayTheme.titleText }}>GoNavi MCP HTTP 服务</div>
+            <div style={{ fontWeight: 800, fontSize: 14, color: overlayTheme.titleText }}>
+              {copy('ai_settings.mcp_http.panel.title')}
+            </div>
             <Tag color={running ? 'success' : 'default'} style={{ marginInlineEnd: 0 }}>
-              {running ? '已启动' : '未启动'}
+              {copy(running ? 'ai_settings.mcp_http.panel.status.running' : 'ai_settings.mcp_http.panel.status.stopped')}
             </Tag>
             <Tag color="blue" style={{ marginInlineEnd: 0 }}>
               schema-only
             </Tag>
           </div>
           <div style={{ marginTop: 6, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-            给 OpenClaw、Hermans 等远程 Agent 使用。打开后监听本机地址，只开放连接、库表、字段和 DDL 等结构读取工具。
+            {copy('ai_settings.mcp_http.panel.description')}
           </div>
         </div>
         <Switch
           checked={running}
           loading={loading}
           onChange={onToggle}
-          checkedChildren="开"
-          unCheckedChildren="关"
+          checkedChildren={copy('ai_settings.mcp_http.panel.switch.on')}
+          unCheckedChildren={copy('ai_settings.mcp_http.panel.switch.off')}
         />
       </div>
       <div
@@ -94,7 +100,9 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
       >
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: overlayTheme.mutedText }}>监听地址 / 端口</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: overlayTheme.mutedText }}>
+              {copy('ai_settings.mcp_http.panel.addr_label')}
+            </span>
             <Input
               size="small"
               value={draft.addr}
@@ -111,7 +119,7 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
               value={draft.authorizationHeader}
               disabled={loading}
               readOnly={running || loading}
-              placeholder="Bearer gnv_xxx（留空自动生成）"
+              placeholder={copy('ai_settings.mcp_http.panel.authorization_placeholder')}
               autoComplete="off"
               onChange={(event) => onDraftChange({ authorizationHeader: event.target.value })}
               style={inputStyle}
@@ -120,8 +128,8 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
           {running
-            ? status.message || '服务运行中，可把 URL 和 Authorization Header 配置到远程 MCP 客户端。'
-            : '可自定义本机监听端口和 Bearer Token；留空 Authorization 时启动会自动生成随机 Token。'}
+            ? status.message || copy('ai_settings.mcp_http.panel.running_hint')
+            : copy('ai_settings.mcp_http.panel.stopped_hint')}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <code
@@ -136,7 +144,7 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
             {url || 'http://127.0.0.1:8765/mcp'}
           </code>
           <Button size="small" icon={<CopyOutlined />} disabled={!running || !url} onClick={onCopyURL}>
-            复制 URL
+            {copy('ai_settings.mcp_http.panel.copy_url')}
           </Button>
           <Button
             size="small"
@@ -144,7 +152,7 @@ const AIMCPHTTPServerPanel: React.FC<AIMCPHTTPServerPanelProps> = ({
             disabled={!running || !authorizationHeader}
             onClick={onCopyAuthorization}
           >
-            复制 Authorization
+            {copy('ai_settings.mcp_http.panel.copy_authorization')}
           </Button>
         </div>
       </div>

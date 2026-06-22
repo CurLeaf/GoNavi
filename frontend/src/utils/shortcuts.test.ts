@@ -125,6 +125,8 @@ describe('shortcut localization', () => {
     try {
       expect(SHORTCUT_ACTION_META.runQuery.label).toBe('Run SQL');
       expect(SHORTCUT_ACTION_META.saveQuery.description).toBe('Save the current query tab; unnamed queries open the save dialog');
+      expect(SHORTCUT_ACTION_META.toggleQueryResultsPanel.label).toBe('Toggle Results Panel');
+      expect(SHORTCUT_ACTION_META.toggleQueryResultsPanel.description).toBe('Show or hide the results area below the query editor');
       expect(SHORTCUT_ACTION_META.sendAIChatMessage.description).toContain('Shift+Enter');
       expect(describeConflictContext('global')).toBe('Browser');
 

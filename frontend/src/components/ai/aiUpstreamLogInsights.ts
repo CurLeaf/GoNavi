@@ -1,3 +1,6 @@
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
+
 const DEFAULT_AI_UPSTREAM_LOG_LIMIT = 160;
 const MAX_AI_UPSTREAM_LOG_LIMIT = 300;
 const DEFAULT_AI_UPSTREAM_REQUEST_LIMIT = 12;
@@ -44,6 +47,11 @@ interface AIUpstreamPayloadSummary {
   warnings?: string[];
 }
 
+interface LocalizableText {
+  key: string;
+  fallback: string;
+}
+
 interface AIUpstreamRequestSummary {
   requestId: string;
   provider: string;
@@ -88,6 +96,11 @@ const truncateText = (value: string, limit: number): string => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
+
+const translateText = (
+  translate: AIInspectionTranslator | undefined,
+  { key, fallback }: LocalizableText,
+): string => translateInspectionCopy(translate, key, fallback);
 
 const asRecordArray = (value: unknown): Record<string, unknown>[] =>
   Array.isArray(value) ? value.filter(isRecord) : [];
@@ -164,7 +177,10 @@ const estimateInputTextChars = (body: Record<string, unknown>): number => {
     + addTextLength(body.input);
 };
 
-const summarizeAIUpstreamPayload = (bodyText: string): AIUpstreamPayloadSummary => {
+const summarizeAIUpstreamPayload = (
+  bodyText: string,
+  translate?: AIInspectionTranslator,
+): AIUpstreamPayloadSummary => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(bodyText);
@@ -172,7 +188,10 @@ const summarizeAIUpstreamPayload = (bodyText: string): AIUpstreamPayloadSummary 
     return {
       parseable: false,
       parseError: String(error?.message || error || 'invalid JSON'),
-      warnings: ['请求 body 不是完整 JSON，可能已被日志截断，无法生成结构化摘要'],
+      warnings: [translateText(translate, {
+        key: 'ai_chat.inspection.upstream_logs.warning.invalid_json',
+        fallback: 'The request body is not complete JSON. It may have been truncated by logs, so a structured summary cannot be generated.',
+      })],
     };
   }
 
@@ -180,7 +199,10 @@ const summarizeAIUpstreamPayload = (bodyText: string): AIUpstreamPayloadSummary 
     return {
       parseable: false,
       parseError: 'request body is not a JSON object',
-      warnings: ['请求 body 不是 JSON object，无法识别模型、消息和工具字段'],
+      warnings: [translateText(translate, {
+        key: 'ai_chat.inspection.upstream_logs.warning.not_json_object',
+        fallback: 'The request body is not a JSON object, so model, message, and tool fields cannot be identified.',
+      })],
     };
   }
 
@@ -201,13 +223,22 @@ const summarizeAIUpstreamPayload = (bodyText: string): AIUpstreamPayloadSummary 
   const warnings: string[] = [];
 
   if (messageCount === 0) {
-    warnings.push('未识别到 messages、contents、system 或 prompt 字段，请确认上游协议是否符合预期');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.upstream_logs.warning.missing_messages',
+      fallback: 'No messages, contents, system, or prompt field was found. Confirm whether the upstream protocol matches expectations.',
+    }));
   }
   if (toolCount === 0) {
-    warnings.push('payload 未携带 tools/functions，模型无法发起工具调用');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.upstream_logs.warning.missing_tools',
+      fallback: 'The payload does not include tools/functions, so the model cannot initiate tool calls.',
+    }));
   }
   if (inputTextCharCount > 60000) {
-    warnings.push('输入文本体量较大，必要时先收窄上下文或减少日志/DDL 内容');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.upstream_logs.warning.large_input',
+      fallback: 'The input text is large. Narrow the context or reduce log/DDL content if needed.',
+    }));
   }
 
   return {
@@ -251,6 +282,7 @@ const parseAIUpstreamLogEvent = (
   line: string,
   bodyPreviewLimit: number,
   includePayloadSummary: boolean,
+  translate?: AIInspectionTranslator,
 ): AIUpstreamLogEvent | null => {
   if (!line.includes('AI 上游请求')) {
     return null;
@@ -275,7 +307,7 @@ const parseAIUpstreamLogEvent = (
     status: statusText ? Number(statusText) : undefined,
     duration,
     bodyPreview: bodyText ? truncateText(redactAIUpstreamLogPreview(bodyText), bodyPreviewLimit) : undefined,
-    bodySummary: bodyText && includePayloadSummary ? summarizeAIUpstreamPayload(bodyText) : undefined,
+    bodySummary: bodyText && includePayloadSummary ? summarizeAIUpstreamPayload(bodyText, translate) : undefined,
     error: errorText ? truncateText(redactAIUpstreamLogPreview(errorText), 2000) : undefined,
     line: truncateText(redactAIUpstreamLogPreview(line), 4000),
   };
@@ -356,6 +388,7 @@ export const buildAIUpstreamLogSnapshot = (params: {
   includeLines?: unknown;
   bodyPreviewLimit?: unknown;
   includePayloadSummary?: unknown;
+  translate?: AIInspectionTranslator;
 }) => {
   const data = params.readResult?.data && typeof params.readResult.data === 'object'
     ? params.readResult.data as Record<string, unknown>
@@ -363,12 +396,13 @@ export const buildAIUpstreamLogSnapshot = (params: {
   const requestedLineLimit = clampNumber(data.requestedLineLimit ?? params.lineLimit, DEFAULT_AI_UPSTREAM_LOG_LIMIT, 1, MAX_AI_UPSTREAM_LOG_LIMIT);
   const requestLimit = clampNumber(params.requestLimit, DEFAULT_AI_UPSTREAM_REQUEST_LIMIT, 1, MAX_AI_UPSTREAM_REQUEST_LIMIT);
   const bodyPreviewLimit = clampNumber(params.bodyPreviewLimit, DEFAULT_AI_UPSTREAM_BODY_LIMIT, 200, MAX_AI_UPSTREAM_BODY_LIMIT);
+  const { translate } = params;
   const includeBody = params.includeBody !== false;
   const includeLines = params.includeLines === true;
   const includePayloadSummary = params.includePayloadSummary !== false;
   const lines = normalizeLogLines(data.lines);
   const parsedEvents = lines
-    .map((line) => parseAIUpstreamLogEvent(line, bodyPreviewLimit, includePayloadSummary))
+    .map((line) => parseAIUpstreamLogEvent(line, bodyPreviewLimit, includePayloadSummary, translate))
     .filter((event): event is AIUpstreamLogEvent => Boolean(event))
     .filter((event) => matchesFilter(event, params));
   const eventBreakdown = {
@@ -398,16 +432,34 @@ export const buildAIUpstreamLogSnapshot = (params: {
     lines: includeLines ? parsedEvents.map((event) => event.line) : undefined,
     message: parsedEvents.length > 0
       ? ''
-      : '最近日志里没有找到 AI 上游请求记录；请先发送一次 AI 消息，或扩大 lineLimit 后重试。',
+      : translateText(translate, {
+          key: 'ai_chat.inspection.upstream_logs.message.empty',
+          fallback: 'No AI upstream request records were found in recent logs. Send one AI message first, or retry with a larger lineLimit.',
+        }),
     nextActions: parsedEvents.length > 0
       ? [
-          '如需核对完整入参，先用 requestId 精确过滤，再查看 bodyPreview 是否已被截断。',
-          '如果只有开始没有完成/失败，继续查看 inspect_app_logs 或扩大 lineLimit 排查请求是否超时。',
+          translateText(translate, {
+            key: 'ai_chat.inspection.upstream_logs.next_action.filter_request_body',
+            fallback: 'To verify full request inputs, filter precisely by requestId first, then check whether bodyPreview was truncated.',
+          }),
+          translateText(translate, {
+            key: 'ai_chat.inspection.upstream_logs.next_action.inspect_timeout',
+            fallback: 'If there is only a start event with no completion or failure, continue with inspect_app_logs or increase lineLimit to check for request timeout.',
+          }),
         ]
       : [
-          '确认当前构建已包含 AI 上游请求日志能力。',
-          '发送一次 AI 聊天消息后再调用本工具。',
-          '如果仍没有记录，调用 inspect_app_logs 读取最近 WARN/ERROR 原文。',
+          translateText(translate, {
+            key: 'ai_chat.inspection.upstream_logs.next_action.confirm_logging',
+            fallback: 'Confirm that the current build includes AI upstream request logging.',
+          }),
+          translateText(translate, {
+            key: 'ai_chat.inspection.upstream_logs.next_action.send_message',
+            fallback: 'Send one AI chat message, then call this tool again.',
+          }),
+          translateText(translate, {
+            key: 'ai_chat.inspection.upstream_logs.next_action.read_warn_error',
+            fallback: 'If there are still no records, call inspect_app_logs to read recent WARN/ERROR raw logs.',
+          }),
         ],
   };
 };

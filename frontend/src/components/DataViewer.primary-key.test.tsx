@@ -526,6 +526,49 @@ describe('DataViewer safe editing locator', () => {
     renderer.unmount();
   });
 
+  it.each([
+    [
+      'zh-TW',
+      '資料庫連線逾時：mysql 127.0.0.1:3306/crm：網路逾時',
+      '查詢超過連線逾時時間，已中斷。請調高連線逾時時間，或縮小查詢範圍後再試。',
+    ],
+    [
+      'ja-JP',
+      'データベース接続がタイムアウトしました: mysql 127.0.0.1:3306/crm: ネットワークタイムアウト',
+      'クエリが接続タイムアウトを超えたため中断されました。接続タイムアウトを延長するか、クエリ範囲を絞って再試行してください。',
+    ],
+    [
+      'de-DE',
+      'Zeitüberschreitung bei der Datenbankverbindung: mysql 127.0.0.1:3306/crm: Netzwerk-Timeout',
+      'Die Abfrage hat das Verbindungstimeout überschritten und wurde unterbrochen. Erhöhen Sie das Verbindungstimeout oder verkleinern Sie den Abfragebereich und versuchen Sie es erneut.',
+    ],
+    [
+      'ru-RU',
+      'Тайм-аут подключения к базе данных: mysql 127.0.0.1:3306/crm: тайм-аут сети',
+      'Запрос превысил тайм-аут подключения и был прерван. Увеличьте тайм-аут подключения или сократите область запроса и повторите попытку.',
+    ],
+  ])('maps localized connection-timeout wrappers to viewer timeout copy for %s', async (locale, backendMessage, expectedMessage) => {
+    storeState.languagePreference = locale;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'crm';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'ID', key: '' }, { name: 'NAME', key: '' }],
+    });
+    backendApp.DBQuery.mockResolvedValue({
+      success: false,
+      message: backendMessage,
+      fields: [],
+      data: [],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: `tab-timeout-${locale}`, dbName: 'crm', tableName: 'orders', title: 'orders' }));
+
+    expect(messageApi.error).toHaveBeenCalledWith(expectedMessage);
+    expect(storeState.addSqlLog.mock.calls.some((call: any[]) => String(call[0]?.message || '').includes(backendMessage))).toBe(true);
+    renderer.unmount();
+  });
+
   it('keeps non-Oracle table preview read-only when no safe locator exists', async () => {
     storeState.languagePreference = 'en-US';
     storeState.connections[0].config.type = 'mysql';

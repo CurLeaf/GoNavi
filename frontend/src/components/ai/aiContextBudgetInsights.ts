@@ -1,10 +1,15 @@
 import type {
+  I18nParams,
+} from '../../i18n';
+import type {
   AIChatMessage,
   AIContextItem,
   AIMCPToolDescriptor,
   AISkillConfig,
   AIUserPromptSettings,
 } from '../../types';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
 
 type ContextRiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
@@ -19,6 +24,7 @@ interface BuildAIContextBudgetSnapshotOptions {
   mcpTools?: AIMCPToolDescriptor[];
   skills?: AISkillConfig[];
   userPromptSettings?: AIUserPromptSettings;
+  translate?: AIInspectionTranslator;
 }
 
 const DEFAULT_MESSAGE_LIMIT = 40;
@@ -64,6 +70,18 @@ const appendUnique = (items: string[], item: string) => {
   }
 };
 
+const translateBudgetCopy = (
+  translate: AIInspectionTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: I18nParams,
+): string => translateInspectionCopy(
+  translate,
+  `ai_chat.inspection.context_budget.${key}`,
+  fallback,
+  params,
+);
+
 const getMessagePayloadChars = (message: AIChatMessage): number =>
   charCount(message.content)
   + charCount(message.thinking)
@@ -81,6 +99,7 @@ export const buildAIContextBudgetSnapshot = ({
   mcpTools = [],
   skills = [],
   userPromptSettings,
+  translate,
 }: BuildAIContextBudgetSnapshotOptions) => {
   const requestedSessionId = String(sessionId || activeSessionId || '').trim();
   const allMessages = requestedSessionId ? (aiChatHistory[requestedSessionId] || []) : [];
@@ -155,40 +174,109 @@ export const buildAIContextBudgetSnapshot = ({
   const nextActions: string[] = [];
 
   if (!requestedSessionId || !session) {
-    appendUnique(warnings, '未找到目标 AI 会话，消息体量统计只覆盖空窗口');
-    appendUnique(nextActions, '先打开或选中目标 AI 会话，再重新调用 inspect_ai_context_budget');
+    appendUnique(warnings, translateBudgetCopy(
+      translate,
+      'warning.missing_session',
+      'The target AI session was not found, so message volume statistics only cover an empty window',
+    ));
+    appendUnique(nextActions, translateBudgetCopy(
+      translate,
+      'next_action.open_session',
+      'Open or select the target AI session first, then call inspect_ai_context_budget again',
+    ));
   }
   if (riskLevel === 'critical') {
-    appendUnique(warnings, '当前 AI 输入上下文体量达到 critical，可能导致回复慢、截断或模型忽略关键约束');
+    appendUnique(warnings, translateBudgetCopy(
+      translate,
+      'warning.critical_risk',
+      'The current AI input context has reached critical volume and may cause slow replies, truncation, or ignored constraints',
+    ));
   } else if (riskLevel === 'high') {
-    appendUnique(warnings, '当前 AI 输入上下文体量偏高，复杂问题前建议先收窄上下文');
+    appendUnique(warnings, translateBudgetCopy(
+      translate,
+      'warning.high_risk',
+      'The current AI input context is large; narrow the context before complex questions',
+    ));
   }
   if (ddlChars >= 60000 || contextEntries.length >= 30) {
-    appendUnique(warnings, '已挂载表结构较多或 DDL 较长，可能挤占用户问题和工具结果空间');
-    appendUnique(nextActions, '只保留本轮相关表，必要时改用 inspect_table_bundle 按需读取目标表');
+    appendUnique(warnings, translateBudgetCopy(
+      translate,
+      'warning.large_schema_context',
+      'Many table schemas or long DDL are mounted and may crowd out the user question and tool results',
+    ));
+    appendUnique(nextActions, translateBudgetCopy(
+      translate,
+      'next_action.narrow_tables',
+      'Keep only tables relevant to this turn; if needed, use inspect_table_bundle to read target tables on demand',
+    ));
   }
   if (messagePayloadChars >= 40000) {
-    appendUnique(warnings, '当前会话最近消息内容较长，可能影响后续回复稳定性');
-    appendUnique(nextActions, '新开会话或先让 AI 总结当前结论，再继续下一轮复杂任务');
+    appendUnique(warnings, translateBudgetCopy(
+      translate,
+      'warning.large_messages',
+      'Recent messages in this session are long and may affect the stability of later replies',
+    ));
+    appendUnique(nextActions, translateBudgetCopy(
+      translate,
+      'next_action.summarize_or_new_session',
+      'Start a new session or ask AI to summarize the current conclusion before continuing the next complex task',
+    ));
   }
   if (toolResultChars >= 20000) {
-    appendUnique(warnings, '最近工具结果较长，可能导致后续回答被日志或大结果集稀释');
-    appendUnique(nextActions, '降低 inspect_app_logs / inspect_recent_sql_logs / includeDDL / includeLogLines 的返回量');
+    appendUnique(warnings, translateBudgetCopy(
+      translate,
+      'warning.large_tool_results',
+      'Recent tool results are long and may dilute later answers with logs or large result sets',
+    ));
+    appendUnique(nextActions, translateBudgetCopy(
+      translate,
+      'next_action.reduce_tool_results',
+      'Reduce the returned volume from inspect_app_logs / inspect_recent_sql_logs / includeDDL / includeLogLines',
+    ));
   }
   if (mcpTools.length >= 40 || mcpSchemaChars >= 30000) {
-    appendUnique(warnings, '当前暴露的 MCP 工具或 schema 较多，模型选择工具时可能更容易走偏');
-    appendUnique(nextActions, '临时禁用无关 MCP 服务，或先调用 inspect_ai_tool_catalog 按关键词收窄工具路线');
+    appendUnique(warnings, translateBudgetCopy(
+      translate,
+      'warning.large_mcp_catalog',
+      'Many MCP tools or schemas are exposed, which may make the model more likely to choose the wrong tool',
+    ));
+    appendUnique(nextActions, translateBudgetCopy(
+      translate,
+      'next_action.narrow_tools',
+      'Temporarily disable unrelated MCP services, or call inspect_ai_tool_catalog by keyword first to narrow the tool route',
+    ));
   }
   if (enabledSkills.length >= 8 || skillPromptChars >= 16000) {
-    appendUnique(warnings, '当前启用 Skills 较多或提示词较长，可能叠加冲突约束');
-    appendUnique(nextActions, '仅保留本轮任务相关 Skills，完成后再恢复其它 Skills');
+    appendUnique(warnings, translateBudgetCopy(
+      translate,
+      'warning.large_skills',
+      'Many Skills are enabled or prompts are long, which may stack conflicting constraints',
+    ));
+    appendUnique(nextActions, translateBudgetCopy(
+      translate,
+      'next_action.reduce_skills',
+      'Keep only Skills relevant to this turn, then restore other Skills after finishing',
+    ));
   }
   if (unresolvedToolCallIds.size > 0) {
-    appendUnique(warnings, `最近消息窗口内有 ${unresolvedToolCallIds.size} 个未闭环工具调用`);
-    appendUnique(nextActions, '先调用 inspect_ai_message_flow 确认工具调用是否缺少 tool 结果消息');
+    appendUnique(warnings, translateBudgetCopy(
+      translate,
+      'warning.unresolved_tool_calls',
+      `The recent message window contains ${unresolvedToolCallIds.size} unclosed tool calls`,
+      { count: unresolvedToolCallIds.size },
+    ));
+    appendUnique(nextActions, translateBudgetCopy(
+      translate,
+      'next_action.inspect_message_flow',
+      'Call inspect_ai_message_flow first to confirm whether tool calls are missing tool result messages',
+    ));
   }
   if (warnings.length === 0) {
-    appendUnique(nextActions, '当前上下文体量可控，可继续按具体问题调用更窄的结构、日志或 SQL 风险探针');
+    appendUnique(nextActions, translateBudgetCopy(
+      translate,
+      'next_action.continue_narrow_probe',
+      'The current context volume is manageable; continue by calling narrower schema, log, or SQL risk probes for the specific question',
+    ));
   }
 
   const largestMessages = inspectedMessages

@@ -6,7 +6,8 @@ import type {
   SavedConnection,
   TabData,
 } from '../../types';
-import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
+import { t as translateCatalog, type I18nParams } from '../../i18n';
+import { BUILTIN_AI_TOOL_INFO, localizeBuiltinAIToolInfo } from '../../utils/aiToolRegistry';
 import { buildAIChatReadinessSnapshot } from './aiChatReadiness';
 import { buildAIGuidanceSnapshot } from './aiPromptInsights';
 import { buildAIProviderSnapshot } from './aiProviderInsights';
@@ -20,6 +21,7 @@ import { buildAISetupHealthSnapshot } from './aiSetupHealthInsights';
 import { buildMCPSetupSnapshot } from './aiMCPInsights';
 import { buildMCPRemoteAccessSnapshot } from './aiMCPRemoteAccessInsights';
 import { buildMCPToolSchemaSnapshot } from './aiMCPToolSchemaInsights';
+import { translateInspectionCopy } from './aiInspectionI18n';
 import type {
   AISnapshotInspectionRuntime,
   AISnapshotInspectionRuntimeState,
@@ -40,8 +42,14 @@ interface ExecuteAIConfigSnapshotToolCallOptions {
   skills?: AISkillConfig[];
   userPromptSettings?: AIUserPromptSettings;
   dynamicModels?: string[];
+  translate?: (key: string, params?: I18nParams) => string;
   runtime?: AISnapshotInspectionRuntime;
 }
+
+const translateInspectionZhCN = (
+  key: string,
+  params?: I18nParams,
+) => translateCatalog(key, params, 'zh-CN');
 
 const loadRuntimeState = async (
   runtime: AISnapshotInspectionRuntime | undefined,
@@ -83,6 +91,7 @@ export async function executeAIConfigSnapshotToolCall(
     skills = [],
     userPromptSettings,
     dynamicModels = [],
+    translate,
     runtime,
   } = options;
 
@@ -109,6 +118,7 @@ export async function executeAIConfigSnapshotToolCall(
             userPromptSettings,
             activeContext,
             activeContextItems: aiContexts[activeContextKey] || [],
+            translate,
           })),
           success: true,
         };
@@ -125,6 +135,7 @@ export async function executeAIConfigSnapshotToolCall(
             mcpTools,
             dynamicModels,
             builtinToolNames: BUILTIN_AI_TOOL_NAMES,
+            translate,
           })),
           success: true,
         };
@@ -138,6 +149,7 @@ export async function executeAIConfigSnapshotToolCall(
             tabs,
             activeTabId,
             connections,
+            translate,
           })),
           success: true,
         };
@@ -149,6 +161,7 @@ export async function executeAIConfigSnapshotToolCall(
             providers: Array.isArray(runtimeState?.providers) ? runtimeState.providers : [],
             activeProviderId: runtimeState?.activeProviderId || '',
             dynamicModels,
+            translate,
           })),
           success: true,
         };
@@ -165,6 +178,7 @@ export async function executeAIConfigSnapshotToolCall(
             dynamicModels,
             activeContext,
             activeContextItems: aiContexts[activeContextKey] || [],
+            translate,
           })),
           success: true,
         };
@@ -172,12 +186,13 @@ export async function executeAIConfigSnapshotToolCall(
       case 'inspect_ai_tool_catalog':
         return {
           content: JSON.stringify(buildAIToolCatalogSnapshot({
-            builtinTools: BUILTIN_AI_TOOL_INFO,
+            builtinTools: localizeBuiltinAIToolInfo(translate),
             mcpTools,
             keyword: args.keyword,
             toolName: args.toolName,
             includeMCPTools: args.includeMCPTools !== false,
             limit: args.limit,
+            translate,
           })),
           success: true,
         };
@@ -188,6 +203,7 @@ export async function executeAIConfigSnapshotToolCall(
             mcpServers: Array.isArray(mcpServers) ? mcpServers : [],
             mcpClientStatuses: Array.isArray(mcpClientInstallStatuses) ? mcpClientInstallStatuses : [],
             mcpTools,
+            translate,
           })),
           success: true,
         };
@@ -202,18 +218,22 @@ export async function executeAIConfigSnapshotToolCall(
             path: args.path,
             exposeStrategy: args.exposeStrategy,
             tokenConfigured: args.tokenConfigured,
+            translate,
           })),
           success: true,
         };
       }
       case 'inspect_mcp_authoring_guide':
         return {
-          content: JSON.stringify(buildMCPAuthoringGuideSnapshot()),
+          content: JSON.stringify(buildMCPAuthoringGuideSnapshot(translate)),
           success: true,
         };
       case 'inspect_mcp_draft':
         return {
-          content: JSON.stringify(buildMCPDraftInspectionSnapshot(args)),
+          content: JSON.stringify(buildMCPDraftInspectionSnapshot({
+            ...args,
+            translate: translate || translateInspectionZhCN,
+          })),
           success: true,
         };
       case 'inspect_mcp_docker_setup': {
@@ -224,6 +244,7 @@ export async function executeAIConfigSnapshotToolCall(
             mcpTools,
             serverId: args.serverId,
             includeDisabled: args.includeDisabled !== false,
+            translate,
           })),
           success: true,
         };
@@ -237,6 +258,7 @@ export async function executeAIConfigSnapshotToolCall(
             keyword: args.keyword,
             includeSchema: args.includeSchema === true,
             limit: args.limit,
+            translate,
           })),
           success: true,
         };
@@ -245,6 +267,7 @@ export async function executeAIConfigSnapshotToolCall(
           content: JSON.stringify(buildAIGuidanceSnapshot({
             userPromptSettings,
             skills,
+            translate,
           })),
           success: true,
         };
@@ -252,21 +275,25 @@ export async function executeAIConfigSnapshotToolCall(
         return null;
     }
   } catch (error: any) {
-    const label = {
-      inspect_ai_setup_health: '体检当前 AI 配置失败',
-      inspect_ai_runtime: '读取当前 AI 运行状态失败',
-      inspect_ai_safety: '读取当前 AI 安全边界失败',
-      inspect_ai_providers: '读取当前 AI 供应商配置失败',
-      inspect_ai_chat_readiness: '读取 AI 聊天发送前置状态失败',
-      inspect_ai_tool_catalog: '读取 AI 工具目录失败',
-      inspect_mcp_setup: '读取 MCP 配置状态失败',
-      inspect_mcp_remote_access: '读取 MCP 远程接入指引失败',
-      inspect_mcp_authoring_guide: '读取 MCP 新增填写指引失败',
-      inspect_mcp_draft: '校验 MCP 新增草稿失败',
-      inspect_mcp_docker_setup: '检查 Docker MCP 配置失败',
-      inspect_mcp_tool_schema: '读取 MCP 工具参数 schema 失败',
-      inspect_ai_guidance: '读取当前 AI 提示与技能配置失败',
-    }[toolName] || '读取 AI 配置探针失败';
+    const label = translateInspectionCopy(
+      translate,
+      `ai_chat.inspection.ai_config.error.${toolName}`,
+      {
+        inspect_ai_setup_health: 'Failed to inspect current AI setup',
+        inspect_ai_runtime: 'Failed to read current AI runtime state',
+        inspect_ai_safety: 'Failed to read current AI safety boundary',
+        inspect_ai_providers: 'Failed to read current AI provider configuration',
+        inspect_ai_chat_readiness: 'Failed to read AI chat prerequisites',
+        inspect_ai_tool_catalog: 'Failed to read AI tool catalog',
+        inspect_mcp_setup: 'Failed to read MCP setup state',
+        inspect_mcp_remote_access: 'Failed to read MCP remote access guidance',
+        inspect_mcp_authoring_guide: 'Failed to read MCP authoring guide',
+        inspect_mcp_draft: 'Failed to validate MCP draft',
+        inspect_mcp_docker_setup: 'Failed to inspect Docker MCP setup',
+        inspect_mcp_tool_schema: 'Failed to read MCP tool parameter schema',
+        inspect_ai_guidance: 'Failed to read current AI prompts and Skills configuration',
+      }[toolName] || 'Failed to read AI configuration inspection',
+    );
     return {
       content: `${label}: ${error?.message || error}`,
       success: false,

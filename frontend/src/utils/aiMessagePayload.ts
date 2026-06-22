@@ -1,5 +1,8 @@
 import type { AIChatMessage, AIToolCall } from '../types';
-import { appendAIChatAttachmentsToContent } from '../components/ai/aiChatAttachments';
+import {
+  appendAIChatAttachmentsToContent,
+  type AIChatAttachmentTranslator,
+} from '../components/ai/aiChatAttachments';
 
 export interface AIRequestMessage {
   role: AIChatMessage['role'];
@@ -10,10 +13,13 @@ export interface AIRequestMessage {
   reasoning_content?: string;
 }
 
-export const toAIRequestMessage = (message: AIChatMessage): AIRequestMessage => {
+export const toAIRequestMessage = (
+  message: AIChatMessage,
+  translate?: AIChatAttachmentTranslator,
+): AIRequestMessage => {
   const payload: AIRequestMessage = {
     role: message.role,
-    content: appendAIChatAttachmentsToContent(message.content, message.attachments),
+    content: appendAIChatAttachmentsToContent(message.content, message.attachments, translate),
   };
 
   if (message.images && message.images.length > 0) {

@@ -2,6 +2,8 @@ import React from 'react';
 import { Select } from 'antd';
 import { DownOutlined } from '@ant-design/icons';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { AIProviderConfig } from '../../types';
 
 interface AIChatProviderModelSelectProps {
@@ -21,6 +23,10 @@ const AIChatProviderModelSelect: React.FC<AIChatProviderModelSelectProps> = ({
   onModelChange,
   onFetchModels,
 }) => {
+  const i18n = useOptionalI18n();
+  const t = i18n?.t ?? ((key: string, params?: Record<string, string | number | boolean | null | undefined>) =>
+    catalogTranslate('en-US', key, params));
+
   if (!activeProvider) {
     return null;
   }
@@ -49,7 +55,7 @@ const AIChatProviderModelSelect: React.FC<AIChatProviderModelSelectProps> = ({
         style={{ width: 130, fontSize: 11, background: 'transparent' }}
         styles={{ popup: { root: { minWidth: 200 } } }}
         showSearch
-        placeholder="选择模型"
+        placeholder={t('ai_chat.input.model.placeholder')}
       />
     );
   }
@@ -63,7 +69,7 @@ const AIChatProviderModelSelect: React.FC<AIChatProviderModelSelectProps> = ({
       loading={loadingModels}
       options={options}
       styles={{ popup: { root: { minWidth: 200 } } }}
-      placeholder="选择模型"
+      placeholder={t('ai_chat.input.model.placeholder')}
       className="gn-v2-ai-model-select"
       suffixIcon={<DownOutlined />}
     />

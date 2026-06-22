@@ -2,6 +2,7 @@ package aiservice
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,12 +15,21 @@ import (
 )
 
 type fakeMCPHTTPProcess struct {
-	done chan struct{}
-	once sync.Once
+	done    chan struct{}
+	once    sync.Once
+	stopErr error
+	waitErr error
 }
 
 func newFakeMCPHTTPProcess() *fakeMCPHTTPProcess {
 	return &fakeMCPHTTPProcess{done: make(chan struct{})}
+}
+
+func newFakeMCPHTTPProcessWithWaitErr(err error) *fakeMCPHTTPProcess {
+	return &fakeMCPHTTPProcess{
+		done:    make(chan struct{}),
+		waitErr: err,
+	}
 }
 
 func (p *fakeMCPHTTPProcess) Done() <-chan struct{} {
@@ -30,12 +40,18 @@ func (p *fakeMCPHTTPProcess) Stop(context.Context) error {
 	p.once.Do(func() {
 		close(p.done)
 	})
-	return nil
+	return p.stopErr
 }
 
 func (p *fakeMCPHTTPProcess) Wait() error {
 	<-p.done
-	return nil
+	return p.waitErr
+}
+
+func (p *fakeMCPHTTPProcess) finish() {
+	p.once.Do(func() {
+		close(p.done)
+	})
 }
 
 func TestMCPHTTPServerLifecycleFromAIService(t *testing.T) {
@@ -46,11 +62,11 @@ func TestMCPHTTPServerLifecycleFromAIService(t *testing.T) {
 		waitMCPHTTPHealth = originalHealth
 	})
 	var capturedOptions mcpHTTPProcessStartOptions
-	startMCPHTTPProcess = func(_ context.Context, options mcpHTTPProcessStartOptions) (mcpHTTPProcess, error) {
+	startMCPHTTPProcess = func(_ context.Context, options mcpHTTPProcessStartOptions, _ mcpHTTPTextLookup) (mcpHTTPProcess, error) {
 		capturedOptions = options
 		return newFakeMCPHTTPProcess(), nil
 	}
-	waitMCPHTTPHealth = func(_ context.Context, _ string) error {
+	waitMCPHTTPHealth = func(_ context.Context, _ string, _ mcpHTTPTextLookup) error {
 		return nil
 	}
 
@@ -112,11 +128,11 @@ func TestMCPHTTPServerStartUsesCustomAddrAndToken(t *testing.T) {
 	})
 
 	var capturedOptions mcpHTTPProcessStartOptions
-	startMCPHTTPProcess = func(_ context.Context, options mcpHTTPProcessStartOptions) (mcpHTTPProcess, error) {
+	startMCPHTTPProcess = func(_ context.Context, options mcpHTTPProcessStartOptions, _ mcpHTTPTextLookup) (mcpHTTPProcess, error) {
 		capturedOptions = options
 		return newFakeMCPHTTPProcess(), nil
 	}
-	waitMCPHTTPHealth = func(_ context.Context, _ string) error {
+	waitMCPHTTPHealth = func(_ context.Context, _ string, _ mcpHTTPTextLookup) error {
 		return nil
 	}
 
@@ -147,6 +163,127 @@ func TestMCPHTTPServerStartUsesCustomAddrAndToken(t *testing.T) {
 	if !started.SchemaOnly || !capturedOptions.SchemaOnly {
 		t.Fatal("expected custom in-app MCP HTTP server to remain schema-only")
 	}
+}
+
+func TestMCPHTTPServerLifecycleUsesEnglishStatusMessages(t *testing.T) {
+	originalStarter := startMCPHTTPProcess
+	originalHealth := waitMCPHTTPHealth
+	t.Cleanup(func() {
+		startMCPHTTPProcess = originalStarter
+		waitMCPHTTPHealth = originalHealth
+	})
+	startMCPHTTPProcess = func(_ context.Context, options mcpHTTPProcessStartOptions, _ mcpHTTPTextLookup) (mcpHTTPProcess, error) {
+		return newFakeMCPHTTPProcess(), nil
+	}
+	waitMCPHTTPHealth = func(_ context.Context, _ string, _ mcpHTTPTextLookup) error {
+		return nil
+	}
+
+	service := NewServiceWithSecretStore(secretstore.NewUnavailableStore("test"))
+	InitializeLifecycle(service, context.Background())
+	t.Cleanup(func() {
+		service.Shutdown()
+	})
+	service.AISetLanguage("en-US")
+
+	initial := service.AIGetMCPHTTPServerStatus()
+	if initial.Message != "GoNavi MCP HTTP server is not running" {
+		t.Fatalf("expected English not-running message, got %q", initial.Message)
+	}
+
+	started, err := service.AIStartMCPHTTPServer(ai.MCPHTTPServerOptions{
+		Addr: "127.0.0.1:0",
+		Path: "mcp",
+	})
+	if err != nil {
+		t.Fatalf("AIStartMCPHTTPServer returned error: %v", err)
+	}
+	if started.Message != "GoNavi MCP HTTP server started" {
+		t.Fatalf("expected English started message, got %q", started.Message)
+	}
+
+	stopped, err := service.AIStopMCPHTTPServer()
+	if err != nil {
+		t.Fatalf("AIStopMCPHTTPServer returned error: %v", err)
+	}
+	if stopped.Message != "GoNavi MCP HTTP server stopped" {
+		t.Fatalf("expected English stopped message, got %q", stopped.Message)
+	}
+}
+
+func TestMCPHTTPServerStartFailureUsesEnglishError(t *testing.T) {
+	originalStarter := startMCPHTTPProcess
+	t.Cleanup(func() {
+		startMCPHTTPProcess = originalStarter
+	})
+	startMCPHTTPProcess = func(_ context.Context, _ mcpHTTPProcessStartOptions, _ mcpHTTPTextLookup) (mcpHTTPProcess, error) {
+		return nil, fmt.Errorf("listen tcp 127.0.0.1:8765: bind: permission denied")
+	}
+
+	service := NewServiceWithSecretStore(secretstore.NewUnavailableStore("test"))
+	InitializeLifecycle(service, context.Background())
+	service.AISetLanguage("en-US")
+
+	status, err := service.AIStartMCPHTTPServer(ai.MCPHTTPServerOptions{
+		Addr: "127.0.0.1:8765",
+		Path: "/mcp",
+	})
+	if err == nil {
+		t.Fatal("expected start failure")
+	}
+
+	const want = "Failed to start GoNavi MCP HTTP service: listen tcp 127.0.0.1:8765: bind: permission denied"
+	if err.Error() != want {
+		t.Fatalf("expected localized start failure %q, got %q", want, err.Error())
+	}
+	if status.Message != want {
+		t.Fatalf("expected localized start failure status %q, got %q", want, status.Message)
+	}
+}
+
+func TestMCPHTTPServerUnexpectedExitUsesEnglishStatusMessage(t *testing.T) {
+	originalStarter := startMCPHTTPProcess
+	originalHealth := waitMCPHTTPHealth
+	t.Cleanup(func() {
+		startMCPHTTPProcess = originalStarter
+		waitMCPHTTPHealth = originalHealth
+	})
+
+	process := newFakeMCPHTTPProcessWithWaitErr(fmt.Errorf("exit status 1"))
+	startMCPHTTPProcess = func(_ context.Context, _ mcpHTTPProcessStartOptions, _ mcpHTTPTextLookup) (mcpHTTPProcess, error) {
+		return process, nil
+	}
+	waitMCPHTTPHealth = func(_ context.Context, _ string, _ mcpHTTPTextLookup) error {
+		return nil
+	}
+
+	service := NewServiceWithSecretStore(secretstore.NewUnavailableStore("test"))
+	InitializeLifecycle(service, context.Background())
+	service.AISetLanguage("en-US")
+
+	if _, err := service.AIStartMCPHTTPServer(ai.MCPHTTPServerOptions{
+		Addr: "127.0.0.1:0",
+		Path: "mcp",
+	}); err != nil {
+		t.Fatalf("AIStartMCPHTTPServer returned error: %v", err)
+	}
+
+	process.finish()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		status := service.AIGetMCPHTTPServerStatus()
+		if !status.Running && strings.Contains(status.Message, "GoNavi MCP HTTP service stopped unexpectedly") {
+			const want = "GoNavi MCP HTTP service stopped unexpectedly: exit status 1"
+			if status.Message != want {
+				t.Fatalf("expected localized unexpected-exit message %q, got %q", want, status.Message)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	t.Fatal("timed out waiting for unexpected-exit status")
 }
 
 func TestMCPHTTPCommandProcessStopTreatsRequestedCancelAsSuccess(t *testing.T) {

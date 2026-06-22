@@ -855,6 +855,17 @@ describe("ConnectionModal i18n", () => {
     expect(antdMessage.error).toHaveBeenCalledWith("Member discovery failed");
   });
 
+  it("localizes the Redis URI example separator while preserving URI examples as raw text", () => {
+    expect(source).not.toContain(`topology=cluster ${"\u6216"} redis://`);
+    expect(source).toContain('t("connection.modal.example.or"');
+    expect(source).toContain(
+      '"redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster"',
+    );
+    expect(source).toContain(
+      '"redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster"',
+    );
+  });
+
   it("removes the remaining Chinese user-facing tail strings from ConnectionModal source", () => {
     [
       'label: "自动"',

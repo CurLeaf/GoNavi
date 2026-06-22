@@ -1,4 +1,10 @@
 import type {
+  I18nParams,
+} from '../../i18n';
+import {
+  t as translateCatalog,
+} from '../../i18n';
+import type {
   AIContextItem,
   AIMCPClientInstallStatus,
   AIMCPServerConfig,
@@ -16,6 +22,7 @@ import { buildRecentConnectionFailureSnapshot } from './aiConnectionFailureInsig
 import { buildActiveTabSnapshot, buildWorkspaceTabsSnapshot } from './aiWorkspaceInsights';
 
 type AIAppHealthStatus = 'ready' | 'needs_attention' | 'degraded' | 'blocked';
+type AIInspectionTranslator = (key: string, params?: I18nParams) => string;
 
 interface AILastRenderErrorHealthSnapshot {
   hasError: boolean;
@@ -39,6 +46,17 @@ const appendUnique = (items: string[], value: string) => {
     return;
   }
   items.push(trimmed);
+};
+
+const translateInspectionCopy = (
+  translate: AIInspectionTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: I18nParams,
+): string => {
+  const t = translate || ((catalogKey, catalogParams) => translateCatalog(catalogKey, catalogParams, 'en-US'));
+  const translated = t(key, params);
+  return translated && translated !== key ? translated : fallback;
 };
 
 const normalizeAppHealthLogLimit = (value: unknown): number => {
@@ -71,9 +89,15 @@ const buildUnreadLogSnapshot = (message: string, lineLimit: number) => ({
   message,
 });
 
-const buildEmptyLastRenderErrorSnapshot = (): AILastRenderErrorHealthSnapshot => ({
+const buildEmptyLastRenderErrorSnapshot = (
+  translate?: AIInspectionTranslator,
+): AILastRenderErrorHealthSnapshot => ({
   hasError: false,
-  summary: '当前还没有记录到 AI 消息渲染异常。',
+  summary: translateInspectionCopy(
+    translate,
+    'ai_chat.inspection.app_health.last_render_error.empty_summary',
+    'No AI message render errors have been recorded yet.',
+  ),
   nextActions: [],
 });
 
@@ -83,11 +107,22 @@ const summarizeAppLogSnapshot = (
     keyword?: unknown;
     lineLimit: number;
     includeLogLines?: boolean;
+    translate?: AIInspectionTranslator;
   },
 ) => {
   if (!readResult?.success) {
+    const detail = readResult?.message || translateInspectionCopy(
+      options.translate,
+      'ai_chat.inspection.app_health.log_reading_unavailable',
+      'The current runtime does not provide log reading capability',
+    );
     return buildUnreadLogSnapshot(
-      `GoNavi 应用日志暂不可读: ${readResult?.message || '当前环境未提供日志读取能力'}`,
+      translateInspectionCopy(
+        options.translate,
+        'ai_chat.inspection.app_health.app_log.unread',
+        `GoNavi application logs are not readable: ${detail}`,
+        { detail },
+      ),
       options.lineLimit,
     );
   }
@@ -96,6 +131,7 @@ const summarizeAppLogSnapshot = (
     readResult,
     keyword: options.keyword,
     lineLimit: options.lineLimit,
+    translate: options.translate,
   });
   return {
     readable: true,
@@ -110,9 +146,15 @@ const summarizeConnectionFailures = (
   options: {
     keyword?: unknown;
     lineLimit: number;
+    translate?: AIInspectionTranslator;
   },
 ) => {
   if (!readResult?.success) {
+    const detail = readResult?.message || translateInspectionCopy(
+      options.translate,
+      'ai_chat.inspection.app_health.log_reading_unavailable',
+      'The current runtime does not provide log reading capability',
+    );
     return {
       readable: false,
       logPath: '',
@@ -134,7 +176,12 @@ const summarizeConnectionFailures = (
       latestFailure: null,
       recentFailures: [],
       nextActions: [] as string[],
-      message: `连接失败日志暂不可读: ${readResult?.message || '当前环境未提供日志读取能力'}`,
+      message: translateInspectionCopy(
+        options.translate,
+        'ai_chat.inspection.app_health.connection_failures.unread',
+        `Connection failure logs are not readable: ${detail}`,
+        { detail },
+      ),
     };
   }
 
@@ -144,6 +191,7 @@ const summarizeConnectionFailures = (
       readResult,
       keyword: options.keyword,
       lineLimit: options.lineLimit,
+      translate: options.translate,
     }),
   };
 };
@@ -172,7 +220,9 @@ export const buildAIAppHealthSnapshot = (params: {
   connectionKeyword?: unknown;
   lineLimit?: unknown;
   includeLogLines?: boolean;
+  translate?: AIInspectionTranslator;
 }) => {
+  const translate = params.translate;
   const connections = Array.isArray(params.connections) ? params.connections : [];
   const tabs = Array.isArray(params.tabs) ? params.tabs : [];
   const lineLimit = normalizeAppHealthLogLimit(params.lineLimit);
@@ -197,11 +247,13 @@ export const buildAIAppHealthSnapshot = (params: {
     keyword: params.keyword,
     lineLimit,
     includeLogLines: params.includeLogLines === true,
+    translate,
   });
-  const lastRenderError = params.lastRenderErrorSnapshot || buildEmptyLastRenderErrorSnapshot();
+  const lastRenderError = params.lastRenderErrorSnapshot || buildEmptyLastRenderErrorSnapshot(translate);
   const connectionFailures = summarizeConnectionFailures(params.connectionFailureReadResult, {
     keyword: params.connectionKeyword ?? params.keyword,
     lineLimit,
+    translate,
   });
   const workspace = buildWorkspaceTabsSnapshot({
     tabs,
@@ -224,36 +276,91 @@ export const buildAIAppHealthSnapshot = (params: {
   const nextActions = [...setupHealth.nextActions];
 
   if (!appLog.readable) {
-    appendUnique(warnings, '当前无法读取 GoNavi 应用日志，启动异常和 MCP/连接错误缺少日志证据');
-    appendUnique(nextActions, '确认当前运行环境支持读取 gonavi.log 后，再调用 inspect_app_logs 下钻日志细节');
+    appendUnique(warnings, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.app_health.warning.app_log_unread',
+      'GoNavi application logs cannot be read, so startup exceptions and MCP/connection errors lack log evidence',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.app_health.next_action.enable_app_log_reading',
+      'Confirm the current runtime can read gonavi.log, then call inspect_app_logs for log details',
+    ));
   } else {
     const errorCount = Number(appLog.levelBreakdown.ERROR) || 0;
     const warnCount = Number(appLog.levelBreakdown.WARN) || 0;
     if (errorCount > 0) {
-      appendUnique(warnings, `最近应用日志里有 ${errorCount} 条 ERROR，需要优先查看 inspect_app_logs`);
-      appendUnique(nextActions, '调用 inspect_app_logs 查看最近 ERROR/WARN 原文，确认是否影响 AI、MCP 或数据库连接');
+      appendUnique(warnings, translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.app_health.warning.app_log_errors',
+        `Recent application logs contain ${errorCount} ERROR entries; inspect_app_logs should be checked first`,
+        { count: errorCount },
+      ));
+      appendUnique(nextActions, translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.app_health.next_action.inspect_app_log_errors',
+        'Call inspect_app_logs to review recent raw ERROR/WARN lines and confirm whether they affect AI, MCP, or database connections',
+      ));
     } else if (warnCount > 0) {
-      appendUnique(warnings, `最近应用日志里有 ${warnCount} 条 WARN，建议确认是否为已知可忽略警告`);
-      appendUnique(nextActions, '如用户反馈不稳定，先调用 inspect_app_logs 查看 WARN 是否集中在 AI/MCP/连接链路');
+      appendUnique(warnings, translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.app_health.warning.app_log_warnings',
+        `Recent application logs contain ${warnCount} WARN entries; confirm whether they are known ignorable warnings`,
+        { count: warnCount },
+      ));
+      appendUnique(nextActions, translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.app_health.next_action.inspect_app_log_warnings',
+        'If the user reports instability, call inspect_app_logs first to see whether WARN lines cluster around AI/MCP/connection paths',
+      ));
     }
   }
 
   if (!connectionFailures.readable) {
-    appendUnique(warnings, '当前无法读取连接失败日志，数据库连接冷却和验证失败缺少结构化证据');
+    appendUnique(warnings, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.app_health.warning.connection_failures_unread',
+      'Connection failure logs cannot be read, so database connection cooldown and validation failures lack structured evidence',
+    ));
   } else if (connectionFailures.failureEventCount > 0) {
-    appendUnique(warnings, `最近识别到 ${connectionFailures.failureEventCount} 条连接失败/冷却记录`);
-    appendUnique(nextActions, '调用 inspect_recent_connection_failures 查看最新连接失败根因，再决定是否检查当前连接或保存连接配置');
+    appendUnique(warnings, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.app_health.warning.connection_failures_recent',
+      `Recently detected ${connectionFailures.failureEventCount} connection failure/cooldown records`,
+      { count: connectionFailures.failureEventCount },
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.app_health.next_action.inspect_recent_connection_failures',
+      'Call inspect_recent_connection_failures to review the latest connection failure cause, then decide whether to inspect the current connection or saved connection config',
+    ));
     connectionFailures.nextActions.forEach((action: string) => appendUnique(nextActions, action));
   }
 
   if (workspace.totalTabs === 0) {
-    appendUnique(warnings, '当前工作区没有打开任何页签，AI 缺少可直接读取的活动编辑器上下文');
-    appendUnique(nextActions, '如果要分析当前 SQL，先打开或选中目标 SQL 页签，再调用 inspect_active_tab');
+    appendUnique(warnings, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.app_health.warning.no_workspace_tabs',
+      'No tabs are open in the current workspace, so AI has no active editor context to read directly',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.app_health.next_action.open_sql_tab',
+      'To analyze the current SQL, open or select the target SQL tab first, then call inspect_active_tab',
+    ));
   }
 
   if (lastRenderError.hasError) {
-    appendUnique(warnings, '最近记录到 AI 消息渲染异常，可能影响回复气泡展示或 Markdown 渲染');
-    appendUnique(nextActions, '调用 inspect_ai_last_render_error 查看最近一次气泡渲染异常的 messageId、内容预览和组件栈');
+    appendUnique(warnings, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.app_health.warning.last_render_error',
+      'A recent AI message render error was recorded and may affect reply bubble display or Markdown rendering',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.app_health.next_action.inspect_last_render_error',
+      'Call inspect_ai_last_render_error to review the latest bubble render error messageId, content preview, and component stack',
+    ));
     (lastRenderError.nextActions || []).forEach((action) => appendUnique(nextActions, action));
   }
 
@@ -266,12 +373,30 @@ export const buildAIAppHealthSnapshot = (params: {
         : 'ready';
 
   const message = status === 'ready'
-    ? '当前 AI 应用健康总览通过，AI 配置、日志、连接失败和工作区上下文都没有明显异常'
+    ? translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.app_health.message.ready',
+      'The AI application health overview passed; AI configuration, logs, connection failures, and workspace context show no obvious issues',
+    )
     : status === 'blocked'
-      ? `当前 AI 应用健康存在 ${blockers.length} 个阻塞项，优先修复供应商和发送前置条件`
+      ? translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.app_health.message.blocked',
+        `AI application health has ${blockers.length} blockers; fix provider and send prerequisites first`,
+        { count: blockers.length },
+      )
       : status === 'degraded'
-        ? '当前 AI 应用健康存在运行期异常信号，建议先下钻日志或连接失败记录'
-        : `当前 AI 应用健康整体可用，但还有 ${warnings.length} 个建议项`;
+        ? translateInspectionCopy(
+          translate,
+          'ai_chat.inspection.app_health.message.degraded',
+          'AI application health has runtime anomaly signals; drill into logs or connection failure records first',
+        )
+        : translateInspectionCopy(
+          translate,
+          'ai_chat.inspection.app_health.message.needs_attention',
+          `AI application health is usable overall, but still has ${warnings.length} recommendations`,
+          { count: warnings.length },
+        );
 
   return {
     status,

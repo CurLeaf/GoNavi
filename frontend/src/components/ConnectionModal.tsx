@@ -71,7 +71,7 @@ import {
   resolveRedisConfigDraft,
 } from "../utils/redisConnectionUri";
 import {
-  CONNECTION_TYPE_GROUPS,
+  buildConnectionTypeGroups,
   getAllConnectionTypeCatalogItems,
   getConnectionTypeDefaultPort as getDefaultPortByType,
   getConnectionTypeHint,
@@ -1228,7 +1228,7 @@ const ConnectionModal: React.FC<{
     const normalizedParamsText = normalizeConnectionParamsText(rawParams);
     const protocolFromParams = resolveOceanBaseProtocolQueryText(normalizedParamsText);
     if (protocolFromParams.unsupportedValue) {
-      throw new Error(describeUnsupportedOceanBaseProtocol(protocolFromParams.unsupportedValue));
+      throw new Error(describeUnsupportedOceanBaseProtocol(protocolFromParams.unsupportedValue, t));
     }
     const params = new URLSearchParams(normalizedParamsText);
     for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
@@ -2155,7 +2155,12 @@ const ConnectionModal: React.FC<{
       return "rabbitmq://guest:guest@127.0.0.1:15672/%2F?defaultQueue=orders.queue&exchange=events.topic&timeout=30";
     }
     if (dbType === "redis") {
-      return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster 或 redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster";
+      return t("connection.modal.example.or", {
+        first:
+          "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster",
+        second:
+          "redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster",
+      });
     }
     if (dbType === "oracle") {
       return "oracle://user:pass@127.0.0.1:1521/ORCLPDB1";
@@ -4368,7 +4373,7 @@ const ConnectionModal: React.FC<{
 
   const dbTypeGroups = useMemo(
     () =>
-      CONNECTION_TYPE_GROUPS.map((group) => ({
+      buildConnectionTypeGroups(t).map((group) => ({
         ...group,
         items: group.items.map((item) => ({
           ...item,
@@ -4537,7 +4542,7 @@ const ConnectionModal: React.FC<{
                       {item.name}
                     </Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      {getConnectionTypeHint(item.key)}
+                      {getConnectionTypeHint(item.key, t)}
                     </Text>
                   </div>
                 </Card>
@@ -7874,7 +7879,7 @@ const ConnectionModal: React.FC<{
                       <button
                         key={iconKey}
                         type="button"
-                        title={getDbIconLabel(iconKey)}
+                        title={getDbIconLabel(iconKey, t)}
                         onClick={() =>
                           setCustomIconType(
                             iconKey === dbType ? undefined : iconKey,
@@ -7915,7 +7920,7 @@ const ConnectionModal: React.FC<{
                   }}
                 >
                   {t("connection.modal.appearance.current", {
-                    name: getDbIconLabel(effectiveIconType),
+                    name: getDbIconLabel(effectiveIconType, t),
                   })}
                 </div>
               </div>

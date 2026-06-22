@@ -89,6 +89,56 @@ describe('mcpClientInstallStatus helpers', () => {
     expect(pickPreferredMCPClient(statuses)).toBe('codex');
   });
 
+  it('prefers a client whose English status message reports a configuration error', () => {
+    const statuses: AIMCPClientInstallStatus[] = [
+      {
+        client: 'claude-code',
+        displayName: 'Claude Code',
+        installed: false,
+        matchesCurrent: false,
+        clientDetected: false,
+        clientCommand: 'claude',
+        message: 'No Claude Code user-level GoNavi MCP configuration was detected',
+      },
+      {
+        client: 'codex',
+        displayName: 'Codex',
+        installed: false,
+        matchesCurrent: false,
+        clientDetected: false,
+        clientCommand: 'codex',
+        message: 'Failed to locate Codex configuration: access denied',
+      },
+    ];
+
+    expect(pickPreferredMCPClient(statuses)).toBe('codex');
+  });
+
+  it('treats an English empty-path status as higher priority than a plain missing status', () => {
+    const statuses: AIMCPClientInstallStatus[] = [
+      {
+        client: 'claude-code',
+        displayName: 'Claude Code',
+        installed: false,
+        matchesCurrent: false,
+        clientDetected: false,
+        clientCommand: 'claude',
+        message: 'No Claude Code user-level GoNavi MCP configuration was detected',
+      },
+      {
+        client: 'codex',
+        displayName: 'Codex',
+        installed: false,
+        matchesCurrent: false,
+        clientDetected: false,
+        clientCommand: 'codex',
+        message: 'Current GoNavi executable path is empty',
+      },
+    ];
+
+    expect(pickPreferredMCPClient(statuses)).toBe('codex');
+  });
+
   it('prefers a client that already matches current GoNavi over another client with a stale config', () => {
     const statuses: AIMCPClientInstallStatus[] = [
       {
@@ -131,15 +181,15 @@ describe('mcpClientInstallStatus helpers', () => {
 
     expect(isRemoteMCPClientStatus(openClaw)).toBe(true);
     const guide = buildRemoteMCPClientGuide(openClaw);
-    expect(guide).toContain('GoNavi MCP 远程接入说明 - OpenClaw');
-    expect(guide).toContain('云端 Agent 不需要保存数据库密码');
-    expect(guide).toContain('默认使用 schema-only 模式，不注册 execute_sql');
-    expect(guide).toContain('不能直接使用 Windows 本地 stdio 命令');
+    expect(guide).toContain('GoNavi MCP remote access guide - OpenClaw');
+    expect(guide).toContain('The cloud Agent does not need to store database passwords.');
+    expect(guide).toContain('Remote access uses schema-only mode by default and does not register execute_sql');
+    expect(guide).toContain('it cannot use the Windows local stdio command directly');
     expect(guide).toContain('allowMutating=true');
     expect(guide).toContain('"type": "streamable-http"');
-    expect(guide).toContain('"Authorization": "Bearer <随机token>"');
-    expect(guide).toContain('GoNavi.exe mcp-server remote-config --client openclaw --url https://<你的域名或隧道地址>/mcp --token <随机token> --schema-only');
-    expect(guide).toContain('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token> --schema-only');
+    expect(guide).toContain('"Authorization": "Bearer <random-token>"');
+    expect(guide).toContain('GoNavi.exe mcp-server remote-config --client openclaw --url https://<your-domain-or-tunnel>/mcp --token <random-token> --schema-only');
+    expect(guide).toContain('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <random-token> --schema-only');
   });
 
   it('builds remote quick-start snippets for cloud agents without database secrets', () => {
@@ -150,14 +200,14 @@ describe('mcpClientInstallStatus helpers', () => {
 
     expect(quickStart.displayName).toBe('OpenClaw');
     expect(quickStart.configJson).toContain('"type": "streamable-http"');
-    expect(quickStart.configJson).toContain('"url": "https://<你的域名或隧道地址>/mcp"');
-    expect(quickStart.configJson).toContain('"Authorization": "Bearer <随机token>"');
+    expect(quickStart.configJson).toContain('"url": "https://<your-domain-or-tunnel>/mcp"');
+    expect(quickStart.configJson).toContain('"Authorization": "Bearer <random-token>"');
     expect(quickStart.configJson).not.toContain('password');
-    expect(quickStart.configCommand).toBe('GoNavi.exe mcp-server remote-config --client hermans --url https://<你的域名或隧道地址>/mcp --token <随机token> --schema-only');
-    expect(quickStart.launchCommand).toBe('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token> --schema-only');
-    expect(quickStart.standaloneCommand).toBe('gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token> --schema-only');
+    expect(quickStart.configCommand).toBe('GoNavi.exe mcp-server remote-config --client hermans --url https://<your-domain-or-tunnel>/mcp --token <random-token> --schema-only');
+    expect(quickStart.launchCommand).toBe('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <random-token> --schema-only');
+    expect(quickStart.standaloneCommand).toBe('gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <random-token> --schema-only');
     expect(quickStart.verificationSteps.join('\n')).toContain('get_connections');
-    expect(quickStart.securityNotes.join('\n')).toContain('默认 --schema-only 不注册 execute_sql');
+    expect(quickStart.securityNotes.join('\n')).toContain('--schema-only does not register execute_sql by default');
     expect(quickStart.securityNotes.join('\n')).toContain('allowMutating=true');
   });
 });

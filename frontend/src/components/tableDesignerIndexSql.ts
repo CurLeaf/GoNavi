@@ -5,8 +5,11 @@ import {
   isSqlServerDialect,
   quoteSqlIdentifierPart,
 } from '../utils/sqlDialect';
+import { t as catalogTranslate } from '../i18n/catalog';
 
 export type TableDesignerIndexKind = 'NORMAL' | 'UNIQUE' | 'PRIMARY' | 'FULLTEXT' | 'SPATIAL';
+type TableDesignerIndexMessageParams = Record<string, string | number | boolean | null | undefined>;
+type TableDesignerIndexTranslate = (key: string, params?: TableDesignerIndexMessageParams) => string;
 
 export interface BuildIndexCreateSqlInput {
   dbType: string;
@@ -15,6 +18,7 @@ export interface BuildIndexCreateSqlInput {
   columnNames: string[];
   kind: TableDesignerIndexKind;
   indexType?: string;
+  translate?: TableDesignerIndexTranslate;
 }
 
 export interface BuildIndexCreateSqlResult {
@@ -25,13 +29,29 @@ export interface BuildIndexCreateSqlResult {
 
 const isNonRelationalDialect = (dbType: string): boolean => dbType === 'redis' || dbType === 'mongodb' || dbType === 'elasticsearch';
 
+const formatTableDesignerIndexMessage = (
+  translate: TableDesignerIndexTranslate | undefined,
+  key: string,
+  params?: TableDesignerIndexMessageParams,
+): string => {
+  if (translate) {
+    return translate(key, params);
+  }
+  return catalogTranslate('zh-CN', key, params);
+};
+
 export const buildIndexCreateSqlPreview = (input: BuildIndexCreateSqlInput): BuildIndexCreateSqlResult => {
   const dbType = input.dbType;
+  const translate = input.translate;
   const kind = input.kind || 'NORMAL';
   const indexName = String(input.name || '').trim();
   const cleanedCols = input.columnNames.map(col => String(col || '').trim()).filter(Boolean);
   if (cleanedCols.length === 0) {
-    return { sql: null, message: '请至少选择一个字段', severity: 'error' };
+    return {
+      sql: null,
+      message: formatTableDesignerIndexMessage(translate, 'table_designer.message.select_at_least_one_column'),
+      severity: 'error',
+    };
   }
   const colSql = cleanedCols
     .map(col => quoteSqlIdentifierPart(dbType, col))
@@ -43,7 +63,11 @@ export const buildIndexCreateSqlPreview = (input: BuildIndexCreateSqlInput): Bui
     }
 
     if (!indexName) {
-      return { sql: null, message: '请输入索引名', severity: 'error' };
+      return {
+        sql: null,
+        message: formatTableDesignerIndexMessage(translate, 'table_designer.message.index_name_required'),
+        severity: 'error',
+      };
     }
 
     const indexRef = quoteSqlIdentifierPart(dbType, indexName);
@@ -56,7 +80,11 @@ export const buildIndexCreateSqlPreview = (input: BuildIndexCreateSqlInput): Bui
 
     const normalizedType = String(input.indexType || '').trim().toUpperCase() || 'DEFAULT';
     if (normalizedType === 'FULLTEXT' || normalizedType === 'SPATIAL') {
-      return { sql: null, message: `请将“索引类别”切换为 ${normalizedType} 索引`, severity: 'error' };
+      return {
+        sql: null,
+        message: formatTableDesignerIndexMessage(translate, 'table_designer.message.switch_index_kind', { kind: normalizedType }),
+        severity: 'error',
+      };
     }
     const usingSql = normalizedType !== 'DEFAULT' ? ` USING ${normalizedType}` : '';
     const prefix = kind === 'UNIQUE' ? 'ADD UNIQUE INDEX' : 'ADD INDEX';
@@ -64,10 +92,18 @@ export const buildIndexCreateSqlPreview = (input: BuildIndexCreateSqlInput): Bui
   }
 
   if (kind === 'PRIMARY' || kind === 'FULLTEXT' || kind === 'SPATIAL') {
-    return { sql: null, message: '当前数据库仅支持普通索引与唯一索引维护', severity: 'warning' };
+    return {
+      sql: null,
+      message: formatTableDesignerIndexMessage(translate, 'table_designer.message.only_normal_unique_index_supported'),
+      severity: 'warning',
+    };
   }
   if (!indexName) {
-    return { sql: null, message: '请输入索引名', severity: 'error' };
+    return {
+      sql: null,
+      message: formatTableDesignerIndexMessage(translate, 'table_designer.message.index_name_required'),
+      severity: 'error',
+    };
   }
 
   const indexRef = quoteSqlIdentifierPart(dbType, indexName);
@@ -91,7 +127,11 @@ export const buildIndexCreateSqlPreview = (input: BuildIndexCreateSqlInput): Bui
   }
 
   if (isNonRelationalDialect(dbType)) {
-    return { sql: null, message: '当前数据源不支持关系型索引维护', severity: 'warning' };
+    return {
+      sql: null,
+      message: formatTableDesignerIndexMessage(translate, 'table_designer.message.relational_index_unsupported'),
+      severity: 'warning',
+    };
   }
   return { sql: `CREATE ${uniquePrefix}INDEX ${indexRef} ON ${input.tableRef} (${colSql});` };
 };

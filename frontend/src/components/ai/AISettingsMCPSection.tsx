@@ -2,6 +2,8 @@ import React from 'react';
 import { Button } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { AIMCPClientInstallStatus, AIMCPHTTPServerStatus, AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import type { MCPClientKey } from '../../utils/mcpClientInstallStatus';
 import { MCP_FIELD_GUIDES } from '../../utils/mcpServerGuidance';
@@ -79,8 +81,12 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
   onTestServer,
   onSaveServer,
   onDeleteServer,
-}) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+}) => {
+  const i18n = useOptionalI18n();
+  const copy = (key: string) => (i18n?.t ?? ((catalogKey) => catalogTranslate('en-US', catalogKey)))(key);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
     <AIMCPHTTPServerPanel
       status={mcpHTTPServerStatus}
       draft={mcpHTTPServerDraft}
@@ -130,9 +136,9 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
         gap: 10,
       }}
     >
-      <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>新增 MCP 参数速查</div>
+      <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>{copy('ai_settings.mcp_server.section.quick_reference.title')}</div>
       <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-        先确认这几个字段再新增服务：`command` 只填可执行程序，`args` 才放脚本名和 --stdio，`env` 每行一个 KEY=VALUE，`timeout` 控制单次工具发现或调用等待时间。
+        {copy('ai_settings.mcp_server.section.quick_reference.description')}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
         {MCP_FIELD_GUIDES.filter((item) => ['command', 'args', 'env', 'timeout'].includes(item.key)).map((item) => (
@@ -148,12 +154,12 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
       </div>
     </div>
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-      <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>支持命令、参数、环境变量和超时；不确定怎么填时先看卡片里的“字段速查”，保存后会自动进入 AI 工具列表。</div>
-      <Button icon={<PlusOutlined />} onClick={() => onAddServer()} style={{ borderRadius: 10 }}>新增 MCP 服务</Button>
+      <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>{copy('ai_settings.mcp_server.section.quick_reference.footer')}</div>
+      <Button icon={<PlusOutlined />} onClick={() => onAddServer()} style={{ borderRadius: 10 }}>{copy('ai_settings.mcp_server.section.action.add_server')}</Button>
     </div>
     {mcpServers.length === 0 && (
       <div style={{ padding: '18px 16px', borderRadius: 14, border: `1px dashed ${cardBorder}`, background: cardBg, color: overlayTheme.mutedText }}>
-        还没有 MCP 服务。常见形式是 `npx -y package --stdio`、`node server.js`、`uvx some-mcp-server`、`python -m server`、`docker run --rm -i image`。
+        {copy('ai_settings.mcp_server.section.empty')}
       </div>
     )}
     {mcpServers.map((server) => (
@@ -173,7 +179,8 @@ const AISettingsMCPSection: React.FC<AISettingsMCPSectionProps> = ({
         onDelete={() => onDeleteServer(server.id)}
       />
     ))}
-  </div>
-);
+    </div>
+  );
+};
 
 export default AISettingsMCPSection;

@@ -62,6 +62,7 @@ const headerKeys = [
   'ai_chat.header.action.export',
   'ai_chat.header.export_time',
   'ai_chat.header.export_user',
+  'app.theme.ui_version.v2.badge',
 ] as const;
 
 type HeaderKey = (typeof headerKeys)[number];
@@ -81,6 +82,7 @@ const placeholderExpectations: Record<HeaderKey, string[]> = {
   'ai_chat.header.action.export': [],
   'ai_chat.header.export_time': [],
   'ai_chat.header.export_user': [],
+  'app.theme.ui_version.v2.badge': [],
 };
 
 const valuesExpectedToDifferFromEnglish = [
@@ -151,6 +153,22 @@ const renderHeader = async (
   return renderer!;
 };
 
+const renderHeaderWithoutProvider = (overrides: Partial<React.ComponentProps<typeof AIChatHeader>> = {}) =>
+  create(
+    <AIChatHeader
+      darkMode={false}
+      mutedColor="#667085"
+      textColor="#101828"
+      overlayTheme={buildOverlayWorkbenchTheme(false)}
+      onHistoryClick={() => {}}
+      onClear={() => {}}
+      onSettingsClick={() => {}}
+      onClose={() => {}}
+      messages={messages}
+      {...overrides}
+    />,
+  );
+
 describe('AIChatHeader i18n', () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
@@ -196,6 +214,7 @@ describe('AIChatHeader i18n', () => {
     expect(v2Text).toContain('Auto insights');
     expect(v2Text).toContain('History');
     expect(v2Text).toContain('Export');
+    expect(v2Text).toContain('Beta');
     expect(v2Text).not.toContain('已连接');
     expect(v2Text).not.toContain('自动洞察');
   });
@@ -206,6 +225,29 @@ describe('AIChatHeader i18n', () => {
 
     expect(pageText).toContain('New chat · Connected');
     expect(pageText).not.toContain('新对话 · 已连接');
+  });
+
+  it('falls back to English header chrome when no i18n provider is mounted', () => {
+    expect(() => renderHeaderWithoutProvider({ isV2Ui: false, sessionTitle: undefined })).not.toThrow();
+    expect(() => renderHeaderWithoutProvider({ isV2Ui: true, sessionTitle: 'prod/main.orders' })).not.toThrow();
+
+    const legacyText = textContent(renderHeaderWithoutProvider({ isV2Ui: false, sessionTitle: undefined }).toJSON());
+    expect(legacyText).toContain('Chat history');
+    expect(legacyText).toContain('Export as Markdown');
+    expect(legacyText).toContain('New chat (clear current)');
+    expect(legacyText).toContain('AI settings');
+    expect(legacyText).toContain('Close panel');
+    expect(legacyText).not.toContain('ai_chat.header.tooltip.history');
+
+    const v2Text = textContent(renderHeaderWithoutProvider({ isV2Ui: true, sessionTitle: 'prod/main.orders' }).toJSON());
+    expect(v2Text).toContain('prod/main.orders · Connected');
+    expect(v2Text).toContain('AI work mode');
+    expect(v2Text).toContain('Chat');
+    expect(v2Text).toContain('Auto insights');
+    expect(v2Text).toContain('History');
+    expect(v2Text).toContain('Export');
+    expect(v2Text).toContain('Beta');
+    expect(v2Text).not.toContain('ai_chat.header.mode.chat');
   });
 
   it('exports Markdown with localized chrome while preserving raw title and message content', async () => {
@@ -253,11 +295,59 @@ describe('AIChatHeader i18n', () => {
     expect(markdown).not.toContain('导出时间');
   });
 
+  it('exports Markdown with English fallback labels when no i18n provider is mounted', async () => {
+    const createdBlobs: Blob[] = [];
+    const anchor = {
+      click: vi.fn(),
+      href: '',
+      download: '',
+    };
+
+    vi.stubGlobal('document', {
+      createElement: vi.fn(() => anchor),
+      body: {
+        getAttribute: vi.fn(() => null),
+        appendChild: vi.fn(),
+        removeChild: vi.fn(),
+      },
+    });
+    vi.stubGlobal('URL', {
+      createObjectURL: vi.fn((blob: Blob) => {
+        createdBlobs.push(blob);
+        return 'blob:markdown';
+      }),
+      revokeObjectURL: vi.fn(),
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = renderHeaderWithoutProvider({ isV2Ui: true, sessionTitle: undefined });
+    });
+
+    const exportButton = renderer!.root.findByProps({ className: 'gn-v2-ai-export-button' });
+
+    await act(async () => {
+      exportButton.props.onClick();
+    });
+
+    expect(anchor.click).toHaveBeenCalledTimes(1);
+    expect(anchor.download).toBe('New chat.md');
+    expect(createdBlobs).toHaveLength(1);
+
+    const markdown = await createdBlobs[0].text();
+    expect(markdown).toContain('# New chat');
+    expect(markdown).toContain('> Exported at:');
+    expect(markdown).toContain('## 👤 You');
+    expect(markdown).toContain('## 🤖 GoNavi AI');
+    expect(markdown).not.toContain('ai_chat.header.export_time');
+  });
+
   it('keeps source wired to i18n keys instead of fixed Chinese header chrome', () => {
     for (const key of headerKeys) {
       expect(source).toContain(key);
     }
     expect(source).toContain("t('ai_chat.panel.session.default_title')");
+    expect(source).toContain("app.theme.ui_version.v2.badge");
     expect(source).not.toContain('历史会话');
     expect(source).not.toContain('导出为 Markdown');
     expect(source).not.toContain('新对话 (清空当前)');
@@ -266,6 +356,7 @@ describe('AIChatHeader i18n', () => {
     expect(source).not.toContain('AI 工作模式');
     expect(source).not.toContain('自动洞察');
     expect(source).not.toContain('导出时间');
+    expect(source).not.toContain('BETA');
   });
 
   it('translates only the connected wrapper and keeps title parameter raw', () => {

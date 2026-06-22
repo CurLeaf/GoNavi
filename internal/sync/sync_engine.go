@@ -66,7 +66,12 @@ func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
 	}
 
 	totalTables := len(config.Tables)
-	s.progress(config.JobID, 0, totalTables, "", "开始同步")
+	syncStartedStage := localizedSyncBackendText("data_sync.progress.stage.sync_started", nil)
+	connectingSourceStage := localizedSyncBackendText("data_sync.progress.stage.connecting_source", nil)
+	connectingTargetStage := localizedSyncBackendText("data_sync.progress.stage.connecting_target", nil)
+	tableCompletedStage := localizedSyncBackendText("data_sync.progress.stage.table_completed", nil)
+	syncCompletedStage := localizedSyncBackendText("data_sync.progress.stage.completed", nil)
+	s.progress(config.JobID, 0, totalTables, "", syncStartedStage)
 
 	contentRaw := strings.ToLower(strings.TrimSpace(config.Content))
 	syncSchema := false
@@ -103,7 +108,7 @@ func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
 	sourceDB, err := newSyncDatabase(config.SourceConfig.Type)
 	if err != nil {
 		logger.Error(err, "初始化源数据库驱动失败：类型=%s", config.SourceConfig.Type)
-		return s.fail(config.JobID, totalTables, result, "初始化源数据库驱动失败: "+err.Error())
+		return s.fail(config.JobID, totalTables, result, localizedSyncBackendDetailText("data_sync.backend.error.init_source_driver_failed", err))
 	}
 	if config.SourceConfig.Type == "custom" {
 		// Custom DB setup would go here if needed
@@ -112,24 +117,24 @@ func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
 	targetDB, err := newSyncDatabase(config.TargetConfig.Type)
 	if err != nil {
 		logger.Error(err, "初始化目标数据库驱动失败：类型=%s", config.TargetConfig.Type)
-		return s.fail(config.JobID, totalTables, result, "初始化目标数据库驱动失败: "+err.Error())
+		return s.fail(config.JobID, totalTables, result, localizedSyncBackendDetailText("data_sync.backend.error.init_target_driver_failed", err))
 	}
 
 	// Connect Source
 	s.appendLog(config.JobID, &result, "info", fmt.Sprintf("正在连接源数据库: %s...", config.SourceConfig.Host))
-	s.progress(config.JobID, 0, totalTables, "", "连接源数据库")
+	s.progress(config.JobID, 0, totalTables, "", connectingSourceStage)
 	if err := sourceDB.Connect(config.SourceConfig); err != nil {
 		logger.Error(err, "源数据库连接失败：%s", formatConnSummaryForSync(config.SourceConfig))
-		return s.fail(config.JobID, totalTables, result, "源数据库连接失败: "+err.Error())
+		return s.fail(config.JobID, totalTables, result, localizedSyncBackendDetailText("data_sync.backend.error.connect_source_failed", err))
 	}
 	defer sourceDB.Close()
 
 	// Connect Target
 	s.appendLog(config.JobID, &result, "info", fmt.Sprintf("正在连接目标数据库: %s...", config.TargetConfig.Host))
-	s.progress(config.JobID, 0, totalTables, "", "连接目标数据库")
+	s.progress(config.JobID, 0, totalTables, "", connectingTargetStage)
 	if err := targetDB.Connect(config.TargetConfig); err != nil {
 		logger.Error(err, "目标数据库连接失败：%s", formatConnSummaryForSync(config.TargetConfig))
-		return s.fail(config.JobID, totalTables, result, "目标数据库连接失败: "+err.Error())
+		return s.fail(config.JobID, totalTables, result, localizedSyncBackendDetailText("data_sync.backend.error.connect_target_failed", err))
 	}
 	defer targetDB.Close()
 
@@ -137,8 +142,11 @@ func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
 		func() {
 			tableMode := defaultMode
 			s.appendLog(config.JobID, &result, "info", fmt.Sprintf("正在同步表: %s", tableName))
-			s.progress(config.JobID, i, totalTables, tableName, fmt.Sprintf("同步表(%d/%d)", i+1, totalTables))
-			defer s.progress(config.JobID, i+1, totalTables, tableName, "表处理完成")
+			s.progress(config.JobID, i, totalTables, tableName, localizedSyncBackendText("data_sync.progress.stage.syncing_table", map[string]any{
+				"current": i + 1,
+				"total":   totalTables,
+			}))
+			defer s.progress(config.JobID, i+1, totalTables, tableName, tableCompletedStage)
 
 			plan, cols, targetCols, err := buildSchemaMigrationPlan(config, tableName, sourceDB, targetDB)
 			if err != nil {
@@ -482,7 +490,7 @@ func (s *SyncEngine) RunSync(config SyncConfig) SyncResult {
 		}()
 	}
 
-	s.progress(config.JobID, totalTables, totalTables, "", "同步完成")
+	s.progress(config.JobID, totalTables, totalTables, "", syncCompletedStage)
 	return result
 }
 
@@ -547,7 +555,7 @@ func (s *SyncEngine) fail(jobID string, totalTables int, res SyncResult, msg str
 	res.Success = false
 	res.Message = msg
 	s.appendLog(jobID, &res, "error", "致命错误: "+msg)
-	s.progress(jobID, res.TablesSynced, totalTables, "", "同步失败")
+	s.progress(jobID, res.TablesSynced, totalTables, "", localizedSyncBackendText("data_sync.progress.stage.failed", nil))
 	return res
 }
 

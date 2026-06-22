@@ -2,13 +2,13 @@ import React, { useState } from 'react';
 import { SearchOutlined, ToolOutlined } from '@ant-design/icons';
 
 import {
-  BUILTIN_TOOL_FLOWS,
   describeBuiltinToolParameters,
   filterBuiltinToolFlows,
   filterBuiltinTools,
+  localizeBuiltinToolFlows,
 } from '../../utils/aiBuiltinToolCatalog';
 import { useI18n } from '../../i18n/provider';
-import { BUILTIN_AI_TOOL_INFO } from '../../utils/aiToolRegistry';
+import { localizeBuiltinAIToolInfo } from '../../utils/aiToolRegistry';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
 interface AIBuiltinToolsCatalogProps {
@@ -26,8 +26,10 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
 }) => {
   const { t } = useI18n();
   const [searchText, setSearchText] = useState('');
-  const visibleFlows = filterBuiltinToolFlows(BUILTIN_TOOL_FLOWS, searchText);
-  const visibleTools = filterBuiltinTools(BUILTIN_AI_TOOL_INFO, searchText);
+  const builtinToolFlows = localizeBuiltinToolFlows(t);
+  const builtinToolInfo = localizeBuiltinAIToolInfo(t);
+  const visibleFlows = filterBuiltinToolFlows(builtinToolFlows, searchText);
+  const visibleTools = filterBuiltinTools(builtinToolInfo, searchText);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -79,9 +81,9 @@ export const AIBuiltinToolsCatalog: React.FC<AIBuiltinToolsCatalogProps> = ({
       <div style={{ fontSize: 12, color: overlayTheme.mutedText }}>
         {t('ai_settings.tools.summary', {
           flowVisible: visibleFlows.length,
-          flowTotal: BUILTIN_TOOL_FLOWS.length,
+          flowTotal: builtinToolFlows.length,
           toolVisible: visibleTools.length,
-          toolTotal: BUILTIN_AI_TOOL_INFO.length,
+          toolTotal: builtinToolInfo.length,
         })}
       </div>
       {visibleFlows.length > 0 && (

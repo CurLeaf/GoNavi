@@ -420,6 +420,14 @@ const toTrimmedString = (value: unknown, fallback = ""): string => {
   return fallback;
 };
 
+const indexedStoreFallback = (
+  key:
+    | "store.fallback.connection_name"
+    | "store.fallback.connection_tag_name"
+    | "store.fallback.sql_snippet_name",
+  index: number,
+): string => translate(key, { index: index + 1 });
+
 const normalizeClickHouseProtocol = (
   value: unknown,
 ): "auto" | "http" | "native" => {
@@ -902,7 +910,7 @@ const sanitizeSavedConnection = (
   const displayType = config.type === "diros" ? "doris" : config.type;
   const fallbackName = config.host
     ? `${displayType}-${config.host}`
-    : `连接-${index + 1}`;
+    : indexedStoreFallback("store.fallback.connection_name", index);
   const name = toTrimmedString(raw.name, fallbackName) || fallbackName;
   const includeDatabases = sanitizeStringArray(raw.includeDatabases, 256);
   const includeRedisDatabases = sanitizeNumberArray(
@@ -966,8 +974,11 @@ const sanitizeConnectionTags = (value: unknown): ConnectionTag[] => {
     if (idSet.has(id)) return;
     idSet.add(id);
 
-    const name =
-      toTrimmedString(raw.name, `标签-${index + 1}`) || `标签-${index + 1}`;
+    const fallbackName = indexedStoreFallback(
+      "store.fallback.connection_tag_name",
+      index,
+    );
+    const name = toTrimmedString(raw.name, fallbackName) || fallbackName;
     const connectionIds = sanitizeStringArray(raw.connectionIds, 256);
 
     result.push({ id, name, connectionIds });
@@ -1431,12 +1442,16 @@ const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
     const body = toTrimmedString(raw.body);
     if (!prefix || !body) return;
     const id = toTrimmedString(raw.id, `snippet-${index + 1}`) || `snippet-${index + 1}`;
+    const fallbackName = indexedStoreFallback(
+      "store.fallback.sql_snippet_name",
+      index,
+    );
     if (seenIds.has(id)) return;
     seenIds.add(id);
     result.push({
       id,
       prefix,
-      name: toTrimmedString(raw.name, `片段-${index + 1}`) || `片段-${index + 1}`,
+      name: toTrimmedString(raw.name, fallbackName) || fallbackName,
       description: toTrimmedString(raw.description) || undefined,
       syntaxHelp: toTrimmedString(raw.syntaxHelp) || undefined,
       body,
@@ -1522,7 +1537,9 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
 
     result.push({
       id,
-      title: toTrimmedString(raw.title, "新建查询") || "新建查询",
+      title:
+        toTrimmedString(raw.title, translate("sidebar.tab.new_query")) ||
+        translate("sidebar.tab.new_query"),
       type: "query",
       connectionId: toTrimmedString(raw.connectionId),
       dbName: toTrimmedString(raw.dbName),
@@ -2049,7 +2066,8 @@ function _debouncedPersistSession(sessionId: string) {
     const messages = state.aiChatHistory[sessionId];
     const sessionMeta = state.aiChatSessions.find((s) => s.id === sessionId);
     if (!messages && !sessionMeta) return; // session 已被删除，跳过
-    const title = sessionMeta?.title || "新的对话";
+    const title =
+      sessionMeta?.title || translate("ai_chat.panel.session.default_title");
     const updatedAt = sessionMeta?.updatedAt || Date.now();
     const messagesJSON = JSON.stringify(messages || []);
     const Service = (window as any).go?.aiservice?.Service;
@@ -3122,7 +3140,10 @@ export const useStore = create<AppState>()(
           const existingSession = newSessions.find((s) => s.id === sessionId);
 
           if (!existingSession) {
-            let title = message.role === "user" ? message.content : "新的对话";
+            let title =
+              message.role === "user"
+                ? message.content
+                : translate("ai_chat.panel.session.default_title");
             if (title.length > 20) {
               title = title.substring(0, 20) + "...";
             }

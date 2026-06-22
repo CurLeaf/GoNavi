@@ -57,16 +57,16 @@ func NormalizeConfig(config connection.ProxyConfig) (connection.ProxyConfig, err
 	switch result.Type {
 	case "socks5", "socks5h", "http":
 	default:
-		return result, fmt.Errorf("不支持的代理类型：%s", config.Type)
+		return result, proxyTextError("proxy.backend.error.unsupported_type", map[string]any{"type": config.Type})
 	}
 	if result.Type == "socks5h" {
 		result.Type = "socks5"
 	}
 	if result.Host == "" {
-		return result, fmt.Errorf("代理主机为空")
+		return result, proxyTextError("proxy.backend.error.host_empty", nil)
 	}
 	if result.Port <= 0 || result.Port > 65535 {
-		return result, fmt.Errorf("代理端口无效：%d", result.Port)
+		return result, proxyTextError("proxy.backend.error.port_invalid", map[string]any{"port": result.Port})
 	}
 	return result, nil
 }
@@ -77,7 +77,9 @@ func GetOrCreateLocalForwarder(proxyConfig connection.ProxyConfig, remoteHost st
 		return nil, err
 	}
 	if strings.TrimSpace(remoteHost) == "" || remotePort <= 0 {
-		return nil, fmt.Errorf("无效的远端地址：%s:%d", remoteHost, remotePort)
+		return nil, proxyTextError("proxy.backend.error.remote_addr_invalid", map[string]any{
+			"address": fmt.Sprintf("%s:%d", remoteHost, remotePort),
+		})
 	}
 
 	key := forwarderCacheKey(cfg, remoteHost, remotePort)
@@ -122,7 +124,7 @@ func NewLocalForwarder(proxyConfig connection.ProxyConfig, remoteHost string, re
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return nil, fmt.Errorf("创建本地代理监听失败：%w", err)
+		return nil, proxyWrapError("proxy.backend.error.listen_failed", map[string]any{"detail": err.Error()}, err)
 	}
 
 	localAddr := listener.Addr().String()
@@ -241,7 +243,7 @@ func dialThroughProxy(ctx context.Context, cfg connection.ProxyConfig, network, 
 	case "http":
 		return dialHTTPConnect(ctx, cfg, address)
 	default:
-		return nil, fmt.Errorf("不支持的代理类型：%s", cfg.Type)
+		return nil, proxyTextError("proxy.backend.error.unsupported_type", map[string]any{"type": cfg.Type})
 	}
 }
 
@@ -256,7 +258,7 @@ func dialSOCKS5(ctx context.Context, cfg connection.ProxyConfig, network, addres
 	}
 	dialer, err := xproxy.SOCKS5("tcp", proxyAddr, auth, &net.Dialer{Timeout: defaultDialTimeout})
 	if err != nil {
-		return nil, fmt.Errorf("创建 SOCKS5 代理拨号器失败：%w", err)
+		return nil, proxyWrapError("proxy.backend.error.socks5_dialer_failed", map[string]any{"detail": err.Error()}, err)
 	}
 
 	type result struct {
@@ -280,7 +282,7 @@ func dialSOCKS5(ctx context.Context, cfg connection.ProxyConfig, network, addres
 		return nil, ctx.Err()
 	case r := <-ch:
 		if r.err != nil {
-			return nil, fmt.Errorf("SOCKS5 代理连接失败：%w", r.err)
+			return nil, proxyWrapError("proxy.backend.error.socks5_connect_failed", map[string]any{"detail": r.err.Error()}, r.err)
 		}
 		return r.conn, nil
 	}
@@ -291,7 +293,7 @@ func dialHTTPConnect(ctx context.Context, cfg connection.ProxyConfig, address st
 	dialer := &net.Dialer{Timeout: defaultDialTimeout}
 	conn, err := dialer.DialContext(ctx, "tcp", proxyAddr)
 	if err != nil {
-		return nil, fmt.Errorf("连接 HTTP 代理失败：%w", err)
+		return nil, proxyWrapError("proxy.backend.error.http_connect_failed", map[string]any{"detail": err.Error()}, err)
 	}
 
 	connectReq := &http.Request{
@@ -306,19 +308,19 @@ func dialHTTPConnect(ctx context.Context, cfg connection.ProxyConfig, address st
 	}
 	if err := connectReq.Write(conn); err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("发送 HTTP CONNECT 请求失败：%w", err)
+		return nil, proxyWrapError("proxy.backend.error.http_connect_write_failed", map[string]any{"detail": err.Error()}, err)
 	}
 
 	reader := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(reader, connectReq)
 	if err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("读取 HTTP CONNECT 响应失败：%w", err)
+		return nil, proxyWrapError("proxy.backend.error.http_connect_read_failed", map[string]any{"detail": err.Error()}, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		_ = conn.Close()
-		return nil, fmt.Errorf("HTTP 代理 CONNECT 失败：%s", strings.TrimSpace(resp.Status))
+		return nil, proxyTextError("proxy.backend.error.http_connect_status_failed", map[string]any{"status": strings.TrimSpace(resp.Status)})
 	}
 
 	if reader.Buffered() == 0 {

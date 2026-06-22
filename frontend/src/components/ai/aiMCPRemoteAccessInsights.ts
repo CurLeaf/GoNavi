@@ -4,6 +4,8 @@ import {
   isRemoteMCPClientStatus,
   normalizeMCPClientStatuses,
 } from '../../utils/mcpClientInstallStatus';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
 
 type MCPRemoteExposeStrategyKey =
   | 'reverse_proxy'
@@ -14,44 +16,66 @@ type MCPRemoteExposeStrategyKey =
 
 const DEFAULT_HTTP_ADDR = '127.0.0.1:8765';
 const DEFAULT_HTTP_PATH = '/mcp';
+const TOKEN_PLACEHOLDER = '<random-token>';
 
 const REMOTE_EXPOSE_STRATEGIES: Array<{
   key: MCPRemoteExposeStrategyKey;
-  title: string;
-  detail: string;
-  risk: string;
 }> = [
   {
     key: 'reverse_proxy',
-    title: '内网反向代理',
-    detail: '适合 Windows GoNavi 和云端 Agent 之间已有可信内网或网关的团队环境。',
-    risk: '需要网关层继续限制来源 IP、TLS 和 Bearer Token，不要裸露公网。',
   },
   {
     key: 'ssh_reverse_tunnel',
-    title: 'SSH 反向隧道',
-    detail: '适合临时把 Windows 本机的 127.0.0.1:8765 映射到云端 Linux。配置简单，但要保证 SSH 账号和端口受控。',
-    risk: '隧道断开后云端 Agent 会不可用，适合 PoC 或受控运维环境。',
   },
   {
     key: 'cloudflare_tunnel',
-    title: 'Cloudflare Tunnel',
-    detail: '适合没有固定公网入口的 Windows 机器，通过 Cloudflare Access 叠加身份校验。',
-    risk: '必须启用 Access / Zero Trust 规则，不能只依赖随机 URL。',
   },
   {
     key: 'tailscale',
-    title: 'Tailscale / WireGuard',
-    detail: '适合把 Windows GoNavi 和云端 Agent 放进同一个私有网络，优先走内网地址。',
-    risk: '需要控制 ACL，只允许目标 Agent 访问 GoNavi MCP 端口。',
   },
   {
     key: 'custom',
-    title: '自定义桥接',
-    detail: '适合已有企业网关、堡垒机或专用 MCP 网关的环境。',
-    risk: '需要明确 TLS、鉴权、审计和来源限制，避免把本机数据库能力暴露给未知 Agent。',
   },
 ];
+
+const MCP_REMOTE_STRATEGY_FALLBACKS: Record<MCPRemoteExposeStrategyKey, {
+  title: string;
+  detail: string;
+  risk: string;
+}> = {
+  reverse_proxy: {
+    title: 'Internal reverse proxy',
+    detail: 'Use this when Windows GoNavi and the cloud Agent already share a trusted intranet or gateway.',
+    risk: 'Keep source IP, TLS, and Bearer Token restrictions at the gateway; do not expose it directly to the public internet.',
+  },
+  ssh_reverse_tunnel: {
+    title: 'SSH reverse tunnel',
+    detail: 'Use this to temporarily map Windows 127.0.0.1:8765 to cloud Linux. It is simple, but the SSH account and port must be controlled.',
+    risk: 'The cloud Agent becomes unavailable if the tunnel disconnects, so this fits PoC or controlled operations environments.',
+  },
+  cloudflare_tunnel: {
+    title: 'Cloudflare Tunnel',
+    detail: 'Use this for Windows machines without a fixed public entry point, with Cloudflare Access layered for identity checks.',
+    risk: 'Access / Zero Trust rules must be enabled; do not rely only on a random URL.',
+  },
+  tailscale: {
+    title: 'Tailscale / WireGuard',
+    detail: 'Use this when Windows GoNavi and the cloud Agent can join the same private network and prefer an intranet address.',
+    risk: 'Control ACLs so only the target Agent can reach the GoNavi MCP port.',
+  },
+  custom: {
+    title: 'Custom bridge',
+    detail: 'Use this when an enterprise gateway, bastion host, or dedicated MCP gateway already exists.',
+    risk: 'Define TLS, authentication, audit, and source restrictions clearly to avoid exposing local database capabilities to unknown Agents.',
+  },
+};
+
+const translateMCPRemoteCopy = (
+  translate: AIInspectionTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: Parameters<AIInspectionTranslator>[1],
+): string => translateInspectionCopy(translate, key, fallback, params);
 
 const normalizePath = (value: unknown): string => {
   const raw = String(value || DEFAULT_HTTP_PATH).trim();
@@ -79,14 +103,39 @@ const normalizePublicUrl = (value: unknown, path: string): string => {
 };
 
 const buildHttpLaunchCommand = (binary: string, addr: string, path: string): string =>
-  `${binary} mcp-server http --addr ${addr} --path ${path} --token <随机token>`;
+  `${binary} mcp-server http --addr ${addr} --path ${path} --token ${TOKEN_PLACEHOLDER}`;
 
 const buildStandaloneLaunchCommand = (addr: string, path: string): string =>
-  `gonavi-mcp-server http --addr ${addr} --path ${path} --token <随机token>`;
+  `gonavi-mcp-server http --addr ${addr} --path ${path} --token ${TOKEN_PLACEHOLDER}`;
 
 const resolveStrategy = (value: unknown) => {
   const key = String(value || '').trim() as MCPRemoteExposeStrategyKey;
   return REMOTE_EXPOSE_STRATEGIES.find((item) => item.key === key) || REMOTE_EXPOSE_STRATEGIES[0];
+};
+
+const translateStrategy = (
+  strategy: { key: MCPRemoteExposeStrategyKey },
+  translate: AIInspectionTranslator | undefined,
+) => {
+  const fallback = MCP_REMOTE_STRATEGY_FALLBACKS[strategy.key];
+  return {
+    ...strategy,
+    title: translateMCPRemoteCopy(
+      translate,
+      `ai_chat.inspection.mcp_remote.strategy.${strategy.key}.title`,
+      fallback.title,
+    ),
+    detail: translateMCPRemoteCopy(
+      translate,
+      `ai_chat.inspection.mcp_remote.strategy.${strategy.key}.detail`,
+      fallback.detail,
+    ),
+    risk: translateMCPRemoteCopy(
+      translate,
+      `ai_chat.inspection.mcp_remote.strategy.${strategy.key}.risk`,
+      fallback.risk,
+    ),
+  };
 };
 
 export const buildMCPRemoteAccessSnapshot = (params: {
@@ -96,7 +145,9 @@ export const buildMCPRemoteAccessSnapshot = (params: {
   path?: string;
   exposeStrategy?: MCPRemoteExposeStrategyKey | string;
   tokenConfigured?: boolean;
+  translate?: AIInspectionTranslator;
 } = {}) => {
+  const { translate } = params;
   const localAddr = normalizeLocalAddr(params.localAddr);
   const path = normalizePath(params.path);
   const localUrl = `http://${localAddr}${path}`;
@@ -110,47 +161,84 @@ export const buildMCPRemoteAccessSnapshot = (params: {
       displayName: status.displayName,
       installMode: status.installMode || 'remote',
       message: status.message || '',
-      guide: buildRemoteMCPClientGuide(status),
+      guide: buildRemoteMCPClientGuide(status, translate),
     }));
 
   const warnings: string[] = [];
   const nextActions: string[] = [
-    '在 Windows 本机启动 GoNavi MCP HTTP 模式，并确认 /healthz 可访问。',
-    '通过隧道、反向代理或私有网络只暴露 /mcp 给指定云端 Agent。',
-    '在 OpenClaw/Hermans 里配置 Streamable HTTP MCP URL 和 Authorization Bearer Token。',
-    '先调用 get_connections 获取 connectionId，再读取库表结构；不要把数据库密码复制到云端 Agent。',
+    translateMCPRemoteCopy(
+      translate,
+      'ai_chat.inspection.mcp_remote.next_action.start_local_http',
+      'Start GoNavi MCP HTTP mode on Windows and confirm /healthz is reachable.',
+    ),
+    translateMCPRemoteCopy(
+      translate,
+      'ai_chat.inspection.mcp_remote.next_action.expose_mcp_only',
+      'Expose only /mcp to the target cloud Agent through a tunnel, reverse proxy, or private network.',
+    ),
+    translateMCPRemoteCopy(
+      translate,
+      'ai_chat.inspection.mcp_remote.next_action.configure_agent',
+      'Configure Streamable HTTP MCP URL and Authorization Bearer Token in OpenClaw/Hermans.',
+    ),
+    translateMCPRemoteCopy(
+      translate,
+      'ai_chat.inspection.mcp_remote.next_action.inspect_connections',
+      'Call get_connections first to obtain connectionId, then read schemas; do not copy database passwords to the cloud Agent.',
+    ),
   ];
 
   if (!publicUrl) {
-    warnings.push('尚未提供云端 Agent 可访问的 MCP URL；远程 Agent 不能直接访问 Windows 本机 127.0.0.1。');
+    warnings.push(translateMCPRemoteCopy(
+      translate,
+      'ai_chat.inspection.mcp_remote.warning.missing_public_url',
+      'No MCP URL reachable by the cloud Agent was provided; a remote Agent cannot directly access Windows local 127.0.0.1.',
+    ));
   } else if (!/^https:\/\//iu.test(publicUrl) && !/^http:\/\/(127\.0\.0\.1|localhost|\[::1\])/iu.test(publicUrl)) {
-    warnings.push('远程 MCP URL 不是 HTTPS；如果不是私有网络地址，建议加 TLS 或放到受控隧道后面。');
+    warnings.push(translateMCPRemoteCopy(
+      translate,
+      'ai_chat.inspection.mcp_remote.warning.non_https_public_url',
+      'The remote MCP URL is not HTTPS; if it is not a private network address, add TLS or place it behind a controlled tunnel.',
+    ));
   }
 
   if (params.tokenConfigured === false) {
-    warnings.push('尚未确认 Bearer Token；HTTP MCP 必须配置随机 token，不能无鉴权暴露。');
+    warnings.push(translateMCPRemoteCopy(
+      translate,
+      'ai_chat.inspection.mcp_remote.warning.missing_token',
+      'Bearer Token readiness is not confirmed; HTTP MCP must use a random token and must not be exposed without authentication.',
+    ));
   }
 
   return {
     mode: 'streamable-http',
     message: publicUrl
-      ? `远程 Agent 应通过 ${publicUrl} 访问 GoNavi MCP，并使用 Bearer Token 鉴权`
-      : '远程 Agent 需要通过受控隧道或反向代理访问 Windows GoNavi MCP HTTP 入口',
+      ? translateMCPRemoteCopy(
+          translate,
+          'ai_chat.inspection.mcp_remote.message.with_public_url',
+          'The remote Agent should access GoNavi MCP through {{publicUrl}} and authenticate with Bearer Token',
+          { publicUrl },
+        )
+      : translateMCPRemoteCopy(
+          translate,
+          'ai_chat.inspection.mcp_remote.message.no_public_url',
+          'The remote Agent needs to access the Windows GoNavi MCP HTTP endpoint through a controlled tunnel or reverse proxy',
+        ),
     endpoint: {
       localAddr,
       path,
       localUrl,
       publicUrl,
       healthCheckPath: '/healthz',
-      authHeader: 'Authorization: Bearer <随机token>',
+      authHeader: `Authorization: Bearer ${TOKEN_PLACEHOLDER}`,
     },
     launchCommands: {
       appBinary: buildHttpLaunchCommand('GoNavi.exe', localAddr, path),
       standaloneBinary: buildStandaloneLaunchCommand(localAddr, path),
-      tokenEnvFallback: 'GONAVI_MCP_HTTP_TOKEN=<随机token> gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp',
+      tokenEnvFallback: `GONAVI_MCP_HTTP_TOKEN=${TOKEN_PLACEHOLDER} gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp`,
     },
-    selectedStrategy,
-    exposeStrategies: REMOTE_EXPOSE_STRATEGIES,
+    selectedStrategy: translateStrategy(selectedStrategy, translate),
+    exposeStrategies: REMOTE_EXPOSE_STRATEGIES.map((strategy) => translateStrategy(strategy, translate)),
     remoteClients,
     securityBoundary: {
       databaseSecretsStayLocal: true,
@@ -158,7 +246,11 @@ export const buildMCPRemoteAccessSnapshot = (params: {
       httpBearerTokenRequired: true,
       executeSqlStillRequiresAISafetyPolicy: true,
       mutatingSqlStillRequiresAllowMutating: true,
-      recommendedBindAddress: '127.0.0.1，除非前面有受控网关或私有网络',
+      recommendedBindAddress: translateMCPRemoteCopy(
+        translate,
+        'ai_chat.inspection.mcp_remote.security.recommended_bind_address',
+        '127.0.0.1 unless a controlled gateway or private network is in front',
+      ),
     },
     warnings,
     nextActions,

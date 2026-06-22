@@ -18,6 +18,11 @@ const allowedRiskLevels = new Set<JVMDiagnosticPlan["riskLevel"]>([
 
 const asTrimmedString = (value: unknown): string => String(value ?? "").trim();
 
+export type JVMDiagnosticPlanTranslator = (
+  key: string,
+  params?: Record<string, string>,
+) => string;
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
 
@@ -31,7 +36,17 @@ const normalizeRiskLevel = (value: unknown): JVMDiagnosticPlan["riskLevel"] => {
   return allowedRiskLevels.has(riskLevel) ? riskLevel : "low";
 };
 
-const normalizePlan = (value: unknown): JVMDiagnosticPlan | null => {
+const getDefaultReason = (
+  intent: string,
+  translate?: JVMDiagnosticPlanTranslator,
+): string =>
+  translate?.("jvm_diagnostic.ai_plan.default_reason", { intent })
+  || `AI diagnostic plan: ${intent}`;
+
+const normalizePlan = (
+  value: unknown,
+  translate?: JVMDiagnosticPlanTranslator,
+): JVMDiagnosticPlan | null => {
   if (!isRecord(value)) {
     return null;
   }
@@ -45,7 +60,7 @@ const normalizePlan = (value: unknown): JVMDiagnosticPlan | null => {
   }
 
   const intent = asTrimmedString(value.intent) || "generic_diagnostic";
-  const reason = asTrimmedString(value.reason) || `AI 诊断计划：${intent}`;
+  const reason = asTrimmedString(value.reason) || getDefaultReason(intent, translate);
 
   return {
     intent,
@@ -61,9 +76,12 @@ const normalizePlan = (value: unknown): JVMDiagnosticPlan | null => {
   };
 };
 
-const tryParsePlan = (content: string): JVMDiagnosticPlan | null => {
+const tryParsePlan = (
+  content: string,
+  translate?: JVMDiagnosticPlanTranslator,
+): JVMDiagnosticPlan | null => {
   try {
-    return normalizePlan(JSON.parse(content));
+    return normalizePlan(JSON.parse(content), translate);
   } catch {
     return null;
   }
@@ -76,6 +94,7 @@ const resolveDiagnosticTransport = (
 
 export const parseJVMDiagnosticPlan = (
   content: string,
+  translate?: JVMDiagnosticPlanTranslator,
 ): JVMDiagnosticPlan | null => {
   const source = String(content || "").trim();
   if (!source) {
@@ -85,13 +104,13 @@ export const parseJVMDiagnosticPlan = (
   planFencePattern.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = planFencePattern.exec(source)) !== null) {
-    const parsed = tryParsePlan(match[1]);
+    const parsed = tryParsePlan(match[1], translate);
     if (parsed) {
       return parsed;
     }
   }
 
-  return tryParsePlan(source);
+  return tryParsePlan(source, translate);
 };
 
 export const matchesJVMDiagnosticPlanTargetTab = (

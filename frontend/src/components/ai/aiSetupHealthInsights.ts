@@ -13,6 +13,8 @@ import { buildAIGuidanceSnapshot } from './aiPromptInsights';
 import { buildAIProviderSnapshot } from './aiProviderInsights';
 import { buildAIRuntimeSnapshot } from './aiRuntimeInsights';
 import { buildMCPSetupSnapshot } from './aiMCPInsights';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
 
 type AISetupHealthStatus = 'ready' | 'needs_attention' | 'blocked';
 
@@ -44,7 +46,9 @@ export const buildAISetupHealthSnapshot = (params: {
   userPromptSettings?: AIUserPromptSettings;
   activeContext?: { connectionId?: string | null; dbName?: string | null } | null;
   activeContextItems?: AIContextItem[];
+  translate?: AIInspectionTranslator;
 }) => {
+  const translate = params.translate;
   const activeContextItems = Array.isArray(params.activeContextItems) ? params.activeContextItems : [];
   const runtimeSnapshot = buildAIRuntimeSnapshot({
     providers: params.providers,
@@ -55,11 +59,13 @@ export const buildAISetupHealthSnapshot = (params: {
     mcpTools: params.mcpTools,
     dynamicModels: params.dynamicModels,
     builtinToolNames: params.builtinToolNames,
+    translate,
   });
   const providerSnapshot = buildAIProviderSnapshot({
     providers: params.providers,
     activeProviderId: params.activeProviderId,
     dynamicModels: params.dynamicModels,
+    translate,
   });
   const chatReadiness = buildAIChatReadinessSnapshot({
     providers: params.providers,
@@ -67,15 +73,18 @@ export const buildAISetupHealthSnapshot = (params: {
     dynamicModels: params.dynamicModels,
     activeContext: params.activeContext,
     activeContextItems,
+    translate,
   });
   const mcpSnapshot = buildMCPSetupSnapshot({
     mcpServers: params.mcpServers,
     mcpClientStatuses: params.mcpClientStatuses,
     mcpTools: params.mcpTools,
+    translate,
   });
   const guidanceSnapshot = buildAIGuidanceSnapshot({
     userPromptSettings: params.userPromptSettings,
     skills: params.skills,
+    translate,
   });
 
   const blockers: string[] = [];
@@ -83,49 +92,129 @@ export const buildAISetupHealthSnapshot = (params: {
   const nextActions: string[] = [];
 
   if (!providerSnapshot.hasActiveProvider) {
-    appendUnique(blockers, '当前没有活动 AI 供应商');
-    appendUnique(nextActions, '先在 AI 设置里添加并选中一个活动供应商');
+    appendUnique(blockers, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.blocker.no_active_provider',
+      'No active AI provider is selected',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.next_action.select_provider',
+      'Add and select an active provider in AI settings first',
+    ));
   }
 
   const activeProviderIssues = providerSnapshot.activeProvider?.issues || [];
   if (activeProviderIssues.includes('missing_secret')) {
-    appendUnique(blockers, '当前活动供应商缺少 API Key / Secret');
-    appendUnique(nextActions, '补齐当前活动供应商的密钥');
+    appendUnique(blockers, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.blocker.missing_secret',
+      'The active provider is missing an API Key / Secret',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.next_action.fill_secret',
+      'Fill in the active provider secret',
+    ));
   }
   if (activeProviderIssues.includes('missing_base_url')) {
-    appendUnique(blockers, '当前活动供应商缺少接口地址');
-    appendUnique(nextActions, '补齐当前活动供应商的 baseUrl');
+    appendUnique(blockers, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.blocker.missing_base_url',
+      'The active provider is missing a base URL',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.next_action.fill_base_url',
+      'Fill in the active provider baseUrl',
+    ));
   }
   if (activeProviderIssues.includes('missing_selected_model') || chatReadiness.status === 'missing_model') {
-    appendUnique(blockers, '当前活动供应商还没有选中模型');
-    appendUnique(nextActions, '为当前活动供应商选择一个可用模型');
+    appendUnique(blockers, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.blocker.missing_model',
+      'The active provider has no selected model',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.next_action.select_model',
+      'Select an available model for the active provider',
+    ));
   }
   if (chatReadiness.status === 'loading_models') {
-    appendUnique(warnings, '当前正在加载模型列表，模型选择尚未完成');
-    appendUnique(nextActions, '等待模型列表加载完成后重新确认活动模型');
+    appendUnique(warnings, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.warning.loading_models',
+      'The model list is still loading, so model selection is not complete yet',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.next_action.wait_models',
+      'Wait for the model list to finish loading, then confirm the active model again',
+    ));
   }
 
   if (mcpSnapshot.serverCount === 0) {
-    appendUnique(warnings, '当前还没有配置任何 MCP 服务');
-    appendUnique(nextActions, '如需扩展 AI 工具能力，可新增并测试至少 1 个 MCP 服务');
+    appendUnique(warnings, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.warning.no_mcp_servers',
+      'No MCP servers are configured yet',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.next_action.add_mcp_server',
+      'To extend AI tool capabilities, add and test at least one MCP server',
+    ));
   }
   mcpSnapshot.warnings.forEach((warning) => appendUnique(warnings, warning));
   mcpSnapshot.nextActions.forEach((action) => appendUnique(nextActions, action));
   if (mcpSnapshot.currentClientCount === 0) {
-    appendUnique(warnings, 'Claude Code / Codex 还没有本机客户端接入当前 GoNavi MCP，OpenClaw/Hermans 需要远程桥接');
-    appendUnique(nextActions, '如需让外部 Agent 使用 GoNavi MCP，本机客户端可接入 Claude Code/Codex，云端 Agent 先配置远程 MCP 桥接');
+    appendUnique(warnings, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.warning.external_client_not_connected',
+      'Claude Code / Codex is not connected to the current GoNavi MCP as a local client yet; OpenClaw/Hermans need a remote bridge',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.next_action.connect_external_client',
+      'To let external Agents use GoNavi MCP, connect local clients such as Claude Code/Codex or configure a remote MCP bridge for cloud Agents',
+    ));
   }
   if (mcpSnapshot.enabledServerCount > 0 && runtimeSnapshot.mcpToolCount === 0) {
-    appendUnique(warnings, '已启用 MCP 服务，但当前还没有发现可用 MCP 工具');
-    appendUnique(nextActions, '逐条测试已启用的 MCP 服务，确认命令、参数和环境变量能正确发现工具');
+    appendUnique(warnings, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.warning.no_mcp_tools',
+      'MCP servers are enabled, but no available MCP tools have been discovered yet',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.next_action.test_mcp_servers',
+      'Test each enabled MCP server and confirm its command, arguments, and environment variables can discover tools correctly',
+    ));
   }
   if (guidanceSnapshot.customPromptCount === 0 && guidanceSnapshot.enabledSkillCount === 0) {
-    appendUnique(warnings, '当前没有自定义提示词或 Skills');
-    appendUnique(nextActions, '如需固定回答风格或工作流，可补充自定义提示词或启用 Skills');
+    appendUnique(warnings, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.warning.no_guidance',
+      'No custom prompts or Skills are configured',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.next_action.add_guidance',
+      'To pin response style or workflow, add custom prompts or enable Skills',
+    ));
   }
   if (chatReadiness.ready && params.activeContext?.connectionId && activeContextItems.length === 0) {
-    appendUnique(warnings, '当前聊天已就绪，但还没有挂载任何表结构上下文');
-    appendUnique(nextActions, '如需更准的 SQL / 结构建议，可先把目标表结构关联到 AI 上下文');
+    appendUnique(warnings, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.warning.no_schema_context',
+      'Chat is ready, but no table schema context is attached yet',
+    ));
+    appendUnique(nextActions, translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.next_action.attach_schema_context',
+      'For more accurate SQL or schema suggestions, attach the target table schema to AI context first',
+    ));
   }
 
   const status: AISetupHealthStatus = blockers.length > 0
@@ -135,10 +224,24 @@ export const buildAISetupHealthSnapshot = (params: {
       : 'ready';
 
   const message = status === 'ready'
-    ? '当前 AI 配置体检通过，供应商、聊天前置和 MCP 运行链路都处于可用状态'
+    ? translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.setup.message.ready',
+      'AI setup health passed; provider, chat prerequisites, and MCP runtime path are available',
+    )
     : status === 'blocked'
-      ? `当前 AI 配置存在 ${blockers.length} 个阻塞项，优先修复活动供应商和聊天前置条件`
-      : `当前 AI 配置整体可用，但还有 ${warnings.length} 个建议项可以继续优化`;
+      ? translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.setup.message.blocked',
+        `AI setup has ${blockers.length} blockers; fix the active provider and chat prerequisites first`,
+        { count: blockers.length },
+      )
+      : translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.setup.message.needs_attention',
+        `AI setup is usable overall, but ${warnings.length} recommendations can still be optimized`,
+        { count: warnings.length },
+      );
 
   return {
     status,

@@ -100,7 +100,7 @@ func (a *App) ConfigureGlobalProxy(enabled bool, proxyConfig connection.ProxyCon
 
 	return connection.QueryResult{
 		Success: true,
-		Message: "全局代理配置已生效",
+		Message: a.appText("app.proxy.message.config_applied", nil),
 		Data:    snapshot,
 	}
 }
@@ -309,13 +309,13 @@ func buildProxyURLFromConfig(proxyConfig connection.ProxyConfig) (*url.URL, erro
 
 	proxyType := strings.ToLower(strings.TrimSpace(normalizedProxy.Type))
 	if proxyType != "http" && proxyType != "socks5" {
-		return nil, fmt.Errorf("不支持的代理类型：%s", normalizedProxy.Type)
+		return nil, fmt.Errorf("unsupported proxy type: %s", normalizedProxy.Type)
 	}
 	if strings.TrimSpace(normalizedProxy.Host) == "" {
-		return nil, fmt.Errorf("代理地址不能为空")
+		return nil, fmt.Errorf("proxy host is empty")
 	}
 	if normalizedProxy.Port <= 0 || normalizedProxy.Port > 65535 {
-		return nil, fmt.Errorf("代理端口无效：%d", normalizedProxy.Port)
+		return nil, fmt.Errorf("invalid proxy port: %d", normalizedProxy.Port)
 	}
 
 	proxyURL := &url.URL{

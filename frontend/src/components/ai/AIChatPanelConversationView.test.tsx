@@ -2,12 +2,20 @@ import React, { createRef } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
+import { I18nProvider } from '../../i18n/provider';
 import AIChatPanelConversationView from './AIChatPanelConversationView';
 import { buildOverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
+const renderWithI18n = (node: React.ReactElement) =>
+  renderToStaticMarkup(
+    <I18nProvider preference="zh-CN" systemLanguages={['zh-CN']} onPreferenceChange={() => {}}>
+      {node}
+    </I18nProvider>,
+  );
+
 describe('AIChatPanelConversationView', () => {
   it('renders the welcome state when the chat mode has no messages', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <AIChatPanelConversationView
         mode="chat"
         messages={[]}
@@ -44,7 +52,7 @@ describe('AIChatPanelConversationView', () => {
   });
 
   it('renders inline history mode content and the scroll-bottom affordance', () => {
-    const markup = renderToStaticMarkup(
+    const markup = renderWithI18n(
       <AIChatPanelConversationView
         mode="history"
         messages={[]}

@@ -12,6 +12,13 @@ import {
   stripSchemaFromTabObjectLabel,
 } from './tabDisplay';
 
+const keyEchoTranslate = (key: string, params?: Record<string, unknown>): string => {
+  if (key === 'sidebar.tab.new_query') return 'T(New query)';
+  if (key === 'sidebar.tab.redis_command') return `T(Command ${params?.database})`;
+  if (key === 'sidebar.tab.redis_monitor') return `T(Monitor ${params?.database})`;
+  return key;
+};
+
 const redisConnection: SavedConnection = {
   id: 'redis-1',
   name: '订单缓存',
@@ -58,8 +65,28 @@ describe('tabDisplay', () => {
       redisDB: 1,
     };
 
-    expect(buildTabDisplayTitle(commandTab, redisConnection)).toBe('[订单缓存 | 10.10.0.12 +2] 命令 - db1');
-    expect(buildTabDisplayTitle(monitorTab, redisConnection)).toBe('[订单缓存 | 10.10.0.12 +2] 监控 - db1');
+    expect(buildTabDisplayTitle(commandTab, redisConnection)).toBe('[订单缓存 | 10.10.0.12 +2] Command - db1');
+    expect(buildTabDisplayTitle(monitorTab, redisConnection)).toBe('[订单缓存 | 10.10.0.12 +2] Monitor - db1');
+  });
+
+  it('localizes redis command and monitor fallback titles while keeping db labels raw', () => {
+    const commandTab: TabData = {
+      id: 'cmd-1',
+      title: '命令 - db1',
+      type: 'redis-command',
+      connectionId: 'redis-1',
+      redisDB: 1,
+    };
+    const monitorTab: TabData = {
+      id: 'monitor-1',
+      title: '监控: 订单缓存',
+      type: 'redis-monitor',
+      connectionId: 'redis-1',
+      redisDB: 1,
+    };
+
+    expect(buildTabDisplayTitle(commandTab, redisConnection, undefined, keyEchoTranslate)).toBe('[订单缓存 | 10.10.0.12 +2] T(Command db1)');
+    expect(buildTabDisplayTitle(monitorTab, redisConnection, undefined, keyEchoTranslate)).toBe('[订单缓存 | 10.10.0.12 +2] T(Monitor db1)');
   });
 
   it('keeps table tabs on the existing prefix strategy', () => {
@@ -222,7 +249,24 @@ describe('tabDisplay', () => {
 
     const model = buildTabDisplayModel(queryTab, connection);
 
-    expect(model.primaryText).toBe('[开发240] SQL 新建查询');
+    expect(model.primaryText).toBe('[开发240] SQL New query');
+    expect(model.fullTitle).not.toContain('fs_org_auth_application');
+    expect(model.fullTitle).not.toContain('select *');
+  });
+
+  it('localizes query tab fallback object labels without translating raw SQL', () => {
+    const queryTab: TabData = {
+      id: 'query-1',
+      title: 'select * from fs_org_auth_application where application_id is not null;',
+      type: 'query',
+      connectionId: 'mysql-1',
+      dbName: 'front_end_sys',
+      query: 'select * from fs_org_auth_application where application_id is not null;',
+    };
+
+    const model = buildTabDisplayModel(queryTab, undefined, undefined, keyEchoTranslate);
+
+    expect(model.primaryText).toBe('SQL T(New query)');
     expect(model.fullTitle).not.toContain('fs_org_auth_application');
     expect(model.fullTitle).not.toContain('select *');
   });

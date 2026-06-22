@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import { buildMCPEnvHintProfile } from '../../utils/mcpEnvHints';
 import { buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
@@ -14,12 +16,12 @@ interface AIMCPEnvHintsProps {
 }
 
 const categoryLabel = {
-  secret: '密钥',
-  endpoint: '地址',
-  proxy: '代理',
-  path: '路径',
-  runtime: '运行时',
-  generic: '自定义',
+  secret: 'ai_settings.mcp_server.env_hints.category.secret',
+  endpoint: 'ai_settings.mcp_server.env_hints.category.endpoint',
+  proxy: 'ai_settings.mcp_server.env_hints.category.proxy',
+  path: 'ai_settings.mcp_server.env_hints.category.path',
+  runtime: 'ai_settings.mcp_server.env_hints.category.runtime',
+  generic: 'ai_settings.mcp_server.env_hints.category.generic',
 };
 
 const categoryColor = {
@@ -39,7 +41,12 @@ const AIMCPEnvHints: React.FC<AIMCPEnvHintsProps> = ({
   darkMode,
   overlayTheme,
 }) => {
-  const profile = buildMCPEnvHintProfile(command, args, env);
+  const i18n = useOptionalI18n();
+  const copy = (
+    key: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => (i18n?.t ?? ((catalogKey, catalogParams) => catalogTranslate('en-US', catalogKey, catalogParams)))(key, params);
+  const profile = buildMCPEnvHintProfile(command, args, env, copy);
   if (!profile) {
     return null;
   }
@@ -56,9 +63,14 @@ const AIMCPEnvHints: React.FC<AIMCPEnvHintsProps> = ({
         gap: 8,
       }}
     >
-      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>环境变量用途提示</div>
+      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>
+        {copy('ai_settings.mcp_server.env_hints.title')}
+      </div>
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-        已识别 {profile.envVarCount} 个变量，其中 {profile.secretLikeCount} 个像密钥；这里只解释 key 的用途和风险，不会显示 value。
+        {copy('ai_settings.mcp_server.env_hints.summary', {
+          envVarCount: profile.envVarCount,
+          secretLikeCount: profile.secretLikeCount,
+        })}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
         {profile.items.map((item) => (
@@ -86,27 +98,35 @@ const AIMCPEnvHints: React.FC<AIMCPEnvHintsProps> = ({
                   background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)',
                 }}
               >
-                {categoryLabel[item.category]}
+                {copy(categoryLabel[item.category])}
               </span>
-              {item.known ? <span style={buildMCPHintStyle('#16a34a')}>已识别</span> : null}
+              {item.known ? (
+                <span style={buildMCPHintStyle('#16a34a')}>
+                  {copy('ai_settings.mcp_server.env_hints.recognized')}
+                </span>
+              ) : null}
             </div>
             <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{item.label}</div>
             <div style={buildMCPHintStyle(overlayTheme.mutedText)}>{item.detail}</div>
             <div style={buildMCPHintStyle(item.empty || item.placeholder ? '#b45309' : overlayTheme.mutedText)}>
-              应填：{item.valueHint}
-              {item.empty ? ' 当前值为空。' : ''}
-              {item.placeholder ? ' 当前像示例占位值。' : ''}
+              {copy('ai_settings.mcp_server.env_hints.value_hint_prefix')}{item.valueHint}
+              {item.empty ? copy('ai_settings.mcp_server.env_hints.empty_value') : ''}
+              {item.placeholder ? copy('ai_settings.mcp_server.env_hints.placeholder_value') : ''}
             </div>
           </div>
         ))}
       </div>
       {profile.warnings.length > 0 ? (
         <div style={buildMCPHintStyle('#b45309')}>
-          注意：{profile.warnings.join('；')}
+          {copy('ai_settings.mcp_server.env_hints.warning_prefix', {
+            warnings: profile.warnings.join(copy('ai_settings.mcp_server.env_hints.action_separator')),
+          })}
         </div>
       ) : null}
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-        下一步：{profile.nextActions.join('；')}
+        {copy('ai_settings.mcp_server.env_hints.next_actions', {
+          actions: profile.nextActions.join(copy('ai_settings.mcp_server.env_hints.action_separator')),
+        })}
       </div>
     </div>
   );

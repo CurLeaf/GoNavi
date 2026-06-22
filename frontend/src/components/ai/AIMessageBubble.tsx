@@ -14,6 +14,9 @@ import {
 
 import type { AIChatMessage } from '../../types';
 import { useStore } from '../../store';
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
+import type { I18nParams } from '../../i18n/types';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import { extractJVMChangePlan, resolveJVMAIPlanTargetTabId } from '../../utils/jvmAiPlan';
 import {
@@ -48,6 +51,7 @@ interface AIMessageActionBarProps {
   onRetry: (msg: AIChatMessage) => void;
   onDelete: (id: string) => void;
   onCopy: () => void;
+  copy: (key: string, params?: I18nParams) => string;
 }
 
 const AIMessageAttachmentSummary: React.FC<{
@@ -97,9 +101,10 @@ const AIMessageActionBar: React.FC<AIMessageActionBarProps> = ({
   onRetry,
   onDelete,
   onCopy,
+  copy,
 }) => (
   <div className="ai-message-actions" style={{ display: 'flex', gap: 8, opacity: 0, transition: 'opacity 0.2s', padding: '0 4px' }}>
-    <Tooltip title={isCopied ? '已复制' : '复制全文'}>
+    <Tooltip title={isCopied ? copy('ai_chat.message.action.copied') : copy('ai_chat.message.action.copy_full')}>
       {isCopied ? (
         <CheckOutlined className="ai-action-icon" style={{ color: '#10b981' }} />
       ) : (
@@ -113,7 +118,7 @@ const AIMessageActionBar: React.FC<AIMessageActionBarProps> = ({
       )}
     </Tooltip>
     {isUser ? (
-      <Tooltip title="编辑此条消息（移除其后所有记录并重新发送）">
+      <Tooltip title={copy('ai_chat.message.action.edit')}>
         <EditOutlined
           className="ai-action-icon"
           onClick={() => onEdit(msg)}
@@ -123,7 +128,7 @@ const AIMessageActionBar: React.FC<AIMessageActionBarProps> = ({
         />
       </Tooltip>
     ) : (
-      <Tooltip title="重新生成（移除此条并触发上次用户输入重发）">
+      <Tooltip title={copy('ai_chat.message.action.retry')}>
         <ReloadOutlined
           className="ai-action-icon"
           onClick={() => onRetry(msg)}
@@ -133,7 +138,7 @@ const AIMessageActionBar: React.FC<AIMessageActionBarProps> = ({
         />
       </Tooltip>
     )}
-    <Tooltip title="删除单条消息">
+    <Tooltip title={copy('ai_chat.message.action.delete')}>
       <DeleteOutlined
         className="ai-action-icon"
         onClick={() => onDelete(msg.id)}
@@ -150,16 +155,17 @@ const AIRawErrorButton: React.FC<{
   rawError: string;
   darkMode: boolean;
   overlayTheme: OverlayWorkbenchTheme;
-}> = ({ messageId, rawError, darkMode, overlayTheme }) => (
+  copy: (key: string, params?: I18nParams) => string;
+}> = ({ messageId, rawError, darkMode, overlayTheme, copy }) => (
   <div style={{ marginTop: 8 }}>
     <button
       onClick={() => {
         navigator.clipboard.writeText(rawError || '');
         const button = document.getElementById(`raw-err-btn-${messageId}`);
         if (button) {
-          button.textContent = '✅ 已复制';
+          button.textContent = `✅ ${copy('ai_chat.message.action.copied_error_raw')}`;
           setTimeout(() => {
-            button.textContent = '📋 复制报错原文';
+            button.textContent = `📋 ${copy('ai_chat.message.action.copy_error_raw')}`;
           }, 1500);
         }
       }}
@@ -175,7 +181,7 @@ const AIRawErrorButton: React.FC<{
         transition: 'all 0.15s ease',
       }}
     >
-      📋 复制报错原文
+      📋 {copy('ai_chat.message.action.copy_error_raw')}
     </button>
   </div>
 );
@@ -194,6 +200,10 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
   allMessages,
 }) => {
   const [isCopied, setIsCopied] = useState(false);
+  const i18n = useOptionalI18n();
+  const copy = (key: string, params?: I18nParams) => (
+    i18n?.t ?? ((catalogKey, catalogParams) => catalogTranslate('en-US', catalogKey, catalogParams))
+  )(key, params);
   const isUser = msg.role === 'user';
   const toolMessages = allMessages || [];
 
@@ -228,8 +238,8 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
     if (isUser) {
       return null;
     }
-    return parseJVMDiagnosticPlan(displayContent);
-  }, [displayContent, isUser]);
+    return parseJVMDiagnosticPlan(displayContent, copy);
+  }, [copy, displayContent, isUser]);
 
   const isTypingThinking = Boolean(msg.loading && msg.phase === 'thinking');
 
@@ -252,7 +262,7 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
             <div className="ai-wave-pulse">
               <span /> <span /> <span />
             </div>
-            <span style={{ fontSize: 13, opacity: 0.8 }}>{msg.content || '正在建立连接'}...</span>
+            <span style={{ fontSize: 13, opacity: 0.8 }}>{msg.content || copy('ai_chat.message.wait.connecting')}...</span>
           </div>
 
           <div style={{ marginTop: parsedThinking || (msg.tool_calls && msg.tool_calls.length > 0) ? 12 : 0 }}>
@@ -298,7 +308,7 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
         }}>
           <div>
             {isUser
-              ? <><UserOutlined /> <span>You</span></>
+              ? <><UserOutlined /> <span>{copy('ai_chat.message.role.user')}</span></>
               : <><RobotOutlined style={{ color: overlayTheme.iconColor }} /> <span>GoNavi AI</span></>}
           </div>
           <AIMessageActionBar
@@ -315,6 +325,7 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
               setIsCopied(true);
               setTimeout(() => setIsCopied(false), 2000);
             }}
+            copy={copy}
           />
         </div>
 
@@ -322,7 +333,7 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
           {msg.images && msg.images.length > 0 && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
               {msg.images.map((image, index) => (
-                <img key={index} src={image} alt={`Attached ${index}`} style={{ maxWidth: 200, maxHeight: 200, borderRadius: 8, objectFit: 'contain', border: overlayTheme.shellBorder }} />
+                <img key={index} src={image} alt={copy('ai_chat.message.image_alt', { index })} style={{ maxWidth: 200, maxHeight: 200, borderRadius: 8, objectFit: 'contain', border: overlayTheme.shellBorder }} />
               ))}
             </div>
           )}
@@ -360,14 +371,14 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
                 onClick={() => {
                   const targetContext = msg.jvmPlanContext;
                   if (!targetContext) {
-                    message.warning('这条 JVM 计划缺少来源页签上下文，请在目标 JVM 资源页重新生成。');
+                    message.warning(copy('ai_chat.message.jvm.missing_plan_context'));
                     return;
                   }
 
                   const store = useStore.getState();
                   const targetTabId = resolveJVMAIPlanTargetTabId(store.tabs, targetContext);
                   if (!targetTabId) {
-                    message.warning('未找到与该 JVM 计划匹配的资源页签，请先打开原目标资源后再应用。');
+                    message.warning(copy('ai_chat.message.jvm.plan_target_not_found'));
                     return;
                   }
 
@@ -382,7 +393,7 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
                   }));
                 }}
               >
-                应用到 JVM 预览
+                {copy('ai_chat.message.jvm.apply_preview')}
               </Button>
             </div>
           )}
@@ -395,7 +406,7 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
                 onClick={() => {
                   const targetContext = msg.jvmDiagnosticPlanContext;
                   if (!targetContext) {
-                    message.warning('这条诊断计划缺少来源页签上下文，请在目标诊断控制台重新生成。');
+                    message.warning(copy('ai_chat.message.jvm.missing_diagnostic_context'));
                     return;
                   }
 
@@ -406,7 +417,7 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
                     targetContext,
                   );
                   if (!targetTabId) {
-                    message.warning('未找到与该诊断计划匹配的诊断控制台页签，请先打开原目标控制台后再应用。');
+                    message.warning(copy('ai_chat.message.jvm.diagnostic_target_not_found'));
                     return;
                   }
 
@@ -420,7 +431,7 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
                   }));
                 }}
               >
-                应用到诊断控制台
+                {copy('ai_chat.message.jvm.apply_diagnostic')}
               </Button>
             </div>
           )}
@@ -431,6 +442,7 @@ export const AIMessageBubble: React.FC<AIMessageBubbleProps> = React.memo(({
               rawError={msg.rawError}
               darkMode={darkMode}
               overlayTheme={overlayTheme}
+              copy={copy}
             />
           )}
 

@@ -976,6 +976,90 @@ describe('store appearance persistence', () => {
     ]);
   });
 
+  it('uses localized store fallback names when restoring persisted records', async () => {
+    const i18n = await import('./i18n');
+    i18n.setCurrentLanguage('en-US');
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        connectionTags: [
+          {
+            id: 'tag-empty-name',
+            name: '   ',
+            connectionIds: [],
+          },
+        ],
+        sqlSnippets: [
+          {
+            id: 'snippet-empty-name',
+            prefix: 'demo',
+            name: '   ',
+            body: 'select 1;',
+            isBuiltin: false,
+            createdAt: 1,
+          },
+        ],
+        tabs: [
+          {
+            id: 'query-empty-title',
+            title: '   ',
+            type: 'query',
+            query: 'select 1;',
+          },
+        ],
+        activeTabId: 'query-empty-title',
+      },
+      version: 11,
+    }));
+
+    vi.resetModules();
+    const reloadedI18n = await import('./i18n');
+    reloadedI18n.setCurrentLanguage('en-US');
+    const reloaded = await importStore();
+
+    expect(reloaded.useStore.getState().connectionTags[0]?.name).toBe(
+      reloadedI18n.t('store.fallback.connection_tag_name', { index: 1 }),
+    );
+    expect(reloaded.useStore.getState().sqlSnippets[0]?.name).toBe(
+      reloadedI18n.t('store.fallback.sql_snippet_name', { index: 1 }),
+    );
+    expect(reloaded.useStore.getState().tabs[0]?.title).toBe(
+      reloadedI18n.t('sidebar.tab.new_query'),
+    );
+  });
+
+  it('uses localized AI session fallback titles for non-user first messages', async () => {
+    vi.useFakeTimers();
+    try {
+      const i18n = await import('./i18n');
+      i18n.setCurrentLanguage('ja-JP');
+      const { useStore } = await importStore();
+
+      useStore.getState().addAIChatMessage('assistant-first', {
+        id: 'message-1',
+        role: 'assistant',
+        content: '',
+        timestamp: 1,
+      });
+
+      expect(useStore.getState().aiChatSessions[0]?.title).toBe(
+        i18n.t('ai_chat.panel.session.default_title'),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps store fallback titles out of production source literals', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('./store.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('`连接-${index + 1}`');
+    expect(source).not.toContain('`标签-${index + 1}`');
+    expect(source).not.toContain('`片段-${index + 1}`');
+    expect(source).not.toContain('"新建查询"');
+    expect(source).not.toContain('"新的对话"');
+  });
+
   it('persists open query tab drafts and restores them after reload', async () => {
     const { useStore } = await importStore();
 

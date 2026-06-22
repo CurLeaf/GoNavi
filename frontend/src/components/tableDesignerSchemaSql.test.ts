@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -8,6 +10,30 @@ import {
   type BuildAlterTablePreviewInput,
   type EditableColumnSnapshot,
 } from './tableDesignerSchemaSql';
+import { t as catalogTranslate } from '../i18n/catalog';
+
+const sharedI18nDir = new URL('../../../shared/i18n/', import.meta.url);
+const sharedI18nLocaleFiles = [
+  'de-DE.json',
+  'en-US.json',
+  'ja-JP.json',
+  'ru-RU.json',
+  'zh-CN.json',
+  'zh-TW.json',
+] as const;
+
+const schemaSqlI18nKeys = [
+  'table_designer.schema_sql.doris.primary_key_hint',
+  'table_designer.schema_sql.duckdb.comment_hint',
+  'table_designer.schema_sql.duckdb.primary_key_hint',
+  'table_designer.schema_sql.limited_column_hint',
+  'table_designer.schema_sql.sqlite.modify_column_hint',
+  'table_designer.schema_sql.sqlserver.drop_primary_key_hint',
+  'table_designer.schema_sql.tdengine.timestamp_hint',
+] as const;
+
+const translateEn = (key: string, params?: Record<string, string | number | boolean | null | undefined>) =>
+  catalogTranslate('en-US', key, params);
 
 const baseColumn = (overrides: Partial<EditableColumnSnapshot>): EditableColumnSnapshot => ({
   _key: overrides._key || 'col',
@@ -32,6 +58,82 @@ const buildInput = (overrides: Partial<BuildAlterTablePreviewInput>): BuildAlter
 });
 
 describe('tableDesignerSchemaSql', () => {
+  it('keeps generated SQL warning comments in i18n catalogs without source Chinese literals', () => {
+    const source = readFileSync(new URL('./tableDesignerSchemaSql.ts', import.meta.url), 'utf8');
+
+    for (const localeFile of sharedI18nLocaleFiles) {
+      const catalog = JSON.parse(readFileSync(new URL(localeFile, sharedI18nDir), 'utf8')) as Record<string, string>;
+      for (const key of schemaSqlI18nKeys) {
+        expect(catalog[key], `${localeFile} ${key}`).toBeTruthy();
+      }
+    }
+
+    for (const key of schemaSqlI18nKeys) {
+      expect(source).toContain(key);
+    }
+
+    for (const literal of [
+      'Doris 修改主键/Key 模型需要按表模型手工迁移',
+      'SQL Server 删除旧主键需要原约束名',
+      'SQLite 不支持直接修改字段属性',
+      'DuckDB 不支持通过 COMMENT ON COLUMN 持久化字段备注',
+      'DuckDB 当前仅支持为无主键表新增 PRIMARY KEY',
+      '字段约束/默认值/备注语法与 MySQL 不同',
+      'TDengine 普通表通常需要 TIMESTAMP 时间列',
+    ]) {
+      expect(source).not.toContain(literal);
+    }
+  });
+
+  it('localizes generated SQL warning comments while keeping SQL and identifiers raw', () => {
+    const sqliteSql = buildAlterTablePreviewSql(buildInput({
+      dbType: 'sqlite',
+      tableName: 'users',
+      originalColumns: [baseColumn({ _key: 'name', name: 'name', type: 'TEXT', nullable: 'YES' })],
+      columns: [baseColumn({ _key: 'name', name: 'display_name', type: 'INTEGER', nullable: 'NO' })],
+      translate: translateEn,
+    }));
+    const duckCommentSql = buildAlterTablePreviewSql(buildInput({
+      dbType: 'duckdb',
+      tableName: 'main.users',
+      originalColumns: [baseColumn({ _key: 'name', name: 'name', type: 'VARCHAR', nullable: 'YES', comment: '' })],
+      columns: [baseColumn({ _key: 'name', name: 'name', type: 'VARCHAR', nullable: 'YES', comment: 'visible name' })],
+      translate: translateEn,
+    }));
+    const limitedSql = buildAlterTablePreviewSql(buildInput({
+      dbType: 'clickhouse',
+      tableName: 'events',
+      originalColumns: [],
+      columns: [baseColumn({ _key: 'name', name: 'name', type: 'String', nullable: 'NO', default: 'guest', comment: 'raw comment' })],
+      translate: translateEn,
+    }));
+    const tdengineSql = buildCreateTablePreviewSql({
+      dbType: 'tdengine',
+      tableName: 'meters',
+      columns: [baseColumn({ _key: 'value', name: 'value', type: 'FLOAT', nullable: 'YES' })],
+      translate: translateEn,
+    });
+
+    expect(sqliteSql).toContain('-- SQLite cannot alter column properties directly.');
+    expect(sqliteSql).toContain('column display_name');
+    expect(sqliteSql).toContain('ALTER TABLE "users"');
+    expect(sqliteSql).not.toContain('不支持直接修改字段属性');
+
+    expect(duckCommentSql).toContain('-- DuckDB cannot persist column comments through COMMENT ON COLUMN.');
+    expect(duckCommentSql).toContain('column name');
+    expect(duckCommentSql).toContain('COMMENT ON COLUMN');
+    expect(duckCommentSql).not.toContain('字段 name 的备注');
+
+    expect(limitedSql).toContain('-- ClickHouse column constraint, default, and comment syntax differs from MySQL.');
+    expect(limitedSql).toContain('ALTER TABLE `events`');
+    expect(limitedSql).toContain('ADD COLUMN `name` String;');
+    expect(limitedSql).not.toContain('字段约束/默认值/备注语法');
+
+    expect(tdengineSql).toContain('CREATE TABLE `meters`');
+    expect(tdengineSql).toContain('-- TDengine regular tables usually require a TIMESTAMP column.');
+    expect(tdengineSql).not.toContain('普通表通常需要 TIMESTAMP 时间列');
+  });
+
   it('detects when alter table drafts contain unsaved column changes', () => {
     expect(hasAlterTableDraftChanges(buildInput({ dbType: 'mysql' }))).toBe(true);
     expect(
@@ -138,7 +240,7 @@ describe('tableDesignerSchemaSql', () => {
     }));
 
     expect(sql).toContain('ALTER TABLE "users"\nRENAME COLUMN "name" TO "display_name";');
-    expect(sql).toContain('-- SQLite 不支持直接修改字段属性');
+    expect(sql).toContain('-- SQLite cannot alter column properties directly.');
     expect(sql).not.toContain('CHANGE COLUMN');
     expect(sql).not.toContain('MODIFY COLUMN');
     expect(sql).not.toContain('AFTER');
@@ -195,7 +297,7 @@ describe('tableDesignerSchemaSql', () => {
       ],
     }));
 
-    expect(sql).toContain('-- DuckDB 当前仅支持为无主键表新增 PRIMARY KEY；已有主键的修改或删除需要通过重建表完成。');
+    expect(sql).toContain('-- DuckDB currently only supports adding PRIMARY KEY to tables without an existing primary key.');
     expect(sql).not.toContain('DROP CONSTRAINT');
     expect(sql).not.toContain('DROP PRIMARY KEY');
   });

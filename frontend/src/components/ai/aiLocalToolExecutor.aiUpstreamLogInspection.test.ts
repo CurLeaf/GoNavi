@@ -69,7 +69,7 @@ describe('aiLocalToolExecutor inspect_ai_upstream_logs', () => {
       success: true,
       data: {
         logPath: 'C:/Users/demo/.GoNavi/Logs/gonavi.log',
-        keyword: 'AI 上游请求',
+        keyword: 'requestId=',
         requestedLineLimit: 160,
         lines: [
           '2026/06/11 13:20:00.000000 [INFO] AI 上游请求开始：requestId=openai-tools-123 provider=openai method=POST endpoint=https://api.example.com/v1/chat/completions body={"model":"gpt-5.5","stream":true,"messages":[{"role":"system","content":"system secret password=abc123"},{"role":"user","content":"user private text"}],"tools":[{"type":"function","function":{"name":"inspect_app_health","description":"inspect app","parameters":{"type":"object","properties":{}}}}],"tool_choice":"auto","response_format":{"type":"json_object"},"api_key":"sk-should-not-leak"}',
@@ -93,8 +93,9 @@ describe('aiLocalToolExecutor inspect_ai_upstream_logs', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(readAppLogTail).toHaveBeenCalledWith(160, 'AI 上游请求');
+    expect(readAppLogTail).toHaveBeenCalledWith(160, 'requestId=');
     expect(result.content).toContain('"payloadSummaryEnabled":true');
+    expect(result.content).toContain('"keyword":""');
     expect(result.content).not.toContain('"bodyPreview"');
     expect(result.content).not.toContain('password=abc123');
     expect(result.content).not.toContain('user private text');
@@ -132,12 +133,18 @@ describe('aiLocalToolExecutor inspect_ai_upstream_logs', () => {
           },
         }),
       },
+      translate: (key) => ({
+        'ai_chat.inspection.upstream_logs.message.empty': 'translated executor empty message',
+        'ai_chat.inspection.upstream_logs.next_action.confirm_logging': 'translated executor confirm logging',
+        'ai_chat.inspection.upstream_logs.next_action.send_message': 'translated executor send message',
+        'ai_chat.inspection.upstream_logs.next_action.read_warn_error': 'translated executor read warn error',
+      })[key] || key,
     });
 
     expect(result.success).toBe(true);
     expect(result.content).toContain('"upstreamEventCount":0');
-    expect(result.content).toContain('请先发送一次 AI 消息');
-    expect(result.content).toContain('扩大 lineLimit');
+    expect(result.content).toContain('translated executor empty message');
+    expect(result.content).toContain('translated executor send message');
   });
 
   it('summarizes CLI upstream requests that complete without an HTTP status code', async () => {

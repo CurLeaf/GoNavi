@@ -1,4 +1,6 @@
 import React from 'react';
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 
 import {
   DEFAULT_AI_SLASH_COMMANDS,
@@ -44,7 +46,11 @@ export const AISlashCommandMenu: React.FC<AISlashCommandMenuProps> = ({
     return null;
   }
 
-  const groups = groupAISlashCommands(commands);
+  const i18n = useOptionalI18n();
+  const t = i18n?.t ?? ((key: string, params?: Record<string, string | number | boolean | null | undefined>) =>
+    catalogTranslate('en-US', key, params));
+  const groups = React.useMemo(() => groupAISlashCommands(commands, t), [commands, t]);
+  const featuredCommands = React.useMemo(() => getFeaturedAISlashCommands(t), [t]);
 
   return (
     <div
@@ -95,10 +101,10 @@ export const AISlashCommandMenu: React.FC<AISlashCommandMenuProps> = ({
           }}
         >
           <div style={{ fontSize: 12, fontWeight: 600, color: textColor }}>
-            没有匹配的快捷命令
+            {t('ai_chat.input.slash.empty.title')}
           </div>
           <div style={{ fontSize: 11, color: mutedColor, lineHeight: 1.5 }}>
-            可以先试这些更常用的入口，快速走到生成 SQL、AI 体检或 MCP 排查。
+            {t('ai_chat.input.slash.empty.description')}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {featuredCommands.map((command) => (
@@ -121,7 +127,7 @@ export const AISlashCommandMenu: React.FC<AISlashCommandMenuProps> = ({
             ))}
           </div>
           <div style={{ fontSize: 11, color: mutedColor, lineHeight: 1.5 }}>
-            当前共提供 {DEFAULT_AI_SLASH_COMMANDS.length} 个 slash 命令，支持按命令名、中文说明或关键词搜索。
+            {t('ai_chat.input.slash.empty.summary', { count: DEFAULT_AI_SLASH_COMMANDS.length })}
           </div>
         </div>
       )}

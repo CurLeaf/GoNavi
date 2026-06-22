@@ -1,5 +1,7 @@
 export type TableDataDangerActionKind = 'truncate' | 'clear';
 
+type TableDataDangerActionTranslator = (key: string) => string;
+
 const resolveCustomDriverDialect = (driver: string): string => {
   const normalized = String(driver || '').trim().toLowerCase();
   switch (normalized) {
@@ -105,12 +107,24 @@ export const supportsTableTruncateAction = (type: string, driver?: string): bool
   }
 };
 
-export const getTableDataDangerActionMeta = (action: TableDataDangerActionKind): {
+const tableDataDangerActionCopy = (
+  translate: TableDataDangerActionTranslator | undefined,
+  key: string,
+  fallback: string,
+) => translate ? translate(key) : fallback;
+
+export const getTableDataDangerActionMeta = (action: TableDataDangerActionKind, translate?: TableDataDangerActionTranslator): {
   label: string;
   progressLabel: string;
 } => {
   if (action === 'truncate') {
-    return { label: '截断表', progressLabel: '截断' };
+    return {
+      label: tableDataDangerActionCopy(translate, 'sidebar.table_action.truncate.label', 'Truncate table'),
+      progressLabel: tableDataDangerActionCopy(translate, 'sidebar.table_action.truncate.progress', 'Truncating'),
+    };
   }
-  return { label: '清空表', progressLabel: '清空' };
+  return {
+    label: tableDataDangerActionCopy(translate, 'sidebar.table_action.clear.label', 'Clear table'),
+    progressLabel: tableDataDangerActionCopy(translate, 'sidebar.table_action.clear.progress', 'Clearing'),
+  };
 };

@@ -37,8 +37,10 @@ const SQL_FILE_MISSING_MESSAGE_PATTERNS = [
   'system cannot find the file specified',
   'does not exist',
   'not exist',
-  '系统找不到指定的文件',
-  '文件不存在',
+  '\u7cfb\u7edf\u627e\u4e0d\u5230\u6307\u5b9a\u7684\u6587\u4ef6',
+  '\u6587\u4ef6\u4e0d\u5b58\u5728',
+  '\u7cfb\u7d71\u627e\u4e0d\u5230\u6307\u5b9a\u7684\u6a94\u6848',
+  '\u6a94\u6848\u4e0d\u5b58\u5728',
 ];
 
 export const isSQLFileMissingErrorMessage = (message: unknown): boolean => {

@@ -27,7 +27,11 @@ const CONNECTION_PACKAGE_SCHEMA_VERSION_V2 = 2;
 const CONNECTION_PACKAGE_PROTECTION_APP_MANAGED = 1;
 const CONNECTION_PACKAGE_PROTECTION_FILE_PASSWORD = 2;
 export const BACKEND_CANCELLED_MESSAGE = '已取消';
-const CONNECTION_PACKAGE_PASSWORD_REQUIRED_MESSAGE = '恢复包密码不能为空';
+const CONNECTION_PACKAGE_PASSWORD_REQUIRED_MESSAGE = t(
+  'file.backend.error.connection_package_password_required',
+  undefined,
+  'zh-CN',
+);
 
 const isJsonObject = (value: unknown): value is JsonObject => (
   typeof value === 'object' && value !== null && !Array.isArray(value)

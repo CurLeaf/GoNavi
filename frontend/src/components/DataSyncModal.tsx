@@ -459,9 +459,9 @@ const DataSyncModal: React.FC<{ open: boolean; onClose: () => void; entryMode?: 
   };
 
   const nextToTables = async () => {
-      if (!sourceConnId || !targetConnId) return message.error("Select connections first");
-      if (!sourceDb) return message.error("Select source database");
-      if (!targetDb) return message.error("Select target database");
+      if (!sourceConnId || !targetConnId) return message.error(tr('data_sync.message.select_connections_first'));
+      if (!sourceDb) return message.error(tr('data_sync.message.select_source_database'));
+      if (!targetDb) return message.error(tr('data_sync.message.select_target_database'));
 
       setLoading(true);
       try {

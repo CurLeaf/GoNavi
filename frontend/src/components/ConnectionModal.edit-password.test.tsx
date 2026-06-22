@@ -51,7 +51,10 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain("name: 'Elasticsearch'");
     expect(source).toContain('icon: getDbIcon(item.key, undefined, 36)');
     expect(source).toContain('type === "elasticsearch"');
-    expect(source).toContain("return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';");
+    expect(source).toContain("'connection_modal.step1.hint.elasticsearch'");
+    expect(source).toContain(
+      "'Index browsing, Mapping inspection, JSON DSL, and query_string queries'",
+    );
     expect(source).toContain('const PRIMARY_USERNAME_OPTIONAL_TYPES = new Set([');
     expect(source).toContain('"mqtt",');
     expect(source).toContain(
@@ -75,7 +78,10 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain("key: 'chroma'");
     expect(source).toContain("name: 'Chroma'");
     expect(source).toContain('type === "chroma"');
-    expect(source).toContain("return 'Collection 浏览、向量检索和元数据过滤';");
+    expect(source).toContain("'connection_modal.step1.hint.chroma'");
+    expect(source).toContain(
+      "'Collection browsing, vector retrieval, and metadata filtering'",
+    );
     expect(source).toContain('return "http://127.0.0.1:8000/default_database?tenant=default_tenant";');
     expect(source).toContain('return "tenant=default_tenant&apiKey=...";');
   });
@@ -87,7 +93,10 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain("key: 'qdrant'");
     expect(source).toContain("name: 'Qdrant'");
     expect(source).toContain('type === "qdrant"');
-    expect(source).toContain("return 'Collection 浏览、向量搜索和 Payload 过滤';");
+    expect(source).toContain("'connection_modal.step1.hint.qdrant'");
+    expect(source).toContain(
+      "'Collection browsing, vector search, and Payload filtering'",
+    );
     expect(source).toContain('return "http://127.0.0.1:6333";');
     expect(source).toContain('return "apiKey=...";');
   });
@@ -178,7 +187,8 @@ describe('ConnectionModal data source registry', () => {
     expect(source).toContain("key: 'goldendb'");
     expect(source).toContain("name: 'GoldenDB'");
     expect(source).toContain('type === "goldendb"');
-    expect(source).toContain("return 'MySQL 兼容 / 分布式事务';");
+    expect(source).toContain("'connection_modal.step1.hint.goldendb'");
+    expect(source).toContain("'MySQL compatible / distributed transactions'");
     expect(source).toContain('dbType === "goldendb" ? "goldendb" : "mysql"');
     expect(source).toContain('type === "goldendb" ? "goldendb" : "mysql"');
     expect(source).toContain('? "goldendb"');
@@ -186,7 +196,9 @@ describe('ConnectionModal data source registry', () => {
 
   it('keeps OceanBase Oracle service name optional for OBClient/MySQL-wire connections', () => {
     expect(source).toContain('connection.modal.field.oceanBaseServiceName.label');
-    expect(source).toContain('isOceanBaseOracle\n                          ? []');
+    expect(source).toMatch(
+      /isOceanBaseOracle\s*\?\s*\[\]\s*:\s*\[\s*createUriAwareRequiredRule\(\s*t\("connection\.modal\.field\.serviceName\.required"/,
+    );
     expect(source).toContain('connection.modal.field.oceanBaseServiceName.help');
     expect(source).toContain('connection.modal.field.serviceName.help');
     expect(source).toContain('connection.modal.field.serviceName.required');

@@ -6,9 +6,13 @@ import (
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
+	"GoNavi-Wails/shared/i18n"
 )
 
 func TestOptionalDriverAgentRevisionStatusDetectsStaleClickHouseAgent(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage(string(i18n.LanguageZhCN))
+
 	needsUpdate, reason, expected := optionalDriverAgentRevisionStatus("clickhouse", installedDriverPackage{}, true)
 	if !needsUpdate {
 		t.Fatal("expected missing ClickHouse agent revision to require update")
@@ -34,6 +38,9 @@ func TestOptionalDriverAgentRevisionStatusDetectsStaleClickHouseAgent(t *testing
 }
 
 func TestOptionalDriverPackageUpdateStatusDetectsMongoV2WhenLegacyDefault(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage(string(i18n.LanguageZhCN))
+
 	definition, ok := resolveDriverDefinition("mongodb")
 	if !ok {
 		t.Fatal("expected mongodb driver definition")
@@ -53,6 +60,9 @@ func TestOptionalDriverPackageUpdateStatusDetectsMongoV2WhenLegacyDefault(t *tes
 }
 
 func TestOptionalDriverPackageUpdateStatusAcceptsMongoV1WithoutRevision(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage(string(i18n.LanguageZhCN))
+
 	definition, ok := resolveDriverDefinition("mongodb")
 	if !ok {
 		t.Fatal("expected mongodb driver definition")

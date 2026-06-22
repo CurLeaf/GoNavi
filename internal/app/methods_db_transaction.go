@@ -22,6 +22,23 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	transactionDBType := resolveDDLDBType(runConfig)
 	transactionConfig := runConfig
 	transactionConfig.Type = transactionDBType
+	buildManagedTransactionUnsupportedMessage := func() string {
+		return a.appText("db.backend.error.managed_transaction_unsupported", map[string]any{
+			"dbType": transactionDBType,
+		})
+	}
+	appendRollbackFailureMessage := func(baseErr error, rollbackErr error) error {
+		if rollbackErr == nil {
+			return baseErr
+		}
+		rollbackMessage := a.appText("db.backend.error.transaction_rollback_failed", map[string]any{
+			"detail": rollbackErr.Error(),
+		})
+		if baseErr == nil {
+			return fmt.Errorf("%s", rollbackMessage)
+		}
+		return fmt.Errorf("%s; %s", baseErr.Error(), rollbackMessage)
+	}
 
 	if queryID == "" {
 		queryID = generateQueryID()
@@ -87,7 +104,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		if !ok {
 			return connection.QueryResult{
 				Success: false,
-				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", transactionDBType),
+				Message: buildManagedTransactionUnsupportedMessage(),
 				QueryID: queryID,
 			}
 		}
@@ -100,7 +117,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		if !hasTextTransaction {
 			return connection.QueryResult{
 				Success: false,
-				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", transactionDBType),
+				Message: buildManagedTransactionUnsupportedMessage(),
 				QueryID: queryID,
 			}
 		}
@@ -108,7 +125,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		if !ok {
 			return connection.QueryResult{
 				Success: false,
-				Message: fmt.Sprintf("当前数据源（%s）不支持 SQL 编辑器托管事务", transactionDBType),
+				Message: buildManagedTransactionUnsupportedMessage(),
 				QueryID: queryID,
 			}
 		}
@@ -140,7 +157,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	}
 
 	statements := splitSQLStatements(query)
-	resultSets, err := executeManagedSQLTransactionStatements(ctx, sessionExecer, transactionConfig, statements)
+	resultSets, err := executeManagedSQLTransactionStatements(ctx, sessionExecer, transactionConfig, statements, a.appText)
 	if err != nil {
 		var rollbackErr error
 		if transactor != nil {
@@ -150,7 +167,7 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 		}
 		if rollbackErr != nil {
 			logger.Error(rollbackErr, "DBQueryMultiTransactional 执行失败后回滚失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
-			err = fmt.Errorf("%v；回滚失败: %w", err, rollbackErr)
+			err = appendRollbackFailureMessage(err, rollbackErr)
 		}
 		logger.Error(err, "DBQueryMultiTransactional 执行失败：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
@@ -183,7 +200,20 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	}
 }
 
-func executeManagedSQLTransactionStatements(ctx context.Context, session db.StatementExecer, runConfig connection.ConnectionConfig, statements []string) ([]connection.ResultSetData, error) {
+func executeManagedSQLTransactionStatements(ctx context.Context, session db.StatementExecer, runConfig connection.ConnectionConfig, statements []string, text func(string, map[string]any) string) ([]connection.ResultSetData, error) {
+	if text == nil {
+		text = defaultDBBackendText
+	}
+	buildStatementExecutionFailedError := func(index int, err error) error {
+		return fmt.Errorf("%s", text("db.backend.error.multi_statement_execution_failed", map[string]any{
+			"index":  index,
+			"detail": err.Error(),
+		}))
+	}
+	buildTransactionQueryUnsupportedError := func() error {
+		return fmt.Errorf("%s", text("db.backend.error.transaction_query_unsupported", nil))
+	}
+
 	var resultSets []connection.ResultSetData
 	sessionQueryTarget, _ := session.(db.StatementQueryExecer)
 	sessionQueryMessageTarget, _ := session.(db.StatementQueryMessageExecer)
@@ -218,7 +248,7 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 			} else if sessionQueryTarget != nil {
 				data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
 			} else {
-				err = fmt.Errorf("当前事务会话不支持查询语句")
+				err = buildTransactionQueryUnsupportedError()
 			}
 			if err == nil {
 				if usedMultiResult {
@@ -256,13 +286,13 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 				continue
 			}
 			if isReadStmt {
-				return nil, fmt.Errorf("第 %d 条语句执行失败: %w", idx+1, err)
+				return nil, buildStatementExecutionFailedError(idx+1, err)
 			}
 		}
 
 		affected, err := session.ExecContext(ctx, stmt)
 		if err != nil {
-			return nil, fmt.Errorf("第 %d 条语句执行失败: %w", idx+1, err)
+			return nil, buildStatementExecutionFailedError(idx+1, err)
 		}
 		resultSets = append(resultSets, connection.ResultSetData{
 			Rows:           []map[string]interface{}{{"affectedRows": affected}},
@@ -334,7 +364,7 @@ func (a *App) DBRollbackTransaction(transactionID string) connection.QueryResult
 func (a *App) finishManagedSQLTransaction(transactionID string, commit bool) connection.QueryResult {
 	transactionID = strings.TrimSpace(transactionID)
 	if transactionID == "" {
-		return connection.QueryResult{Success: false, Message: "事务 ID 不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.transaction_id_required", nil)}
 	}
 
 	a.sqlTransactionMu.Lock()
@@ -344,16 +374,16 @@ func (a *App) finishManagedSQLTransaction(transactionID string, commit bool) con
 	}
 	a.sqlTransactionMu.Unlock()
 	if !ok || tx == nil || tx.execer == nil {
-		return connection.QueryResult{Success: false, Message: "事务不存在或已结束"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.transaction_not_found", nil)}
 	}
 	if tx.cancel != nil {
 		defer tx.cancel()
 	}
 
-	action := "回滚"
+	actionCode := "rollback"
 	sqlText := tx.rollbackSQL
 	if commit {
-		action = "提交"
+		actionCode = "commit"
 		sqlText = tx.commitSQL
 	}
 
@@ -372,18 +402,26 @@ func (a *App) finishManagedSQLTransaction(transactionID string, commit bool) con
 	}
 	closeErr := tx.execer.Close()
 	if execErr != nil {
-		logger.Error(execErr, "SQL 编辑器事务%s失败：id=%s dbType=%s", action, transactionID, tx.dbType)
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("事务%s失败: %v", action, execErr)}
+		logger.Error(execErr, "SQL 编辑器事务%s失败：id=%s dbType=%s", actionCode, transactionID, tx.dbType)
+		key := "db.backend.error.transaction_rollback_failed"
+		if commit {
+			key = "db.backend.error.transaction_commit_failed"
+		}
+		return connection.QueryResult{Success: false, Message: a.appText(key, map[string]any{"detail": execErr.Error()})}
 	}
 	if closeErr != nil {
-		logger.Error(closeErr, "SQL 编辑器事务%s后关闭会话失败：id=%s dbType=%s", action, transactionID, tx.dbType)
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("事务%s成功，但关闭会话失败: %v", action, closeErr)}
+		logger.Error(closeErr, "SQL 编辑器事务%s后关闭会话失败：id=%s dbType=%s", actionCode, transactionID, tx.dbType)
+		key := "db.backend.error.transaction_rollback_close_failed"
+		if commit {
+			key = "db.backend.error.transaction_commit_close_failed"
+		}
+		return connection.QueryResult{Success: false, Message: a.appText(key, map[string]any{"detail": closeErr.Error()})}
 	}
 
 	if commit {
-		return connection.QueryResult{Success: true, Message: "事务已提交"}
+		return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.transaction_committed", nil)}
 	}
-	return connection.QueryResult{Success: true, Message: "事务已回滚"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.transaction_rolled_back", nil)}
 }
 
 func (a *App) rollbackPendingSQLTransactionsOnShutdown() {

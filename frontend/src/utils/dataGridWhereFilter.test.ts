@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
+import { setCurrentLanguage } from '../i18n';
 import {
   applyWhereConditionSuggestion,
   buildEffectiveFilterConditions,
@@ -11,7 +13,13 @@ import {
   validateQuickWhereCondition,
 } from './dataGridWhereFilter';
 
+const source = readFileSync(new URL('./dataGridWhereFilter.ts', import.meta.url), 'utf8');
+
 describe('dataGridWhereFilter', () => {
+  beforeEach(() => {
+    setCurrentLanguage('zh-CN');
+  });
+
   it('normalizes pasted WHERE clauses to condition bodies', () => {
     expect(normalizeQuickWhereCondition(' WHERE status = 1; ')).toBe('status = 1');
     expect(normalizeQuickWhereCondition('\nwhere name like \'A%\'\n')).toBe("name like 'A%'");
@@ -27,6 +35,36 @@ describe('dataGridWhereFilter', () => {
       ok: false,
       message: 'WHERE 条件不能包含分号或 SQL 注释',
     });
+  });
+
+  it('switches quick where validation and suggestion labels to English', () => {
+    setCurrentLanguage('en-US');
+
+    expect(validateQuickWhereCondition('status = 1 -- bypass')).toEqual({
+      ok: false,
+      message: 'WHERE condition cannot contain semicolons or SQL comments',
+    });
+
+    const [columnSuggestion] = resolveWhereConditionSuggestions({
+      input: 'sta',
+      columnNames: ['status'],
+      dbType: 'mysql',
+    });
+    expect(columnSuggestion.detail).toBe('Column');
+
+    const [operatorSuggestion] = resolveWhereConditionSuggestions({
+      input: 'status ',
+      columnNames: ['status'],
+      dbType: 'mysql',
+    });
+    expect(operatorSuggestion.detail).toBe('Operator');
+
+    const [keywordSuggestion] = resolveWhereConditionSuggestions({
+      input: 'status = 1 a',
+      columnNames: ['status'],
+      dbType: 'mysql',
+    });
+    expect(keywordSuggestion.detail).toBe('Keyword');
   });
 
   it('merges structured filters with a quick custom where condition', () => {
@@ -136,5 +174,16 @@ describe('dataGridWhereFilter', () => {
       suggestionsOpen: false,
       suggestionCount: 0,
     })).toBe(false);
+  });
+
+  it('keeps quick where UI copy out of hard-coded Chinese strings', () => {
+    [
+      'WHERE 条件不能包含分号或 SQL 注释',
+      "detail: '操作符'",
+      "detail: '关键字'",
+      "detail: '字段'",
+    ].forEach((snippet) => {
+      expect(source).not.toContain(snippet);
+    });
   });
 });

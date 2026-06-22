@@ -11,10 +11,12 @@ import type {
   TabData,
 } from '../../types';
 import type { SqlLog } from '../../store';
+import type { I18nParams } from '../../i18n';
 import { executeConnectionWorkspaceSnapshotToolCall } from './aiSnapshotInspectionConnectionToolExecutor';
 import { executeDiagnosticsSnapshotToolCall } from './aiSnapshotInspectionDiagnosticsToolExecutor';
 import { executeAIConfigSnapshotToolCall } from './aiSnapshotInspectionAIConfigToolExecutor';
 import { executeAppHealthSnapshotToolCall } from './aiSnapshotInspectionAppHealthToolExecutor';
+import { translateInspectionCopy } from './aiInspectionI18n';
 import type {
   AISnapshotInspectionRuntime,
   SnapshotInspectionResult,
@@ -40,6 +42,7 @@ interface ExecuteSnapshotInspectionToolCallOptions {
   skills?: AISkillConfig[];
   userPromptSettings?: AIUserPromptSettings;
   dynamicModels?: string[];
+  translate?: (key: string, params?: I18nParams) => string;
   runtime?: AISnapshotInspectionRuntime;
 }
 
@@ -65,6 +68,7 @@ export async function executeSnapshotInspectionToolCall(
     skills = [],
     userPromptSettings,
     dynamicModels = [],
+    translate,
     runtime,
   } = options;
 
@@ -84,6 +88,7 @@ export async function executeSnapshotInspectionToolCall(
       skills,
       userPromptSettings,
       dynamicModels,
+      translate,
       runtime,
     });
     if (appHealthResult) {
@@ -102,6 +107,7 @@ export async function executeSnapshotInspectionToolCall(
       skills,
       userPromptSettings,
       dynamicModels,
+      translate,
       runtime,
     });
     if (aiConfigResult) {
@@ -114,6 +120,7 @@ export async function executeSnapshotInspectionToolCall(
       connections,
       tabs,
       activeTabId,
+      translate,
       runtime,
     });
     if (sqlRiskResult) {
@@ -129,6 +136,7 @@ export async function executeSnapshotInspectionToolCall(
       tabs,
       activeTabId,
       externalSQLDirectories,
+      translate,
       runtime,
     });
     if (connectionWorkspaceResult) {
@@ -151,6 +159,7 @@ export async function executeSnapshotInspectionToolCall(
       sqlSnippets,
       skills,
       userPromptSettings,
+      translate,
       runtime,
     });
     if (diagnosticsResult) {
@@ -159,36 +168,78 @@ export async function executeSnapshotInspectionToolCall(
 
     return null;
   } catch (error: any) {
-    const label = {
-      inspect_current_connection: '读取当前连接失败',
-      inspect_connection_capabilities: '读取当前连接能力矩阵失败',
-      inspect_saved_connections: '读取本地连接清单失败',
-      inspect_redis_topology: '读取 Redis 拓扑配置失败',
-      inspect_external_sql_directories: '读取外部 SQL 目录失败',
-      inspect_external_sql_file: '读取外部 SQL 文件失败',
-      inspect_ai_sessions: '读取本地 AI 会话清单失败',
-      inspect_active_tab: '读取当前活动页签失败',
-      inspect_workspace_tabs: '读取当前工作区页签失败',
-      inspect_ai_context: '读取当前 AI 上下文失败',
-      inspect_recent_sql_logs: '获取最近 SQL 日志失败',
-      inspect_recent_sql_activity: '汇总最近 SQL 活动失败',
-      inspect_sql_editor_transaction: '读取 SQL 编辑器事务状态失败',
-      inspect_sql_risk: '检查 SQL 风险失败',
-      inspect_app_logs: '读取 GoNavi 应用日志失败',
-      inspect_ai_upstream_logs: '读取 AI 上游请求日志失败',
-      inspect_recent_connection_failures: '汇总最近连接失败记录失败',
-      inspect_mcp_runtime_failures: '读取 MCP 运行期失败诊断失败',
-      inspect_ai_last_render_error: '读取最近一次 AI 渲染异常失败',
-      inspect_ai_message_flow: '读取 AI 消息流诊断失败',
-      inspect_ai_context_budget: '读取 AI 上下文体量诊断失败',
-      inspect_codebase_hotspots: '读取代码热点诊断失败',
-      inspect_saved_queries: '读取已保存查询失败',
-      inspect_sql_snippets: '读取 SQL 片段失败',
-      inspect_shortcuts: '读取快捷键配置失败',
-      inspect_app_health: '读取 AI 应用健康总览失败',
-    }[toolName] || '读取本地探针快照失败';
+    const detail = String(error?.message || error);
+    const diagnosticsReadError = {
+      inspect_app_logs: {
+        key: 'ai_chat.inspection.diagnostics.error.read_app_logs_failed',
+        fallback: `Failed to read GoNavi app logs: ${detail}`,
+      },
+      inspect_ai_upstream_logs: {
+        key: 'ai_chat.inspection.diagnostics.error.read_ai_upstream_logs_failed',
+        fallback: `Failed to read AI upstream request logs: ${detail}`,
+      },
+      inspect_recent_connection_failures: {
+        key: 'ai_chat.inspection.diagnostics.error.read_recent_connection_failures_failed',
+        fallback: `Failed to read recent connection failure records: ${detail}`,
+      },
+    }[toolName];
+    if (diagnosticsReadError) {
+      return {
+        content: translateInspectionCopy(
+          translate,
+          diagnosticsReadError.key,
+          diagnosticsReadError.fallback,
+          { detail },
+        ),
+        success: false,
+      };
+    }
+    if (toolName === 'inspect_sql_risk') {
+      return {
+        content: translateInspectionCopy(
+          translate,
+          'ai_chat.inspection.sql_risk.error.inspect_failed',
+          `Failed to inspect SQL risk: ${detail}`,
+          { detail },
+        ),
+        success: false,
+      };
+    }
+    const fallbackByToolName: Record<string, string> = {
+      inspect_current_connection: `Failed to read current connection: ${detail}`,
+      inspect_connection_capabilities: `Failed to read current connection capability matrix: ${detail}`,
+      inspect_saved_connections: `Failed to read saved connection list: ${detail}`,
+      inspect_redis_topology: `Failed to read Redis topology configuration: ${detail}`,
+      inspect_external_sql_directories: `Failed to read external SQL directories: ${detail}`,
+      inspect_external_sql_file: `Failed to read external SQL file: ${detail}`,
+      inspect_ai_sessions: `Failed to read local AI session list: ${detail}`,
+      inspect_active_tab: `Failed to read current active tab: ${detail}`,
+      inspect_workspace_tabs: `Failed to read current workspace tabs: ${detail}`,
+      inspect_ai_context: `Failed to read current AI context: ${detail}`,
+      inspect_recent_sql_logs: `Failed to fetch recent SQL logs: ${detail}`,
+      inspect_recent_sql_activity: `Failed to summarize recent SQL activity: ${detail}`,
+      inspect_sql_editor_transaction: `Failed to read SQL editor transaction state: ${detail}`,
+      inspect_mcp_runtime_failures: `Failed to read MCP runtime failure diagnostics: ${detail}`,
+      inspect_ai_last_render_error: `Failed to read the latest AI render error: ${detail}`,
+      inspect_ai_message_flow: `Failed to read AI message flow diagnostics: ${detail}`,
+      inspect_ai_context_budget: `Failed to read AI context budget diagnostics: ${detail}`,
+      inspect_codebase_hotspots: `Failed to read code hotspot diagnostics: ${detail}`,
+      inspect_saved_queries: `Failed to read saved queries: ${detail}`,
+      inspect_sql_snippets: `Failed to read SQL snippets: ${detail}`,
+      inspect_shortcuts: `Failed to read shortcut configuration: ${detail}`,
+      inspect_app_health: `Failed to read AI app health overview: ${detail}`,
+    };
+    const fallback = fallbackByToolName[toolName] || `Failed to read local inspection snapshot: ${detail}`;
+    const errorKey = fallbackByToolName[toolName]
+      ? `ai_chat.inspection.snapshot.error.${toolName}`
+      : 'ai_chat.inspection.snapshot.error.default';
     return {
-      content: `${label}: ${error?.message || error}`,
+      content: translateInspectionCopy(
+        translate,
+        errorKey,
+        fallback,
+        { detail },
+      ),
       success: false,
     };
   }

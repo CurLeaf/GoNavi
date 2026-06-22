@@ -8,10 +8,11 @@ const modalSource = readFileSync(new URL('./MessagePublishModal.tsx', import.met
 describe('Sidebar Kafka publish entry', () => {
   it('adds a Kafka topic publish action in both legacy and v2 table menus', () => {
     expect(sidebarSource).toContain("key: 'publish-message'");
-    expect(sidebarSource).toContain("label: '测试发送消息'");
+    expect(sidebarSource).toContain("label: t('message_publish_modal.title')");
     expect(sidebarSource).toContain('openMessagePublishModal(node)');
     expect(contextMenuSource).toContain("| 'publish-message'");
-    expect(contextMenuSource).toContain("title: '测试发送消息'");
+    expect(contextMenuSource).toContain("title: t('message_publish_modal.title')");
+    expect(contextMenuSource).not.toContain("title: '测试发送消息'");
   });
 
   it('renders the dedicated message publish modal and executes DBQuery through the encoder', () => {

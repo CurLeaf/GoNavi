@@ -43,6 +43,30 @@ describe('TableDesigner i18n', () => {
     expect(source).toContain('-- Trigger definition unavailable');
   });
 
+  it('localizes trigger edit tab title and DuckDB primary key warning while keeping raw names', () => {
+    [
+      '修改触发器:',
+      'DuckDB 当前仅支持为无主键表新增主键；已有主键的修改或删除需要通过重建表完成。',
+    ].forEach((snippet) => {
+      expect(source).not.toContain(snippet);
+    });
+
+    [
+      "t('table_designer.tab.edit_trigger_title'",
+      "t('table_designer.message.duckdb_primary_key_change_unsupported'",
+    ].forEach((snippet) => {
+      expect(source).toContain(snippet);
+    });
+
+    ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'].forEach((locale) => {
+      const messages = readLocale(locale);
+
+      expect(messages['table_designer.tab.edit_trigger_title']).toBeTruthy();
+      expect(messages['table_designer.tab.edit_trigger_title']).toContain('{{name}}');
+      expect(messages['table_designer.message.duckdb_primary_key_change_unsupported']).toBeTruthy();
+    });
+  });
+
   it('localizes remaining V2 and StarRocks technical labels without translating raw values', () => {
     [
       'SCHEMA DESIGNER',

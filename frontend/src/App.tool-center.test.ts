@@ -273,8 +273,8 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain('fontFamilyCode: resolvedMonoFontFamily');
     expect(appSource).toContain("t('app.theme.data_table.font_size')");
     expect(appSource).toContain("t('app.theme.data_table.sidebar_tree_font_size')");
-    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'ui\', installedFontFamilies)');
-    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies)');
+    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'ui\', installedFontFamilies, t)');
+    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies, t)');
     expect(appSource).toContain('ListInstalledFontFamilies()');
     expect(appSource).toContain('const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);');
     expect(appSource).toContain("import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';");

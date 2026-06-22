@@ -2,7 +2,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, create } from "react-test-renderer";
 import { message } from "antd";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import JVMDiagnosticConsole, {
   createJVMDiagnosticLocalPendingChunk,
@@ -47,6 +47,7 @@ let mockState: any = baseState;
 let registeredCompletionProvider: any = null;
 let registeredDiagnosticChunkHandler: any = null;
 let registeredApplyDiagnosticPlanHandler: any = null;
+const mountedRenderers: any[] = [];
 const mockBackendApp = {
   JVMListDiagnosticAuditRecords: vi.fn(),
   JVMProbeDiagnosticCapabilities: vi.fn(),
@@ -230,6 +231,7 @@ const createConsoleWithLanguage = async (
       </I18nProvider>,
     );
   });
+  mountedRenderers.push(renderer);
   return renderer;
 };
 
@@ -271,6 +273,12 @@ describe("JVMDiagnosticConsole", () => {
     mockMonaco.languages.register.mockClear();
     mockMonaco.languages.registerCompletionItemProvider.mockClear();
     mockEditor.addCommand.mockClear();
+  });
+
+  afterEach(() => {
+    while (mountedRenderers.length > 0) {
+      mountedRenderers.pop()?.unmount?.();
+    }
   });
 
   it("builds local pending output and history while a command is waiting for backend events", () => {
@@ -347,16 +355,7 @@ describe("JVMDiagnosticConsole", () => {
       jvmDiagnosticDrafts: {},
     };
 
-    const markup = renderToStaticMarkup(
-      <JVMDiagnosticConsole
-        tab={{
-          id: "tab-1",
-          title: "诊断增强",
-          type: "jvm-diagnostic",
-          connectionId: "conn-1",
-        }}
-      />,
-    );
+    const markup = renderConsoleWithLanguage("zh-CN", mockState);
 
     expect(markup).toContain("开始一次诊断");
     expect(markup).toContain("命令输入将在会话建立后显示");
@@ -426,24 +425,7 @@ describe("JVMDiagnosticConsole", () => {
     });
 
     let renderer: any;
-    await act(async () => {
-      renderer = create(
-        <I18nProvider
-          preference="en-US"
-          systemLanguages={["en-US"]}
-          onPreferenceChange={vi.fn()}
-        >
-          <JVMDiagnosticConsole
-            tab={{
-              id: "tab-1",
-              title: "诊断增强",
-              type: "jvm-diagnostic",
-              connectionId: "conn-1",
-            }}
-          />
-        </I18nProvider>,
-      );
-    });
+    renderer = await createConsoleWithLanguage("en-US", mockState);
 
     const beforeProbe = JSON.stringify(renderer.toJSON());
     expect(beforeProbe).toContain("Session and capabilities");
@@ -486,16 +468,7 @@ describe("JVMDiagnosticConsole", () => {
       },
     };
 
-    const markup = renderToStaticMarkup(
-      <JVMDiagnosticConsole
-        tab={{
-          id: "tab-1",
-          title: "诊断增强",
-          type: "jvm-diagnostic",
-          connectionId: "conn-1",
-        }}
-      />,
-    );
+    const markup = renderConsoleWithLanguage("zh-CN", mockState);
 
     expect(markup).toContain("overflow:auto");
     expect(markup).toContain("JVM 诊断工作台");
@@ -854,16 +827,7 @@ describe("JVMDiagnosticConsole", () => {
       },
     };
 
-    const markup = renderToStaticMarkup(
-      <JVMDiagnosticConsole
-        tab={{
-          id: "tab-1",
-          title: "诊断增强",
-          type: "jvm-diagnostic",
-          connectionId: "conn-1",
-        }}
-      />,
-    );
+    const markup = renderConsoleWithLanguage("zh-CN", mockState);
 
     expect(markup).toContain("password=********");
     expect(markup).toContain("apiKey: ********");
@@ -883,16 +847,7 @@ describe("JVMDiagnosticConsole", () => {
       },
     };
 
-    const markup = renderToStaticMarkup(
-      <JVMDiagnosticConsole
-        tab={{
-          id: "tab-1",
-          title: "诊断增强",
-          type: "jvm-diagnostic",
-          connectionId: "conn-1",
-        }}
-      />,
-    );
+    const markup = renderConsoleWithLanguage("zh-CN", mockState);
 
     expect(markup).toContain(
       'data-jvm-diagnostic-command-editor-shell="true"',
@@ -931,18 +886,7 @@ describe("JVMDiagnosticConsole", () => {
     };
 
     let renderer: any;
-    await act(async () => {
-      renderer = create(
-        <JVMDiagnosticConsole
-          tab={{
-            id: "tab-1",
-            title: "诊断增强",
-            type: "jvm-diagnostic",
-            connectionId: "conn-1",
-          }}
-        />,
-      );
-    });
+    renderer = await createConsoleWithLanguage("zh-CN", mockState);
 
     await act(async () => {
       registeredDiagnosticChunkHandler({
@@ -990,18 +934,7 @@ describe("JVMDiagnosticConsole", () => {
       message: "api_key=query-secret",
     });
 
-    await act(async () => {
-      create(
-        <JVMDiagnosticConsole
-          tab={{
-            id: "tab-1",
-            title: "诊断增强",
-            type: "jvm-diagnostic",
-            connectionId: "conn-1",
-          }}
-        />,
-      );
-    });
+    await createConsoleWithLanguage("zh-CN", mockState);
 
     await act(async () => {
       mockEditor.addCommand.mock.calls[0][1]();
@@ -1030,18 +963,7 @@ describe("JVMDiagnosticConsole", () => {
       }),
     );
 
-    await act(async () => {
-      create(
-        <JVMDiagnosticConsole
-          tab={{
-            id: "tab-1",
-            title: "诊断增强",
-            type: "jvm-diagnostic",
-            connectionId: "conn-1",
-          }}
-        />,
-      );
-    });
+    await createConsoleWithLanguage("zh-CN", mockState);
 
     await act(async () => {
       mockEditor.addCommand.mock.calls[0][1]();
@@ -1085,18 +1007,7 @@ describe("JVMDiagnosticConsole", () => {
     };
 
     let renderer: any;
-    await act(async () => {
-      renderer = create(
-        <JVMDiagnosticConsole
-          tab={{
-            id: "tab-1",
-            title: "诊断增强",
-            type: "jvm-diagnostic",
-            connectionId: "conn-1",
-          }}
-        />,
-      );
-    });
+    renderer = await createConsoleWithLanguage("zh-CN", mockState);
 
     await act(async () => {
       registeredDiagnosticChunkHandler({
@@ -1156,18 +1067,7 @@ describe("JVMDiagnosticConsole", () => {
       }),
     );
 
-    await act(async () => {
-      create(
-        <JVMDiagnosticConsole
-          tab={{
-            id: "tab-1",
-            title: "诊断增强",
-            type: "jvm-diagnostic",
-            connectionId: "conn-1",
-          }}
-        />,
-      );
-    });
+    await createConsoleWithLanguage("zh-CN", mockState);
 
     await act(async () => {
       mockEditor.addCommand.mock.calls[0][1]();
@@ -1215,18 +1115,7 @@ describe("JVMDiagnosticConsole", () => {
       }),
     );
 
-    await act(async () => {
-      create(
-        <JVMDiagnosticConsole
-          tab={{
-            id: "tab-1",
-            title: "诊断增强",
-            type: "jvm-diagnostic",
-            connectionId: "conn-1",
-          }}
-        />,
-      );
-    });
+    await createConsoleWithLanguage("zh-CN", mockState);
 
     await act(async () => {
       mockEditor.addCommand.mock.calls[0][1]();
@@ -1288,18 +1177,7 @@ describe("JVMDiagnosticConsole", () => {
     );
 
     let renderer: any;
-    await act(async () => {
-      renderer = create(
-        <JVMDiagnosticConsole
-          tab={{
-            id: "tab-1",
-            title: "诊断增强",
-            type: "jvm-diagnostic",
-            connectionId: "conn-1",
-          }}
-        />,
-      );
-    });
+    renderer = await createConsoleWithLanguage("zh-CN", mockState);
 
     await act(async () => {
       mockEditor.addCommand.mock.calls[0][1]();
@@ -1354,18 +1232,7 @@ describe("JVMDiagnosticConsole", () => {
     );
 
     let renderer: any;
-    await act(async () => {
-      renderer = create(
-        <JVMDiagnosticConsole
-          tab={{
-            id: "tab-1",
-            title: "诊断增强",
-            type: "jvm-diagnostic",
-            connectionId: "conn-1",
-          }}
-        />,
-      );
-    });
+    renderer = await createConsoleWithLanguage("zh-CN", mockState);
 
     await act(async () => {
       mockEditor.addCommand.mock.calls[0][1]();
@@ -1419,18 +1286,7 @@ describe("JVMDiagnosticConsole", () => {
       }),
     );
 
-    await act(async () => {
-      create(
-        <JVMDiagnosticConsole
-          tab={{
-            id: "tab-1",
-            title: "诊断增强",
-            type: "jvm-diagnostic",
-            connectionId: "conn-1",
-          }}
-        />,
-      );
-    });
+    await createConsoleWithLanguage("zh-CN", mockState);
 
     await act(async () => {
       mockEditor.addCommand.mock.calls[0][1]();

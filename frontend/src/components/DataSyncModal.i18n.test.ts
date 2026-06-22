@@ -37,6 +37,16 @@ describe('DataSyncModal i18n', () => {
     expect(source).toContain("tr('data_sync.message.preview_load_failed_detail', { detail:");
   });
 
+  it('localizes the next-step selection guards before loading table lists', () => {
+    expect(source).not.toContain('message.error("Select connections first")');
+    expect(source).not.toContain('message.error("Select source database")');
+    expect(source).not.toContain('message.error("Select target database")');
+
+    expect(source).toContain("message.error(tr('data_sync.message.select_connections_first'))");
+    expect(source).toContain("message.error(tr('data_sync.message.select_source_database'))");
+    expect(source).toContain("message.error(tr('data_sync.message.select_target_database'))");
+  });
+
   it('localizes compare-entry only chrome without translating SQL preview or raw table names', () => {
     [
       '当前入口只做差异分析和预览',

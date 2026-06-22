@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"regexp"
 	"testing"
 )
 
@@ -44,6 +45,36 @@ func TestParseRedisScanCursor(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Fatalf("parseRedisScanCursor() mismatch, want=%d got=%d", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestParseRedisScanCursorErrorsAreInternalRawText(t *testing.T) {
+	t.Parallel()
+
+	hanText := regexp.MustCompile(`\p{Han}`)
+	testCases := []struct {
+		name  string
+		input any
+	}{
+		{name: "negative int", input: -1},
+		{name: "invalid string", input: "abc"},
+		{name: "unsupported type", input: true},
+		{name: "invalid float", input: json.Number("1.5")},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := parseRedisScanCursor(tc.input)
+			if err == nil {
+				t.Fatal("expected cursor parsing error, got nil")
+			}
+			if hanText.MatchString(err.Error()) {
+				t.Fatalf("cursor parser error should stay internal raw text without Chinese: %q", err.Error())
 			}
 		})
 	}

@@ -21,7 +21,7 @@ func (a *App) resolveConnectionSecrets(config connection.ConnectionConfig) (conn
 		if shouldFallbackToInlineConnectionSecrets(config, err) {
 			return config, nil
 		}
-		return config, normalizeConnectionSecretResolutionError(config, err)
+		return config, a.normalizeConnectionSecretResolutionError(config, err)
 	}
 
 	base := config
@@ -33,7 +33,7 @@ func (a *App) resolveConnectionSecrets(config connection.ConnectionConfig) (conn
 		if shouldFallbackToInlineConnectionSecrets(config, err) {
 			return mergeInlineConnectionSecrets(base, config), nil
 		}
-		return base, normalizeConnectionSecretResolutionError(base, err)
+		return base, a.normalizeConnectionSecretResolutionError(base, err)
 	}
 	resolved := mergeConnectionSecretBundleIntoConfig(base, bundle)
 	resolved.ID = view.ID
@@ -96,7 +96,7 @@ func mergeInlineConnectionSecrets(base connection.ConnectionConfig, inline conne
 	return merged
 }
 
-func normalizeConnectionSecretResolutionError(config connection.ConnectionConfig, err error) error {
+func (a *App) normalizeConnectionSecretResolutionError(config connection.ConnectionConfig, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -105,13 +105,13 @@ func normalizeConnectionSecretResolutionError(config connection.ConnectionConfig
 	switch {
 	case strings.Contains(lower, "saved connection not found:"):
 		if connectionMetadataLooksEmpty(config) {
-			return fmt.Errorf("未找到已保存连接，可能已被删除，请刷新后重试")
+			return fmt.Errorf("%s", a.appText("connection_modal.secret.error.saved_connection_deleted", nil))
 		}
-		return fmt.Errorf("未找到当前连接对应的已保存密文，请重新填写密码并保存后再试")
+		return fmt.Errorf("%s", a.appText("connection_modal.secret.error.saved_connection_missing", nil))
 	case errors.Is(err, os.ErrNotExist):
-		return fmt.Errorf("未找到当前连接对应的已保存密文，请重新填写密码并保存后再试")
+		return fmt.Errorf("%s", a.appText("connection_modal.secret.error.saved_connection_missing", nil))
 	case strings.Contains(lower, "secret store unavailable"):
-		return fmt.Errorf("系统密文存储当前不可用，请检查系统钥匙串或凭据管理器后再试")
+		return fmt.Errorf("%s", a.appText("connection_modal.secret.error.store_unavailable", nil))
 	default:
 		return err
 	}

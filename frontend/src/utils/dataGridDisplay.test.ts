@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
+  DENSITY_OPTIONS,
+  createDensityOptions,
   resolveDataTableColumnWidth,
   resolveDataTableDefaultColumnWidth,
   resolveDataTableVerticalBorderColor,
@@ -18,6 +20,21 @@ describe('dataGridDisplay helpers', () => {
     expect(resolveDataTableDefaultColumnWidth('comfortable')).toBe(180);
     expect(resolveDataTableDefaultColumnWidth('standard')).toBe(140);
     expect(resolveDataTableDefaultColumnWidth('compact')).toBe(100);
+  });
+
+  it('creates density option labels from i18n keys while keeping density values raw', () => {
+    const options = createDensityOptions((key) => `T(${key})`);
+
+    expect(options).toEqual([
+      { label: 'T(app.theme.data_table.density.comfortable)', value: 'comfortable' },
+      { label: 'T(app.theme.data_table.density.standard)', value: 'standard' },
+      { label: 'T(app.theme.data_table.density.compact)', value: 'compact' },
+    ]);
+    expect(DENSITY_OPTIONS).toEqual([
+      { label: 'Comfortable', value: 'comfortable' },
+      { label: 'Standard', value: 'standard' },
+      { label: 'Compact', value: 'compact' },
+    ]);
   });
 
   it('keeps manual column widths ahead of density defaults', () => {

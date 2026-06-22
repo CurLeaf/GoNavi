@@ -1,5 +1,6 @@
 import type { SqlLog } from '../../store';
 
+type SqlLogInsightTranslate = (key: string) => string;
 type SqlLogStatusFilter = 'all' | 'success' | 'error';
 type SqlActivityKind = 'read' | 'write' | 'ddl' | 'transaction' | 'session' | 'other';
 type SqlActivityKindFilter = 'all' | SqlActivityKind;
@@ -235,8 +236,12 @@ export const buildRecentSqlActivitySnapshot = (params: {
   keyword?: unknown;
   dbName?: unknown;
   activityKind?: unknown;
+  translate?: SqlLogInsightTranslate;
 }) => {
-  const { sqlLogs = [], limit, status, keyword, dbName, activityKind } = params;
+  const { sqlLogs = [], limit, status, keyword, dbName, activityKind, translate } = params;
+  const unspecifiedDatabaseLabel = translate
+    ? translate('ai_chat.inspection.sql_log.unspecified_database')
+    : '(Unspecified database)';
   const safeLimit = normalizeSqlLogLimit(limit, DEFAULT_SQL_ACTIVITY_LIMIT);
   const safeStatus = normalizeSqlLogStatus(status);
   const safeKeyword = String(keyword || '').trim().toLowerCase();
@@ -270,7 +275,7 @@ export const buildRecentSqlActivitySnapshot = (params: {
   });
 
   const statementTypeBreakdown = buildCountBreakdown(filteredLogs.map((log) => log.statementType));
-  const dbBreakdown = buildCountBreakdown(filteredLogs.map((log) => log.dbName || '(未指定数据库)'));
+  const dbBreakdown = buildCountBreakdown(filteredLogs.map((log) => log.dbName || unspecifiedDatabaseLabel));
   const errorMessageBreakdown = buildCountBreakdown(
     filteredLogs
       .filter((log) => log.status === 'error' && String(log.message || '').trim())

@@ -3,6 +3,7 @@ import {
   getDataSourceCapabilities,
   resolveDataSourceType,
 } from '../../utils/dataSourceCapabilities';
+import { translateInspectionCopy, type AIInspectionTranslator } from './aiInspectionI18n';
 
 export const buildConnectionCapabilitiesSnapshot = (params: {
   connectionId?: string | null;
@@ -10,6 +11,7 @@ export const buildConnectionCapabilitiesSnapshot = (params: {
   tabs?: TabData[];
   activeTabId?: string | null;
   connections: SavedConnection[];
+  translate?: AIInspectionTranslator;
 }) => {
   const {
     connectionId,
@@ -17,6 +19,7 @@ export const buildConnectionCapabilitiesSnapshot = (params: {
     tabs = [],
     activeTabId = null,
     connections,
+    translate,
   } = params;
 
   const trimmedExplicitConnectionId = String(connectionId || '').trim();
@@ -31,7 +34,11 @@ export const buildConnectionCapabilitiesSnapshot = (params: {
   if (!fallbackConnectionId) {
     return {
       hasConnection: false,
-      message: '当前没有可用于能力分析的连接',
+      message: translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.connection_capabilities.no_connection',
+        'No connection is available for capability analysis',
+      ),
     };
   }
 
@@ -40,7 +47,11 @@ export const buildConnectionCapabilitiesSnapshot = (params: {
     return {
       hasConnection: false,
       connectionId: fallbackConnectionId,
-      message: '目标连接在本地缓存中不存在',
+      message: translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.connection_capabilities.cache_missing',
+        'The target connection does not exist in the local cache',
+      ),
     };
   }
 
@@ -68,17 +79,49 @@ export const buildConnectionCapabilitiesSnapshot = (params: {
 
   const uiHints = [
     capabilities.forceReadOnlyQueryResult
-      ? '当前数据源的查询结果默认按只读方式展示，不提供直接编辑结果集。'
-      : '当前数据源的查询结果在满足定位条件时可进入编辑路径。',
+      ? translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.connection_capabilities.hint.readonly_result',
+        'Query results for this data source are shown as read-only by default and cannot be edited directly.',
+      )
+      : translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.connection_capabilities.hint.editable_result',
+        'Query results for this data source can enter the edit path when row locating conditions are available.',
+      ),
     capabilities.preferManualTotalCount
-      ? '结果总数优先走手动统计或延迟统计，避免直接依赖快速总数。'
-      : '结果总数可以优先使用常规统计路径。',
+      ? translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.connection_capabilities.hint.manual_total_count',
+        'Total result counts should prefer manual or deferred counting instead of relying directly on fast totals.',
+      )
+      : translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.connection_capabilities.hint.regular_total_count',
+        'Total result counts can prefer the regular counting path.',
+      ),
     capabilities.supportsApproximateTableCount
-      ? '表浏览场景允许显示近似行数，减少大表统计开销。'
-      : '表浏览场景默认不使用近似行数。',
+      ? translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.connection_capabilities.hint.approximate_table_count',
+        'Table browsing can show approximate row counts to reduce large-table counting overhead.',
+      )
+      : translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.connection_capabilities.hint.exact_table_count',
+        'Table browsing does not use approximate row counts by default.',
+      ),
     capabilities.supportsMessagePublish
-      ? '当前数据源提供测试发送消息入口，适合做 Topic/Queue 的联调验证。'
-      : '当前数据源未暴露测试发送消息入口。',
+      ? translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.connection_capabilities.hint.message_publish_supported',
+        'This data source provides a test message publishing entry, suitable for Topic/Queue integration checks.',
+      )
+      : translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.connection_capabilities.hint.message_publish_unsupported',
+        'This data source does not expose a test message publishing entry.',
+      ),
   ];
 
   return {
@@ -96,6 +139,15 @@ export const buildConnectionCapabilitiesSnapshot = (params: {
     supportedActions,
     restrictions,
     uiHints,
-    message: `当前连接 ${connection.name} (${resolvedType || connection.config?.type || 'unknown'}) 已解析出 ${supportedActions.length} 项前端能力信号`,
+    message: translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.connection_capabilities.summary',
+      `Current connection ${connection.name} (${resolvedType || connection.config?.type || 'unknown'}) exposes ${supportedActions.length} frontend capability signals`,
+      {
+        connectionName: connection.name,
+        type: resolvedType || connection.config?.type || 'unknown',
+        count: supportedActions.length,
+      },
+    ),
   };
 };

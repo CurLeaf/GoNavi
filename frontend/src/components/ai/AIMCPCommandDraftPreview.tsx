@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { ParsedMCPCommandDraft } from '../../utils/mcpCommandDraft';
 
@@ -37,6 +39,11 @@ const AIMCPCommandDraftPreview: React.FC<AIMCPCommandDraftPreviewProps> = ({
   overlayTheme,
   cardBorder,
 }) => {
+  const i18n = useOptionalI18n();
+  const copy = (
+    key: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => (i18n?.t ?? ((catalogKey, catalogParams) => catalogTranslate('en-US', catalogKey, catalogParams)))(key, params);
   const envKeys = Object.keys(draft.env || {});
 
   return (
@@ -52,42 +59,56 @@ const AIMCPCommandDraftPreview: React.FC<AIMCPCommandDraftPreviewProps> = ({
       }}
     >
       <div>
-        <div style={sectionTitleStyle(overlayTheme)}>自动拆分预览</div>
+        <div style={sectionTitleStyle(overlayTheme)}>
+          {copy('ai_settings.mcp_server.command_preview.title')}
+        </div>
         <div style={{ ...sectionHintStyle(overlayTheme), marginTop: 4 }}>
-          点击“自动拆分到下方字段”后，会把这份解析结果写进服务名称下面的启动配置区域。
+          {copy('ai_settings.mcp_server.command_preview.description')}
         </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={sectionTitleStyle(overlayTheme)}>环境变量</div>
+          <div style={sectionTitleStyle(overlayTheme)}>
+            {copy('ai_settings.mcp_server.command_preview.env_title')}
+          </div>
           <div style={sectionHintStyle(overlayTheme)}>
-            {envKeys.length > 0 ? `会写入 ${envKeys.length} 条环境变量。` : '这条命令里没有检测到前缀环境变量。'}
+            {envKeys.length > 0
+              ? copy('ai_settings.mcp_server.command_preview.env_count', { count: envKeys.length })
+              : copy('ai_settings.mcp_server.command_preview.env_empty')}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {envKeys.length > 0 ? envKeys.map((key) => (
               <span key={key} style={chipStyle(darkMode, overlayTheme)}>{key}</span>
-            )) : <span style={chipStyle(darkMode, overlayTheme)}>无</span>}
+            )) : <span style={chipStyle(darkMode, overlayTheme)}>{copy('ai_settings.mcp_server.command_preview.empty_value')}</span>}
           </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={sectionTitleStyle(overlayTheme)}>启动命令</div>
-          <div style={sectionHintStyle(overlayTheme)}>这里只会保留真正的可执行程序本身。</div>
+          <div style={sectionTitleStyle(overlayTheme)}>
+            {copy('ai_settings.mcp_server.command_preview.command_title')}
+          </div>
+          <div style={sectionHintStyle(overlayTheme)}>
+            {copy('ai_settings.mcp_server.command_preview.command_hint')}
+          </div>
           <code style={{ ...chipStyle(darkMode, overlayTheme), borderRadius: 10, display: 'inline-block' }}>
             {draft.command}
           </code>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={sectionTitleStyle(overlayTheme)}>命令参数</div>
+          <div style={sectionTitleStyle(overlayTheme)}>
+            {copy('ai_settings.mcp_server.command_preview.args_title')}
+          </div>
           <div style={sectionHintStyle(overlayTheme)}>
-            {draft.args.length > 0 ? `会拆成 ${draft.args.length} 个独立参数标签。` : '这条命令里没有检测到额外参数。'}
+            {draft.args.length > 0
+              ? copy('ai_settings.mcp_server.command_preview.args_count', { count: draft.args.length })
+              : copy('ai_settings.mcp_server.command_preview.args_empty')}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {draft.args.length > 0 ? draft.args.map((arg) => (
               <span key={arg} style={chipStyle(darkMode, overlayTheme)}>{arg}</span>
-            )) : <span style={chipStyle(darkMode, overlayTheme)}>无</span>}
+            )) : <span style={chipStyle(darkMode, overlayTheme)}>{copy('ai_settings.mcp_server.command_preview.empty_value')}</span>}
           </div>
         </div>
       </div>

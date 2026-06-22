@@ -63,6 +63,7 @@ const historyKeys = [
   'ai_chat.history.tooltip.collapse',
   'ai_chat.history.action.new_chat',
   'ai_chat.history.search.placeholder',
+  'ai_chat.history.empty.no_history',
   'ai_chat.history.empty.no_matches',
   'ai_chat.history.default_session_title',
   'ai_chat.history.tooltip.delete',
@@ -147,9 +148,52 @@ describe('AIHistoryDrawer i18n', () => {
     expect(t('en-US', 'ai_chat.history.tooltip.collapse')).toBe('Collapse');
     expect(t('en-US', 'ai_chat.history.action.new_chat')).toBe('Start new chat');
     expect(t('en-US', 'ai_chat.history.search.placeholder')).toBe('Search history...');
+    expect(t('en-US', 'ai_chat.history.empty.no_history')).toBe('No history yet');
     expect(t('en-US', 'ai_chat.history.empty.no_matches')).toBe('No matching chats');
     expect(t('en-US', 'ai_chat.history.default_session_title')).toBe('New chat');
     expect(t('en-US', 'ai_chat.history.tooltip.delete')).toBe('Delete');
+  });
+
+  it('uses distinct empty-state copy for no history versus filtered no-match results', async () => {
+    const renderer = await renderDrawer();
+    let pageText = textContent(renderer.toJSON());
+
+    expect(pageText).toContain('No history yet');
+    expect(pageText).not.toContain('No matching chats');
+
+    storeState.aiChatSessions = [
+      { id: 's1', title: 'prod/main.orders', updatedAt: Date.UTC(2026, 5, 13, 9, 30) },
+    ];
+
+    await act(async () => {
+      renderer.update(
+        <I18nProvider
+          preference="en-US"
+          systemLanguages={['en-US']}
+          onPreferenceChange={() => {}}
+        >
+          <AIHistoryDrawer
+            open
+            onClose={() => {}}
+            bgColor="#fff"
+            darkMode={false}
+            textColor="#101828"
+            mutedColor="#667085"
+            borderColor="#d0d5dd"
+            onCreateNew={() => {}}
+            sessionId="s1"
+          />
+        </I18nProvider>,
+      );
+    });
+
+    await act(async () => {
+      renderer.root.findByType('input').props.onChange({ target: { value: 'does-not-match' } });
+    });
+
+    pageText = textContent(renderer.toJSON());
+    expect(pageText).toContain('No matching chats');
+    expect(pageText).not.toContain('No history yet');
   });
 
   it('renders English drawer chrome while preserving raw session titles and localized fallback titles', async () => {
@@ -216,5 +260,6 @@ describe('AIHistoryDrawer i18n', () => {
     for (const snippet of fixedChineseDrawerChrome) {
       expect(source).not.toContain(snippet);
     }
+    expect(source).not.toContain('还没有历史对话');
   });
 });

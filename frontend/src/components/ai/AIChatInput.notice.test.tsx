@@ -2,6 +2,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
+import type { I18nParams } from '../../i18n/types';
 import { AIChatInput } from './AIChatInput';
 import AIChatComposerStatus from './AIChatComposerStatus';
 import { buildAIChatReadinessSnapshot } from './aiChatReadiness';
@@ -21,6 +22,20 @@ vi.mock('../../../wailsjs/go/app/App', () => ({
   DBGetDatabases: vi.fn(),
   DBGetColumns: vi.fn(),
 }));
+
+vi.mock('../../i18n/provider', async () => {
+  const { t } = await import('../../i18n/catalog');
+  const mockedI18n = {
+    language: 'zh-CN',
+    preference: 'zh-CN',
+    setPreference: () => undefined,
+    t: (key: string, params?: I18nParams) => t('zh-CN', key, params),
+  };
+  return {
+    useI18n: () => mockedI18n,
+    useOptionalI18n: () => mockedI18n,
+  };
+});
 
 const baseProvider = {
   id: 'provider-1',

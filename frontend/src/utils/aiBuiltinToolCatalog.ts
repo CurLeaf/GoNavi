@@ -16,233 +16,310 @@ export interface AIBuiltinToolParameterHint {
   exampleValue: string;
 }
 
-export const BUILTIN_TOOL_FLOWS: AIBuiltinToolFlow[] = [
+type BuiltinToolFlowTranslator = (key: string) => string;
+
+interface BuiltinToolFlowCopy extends AIBuiltinToolFlow {
+  key: string;
+}
+
+const BUILTIN_TOOL_FLOW_KEY_PREFIX = 'ai_chat.builtin_tools.flows';
+
+const translateBuiltinToolFlow = (
+  t: BuiltinToolFlowTranslator | undefined,
+  key: string,
+  fallback: string,
+): string => {
+  if (!t) return fallback;
+  const translated = t(key);
+  return translated && translated !== key ? translated : fallback;
+};
+
+const BUILTIN_TOOL_FLOW_COPY: BuiltinToolFlowCopy[] = [
   {
-    title: '定位表与字段',
+    key: 'locate_table_fields',
+    title: 'Locate tables and fields',
     steps: 'get_connections -> get_databases -> get_tables -> get_columns',
-    description: '适合先找连接、找库、找表，再确认真实字段名后生成 SQL。',
+    description: 'Find the connection, database, and table first, then confirm real field names before generating SQL.',
   },
   {
-    title: '字段反查表',
+    key: 'field_lookup_table',
+    title: 'Find tables by field',
     steps: 'get_databases -> get_all_columns',
-    description: '适合只知道字段名、业务含义或注释关键词，但还不确定具体落在哪张表。',
+    description: 'Use when only a field name, business meaning, or comment keyword is known, but the exact table is still unclear.',
   },
   {
-    title: '结构深挖',
+    key: 'deep_structure',
+    title: 'Deep-dive structure',
     steps: 'get_columns -> get_indexes -> get_foreign_keys -> get_triggers -> get_table_ddl',
-    description: '适合做索引优化、关系梳理、隐式副作用排查和 DDL 审查。',
+    description: 'Use for index optimization, relationship mapping, implicit side-effect investigation, and DDL review.',
   },
   {
-    title: '一键结构快照',
+    key: 'table_snapshot',
+    title: 'One-shot table snapshot',
     steps: 'inspect_table_bundle',
-    description: '适合一次带回字段、索引、外键、触发器和 DDL；必要时还能附带样例行，减少来回调用。',
+    description: 'Return columns, indexes, foreign keys, triggers, and DDL in one call; sample rows can be included when needed to reduce round trips.',
   },
   {
-    title: '全库快速摸底',
+    key: 'database_overview',
+    title: 'Quick database overview',
     steps: 'inspect_database_bundle -> inspect_table_bundle',
-    description: '适合先看整库有哪些表、每张表大概有哪些字段，再对目标表继续做深挖快照。',
+    description: 'Start by seeing which tables exist and what fields they roughly contain, then drill into target tables with snapshots.',
   },
   {
-    title: 'AI 应用健康总览',
+    key: 'app_health_overview',
+    title: 'AI app health overview',
     steps: 'inspect_app_health -> inspect_ai_setup_health / inspect_app_logs / inspect_recent_connection_failures / inspect_ai_last_render_error / inspect_ai_message_flow',
-    description: '适合用户反馈 AI 不稳定、连接和 MCP 问题交织、回复气泡显示异常，或需要先看整体健康状态时，一次汇总配置、日志、连接失败、渲染异常、消息流和工作区现场。',
+    description: 'Use when AI instability, connection issues, MCP issues, or message rendering problems overlap and an overall health snapshot is needed first.',
   },
   {
-    title: '导出 AI 排障支持包',
+    key: 'support_bundle',
+    title: 'Export AI troubleshooting support bundle',
     steps: 'inspect_ai_support_bundle -> inspect_app_health / inspect_ai_context_budget / inspect_ai_message_flow / inspect_mcp_remote_access',
-    description: '适合需要一次性带走排障证据，或用户反馈 AI 不成熟、不稳定、MCP/连接/日志/上下文都可能相关时，先生成不含密钥和数据库密码的支持包。',
+    description: 'Use when troubleshooting evidence needs to be collected at once, without secrets or database passwords.',
   },
   {
-    title: '选择 AI 工具路线',
+    key: 'choose_tool_route',
+    title: 'Choose an AI tool route',
     steps: 'inspect_ai_tool_catalog -> inspect_ai_runtime / inspect_mcp_setup',
-    description: '适合先按关键词确认该用哪些内置探针、每个工具 arguments 怎么填，以及当前有没有外部 MCP 工具可用。',
+    description: 'Use keywords to decide which built-in probes to call, how to fill tool arguments, and whether external MCP tools are available.',
   },
   {
-    title: '一键体检 AI 配置',
+    key: 'ai_setup_health',
+    title: 'One-shot AI setup health check',
     steps: 'inspect_ai_setup_health -> inspect_ai_providers / inspect_mcp_setup / inspect_ai_guidance',
-    description: '适合先拿到一份 AI 配置健康快照，看清当前是供应商没配好、聊天发送前置没满足、MCP 没接入，还是提示词 / Skills / 上下文还不完整，再决定往哪条探针继续下钻。',
+    description: 'Get an AI configuration health snapshot first, then decide whether to drill into providers, chat readiness, MCP, prompts, Skills, or context.',
   },
   {
-    title: '查看 AI 当前能力',
+    key: 'ai_runtime',
+    title: 'Inspect current AI capabilities',
     steps: 'inspect_ai_runtime -> inspect_ai_context / inspect_current_connection',
-    description: '适合先确认当前模型、安全级别、上下文级别、Skills 和 MCP 工具，再决定让 AI 走哪条探针链路。',
+    description: 'Confirm the current model, safety level, context level, Skills, and MCP tools before choosing a probe chain.',
   },
   {
-    title: '核对写入安全边界',
+    key: 'safety_boundary',
+    title: 'Check write safety boundaries',
     steps: 'inspect_ai_safety -> inspect_ai_runtime -> inspect_current_connection',
-    description: '适合先确认当前是不是只读、DDL/DML 到底允不允许、MCP 写操作是否还需要 allowMutating，再决定后续该走查询、改数据还是改结构。',
+    description: 'Check whether the current state is read-only, whether DDL/DML is allowed, and whether MCP writes require allowMutating.',
   },
   {
-    title: '排查供应商与模型',
+    key: 'providers_models',
+    title: 'Troubleshoot providers and models',
     steps: 'inspect_ai_providers -> inspect_ai_runtime',
-    description: '适合先确认当前到底配置了哪些供应商、哪个在生效、有没有缺密钥或没选模型，再解释为什么 AI 不能发送、为什么模型列表为空。',
+    description: 'Confirm which providers are configured and active, whether keys or models are missing, and why chat cannot send or model lists are empty.',
   },
   {
-    title: '排查聊天发送状态',
+    key: 'chat_readiness',
+    title: 'Troubleshoot chat send readiness',
     steps: 'inspect_ai_chat_readiness -> inspect_ai_providers',
-    description: '适合先确认当前聊天输入区到底缺什么前置条件，例如没选活动供应商、缺密钥、缺接口地址、没选模型，避免只凭界面现象猜测。',
+    description: 'Check which chat input prerequisites are missing, such as active provider, key, endpoint, or selected model, instead of guessing from UI symptoms.',
   },
   {
-    title: '追踪 AI 上游请求',
+    key: 'upstream_request',
+    title: 'Trace AI upstream requests',
     steps: 'inspect_ai_upstream_logs -> inspect_ai_providers / inspect_ai_message_flow',
-    description: '适合用户想看发给上游模型的真实入参、requestId、状态码、耗时或请求体预览时，先读脱敏后的 gonavi.log 请求记录，再结合供应商配置和当前消息流继续排查。',
+    description: 'Read redacted gonavi.log request records when the user needs upstream payloads, requestId, status codes, latency, or request body previews.',
   },
   {
-    title: '排查 MCP 接入状态',
+    key: 'mcp_setup',
+    title: 'Troubleshoot MCP access status',
     steps: 'inspect_mcp_setup -> inspect_mcp_runtime_failures -> inspect_ai_runtime',
-    description: '适合先确认当前配置了哪些 MCP 服务、哪些已启用、外部客户端有没有写入当前 GoNavi 路径，再结合 MCP 运行期失败日志判断为什么某个工具没暴露出来。',
+    description: 'Confirm configured and enabled MCP services and external client write status, then use MCP runtime failure logs to explain missing tools.',
   },
   {
-    title: '远程 Agent 接入 GoNavi MCP',
+    key: 'remote_agent_mcp',
+    title: 'Connect remote Agents to GoNavi MCP',
     steps: 'inspect_mcp_remote_access -> inspect_mcp_setup -> inspect_ai_safety',
-    description: '适合 OpenClaw/Hermans 部署在云端 Linux，但数据库连接和密码只在 Windows GoNavi 本机时，先生成 HTTP MCP、Bearer Token、隧道和安全边界指引。',
+    description: 'Use when OpenClaw/Hermans run on cloud Linux while database connections and passwords stay on the Windows GoNavi machine.',
   },
   {
-    title: '新增 MCP 填写指引',
+    key: 'mcp_authoring',
+    title: 'New MCP authoring guide',
     steps: 'inspect_mcp_authoring_guide -> inspect_mcp_draft -> inspect_mcp_setup',
-    description: '适合先读真实字段说明、模板样例和整行命令拆分规则，再把用户贴出的命令或草稿交给真实校验器试算，最后结合当前 MCP 配置现状判断应该新增哪种启动方式。',
+    description: 'Read real field descriptions, templates, and full-command splitting rules before validating pasted commands or drafts.',
   },
   {
-    title: '排查 Docker MCP 启动',
+    key: 'docker_mcp',
+    title: 'Troubleshoot Docker MCP startup',
     steps: 'inspect_mcp_runtime_failures -> inspect_mcp_docker_setup -> inspect_mcp_draft',
-    description: '适合用户按 Docker README 新增 MCP 后发现 0 个工具、容器一启动就退出，或不确定 docker run 参数是否拆对时，先看运行期失败原因，再检查 run、-i、镜像名和超时设置。',
+    description: 'Use when Docker README setup discovers 0 tools, containers exit immediately, or docker run arguments may be split incorrectly.',
   },
   {
-    title: '查看 MCP 工具参数',
+    key: 'mcp_tool_parameters',
+    title: 'Inspect MCP tool parameters',
     steps: 'inspect_mcp_setup -> inspect_mcp_tool_schema',
-    description: '适合先找到当前真实发现到的 MCP 工具 alias，再读取对应 inputSchema、必填字段、枚举和嵌套参数路径，避免调用外部 MCP 工具时乱填 arguments。',
+    description: 'Find the real discovered MCP tool alias first, then read inputSchema, required fields, enums, and nested parameter paths.',
   },
   {
-    title: '查看当前提示与 Skills',
+    key: 'prompts_skills',
+    title: 'Inspect current prompts and Skills',
     steps: 'inspect_ai_guidance -> inspect_ai_runtime',
-    description: '适合先确认当前自定义提示词、启用的 Skills、依赖工具和生效范围，再解释为什么 AI 当前会这样回答或为什么某个规则没有触发。',
+    description: 'Confirm current custom prompts, enabled Skills, dependency tools, and effective scope before explaining current AI behavior.',
   },
   {
-    title: '查看当前 AI 上下文',
+    key: 'ai_context',
+    title: 'Inspect current AI context',
     steps: 'inspect_ai_context -> inspect_table_bundle / get_columns',
-    description: '适合先确认这轮对话当前到底挂了哪些表结构，再继续做字段核对、表设计评审或 SQL 生成。',
+    description: 'Confirm which table structures are attached to the current conversation before field checks, table design review, or SQL generation.',
   },
   {
-    title: '查看当前连接',
+    key: 'current_connection',
+    title: 'Inspect current connection',
     steps: 'inspect_current_connection -> get_databases / get_tables',
-    description: '适合先确认当前活动数据源的类型、地址、当前库和 SSH/代理状态，再继续做库表探索或连接问题排查。',
+    description: 'Confirm the active data source type, address, current database, and SSH/proxy status before database exploration or connection troubleshooting.',
   },
   {
-    title: '核对数据源能力边界',
+    key: 'connection_capabilities',
+    title: 'Check data-source capability boundaries',
     steps: 'inspect_connection_capabilities -> inspect_current_connection',
-    description: '适合先确认当前连接到底支不支持建库、删库、结果编辑、SQL 导出或近似计数，再解释为什么某些按钮没出现或某类操作只能只读。',
+    description: 'Check whether the current connection supports database creation/deletion, result editing, SQL export, or approximate counts.',
   },
   {
-    title: '盘点本地连接资产',
+    key: 'saved_connections',
+    title: 'Inventory local connection assets',
     steps: 'inspect_saved_connections -> inspect_current_connection / get_databases',
-    description: '适合先按关键词或类型筛出本地保存的数据源，再挑目标连接继续看当前状态或库表结构。',
+    description: 'Filter locally saved data sources by keyword or type, then inspect the chosen connection state or database structure.',
   },
   {
-    title: '诊断 Redis 拓扑',
+    key: 'redis_topology',
+    title: 'Diagnose Redis topology',
     steps: 'inspect_redis_topology -> inspect_current_connection / inspect_app_logs',
-    description: '适合用户问 Redis 哨兵、Cluster、多节点、切库失败或 SSH 隧道不可用时，先拿到状态分级、脱敏 URI、后端适配器、DB 语义和下一步动作。',
+    description: 'Use for Redis Sentinel, Cluster, multi-node, DB switch failures, or SSH tunnel issues to get status, redacted URI, adapter, DB semantics, and next actions.',
   },
   {
-    title: '盘点外部 SQL 目录',
+    key: 'external_sql_dirs',
+    title: 'Inventory external SQL directories',
     steps: 'inspect_external_sql_directories -> inspect_workspace_tabs / inspect_active_tab',
-    description: '适合先确认本地配置了哪些外部 SQL 目录、目录绑定到哪个连接/库，以及当前打开的 SQL 文件来自哪里，再继续分析脚本内容。',
+    description: 'Confirm configured external SQL directories, their connection/database bindings, and where an opened SQL file comes from before analyzing scripts.',
   },
   {
-    title: '读取外部 SQL 文件',
+    key: 'external_sql_file',
+    title: 'Read external SQL files',
     steps: 'inspect_external_sql_directories -> inspect_external_sql_file -> inspect_active_tab',
-    description: '适合先定位具体脚本路径，再直接读取目录中的 SQL 文件内容；如果这个文件已经在编辑器里打开，再继续结合当前页签草稿一起分析。',
+    description: 'Locate a script path, read SQL file content from the directory, and combine it with the active tab draft if already opened.',
   },
   {
-    title: '读取当前页签',
+    key: 'active_tab',
+    title: 'Read the current tab',
     steps: 'inspect_active_tab -> get_columns / get_indexes / execute_sql',
-    description: '适合先读取当前编辑器里的 SQL 草稿或当前表页签，再继续做字段核对、索引分析和只读验证。',
+    description: 'Read the current editor SQL draft or table tab before field checks, index analysis, and read-only verification.',
   },
   {
-    title: '盘点当前工作区',
+    key: 'workspace_tabs',
+    title: 'Inventory the current workspace',
     steps: 'inspect_workspace_tabs -> inspect_active_tab -> get_columns / execute_sql',
-    description: '适合先看当前打开了哪些 SQL / 表 / 命令页签，再切到目标页签继续做字段核对、对比分析和只读验证。',
+    description: 'See which SQL, table, or command tabs are open, then inspect the target tab for field checks, comparisons, and read-only validation.',
   },
   {
-    title: '查看当前快捷键配置',
+    key: 'shortcuts',
+    title: 'Inspect current shortcut configuration',
     steps: 'inspect_shortcuts -> inspect_active_tab / inspect_workspace_tabs',
-    description: '适合先确认当前 Win / Mac 快捷键、是否改过默认值，以及结果区、AI 面板、查询执行等动作到底该怎么按，再结合当前页签解释具体使用场景。',
+    description: 'Confirm current Win/Mac shortcuts, customizations, and how to trigger result panel, AI panel, query execution, and related actions.',
   },
   {
-    title: '回看最近执行记录',
+    key: 'recent_sql_logs',
+    title: 'Review recent execution records',
     steps: 'inspect_recent_sql_logs -> get_columns / get_indexes / execute_sql',
-    description: '适合追查刚刚执行失败的 SQL、慢查询耗时，或基于真实执行历史继续让 AI 给解释和优化建议。',
+    description: 'Trace recently failed SQL, slow query duration, or let AI explain and optimize based on real execution history.',
   },
   {
-    title: '总结最近 SQL 活动',
+    key: 'recent_sql_activity',
+    title: 'Summarize recent SQL activity',
     steps: 'inspect_recent_sql_activity -> inspect_recent_sql_logs -> inspect_current_connection',
-    description: '适合先看最近到底以读还是写为主、有没有 DDL 或删除、哪个库最近报错最多，再决定继续下钻哪条日志或哪个连接。',
+    description: 'Check whether recent activity is mostly read or write, whether DDL or deletes occurred, and which database has the most recent errors.',
   },
   {
-    title: '核对 SQL 编辑器事务',
+    key: 'sql_editor_transaction',
+    title: 'Check SQL editor transactions',
     steps: 'inspect_sql_editor_transaction -> inspect_recent_sql_activity -> inspect_sql_risk',
-    description: '适合先确认 SQL 编辑器 DML 是否会进入托管事务、当前是手动还是自动提交、有没有待提交事务，再解释 update/insert/delete 执行后的提交语义。',
+    description: 'Confirm whether SQL editor DML enters a managed transaction, current commit mode, pending transactions, and commit semantics after update/insert/delete.',
   },
   {
-    title: 'SQL 风险预检',
+    key: 'sql_risk',
+    title: 'Pre-check SQL risk',
     steps: 'inspect_sql_risk -> inspect_ai_safety -> execute_sql',
-    description: '适合用户要求执行、删除、更新、DDL 或批量 SQL 前，先检查语句数量、写入/DDL 风险、WHERE 条件和当前安全策略，再决定是否需要用户确认。',
+    description: 'Before execution, deletion, update, DDL, or batch SQL, check statement count, write/DDL risk, WHERE clauses, and current safety policy.',
   },
   {
-    title: '排查应用日志',
+    key: 'app_logs',
+    title: 'Troubleshoot application logs',
     steps: 'inspect_app_logs -> inspect_mcp_setup / inspect_saved_connections / inspect_current_connection',
-    description: '适合先回看 gonavi.log 尾部的 ERROR/WARN，再结合 MCP、连接和当前数据源状态继续定位启动异常、连接失败或外部工具拉起问题。',
+    description: 'Review ERROR/WARN lines from the gonavi.log tail, then combine MCP, connection, and current data source state for diagnosis.',
   },
   {
-    title: '排查连接失败与冷却',
+    key: 'connection_failures',
+    title: 'Troubleshoot connection failures and cooldown',
     steps: 'inspect_recent_connection_failures -> inspect_current_connection / inspect_saved_connections / inspect_app_logs',
-    description: '适合用户直接问“为什么连接不上”或已经看到冷却/验证失败提示时，先拿到结构化根因、最新地址和下一步建议，再决定回到连接配置还是看更长日志。',
+    description: 'When connection failures, cooldown, or validation failures appear, get structured root cause, latest address, and next actions first.',
   },
   {
-    title: '排查 AI 气泡渲染异常',
+    key: 'render_error',
+    title: 'Troubleshoot AI bubble render errors',
     steps: 'inspect_ai_last_render_error -> inspect_active_tab / inspect_ai_runtime',
-    description: '适合用户反馈 AI 某条消息空白、气泡局部报错但整个面板没挂时，先拿到最近一次被隔离的渲染异常快照，再回到具体会话和运行时上下文继续缩小范围。',
+    description: 'Use when an AI message is blank or a bubble fails locally while the panel stays alive; read the isolated render-error snapshot first.',
   },
   {
-    title: '诊断 AI 消息流',
+    key: 'message_flow',
+    title: 'Diagnose AI message flow',
     steps: 'inspect_ai_message_flow -> inspect_ai_last_render_error / inspect_app_logs',
-    description: '适合用户反馈回复被拆成多个气泡、工具调用后没继续回答、消息流状态不对时，先读取当前会话的真实消息结构和异常信号。',
+    description: 'Read the real current-session message structure and anomaly signals when replies split into bubbles, tool calls do not close, or flow state looks wrong.',
   },
   {
-    title: '诊断 AI 上下文体量',
+    key: 'context_budget',
+    title: 'Diagnose AI context size',
     steps: 'inspect_ai_context_budget -> inspect_ai_context / inspect_ai_message_flow / inspect_ai_tool_catalog',
-    description: '适合用户反馈 AI 变慢、乱答、上下文太大、工具结果过长或表结构挂太多时，先看消息、DDL、MCP schema、提示词和 Skills 的体量来源，再决定收窄上下文或拆任务。',
+    description: 'When AI slows down, answers poorly, or context is too large, inspect messages, DDL, MCP schema, prompts, and Skills before narrowing context.',
   },
   {
-    title: '治理前端大文件',
+    key: 'codebase_hotspots',
+    title: 'Govern large frontend files',
     steps: 'inspect_codebase_hotspots -> inspect_ai_tool_catalog',
-    description: '适合用户要求继续拆分几千行组件、评估下一步重构切入点，或 AI 修改 UI/AI/MCP 前先判断大文件拆分热点、风险和验证范围。',
+    description: 'Use before splitting thousand-line components, choosing the next refactor slice, or changing UI/AI/MCP code to inspect split hotspots, risk, and validation scope.',
   },
   {
-    title: '复用历史 SQL',
+    key: 'saved_queries',
+    title: 'Reuse saved SQL',
     steps: 'inspect_saved_queries -> get_columns / execute_sql',
-    description: '适合先找本地保存过的查询脚本，再核对字段和只读验证，避免把之前写过的 SQL 重新手打一遍。',
+    description: 'Find locally saved query scripts first, then check fields and run read-only validation instead of rewriting old SQL manually.',
   },
   {
-    title: '回看 AI 历史对话',
+    key: 'ai_sessions',
+    title: 'Review AI chat history',
     steps: 'inspect_ai_sessions -> inspect_active_tab / inspect_saved_queries',
-    description: '适合先定位之前聊过的 AI 会话、首条问题和最近回复，再继续复用当前页签或历史 SQL 上下文。',
+    description: 'Locate previous AI sessions, first user questions, and recent replies before reusing the current tab or historical SQL context.',
   },
   {
-    title: '查找模板片段',
+    key: 'sql_snippets',
+    title: 'Find SQL snippet templates',
     steps: 'inspect_sql_snippets',
-    description: '适合先找团队已有的 SQL 片段模板、补全前缀和常用骨架，再决定是否继续改写。',
+    description: 'Find team SQL snippet templates, completion prefixes, and common skeletons before deciding whether to rewrite.',
   },
   {
-    title: '理解样例数据',
+    key: 'sample_data',
+    title: 'Understand sample data',
     steps: 'get_columns -> preview_table_rows',
-    description: '适合先确认字段，再直接查看前几行真实样例数据和空值形态。',
+    description: 'Confirm fields first, then inspect the first real sample rows and null patterns.',
   },
   {
-    title: '只读验证',
+    key: 'readonly_validation',
+    title: 'Read-only validation',
     steps: 'get_columns -> preview_table_rows -> execute_sql',
-    description: '适合生成 SQL 后做小范围结果核对，仍会受 AI 安全级别控制。',
+    description: 'After generating SQL, validate results on a small scope while still respecting the AI safety level.',
   },
 ];
+
+export const localizeBuiltinToolFlows = (
+  t?: BuiltinToolFlowTranslator,
+): AIBuiltinToolFlow[] =>
+  BUILTIN_TOOL_FLOW_COPY.map((flow) => {
+    const keyPrefix = `${BUILTIN_TOOL_FLOW_KEY_PREFIX}.${flow.key}`;
+    return {
+      title: translateBuiltinToolFlow(t, `${keyPrefix}.title`, flow.title),
+      steps: flow.steps,
+      description: translateBuiltinToolFlow(t, `${keyPrefix}.description`, flow.description),
+    };
+  });
+
+export const BUILTIN_TOOL_FLOWS: AIBuiltinToolFlow[] = localizeBuiltinToolFlows();
 
 const stringifyHintValue = (value: unknown): string => {
   if (value === undefined) return '';
@@ -273,12 +350,12 @@ const readDefaultValue = (schema: Record<string, any>, description: string): str
   if (Object.prototype.hasOwnProperty.call(schema, 'default')) {
     return stringifyHintValue(schema.default);
   }
-  const match = description.match(/默认\s*([^\s，,；;。)）]+)/u);
+  const match = description.match(/\u9ed8\u8ba4\s*([^\s\uff0c,；;\u3002)\uff09]+)/u);
   return match?.[1]?.trim() || '';
 };
 
 const readExampleValue = (description: string): string => {
-  const match = description.match(/(?:例如|示例值?[:：])\s*([^。；;\n]+)/u);
+  const match = description.match(/(?:\u4f8b\u5982|\u793a\u4f8b\u503c?[:\uff1a])\s*([^\u3002；;\n]+)/u);
   return match?.[1]?.trim() || '';
 };
 

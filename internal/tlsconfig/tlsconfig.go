@@ -30,13 +30,13 @@ func BuildClientConfig(options ClientConfigOptions) (*tls.Config, error) {
 	if caPath != "" {
 		pemBytes, err := os.ReadFile(caPath)
 		if err != nil {
-			return nil, fmt.Errorf("读取 TLS CA 证书失败（%s）：%w", caPath, err)
+			return nil, fmt.Errorf("failed to read TLS CA certificate (%s): %w", caPath, err)
 		}
 		pool := x509.NewCertPool()
 		if ok := pool.AppendCertsFromPEM(pemBytes); !ok {
 			certs, err := x509.ParseCertificates(pemBytes)
 			if err != nil || len(certs) == 0 {
-				return nil, fmt.Errorf("TLS CA 证书不是有效的 PEM/DER 文件：%s", caPath)
+				return nil, fmt.Errorf("TLS CA certificate is not a valid PEM/DER file: %s", caPath)
 			}
 			for _, cert := range certs {
 				pool.AddCert(cert)
@@ -48,12 +48,12 @@ func BuildClientConfig(options ClientConfigOptions) (*tls.Config, error) {
 	certPath := strings.TrimSpace(options.CertPath)
 	keyPath := strings.TrimSpace(options.KeyPath)
 	if (certPath == "") != (keyPath == "") {
-		return nil, fmt.Errorf("TLS 客户端证书和私钥需要同时配置")
+		return nil, fmt.Errorf("TLS client certificate and private key must be configured together")
 	}
 	if certPath != "" {
 		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 		if err != nil {
-			return nil, fmt.Errorf("加载 TLS 客户端证书失败（cert=%s key=%s）：%w", certPath, keyPath, err)
+			return nil, fmt.Errorf("failed to load TLS client certificate (cert=%s key=%s): %w", certPath, keyPath, err)
 		}
 		cfg.Certificates = []tls.Certificate{cert}
 	}

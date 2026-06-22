@@ -7,6 +7,7 @@ import {
   formatJVMDiagnosticEventLabel,
   formatJVMDiagnosticPhaseLabel,
 } from "../../utils/jvmDiagnosticPresentation";
+import { useI18n } from "../../i18n/provider";
 const { Text } = Typography;
 
 type JVMDiagnosticOutputProps = {
@@ -18,16 +19,18 @@ const JVMDiagnosticOutput: React.FC<JVMDiagnosticOutputProps> = ({
   chunks,
   maxHeight = 420,
 }) => {
+  const { t } = useI18n();
+
   if (!chunks.length) {
     return (
       <Empty
-        description="暂无实时输出。命令执行后，这里会按时间顺序追加后端返回内容。"
+        description={t("jvm_diagnostic.output.empty.description")}
         image={Empty.PRESENTED_IMAGE_SIMPLE}
       />
     );
   }
 
-  const chunkTexts = formatJVMDiagnosticChunksForDisplay(chunks);
+  const chunkTexts = formatJVMDiagnosticChunksForDisplay(chunks, t);
 
   return (
     <div style={{ maxHeight, overflow: "auto", paddingRight: 4 }}>
@@ -50,9 +53,9 @@ const JVMDiagnosticOutput: React.FC<JVMDiagnosticOutputProps> = ({
               </Text>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {chunk.phase ? (
-                  <Tag color="geekblue">{formatJVMDiagnosticPhaseLabel(chunk.phase)}</Tag>
+                  <Tag color="geekblue">{formatJVMDiagnosticPhaseLabel(chunk.phase, t)}</Tag>
                 ) : null}
-                {chunk.event ? <Tag>{formatJVMDiagnosticEventLabel(chunk.event)}</Tag> : null}
+                {chunk.event ? <Tag>{formatJVMDiagnosticEventLabel(chunk.event, t)}</Tag> : null}
                 {chunk.commandId ? <Tag color="blue">{chunk.commandId}</Tag> : null}
               </div>
             </div>

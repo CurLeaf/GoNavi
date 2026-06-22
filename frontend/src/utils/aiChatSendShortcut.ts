@@ -18,15 +18,22 @@ export interface AIChatSendShortcutKeyEventLike {
   stopPropagation?: () => void;
 }
 
+export type AIChatSendShortcutTranslate = (
+  key: string,
+  params?: Record<string, string>,
+) => string;
+
 export const getAIChatSendShortcutLabel = (
   binding: ShortcutPlatformBinding | undefined,
   platform: ShortcutPlatform = 'windows',
+  translate?: AIChatSendShortcutTranslate,
 ): string => {
   if (binding?.enabled === false) {
-    return '快捷键发送已关闭';
+    return translate?.('ai_chat.input.shortcut.disabled') || 'Shortcut sending disabled';
   }
   const combo = binding?.combo || DEFAULT_SHORTCUT_OPTIONS.sendAIChatMessage.windows.combo;
-  return `${getShortcutDisplayLabel(combo, platform)} 发送`;
+  const shortcut = getShortcutDisplayLabel(combo, platform);
+  return translate?.('ai_chat.input.shortcut.send_with_combo', { shortcut }) || `${shortcut} to send`;
 };
 
 export const shouldSendAIChatOnKeyDown = (

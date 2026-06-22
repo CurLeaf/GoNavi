@@ -1,5 +1,6 @@
 import type { SavedConnection, TabData } from '../../types';
 import { buildSqlRiskSnapshot } from './aiSqlRiskInsights';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
 import type {
   AISnapshotInspectionRuntime,
   SnapshotInspectionResult,
@@ -12,6 +13,7 @@ interface ExecuteSqlRiskInspectionToolCallOptions {
   tabs?: TabData[];
   activeTabId?: string | null;
   runtime?: AISnapshotInspectionRuntime;
+  translate?: AIInspectionTranslator;
 }
 
 export async function executeSqlRiskInspectionToolCall({
@@ -21,6 +23,7 @@ export async function executeSqlRiskInspectionToolCall({
   tabs = [],
   activeTabId = null,
   runtime,
+  translate,
 }: ExecuteSqlRiskInspectionToolCallOptions): Promise<SnapshotInspectionResult | null> {
   if (toolName !== 'inspect_sql_risk') {
     return null;
@@ -42,6 +45,7 @@ export async function executeSqlRiskInspectionToolCall({
       activeTabId,
       connections,
       safetyCheck,
+      translate,
     })),
     success: true,
   };

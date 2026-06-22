@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { AIChatMessage } from '../../types';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
@@ -10,6 +12,7 @@ interface AIMessageRenderBoundaryProps {
   overlayTheme: OverlayWorkbenchTheme;
   onDeleteMessage: (id: string) => void;
   onError?: (error: Error, errorInfo: React.ErrorInfo, msg: AIChatMessage) => void;
+  copy?: (key: string) => string;
 }
 
 interface AIMessageRenderBoundaryState {
@@ -41,6 +44,7 @@ export class AIMessageRenderBoundary extends React.Component<
   render() {
     if (this.state.hasError) {
       const { msg, darkMode, overlayTheme, onDeleteMessage } = this.props;
+      const copy = this.props.copy ?? ((key: string) => catalogTranslate('en-US', key));
       return (
         <div className="ai-ide-message" style={{ borderBottom: 'none', padding: '8px 16px' }}>
           <div style={{
@@ -50,10 +54,10 @@ export class AIMessageRenderBoundary extends React.Component<
             padding: '14px 16px',
           }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: overlayTheme.titleText }}>
-              这条 AI 消息渲染失败，已自动隔离
+              {copy('ai_chat.message.render_error.title')}
             </div>
             <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: overlayTheme.mutedText }}>
-              其余对话仍可继续使用。你可以先删除这条异常消息，再继续操作。
+              {copy('ai_chat.message.render_error.body')}
             </div>
             <div style={{
               marginTop: 10,
@@ -65,7 +69,7 @@ export class AIMessageRenderBoundary extends React.Component<
               wordBreak: 'break-word',
               whiteSpace: 'pre-wrap',
             }}>
-              {this.state.error?.message || '未知渲染错误'}
+              {this.state.error?.message || copy('ai_chat.message.render_error.unknown')}
             </div>
             <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
               <button
@@ -80,7 +84,7 @@ export class AIMessageRenderBoundary extends React.Component<
                   cursor: 'pointer',
                 }}
               >
-                重试渲染
+                {copy('ai_chat.message.render_error.retry')}
               </button>
               <button
                 type="button"
@@ -94,7 +98,7 @@ export class AIMessageRenderBoundary extends React.Component<
                   cursor: 'pointer',
                 }}
               >
-                删除这条消息
+                {copy('ai_chat.message.render_error.delete')}
               </button>
             </div>
           </div>
@@ -106,4 +110,10 @@ export class AIMessageRenderBoundary extends React.Component<
   }
 }
 
-export default AIMessageRenderBoundary;
+const AIMessageRenderBoundaryWithI18n: React.FC<AIMessageRenderBoundaryProps> = (props) => {
+  const i18n = useOptionalI18n();
+  const copy = i18n?.t ?? ((key: string) => catalogTranslate('en-US', key));
+  return <AIMessageRenderBoundary {...props} copy={copy} />;
+};
+
+export default AIMessageRenderBoundaryWithI18n;

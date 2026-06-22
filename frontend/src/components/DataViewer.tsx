@@ -243,6 +243,14 @@ const escapeSQLLiteral = (value: string): string => String(value || '').replace(
 
 const isDuckDBUnsupportedTypeError = (msg: string): boolean => /unsupported\s*type:\s*duckdb\./i.test(String(msg || ''));
 
+const DATA_VIEWER_TIMEOUT_KEYWORDS = [
+  '\u8d85\u65f6',
+  '\u903e\u6642',
+  'タイムアウト',
+  'zeitüberschreitung',
+  'тайм-аут',
+];
+
 const isDuckDBComplexColumnType = (columnType?: string): boolean => {
   const raw = String(columnType || '').trim().toLowerCase();
   if (!raw) return false;
@@ -252,7 +260,8 @@ const isDuckDBComplexColumnType = (columnType?: string): boolean => {
 const formatDataViewerQueryError = (dbType: string, messageText: unknown, tr: DataViewerTranslator): string => {
   const rawMessage = String(messageText || tr('data_viewer.message.query_failed')).trim() || tr('data_viewer.message.query_failed');
   const lower = rawMessage.toLowerCase();
-  const isTimeout = lower.includes('context deadline exceeded') || lower.includes('deadline exceeded') || lower.includes('timeout') || lower.includes('timed out') || lower.includes('\u8d85\u65f6');
+  const hasLocalizedTimeoutKeyword = DATA_VIEWER_TIMEOUT_KEYWORDS.some((keyword) => lower.includes(keyword.toLowerCase()));
+  const isTimeout = lower.includes('context deadline exceeded') || lower.includes('deadline exceeded') || lower.includes('timeout') || lower.includes('timed out') || hasLocalizedTimeoutKeyword;
   const isDuckDBInterrupted = String(dbType || '').trim().toLowerCase() === 'duckdb' && (lower.includes('interrupt error') || lower.includes('interrupted'));
   if (isTimeout || isDuckDBInterrupted) {
     if (String(dbType || '').trim().toLowerCase() === 'duckdb') {
@@ -640,6 +649,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                         indexes,
                         allowOracleRowID: true,
                         allowDuckDBRowID: String(dbType || '').trim().toLowerCase() === 'duckdb',
+                        translate: tr,
                     }), tr);
 
                     if (nextLocator.readOnly && primaryKeys.length === 0 && !resIndexes?.success && !isOracleLikeDialect(dbType)) {

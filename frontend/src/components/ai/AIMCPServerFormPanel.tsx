@@ -2,6 +2,8 @@ import React from 'react';
 import { Button, Input, Popconfirm, Select } from 'antd';
 import { DeleteOutlined } from '@ant-design/icons';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import type { ParsedMCPEnvDraft } from '../../utils/mcpEnvDraft';
@@ -48,57 +50,73 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
   onTest,
   onSave,
   onDelete,
-}) => (
-  <>
+}) => {
+  const i18n = useOptionalI18n();
+  const copy = (
+    key: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => (i18n?.t ?? ((catalogKey, catalogParams) => catalogTranslate('en-US', catalogKey, catalogParams)))(key, params);
+  const envStatusText = envDraft.trim()
+    ? parsedEnvDraft.invalidLines.length > 0
+      ? copy('ai_settings.mcp_server.form.env_status.invalid', {
+        validCount: parsedEnvDraft.validLines,
+        invalidCount: parsedEnvDraft.invalidLines.length,
+        invalidLines: parsedEnvDraft.invalidLines.slice(0, 2).join(' / '),
+      })
+      : copy('ai_settings.mcp_server.form.env_status.valid', { count: parsedEnvDraft.validLines })
+    : copy('ai_settings.mcp_server.form.env_status.empty');
+
+  return (
+    <>
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 132px', gap: 12 }}>
-      <AIMCPHelpBlock title="服务名称" description="给这个 MCP 起一个你自己能识别的名字，后面 AI 工具列表里会直接显示；不要只写 server、test 这类看不出用途的名字。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="required" example="Filesystem / Browser / GitHub">
+      <AIMCPHelpBlock title={copy('ai_settings.mcp_server.form.name.title')} description={copy('ai_settings.mcp_server.form.name.description')} overlayTheme={overlayTheme} darkMode={darkMode} fieldState="required" example="Filesystem / Browser / GitHub">
         <Input
           value={server.name}
           onChange={(event) => onChange({ name: event.target.value })}
-          placeholder="服务名称，例如：Filesystem / Browser / GitHub"
+          placeholder={copy('ai_settings.mcp_server.form.name.placeholder')}
           style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
         />
       </AIMCPHelpBlock>
-      <AIMCPHelpBlock title="启用状态" description="临时不用可以先禁用，保留配置但不参与 AI 工具发现。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional">
+      <AIMCPHelpBlock title={copy('ai_settings.mcp_server.form.enabled.title')} description={copy('ai_settings.mcp_server.form.enabled.description')} overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional">
         <Select
           value={server.enabled ? 'enabled' : 'disabled'}
           onChange={(value) => onChange({ enabled: value === 'enabled' })}
-          options={[{ label: '已启用', value: 'enabled' }, { label: '已禁用', value: 'disabled' }]}
+          options={[{ label: copy('ai_settings.mcp_server.form.enabled.option.enabled'), value: 'enabled' }, { label: copy('ai_settings.mcp_server.form.enabled.option.disabled'), value: 'disabled' }]}
         />
       </AIMCPHelpBlock>
     </div>
 
     <div style={{ display: 'grid', gridTemplateColumns: '132px minmax(0,1fr) 132px', gap: 12 }}>
-      <AIMCPHelpBlock title="传输方式" description="当前阶段只支持 stdio，表示 GoNavi 会在本机启动这个进程，并通过标准输入输出与它通信。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="fixed">
+      <AIMCPHelpBlock title={copy('ai_settings.mcp_server.form.transport.title')} description={copy('ai_settings.mcp_server.form.transport.description')} overlayTheme={overlayTheme} darkMode={darkMode} fieldState="fixed">
         <Select
           value={server.transport}
           onChange={(value) => onChange({ transport: value as AIMCPServerConfig['transport'] })}
           options={[{ label: 'stdio', value: 'stdio' }]}
         />
       </AIMCPHelpBlock>
-      <AIMCPHelpBlock title="启动命令" description="这里只填命令本身；如果是 npx/node/uvx/python/docker 这类启动器，把包名、脚本名、模块名或 docker run 参数放到下面的参数里。不要把 npx -y package --stdio、node server.js --stdio 或 docker run -i image 整串都塞进这里。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="required" example="npx / node / uvx / python / docker">
+      <AIMCPHelpBlock title={copy('ai_settings.mcp_server.form.command.title')} description={copy('ai_settings.mcp_server.form.command.description')} overlayTheme={overlayTheme} darkMode={darkMode} fieldState="required" example="npx / node / uvx / python / docker">
         <Input
           value={server.command}
           onChange={(event) => onChange({ command: event.target.value })}
-          placeholder="启动命令，例如：npx / node / uvx / python / docker"
+          placeholder={copy('ai_settings.mcp_server.form.command.placeholder')}
           style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
         />
       </AIMCPHelpBlock>
-      <AIMCPHelpBlock title="超时(秒)" description="工具发现和工具调用单次最多等多久。大多数本机工具保持默认 20 秒即可；远端服务或启动慢的脚本再调大。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="20">
+      <AIMCPHelpBlock title={copy('ai_settings.mcp_server.form.timeout.title')} description={copy('ai_settings.mcp_server.form.timeout.description')} overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="20">
         <Input
           type="number"
           min={3}
           max={120}
           value={server.timeoutSeconds}
           onChange={(event) => onChange({ timeoutSeconds: Number(event.target.value) || 20 })}
-          placeholder="超时(秒)"
+          placeholder={copy('ai_settings.mcp_server.form.timeout.placeholder')}
           style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}` }}
         />
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {[
-            { label: '默认 20 秒', value: 20 },
-            { label: '稍宽松 45 秒', value: 45 },
-            { label: '慢启动 60 秒', value: 60 },
+            { label: copy('ai_settings.mcp_server.form.timeout.preset.default'), value: 20 },
+            { label: copy('ai_settings.mcp_server.form.timeout.preset.relaxed'), value: 45 },
+            { label: copy('ai_settings.mcp_server.form.timeout.preset.slow'), value: 60 },
           ].map((option) => (
             <button
               key={option.value}
@@ -123,12 +141,12 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
       </AIMCPHelpBlock>
     </div>
 
-    <AIMCPHelpBlock title="命令参数" description="每个参数单独录入一个标签；命令本体不要填在这里。比如 npx -y package --stdio，要把 -y、package 和 --stdio 分开填；node server.js --stdio 要把 server.js 和 --stdio 分开填；docker run --rm -i image 要把 run、--rm、-i 和镜像名分开填。不确定怎么拆时，优先回到上面的“完整命令”框自动拆分。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="-y、@modelcontextprotocol/server-filesystem、--stdio、server.js、run、--rm、-i、image">
+    <AIMCPHelpBlock title={copy('ai_settings.mcp_server.form.args.title')} description={copy('ai_settings.mcp_server.form.args.description')} overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="-y / @modelcontextprotocol/server-filesystem / --stdio / server.js / run / --rm / -i / image">
       <Select
         mode="tags"
         value={server.args || []}
         onChange={(value) => onChange({ args: value })}
-        placeholder="命令参数，回车录入，例如：-y、包名、--stdio"
+        placeholder={copy('ai_settings.mcp_server.form.args.placeholder')}
         style={{ width: '100%' }}
       />
       <AIMCPArgumentHints
@@ -144,9 +162,9 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
 
     {launchPreview && (
       <div style={{ padding: '10px 12px', borderRadius: 10, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.72)' }}>
-        <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>实际启动命令预览</div>
+        <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>{copy('ai_settings.mcp_server.form.launch_preview.title')}</div>
         <div style={{ ...buildMCPHintStyle(overlayTheme.mutedText), marginTop: 4 }}>
-          GoNavi 会按下面的形式启动进程，方便你确认命令和参数是不是拆对了。
+          {copy('ai_settings.mcp_server.form.launch_preview.description')}
         </div>
         <code style={{ display: 'block', marginTop: 8, fontFamily: 'var(--gn-font-mono)', fontSize: 12, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
           {launchPreview}
@@ -154,20 +172,16 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
       </div>
     )}
 
-    <AIMCPHelpBlock title="环境变量" description="每行一个 KEY=VALUE，通常用于 API Key、工作目录、服务地址等配置；不需要时可以留空。这里会保存到本机配置，并在启动 MCP 进程时作为环境变量传入；不要写 export，也不要把密钥写进聊天内容。" overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="OPENAI_API_KEY=...">
+    <AIMCPHelpBlock title={copy('ai_settings.mcp_server.form.env.title')} description={copy('ai_settings.mcp_server.form.env.description')} overlayTheme={overlayTheme} darkMode={darkMode} fieldState="optional" example="OPENAI_API_KEY=...">
       <Input.TextArea
         rows={3}
         value={envDraft}
         onChange={(event) => onEnvDraftChange(event.target.value)}
-        placeholder={"环境变量，每行一个 KEY=VALUE，例如：\nOPENAI_API_KEY=...\nGITHUB_TOKEN=..."}
+        placeholder={copy('ai_settings.mcp_server.form.env.placeholder')}
         style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}`, fontFamily: 'var(--gn-font-mono)' }}
       />
       <div style={{ ...buildMCPHintStyle(parsedEnvDraft.invalidLines.length > 0 ? '#d97706' : overlayTheme.mutedText) }}>
-        {envDraft.trim()
-          ? parsedEnvDraft.invalidLines.length > 0
-            ? `已识别 ${parsedEnvDraft.validLines} 条环境变量，另有 ${parsedEnvDraft.invalidLines.length} 行格式无效，本次不会保存：${parsedEnvDraft.invalidLines.slice(0, 2).join(' / ')}`
-            : `已识别 ${parsedEnvDraft.validLines} 条环境变量。`
-          : '每行都要写成 KEY=VALUE；没有等号或 key 含空格的行不会保存。'}
+        {envStatusText}
       </div>
       <AIMCPEnvHints
         command={server.command}
@@ -194,26 +208,27 @@ const AIMCPServerFormPanel: React.FC<AIMCPServerFormPanelProps> = ({
     />
 
     <div style={{ padding: '10px 12px', borderRadius: 10, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.72)' }}>
-      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>操作说明</div>
+      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>{copy('ai_settings.mcp_server.form.instructions.title')}</div>
       <div style={{ ...buildMCPHintStyle(overlayTheme.mutedText), marginTop: 4 }}>
-        <strong>测试工具发现</strong>
-        {' '}只会按当前字段试启动一次，检查能发现哪些工具，不会保存配置。
-        {' '}<strong>保存</strong>
-        {' '}才会把这条 MCP 长期写入本地配置。
+        <strong>{copy('ai_settings.mcp_server.form.instructions.test_title')}</strong>
+        {' '}{copy('ai_settings.mcp_server.form.instructions.test_description')}
+        {' '}<strong>{copy('ai_settings.mcp_server.form.instructions.save_title')}</strong>
+        {' '}{copy('ai_settings.mcp_server.form.instructions.save_description')}
         {serverTools.length > 0
-          ? ' 当前上方列出的工具，就是最近一次测试成功后发现到的别名。'
-          : ' 建议先测试成功，再保存；测试通过后，上方会显示这条服务实际发现到的工具。'}
+          ? ` ${copy('ai_settings.mcp_server.form.instructions.tools_found')}`
+          : ` ${copy('ai_settings.mcp_server.form.instructions.test_first')}`}
       </div>
     </div>
 
     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-      <Button onClick={onTest} loading={loading} disabled={!validation.canTest} style={{ borderRadius: 10 }}>测试工具发现</Button>
-      <Button type="primary" onClick={onSave} loading={loading} disabled={!validation.canSave} style={{ borderRadius: 10, fontWeight: 600 }}>保存</Button>
-      <Popconfirm title="删除这个 MCP 服务？" okText="删除" cancelText="取消" onConfirm={onDelete}>
-        <Button danger icon={<DeleteOutlined />} style={{ borderRadius: 10 }}>删除</Button>
+      <Button onClick={onTest} loading={loading} disabled={!validation.canTest} style={{ borderRadius: 10 }}>{copy('ai_settings.mcp_server.form.action.test')}</Button>
+      <Button type="primary" onClick={onSave} loading={loading} disabled={!validation.canSave} style={{ borderRadius: 10, fontWeight: 600 }}>{copy('ai_settings.mcp_server.form.action.save')}</Button>
+      <Popconfirm title={copy('ai_settings.mcp_server.form.action.delete_confirm')} okText={copy('ai_settings.mcp_server.form.action.delete_ok')} cancelText={copy('ai_settings.mcp_server.form.action.delete_cancel')} onConfirm={onDelete}>
+        <Button danger icon={<DeleteOutlined />} style={{ borderRadius: 10 }}>{copy('ai_settings.mcp_server.form.action.delete')}</Button>
       </Popconfirm>
     </div>
   </>
-);
+  );
+};
 
 export default AIMCPServerFormPanel;

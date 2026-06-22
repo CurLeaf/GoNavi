@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import React, { useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
@@ -5,6 +6,8 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { useStore } from '../../store';
 import { useAIChatStreamSubscription } from './useAIChatStreamSubscription';
 
+const aiChatStreamMock = vi.hoisted(() => vi.fn(async (..._args: any[]) => undefined));
+const generateTitleForSessionMock = vi.hoisted(() => vi.fn(async () => undefined));
 const runtimeMock = vi.hoisted(() => {
   const handlers = new Map<string, (data: any) => void>();
   return {
@@ -24,6 +27,19 @@ vi.mock('../../../wailsjs/runtime', () => ({
 }));
 
 const SESSION_ID = 'session-stream';
+const source = readFileSync(new URL('./useAIChatStreamSubscription.ts', import.meta.url), 'utf8');
+const panelSource = readFileSync(new URL('../AIChatPanel.tsx', import.meta.url), 'utf8');
+const translatedCopy: Record<string, string> = {
+  'ai_chat.panel.model_control.force_tool_call': 'T:force-tool-call',
+  'ai_chat.panel.message.error': 'T:error {{detail}}',
+  'ai_chat.panel.message.empty_response': 'T:empty-response',
+  'ai_chat.panel.message.request_interrupted': 'T:request-interrupted',
+};
+
+const translate = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) => (translatedCopy[key] || key).replace(/\{\{(\w+)\}\}/g, (_match, name) => String(params?.[name] ?? ''));
 let nextId = 0;
 
 const emitStreamChunk = async (data: any) => {
@@ -86,22 +102,50 @@ const StreamHarness = () => {
     updateAIChatMessage: patchMessage,
     buildSystemContextMessages: async () => [],
     executeLocalTools: async () => {},
-    generateTitleForSession: async () => {},
+    generateTitleForSession: generateTitleForSessionMock,
     nextMessageId: () => `assistant-created-${++nextId}`,
     nudgeCountRef,
     pendingJVMPlanContextRef,
     pendingJVMDiagnosticPlanContextRef,
+    translate,
   });
 
   return null;
 };
 
 describe('useAIChatStreamSubscription', () => {
+  it('threads the panel translator through the nudge resend chain', () => {
+    expect(panelSource).toContain('translate: t,');
+    expect(source).toContain('const messagesPayload = currentHistory.map((message) => toAIRequestMessage(message, translate));');
+  });
+
+  it('keeps stream error and empty-response copy behind panel i18n keys', () => {
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.message\.error'/);
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.message\.empty_response'/);
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.message\.request_interrupted'/);
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.model_control\.force_tool_call'/);
+    expect(source).not.toContain('content: `❌ 错误: ${cleanErr}`');
+    expect(source).not.toContain("content: '❌ 模型未能成功响应任何内容");
+    expect(source).not.toContain("content: '❌ 请求中断");
+    expect(source).not.toContain('请直接使用 function call 调用工具执行操作，不要只用文字描述计划。');
+  });
+
   beforeEach(() => {
     nextId = 0;
+    aiChatStreamMock.mockClear();
+    generateTitleForSessionMock.mockClear();
     runtimeMock.handlers.clear();
     runtimeMock.EventsOn.mockClear();
     runtimeMock.EventsOff.mockClear();
+    vi.stubGlobal('window', {
+      go: {
+        aiservice: {
+          Service: {
+            AIChatStream: aiChatStreamMock,
+          },
+        },
+      },
+    });
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       callback(0);
       return 1;
@@ -131,6 +175,7 @@ describe('useAIChatStreamSubscription', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     useStore.setState({
       aiChatHistory: {},
@@ -159,6 +204,167 @@ describe('useAIChatStreamSubscription', () => {
       content: 'Hello world',
       loading: true,
     });
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('resends a localized force-tool-call nudge when the model only describes the next action', async () => {
+    vi.useFakeTimers();
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<StreamHarness />);
+    });
+
+    await emitStreamChunk({ content: '我先查询一下相关信息' });
+    await emitStreamChunk({ done: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(1);
+    const resentMessages = (aiChatStreamMock.mock.calls[0]?.[1] ?? []) as Array<{ role: string; content: string }>;
+    expect(resentMessages[resentMessages.length - 1]).toEqual({ role: 'user', content: 'T:force-tool-call' });
+    expect(generateTitleForSessionMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('resends a localized force-tool-call nudge when the model describes the next action in English', async () => {
+    vi.useFakeTimers();
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<StreamHarness />);
+    });
+
+    await emitStreamChunk({ content: "I'll check the relevant information first" });
+    await emitStreamChunk({ done: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(1);
+    const resentMessages = (aiChatStreamMock.mock.calls[0]?.[1] ?? []) as Array<{ role: string; content: string }>;
+    expect(resentMessages[resentMessages.length - 1]).toEqual({ role: 'user', content: 'T:force-tool-call' });
+    expect(generateTitleForSessionMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('resends a localized force-tool-call nudge when the model describes the next action in Traditional Chinese', async () => {
+    vi.useFakeTimers();
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<StreamHarness />);
+    });
+
+    await emitStreamChunk({ content: '我先查詢一下相關資料' });
+    await emitStreamChunk({ done: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(1);
+    const resentMessages = (aiChatStreamMock.mock.calls[0]?.[1] ?? []) as Array<{ role: string; content: string }>;
+    expect(resentMessages[resentMessages.length - 1]).toEqual({ role: 'user', content: 'T:force-tool-call' });
+    expect(generateTitleForSessionMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('localizes stream error copy while preserving the sanitized raw detail', async () => {
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<StreamHarness />);
+    });
+
+    await emitStreamChunk({ error: 'rpc failure' });
+
+    const messages = useStore.getState().aiChatHistory[SESSION_ID] || [];
+    const assistant = messages.find((message) => message.id === 'assistant-connecting');
+    expect(assistant).toMatchObject({
+      content: 'T:error rpc failure',
+      phase: 'idle',
+      loading: false,
+    });
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('localizes the empty-response fallback when the stream completes without content', async () => {
+    vi.useFakeTimers();
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<StreamHarness />);
+    });
+
+    await emitStreamChunk({ done: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+
+    const messages = useStore.getState().aiChatHistory[SESSION_ID] || [];
+    const assistant = messages.find((message) => message.id === 'assistant-connecting');
+    expect(assistant).toMatchObject({
+      content: 'T:empty-response',
+      phase: 'idle',
+      loading: false,
+    });
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('localizes the interrupted-request fallback when no assistant message was created', async () => {
+    vi.useFakeTimers();
+    useStore.setState({
+      aiChatHistory: {
+        [SESSION_ID]: [
+          {
+            id: 'user-1',
+            role: 'user',
+            content: 'hello',
+            timestamp: 1,
+          },
+        ],
+      },
+      aiChatSessions: [{ id: SESSION_ID, title: 'hello', updatedAt: 1 }],
+      aiActiveSessionId: SESSION_ID,
+    });
+
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(<StreamHarness />);
+    });
+
+    await emitStreamChunk({ done: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+
+    const messages = useStore.getState().aiChatHistory[SESSION_ID] || [];
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        role: 'assistant',
+        content: 'T:request-interrupted',
+        loading: false,
+      }),
+    ]));
 
     await act(async () => {
       renderer?.unmount();

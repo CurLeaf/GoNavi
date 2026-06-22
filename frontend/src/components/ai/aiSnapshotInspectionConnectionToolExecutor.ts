@@ -4,6 +4,7 @@ import type {
   SavedConnection,
   TabData,
 } from '../../types';
+import type { I18nParams } from '../../i18n';
 import { buildAIContextSnapshot } from './aiContextInsights';
 import { buildConnectionCapabilitiesSnapshot } from './aiConnectionCapabilitiesInsights';
 import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
@@ -30,8 +31,16 @@ interface ExecuteConnectionWorkspaceSnapshotToolCallOptions {
   tabs?: TabData[];
   activeTabId?: string | null;
   externalSQLDirectories?: ExternalSQLDirectory[];
+  translate?: (key: string, params?: I18nParams) => string;
   runtime?: AISnapshotInspectionRuntime;
 }
+
+const translateInspectionMessage = (
+  translate: ((key: string, params?: I18nParams) => string) | undefined,
+  key: string,
+  fallback: string,
+  params?: I18nParams,
+) => translate?.(key, params) || fallback;
 
 export async function executeConnectionWorkspaceSnapshotToolCall({
   toolName,
@@ -42,6 +51,7 @@ export async function executeConnectionWorkspaceSnapshotToolCall({
   tabs = [],
   activeTabId = null,
   externalSQLDirectories = [],
+  translate,
   runtime,
 }: ExecuteConnectionWorkspaceSnapshotToolCallOptions): Promise<SnapshotInspectionResult | null> {
   switch (toolName) {
@@ -52,6 +62,7 @@ export async function executeConnectionWorkspaceSnapshotToolCall({
           tabs,
           activeTabId,
           connections,
+          translate,
         })),
         success: true,
       };
@@ -63,6 +74,7 @@ export async function executeConnectionWorkspaceSnapshotToolCall({
           tabs,
           activeTabId,
           connections,
+          translate,
         })),
         success: true,
       };
@@ -84,6 +96,7 @@ export async function executeConnectionWorkspaceSnapshotToolCall({
           keyword: args.keyword,
           limit: args.limit,
           includeRecommendations: args.includeRecommendations,
+          translate,
         })),
         success: true,
       };
@@ -104,22 +117,71 @@ export async function executeConnectionWorkspaceSnapshotToolCall({
       const requestedFilePath = String(args.filePath || '').trim();
       if (!requestedFilePath) {
         return {
-          content: '读取外部 SQL 文件失败: filePath 不能为空',
+          content: translateInspectionMessage(
+            translate,
+            'ai_chat.inspection.external_sql_file.error.read_failed',
+            'Failed to read external SQL file: filePath is required',
+            {
+              detail: translateInspectionMessage(
+                translate,
+                'ai_chat.inspection.external_sql_file.error.file_path_required',
+                'filePath is required',
+              ),
+            },
+          ),
           success: false,
         };
       }
       if (!findBestMatchingExternalSQLDirectory(requestedFilePath, externalSQLDirectories)) {
         return {
-          content: '读取外部 SQL 文件失败: 目标文件不在已配置的外部 SQL 目录中',
+          content: translateInspectionMessage(
+            translate,
+            'ai_chat.inspection.external_sql_file.error.read_failed',
+            'Failed to read external SQL file: The target file is outside configured external SQL directories',
+            {
+              detail: translateInspectionMessage(
+                translate,
+                'ai_chat.inspection.external_sql_file.error.outside_configured_directory',
+                'The target file is outside configured external SQL directories',
+              ),
+            },
+          ),
           success: false,
         };
       }
-      const readResult = typeof runtime?.readSQLFile === 'function'
-        ? await runtime.readSQLFile(requestedFilePath)
-        : { success: false, message: '当前环境暂不支持读取本地 SQL 文件' };
+      let readResult;
+      if (typeof runtime?.readSQLFile === 'function') {
+        try {
+          readResult = await runtime.readSQLFile(requestedFilePath);
+        } catch (error: any) {
+          readResult = {
+            success: false,
+            message: error?.message || String(error),
+          };
+        }
+      } else {
+        readResult = {
+          success: false,
+          message: translateInspectionMessage(
+            translate,
+            'ai_chat.inspection.external_sql_file.error.unsupported_runtime',
+            'The current runtime does not support reading local SQL files yet',
+          ),
+        };
+      }
       if (!readResult?.success) {
+        const detail = readResult?.message || translateInspectionMessage(
+          translate,
+          'ai_chat.inspection.external_sql_file.error.unknown',
+          'Unknown error',
+        );
         return {
-          content: `读取外部 SQL 文件失败: ${readResult?.message || '未知错误'}`,
+          content: translateInspectionMessage(
+            translate,
+            'ai_chat.inspection.external_sql_file.error.read_failed',
+            `Failed to read external SQL file: ${detail}`,
+            { detail },
+          ),
           success: false,
         };
       }
@@ -142,6 +204,7 @@ export async function executeConnectionWorkspaceSnapshotToolCall({
           activeTabId,
           connections,
           includeContent: args.includeContent !== false,
+          translate,
         })),
         success: true,
       };
@@ -164,6 +227,7 @@ export async function executeConnectionWorkspaceSnapshotToolCall({
           connections,
           includeDDL: args.includeDDL === true,
           ddlLimit: args.ddlLimit,
+          translate,
         })),
         success: true,
       };

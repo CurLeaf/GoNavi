@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { buildAIChatReadinessSnapshot } from './aiChatReadiness';
 
 describe('buildAIChatReadinessSnapshot', () => {
-  it('reports missing provider when no active provider is configured', () => {
+  it('defaults missing-provider status copy to English when no translator is provided', () => {
     const snapshot = buildAIChatReadinessSnapshot({
       providers: [],
       activeProviderId: '',
@@ -12,15 +12,18 @@ describe('buildAIChatReadinessSnapshot', () => {
     expect(snapshot.status).toBe('missing_provider');
     expect(snapshot.ready).toBe(false);
     expect(snapshot.action?.key).toBe('open-settings');
-    expect(snapshot.title).toContain('还没有配置 AI 供应商');
+    expect(snapshot.label).toBe('Not ready');
+    expect(snapshot.title).toBe('No provider available');
+    expect(snapshot.description).toBe('Add and enable a model provider in AI settings first.');
+    expect(snapshot.action?.label).toBe('Open AI settings');
   });
 
-  it('reports incomplete provider when secret or base url is missing', () => {
+  it('defaults incomplete-provider status copy to English while keeping raw provider names', () => {
     const snapshot = buildAIChatReadinessSnapshot({
       providers: [{
         id: 'provider-1',
         type: 'custom',
-        name: '自建代理',
+        name: 'Custom proxy',
         apiKey: '',
         hasSecret: false,
         baseUrl: '',
@@ -34,16 +37,19 @@ describe('buildAIChatReadinessSnapshot', () => {
 
     expect(snapshot.status).toBe('provider_incomplete');
     expect(snapshot.issues).toEqual(['missing_secret', 'missing_base_url']);
-    expect(snapshot.action?.label).toContain('修复');
-    expect(snapshot.message).toContain('还缺少 密钥、接口地址');
+    expect(snapshot.label).toBe('Needs fix');
+    expect(snapshot.title).toBe('Custom proxy is missing API key, endpoint URL');
+    expect(snapshot.description).toBe('Complete the provider configuration before sending to avoid immediate request failures.');
+    expect(snapshot.action?.label).toBe('Fix provider configuration');
+    expect(snapshot.message).toContain('Custom proxy is missing API key, endpoint URL');
   });
 
-  it('reports missing model and available model count when provider has no selected model', () => {
+  it('defaults missing-model status copy to English when no translator is provided', () => {
     const snapshot = buildAIChatReadinessSnapshot({
       providers: [{
         id: 'provider-1',
         type: 'openai',
-        name: 'OpenAI 主账号',
+        name: 'OpenAI Primary',
         apiKey: '',
         hasSecret: true,
         baseUrl: 'https://api.openai.com/v1',
@@ -58,15 +64,18 @@ describe('buildAIChatReadinessSnapshot', () => {
     expect(snapshot.status).toBe('missing_model');
     expect(snapshot.selectableModelCount).toBe(2);
     expect(snapshot.action?.key).toBe('reload-models');
-    expect(snapshot.description).toContain('当前已发现 2 个可选模型');
+    expect(snapshot.label).toBe('Model required');
+    expect(snapshot.title).toBe('Select a model for OpenAI Primary');
+    expect(snapshot.description).toBe('2 models are available right now. Select one before sending.');
+    expect(snapshot.action?.label).toBe('Reload models');
   });
 
-  it('reports ready with context summary when provider and context are already attached', () => {
+  it('defaults ready status copy to English while preserving raw provider and model values', () => {
     const snapshot = buildAIChatReadinessSnapshot({
       providers: [{
         id: 'provider-1',
         type: 'openai',
-        name: 'OpenAI 主账号',
+        name: 'OpenAI Primary',
         apiKey: '',
         hasSecret: true,
         baseUrl: 'https://api.openai.com/v1',
@@ -90,6 +99,8 @@ describe('buildAIChatReadinessSnapshot', () => {
     expect(snapshot.status).toBe('ready');
     expect(snapshot.ready).toBe(true);
     expect(snapshot.contextAttachedCount).toBe(1);
-    expect(snapshot.title).toContain('OpenAI 主账号 / gpt-5.5');
+    expect(snapshot.label).toBe('Ready');
+    expect(snapshot.title).toBe('AI is ready: OpenAI Primary / gpt-5.5');
+    expect(snapshot.description).toBe('1 table schema contexts are attached. You can send now.');
   });
 });

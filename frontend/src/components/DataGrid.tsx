@@ -3370,6 +3370,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               void message.error(content);
           },
       },
+      translate: translateDataGrid,
   });
 
   useEffect(() => {
@@ -5343,7 +5344,7 @@ const DataGrid: React.FC<DataGridProps> = ({
                   textAlign: 'center',
               }}
           >
-              <span aria-label="行号">#</span>
+              <span aria-label={translateDataGrid('data_grid.aria.row_number')}>#</span>
           </div>
       ),
       key: GONAVI_ROW_NUMBER_COLUMN_KEY,

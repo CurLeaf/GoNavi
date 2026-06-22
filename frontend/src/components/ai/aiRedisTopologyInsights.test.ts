@@ -1,7 +1,48 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import type { SavedConnection } from '../../types';
+import { catalogs } from '../../i18n/catalog';
 import { buildRedisTopologySnapshot } from './aiRedisTopologyInsights';
+
+const source = readFileSync(new URL('./aiRedisTopologyInsights.ts', import.meta.url), 'utf8');
+
+const REDIS_TOPOLOGY_I18N_KEYS = [
+  'ai_chat.inspection.redis_topology.label.single',
+  'ai_chat.inspection.redis_topology.label.cluster',
+  'ai_chat.inspection.redis_topology.label.sentinel',
+  'ai_chat.inspection.redis_topology.warning.missing_host',
+  'ai_chat.inspection.redis_topology.warning.ssh_unsupported',
+  'ai_chat.inspection.redis_topology.warning.missing_sentinel_master',
+  'ai_chat.inspection.redis_topology.warning.single_sentinel_node',
+  'ai_chat.inspection.redis_topology.warning.sentinel_default_redis_port',
+  'ai_chat.inspection.redis_topology.warning.cluster_single_seed',
+  'ai_chat.inspection.redis_topology.warning.cluster_logical_db',
+  'ai_chat.inspection.redis_topology.warning.cluster_sentinel_fields_ignored',
+  'ai_chat.inspection.redis_topology.warning.single_multiple_nodes',
+  'ai_chat.inspection.redis_topology.warning.single_sentinel_fields_ignored',
+  'ai_chat.inspection.redis_topology.db_note.cluster_logical_namespace',
+  'ai_chat.inspection.redis_topology.db_note.sentinel_selected_db',
+  'ai_chat.inspection.redis_topology.db_note.single_selected_db',
+  'ai_chat.inspection.redis_topology.next_action.fill_host',
+  'ai_chat.inspection.redis_topology.next_action.fill_sentinel_master',
+  'ai_chat.inspection.redis_topology.next_action.disable_ssh',
+  'ai_chat.inspection.redis_topology.next_action.check_sentinel_port',
+  'ai_chat.inspection.redis_topology.next_action.review_cluster_logical_db',
+  'ai_chat.inspection.redis_topology.next_action.align_single_topology',
+  'ai_chat.inspection.redis_topology.next_action.test_connection',
+  'ai_chat.inspection.redis_topology.recommendation.sentinel_addresses',
+  'ai_chat.inspection.redis_topology.recommendation.separate_auth',
+  'ai_chat.inspection.redis_topology.recommendation.cluster_multiple_seeds',
+  'ai_chat.inspection.redis_topology.recommendation.cluster_namespace',
+  'ai_chat.inspection.redis_topology.recommendation.single_one_address',
+  'ai_chat.inspection.redis_topology.recommendation.network_for_cluster_sentinel',
+  'ai_chat.inspection.redis_topology.recommendation.check_tls',
+] as const;
+
+const translateWithKeyEcho = (key: string, params?: Record<string, unknown>) =>
+  `T:${key}${params ? `:${JSON.stringify(params)}` : ''}`;
 
 const buildRedisConnection = (
   id: string,
@@ -25,7 +66,7 @@ describe('buildRedisTopologySnapshot', () => {
   it('summarizes Redis Sentinel settings without exposing passwords', () => {
     const snapshot = buildRedisTopologySnapshot({
       connections: [
-        buildRedisConnection('redis-sentinel', '生产 Redis Sentinel', {
+        buildRedisConnection('redis-sentinel', 'Production Redis Sentinel', {
           host: 'sentinel-a.local',
           port: 6379,
           hosts: ['sentinel-b.local:26379'],
@@ -41,7 +82,7 @@ describe('buildRedisTopologySnapshot', () => {
           hasRedisSentinelPassword: true,
         }),
       ],
-      keyword: '生产',
+      keyword: 'production',
     });
 
     expect(snapshot.totalRedisConnections).toBe(1);
@@ -63,10 +104,13 @@ describe('buildRedisTopologySnapshot', () => {
       physicalDb: 2,
       mode: 'failover_selected_db',
     });
-    expect(snapshot.connections[0].warnings).toContain('Sentinel master 名称为空，go-redis FailoverClient 无法发现主节点');
-    expect(snapshot.connections[0].warnings).toContain('Sentinel 主地址端口是 6379，请确认这里填写的是 Sentinel 端口，常见默认值是 26379');
-    expect(snapshot.connections[0].blockingReasons).toContain('Sentinel master 名称为空，go-redis FailoverClient 无法发现主节点');
-    expect(snapshot.connections[0].nextActions.join('\n')).toContain('补充 Sentinel master 名称');
+    expect(snapshot.connections[0].warnings.length).toBeGreaterThan(0);
+    expect(snapshot.connections[0].warnings.join('\n')).toContain('Sentinel');
+    expect(snapshot.connections[0].warnings.join('\n')).toContain('go-redis FailoverClient');
+    expect(snapshot.connections[0].warnings.join('\n')).toContain('26379');
+    expect(snapshot.connections[0].blockingReasons.length).toBeGreaterThan(0);
+    expect(snapshot.connections[0].blockingReasons.join('\n')).toContain('go-redis FailoverClient');
+    expect(snapshot.connections[0].nextActions.join('\n')).toContain('Sentinel');
     expect(JSON.stringify(snapshot)).not.toContain('redis-secret');
     expect(JSON.stringify(snapshot)).not.toContain('sentinel-secret');
   });
@@ -74,7 +118,7 @@ describe('buildRedisTopologySnapshot', () => {
   it('reports cluster logical-db and SSH risks', () => {
     const snapshot = buildRedisTopologySnapshot({
       connections: [
-        buildRedisConnection('redis-cluster', '订单 Redis Cluster', {
+        buildRedisConnection('redis-cluster', 'Orders Redis Cluster', {
           host: '10.10.1.10',
           port: 6379,
           hosts: ['10.10.1.11:6379', '10.10.1.12:6379'],
@@ -100,16 +144,17 @@ describe('buildRedisTopologySnapshot', () => {
       selectedDb: 4,
       mode: 'cluster_logical_namespace',
     });
-    expect(snapshot.connections[0].warnings).toContain('Redis Cluster 当前后端不支持 SSH 隧道，请改用直连、代理或远程 MCP HTTP 方案');
-    expect(snapshot.connections[0].warnings).toContain('Redis Cluster 物理上只支持 db0；GoNavi 会用 __gonavi_db_N__: 前缀模拟逻辑库隔离');
-    expect(snapshot.connections[0].nextActions.join('\n')).toContain('关闭 SSH 隧道');
-    expect(snapshot.connections[0].recommendations?.join('\n')).toContain('种子节点');
+    expect(snapshot.connections[0].warnings.join('\n')).toContain('Redis Cluster');
+    expect(snapshot.connections[0].warnings.join('\n')).toContain('SSH');
+    expect(snapshot.connections[0].warnings.join('\n')).toContain('__gonavi_db_N__');
+    expect(snapshot.connections[0].nextActions.join('\n')).toContain('SSH');
+    expect(snapshot.connections[0].recommendations?.join('\n')).toContain('Redis Cluster');
   });
 
   it('filters out non-Redis connections and warns about multi-host single mode', () => {
     const snapshot = buildRedisTopologySnapshot({
       connections: [
-        buildRedisConnection('redis-single', '缓存单机', {
+        buildRedisConnection('redis-single', 'Cache Standalone', {
           host: 'redis.local',
           port: 6379,
           topology: 'single',
@@ -117,7 +162,7 @@ describe('buildRedisTopologySnapshot', () => {
         }),
         {
           id: 'mysql-1',
-          name: '业务库',
+          name: 'Business Database',
           config: {
             type: 'mysql',
             host: 'mysql.local',
@@ -140,7 +185,61 @@ describe('buildRedisTopologySnapshot', () => {
       physicalDb: 0,
       mode: 'cluster_logical_namespace',
     });
-    expect(snapshot.connections[0].warnings).toContain('单机模式下存在多个节点地址，后端会按多节点集群路径处理，建议显式改为 Cluster 模式');
-    expect(snapshot.connections[0].nextActions.join('\n')).toContain('显式切换为 Cluster 模式');
+    expect(snapshot.connections[0].warnings.join('\n')).toContain('Cluster');
+    expect(snapshot.connections[0].nextActions.join('\n')).toContain('Cluster');
+  });
+
+  it('localizes controlled Redis topology diagnostics while preserving raw Redis values', () => {
+    const snapshot = buildRedisTopologySnapshot({
+      connections: [
+        buildRedisConnection('redis-cluster', 'Orders Redis Cluster', {
+          host: '10.10.1.10',
+          port: 6379,
+          hosts: ['10.10.1.11:6379'],
+          topology: 'cluster',
+          redisDB: 3,
+          useSSH: true,
+          useSSL: true,
+        }, {
+          includeRedisDatabases: [0, 3],
+        }),
+      ],
+      connectionId: 'redis-cluster',
+      translate: translateWithKeyEcho,
+    });
+
+    const connection = snapshot.connections[0];
+    expect(connection.topologyLabel).toBe('T:ai_chat.inspection.redis_topology.label.cluster');
+    expect(connection.effectiveTopologyLabel).toBe('T:ai_chat.inspection.redis_topology.label.cluster');
+    expect(connection.warnings).toContain('T:ai_chat.inspection.redis_topology.warning.ssh_unsupported:{"topologyLabel":"T:ai_chat.inspection.redis_topology.label.cluster"}');
+    expect(connection.warnings).toContain('T:ai_chat.inspection.redis_topology.warning.cluster_logical_db');
+    expect(connection.blockingReasons).toContain('T:ai_chat.inspection.redis_topology.warning.ssh_unsupported:{"topologyLabel":"T:ai_chat.inspection.redis_topology.label.cluster"}');
+    expect(connection.dbSemantics.note).toBe('T:ai_chat.inspection.redis_topology.db_note.cluster_logical_namespace');
+    expect(connection.nextActions).toContain('T:ai_chat.inspection.redis_topology.next_action.disable_ssh');
+    expect(connection.recommendations).toContain('T:ai_chat.inspection.redis_topology.recommendation.check_tls');
+    expect(connection.safeUriExample).toBe('rediss://10.10.1.10:6379,10.10.1.11:6379/0?topology=cluster&skip_verify=true');
+    expect(JSON.stringify(connection)).toContain('Redis Cluster');
+    expect(JSON.stringify(connection)).toContain('go-redis ClusterClient');
+  });
+
+  it('keeps Redis topology snapshot copy behind six-language catalog keys', () => {
+    for (const [language, catalog] of Object.entries(catalogs)) {
+      const missing = REDIS_TOPOLOGY_I18N_KEYS.filter((key) => !(key in catalog));
+      expect(missing, language).toEqual([]);
+    }
+  });
+
+  it('keeps Redis topology source free of hardcoded Chinese diagnostics', () => {
+    [
+      '\u4e3b\u673a\u5730\u5740\u4e3a\u7a7a',
+      '\u5355\u673a\u6a21\u5f0f\u76f4\u63a5\u4f7f\u7528',
+      '\u8865\u5145 Sentinel master \u540d\u79f0',
+      '\u786e\u8ba4\u4e3b\u673a\u548c\u9644\u52a0\u8282\u70b9',
+      'Redis Cluster \u7269\u7406',
+      '\u4e0d\u652f\u6301 SSH \u96a7\u9053',
+      'Sentinel master \u540d\u79f0\u4e3a\u7a7a',
+    ].forEach((literal) => {
+      expect(source).not.toContain(literal);
+    });
   });
 });

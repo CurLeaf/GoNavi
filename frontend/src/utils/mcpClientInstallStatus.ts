@@ -1,12 +1,70 @@
 import type { AIMCPClientInstallStatus } from '../types';
+import { t as catalogTranslate } from '../i18n/catalog';
+import { SUPPORTED_LANGUAGES } from '../i18n/resolveLanguage';
+import type { I18nParams } from '../i18n/types';
 
 export type MCPClientKey = 'claude-code' | 'codex' | 'openclaw' | 'hermans';
 
 const AUTO_MCP_CLIENTS = new Set<MCPClientKey>(['claude-code', 'codex']);
 const REMOTE_MCP_CLIENTS = new Set<MCPClientKey>(['openclaw', 'hermans']);
-const DEFAULT_REMOTE_MCP_PUBLIC_URL = 'https://<你的域名或隧道地址>/mcp';
+const DEFAULT_REMOTE_MCP_PUBLIC_URL = 'https://<your-domain-or-tunnel>/mcp';
 const DEFAULT_REMOTE_MCP_LOCAL_ADDR = '127.0.0.1:8765';
 const DEFAULT_REMOTE_MCP_PATH = '/mcp';
+type MCPClientInstallTranslator = (key: string, params?: I18nParams) => string;
+
+const defaultTranslate: MCPClientInstallTranslator = (key, params) => catalogTranslate('en-US', key, params);
+
+const MCP_CLIENT_STATUS_ERROR_TEMPLATE_KEYS = [
+  'ai.service.mcp_client.claude_code.config_path_failed',
+  'ai.service.mcp_client.codex.config_path_failed',
+  'ai.service.mcp_client.executable_path_failed',
+  'ai.service.mcp_client.executable_path_empty',
+  'ai.service.mcp_client.claude_code.config_format_invalid',
+  'ai.service.mcp_client.codex.config_format_invalid',
+  'ai.service.mcp_client.claude_code.config_read_failed',
+  'ai.service.mcp_client.claude_code.config_parse_failed',
+  'ai.service.mcp_client.claude_code.config_serialize_failed',
+  'ai.service.mcp_client.claude_code.config_dir_create_failed',
+  'ai.service.mcp_client.claude_code.config_write_failed',
+  'ai.service.mcp_client.codex.config_read_failed',
+  'ai.service.mcp_client.codex.config_dir_create_failed',
+  'ai.service.mcp_client.codex.config_write_failed',
+  'ai.service.mcp_client.claude_code.status.path_check_failed',
+  'ai.service.mcp_client.codex.status.path_check_failed',
+] as const;
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const buildCatalogTemplatePattern = (template: string): RegExp | null => {
+  const normalized = String(template || '').trim();
+  if (!normalized) {
+    return null;
+  }
+  const source = normalized
+    .split(/(\{\{[^}]+\}\})/u)
+    .filter(Boolean)
+    .map((segment) => (segment.startsWith('{{') && segment.endsWith('}}') ? '(.+?)' : escapeRegExp(segment)))
+    .join('');
+  return source ? new RegExp(`^${source}$`, 'u') : null;
+};
+
+const MCP_CLIENT_STATUS_ERROR_PATTERNS: RegExp[] = Array.from(new Set(
+  SUPPORTED_LANGUAGES.flatMap((language) => (
+    MCP_CLIENT_STATUS_ERROR_TEMPLATE_KEYS.map((key) => catalogTranslate(language, key))
+  )),
+))
+  .map((template) => buildCatalogTemplatePattern(template))
+  .filter((pattern): pattern is RegExp => Boolean(pattern));
+
+const translateMCPClientCopy = (
+  translate: MCPClientInstallTranslator,
+  key: string,
+  fallback: string,
+  params?: I18nParams,
+): string => {
+  const translated = translate(key, params);
+  return translated && translated !== key ? translated : fallback;
+};
 
 export interface RemoteMCPClientQuickStart {
   displayName: string;
@@ -27,48 +85,56 @@ export interface RemoteMCPParameterGuide {
   avoid: string;
 }
 
-export const REMOTE_MCP_PARAMETER_GUIDES: RemoteMCPParameterGuide[] = [
+const REMOTE_MCP_PARAMETER_GUIDE_DEFS: Array<Pick<RemoteMCPParameterGuide, 'key' | 'required' | 'example'>> = [
   {
     key: 'publicUrl',
-    title: '公网/隧道 URL',
     required: true,
-    fill: '填云端 Agent 能访问到的 Streamable HTTP MCP 地址，通常以 /mcp 结尾。',
     example: 'https://agent-gateway.example.com/mcp',
-    avoid: '不要填 Windows 本机的 127.0.0.1；云端 Linux 访问不到这个地址。',
   },
   {
     key: 'bearerToken',
-    title: 'Bearer Token',
     required: true,
-    fill: '填一段随机长 token，Windows 启动命令和云端 Agent 配置必须一致。',
     example: 'Authorization: Bearer gnv_xxx',
-    avoid: '不要使用空 token、短 token，也不要把数据库密码当 token 填进去。',
   },
   {
     key: 'localAddr',
-    title: '本机监听地址',
     required: true,
-    fill: 'Windows GoNavi HTTP MCP 默认监听 127.0.0.1:8765，再交给隧道或反向代理转发。',
     example: DEFAULT_REMOTE_MCP_LOCAL_ADDR,
-    avoid: '没有网关隔离时不要直接绑定 0.0.0.0 暴露到公网。',
   },
   {
     key: 'path',
-    title: 'MCP 路径',
     required: true,
-    fill: '本机启动命令、隧道 URL 和云端 Agent 配置里的路径要保持一致。',
     example: DEFAULT_REMOTE_MCP_PATH,
-    avoid: '不要一边用 /mcp，另一边配置 /api/mcp，路径不一致会 404。',
   },
   {
     key: 'serverId',
-    title: '服务 ID',
     required: false,
-    fill: '给云端 Agent 识别这条 MCP 服务的名称，默认 gonavi 即可。',
     example: 'gonavi',
-    avoid: '不要频繁改名，否则 Agent 里已有的工具引用可能失效。',
   },
 ];
+
+const REMOTE_MCP_PARAMETER_KEY_MAP: Record<string, string> = {
+  publicUrl: 'public_url',
+  bearerToken: 'bearer_token',
+  localAddr: 'local_addr',
+  path: 'path',
+  serverId: 'server_id',
+};
+
+export const buildRemoteMCPParameterGuides = (
+  translate: MCPClientInstallTranslator = defaultTranslate,
+): RemoteMCPParameterGuide[] =>
+  REMOTE_MCP_PARAMETER_GUIDE_DEFS.map((item) => {
+    const key = REMOTE_MCP_PARAMETER_KEY_MAP[item.key] || item.key;
+    return {
+      ...item,
+      title: translate(`ai_settings.mcp_server.remote_quick_start.parameter.${key}.title`),
+      fill: translate(`ai_settings.mcp_server.remote_quick_start.parameter.${key}.fill`),
+      avoid: translate(`ai_settings.mcp_server.remote_quick_start.parameter.${key}.avoid`),
+    };
+  });
+
+export const REMOTE_MCP_PARAMETER_GUIDES: RemoteMCPParameterGuide[] = buildRemoteMCPParameterGuides();
 
 export const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
   {
@@ -79,7 +145,7 @@ export const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
     matchesCurrent: false,
     clientDetected: false,
     clientCommand: 'claude',
-    message: '未检测到 Claude Code 用户级 GoNavi MCP 配置',
+    message: 'No Claude Code user-level GoNavi MCP configuration was detected',
   },
   {
     client: 'codex',
@@ -89,7 +155,7 @@ export const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
     matchesCurrent: false,
     clientDetected: false,
     clientCommand: 'codex',
-    message: '未检测到 Codex 用户级 GoNavi MCP 配置',
+    message: 'No Codex user-level GoNavi MCP configuration was detected',
   },
   {
     client: 'openclaw',
@@ -99,7 +165,7 @@ export const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
     matchesCurrent: false,
     clientDetected: false,
     clientCommand: 'openclaw',
-    message: 'OpenClaw 通常部署在云端 Linux；请通过远程 MCP 桥接接入 Windows GoNavi，不要复制数据库密码。',
+    message: 'OpenClaw usually runs on cloud Linux; use a remote MCP bridge to reach Windows GoNavi and do not copy database passwords.',
   },
   {
     client: 'hermans',
@@ -109,7 +175,7 @@ export const EMPTY_MCP_CLIENT_STATUSES: AIMCPClientInstallStatus[] = [
     matchesCurrent: false,
     clientDetected: false,
     clientCommand: 'hermans',
-    message: 'Hermans 这类远程 Agent 请通过远程 MCP 桥接接入 Windows GoNavi，不要复制数据库密码。',
+    message: 'Remote Agents such as Hermans should use a remote MCP bridge to reach Windows GoNavi and should not copy database passwords.',
   },
 ];
 
@@ -137,7 +203,7 @@ export const supportsAutoMCPClientInstall = (status?: Pick<AIMCPClientInstallSta
 };
 
 const hasStatusError = (status: AIMCPClientInstallStatus): boolean =>
-  /失败|异常|错误|校验失败/u.test(String(status.message || ''));
+  MCP_CLIENT_STATUS_ERROR_PATTERNS.some((pattern) => pattern.test(String(status.message || '').trim()));
 
 const getMCPClientPriority = (status: AIMCPClientInstallStatus): number => {
   if (status.matchesCurrent) {
@@ -224,56 +290,142 @@ export const formatMCPLaunchCommand = (
 
 export const buildRemoteMCPClientGuide = (
   status?: Partial<Pick<AIMCPClientInstallStatus, 'client' | 'displayName' | 'message'>> | null,
+  translate: MCPClientInstallTranslator = defaultTranslate,
 ): string => {
-  const quickStart = buildRemoteMCPClientQuickStart(status);
+  const quickStart = buildRemoteMCPClientQuickStart(status, translate);
+  const standaloneWithoutToken = quickStart.standaloneCommand.replace(` --token <random-token>`, '');
   return [
-    `GoNavi MCP 远程接入说明 - ${quickStart.displayName}`,
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.title',
+      'GoNavi MCP remote access guide - {{displayName}}',
+      { displayName: quickStart.displayName },
+    ),
     '',
-    '目标：',
-    '- 数据库连接、账号和密码继续保存在 Windows 上的 GoNavi。云端 Agent 不需要保存数据库密码。',
-    '- 云端 Agent 只通过 MCP tools 读取 get_connections/get_databases/get_tables/get_columns/get_table_ddl 等结果。',
-    '- 远程接入默认使用 schema-only 模式，不注册 execute_sql，适合只给 OpenClaw/Hermans 读取库表结构。',
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.goal_heading',
+      'Goal:',
+    ),
+    `- ${translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.goal.credentials_stay_local',
+      'Database connections, accounts, and passwords stay in Windows GoNavi. The cloud Agent does not need to store database passwords.',
+    )}`,
+    `- ${translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.goal.tools_only',
+      'The cloud Agent only reads get_connections/get_databases/get_tables/get_columns/get_table_ddl results through MCP tools.',
+    )}`,
+    `- ${translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.goal.schema_only',
+      'Remote access uses schema-only mode by default and does not register execute_sql, suitable for giving OpenClaw/Hermans schema-structure access only.',
+    )}`,
     '',
-    '当前边界：',
-    '- GoNavi 内置 MCP 本机入口是 stdio，适合 Claude Code / Codex 这类和 GoNavi 在同一台机器上的客户端。',
-    '- 如果 OpenClaw/Hermans 部署在云端 Linux，不能直接使用 Windows 本地 stdio 命令；可在 Windows 上启动 GoNavi Streamable HTTP 模式，再通过隧道或反向代理给云端 Agent 调用。',
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.boundary_heading',
+      'Current boundary:',
+    ),
+    `- ${translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.boundary.local_stdio',
+      'The built-in local GoNavi MCP entry is stdio, suitable for clients such as Claude Code / Codex running on the same machine as GoNavi.',
+    )}`,
+    `- ${translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.boundary.remote_cloud',
+      'If OpenClaw/Hermans runs on cloud Linux, it cannot use the Windows local stdio command directly; start GoNavi Streamable HTTP mode on Windows, then let the cloud Agent call it through a tunnel or reverse proxy.',
+    )}`,
     '',
-    '建议接入方式：',
-    '1. Windows 本机保持 GoNavi 可访问，由 GoNavi 读取保存连接和系统凭据。',
-    `2. 在 Windows 或可信内网侧运行：${quickStart.launchCommand}。`,
-    `3. 在 ${quickStart.displayName} 中添加远程 MCP Server，transport 选择 Streamable HTTP，URL 填隧道/反向代理后的 /mcp 地址，并设置 Authorization: Bearer <随机token>。`,
-    '4. 先调用 get_connections 获取 connectionId，再调用表结构工具；不要把数据库 host/user/password 写进云端 Agent 配置。',
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.access_heading',
+      'Recommended access method:',
+    ),
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.step.keep_windows_accessible',
+      '1. Keep GoNavi reachable on Windows, and let GoNavi read saved connections and system credentials.',
+    ),
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.step.run_command',
+      '2. Run this on Windows or the trusted intranet side: {{launchCommand}}.',
+      { launchCommand: quickStart.launchCommand },
+    ),
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.step.configure_remote_server',
+      '3. Add a remote MCP Server in {{displayName}}, choose Streamable HTTP transport, set the URL to the tunneled/reverse-proxied /mcp address, and set Authorization: Bearer <random-token>.',
+      { displayName: quickStart.displayName },
+    ),
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.step.inspect_schema',
+      '4. Call get_connections first to obtain connectionId, then call schema tools; do not write database host/user/password into the cloud Agent config.',
+    ),
     '',
-    '可复制配置片段（适用于支持 mcpServers JSON 的 Agent）：',
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.config_heading',
+      'Copyable config snippet (for Agents that support mcpServers JSON):',
+    ),
     ...quickStart.configJson.split('\n'),
     '',
-    '无 GUI / CLI 生成配置命令：',
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.config_command_heading',
+      'No GUI / CLI config generation command:',
+    ),
     quickStart.configCommand,
     '',
-    'CLI / 服务启动命令：',
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.launch_command_heading',
+      'CLI / service launch command:',
+    ),
     quickStart.launchCommand,
-    `或设置环境变量：GONAVI_MCP_HTTP_TOKEN=<随机token> 后运行 ${quickStart.standaloneCommand.replace(' --token <随机token>', '')}`,
-    '如果明确需要远程执行 SQL，可去掉 --schema-only；此时 execute_sql 仍受 GoNavi AI 安全控制约束，写操作必须显式传 allowMutating=true。',
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.env_fallback',
+      'Or set environment variable GONAVI_MCP_HTTP_TOKEN=<random-token>, then run {{standaloneCommand}}',
+      { standaloneCommand: standaloneWithoutToken },
+    ),
+    translateMCPClientCopy(
+      translate,
+      'ai_settings.mcp_server.remote_quick_start.guide.execute_sql_note',
+      'If remote SQL execution is explicitly required, remove --schema-only; execute_sql remains constrained by GoNavi AI safety controls, and writes must explicitly pass allowMutating=true.',
+    ),
     '',
-    status?.message ? `当前提示：${status.message}` : '',
+    status?.message
+      ? translateMCPClientCopy(
+          translate,
+          'ai_settings.mcp_server.remote_quick_start.guide.current_hint',
+          'Current hint: {{message}}',
+          { message: status.message },
+        )
+      : '',
   ].filter((line, index, lines) => line || index < lines.length - 1).join('\n');
 };
 
 export const buildRemoteMCPClientQuickStart = (
   status?: Partial<Pick<AIMCPClientInstallStatus, 'client' | 'displayName'>> | null,
+  translate: MCPClientInstallTranslator = defaultTranslate,
 ): RemoteMCPClientQuickStart => {
-  const displayName = String(status?.displayName || '远程 Agent').trim();
+  const displayName = String(status?.displayName || translate('ai_settings.mcp_server.remote_quick_start.default_agent_name')).trim();
   const client = isMCPClientKey(String(status?.client || '')) ? String(status?.client || '').trim() : 'openclaw';
-  const launchCommand = `GoNavi.exe mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <随机token> --schema-only`;
-  const standaloneCommand = `gonavi-mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <随机token> --schema-only`;
-  const configCommand = `GoNavi.exe mcp-server remote-config --client ${client} --url ${DEFAULT_REMOTE_MCP_PUBLIC_URL} --token <随机token> --schema-only`;
+  const launchCommand = `GoNavi.exe mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <random-token> --schema-only`;
+  const standaloneCommand = `gonavi-mcp-server http --addr ${DEFAULT_REMOTE_MCP_LOCAL_ADDR} --path ${DEFAULT_REMOTE_MCP_PATH} --token <random-token> --schema-only`;
+  const configCommand = `GoNavi.exe mcp-server remote-config --client ${client} --url ${DEFAULT_REMOTE_MCP_PUBLIC_URL} --token <random-token> --schema-only`;
   const configJson = JSON.stringify({
     mcpServers: {
       gonavi: {
         type: 'streamable-http',
         url: DEFAULT_REMOTE_MCP_PUBLIC_URL,
         headers: {
-          Authorization: 'Bearer <随机token>',
+          Authorization: 'Bearer <random-token>',
         },
       },
     },
@@ -286,15 +438,15 @@ export const buildRemoteMCPClientQuickStart = (
     launchCommand,
     standaloneCommand,
     verificationSteps: [
-      'Windows 本机先访问 http://127.0.0.1:8765/healthz，确认 GoNavi MCP HTTP 服务已启动。',
-      `${displayName} 里配置 Streamable HTTP MCP，URL 指向隧道或反向代理后的 /mcp 地址。`,
-      '先调用 get_connections 获取 connectionId，再读取 get_databases / get_tables / get_columns。',
+      translate('ai_settings.mcp_server.remote_quick_start.verification.healthz'),
+      translate('ai_settings.mcp_server.remote_quick_start.verification.configure_agent', { displayName }),
+      translate('ai_settings.mcp_server.remote_quick_start.verification.inspect_schema'),
     ],
     securityNotes: [
-      '数据库账号和密码仍保存在 Windows GoNavi，本段配置不要写数据库密码。',
-      '默认 --schema-only 不注册 execute_sql，远程 Agent 只能走库表结构类工具。',
-      'HTTP MCP 必须使用随机 Bearer Token，并放在 HTTPS、私有网络或受控隧道后面。',
-      '如去掉 --schema-only 开放 execute_sql，仍受 GoNavi AI 安全控制约束，写操作仍必须显式传 allowMutating=true。',
+      translate('ai_settings.mcp_server.remote_quick_start.security.credentials_stay_local'),
+      translate('ai_settings.mcp_server.remote_quick_start.security.schema_only'),
+      translate('ai_settings.mcp_server.remote_quick_start.security.token_required'),
+      translate('ai_settings.mcp_server.remote_quick_start.security.execute_sql'),
     ],
   };
 };

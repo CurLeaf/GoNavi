@@ -18,9 +18,12 @@ import (
 	"GoNavi-Wails/internal/appdata"
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
+	"GoNavi-Wails/internal/jvm"
 	"GoNavi-Wails/internal/logger"
 	proxytunnel "GoNavi-Wails/internal/proxy"
+	redisbackend "GoNavi-Wails/internal/redis"
 	"GoNavi-Wails/internal/secretstore"
+	syncbackend "GoNavi-Wails/internal/sync"
 	"GoNavi-Wails/shared/i18n"
 	"github.com/google/uuid"
 )
@@ -39,6 +42,9 @@ var (
 	resolveDialConfigWithProxyFunc = resolveDialConfigWithProxy
 	driverRuntimeSupportStatusFunc = db.DriverRuntimeSupportStatus
 	verifyDriverAgentRevisionFunc  = verifyRuntimeOptionalDriverAgentRevision
+	defaultAppTextMu               sync.RWMutex
+	defaultAppTextLanguage         = i18n.LanguageEnUS
+	defaultAppTextLocalizer        *i18n.Localizer
 )
 
 type cachedDatabase struct {
@@ -121,6 +127,45 @@ func newAppLocalizer() *i18n.Localizer {
 	return localizer
 }
 
+func setDefaultAppLanguage(language i18n.Language) {
+	defaultAppTextMu.Lock()
+	defer defaultAppTextMu.Unlock()
+
+	defaultAppTextLanguage = language
+	if defaultAppTextLocalizer == nil {
+		localizer, err := i18n.NewLocalizer(language)
+		if err != nil {
+			logger.Warnf("加载默认多语言目录失败：%v", err)
+			return
+		}
+		defaultAppTextLocalizer = localizer
+		return
+	}
+	defaultAppTextLocalizer.SetLanguage(language)
+}
+
+func defaultAppText(key string, params map[string]any) string {
+	defaultAppTextMu.RLock()
+	if defaultAppTextLocalizer != nil {
+		text := defaultAppTextLocalizer.T(key, params)
+		defaultAppTextMu.RUnlock()
+		return text
+	}
+	defaultAppTextMu.RUnlock()
+
+	defaultAppTextMu.Lock()
+	defer defaultAppTextMu.Unlock()
+	if defaultAppTextLocalizer == nil {
+		localizer, err := i18n.NewLocalizer(defaultAppTextLanguage)
+		if err != nil {
+			logger.Warnf("加载默认多语言目录失败：%v", err)
+			return key
+		}
+		defaultAppTextLocalizer = localizer
+	}
+	return defaultAppTextLocalizer.T(key, params)
+}
+
 func (a *App) SetLanguage(language string) {
 	normalized, ok := i18n.NormalizeLanguage(language)
 	if !ok {
@@ -134,6 +179,12 @@ func (a *App) SetLanguage(language string) {
 	if a.localizer != nil {
 		a.localizer.SetLanguage(normalized)
 	}
+	setDefaultAppLanguage(normalized)
+	db.SetBackendLanguage(normalized)
+	jvm.SetBackendLanguage(normalized)
+	proxytunnel.SetBackendLanguage(normalized)
+	redisbackend.SetBackendLanguage(normalized)
+	syncbackend.SetBackendLanguage(normalized)
 }
 
 func (a *App) appText(key string, params map[string]any) string {
@@ -210,7 +261,7 @@ func (a *App) ResetWebViewZoom() (result connection.QueryResult) {
 			logger.Errorf("重置 WebView2 zoom 失败：%v", recovered)
 			result = connection.QueryResult{
 				Success: false,
-				Message: fmt.Sprintf("重置 WebView2 zoom 失败：%v", recovered),
+				Message: a.appText("app.backend.error.reset_webview_zoom_failed", map[string]any{"detail": fmt.Sprint(recovered)}),
 			}
 		}
 	}()
@@ -434,7 +485,16 @@ func wrapConnectError(config connection.ConnectionConfig, err error) error {
 		if dbName == "" {
 			dbName = "(default)"
 		}
-		err = fmt.Errorf("数据库连接超时：%s %s:%d/%s：%w", config.Type, config.Host, config.Port, dbName, err)
+		err = errorMessageOverride{
+			message: defaultAppText("db.backend.message.connect_timeout_detail", map[string]any{
+				"dbType":   config.Type,
+				"host":     config.Host,
+				"port":     config.Port,
+				"database": dbName,
+				"detail":   normalizeErrorMessage(err),
+			}),
+			cause: err,
+		}
 	}
 
 	return withLogHint{err: err, logPath: logger.Path()}
@@ -443,6 +503,16 @@ func wrapConnectError(config connection.ConnectionConfig, err error) error {
 type errorMessageOverride struct {
 	message string
 	cause   error
+}
+
+type mongoConnectErrorLabelRewrite struct {
+	legacy string
+	key    string
+}
+
+var mongoConnectErrorLabelRewrites = []mongoConnectErrorLabelRewrite{
+	{legacy: "SSL \u4e3b\u5e93\u51ed\u636e", key: "db.backend.message.mongo_primary_credentials_label"},
+	{legacy: "SSL \u4ece\u5e93\u51ed\u636e", key: "db.backend.message.mongo_replica_credentials_label"},
 }
 
 func (e errorMessageOverride) Error() string {
@@ -464,8 +534,14 @@ func sanitizeMongoConnectErrorLabel(config connection.ConnectionConfig, err erro
 		return err
 	}
 	original := err.Error()
-	rewritten := strings.ReplaceAll(original, "SSL 主库凭据", "主库凭据")
-	rewritten = strings.ReplaceAll(rewritten, "SSL 从库凭据", "从库凭据")
+	rewritten := original
+	for _, candidate := range mongoConnectErrorLabelRewrites {
+		replacement := defaultAppText(candidate.key, nil)
+		if replacement == "" || replacement == candidate.key {
+			continue
+		}
+		rewritten = strings.ReplaceAll(rewritten, candidate.legacy, replacement)
+	}
 	if rewritten == original {
 		return err
 	}
@@ -512,6 +588,17 @@ type withLogHint struct {
 	logPath string
 }
 
+func unwrapLogHintError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var hinted withLogHint
+	if errors.As(err, &hinted) && hinted.err != nil {
+		return hinted.err
+	}
+	return err
+}
+
 func (e withLogHint) Error() string {
 	message := normalizeErrorMessage(e.err)
 	path := strings.TrimSpace(e.logPath)
@@ -522,7 +609,7 @@ func (e withLogHint) Error() string {
 	if statErr != nil || info.IsDir() || info.Size() <= 0 {
 		return message
 	}
-	return fmt.Sprintf("%s（详细日志：%s）", message, path)
+	return message + defaultAppText("driver_manager.backend.message.log_hint", map[string]any{"path": path})
 }
 
 func (e withLogHint) Unwrap() error {
@@ -645,7 +732,7 @@ func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Datab
 	effectiveConfig := applyGlobalProxyToConnection(resolvedConfig)
 	if supported, reason := driverRuntimeSupportStatusFunc(effectiveConfig.Type); !supported {
 		if strings.TrimSpace(reason) == "" {
-			reason = fmt.Sprintf("%s 驱动未启用，请先在驱动管理中安装启用", strings.TrimSpace(effectiveConfig.Type))
+			reason = a.appText("driver_manager.backend.status.optional_disabled", map[string]any{"name": strings.TrimSpace(effectiveConfig.Type)})
 		}
 		return nil, withLogHint{err: fmt.Errorf("%s", reason), logPath: logger.Path()}
 	}
@@ -689,7 +776,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 
 	if supported, reason := driverRuntimeSupportStatusFunc(effectiveConfig.Type); !supported {
 		if strings.TrimSpace(reason) == "" {
-			reason = fmt.Sprintf("%s 驱动未启用，请先在驱动管理中安装启用", strings.TrimSpace(effectiveConfig.Type))
+			reason = a.appText("driver_manager.backend.status.optional_disabled", map[string]any{"name": strings.TrimSpace(effectiveConfig.Type)})
 		}
 		// Best-effort cleanup: if cached instance exists for this exact config, close it.
 		a.mu.Lock()
@@ -756,10 +843,10 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 		logger.Infof("未命中文件库连接缓存，开始创建连接：类型=%s 缓存Key=%s", strings.TrimSpace(effectiveConfig.Type), shortKey)
 	}
 	if failure, remaining, ok := a.getCachedConnectFailureByKey(key); ok {
-		message := fmt.Sprintf("连接最近失败，正在冷却中，请 %s 后重试；上次错误：%s",
-			formatConnectFailureCooldown(remaining),
-			normalizeErrorMessage(failure.err),
-		)
+		message := a.appText("db.backend.message.connect_failure_cooldown", map[string]any{
+			"remaining": formatConnectFailureCooldown(remaining),
+			"detail":    normalizeErrorMessage(unwrapLogHintError(failure.err)),
+		})
 		logger.Warnf("命中数据库连接失败冷却：%s 缓存Key=%s 剩余=%s 原因=%s",
 			formatConnSummary(effectiveConfig), shortKey, formatConnectFailureCooldown(remaining), normalizeErrorMessage(failure.err))
 		return nil, withLogHint{err: fmt.Errorf("%s", message), logPath: logger.Path()}
@@ -1032,10 +1119,10 @@ func (a *App) CancelQuery(queryID string) connection.QueryResult {
 		ctx.cancel()
 		delete(a.runningQueries, queryID)
 		logger.Infof("查询已取消：queryID=%s", queryID)
-		return connection.QueryResult{Success: true, Message: "查询已取消"}
+		return connection.QueryResult{Success: true, Message: a.appText("query_editor.message.cancel_success", nil)}
 	}
 	logger.Warnf("取消查询失败：queryID=%s 不存在或已完成", queryID)
-	return connection.QueryResult{Success: false, Message: "查询不存在或已完成"}
+	return connection.QueryResult{Success: false, Message: a.appText("query_editor.message.cancel_no_running", nil)}
 }
 
 // cleanupStaleQueries removes queries older than maxAge.

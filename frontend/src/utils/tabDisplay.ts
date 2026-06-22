@@ -1,4 +1,6 @@
 import type { ConnectionConfig, SavedConnection, TabData } from '../types';
+import { t as catalogTranslate } from '../i18n/catalog';
+import type { I18nParams } from '../i18n/types';
 
 export const TAB_DISPLAY_ELEMENT_KEYS = ['connection', 'kind', 'object', 'database', 'schema', 'host'] as const;
 
@@ -17,6 +19,10 @@ export interface TabDisplaySettings {
   single?: TabDisplayLayoutSnapshot;
   double?: TabDisplayLayoutSnapshot;
 }
+
+export type TabDisplayTranslate = (key: string, params?: I18nParams) => string;
+
+const defaultTranslate: TabDisplayTranslate = (key, params) => catalogTranslate('en-US', key, params);
 
 export const TAB_DISPLAY_SECONDARY_DEFAULT_KEYS: TabDisplayElementKey[] = ['connection', 'database', 'schema', 'host'];
 
@@ -259,10 +265,10 @@ const isRedisTab = (tab: TabData): boolean => {
   return tab.type === 'redis-keys' || tab.type === 'redis-command' || tab.type === 'redis-monitor';
 };
 
-const buildRedisBaseTitle = (tab: TabData): string => {
+const buildRedisBaseTitle = (tab: TabData, translate: TabDisplayTranslate = defaultTranslate): string => {
   const dbLabel = `db${tab.redisDB ?? 0}`;
-  if (tab.type === 'redis-command') return `命令 - ${dbLabel}`;
-  if (tab.type === 'redis-monitor') return `监控 - ${dbLabel}`;
+  if (tab.type === 'redis-command') return translate('sidebar.tab.redis_command', { database: dbLabel });
+  if (tab.type === 'redis-monitor') return translate('sidebar.tab.redis_monitor', { database: dbLabel });
   return dbLabel;
 };
 
@@ -399,7 +405,6 @@ const stripSchemaFromTableOverviewTitle = (title: string): string => {
   return rawTitle.replace(/\s+\([^()]+\)\s*$/, '').trim() || rawTitle;
 };
 
-const QUERY_TAB_FALLBACK_TITLE = '新建查询';
 const QUERY_TAB_TITLE_MAX_LENGTH = 28;
 
 const getFileNameFromPath = (value: string): string => (
@@ -413,23 +418,23 @@ const isLikelyRawSqlTitle = (value: string): boolean => {
   return /^(select|with|insert|update|delete|merge|create|alter|drop|truncate|explain|show|desc|describe)\b/i.test(text);
 };
 
-const compactQueryTabTitle = (tab: TabData): string => {
+const compactQueryTabTitle = (tab: TabData, translate: TabDisplayTranslate = defaultTranslate): string => {
   const filePath = String(tab.filePath || '').trim();
   if (filePath) {
     return getFileNameFromPath(filePath);
   }
 
   const rawTitle = String(tab.title || '').trim();
-  const title = rawTitle && !isLikelyRawSqlTitle(rawTitle) ? rawTitle : QUERY_TAB_FALLBACK_TITLE;
+  const title = rawTitle && !isLikelyRawSqlTitle(rawTitle) ? rawTitle : translate('sidebar.tab.new_query');
   if (title.length <= QUERY_TAB_TITLE_MAX_LENGTH) {
     return title;
   }
   return `${title.slice(0, QUERY_TAB_TITLE_MAX_LENGTH - 3)}...`;
 };
 
-const buildCompactObjectTabTitle = (tab: TabData): string => {
+const buildCompactObjectTabTitle = (tab: TabData, translate: TabDisplayTranslate = defaultTranslate): string => {
   if (tab.type === 'query') {
-    return compactQueryTabTitle(tab);
+    return compactQueryTabTitle(tab, translate);
   }
   if (tab.type === 'table') {
     return stripSchemaFromTabObjectLabel(tab.tableName || tab.title) || tab.title;
@@ -469,8 +474,8 @@ export const getTabDisplayKindLabel = (tab: TabData): string => {
   return 'TAB';
 };
 
-const getTabRawObjectLabel = (tab: TabData): string => {
-  if (tab.type === 'query') return compactQueryTabTitle(tab);
+const getTabRawObjectLabel = (tab: TabData, translate: TabDisplayTranslate = defaultTranslate): string => {
+  if (tab.type === 'query') return compactQueryTabTitle(tab, translate);
   if (tab.tableName) return tab.tableName;
   if (tab.viewName) return tab.viewName;
   if (tab.eventName) return tab.eventName;
@@ -491,8 +496,9 @@ const getTabDisplayElementValue = (
   key: TabDisplayElementKey,
   tab: TabData,
   connection?: SavedConnection,
+  translate: TabDisplayTranslate = defaultTranslate,
 ): string => {
-  const rawObjectLabel = getTabRawObjectLabel(tab);
+  const rawObjectLabel = getTabRawObjectLabel(tab, translate);
   switch (key) {
     case 'connection':
       return getTabConnectionLabel(connection);
@@ -502,7 +508,7 @@ const getTabDisplayElementValue = (
       return buildCompactObjectTabTitle({
         ...tab,
         title: tab.type === 'table' || tab.type === 'query' ? rawObjectLabel : tab.title,
-      });
+      }, translate);
     case 'database':
       return String(tab.dbName || '').trim();
     case 'schema':
@@ -540,9 +546,10 @@ const buildTabDisplayParts = (
   keys: TabDisplayElementKey[],
   tab: TabData,
   connection?: SavedConnection,
+  translate: TabDisplayTranslate = defaultTranslate,
 ): TabDisplayPart[] => keys
   .map((key) => {
-    const value = getTabDisplayElementValue(key, tab, connection);
+    const value = getTabDisplayElementValue(key, tab, connection, translate);
     return {
       key,
       value,
@@ -555,11 +562,12 @@ export const buildTabDisplayModel = (
   tab: TabData,
   connection?: SavedConnection,
   settings?: Partial<TabDisplaySettings> | null,
+  translate: TabDisplayTranslate = defaultTranslate,
 ): TabDisplayModel => {
   const sanitized = sanitizeTabDisplaySettings(settings);
-  const primaryParts = buildTabDisplayParts(sanitized.primaryElements, tab, connection);
-  const secondaryParts = buildTabDisplayParts(sanitized.secondaryElements, tab, connection);
-  const primaryText = primaryParts.map((part) => part.text).join(' ').trim() || buildCompactObjectTabTitle(tab);
+  const primaryParts = buildTabDisplayParts(sanitized.primaryElements, tab, connection, translate);
+  const secondaryParts = buildTabDisplayParts(sanitized.secondaryElements, tab, connection, translate);
+  const primaryText = primaryParts.map((part) => part.text).join(' ').trim() || buildCompactObjectTabTitle(tab, translate);
   const secondaryText = secondaryParts.map((part) => part.text).join('·').trim();
   const fullTitle = [primaryText, secondaryText].filter(Boolean).join(' · ');
   return {
@@ -576,9 +584,10 @@ export const buildTabDisplayTitle = (
   tab: TabData,
   connection?: SavedConnection,
   settings?: Partial<TabDisplaySettings> | null,
+  translate: TabDisplayTranslate = defaultTranslate,
 ): string => {
   if (settings) {
-    return buildTabDisplayModel(tab, connection, settings).fullTitle;
+    return buildTabDisplayModel(tab, connection, settings, translate).fullTitle;
   }
 
   const connectionName = String(connection?.name || '').trim();
@@ -586,10 +595,10 @@ export const buildTabDisplayTitle = (
   if (isRedisTab(tab)) {
     const hostSummary = resolveConnectionHostSummary(connection?.config);
     const identity = [connectionName, hostSummary].filter(Boolean).join(' | ');
-    return identity ? `[${identity}] ${buildRedisBaseTitle(tab)}` : buildRedisBaseTitle(tab);
+    return identity ? `[${identity}] ${buildRedisBaseTitle(tab, translate)}` : buildRedisBaseTitle(tab, translate);
   }
 
-  const baseTitle = buildCompactObjectTabTitle(tab);
+  const baseTitle = buildCompactObjectTabTitle(tab, translate);
   if (tab.type !== 'table' && tab.type !== 'design' && tab.type !== 'table-overview') {
     return baseTitle;
   }

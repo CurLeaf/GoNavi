@@ -12,6 +12,7 @@ import type {
 import { sanitizeErrorMsg } from '../../utils/aiChatRuntime';
 import { toAIRequestMessage } from '../../utils/aiMessagePayload';
 import type { AIChatToolDefinition } from '../../utils/aiToolRegistry';
+import type { AIChatAttachmentTranslator } from './aiChatAttachments';
 
 interface AIChatStreamChunk {
   content?: string;
@@ -43,6 +44,7 @@ interface UseAIChatStreamSubscriptionOptions {
   nudgeCountRef: MutableRefObject<number>;
   pendingJVMPlanContextRef: MutableRefObject<JVMAIPlanContext | undefined>;
   pendingJVMDiagnosticPlanContextRef: MutableRefObject<JVMDiagnosticPlanContext | undefined>;
+  translate?: AIChatAttachmentTranslator;
 }
 
 interface AIChatStreamState {
@@ -74,6 +76,29 @@ const resetAIChatStreamProgress = (state: AIChatStreamState) => {
   state.flushPending = false;
 };
 
+const translatePanelCopy = (
+  t: AIChatAttachmentTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+): string => {
+  if (!t) return fallback;
+  const translated = t(key, params);
+  return translated && translated !== key ? translated : fallback;
+};
+
+const FORCE_TOOL_CALL_NUDGE_PATTERNS = [
+  /(?:let me|i(?:'|’)ll|i will|first|next|now).*(?:query|search|find|fetch|get|check|inspect|review|look up|call)/i,
+  /(?:query|search|find|fetch|get|check|inspect|review|look up).*(?:info(?:rmation)?|field|fields|column|columns|list|data)\s*[:：]?\s*$/i,
+  /(?:\u8ba9\u6211|\u6211\u5148|\u6211\u6765|\u73b0\u5728|\u63a5\u4e0b\u6765|\u4e0b\u9762).*(?:\u67e5\u8be2|\u67e5\u627e|\u83b7\u53d6|\u67e5\u770b|\u68c0\u67e5|\u8c03\u7528)|(?:\u83b7\u53d6|\u67e5\u8be2|\u67e5\u627e|\u67e5\u770b).*(?:\u4fe1\u606f|\u5b57\u6bb5|\u5217\u8868|\u6570\u636e)[：:]?\s*$/u,
+  /(?:\u8b93\u6211|\u6211\u5148|\u6211\u4f86|\u73fe\u5728|\u63a5\u4e0b\u4f86|\u4e0b\u9762).*(?:\u67e5\u8a62|\u67e5\u627e|\u7372\u53d6|\u67e5\u770b|\u6aa2\u67e5|\u8abf\u7528)|(?:\u7372\u53d6|\u67e5\u8a62|\u67e5\u627e|\u67e5\u770b).*(?:\u8cc7\u8a0a|\u5b57\u6bb5|\u6b04\u4f4d|\u5217\u8868|\u8cc7\u6599)[：:]?\s*$/u,
+];
+
+const shouldResendForceToolCallNudge = (content: string): boolean => {
+  const text = String(content || '').trim();
+  return text !== '' && FORCE_TOOL_CALL_NUDGE_PATTERNS.some((pattern) => pattern.test(text));
+};
+
 export const useAIChatStreamSubscription = ({
   sid,
   sending,
@@ -88,6 +113,7 @@ export const useAIChatStreamSubscription = ({
   nudgeCountRef,
   pendingJVMPlanContextRef,
   pendingJVMDiagnosticPlanContextRef,
+  translate,
 }: UseAIChatStreamSubscriptionOptions) => {
   const sendingRef = useRef(sending);
   const streamStateRef = useRef(createAIChatStreamState(sid));
@@ -145,11 +171,16 @@ export const useAIChatStreamSubscription = ({
       }
 
       if (data.error) {
-        const cleanErr = sanitizeErrorMsg(data.error);
+        const cleanErr = sanitizeErrorMsg(data.error, translate);
         const rawErr = cleanErr !== data.error ? data.error : undefined;
         if (streamState.assistantMsgId) {
           updateAIChatMessage(sid, streamState.assistantMsgId, {
-            content: `❌ 错误: ${cleanErr}`,
+            content: translatePanelCopy(
+              translate,
+              'ai_chat.panel.message.error',
+              `❌ Error: ${cleanErr}`,
+              { detail: cleanErr },
+            ),
             phase: 'idle',
             loading: false,
             rawError: rawErr,
@@ -159,7 +190,12 @@ export const useAIChatStreamSubscription = ({
             id: nextMessageId(),
             role: 'assistant',
             phase: 'idle',
-            content: `❌ 错误: ${cleanErr}`,
+            content: translatePanelCopy(
+              translate,
+              'ai_chat.panel.message.error',
+              `❌ Error: ${cleanErr}`,
+              { detail: cleanErr },
+            ),
             rawError: rawErr,
             timestamp: Date.now(),
             jvmPlanContext: pendingJVMPlanContextRef.current,
@@ -272,21 +308,25 @@ export const useAIChatStreamSubscription = ({
             if (
               existing &&
               nudgeCountRef.current < 2 &&
-              /(?:让我|我先|我来|现在|接下来|下面).*(?:查询|查找|获取|查看|检查|调用)|(?:获取|查询|查找|查看).*(?:信息|字段|列表|数据)[：:]?\s*$/.test(existing.content || '')
+              shouldResendForceToolCallNudge(existing.content || '')
             ) {
               nudgeCountRef.current += 1;
               updateAIChatMessage(sid, doneAssistantId, { loading: false, phase: 'idle' });
               (async () => {
                 try {
                   const currentHistory = useStore.getState().aiChatHistory[sid] || [];
-                  const messagesPayload = currentHistory.map(toAIRequestMessage);
+                  const messagesPayload = currentHistory.map((message) => toAIRequestMessage(message, translate));
                   const sysMessages = await buildSystemContextMessages(
                     existing.jvmPlanContext,
                     existing.jvmDiagnosticPlanContext,
                   );
                   messagesPayload.push({
                     role: 'user',
-                    content: '请直接使用 function call 调用工具执行操作，不要只用文字描述计划。',
+                    content: translatePanelCopy(
+                      translate,
+                      'ai_chat.panel.model_control.force_tool_call',
+                      'Use a function call directly to invoke the tool and perform the operation; do not only describe the plan in text.',
+                    ),
                   });
                   const allMsg = [...sysMessages, ...messagesPayload];
                   const service = (window as any).go?.aiservice?.Service;
@@ -309,7 +349,11 @@ export const useAIChatStreamSubscription = ({
 
             if (!hasContent && !hasThinking && !hasTools) {
               updateAIChatMessage(sid, doneAssistantId, {
-                content: '❌ 模型未能成功响应任何内容，可能遭遇频控、上下文超载或理解拒绝。',
+                content: translatePanelCopy(
+                  translate,
+                  'ai_chat.panel.message.empty_response',
+                  '❌ The model did not return any content. It may have hit rate limits, context overload, or a refusal.',
+                ),
                 loading: false,
                 phase: 'idle',
               });
@@ -320,7 +364,11 @@ export const useAIChatStreamSubscription = ({
             addAIChatMessage(sid, {
               id: nextMessageId(),
               role: 'assistant',
-              content: '❌ 请求中断：未收到任何具体回复。',
+              content: translatePanelCopy(
+                translate,
+                'ai_chat.panel.message.request_interrupted',
+                '❌ Request interrupted: no concrete reply was received.',
+              ),
               timestamp: Date.now(),
               loading: false,
             });
@@ -346,6 +394,7 @@ export const useAIChatStreamSubscription = ({
     pendingJVMPlanContextRef,
     setSending,
     sid,
+    translate,
     updateAIChatMessage,
   ]);
 };

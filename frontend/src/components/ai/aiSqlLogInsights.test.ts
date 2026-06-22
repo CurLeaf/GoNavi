@@ -3,6 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { buildRecentSqlActivitySnapshot, buildRecentSqlLogsSnapshot } from './aiSqlLogInsights';
 
 describe('aiSqlLogInsights', () => {
+  const translate = (key: string): string => ({
+    'ai_chat.inspection.sql_log.unspecified_database': '(Unspecified database)',
+  }[key] ?? key);
+
   it('keeps recent sql logs as structured previews with inferred statement metadata', () => {
     const snapshot = buildRecentSqlLogsSnapshot({
       status: 'all',
@@ -115,6 +119,34 @@ describe('aiSqlLogInsights', () => {
     expect(snapshot.recentErrors[0]).toMatchObject({
       statementType: 'update',
       activityKind: 'write',
+    });
+  });
+
+  it('localizes generated database placeholders while preserving raw log fields', () => {
+    const snapshot = buildRecentSqlActivitySnapshot({
+      status: 'all',
+      activityKind: 'all',
+      limit: 5,
+      translate,
+      sqlLogs: [
+        {
+          id: 'log-1',
+          timestamp: 2,
+          sql: 'SELECT * FROM raw_table',
+          status: 'error',
+          duration: 10,
+          dbName: '',
+          message: '原始错误',
+        },
+      ],
+    });
+
+    expect(snapshot.dbBreakdown).toEqual({
+      '(Unspecified database)': 1,
+    });
+    expect(snapshot.recentExamples[0]).toMatchObject({
+      sql: 'SELECT * FROM raw_table',
+      message: '原始错误',
     });
   });
 });

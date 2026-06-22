@@ -1,10 +1,13 @@
 package app
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/shared/i18n"
 )
 
 func TestResolveConnectionConfigByIDLoadsSecretsFromStore(t *testing.T) {
@@ -118,10 +121,60 @@ func TestResolveConnectionSecretsOnDarwinUsesInlineSavedSecrets(t *testing.T) {
 	}
 }
 
-func TestResolveConnectionSecretsReturnsFriendlyMessageWhenSavedSecretSourceIsMissing(t *testing.T) {
+func TestConnectionSecretResolutionMessagesUseLocalizedText(t *testing.T) {
+	sourceBytes, err := os.ReadFile("connection_secret_resolution.go")
+	if err != nil {
+		t.Fatalf("read connection_secret_resolution.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	for _, rawMessage := range []string{
+		`fmt.Errorf("未找到已保存连接，可能已被删除，请刷新后重试")`,
+		`fmt.Errorf("未找到当前连接对应的已保存密文，请重新填写密码并保存后再试")`,
+		`fmt.Errorf("系统密文存储当前不可用，请检查系统钥匙串或凭据管理器后再试")`,
+	} {
+		if strings.Contains(source, rawMessage) {
+			t.Fatalf("connection_secret_resolution.go still contains raw secret resolution text %q", rawMessage)
+		}
+	}
+
+	for _, key := range []string{
+		"connection_modal.secret.error.saved_connection_deleted",
+		"connection_modal.secret.error.saved_connection_missing",
+		"connection_modal.secret.error.store_unavailable",
+	} {
+		if !strings.Contains(source, key) {
+			t.Fatalf("connection_secret_resolution.go does not reference secret resolution i18n key %q", key)
+		}
+	}
+}
+
+func TestConnectionSecretResolutionCatalogKeysExist(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	keys := []string{
+		"connection_modal.secret.error.saved_connection_deleted",
+		"connection_modal.secret.error.saved_connection_missing",
+		"connection_modal.secret.error.store_unavailable",
+	}
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		for _, key := range keys {
+			if strings.TrimSpace(catalog[key]) == "" {
+				t.Fatalf("%s catalog missing secret resolution key %q", language, key)
+			}
+		}
+	}
+}
+
+func TestResolveConnectionSecretsReturnsLocalizedMessageWhenSavedSecretSourceIsMissing(t *testing.T) {
 	store := newFakeAppSecretStore()
 	app := NewAppWithSecretStore(store)
 	app.configDir = t.TempDir()
+	app.SetLanguage(string(i18n.LanguageEnUS))
 
 	_, err := app.resolveConnectionSecrets(connection.ConnectionConfig{
 		ID:   "conn-missing",
@@ -133,8 +186,37 @@ func TestResolveConnectionSecretsReturnsFriendlyMessageWhenSavedSecretSourceIsMi
 	if err == nil {
 		t.Fatal("expected resolveConnectionSecrets to fail for a missing saved connection")
 	}
-	if !strings.Contains(err.Error(), "已保存密文") {
-		t.Fatalf("expected a secret-specific error message, got %q", err.Error())
+	want := "The saved secret for the current connection was not found. Re-enter the password, save, and try again."
+	if err.Error() != want {
+		t.Fatalf("expected localized secret-specific error message %q, got %q", want, err.Error())
+	}
+}
+
+func TestResolveConnectionSecretsReturnsLocalizedMessageWhenSavedConnectionRecordIsMissing(t *testing.T) {
+	store := newFakeAppSecretStore()
+	app := NewAppWithSecretStore(store)
+	app.configDir = t.TempDir()
+	app.SetLanguage(string(i18n.LanguageEnUS))
+
+	_, err := app.resolveConnectionSecrets(connection.ConnectionConfig{ID: "conn-deleted"})
+	if err == nil {
+		t.Fatal("expected resolveConnectionSecrets to fail for a missing saved connection record")
+	}
+
+	want := "The saved connection was not found. It may have been deleted. Refresh and try again."
+	if err.Error() != want {
+		t.Fatalf("expected localized missing saved connection message %q, got %q", want, err.Error())
+	}
+}
+
+func TestResolveConnectionSecretsReturnsLocalizedMessageWhenSecretStoreIsUnavailable(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.SetLanguage(string(i18n.LanguageEnUS))
+
+	err := app.normalizeConnectionSecretResolutionError(connection.ConnectionConfig{}, fmt.Errorf("secret store unavailable"))
+	want := "Secure secret storage is currently unavailable. Check the system keychain or credential manager, then try again."
+	if err.Error() != want {
+		t.Fatalf("expected localized unavailable secret store message %q, got %q", want, err.Error())
 	}
 }
 

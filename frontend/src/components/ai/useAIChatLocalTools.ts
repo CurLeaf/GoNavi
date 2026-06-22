@@ -15,6 +15,7 @@ import { compressContextIfNeeded, getDynamicMaxContextChars } from '../../utils/
 import { toAIRequestMessage } from '../../utils/aiMessagePayload';
 import type { AIChatToolDefinition } from '../../utils/aiToolRegistry';
 import { dispatchAIChatPayload } from './aiChatPayloadDispatch';
+import type { AIChatAttachmentTranslator } from './aiChatAttachments';
 import {
   buildToolResultMessage,
   executeLocalAIToolCall,
@@ -37,6 +38,7 @@ interface UseAIChatLocalToolsOptions {
   pendingJVMDiagnosticPlanContextRef: MutableRefObject<JVMDiagnosticPlanContext | undefined>;
   setSending: (sending: boolean) => void;
   skills: AISkillConfig[];
+  translate?: AIChatAttachmentTranslator;
   updateAIChatMessage: (
     sid: string,
     messageId: string,
@@ -47,6 +49,17 @@ interface UseAIChatLocalToolsOptions {
 
 const MAX_TOOL_CALL_ROUNDS = 15;
 const SOFT_LIMIT_ROUNDS = 10;
+
+const translatePanelCopy = (
+  t: AIChatAttachmentTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+): string => {
+  if (!t) return fallback;
+  const translated = t(key, params);
+  return translated && translated !== key ? translated : fallback;
+};
 
 export const useAIChatLocalTools = ({
   sid,
@@ -60,6 +73,7 @@ export const useAIChatLocalTools = ({
   pendingJVMDiagnosticPlanContextRef,
   setSending,
   skills,
+  translate,
   updateAIChatMessage,
   userPromptSettings,
 }: UseAIChatLocalToolsOptions) => {
@@ -87,7 +101,12 @@ export const useAIChatLocalTools = ({
       useStore.getState().addAIChatMessage(sid, {
         id: nextMessageId(),
         role: 'assistant',
-        content: `⚠️ 工具调用已达 ${MAX_TOOL_CALL_ROUNDS} 轮上限，自动终止循环。如需继续探索，请发送新的消息。`,
+        content: translatePanelCopy(
+          translate,
+          'ai_chat.panel.probe.max_rounds',
+          `⚠️ Tool calls reached the ${MAX_TOOL_CALL_ROUNDS} round limit and were stopped. Send a new message to continue exploring.`,
+          { count: MAX_TOOL_CALL_ROUNDS },
+        ),
         timestamp: Date.now(),
         jvmPlanContext: inheritedJVMPlanContext,
         jvmDiagnosticPlanContext: inheritedJVMDiagnosticPlanContext,
@@ -120,6 +139,7 @@ export const useAIChatLocalTools = ({
         skills,
         userPromptSettings,
         dynamicModels,
+        translate,
       });
       executions.push(execution);
       const toolResultMsg: AIChatMessage = buildToolResultMessage({
@@ -140,10 +160,15 @@ export const useAIChatLocalTools = ({
     } else {
       toolCallRoundRef.current += 1;
       if (toolCallRoundRef.current >= 3) {
+        updateAIChatMessage(sid, currentAsstMsgId, { loading: false, phase: 'idle' });
         useStore.getState().addAIChatMessage(sid, {
           id: nextMessageId(),
           role: 'assistant',
-          content: '⚠️ 探针连续 3 轮执行失败，自动终止。请检查连接状态后重试。',
+          content: translatePanelCopy(
+            translate,
+            'ai_chat.panel.probe.consecutive_failed',
+            '⚠️ Probes failed for 3 consecutive rounds and were stopped. Check the connection status and retry.',
+          ),
           timestamp: Date.now(),
           jvmPlanContext: inheritedJVMPlanContext,
           jvmDiagnosticPlanContext: inheritedJVMDiagnosticPlanContext,
@@ -160,7 +185,11 @@ export const useAIChatLocalTools = ({
         id: nextMessageId(),
         role: 'assistant',
         phase: 'connecting',
-        content: '汇总探针执行结果中',
+        content: translatePanelCopy(
+          translate,
+          'ai_chat.panel.status.summarizing_probe',
+          'Summarizing probe results',
+        ),
         timestamp: Date.now(),
         loading: true,
         jvmPlanContext: inheritedJVMPlanContext,
@@ -175,16 +204,32 @@ export const useAIChatLocalTools = ({
         }
       };
 
-      setTimeout(() => safeUpdateTransition('向模型回传运行时数据'), 200);
-      setTimeout(() => safeUpdateTransition('模型大脑深度推理中'), 500);
-      setTimeout(() => safeUpdateTransition('等待下发操作指令'), 1200);
-      setTimeout(() => safeUpdateTransition('正在深度思考链路与逻辑'), 3000);
+      setTimeout(() => safeUpdateTransition(translatePanelCopy(
+        translate,
+        'ai_chat.panel.status.returning_runtime_data',
+        'Returning runtime data to the model',
+      )), 200);
+      setTimeout(() => safeUpdateTransition(translatePanelCopy(
+        translate,
+        'ai_chat.panel.status.deep_reasoning',
+        'Model is reasoning deeply',
+      )), 500);
+      setTimeout(() => safeUpdateTransition(translatePanelCopy(
+        translate,
+        'ai_chat.panel.status.waiting_instruction',
+        'Waiting for operation instructions',
+      )), 1200);
+      setTimeout(() => safeUpdateTransition(translatePanelCopy(
+        translate,
+        'ai_chat.panel.status.analyzing_chain',
+        'Analyzing chain and logic deeply',
+      )), 3000);
 
       setSending(true);
       const currentHistory = useStore.getState().aiChatHistory[sid] || [];
       const messagesPayload = currentHistory
         .filter((message) => message.phase !== 'connecting')
-        .map(toAIRequestMessage);
+        .map((message) => toAIRequestMessage(message, translate));
       const sysMessages = await buildSystemContextMessages(
         inheritedJVMPlanContext,
         inheritedJVMDiagnosticPlanContext,
@@ -192,18 +237,27 @@ export const useAIChatLocalTools = ({
 
       let finalMessagesPayload = messagesPayload;
       const dynamicMaxLimit = getDynamicMaxContextChars(activeProviderModel);
-      const summary = await compressContextIfNeeded(sid, messagesPayload, dynamicMaxLimit);
+      const summary = await compressContextIfNeeded(sid, messagesPayload, dynamicMaxLimit, translate);
       if (summary) {
         const compressedMsg: AIChatMessage = {
           id: nextMessageId(),
           role: 'assistant',
-          content: `【自动记忆重塑】已将超长历史探针数据和对话压缩为摘要：\n\n${summary}`,
+          content: translatePanelCopy(
+            translate,
+            'ai_chat.panel.status.memory_probe_summary',
+            `[Automatic memory reshape] Long probe history and chat have been compressed into a summary:\n\n${summary}`,
+            { summary },
+          ),
           timestamp: Date.now() - 1000,
         };
         const continueMsg: AIChatMessage = {
           id: nextMessageId(),
           role: 'user',
-          content: '请根据上述最新状态与探索结果，继续完成你先前未竟的分析或执行下一步。',
+          content: translatePanelCopy(
+            translate,
+            'ai_chat.panel.model_control.continue_after_summary',
+            'Based on the latest status and exploration results above, continue the analysis you had not finished or perform the next step.',
+          ),
           timestamp: Date.now() - 500,
         };
         useStore.getState().replaceAIChatHistory(sid, [compressedMsg, continueMsg, chainConnectingMsg]);
@@ -227,6 +281,7 @@ export const useAIChatLocalTools = ({
         pendingAssistantMessageId: chainConnectingMsg.id,
         jvmPlanContext: inheritedJVMPlanContext,
         jvmDiagnosticPlanContext: inheritedJVMDiagnosticPlanContext,
+        translate,
       });
     } catch (error) {
       console.error('Failed to chain tool call', error);
@@ -244,6 +299,7 @@ export const useAIChatLocalTools = ({
     setSending,
     sid,
     skills,
+    translate,
     updateAIChatMessage,
     userPromptSettings,
   ]);

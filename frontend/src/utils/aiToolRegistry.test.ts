@@ -9,37 +9,38 @@ describe('aiToolRegistry', () => {
   it('registers the ai-runtime inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_runtime');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('AI 自身运行状态');
-    expect(info?.tool.function.description).toContain('当前供应商');
+    expect(info?.desc).toContain('AI runtime status');
+    expect(info?.tool.function.description).toContain('provider');
+    expect(info?.tool.function.description).toContain('safety level');
   });
 
   it('registers the ai-setup-health inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_setup_health');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('体检当前 AI 配置');
-    expect(info?.tool.function.description).toContain('聊天发送前置');
+    expect(info?.desc).toContain('current AI setup');
+    expect(info?.tool.function.description).toContain('chat send prerequisites');
   });
 
   it('registers the ai-support-bundle inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_support_bundle');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('排障支持包');
-    expect(info?.tool.function.description).toContain('默认不包含数据库密码');
-    expect(info?.tool.function.parameters?.properties?.includeMessageContent?.description).toContain('默认 false');
+    expect(info?.desc).toContain('troubleshooting support bundle');
+    expect(info?.tool.function.description).toContain('does not include database passwords');
+    expect(info?.tool.function.parameters?.properties?.includeMessageContent?.description).toContain('Default false');
   });
 
   it('registers the ai-safety inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_safety');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('写入安全边界');
+    expect(info?.desc).toContain('write safety boundaries');
     expect(info?.tool.function.description).toContain('allowMutating');
   });
 
   it('registers the mcp-setup inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_setup');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('MCP 配置');
-    expect(info?.tool.function.description).toContain('外部客户端');
+    expect(info?.desc).toContain('MCP configuration');
+    expect(info?.tool.function.description).toContain('external client');
   });
 
   it('registers the mcp-remote-access inspector as a builtin tool', () => {
@@ -53,24 +54,24 @@ describe('aiToolRegistry', () => {
   it('registers the mcp-runtime-failure inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_runtime_failures');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('启动与调用失败');
-    expect(info?.tool.function.description).toContain('工具发现失败');
-    expect(info?.tool.function.parameters?.properties?.serverName?.description).toContain('MCP 服务名');
+    expect(info?.desc).toContain('startup and tool-call failures');
+    expect(info?.tool.function.description).toContain('tool discovery failures');
+    expect(info?.tool.function.parameters?.properties?.serverName?.description).toContain('MCP service name');
   });
 
   it('registers the mcp-authoring-guide inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_authoring_guide');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('新增 MCP');
-    expect(info?.tool.function.description).toContain('command、args、env、timeout');
+    expect(info?.desc).toContain('add-MCP');
+    expect(info?.tool.function.description).toContain('full-command auto-splitting');
   });
 
   it('registers the mcp-draft inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_draft');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('MCP 新增草稿');
-    expect(info?.tool.function.description).toContain('真实校验器试算');
-    expect(info?.tool.function.parameters?.properties?.fullCommand?.description).toContain('一整行 MCP 启动命令');
+    expect(info?.desc).toContain('add-MCP draft');
+    expect(info?.tool.function.description).toContain('automatic splitting');
+    expect(info?.tool.function.parameters?.properties?.fullCommand?.description).toContain('full MCP startup command');
     expect(info?.tool.function.parameters?.properties?.templateKey?.enum).toContain('docker');
   });
 
@@ -79,149 +80,152 @@ describe('aiToolRegistry', () => {
     expect(info).toBeTruthy();
     expect(info?.desc).toContain('Docker MCP');
     expect(info?.tool.function.description).toContain('docker run');
-    expect(info?.tool.function.parameters?.properties?.includeDisabled?.description).toContain('默认 true');
+    expect(info?.tool.function.parameters?.properties?.includeDisabled?.description).toContain('Default true');
   });
 
   it('registers the mcp-tool-schema inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_mcp_tool_schema');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('MCP 工具参数');
-    expect(info?.tool.function.description).toContain('inputSchema');
-    expect(info?.tool.function.parameters?.properties?.alias?.description).toContain('真实 alias');
+    expect(info?.desc).toContain('MCP tool argument schema');
+    expect(info?.tool.function.description).toContain('parameter schema');
+    expect(info?.tool.function.parameters?.properties?.alias?.description).toContain('real alias');
   });
 
   it('registers the ai-provider inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_providers');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('供应商与模型配置');
-    expect(info?.tool.function.description).toContain('模型列表为空');
+    expect(info?.desc).toContain('providers and model configuration');
+    expect(info?.tool.function.description).toContain('model list');
   });
 
   it('registers the chat-readiness inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_chat_readiness');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('发送条件');
-    expect(info?.tool.function.description).toContain('当前 AI 聊天输入区');
+    expect(info?.desc).toContain('AI chat can send');
+    expect(info?.tool.function.description).toContain('current AI chat input');
   });
 
   it('registers the ai-upstream-log inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_upstream_logs');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('上游请求入参');
-    expect(info?.tool.function.description).toContain('请求 body 预览');
+    expect(info?.desc).toContain('upstream request payloads');
+    expect(info?.tool.function.description).toContain('request body preview');
     expect(info?.tool.function.parameters?.properties?.requestId?.description).toContain('requestId');
-    expect(info?.tool.function.parameters?.properties?.includePayloadSummary?.description).toContain('工具数量');
+    expect(info?.tool.function.parameters?.properties?.includePayloadSummary?.description).toContain('tool count');
+    expect(info?.tool.function.parameters?.properties?.includePayloadSummary?.description).toContain('tool_choice');
   });
 
   it('registers the ai-tool-catalog inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_tool_catalog');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('内置工具目录');
-    expect(info?.tool.function.description).toContain('推荐工具调用流程');
-    expect(info?.tool.function.parameters?.properties?.keyword?.description).toContain('连接失败');
-    expect(info?.tool.function.parameters?.properties?.includeMCPTools?.description).toContain('MCP 工具摘要');
+    expect(info?.desc).toContain('built-in tool catalog');
+    expect(info?.tool.function.description).toContain('recommended tool-call flows');
+    expect(info?.tool.function.parameters?.properties?.keyword?.description).toContain('connection failure');
+    expect(info?.tool.function.parameters?.properties?.includeMCPTools?.description).toContain('MCP tool summaries');
   });
 
   it('registers the ai-guidance inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_guidance');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('提示词与 Skills');
-    expect(info?.tool.function.description).toContain('自定义提示词');
+    expect(info?.desc).toContain('prompts and Skills');
+    expect(info?.tool.function.description).toContain('user-defined prompts');
   });
 
   it('registers the current-connection inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_current_connection');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('当前活动连接');
-    expect(info?.tool.function.description).toContain('SSH/代理/HTTP 隧道状态');
+    expect(info?.desc).toContain('active connection');
+    expect(info?.tool.function.description).toContain('SSH/proxy/HTTP tunnel state');
   });
 
   it('registers the connection-capability inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_connection_capabilities');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('前端能力');
-    expect(info?.tool.function.description).toContain('结果是否强制只读');
+    expect(info?.desc).toContain('frontend capabilities');
+    expect(info?.tool.function.description).toContain('forced read-only result state');
   });
 
   it('registers the saved-connections inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_saved_connections');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('已保存连接');
-    expect(info?.tool.function.description).toContain('本地已保存连接清单');
+    expect(info?.desc).toContain('saved connections');
+    expect(info?.tool.function.description).toContain('locally saved connections');
   });
 
   it('registers the Redis topology inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_redis_topology');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('Redis 单机/哨兵/集群');
+    expect(info?.desc).toContain('Redis standalone, Sentinel, and Cluster');
     expect(info?.tool.function.description).toContain('Sentinel');
-    expect(info?.tool.function.description).toContain('不会回显 Redis 密码');
-    expect(info?.tool.function.parameters?.properties?.connectionId?.description).toContain('Redis 连接 ID');
+    expect(info?.tool.function.description).toContain('do not echo Redis or Sentinel passwords');
+    expect(info?.tool.function.parameters?.properties?.connectionId?.description).toContain('Redis connection ID');
   });
 
   it('registers the external-sql-directory inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_external_sql_directories');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('外部 SQL 目录');
-    expect(info?.tool.function.description).toContain('当前打开的外部 SQL 文件页签');
+    expect(info?.desc).toContain('external SQL directory');
+    expect(info?.tool.function.description).toContain('currently open external SQL file tabs');
   });
 
   it('registers the external-sql-file inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_external_sql_file');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('外部 SQL 文件内容');
-    expect(info?.tool.function.description).toContain('目录中的具体 SQL 脚本');
+    expect(info?.desc).toContain('external SQL file content');
+    expect(info?.tool.function.description).toContain('specified external SQL file');
+    expect(info?.tool.function.parameters?.properties?.filePath?.description).toContain('Absolute path');
   });
 
   it('registers the shortcut inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_shortcuts');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('快捷键配置');
-    expect(info?.tool.function.description).toContain('Win/Mac');
+    expect(info?.desc).toContain('shortcut configuration');
+    expect(info?.tool.function.description).toContain('Windows/macOS');
   });
 
   it('registers the app-log inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_app_logs');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('应用日志');
+    expect(info?.desc).toContain('application log');
     expect(info?.tool.function.description).toContain('gonavi.log');
   });
 
   it('registers the recent-connection-failure inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_recent_connection_failures');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('连接失败');
-    expect(info?.tool.function.description).toContain('multiStatements');
+    expect(info?.desc).toContain('connection failures');
+    expect(info?.tool.function.description).toContain('SSH tunnel failures');
+    expect(info?.tool.function.parameters?.properties?.keyword?.description).toContain('127.0.0.1');
   });
 
   it('registers the ai-render-error inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_last_render_error');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('渲染异常');
-    expect(info?.tool.function.description).toContain('消息渲染异常');
+    expect(info?.desc).toContain('render error');
+    expect(info?.tool.function.description).toContain('AI message render error');
   });
 
   it('registers the ai-message-flow inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_message_flow');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('消息流');
-    expect(info?.tool.function.description).toContain('连续 assistant 消息');
+    expect(info?.desc).toContain('message flow');
+    expect(info?.tool.function.description).toContain('consecutive assistant messages');
   });
 
   it('registers the ai-context-budget inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_context_budget');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('上下文体量');
-    expect(info?.tool.function.description).toContain('MCP 工具 schema');
-    expect(info?.tool.function.parameters?.properties?.messageLimit?.description).toContain('最大 120');
+    expect(info?.desc).toContain('context size');
+    expect(info?.tool.function.description).toContain('MCP tool schemas');
+    expect(info?.tool.function.parameters?.properties?.messageLimit?.description).toContain('maximum 120');
   });
 
   it('registers the codebase-hotspots inspector as a builtin tool', () => {
     const info = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_codebase_hotspots');
     expect(info).toBeTruthy();
-    expect(info?.desc).toContain('前端大文件');
-    expect(info?.tool.function.description).toContain('拆分热点快照');
-    expect(info?.tool.function.parameters?.properties?.minLines?.description).toContain('默认 1000');
+    expect(info?.desc).toContain('large frontend files');
+    expect(info?.tool.function.description).toContain('split-hotspot snapshot');
+    expect(info?.tool.function.parameters?.properties?.minLines?.description).toContain('Default 1000');
   });
 
   it('registers the recent-sql-activity, saved-query, and sql-snippet inspectors as builtin tools', () => {
@@ -236,26 +240,26 @@ describe('aiToolRegistry', () => {
     const aiSessionsTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_ai_sessions');
     const snippetTool = BUILTIN_AI_TOOL_INFO.find((item) => item.name === 'inspect_sql_snippets');
 
-    expect(recentActivityTool?.desc).toContain('最近 SQL 活动');
-    expect(recentActivityTool?.tool.function.description).toContain('最近 SQL 活动');
-    expect(sqlEditorTransactionTool?.desc).toContain('SQL 编辑器事务');
-    expect(sqlEditorTransactionTool?.tool.function.description).toContain('托管事务');
-    expect(sqlRiskTool?.desc).toContain('SQL 的执行风险');
-    expect(sqlRiskTool?.tool.function.description).toContain('危险点');
-    expect(appLogTool?.desc).toContain('GoNavi 应用日志');
-    expect(appLogTool?.tool.function.description).toContain('应用日志');
-    expect(connectionFailureTool?.desc).toContain('连接失败');
-    expect(connectionFailureTool?.tool.function.description).toContain('连接冷却');
-    expect(renderErrorTool?.desc).toContain('渲染异常记录');
-    expect(renderErrorTool?.tool.function.description).toContain('气泡局部报错');
-    expect(messageFlowTool?.desc).toContain('消息流');
-    expect(messageFlowTool?.tool.function.description).toContain('工具调用没有闭环');
-    expect(savedQueryTool?.desc).toContain('已保存的 SQL 查询');
-    expect(savedQueryTool?.tool.function.description).toContain('历史查询');
-    expect(aiSessionsTool?.desc).toContain('AI 历史会话');
-    expect(aiSessionsTool?.tool.function.description).toContain('之前的 AI 对话');
-    expect(snippetTool?.desc).toContain('SQL 片段模板');
-    expect(snippetTool?.tool.function.description).toContain('片段模板');
+    expect(recentActivityTool?.desc).toContain('recent SQL activity');
+    expect(recentActivityTool?.tool.function.description).toContain('recent SQL activity');
+    expect(sqlEditorTransactionTool?.desc).toContain('SQL editor transaction');
+    expect(sqlEditorTransactionTool?.tool.function.description).toContain('managed transaction');
+    expect(sqlRiskTool?.desc).toContain('execution risk');
+    expect(sqlRiskTool?.tool.function.description).toContain('risk points');
+    expect(appLogTool?.desc).toContain('GoNavi application log');
+    expect(appLogTool?.tool.function.description).toContain('application log');
+    expect(connectionFailureTool?.desc).toContain('connection failures');
+    expect(connectionFailureTool?.tool.function.description).toContain('cooldown');
+    expect(renderErrorTool?.desc).toContain('message render error');
+    expect(renderErrorTool?.tool.function.description).toContain('render error snapshot');
+    expect(messageFlowTool?.desc).toContain('message flow');
+    expect(messageFlowTool?.tool.function.description).toContain('tool-call to tool-result matching');
+    expect(savedQueryTool?.desc).toContain('saved SQL queries');
+    expect(savedQueryTool?.tool.function.description).toContain('SQL preview');
+    expect(aiSessionsTool?.desc).toContain('AI conversation history');
+    expect(aiSessionsTool?.tool.function.description).toContain('latest message preview');
+    expect(snippetTool?.desc).toContain('SQL snippet templates');
+    expect(snippetTool?.tool.function.description).toContain('snippet templates');
   });
 
   it('keeps builtin tools and MCP tools in the unified runtime tool chain', () => {
@@ -332,5 +336,48 @@ describe('aiToolRegistry', () => {
     expect(mcpTool?.function.description).toBe(
       'ai_chat.tools.mcp_fallback_description: raw_tool_title @ raw-server.local',
     );
+  });
+
+  it('localizes SQL inspection tool schema copy while preserving raw tool and parameter names', () => {
+    const tools = buildAvailableAIChatTools([], (key) => `T:${key}`);
+    const recentLogsTool = tools.find((item) => item.function.name === 'inspect_recent_sql_logs');
+    const sqlRiskTool = tools.find((item) => item.function.name === 'inspect_sql_risk');
+
+    expect(recentLogsTool?.function.name).toBe('inspect_recent_sql_logs');
+    expect(recentLogsTool?.function.description).toBe(
+      'T:ai_chat.inspection.tool_info.inspect_recent_sql_logs.tool_description',
+    );
+    expect(recentLogsTool?.function.parameters?.properties?.limit?.description).toBe(
+      'T:ai_chat.inspection.tool_info.inspect_recent_sql_logs.param.limit',
+    );
+    expect(recentLogsTool?.function.parameters?.properties?.status?.enum).toEqual(['all', 'success', 'error']);
+
+    expect(sqlRiskTool?.function.name).toBe('inspect_sql_risk');
+    expect(sqlRiskTool?.function.description).toBe(
+      'T:ai_chat.inspection.tool_info.inspect_sql_risk.tool_description',
+    );
+    expect(sqlRiskTool?.function.parameters?.properties?.sql?.description).toBe(
+      'T:ai_chat.inspection.tool_info.inspect_sql_risk.param.sql',
+    );
+    expect(sqlRiskTool?.function.parameters?.properties?.previewCharLimit?.description).toBe(
+      'T:ai_chat.inspection.tool_info.inspect_sql_risk.param.previewCharLimit',
+    );
+  });
+
+  it('keeps SQL inspection tool info source free of legacy Chinese copy', () => {
+    const sqlToolInfoSource = readFileSync(
+      new URL('./aiBuiltinInspectionSqlToolInfo.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(sqlToolInfoSource).toContain('const SQL_TOOL_INFO_KEY_PREFIX = "ai_chat.inspection.tool_info";');
+    expect(sqlToolInfoSource).toContain('inspect_recent_sql_logs');
+    expect(sqlToolInfoSource).toContain('`${keyPrefix}.desc`');
+    expect(sqlToolInfoSource).not.toContain('查看最近 SQL 执行日志');
+    expect(sqlToolInfoSource).not.toContain('总结最近 SQL 活动分布');
+    expect(sqlToolInfoSource).not.toContain('查看 SQL 编辑器事务提交状态');
+    expect(sqlToolInfoSource).not.toContain('检查当前或指定 SQL 的执行风险');
+    expect(sqlToolInfoSource).not.toContain('可选，返回多少条日志，默认 20，最大 100');
+    expect(sqlToolInfoSource).not.toContain('可选，要检查的 SQL；不传时默认读取当前活动查询页签的 SQL 草稿');
   });
 });

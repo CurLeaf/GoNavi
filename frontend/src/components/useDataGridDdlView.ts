@@ -1,10 +1,12 @@
 import React from 'react';
 import { DBShowCreateTable } from '../../wailsjs/go/app/App';
+import { t as catalogTranslate } from '../i18n/catalog';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { formatDdlForDisplay } from '../utils/ddlFormat';
 
 type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er';
 type DdlViewLayoutMode = 'bottom' | 'side';
+type TranslateParams = Record<string, string | number | boolean | null | undefined>;
 
 interface UseDataGridDdlViewParams {
   canViewDdl: boolean;
@@ -22,6 +24,7 @@ interface UseDataGridDdlViewParams {
     error: (content: string) => void;
   };
   dbType?: string;
+  translate?: (key: string, params?: TranslateParams) => string;
 }
 
 export interface UseDataGridDdlViewResult {
@@ -57,6 +60,7 @@ export const useDataGridDdlView = ({
   setTextRecordIndex,
   messageApi,
   dbType,
+  translate,
 }: UseDataGridDdlViewParams): UseDataGridDdlViewResult => {
   const [viewMode, setViewMode] = React.useState<GridViewMode>('table');
   const [ddlModalOpen, setDdlModalOpen] = React.useState(false);
@@ -76,9 +80,13 @@ export const useDataGridDdlView = ({
 
   const isTableSurfaceActive = viewMode === 'table' || (isV2Ui && viewMode === 'ddl' && ddlViewLayout === 'side');
 
+  const translateMessage = React.useCallback((key: string, params?: TranslateParams) => {
+    return translate ? translate(key, params) : catalogTranslate('zh-CN', key, params);
+  }, [translate]);
+
   const handleOpenTableDdl = React.useCallback(async (options?: { asView?: boolean }) => {
     if (!canViewDdl || !currentConnConfig || !tableName) {
-      messageApi.error('当前表缺少连接或表名，无法查看 DDL');
+      messageApi.error(translateMessage('data_grid.message.ddl_missing_context'));
       return;
     }
     const asView = options?.asView === true && isV2Ui;
@@ -98,16 +106,16 @@ export const useDataGridDdlView = ({
         setDdlText(formatDdlForDisplay(res.data, dbType || String((currentConnConfig as any)?.type || '')));
         return;
       }
-      messageApi.error(res.message || '获取 DDL 失败');
+      messageApi.error(res.message || translateMessage('data_grid.message.ddl_load_failed'));
     } catch (error: any) {
       if (requestSeq !== ddlRequestSeqRef.current) return;
-      messageApi.error(error?.message || '获取 DDL 失败');
+      messageApi.error(error?.message || translateMessage('data_grid.message.ddl_load_failed'));
     } finally {
       if (requestSeq === ddlRequestSeqRef.current) {
         setDdlLoading(false);
       }
     }
-  }, [canViewDdl, currentConnConfig, dbName, dbType, isV2Ui, messageApi, tableName]);
+  }, [canViewDdl, currentConnConfig, dbName, dbType, isV2Ui, messageApi, tableName, translateMessage]);
 
   React.useEffect(() => {
     if (isV2Ui || (viewMode !== 'fields' && viewMode !== 'ddl' && viewMode !== 'er')) return;

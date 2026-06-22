@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { t as translateCatalog } from '../../i18n/catalog';
 import type { AIToolCall } from '../../types';
 import { executeLocalAIToolCall } from './aiLocalToolExecutor';
 
@@ -64,6 +65,38 @@ describe('aiLocalToolExecutor inspect_ai_last_render_error', () => {
 
     expect(result.success).toBe(true);
     expect(result.content).toContain('"hasError":false');
-    expect(result.content).toContain('当前还没有记录到 AI 消息渲染异常');
+    expect(result.content).toContain('No AI message render errors have been recorded yet');
+  });
+
+  it('localizes the render error snapshot while preserving raw diagnostic fields', async () => {
+    (globalThis as Record<string, unknown>).__gonaviLastAIMessageRenderError = {
+      messageId: 'msg-raw-1',
+      role: 'assistant',
+      contentPreview: '原始 AI 回复预览 raw',
+      message: 'Cannot read properties of undefined',
+      stack: 'TypeError: Cannot read properties of undefined\n    at Bubble.tsx:12:3',
+      componentStack: '\n    at AIMessageBubble',
+      recordedAt: 1780700000000,
+    };
+
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_last_render_error', {}),
+      connections: [],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      translate: (key, params) => translateCatalog('en-US', key, params),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('A recent AI message render error was recorded');
+    expect(result.content).toContain('Match messageId and contentPreview against the current conversation');
+    expect(result.content).toContain('"messageId":"msg-raw-1"');
+    expect(result.content).toContain('"contentPreview":"原始 AI 回复预览 raw"');
+    expect(result.content).toContain('Cannot read properties of undefined');
+    expect(result.content).toContain('AIMessageBubble');
   });
 });

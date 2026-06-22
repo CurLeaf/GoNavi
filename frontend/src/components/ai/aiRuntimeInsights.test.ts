@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import type { AIMCPToolDescriptor, AIProviderConfig, AISkillConfig } from '../../types';
@@ -44,6 +46,40 @@ const mcpTools: AIMCPToolDescriptor[] = [{
 }];
 
 describe('buildAIRuntimeSnapshot', () => {
+  it('localizes runtime labels and summary while keeping provider and tool names raw', () => {
+    const snapshot = buildAIRuntimeSnapshot({
+      providers,
+      activeProviderId: 'provider-1',
+      safetyLevel: 'readonly',
+      contextLevel: 'with_samples',
+      skills,
+      mcpTools,
+      dynamicModels: ['gpt-5.4'],
+      builtinToolNames: ['inspect_ai_runtime'],
+      translate: (key, params) => {
+        const suffix = params
+          ? ` ${Object.entries(params).map(([paramKey, value]) => `${paramKey}=${value}`).join(',')}`
+          : '';
+        return `T:${key}${suffix}`;
+      },
+    });
+
+    expect(snapshot.safetyLabel).toBe('T:ai_chat.inspection.runtime.safety.readonly');
+    expect(snapshot.contextLabel).toBe('T:ai_chat.inspection.runtime.context.with_samples');
+    expect(snapshot.activeProvider?.name).toBe('OpenAI 主账号');
+    expect(snapshot.mcpTools[0].title).toBe('打开浏览器');
+    expect(snapshot.message).toBe('T:ai_chat.inspection.runtime.message.active provider=OpenAI 主账号,toolCount=2');
+  });
+
+  it('keeps runtime production source free of legacy Chinese wrappers', () => {
+    const source = readFileSync('src/components/ai/aiRuntimeInsights.ts', 'utf8');
+
+    expect(source).not.toContain('只读');
+    expect(source).not.toContain('结构+样例');
+    expect(source).not.toContain('当前 AI 正在使用');
+    expect(source).not.toContain('当前未启用 AI 供应商');
+  });
+
   it('returns a sanitized runtime snapshot for the active provider, tools, and skills', () => {
     const snapshot = buildAIRuntimeSnapshot({
       providers,
@@ -60,9 +96,9 @@ describe('buildAIRuntimeSnapshot', () => {
       hasActiveProvider: true,
       providerCount: 1,
       safetyLevel: 'readonly',
-      safetyLabel: '只读',
+      safetyLabel: 'Read-only',
       contextLevel: 'with_samples',
-      contextLabel: '结构+样例',
+      contextLabel: 'Schema + samples',
       dynamicModelCount: 2,
       enabledSkillCount: 1,
       builtinToolCount: 3,
@@ -113,7 +149,7 @@ describe('buildAIRuntimeSnapshot', () => {
     expect(snapshot).toMatchObject({
       hasActiveProvider: false,
       activeProvider: null,
-      message: '当前未启用 AI 供应商',
+      message: 'No AI provider is currently active',
     });
   });
 });

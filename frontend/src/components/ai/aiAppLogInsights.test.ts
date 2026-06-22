@@ -45,4 +45,24 @@ describe('buildAppLogSnapshot', () => {
     expect(snapshot.returnedLineCount).toBe(0);
     expect(snapshot.message).toContain('mcp');
   });
+
+  it('localizes empty-state wrapper while preserving the raw keyword', () => {
+    const snapshot = buildAppLogSnapshot({
+      readResult: {
+        success: true,
+        data: {
+          lines: [],
+        },
+      },
+      keyword: 'MCP 启动失败',
+      translate: (key, params) => {
+        if (key === 'ai_chat.inspection.app_log.message.no_keyword_match') {
+          return `no match for ${params?.keyword}`;
+        }
+        return key;
+      },
+    });
+
+    expect(snapshot.message).toBe('no match for MCP 启动失败');
+  });
 });

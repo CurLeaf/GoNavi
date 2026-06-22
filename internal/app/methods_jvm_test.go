@@ -201,6 +201,42 @@ func TestTestJVMConnectionTranslatesJMXBusinessPortError(t *testing.T) {
 	}
 }
 
+func TestTestJVMConnectionLocalizesJMXBusinessPortErrorInEnglish(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	t.Cleanup(func() {
+		app.SetLanguage("zh-CN")
+	})
+
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{testErr: errors.New("jmx test connection failed: jmx helper ping failed for localhost:18080: JMX command ping failed for localhost:18080: Failed to retrieve RMIServer stub: javax.naming.CommunicationException [Root exception is java.rmi.ConnectIOException: non-JRMP server at remote endpoint]; details={\"exception\":\"java.lang.IllegalStateException\"}")}, nil
+	})
+	defer restore()
+
+	res := app.TestJVMConnection(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "localhost",
+		Port: 18080,
+		JVM: connection.JVMConfig{
+			PreferredMode: "jmx",
+			AllowedModes:  []string{"jmx"},
+		},
+	})
+
+	if res.Success {
+		t.Fatalf("expected failure, got %+v", res)
+	}
+	if !strings.Contains(res.Message, "JMX connection failed: localhost:18080 is not a standard JMX remote management port") {
+		t.Fatalf("expected English translated summary, got %q", res.Message)
+	}
+	if !strings.Contains(res.Message, "business `server.port`") {
+		t.Fatalf("expected English actionable suggestion, got %q", res.Message)
+	}
+	if !strings.Contains(res.Message, "Technical detail:") {
+		t.Fatalf("expected English technical detail wrapper, got %q", res.Message)
+	}
+}
+
 func TestTestJVMConnectionTranslatesAgentConnectionRefused(t *testing.T) {
 	app := NewAppWithSecretStore(nil)
 	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
@@ -225,6 +261,73 @@ func TestTestJVMConnectionTranslatesAgentConnectionRefused(t *testing.T) {
 	}
 	if !strings.Contains(res.Message, "`-javaagent`") {
 		t.Fatalf("expected actionable suggestion, got %q", res.Message)
+	}
+}
+
+func TestTestJVMConnectionLocalizesAgentConnectionRefusedInEnglish(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+	t.Cleanup(func() {
+		app.SetLanguage("zh-CN")
+	})
+
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{testErr: errors.New("agent probe request failed: Get \"http://127.0.0.1:19090/gonavi/agent/jvm\": dial tcp 127.0.0.1:19090: connect: connection refused")}, nil
+	})
+	defer restore()
+
+	res := app.TestJVMConnection(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "127.0.0.1",
+		JVM: connection.JVMConfig{
+			PreferredMode: "agent",
+			AllowedModes:  []string{"agent"},
+		},
+	})
+
+	if res.Success {
+		t.Fatalf("expected failure, got %+v", res)
+	}
+	if !strings.Contains(res.Message, "Agent connection failed: the target Agent management port is not listening, or the address is unreachable.") {
+		t.Fatalf("expected English agent summary, got %q", res.Message)
+	}
+	if !strings.Contains(res.Message, "Suggestion: Confirm the Java service started GoNavi Agent with `-javaagent`") {
+		t.Fatalf("expected English actionable suggestion, got %q", res.Message)
+	}
+	if !strings.Contains(res.Message, `Technical detail: agent probe request failed: Get "http://127.0.0.1:19090/gonavi/agent/jvm": dial tcp 127.0.0.1:19090: connect: connection refused`) {
+		t.Fatalf("expected raw technical detail to be preserved with English wrapper, got %q", res.Message)
+	}
+}
+
+func TestTestJVMConnectionLocalizesEndpointErrorInEnglish(t *testing.T) {
+	app := NewAppWithSecretStore(nil)
+	app.SetLanguage("en-US")
+
+	restore := swapJVMProviderFactory(func(mode string) (jvm.Provider, error) {
+		return fakeJVMProvider{testErr: errors.New(`endpoint baseurl is invalid: parse ":bad-url": missing protocol scheme`)}, nil
+	})
+	defer restore()
+
+	res := app.TestJVMConnection(connection.ConnectionConfig{
+		Type: "jvm",
+		Host: "127.0.0.1",
+		JVM: connection.JVMConfig{
+			PreferredMode: "endpoint",
+			AllowedModes:  []string{"endpoint"},
+		},
+	})
+
+	if res.Success {
+		t.Fatalf("expected failure, got %+v", res)
+	}
+	if !strings.Contains(res.Message, "Endpoint connection failed: Endpoint Base URL is invalid.") {
+		t.Fatalf("expected English endpoint summary, got %q", res.Message)
+	}
+	if !strings.Contains(res.Message, "Suggestion: Enter a full http:// or https:// URL") {
+		t.Fatalf("expected English actionable suggestion, got %q", res.Message)
+	}
+	if !strings.Contains(res.Message, `Technical detail: endpoint baseurl is invalid: parse ":bad-url": missing protocol scheme`) {
+		t.Fatalf("expected raw technical detail to be preserved with English wrapper, got %q", res.Message)
 	}
 }
 

@@ -11,6 +11,9 @@ import {
   unquoteSqlIdentifierPath,
 } from '../utils/sqlDialect';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
+import { t as translateCatalog, type I18nParams } from '../i18n';
+
+type SchemaSqlTranslator = (key: string, params?: I18nParams) => string;
 
 export interface EditableColumnSnapshot {
   _key: string;
@@ -29,6 +32,7 @@ export interface BuildAlterTablePreviewInput {
   tableName: string;
   originalColumns: EditableColumnSnapshot[];
   columns: EditableColumnSnapshot[];
+  translate?: SchemaSqlTranslator;
 }
 
 export interface BuildCreateTablePreviewInput {
@@ -38,6 +42,7 @@ export interface BuildCreateTablePreviewInput {
   charset?: string;
   collation?: string;
   starRocksOptions?: StarRocksCreateTableOptions;
+  translate?: SchemaSqlTranslator;
 }
 
 export type StarRocksTableKind = 'olap' | 'external';
@@ -86,6 +91,15 @@ const collectPrimaryKeyColumnKeys = (columns: EditableColumnSnapshot[]): string[
 );
 
 const escapeSqlString = (value: string) => String(value || '').replace(/'/g, "''");
+
+const translateSchemaSqlComment = (
+  translate: SchemaSqlTranslator | undefined,
+  key: string,
+  params?: I18nParams,
+): string => {
+  const resolved = (translate || translateCatalog)(key, params);
+  return resolved && resolved !== key ? resolved : key;
+};
 
 const stripIdentifierQuotes = unquoteSqlIdentifierPart;
 
@@ -347,7 +361,7 @@ const buildDorisAlterPreviewSql = (input: BuildAlterTablePreviewInput, dbType: s
   const newPKKeys = input.columns.filter((col) => col.key === 'PRI').map((col) => col._key);
   const keysChanged = origPKKeys.length !== newPKKeys.length || !origPKKeys.every((key) => newPKKeys.includes(key));
   if (keysChanged) {
-    statements.push('-- Doris 修改主键/Key 模型需要按表模型手工迁移，已避免生成 MySQL 专属的 DROP/ADD PRIMARY KEY。');
+    statements.push(translateSchemaSqlComment(input.translate, 'table_designer.schema_sql.doris.primary_key_hint'));
   }
 
   return statements.join('\n');
@@ -528,7 +542,7 @@ const buildSqlServerAlterPreviewSql = (input: BuildAlterTablePreviewInput): stri
     const { objectName } = splitQualifiedName(input.tableName);
     const constraintName = quoteIdentifierPart(`PK_${objectName || 'table'}`, dbType);
     if (origPKKeys.length > 0) {
-      statements.push(`-- SQL Server 删除旧主键需要原约束名；请先在索引页确认后删除。`);
+      statements.push(translateSchemaSqlComment(input.translate, 'table_designer.schema_sql.sqlserver.drop_primary_key_hint'));
     }
     if (newPKKeys.length > 0) {
       const pkNames = input.columns.filter((col) => col.key === 'PRI').map((col) => quoteIdentifierPart(col.name, dbType)).join(', ');
@@ -563,7 +577,9 @@ const buildSqliteAlterPreviewSql = (input: BuildAlterTablePreviewInput): string 
       currentName = curr.name;
     }
     if (physicalDefinitionChanged(curr, orig) || (curr.comment || '') !== (orig.comment || '')) {
-      statements.push(`-- SQLite 不支持直接修改字段属性，请通过创建新表、迁移数据、替换旧表的方式处理字段 ${currentName}。`);
+      statements.push(translateSchemaSqlComment(input.translate, 'table_designer.schema_sql.sqlite.modify_column_hint', {
+        column: currentName,
+      }));
     }
   });
 
@@ -609,7 +625,9 @@ const buildDuckDbAlterPreviewSql = (input: BuildAlterTablePreviewInput): string 
       statements.push(`ALTER TABLE ${tableRef}\nALTER COLUMN ${quoteIdentifierPart(currentName, dbType)} ${curr.nullable === 'NO' ? 'SET NOT NULL' : 'DROP NOT NULL'};`);
     }
     if ((curr.comment || '') !== (orig.comment || '')) {
-      statements.push(`-- DuckDB 不支持通过 COMMENT ON COLUMN 持久化字段备注，字段 ${currentName} 的备注仅保留在设计器预览中。`);
+      statements.push(translateSchemaSqlComment(input.translate, 'table_designer.schema_sql.duckdb.comment_hint', {
+        column: currentName,
+      }));
     }
   });
 
@@ -624,7 +642,7 @@ const buildDuckDbAlterPreviewSql = (input: BuildAlterTablePreviewInput): string 
         .join(', ');
       statements.push(`ALTER TABLE ${tableRef}\nADD PRIMARY KEY (${pkNames});`);
     } else {
-      statements.push('-- DuckDB 当前仅支持为无主键表新增 PRIMARY KEY；已有主键的修改或删除需要通过重建表完成。');
+      statements.push(translateSchemaSqlComment(input.translate, 'table_designer.schema_sql.duckdb.primary_key_hint'));
     }
   }
 
@@ -646,7 +664,9 @@ const buildLimitedBacktickAlterPreviewSql = (input: BuildAlterTablePreviewInput,
     if (!orig) {
       statements.push(`ALTER TABLE ${tableRef}\nADD COLUMN ${quoteIdentifierPart(curr.name, dbType)} ${curr.type};`);
       if (curr.nullable === 'NO' || normalizeDefaultText(curr.default) || String(curr.comment || '').trim()) {
-        statements.push(`-- ${label} 的字段约束/默认值/备注语法与 MySQL 不同，已避免生成 MySQL 专属子句，请按目标库能力补充。`);
+        statements.push(translateSchemaSqlComment(input.translate, 'table_designer.schema_sql.limited_column_hint', {
+          dialect: label,
+        }));
       }
       return;
     }
@@ -665,7 +685,9 @@ const buildLimitedBacktickAlterPreviewSql = (input: BuildAlterTablePreviewInput,
       (curr.comment || '') !== (orig.comment || '') ||
       Boolean(curr.isAutoIncrement) !== Boolean(orig.isAutoIncrement)
     ) {
-      statements.push(`-- ${label} 的字段约束/默认值/备注语法与 MySQL 不同，已避免生成 MySQL 专属子句，请按目标库能力补充。`);
+      statements.push(translateSchemaSqlComment(input.translate, 'table_designer.schema_sql.limited_column_hint', {
+        dialect: label,
+      }));
     }
   });
 
@@ -890,7 +912,7 @@ export const buildCreateTablePreviewSql = (input: BuildCreateTablePreviewInput):
 
   const suffixComments = comments.length > 0 ? `\n${comments.join('\n')}` : '';
   if (dbType === 'tdengine' && !input.columns.some((column) => /^timestamp$/i.test(String(column.type || '').trim()))) {
-    return `${createSql};\n-- TDengine 普通表通常需要 TIMESTAMP 时间列，执行前请确认表模型。${suffixComments}`;
+    return `${createSql};\n${translateSchemaSqlComment(input.translate, 'table_designer.schema_sql.tdengine.timestamp_hint')}${suffixComments}`;
   }
 
   if (isBacktickIdentifierDialect(dbType) && dbType !== 'mysql' && dbType !== 'mariadb') {

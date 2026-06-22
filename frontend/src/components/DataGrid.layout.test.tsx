@@ -2475,11 +2475,26 @@ describe('DataGrid layout', () => {
   it('keeps the DataGrid performance harness aligned with legacy and v2 comparison controls', () => {
     const harnessSource = readFileSync(new URL('../dev/PerfDataGridHarness.tsx', import.meta.url), 'utf8');
     expect(harnessSource).toContain("options={[");
-    expect(harnessSource).toContain("{ label: '旧版 UI', value: 'legacy' }");
-    expect(harnessSource).toContain("{ label: '新版 UI', value: 'v2' }");
-    expect(harnessSource).toContain("{ value: 'comfortable', label: '标准' }");
-    expect(harnessSource).toContain("{ value: 'standard', label: '紧凑' }");
-    expect(harnessSource).toContain("{ value: 'compact', label: '极紧凑' }");
+    expect(harnessSource).toContain("t('dev.perf_data_grid.ui_version.legacy')");
+    expect(harnessSource).toContain("t('dev.perf_data_grid.ui_version.v2')");
+    expect(harnessSource).toContain("t('dev.perf_data_grid.density.comfortable')");
+    expect(harnessSource).toContain("t('dev.perf_data_grid.density.standard')");
+    expect(harnessSource).toContain("t('dev.perf_data_grid.density.compact')");
+    [
+      'DataGrid 性能复现页',
+      '旧版 UI',
+      '新版 UI',
+      '行数',
+      '列数',
+      '标准',
+      '紧凑',
+      '极紧凑',
+      '触发布局重算',
+      '这个页面只用于开发态滚动性能采样',
+      '直接在表格区域做纵向、横向、Shift+滚轮滚动采样',
+    ].forEach((rawSnippet) => {
+      expect(harnessSource).not.toContain(rawSnippet);
+    });
     expect(harnessSource).toContain("document.body.setAttribute('data-ui-version', uiVersion);");
     expect(harnessSource).toContain("if (value === null || value === undefined || value === '') {");
     expect(harnessSource).toContain("const currentState = useStore.getState();");

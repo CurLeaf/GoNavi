@@ -12,8 +12,36 @@ import {
   stopTabHoverDragPropagation,
 } from './TabManager';
 import { setCurrentLanguage } from '../i18n';
+import { catalogs } from '../i18n/catalog';
 import type { TabData } from '../types';
 import { buildTabDisplayModel } from '../utils/tabDisplay';
+
+const TAB_MANAGER_SQL_FILE_CLOSE_KEYS = [
+  'tab_manager.sql_file_close.read_failed_cancel_close',
+  'tab_manager.sql_file_close.dirty_single_label',
+  'tab_manager.sql_file_close.dirty_multiple_label',
+  'tab_manager.sql_file_close.save_confirm_title',
+  'tab_manager.sql_file_close.save_confirm_content',
+  'tab_manager.sql_file_close.save_and_close',
+  'tab_manager.sql_file_close.discard',
+  'tab_manager.sql_file_close.save_failed',
+  'tab_manager.sql_file_close.unknown_error',
+  'tab_manager.sql_file_close.saved',
+  'tab_manager.sql_file_close.missing_single_label',
+  'tab_manager.sql_file_close.missing_multiple_label',
+  'tab_manager.sql_file_close.missing_confirm_title',
+  'tab_manager.sql_file_close.missing_confirm_content',
+  'tab_manager.sql_file_close.continue_close',
+  'tab_manager.sql_file_close.close_tabs',
+] as const;
+
+const TAB_MANAGER_MENU_KEYS = [
+  'tab_manager.menu.tab_display_settings',
+  'tab_manager.menu.close_other',
+  'tab_manager.menu.close_left',
+  'tab_manager.menu.close_right',
+  'tab_manager.menu.close_all',
+] as const;
 
 const stripSourceComments = (source: string): string =>
   source
@@ -255,9 +283,9 @@ describe('TabManager hover info', () => {
   });
 
   it('renders tab labels from appearance tab display settings', () => {
-    const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
+    const source = stripSourceComments(readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8'));
 
-    expect(source).toContain('buildTabDisplayModel(tab, connection, appearance.tabDisplay)');
+    expect(source).toContain('buildTabDisplayModel(tab, connection, appearance.tabDisplay, t)');
     expect(source).toContain('displayModel={displayModel}');
     expect(source).toContain('displayModel.primaryParts.map(renderV2TabDisplayPart)');
     expect(source).toContain("if (part.key === 'kind')");
@@ -270,7 +298,8 @@ describe('TabManager hover info', () => {
     expect(source).toContain('gn-v2-tab-label-double');
     expect(source).toContain('gn-v2-tab-label-main tab-title-text');
     expect(source).toContain("key: 'tab-display-settings'");
-    expect(source).toContain('label: \'标签设置\'');
+    expect(source).toContain("label: t('tab_manager.menu.tab_display_settings')");
+    expect(source).not.toContain("label: '标签设置'");
     expect(source).toContain('icon: <SettingOutlined />');
     expect(source).toContain('onClick: openTabDisplaySettings');
     expect(source).toContain("rootClassName={isV2Ui ? 'gn-v2-tab-context-menu-popup' : undefined}");
@@ -304,19 +333,32 @@ describe('TabManager hover info', () => {
   });
 
   it('guards closing opened SQL file tabs with save confirmation', () => {
-    const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
+    const source = stripSourceComments(readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8'));
 
     expect(source).toContain('ReadSQLFile(filePath)');
     expect(source).toContain('isSQLFileMissingReadResult(res)');
     expect(source).toContain('isSQLFileMissingErrorMessage(errorMessage)');
-    expect(source).toContain("title: '关闭已丢失的 SQL 文件标签？'");
-    expect(source).toContain('关闭后将丢弃标签内的本地草稿');
+    TAB_MANAGER_SQL_FILE_CLOSE_KEYS.forEach((key) => {
+      expect(source).toContain(`t('${key}'`);
+    });
+    [
+      '读取 SQL 文件失败，已取消关闭',
+      '保存 SQL 文件修改？',
+      '有未保存修改，是否保存后再关闭？',
+      '保存并关闭',
+      '不保存',
+      '未知错误',
+      'SQL 文件已保存',
+      '关闭已丢失的 SQL 文件标签？',
+      '对应的外部 SQL 文件已不存在或已被移动',
+      '继续关闭',
+      '关闭标签',
+    ].forEach((text) => {
+      expect(source).not.toContain(text);
+    });
     expect(source).toContain('confirmDirtyTabsOrClose();');
     expect(source).toContain("getSQLFileTabDraft(tab.id, String(tab.query ?? ''))");
     expect(source).toContain('hasSQLFileTabUnsavedChanges({ ...tab, query: draft }, normalizeSQLFileReadContent(res.data))');
-    expect(source).toContain("title: '保存 SQL 文件修改？'");
-    expect(source).toContain("okText: '保存并关闭'");
-    expect(source).toContain('不保存');
     expect(source).toContain('WriteSQLFile(filePath, draft)');
     expect(source).toContain('clearSQLFileTabDraft(tab.id)');
     expect(source).toContain('closeTabsWithSQLFilePrompt([id], () => closeTab(id))');
@@ -324,5 +366,21 @@ describe('TabManager hover info', () => {
     expect(source).toContain('closeTabsWithSQLFilePrompt(getCloseTabsToLeftIds(tabs, tab.id), () => closeTabsToLeft(tab.id))');
     expect(source).toContain('closeTabsWithSQLFilePrompt(getCloseTabsToRightIds(tabs, tab.id), () => closeTabsToRight(tab.id))');
     expect(source).toContain('closeTabsWithSQLFilePrompt(tabs.map((item) => item.id), () => closeAllTabs())');
+  });
+
+  it('keeps SQL file close prompt keys in every catalog', () => {
+    Object.entries(catalogs).forEach(([language, catalog]) => {
+      TAB_MANAGER_SQL_FILE_CLOSE_KEYS.forEach((key) => {
+        expect(catalog, `${language}:${key}`).toHaveProperty(key);
+      });
+    });
+  });
+
+  it('keeps tab context menu keys in every catalog', () => {
+    Object.entries(catalogs).forEach(([language, catalog]) => {
+      TAB_MANAGER_MENU_KEYS.forEach((key) => {
+        expect(catalog, `${language}:${key}`).toHaveProperty(key);
+      });
+    });
   });
 });

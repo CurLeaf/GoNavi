@@ -1,26 +1,95 @@
 import type { AIBuiltinToolInfo } from "./aiBuiltinToolInfo.types";
 
+type InspectionToolInfoTranslator = (key: string) => string;
+
+const translateToolInfo = (
+  t: InspectionToolInfoTranslator | undefined,
+  key: string,
+  fallback: string,
+): string => {
+  if (!t) return fallback;
+  const translated = t(key);
+  return translated && translated !== key ? translated : fallback;
+};
+
+const SQL_TOOL_INFO_KEY_PREFIX = "ai_chat.inspection.tool_info";
+
+const SQL_TOOL_INFO_COPY: Record<
+  string,
+  {
+    desc: string;
+    detail: string;
+    toolDescription: string;
+    params?: Record<string, string>;
+  }
+> = {
+  inspect_recent_sql_logs: {
+    desc: "View recent SQL execution logs",
+    detail:
+      "Accepts optional limit and status filters, then returns recent SQL execution records including database, duration, success or failure, error, affected rows, and SQL text. Use it to trace failed statements, locate slow queries, and let AI explain or optimize based on real execution history.",
+    toolDescription:
+      "Get a summary of recent SQL execution logs, optionally filtered by success or failure. Use it to review recently executed SQL, diagnose failures, locate slow queries, and let AI explain or optimize from real execution history.",
+    params: {
+      limit: "Optional. Number of log entries to return. Default 20, maximum 100.",
+      status: "Optional. Filter by execution status: all, success, or error. Default all.",
+    },
+  },
+  inspect_recent_sql_activity: {
+    desc: "Summarize recent SQL activity distribution",
+    detail:
+      "Can filter by status, activityKind, dbName, and keyword, then returns a structured summary of recent SQL activity including read/write/DDL ratio, statement type distribution, database distribution, recent errors, recent writes, and slowest statements. Use it when the user asks what ran recently, whether data may have been deleted, which database is failing most, or whether recent activity is mostly reads or writes.",
+    toolDescription:
+      "Summarize the structured profile of recent SQL activity, optionally filtered by execution status, activity type, database name, and keyword. Use it to inspect recent read/write operations, concentrated errors in a database, DELETE or DDL activity, and let AI judge from the real execution scene first.",
+    params: {
+      limit: "Optional. Maximum number of recent activity samples to return. Default 30, maximum 100.",
+      status: "Optional. Filter by execution status: all, success, or error. Default all.",
+      activityKind: "Optional. Filter by activity type: all, read, write, ddl, transaction, session, or other. Default all.",
+      dbName: "Optional. Only include logs whose database name contains this keyword.",
+      keyword: "Optional. Filter by SQL text, error message, statement type, or database name.",
+    },
+  },
+  inspect_sql_editor_transaction: {
+    desc: "View SQL editor transaction commit state",
+    detail:
+      "Returns SQL editor managed-DML transaction semantics, current manual or auto commit setting, whether the active SQL tab will enter a managed transaction, pending transactions, and recent write or transaction execution records. Use it when the user asks what manual or auto commit means, whether there are uncommitted transactions, or whether update/insert/delete will commit automatically.",
+    toolDescription:
+      "Read a SQL editor transaction state snapshot, including the real semantics that DML always enters a managed transaction, current commit mode, auto-commit delay, whether the active SQL tab triggers a managed transaction, pending transactions, and recent write or transaction logs. Use it when the user asks about SQL editor manual commit, auto commit, uncommitted transactions, or whether DML commits after execution.",
+    params: {
+      includeSqlPreview: "Optional. Whether to return a SQL preview from the active SQL tab. Default true.",
+    },
+  },
+  inspect_sql_risk: {
+    desc: "Check execution risk for current or specified SQL",
+    detail:
+      "Reads supplied SQL or the current active query tab content, detects multiple statements, writes, DDL, DELETE/UPDATE without WHERE, DROP/TRUNCATE, and other risks, then combines the result with current AI safety policy to say whether execution is allowed. Use it before AI executes SQL, explains risk, or confirms whether a SQL statement can run.",
+    toolDescription:
+      "Check execution risk for supplied SQL or the current active query tab SQL, returning statement count, activity type, risk level, risk points, whether user confirmation is required, and the current AI safety policy result. Use it before answering or continuing when the user asks to execute, delete, update, run DDL, run batch SQL, or asks whether a SQL statement can run.",
+    params: {
+      sql: "Optional. SQL to inspect. If omitted, the current active query tab SQL draft is read by default.",
+      previewCharLimit: "Optional. Maximum number of characters to return in the SQL preview. Default 12000, maximum 40000.",
+    },
+  },
+};
+
 export const BUILTIN_AI_INSPECTION_SQL_TOOL_INFO: AIBuiltinToolInfo[] = [
   {
     name: "inspect_recent_sql_logs",
     icon: "🧾",
-    desc: "查看最近 SQL 执行日志",
-    detail:
-      "传入可选 limit 和 status，返回最近 SQL 执行记录，包括数据库、耗时、成功/失败、报错、受影响行数和 SQL 文本。适合追查刚执行失败的语句、定位慢查询，并让 AI 基于真实执行历史给出解释或优化建议。",
+    desc: SQL_TOOL_INFO_COPY.inspect_recent_sql_logs.desc,
+    detail: SQL_TOOL_INFO_COPY.inspect_recent_sql_logs.detail,
     params: "limit?, status?(all|success|error)",
     tool: {
       type: "function",
       function: {
         name: "inspect_recent_sql_logs",
-        description:
-          "获取最近 SQL 执行日志摘要，可按成功/失败过滤。适用于回看刚执行过的 SQL、排查失败原因、定位慢查询，以及让 AI 基于真实执行历史给出解释和优化建议。",
+        description: SQL_TOOL_INFO_COPY.inspect_recent_sql_logs.toolDescription,
         parameters: {
           type: "object",
           properties: {
-            limit: { type: "number", description: "可选，返回多少条日志，默认 20，最大 100" },
+            limit: { type: "number", description: SQL_TOOL_INFO_COPY.inspect_recent_sql_logs.params?.limit },
             status: {
               type: "string",
-              description: "可选，按执行状态过滤，支持 all、success、error，默认 all",
+              description: SQL_TOOL_INFO_COPY.inspect_recent_sql_logs.params?.status,
               enum: ["all", "success", "error"],
             },
           },
@@ -31,32 +100,30 @@ export const BUILTIN_AI_INSPECTION_SQL_TOOL_INFO: AIBuiltinToolInfo[] = [
   {
     name: "inspect_recent_sql_activity",
     icon: "📊",
-    desc: "总结最近 SQL 活动分布",
-    detail:
-      "可按 status、activityKind、dbName 和 keyword 过滤，返回最近 SQL 活动的结构化总结，包括读写/DDL 比例、语句类型分布、数据库分布、最近报错、最近写操作和最慢语句。适合用户提到“最近都执行了什么”“是不是刚删过数据”“哪个库最近报错最多”“最近主要在跑查询还是写入”时先读真实执行画像。",
+    desc: SQL_TOOL_INFO_COPY.inspect_recent_sql_activity.desc,
+    detail: SQL_TOOL_INFO_COPY.inspect_recent_sql_activity.detail,
     params: "limit?, status?(all|success|error), activityKind?(all|read|write|ddl|transaction|session|other), dbName?, keyword?",
     tool: {
       type: "function",
       function: {
         name: "inspect_recent_sql_activity",
-        description:
-          "汇总最近 SQL 活动的结构化画像，可按执行状态、活动类型、数据库名和关键词过滤。适用于排查最近主要在执行哪些读写操作、某个库近期错误是否集中、是否发生过删除或 DDL、以及让 AI 基于真实执行现场先做全局判断。",
+        description: SQL_TOOL_INFO_COPY.inspect_recent_sql_activity.toolDescription,
         parameters: {
           type: "object",
           properties: {
-            limit: { type: "number", description: "可选，最近活动样例最多返回多少条，默认 30，最大 100" },
+            limit: { type: "number", description: SQL_TOOL_INFO_COPY.inspect_recent_sql_activity.params?.limit },
             status: {
               type: "string",
-              description: "可选，按执行状态过滤，支持 all、success、error，默认 all",
+              description: SQL_TOOL_INFO_COPY.inspect_recent_sql_activity.params?.status,
               enum: ["all", "success", "error"],
             },
             activityKind: {
               type: "string",
-              description: "可选，按活动类型过滤，支持 all、read、write、ddl、transaction、session、other，默认 all",
+              description: SQL_TOOL_INFO_COPY.inspect_recent_sql_activity.params?.activityKind,
               enum: ["all", "read", "write", "ddl", "transaction", "session", "other"],
             },
-            dbName: { type: "string", description: "可选，只看数据库名里包含该关键词的日志" },
-            keyword: { type: "string", description: "可选，按 SQL 文本、报错信息、语句类型或数据库名做关键词筛选" },
+            dbName: { type: "string", description: SQL_TOOL_INFO_COPY.inspect_recent_sql_activity.params?.dbName },
+            keyword: { type: "string", description: SQL_TOOL_INFO_COPY.inspect_recent_sql_activity.params?.keyword },
           },
         },
       },
@@ -65,20 +132,21 @@ export const BUILTIN_AI_INSPECTION_SQL_TOOL_INFO: AIBuiltinToolInfo[] = [
   {
     name: "inspect_sql_editor_transaction",
     icon: "🔁",
-    desc: "查看 SQL 编辑器事务提交状态",
-    detail:
-      "返回 SQL 编辑器 DML 托管事务语义、当前手动/自动提交设置、活动 SQL 页签是否会进入托管事务、待提交事务以及最近写入/事务执行记录。适合用户问“手动/自动提交到底是什么意思”“当前有没有事务没提交”“执行 update/insert/delete 会不会自动提交”时先读真实状态。",
-    params: "includeSqlPreview?(默认 true)",
+    desc: SQL_TOOL_INFO_COPY.inspect_sql_editor_transaction.desc,
+    detail: SQL_TOOL_INFO_COPY.inspect_sql_editor_transaction.detail,
+    params: "includeSqlPreview?(default true)",
     tool: {
       type: "function",
       function: {
         name: "inspect_sql_editor_transaction",
-        description:
-          "读取 SQL 编辑器事务状态快照，包括 DML 始终进入托管事务的真实语义、当前提交模式、自动提交延迟、活动 SQL 页签是否会触发托管事务、待提交事务列表和最近写入/事务日志。适用于用户提到 SQL 编辑器手动提交、自动提交、未提交事务、DML 执行后是否提交或事务语义不清时，先读取真实状态再解释。",
+        description: SQL_TOOL_INFO_COPY.inspect_sql_editor_transaction.toolDescription,
         parameters: {
           type: "object",
           properties: {
-            includeSqlPreview: { type: "boolean", description: "可选，是否返回活动 SQL 页签的 SQL 预览，默认 true" },
+            includeSqlPreview: {
+              type: "boolean",
+              description: SQL_TOOL_INFO_COPY.inspect_sql_editor_transaction.params?.includeSqlPreview,
+            },
           },
         },
       },
@@ -87,24 +155,65 @@ export const BUILTIN_AI_INSPECTION_SQL_TOOL_INFO: AIBuiltinToolInfo[] = [
   {
     name: "inspect_sql_risk",
     icon: "🛑",
-    desc: "检查当前或指定 SQL 的执行风险",
-    detail:
-      "读取传入 SQL 或当前活动查询页签内容，识别多语句、写入、DDL、DELETE/UPDATE 无 WHERE、DROP/TRUNCATE 等风险，并结合当前 AI 安全策略返回是否允许执行。适合用户让 AI 执行、解释风险、确认能不能跑某条 SQL 前先做一次安全体检。",
-    params: "sql?(默认读取当前活动查询页签), previewCharLimit?",
+    desc: SQL_TOOL_INFO_COPY.inspect_sql_risk.desc,
+    detail: SQL_TOOL_INFO_COPY.inspect_sql_risk.detail,
+    params: "sql?(default current active query tab), previewCharLimit?",
     tool: {
       type: "function",
       function: {
         name: "inspect_sql_risk",
-        description:
-          "检查传入 SQL 或当前活动查询页签 SQL 的执行风险，返回语句数量、活动类型、风险级别、危险点、是否需要用户确认，以及当前 AI 安全策略检查结果。适用于用户要求执行、删除、更新、DDL、批量 SQL、或询问某条 SQL 能不能跑时，先读取这份风险快照再回答或继续执行。",
+        description: SQL_TOOL_INFO_COPY.inspect_sql_risk.toolDescription,
         parameters: {
           type: "object",
           properties: {
-            sql: { type: "string", description: "可选，要检查的 SQL；不传时默认读取当前活动查询页签的 SQL 草稿" },
-            previewCharLimit: { type: "number", description: "可选，SQL 预览最多返回多少字符，默认 12000，最大 40000" },
+            sql: { type: "string", description: SQL_TOOL_INFO_COPY.inspect_sql_risk.params?.sql },
+            previewCharLimit: { type: "number", description: SQL_TOOL_INFO_COPY.inspect_sql_risk.params?.previewCharLimit },
           },
         },
       },
     },
   },
 ];
+
+export const localizeBuiltinInspectionSqlToolInfo = (
+  t?: InspectionToolInfoTranslator,
+): AIBuiltinToolInfo[] =>
+  BUILTIN_AI_INSPECTION_SQL_TOOL_INFO.map((tool) => {
+    const copy = SQL_TOOL_INFO_COPY[tool.name];
+    if (!copy) return tool;
+
+    const keyPrefix = `${SQL_TOOL_INFO_KEY_PREFIX}.${tool.name}`;
+    const originalProperties = tool.tool.function.parameters?.properties || {};
+    const translatedProperties = Object.fromEntries(
+      Object.entries(originalProperties).map(([paramName, schema]) => {
+        const fallback = copy.params?.[paramName];
+        if (!fallback || !schema || typeof schema !== "object") {
+          return [paramName, schema];
+        }
+        return [
+          paramName,
+          {
+            ...schema,
+            description: translateToolInfo(t, `${keyPrefix}.param.${paramName}`, fallback),
+          },
+        ];
+      }),
+    );
+
+    return {
+      ...tool,
+      desc: translateToolInfo(t, `${keyPrefix}.desc`, copy.desc),
+      detail: translateToolInfo(t, `${keyPrefix}.detail`, copy.detail),
+      tool: {
+        ...tool.tool,
+        function: {
+          ...tool.tool.function,
+          description: translateToolInfo(t, `${keyPrefix}.tool_description`, copy.toolDescription),
+          parameters: {
+            ...tool.tool.function.parameters,
+            properties: translatedProperties,
+          },
+        },
+      },
+    };
+  });

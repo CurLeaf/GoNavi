@@ -1,0 +1,1283 @@
+package aiservice
+
+import (
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"GoNavi-Wails/internal/ai"
+	"GoNavi-Wails/shared/i18n"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+func aiServiceFunctionSource(t *testing.T, source string, signature string) string {
+	t.Helper()
+	start := strings.Index(source, signature)
+	if start < 0 {
+		t.Fatalf("service.go missing function signature %q", signature)
+	}
+	rest := source[start+len(signature):]
+	end := strings.Index(rest, "\nfunc ")
+	if end < 0 {
+		return source[start:]
+	}
+	return source[start : start+len(signature)+end]
+}
+
+func TestAIServiceProviderSelectionUsesLocalizedText(t *testing.T) {
+	sourceBytes, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatalf("read service.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	checks := map[string]struct {
+		rawMessages []string
+		keys        []string
+	}{
+		"func (s *Service) AIListModels() map[string]interface{} {": {
+			rawMessages: []string{`"error": "未找到活跃 Provider"`},
+			keys:        []string{"ai_service.backend.error.active_provider_not_found"},
+		},
+		"func (s *Service) getActiveProvider() (provider.Provider, error) {": {
+			rawMessages: []string{`fmt.Errorf("未配置 AI Provider，请先在设置中配置")`},
+			keys:        []string{"ai_service.backend.error.provider_not_configured"},
+		},
+	}
+
+	for signature, check := range checks {
+		functionSource := aiServiceFunctionSource(t, source, signature)
+		for _, rawMessage := range check.rawMessages {
+			if strings.Contains(functionSource, rawMessage) {
+				t.Fatalf("%s still contains raw AI service text %q", signature, rawMessage)
+			}
+		}
+		for _, key := range check.keys {
+			if !strings.Contains(functionSource, key) {
+				t.Fatalf("%s does not reference AI service i18n key %q", signature, key)
+			}
+		}
+	}
+}
+
+func TestAIGetBuiltinPromptsUsesCurrentLanguageForPromptTitles(t *testing.T) {
+	service := NewServiceWithSecretStore(nil)
+	service.AISetLanguage("en-US")
+
+	prompts := service.AIGetBuiltinPrompts()
+	if _, ok := prompts["General chat assistant"]; !ok {
+		t.Fatalf("expected English builtin prompt title, got keys %v", mapKeys(prompts))
+	}
+	for _, legacyTitle := range []string{"通用聊天助手", "SQL 生成器", "SQL 解析器", "SQL 优化器", "数据洞察分析", "表结构审查"} {
+		if _, ok := prompts[legacyTitle]; ok {
+			t.Fatalf("expected no legacy Chinese builtin prompt title %q in en-US mode", legacyTitle)
+		}
+	}
+}
+
+func mapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func TestAIServiceModelListErrorsUseLocalizedText(t *testing.T) {
+	sourceBytes, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatalf("read service.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	checks := map[string]struct {
+		rawMessages []string
+		symbols     []string
+	}{
+		"func filterFetchedModelsForProvider(config ai.ProviderConfig, models []string, localizer *i18n.Localizer) ([]string, error) {": {
+			rawMessages: []string{"volcengineCodingPlanEmptyModelsError"},
+			symbols:     []string{"volcengineCodingPlanModelsEmptyKey"},
+		},
+		"func fetchOpenAIModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {": {
+			rawMessages: []string{`fmt.Errorf("请求模型列表失败: %w", err)`, `fmt.Errorf("获取模型列表失败 (HTTP %d): %s", resp.StatusCode, string(body))`, `fmt.Errorf("解析模型列表失败: %w", err)`},
+			symbols:     []string{"localizeModelListRequestCreateError", "localizeModelListRequestError", "localizeModelListHTTPStatusError", "localizeModelListParseError"},
+		},
+		"func fetchAnthropicModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {": {
+			rawMessages: []string{`fmt.Errorf("请求模型列表失败: %w", err)`, `fmt.Errorf("获取模型列表失败 (HTTP %d): %s", resp.StatusCode, string(body))`, `fmt.Errorf("解析模型列表失败: %w", err)`},
+			symbols:     []string{"localizeModelListRequestCreateError", "localizeModelListRequestError", "localizeModelListHTTPStatusError", "localizeModelListParseError"},
+		},
+		"func fetchGeminiModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {": {
+			rawMessages: []string{`fmt.Errorf("创建请求失败: %w", err)`, `fmt.Errorf("请求模型列表失败: %w", err)`, `fmt.Errorf("获取模型列表失败 (HTTP %d): %s", resp.StatusCode, string(body))`, `fmt.Errorf("解析模型列表失败: %w", err)`},
+			symbols:     []string{"localizeModelListRequestCreateError", "localizeModelListRequestError", "localizeModelListHTTPStatusError", "localizeModelListParseError"},
+		},
+	}
+
+	for signature, check := range checks {
+		functionSource := aiServiceFunctionSource(t, source, signature)
+		for _, rawMessage := range check.rawMessages {
+			if strings.Contains(functionSource, rawMessage) {
+				t.Fatalf("%s still contains raw model-list text %q", signature, rawMessage)
+			}
+		}
+		for _, symbol := range check.symbols {
+			if !strings.Contains(functionSource, symbol) {
+				t.Fatalf("%s does not reference model-list localization symbol %q", signature, symbol)
+			}
+		}
+	}
+}
+
+func TestAIServiceHealthCheckRequestErrorsUseLocalizedText(t *testing.T) {
+	sourceBytes, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatalf("read service.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	checks := map[string]struct {
+		rawMessages   []string
+		requiredTexts []string
+		requiredKeys  []string
+	}{
+		"func (s *Service) localizeProviderHealthCheckRequestError(err error) error {": {
+			rawMessages:   []string{`"创建请求失败: "`, `"序列化请求失败: "`},
+			requiredTexts: []string{`"create request failed: "`, `"serialize request failed: "`},
+			requiredKeys: []string{
+				"ai_service.backend.error.provider_request_create_failed",
+				"ai_service.backend.error.provider_request_serialize_failed",
+			},
+		},
+		"func trimLocalizedModelListRequestCreateDetail(err error) string {": {
+			rawMessages:   []string{`"创建请求失败: "`},
+			requiredTexts: []string{`"create request failed: "`},
+		},
+		"func newModelsRequest(config ai.ProviderConfig) (*http.Request, error) {": {
+			rawMessages:   []string{`fmt.Errorf("创建请求失败: %w", err)`},
+			requiredTexts: []string{`fmt.Errorf("create request failed: %w", err)`},
+		},
+		"func newAnthropicMessagesHealthCheckRequest(config ai.ProviderConfig) (*http.Request, error) {": {
+			rawMessages: []string{
+				`fmt.Errorf("序列化请求失败: %w", err)`,
+				`fmt.Errorf("创建请求失败: %w", err)`,
+			},
+			requiredTexts: []string{
+				`fmt.Errorf("serialize request failed: %w", err)`,
+				`fmt.Errorf("create request failed: %w", err)`,
+			},
+		},
+	}
+
+	for signature, check := range checks {
+		functionSource := aiServiceFunctionSource(t, source, signature)
+		for _, rawMessage := range check.rawMessages {
+			if strings.Contains(functionSource, rawMessage) {
+				t.Fatalf("%s still contains raw health-check text %q", signature, rawMessage)
+			}
+		}
+		for _, requiredText := range check.requiredTexts {
+			if !strings.Contains(functionSource, requiredText) {
+				t.Fatalf("%s does not reference health-check wrapper %q", signature, requiredText)
+			}
+		}
+		for _, requiredKey := range check.requiredKeys {
+			if !strings.Contains(functionSource, requiredKey) {
+				t.Fatalf("%s does not reference AI service health-check key %q", signature, requiredKey)
+			}
+		}
+	}
+}
+
+func TestAIServiceLocalizeProviderHealthCheckRequestErrorSupportsEnglishWrappers(t *testing.T) {
+	service := NewService()
+	service.AISetLanguage("en-US")
+
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "create_request_failed",
+			input: "create request failed: parse \"http://[::1\": missing ']' in host",
+			want:  "Failed to create request: parse \"http://[::1\": missing ']' in host",
+		},
+		{
+			name:  "serialize_request_failed",
+			input: "serialize request failed: unsupported value",
+			want:  "Failed to serialize request: unsupported value",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := service.localizeProviderHealthCheckRequestError(errors.New(tc.input))
+			if err == nil {
+				t.Fatalf("expected localized error for %q", tc.input)
+			}
+			if err.Error() != tc.want {
+				t.Fatalf("expected localized health-check error %q, got %q", tc.want, err.Error())
+			}
+			if strings.Contains(err.Error(), "创建请求失败") || strings.Contains(err.Error(), "序列化请求失败") {
+				t.Fatalf("expected no Chinese health-check wrapper text, got %q", err.Error())
+			}
+		})
+	}
+}
+
+func TestAIServiceProviderSelectionCatalogKeysExist(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	keys := []string{
+		"ai_service.backend.error.active_provider_not_found",
+	}
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		for _, key := range keys {
+			if strings.TrimSpace(catalog[key]) == "" {
+				t.Fatalf("%s catalog missing AI service provider-selection key %q", language, key)
+			}
+		}
+	}
+}
+
+func TestAIServiceModelListCatalogKeysExist(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	keys := []string{
+		"ai_service.backend.error.models_request_create_failed",
+		"ai_service.backend.error.models_request_failed",
+		"ai_service.backend.error.models_http_status_failed",
+		"ai_service.backend.error.models_parse_failed",
+		"ai_service.backend.error.volcengine_coding_models_empty",
+	}
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		for _, key := range keys {
+			if strings.TrimSpace(catalog[key]) == "" {
+				t.Fatalf("%s catalog missing AI service model-list key %q", language, key)
+			}
+		}
+	}
+}
+
+func TestAIServiceSessionPersistenceErrorsUseLocalizedText(t *testing.T) {
+	sourceBytes, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatalf("read service.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	checks := map[string]struct {
+		rawMessages []string
+		keys        []string
+	}{
+		"func (s *Service) AISaveSession(sessionID string, title string, updatedAt float64, messagesJSON string) error {": {
+			rawMessages: []string{
+				`fmt.Errorf("创建 sessions 目录失败: %w", err)`,
+				`fmt.Errorf("序列化会话数据失败: %w", err)`,
+			},
+			keys: []string{
+				"ai_service.backend.error.sessions_dir_create_failed",
+				"ai_service.backend.error.session_serialize_failed",
+				"ai_service.backend.error.session_write_failed",
+			},
+		},
+		"func (s *Service) AIDeleteSession(sessionID string) error {": {
+			rawMessages: []string{
+				`fmt.Errorf("删除会话失败: %w", err)`,
+			},
+			keys: []string{
+				"ai_service.backend.error.session_delete_failed",
+			},
+		},
+	}
+
+	for signature, check := range checks {
+		functionSource := aiServiceFunctionSource(t, source, signature)
+		for _, rawMessage := range check.rawMessages {
+			if strings.Contains(functionSource, rawMessage) {
+				t.Fatalf("%s still contains raw AI session persistence text %q", signature, rawMessage)
+			}
+		}
+		for _, key := range check.keys {
+			if !strings.Contains(functionSource, key) {
+				t.Fatalf("%s does not reference AI session persistence i18n key %q", signature, key)
+			}
+		}
+	}
+}
+
+func TestAIServiceSessionPersistenceCatalogKeysExist(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	keys := []string{
+		"ai_service.backend.error.sessions_dir_create_failed",
+		"ai_service.backend.error.session_serialize_failed",
+		"ai_service.backend.error.session_write_failed",
+		"ai_service.backend.error.session_delete_failed",
+	}
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		for _, key := range keys {
+			if strings.TrimSpace(catalog[key]) == "" {
+				t.Fatalf("%s catalog missing AI session persistence key %q", language, key)
+			}
+		}
+	}
+}
+
+func TestAIServiceSessionLoadErrorsUseLocalizedText(t *testing.T) {
+	sourceBytes, err := os.ReadFile("service.go")
+	if err != nil {
+		t.Fatalf("read service.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	checks := map[string]struct {
+		rawMessages []string
+		keys        []string
+	}{
+		"func (s *Service) AILoadSession(sessionID string) map[string]interface{} {": {
+			rawMessages: []string{
+				`"error": "会话不存在"`,
+				`"error": "会话数据损坏"`,
+			},
+			keys: []string{
+				"ai_service.backend.error.session_missing",
+				"ai_service.backend.error.session_corrupt",
+			},
+		},
+	}
+
+	for signature, check := range checks {
+		functionSource := aiServiceFunctionSource(t, source, signature)
+		for _, rawMessage := range check.rawMessages {
+			if strings.Contains(functionSource, rawMessage) {
+				t.Fatalf("%s still contains raw AI session load text %q", signature, rawMessage)
+			}
+		}
+		for _, key := range check.keys {
+			if !strings.Contains(functionSource, key) {
+				t.Fatalf("%s does not reference AI session load i18n key %q", signature, key)
+			}
+		}
+	}
+}
+
+func TestAIServiceSessionLoadCatalogKeysExist(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	keys := []string{
+		"ai_service.backend.error.session_missing",
+		"ai_service.backend.error.session_corrupt",
+	}
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		for _, key := range keys {
+			if strings.TrimSpace(catalog[key]) == "" {
+				t.Fatalf("%s catalog missing AI session load key %q", language, key)
+			}
+		}
+	}
+}
+
+func TestAILoadSessionUsesCurrentLanguageForLoadErrors(t *testing.T) {
+	t.Run("session_missing", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.configDir = t.TempDir()
+
+		result := service.AILoadSession("session-missing")
+		if success, _ := result["success"].(bool); success {
+			t.Fatalf("AILoadSession(session_missing) returned success: %+v", result)
+		}
+		if result["error"] != "Session does not exist" {
+			t.Fatalf("expected localized session missing message, got %#v", result["error"])
+		}
+	})
+
+	t.Run("session_corrupt", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.configDir = t.TempDir()
+
+		sessionPath := filepath.Join(service.sessionsDir(), "session-corrupt.json")
+		if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+			t.Fatalf("mkdir sessions dir: %v", err)
+		}
+		if err := os.WriteFile(sessionPath, []byte(`{invalid`), 0o644); err != nil {
+			t.Fatalf("write corrupt session: %v", err)
+		}
+
+		result := service.AILoadSession("session-corrupt")
+		if success, _ := result["success"].(bool); success {
+			t.Fatalf("AILoadSession(session_corrupt) returned success: %+v", result)
+		}
+		if result["error"] != "Session data is corrupted" {
+			t.Fatalf("expected localized session corrupt message, got %#v", result["error"])
+		}
+	})
+}
+
+func assertLocalizedAIServiceError(t *testing.T, service *Service, err error, key string, rawChinesePrefix string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected localized error")
+	}
+	cause := errors.Unwrap(err)
+	if cause == nil {
+		t.Fatalf("expected wrapped cause for key %q, got %T", key, err)
+	}
+	want := service.serviceText(key, map[string]any{"detail": cause.Error()})
+	if err.Error() != want {
+		t.Fatalf("expected localized error %q, got %q", want, err.Error())
+	}
+	if strings.Contains(err.Error(), rawChinesePrefix) {
+		t.Fatalf("expected no raw Chinese text %q, got %q", rawChinesePrefix, err.Error())
+	}
+}
+
+func TestAISaveSessionUsesCurrentLanguageForStructuredErrors(t *testing.T) {
+	t.Run("sessions_dir_create_failed", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+
+		blockingFile := filepath.Join(t.TempDir(), "config-file")
+		if err := os.WriteFile(blockingFile, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write blocking config file: %v", err)
+		}
+		service.configDir = blockingFile
+
+		err := service.AISaveSession("session-dir-failure", "Dir Failure", 1, `[]`)
+		assertLocalizedAIServiceError(t, service, err, "ai_service.backend.error.sessions_dir_create_failed", "创建 sessions 目录失败")
+	})
+
+	t.Run("session_serialize_failed", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.configDir = t.TempDir()
+
+		err := service.AISaveSession("session-serialize-failure", "Serialize Failure", 1, `{invalid`)
+		assertLocalizedAIServiceError(t, service, err, "ai_service.backend.error.session_serialize_failed", "序列化会话数据失败")
+	})
+
+	t.Run("session_write_failed", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.configDir = t.TempDir()
+
+		sessionPath := filepath.Join(service.sessionsDir(), "session-write-failure.json")
+		if err := os.MkdirAll(sessionPath, 0o755); err != nil {
+			t.Fatalf("mkdir session path directory: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(sessionPath, "blocker.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write blocker file: %v", err)
+		}
+
+		err := service.AISaveSession("session-write-failure", "Write Failure", 1, `[]`)
+		assertLocalizedAIServiceError(t, service, err, "ai_service.backend.error.session_write_failed", "保存会话失败")
+	})
+}
+
+func TestAIDeleteSessionUsesCurrentLanguageForDeleteFailure(t *testing.T) {
+	service := NewService()
+	service.AISetLanguage("en-US")
+	service.configDir = t.TempDir()
+
+	sessionPath := filepath.Join(service.sessionsDir(), "session-delete-failure.json")
+	if err := os.MkdirAll(sessionPath, 0o755); err != nil {
+		t.Fatalf("mkdir session path directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionPath, "blocker.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write blocker file: %v", err)
+	}
+
+	err := service.AIDeleteSession("session-delete-failure")
+	assertLocalizedAIServiceError(t, service, err, "ai_service.backend.error.session_delete_failed", "删除会话失败")
+}
+
+func TestAIServiceMCPServerMessagesUseLocalizedText(t *testing.T) {
+	sourceBytes, err := os.ReadFile("extensions_service.go")
+	if err != nil {
+		t.Fatalf("read extensions_service.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	checks := map[string]struct {
+		rawMessages []string
+		keys        []string
+	}{
+		"func (s *Service) AISaveMCPServer(config ai.MCPServerConfig) error {": {
+			rawMessages: []string{
+				`fmt.Errorf("MCP 服务命令不能为空")`,
+			},
+			keys: []string{
+				"ai_service.backend.error.mcp_command_required",
+			},
+		},
+		"func (s *Service) AITestMCPServer(config ai.MCPServerConfig) map[string]any {": {
+			rawMessages: []string{
+				`"message": "MCP 服务命令不能为空"`,
+				`fmt.Sprintf("MCP 服务连接成功，发现 %d 个工具", len(tools))`,
+			},
+			keys: []string{
+				"ai_service.backend.error.mcp_command_required",
+				"ai_service.backend.message.mcp_test_success",
+			},
+		},
+		"func (s *Service) AICallMCPTool(alias string, argumentsJSON string) (ai.MCPToolCallResult, error) {": {
+			rawMessages: []string{
+				`fmt.Errorf("未找到 MCP 服务: %s", serverID)`,
+				`fmt.Errorf("MCP 服务未启用: %s", serverConfig.Name)`,
+				`fmt.Errorf("解析 MCP 工具参数失败: %w", err)`,
+				`fmt.Errorf("调用 MCP 工具失败: %w", err)`,
+			},
+			keys: []string{
+				"ai_service.backend.error.mcp_server_not_found",
+				"ai_service.backend.error.mcp_server_disabled",
+				"ai_service.backend.error.mcp_tool_arguments_parse_failed",
+				"ai_chat.panel.tool_error.mcp_failed_with_detail",
+			},
+		},
+		"func (s *Service) withMCPClientSession(localizer *i18n.Localizer, serverConfig ai.MCPServerConfig, fn func(context.Context, *mcp.ClientSession) error) error {": {
+			rawMessages: []string{
+				`fmt.Errorf("暂不支持的 MCP transport: %s", serverConfig.Transport)`,
+				`fmt.Errorf("MCP 服务命令不能为空")`,
+			},
+			keys: []string{
+				"ai_service.backend.error.mcp_transport_unsupported",
+				"ai_service.backend.error.mcp_command_required",
+			},
+		},
+		"func parseMCPToolAlias(localizer *i18n.Localizer, alias string) (string, string, error) {": {
+			rawMessages: []string{
+				`fmt.Errorf("无效的 MCP 工具别名: %s", alias)`,
+			},
+			keys: []string{
+				"ai_service.backend.error.mcp_tool_alias_invalid",
+			},
+		},
+		"func formatMCPToolCallContent(localizer *i18n.Localizer, result *mcp.CallToolResult) string {": {
+			rawMessages: []string{
+				`return "MCP 工具调用失败"`,
+			},
+			keys: []string{
+				"ai_chat.panel.tool_error.mcp_failed",
+			},
+		},
+		"func normalizeSkillConfig(config ai.SkillConfig, localizer *i18n.Localizer) ai.SkillConfig {": {
+			rawMessages: []string{
+				`Name:          firstNonEmpty(strings.TrimSpace(config.Name), "未命名 Skill"),`,
+			},
+			keys: []string{
+				"ai_service.backend.message.skill_unnamed",
+			},
+		},
+	}
+
+	for signature, check := range checks {
+		functionSource := aiServiceFunctionSource(t, source, signature)
+		for _, rawMessage := range check.rawMessages {
+			if strings.Contains(functionSource, rawMessage) {
+				t.Fatalf("%s still contains raw MCP service text %q", signature, rawMessage)
+			}
+		}
+		for _, key := range check.keys {
+			if !strings.Contains(functionSource, key) {
+				t.Fatalf("%s does not reference MCP service i18n key %q", signature, key)
+			}
+		}
+	}
+}
+
+func TestAIServiceMCPClientHomeDirSentinelUsesEnglishInternalText(t *testing.T) {
+	sourceBytes, err := os.ReadFile("claude_code_mcp.go")
+	if err != nil {
+		t.Fatalf("read claude_code_mcp.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	if strings.Contains(source, `errors.New("无法确定用户目录")`) {
+		t.Fatalf(`claude_code_mcp.go still contains raw MCP client home-dir sentinel %q`, `errors.New("无法确定用户目录")`)
+	}
+	if !strings.Contains(source, `errors.New("user home directory is unavailable")`) {
+		t.Fatalf(`claude_code_mcp.go does not contain expected English MCP client home-dir sentinel %q`, `errors.New("user home directory is unavailable")`)
+	}
+	if !strings.Contains(source, `"ai.service.mcp_client.user_home_dir_unavailable"`) {
+		t.Fatal(`claude_code_mcp.go does not reference ai.service.mcp_client.user_home_dir_unavailable`)
+	}
+}
+
+func TestAIServiceMCPServerCatalogKeysExist(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	keys := []string{
+		"ai_service.backend.error.mcp_command_required",
+		"ai_service.backend.message.mcp_test_success",
+		"ai_service.backend.error.mcp_server_not_found",
+		"ai_service.backend.error.mcp_server_disabled",
+		"ai_service.backend.error.mcp_tool_arguments_parse_failed",
+		"ai_service.backend.error.mcp_tool_alias_invalid",
+		"ai_service.backend.error.mcp_transport_unsupported",
+		"ai_service.backend.message.skill_unnamed",
+		"ai_chat.panel.tool_error.mcp_failed",
+		"ai_chat.panel.tool_error.mcp_failed_with_detail",
+	}
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		for _, key := range keys {
+			if strings.TrimSpace(catalog[key]) == "" {
+				t.Fatalf("%s catalog missing MCP service key %q", language, key)
+			}
+		}
+	}
+}
+
+func TestAIServiceMCPHTTPServerMessagesUseLocalizedText(t *testing.T) {
+	sourceBytes, err := os.ReadFile("mcp_http_server.go")
+	if err != nil {
+		t.Fatalf("read mcp_http_server.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	checks := map[string]struct {
+		rawMessages []string
+		keys        []string
+	}{
+		"func (s *Service) AIStartMCPHTTPServer(options ai.MCPHTTPServerOptions) (ai.MCPHTTPServerStatus, error) {": {
+			rawMessages: []string{
+				`fmt.Sprintf("GoNavi MCP HTTP 服务启动失败：%v", err)`,
+			},
+			keys: []string{
+				"ai_service.backend.error.mcp_http_start_failed",
+			},
+		},
+		"func (s *Service) AIStopMCPHTTPServer() (ai.MCPHTTPServerStatus, error) {": {
+			rawMessages: []string{
+				`"GoNavi MCP HTTP 服务已停止"`,
+			},
+			keys: []string{
+				"ai_settings.mcp_http.message.stopped",
+			},
+		},
+		"func (s *Service) stopMCPHTTPServer(ctx context.Context, message string) (ai.MCPHTTPServerStatus, error) {": {
+			rawMessages: []string{
+				`"GoNavi MCP HTTP 服务未启动"`,
+				`fmt.Sprintf("GoNavi MCP HTTP 服务停止失败：%v", err)`,
+			},
+			keys: []string{
+				"ai_settings.mcp_http.status.not_running",
+				"ai_service.backend.error.mcp_http_stop_failed",
+			},
+		},
+		"func (s *Service) watchMCPHTTPServer(runtime *mcpHTTPServerRuntime) {": {
+			rawMessages: []string{
+				`"GoNavi MCP HTTP 服务已停止"`,
+				`fmt.Sprintf("GoNavi MCP HTTP 服务异常退出：%v", err)`,
+			},
+			keys: []string{
+				"ai_settings.mcp_http.message.stopped",
+				"ai_service.backend.error.mcp_http_process_exited",
+			},
+		},
+		"func startMCPHTTPCommandProcess(ctx context.Context, options mcpHTTPProcessStartOptions, textLookup mcpHTTPTextLookup) (mcpHTTPProcess, error) {": {
+			rawMessages: []string{
+				`fmt.Errorf("定位当前 GoNavi 可执行文件失败: %w", err)`,
+			},
+			keys: []string{
+				"ai_service.backend.error.mcp_http_executable_resolve_failed",
+			},
+		},
+		"func waitForMCPHTTPReady(ctx context.Context, process mcpHTTPProcess, status ai.MCPHTTPServerStatus, textLookup mcpHTTPTextLookup) error {": {
+			rawMessages: []string{
+				`fmt.Errorf("MCP HTTP 子进程已退出")`,
+			},
+			keys: []string{
+				"ai_service.backend.error.mcp_http_subprocess_exited",
+			},
+		},
+		"func waitMCPHTTPHealthEndpoint(ctx context.Context, healthURL string, textLookup mcpHTTPTextLookup) error {": {
+			rawMessages: []string{
+				`fmt.Errorf("healthz 返回 HTTP %d", resp.StatusCode)`,
+			},
+			keys: []string{
+				"ai_service.backend.error.mcp_http_health_status_failed",
+			},
+		},
+		"func statusFromMCPHTTPOptions(options mcpHTTPProcessStartOptions, token string, textLookup mcpHTTPTextLookup) ai.MCPHTTPServerStatus {": {
+			rawMessages: []string{
+				`"GoNavi MCP HTTP 服务已启动"`,
+			},
+			keys: []string{
+				"ai_settings.mcp_http.message.started",
+			},
+		},
+		"func generateMCPHTTPToken(textLookup mcpHTTPTextLookup) (string, error) {": {
+			rawMessages: []string{
+				`fmt.Errorf("生成 MCP HTTP Token 失败: %w", err)`,
+			},
+			keys: []string{
+				"ai_service.backend.error.mcp_http_token_generate_failed",
+			},
+		},
+		"func defaultMCPHTTPServerStatus(textLookup mcpHTTPTextLookup) ai.MCPHTTPServerStatus {": {
+			rawMessages: []string{
+				`"GoNavi MCP HTTP 服务未启动"`,
+			},
+			keys: []string{
+				"ai_settings.mcp_http.status.not_running",
+			},
+		},
+	}
+
+	for signature, check := range checks {
+		functionSource := aiServiceFunctionSource(t, source, signature)
+		for _, rawMessage := range check.rawMessages {
+			if strings.Contains(functionSource, rawMessage) {
+				t.Fatalf("%s still contains raw MCP HTTP service text %q", signature, rawMessage)
+			}
+		}
+		for _, key := range check.keys {
+			if !strings.Contains(functionSource, key) {
+				t.Fatalf("%s does not reference MCP HTTP service i18n key %q", signature, key)
+			}
+		}
+	}
+}
+
+func TestAIServiceMCPHTTPServerCatalogKeysExist(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	keys := []string{
+		"ai_settings.mcp_http.message.started",
+		"ai_settings.mcp_http.message.stopped",
+		"ai_settings.mcp_http.status.not_running",
+		"ai_service.backend.error.mcp_http_start_failed",
+		"ai_service.backend.error.mcp_http_stop_failed",
+		"ai_service.backend.error.mcp_http_process_exited",
+		"ai_service.backend.error.mcp_http_executable_resolve_failed",
+		"ai_service.backend.error.mcp_http_subprocess_exited",
+		"ai_service.backend.error.mcp_http_health_status_failed",
+		"ai_service.backend.error.mcp_http_token_generate_failed",
+	}
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		for _, key := range keys {
+			if strings.TrimSpace(catalog[key]) == "" {
+				t.Fatalf("%s catalog missing MCP HTTP service key %q", language, key)
+			}
+		}
+	}
+}
+
+func TestGetActiveProviderUsesEnglishProviderNotConfiguredMessage(t *testing.T) {
+	service := NewService()
+	service.AISetLanguage("en-US")
+
+	_, err := service.getActiveProvider()
+	if err == nil {
+		t.Fatal("expected missing provider error")
+	}
+
+	const want = "AI Provider is not configured. Configure one in Settings first."
+	if err.Error() != want {
+		t.Fatalf("expected localized provider-not-configured message %q, got %q", want, err.Error())
+	}
+	if strings.Contains(err.Error(), "未配置 AI Provider，请先在设置中配置") {
+		t.Fatalf("expected no Chinese provider-not-configured text, got %q", err.Error())
+	}
+}
+
+func TestAIListModelsUsesEnglishMissingActiveProviderMessage(t *testing.T) {
+	service := NewService()
+	service.AISetLanguage("en-US")
+	service.providers = []ai.ProviderConfig{
+		{
+			ID:      "provider-1",
+			Type:    "openai",
+			BaseURL: "https://api.openai.com/v1",
+			Model:   "gpt-4o-mini",
+		},
+	}
+	service.activeProvider = "missing-provider"
+
+	result := service.AIListModels()
+	if success, _ := result["success"].(bool); success {
+		t.Fatalf("expected missing active provider failure, got %+v", result)
+	}
+
+	errorText, _ := result["error"].(string)
+	const want = "Active AI Provider was not found"
+	if errorText != want {
+		t.Fatalf("expected localized missing-active-provider message %q, got %q", want, errorText)
+	}
+	if strings.Contains(errorText, "未找到活跃 Provider") {
+		t.Fatalf("expected no Chinese missing-active-provider text, got %q", errorText)
+	}
+}
+
+func TestAIChatSendUsesCurrentLanguageForImageFallbackPrompt(t *testing.T) {
+	var requestBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		defer r.Body.Close()
+		requestBody = string(body)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	service := NewService()
+	service.AISetLanguage("en-US")
+	service.providers = []ai.ProviderConfig{
+		{
+			ID:      "provider-image",
+			Type:    "openai",
+			BaseURL: server.URL,
+			Model:   "gpt-4o-mini",
+			APIKey:  "sk-test",
+		},
+	}
+	service.activeProvider = "provider-image"
+
+	result := service.AIChatSend([]ai.Message{
+		{
+			Role:   "user",
+			Images: []string{"data:image/png;base64,abc"},
+		},
+	}, nil)
+
+	if success, _ := result["success"].(bool); !success {
+		t.Fatalf("expected chat send success, got %+v", result)
+	}
+	const want = "Please describe and analyze this image."
+	if !strings.Contains(requestBody, want) {
+		t.Fatalf("expected localized image fallback prompt %q in request body, got %s", want, requestBody)
+	}
+	if strings.Contains(requestBody, "请描述和分析这张图片。") {
+		t.Fatalf("expected no raw Chinese image fallback prompt in request body, got %s", requestBody)
+	}
+}
+
+func TestAIChatSendUsesCurrentLanguageForImageOmittedNotice(t *testing.T) {
+	var requestBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		defer r.Body.Close()
+		requestBody = string(body)
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	service := NewService()
+	service.AISetLanguage("en-US")
+	service.providers = []ai.ProviderConfig{
+		{
+			ID:      "provider-image",
+			Type:    "openai",
+			BaseURL: server.URL,
+			Model:   "minimax-m1",
+			APIKey:  "sk-test",
+		},
+	}
+	service.activeProvider = "provider-image"
+
+	result := service.AIChatSend([]ai.Message{
+		{
+			Role:    "user",
+			Content: "Analyze this attachment.",
+			Images:  []string{"data:image/png;base64,abc"},
+		},
+	}, nil)
+
+	if success, _ := result["success"].(bool); !success {
+		t.Fatalf("expected chat send success, got %+v", result)
+	}
+	const want = "[Image omitted: the current model or upstream API does not support image input. Switch to a vision-capable model and resend the image.]"
+	if !strings.Contains(requestBody, want) {
+		t.Fatalf("expected localized image omitted notice %q in request body, got %s", want, requestBody)
+	}
+	if strings.Contains(requestBody, "【图片已省略：当前模型或上游接口不支持图片输入，请切换支持视觉的模型后重新发送图片。】") {
+		t.Fatalf("expected no raw Chinese image omitted notice in request body, got %s", requestBody)
+	}
+	if strings.Contains(requestBody, `"image_url"`) {
+		t.Fatalf("expected text-only model request to omit image_url, got %s", requestBody)
+	}
+}
+
+func TestAIServiceMCPServerUsesEnglishMessages(t *testing.T) {
+	t.Run("save_command_required", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+
+		err := service.AISaveMCPServer(ai.MCPServerConfig{
+			Name:    "Filesystem",
+			Enabled: true,
+		})
+		if err == nil {
+			t.Fatal("expected missing MCP command error")
+		}
+
+		const want = "MCP command cannot be empty"
+		if err.Error() != want {
+			t.Fatalf("expected localized MCP command-required message %q, got %q", want, err.Error())
+		}
+		if strings.Contains(err.Error(), "MCP 服务命令不能为空") {
+			t.Fatalf("expected no Chinese MCP command-required text, got %q", err.Error())
+		}
+	})
+
+	t.Run("test_command_required", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+
+		result := service.AITestMCPServer(ai.MCPServerConfig{
+			Name:    "Filesystem",
+			Enabled: true,
+		})
+		if success, _ := result["success"].(bool); success {
+			t.Fatalf("expected MCP test failure, got %+v", result)
+		}
+
+		message, _ := result["message"].(string)
+		const want = "MCP command cannot be empty"
+		if message != want {
+			t.Fatalf("expected localized MCP test command-required message %q, got %q", want, message)
+		}
+		if strings.Contains(message, "MCP 服务命令不能为空") {
+			t.Fatalf("expected no Chinese MCP test command-required text, got %q", message)
+		}
+	})
+
+	t.Run("call_server_not_found", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+
+		_, err := service.AICallMCPTool("mcp__missing-server__list_tools", "{}")
+		if err == nil {
+			t.Fatal("expected missing MCP server error")
+		}
+
+		const want = "MCP server was not found: missing-server"
+		if err.Error() != want {
+			t.Fatalf("expected localized missing-server message %q, got %q", want, err.Error())
+		}
+		if strings.Contains(err.Error(), "未找到 MCP 服务") {
+			t.Fatalf("expected no Chinese missing-server text, got %q", err.Error())
+		}
+	})
+
+	t.Run("call_server_disabled", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.mcpServers = []ai.MCPServerConfig{
+			{
+				ID:      "server-disabled",
+				Name:    "Filesystem",
+				Command: "node",
+				Enabled: false,
+			},
+		}
+
+		_, err := service.AICallMCPTool("mcp__server-disabled__list_tools", "{}")
+		if err == nil {
+			t.Fatal("expected disabled MCP server error")
+		}
+
+		const want = "MCP server is disabled: Filesystem"
+		if err.Error() != want {
+			t.Fatalf("expected localized disabled-server message %q, got %q", want, err.Error())
+		}
+		if strings.Contains(err.Error(), "MCP 服务未启用") {
+			t.Fatalf("expected no Chinese disabled-server text, got %q", err.Error())
+		}
+	})
+
+	t.Run("call_arguments_parse_failed", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.mcpServers = []ai.MCPServerConfig{
+			{
+				ID:      "server-json",
+				Name:    "Filesystem",
+				Command: "node",
+				Enabled: true,
+			},
+		}
+
+		_, err := service.AICallMCPTool("mcp__server-json__list_tools", "{")
+		if err == nil {
+			t.Fatal("expected MCP tool arguments parse error")
+		}
+
+		if !strings.HasPrefix(err.Error(), "Failed to parse MCP tool arguments: ") {
+			t.Fatalf("expected localized MCP arguments parse prefix, got %q", err.Error())
+		}
+		if strings.Contains(err.Error(), "解析 MCP 工具参数失败") {
+			t.Fatalf("expected no Chinese MCP arguments parse text, got %q", err.Error())
+		}
+	})
+
+	t.Run("call_invalid_alias", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+
+		_, err := service.AICallMCPTool("not-an-alias", "{}")
+		if err == nil {
+			t.Fatal("expected invalid MCP tool alias error")
+		}
+
+		const want = "Invalid MCP tool alias: not-an-alias"
+		if err.Error() != want {
+			t.Fatalf("expected localized invalid-alias message %q, got %q", want, err.Error())
+		}
+		if strings.Contains(err.Error(), "无效的 MCP 工具别名") {
+			t.Fatalf("expected no Chinese invalid-alias text, got %q", err.Error())
+		}
+	})
+
+	t.Run("call_command_required_wrapped", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.mcpServers = []ai.MCPServerConfig{
+			{
+				ID:      "server-empty-command",
+				Name:    "Filesystem",
+				Command: "",
+				Enabled: true,
+			},
+		}
+
+		_, err := service.AICallMCPTool("mcp__server-empty-command__list_tools", "{}")
+		if err == nil {
+			t.Fatal("expected wrapped MCP tool call failure")
+		}
+
+		const want = "MCP tool call failed: MCP command cannot be empty"
+		if err.Error() != want {
+			t.Fatalf("expected localized wrapped MCP call message %q, got %q", want, err.Error())
+		}
+		if strings.Contains(err.Error(), "调用 MCP 工具失败") || strings.Contains(err.Error(), "MCP 服务命令不能为空") {
+			t.Fatalf("expected no Chinese wrapped MCP call text, got %q", err.Error())
+		}
+	})
+}
+
+func TestAIServiceMCPToolErrorFallbackUsesLocalizedText(t *testing.T) {
+	localizer := newServiceLocalizerForLanguage(i18n.LanguageEnUS)
+	result := &mcp.CallToolResult{IsError: true}
+
+	message := formatMCPToolCallContent(localizer, result)
+	const want = "MCP tool call failed"
+	if message != want {
+		t.Fatalf("expected localized MCP fallback message %q, got %q", want, message)
+	}
+	if strings.Contains(message, "MCP 工具调用失败") {
+		t.Fatalf("expected no Chinese MCP fallback text, got %q", message)
+	}
+}
+
+func TestAIServiceSkillUnnamedFallbackUsesLocalizedText(t *testing.T) {
+	localizer := newServiceLocalizerForLanguage(i18n.LanguageEnUS)
+	normalized := normalizeSkillConfig(ai.SkillConfig{Enabled: true}, localizer)
+
+	const want = "Unnamed Skill"
+	if normalized.Name != want {
+		t.Fatalf("expected localized unnamed skill %q, got %q", want, normalized.Name)
+	}
+	if strings.Contains(normalized.Name, "未命名 Skill") {
+		t.Fatalf("expected no Chinese unnamed skill text, got %q", normalized.Name)
+	}
+}
+
+func TestAIListModelsUsesEnglishLocalizedModelListErrors(t *testing.T) {
+	t.Run("request_create_failed", func(t *testing.T) {
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.providers = []ai.ProviderConfig{
+			{
+				ID:      "provider-invalid-url",
+				Type:    "openai",
+				BaseURL: "http://[::1",
+			},
+		}
+		service.activeProvider = "provider-invalid-url"
+
+		result := service.AIListModels()
+		if success, _ := result["success"].(bool); success {
+			t.Fatalf("expected invalid model-list request failure, got %+v", result)
+		}
+
+		errorText, _ := result["error"].(string)
+		if !strings.HasPrefix(errorText, "Failed to create model list request: ") {
+			t.Fatalf("expected localized create-request prefix, got %q", errorText)
+		}
+		if strings.Contains(errorText, "创建请求失败") {
+			t.Fatalf("expected no Chinese create-request text, got %q", errorText)
+		}
+	})
+
+	t.Run("request_failed", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		server.Close()
+
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.providers = []ai.ProviderConfig{
+			{
+				ID:      "provider-request-failed",
+				Type:    "openai",
+				BaseURL: server.URL + "/v1",
+			},
+		}
+		service.activeProvider = "provider-request-failed"
+
+		result := service.AIListModels()
+		if success, _ := result["success"].(bool); success {
+			t.Fatalf("expected model-list request failure, got %+v", result)
+		}
+
+		errorText, _ := result["error"].(string)
+		if !strings.HasPrefix(errorText, "Failed to request model list: ") {
+			t.Fatalf("expected localized request-failed prefix, got %q", errorText)
+		}
+		if strings.Contains(errorText, "请求模型列表失败") {
+			t.Fatalf("expected no Chinese request-failed text, got %q", errorText)
+		}
+	})
+
+	t.Run("http_status_failed", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "upstream failure", http.StatusBadGateway)
+		}))
+		defer server.Close()
+
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.providers = []ai.ProviderConfig{
+			{
+				ID:      "provider-http-status",
+				Type:    "openai",
+				BaseURL: server.URL + "/v1",
+			},
+		}
+		service.activeProvider = "provider-http-status"
+
+		result := service.AIListModels()
+		if success, _ := result["success"].(bool); success {
+			t.Fatalf("expected model-list http-status failure, got %+v", result)
+		}
+
+		errorText, _ := result["error"].(string)
+		const want = "Model list endpoint returned an unexpected status (HTTP 502): upstream failure"
+		if errorText != want {
+			t.Fatalf("expected localized http-status error %q, got %q", want, errorText)
+		}
+		if strings.Contains(errorText, "获取模型列表失败") {
+			t.Fatalf("expected no Chinese http-status text, got %q", errorText)
+		}
+	})
+
+	t.Run("parse_failed", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":`))
+		}))
+		defer server.Close()
+
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.providers = []ai.ProviderConfig{
+			{
+				ID:      "provider-parse-failed",
+				Type:    "openai",
+				BaseURL: server.URL + "/v1",
+			},
+		}
+		service.activeProvider = "provider-parse-failed"
+
+		result := service.AIListModels()
+		if success, _ := result["success"].(bool); success {
+			t.Fatalf("expected model-list parse failure, got %+v", result)
+		}
+
+		errorText, _ := result["error"].(string)
+		if !strings.HasPrefix(errorText, "Failed to parse model list: ") {
+			t.Fatalf("expected localized parse-failed prefix, got %q", errorText)
+		}
+		if strings.Contains(errorText, "解析模型列表失败") {
+			t.Fatalf("expected no Chinese parse-failed text, got %q", errorText)
+		}
+	})
+
+	t.Run("volcengine_coding_plan_empty", func(t *testing.T) {
+		originalFetchModelsFunc := fetchModelsFunc
+		fetchModelsFunc = func(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {
+			return []string{
+				"qwen3-14b-20250429",
+				"wan2-1-14b-t2v-250225",
+			}, nil
+		}
+		t.Cleanup(func() {
+			fetchModelsFunc = originalFetchModelsFunc
+		})
+
+		service := NewService()
+		service.AISetLanguage("en-US")
+		service.providers = []ai.ProviderConfig{
+			{
+				ID:      "provider-coding-plan",
+				Type:    "openai",
+				BaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3",
+			},
+		}
+		service.activeProvider = "provider-coding-plan"
+
+		result := service.AIListModels()
+		if success, _ := result["success"].(bool); success {
+			t.Fatalf("expected coding-plan model-list failure, got %+v", result)
+		}
+
+		errorText, _ := result["error"].(string)
+		const want = "The current endpoint did not return any available Volcengine Coding Plan models. Check account access or switch to the \"Volcengine Ark\" provider"
+		if errorText != want {
+			t.Fatalf("expected localized volcengine-coding-plan error %q, got %q", want, errorText)
+		}
+		if strings.Contains(errorText, "当前接口未返回可用的火山 Coding Plan 模型") {
+			t.Fatalf("expected no Chinese coding-plan text, got %q", errorText)
+		}
+	})
+}

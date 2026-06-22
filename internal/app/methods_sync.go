@@ -15,11 +15,11 @@ func (a *App) resolveDataSyncConfigSecrets(config sync.SyncConfig) (sync.SyncCon
 	resolved := config
 	sourceConfig, sourceDatabase, err := a.resolveDataSyncEndpointConfig(config.SourceConfig, config.SourceDatabase)
 	if err != nil {
-		return resolved, fmt.Errorf("恢复源数据库连接密文失败: %w", err)
+		return resolved, fmt.Errorf("%s", a.appText("data_sync.backend.error.restore_source_secret_failed", map[string]any{"detail": err.Error()}))
 	}
 	targetConfig, targetDatabase, err := a.resolveDataSyncEndpointConfig(config.TargetConfig, config.TargetDatabase)
 	if err != nil {
-		return resolved, fmt.Errorf("恢复目标数据库连接密文失败: %w", err)
+		return resolved, fmt.Errorf("%s", a.appText("data_sync.backend.error.restore_target_secret_failed", map[string]any{"detail": err.Error()}))
 	}
 	resolved.SourceConfig = sourceConfig
 	resolved.TargetConfig = targetConfig
@@ -172,5 +172,5 @@ func (a *App) DataSyncPreview(config sync.SyncConfig, tableName string, limit in
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	return connection.QueryResult{Success: true, Message: "OK", Data: preview}
+	return connection.QueryResult{Success: true, Message: a.appText("data_sync.backend.result.preview_ready", nil), Data: preview}
 }

@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { MCPFieldGuide } from '../../utils/mcpServerGuidance';
 import { buildMCPFieldTone, buildMCPHintStyle } from './AIMCPHelpBlock';
@@ -19,6 +21,9 @@ const AIMCPFieldGuideCard: React.FC<AIMCPFieldGuideCardProps> = ({
   overlayTheme,
   compact = false,
 }) => {
+  const i18n = useOptionalI18n();
+  const copy = (key: string) => (i18n?.t ?? ((catalogKey) => catalogTranslate('en-US', catalogKey)))(key);
+  const example = item.exampleKey ? copy(item.exampleKey) : item.example;
   const tone = buildMCPFieldTone(item.fieldState, darkMode);
   return (
     <div
@@ -33,7 +38,7 @@ const AIMCPFieldGuideCard: React.FC<AIMCPFieldGuideCardProps> = ({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{item.title}</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{copy(item.titleKey)}</div>
         <span
           style={{
             padding: '2px 8px',
@@ -44,24 +49,24 @@ const AIMCPFieldGuideCard: React.FC<AIMCPFieldGuideCardProps> = ({
             background: tone.bg,
           }}
         >
-          {tone.label}
+          {copy(tone.labelKey)}
         </span>
       </div>
-      <div style={{ fontSize: 12, lineHeight: 1.6, color: overlayTheme.titleText }}>{item.summary}</div>
-      {!compact && <div style={buildMCPHintStyle(overlayTheme.mutedText)}>{item.detail}</div>}
+      <div style={{ fontSize: 12, lineHeight: 1.6, color: overlayTheme.titleText }}>{copy(item.summaryKey)}</div>
+      {!compact && <div style={buildMCPHintStyle(overlayTheme.mutedText)}>{copy(item.detailKey)}</div>}
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-        <strong>应填：</strong>
-        {item.fill}
+        <strong>{copy('ai_settings.mcp_server.guide.field.fill_label')}</strong>
+        {copy(item.fillKey)}
       </div>
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-        <strong>不要填：</strong>
-        {item.avoid}
+        <strong>{copy('ai_settings.mcp_server.guide.field.avoid_label')}</strong>
+        {copy(item.avoidKey)}
       </div>
-      {item.example ? (
+      {example ? (
         <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-          示例值：
+          {copy('ai_settings.mcp_server.guide.field.example_label')}
           {' '}
-          <code style={{ fontFamily: 'var(--gn-font-mono)' }}>{item.example}</code>
+          <code style={{ fontFamily: 'var(--gn-font-mono)' }}>{example}</code>
         </div>
       ) : null}
     </div>

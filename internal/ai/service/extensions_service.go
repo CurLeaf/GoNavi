@@ -12,6 +12,7 @@ import (
 
 	"GoNavi-Wails/internal/ai"
 	"GoNavi-Wails/internal/logger"
+	"GoNavi-Wails/shared/i18n"
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -38,7 +39,7 @@ func (s *Service) AISaveMCPServer(config ai.MCPServerConfig) error {
 
 	normalized := normalizeMCPServerConfig(config)
 	if normalized.Enabled && strings.TrimSpace(normalized.Command) == "" {
-		return fmt.Errorf("MCP 服务命令不能为空")
+		return fmt.Errorf("%s", s.serviceTextLocked("ai_service.backend.error.mcp_command_required", nil))
 	}
 
 	for i := range s.mcpServers {
@@ -71,7 +72,11 @@ func (s *Service) AIDeleteMCPServer(id string) error {
 func (s *Service) AITestMCPServer(config ai.MCPServerConfig) map[string]any {
 	normalized := normalizeMCPServerConfig(config)
 	if strings.TrimSpace(normalized.Command) == "" {
-		return map[string]any{"success": false, "message": "MCP 服务命令不能为空", "tools": []ai.MCPToolDescriptor{}}
+		return map[string]any{
+			"success": false,
+			"message": s.serviceText("ai_service.backend.error.mcp_command_required", nil),
+			"tools":   []ai.MCPToolDescriptor{},
+		}
 	}
 
 	tools, err := s.listMCPToolsForServer(normalized)
@@ -81,7 +86,7 @@ func (s *Service) AITestMCPServer(config ai.MCPServerConfig) map[string]any {
 
 	return map[string]any{
 		"success":   true,
-		"message":   fmt.Sprintf("MCP 服务连接成功，发现 %d 个工具", len(tools)),
+		"message":   s.serviceText("ai_service.backend.message.mcp_test_success", map[string]any{"count": len(tools)}),
 		"toolCount": len(tools),
 		"tools":     tools,
 	}
@@ -110,7 +115,8 @@ func (s *Service) AIListMCPTools() []ai.MCPToolDescriptor {
 
 // AICallMCPTool 调用指定的 MCP 工具
 func (s *Service) AICallMCPTool(alias string, argumentsJSON string) (ai.MCPToolCallResult, error) {
-	serverID, originalName, err := parseMCPToolAlias(alias)
+	localizer := s.serviceLocalizerForLanguage()
+	serverID, originalName, err := parseMCPToolAlias(localizer, alias)
 	if err != nil {
 		return ai.MCPToolCallResult{}, err
 	}
@@ -119,22 +125,26 @@ func (s *Service) AICallMCPTool(alias string, argumentsJSON string) (ai.MCPToolC
 	serverConfig, ok := findMCPServerConfigByID(s.mcpServers, serverID)
 	s.mu.RUnlock()
 	if !ok {
-		return ai.MCPToolCallResult{}, fmt.Errorf("未找到 MCP 服务: %s", serverID)
+		return ai.MCPToolCallResult{}, fmt.Errorf("%s", s.serviceText("ai_service.backend.error.mcp_server_not_found", map[string]any{
+			"serverID": serverID,
+		}))
 	}
 	if !serverConfig.Enabled {
-		return ai.MCPToolCallResult{}, fmt.Errorf("MCP 服务未启用: %s", serverConfig.Name)
+		return ai.MCPToolCallResult{}, fmt.Errorf("%s", s.serviceText("ai_service.backend.error.mcp_server_disabled", map[string]any{
+			"name": serverConfig.Name,
+		}))
 	}
 
 	var arguments any = map[string]any{}
 	trimmedArguments := strings.TrimSpace(argumentsJSON)
 	if trimmedArguments != "" {
 		if err := json.Unmarshal([]byte(trimmedArguments), &arguments); err != nil {
-			return ai.MCPToolCallResult{}, fmt.Errorf("解析 MCP 工具参数失败: %w", err)
+			return ai.MCPToolCallResult{}, s.serviceError("ai_service.backend.error.mcp_tool_arguments_parse_failed", nil, err)
 		}
 	}
 
 	var callResult *mcp.CallToolResult
-	err = s.withMCPClientSession(serverConfig, func(ctx context.Context, session *mcp.ClientSession) error {
+	err = s.withMCPClientSession(localizer, serverConfig, func(ctx context.Context, session *mcp.ClientSession) error {
 		result, callErr := session.CallTool(ctx, &mcp.CallToolParams{
 			Name:      originalName,
 			Arguments: arguments,
@@ -146,7 +156,9 @@ func (s *Service) AICallMCPTool(alias string, argumentsJSON string) (ai.MCPToolC
 		return nil
 	})
 	if err != nil {
-		return ai.MCPToolCallResult{}, fmt.Errorf("调用 MCP 工具失败: %w", err)
+		return ai.MCPToolCallResult{}, fmt.Errorf("%s", serviceTextFromLocalizer(localizer, "ai_chat.panel.tool_error.mcp_failed_with_detail", map[string]any{
+			"detail": err.Error(),
+		}))
 	}
 
 	return ai.MCPToolCallResult{
@@ -155,7 +167,7 @@ func (s *Service) AICallMCPTool(alias string, argumentsJSON string) (ai.MCPToolC
 		ServerName:        serverConfig.Name,
 		OriginalName:      originalName,
 		Title:             originalName,
-		Content:           formatMCPToolCallContent(callResult),
+		Content:           formatMCPToolCallContent(localizer, callResult),
 		StructuredContent: callResult.StructuredContent,
 		IsError:           callResult.IsError,
 	}, nil
@@ -173,7 +185,7 @@ func (s *Service) AISaveSkill(config ai.SkillConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	normalized := normalizeSkillConfig(config)
+	normalized := normalizeSkillConfig(config, s.serviceLocalizerForLanguageLocked())
 	for i := range s.skills {
 		if s.skills[i].ID == normalized.ID {
 			s.skills[i] = normalized
@@ -202,7 +214,7 @@ func (s *Service) AIDeleteSkill(id string) error {
 
 func (s *Service) listMCPToolsForServer(serverConfig ai.MCPServerConfig) ([]ai.MCPToolDescriptor, error) {
 	descriptors := make([]ai.MCPToolDescriptor, 0)
-	err := s.withMCPClientSession(serverConfig, func(ctx context.Context, session *mcp.ClientSession) error {
+	err := s.withMCPClientSession(s.serviceLocalizerForLanguage(), serverConfig, func(ctx context.Context, session *mcp.ClientSession) error {
 		cursor := ""
 		for {
 			result, err := session.ListTools(ctx, &mcp.ListToolsParams{Cursor: cursor})
@@ -233,13 +245,15 @@ func (s *Service) listMCPToolsForServer(serverConfig ai.MCPServerConfig) ([]ai.M
 	return descriptors, err
 }
 
-func (s *Service) withMCPClientSession(serverConfig ai.MCPServerConfig, fn func(context.Context, *mcp.ClientSession) error) error {
+func (s *Service) withMCPClientSession(localizer *i18n.Localizer, serverConfig ai.MCPServerConfig, fn func(context.Context, *mcp.ClientSession) error) error {
 	serverConfig = normalizeMCPServerConfig(serverConfig)
 	if serverConfig.Transport != ai.MCPTransportStdio {
-		return fmt.Errorf("暂不支持的 MCP transport: %s", serverConfig.Transport)
+		return fmt.Errorf("%s", serviceTextFromLocalizer(localizer, "ai_service.backend.error.mcp_transport_unsupported", map[string]any{
+			"transport": serverConfig.Transport,
+		}))
 	}
 	if strings.TrimSpace(serverConfig.Command) == "" {
-		return fmt.Errorf("MCP 服务命令不能为空")
+		return fmt.Errorf("%s", serviceTextFromLocalizer(localizer, "ai_service.backend.error.mcp_command_required", nil))
 	}
 
 	timeout := time.Duration(serverConfig.TimeoutSeconds) * time.Second
@@ -345,15 +359,19 @@ func buildMCPToolAlias(serverID string, originalName string) string {
 	return mcpToolAliasPrefix + sanitizeAliasPart(serverID) + "__" + sanitizeAliasPart(originalName)
 }
 
-func parseMCPToolAlias(alias string) (string, string, error) {
+func parseMCPToolAlias(localizer *i18n.Localizer, alias string) (string, string, error) {
 	trimmed := strings.TrimSpace(alias)
 	if !strings.HasPrefix(trimmed, mcpToolAliasPrefix) {
-		return "", "", fmt.Errorf("无效的 MCP 工具别名: %s", alias)
+		return "", "", fmt.Errorf("%s", serviceTextFromLocalizer(localizer, "ai_service.backend.error.mcp_tool_alias_invalid", map[string]any{
+			"alias": alias,
+		}))
 	}
 
 	parts := strings.SplitN(strings.TrimPrefix(trimmed, mcpToolAliasPrefix), "__", 2)
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-		return "", "", fmt.Errorf("无效的 MCP 工具别名: %s", alias)
+		return "", "", fmt.Errorf("%s", serviceTextFromLocalizer(localizer, "ai_service.backend.error.mcp_tool_alias_invalid", map[string]any{
+			"alias": alias,
+		}))
 	}
 	return parts[0], parts[1], nil
 }
@@ -401,7 +419,7 @@ func normalizeToolSchema(schema any) map[string]any {
 	return result
 }
 
-func formatMCPToolCallContent(result *mcp.CallToolResult) string {
+func formatMCPToolCallContent(localizer *i18n.Localizer, result *mcp.CallToolResult) string {
 	if result == nil {
 		return ""
 	}
@@ -431,7 +449,7 @@ func formatMCPToolCallContent(result *mcp.CallToolResult) string {
 	}
 
 	if len(parts) == 0 && result.IsError {
-		return "MCP 工具调用失败"
+		return serviceTextFromLocalizer(localizer, "ai_chat.panel.tool_error.mcp_failed", nil)
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -445,15 +463,15 @@ func findMCPServerConfigByID(configs []ai.MCPServerConfig, id string) (ai.MCPSer
 	return ai.MCPServerConfig{}, false
 }
 
-func normalizeSkillConfigs(configs []ai.SkillConfig) []ai.SkillConfig {
+func normalizeSkillConfigs(configs []ai.SkillConfig, localizer *i18n.Localizer) []ai.SkillConfig {
 	normalized := make([]ai.SkillConfig, 0, len(configs))
 	for _, config := range configs {
-		normalized = append(normalized, normalizeSkillConfig(config))
+		normalized = append(normalized, normalizeSkillConfig(config, localizer))
 	}
 	return normalized
 }
 
-func normalizeSkillConfig(config ai.SkillConfig) ai.SkillConfig {
+func normalizeSkillConfig(config ai.SkillConfig, localizer *i18n.Localizer) ai.SkillConfig {
 	id := sanitizeExtensionID(strings.TrimSpace(config.ID), "skill")
 	if id == "" {
 		id = "skill-" + uuid.New().String()[:8]
@@ -475,7 +493,7 @@ func normalizeSkillConfig(config ai.SkillConfig) ai.SkillConfig {
 
 	return ai.SkillConfig{
 		ID:            id,
-		Name:          firstNonEmpty(strings.TrimSpace(config.Name), "未命名 Skill"),
+		Name:          firstNonEmpty(strings.TrimSpace(config.Name), serviceTextFromLocalizer(localizer, "ai_service.backend.message.skill_unnamed", nil)),
 		Description:   strings.TrimSpace(config.Description),
 		SystemPrompt:  normalizeUserPromptText(config.SystemPrompt),
 		Enabled:       config.Enabled,

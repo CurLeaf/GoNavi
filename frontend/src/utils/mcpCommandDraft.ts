@@ -8,6 +8,7 @@ export interface ParseMCPCommandDraftResult {
   ok: boolean;
   draft?: ParsedMCPCommandDraft;
   error?: string;
+  errorKey?: string;
 }
 
 const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=.*/u;
@@ -19,7 +20,7 @@ const pushToken = (tokens: string[], current: string) => {
   }
 };
 
-export const splitShellLikeCommand = (input: string): { tokens: string[]; error?: string } => {
+export const splitShellLikeCommand = (input: string): { tokens: string[]; error?: string; errorKey?: string } => {
   const text = String(input || '').trim();
   if (!text) {
     return { tokens: [] };
@@ -88,7 +89,8 @@ export const splitShellLikeCommand = (input: string): { tokens: string[]; error?
   if (quoteMode) {
     return {
       tokens,
-      error: '命令中存在未闭合的引号，请检查后重试。',
+      error: 'The command contains an unclosed quote. Check it and try again.',
+      errorKey: 'ai_settings.mcp_server.command_parse.error.unclosed_quote',
     };
   }
 
@@ -152,12 +154,16 @@ const consumeLeadingEnvAssignments = (tokens: string[], env: Record<string, stri
 };
 
 export const parseMCPCommandDraft = (input: string): ParseMCPCommandDraftResult => {
-  const { tokens, error } = splitShellLikeCommand(input);
+  const { tokens, error, errorKey } = splitShellLikeCommand(input);
   if (error) {
-    return { ok: false, error };
+    return { ok: false, error, errorKey };
   }
   if (tokens.length === 0) {
-    return { ok: false, error: '请先粘贴完整命令。' };
+    return {
+      ok: false,
+      error: 'Paste the full command first.',
+      errorKey: 'ai_settings.mcp_server.command_parse.error.empty',
+    };
   }
 
   const env: Record<string, string> = {};
@@ -167,7 +173,8 @@ export const parseMCPCommandDraft = (input: string): ParseMCPCommandDraftResult 
   if (!command) {
     return {
       ok: false,
-      error: '没有解析出启动命令，请至少提供可执行程序名。',
+      error: 'No startup command was parsed. Provide at least an executable name.',
+      errorKey: 'ai_settings.mcp_server.command_parse.error.missing_command',
     };
   }
 

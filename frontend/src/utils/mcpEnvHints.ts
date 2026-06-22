@@ -1,4 +1,5 @@
 import { splitShellLikeCommand } from './mcpCommandDraft';
+import { translateMCPHintCopy, type MCPHintTranslator } from './mcpArgumentHints';
 
 export type MCPEnvHintCategory = 'secret' | 'endpoint' | 'proxy' | 'path' | 'runtime' | 'generic';
 
@@ -29,115 +30,140 @@ interface KnownEnvHint {
   detail: string;
   valueHint: string;
   sensitive?: boolean;
+  labelKey?: string;
+  detailKey?: string;
+  valueHintKey?: string;
 }
 
+export type MCPEnvHintTranslator = MCPHintTranslator;
+
+const withEnvHintKeys = (
+  key: string,
+  hint: Omit<KnownEnvHint, 'labelKey' | 'detailKey' | 'valueHintKey'>,
+): KnownEnvHint => ({
+  ...hint,
+  labelKey: `ai_settings.mcp_server.env_hints.${key}.label`,
+  detailKey: `ai_settings.mcp_server.env_hints.${key}.detail`,
+  valueHintKey: `ai_settings.mcp_server.env_hints.${key}.value_hint`,
+});
+
+const localizeEnvHint = (
+  hint: KnownEnvHint,
+  translate?: MCPEnvHintTranslator,
+): KnownEnvHint => ({
+  ...hint,
+  label: hint.labelKey ? translateMCPHintCopy(translate, hint.labelKey, hint.label) : hint.label,
+  detail: hint.detailKey ? translateMCPHintCopy(translate, hint.detailKey, hint.detail) : hint.detail,
+  valueHint: hint.valueHintKey ? translateMCPHintCopy(translate, hint.valueHintKey, hint.valueHint) : hint.valueHint,
+});
+
 const KNOWN_ENV_HINTS: Record<string, KnownEnvHint> = {
-  GITHUB_TOKEN: {
+  GITHUB_TOKEN: withEnvHintKeys('known.github_token', {
     category: 'secret',
     label: 'GitHub Token',
-    detail: '通常给 GitHub MCP 读取仓库、Issue、PR 或 Actions 使用。',
-    valueHint: '填 GitHub Personal Access Token，按 MCP README 要求授予最小权限。',
+    detail: 'Usually used by GitHub MCP services to read repositories, issues, pull requests, or Actions.',
+    valueHint: 'Enter a GitHub Personal Access Token with the minimum permissions required by the MCP README.',
     sensitive: true,
-  },
-  GITLAB_TOKEN: {
+  }),
+  GITLAB_TOKEN: withEnvHintKeys('known.gitlab_token', {
     category: 'secret',
     label: 'GitLab Token',
-    detail: '通常给 GitLab MCP 访问项目、Merge Request 或 CI 使用。',
-    valueHint: '填 GitLab Access Token，并限制到需要访问的项目范围。',
+    detail: 'Usually used by GitLab MCP services to access projects, merge requests, or CI.',
+    valueHint: 'Enter a GitLab Access Token and restrict it to the required project scope.',
     sensitive: true,
-  },
-  OPENAI_API_KEY: {
+  }),
+  OPENAI_API_KEY: withEnvHintKeys('known.openai_api_key', {
     category: 'secret',
     label: 'OpenAI API Key',
-    detail: '给依赖 OpenAI API 的 MCP 服务调用模型或 embedding 接口。',
-    valueHint: '填真实 API Key；不要写到 command、args 或聊天消息里。',
+    detail: 'Used by MCP services that depend on OpenAI APIs for model or embedding calls.',
+    valueHint: 'Enter the real API Key; do not put it in command, args, or chat messages.',
     sensitive: true,
-  },
-  ANTHROPIC_API_KEY: {
+  }),
+  ANTHROPIC_API_KEY: withEnvHintKeys('known.anthropic_api_key', {
     category: 'secret',
     label: 'Anthropic API Key',
-    detail: '给依赖 Anthropic Claude API 的 MCP 服务使用。',
-    valueHint: '填真实 API Key；确认服务确实需要该变量后再配置。',
+    detail: 'Used by MCP services that depend on the Anthropic Claude API.',
+    valueHint: 'Enter the real API Key only after confirming the service requires this variable.',
     sensitive: true,
-  },
-  GEMINI_API_KEY: {
+  }),
+  GEMINI_API_KEY: withEnvHintKeys('known.gemini_api_key', {
     category: 'secret',
     label: 'Gemini API Key',
-    detail: '给依赖 Google Gemini API 的 MCP 服务使用。',
-    valueHint: '填真实 API Key；也有服务会要求 GOOGLE_API_KEY。',
+    detail: 'Used by MCP services that depend on the Google Gemini API.',
+    valueHint: 'Enter the real API Key; some services may require GOOGLE_API_KEY instead.',
     sensitive: true,
-  },
-  GOOGLE_API_KEY: {
+  }),
+  GOOGLE_API_KEY: withEnvHintKeys('known.google_api_key', {
     category: 'secret',
     label: 'Google API Key',
-    detail: '给 Google/Gemini/Maps/Search 类 MCP 服务使用。',
-    valueHint: '填真实 API Key，并确认 README 要求的是 GOOGLE_API_KEY 还是 GEMINI_API_KEY。',
+    detail: 'Used by Google, Gemini, Maps, or Search MCP services.',
+    valueHint: 'Enter the real API Key and confirm whether the README requires GOOGLE_API_KEY or GEMINI_API_KEY.',
     sensitive: true,
-  },
-  SLACK_BOT_TOKEN: {
+  }),
+  SLACK_BOT_TOKEN: withEnvHintKeys('known.slack_bot_token', {
     category: 'secret',
     label: 'Slack Bot Token',
-    detail: '给 Slack MCP 读取频道、消息或发送通知使用。',
-    valueHint: '填 xoxb- 开头的 Bot Token，并控制 workspace 权限。',
+    detail: 'Used by Slack MCP services to read channels, messages, or send notifications.',
+    valueHint: 'Enter the Bot Token starting with xoxb- and restrict workspace permissions.',
     sensitive: true,
-  },
-  NOTION_API_KEY: {
+  }),
+  NOTION_API_KEY: withEnvHintKeys('known.notion_api_key', {
     category: 'secret',
     label: 'Notion API Key',
-    detail: '给 Notion MCP 访问页面、数据库或 workspace 内容使用。',
-    valueHint: '填 Notion integration secret，并只授权需要的页面。',
+    detail: 'Used by Notion MCP services to access pages, databases, or workspace content.',
+    valueHint: 'Enter the Notion integration secret and authorize only the required pages.',
     sensitive: true,
-  },
-  DATABASE_URL: {
+  }),
+  DATABASE_URL: withEnvHintKeys('known.database_url', {
     category: 'endpoint',
-    label: '数据库连接串',
-    detail: '给 MCP 服务自己连接数据库使用；这会把数据库连接信息交给该 MCP 进程。',
-    valueHint: '只在确实要让该 MCP 直连数据库时填写，优先考虑使用 GoNavi MCP 避免密码外泄。',
+    label: 'Database connection string',
+    detail: 'Lets the MCP service connect to a database itself; this gives database connection information to that MCP process.',
+    valueHint: 'Fill this only when the MCP must connect to the database directly; prefer GoNavi MCP to avoid password exposure.',
     sensitive: true,
-  },
-  HTTP_PROXY: {
+  }),
+  HTTP_PROXY: withEnvHintKeys('known.http_proxy', {
     category: 'proxy',
-    label: 'HTTP 代理',
-    detail: '让 MCP 进程访问 HTTP 资源时走指定代理。',
-    valueHint: '填 http://host:port；如果代理带账号密码，按敏感变量处理。',
-  },
-  HTTPS_PROXY: {
+    label: 'HTTP proxy',
+    detail: 'Routes HTTP resource access from the MCP process through the specified proxy.',
+    valueHint: 'Enter http://host:port; treat it as sensitive if the proxy includes a username or password.',
+  }),
+  HTTPS_PROXY: withEnvHintKeys('known.https_proxy', {
     category: 'proxy',
-    label: 'HTTPS 代理',
-    detail: '让 MCP 进程访问 HTTPS 资源时走指定代理。',
-    valueHint: '填 http://host:port 或 https://host:port。',
-  },
-  NO_PROXY: {
+    label: 'HTTPS proxy',
+    detail: 'Routes HTTPS resource access from the MCP process through the specified proxy.',
+    valueHint: 'Enter http://host:port or https://host:port.',
+  }),
+  NO_PROXY: withEnvHintKeys('known.no_proxy', {
     category: 'proxy',
-    label: '代理绕过列表',
-    detail: '指定哪些域名或地址不走代理。',
-    valueHint: '逗号分隔，例如 localhost,127.0.0.1,.corp.local。',
-  },
-  DOCKER_HOST: {
+    label: 'Proxy bypass list',
+    detail: 'Specifies which domains or addresses should bypass the proxy.',
+    valueHint: 'Use comma-separated entries, for example localhost,127.0.0.1,.corp.local.',
+  }),
+  DOCKER_HOST: withEnvHintKeys('known.docker_host', {
     category: 'runtime',
-    label: 'Docker Daemon 地址',
-    detail: '给 docker CLI 指定连接哪个 Docker Engine。',
-    valueHint: 'Windows 常见为 npipe:////./pipe/docker_engine；远端 Docker 请确认安全边界。',
-  },
-  GONAVI_MCP_HTTP_TOKEN: {
+    label: 'Docker Daemon address',
+    detail: 'Tells the docker CLI which Docker Engine to connect to.',
+    valueHint: 'Common on Windows: npipe:////./pipe/docker_engine; confirm security boundaries for remote Docker.',
+  }),
+  GONAVI_MCP_HTTP_TOKEN: withEnvHintKeys('known.gonavi_mcp_http_token', {
     category: 'secret',
     label: 'GoNavi MCP HTTP Token',
-    detail: '给远程 MCP HTTP 服务开启 Bearer Token 鉴权时使用。',
-    valueHint: '填高熵随机 token；不要复用数据库密码或模型 API Key。',
+    detail: 'Used when a remote MCP HTTP service enables Bearer Token authentication.',
+    valueHint: 'Enter a high-entropy random token; do not reuse database passwords or model API Keys.',
     sensitive: true,
-  },
-  NODE_ENV: {
+  }),
+  NODE_ENV: withEnvHintKeys('known.node_env', {
     category: 'runtime',
-    label: 'Node 运行环境',
-    detail: '影响部分 Node MCP 服务的日志、调试或生产模式。',
-    valueHint: '通常填 production、development 或 README 指定值。',
-  },
-  LOG_LEVEL: {
+    label: 'Node runtime environment',
+    detail: 'Affects logging, debugging, or production mode for some Node MCP services.',
+    valueHint: 'Usually production, development, or a value specified by the README.',
+  }),
+  LOG_LEVEL: withEnvHintKeys('known.log_level', {
     category: 'runtime',
-    label: '日志级别',
-    detail: '控制 MCP 服务输出多少日志。',
-    valueHint: '常见值为 debug、info、warn、error；排障时可临时调高。',
-  },
+    label: 'Log level',
+    detail: 'Controls how much log output the MCP service emits.',
+    valueHint: 'Common values are debug, info, warn, and error; temporarily raise it for troubleshooting.',
+  }),
 };
 
 const SECRET_KEY_RE = /(TOKEN|API[_-]?KEY|SECRET|PASSWORD|PASS|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|DATABASE_URL|DSN)/iu;
@@ -162,52 +188,52 @@ const normalizeCommandName = (command: string): string => {
 
 const inferEnvHint = (key: string): KnownEnvHint => {
   if (SECRET_KEY_RE.test(key)) {
-    return {
+    return withEnvHintKeys('inferred.secret', {
       category: 'secret',
-      label: '密钥 / Token',
-      detail: '变量名看起来像密钥、Token、密码或连接串。',
-      valueHint: '填真实值，但只保存在本机 MCP 配置里；不要放到 command、args 或聊天内容。',
+      label: 'Secret / Token',
+      detail: 'The variable name looks like a secret, token, password, or connection string.',
+      valueHint: 'Enter the real value, but keep it only in local MCP configuration; do not put it in command, args, or chat content.',
       sensitive: true,
-    };
+    });
   }
   if (PROXY_KEY_RE.test(key)) {
-    return {
+    return withEnvHintKeys('inferred.proxy', {
       category: 'proxy',
-      label: '代理配置',
-      detail: '变量名看起来像网络代理设置。',
-      valueHint: '按 README 或企业代理格式填写，例如 http://127.0.0.1:7890。',
-    };
+      label: 'Proxy configuration',
+      detail: 'The variable name looks like a network proxy setting.',
+      valueHint: 'Follow the README or enterprise proxy format, for example http://127.0.0.1:7890.',
+    });
   }
   if (ENDPOINT_KEY_RE.test(key)) {
-    return {
+    return withEnvHintKeys('inferred.endpoint', {
       category: 'endpoint',
-      label: '服务地址',
-      detail: '变量名看起来像服务地址、接口地址或主机配置。',
-      valueHint: '填写 MCP Server 要访问的 URL、host 或 endpoint。',
-    };
+      label: 'Service endpoint',
+      detail: 'The variable name looks like a service URL, API endpoint, or host configuration.',
+      valueHint: 'Enter the URL, host, or endpoint the MCP Server needs to access.',
+    });
   }
   if (PATH_KEY_RE.test(key)) {
-    return {
+    return withEnvHintKeys('inferred.path', {
       category: 'path',
-      label: '路径 / 配置文件',
-      detail: '变量名看起来像本地路径、目录或配置文件位置。',
-      valueHint: '填写本机 MCP 进程能访问的绝对路径；Windows 路径建议保留盘符。',
-    };
+      label: 'Path / config file',
+      detail: 'The variable name looks like a local path, directory, or config file location.',
+      valueHint: 'Enter an absolute path accessible to the local MCP process; keep the drive letter for Windows paths.',
+    });
   }
   if (RUNTIME_KEY_RE.test(key)) {
-    return {
+    return withEnvHintKeys('inferred.runtime', {
       category: 'runtime',
-      label: '运行时开关',
-      detail: '变量名看起来像运行环境、日志或调试开关。',
-      valueHint: '按 README 指定的枚举值填写。',
-    };
+      label: 'Runtime switch',
+      detail: 'The variable name looks like a runtime environment, logging, or debug switch.',
+      valueHint: 'Use the enum value specified by the README.',
+    });
   }
-  return {
+  return withEnvHintKeys('inferred.generic', {
     category: 'generic',
-    label: '自定义配置',
-    detail: '未命中内置变量库，按 MCP README 对应字段说明填写。',
-    valueHint: '确认变量名大小写和 README 完全一致。',
-  };
+    label: 'Custom configuration',
+    detail: 'No built-in variable hint matched; follow the matching field description in the MCP README.',
+    valueHint: 'Confirm the variable name casing exactly matches the README.',
+  });
 };
 
 const isPlaceholderValue = (value: string): boolean => {
@@ -218,10 +244,10 @@ const isPlaceholderValue = (value: string): boolean => {
   return PLACEHOLDER_VALUE_RE.test(text) || text.includes('...');
 };
 
-const buildEnvHintItem = ([key, value]: [string, string]): MCPEnvHintItem => {
+const buildEnvHintItem = ([key, value]: [string, string], translate?: MCPEnvHintTranslator): MCPEnvHintItem => {
   const normalizedKey = normalizeEnvKey(key);
   const knownHint = KNOWN_ENV_HINTS[normalizedKey];
-  const hint = knownHint || inferEnvHint(normalizedKey);
+  const hint = localizeEnvHint(knownHint || inferEnvHint(normalizedKey), translate);
   return {
     key: normalizedKey,
     category: hint.category,
@@ -239,10 +265,11 @@ export const buildMCPEnvHintProfile = (
   command: string,
   args: string[] | undefined,
   env: Record<string, string> | undefined,
+  translate?: MCPEnvHintTranslator,
 ): MCPEnvHintProfile | null => {
   const items = Object.entries(env || {})
     .sort(([left], [right]) => normalizeEnvKey(left).localeCompare(normalizeEnvKey(right)))
-    .map(buildEnvHintItem);
+    .map((entry) => buildEnvHintItem(entry, translate));
 
   if (items.length === 0) {
     return null;
@@ -258,22 +285,60 @@ export const buildMCPEnvHintProfile = (
   const dockerEnvForwarded = (args || []).some((arg) => ['-e', '--env'].includes(toTrimmedString(arg).toLowerCase()) || toTrimmedString(arg).startsWith('-e='));
 
   if (emptyItems.length > 0) {
-    warnings.push(`${emptyItems.length} 个环境变量值为空，测试前需要补齐或删除。`);
-    nextActions.push(`补齐 ${emptyItems.map((item) => item.key).slice(0, 3).join('、')} 的值，或删除不需要的变量。`);
+    const keys = emptyItems.map((item) => item.key).slice(0, 3).join(', ');
+    warnings.push(translateMCPHintCopy(
+      translate,
+      'ai_settings.mcp_server.env_hints.warning.empty',
+      '{{count}} environment variable values are empty and must be filled or removed before testing.',
+      { count: emptyItems.length },
+    ));
+    nextActions.push(translateMCPHintCopy(
+      translate,
+      'ai_settings.mcp_server.env_hints.next_action.empty',
+      'Fill values for {{keys}}, or remove variables you do not need.',
+      { keys },
+    ));
   }
   if (placeholderItems.length > 0) {
-    warnings.push(`${placeholderItems.length} 个环境变量看起来仍是示例占位值。`);
-    nextActions.push(`把 ${placeholderItems.map((item) => item.key).slice(0, 3).join('、')} 替换成真实值后再测试工具发现。`);
+    const keys = placeholderItems.map((item) => item.key).slice(0, 3).join(', ');
+    warnings.push(translateMCPHintCopy(
+      translate,
+      'ai_settings.mcp_server.env_hints.warning.placeholder',
+      '{{count}} environment variables still look like example placeholder values.',
+      { count: placeholderItems.length },
+    ));
+    nextActions.push(translateMCPHintCopy(
+      translate,
+      'ai_settings.mcp_server.env_hints.next_action.placeholder',
+      'Replace {{keys}} with real values before testing tool discovery.',
+      { keys },
+    ));
   }
   if (dockerCommand && items.length > 0 && !dockerEnvForwarded) {
-    warnings.push('command=docker 时，这里的环境变量只传给 docker CLI，不会自动进入容器。');
-    nextActions.push('如果容器内 MCP 需要这些变量，请在 args 里按 README 增加 -e KEY=VALUE 或 --env KEY=VALUE。');
+    warnings.push(translateMCPHintCopy(
+      translate,
+      'ai_settings.mcp_server.env_hints.warning.docker_env_not_forwarded',
+      'When command=docker, these environment variables are passed only to the docker CLI and do not automatically enter the container.',
+    ));
+    nextActions.push(translateMCPHintCopy(
+      translate,
+      'ai_settings.mcp_server.env_hints.next_action.docker_env',
+      'If the MCP inside the container needs these variables, add -e KEY=VALUE or --env KEY=VALUE to args according to the README.',
+    ));
   }
   if (secretLikeCount > 0) {
-    nextActions.push('密钥类变量只保存在本机配置；不要把真实值发到聊天、Issue 或截图里。');
+    nextActions.push(translateMCPHintCopy(
+      translate,
+      'ai_settings.mcp_server.env_hints.next_action.secrets_local',
+      'Secret-like variables are stored only in local configuration; do not send real values to chat, issues, or screenshots.',
+    ));
   }
   if (nextActions.length === 0) {
-    nextActions.push('环境变量 key 已可识别；测试失败时优先核对 README 要求的变量名大小写。');
+    nextActions.push(translateMCPHintCopy(
+      translate,
+      'ai_settings.mcp_server.env_hints.next_action.keys_recognized',
+      'Environment variable keys are recognizable; if testing fails, first check the variable name casing required by the README.',
+    ));
   }
 
   return {

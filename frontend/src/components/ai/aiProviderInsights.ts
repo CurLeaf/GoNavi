@@ -1,4 +1,6 @@
 import type { AIProviderConfig } from '../../types';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
 
 const DECLARED_MODEL_PREVIEW_LIMIT = 12;
 const DYNAMIC_MODEL_PREVIEW_LIMIT = 20;
@@ -58,7 +60,9 @@ export const buildAIProviderSnapshot = (params: {
   providers?: AIProviderConfig[];
   activeProviderId?: string | null;
   dynamicModels?: string[];
+  translate?: AIInspectionTranslator;
 }) => {
+  const translate = params.translate;
   const providers = Array.isArray(params.providers) ? params.providers : [];
   const activeProviderId = trimText(params.activeProviderId);
   const dynamicModelPreview = sliceList(
@@ -130,11 +134,30 @@ export const buildAIProviderSnapshot = (params: {
     dynamicModels: dynamicModelPreview.items,
     dynamicModelsTruncated: dynamicModelPreview.truncated,
     message: providerSummaries.length === 0
-      ? '当前没有配置 AI 供应商'
+      ? translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.provider.message.empty',
+        'No AI providers are configured',
+      )
       : activeProvider
         ? activeProvider.issueCount > 0
-          ? `当前正在使用 ${activeProvider.name || activeProvider.id}，但还有 ${activeProvider.issueCount} 项待检查`
-          : `当前共配置 ${providerSummaries.length} 个供应商，正在使用 ${activeProvider.name || activeProvider.id}`
-        : `当前已配置 ${providerSummaries.length} 个供应商，但尚未选择活动供应商`,
+          ? translateInspectionCopy(
+            translate,
+            'ai_chat.inspection.provider.message.active_needs_attention',
+            `Using ${activeProvider.name || activeProvider.id}, but ${activeProvider.issueCount} items still need checking`,
+            { provider: activeProvider.name || activeProvider.id, issueCount: activeProvider.issueCount },
+          )
+          : translateInspectionCopy(
+            translate,
+            'ai_chat.inspection.provider.message.active_ready',
+            `${providerSummaries.length} providers are configured; using ${activeProvider.name || activeProvider.id}`,
+            { count: providerSummaries.length, provider: activeProvider.name || activeProvider.id },
+          )
+        : translateInspectionCopy(
+          translate,
+          'ai_chat.inspection.provider.message.unselected',
+          `${providerSummaries.length} providers are configured, but no active provider is selected`,
+          { count: providerSummaries.length },
+        ),
   };
 };

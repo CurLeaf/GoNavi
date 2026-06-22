@@ -1,3 +1,5 @@
+import { t as catalogTranslate } from '../../i18n/catalog';
+import type { I18nParams } from '../../i18n/types';
 import type { AIContextItem, AIProviderConfig } from '../../types';
 
 export type AIChatReadinessActionKey = 'open-settings' | 'reload-models';
@@ -45,6 +47,16 @@ export interface AIChatReadinessSnapshot {
   message: string;
 }
 
+type AIChatReadinessTranslate = (key: string, params?: I18nParams) => string;
+
+const defaultTranslate: AIChatReadinessTranslate = (key, params) =>
+  catalogTranslate('en-US', key, params);
+
+const joinIssueLabels = (
+  labels: string[],
+  translate: AIChatReadinessTranslate,
+): string => labels.join(translate('ai_chat.input.status.issue.separator'));
+
 const trimText = (value: unknown): string => String(value || '').trim();
 
 const getProviderHost = (baseUrl: string): string => {
@@ -78,11 +90,14 @@ const getSelectedProvider = (params: {
   return providers.find((provider) => provider.id === activeProviderId) || null;
 };
 
-export const formatAIChatProviderIssueLabels = (issues: AIChatReadinessIssue[]): string[] => {
+export const formatAIChatProviderIssueLabels = (
+  issues: AIChatReadinessIssue[],
+  translate: AIChatReadinessTranslate = defaultTranslate,
+): string[] => {
   const issueLabels: Record<AIChatReadinessIssue, string> = {
-    missing_secret: '密钥',
-    missing_base_url: '接口地址',
-    missing_selected_model: '模型',
+    missing_secret: translate('ai_chat.input.status.issue.missing_secret'),
+    missing_base_url: translate('ai_chat.input.status.issue.missing_base_url'),
+    missing_selected_model: translate('ai_chat.input.status.issue.missing_selected_model'),
   };
   return issues
     .map((issue) => issueLabels[issue])
@@ -97,7 +112,9 @@ export const buildAIChatReadinessSnapshot = (params: {
   loadingModels?: boolean;
   activeContext?: { connectionId?: string | null; dbName?: string | null } | null;
   activeContextItems?: AIContextItem[];
+  translate?: AIChatReadinessTranslate;
 }): AIChatReadinessSnapshot => {
+  const translate = params.translate || defaultTranslate;
   const providers = Array.isArray(params.providers) ? params.providers : [];
   const activeProvider = getSelectedProvider(params);
   const providerCount = providers.length > 0 ? providers.length : (activeProvider ? 1 : 0);
@@ -109,19 +126,20 @@ export const buildAIChatReadinessSnapshot = (params: {
   const selectableModelCount = dynamicModels.length > 0 ? dynamicModels.length : declaredModels.length;
   const hasConnectionContext = Boolean(trimText(params.activeContext?.connectionId));
   const contextAttachedCount = activeContextItems.length;
+  const fallbackProviderName = translate('ai_chat.input.status.provider_fallback_name');
 
   if (!activeProvider) {
     const title = providers.length > 0
-      ? '已配置供应商，但当前没有选中生效项'
-      : '还没有配置 AI 供应商';
+      ? translate('ai_chat.input.status.missing_provider.title.unselected')
+      : translate('ai_chat.input.status.missing_provider.title.none');
     const description = providers.length > 0
-      ? '先在 AI 设置里选中一个活动供应商，然后再发送。'
-      : '先在 AI 设置里添加并启用一个模型供应商。';
+      ? translate('ai_chat.input.status.missing_provider.description.unselected')
+      : translate('ai_chat.input.status.missing_provider.description.none');
     return {
       status: 'missing_provider',
       ready: false,
       severity: 'warning',
-      label: '未就绪',
+      label: translate('ai_chat.input.status.label.not_ready'),
       title,
       description,
       providerCount,
@@ -132,10 +150,10 @@ export const buildAIChatReadinessSnapshot = (params: {
       issues: [],
       action: {
         key: 'open-settings',
-        label: '打开 AI 设置',
+        label: translate('ai_chat.input.status.action.open_settings'),
       },
       activeProvider: null,
-      message: `${title}。${description}`,
+      message: [title, description].filter(Boolean).join(' '),
     };
   }
 
@@ -164,14 +182,17 @@ export const buildAIChatReadinessSnapshot = (params: {
 
   const blockingProviderIssues = issues.filter((issue) => issue !== 'missing_selected_model');
   if (blockingProviderIssues.length > 0) {
-    const missingLabels = formatAIChatProviderIssueLabels(blockingProviderIssues);
-    const title = `${providerSummary.name || providerSummary.id || '当前供应商'} 还缺少 ${missingLabels.join('、')}`;
-    const description = '先补全供应商配置再发送，避免请求直接失败。';
+    const missingLabels = formatAIChatProviderIssueLabels(blockingProviderIssues, translate);
+    const title = translate('ai_chat.input.status.provider_incomplete.title', {
+      provider: providerSummary.name || providerSummary.id || fallbackProviderName,
+      issues: joinIssueLabels(missingLabels, translate),
+    });
+    const description = translate('ai_chat.input.status.provider_incomplete.description');
     return {
       status: 'provider_incomplete',
       ready: false,
       severity: 'error',
-      label: '需修复',
+      label: translate('ai_chat.input.status.label.needs_fix'),
       title,
       description,
       providerCount,
@@ -182,25 +203,31 @@ export const buildAIChatReadinessSnapshot = (params: {
       issues,
       action: {
         key: 'open-settings',
-        label: '修复供应商配置',
+        label: translate('ai_chat.input.status.action.fix_provider'),
       },
       activeProvider: providerSummary,
-      message: `${title}。${description}`,
+      message: [title, description].filter(Boolean).join(' '),
     };
   }
 
   if (!providerSummary.model) {
     const title = params.loadingModels
-      ? `正在加载 ${providerSummary.name || providerSummary.id || '当前供应商'} 的模型列表`
-      : `先为 ${providerSummary.name || providerSummary.id || '当前供应商'} 选择一个模型`;
+      ? translate('ai_chat.input.status.missing_model.title.loading', {
+        provider: providerSummary.name || providerSummary.id || fallbackProviderName,
+      })
+      : translate('ai_chat.input.status.missing_model.title.select', {
+        provider: providerSummary.name || providerSummary.id || fallbackProviderName,
+      });
     const description = selectableModelCount > 0
-      ? `当前已发现 ${selectableModelCount} 个可选模型，选中后即可发送。`
-      : '如果列表为空，请检查供应商入口、密钥和模型权限。';
+      ? translate('ai_chat.input.status.missing_model.description.available', { count: selectableModelCount })
+      : translate('ai_chat.input.status.missing_model.description.empty');
     return {
       status: params.loadingModels ? 'loading_models' : 'missing_model',
       ready: false,
       severity: params.loadingModels ? 'info' : 'warning',
-      label: params.loadingModels ? '加载中' : '未选模型',
+      label: params.loadingModels
+        ? translate('ai_chat.input.status.label.loading')
+        : translate('ai_chat.input.status.label.model_required'),
       title,
       description,
       providerCount,
@@ -211,25 +238,28 @@ export const buildAIChatReadinessSnapshot = (params: {
       issues,
       action: {
         key: 'reload-models',
-        label: '重新加载模型',
+        label: translate('ai_chat.input.status.action.reload_models'),
       },
       activeProvider: providerSummary,
-      message: `${title}。${description}`,
+      message: [title, description].filter(Boolean).join(' '),
     };
   }
 
-  const title = `AI 已就绪：${providerSummary.name || providerSummary.id} / ${providerSummary.model}`;
+  const title = translate('ai_chat.input.status.ready.title', {
+    provider: providerSummary.name || providerSummary.id || fallbackProviderName,
+    model: providerSummary.model,
+  });
   const description = contextAttachedCount > 0
-    ? `当前已关联 ${contextAttachedCount} 张表结构上下文，可直接发送。`
+    ? translate('ai_chat.input.status.ready.description.with_context', { count: contextAttachedCount })
     : hasConnectionContext
-      ? '已选中当前连接；如需更准的数据库语义，建议再关联表结构上下文。'
-      : '可直接发送；如需更准的数据库语义，建议先选中连接或关联表结构。';
+      ? translate('ai_chat.input.status.ready.description.with_connection')
+      : translate('ai_chat.input.status.ready.description.no_context');
 
   return {
     status: 'ready',
     ready: true,
     severity: 'success',
-    label: '已就绪',
+    label: translate('ai_chat.input.status.label.ready'),
     title,
     description,
     providerCount,
@@ -239,6 +269,6 @@ export const buildAIChatReadinessSnapshot = (params: {
     selectableModelCount,
     issues: [],
     activeProvider: providerSummary,
-    message: `${title}。${description}`,
+    message: [title, description].filter(Boolean).join(' '),
   };
 };

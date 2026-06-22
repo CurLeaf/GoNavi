@@ -18,7 +18,7 @@ type CustomProvider struct {
 // NewCustomProvider 创建自定义 Provider 实例
 func NewCustomProvider(config ai.ProviderConfig) (Provider, error) {
 	if strings.TrimSpace(config.BaseURL) == "" {
-		return nil, fmt.Errorf("自定义 Provider 必须指定 Base URL")
+		return nil, fmt.Errorf("custom provider Base URL is required")
 	}
 
 	// 根据 apiFormat 决定使用哪个底层协议，默认 openai

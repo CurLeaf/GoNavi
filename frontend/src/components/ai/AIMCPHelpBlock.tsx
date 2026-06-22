@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { MCPFieldState } from '../../utils/mcpServerGuidance';
 
@@ -18,19 +20,19 @@ export const buildMCPFieldTone = (kind: MCPFieldState, darkMode: boolean) => {
   switch (kind) {
     case 'required':
       return {
-        label: '必填',
+        labelKey: 'ai_settings.mcp_server.help.field_state.required',
         color: '#b45309',
         bg: darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)',
       };
     case 'fixed':
       return {
-        label: '固定',
+        labelKey: 'ai_settings.mcp_server.help.field_state.fixed',
         color: '#2563eb',
         bg: darkMode ? 'rgba(59,130,246,0.18)' : 'rgba(59,130,246,0.12)',
       };
     default:
       return {
-        label: '可选',
+        labelKey: 'ai_settings.mcp_server.help.field_state.optional',
         color: '#475569',
         bg: darkMode ? 'rgba(148,163,184,0.18)' : 'rgba(148,163,184,0.12)',
       };
@@ -56,6 +58,8 @@ const AIMCPHelpBlock: React.FC<AIMCPHelpBlockProps> = ({
   example,
   children,
 }) => {
+  const i18n = useOptionalI18n();
+  const copy = (key: string) => (i18n?.t ?? ((catalogKey) => catalogTranslate('en-US', catalogKey)))(key);
   const tone = buildMCPFieldTone(fieldState, darkMode);
 
   return (
@@ -72,14 +76,14 @@ const AIMCPHelpBlock: React.FC<AIMCPHelpBlockProps> = ({
             background: tone.bg,
           }}
         >
-          {tone.label}
+          {copy(tone.labelKey)}
         </span>
       </div>
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
         {description}
         {example ? (
           <>
-            {' '}例如：<code style={{ fontFamily: 'var(--gn-font-mono)' }}>{example}</code>
+            {' '}{copy('ai_settings.mcp_server.help.example_prefix')}<code style={{ fontFamily: 'var(--gn-font-mono)' }}>{example}</code>
           </>
         ) : null}
       </div>

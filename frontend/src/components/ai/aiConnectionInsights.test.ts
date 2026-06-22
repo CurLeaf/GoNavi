@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { t as translateCatalog } from '../../i18n/catalog';
 import type { SavedConnection, TabData } from '../../types';
 import { buildCurrentConnectionSnapshot } from './aiConnectionInsights';
 
@@ -103,7 +104,37 @@ describe('buildCurrentConnectionSnapshot', () => {
 
     expect(snapshot).toEqual({
       hasActiveConnection: false,
-      message: '当前没有活动连接',
+      message: 'No active connection is currently selected',
+    });
+  });
+
+  it('localizes empty-state messages while keeping raw ids unchanged', () => {
+    const missingActiveSnapshot = buildCurrentConnectionSnapshot({
+      activeContext: null,
+      tabs: [],
+      activeTabId: null,
+      connections: [baseConnection],
+      translate: (key, params) => translateCatalog('en-US', key, params),
+    });
+    const staleConnectionSnapshot = buildCurrentConnectionSnapshot({
+      activeContext: {
+        connectionId: 'conn-missing',
+        dbName: 'crm',
+      },
+      tabs: [],
+      activeTabId: null,
+      connections: [baseConnection],
+      translate: (key, params) => translateCatalog('en-US', key, params),
+    });
+
+    expect(missingActiveSnapshot).toEqual({
+      hasActiveConnection: false,
+      message: 'No active connection is currently selected',
+    });
+    expect(staleConnectionSnapshot).toEqual({
+      hasActiveConnection: false,
+      connectionId: 'conn-missing',
+      message: 'The current active connection does not exist in the local cache',
     });
   });
 });

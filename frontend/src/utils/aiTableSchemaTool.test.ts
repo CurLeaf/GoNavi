@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { resolveAITableSchemaToolResult } from './aiTableSchemaTool';
 
+const translate = (key: string, params?: Record<string, unknown>) => {
+  const renderedParams = params
+    ? Object.entries(params).map(([name, value]) => `${name}=${value}`).join('|')
+    : '';
+  return `T:${key}${renderedParams ? ` ${renderedParams}` : ''}`;
+};
+
 describe('resolveAITableSchemaToolResult', () => {
   it('returns DDL directly when DDL fetch succeeds', async () => {
     const fetchColumns = vi.fn();
@@ -27,14 +34,23 @@ describe('resolveAITableSchemaToolResult', () => {
           { Name: 'NAME', Type: 'VARCHAR2(64)', Nullable: 'YES' },
         ],
       }),
+      translate,
     });
 
     expect(result.success).toBe(true);
-    expect(result.content).toContain('DDL 获取失败，已降级为字段元数据摘要');
-    expect(result.content).toContain('ORA-31603');
-    expect(result.content).toContain('可用字段：ID, NAME');
+    expect(result.content).toContain(
+      'T:ai_chat.inspection.table_schema.warning.ddl_fallback tableName=USERS',
+    );
+    expect(result.content).toContain(
+      'T:ai_chat.inspection.table_schema.warning.ddl_error detail=ORA-31603: object not found or insufficient privileges',
+    );
+    expect(result.content).toContain(
+      'T:ai_chat.inspection.table_schema.warning.available_fields fields=ID, NAME',
+    );
     expect(result.content).toContain('"field":"ID"');
     expect(result.content).toContain('"type":"NUMBER"');
+    expect(result.content).not.toContain('DDL 获取失败');
+    expect(result.content).not.toContain('可用字段');
   });
 
   it('returns a combined failure when both DDL and column metadata fail', async () => {
@@ -42,10 +58,21 @@ describe('resolveAITableSchemaToolResult', () => {
       tableName: 'USERS',
       fetchDDL: vi.fn().mockResolvedValue({ success: false, message: 'DDL permission denied' }),
       fetchColumns: vi.fn().mockResolvedValue({ success: false, message: 'columns permission denied' }),
+      translate,
     });
 
     expect(result.success).toBe(false);
+    expect(result.content).toBe(
+      'T:ai_chat.inspection.table_schema.error.ddl_and_columns_failed ddlDetail=DDL permission denied|columnDetail=columns permission denied',
+    );
     expect(result.content).toContain('DDL permission denied');
     expect(result.content).toContain('columns permission denied');
+    expect(result.content).not.toContain('获取建表语句失败');
+  });
+
+  it('keeps legacy Chinese table schema wrappers out of the source', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('./aiTableSchemaTool.ts', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/DDL 获取失败|DDL 错误|该结果不包含完整索引|可用字段|详细信息|获取建表语句失败|未知错误|降级获取字段列表/);
   });
 });

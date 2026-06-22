@@ -1,9 +1,13 @@
 import type { AIMCPToolDescriptor } from '../../types';
+import type { I18nParams } from '../../i18n';
+import { t as translateCatalog } from '../../i18n';
 import {
-  BUILTIN_TOOL_FLOWS,
   describeBuiltinToolParameters,
+  localizeBuiltinToolFlows,
 } from '../../utils/aiBuiltinToolCatalog';
 import type { AIBuiltinToolInfo } from '../../utils/aiBuiltinToolInfo.types';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
 
 const DEFAULT_LIMIT = 12;
 const MAX_LIMIT = 40;
@@ -42,6 +46,21 @@ const readMCPToolParameterSummary = (tool: AIMCPToolDescriptor) => {
   };
 };
 
+const translateToolCatalogCopy = (
+  translate: AIInspectionTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: I18nParams,
+): string => translateInspectionCopy(
+  translate,
+  `ai_chat.inspection.tool_catalog.${key}`,
+  fallback,
+  params,
+);
+
+const defaultBuiltinFlowTranslator = (key: string) =>
+  translateCatalog(key, undefined, 'zh-CN');
+
 export const buildAIToolCatalogSnapshot = (params: {
   builtinTools: AIBuiltinToolInfo[];
   mcpTools?: AIMCPToolDescriptor[];
@@ -49,20 +68,25 @@ export const buildAIToolCatalogSnapshot = (params: {
   toolName?: string;
   includeMCPTools?: boolean;
   limit?: number;
+  translate?: AIInspectionTranslator;
 }) => {
   const {
     builtinTools,
     mcpTools = [],
     toolName = '',
     includeMCPTools = true,
+    translate,
   } = params;
   const keyword = normalizeText(params.keyword);
   const normalizedToolName = normalizeText(toolName);
   const limit = normalizeLimit(params.limit);
   const mcpKeyword = keyword || normalizedToolName;
-  const shouldReturnAllMCPTools = !mcpKeyword || mcpKeyword.includes('mcp') || mcpKeyword.includes('工具');
+  const shouldReturnAllMCPTools = !mcpKeyword || mcpKeyword.includes('mcp') || mcpKeyword.includes('\u5de5\u5177');
+  const builtinToolFlows = localizeBuiltinToolFlows(
+    translate || defaultBuiltinFlowTranslator,
+  );
 
-  const matchedFlows = BUILTIN_TOOL_FLOWS
+  const matchedFlows = builtinToolFlows
     .filter((flow) => matchesAnyText(keyword, [flow.title, flow.steps, flow.description]))
     .map((flow, index) => ({
       flow,
@@ -148,18 +172,42 @@ export const buildAIToolCatalogSnapshot = (params: {
   const nextActions: string[] = [];
 
   if (!keyword && !normalizedToolName) {
-    nextActions.push('先按用户问题关键词过滤，例如 mcp、连接失败、事务、快捷键、schema 或日志。');
+    nextActions.push(translateToolCatalogCopy(
+      translate,
+      'next_action.filter_by_keyword',
+      'Filter by user-question keywords first, such as mcp, connection failure, transaction, shortcut, schema, or logs',
+    ));
   }
   if (includeMCPTools && mcpTools.length === 0) {
-    warnings.push('当前没有发现外部 MCP 工具；如果用户需要外部能力，先检查 MCP 服务配置和工具发现状态。');
-    nextActions.push('调用 inspect_mcp_setup 查看 MCP 服务和外部客户端接入状态。');
+    warnings.push(translateToolCatalogCopy(
+      translate,
+      'warning.no_mcp_tools',
+      'No external MCP tools were discovered; if the user needs external capabilities, check MCP service configuration and tool discovery status first',
+    ));
+    nextActions.push(translateToolCatalogCopy(
+      translate,
+      'next_action.inspect_mcp_setup',
+      'Call inspect_mcp_setup to inspect MCP services and external client access status',
+    ));
   }
   if (keyword && matchedFlows.length === 0 && matchedBuiltinTools.length === 0 && matchedMCPTools.length === 0) {
-    warnings.push('没有找到匹配的工具或推荐流程。');
-    nextActions.push('改用更宽泛关键词，或先调用 inspect_ai_runtime 查看当前完整工具清单。');
+    warnings.push(translateToolCatalogCopy(
+      translate,
+      'warning.no_matches',
+      'No matching tools or recommended flows were found',
+    ));
+    nextActions.push(translateToolCatalogCopy(
+      translate,
+      'next_action.broaden_keyword',
+      'Use broader keywords, or call inspect_ai_runtime first to view the complete current tool list',
+    ));
   }
   if (matchedBuiltinTools.some((tool) => tool.parameters.length > 0)) {
-    nextActions.push('调用带参数工具前，优先按 parameters.description 组装 arguments；缺少上下文时先向用户确认。');
+    nextActions.push(translateToolCatalogCopy(
+      translate,
+      'next_action.use_parameter_descriptions',
+      'Before calling tools with parameters, build arguments from parameters.description first; confirm with the user when context is missing',
+    ));
   }
 
   return {
@@ -171,7 +219,7 @@ export const buildAIToolCatalogSnapshot = (params: {
     },
     totals: {
       builtinToolCount: builtinTools.length,
-      flowCount: BUILTIN_TOOL_FLOWS.length,
+      flowCount: builtinToolFlows.length,
       mcpToolCount: Array.isArray(mcpTools) ? mcpTools.length : 0,
     },
     returned: {
@@ -185,9 +233,23 @@ export const buildAIToolCatalogSnapshot = (params: {
     warnings,
     nextActions,
     message: normalizedToolName
-      ? `已按工具名 ${toolName} 返回目录信息`
+      ? translateToolCatalogCopy(
+        translate,
+        'message.by_tool_name',
+        `Returned catalog information for tool ${toolName}`,
+        { toolName },
+      )
       : keyword
-        ? `已按关键词 ${params.keyword} 返回工具目录建议`
-        : '已返回 GoNavi AI 工具目录摘要',
+        ? translateToolCatalogCopy(
+          translate,
+          'message.by_keyword',
+          `Returned tool catalog suggestions for keyword ${params.keyword}`,
+          { keyword: params.keyword || '' },
+        )
+        : translateToolCatalogCopy(
+          translate,
+          'message.summary',
+          'Returned the GoNavi AI tool catalog summary',
+        ),
   };
 };

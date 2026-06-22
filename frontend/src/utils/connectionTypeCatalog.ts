@@ -1,16 +1,34 @@
 export type ConnectionTypeCatalogItem = {
   key: string;
   name: string;
+  nameKey?: string;
 };
 
+export type ConnectionTypeCatalogTranslator = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) => string;
+
 export type ConnectionTypeCatalogGroup = {
+  labelKey: string;
   label: string;
   items: ConnectionTypeCatalogItem[];
 };
 
+const translateCatalogCopy = (
+  translate: ConnectionTypeCatalogTranslator | undefined,
+  key: string,
+  fallback: string,
+): string => {
+  if (!translate) return fallback;
+  const translated = translate(key);
+  return translated && translated !== key ? translated : fallback;
+};
+
 export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
   {
-    label: '关系型数据库',
+    labelKey: 'connection_modal.step1.group.relational',
+    label: 'Relational databases',
     items: [
       { key: 'mysql', name: 'MySQL' },
       { key: 'mariadb', name: 'MariaDB' },
@@ -27,7 +45,8 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
     ],
   },
   {
-    label: '国产数据库',
+    labelKey: 'connection_modal.step1.group.domestic',
+    label: 'Domestic databases',
     items: [
       { key: 'oceanbase', name: 'OceanBase' },
       { key: 'dameng', name: 'Dameng (达梦)' },
@@ -40,6 +59,7 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
     ],
   },
   {
+    labelKey: 'connection_modal.step1.group.nosql',
     label: 'NoSQL',
     items: [
       { key: 'mongodb', name: 'MongoDB' },
@@ -48,21 +68,24 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
     ],
   },
   {
-    label: '向量数据库',
+    labelKey: 'connection_modal.step1.group.vector',
+    label: 'Vector databases',
     items: [
       { key: 'chroma', name: 'Chroma' },
       { key: 'qdrant', name: 'Qdrant' },
     ],
   },
   {
-    label: '时序数据库',
+    labelKey: 'connection_modal.step1.group.timeseries',
+    label: 'Time-series databases',
     items: [
       { key: 'tdengine', name: 'TDengine' },
       { key: 'iotdb', name: 'Apache IoTDB' },
     ],
   },
   {
-    label: '消息队列',
+    labelKey: 'connection_modal.step1.group.message_queue',
+    label: 'Message queues',
     items: [
       { key: 'rocketmq', name: 'RocketMQ' },
       { key: 'mqtt', name: 'MQTT' },
@@ -71,13 +94,28 @@ export const CONNECTION_TYPE_GROUPS: ConnectionTypeCatalogGroup[] = [
     ],
   },
   {
-    label: '其他',
+    labelKey: 'connection_modal.step1.group.other',
+    label: 'Other',
     items: [
-      { key: 'jvm', name: 'JVM Runtime' },
-      { key: 'custom', name: 'Custom (自定义)' },
+      { key: 'jvm', name: 'JVM Runtime', nameKey: 'connection_modal.layoutKind.jvm' },
+      { key: 'custom', name: 'Custom', nameKey: 'connection_modal.db_icon_label.custom' },
     ],
   },
 ];
+
+export const buildConnectionTypeGroups = (
+  translate?: ConnectionTypeCatalogTranslator,
+): ConnectionTypeCatalogGroup[] =>
+  CONNECTION_TYPE_GROUPS.map((group) => ({
+    ...group,
+    label: translateCatalogCopy(translate, group.labelKey, group.label),
+    items: group.items.map((item) => ({
+      ...item,
+      name: item.nameKey
+        ? translateCatalogCopy(translate, item.nameKey, item.name)
+        : item.name,
+    })),
+  }));
 
 export const getConnectionTypeDefaultPort = (type: string): number => {
   switch (String(type || '').trim().toLowerCase()) {
@@ -147,22 +185,37 @@ export const getConnectionTypeDefaultPort = (type: string): number => {
   }
 };
 
-export const getConnectionTypeHint = (type: string): string => {
+export const getConnectionTypeHint = (
+  type: string,
+  translate?: ConnectionTypeCatalogTranslator,
+): string => {
   switch (String(type || '').trim().toLowerCase()) {
     case 'jvm':
-      return 'JMX / Endpoint / Agent';
+      return translateCatalogCopy(translate, 'connection_modal.step1.hint.jvm', 'JMX / Endpoint / Agent');
     case 'custom':
-      return '自定义驱动与 DSN';
+      return translateCatalogCopy(translate, 'connection_modal.step1.hint.custom', 'Custom driver and DSN');
     case 'redis':
-      return '单机 / 哨兵 / 集群';
+      return translateCatalogCopy(translate, 'connection_modal.step1.hint.redis', 'Single node / cluster');
     case 'mongodb':
-      return '单机 / 副本集';
+      return translateCatalogCopy(translate, 'connection_modal.step1.hint.mongodb', 'Single node / replica set');
     case 'elasticsearch':
-      return '支持索引浏览、Mapping 检查、JSON DSL 和 query_string 查询';
+      return translateCatalogCopy(
+        translate,
+        'connection_modal.step1.hint.elasticsearch',
+        'Index browsing, Mapping inspection, JSON DSL, and query_string queries',
+      );
     case 'chroma':
-      return 'Collection 浏览、向量检索和元数据过滤';
+      return translateCatalogCopy(
+        translate,
+        'connection_modal.step1.hint.chroma',
+        'Collection browsing, vector retrieval, and metadata filtering',
+      );
     case 'qdrant':
-      return 'Collection 浏览、向量搜索和 Payload 过滤';
+      return translateCatalogCopy(
+        translate,
+        'connection_modal.step1.hint.qdrant',
+        'Collection browsing, vector search, and Payload filtering',
+      );
     case 'iotdb':
       return 'Storage Group / Device / Timeseries';
     case 'rocketmq':
@@ -174,14 +227,22 @@ export const getConnectionTypeHint = (type: string): string => {
     case 'rabbitmq':
       return 'Management API / Virtual Host / Queue';
     case 'oceanbase':
-      return 'MySQL / Oracle 租户';
+      return translateCatalogCopy(translate, 'connection_modal.step1.hint.oceanBase', 'MySQL / Oracle tenant');
     case 'goldendb':
-      return 'MySQL 兼容 / 分布式事务';
+      return translateCatalogCopy(
+        translate,
+        'connection_modal.step1.hint.goldendb',
+        'MySQL compatible / distributed transactions',
+      );
     case 'sqlite':
     case 'duckdb':
-      return '本地文件连接';
+      return translateCatalogCopy(translate, 'connection_modal.step1.hint.file', 'Local file connection');
     default:
-      return '标准连接配置';
+      return translateCatalogCopy(
+        translate,
+        'connection_modal.step1.hint.standard',
+        'Standard connection configuration',
+      );
   }
 };
 

@@ -9,7 +9,7 @@ import type { TabData } from '../types';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
-import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
+import { supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
 import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
 import {
     TABLE_OVERVIEW_RENDER_BATCH_SIZE,
@@ -295,7 +295,9 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                 if (res.success && Array.isArray(res.data)) {
                     setTables(parseTableStats(metadataDialect, res.data));
                 } else {
-                    message.error('获取表信息失败: ' + (res.message || '未知错误'));
+                    message.error(t('table_overview.message.load_tables_failed', {
+                        detail: res.message || t('table_overview.message.unknown_error'),
+                    }));
                 }
                 return;
             }
@@ -315,7 +317,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         } finally {
             setLoading(false);
         }
-    }, [connection, metadataDialect, schemaName, tab.dbName]);
+    }, [connection, metadataDialect, schemaName, t, tab.dbName]);
 
     useEffect(() => {
         if (!autoFetchVisible) {
@@ -444,7 +446,10 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         const structureOnly = !supportsDesignWrite;
         addTab({
             id: `design-${connection.id}-${tab.dbName}-${tableName}`,
-            title: `${structureOnly ? '表结构' : '设计表'} (${tableName})`,
+            title: t(
+                structureOnly ? 'table_overview.tab.table_structure_title' : 'table_overview.tab.design_table_title',
+                { table: tableName },
+            ),
             type: 'design',
             connectionId: connection.id,
             dbName: tab.dbName,
@@ -452,14 +457,14 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             initialTab: 'columns',
             readOnly: structureOnly,
         });
-    }, [connection, tab.dbName, addTab, setActiveContext, supportsDesignWrite]);
+    }, [connection, tab.dbName, addTab, setActiveContext, supportsDesignWrite, t]);
 
     const openTableDdl = useCallback((tableName: string) => {
         if (!connection) return;
         setActiveContext({ connectionId: connection.id, dbName: tab.dbName || '' });
         addTab({
             id: `design-${connection.id}-${tab.dbName}-${tableName}`,
-            title: `表结构 (${tableName})`,
+            title: t('table_overview.tab.table_structure_title', { table: tableName }),
             type: 'design',
             connectionId: connection.id,
             dbName: tab.dbName,
@@ -467,20 +472,20 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             initialTab: 'ddl',
             readOnly: true,
         });
-    }, [connection, tab.dbName, addTab, setActiveContext]);
+    }, [connection, tab.dbName, addTab, setActiveContext, t]);
 
     const openQueryForTable = useCallback((tableName: string) => {
         if (!connection) return;
         setActiveContext({ connectionId: connection.id, dbName: tab.dbName || '' });
         addTab({
             id: `query-${Date.now()}`,
-            title: '新建查询',
+            title: t('table_overview.menu.new_query'),
             type: 'query',
             connectionId: connection.id,
             dbName: tab.dbName,
             query: buildTableSelectQuery(metadataDialect, tableName),
         });
-    }, [addTab, connection, metadataDialect, setActiveContext, tab.dbName]);
+    }, [addTab, connection, metadataDialect, setActiveContext, t, tab.dbName]);
 
     const openTableInER = useCallback((tableName: string) => {
         if (!connection) return;
@@ -515,38 +520,45 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         const res = await DBShowCreateTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName);
         if (res.success) {
             navigator.clipboard.writeText(res.data as string);
-            message.success('表结构已复制到剪贴板');
+            message.success(t('table_overview.message.copy_structure_success'));
         } else {
-            message.error(res.message);
+            message.error(t('table_overview.message.copy_structure_failed', {
+                detail: res.message || t('table_overview.message.unknown_error'),
+            }));
         }
-    }, [buildConfig, tab.dbName]);
+    }, [buildConfig, t, tab.dbName]);
 
     const handleCopyTableName = useCallback(async (tableName: string) => {
         const name = String(tableName || '').trim();
         if (!name) {
-            message.warning('表名为空，无法复制');
+            message.warning(t('table_overview.message.copy_table_name_empty'));
             return;
         }
         try {
             await navigator.clipboard.writeText(name);
-            message.success('表名已复制到剪贴板');
+            message.success(t('table_overview.message.copy_table_name_success'));
         } catch (e: any) {
-            message.error('复制表名失败: ' + (e?.message || String(e)));
+            message.error(t('table_overview.message.copy_table_name_failed', {
+                detail: e?.message || String(e),
+            }));
         }
-    }, []);
+    }, [t]);
 
     const handleExport = useCallback(async (tableName: string, format: string) => {
         const config = buildConfig();
         if (!config) return;
-        const hide = message.loading(`正在导出 ${tableName} 为 ${format.toUpperCase()}...`, 0);
+        const hide = message.loading(t('table_overview.message.exporting_table_format', {
+            table: tableName,
+            format: format.toUpperCase(),
+        }), 0);
         const res = await ExportTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName, format);
         hide();
         if (res.success) {
-            message.success('导出成功');
+            message.success(t('table_overview.message.export_success'));
         } else if (res.message !== '已取消') {
-            message.error('导出失败: ' + res.message);
+            message.error(t('table_overview.message.export_failed', { detail: res.message }));
         }
-    }, [buildConfig, tab.dbName]);
+    }, [buildConfig, t, tab.dbName]);
 
     const handleCopyTableAsInsert = useCallback(async (tableName: string) => {
         await handleExport(tableName, 'sql');
@@ -556,54 +568,63 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         const config = buildConfig();
         if (!config) return;
         Modal.confirm({
-            title: '确认删除表',
-            content: `确定删除表 "${tableName}" 吗？该操作不可恢复。`,
+            title: t('table_overview.modal.delete_table.title'),
+            content: t('table_overview.modal.delete_table.content', { table: tableName }),
             okButtonProps: { danger: true },
             onOk: async () => {
                 const res = await DropTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName);
                 if (res.success) {
-                    message.success('表删除成功');
+                    message.success(t('table_overview.message.delete_table_success'));
                     loadData();
                 } else {
-                    message.error('删除失败: ' + res.message);
+                    message.error(t('table_overview.message.delete_table_failed', { detail: res.message }));
                 }
             },
         });
-    }, [buildConfig, tab.dbName, loadData]);
+    }, [buildConfig, loadData, t, tab.dbName]);
 
     const handleTableDataDangerAction = useCallback((tableName: string, action: TableDataDangerActionKind) => {
         const config = buildConfig();
         if (!config) return;
 
-        const { label, progressLabel } = getTableDataDangerActionMeta(action);
+        const actionLabel = t(`table_overview.table_data_action.${action}.label`);
         Modal.confirm({
-            title: `确认${label}`,
-            content: `${label}会永久删除表 "${tableName}" 中的所有数据，操作不可逆，是否继续？`,
-            okText: '继续',
-            cancelText: '取消',
+            title: t('table_overview.modal.table_data_action.title', { action: actionLabel }),
+            content: t('table_overview.modal.table_data_action.content', {
+                action: actionLabel,
+                table: tableName,
+            }),
+            okText: t('common.continue'),
+            cancelText: t('common.cancel'),
             okButtonProps: { danger: true },
             onOk: async () => {
                 const app = (window as any).go.app.App;
                 const methodName = action === 'truncate' ? 'TruncateTables' : 'ClearTables';
-                const hide = message.loading(`正在${progressLabel} ${tableName}...`, 0);
+                const hide = message.loading(t('table_overview.message.table_data_action_loading', {
+                    action: actionLabel,
+                    table: tableName,
+                }), 0);
                 try {
                     const res = await app[methodName](buildRpcConnectionConfig(config) as any, tab.dbName || '', [tableName]);
                     hide();
                     if (res.success) {
-                        message.success(`${progressLabel}成功`);
+                        message.success(t('table_overview.message.table_data_action_success', { action: actionLabel }));
                         loadData();
                     } else {
-                        message.error(`${progressLabel}失败: ${res.message}`);
+                        message.error(t('table_overview.message.table_data_action_failed', { action: actionLabel, detail: res.message }));
                         return Promise.reject();
                     }
                 } catch (e: any) {
                     hide();
-                    message.error(`${progressLabel}失败: ${e?.message || String(e)}`);
+                    message.error(t('table_overview.message.table_data_action_failed', {
+                        action: actionLabel,
+                        detail: e?.message || String(e),
+                    }));
                     return Promise.reject();
                 }
             },
         });
-    }, [buildConfig, tab.dbName, loadData]);
+    }, [buildConfig, loadData, t, tab.dbName]);
 
     const toggleOverviewTablePinned = useCallback((tableName: string, pinned?: boolean) => {
         if (!connection?.id || !tab.dbName || !tableName) return;
@@ -623,38 +644,38 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             },
         }));
         message.success(shouldPin ? t('table_overview.message.pinned') : t('table_overview.message.unpinned'));
-    }, [connection?.id, pinnedSidebarTables, schemaName, setSidebarTablePinned, tab.dbName]);
+    }, [connection?.id, pinnedSidebarTables, schemaName, setSidebarTablePinned, t, tab.dbName]);
 
     const handleRenameTable = useCallback((tableName: string) => {
         const config = buildConfig();
         if (!config) return;
         let newName = tableName;
         Modal.confirm({
-            title: '重命名表',
+            title: t('table_overview.modal.rename_table.title'),
             content: (
                 <Input
                     {...noAutoCapInputProps}
                     defaultValue={tableName}
                     onChange={e => { newName = e.target.value; }}
-                    placeholder="输入新表名"
+                    placeholder={t('table_overview.modal.rename_table.placeholder')}
                     autoFocus
                     style={{ marginTop: 8 }}
                 />
             ),
             onOk: async () => {
                 const trimmed = newName.trim();
-                if (!trimmed) { message.error('表名不能为空'); return Promise.reject(); }
-                if (trimmed === tableName) { message.warning('新旧表名相同'); return; }
+                if (!trimmed) { message.error(t('table_overview.validation.table_name_required')); return Promise.reject(); }
+                if (trimmed === tableName) { message.warning(t('table_overview.validation.table_name_unchanged')); return; }
                 const res = await RenameTable(buildRpcConnectionConfig(config) as any, tab.dbName || '', tableName, trimmed);
                 if (res.success) {
-                    message.success('表重命名成功');
+                    message.success(t('table_overview.message.rename_table_success'));
                     loadData();
                 } else {
-                    message.error('重命名失败: ' + res.message);
+                    message.error(t('table_overview.message.rename_table_failed', { detail: res.message }));
                 }
             },
         });
-    }, [buildConfig, tab.dbName, loadData]);
+    }, [buildConfig, loadData, t, tab.dbName]);
 
     const openCreateStarRocksRollup = useCallback((tableName: string) => {
         if (!connection) return;
@@ -662,20 +683,21 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         const quotedTable = safeTable.includes('`') ? safeTable : safeTable.split('.').map(part => `\`${part.replace(/`/g, '``')}\``).join('.');
         addTab({
             id: `query-create-starrocks-rollup-${Date.now()}`,
-            title: '新增 Rollup',
+            title: t('sidebar.v2_table_menu.new_rollup', { keyword: 'Rollup' }),
             type: 'query',
             connectionId: connection.id,
             dbName: tab.dbName,
             query: `ALTER TABLE ${quotedTable}\nADD ROLLUP rollup_name (column1, column2);`,
         });
-    }, [addTab, connection, tab.dbName]);
+    }, [addTab, connection, t, tab.dbName]);
 
     const injectTablePromptToAI = useCallback(async (tableName: string, promptKind: 'explain' | 'query') => {
         const dbName = tab.dbName || '';
         if (!connection?.id || !dbName || !tableName) {
-            message.warning('当前表缺少连接上下文，无法发送给 AI');
+            message.warning(t('sidebar.message.ai_table_context_missing'));
             return;
         }
+        const tableRef = `${dbName}.${tableName}`;
 
         let ddl = '';
         const config = buildConfig();
@@ -693,13 +715,13 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
 
         const prompt = promptKind === 'explain'
             ? [
-                `请解释数据表 ${dbName}.${tableName} 的结构和业务含义。`,
-                '重点说明字段含义、主键/索引、潜在关联关系、典型查询场景和风险点。',
+                t('sidebar.ai_prompt.explain.intro', { table: tableRef }),
+                t('sidebar.ai_prompt.explain.detail'),
                 ddl ? `\n\`\`\`sql\n${ddl}\n\`\`\`` : '',
             ].filter(Boolean).join('\n')
             : [
-                `请基于数据表 ${dbName}.${tableName} 生成 3 条常用查询 SQL。`,
-                '要求包含：数据预览查询、按关键字段过滤查询、一个聚合或统计查询。',
+                t('sidebar.ai_prompt.query.intro', { table: tableRef }),
+                t('sidebar.ai_prompt.query.detail'),
                 ddl ? `\n\`\`\`sql\n${ddl}\n\`\`\`` : '',
             ].filter(Boolean).join('\n');
 
@@ -882,25 +904,30 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     ), [activeShortcutPlatform, allowTruncate, connection?.id, handleV2TableContextMenuAction, metadataDialect, pinnedSidebarTables, schemaName, tab.dbName]);
 
     const buildLegacyTableContextMenuItems = useCallback((table: TableStatRow): MenuProps['items'] => [
-        { key: 'new-query', label: '新建查询', icon: <ConsoleSqlOutlined />, onClick: () => openQueryForTable(table.name) },
+        { key: 'new-query', label: t('table_overview.menu.new_query'), icon: <ConsoleSqlOutlined />, onClick: () => openQueryForTable(table.name) },
         { type: 'divider' },
-        { key: 'design-table', label: supportsDesignWrite ? '设计表' : '表结构', icon: <EditOutlined />, onClick: () => openDesign(table.name) },
-        { key: 'copy-table-name', label: '复制表名', icon: <CopyOutlined />, onClick: () => handleCopyTableName(table.name) },
-        { key: 'copy-structure', label: '复制表结构', icon: <CopyOutlined />, onClick: () => handleCopyStructure(table.name) },
-        { key: 'backup-table', label: '备份表 (SQL)', icon: <SaveOutlined />, onClick: () => handleExport(table.name, 'sql') },
-        { key: 'rename-table', label: '重命名表', icon: <EditOutlined />, onClick: () => handleRenameTable(table.name) },
-        { key: 'danger-zone', label: '危险操作', icon: <WarningOutlined />, children: [
-            ...(allowTruncate ? [{ key: 'truncate-table', label: '截断表', danger: true, onClick: () => handleTableDataDangerAction(table.name, 'truncate') }] : []),
-            { key: 'clear-table', label: '清空表', danger: true, onClick: () => handleTableDataDangerAction(table.name, 'clear') },
-            { key: 'drop-table', label: '删除表', icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(table.name) },
+        {
+            key: 'design-table',
+            label: supportsDesignWrite ? t('table_overview.menu.design_table') : t('table_overview.menu.table_structure'),
+            icon: <EditOutlined />,
+            onClick: () => openDesign(table.name),
+        },
+        { key: 'copy-table-name', label: t('table_overview.menu.copy_table_name'), icon: <CopyOutlined />, onClick: () => handleCopyTableName(table.name) },
+        { key: 'copy-structure', label: t('table_overview.menu.copy_structure'), icon: <CopyOutlined />, onClick: () => handleCopyStructure(table.name) },
+        { key: 'backup-table', label: t('table_overview.menu.backup_table_sql'), icon: <SaveOutlined />, onClick: () => handleExport(table.name, 'sql') },
+        { key: 'rename-table', label: t('table_overview.menu.rename_table'), icon: <EditOutlined />, onClick: () => handleRenameTable(table.name) },
+        { key: 'danger-zone', label: t('table_overview.menu.danger_operations'), icon: <WarningOutlined />, children: [
+            ...(allowTruncate ? [{ key: 'truncate-table', label: t('table_overview.menu.truncate_table'), danger: true, onClick: () => handleTableDataDangerAction(table.name, 'truncate') }] : []),
+            { key: 'clear-table', label: t('table_overview.menu.clear_table'), danger: true, onClick: () => handleTableDataDangerAction(table.name, 'clear') },
+            { key: 'drop-table', label: t('table_overview.menu.delete_table'), icon: <DeleteOutlined />, danger: true, onClick: () => handleDeleteTable(table.name) },
         ]},
         { type: 'divider' },
-        { key: 'export', label: '导出表数据', icon: <ExportOutlined />, children: [
-            { key: 'export-csv', label: '导出 CSV', onClick: () => handleExport(table.name, 'csv') },
-            { key: 'export-xlsx', label: '导出 Excel (XLSX)', onClick: () => handleExport(table.name, 'xlsx') },
-            { key: 'export-json', label: '导出 JSON', onClick: () => handleExport(table.name, 'json') },
-            { key: 'export-md', label: '导出 Markdown', onClick: () => handleExport(table.name, 'md') },
-            { key: 'export-html', label: '导出 HTML', onClick: () => handleExport(table.name, 'html') },
+        { key: 'export', label: t('table_overview.menu.export_table_data'), icon: <ExportOutlined />, children: [
+            { key: 'export-csv', label: t('table_overview.menu.export_csv'), onClick: () => handleExport(table.name, 'csv') },
+            { key: 'export-xlsx', label: t('table_overview.menu.export_xlsx'), onClick: () => handleExport(table.name, 'xlsx') },
+            { key: 'export-json', label: t('table_overview.menu.export_json'), onClick: () => handleExport(table.name, 'json') },
+            { key: 'export-md', label: t('table_overview.menu.export_markdown'), onClick: () => handleExport(table.name, 'md') },
+            { key: 'export-html', label: t('table_overview.menu.export_html'), onClick: () => handleExport(table.name, 'html') },
         ]},
     ], [
         allowTruncate,
@@ -913,6 +940,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         openDesign,
         openQueryForTable,
         supportsDesignWrite,
+        t,
     ]);
 
     const renderOverviewSectionTitle = (section: OverviewTableSection) => {

@@ -38,14 +38,33 @@ const ensureSqlStatementTerminator = (sql: string): string => {
     return /;\s*$/.test(normalized) ? normalized : `${normalized};`;
 };
 
-const buildEditableDefinitionSql = (tab: TabData, definition: string, objectLabel: string, objectName: string): string => {
+const isCommentOnlyDefinition = (definition: string): boolean => {
+    const normalized = String(definition || '').replace(/\r\n/g, '\n').trim();
+    if (!normalized) return false;
+    const lines = normalized
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+    return lines.length > 0 && lines.every((line) => line.startsWith('--'));
+};
+
+const buildEditableDefinitionSql = (
+    tab: TabData,
+    definition: string,
+    objectName: string,
+    copy: {
+        commentTitle: string;
+        compatibilityHint: string;
+        emptyDefinitionHint: string;
+    },
+): string => {
     const normalizedDefinition = String(definition || '').trim();
-    const header = `-- 修改${objectLabel}: ${objectName}\n-- 请确认语法兼容当前数据库后执行\n`;
+    const header = `-- ${copy.commentTitle}\n-- ${copy.compatibilityHint}\n`;
     if (!normalizedDefinition) {
-        return `${header}-- 当前对象定义为空，请补全 ${objectName} 的 DDL 后执行\n`;
+        return `${header}-- ${copy.emptyDefinitionHint}\n`;
     }
 
-    if (/^\s*--\s*(未找到|暂不支持|当前)/.test(normalizedDefinition)) {
+    if (isCommentOnlyDefinition(normalizedDefinition)) {
         return `${header}${ensureSqlStatementTerminator(normalizedDefinition)}`;
     }
 
@@ -654,6 +673,20 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     const normalizedObjectName = String(objectName || '').trim();
     const displayedDefinition = loadedDefinitionKeyRef.current === objectIdentityKey ? definition : '';
     const hasDefinition = String(displayedDefinition || '').trim() !== '';
+    const editTabTitle = t('definition_viewer.edit.tab_title', {
+        object: objectLabel,
+        name: normalizedObjectName,
+    });
+    const editableDefinitionCopy = {
+        commentTitle: t('definition_viewer.edit.comment_title', {
+            object: objectLabel,
+            name: normalizedObjectName,
+        }),
+        compatibilityHint: t('definition_viewer.edit.comment_compatibility'),
+        emptyDefinitionHint: t('definition_viewer.edit.comment_empty_definition', {
+            name: normalizedObjectName,
+        }),
+    };
 
     const openObjectEditQuery = async () => {
         if (!normalizedObjectName || openingObjectEdit) return;
@@ -672,11 +705,11 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             const latestDefinition = String(result.definition || '');
             loadedDefinitionKeyRef.current = objectIdentityKey;
             setDefinition(latestDefinition);
-            const query = buildEditableDefinitionSql(tab, latestDefinition, objectLabel, normalizedObjectName);
+            const query = buildEditableDefinitionSql(tab, latestDefinition, normalizedObjectName, editableDefinitionCopy);
             setActiveContext({ connectionId: tab.connectionId, dbName });
             addTab({
                 id: `query-edit-object-${tab.connectionId}-${dbName}-${Date.now()}`,
-                title: `修改${objectLabel}: ${normalizedObjectName}`,
+                title: editTabTitle,
                 type: 'query',
                 connectionId: tab.connectionId,
                 dbName,
@@ -715,12 +748,12 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                     {tab.routineType && <span style={{ marginLeft: 16, color: '#888' }}>{t('definition_viewer.field.type')}: {tab.routineType}</span>}
                 </div>
                 <Button size="small" icon={<EditOutlined />} onClick={openObjectEditQuery} disabled={!normalizedObjectName} loading={openingObjectEdit}>
-                    对象修改
+                    {t('definition_viewer.action.edit_object')}
                 </Button>
             </div>
             {error && hasDefinition && (
                 <div style={{ padding: '8px 16px 0' }}>
-                    <Alert type="warning" message="刷新最新定义失败" description={error} showIcon />
+                    <Alert type="warning" message={t('definition_viewer.warning.refresh_latest_failed')} description={error} showIcon />
                 </div>
             )}
             <div style={{ flex: 1, minHeight: 0 }}>

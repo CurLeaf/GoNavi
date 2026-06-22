@@ -22,7 +22,7 @@ import {
 } from '../utils/queryResultPagination';
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
 import { quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
-import { formatSqlExecutionError } from '../utils/sqlErrorSemantics';
+import { formatSqlExecutionError, hasLocalizedSqlTimeoutKeyword } from '../utils/sqlErrorSemantics';
 import { shouldUseSqlEditorManagedTransaction } from '../utils/sqlEditorTransaction';
 import { findSqlStatementRanges, resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/sqlStatementSelection';
 import { isMacLikePlatform } from '../utils/appearance';
@@ -2320,7 +2320,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       finishPendingSqlTransaction,
       pendingSqlTransaction,
       pendingSqlTransactionRef,
-  } = useSqlEditorTransactionController({ tabId: tab.id });
+  } = useSqlEditorTransactionController({
+      tabId: tab.id,
+      translate: (key, params) => translate(key, params),
+  });
   const autoFetchVisible = useAutoFetchVisibility();
 
   useEffect(() => {
@@ -2570,6 +2573,34 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       editor.trigger?.('gonavi-hover', 'editor.action.showHover', null);
       return true;
   }, []);
+
+  const registerShowObjectInfoAction = useCallback(() => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) {
+          return;
+      }
+
+      objectHoverActionRef.current?.dispose?.();
+      const showObjectInfoKeybinding = monaco.KeyMod?.CtrlCmd && monaco.KeyCode?.KeyQ
+          ? [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyQ]
+          : undefined;
+      objectHoverActionRef.current = editor.addAction({
+          id: 'gonavi.queryEditor.showObjectInfo',
+          label: buildQueryEditorMonacoActionLabel('query_editor.action.show_object_info'),
+          keybindings: showObjectInfoKeybinding,
+          run: () => {
+              const preferredPosition = lastHoverTargetPositionRef.current || editor.getPosition?.();
+              const shown = showObjectInfoAtPosition(preferredPosition);
+              if (!shown) {
+                  void message.info({
+                      key: 'gonavi-query-editor-object-info-miss',
+                      content: translate('query_editor.message.object_info_target_not_found'),
+                  });
+              }
+          },
+      });
+  }, [showObjectInfoAtPosition]);
 
   useEffect(() => {
       refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
@@ -4595,7 +4626,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const res = await DBQueryMulti(buildRpcConnectionConfig(config) as any, currentDb, sql, queryId);
           if (!res?.success) {
               message.error(translate('query_editor.message.refresh_failed', {
-                  error: formatSqlExecutionError(res?.message || translate('common.unknown')),
+                  error: formatSqlExecutionError(res?.message || translate('common.unknown'), { translate }),
               }));
               return;
           }
@@ -4639,7 +4670,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           ));
       } catch (err: any) {
           message.error(translate('query_editor.message.refresh_failed', {
-              error: formatSqlExecutionError(err?.message || err || translate('common.unknown')),
+              error: formatSqlExecutionError(err?.message || err || translate('common.unknown'), { translate }),
           }));
       } finally {
           setLoading(false);
@@ -4691,7 +4722,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const res = await DBQueryMulti(buildRpcConnectionConfig(config) as any, currentDb, pageSql, queryId);
           if (!res?.success) {
               message.error(translate('query_editor.message.page_query_failed', {
-                  error: formatSqlExecutionError(res?.message || translate('common.unknown')),
+                  error: formatSqlExecutionError(res?.message || translate('common.unknown'), { translate }),
               }));
               return;
           }
@@ -4739,7 +4770,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           ));
       } catch (err: any) {
           message.error(translate('query_editor.message.page_query_failed', {
-              error: formatSqlExecutionError(err?.message || err || translate('common.unknown')),
+              error: formatSqlExecutionError(err?.message || err || translate('common.unknown'), { translate }),
           }));
       } finally {
           setLoading(false);
@@ -4851,7 +4882,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                             ? translate('query_editor.message.statement_failed_prefix', { index: idx + 1 })
                             : '';
                         updateResultPanelVisibility(true);
-                        setExecutionError(formatSqlExecutionError(shellConvert.error, { prefix }));
+                        setExecutionError(formatSqlExecutionError(shellConvert.error, { prefix, translate }));
                         setResultSets([]);
                         setActiveResultKey('');
                         return;
@@ -4893,7 +4924,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         ? translate('query_editor.message.statement_failed_prefix', { index: idx + 1 })
                         : '';
                     updateResultPanelVisibility(true);
-                    setExecutionError(formatSqlExecutionError(res.message, { prefix }));
+                    setExecutionError(formatSqlExecutionError(res.message, { prefix, translate }));
                     setResultSets([]);
                     setActiveResultKey('');
                     return;
@@ -5137,7 +5168,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                                          errorMsg.includes('sql: statement canceled');
                 const isTimeoutError = errorMsg.includes('context deadline exceeded') ||
                                        errorMsg.includes('timeout') ||
-                                       errorMsg.includes('超时') ||
+                                       hasLocalizedSqlTimeoutKeyword(errorMsg) ||
                                        errorMsg.includes('deadline exceeded');
 
                 if (isCancelledError && !isTimeoutError) {
@@ -5150,7 +5181,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 }
 
                 updateResultPanelVisibility(true);
-                setExecutionError(formatSqlExecutionError(res.message));
+                setExecutionError(formatSqlExecutionError(res.message, { translate }));
                 setResultSets([]);
                 setActiveResultKey('');
                 return;
@@ -5315,7 +5346,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
         }
     } catch (e: any) {
-        const formattedError = formatSqlExecutionError(e?.message || e);
+        const formattedError = formatSqlExecutionError(e?.message || e, { translate });
         message.error(translate('query_editor.message.execution_failed_with_error', { error: formattedError }));
         addSqlLog({
             id: `log-${Date.now()}-error`,
@@ -5428,6 +5459,24 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [isActive, runQueryShortcutBinding, handleRun]);
 
   // Re-register Monaco internal keybinding when runQuery shortcut changes
+  useEffect(() => {
+      if (objectHoverActionRef.current) {
+          objectHoverActionRef.current.dispose();
+          objectHoverActionRef.current = null;
+      }
+
+      if (!editorRef.current || !monacoRef.current) return;
+
+      registerShowObjectInfoAction();
+
+      return () => {
+          if (objectHoverActionRef.current) {
+              objectHoverActionRef.current.dispose();
+              objectHoverActionRef.current = null;
+          }
+      };
+  }, [languagePreference, registerShowObjectInfoAction]);
+
   useEffect(() => {
       if (runQueryActionRef.current) {
           runQueryActionRef.current.dispose();

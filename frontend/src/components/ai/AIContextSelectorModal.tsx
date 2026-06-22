@@ -2,6 +2,8 @@ import React from 'react';
 import { Button, Checkbox, Input, Modal, Select, Spin } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
 interface ContextTableItem {
@@ -45,9 +47,22 @@ export const AIContextSelectorModal: React.FC<AIContextSelectorModalProps> = ({
   onSearchTextChange,
   onSelectedTableKeysChange,
 }) => {
+  const i18n = useOptionalI18n();
+  const t = i18n?.t ?? ((key: string, params?: Record<string, string | number | boolean | null | undefined>) =>
+    catalogTranslate('en-US', key, params));
   const matchedKeys = filteredTables.map((table) => `${selectedDbName}::${table.name}`);
   const allSelected = matchedKeys.length > 0 && matchedKeys.every((key) => selectedTableKeys.includes(key));
   const partiallySelected = matchedKeys.length > 0 && matchedKeys.some((key) => selectedTableKeys.includes(key)) && !allSelected;
+  const modalTitle = t('ai_chat.input.context.selector.title');
+  const confirmText = t('ai_chat.input.context.selector.confirm');
+  const cancelText = t('ai_chat.input.context.selector.cancel');
+  const databasePlaceholder = t('ai_chat.input.context.selector.database_placeholder');
+  const searchPlaceholder = t('ai_chat.input.context.selector.search_placeholder');
+  const selectAllLabel = t('ai_chat.input.context.selector.select_all', { count: filteredTables.length });
+  const invertSelectionLabel = t('ai_chat.input.context.selector.invert_selection');
+  const emptyStateText = searchText
+    ? t('ai_chat.input.context.selector.empty_no_match', { searchText })
+    : t('ai_chat.input.context.selector.empty_no_tables');
 
   const handleToggleAll = (checked: boolean) => {
     if (checked) {
@@ -74,13 +89,13 @@ export const AIContextSelectorModal: React.FC<AIContextSelectorModalProps> = ({
 
   return (
     <Modal
-      title={<span style={{ color: textColor }}>关联数据库表结构上下文</span>}
+      title={<span style={{ color: textColor }}>{modalTitle}</span>}
       open={open}
       onCancel={onCancel}
       onOk={onConfirm}
       confirmLoading={confirmLoading}
-      okText="同步所选表至上下文"
-      cancelText="取消"
+      okText={confirmText}
+      cancelText={cancelText}
       centered
       styles={{
         content: { background: darkMode ? '#1e1e1e' : '#ffffff', border: overlayTheme.shellBorder },
@@ -96,12 +111,12 @@ export const AIContextSelectorModal: React.FC<AIContextSelectorModalProps> = ({
               onChange={onDbChange}
               options={dbList.map((dbName) => ({ label: dbName, value: dbName }))}
               style={{ width: 160, flexShrink: 0 }}
-              placeholder="切换数据库"
+              placeholder={databasePlaceholder}
               showSearch
             />
           )}
           <Input
-            placeholder="在当前库搜索表名..."
+            placeholder={searchPlaceholder}
             prefix={<SearchOutlined style={{ color: overlayTheme.mutedText }} />}
             value={searchText}
             onChange={(event) => onSearchTextChange(event.target.value)}
@@ -127,7 +142,7 @@ export const AIContextSelectorModal: React.FC<AIContextSelectorModalProps> = ({
                 onChange={(event) => handleToggleAll(event.target.checked)}
                 style={{ color: textColor, fontWeight: 'bold' }}
               >
-                全选匹配的表 ({filteredTables.length})
+                {selectAllLabel}
               </Checkbox>
               <Button
                 type="link"
@@ -135,7 +150,7 @@ export const AIContextSelectorModal: React.FC<AIContextSelectorModalProps> = ({
                 style={{ padding: 0, height: 'auto', fontSize: 13 }}
                 onClick={handleInvertSelection}
               >
-                反选匹配结果
+                {invertSelectionLabel}
               </Button>
             </div>
             <div style={{ maxHeight: 300, overflowY: 'auto', margin: '0 -24px', padding: '0 24px' }}>
@@ -180,7 +195,7 @@ export const AIContextSelectorModal: React.FC<AIContextSelectorModalProps> = ({
           </div>
         ) : (
           <div style={{ padding: '40px 0', textAlign: 'center', color: overlayTheme.mutedText }}>
-            {searchText ? `没有找到匹配 '${searchText}' 的表` : '当前数据库没有可关联的表'}
+            {emptyStateText}
           </div>
         )}
       </Spin>

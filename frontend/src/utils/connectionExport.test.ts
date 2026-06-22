@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { setCurrentLanguage } from '../i18n';
@@ -8,6 +10,8 @@ import {
   resolveConnectionPackageExportResult,
   normalizeConnectionPackagePassword,
 } from './connectionExport';
+
+const source = readFileSync(new URL('./connectionExport.ts', import.meta.url), 'utf8');
 
 describe('connectionExport', () => {
   beforeEach(() => {
@@ -138,6 +142,11 @@ describe('connectionExport', () => {
     expect(isConnectionPackagePasswordRequiredError('恢复包密码不能为空')).toBe(true);
     expect(isConnectionPackagePasswordRequiredError(new Error('文件密码错误或文件已损坏'))).toBe(false);
     expect(isConnectionPackagePasswordRequiredError(undefined)).toBe(false);
+  });
+
+  it('keeps the backend password-required sentinel keyed instead of hard-coded in source', () => {
+    expect(source).not.toContain('恢复包密码不能为空');
+    expect(source).toContain('file.backend.error.connection_package_password_required');
   });
 
   it('treats export cancel as a non-error backend result', () => {

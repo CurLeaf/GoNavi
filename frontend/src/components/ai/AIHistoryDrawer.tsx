@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Drawer, Button, Tooltip, Input } from 'antd';
 import { MenuFoldOutlined, PlusOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
+import { t as catalogTranslate } from '../../i18n/catalog';
 import { useStore } from '../../store';
 import { useOptionalI18n } from '../../i18n/provider';
 
@@ -20,7 +21,7 @@ export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
     open, onClose, bgColor, darkMode, textColor, mutedColor, borderColor, onCreateNew, sessionId
 }) => {
     const i18n = useOptionalI18n();
-    const t = i18n?.t ?? ((key: string) => key);
+    const t = i18n?.t ?? ((key: string) => catalogTranslate('en-US', key));
     const aiChatSessions = useStore(state => state.aiChatSessions);
     const setAIActiveSessionId = useStore(state => state.setAIActiveSessionId);
     const deleteAISession = useStore(state => state.deleteAISession);
@@ -46,9 +47,9 @@ export const AIHistoryDrawer: React.FC<AIHistoryDrawerProps> = ({
         [normalizedSearchText, sortedSessions],
     );
 
-    const emptyStateText = !i18n && aiChatSessions.length === 0
-        ? '还没有历史对话'
-        : t('ai_chat.history.empty.no_matches');
+    const emptyStateText = normalizedSearchText
+        ? t('ai_chat.history.empty.no_matches')
+        : t('ai_chat.history.empty.no_history');
 
     return (
         <Drawer

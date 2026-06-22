@@ -1,16 +1,31 @@
 import type { SavedConnection, TabData } from '../../types';
+import { t as translateCatalog, type I18nParams } from '../../i18n';
+
+type AIInspectionTranslator = (key: string, params?: I18nParams) => string;
+
+const translateInspectionCopy = (
+  translate: AIInspectionTranslator | undefined,
+  key: string,
+  fallback: string,
+): string => {
+  const t = translate || ((catalogKey, params) => translateCatalog(catalogKey, params, 'en-US'));
+  const translated = t(key);
+  return translated && translated !== key ? translated : fallback;
+};
 
 export const buildCurrentConnectionSnapshot = (params: {
   activeContext?: { connectionId: string; dbName?: string } | null;
   tabs?: TabData[];
   activeTabId?: string | null;
   connections: SavedConnection[];
+  translate?: AIInspectionTranslator;
 }) => {
   const {
     activeContext = null,
     tabs = [],
     activeTabId = null,
     connections,
+    translate,
   } = params;
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const connectionId = String(activeContext?.connectionId || activeTab?.connectionId || '').trim();
@@ -19,7 +34,11 @@ export const buildCurrentConnectionSnapshot = (params: {
   if (!connectionId) {
     return {
       hasActiveConnection: false,
-      message: '当前没有活动连接',
+      message: translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.current_connection.no_active',
+        'No active connection is currently selected',
+      ),
     };
   }
 
@@ -28,7 +47,11 @@ export const buildCurrentConnectionSnapshot = (params: {
     return {
       hasActiveConnection: false,
       connectionId,
-      message: '当前活动连接在本地缓存中不存在',
+      message: translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.current_connection.cache_missing',
+        'The current active connection does not exist in the local cache',
+      ),
     };
   }
 

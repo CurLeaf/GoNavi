@@ -1024,7 +1024,10 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
 
       const installWatchdog = new Promise<never>((_, reject) => {
         watchdogId = setTimeout(() => {
-          reject(new Error(`安装 ${row.name} 超过 ${Math.round(DRIVER_INSTALL_WATCHDOG_MS / 60000)} 分钟仍未完成。后台任务可能仍在下载或构建，请稍后刷新状态；如多次出现，请检查代理或改用本地驱动包导入。`));
+          reject(new Error(t('driver_manager.message.install_watchdog_timeout', {
+            name: row.name,
+            minutes: Math.round(DRIVER_INSTALL_WATCHDOG_MS / 60000),
+          })));
         }, DRIVER_INSTALL_WATCHDOG_MS);
       });
       const result = await Promise.race([
@@ -1062,7 +1065,9 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       }
       return true;
     } catch (error) {
-      const errText = error instanceof Error ? error.message : String(error || `安装 ${row.name} 失败`);
+      const errText = error instanceof Error
+        ? error.message
+        : String(error || t('driver_manager.message.install_failed_fallback', { name: row.name }));
       appendOperationLog(row.type, `[ERROR] ${errText}`);
       updateDriverProgress(row.type, {
         status: 'error',
@@ -1403,8 +1408,18 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         {(row.packageInstalled || row.connectable) ? (
           <Text type="secondary" className="driver-manager-small-text">
             {versionSwitchPending
-              ? `当前已安装 ${installedVersion || '当前版本'}，已选择 ${selectedOption?.version || '目标版本'}，点击“切换版本”生效`
-              : `${installedVersion ? `${installedVersion}（已安装` : '已安装'}${row.needsUpdate ? '，需重装' : ''}${installedVersion ? '）' : ''}`}
+              ? t('driver_manager.version.switch_pending', {
+                installedVersion: installedVersion || t('driver_manager.version.current_fallback'),
+                targetVersion: selectedOption?.version || t('driver_manager.version.target_fallback'),
+              })
+              : installedVersion
+                ? t('driver_manager.version.installed_with_version', {
+                  version: installedVersion,
+                  suffix: row.needsUpdate ? t('driver_manager.version.needs_reinstall_suffix') : '',
+                })
+                : t('driver_manager.version.installed', {
+                  suffix: row.needsUpdate ? t('driver_manager.version.needs_reinstall_suffix') : '',
+                })}
           </Text>
         ) : null}
         {mongoHint ? <Text type="secondary" className="driver-manager-small-text">{mongoHint}</Text> : null}
@@ -1434,7 +1449,7 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
       </Button>
     ) : versionSwitchPending ? (
       <Button type="primary" icon={<DownloadOutlined />} disabled={batchBusy} loading={loadingInstallOrRemove} onClick={() => installDriver(row)}>
-        切换版本
+        {t('driver_manager.action.switch_version')}
       </Button>
     ) : row.connectable ? (
       <Button danger icon={<DeleteOutlined />} disabled={batchBusy} loading={loadingInstallOrRemove} onClick={() => removeDriver(row)}>

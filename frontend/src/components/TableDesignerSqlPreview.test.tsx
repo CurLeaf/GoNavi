@@ -18,6 +18,17 @@ const tableDesignerColumnI18nKeys = [
   'table_designer.tooltip.edit_comment_popup',
 ] as const;
 
+const tableDesignerSqlPreviewChangeKeys = [
+  'table_designer.sql_preview.change.add',
+  'table_designer.sql_preview.change.comment',
+  'table_designer.sql_preview.change.constraint',
+  'table_designer.sql_preview.change.create',
+  'table_designer.sql_preview.change.create_index',
+  'table_designer.sql_preview.change.drop',
+  'table_designer.sql_preview.change.modify',
+  'table_designer.sql_preview.change.rename',
+] as const;
+
 const sharedI18nDir = new URL('../../../shared/i18n/', import.meta.url);
 const sharedI18nLocaleFiles = [
   'de-DE.json',
@@ -168,6 +179,30 @@ describe('TableDesignerSqlPreview', () => {
     expect(badValues).toEqual([]);
   });
 
+  it('keeps SQL preview change labels in i18n catalogs without shipping Chinese source labels', () => {
+    const source = readFileSync(new URL('./TableDesignerSqlPreview.tsx', import.meta.url), 'utf8');
+
+    for (const localeFile of sharedI18nLocaleFiles) {
+      const catalog = JSON.parse(readFileSync(new URL(localeFile, sharedI18nDir), 'utf8')) as Record<string, string>;
+      for (const key of tableDesignerSqlPreviewChangeKeys) {
+        expect(catalog[key], `${localeFile} ${key}`).toBeTruthy();
+      }
+    }
+
+    for (const literal of [
+      '重命名变更',
+      '新增变更',
+      '删除变更',
+      '字段属性变更',
+      '约束变更',
+      '备注变更',
+      '新建索引',
+      '新建表结构',
+    ]) {
+      expect(source).not.toContain(literal);
+    }
+  });
+
   it('keeps generated SQL fallback text independent from UI locale', () => {
     const source = readFileSync(new URL('./TableDesigner.tsx', import.meta.url), 'utf8');
 
@@ -230,27 +265,42 @@ describe('TableDesignerSqlPreview', () => {
   });
 
   it('detects only SQL change operation lines instead of highlighting the whole SQL block', () => {
+    const translate = (key: string) => `translated:${key}`;
     const highlights = resolveSqlChangeHighlights([
       'ALTER TABLE "users"',
       'ADD COLUMN "age" int NULL;',
       'ALTER TABLE "users"',
       'RENAME COLUMN "name" TO "display_name";',
       '-- DuckDB 不支持通过 COMMENT ON COLUMN 持久化字段备注',
-    ].join('\n'));
+    ].join('\n'), translate);
 
     expect(highlights).toEqual([
-      expect.objectContaining({ kind: 'add', lineNumber: 2 }),
-      expect.objectContaining({ kind: 'rename', lineNumber: 4 }),
+      expect.objectContaining({
+        kind: 'add',
+        lineNumber: 2,
+        label: 'translated:table_designer.sql_preview.change.add',
+      }),
+      expect.objectContaining({
+        kind: 'rename',
+        lineNumber: 4,
+        label: 'translated:table_designer.sql_preview.change.rename',
+      }),
     ]);
   });
 
   it('detects CREATE INDEX preview lines as create changes', () => {
+    const translate = (key: string) => `translated:${key}`;
     const highlights = resolveSqlChangeHighlights(
       'CREATE UNIQUE NONCLUSTERED INDEX [IX_Users_Email] ON [dbo].[Users] ([email]);',
+      translate,
     );
 
     expect(highlights).toEqual([
-      expect.objectContaining({ kind: 'create', lineNumber: 1, label: '新建索引' }),
+      expect.objectContaining({
+        kind: 'create',
+        lineNumber: 1,
+        label: 'translated:table_designer.sql_preview.change.create_index',
+      }),
     ]);
   });
 

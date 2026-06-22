@@ -11,6 +11,7 @@ import (
 	"GoNavi-Wails/internal/db"
 	"GoNavi-Wails/internal/logger"
 	"GoNavi-Wails/internal/utils"
+	"GoNavi-Wails/shared/i18n"
 )
 
 const testConnectionTimeoutUpperBoundSeconds = 12
@@ -35,12 +36,27 @@ func newQueryExecutionContext(config connection.ConnectionConfig) (context.Conte
 }
 
 func validateTestConnectionInput(config connection.ConnectionConfig) error {
+	return validateTestConnectionInputWithText(config, defaultDBBackendText)
+}
+
+func defaultDBBackendText(key string, params map[string]any) string {
+	localizer, err := i18n.NewLocalizer(i18n.LanguageZhCN)
+	if err != nil {
+		return key
+	}
+	return localizer.T(key, params)
+}
+
+func validateTestConnectionInputWithText(config connection.ConnectionConfig, text func(string, map[string]any) string) error {
+	if text == nil {
+		text = defaultDBBackendText
+	}
 	dbType := strings.ToLower(strings.TrimSpace(config.Type))
 	if dbType == "" {
-		return fmt.Errorf("请先选择数据源类型")
+		return fmt.Errorf("%s", text("db.backend.error.data_source_type_required", nil))
 	}
 	if dbType == "clickhouse" && strings.TrimSpace(config.Host) == "" && strings.TrimSpace(config.URI) == "" {
-		return fmt.Errorf("请填写 ClickHouse 主机地址或连接 URI")
+		return fmt.Errorf("%s", text("db.backend.error.clickhouse_address_required", nil))
 	}
 	return nil
 }
@@ -48,7 +64,7 @@ func validateTestConnectionInput(config connection.ConnectionConfig) error {
 // Generic DB Methods
 
 func (a *App) DBConnect(config connection.ConnectionConfig) connection.QueryResult {
-	if err := validateTestConnectionInput(config); err != nil {
+	if err := validateTestConnectionInputWithText(config, a.appText); err != nil {
 		logger.Warnf("DBConnect 参数校验失败：%s %s", err.Error(), formatConnSummary(config))
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -60,7 +76,7 @@ func (a *App) DBConnect(config connection.ConnectionConfig) connection.QueryResu
 	}
 
 	logger.Infof("DBConnect 连接成功：%s", formatConnSummary(config))
-	return connection.QueryResult{Success: true, Message: "连接成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.connect_success", nil)}
 }
 
 func (a *App) DBReleaseConnection(config connection.ConnectionConfig) connection.QueryResult {
@@ -72,7 +88,7 @@ func (a *App) DBReleaseConnection(config connection.ConnectionConfig) connection
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 		logger.Infof("DBReleaseConnection 已释放 Redis 连接：%s 数量=%d", formatConnSummary(config), closed)
-		return connection.QueryResult{Success: true, Message: "连接已释放", Data: map[string]int{"closed": closed}}
+		return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.release_success", nil), Data: map[string]int{"closed": closed}}
 	}
 
 	resolvedConfig, err := a.resolveConnectionSecrets(config)
@@ -104,14 +120,14 @@ func (a *App) DBReleaseConnection(config connection.ConnectionConfig) connection
 	a.mu.Unlock()
 
 	logger.Infof("DBReleaseConnection 已释放数据库连接：%s 数量=%d", formatConnSummary(resolvedConfig), closed)
-	return connection.QueryResult{Success: true, Message: "连接已释放", Data: map[string]int{"closed": closed}}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.release_success", nil), Data: map[string]int{"closed": closed}}
 }
 
 func (a *App) TestConnection(config connection.ConnectionConfig) connection.QueryResult {
 	testConfig := normalizeTestConnectionConfig(config)
 	started := time.Now()
 	logger.Infof("TestConnection 开始：%s", formatConnSummary(testConfig))
-	if err := validateTestConnectionInput(testConfig); err != nil {
+	if err := validateTestConnectionInputWithText(testConfig, a.appText); err != nil {
 		logger.Warnf("TestConnection 参数校验失败：耗时=%s %s 原因=%s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig), err.Error())
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -122,7 +138,7 @@ func (a *App) TestConnection(config connection.ConnectionConfig) connection.Quer
 	}
 
 	logger.Infof("TestConnection 连接测试成功：耗时=%s %s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig))
-	return connection.QueryResult{Success: true, Message: "连接成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.connect_success", nil)}
 }
 
 func (a *App) MongoDiscoverMembers(config connection.ConnectionConfig) connection.QueryResult {
@@ -138,7 +154,7 @@ func (a *App) MongoDiscoverMembers(config connection.ConnectionConfig) connectio
 		DiscoverMembers() (string, []connection.MongoMemberInfo, error)
 	})
 	if !ok {
-		return connection.QueryResult{Success: false, Message: "当前 MongoDB 驱动不支持成员发现"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.mongo_member_discovery_unsupported", nil)}
 	}
 
 	replicaSet, members, err := discoverable.DiscoverMembers()
@@ -155,7 +171,7 @@ func (a *App) MongoDiscoverMembers(config connection.ConnectionConfig) connectio
 	logger.Infof("MongoDiscoverMembers 成功：%s 成员数=%d 副本集=%s", formatConnSummary(config), len(members), replicaSet)
 	return connection.QueryResult{
 		Success: true,
-		Message: fmt.Sprintf("发现 %d 个成员", len(members)),
+		Message: a.appText("db.backend.message.mongo_members_discovered", map[string]any{"count": len(members)}),
 		Data:    data,
 	}
 }
@@ -163,7 +179,7 @@ func (a *App) MongoDiscoverMembers(config connection.ConnectionConfig) connectio
 func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) connection.QueryResult {
 	dbName = strings.TrimSpace(dbName)
 	if dbName == "" {
-		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.database_name_required", nil)}
 	}
 
 	runConfig := config
@@ -191,9 +207,9 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 	} else if dbType == "mariadb" || dbType == "diros" || dbType == "oceanbase" {
 		// MariaDB uses same syntax as MySQL
 	} else if dbType == "sphinx" {
-		return connection.QueryResult{Success: false, Message: "Sphinx 暂不支持创建数据库"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.database_create_sphinx_unsupported", nil)}
 	} else if dbType == "oracle" || dbType == "dameng" {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源（%s）的「数据库」实际为用户/Schema，暂不支持通过此入口创建，请使用 SQL 编辑器执行 CREATE USER 语句", dbType)}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.database_create_user_schema_unsupported", map[string]any{"dbType": dbType})}
 	}
 
 	_, err = dbInst.Exec(query)
@@ -201,7 +217,7 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "数据库创建成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.database_created", nil)}
 }
 
 func isPostgresSchemaDDLDBType(dbType string) bool {
@@ -253,29 +269,43 @@ func resolvePGLikeDatabaseDDLRunConfig(config connection.ConnectionConfig, dbTyp
 }
 
 func buildCreateSchemaSQL(dbType string, schemaName string) (string, error) {
+	return buildCreateSchemaSQLWithText(dbType, schemaName, defaultDBBackendText)
+}
+
+func buildCreateSchemaSQLWithText(dbType string, schemaName string, text func(string, map[string]any) string) (string, error) {
+	if text == nil {
+		text = defaultDBBackendText
+	}
 	schemaName = strings.TrimSpace(schemaName)
 	if schemaName == "" {
-		return "", fmt.Errorf("模式名称不能为空")
+		return "", fmt.Errorf("%s", text("db.backend.error.schema_name_required", nil))
 	}
 
 	if !isPostgresSchemaDDLDBType(dbType) {
-		return "", fmt.Errorf("当前数据源（%s）暂不支持通过此入口新建模式", dbType)
+		return "", fmt.Errorf("%s", text("db.backend.error.schema_create_unsupported", map[string]any{"dbType": dbType}))
 	}
 
 	return fmt.Sprintf("CREATE SCHEMA %s", quoteIdentByType(dbType, schemaName)), nil
 }
 
 func buildRenameSchemaSQL(dbType string, oldSchemaName string, newSchemaName string) (string, error) {
+	return buildRenameSchemaSQLWithText(dbType, oldSchemaName, newSchemaName, defaultDBBackendText)
+}
+
+func buildRenameSchemaSQLWithText(dbType string, oldSchemaName string, newSchemaName string, text func(string, map[string]any) string) (string, error) {
+	if text == nil {
+		text = defaultDBBackendText
+	}
 	oldSchemaName = strings.TrimSpace(oldSchemaName)
 	newSchemaName = strings.TrimSpace(newSchemaName)
 	if oldSchemaName == "" || newSchemaName == "" {
-		return "", fmt.Errorf("模式名称不能为空")
+		return "", fmt.Errorf("%s", text("db.backend.error.schema_name_required", nil))
 	}
 	if strings.EqualFold(oldSchemaName, newSchemaName) {
-		return "", fmt.Errorf("新旧模式名称不能相同")
+		return "", fmt.Errorf("%s", text("db.backend.error.schema_same_name", nil))
 	}
 	if !isPostgresSchemaDDLDBType(dbType) {
-		return "", fmt.Errorf("当前数据源（%s）暂不支持通过此入口编辑模式", dbType)
+		return "", fmt.Errorf("%s", text("db.backend.error.schema_rename_unsupported", map[string]any{"dbType": dbType}))
 	}
 	return fmt.Sprintf(
 		"ALTER SCHEMA %s RENAME TO %s",
@@ -285,35 +315,49 @@ func buildRenameSchemaSQL(dbType string, oldSchemaName string, newSchemaName str
 }
 
 func buildDropSchemaSQL(dbType string, schemaName string) (string, error) {
+	return buildDropSchemaSQLWithText(dbType, schemaName, defaultDBBackendText)
+}
+
+func buildDropSchemaSQLWithText(dbType string, schemaName string, text func(string, map[string]any) string) (string, error) {
+	if text == nil {
+		text = defaultDBBackendText
+	}
 	schemaName = strings.TrimSpace(schemaName)
 	if schemaName == "" {
-		return "", fmt.Errorf("模式名称不能为空")
+		return "", fmt.Errorf("%s", text("db.backend.error.schema_name_required", nil))
 	}
 	if !isPostgresSchemaDDLDBType(dbType) {
-		return "", fmt.Errorf("当前数据源（%s）暂不支持通过此入口删除模式", dbType)
+		return "", fmt.Errorf("%s", text("db.backend.error.schema_drop_unsupported", map[string]any{"dbType": dbType}))
 	}
 	return fmt.Sprintf("DROP SCHEMA %s CASCADE", quoteIdentByType(dbType, schemaName)), nil
 }
 
 func resolveSchemaDDLTargetDatabase(config connection.ConnectionConfig, dbName string) (string, error) {
+	return resolveSchemaDDLTargetDatabaseWithText(config, dbName, defaultDBBackendText)
+}
+
+func resolveSchemaDDLTargetDatabaseWithText(config connection.ConnectionConfig, dbName string, text func(string, map[string]any) string) (string, error) {
+	if text == nil {
+		text = defaultDBBackendText
+	}
 	targetDbName := strings.TrimSpace(dbName)
 	if targetDbName == "" {
 		targetDbName = strings.TrimSpace(config.Database)
 	}
 	if targetDbName == "" {
-		return "", fmt.Errorf("目标数据库不能为空")
+		return "", fmt.Errorf("%s", text("db.backend.error.target_database_required", nil))
 	}
 	return targetDbName, nil
 }
 
 func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
 	dbType := resolveDDLDBType(config)
-	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
+	targetDbName, err := resolveSchemaDDLTargetDatabaseWithText(config, dbName, a.appText)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	query, err := buildCreateSchemaSQL(dbType, schemaName)
+	query, err := buildCreateSchemaSQLWithText(dbType, schemaName, a.appText)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -328,17 +372,17 @@ func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, sc
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "模式创建成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.schema_created", nil)}
 }
 
 func (a *App) RenameSchema(config connection.ConnectionConfig, dbName string, oldSchemaName string, newSchemaName string) connection.QueryResult {
 	dbType := resolveDDLDBType(config)
-	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
+	targetDbName, err := resolveSchemaDDLTargetDatabaseWithText(config, dbName, a.appText)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	query, err := buildRenameSchemaSQL(dbType, oldSchemaName, newSchemaName)
+	query, err := buildRenameSchemaSQLWithText(dbType, oldSchemaName, newSchemaName, a.appText)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -351,17 +395,17 @@ func (a *App) RenameSchema(config connection.ConnectionConfig, dbName string, ol
 	if _, err := dbInst.Exec(query); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	return connection.QueryResult{Success: true, Message: "模式重命名成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.schema_renamed", nil)}
 }
 
 func (a *App) DropSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
 	dbType := resolveDDLDBType(config)
-	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
+	targetDbName, err := resolveSchemaDDLTargetDatabaseWithText(config, dbName, a.appText)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	query, err := buildDropSchemaSQL(dbType, schemaName)
+	query, err := buildDropSchemaSQLWithText(dbType, schemaName, a.appText)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -374,7 +418,7 @@ func (a *App) DropSchema(config connection.ConnectionConfig, dbName string, sche
 	if _, err := dbInst.Exec(query); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	return connection.QueryResult{Success: true, Message: "模式删除成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.schema_dropped", nil)}
 }
 
 func resolveDDLDBType(config connection.ConnectionConfig) string {
@@ -585,10 +629,10 @@ func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string,
 	oldName = strings.TrimSpace(oldName)
 	newName = strings.TrimSpace(newName)
 	if oldName == "" || newName == "" {
-		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.database_name_required", nil)}
 	}
 	if strings.EqualFold(oldName, newName) {
-		return connection.QueryResult{Success: false, Message: "新旧数据库名称不能相同"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.database_same_name", nil)}
 	}
 
 	dbType := resolveDDLDBType(config)
@@ -606,9 +650,9 @@ func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string,
 		if _, err := dbInst.Exec(sql); err != nil {
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
-		return connection.QueryResult{Success: true, Message: "数据库重命名成功"}
+		return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.database_renamed", nil)}
 	case "mysql", "mariadb", "oceanbase", "starrocks", "sphinx":
-		return connection.QueryResult{Success: false, Message: "MySQL/MariaDB/OceanBase/StarRocks/Sphinx 不支持直接重命名数据库，请新建库后迁移数据"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.database_rename_direct_unsupported", nil)}
 	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
 		runConfig := resolvePGLikeDatabaseDDLRunConfig(config, dbType, oldName)
 		dbInst, err := a.getDatabase(runConfig)
@@ -619,16 +663,16 @@ func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string,
 		if _, err := dbInst.Exec(sql); err != nil {
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
-		return connection.QueryResult{Success: true, Message: "数据库重命名成功"}
+		return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.database_renamed", nil)}
 	default:
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持重命名数据库", dbType)}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.database_rename_unsupported", map[string]any{"dbType": dbType})}
 	}
 }
 
 func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) connection.QueryResult {
 	dbName = strings.TrimSpace(dbName)
 	if dbName == "" {
-		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.database_name_required", nil)}
 	}
 
 	dbType := resolveDDLDBType(config)
@@ -645,7 +689,7 @@ func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) co
 		runConfig = resolvePGLikeDatabaseDDLRunConfig(config, dbType, dbName)
 		sql = fmt.Sprintf("DROP DATABASE %s", quoteIdentByType(dbType, dbName))
 	default:
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除数据库", dbType)}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.database_drop_unsupported", map[string]any{"dbType": dbType})}
 	}
 
 	dbInst, err := a.getDatabase(runConfig)
@@ -655,32 +699,32 @@ func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) co
 	if _, err := dbInst.Exec(sql); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	return connection.QueryResult{Success: true, Message: "数据库删除成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.database_dropped", nil)}
 }
 
 func (a *App) RenameTable(config connection.ConnectionConfig, dbName string, oldTableName string, newTableName string) connection.QueryResult {
 	oldTableName = strings.TrimSpace(oldTableName)
 	newTableName = strings.TrimSpace(newTableName)
 	if oldTableName == "" || newTableName == "" {
-		return connection.QueryResult{Success: false, Message: "表名不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.table_name_required", nil)}
 	}
 	if strings.EqualFold(oldTableName, newTableName) {
-		return connection.QueryResult{Success: false, Message: "新旧表名不能相同"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.table_same_name", nil)}
 	}
 	if strings.Contains(newTableName, ".") {
-		return connection.QueryResult{Success: false, Message: "新表名不能包含 schema 或数据库前缀"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.table_new_name_no_qualifier", nil)}
 	}
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
 	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "clickhouse":
 	default:
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持重命名表", dbType)}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.table_rename_unsupported", map[string]interface{}{"dbType": dbType})}
 	}
 
 	schemaName, pureOldTableName := normalizeSchemaAndTableByType(dbType, dbName, oldTableName)
 	if pureOldTableName == "" {
-		return connection.QueryResult{Success: false, Message: "旧表名不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.old_table_name_required", nil)}
 	}
 	oldQualifiedTable := quoteTableIdentByType(dbType, schemaName, pureOldTableName)
 	newTableQuoted := quoteIdentByType(dbType, newTableName)
@@ -708,25 +752,25 @@ func (a *App) RenameTable(config connection.ConnectionConfig, dbName string, old
 	if _, err := dbInst.Exec(sql); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	return connection.QueryResult{Success: true, Message: "表重命名成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.table_renamed", nil)}
 }
 
 func (a *App) DropTable(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
 	tableName = strings.TrimSpace(tableName)
 	if tableName == "" {
-		return connection.QueryResult{Success: false, Message: "表名不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.table_name_required", nil)}
 	}
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
 	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "tdengine", "clickhouse":
 	default:
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除表", dbType)}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.table_drop_unsupported", map[string]interface{}{"dbType": dbType})}
 	}
 
 	schemaName, pureTableName := normalizeSchemaAndTableByType(dbType, dbName, tableName)
 	if pureTableName == "" {
-		return connection.QueryResult{Success: false, Message: "表名不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.table_name_required", nil)}
 	}
 	qualifiedTable := quoteTableIdentByType(dbType, schemaName, pureTableName)
 	sql := fmt.Sprintf("DROP TABLE %s", qualifiedTable)
@@ -739,7 +783,7 @@ func (a *App) DropTable(config connection.ConnectionConfig, dbName string, table
 	if _, err := dbInst.Exec(sql); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	return connection.QueryResult{Success: true, Message: "表删除成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.table_dropped", nil)}
 }
 
 func (a *App) MySQLConnect(config connection.ConnectionConfig) connection.QueryResult {
@@ -877,6 +921,24 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 // 否则按分号拆分后逐条执行，模拟多结果集。
 func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult {
 	runConfig := normalizeRunConfig(config, dbName)
+	buildStatementExecutionFailedMessage := func(index int, err error, previousSuccessCount int) string {
+		message := a.appText("db.backend.error.multi_statement_execution_failed", map[string]any{
+			"index":  index,
+			"detail": err.Error(),
+		})
+		if previousSuccessCount > 0 {
+			message += a.appText("db.backend.error.multi_statement_previous_success", map[string]any{
+				"count": previousSuccessCount,
+			})
+		}
+		return message
+	}
+	buildSequentialFallbackMessage := func(statementCount int) string {
+		return a.appText("db.backend.message.multi_statement_sequential_fallback", map[string]any{
+			"dbType": runConfig.Type,
+			"count":  statementCount,
+		})
+	}
 
 	if queryID == "" {
 		queryID = generateQueryID()
@@ -1145,10 +1207,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 			}
 			if isReadStmt {
 				logger.Error(err, "DBQueryMulti 逐条查询失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
-				errMsg := fmt.Sprintf("第 %d 条语句执行失败: %v", idx+1, err)
-				if len(resultSets) > 0 {
-					errMsg += fmt.Sprintf("（前 %d 条已执行成功）", len(resultSets))
-				}
+				errMsg := buildStatementExecutionFailedMessage(idx+1, err, len(resultSets))
 				return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
 			}
 		}
@@ -1165,10 +1224,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		}
 		if err != nil {
 			logger.Error(err, "DBQueryMulti 逐条执行失败（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
-			errMsg := fmt.Sprintf("第 %d 条语句执行失败: %v", idx+1, err)
-			if len(resultSets) > 0 {
-				errMsg += fmt.Sprintf("（前 %d 条已执行成功）", len(resultSets))
-			}
+			errMsg := buildStatementExecutionFailedMessage(idx+1, err, len(resultSets))
 			return connection.QueryResult{Success: false, Message: errMsg, QueryID: queryID}
 		}
 		resultSets = append(resultSets, connection.ResultSetData{
@@ -1184,7 +1240,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	// 回退到逐条执行且有多条语句时，附加提示信息
 	var fallbackMsg string
 	if len(statements) > 1 {
-		fallbackMsg = fmt.Sprintf("当前数据源（%s）不支持原生多语句执行，已自动拆分为 %d 条语句逐条执行。", runConfig.Type, len(statements))
+		fallbackMsg = buildSequentialFallbackMessage(len(statements))
 	}
 	return connection.QueryResult{Success: true, Data: resultSets, QueryID: queryID, Message: fallbackMsg}
 }
@@ -1493,7 +1549,7 @@ func (a *App) DBShowCreateTable(config connection.ConnectionConfig, dbName strin
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	sqlStr, err := resolveCreateStatementWithFallback(dbInst, config, dbName, tableName)
+	sqlStr, err := resolveCreateStatementWithFallbackWithText(dbInst, config, dbName, tableName, a.appText)
 	if err != nil {
 		logger.Error(err, "DBShowCreateTable 获取建表语句失败：%s 表=%s", formatConnSummary(runConfig), tableName)
 		return connection.QueryResult{Success: false, Message: err.Error()}
@@ -1503,10 +1559,17 @@ func (a *App) DBShowCreateTable(config connection.ConnectionConfig, dbName strin
 }
 
 func resolveCreateStatementWithFallback(dbInst db.Database, config connection.ConnectionConfig, dbName string, tableName string) (string, error) {
+	return resolveCreateStatementWithFallbackWithText(dbInst, config, dbName, tableName, defaultDBBackendText)
+}
+
+func resolveCreateStatementWithFallbackWithText(dbInst db.Database, config connection.ConnectionConfig, dbName string, tableName string, text func(string, map[string]any) string) (string, error) {
+	if text == nil {
+		text = defaultDBBackendText
+	}
 	dbType := resolveDDLDBType(config)
 	metadataSchemaName, metadataTableName, ddlSchemaName, ddlTableName := resolveCreateStatementTargets(config, dbType, dbName, tableName)
 	if metadataTableName == "" || ddlTableName == "" {
-		return "", fmt.Errorf("表名不能为空")
+		return "", fmt.Errorf("%s", text("db.backend.error.table_name_required", nil))
 	}
 
 	sqlStr, sourceErr := dbInst.GetCreateStatement(metadataSchemaName, metadataTableName)
@@ -1549,7 +1612,7 @@ func resolveCreateStatementWithFallback(dbInst db.Database, config connection.Co
 		return "", colErr
 	}
 
-	fallbackDDL, buildErr := buildFallbackCreateStatement(dbType, ddlSchemaName, ddlTableName, columns)
+	fallbackDDL, buildErr := buildFallbackCreateStatementWithText(dbType, ddlSchemaName, ddlTableName, columns, text)
 	if buildErr != nil {
 		if sourceErr != nil {
 			return "", sourceErr
@@ -1654,12 +1717,19 @@ func hasCreateTableOrViewHead(sqlText string) bool {
 }
 
 func buildFallbackCreateStatement(dbType string, schemaName string, tableName string, columns []connection.ColumnDefinition) (string, error) {
+	return buildFallbackCreateStatementWithText(dbType, schemaName, tableName, columns, defaultDBBackendText)
+}
+
+func buildFallbackCreateStatementWithText(dbType string, schemaName string, tableName string, columns []connection.ColumnDefinition, text func(string, map[string]any) string) (string, error) {
+	if text == nil {
+		text = defaultDBBackendText
+	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return "", fmt.Errorf("表名不能为空")
+		return "", fmt.Errorf("%s", text("db.backend.error.table_name_required", nil))
 	}
 	if len(columns) == 0 {
-		return "", fmt.Errorf("未获取到字段定义，无法生成建表语句")
+		return "", fmt.Errorf("%s", text("db.backend.error.table_columns_missing_for_ddl", nil))
 	}
 
 	qualifiedTable := quoteTableIdentByType(dbType, schemaName, table)
@@ -1703,7 +1773,7 @@ func buildFallbackCreateStatement(dbType string, schemaName string, tableName st
 	}
 
 	if len(columnLines) == 0 {
-		return "", fmt.Errorf("字段定义为空，无法生成建表语句")
+		return "", fmt.Errorf("%s", text("db.backend.error.table_columns_empty_for_ddl", nil))
 	}
 	if len(primaryKeys) > 0 {
 		columnLines = append(columnLines, "  PRIMARY KEY ("+strings.Join(primaryKeys, ", ")+")")
@@ -2148,19 +2218,19 @@ func (a *App) DBGetTriggers(config connection.ConnectionConfig, dbName string, t
 func (a *App) DropView(config connection.ConnectionConfig, dbName string, viewName string) connection.QueryResult {
 	viewName = strings.TrimSpace(viewName)
 	if viewName == "" {
-		return connection.QueryResult{Success: false, Message: "视图名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.view_name_required", nil)}
 	}
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
 	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "sqlite", "duckdb", "oracle", "dameng", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "clickhouse":
 	default:
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除视图", dbType)}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.view_drop_unsupported", map[string]any{"dbType": dbType})}
 	}
 
 	schemaName, pureViewName := normalizeSchemaAndTableByType(dbType, dbName, viewName)
 	if pureViewName == "" {
-		return connection.QueryResult{Success: false, Message: "视图名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.view_name_required", nil)}
 	}
 	qualifiedView := quoteTableIdentByType(dbType, schemaName, pureViewName)
 	sql := fmt.Sprintf("DROP VIEW %s", qualifiedView)
@@ -2173,14 +2243,14 @@ func (a *App) DropView(config connection.ConnectionConfig, dbName string, viewNa
 	if _, err := dbInst.Exec(sql); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	return connection.QueryResult{Success: true, Message: "视图删除成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.view_dropped", nil)}
 }
 
 func (a *App) DropFunction(config connection.ConnectionConfig, dbName string, routineName string, routineType string) connection.QueryResult {
 	routineName = strings.TrimSpace(routineName)
 	routineType = strings.TrimSpace(strings.ToUpper(routineType))
 	if routineName == "" {
-		return connection.QueryResult{Success: false, Message: "函数/存储过程名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.routine_name_required", nil)}
 	}
 	if routineType != "FUNCTION" && routineType != "PROCEDURE" {
 		routineType = "FUNCTION"
@@ -2190,15 +2260,15 @@ func (a *App) DropFunction(config connection.ConnectionConfig, dbName string, ro
 	switch dbType {
 	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "postgres", "kingbase", "oracle", "dameng", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "duckdb":
 	default:
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持删除函数/存储过程", dbType)}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.routine_drop_unsupported", map[string]any{"dbType": dbType})}
 	}
 	if dbType == "duckdb" && routineType == "PROCEDURE" {
-		return connection.QueryResult{Success: false, Message: "DuckDB 暂不支持存储过程"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.duckdb_procedure_drop_unsupported", nil)}
 	}
 
 	schemaName, pureName := normalizeSchemaAndTableByType(dbType, dbName, routineName)
 	if pureName == "" {
-		return connection.QueryResult{Success: false, Message: "函数/存储过程名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.routine_name_required", nil)}
 	}
 	qualifiedName := quoteTableIdentByType(dbType, schemaName, pureName)
 	sql := fmt.Sprintf("DROP %s %s", routineType, qualifiedName)
@@ -2212,30 +2282,32 @@ func (a *App) DropFunction(config connection.ConnectionConfig, dbName string, ro
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	label := "函数"
 	if routineType == "PROCEDURE" {
-		label = "存储过程"
+		return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.procedure_dropped", nil)}
 	}
-	return connection.QueryResult{Success: true, Message: fmt.Sprintf("%s删除成功", label)}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.function_dropped", nil)}
 }
 
 func (a *App) RenameView(config connection.ConnectionConfig, dbName string, oldName string, newName string) connection.QueryResult {
 	oldName = strings.TrimSpace(oldName)
 	newName = strings.TrimSpace(newName)
 	if oldName == "" || newName == "" {
-		return connection.QueryResult{Success: false, Message: "视图名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.view_name_required", nil)}
 	}
 	if strings.EqualFold(oldName, newName) {
-		return connection.QueryResult{Success: false, Message: "新旧视图名称不能相同"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.view_same_name", nil)}
 	}
 	if strings.Contains(newName, ".") {
-		return connection.QueryResult{Success: false, Message: "新视图名不能包含 schema 或数据库前缀"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.view_new_name_no_qualifier", nil)}
+	}
+	if strings.HasSuffix(oldName, ".") {
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.old_view_name_required", nil)}
 	}
 
 	dbType := resolveDDLDBType(config)
 	schemaName, pureOldName := normalizeSchemaAndTableByType(dbType, dbName, oldName)
 	if pureOldName == "" {
-		return connection.QueryResult{Success: false, Message: "旧视图名不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.old_view_name_required", nil)}
 	}
 	oldQualified := quoteTableIdentByType(dbType, schemaName, pureOldName)
 	newQuoted := quoteIdentByType(dbType, newName)
@@ -2253,7 +2325,7 @@ func (a *App) RenameView(config connection.ConnectionConfig, dbName string, oldN
 		escapedNew := strings.ReplaceAll(newName, "'", "''")
 		sql = fmt.Sprintf("EXEC sp_rename '%s', '%s'", escapedOld, escapedNew)
 	default:
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("当前数据源(%s)暂不支持重命名视图", dbType)}
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.view_rename_unsupported", map[string]any{"dbType": dbType})}
 	}
 
 	runConfig := buildRunConfigForDDL(config, dbType, dbName)
@@ -2264,7 +2336,7 @@ func (a *App) RenameView(config connection.ConnectionConfig, dbName string, oldN
 	if _, err := dbInst.Exec(sql); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	return connection.QueryResult{Success: true, Message: "视图重命名成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.view_renamed", nil)}
 }
 
 func (a *App) DBGetAllColumns(config connection.ConnectionConfig, dbName string) connection.QueryResult {

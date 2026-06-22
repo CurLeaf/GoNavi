@@ -1,8 +1,65 @@
 import type { AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import { buildMCPLaunchPreview } from '../../utils/mcpServerGuidance';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
 
 const DEFAULT_MCP_RUNTIME_LOG_LIMIT = 160;
 const MAX_MCP_RUNTIME_LOG_LIMIT = 200;
+
+const MCP_HTTP_START_FAILED_MARKERS = [
+  'GoNavi MCP HTTP \u670d\u52a1\u542f\u52a8\u5931\u8d25',
+  '\u542f\u52a8 GoNavi MCP HTTP \u670d\u52a1\u5931\u8d25',
+  '\u555f\u52d5 GoNavi MCP HTTP \u670d\u52d9\u5931\u6557',
+  'Failed to start GoNavi MCP HTTP service',
+  'GoNavi MCP HTTP \u30b5\u30fc\u30d3\u30b9\u306e\u8d77\u52d5\u306b\u5931\u6557\u3057\u307e\u3057\u305f',
+  'Starten des GoNavi MCP HTTP-Dienstes fehlgeschlagen',
+  '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u0441\u043b\u0443\u0436\u0431\u0443 GoNavi MCP HTTP',
+];
+
+const MCP_HTTP_PROCESS_EXITED_MARKERS = [
+  'GoNavi MCP HTTP \u670d\u52a1\u5f02\u5e38\u9000\u51fa',
+  'GoNavi MCP HTTP \u670d\u52d9\u7570\u5e38\u9000\u51fa',
+  'GoNavi MCP HTTP service stopped unexpectedly',
+  'GoNavi MCP HTTP \u30b5\u30fc\u30d3\u30b9\u304c\u7570\u5e38\u7d42\u4e86\u3057\u307e\u3057\u305f',
+  'Der GoNavi MCP HTTP-Dienst wurde unerwartet beendet',
+  '\u0421\u043b\u0443\u0436\u0431\u0430 GoNavi MCP HTTP \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u043b\u0430\u0441\u044c \u0430\u0432\u0430\u0440\u0438\u0439\u043d\u043e',
+];
+
+const MCP_HTTP_SUBPROCESS_EXITED_MARKERS = [
+  'MCP HTTP \u5b50\u8fdb\u7a0b\u5df2\u9000\u51fa',
+  'MCP HTTP \u5b50\u7a0b\u5e8f\u5df2\u9000\u51fa',
+  'MCP HTTP subprocess exited',
+  'MCP HTTP \u30b5\u30d6\u30d7\u30ed\u30bb\u30b9\u304c\u7d42\u4e86\u3057\u307e\u3057\u305f',
+  'Der MCP HTTP-Unterprozess wurde beendet',
+  '\u041f\u043e\u0434\u043f\u0440\u043e\u0446\u0435\u0441\u0441 MCP HTTP \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u043b\u0441\u044f',
+];
+
+const MCP_COMMAND_REQUIRED_MARKERS = [
+  'MCP \u670d\u52a1\u547d\u4ee4\u4e0d\u80fd\u4e3a\u7a7a',
+  'MCP \u547d\u4ee4\u4e0d\u80fd\u4e3a\u7a7a',
+  'MCP \u547d\u4ee4\u4e0d\u80fd\u70ba\u7a7a',
+  'MCP command cannot be empty',
+  'MCP \u30b3\u30de\u30f3\u30c9\u306f\u7a7a\u306b\u3067\u304d\u307e\u305b\u3093',
+  'MCP-Befehl darf nicht leer sein',
+  '\u041a\u043e\u043c\u0430\u043d\u0434\u0430 MCP \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u0431\u044b\u0442\u044c \u043f\u0443\u0441\u0442\u043e\u0439',
+];
+
+const MCP_TRANSPORT_UNSUPPORTED_MARKERS = [
+  '\u6682\u4e0d\u652f\u6301\u7684 MCP transport',
+  '\u6682\u4e0d\u652f\u6301\u7684 MCP \u4f20\u8f93\u65b9\u5f0f',
+  '\u66ab\u4e0d\u652f\u63f4\u7684 MCP \u50b3\u8f38\u65b9\u5f0f',
+];
+
+const MCP_LIST_TOOLS_FAILED_MARKERS = [
+  '\u5217\u51fa MCP \u5de5\u5177\u5931\u8d25',
+  'Failed to list MCP tools',
+];
+
+const MCP_TOOL_CALL_FAILED_MARKERS = [
+  '\u8c03\u7528 MCP \u5de5\u5177\u5931\u8d25',
+  'MCP \u5de5\u5177\u8c03\u7528\u5931\u8d25',
+  'MCP tool call failed',
+];
 
 type MCPRuntimeFailureKind =
   | 'list_tools_failed'
@@ -22,6 +79,7 @@ type MCPRuntimeCause =
   | 'stdio_closed'
   | 'process_exit'
   | 'argument_error'
+  | 'command_required'
   | 'transport'
   | 'unknown';
 
@@ -74,12 +132,15 @@ const extractServerName = (line: string): string => {
   return String(match?.[1] || '').trim();
 };
 
+const includesAny = (line: string, markers: string[]): boolean =>
+  markers.some((marker) => line.includes(marker));
+
 const detectFailureKind = (line: string): MCPRuntimeFailureKind | null => {
-  if (line.includes('列出 MCP 工具失败')) return 'list_tools_failed';
-  if (line.includes('调用 MCP 工具失败') || line.includes('MCP 工具调用失败')) return 'tool_call_failed';
-  if (line.includes('GoNavi MCP HTTP 服务启动失败')) return 'http_start_failed';
-  if (line.includes('GoNavi MCP HTTP 服务异常退出') || line.includes('MCP HTTP 子进程已退出')) return 'http_process_exited';
-  if (line.includes('MCP 服务命令不能为空') || line.includes('暂不支持的 MCP transport')) return 'configuration_error';
+  if (includesAny(line, MCP_LIST_TOOLS_FAILED_MARKERS)) return 'list_tools_failed';
+  if (includesAny(line, MCP_TOOL_CALL_FAILED_MARKERS)) return 'tool_call_failed';
+  if (includesAny(line, MCP_HTTP_START_FAILED_MARKERS)) return 'http_start_failed';
+  if (includesAny(line, MCP_HTTP_PROCESS_EXITED_MARKERS) || includesAny(line, MCP_HTTP_SUBPROCESS_EXITED_MARKERS)) return 'http_process_exited';
+  if (includesAny(line, MCP_COMMAND_REQUIRED_MARKERS) || includesAny(line, MCP_TRANSPORT_UNSUPPORTED_MARKERS)) return 'configuration_error';
   if (line.toLowerCase().includes('mcp') && line.includes('[ERROR]')) return 'mcp_error';
   if (line.toLowerCase().includes('mcp') && line.includes('[WARN]')) return 'mcp_warning';
   return null;
@@ -87,6 +148,12 @@ const detectFailureKind = (line: string): MCPRuntimeFailureKind | null => {
 
 const detectCause = (line: string): MCPRuntimeCause => {
   const lower = line.toLowerCase();
+  if (includesAny(line, MCP_COMMAND_REQUIRED_MARKERS)) {
+    return 'command_required';
+  }
+  if (includesAny(line, MCP_TRANSPORT_UNSUPPORTED_MARKERS)) {
+    return 'transport';
+  }
   if (/(executable file not found|not found|no such file|cannot find|找不到|无法找到)/iu.test(line)) {
     return 'command_not_found';
   }
@@ -105,7 +172,7 @@ const detectCause = (line: string): MCPRuntimeCause => {
   if (/(stdio|eof|closed pipe|broken pipe|stdin|stdout|标准输入|标准输出)/iu.test(line)) {
     return 'stdio_closed';
   }
-  if (/(exit status|exited|异常退出|子进程已退出|process exited)/iu.test(line)) {
+  if (/(exit status|exited|异常退出|子进程已退出|process exited)/iu.test(line) || includesAny(line, MCP_HTTP_SUBPROCESS_EXITED_MARKERS)) {
     return 'process_exit';
   }
   if (/(invalid character|invalid json|arguments|参数|schema|unmarshal)/iu.test(line)) {
@@ -117,20 +184,44 @@ const detectCause = (line: string): MCPRuntimeCause => {
   return 'unknown';
 };
 
-const causeNextAction: Record<MCPRuntimeCause, string> = {
-  command_not_found: '检查 command 是否只填可执行程序本身，并确认该命令在 PATH 中或使用绝对路径。',
-  timeout: '提高 timeoutSeconds 到 45 或 60，并确认服务启动后会保持 stdio 连接。',
-  permission: '检查可执行文件权限、杀毒/系统拦截和工作目录访问权限。',
-  auth: '检查环境变量里的 Token/API Key 是否已配置、未过期且权限范围足够。',
-  network: '检查 MCP 依赖的远端地址、代理、VPN 或本机端口是否可达。',
-  stdio_closed: '确认 README 要求的 --stdio/stdin 参数已填写；Docker 场景确认 args 包含 -i。',
-  process_exit: '单独在终端运行启动命令，查看进程启动后为什么立即退出。',
-  argument_error: '先调用 inspect_mcp_tool_schema 读取真实 inputSchema，再修正工具 arguments JSON。',
-  transport: '当前 GoNavi 新增 MCP 只支持 stdio，HTTP MCP 请使用 GoNavi HTTP 服务或对应远程接入说明。',
-  unknown: '结合 inspect_mcp_setup 查看配置，再调用 inspect_app_logs 扩大日志窗口确认原始错误。',
+const translateMCPRuntimeCopy = (
+  translate: AIInspectionTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+): string => (
+  translate
+    ? translateInspectionCopy(translate, key, fallback, params)
+    : fallback
+);
+
+const causeNextActionFallback: Record<MCPRuntimeCause, string> = {
+  command_not_found: 'Check that command contains only the executable name, and confirm it is on PATH or uses an absolute path.',
+  timeout: 'Raise timeoutSeconds to 45 or 60, and confirm the service keeps the stdio connection open after startup.',
+  permission: 'Check executable permissions, antivirus/system blocking, and working directory access.',
+  auth: 'Check whether the Token/API Key in environment variables is configured, unexpired, and has enough scope.',
+  network: 'Check whether the remote endpoint, proxy, VPN, or local port required by MCP is reachable.',
+  stdio_closed: 'Confirm the --stdio/stdin argument required by README is set; for Docker, confirm args includes -i.',
+  process_exit: 'Run the launch command in a terminal separately and inspect why the process exits immediately after startup.',
+  argument_error: 'Call inspect_mcp_tool_schema first to read the real inputSchema, then fix the tool arguments JSON.',
+  command_required: 'Fill startup command with the executable only. Move script names, modules, --stdio, and extra flags into args, then run Test tool discovery again.',
+  transport: 'New MCP servers in GoNavi currently support stdio only; for HTTP MCP, use the GoNavi HTTP service or the matching remote access guide.',
+  unknown: 'Inspect the configuration with inspect_mcp_setup, then call inspect_app_logs with a larger log window to confirm the raw error.',
 };
 
-const parseFailureEvent = (line: string): MCPRuntimeFailureEvent | null => {
+const getCauseNextAction = (
+  cause: MCPRuntimeCause,
+  translate?: AIInspectionTranslator,
+): string => translateMCPRuntimeCopy(
+  translate,
+  `ai_chat.inspection.mcp_runtime.next_action.${cause}`,
+  causeNextActionFallback[cause],
+);
+
+const parseFailureEvent = (
+  line: string,
+  translate?: AIInspectionTranslator,
+): MCPRuntimeFailureEvent | null => {
   const kind = detectFailureKind(line);
   if (!kind) {
     return null;
@@ -142,7 +233,7 @@ const parseFailureEvent = (line: string): MCPRuntimeFailureEvent | null => {
     level: detectLevel(line),
     serverName: extractServerName(line),
     linePreview: redactLogLine(line),
-    nextAction: causeNextAction[cause],
+    nextAction: getCauseNextAction(cause, translate),
   };
 };
 
@@ -189,17 +280,30 @@ const buildServerSummaries = (
 const collectNextActions = (
   events: MCPRuntimeFailureEvent[],
   serverSummaries: ReturnType<typeof buildServerSummaries>,
+  translate?: AIInspectionTranslator,
 ): string[] => {
   const actions = Array.from(new Set(events.map((event) => event.nextAction)));
   const enabledServersWithoutTools = serverSummaries.filter((server) => server.enabled && server.discoveredToolCount === 0);
   if (enabledServersWithoutTools.length > 0) {
-    actions.push('有已启用 MCP 服务暂未发现工具，优先点击“测试工具发现”刷新并确认启动命令可独立运行。');
+    actions.push(translateMCPRuntimeCopy(
+      translate,
+      'ai_chat.inspection.mcp_runtime.next_action.enabled_without_tools',
+      'Some enabled MCP servers have no discovered tools; click "Test tool discovery" first and confirm the launch command runs independently.',
+    ));
   }
   if (events.some((event) => event.kind === 'list_tools_failed')) {
-    actions.push('工具列表为空时先修复启动/发现失败，再排查单个工具 arguments。');
+    actions.push(translateMCPRuntimeCopy(
+      translate,
+      'ai_chat.inspection.mcp_runtime.next_action.fix_discovery_first',
+      'When the tool list is empty, fix startup/discovery failure before diagnosing individual tool arguments.',
+    ));
   }
   if (actions.length === 0) {
-    actions.push('最近日志未发现 MCP 失败信号；如果刚刚复现过问题，请扩大 lineLimit 或改用 serverName 精确过滤。');
+    actions.push(translateMCPRuntimeCopy(
+      translate,
+      'ai_chat.inspection.mcp_runtime.next_action.expand_logs',
+      'No MCP failure signal was found in recent logs; if you just reproduced the issue, increase lineLimit or filter precisely with serverName.',
+    ));
   }
   return actions;
 };
@@ -212,7 +316,9 @@ export const buildMCPRuntimeFailureSnapshot = (params: {
   serverName?: unknown;
   lineLimit?: unknown;
   includeLines?: unknown;
+  translate?: AIInspectionTranslator;
 }) => {
+  const { translate } = params;
   const data = params.readResult?.data && typeof params.readResult.data === 'object'
     ? params.readResult.data as Record<string, unknown>
     : {};
@@ -223,7 +329,7 @@ export const buildMCPRuntimeFailureSnapshot = (params: {
   const includeLines = params.includeLines === true;
   const lines = normalizeLogLines(data.lines);
   const events = lines
-    .map(parseFailureEvent)
+    .map((line) => parseFailureEvent(line, translate))
     .filter((event): event is MCPRuntimeFailureEvent => Boolean(event))
     .filter((event) => !serverNameFilter || event.serverName.toLowerCase().includes(serverNameFilter) || event.linePreview.toLowerCase().includes(serverNameFilter))
     .filter((event) => !textFilter || event.linePreview.toLowerCase().includes(textFilter));
@@ -236,11 +342,21 @@ export const buildMCPRuntimeFailureSnapshot = (params: {
   const warnings: string[] = [];
 
   if (events.length > 0) {
-    warnings.push(`最近日志中发现 ${events.length} 条 MCP 运行期异常信号。`);
+    warnings.push(translateMCPRuntimeCopy(
+      translate,
+      'ai_chat.inspection.mcp_runtime.warning.failure_events',
+      `${events.length} MCP runtime failure signal was found in recent logs.`,
+      { count: events.length },
+    ));
   }
   const serversWithoutTools = serverSummaries.filter((server) => server.enabled && server.discoveredToolCount === 0).length;
   if (serversWithoutTools > 0) {
-    warnings.push(`有 ${serversWithoutTools} 个已启用 MCP 服务当前未发现工具。`);
+    warnings.push(translateMCPRuntimeCopy(
+      translate,
+      'ai_chat.inspection.mcp_runtime.warning.enabled_without_tools',
+      `${serversWithoutTools} enabled MCP server currently has no discovered tools.`,
+      { count: serversWithoutTools },
+    ));
   }
 
   return {
@@ -257,10 +373,19 @@ export const buildMCPRuntimeFailureSnapshot = (params: {
     events,
     serverSummaries,
     warnings,
-    nextActions: collectNextActions(events, serverSummaries),
+    nextActions: collectNextActions(events, serverSummaries, translate),
     lines: includeLines ? lines.map(redactLogLine) : undefined,
     message: events.length > 0
-      ? `最近日志中发现 ${events.length} 条 MCP 运行期异常信号`
-      : '最近日志里没有发现 MCP 启动、工具发现或工具调用失败信号。',
+      ? translateMCPRuntimeCopy(
+        translate,
+        'ai_chat.inspection.mcp_runtime.message.failure_events',
+        `${events.length} MCP runtime failure signal was found in recent logs`,
+        { count: events.length },
+      )
+      : translateMCPRuntimeCopy(
+        translate,
+        'ai_chat.inspection.mcp_runtime.message.no_failure_events',
+        'No MCP startup, tool discovery, or tool call failure signal was found in recent logs.',
+      ),
   };
 };

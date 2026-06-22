@@ -20,15 +20,17 @@ func buildTDengineToMySQLPlan(config SyncConfig, tableName string, sourceDB db.D
 
 	sourceCols, sourceExists, err := inspectTableColumns(sourceDB, plan.SourceSchema, plan.SourceTable)
 	if err != nil {
-		return plan, nil, nil, fmt.Errorf("获取源表字段失败: %w", err)
+		return plan, nil, nil, syncWrapDetailError("data_sync.backend.error.source_table_columns_failed", err)
 	}
 	if !sourceExists {
-		return plan, nil, nil, fmt.Errorf("源表不存在或无列定义: %s", tableName)
+		return plan, nil, nil, syncTextError("data_sync.backend.error.source_table_missing_or_no_columns", map[string]any{
+			"table": tableName,
+		})
 	}
 
 	targetCols, targetExists, err := inspectTableColumns(targetDB, plan.TargetSchema, plan.TargetTable)
 	if err != nil {
-		return plan, sourceCols, nil, fmt.Errorf("获取目标表字段失败: %w", err)
+		return plan, sourceCols, nil, syncWrapDetailError("data_sync.backend.error.target_table_columns_failed", err)
 	}
 	plan.TargetTableExists = targetExists
 	plan.Warnings = append(plan.Warnings, tdengineSemanticWarnings(sourceCols)...)
@@ -75,15 +77,17 @@ func buildTDengineToPGLikePlan(config SyncConfig, tableName string, sourceDB db.
 
 	sourceCols, sourceExists, err := inspectTableColumns(sourceDB, plan.SourceSchema, plan.SourceTable)
 	if err != nil {
-		return plan, nil, nil, fmt.Errorf("获取源表字段失败: %w", err)
+		return plan, nil, nil, syncWrapDetailError("data_sync.backend.error.source_table_columns_failed", err)
 	}
 	if !sourceExists {
-		return plan, nil, nil, fmt.Errorf("源表不存在或无列定义: %s", tableName)
+		return plan, nil, nil, syncTextError("data_sync.backend.error.source_table_missing_or_no_columns", map[string]any{
+			"table": tableName,
+		})
 	}
 
 	targetCols, targetExists, err := inspectTableColumns(targetDB, plan.TargetSchema, plan.TargetTable)
 	if err != nil {
-		return plan, sourceCols, nil, fmt.Errorf("获取目标表字段失败: %w", err)
+		return plan, sourceCols, nil, syncWrapDetailError("data_sync.backend.error.target_table_columns_failed", err)
 	}
 	plan.TargetTableExists = targetExists
 	plan.Warnings = append(plan.Warnings, tdengineSemanticWarnings(sourceCols)...)

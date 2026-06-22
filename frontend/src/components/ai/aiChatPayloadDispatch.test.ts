@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { t as translateCatalog } from '../../i18n';
 import { dispatchAIChatPayload } from './aiChatPayloadDispatch';
 
 describe('aiChatPayloadDispatch', () => {
@@ -122,6 +123,7 @@ describe('aiChatPayloadDispatch', () => {
   it('emits the unavailable message when the AI service is missing', async () => {
     const addAIChatMessage = vi.fn();
     const setSending = vi.fn();
+    const unavailableContent = translateCatalog('ai_chat.panel.message.service_not_ready', undefined, 'zh-CN');
     (globalThis as any).window = {};
 
     const result = await dispatchAIChatPayload({
@@ -131,13 +133,13 @@ describe('aiChatPayloadDispatch', () => {
       addAIChatMessage,
       setSending,
       nextMessageId: () => 'msg-unavailable',
-      unavailableContent: '❌ AI Service 未就绪',
+      unavailableContent,
     });
 
     expect(result).toBe('unavailable');
     expect(addAIChatMessage).toHaveBeenCalledWith('session-1', expect.objectContaining({
       id: 'msg-unavailable',
-      content: '❌ AI Service 未就绪',
+      content: unavailableContent,
     }));
     expect(setSending).toHaveBeenCalledWith(false);
   });
@@ -162,7 +164,7 @@ describe('aiChatPayloadDispatch', () => {
     expect(result).toBe('unavailable');
     expect(addAIChatMessage).not.toHaveBeenCalled();
     expect(updateAIChatMessage).toHaveBeenCalledWith('session-1', 'assistant-connecting', expect.objectContaining({
-      content: '❌ AI Service 未就绪',
+      content: '❌ AI Service is not ready',
       loading: false,
       phase: 'idle',
     }));
@@ -194,7 +196,7 @@ describe('aiChatPayloadDispatch', () => {
     expect(result).toBe('error');
     expect(addAIChatMessage).toHaveBeenCalledWith('session-1', expect.objectContaining({
       id: 'msg-error',
-      content: '❌ 发送失败: HTTP 502: 502 Bad Gateway',
+      content: '❌ Send failed: HTTP 502: 502 Bad Gateway',
       rawError: '<html><title>502 Bad Gateway</title></html>',
     }));
     expect(setSending).toHaveBeenCalledWith(false);
@@ -228,11 +230,65 @@ describe('aiChatPayloadDispatch', () => {
     expect(result).toBe('error');
     expect(addAIChatMessage).not.toHaveBeenCalled();
     expect(updateAIChatMessage).toHaveBeenCalledWith('session-1', 'assistant-connecting', expect.objectContaining({
-      content: '❌ 发送失败: HTTP 502: 502 Bad Gateway',
+      content: '❌ Send failed: HTTP 502: 502 Bad Gateway',
       rawError: '<html><title>502 Bad Gateway</title></html>',
       loading: false,
       phase: 'idle',
     }));
     expect(setSending).toHaveBeenCalledWith(false);
+  });
+
+  it('localizes fallback service and dispatch error messages while preserving raw error detail', async () => {
+    const addAIChatMessage = vi.fn();
+    const updateAIChatMessage = vi.fn();
+    const setSending = vi.fn();
+    (globalThis as any).window = {};
+
+    await dispatchAIChatPayload({
+      sid: 'session-1',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      addAIChatMessage,
+      updateAIChatMessage,
+      setSending,
+      nextMessageId: () => 'msg-unavailable',
+      pendingAssistantMessageId: 'assistant-connecting',
+      translate: (key, params) => translateCatalog(key, params, 'en-US'),
+    } as Parameters<typeof dispatchAIChatPayload>[0] & {
+      translate: (key: string, params?: Record<string, string | number | boolean | null | undefined>) => string;
+    });
+
+    expect(updateAIChatMessage).toHaveBeenCalledWith('session-1', 'assistant-connecting', expect.objectContaining({
+      content: '❌ AI Service is not ready',
+    }));
+
+    const AIChatStream = vi.fn().mockRejectedValue(new Error('<html><title>502 Bad Gateway</title></html>'));
+    (globalThis as any).window = {
+      go: {
+        aiservice: {
+          Service: { AIChatStream },
+        },
+      },
+    };
+    updateAIChatMessage.mockClear();
+
+    await dispatchAIChatPayload({
+      sid: 'session-1',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      addAIChatMessage,
+      updateAIChatMessage,
+      setSending,
+      nextMessageId: () => 'msg-error',
+      pendingAssistantMessageId: 'assistant-connecting',
+      translate: (key, params) => translateCatalog(key, params, 'en-US'),
+    } as Parameters<typeof dispatchAIChatPayload>[0] & {
+      translate: (key: string, params?: Record<string, string | number | boolean | null | undefined>) => string;
+    });
+
+    expect(updateAIChatMessage).toHaveBeenCalledWith('session-1', 'assistant-connecting', expect.objectContaining({
+      content: '❌ Send failed: HTTP 502: 502 Bad Gateway',
+      rawError: '<html><title>502 Bad Gateway</title></html>',
+    }));
   });
 });

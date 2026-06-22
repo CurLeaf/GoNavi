@@ -1,26 +1,59 @@
 import React from 'react';
 import { message } from 'antd';
 import type { AIChatAttachment } from '../../types';
-import { createAIChatAttachmentFromFile } from './aiChatAttachments';
+import { createAIChatAttachmentFromFile, type AIChatAttachmentTranslator } from './aiChatAttachments';
 
 interface UseAIChatDraftAttachmentsParams {
   setDraftAttachments: React.Dispatch<React.SetStateAction<AIChatAttachment[]>>;
+  translate?: AIChatAttachmentTranslator;
 }
 
 export const useAIChatDraftAttachments = ({
   setDraftAttachments,
+  translate,
 }: UseAIChatDraftAttachmentsParams) => {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const translateAttachmentMessage = React.useCallback((
+    key: string,
+    fallback: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => {
+    if (!translate) {
+      return fallback;
+    }
+    const translated = translate(key, params);
+    return translated && translated !== key ? translated : fallback;
+  }, [translate]);
 
   const appendDraftFiles = React.useCallback(async (files: File[]) => {
     for (const file of files) {
-      const attachment = await createAIChatAttachmentFromFile(file);
-      setDraftAttachments((prev) => [...prev, attachment]);
-      if (attachment.extractWarning) {
-        message.warning(`${attachment.name}: ${attachment.extractWarning}`);
+      try {
+        const attachment = await createAIChatAttachmentFromFile(file, translate);
+        setDraftAttachments((prev) => [...prev, attachment]);
+        if (attachment.extractWarning) {
+          message.warning(translateAttachmentMessage(
+            'ai_chat.input.attachment.message.warning',
+            `${attachment.name}: ${attachment.extractWarning}`,
+            {
+              name: attachment.name,
+              message: attachment.extractWarning,
+            },
+          ));
+        }
+      } catch (error: any) {
+        const detail = error?.message || String(error);
+        const name = file.name || 'unnamed';
+        message.error(translateAttachmentMessage(
+          'ai_chat.input.attachment.message.read_failed',
+          `Failed to read attachment ${name}: ${detail}`,
+          {
+            name,
+            detail,
+          },
+        ));
       }
     }
-  }, [setDraftAttachments]);
+  }, [setDraftAttachments, translate, translateAttachmentMessage]);
 
   const handleAttachmentUpload = React.useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files || []);

@@ -8,6 +8,7 @@ import {
   inferAIChatConnectionContext,
   resolveAIChatPanelMode,
 } from './aiChatPanelDerivedState';
+import { t as translateCatalog } from '../../i18n';
 
 describe('aiChatPanelDerivedState', () => {
   it('falls back to tool context matches when the active context is incomplete', () => {
@@ -31,6 +32,7 @@ describe('aiChatPanelDerivedState', () => {
 
   it('builds insight cards from recent sql logs and linked table contexts', () => {
     const insights = buildAIChatInsights({
+      translate: (key, params) => translateCatalog(key, params, 'zh-CN'),
       contextTableNames: ['sales.orders', 'sales.order_items', 'sales.customers', 'sales.payments'],
       sqlLogs: [
         {
@@ -68,6 +70,50 @@ describe('aiChatPanelDerivedState', () => {
     expect(insights[3]).toMatchObject({
       tone: 'warn',
       title: '检测到 1 条写操作',
+    });
+  });
+
+  it('localizes insight cards while preserving raw sql and database errors', () => {
+    const insights = buildAIChatInsights({
+      translate: (key, params) => translateCatalog(key, params, 'en-US'),
+      contextTableNames: ['sales.orders', 'sales.order_items', 'sales.customers', 'sales.payments'],
+      sqlLogs: [
+        {
+          id: 'log-1',
+          timestamp: 1,
+          sql: 'SELECT * FROM orders',
+          status: 'success',
+          duration: 1520,
+        },
+        {
+          id: 'log-2',
+          timestamp: 2,
+          sql: 'UPDATE orders SET status = 1',
+          status: 'error',
+          duration: 120,
+          message: 'Deadlock found',
+        },
+      ],
+    });
+
+    expect(insights[0]).toMatchObject({
+      tone: 'info',
+      title: '4 linked tables',
+      body: 'This conversation includes structure context for sales.orders, sales.order_items, sales.customers and more tables.',
+    });
+    expect(insights[1]).toMatchObject({
+      tone: 'warn',
+      title: 'Slowest recent query 1,520ms',
+      body: 'SELECT * FROM orders',
+    });
+    expect(insights[2]).toMatchObject({
+      tone: 'warn',
+      title: '1 recent query failures',
+      body: 'Deadlock found',
+    });
+    expect(insights[3]).toMatchObject({
+      tone: 'warn',
+      title: 'Detected 1 write operations',
     });
   });
 

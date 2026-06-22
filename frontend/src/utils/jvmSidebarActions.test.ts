@@ -16,12 +16,12 @@ describe("jvmSidebarActions", () => {
     ).toEqual([
       {
         key: "conn-1-jvm-monitoring-jmx",
-        title: "持续监控 · JMX",
+        title: "Continuous monitoring · JMX",
         providerMode: "jmx",
       },
       {
         key: "conn-1-jvm-monitoring-endpoint",
-        title: "持续监控 · Endpoint",
+        title: "Continuous monitoring · Endpoint",
         providerMode: "endpoint",
       },
     ]);
@@ -36,7 +36,7 @@ describe("jvmSidebarActions", () => {
     ).toEqual([
       {
         key: "conn-1-jvm-monitoring-jmx",
-        title: "持续监控 · JMX",
+        title: "Continuous monitoring · JMX",
         providerMode: "jmx",
       },
     ]);
@@ -50,7 +50,7 @@ describe("jvmSidebarActions", () => {
       }),
     ).toEqual({
       key: "conn-1-jvm-diagnostic",
-      title: "诊断增强 · Arthas Tunnel",
+      title: "Diagnostic enhancement · Arthas Tunnel",
       transport: "arthas-tunnel",
     });
 
@@ -60,5 +60,30 @@ describe("jvmSidebarActions", () => {
         transport: "agent-bridge",
       }),
     ).toBeNull();
+  });
+
+  it("localizes JVM sidebar action titles while preserving runtime labels", () => {
+    const translate = (key: string) => ({
+      "sidebar.jvm.action.monitoring": "持續監控",
+      "sidebar.jvm.action.diagnostic": "診斷增強",
+    }[key] ?? key);
+
+    expect(
+      buildJVMMonitoringActionDescriptors("conn-1", [{ mode: "endpoint" }], translate),
+    ).toEqual([
+      {
+        key: "conn-1-jvm-monitoring-endpoint",
+        title: "持續監控 · Endpoint",
+        providerMode: "endpoint",
+      },
+    ]);
+
+    expect(
+      buildJVMDiagnosticActionDescriptor("conn-1", { enabled: true }, translate),
+    ).toEqual({
+      key: "conn-1-jvm-diagnostic",
+      title: "診斷增強 · Agent Bridge",
+      transport: "agent-bridge",
+    });
   });
 });

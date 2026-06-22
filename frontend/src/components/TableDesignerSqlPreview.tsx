@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import Editor, { type BeforeMount, type OnMount } from './MonacoEditor';
+import { t as defaultTranslate } from '../i18n';
+import { useOptionalI18n } from '../i18n/provider';
 interface TableDesignerSqlPreviewProps {
   sql: string;
   darkMode?: boolean;
@@ -22,36 +24,74 @@ export interface SqlChangeHighlight {
   label: string;
 }
 
+type SqlPreviewTranslator = (key: string) => string;
+type SqlChangeHighlightLabelKey =
+  | 'table_designer.sql_preview.change.add'
+  | 'table_designer.sql_preview.change.comment'
+  | 'table_designer.sql_preview.change.constraint'
+  | 'table_designer.sql_preview.change.create'
+  | 'table_designer.sql_preview.change.create_index'
+  | 'table_designer.sql_preview.change.drop'
+  | 'table_designer.sql_preview.change.modify'
+  | 'table_designer.sql_preview.change.rename';
+
 const SQL_PREVIEW_LIGHT_THEME = 'gonavi-sql-preview-light';
 const SQL_PREVIEW_DARK_THEME = 'gonavi-sql-preview-dark';
+const SQL_PREVIEW_CHANGE_LABEL_FALLBACKS: Record<SqlChangeHighlightLabelKey, string> = {
+  'table_designer.sql_preview.change.add': 'Add change',
+  'table_designer.sql_preview.change.comment': 'Comment change',
+  'table_designer.sql_preview.change.constraint': 'Constraint change',
+  'table_designer.sql_preview.change.create': 'New table structure',
+  'table_designer.sql_preview.change.create_index': 'Create index',
+  'table_designer.sql_preview.change.drop': 'Drop change',
+  'table_designer.sql_preview.change.modify': 'Column property change',
+  'table_designer.sql_preview.change.rename': 'Rename change',
+};
+
 const CHANGE_LINE_RULES: Array<{
   kind: SqlChangeHighlightKind;
-  label: string;
+  labelKey: SqlChangeHighlightLabelKey;
   pattern: RegExp;
 }> = [
-  { kind: 'rename', label: '重命名变更', pattern: /\b(RENAME\s+COLUMN|CHANGE\s+COLUMN|RENAME\s+TO|SP_RENAME)\b/i },
-  { kind: 'add', label: '新增变更', pattern: /\b(ADD\s+COLUMN|ADD\s+PRIMARY\s+KEY)\b/i },
-  { kind: 'drop', label: '删除变更', pattern: /\b(DROP\s+COLUMN|DROP\s+PRIMARY\s+KEY)\b/i },
-  { kind: 'modify', label: '字段属性变更', pattern: /\b(MODIFY\s+COLUMN|ALTER\s+COLUMN|SET\s+DATA\s+TYPE|SET\s+DEFAULT|DROP\s+DEFAULT|SET\s+NOT\s+NULL|DROP\s+NOT\s+NULL)\b/i },
-  { kind: 'constraint', label: '约束变更', pattern: /\b(ADD\s+CONSTRAINT|DROP\s+CONSTRAINT)\b/i },
-  { kind: 'comment', label: '备注变更', pattern: /\b(COMMENT\s+ON\s+COLUMN|COMMENT\s+ON\s+TABLE)\b/i },
-  { kind: 'create', label: '新建索引', pattern: /\bCREATE\s+(UNIQUE\s+)?((CLUSTERED|NONCLUSTERED)\s+)?INDEX\b/i },
+  { kind: 'rename', labelKey: 'table_designer.sql_preview.change.rename', pattern: /\b(RENAME\s+COLUMN|CHANGE\s+COLUMN|RENAME\s+TO|SP_RENAME)\b/i },
+  { kind: 'add', labelKey: 'table_designer.sql_preview.change.add', pattern: /\b(ADD\s+COLUMN|ADD\s+PRIMARY\s+KEY)\b/i },
+  { kind: 'drop', labelKey: 'table_designer.sql_preview.change.drop', pattern: /\b(DROP\s+COLUMN|DROP\s+PRIMARY\s+KEY)\b/i },
+  { kind: 'modify', labelKey: 'table_designer.sql_preview.change.modify', pattern: /\b(MODIFY\s+COLUMN|ALTER\s+COLUMN|SET\s+DATA\s+TYPE|SET\s+DEFAULT|DROP\s+DEFAULT|SET\s+NOT\s+NULL|DROP\s+NOT\s+NULL)\b/i },
+  { kind: 'constraint', labelKey: 'table_designer.sql_preview.change.constraint', pattern: /\b(ADD\s+CONSTRAINT|DROP\s+CONSTRAINT)\b/i },
+  { kind: 'comment', labelKey: 'table_designer.sql_preview.change.comment', pattern: /\b(COMMENT\s+ON\s+COLUMN|COMMENT\s+ON\s+TABLE)\b/i },
+  { kind: 'create', labelKey: 'table_designer.sql_preview.change.create_index', pattern: /\bCREATE\s+(UNIQUE\s+)?((CLUSTERED|NONCLUSTERED)\s+)?INDEX\b/i },
 ];
 
 const CREATE_TABLE_PATTERN = /^\s*CREATE\s+TABLE\b/i;
 
-const getCreateTableLineHighlight = (line: string, lineNumber: number): SqlChangeHighlight | null => {
+const resolveSqlPreviewChangeLabel = (
+  labelKey: SqlChangeHighlightLabelKey,
+  translate: SqlPreviewTranslator = defaultTranslate,
+): string => {
+  const translated = translate(labelKey);
+  return translated === labelKey ? SQL_PREVIEW_CHANGE_LABEL_FALLBACKS[labelKey] : translated;
+};
+
+const getCreateTableLineHighlight = (
+  line: string,
+  lineNumber: number,
+  translate?: SqlPreviewTranslator,
+): SqlChangeHighlight | null => {
   const trimmed = line.trim();
   if (!trimmed || trimmed.startsWith('--')) return null;
   return {
     line,
     lineNumber,
     kind: 'create',
-    label: '新建表结构',
+    label: resolveSqlPreviewChangeLabel('table_designer.sql_preview.change.create', translate),
   };
 };
 
-const getAlterLineHighlight = (line: string, lineNumber: number): SqlChangeHighlight | null => {
+const getAlterLineHighlight = (
+  line: string,
+  lineNumber: number,
+  translate?: SqlPreviewTranslator,
+): SqlChangeHighlight | null => {
   const trimmed = line.trim();
   if (!trimmed || trimmed.startsWith('--')) return null;
 
@@ -62,19 +102,22 @@ const getAlterLineHighlight = (line: string, lineNumber: number): SqlChangeHighl
     line,
     lineNumber,
     kind: matchedRule.kind,
-    label: matchedRule.label,
+    label: resolveSqlPreviewChangeLabel(matchedRule.labelKey, translate),
   };
 };
 
-export const resolveSqlChangeHighlights = (sql: string): SqlChangeHighlight[] => {
+export const resolveSqlChangeHighlights = (
+  sql: string,
+  translate?: SqlPreviewTranslator,
+): SqlChangeHighlight[] => {
   const lines = sql.split(/\r?\n/);
   const isCreateTableSql = lines.some((line) => CREATE_TABLE_PATTERN.test(line));
 
   return lines
     .map((line, index) => (
       isCreateTableSql
-        ? getCreateTableLineHighlight(line, index + 1)
-        : getAlterLineHighlight(line, index + 1)
+        ? getCreateTableLineHighlight(line, index + 1, translate)
+        : getAlterLineHighlight(line, index + 1, translate)
     ))
     .filter((highlight): highlight is SqlChangeHighlight => Boolean(highlight));
 };
@@ -133,7 +176,9 @@ const TableDesignerSqlPreview: React.FC<TableDesignerSqlPreviewProps> = ({
   const decorationIdsRef = useRef<string[]>([]);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
-  const changeHighlights = useMemo(() => resolveSqlChangeHighlights(sql), [sql]);
+  const i18n = useOptionalI18n();
+  const translate = i18n?.t ?? defaultTranslate;
+  const changeHighlights = useMemo(() => resolveSqlChangeHighlights(sql, translate), [sql, translate]);
 
   const applyChangeDecorations = useCallback(() => {
     const editor = editorRef.current;

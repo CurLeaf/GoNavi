@@ -1,5 +1,6 @@
 import type { SqlLog } from '../../store';
 import type { AIChatMessage, AIContextItem } from '../../types';
+import { t as translateCatalog, type I18nParams } from '../../i18n';
 import type { AIToolContextEntry } from './aiLocalToolExecutor';
 import type { AIChatInlineHistorySession, AIChatInsightItem, AIChatPanelMode } from './AIChatPanelModeContent';
 
@@ -19,6 +20,7 @@ interface CollectAIChatContextTableNamesArgs {
 interface BuildAIChatInsightsArgs {
   contextTableNames: string[];
   sqlLogs: SqlLog[];
+  translate?: (key: string, params?: I18nParams) => string;
 }
 
 export const inferAIChatConnectionContext = ({
@@ -86,6 +88,7 @@ export const collectAIChatContextTableNames = ({
 export const buildAIChatInsights = ({
   contextTableNames,
   sqlLogs,
+  translate = (key, params) => translateCatalog(key, params, 'en-US'),
 }: BuildAIChatInsightsArgs): AIChatInsightItem[] => {
   const recentLogs = sqlLogs.slice(0, 24);
   const slowest = recentLogs
@@ -94,29 +97,45 @@ export const buildAIChatInsights = ({
   const errors = recentLogs.filter((log) => log.status === 'error');
   const writeCount = recentLogs.filter((log) => /\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i.test(log.sql)).length;
   const contextCount = contextTableNames.length;
+  const tableSeparator = translate('ai_chat.panel.insight.context.table_separator');
+  const tablePreview = `${contextTableNames.slice(0, 3).join(tableSeparator)}${contextCount > 3 ? translate('ai_chat.panel.insight.context.more_tables_suffix') : ''}`;
 
   return [
     {
       tone: 'info',
-      title: contextCount > 0 ? `已关联 ${contextCount} 张表` : '尚未关联表结构',
+      title: contextCount > 0
+        ? translate('ai_chat.panel.insight.context.linked_title', { count: contextCount })
+        : translate('ai_chat.panel.insight.context.empty_title'),
       body: contextCount > 0
-        ? `当前对话会带上 ${contextTableNames.slice(0, 3).join('、')}${contextCount > 3 ? ' 等表' : ''} 的结构上下文。`
-        : '在表页打开 AI 后会自动关联当前表，也可以在输入框上方手动添加上下文。',
+        ? translate('ai_chat.panel.insight.context.linked_body', { tables: tablePreview })
+        : translate('ai_chat.panel.insight.context.empty_body'),
     },
     {
       tone: slowest && slowest.duration > 1000 ? 'warn' : 'accent',
-      title: slowest ? `最近最慢查询 ${Math.round(slowest.duration).toLocaleString()}ms` : '暂无查询耗时样本',
-      body: slowest ? slowest.sql.slice(0, 140) : '执行查询后这里会显示可用于优化分析的 SQL 线索。',
+      title: slowest
+        ? translate('ai_chat.panel.insight.query.slowest_title', { duration: Math.round(slowest.duration).toLocaleString() })
+        : translate('ai_chat.panel.insight.query.empty_title'),
+      body: slowest ? slowest.sql.slice(0, 140) : translate('ai_chat.panel.insight.query.empty_body'),
     },
     {
       tone: errors.length > 0 ? 'warn' : 'info',
-      title: errors.length > 0 ? `${errors.length} 条最近查询失败` : '最近查询状态正常',
-      body: errors[0]?.message || (recentLogs.length > 0 ? `已记录 ${recentLogs.length} 条最近 SQL，可直接让 AI 解释或优化。` : '暂无 SQL 日志。'),
+      title: errors.length > 0
+        ? translate('ai_chat.panel.insight.status.failed_title', { count: errors.length })
+        : translate('ai_chat.panel.insight.status.ok_title'),
+      body: errors[0]?.message || (
+        recentLogs.length > 0
+          ? translate('ai_chat.panel.insight.status.recent_body', { count: recentLogs.length })
+          : translate('ai_chat.panel.insight.status.empty_body')
+      ),
     },
     {
       tone: writeCount > 0 ? 'warn' : 'accent',
-      title: writeCount > 0 ? `检测到 ${writeCount} 条写操作` : '当前以只读分析为主',
-      body: writeCount > 0 ? '涉及写入的 SQL 建议先生成预览与回滚语句，再执行提交。' : 'AI 默认优先解释、生成 SELECT、分析 Schema 与优化索引。',
+      title: writeCount > 0
+        ? translate('ai_chat.panel.insight.write.detected_title', { count: writeCount })
+        : translate('ai_chat.panel.insight.write.readonly_title'),
+      body: writeCount > 0
+        ? translate('ai_chat.panel.insight.write.detected_body')
+        : translate('ai_chat.panel.insight.write.readonly_body'),
     },
   ];
 };

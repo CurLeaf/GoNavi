@@ -3,6 +3,7 @@ import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TabData } from '../types';
+import { I18nProvider } from '../i18n/provider';
 import DefinitionViewer from './DefinitionViewer';
 
 const storeState = vi.hoisted(() => ({
@@ -34,6 +35,9 @@ vi.mock('../store', () => ({
 }));
 
 vi.mock('../../wailsjs/go/app/App', () => backendApp);
+vi.mock('../i18n/runtime', () => ({
+  syncLanguageRuntime: vi.fn(async () => undefined),
+}));
 
 vi.mock('@ant-design/icons', () => ({
   EditOutlined: () => <span data-icon="edit" />,
@@ -63,6 +67,16 @@ const flushPromises = async (count = 6) => {
     await Promise.resolve();
   }
 };
+
+const renderWithI18n = (tab: TabData) => (
+  <I18nProvider
+    preference="en-US"
+    systemLanguages={['en-US']}
+    onPreferenceChange={() => undefined}
+  >
+    <DefinitionViewer tab={tab} />
+  </I18nProvider>
+);
 
 const findButtonText = (node: any): string => (
   (node.children || [])
@@ -98,11 +112,11 @@ describe('DefinitionViewer object edit entry', () => {
   it('opens an editable query tab for view definitions', async () => {
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab()} />);
+      renderer = create(renderWithI18n(createTab()));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
@@ -110,13 +124,15 @@ describe('DefinitionViewer object edit entry', () => {
 
     expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'main' });
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
-      title: '修改视图: reporting.active_users',
+      title: 'Edit View: reporting.active_users',
       type: 'query',
       connectionId: 'conn-1',
       dbName: 'main',
       queryMode: 'object-edit',
       query: expect.stringContaining('CREATE OR REPLACE VIEW reporting.active_users AS'),
     }));
+    expect(storeState.addTab.mock.calls[0][0].query).toContain('-- Edit View: reporting.active_users');
+    expect(storeState.addTab.mock.calls[0][0].query).toContain('-- Confirm the syntax is compatible with the current database before running it');
     expect(storeState.addTab.mock.calls[0][0].query).toContain('SELECT id, name FROM users;');
   });
 
@@ -128,11 +144,11 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab()} />);
+      renderer = create(renderWithI18n(createTab()));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
@@ -152,7 +168,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab({
+      renderer = create(renderWithI18n(createTab({
         id: 'routine-def-conn-1-main-reporting.refresh_stats',
         title: '函数: reporting.refresh_stats',
         type: 'routine-def',
@@ -160,18 +176,18 @@ describe('DefinitionViewer object edit entry', () => {
         routineType: 'FUNCTION',
         viewName: undefined,
         viewKind: undefined,
-      })} />);
+      })));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
     });
 
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
-      title: '修改函数/存储过程: reporting.refresh_stats',
+      title: 'Edit Function/procedure: reporting.refresh_stats',
       type: 'query',
       queryMode: 'object-edit',
       query: expect.stringContaining('CREATE OR REPLACE FUNCTION reporting.refresh_stats()'),
@@ -187,7 +203,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab({
+      renderer = create(renderWithI18n(createTab({
         id: 'routine-def-conn-1-main-reporting.refresh_stats',
         title: '存储过程: reporting.refresh_stats',
         type: 'routine-def',
@@ -195,7 +211,7 @@ describe('DefinitionViewer object edit entry', () => {
         routineType: 'PROCEDURE',
         viewName: undefined,
         viewKind: undefined,
-      })} />);
+      })));
       await flushPromises();
     });
 
@@ -222,7 +238,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab({
+      renderer = create(renderWithI18n(createTab({
         id: 'routine-def-conn-1-main-reporting.refresh_stats',
         title: '存储过程: reporting.refresh_stats',
         type: 'routine-def',
@@ -230,7 +246,7 @@ describe('DefinitionViewer object edit entry', () => {
         routineType: 'PROCEDURE',
         viewName: undefined,
         viewKind: undefined,
-      })} />);
+      })));
       await flushPromises();
     });
 
@@ -255,7 +271,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab({
+      renderer = create(renderWithI18n(createTab({
         id: 'routine-def-conn-1-main-proc_tally2accept',
         title: '存储过程: proc_tally2accept',
         type: 'routine-def',
@@ -263,11 +279,11 @@ describe('DefinitionViewer object edit entry', () => {
         routineType: 'PROCEDURE',
         viewName: undefined,
         viewKind: undefined,
-      })} />);
+      })));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
@@ -292,11 +308,11 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab()} />);
+      renderer = create(renderWithI18n(createTab()));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       await button.props.onClick();
@@ -326,11 +342,11 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab()} />);
+      renderer = create(renderWithI18n(createTab()));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       await button.props.onClick();
@@ -339,7 +355,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     expect(storeState.addTab).not.toHaveBeenCalled();
     expect(String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''))).toContain('SELECT id, name FROM users');
-    expect(findButtonText(renderer.root)).toContain('刷新最新定义失败');
+    expect(findButtonText(renderer.root)).toContain('Failed to refresh the latest definition');
     expect(findButtonText(renderer.root)).toContain('network down');
   });
 
@@ -357,22 +373,47 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab()} />);
+      renderer = create(renderWithI18n(createTab()));
       await flushPromises();
     });
 
     await act(async () => {
-      renderer.update(<DefinitionViewer tab={createTab({
+      renderer.update(renderWithI18n(createTab({
         id: 'view-def-conn-1-main-reporting.archived_users',
         title: '视图: reporting.archived_users',
         viewName: 'reporting.archived_users',
-      })} />);
+      })));
       await flushPromises();
     });
 
-    expect(findButtonText(renderer.root)).toContain('加载失败');
+    expect(findButtonText(renderer.root)).toContain('Load failed');
     expect(findButtonText(renderer.root)).toContain('load failed');
     expect(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')).toHaveLength(0);
     expect(findButtonText(renderer.root)).not.toContain('SELECT id, name FROM users');
+  });
+
+  it('keeps comment-only fallback definitions editable without reintroducing locale-specific detection', async () => {
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(createTab()));
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    const query = String(storeState.addTab.mock.calls[0][0].query || '');
+    expect(query).toContain('-- Edit View: reporting.active_users');
+    expect(query).toContain('-- View definition not found');
+    expect(query).not.toContain('CREATE OR REPLACE VIEW reporting.active_users AS');
   });
 });

@@ -39,6 +39,48 @@ const textExtensions = new Set([
   'yml',
 ]);
 
+export type AIChatAttachmentTranslator = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) => string;
+
+const translateAttachmentCopy = (
+  t: AIChatAttachmentTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+): string => {
+  if (!t) {
+    return fallback;
+  }
+  const translated = t(key, params);
+  return translated && translated !== key ? translated : fallback;
+};
+
+const resolveAIChatAttachmentKindLabel = (
+  kind: AIChatAttachmentKind,
+  t?: AIChatAttachmentTranslator,
+): string => {
+  switch (kind) {
+    case 'text':
+      return translateAttachmentCopy(t, 'ai_chat.input.attachment.kind.text', 'Text');
+    case 'markdown':
+      return translateAttachmentCopy(t, 'ai_chat.input.attachment.kind.markdown', 'Markdown');
+    case 'pdf':
+      return translateAttachmentCopy(t, 'ai_chat.input.attachment.kind.pdf', 'PDF');
+    case 'word':
+      return translateAttachmentCopy(t, 'ai_chat.input.attachment.kind.word', 'Word');
+    case 'excel':
+      return translateAttachmentCopy(t, 'ai_chat.input.attachment.kind.excel', 'Excel');
+    case 'document':
+      return translateAttachmentCopy(t, 'ai_chat.input.attachment.kind.document', 'File');
+    case 'image':
+      return translateAttachmentCopy(t, 'ai_chat.input.attachment.kind.image', 'Image');
+    default:
+      return kind;
+  }
+};
+
 const nextAttachmentId = () => `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 export const formatAIChatAttachmentSize = (size: number): string => {
@@ -137,7 +179,10 @@ const extractCellValue = (cellXml: string, sharedStrings: string[]): string => {
   return value;
 };
 
-const extractXlsxText = (entries: Record<string, Uint8Array>): string => {
+const extractXlsxText = (
+  entries: Record<string, Uint8Array>,
+  t?: AIChatAttachmentTranslator,
+): string => {
   const sharedStrings = extractSharedStrings(entries);
   const sheetPaths = Object.keys(entries)
     .filter((path) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(path))
@@ -151,7 +196,13 @@ const extractXlsxText = (entries: Record<string, Uint8Array>): string => {
     }).filter((line: string) => line.trim().length > 0);
     if (lines.length === 0) return '';
     const sheetName = path.replace(/^xl\/worksheets\//i, '').replace(/\.xml$/i, '');
-    return `[工作表: ${sheetName}]\n${lines.join('\n')}`;
+    const header = translateAttachmentCopy(
+      t,
+      'ai_chat.input.attachment.excel.worksheet_header',
+      `[Worksheet: ${sheetName}]`,
+      { sheetName },
+    );
+    return `${header}\n${lines.join('\n')}`;
   }).filter(Boolean).join('\n\n');
 };
 
@@ -172,7 +223,10 @@ const bytesToBinaryString = (bytes: Uint8Array): string => {
   return chunks.join('');
 };
 
-const extractPdfText = (bytes: Uint8Array): { text: string; warning?: string } => {
+const extractPdfText = (
+  bytes: Uint8Array,
+  t?: AIChatAttachmentTranslator,
+): { text: string; warning?: string } => {
   const raw = bytesToBinaryString(bytes);
   const values: string[] = [];
   const literalPattern = /\((?:\\.|[^\\)]){1,2000}\)/g;
@@ -185,35 +239,57 @@ const extractPdfText = (bytes: Uint8Array): { text: string; warning?: string } =
   }
   const text = values.join('\n');
   const warning = text
-    ? 'PDF 已使用轻量文本提取；扫描件或压缩字体内容可能无法完整读取。'
-    : '未从 PDF 中提取到可读文本；如果是扫描件或复杂编码 PDF，请复制正文后再发送。';
+    ? translateAttachmentCopy(
+      t,
+      'ai_chat.input.attachment.warning.pdf_partial_text',
+      'PDF used lightweight text extraction; scanned or compressed-font content may not be fully readable.',
+    )
+    : translateAttachmentCopy(
+      t,
+      'ai_chat.input.attachment.warning.pdf_no_text',
+      'No readable text was extracted from the PDF; if it is scanned or uses complex encoding, copy the body before sending.',
+    );
   return { text, warning };
 };
 
-const extractLegacyOfficeText = (bytes: Uint8Array): { text: string; warning: string } => {
+const extractLegacyOfficeText = (
+  bytes: Uint8Array,
+  t?: AIChatAttachmentTranslator,
+): { text: string; warning: string } => {
   const raw = bytesToBinaryString(bytes);
   const matches = raw.match(/[A-Za-z0-9\u4e00-\u9fa5][\x20-\x7E\u4e00-\u9fa5]{3,}/g) || [];
   return {
     text: Array.from(new Set(matches)).join('\n'),
-    warning: '旧版 Office 二进制格式仅做轻量文本片段提取；建议转为 docx/xlsx 后上传以获得更完整正文。',
+    warning: translateAttachmentCopy(
+      t,
+      'ai_chat.input.attachment.warning.legacy_office_partial_text',
+      'Legacy Office binary files only use lightweight text snippet extraction; convert to docx/xlsx before uploading for more complete content.',
+    ),
   };
 };
 
-const extractOfficeOpenXmlText = (bytes: Uint8Array, kind: AIChatAttachmentKind): string => {
+const extractOfficeOpenXmlText = (
+  bytes: Uint8Array,
+  kind: AIChatAttachmentKind,
+  t?: AIChatAttachmentTranslator,
+): string => {
   const entries = unzipSync(bytes);
   if (kind === 'word') return extractDocxText(entries);
-  if (kind === 'excel') return extractXlsxText(entries);
+  if (kind === 'excel') return extractXlsxText(entries, t);
   return '';
 };
 
 const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
   const reader = new FileReader();
   reader.onload = () => resolve(String(reader.result || ''));
-  reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
+  reader.onerror = () => reject(reader.error || new Error('file read failed'));
   reader.readAsDataURL(file);
 });
 
-export const createAIChatAttachmentFromFile = async (file: File): Promise<AIChatAttachment> => {
+export const createAIChatAttachmentFromFile = async (
+  file: File,
+  translate?: AIChatAttachmentTranslator,
+): Promise<AIChatAttachment> => {
   const kind = resolveAIChatAttachmentKind(file);
   const base: Omit<AIChatAttachment, 'kind'> = {
     id: nextAttachmentId(),
@@ -225,10 +301,16 @@ export const createAIChatAttachmentFromFile = async (file: File): Promise<AIChat
     return { ...base, kind, dataUrl: await readFileAsDataUrl(file) };
   }
   if (file.size > MAX_ATTACHMENT_BYTES) {
+    const size = formatAIChatAttachmentSize(MAX_ATTACHMENT_BYTES);
     return {
       ...base,
       kind,
-      extractWarning: `文件超过 ${formatAIChatAttachmentSize(MAX_ATTACHMENT_BYTES)}，已附加文件信息但未读取正文。`,
+      extractWarning: translateAttachmentCopy(
+        translate,
+        'ai_chat.input.attachment.warning.too_large',
+        `File exceeds ${size}; file metadata was attached but the body was not read.`,
+        { size },
+      ),
     };
   }
   try {
@@ -240,72 +322,141 @@ export const createAIChatAttachmentFromFile = async (file: File): Promise<AIChat
     const bytes = new Uint8Array(await file.arrayBuffer());
     const extension = getFileExtension(file.name);
     if ((kind === 'word' || kind === 'excel') && (extension === 'docx' || extension === 'xlsx')) {
-      const { text, truncated } = clampExtractedText(extractOfficeOpenXmlText(bytes, kind));
+      const { text, truncated } = clampExtractedText(extractOfficeOpenXmlText(bytes, kind, translate));
       return { ...base, kind, text, textTruncated: truncated };
     }
     if (kind === 'pdf') {
-      const extracted = extractPdfText(bytes);
+      const extracted = extractPdfText(bytes, translate);
       const { text, truncated } = clampExtractedText(extracted.text);
       return { ...base, kind, text, textTruncated: truncated, extractWarning: extracted.warning };
     }
     if ((kind === 'word' || kind === 'excel') && (extension === 'doc' || extension === 'xls')) {
-      const extracted = extractLegacyOfficeText(bytes);
+      const extracted = extractLegacyOfficeText(bytes, translate);
       const { text, truncated } = clampExtractedText(extracted.text);
       return { ...base, kind, text, textTruncated: truncated, extractWarning: extracted.warning };
     }
     return {
       ...base,
       kind,
-      extractWarning: '当前文件类型已附加，但暂未提取正文；如需模型分析内容，请改用 markdown、txt、docx、xlsx 或 pdf。',
+      extractWarning: translateAttachmentCopy(
+        translate,
+        'ai_chat.input.attachment.warning.unsupported_type',
+        'This file type was attached, but body text was not extracted yet; use markdown, txt, docx, xlsx, or pdf if the model needs the content.',
+      ),
     };
   } catch (error: any) {
+    const detail = error?.message || String(error);
     return {
       ...base,
       kind,
-      extractWarning: `附件正文提取失败：${error?.message || String(error)}`,
+      extractWarning: translateAttachmentCopy(
+        translate,
+        'ai_chat.input.attachment.warning.extract_failed',
+        `Attachment body extraction failed: ${detail}`,
+        { detail },
+      ),
     };
   }
 };
 
-export const buildAIChatAttachmentPromptText = (attachments: AIChatAttachment[] = []): string => {
+export const buildAIChatAttachmentPromptText = (
+  attachments: AIChatAttachment[] = [],
+  translate?: AIChatAttachmentTranslator,
+): string => {
   const documentAttachments = attachments.filter((attachment) => attachment.kind !== 'image');
   if (documentAttachments.length === 0) return '';
   return documentAttachments.map((attachment, index) => {
     const content = String(attachment.text || '').trim();
+    const contentTruncatedMarker = translateAttachmentCopy(
+      translate,
+      'ai_chat.input.attachment.prompt.content_truncated',
+      '[Attachment body truncated]',
+    );
     const truncatedContent = content.length > MAX_PROMPT_TEXT_CHARS
-      ? `${content.slice(0, MAX_PROMPT_TEXT_CHARS).trimEnd()}\n\n[附件正文过长，已截断]`
+      ? `${content.slice(0, MAX_PROMPT_TEXT_CHARS).trimEnd()}\n\n${contentTruncatedMarker}`
       : content;
     const fence = truncatedContent.includes('```') ? '~~~' : '```';
+    const kindLabel = resolveAIChatAttachmentKindLabel(attachment.kind, translate);
+    const size = formatAIChatAttachmentSize(attachment.size);
     const lines = [
-      `### 附件 ${index + 1}: ${attachment.name}`,
-      `- 类型: ${attachment.kind}`,
-      `- MIME: ${attachment.mimeType || 'unknown'}`,
-      `- 大小: ${formatAIChatAttachmentSize(attachment.size)}`,
+      translateAttachmentCopy(
+        translate,
+        'ai_chat.input.attachment.prompt.heading',
+        `### Attachment ${index + 1}: ${attachment.name}`,
+        { index: index + 1, name: attachment.name },
+      ),
+      translateAttachmentCopy(
+        translate,
+        'ai_chat.input.attachment.prompt.kind',
+        `- Type: ${kindLabel}`,
+        { kind: kindLabel },
+      ),
+      translateAttachmentCopy(
+        translate,
+        'ai_chat.input.attachment.prompt.mime',
+        `- MIME: ${attachment.mimeType || 'unknown'}`,
+        { mimeType: attachment.mimeType || 'unknown' },
+      ),
+      translateAttachmentCopy(
+        translate,
+        'ai_chat.input.attachment.prompt.size',
+        `- Size: ${size}`,
+        { size },
+      ),
     ];
     if (attachment.extractWarning) {
-      lines.push(`- 提取说明: ${attachment.extractWarning}`);
+      lines.push(translateAttachmentCopy(
+        translate,
+        'ai_chat.input.attachment.prompt.extract_warning',
+        `- Extraction note: ${attachment.extractWarning}`,
+        { message: attachment.extractWarning },
+      ));
     }
     if (attachment.textTruncated) {
-      lines.push('- 提取说明: 附件正文较长，已截断后发送。');
+      lines.push(translateAttachmentCopy(
+        translate,
+        'ai_chat.input.attachment.prompt.text_truncated',
+        '- Extraction note: Body text was truncated before sending.',
+      ));
     }
     if (truncatedContent) {
       lines.push('', fence, truncatedContent, fence);
     } else {
-      lines.push('', '未提取到可发送的附件正文。');
+      lines.push('', translateAttachmentCopy(
+        translate,
+        'ai_chat.input.attachment.prompt.no_text',
+        'No readable attachment body was extracted.',
+      ));
     }
     return lines.join('\n');
   }).join('\n\n');
 };
 
-export const appendAIChatAttachmentsToContent = (content: string, attachments: AIChatAttachment[] = []): string => {
-  const attachmentPrompt = buildAIChatAttachmentPromptText(attachments);
+export const appendAIChatAttachmentsToContent = (
+  content: string,
+  attachments: AIChatAttachment[] = [],
+  translate?: AIChatAttachmentTranslator,
+): string => {
+  const attachmentPrompt = buildAIChatAttachmentPromptText(attachments, translate);
   if (!attachmentPrompt) return content;
   const userContent = String(content || '').trim();
   return [
-    userContent || '请根据以下附件内容继续处理。',
+    userContent || translateAttachmentCopy(
+      translate,
+      'ai_chat.input.attachment.prompt.default_user_content',
+      'Continue based on the following attachment content.',
+    ),
     '',
-    '<用户上传附件>',
+    translateAttachmentCopy(
+      translate,
+      'ai_chat.input.attachment.prompt.wrapper_start',
+      '<User Uploaded Attachments>',
+    ),
     attachmentPrompt,
-    '</用户上传附件>',
+    translateAttachmentCopy(
+      translate,
+      'ai_chat.input.attachment.prompt.wrapper_end',
+      '</User Uploaded Attachments>',
+    ),
   ].join('\n');
 };

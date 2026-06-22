@@ -230,6 +230,63 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.content).toContain('OpenAI 主账号');
   });
 
+  it('uses the provided translator for the current chat readiness snapshot while keeping raw provider data', async () => {
+    const translate = (key: string, params?: Record<string, unknown>) => ({
+      'ai_chat.input.status.label.model_required': 'T_MODEL_REQUIRED',
+      'ai_chat.input.status.missing_model.title.select': `T_SELECT_${params?.provider || ''}`,
+      'ai_chat.input.status.missing_model.description.available': `T_AVAILABLE_${params?.count || ''}`,
+      'ai_chat.input.status.action.reload_models': 'T_RELOAD_MODELS',
+    }[key] || key);
+
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_chat_readiness', {}),
+      connections: [buildConnection()],
+      mcpTools: [],
+      dynamicModels: ['gpt-5.5', 'gpt-4.1-mini'],
+      activeContext: {
+        connectionId: 'conn-1',
+        dbName: 'demo',
+      },
+      aiContexts: {
+        'conn-1:demo': [{
+          dbName: 'demo',
+          tableName: 'orders',
+          ddl: 'CREATE TABLE orders (...)',
+        }],
+      },
+      toolContextMap: new Map(),
+      translate,
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getAIRuntimeState: vi.fn().mockResolvedValue({
+          activeProviderId: 'provider-1',
+          providers: [{
+            id: 'provider-1',
+            type: 'openai',
+            name: 'OpenAI 主账号',
+            apiKey: '',
+            hasSecret: true,
+            baseUrl: 'https://api.openai.com/v1',
+            model: '',
+            models: ['gpt-5.5', 'gpt-4.1-mini'],
+            maxTokens: 32000,
+            temperature: 0.2,
+          }],
+        }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    const snapshot = JSON.parse(String(result.content));
+    expect(snapshot.status).toBe('missing_model');
+    expect(snapshot.label).toBe('T_MODEL_REQUIRED');
+    expect(snapshot.title).toBe('T_SELECT_OpenAI 主账号');
+    expect(snapshot.description).toBe('T_AVAILABLE_2');
+    expect(snapshot.action?.label).toBe('T_RELOAD_MODELS');
+    expect(snapshot.activeProvider?.name).toBe('OpenAI 主账号');
+  });
+
   it('returns the ai tool catalog so the model can choose probes and build arguments', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_ai_tool_catalog', {
@@ -268,7 +325,7 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.content).toContain('"name":"fullCommand"');
     expect(result.content).toContain('"alias":"github_create_issue"');
     expect(result.content).toContain('"requiredParameters":["owner","repo","title"]');
-    expect(result.content).toContain('调用带参数工具前');
+    expect(result.content).toContain('Before calling tools with parameters');
   });
 
   it('returns the current mcp setup snapshot so the model can inspect configured servers and client install state', async () => {
@@ -355,13 +412,60 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.success).toBe(true);
     expect(result.content).toContain('"supportsWholeCommandAutoSplit":true');
     expect(result.content).toContain('"fullCommandPasteExample":"$env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio"');
-    expect(result.content).toContain('"title":"启动命令"');
+    expect(result.content).toContain('"title":"Startup command"');
     expect(result.content).toContain('"example":"npx / node / uvx / python / docker"');
     expect(result.content).toContain('PowerShell $env:KEY=VALUE;');
-    expect(result.content).toContain('"title":"npx 包"');
+    expect(result.content).toContain('"title":"npx package"');
     expect(result.content).toContain('"exampleLaunchPreview":"npx -y @modelcontextprotocol/server-filesystem --stdio"');
-    expect(result.content).toContain('"title":"uvx 工具"');
+    expect(result.content).toContain('"title":"uvx tool"');
     expect(result.content).toContain('"exampleLaunchPreview":"uvx some-mcp-server"');
+  });
+
+  it('uses the provided translator for the builtin mcp authoring guide while keeping command examples raw', async () => {
+    const translate = (key: string) => ({
+      'ai_settings.mcp_server.guide.step.template.title': 'T_STEP_TEMPLATE_TITLE',
+      'ai_settings.mcp_server.guide.step.template.detail': 'T_STEP_TEMPLATE_DETAIL',
+      'ai_settings.mcp_server.guide.field.command.title': 'T_FIELD_COMMAND_TITLE',
+      'ai_settings.mcp_server.guide.field.command.summary': 'T_FIELD_COMMAND_SUMMARY',
+      'ai_settings.mcp_server.guide.field.command.detail': 'T_FIELD_COMMAND_DETAIL',
+      'ai_settings.mcp_server.template.npx.title': 'T_TEMPLATE_NPX_TITLE',
+      'ai_settings.mcp_server.template.npx.description': 'T_TEMPLATE_NPX_DESCRIPTION',
+      'ai_settings.mcp_server.template.npx.detail': 'T_TEMPLATE_NPX_DETAIL',
+      'ai_settings.mcp_server.guide.note.full_command': 'T_NOTE_FULL_COMMAND',
+    }[key] || key);
+
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_mcp_authoring_guide', {}),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      translate,
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    const snapshot = JSON.parse(String(result.content));
+    expect(snapshot.recommendedSteps[0]).toMatchObject({
+      step: '1',
+      title: 'T_STEP_TEMPLATE_TITLE',
+      detail: 'T_STEP_TEMPLATE_DETAIL',
+    });
+    expect(snapshot.fieldGuides.find((item: any) => item.key === 'command')).toMatchObject({
+      title: 'T_FIELD_COMMAND_TITLE',
+      summary: 'T_FIELD_COMMAND_SUMMARY',
+      detail: 'T_FIELD_COMMAND_DETAIL',
+    });
+    expect(snapshot.templates.find((item: any) => item.key === 'npx')).toMatchObject({
+      title: 'T_TEMPLATE_NPX_TITLE',
+      description: 'T_TEMPLATE_NPX_DESCRIPTION',
+      detail: 'T_TEMPLATE_NPX_DETAIL',
+      exampleLaunchPreview: 'npx -y @modelcontextprotocol/server-filesystem --stdio',
+    });
+    expect(snapshot.notes).toContain('T_NOTE_FULL_COMMAND');
+    expect(snapshot.fullCommandPasteExample).toBe('$env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio');
   });
 
   it('validates an mcp draft with the real command splitter and server validator', async () => {
@@ -426,6 +530,10 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
   });
 
   it('returns mcp tool input schemas so the model can build arguments from discovered tool metadata', async () => {
+    const translate = (key: string, params?: Record<string, unknown>) => ({
+      'ai_chat.inspection.mcp_tool_schema.usage.required_params': `T_REQUIRED_${params?.alias}_${params?.parameters}`,
+    }[key] || key);
+
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_mcp_tool_schema', {
         alias: 'github_create_issue',
@@ -450,6 +558,7 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
         },
       }],
       toolContextMap: new Map(),
+      translate,
       runtime: {
         getDatabases: vi.fn(),
         getTables: vi.fn(),
@@ -461,7 +570,7 @@ describe('aiLocalToolExecutor AI config inspection tools', () => {
     expect(result.content).toContain('"requiredParameters":["owner","repo","title"]');
     expect(result.content).toContain('"path":"state"');
     expect(result.content).toContain('"enumValues":["open","closed"]');
-    expect(result.content).toContain('调用 github_create_issue 前必须提供：owner, repo, title');
+    expect(result.content).toContain('T_REQUIRED_github_create_issue_owner, repo, title');
   });
 
   it('returns the current ai guidance snapshot so the model can inspect active prompts and enabled skills', async () => {

@@ -29,16 +29,16 @@ func IsHighRiskSQL(sql string) (bool, string) {
 
 	switch keyword {
 	case "drop":
-		return true, "⚠️ 高危操作：DROP 语句将永久删除数据库对象"
+		return true, "ai_service.backend.warning.sql_drop"
 	case "truncate":
-		return true, "⚠️ 高危操作：TRUNCATE 将清空表中所有数据"
+		return true, "ai_service.backend.warning.sql_truncate"
 	case "delete":
 		if !containsWhereClause(normalized) {
-			return true, "⚠️ 高危操作：DELETE 语句缺少 WHERE 条件，将删除所有数据"
+			return true, "ai_service.backend.warning.sql_delete_without_where"
 		}
 	case "update":
 		if !containsWhereClause(normalized) {
-			return true, "⚠️ 高危操作：UPDATE 语句缺少 WHERE 条件，将更新所有记录"
+			return true, "ai_service.backend.warning.sql_update_without_where"
 		}
 	}
 
