@@ -1080,7 +1080,7 @@ func (m *MySQLDB) GetCreateStatement(dbName, tableName string) (string, error) {
 			return fmt.Sprintf("%v", val), nil
 		}
 	}
-	return "", fmt.Errorf("未找到建表语句")
+	return "", localizedDatabaseRuntimeError("db.backend.error.create_table_statement_not_found", nil)
 }
 
 func (m *MySQLDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
@@ -1241,7 +1241,7 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		if err != nil {
 			return fmt.Errorf("删除失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "删除"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionDelete); err != nil {
 			return err
 		}
 	}
@@ -1275,7 +1275,7 @@ func (m *MySQLDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "更新"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionUpdate); err != nil {
 			return err
 		}
 	}
@@ -1620,7 +1620,7 @@ func formatMySQLDateTime(t time.Time) string {
 
 func (m *MySQLDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	if dbName == "" {
-		return nil, fmt.Errorf("获取全部列信息需要指定数据库名称")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.database_name_required", nil)
 	}
 	query := fmt.Sprintf("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, COLUMN_COMMENT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s'", strings.ReplaceAll(dbName, "'", "''"))
 

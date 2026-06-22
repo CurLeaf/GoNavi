@@ -508,33 +508,55 @@ func sanitizeClickHouseErrorMessage(err error) string {
 
 func clickHouseAttemptFailureMessage(protocol clickhouse.Protocol, err error) string {
 	if protocol == clickhouse.HTTP && isClickHouseHTTPClientProtocolVersionUnsupported(err) {
-		return "当前 ClickHouse HTTP 端口不支持 client_protocol_version（常见于 ClickHouse 22.8），将使用 HTTP 兼容模式重试；如仍失败请确认连接协议和端口"
+		return localizedDriverRuntimeText("db.backend.error.clickhouse_http_client_protocol_version_unsupported", nil)
 	}
 	if isClickHouseProtocolMismatch(err) {
 		if protocol == clickhouse.Native {
-			return "服务端响应不像 Native 握手，当前端口更像 HTTP/HTTPS 端口；请选择 HTTP 协议，或确认 ClickHouse Native 端口"
+			return localizedDriverRuntimeText("db.backend.error.clickhouse_native_protocol_mismatch", nil)
 		}
-		return "服务端响应不像 HTTP 响应，当前端口更像 Native 端口；请选择 Native 协议，或确认 ClickHouse HTTP 端口"
+		return localizedDriverRuntimeText("db.backend.error.clickhouse_http_protocol_mismatch", nil)
 	}
 	message := sanitizeClickHouseErrorMessage(err)
 	if message == "" {
-		return "未知错误"
+		return localizedDriverRuntimeText("db.backend.error.clickhouse_unknown_error", nil)
 	}
 	return message
 }
 
+func clickHouseTLSConfigFailedMessage(attempt int, protocol string, err error) string {
+	return localizedDriverRuntimeText("db.backend.error.clickhouse_attempt_tls_config_failed", map[string]any{
+		"attempt":  attempt,
+		"protocol": protocol,
+		"detail":   err,
+	})
+}
+
+func clickHouseAttemptValidationFailedMessage(attempt int, protocol string, detail string) string {
+	return localizedDriverRuntimeText("db.backend.error.clickhouse_attempt_validation_failed", map[string]any{
+		"attempt":  attempt,
+		"protocol": protocol,
+		"detail":   detail,
+	})
+}
+
 func clickHouseConnectFailureSummary(config connection.ConnectionConfig, failures []string) string {
 	protocolMode := normalizeClickHouseProtocol(config.ClickHouseProtocol)
-	detail := strings.Join(failures, "；")
+	detail := strings.Join(failures, "; ")
 	if strings.TrimSpace(detail) == "" {
-		detail = "未获取到驱动返回的错误详情"
+		detail = localizedDriverRuntimeText("db.backend.error.clickhouse_driver_detail_missing", nil)
 	}
 	if protocolMode != clickHouseProtocolAuto {
-		return fmt.Sprintf("ClickHouse 连接验证失败：已按用户选择使用 %s 协议连接 %s:%d。%s",
-			strings.ToUpper(protocolMode), config.Host, config.Port, detail)
+		return localizedDriverRuntimeText("db.backend.error.clickhouse_validation_failed_manual", map[string]any{
+			"protocol": strings.ToUpper(protocolMode),
+			"host":     config.Host,
+			"port":     config.Port,
+			"detail":   detail,
+		})
 	}
-	return fmt.Sprintf("ClickHouse 连接验证失败：自动协议探测未成功（Native 常见端口 9000/9440，HTTP 常见端口 %s；非标端口建议在连接协议中手动指定）。%s",
-		clickHouseHTTPPortHint, detail)
+	return localizedDriverRuntimeText("db.backend.error.clickhouse_validation_failed_auto", map[string]any{
+		"httpPorts": clickHouseHTTPPortHint,
+		"detail":    detail,
+	})
 }
 
 func withClickHouseProtocol(config connection.ConnectionConfig, protocol clickhouse.Protocol) connection.ConnectionConfig {
@@ -568,7 +590,7 @@ func clickHouseProtocolsForAttempt(config connection.ConnectionConfig) []clickho
 func (c *ClickHouseDB) Connect(config connection.ConnectionConfig) error {
 	if supported, reason := DriverRuntimeSupportStatus("clickhouse"); !supported {
 		if strings.TrimSpace(reason) == "" {
-			reason = "ClickHouse 纯 Go 驱动未启用，请先在驱动管理中安装启用"
+			reason = localizedDriverRuntimeText("driver_manager.backend.status.optional_disabled", map[string]any{"name": "ClickHouse"})
 		}
 		return fmt.Errorf("%s", reason)
 	}
@@ -636,7 +658,7 @@ func (c *ClickHouseDB) Connect(config connection.ConnectionConfig) error {
 					idx+1, len(attempts), clickHouseProtocolName(protocol), protocolConfig.Host, protocolConfig.Port, protocolConfig.UseSSL, stripHTTPClientProtocolVersion)
 				opts, err := c.buildClickHouseOptionsWithHTTPCompatibility(protocolConfig, stripHTTPClientProtocolVersion)
 				if err != nil {
-					failures = append(failures, fmt.Sprintf("第%d次 TLS 配置失败(protocol=%s): %v", idx+1, protocol.String(), err))
+					failures = append(failures, clickHouseTLSConfigFailedMessage(idx+1, protocol.String(), err))
 					logger.Warnf("ClickHouse TLS 配置失败：第%d组/%d 协议=%s 地址=%s:%d SSL=%t 原因=%v",
 						idx+1, len(attempts), clickHouseProtocolName(protocol), protocolConfig.Host, protocolConfig.Port, protocolConfig.UseSSL, err)
 					lastProtocolErr = err
@@ -646,7 +668,7 @@ func (c *ClickHouseDB) Connect(config connection.ConnectionConfig) error {
 				if err := c.Ping(); err != nil {
 					lastProtocolErr = err
 					failureMessage := clickHouseAttemptFailureMessage(protocol, err)
-					failures = append(failures, fmt.Sprintf("第%d次连接验证失败(protocol=%s): %s", idx+1, protocol.String(), failureMessage))
+					failures = append(failures, clickHouseAttemptValidationFailedMessage(idx+1, protocol.String(), failureMessage))
 					logger.Warnf("ClickHouse 连接尝试失败：第%d组/%d 协议=%s 地址=%s:%d SSL=%t HTTP兼容=%t 原因=%s",
 						idx+1, len(attempts), clickHouseProtocolName(protocol), protocolConfig.Host, protocolConfig.Port, protocolConfig.UseSSL, stripHTTPClientProtocolVersion, failureMessage)
 					if c.conn != nil {
@@ -911,7 +933,7 @@ func (c *ClickHouseDB) GetCreateStatement(dbName, tableName string) (string, err
 		return "", err
 	}
 	if len(data) == 0 {
-		return "", fmt.Errorf("未找到建表语句")
+		return "", localizedDatabaseRuntimeError("db.backend.error.create_table_statement_not_found", nil)
 	}
 	row := data[0]
 	if val, ok := getClickHouseValueFromRow(row, "statement", "create_statement", "sql", "query"); ok {
@@ -934,7 +956,7 @@ func (c *ClickHouseDB) GetCreateStatement(dbName, tableName string) (string, err
 	if longest != "" {
 		return longest, nil
 	}
-	return "", fmt.Errorf("未找到建表语句")
+	return "", localizedDatabaseRuntimeError("db.backend.error.create_table_statement_not_found", nil)
 }
 
 func (c *ClickHouseDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
@@ -1093,7 +1115,7 @@ func (c *ClickHouseDB) GetTriggers(dbName, tableName string) ([]connection.Trigg
 func (c *ClickHouseDB) resolveDatabaseAndTable(dbName, tableName string) (string, string, error) {
 	rawTable := strings.TrimSpace(tableName)
 	if rawTable == "" {
-		return "", "", fmt.Errorf("表名不能为空")
+		return "", "", localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	resolvedDB := strings.TrimSpace(dbName)
@@ -1114,7 +1136,7 @@ func (c *ClickHouseDB) resolveDatabaseAndTable(dbName, tableName string) (string
 		resolvedDB = defaultClickHouseDatabase
 	}
 	if resolvedTable == "" {
-		return "", "", fmt.Errorf("表名不能为空")
+		return "", "", localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 	return resolvedDB, resolvedTable, nil
 }
@@ -1209,7 +1231,10 @@ func (c *ClickHouseDB) ApplyChanges(tableName string, changes connection.ChangeS
 		}
 		query := fmt.Sprintf("ALTER TABLE %s DELETE WHERE %s", qualifiedTable, whereExpr)
 		if _, err := c.conn.Exec(query); err != nil {
-			return fmt.Errorf("delete error: %v; sql=%s", err, query)
+			return localizedDatabaseRuntimeError("db.backend.error.clickhouse_delete_failed_with_sql", map[string]any{
+				"detail": err.Error(),
+				"sql":    query,
+			})
 		}
 	}
 
@@ -1221,7 +1246,10 @@ func (c *ClickHouseDB) ApplyChanges(tableName string, changes connection.ChangeS
 		}
 		query := fmt.Sprintf("ALTER TABLE %s UPDATE %s WHERE %s", qualifiedTable, setExpr, whereExpr)
 		if _, err := c.conn.Exec(query); err != nil {
-			return fmt.Errorf("update error: %v; sql=%s", err, query)
+			return localizedDatabaseRuntimeError("db.backend.error.clickhouse_update_failed_with_sql", map[string]any{
+				"detail": err.Error(),
+				"sql":    query,
+			})
 		}
 	}
 

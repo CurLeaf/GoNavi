@@ -28,6 +28,10 @@ type OracleDB struct {
 var _ SessionExecerProvider = (*OracleDB)(nil)
 var _ TransactionExecerProvider = (*OracleDB)(nil)
 
+func oracleRuntimeError(key string, params map[string]any) error {
+	return fmt.Errorf("%s", localizedDriverRuntimeText(key, params))
+}
+
 func (o *OracleDB) getDSN(config connection.ConnectionConfig) string {
 	// oracle://user:pass@host:port/service_name
 	database := strings.TrimSpace(config.Database)
@@ -357,7 +361,7 @@ func (o *OracleDB) GetCreateStatement(dbName, tableName string) (string, error) 
 	if firstErr != nil {
 		return "", firstErr
 	}
-	return "", fmt.Errorf("未找到建表语句")
+	return "", oracleRuntimeError("db.backend.error.create_table_statement_not_found", nil)
 }
 
 func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
@@ -756,7 +760,7 @@ func parseOracleColumns(data []map[string]interface{}) []connection.ColumnDefini
 
 func (o *OracleDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	if strings.TrimSpace(tableName) == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, oracleRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	for _, candidate := range oracleMetadataNamePairs(dbName, tableName) {
@@ -954,7 +958,10 @@ func (o *OracleDB) loadColumnTypeMap(tableName string) (map[string]string, error
 
 	columns, err := o.GetColumns(schema, table)
 	if err != nil {
-		return nil, fmt.Errorf("加载列元数据失败（表=%s）：%w；请检查 ALL_TAB_COLUMNS 查询权限与表是否存在", tableName, err)
+		return nil, oracleRuntimeError("db.backend.error.oracle_column_metadata_load_failed", map[string]any{
+			"table":  tableName,
+			"detail": err.Error(),
+		})
 	}
 
 	for _, col := range columns {
@@ -1122,7 +1129,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		if err != nil {
 			return fmt.Errorf("删除失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "删除"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionDelete); err != nil {
 			return err
 		}
 	}
@@ -1155,7 +1162,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "更新"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionUpdate); err != nil {
 			return err
 		}
 	}

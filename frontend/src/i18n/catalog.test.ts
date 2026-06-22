@@ -56,6 +56,9 @@ const readDataGridV2DdlWorkspaceSource = (): string =>
 const readQueryEditorSource = (): string =>
   readFileSync(new URL("../components/QueryEditor.tsx", import.meta.url), "utf8");
 
+const readQueryEditorResultsPanelSource = (): string =>
+  readFileSync(new URL("../components/QueryEditorResultsPanel.tsx", import.meta.url), "utf8");
+
 const readSqlDialectSource = (): string =>
   readFileSync(new URL("../utils/sqlDialect.ts", import.meta.url), "utf8");
 
@@ -594,11 +597,13 @@ describe("i18n catalog", () => {
       "data_grid.message.change_set_build_failed_detail",
       "data_grid.message.preview_sql_failed_detail",
       "data_grid.message.commit_failed",
+      "data_grid.message.rollback_failed",
     ];
     const noPlaceholderKeys = [
       "data_grid.message.change_set_build_failed",
       "data_grid.message.preview_sql_failed",
       "data_grid.message.transaction_committed",
+      "data_grid.message.transaction_rolled_back",
       "data_grid.message.no_changes_to_commit",
       "data_grid.message.copied_to_clipboard",
       "data_grid.message.no_field_name",
@@ -639,6 +644,7 @@ describe("i18n catalog", () => {
     }
 
     expect(t("en-US", "data_grid.message.commit_failed", { detail: "<raw-detail>" })).toContain("<raw-detail>");
+    expect(t("en-US", "data_grid.message.rollback_failed", { detail: "<raw-rollback-detail>" })).toContain("<raw-rollback-detail>");
     expect(t("zh-CN", "data_grid.message.preview_sql_failed_detail", { detail: "<raw-preview-error>" })).toContain("<raw-preview-error>");
     expect(t("de-DE", "data_grid.copy_sql.error.missing_table_name", { mode: "UPDATE" })).toContain("UPDATE");
   });
@@ -1990,7 +1996,7 @@ describe("i18n catalog", () => {
     const aiContextSource = sliceBetween(
       source,
       "const buildQueryEditorAiContextPrompt = (connection: any, database: string): string => {",
-      "// SQL 常用内置函数（通用，适用于 MySQL/PostgreSQL/Oracle/SQL Server 等主流数据源）",
+      "// HMR 重载时释放旧注册避免补全和 hover 内容重复",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {
@@ -2126,8 +2132,8 @@ describe("i18n catalog", () => {
     );
     const diagnosePromptSource = sliceBetween(
       source,
-      "const prompt = translate('query_editor.ai_prompt.diagnose', {",
-      "{translate('query_editor.result.ai_diagnose')}",
+      "  const handleDiagnoseExecutionError = () => {",
+      "  const sqlEditorTransactionToolbar = (",
     );
     const toolbarAndDiagnoseSource = `${toolbarPromptSource}\n${diagnosePromptSource}`;
 
@@ -2169,12 +2175,7 @@ describe("i18n catalog", () => {
       sliceBetween(
         source,
         "      // Register runQuery shortcut inside Monaco so it overrides Monaco's default keybinding",
-        "      // HMR 重载时释放旧注册避免补全项重复",
-      ),
-      sliceBetween(
-        source,
-        "      objectHoverActionRef.current?.dispose?.();",
-        "  }, [languagePreference, showObjectInfoAtPosition]);",
+        "      // HMR 重载或测试重置时，以全局状态为准，避免本地闭包状态和 provider 列表不同步。",
       ),
       sliceBetween(
         source,
@@ -2265,11 +2266,11 @@ describe("i18n catalog", () => {
       "query_editor.empty_state.title",
       "query_editor.empty_state.description",
     ] as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorResultsPanelSource();
     const emptyStateSource = sliceBetween(
       source,
       "<div className={isV2Ui ? 'gn-v2-query-empty' : undefined}",
-      "      </div>\r\n\r\n      <Modal",
+      "                    </>",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {

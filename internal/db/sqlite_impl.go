@@ -34,7 +34,7 @@ func (s *SQLiteDB) Connect(config connection.ConnectionConfig) error {
 
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return fmt.Errorf("打开数据库连接失败：%w", err)
+		return wrapDatabaseConnectionOpenError(err)
 	}
 	s.conn = db
 	s.pingTimeout = getConnectTimeout(config)
@@ -43,7 +43,7 @@ func (s *SQLiteDB) Connect(config connection.ConnectionConfig) error {
 	if err := s.Ping(); err != nil {
 		_ = db.Close()
 		s.conn = nil
-		return fmt.Errorf("连接建立后验证失败：%w", err)
+		return wrapDatabaseConnectionVerifyError(err)
 	}
 	return nil
 }
@@ -55,13 +55,13 @@ func resolveSQLiteDSN(config connection.ConnectionConfig) (string, error) {
 	}
 	dsn = normalizeSQLitePath(dsn)
 	if dsn == "" {
-		return "", fmt.Errorf("SQLite 需要本地数据库文件路径（例如 /path/to/demo.sqlite）")
+		return "", localizedDatabaseRuntimeError("db.backend.error.sqlite_file_path_required", nil)
 	}
 	if strings.EqualFold(dsn, ":memory:") {
 		return dsn, nil
 	}
 	if looksLikeHostPort(dsn) {
-		return "", fmt.Errorf("SQLite 需要本地数据库文件路径，当前输入看起来是主机地址：%s", dsn)
+		return "", localizedDatabaseRuntimeError("db.backend.error.sqlite_host_port_not_file_path", map[string]any{"dsn": dsn})
 	}
 	return dsn, nil
 }
@@ -297,13 +297,13 @@ func (s *SQLiteDB) GetCreateStatement(dbName, tableName string) (string, error) 
 			return fmt.Sprintf("%v", val), nil
 		}
 	}
-	return "", fmt.Errorf("未找到建表语句")
+	return "", localizedDatabaseRuntimeError("db.backend.error.create_table_statement_not_found", nil)
 }
 
 func (s *SQLiteDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(v string) string { return strings.ReplaceAll(v, "'", "''") }
@@ -394,7 +394,7 @@ func (s *SQLiteDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 func (s *SQLiteDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(v string) string { return strings.ReplaceAll(v, "'", "''") }
@@ -485,7 +485,7 @@ func (s *SQLiteDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefin
 func (s *SQLiteDB) GetForeignKeys(dbName, tableName string) ([]connection.ForeignKeyDefinition, error) {
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(v string) string { return strings.ReplaceAll(v, "'", "''") }
@@ -559,7 +559,7 @@ func (s *SQLiteDB) GetForeignKeys(dbName, tableName string) ([]connection.Foreig
 func (s *SQLiteDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error) {
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(v string) string { return strings.ReplaceAll(v, "'", "''") }

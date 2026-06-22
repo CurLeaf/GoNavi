@@ -1,17 +1,33 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/shared/i18n"
 )
 
 const customMySQLDSNRecordingDriverName = "custom-mysql-dsn-recording"
 
 var customMySQLDSNRecordingLastDSN string
+
+const customApplyChangesI18nDriverName = "custom-applychanges-i18n"
+
+var (
+	registerCustomApplyChangesI18nDriverOnce sync.Once
+	customApplyChangesI18nStateMu            sync.Mutex
+	customApplyChangesI18nState              = struct {
+		failPrefix string
+		err        error
+	}{}
+)
 
 type customMySQLDSNRecordingDriver struct{}
 
@@ -34,8 +50,314 @@ func (c customMySQLDSNRecordingConn) Begin() (driver.Tx, error) {
 	return nil, driver.ErrSkip
 }
 
+type customApplyChangesI18nDriver struct{}
+
+type customApplyChangesI18nConn struct{}
+
+type customApplyChangesI18nTx struct{}
+
+func (d customApplyChangesI18nDriver) Open(name string) (driver.Conn, error) {
+	return customApplyChangesI18nConn{}, nil
+}
+
+func (c customApplyChangesI18nConn) Prepare(query string) (driver.Stmt, error) {
+	return nil, errors.New("prepare not implemented")
+}
+
+func (c customApplyChangesI18nConn) Close() error {
+	return nil
+}
+
+func (c customApplyChangesI18nConn) Begin() (driver.Tx, error) {
+	return customApplyChangesI18nTx{}, nil
+}
+
+func (c customApplyChangesI18nConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	return customApplyChangesI18nTx{}, nil
+}
+
+func (c customApplyChangesI18nConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	customApplyChangesI18nStateMu.Lock()
+	defer customApplyChangesI18nStateMu.Unlock()
+
+	normalizedQuery := strings.ToUpper(strings.TrimSpace(query))
+	if customApplyChangesI18nState.err != nil && strings.HasPrefix(normalizedQuery, customApplyChangesI18nState.failPrefix) {
+		return nil, customApplyChangesI18nState.err
+	}
+	return driver.RowsAffected(1), nil
+}
+
+func (tx customApplyChangesI18nTx) Commit() error {
+	return nil
+}
+
+func (tx customApplyChangesI18nTx) Rollback() error {
+	return nil
+}
+
 func init() {
 	sql.Register(customMySQLDSNRecordingDriverName, customMySQLDSNRecordingDriver{})
+}
+
+func openCustomApplyChangesI18nDB(t *testing.T, failPrefix string, err error) *sql.DB {
+	t.Helper()
+
+	registerCustomApplyChangesI18nDriverOnce.Do(func() {
+		sql.Register(customApplyChangesI18nDriverName, customApplyChangesI18nDriver{})
+	})
+
+	customApplyChangesI18nStateMu.Lock()
+	customApplyChangesI18nState.failPrefix = failPrefix
+	customApplyChangesI18nState.err = err
+	customApplyChangesI18nStateMu.Unlock()
+
+	db, openErr := sql.Open(customApplyChangesI18nDriverName, "")
+	if openErr != nil {
+		t.Fatalf("open custom ApplyChanges i18n test DB failed: %v", openErr)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+		customApplyChangesI18nStateMu.Lock()
+		customApplyChangesI18nState.failPrefix = ""
+		customApplyChangesI18nState.err = nil
+		customApplyChangesI18nStateMu.Unlock()
+	})
+	return db
+}
+
+func TestCustomDBApplyChangesErrorsUseCurrentLanguage(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	rawConnectionNotOpenText := string([]rune{0x8fde, 0x63a5, 0x672a, 0x6253, 0x5f00})
+	rawDeleteFailedText := string([]rune{0x5220, 0x9664, 0x5931, 0x8d25})
+	rawUpdateKeyConditionsRequiredText := string([]rune{0x66f4, 0x65b0, 0x64cd, 0x4f5c, 0x9700, 0x8981, 0x4e3b, 0x952e, 0x6761, 0x4ef6})
+	rawUpdateFailedText := string([]rune{0x66f4, 0x65b0, 0x5931, 0x8d25})
+
+	t.Run("connection not open", func(t *testing.T) {
+		err := (&CustomDB{}).ApplyChanges("orders", connection.ChangeSet{})
+		if err == nil {
+			t.Fatal("expected connection-not-open error")
+		}
+		if err.Error() != "Connection is not open" {
+			t.Fatalf("expected English connection-not-open error, got %q", err.Error())
+		}
+		if strings.Contains(err.Error(), rawConnectionNotOpenText) {
+			t.Fatalf("expected no raw connection-not-open text, got %q", err.Error())
+		}
+	})
+
+	t.Run("delete failure", func(t *testing.T) {
+		rawErr := errors.New("driver raw delete failure")
+		customDB := &CustomDB{conn: openCustomApplyChangesI18nDB(t, "DELETE", rawErr), driver: "mysql"}
+
+		err := customDB.ApplyChanges("orders", connection.ChangeSet{
+			Deletes: []map[string]interface{}{
+				{"id": int64(42)},
+			},
+		})
+		if err == nil {
+			t.Fatal("expected delete failure")
+		}
+		if err.Error() != "Delete failed: driver raw delete failure" {
+			t.Fatalf("expected English delete failure, got %q", err.Error())
+		}
+		if strings.Contains(err.Error(), rawDeleteFailedText) {
+			t.Fatalf("expected no raw delete wrapper, got %q", err.Error())
+		}
+	})
+
+	t.Run("update key condition required", func(t *testing.T) {
+		customDB := &CustomDB{conn: openCustomApplyChangesI18nDB(t, "", nil), driver: "mysql"}
+
+		err := customDB.ApplyChanges("orders", connection.ChangeSet{
+			Updates: []connection.UpdateRow{{
+				Values: map[string]interface{}{
+					"name": "Alice",
+				},
+			}},
+		})
+		if err == nil {
+			t.Fatal("expected update-key-condition error")
+		}
+		if err.Error() != "Update operation requires key conditions" {
+			t.Fatalf("expected English update-key-condition error, got %q", err.Error())
+		}
+		if strings.Contains(err.Error(), rawUpdateKeyConditionsRequiredText) {
+			t.Fatalf("expected no raw update-key-condition text, got %q", err.Error())
+		}
+	})
+
+	t.Run("update failure", func(t *testing.T) {
+		rawErr := errors.New("driver raw update failure")
+		customDB := &CustomDB{conn: openCustomApplyChangesI18nDB(t, "UPDATE", rawErr), driver: "mysql"}
+
+		err := customDB.ApplyChanges("orders", connection.ChangeSet{
+			Updates: []connection.UpdateRow{{
+				Keys: map[string]interface{}{
+					"id": int64(42),
+				},
+				Values: map[string]interface{}{
+					"name": "Alice",
+				},
+			}},
+		})
+		if err == nil {
+			t.Fatal("expected update failure")
+		}
+		if err.Error() != "Update failed: driver raw update failure" {
+			t.Fatalf("expected English update failure, got %q", err.Error())
+		}
+		if strings.Contains(err.Error(), rawUpdateFailedText) {
+			t.Fatalf("expected no raw update wrapper, got %q", err.Error())
+		}
+	})
+}
+
+func TestCustomDBApplyChangesErrorSourcesUseI18nKeys(t *testing.T) {
+	sourceBytes, err := os.ReadFile("custom_impl.go")
+	if err != nil {
+		t.Fatalf("read custom_impl.go: %v", err)
+	}
+	source := string(sourceBytes)
+	functionSource := databaseFunctionSource(t, source, "func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) error")
+
+	rawConnectionNotOpenText := string([]rune{0x8fde, 0x63a5, 0x672a, 0x6253, 0x5f00})
+	rawDeleteFailedText := string([]rune{0x5220, 0x9664, 0x5931, 0x8d25})
+	rawUpdateKeyConditionsRequiredText := string([]rune{0x66f4, 0x65b0, 0x64cd, 0x4f5c, 0x9700, 0x8981, 0x4e3b, 0x952e, 0x6761, 0x4ef6})
+	rawUpdateFailedText := string([]rune{0x66f4, 0x65b0, 0x5931, 0x8d25})
+
+	for _, rawMessage := range []string{
+		`fmt.Errorf("` + rawConnectionNotOpenText + `")`,
+		`fmt.Errorf("` + rawDeleteFailedText + `：%v", err)`,
+		`fmt.Errorf("` + rawUpdateKeyConditionsRequiredText + `")`,
+		`fmt.Errorf("` + rawUpdateFailedText + `：%v", err)`,
+	} {
+		if strings.Contains(functionSource, rawMessage) {
+			t.Fatalf("CustomDB ApplyChanges still contains raw user-visible text %q", rawMessage)
+		}
+	}
+
+	for _, key := range customDBApplyChangesI18nKeys() {
+		if !strings.Contains(functionSource, key) {
+			t.Fatalf("CustomDB ApplyChanges does not reference i18n key %q", key)
+		}
+	}
+}
+
+func TestCustomDBApplyChangesCatalogKeysExist(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		for _, key := range customDBApplyChangesI18nKeys() {
+			if strings.TrimSpace(catalog[key]) == "" {
+				t.Fatalf("%s catalog missing CustomDB ApplyChanges key %q", language, key)
+			}
+		}
+	}
+}
+
+func customDBApplyChangesI18nKeys() []string {
+	return []string{
+		"db.backend.error.connection_not_open",
+		"db.backend.error.row_delete_failed",
+		"db.backend.error.row_update_key_conditions_required",
+		"db.backend.error.row_update_failed",
+	}
+}
+
+func TestCustomDBBasicExecutionConnectionNotOpenUsesCurrentLanguage(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	rawConnectionNotOpenText := string([]rune{0x8fde, 0x63a5, 0x672a, 0x6253, 0x5f00})
+	customDB := &CustomDB{}
+
+	cases := []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "Ping",
+			run:  customDB.Ping,
+		},
+		{
+			name: "Query",
+			run: func() error {
+				_, _, err := customDB.Query("SELECT 1")
+				return err
+			},
+		},
+		{
+			name: "QueryContext",
+			run: func() error {
+				_, _, err := customDB.QueryContext(context.Background(), "SELECT 1")
+				return err
+			},
+		},
+		{
+			name: "Exec",
+			run: func() error {
+				_, err := customDB.Exec("UPDATE demo SET name = 'raw'")
+				return err
+			},
+		},
+		{
+			name: "ExecContext",
+			run: func() error {
+				_, err := customDB.ExecContext(context.Background(), "UPDATE demo SET name = 'raw'")
+				return err
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			if err == nil {
+				t.Fatal("expected connection-not-open error")
+			}
+			if err.Error() != "Connection is not open" {
+				t.Fatalf("expected English connection-not-open error, got %q", err.Error())
+			}
+			if strings.Contains(err.Error(), rawConnectionNotOpenText) {
+				t.Fatalf("expected no raw connection-not-open text, got %q", err.Error())
+			}
+		})
+	}
+}
+
+func TestCustomDBBasicExecutionConnectionNotOpenSourcesUseI18nKey(t *testing.T) {
+	sourceBytes, err := os.ReadFile("custom_impl.go")
+	if err != nil {
+		t.Fatalf("read custom_impl.go: %v", err)
+	}
+	source := string(sourceBytes)
+	rawConnectionNotOpenText := string([]rune{0x8fde, 0x63a5, 0x672a, 0x6253, 0x5f00})
+
+	for _, signature := range []string{
+		"func (c *CustomDB) Ping() error",
+		"func (c *CustomDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error)",
+		"func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, error)",
+		"func (c *CustomDB) ExecContext(ctx context.Context, query string) (int64, error)",
+		"func (c *CustomDB) Exec(query string) (int64, error)",
+	} {
+		functionSource := databaseFunctionSource(t, source, signature)
+		if strings.Contains(functionSource, `fmt.Errorf("`+rawConnectionNotOpenText+`")`) {
+			t.Fatalf("%s still contains raw connection-not-open text", signature)
+		}
+		if !strings.Contains(functionSource, "db.backend.error.connection_not_open") {
+			t.Fatalf("%s does not reference connection-not-open i18n key", signature)
+		}
+	}
 }
 
 func TestCustomDBConnectReportsUnsupportedODBCDriverName(t *testing.T) {

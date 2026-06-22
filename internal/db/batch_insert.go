@@ -38,16 +38,16 @@ func execParameterizedInsertBatches(config parameterizedInsertConfig) error {
 		return nil
 	}
 	if strings.TrimSpace(config.Table) == "" {
-		return fmt.Errorf("表名不能为空")
+		return localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 	if config.QuoteColumn == nil {
-		return fmt.Errorf("列名引用函数不能为空")
+		return localizedDatabaseRuntimeError("db.backend.error.batch_insert_quote_column_required", nil)
 	}
 	if config.Placeholder == nil {
-		return fmt.Errorf("占位符函数不能为空")
+		return localizedDatabaseRuntimeError("db.backend.error.batch_insert_placeholder_required", nil)
 	}
 	if config.Exec == nil {
-		return fmt.Errorf("执行函数不能为空")
+		return localizedDatabaseRuntimeError("db.backend.error.batch_insert_exec_required", nil)
 	}
 	if config.Value == nil {
 		config.Value = func(_ string, value interface{}) (interface{}, bool) { return value, false }
@@ -70,7 +70,7 @@ func execParameterizedInsertBatches(config parameterizedInsertConfig) error {
 			for range rows {
 				res, err := config.Exec(config.EmptyInsertSQL(config.Table))
 				if err != nil {
-					return fmt.Errorf("插入失败：%v", err)
+					return localizedDatabaseRuntimeError("db.backend.error.batch_insert_failed", map[string]any{"detail": err.Error()})
 				}
 				if config.RequireAffected {
 					if err := requireInsertAffected(res); err != nil {
@@ -163,7 +163,7 @@ func execParameterizedInsertBatch(config parameterizedInsertConfig, rows []prepa
 	)
 	res, err := config.Exec(query, args...)
 	if err != nil {
-		return fmt.Errorf("插入失败：%v", err)
+		return localizedDatabaseRuntimeError("db.backend.error.batch_insert_failed", map[string]any{"detail": err.Error()})
 	}
 	if config.RequireAffected {
 		if err := requireInsertAffected(res); err != nil {
@@ -178,7 +178,7 @@ func requireInsertAffected(result sql.Result) error {
 		return nil
 	}
 	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
-		return fmt.Errorf("插入未生效：未影响任何行")
+		return localizedDatabaseRuntimeError("db.backend.error.batch_insert_no_rows_affected", nil)
 	}
 	return nil
 }
@@ -219,16 +219,16 @@ func execLiteralInsertBatches(config literalInsertConfig) error {
 		return nil
 	}
 	if strings.TrimSpace(config.Table) == "" {
-		return fmt.Errorf("表名不能为空")
+		return localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 	if config.QuoteColumn == nil {
-		return fmt.Errorf("列名引用函数不能为空")
+		return localizedDatabaseRuntimeError("db.backend.error.batch_insert_quote_column_required", nil)
 	}
 	if config.Literal == nil {
-		return fmt.Errorf("字面量函数不能为空")
+		return localizedDatabaseRuntimeError("db.backend.error.batch_insert_literal_required", nil)
 	}
 	if config.Exec == nil {
-		return fmt.Errorf("执行函数不能为空")
+		return localizedDatabaseRuntimeError("db.backend.error.batch_insert_exec_required", nil)
 	}
 	if config.RowSeparator == "" {
 		config.RowSeparator = ", "
@@ -282,7 +282,10 @@ func execLiteralInsertBatch(config literalInsertConfig, rows []preparedInsertRow
 	)
 	res, err := config.Exec(query)
 	if err != nil {
-		return fmt.Errorf("插入失败：%v; sql=%s", err, query)
+		return localizedDatabaseRuntimeError("db.backend.error.batch_insert_failed_with_sql", map[string]any{
+			"detail": err.Error(),
+			"sql":    query,
+		})
 	}
 	if config.RequireAffected {
 		if err := requireInsertAffected(res); err != nil {

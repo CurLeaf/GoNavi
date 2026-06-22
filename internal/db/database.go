@@ -147,9 +147,27 @@ func NewSQLConnStatementExecerWithDialect(conn *sql.Conn, scanDialect string) St
 	return &sqlConnStatementExecer{conn: conn, scanDialect: scanDialect}
 }
 
+func localizedDatabaseRuntimeError(key string, params map[string]any) error {
+	return fmt.Errorf("%s", localizedDriverRuntimeText(key, params))
+}
+
+func wrapDatabaseConnectionOpenError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s%w", localizedDriverRuntimeText("db.backend.error.connection_open_failed_prefix", nil), err)
+}
+
+func wrapDatabaseConnectionVerifyError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s%w", localizedDriverRuntimeText("db.backend.error.connection_verify_failed_prefix", nil), err)
+}
+
 func (e *sqlConnStatementExecer) ExecContext(ctx context.Context, query string) (int64, error) {
 	if e == nil || e.conn == nil {
-		return 0, fmt.Errorf("连接未打开")
+		return 0, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 	res, err := e.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -164,7 +182,7 @@ func (e *sqlConnStatementExecer) Exec(query string) (int64, error) {
 
 func (e *sqlConnStatementExecer) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if e == nil || e.conn == nil {
-		return nil, nil, fmt.Errorf("连接未打开")
+		return nil, nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 	rows, err := e.conn.QueryContext(ctx, query)
 	if err != nil {
@@ -180,7 +198,7 @@ func (e *sqlConnStatementExecer) Query(query string) ([]map[string]interface{}, 
 
 func (e *sqlConnStatementExecer) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
 	if e == nil || e.conn == nil {
-		return nil, fmt.Errorf("连接未打开")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 	rows, err := e.conn.QueryContext(ctx, query)
 	if err != nil {
@@ -229,15 +247,15 @@ func NewSQLConnTransactionExecerWithDialect(conn *sql.Conn, commitSQL string, ro
 
 func (e *sqlConnTransactionExecer) activeConn() (*sql.Conn, error) {
 	if e == nil {
-		return nil, fmt.Errorf("连接未打开")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.conn == nil {
-		return nil, fmt.Errorf("连接未打开")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 	if e.done {
-		return nil, fmt.Errorf("事务已结束")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.transaction_already_finished", nil)
 	}
 	return e.conn, nil
 }
@@ -358,12 +376,12 @@ func NewSQLTxStatementExecer(tx *sql.Tx) TransactionExecer {
 
 func (e *sqlTxStatementExecer) activeTx() (*sql.Tx, error) {
 	if e == nil || e.tx == nil {
-		return nil, fmt.Errorf("事务未打开")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.transaction_not_open", nil)
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.done {
-		return nil, fmt.Errorf("事务已结束")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.transaction_already_finished", nil)
 	}
 	return e.tx, nil
 }
@@ -462,16 +480,43 @@ type ChangePreviewer interface {
 	PreviewChanges(tableName string, changes connection.ChangeSet) (deletes, updates, inserts []string)
 }
 
-func requireSingleRowAffected(result sql.Result, action string) error {
+type rowMutationAction string
+
+const (
+	rowMutationActionDelete rowMutationAction = "delete"
+	rowMutationActionUpdate rowMutationAction = "update"
+)
+
+func localizedRowMutationAction(action rowMutationAction) string {
+	switch action {
+	case rowMutationActionDelete:
+		return localizedDriverRuntimeText("db.backend.action.delete", nil)
+	case rowMutationActionUpdate:
+		return localizedDriverRuntimeText("db.backend.action.update", nil)
+	default:
+		return strings.TrimSpace(string(action))
+	}
+}
+
+func requireSingleRowAffected(result sql.Result, action rowMutationAction) error {
+	actionLabel := localizedRowMutationAction(action)
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("%s未生效：无法确认影响行数：%v", action, err)
+		return fmt.Errorf("%s", localizedDriverRuntimeText("db.backend.error.row_action_not_effective_rows_affected_unknown", map[string]any{
+			"action": actionLabel,
+			"detail": err.Error(),
+		}))
 	}
 	if affected == 0 {
-		return fmt.Errorf("%s未生效：未匹配到任何行", action)
+		return fmt.Errorf("%s", localizedDriverRuntimeText("db.backend.error.row_action_not_effective_no_rows_matched", map[string]any{
+			"action": actionLabel,
+		}))
 	}
 	if affected != 1 {
-		return fmt.Errorf("%s未生效：影响了 %d 行，期望只影响 1 行", action, affected)
+		return fmt.Errorf("%s", localizedDriverRuntimeText("db.backend.error.row_action_not_effective_multiple_rows", map[string]any{
+			"action": actionLabel,
+			"count":  affected,
+		}))
 	}
 	return nil
 }
@@ -575,7 +620,7 @@ func NewDatabase(dbType string) (Database, error) {
 	}
 	factory, ok := databaseFactories[normalized]
 	if !ok {
-		return nil, fmt.Errorf("不支持的数据库类型：%s", dbType)
+		return nil, localizedDatabaseRuntimeError("db.backend.error.unsupported_database_type", map[string]any{"dbType": dbType})
 	}
 	return factory(), nil
 }

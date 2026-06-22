@@ -38,7 +38,7 @@ func (c *CustomDB) Connect(config connection.ConnectionConfig) error {
 	c.driver = driver
 	c.pingTimeout = getConnectTimeout(config)
 	if err := c.Ping(); err != nil {
-		return fmt.Errorf("连接建立后验证失败：%w", err)
+		return wrapDatabaseConnectionVerifyError(err)
 	}
 	return nil
 }
@@ -49,11 +49,15 @@ func formatCustomDriverOpenError(driver string, err error) error {
 	}
 	if strings.Contains(strings.ToLower(err.Error()), "unknown driver") {
 		if isLikelySystemODBCDriverName(driver) {
-			return fmt.Errorf("打开数据库连接失败：自定义连接不支持直接填写系统 ODBC/JDBC 驱动名 %q；请填写 GoNavi 已注册的 Go database/sql 驱动名。当前版本未注册通用 ODBC 驱动，因此暂不支持通过 %q 连接 InterSystems IRIS：%w", driver, driver, err)
+			return fmt.Errorf("%s%w", localizedDriverRuntimeText("db.backend.error.custom_driver_system_odbc_unsupported_prefix", map[string]any{
+				"driver": driver,
+			}), err)
 		}
-		return fmt.Errorf("打开数据库连接失败：自定义连接驱动 %q 未在 GoNavi 中注册；请填写已注册的 Go database/sql 驱动名，不能填写系统 ODBC/JDBC 驱动名：%w", driver, err)
+		return fmt.Errorf("%s%w", localizedDriverRuntimeText("db.backend.error.custom_driver_unregistered_prefix", map[string]any{
+			"driver": driver,
+		}), err)
 	}
-	return fmt.Errorf("打开数据库连接失败：%w", err)
+	return wrapDatabaseConnectionOpenError(err)
 }
 
 func isLikelySystemODBCDriverName(driver string) bool {
@@ -73,7 +77,7 @@ func (c *CustomDB) Close() error {
 
 func (c *CustomDB) Ping() error {
 	if c.conn == nil {
-		return fmt.Errorf("连接未打开")
+		return localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 	timeout := c.pingTimeout
 	if timeout <= 0 {
@@ -86,7 +90,7 @@ func (c *CustomDB) Ping() error {
 
 func (c *CustomDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if c.conn == nil {
-		return nil, nil, fmt.Errorf("连接未打开")
+		return nil, nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 
 	rows, err := c.conn.QueryContext(ctx, query)
@@ -100,7 +104,7 @@ func (c *CustomDB) QueryContext(ctx context.Context, query string) ([]map[string
 
 func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if c.conn == nil {
-		return nil, nil, fmt.Errorf("连接未打开")
+		return nil, nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 
 	rows, err := c.conn.Query(query)
@@ -120,7 +124,7 @@ func (c *CustomDB) scanDialect() string {
 
 func (c *CustomDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if c.conn == nil {
-		return 0, fmt.Errorf("连接未打开")
+		return 0, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 	res, err := c.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -131,7 +135,7 @@ func (c *CustomDB) ExecContext(ctx context.Context, query string) (int64, error)
 
 func (c *CustomDB) Exec(query string) (int64, error) {
 	if c.conn == nil {
-		return 0, fmt.Errorf("连接未打开")
+		return 0, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 	res, err := c.conn.Exec(query)
 	if err != nil {
@@ -384,7 +388,7 @@ func (c *CustomDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDe
 
 func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if c.conn == nil {
-		return fmt.Errorf("连接未打开")
+		return localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 
 	tx, err := c.conn.Begin()
@@ -464,7 +468,7 @@ func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("删除失败：%v", err)
+			return localizedDatabaseRuntimeError("db.backend.error.row_delete_failed", map[string]any{"detail": err.Error()})
 		}
 	}
 
@@ -492,12 +496,12 @@ func (c *CustomDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		}
 
 		if len(wheres) == 0 {
-			return fmt.Errorf("更新操作需要主键条件")
+			return localizedDatabaseRuntimeError("db.backend.error.row_update_key_conditions_required", nil)
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("更新失败：%v", err)
+			return localizedDatabaseRuntimeError("db.backend.error.row_update_failed", map[string]any{"detail": err.Error()})
 		}
 	}
 

@@ -82,7 +82,7 @@ func (p *PostgresDB) getDSN(config connection.ConnectionConfig) string {
 func (p *PostgresDB) Connect(config connection.ConnectionConfig) error {
 	if supported, reason := DriverRuntimeSupportStatus("postgres"); !supported {
 		if strings.TrimSpace(reason) == "" {
-			reason = "PostgreSQL 纯 Go 驱动未启用，请先在驱动管理中安装启用"
+			reason = localizedDriverRuntimeText("driver_manager.backend.status.optional_disabled", map[string]any{"name": "PostgreSQL"})
 		}
 		return fmt.Errorf("%s", reason)
 	}
@@ -408,7 +408,7 @@ func (p *PostgresDB) GetCreateStatement(dbName, tableName string) (string, error
 func (p *PostgresDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	schema, table := normalizePGLikeMetadataTable(dbName, tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	data, _, err := p.Query(buildPGLikeColumnsMetadataQuery(schema, table))
@@ -422,7 +422,7 @@ func (p *PostgresDB) GetColumns(dbName, tableName string) ([]connection.ColumnDe
 func (p *PostgresDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	schema, table := normalizePGLikeMetadataTable(dbName, tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	data, _, err := p.Query(buildPGLikeIndexesMetadataQuery(schema, table))
@@ -440,7 +440,7 @@ func (p *PostgresDB) GetForeignKeys(dbName, tableName string) ([]connection.Fore
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -500,7 +500,7 @@ func (p *PostgresDB) GetTriggers(dbName, tableName string) ([]connection.Trigger
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -719,7 +719,7 @@ func (p *PostgresDB) ApplyChanges(tableName string, changes connection.ChangeSet
 		if err != nil {
 			return fmt.Errorf("删除失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "删除"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionDelete); err != nil {
 			return err
 		}
 	}
@@ -756,7 +756,7 @@ func (p *PostgresDB) ApplyChanges(tableName string, changes connection.ChangeSet
 		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "更新"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionUpdate); err != nil {
 			return err
 		}
 	}

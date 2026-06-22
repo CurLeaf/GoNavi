@@ -881,7 +881,10 @@ func (o *OceanBaseDB) GetCreateStatement(dbName, tableName string) (string, erro
 			return showDDL, nil
 		}
 		if err != nil {
-			return "", fmt.Errorf("%w；OceanBase Oracle SHOW CREATE TABLE 兜底失败：%v", err, showErr)
+			return "", localizedDatabaseRuntimeError("db.backend.error.oceanbase_oracle_show_create_table_fallback_failed", map[string]any{
+				"metadataDetail": err.Error(),
+				"showDetail":     showErr.Error(),
+			})
 		}
 		return "", showErr
 	}
@@ -906,7 +909,7 @@ func (o *OceanBaseDB) getOceanBaseOracleShowCreateStatement(dbName string, table
 	if firstErr != nil {
 		return "", firstErr
 	}
-	return "", fmt.Errorf("未找到建表语句")
+	return "", localizedDatabaseRuntimeError("db.backend.error.create_table_statement_not_found", nil)
 }
 
 func buildOceanBaseOracleShowCreateTableQuery(schema string, table string) string {
@@ -1100,7 +1103,7 @@ func (o *OceanBaseDB) applyOracleChangesMySQLWire(tableName string, changes conn
 		if err != nil {
 			return fmt.Errorf("删除失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "删除"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionDelete); err != nil {
 			return err
 		}
 	}
@@ -1131,7 +1134,7 @@ func (o *OceanBaseDB) applyOracleChangesMySQLWire(tableName string, changes conn
 		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "更新"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionUpdate); err != nil {
 			return err
 		}
 	}

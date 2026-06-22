@@ -47,13 +47,13 @@ func (m *MariaDB) Connect(config connection.ConnectionConfig) error {
 	}
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return fmt.Errorf("打开数据库连接失败：%w", err)
+		return wrapDatabaseConnectionOpenError(err)
 	}
 	m.conn = db
 	m.pingTimeout = getConnectTimeout(config)
 
 	if err := m.Ping(); err != nil {
-		return fmt.Errorf("连接建立后验证失败：%w", err)
+		return wrapDatabaseConnectionVerifyError(err)
 	}
 	return nil
 }
@@ -224,7 +224,7 @@ func (m *MariaDB) GetCreateStatement(dbName, tableName string) (string, error) {
 			return fmt.Sprintf("%v", val), nil
 		}
 	}
-	return "", fmt.Errorf("未找到建表语句")
+	return "", localizedDatabaseRuntimeError("db.backend.error.create_table_statement_not_found", nil)
 }
 
 func (m *MariaDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
@@ -438,7 +438,7 @@ func (m *MariaDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 
 func (m *MariaDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	if dbName == "" {
-		return nil, fmt.Errorf("获取全部列信息需要指定数据库名称")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.database_name_required", nil)
 	}
 	query := fmt.Sprintf("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, COLUMN_COMMENT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s'", strings.ReplaceAll(dbName, "'", "''"))
 
