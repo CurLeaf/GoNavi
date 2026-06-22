@@ -13,14 +13,13 @@ import {
   TableOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
-import type { SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../../types';
+import type { SavedConnection, SavedQuery, JVMCapability, JVMResourceSummary } from '../../types';
 import { useStore } from '../../store';
 import { t } from '../../i18n';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { buildRedisDbNodeLabel, getRedisDbAlias } from '../../utils/redisDbAlias';
 import { buildJVMMonitoringActionDescriptors } from '../../utils/jvmSidebarActions';
 import { type SidebarViewMetadataEntry } from '../../utils/sidebarMetadata';
-import { buildExternalSQLRootNode, type ExternalSQLTreeNode } from '../../utils/externalSqlTree';
 import {
   buildQualifiedName,
   buildSidebarObjectKeyName,
@@ -47,7 +46,7 @@ import {
   sortSidebarTableEntries,
   type SidebarTreeNode as TreeNode,
 } from '../sidebarV2Utils';
-import { DBGetDatabases, DBGetTables, DBQuery, GetDriverStatusList, JVMProbeCapabilities, ListSQLDirectory } from '../../../wailsjs/go/app/App';
+import { DBGetDatabases, DBGetTables, DBQuery, GetDriverStatusList, JVMProbeCapabilities } from '../../../wailsjs/go/app/App';
 
 type DriverStatusSnapshot = {
   type: string;
@@ -119,7 +118,6 @@ const resolveSavedConnectionDriverType = (conn: SavedConnection | undefined): st
 
 type UseSidebarTreeLoadersOptions = {
   savedQueries: SavedQuery[];
-  externalSQLDirectories: ExternalSQLDirectory[];
   tableSortPreference: Record<string, any>;
   tableAccessCount: Record<string, any>;
   pinnedSidebarTables: any[];
@@ -132,12 +130,11 @@ type UseSidebarTreeLoadersOptions = {
   buildJVMRuntimeConfig: (conn: SavedConnection & { dbName?: string }, providerMode: string) => any;
   buildJVMDiagnosticTreeNodes: (conn: SavedConnection) => TreeNode[];
   resolveSavedQueryDisplayName: (name: string | null | undefined) => string;
-  decorateExternalSQLTreeNode: (node: ExternalSQLTreeNode) => TreeNode;
+  onDatabaseTreeLoaded?: (databaseKey: string) => void;
 };
 
 export const useSidebarTreeLoaders = ({
   savedQueries,
-  externalSQLDirectories,
   tableSortPreference,
   tableAccessCount,
   pinnedSidebarTables,
@@ -150,7 +147,7 @@ export const useSidebarTreeLoaders = ({
   buildJVMRuntimeConfig,
   buildJVMDiagnosticTreeNodes,
   resolveSavedQueryDisplayName,
-  decorateExternalSQLTreeNode,
+  onDatabaseTreeLoaded,
 }: UseSidebarTreeLoadersOptions) => {
   const driverStatusCacheRef = useRef<{
       fetchedAt: number;
@@ -516,40 +513,6 @@ export const useSidebarTreeLoaders = ({
 	                loadFunctions(conn, conn.dbName),
 	                loadDatabaseEvents(conn, conn.dbName),
 	            ]);
-                const externalSQLDirectoryResults = await Promise.all(
-                    externalSQLDirectories.map(async (directory: ExternalSQLDirectory) => {
-                        const directoryRes = await ListSQLDirectory(directory.path);
-                        if (!directoryRes.success) {
-                            message.warning({
-                                key: `external-sql-${directory.id}`,
-                                content: t('sidebar.message.external_sql_directory_read_failed', {
-                                    name: directory.name,
-                                    error: directoryRes.message,
-                                }),
-                            });
-                            return { id: directory.id, entries: [] as ExternalSQLTreeEntry[] };
-                        }
-                        return {
-                            id: directory.id,
-                            entries: Array.isArray(directoryRes.data) ? directoryRes.data as ExternalSQLTreeEntry[] : [],
-                        };
-                    }),
-                );
-                const externalSQLTrees = externalSQLDirectoryResults.reduce<Record<string, ExternalSQLTreeEntry[]>>((accumulator, item) => {
-                    accumulator[item.id] = item.entries;
-                    return accumulator;
-                }, {});
-                const externalSQLRootNode = decorateExternalSQLTreeNode(buildExternalSQLRootNode({
-                    dbNodeKey: String(key),
-                    connectionId: String(conn.id),
-                    dbName: String(conn.dbName),
-                    directories: externalSQLDirectories,
-                    directoryTrees: externalSQLTrees,
-                    labels: {
-                        root: t('sidebar.external_sql.root'),
-                        directoryFallback: t('sidebar.external_sql.directory_fallback'),
-                    },
-                }));
             const viewRows: SidebarViewMetadataEntry[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
             const materializedViewRows: SidebarViewMetadataEntry[] = Array.isArray(materializedViewsResult.views) ? materializedViewsResult.views : [];
             const triggerRows: any[] = Array.isArray(triggersResult.triggers) ? triggersResult.triggers : [];
@@ -855,6 +818,7 @@ export const useSidebarTreeLoaders = ({
 
 	                replaceTreeNodeChildren(key, [queriesNode, ...groupedNodes]);
 	            }
+                onDatabaseTreeLoaded?.(String(key));
 	          } else {
 	            setConnectionStates(prev => ({ ...prev, [key as string]: 'error' }));
 	            message.error({ content: res.message, key: `db-${key}-tables` });

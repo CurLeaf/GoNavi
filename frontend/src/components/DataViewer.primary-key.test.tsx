@@ -164,6 +164,14 @@ describe('DataViewer safe editing locator', () => {
     expect(source).toContain('data_viewer.sql_log.phase.sort_buffer_retry');
   });
 
+  it('caps viewer filter snapshots so long-running sessions do not retain unbounded table state', () => {
+    const source = readFileSync(new URL('./DataViewer.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('const MAX_VIEWER_FILTER_SNAPSHOTS = 64;');
+    expect(source).toContain('const trimViewerFilterSnapshots = () => {');
+    expect(source).toContain('setViewerFilterSnapshot(normalizedTabId, {');
+  });
+
   it('enables table preview editing after primary keys are loaded', async () => {
     backendApp.DBGetColumns.mockResolvedValue({
       success: true,

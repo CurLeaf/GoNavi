@@ -164,6 +164,7 @@ import {
   resolveSidebarDropInsertBefore,
   resolveSidebarDropNodeFromDomEvent,
   resolveSidebarDropTargetMetricsFromDomEvent,
+  resolveSidebarDatabaseTreePruneKeys,
   resolveSidebarNodeConnectionId,
   resolveSidebarTagDropInsertBefore,
   resolveV2ActiveConnectionId,
@@ -190,6 +191,7 @@ export {
   resolveSidebarDropInsertBefore,
   resolveSidebarDropNodeFromDomEvent,
   resolveSidebarDropTargetMetricsFromDomEvent,
+  resolveSidebarDatabaseTreePruneKeys,
   resolveSidebarNodeConnectionId,
   resolveSidebarTagDropInsertBefore,
   resolveV2ActiveConnectionId,
@@ -205,6 +207,7 @@ export type { V2CommandSearchItem, V2RailConnectionGroup } from './sidebarV2Util
 const { Search } = Input;
 const SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS = 50;
 const SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS = 160;
+const SIDEBAR_CACHED_DATABASE_TREE_LIMIT = 12;
 
 // resolveV2ObjectGroupTitle 已迁移到 ./sidebar/sidebarHelpers
 
@@ -506,6 +509,8 @@ const Sidebar: React.FC<{
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const selectedNodesRef = useRef<any[]>([]);
   const loadingNodesRef = useRef<Set<string>>(new Set());
+  const databaseTreeTouchedAtRef = useRef<Record<string, number>>({});
+  const pruneLoadedDatabaseTreesRef = useRef<() => void>(() => {});
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const treeDragSelectSuppressUntilRef = useRef(0);
   const treeDragSelectionSnapshotRef = useRef<{
@@ -544,6 +549,7 @@ const Sidebar: React.FC<{
   }, [setActiveContext]);
 
   const openV2CommandSearch = useCallback(() => {
+      pruneLoadedDatabaseTreesRef.current();
       setIsV2CommandSearchOpen(true);
       setV2CommandActiveIndex(0);
   }, []);
@@ -983,6 +989,55 @@ const Sidebar: React.FC<{
       setTreeData(nextTreeData);
       return nextTreeData;
   };
+
+  const clearTreeNodeChildrenByKeys = useCallback((keysToClear: string[]) => {
+      const keysToClearSet = new Set(keysToClear.map((key) => String(key || '').trim()).filter(Boolean));
+      if (keysToClearSet.size === 0) {
+          return;
+      }
+
+      const clearChildren = (nodes: TreeNode[]): TreeNode[] => (
+          nodes.map((node) => {
+              const nodeKey = String(node.key || '').trim();
+              if (keysToClearSet.has(nodeKey)) {
+                  return { ...node, children: undefined };
+              }
+              if (node.children?.length) {
+                  return { ...node, children: clearChildren(node.children) };
+              }
+              return node;
+          })
+      );
+
+      setTreeData((prev) => {
+          const nextTreeData = clearChildren(prev);
+          treeDataRef.current = nextTreeData;
+          return nextTreeData;
+      });
+      setLoadedKeys((prev) => prev.filter((key) => !keysToClearSet.has(String(key))));
+      keysToClearSet.forEach((key) => {
+          delete databaseTreeTouchedAtRef.current[key];
+      });
+  }, []);
+
+  const pruneLoadedDatabaseTrees = useCallback(() => {
+      const activeDatabaseKey = activeContext?.connectionId && activeContext?.dbName
+          ? `${activeContext.connectionId}-${activeContext.dbName}`
+          : '';
+      const keysToClear = resolveSidebarDatabaseTreePruneKeys({
+          treeData: treeDataRef.current,
+          expandedKeys,
+          selectedKeys,
+          activeDatabaseKey,
+          touchedAtByDatabaseKey: databaseTreeTouchedAtRef.current,
+          maxLoadedDatabases: SIDEBAR_CACHED_DATABASE_TREE_LIMIT,
+      });
+      if (keysToClear.length === 0) {
+          return;
+      }
+      clearTreeNodeChildrenByKeys(keysToClear);
+  }, [activeContext?.connectionId, activeContext?.dbName, clearTreeNodeChildrenByKeys, expandedKeys, selectedKeys]);
+  pruneLoadedDatabaseTreesRef.current = pruneLoadedDatabaseTrees;
 
   const mergeExpandedTreeKeys = (requiredKeys: React.Key[]) => {
       setExpandedKeys(prev => {
@@ -1727,7 +1782,6 @@ const Sidebar: React.FC<{
       loadTables,
   } = useSidebarTreeLoaders({
       savedQueries,
-      externalSQLDirectories,
       tableSortPreference,
       tableAccessCount,
       pinnedSidebarTables,
@@ -1740,7 +1794,10 @@ const Sidebar: React.FC<{
       buildJVMRuntimeConfig,
       buildJVMDiagnosticTreeNodes,
       resolveSavedQueryDisplayName,
-      decorateExternalSQLTreeNode,
+      onDatabaseTreeLoaded: (databaseKey: string) => {
+          databaseTreeTouchedAtRef.current[databaseKey] = Date.now();
+          pruneLoadedDatabaseTrees();
+      },
   });
 
   const {
@@ -1950,6 +2007,7 @@ const Sidebar: React.FC<{
       treeViewportWidth,
       treeHeight,
       isV2Ui,
+      isV2CommandSearchOpen,
       connections,
       connectionIds,
       selectedKeys,

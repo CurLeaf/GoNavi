@@ -30,6 +30,7 @@ import {
 } from './sidebarHelpers';
 import type { SearchScope } from '../sidebarCoreUtils';
 import {
+  buildV2CommandSearchTreeIndex,
   V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE,
   estimateV2TreeHorizontalScrollWidth,
   filterV2CommandSearchTreeItems,
@@ -74,6 +75,7 @@ type SidebarSearchModelArgs = {
   treeViewportWidth: number;
   treeHeight: number;
   isV2Ui: boolean;
+  isV2CommandSearchOpen: boolean;
   connections: SavedConnection[];
   connectionIds: string[];
   selectedKeys: React.Key[];
@@ -111,6 +113,7 @@ export const useSidebarSearchModel = ({
   treeViewportWidth,
   treeHeight,
   isV2Ui,
+  isV2CommandSearchOpen,
   connections,
   connectionIds,
   selectedKeys,
@@ -179,6 +182,10 @@ export const useSidebarSearchModel = ({
   };
 
   const currentLanguage = getCurrentLanguage();
+  const connectionById = useMemo(
+    () => new Map(connections.map((connection) => [connection.id, connection])),
+    [connections],
+  );
 
   const searchScopeSummary = useMemo(() => {
     if (searchScopes.includes('smart')) {
@@ -360,6 +367,9 @@ export const useSidebarSearchModel = ({
   }, [deferredSearchValue, searchScopes, treeData]);
 
   const commandSearchTreeItems = useMemo(() => {
+    if (!isV2CommandSearchOpen) {
+      return [];
+    }
     const result: V2CommandSearchItem[] = [];
     const visit = (nodes: TreeNode[]) => {
       nodes.forEach((node) => {
@@ -375,7 +385,7 @@ export const useSidebarSearchModel = ({
             node,
           });
         } else if (node.type === 'database') {
-          const conn = connections.find((item) => item.id === dataRef.id);
+          const conn = connectionById.get(String(dataRef.id || ''));
           result.push({
             key: `node-${node.key}`,
             kind: 'node',
@@ -392,7 +402,7 @@ export const useSidebarSearchModel = ({
           || node.type === 'db-event'
           || node.type === 'routine'
         ) {
-          const conn = connections.find((item) => item.id === dataRef.id);
+          const conn = connectionById.get(String(dataRef.id || ''));
           const objectName = String(dataRef.tableName || dataRef.viewName || dataRef.triggerName || dataRef.eventName || dataRef.routineName || node.title || '').trim();
           const displayName = String(node.title || extractObjectName(objectName) || objectName).trim();
           result.push({
@@ -412,7 +422,11 @@ export const useSidebarSearchModel = ({
 
     visit(treeData);
     return result;
-  }, [connections, treeData]);
+  }, [connectionById, extractObjectName, isV2CommandSearchOpen, treeData]);
+  const commandSearchTreeIndex = useMemo(
+    () => buildV2CommandSearchTreeIndex(commandSearchTreeItems),
+    [commandSearchTreeItems],
+  );
 
   const commandSearchRecentItems = useMemo<V2CommandSearchItem[]>(() => {
     return sqlLogs.slice(0, 5).map((log) => ({
@@ -473,8 +487,8 @@ export const useSidebarSearchModel = ({
   const v2CommandSearchObjectMode = v2CommandSearchQuery.mode === 'object';
   const v2CommandSearchAiMode = v2CommandSearchQuery.mode === 'ai';
   const filteredCommandSearchTreeItems = useMemo(() => {
-    return filterV2CommandSearchTreeItems(commandSearchTreeItems, v2CommandSearchQuery);
-  }, [commandSearchTreeItems, v2CommandSearchQuery]);
+    return filterV2CommandSearchTreeItems(commandSearchTreeIndex, v2CommandSearchQuery);
+  }, [commandSearchTreeIndex, v2CommandSearchQuery]);
 
   const filteredCommandSearchActionItems = useMemo(() => {
     if (v2CommandSearchObjectMode || v2CommandSearchAiMode) return [];
