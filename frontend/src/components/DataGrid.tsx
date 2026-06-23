@@ -159,7 +159,7 @@ import { useDataGridColumnResize } from './useDataGridColumnResize';
 import { useDataGridPreviewPanel } from './useDataGridPreviewPanel';
 import { buildTableExportTab } from '../utils/tableExportTab';
 import { buildDataGridCssText } from './dataGridStyles';
-import { formatMongoEditableValue, parseMongoEditedValue } from '../utils/mongodb';
+import { formatMongoEditableValue, normalizeMongoDocumentForEditing, parseMongoEditedValue } from '../utils/mongodb';
 
 // --- Error Boundary ---
 import {
@@ -549,12 +549,12 @@ const DataGrid: React.FC<DataGridProps> = ({
   const filteredExportSql = useMemo(() => String(exportSqlWithFilter || '').trim(), [exportSqlWithFilter]);
   const hasFilteredExportSql = exportScope === 'table' && filteredExportSql.length > 0;
 
-  const mongoAwareEditableText = useCallback((value: any): string => (
-      isMongoDBConnection ? formatMongoEditableValue(value) : toEditableText(value)
+  const mongoAwareEditableText = useCallback((value: any, columnName?: string): string => (
+      isMongoDBConnection ? formatMongoEditableValue(value, columnName) : toEditableText(value)
   ), [isMongoDBConnection]);
 
-  const mongoAwareFormText = useCallback((value: any): string => (
-      isMongoDBConnection ? formatMongoEditableValue(value) : toFormText(value)
+  const mongoAwareFormText = useCallback((value: any, columnName?: string): string => (
+      isMongoDBConnection ? formatMongoEditableValue(value, columnName) : toFormText(value)
   ), [isMongoDBConnection]);
 
   const normalizeMongoEditedCellValue = useCallback((columnName: string, value: any, currentValue?: any) => (
@@ -1493,9 +1493,15 @@ const DataGrid: React.FC<DataGridProps> = ({
     updateCellSelection,
   });
 
+  const baseData = useMemo(() => (
+      isMongoDBConnection
+          ? data.map((row) => normalizeMongoDocumentForEditing(row))
+          : data
+  ), [data, isMongoDBConnection]);
+
   const displayData = useMemo(() => {
-      return [...data, ...addedRows];
-  }, [data, addedRows]);
+      return [...baseData, ...addedRows];
+  }, [baseData, addedRows]);
 
   useEffect(() => { displayDataRef.current = displayData; }, [displayData]);
 
@@ -1609,7 +1615,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
       if (deletedRowKeys.has(keyStr)) return;
       // 查找原始行数据，对比是否真正有值变更
-      const originalRow = data.find(r => r?.[GONAVI_ROW_KEY] === rowKey);
+      const originalRow = baseData.find(r => r?.[GONAVI_ROW_KEY] === rowKey);
       if (originalRow) {
           const currentRow = modifiedRows[keyStr] ? { ...originalRow, ...modifiedRows[keyStr] } : originalRow;
           const normalizedRow = normalizeMongoEditedRow(row, currentRow);
@@ -1650,7 +1656,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           });
           setModifiedRows(prev => ({ ...prev, [keyStr]: normalizedRow }));
       }
-  }, [addedRows, data, rowKeyStr, deletedRowKeys, effectiveEditLocator, modifiedRows, normalizeMongoEditedRow]);
+  }, [addedRows, baseData, rowKeyStr, deletedRowKeys, effectiveEditLocator, modifiedRows, normalizeMongoEditedRow]);
 
   const handleDataPanelSave = useCallback(() => {
       if (!focusedCellInfo) return;
@@ -1709,7 +1715,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       return;
     }
 
-    const originalRow = data.find((row) => rowKeyStr(row?.[GONAVI_ROW_KEY]) === keyStr);
+    const originalRow = baseData.find((row) => rowKeyStr(row?.[GONAVI_ROW_KEY]) === keyStr);
     if (!originalRow) {
       void message.error(translateDataGrid('data_grid.message.undo_cell_original_missing'));
       setCellContextMenu(prev => ({ ...prev, visible: false }));
@@ -1719,7 +1725,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     handleCellSave({ ...record, [dataIndex]: originalRow[dataIndex] });
     setCellContextMenu(prev => ({ ...prev, visible: false }));
     void message.success(translateDataGrid('data_grid.message.undo_cell_success'));
-  }, [addedRowKeySet, cellContextMenu.dataIndex, cellContextMenu.record, data, handleCellSave, modifiedColumns, rowKeyStr, translateDataGrid]);
+  }, [addedRowKeySet, baseData, cellContextMenu.dataIndex, cellContextMenu.record, handleCellSave, modifiedColumns, rowKeyStr, translateDataGrid]);
 
   const handleCellEditorSave = useCallback(() => {
       if (!cellEditorMeta) return;
@@ -1769,7 +1775,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           setCellFieldValue(form, fieldName, parseToDayjs(raw, pickerType));
       } else {
           const initialValue = isMongoDBConnection
-              ? mongoAwareEditableText(raw)
+              ? mongoAwareEditableText(raw, dataIndex)
               : (typeof raw === 'string' ? normalizeDateTimeString(raw) : raw);
           setCellFieldValue(form, fieldName, initialValue);
       }
@@ -2042,7 +2048,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       }
 
       const baseRow =
-          data.find(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr) ||
+          baseData.find(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr) ||
           addedRows.find(r => rowKeyStr(r?.[GONAVI_ROW_KEY]) === keyStr) ||
           displayRow;
 
@@ -2055,7 +2061,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const baseVal = (baseRow as any)?.[col];
           const displayVal = (displayRow as any)?.[col];
           baseRawMap[col] = baseVal;
-          displayMap[col] = mongoAwareFormText(displayVal);
+          displayMap[col] = mongoAwareFormText(displayVal, col);
           // 日期时间类型: 将字符串值转为 dayjs 对象供 DatePicker 使用
           const colMeta = columnMetaMap[col] || columnMetaMapByLowerName[col.toLowerCase()];
           const rowPickerType = getTemporalPickerType(colMeta?.type, dbType, currentConnConfig);
@@ -2063,7 +2069,7 @@ const DataGrid: React.FC<DataGridProps> = ({
               const dVal = parseToDayjs(displayVal, rowPickerType);
               formMap[col] = dVal;
           } else {
-              formMap[col] = displayVal === null || displayVal === undefined ? undefined : mongoAwareFormText(displayVal);
+              formMap[col] = displayVal === null || displayVal === undefined ? undefined : mongoAwareFormText(displayVal, col);
           }
           if (baseVal === null || baseVal === undefined) nullCols.add(col);
       });
@@ -2075,7 +2081,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           nullCols,
           formValues: formMap,
       });
-  }, [addedRows, canModifyData, columnMetaMap, columnMetaMapByLowerName, currentConnConfig, data, dbType, mergedDisplayData, mongoAwareFormText, openRowEditor, rowKeyStr, translateDataGrid, visibleColumnNames]);
+  }, [addedRows, baseData, canModifyData, columnMetaMap, columnMetaMapByLowerName, currentConnConfig, dbType, mergedDisplayData, mongoAwareFormText, openRowEditor, rowKeyStr, translateDataGrid, visibleColumnNames]);
 
   const openCurrentViewRowEditor = useCallback(() => {
       if (!canModifyData) return;
@@ -2139,7 +2145,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       });
 
       const originalMap = new Map<string, any>();
-      data.forEach((r) => {
+      baseData.forEach((r) => {
           const key = r?.[GONAVI_ROW_KEY];
           if (key === undefined) return;
           originalMap.set(rowKeyStr(key), r);
@@ -2212,7 +2218,7 @@ const DataGrid: React.FC<DataGridProps> = ({
 
       closeJsonEditor();
       void message.success(translateDataGrid('data_grid.message.json_applied'));
-  }, [canModifyData, jsonEditorValue, mergedDisplayData, addedRows, rowKeyStr, data, visibleColumnNames, effectiveEditLocator, closeJsonEditor, translateDataGrid]);
+  }, [canModifyData, jsonEditorValue, mergedDisplayData, addedRows, rowKeyStr, baseData, visibleColumnNames, effectiveEditLocator, closeJsonEditor, translateDataGrid]);
 
   const openRowEditorFieldEditor = useCallback((dataIndex: string) => {
       if (!dataIndex) return;
@@ -2700,7 +2706,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           addedRows,
           modifiedRows,
           deletedRowKeys,
-          data,
+          data: baseData,
           editLocator: effectiveEditLocator,
           visibleColumnNames,
           rowKeyToString: rowKeyStr,
@@ -2747,7 +2753,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           const rawErrorMessage = e?.message || String(e);
           void message.error(translateDataGrid('data_grid.message.preview_sql_failed_detail', { detail: rawErrorMessage }));
       }
-  }, [addedRows, modifiedRows, deletedRowKeys, data, effectiveEditLocator,
+  }, [addedRows, modifiedRows, deletedRowKeys, baseData, effectiveEditLocator,
       visibleColumnNames, rowKeyStr, normalizeCommitCellValue, shouldCommitColumn,
       connectionId, tableName, connections, rowLocatorMessages, translateDataGrid]);
 
@@ -2760,7 +2766,7 @@ const DataGrid: React.FC<DataGridProps> = ({
           addedRows,
           modifiedRows,
           deletedRowKeys,
-          data,
+          data: baseData,
           editLocator: effectiveEditLocator,
           visibleColumnNames,
           rowKeyToString: rowKeyStr,
@@ -2844,7 +2850,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       addedRows,
       modifiedRows,
       deletedRowKeys,
-      data,
+      baseData,
       effectiveEditLocator,
       visibleColumnNames,
       rowKeyStr,

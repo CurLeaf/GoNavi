@@ -5,6 +5,7 @@ import {
   buildMongoFindCommand,
   convertMongoShellToJsonCommand,
   formatMongoEditableValue,
+  normalizeMongoDocumentForEditing,
   parseMongoEditedValue,
 } from './mongodb';
 
@@ -157,6 +158,12 @@ describe('Mongo edit value helpers', () => {
     })).toBe('UUID("12345678-1234-4678-9234-567812345678")');
   });
 
+  it('infers editable Mongo typed literals from common string field names', () => {
+    expect(formatMongoEditableValue('5a7fb5b93560e06a6e1e4950', 'merchantId')).toBe('ObjectId("5a7fb5b93560e06a6e1e4950")');
+    expect(formatMongoEditableValue('5ba279393560e029bb0b6359', 'pMid')).toBe('5ba279393560e029bb0b6359');
+    expect(formatMongoEditableValue('2018-06-24 07:42:51.8', 'updateTime')).toBe('ISODate("2018-06-24T07:42:51.800Z")');
+  });
+
   it('parses typed Mongo edit text back to extended JSON wrappers', () => {
     expect(parseMongoEditedValue('_id', '507f1f77bcf86cd799439011')).toEqual({ $oid: '507f1f77bcf86cd799439011' });
     expect(parseMongoEditedValue('createdAt', '2024-06-23T00:00:00.000Z', { $date: { $numberLong: '1719100800000' } })).toEqual({
@@ -171,6 +178,30 @@ describe('Mongo edit value helpers', () => {
         base64: 'EjRWeBI0RniSNFZ4EjRWeA==',
         subType: '04',
       },
+    });
+  });
+
+  it('infers typed Mongo values from string edits when the field name is sufficient', () => {
+    expect(parseMongoEditedValue('merchantId', '5a7fb5b93560e06a6e1e4950')).toEqual({ $oid: '5a7fb5b93560e06a6e1e4950' });
+    expect(parseMongoEditedValue('updateTime', '2018-06-24 07:42:51.8')).toEqual({
+      $date: '2018-06-24T07:42:51.800Z',
+    });
+    expect(parseMongoEditedValue('pMid', '5ba279393560e029bb0b6359')).toBe('5ba279393560e029bb0b6359');
+  });
+
+  it('normalizes Mongo documents for JSON editing without promoting plain string ids blindly', () => {
+    expect(normalizeMongoDocumentForEditing({
+      _id: '5a8262f93560e05dd3465288',
+      merchantId: '5a7fb5b93560e06a6e1e4950',
+      pMid: '5ba279393560e029bb0b6359',
+      updateTime: '2018-06-24 07:42:51.8',
+      userId: '5a65611fadfce63b96bb2001',
+    })).toEqual({
+      _id: { $oid: '5a8262f93560e05dd3465288' },
+      merchantId: { $oid: '5a7fb5b93560e06a6e1e4950' },
+      pMid: '5ba279393560e029bb0b6359',
+      updateTime: { $date: '2018-06-24T07:42:51.800Z' },
+      userId: { $oid: '5a65611fadfce63b96bb2001' },
     });
   });
 });
