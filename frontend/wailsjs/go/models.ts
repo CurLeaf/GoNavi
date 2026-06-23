@@ -1401,6 +1401,7 @@ export namespace sync {
 	    targetConfig: connection.ConnectionConfig;
 	    sourceDatabase?: string;
 	    targetDatabase?: string;
+	    targetSchema?: string;
 	    tables: string[];
 	    sourceQuery?: string;
 	    content?: string;
@@ -1422,6 +1423,7 @@ export namespace sync {
 	        this.targetConfig = this.convertValues(source["targetConfig"], connection.ConnectionConfig);
 	        this.sourceDatabase = source["sourceDatabase"];
 	        this.targetDatabase = source["targetDatabase"];
+	        this.targetSchema = source["targetSchema"];
 	        this.tables = source["tables"];
 	        this.sourceQuery = source["sourceQuery"];
 	        this.content = source["content"];
