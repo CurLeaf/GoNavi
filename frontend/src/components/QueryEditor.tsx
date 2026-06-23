@@ -8,6 +8,7 @@ import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
 import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBQueryMultiTransactional, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID, WriteSQLFile, ExportSQLFile } from '../../wailsjs/go/app/App';
 import { GONAVI_ROW_KEY } from './DataGrid';
+import { findConnectionMutatingStatements } from '../utils/connectionReadOnly';
 import { getDataSourceCapabilities, shouldShowOceanBaseRowNumberColumn } from '../utils/dataSourceCapabilities';
 import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
 import { getShortcutDisplayLabel, getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, isEditableElement, isImeComposingKeyEvent, isShortcutMatch, comboToMonacoKeyBinding, resolveShortcutBinding } from "../utils/shortcuts";
@@ -3003,13 +3004,18 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         return;
     }
     const connCaps = getDataSourceCapabilities(conn.config);
-    if (!connCaps.supportsQueryEditor) {
-        message.error(translate('query_editor.message.unsupported_source'));
-        if (runSeqRef.current === runSeq) setLoading(false);
-        return;
-    }
+	    if (!connCaps.supportsQueryEditor) {
+	        message.error(translate('query_editor.message.unsupported_source'));
+	        if (runSeqRef.current === runSeq) setLoading(false);
+	        return;
+	    }
+	    if (findConnectionMutatingStatements(conn.config, executableSQL).length > 0) {
+	        message.warning(translate('query_editor.message.connection_readonly_blocked'));
+	        if (runSeqRef.current === runSeq) setLoading(false);
+	        return;
+	    }
 
-    const config = {
+	    const config = {
         ...conn.config,
         port: Number(conn.config.port),
         password: conn.config.password || "",

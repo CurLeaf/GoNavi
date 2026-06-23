@@ -28,6 +28,9 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	}
 
 	query = sanitizeSQLForPgLike(transactionDBType, query)
+	if err := ensureReadOnlyConnectionAllowsQuery(config, query); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+	}
 	if !shouldUseManagedSQLTransaction(transactionDBType, query) {
 		return a.DBQueryMulti(config, dbName, query, queryID)
 	}

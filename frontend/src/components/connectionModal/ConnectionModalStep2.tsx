@@ -37,6 +37,7 @@ import {
 import ConnectionModalMongoSections from "../ConnectionModalMongoSections";
 import ConnectionModalRedisSections from "../ConnectionModalRedisSections";
 import { t } from "../../i18n";
+import { supportsConnectionReadOnlyMode } from "../../utils/connectionReadOnly";
 import {
   getConnectionConfigLayoutKindLabel,
   getStoredSecretPlaceholder,
@@ -192,6 +193,11 @@ const ConnectionModalStep2: React.FC<ConnectionModalStep2Props> = (props) => {
   } = props;
 
 const renderStep2 = () => {
+  const showConnectionReadOnlyField = supportsConnectionReadOnlyMode({
+    type: dbType,
+    driver: form.getFieldValue("driver"),
+    oceanBaseProtocol,
+  });
   const baseInfoSection = (
     <div style={modalInnerSectionStyle}>
       <div
@@ -1339,6 +1345,27 @@ const renderStep2 = () => {
                 ),
               })}
 
+            {showConnectionReadOnlyField &&
+              renderConfigSectionCard({
+                sectionKey: "readOnly",
+                icon: <SafetyCertificateOutlined />,
+                children: (
+                  <Form.Item
+                    name="readOnly"
+                    label={t("connection.modal.field.readOnly.label")}
+                    help={t("connection.modal.field.readOnly.help")}
+                    valuePropName="checked"
+                    style={{ marginBottom: 0 }}
+                  >
+                    <Checkbox
+                      onChange={() => clearConnectionTestResultForChoice()}
+                    >
+                      {t("connection.modal.field.readOnly.checkbox")}
+                    </Checkbox>
+                  </Form.Item>
+                ),
+              })}
+
             {isMySQLLike &&
               renderConfigSectionCard({
                 sectionKey: "connectionMode",
@@ -2306,6 +2333,7 @@ const renderStep2 = () => {
         keepAliveIntervalMinutes: 240,
         uri: "",
         connectionParams: "",
+        readOnly: false,
         oceanBaseProtocol: "mysql",
         mysqlTopology: "single",
         rocketmqTopology: "single",

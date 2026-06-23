@@ -282,6 +282,7 @@ export interface ConnectionConfig {
   password?: string;
   savePassword?: boolean;
   database?: string;
+  readOnly?: boolean;
   useSSL?: boolean;
   sslMode?: "preferred" | "required" | "skip-verify" | "disable";
   sslCAPath?: string;

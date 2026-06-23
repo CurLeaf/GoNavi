@@ -97,4 +97,29 @@ describe("connectionModalConfig keepalive", () => {
     expect(config.keepAliveEnabled).toBe(false);
     expect(config.keepAliveIntervalMinutes).toBe(15);
   });
+
+  it("persists readOnly only for datasource types that support production guard", async () => {
+    const sqlConfig = await buildConnectionConfig({
+      values: {
+        ...buildBaseValues(),
+        type: "postgres",
+        readOnly: true,
+      },
+      forPersist: true,
+      translate,
+    });
+    const redisConfig = await buildConnectionConfig({
+      values: {
+        ...buildBaseValues(),
+        type: "redis",
+        port: 6379,
+        readOnly: true,
+      },
+      forPersist: true,
+      translate,
+    });
+
+    expect(sqlConfig.readOnly).toBe(true);
+    expect(redisConfig.readOnly).toBe(false);
+  });
 });

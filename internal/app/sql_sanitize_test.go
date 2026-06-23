@@ -99,6 +99,18 @@ func TestIsReadOnlySQLQuery_TreatsKafkaConsumeAsReadOnly(t *testing.T) {
 	}
 }
 
+func TestIsReadOnlySQLQuery_TreatsMongoFindAsReadOnly(t *testing.T) {
+	if !isReadOnlySQLQuery("mongodb", `{"find":"users","filter":{"active":true}}`) {
+		t.Fatal("MongoDB find command should be treated as read-only")
+	}
+}
+
+func TestIsReadOnlySQLQuery_TreatsMongoDeleteAsWrite(t *testing.T) {
+	if isReadOnlySQLQuery("mongodb", `{"delete":"users","deletes":[{"q":{"active":false},"limit":0}]}`) {
+		t.Fatal("MongoDB delete command should not be treated as read-only")
+	}
+}
+
 func TestIsBatchableWriteSQLStatement_OnlyMatchesRealWriteStatements(t *testing.T) {
 	if !isBatchableWriteSQLStatement("mysql", "INSERT INTO demo(id) VALUES (1)") {
 		t.Fatal("expected INSERT to be treated as batchable write")

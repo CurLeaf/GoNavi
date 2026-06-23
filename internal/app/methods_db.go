@@ -179,6 +179,9 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 	if dbName == "" {
 		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
 	}
+	if err := ensureReadOnlyConnectionAllowsAction(config, "创建数据库"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 
 	runConfig := config
 	runConfig.Database = ""
@@ -321,6 +324,9 @@ func resolveSchemaDDLTargetDatabase(config connection.ConnectionConfig, dbName s
 }
 
 func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
+	if err := ensureReadOnlyConnectionAllowsAction(config, "创建模式"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	dbType := resolveDDLDBType(config)
 	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
 	if err != nil {
@@ -346,6 +352,9 @@ func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, sc
 }
 
 func (a *App) RenameSchema(config connection.ConnectionConfig, dbName string, oldSchemaName string, newSchemaName string) connection.QueryResult {
+	if err := ensureReadOnlyConnectionAllowsAction(config, "重命名模式"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	dbType := resolveDDLDBType(config)
 	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
 	if err != nil {
@@ -369,6 +378,9 @@ func (a *App) RenameSchema(config connection.ConnectionConfig, dbName string, ol
 }
 
 func (a *App) DropSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
+	if err := ensureReadOnlyConnectionAllowsAction(config, "删除模式"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	dbType := resolveDDLDBType(config)
 	targetDbName, err := resolveSchemaDDLTargetDatabase(config, dbName)
 	if err != nil {
@@ -624,6 +636,9 @@ func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string,
 	if oldName == "" || newName == "" {
 		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
 	}
+	if err := ensureReadOnlyConnectionAllowsAction(config, "重命名数据库"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	if strings.EqualFold(oldName, newName) {
 		return connection.QueryResult{Success: false, Message: "新旧数据库名称不能相同"}
 	}
@@ -667,6 +682,9 @@ func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) co
 	if dbName == "" {
 		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
 	}
+	if err := ensureReadOnlyConnectionAllowsAction(config, "删除数据库"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 
 	dbType := resolveDDLDBType(config)
 	var (
@@ -700,6 +718,9 @@ func (a *App) RenameTable(config connection.ConnectionConfig, dbName string, old
 	newTableName = strings.TrimSpace(newTableName)
 	if oldTableName == "" || newTableName == "" {
 		return connection.QueryResult{Success: false, Message: "表名不能为空"}
+	}
+	if err := ensureReadOnlyConnectionAllowsAction(config, "重命名表"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.EqualFold(oldTableName, newTableName) {
 		return connection.QueryResult{Success: false, Message: "新旧表名不能相同"}
@@ -752,6 +773,9 @@ func (a *App) DropTable(config connection.ConnectionConfig, dbName string, table
 	tableName = strings.TrimSpace(tableName)
 	if tableName == "" {
 		return connection.QueryResult{Success: false, Message: "表名不能为空"}
+	}
+	if err := ensureReadOnlyConnectionAllowsAction(config, "删除表"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
 	dbType := resolveDDLDBType(config)
@@ -816,13 +840,17 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 		queryID = generateQueryID()
 	}
 
+	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
+	if err := ensureReadOnlyConnectionAllowsQuery(config, query); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+	}
+
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
 		logger.Error(err, "DBQuery 获取连接失败：%s", formatConnSummary(runConfig))
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 
-	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
 	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
@@ -930,13 +958,17 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		queryID = generateQueryID()
 	}
 
+	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
+	if err := ensureReadOnlyConnectionAllowsQuery(config, query); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+	}
+
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
 		logger.Error(err, "DBQueryMulti 获取连接失败：%s", formatConnSummary(runConfig))
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 
-	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
 	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
@@ -1340,6 +1372,11 @@ func looksLikeSQLServerProcedureInvocation(query string) bool {
 func (a *App) DBQueryIsolated(config connection.ConnectionConfig, dbName string, query string) connection.QueryResult {
 	runConfig := normalizeRunConfig(config, dbName)
 
+	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
+	if err := ensureReadOnlyConnectionAllowsQuery(config, query); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
 	dbInst, err := a.openDatabaseIsolated(runConfig)
 	if err != nil {
 		logger.Error(err, "DBQueryIsolated 获取连接失败：%s", formatConnSummary(runConfig))
@@ -1351,7 +1388,6 @@ func (a *App) DBQueryIsolated(config connection.ConnectionConfig, dbName string,
 		}
 	}()
 
-	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
 	ctx, cancel := newQueryExecutionContext(runConfig)
 	defer cancel()
 
@@ -2205,6 +2241,9 @@ func (a *App) DropView(config connection.ConnectionConfig, dbName string, viewNa
 	if viewName == "" {
 		return connection.QueryResult{Success: false, Message: "视图名称不能为空"}
 	}
+	if err := ensureReadOnlyConnectionAllowsAction(config, "删除视图"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 
 	dbType := resolveDDLDBType(config)
 	switch dbType {
@@ -2236,6 +2275,9 @@ func (a *App) DropFunction(config connection.ConnectionConfig, dbName string, ro
 	routineType = strings.TrimSpace(strings.ToUpper(routineType))
 	if routineName == "" {
 		return connection.QueryResult{Success: false, Message: "函数/存储过程名称不能为空"}
+	}
+	if err := ensureReadOnlyConnectionAllowsAction(config, "删除函数或存储过程"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if routineType != "FUNCTION" && routineType != "PROCEDURE" {
 		routineType = "FUNCTION"
@@ -2279,6 +2321,9 @@ func (a *App) RenameView(config connection.ConnectionConfig, dbName string, oldN
 	newName = strings.TrimSpace(newName)
 	if oldName == "" || newName == "" {
 		return connection.QueryResult{Success: false, Message: "视图名称不能为空"}
+	}
+	if err := ensureReadOnlyConnectionAllowsAction(config, "重命名视图"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.EqualFold(oldName, newName) {
 		return connection.QueryResult{Success: false, Message: "新旧视图名称不能相同"}

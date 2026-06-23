@@ -169,6 +169,19 @@ describe('buildRpcConnectionConfig', () => {
     expect(result.sslKeyPath).toBe('C:/certs/client-key.pem');
   });
 
+  it('preserves the connection-level readOnly guard flag for RPC calls', () => {
+    const result = buildRpcConnectionConfig({
+      id: 'conn-prod',
+      type: 'postgres',
+      host: 'db.local',
+      port: 5432,
+      user: 'postgres',
+      readOnly: true,
+    } as any);
+
+    expect(result.readOnly).toBe(true);
+  });
+
   it('fills default nested config blocks needed by RPC calls', () => {
     const result = buildRpcConnectionConfig({
       id: 'conn-redis',

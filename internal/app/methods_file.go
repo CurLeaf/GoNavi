@@ -1821,6 +1821,9 @@ func (a *App) PreviewImportFile(filePath string) connection.QueryResult {
 }
 
 func (a *App) ImportData(config connection.ConnectionConfig, dbName, tableName string) connection.QueryResult {
+	if err := ensureReadOnlyConnectionAllowsAction(config, "导入数据"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: fmt.Sprintf("Import into %s", tableName),
 		Filters: []runtime.FileFilter{
@@ -2164,6 +2167,9 @@ func formatImportSQLValue(dbType, columnType string, value interface{}) string {
 
 // ImportDataWithProgress 执行导入并发送进度事件
 func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName, tableName, filePath string) connection.QueryResult {
+	if err := ensureReadOnlyConnectionAllowsAction(config, "导入数据"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	runConfig := normalizeRunConfig(config, dbName)
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
@@ -2211,6 +2217,9 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 }
 
 func (a *App) ApplyChanges(config connection.ConnectionConfig, dbName, tableName string, changes connection.ChangeSet) connection.QueryResult {
+	if err := ensureReadOnlyConnectionAllowsAction(config, "提交结果修改"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	runConfig := normalizeRunConfig(config, dbName)
 
 	dbInst, err := a.getDatabase(runConfig)
@@ -2237,6 +2246,9 @@ type ChangePreview struct {
 }
 
 func (a *App) PreviewChanges(config connection.ConnectionConfig, dbName, tableName string, changes connection.ChangeSet) connection.QueryResult {
+	if err := ensureReadOnlyConnectionAllowsAction(config, "预览结果修改"); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	runConfig := normalizeRunConfig(config, dbName)
 
 	dbInst, err := a.getDatabase(runConfig)
@@ -2733,6 +2745,10 @@ func tableDataClearActionLabels(mode tableDataClearMode) (actionLabel string, pr
 }
 
 func (a *App) runTableDataClear(config connection.ConnectionConfig, dbName string, tableNames []string, mode tableDataClearMode) connection.QueryResult {
+	actionLabel, progressLabel := tableDataClearActionLabels(mode)
+	if err := ensureReadOnlyConnectionAllowsAction(config, actionLabel); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
 	runConfig := normalizeRunConfig(config, dbName)
 
 	// 参数校验
@@ -2767,7 +2783,6 @@ func (a *App) runTableDataClear(config connection.ConnectionConfig, dbName strin
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	actionLabel, progressLabel := tableDataClearActionLabels(mode)
 	logger.Warnf("%s 开始：%s db=%s tables=%v（共 %d 张）", actionLabel, formatConnSummary(runConfig), dbName, objects, len(objects))
 
 	var executedSQLs []string

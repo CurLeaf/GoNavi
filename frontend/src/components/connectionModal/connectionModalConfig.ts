@@ -1,4 +1,5 @@
 import type { ConnectionConfig, SavedConnection } from "../../types";
+import { supportsConnectionReadOnlyMode } from "../../utils/connectionReadOnly";
 import { resolveConnectionSecretDraft } from "../../utils/connectionSecretDraft";
 import {
   getConnectionTypeDefaultPort as getDefaultPortByType,
@@ -805,6 +806,12 @@ export const buildConnectionConfig = async ({
     password: keepPassword ? mergedValues.password || "" : "",
     savePassword: savePassword,
     database: mergedValues.database || "",
+    readOnly:
+      supportsConnectionReadOnlyMode({
+        type,
+        driver: mergedValues.driver,
+        oceanBaseProtocol: selectedOceanBaseProtocol,
+      }) && mergedValues.readOnly === true,
     useSSL: effectiveUseSSL,
     sslMode: effectiveUseSSL ? sslMode : "disable",
     sslCAPath: sslCAPath,

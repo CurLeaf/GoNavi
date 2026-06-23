@@ -1,7 +1,8 @@
 import type { ConnectionConfig } from '../types';
+import { isConnectionForcedReadOnly } from './connectionReadOnly';
 import { normalizeOceanBaseProtocol } from './oceanBaseProtocol';
 
-type ConnectionLike = Pick<ConnectionConfig, 'type' | 'driver' | 'oceanBaseProtocol'> | null | undefined;
+type ConnectionLike = Pick<ConnectionConfig, 'type' | 'driver' | 'oceanBaseProtocol' | 'readOnly'> | null | undefined;
 
 const normalizeDataSourceToken = (raw: string): string => {
   const normalized = String(raw || '').trim().toLowerCase();
@@ -208,16 +209,17 @@ const DROP_DATABASE_TYPES = new Set([
 
 export const getDataSourceCapabilities = (config: ConnectionLike): DataSourceCapabilities => {
   const type = resolveDataSourceType(config);
+  const forcedReadOnly = isConnectionForcedReadOnly(config);
   return {
     type,
     supportsQueryEditor: !QUERY_EDITOR_DISABLED_TYPES.has(type),
     supportsSqlQueryExport: SQL_QUERY_EXPORT_TYPES.has(type),
     supportsCopyInsert: COPY_INSERT_TYPES.has(type),
-    supportsCreateDatabase: CREATE_DATABASE_TYPES.has(type),
-    supportsRenameDatabase: RENAME_DATABASE_TYPES.has(type),
-    supportsDropDatabase: DROP_DATABASE_TYPES.has(type),
-    supportsMessagePublish: MESSAGE_PUBLISH_TYPES.has(type),
-    forceReadOnlyQueryResult: FORCE_READ_ONLY_QUERY_TYPES.has(type),
+    supportsCreateDatabase: !forcedReadOnly && CREATE_DATABASE_TYPES.has(type),
+    supportsRenameDatabase: !forcedReadOnly && RENAME_DATABASE_TYPES.has(type),
+    supportsDropDatabase: !forcedReadOnly && DROP_DATABASE_TYPES.has(type),
+    supportsMessagePublish: !forcedReadOnly && MESSAGE_PUBLISH_TYPES.has(type),
+    forceReadOnlyQueryResult: forcedReadOnly || FORCE_READ_ONLY_QUERY_TYPES.has(type),
     preferManualTotalCount: MANUAL_TOTAL_COUNT_TYPES.has(type),
     supportsApproximateTableCount: APPROXIMATE_TABLE_COUNT_TYPES.has(type),
     supportsApproximateTotalPages: APPROXIMATE_TOTAL_PAGE_TYPES.has(type),

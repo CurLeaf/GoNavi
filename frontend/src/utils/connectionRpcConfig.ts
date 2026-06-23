@@ -129,6 +129,7 @@ export function buildRpcConnectionConfig(
     user: toStringValue(rpcMerged.user),
     password: toStringValue(rpcMerged.password),
     database: toStringValue(rpcMerged.database),
+    readOnly: rpcMerged.readOnly === true,
     useSSH: rpcMerged.useSSH === true,
     ssh: normalizeSSHConfig(rpcMerged.ssh),
     useProxy: rpcMerged.useProxy === true,

@@ -912,6 +912,7 @@ export namespace connection {
 	    password: string;
 	    savePassword?: boolean;
 	    database: string;
+	    readOnly?: boolean;
 	    useSSL?: boolean;
 	    sslMode?: string;
 	    sslCAPath?: string;
@@ -963,6 +964,7 @@ export namespace connection {
 	        this.password = source["password"];
 	        this.savePassword = source["savePassword"];
 	        this.database = source["database"];
+	        this.readOnly = source["readOnly"];
 	        this.useSSL = source["useSSL"];
 	        this.sslMode = source["sslMode"];
 	        this.sslCAPath = source["sslCAPath"];

@@ -1387,6 +1387,7 @@ const ConnectionModal: React.FC<{
           user: config.user,
           password: config.password,
           database: config.database,
+          readOnly: config.readOnly === true,
           uri: config.uri || "",
           connectionParams:
             config.connectionParams ||

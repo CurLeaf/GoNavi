@@ -240,6 +240,27 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('forces supported SQL connections marked read-only into query-only mode', () => {
+    expect(getDataSourceCapabilities({ type: 'postgres', readOnly: true })).toMatchObject({
+      type: 'postgres',
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      supportsMessagePublish: false,
+      forceReadOnlyQueryResult: true,
+    });
+  });
+
+  it('ignores readOnly for datasource types that do not support connection-level production guard', () => {
+    expect(getDataSourceCapabilities({ type: 'redis', readOnly: true })).toMatchObject({
+      type: 'redis',
+      supportsQueryEditor: false,
+      supportsCreateDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
+    });
+  });
+
   it('treats RabbitMQ as a queryable messaging datasource with publish support', () => {
     expect(getDataSourceCapabilities({ type: 'rabbitmq' })).toMatchObject({
       type: 'rabbitmq',
