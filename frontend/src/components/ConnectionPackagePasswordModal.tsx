@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React from 'react';
-import { Checkbox, Input, Modal, Typography } from 'antd';
+import { Button, Checkbox, Input, Typography } from 'antd';
 import { useI18n } from '../i18n/provider';
 
 const { Text } = Typography;
@@ -17,6 +18,8 @@ export interface ConnectionPackagePasswordModalProps {
   confirmLoading?: boolean;
   confirmText?: string;
   cancelText?: string;
+  onBack?: () => void;
+  embedded?: boolean;
   onIncludeSecretsChange?: (value: boolean) => void;
   onUseFilePasswordChange?: (value: boolean) => void;
   onPasswordChange: (value: string) => void;
@@ -35,6 +38,8 @@ export default function ConnectionPackagePasswordModal({
   confirmLoading,
   confirmText,
   cancelText,
+  onBack,
+  embedded = false,
   onIncludeSecretsChange,
   onUseFilePasswordChange,
   onPasswordChange,
@@ -58,14 +63,26 @@ export default function ConnectionPackagePasswordModal({
   return (
     <Modal
       open={open}
-      title={title}
-      okText={resolvedConfirmText}
-      cancelText={resolvedCancelText}
-      confirmLoading={confirmLoading}
-      onOk={onConfirm}
+      embedded={embedded}
+      title={(
+        <span style={{ minWidth: 0 }}>{title}</span>
+      )}
       onCancel={onCancel}
       destroyOnHidden={false}
       maskClosable={false}
+      footer={[
+        <Button key="cancel" onClick={onCancel}>
+          {resolvedCancelText}
+        </Button>,
+        <Button key="confirm" type="primary" loading={confirmLoading} onClick={onConfirm}>
+          {resolvedConfirmText}
+        </Button>,
+        onBack ? (
+          <Button key="back" onClick={onBack}>
+            {t('common.back_to_previous')}
+          </Button>
+        ) : null,
+      ]}
     >
       {isExportMode ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

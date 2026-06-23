@@ -2,12 +2,15 @@ import React from 'react';
 import { readFileSync } from 'node:fs';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readV2ThemeCss } from '../test/readV2ThemeCss';
 
 import { setCurrentLanguage } from '../i18n';
 import { catalogs } from '../i18n/catalog';
+import { formatSqlExecutionError } from '../utils/sqlErrorSemantics';
+import { I18nProvider } from '../i18n/provider';
 import type { SavedQuery, TabData } from '../types';
 import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
-import { formatSqlExecutionError } from '../utils/sqlErrorSemantics';
+import { setGlobalImeCompositionActive } from '../utils/shortcuts';
 import { clearQueryTabDraft, clearSQLFileTabDraft, getQueryTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
 import QueryEditor, {
   collectQueryEditorObjectDecorationCandidates,
@@ -30,6 +33,14 @@ const storeState = vi.hoisted(() => ({
       },
     },
   ],
+  sqlLogs: [] as Array<{
+    id: string;
+    timestamp: number;
+    sql: string;
+    status: 'success' | 'error';
+    duration: number;
+  }>,
+  clearSqlLogs: vi.fn(),
   addSqlLog: vi.fn(),
   addTab: vi.fn(),
   setActiveContext: vi.fn(),
@@ -215,6 +226,9 @@ const editorState = vi.hoisted(() => {
     setSelection: vi.fn((selection: any) => {
       state.selection = selection;
     }),
+    setSelections: vi.fn((selections: any[]) => {
+      state.selection = Array.isArray(selections) ? selections[0] ?? null : null;
+    }),
     executeEdits: vi.fn((_source: string, edits: any[]) => {
       edits.forEach((edit) => {
         const start = offsetAt({ lineNumber: edit.range.startLineNumber, column: edit.range.startColumn });
@@ -349,9 +363,20 @@ vi.mock('./DataGrid', () => ({
   GONAVI_ROW_KEY: '__gonavi_row_key__',
 }));
 
+vi.mock('./LogPanel', () => ({
+  default: ({ variant, executionError }: { variant?: string; executionError?: string }) => (
+    <div data-log-panel={variant}>
+      SQL 执行日志
+      {executionError ? ` ${executionError}` : ''}
+    </div>
+  ),
+}));
+
 vi.mock('@ant-design/icons', () => {
   const Icon = () => <span />;
   return {
+    BugOutlined: Icon,
+    ClearOutlined: Icon,
     PlayCircleOutlined: Icon,
     SaveOutlined: Icon,
     FormatPainterOutlined: Icon,
@@ -378,10 +403,30 @@ vi.mock('antd', () => {
   const Form: any = ({ children }: any) => <form>{children}</form>;
   Form.Item = ({ children }: any) => <>{children}</>;
   Form.useForm = () => [{ setFieldsValue: vi.fn(), validateFields: vi.fn(() => Promise.resolve({ name: '查询' })) }];
+  const Table = ({ dataSource, columns }: { dataSource: any[]; columns: any[] }) => (
+    <div>
+      {dataSource.map((record) => (
+        <div key={record.id}>
+          {columns.map((column) => (
+            <div key={column.dataIndex || column.title}>
+              {column.render
+                ? column.render(record[column.dataIndex], record)
+                : record[column.dataIndex]}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+  const Empty = ({ description }: { description?: React.ReactNode }) => <div>{description}</div>;
+  (Empty as any).PRESENTED_IMAGE_SIMPLE = 'simple';
 
   return {
     Button,
     Space,
+    Table,
+    Tag: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
+    Empty,
     message: messageApi,
     Modal: ({ children, open, onOk, okText = '确认' }: any) => (open ? (
       <section>
@@ -610,6 +655,8 @@ describe('QueryEditor external SQL save', () => {
     backendApp.DBGetTables.mockResolvedValue({ success: true, data: [] });
     backendApp.GenerateQueryID.mockResolvedValue('query-1');
     storeState.connections = createDefaultConnections();
+    storeState.sqlLogs = [];
+    storeState.clearSqlLogs.mockReset();
     storeState.connections[0].config.type = 'mysql';
     storeState.connections[0].config.database = 'main';
     storeState.appearance.uiVersion = 'legacy';
@@ -648,6 +695,7 @@ describe('QueryEditor external SQL save', () => {
     clearQueryTabDraft('tab-2');
     clearSQLFileTabDraft('tab-1');
     clearSQLFileTabDraft('tab-2');
+    setGlobalImeCompositionActive(false);
   });
 
   afterEach(() => {
@@ -668,7 +716,11 @@ describe('QueryEditor external SQL save', () => {
 
     let renderer!: ReactTestRenderer;
     await act(async () => {
-      renderer = create(<QueryEditor tab={createTab()} />);
+      renderer = create(
+        <I18nProvider preference="zh-CN" onPreferenceChange={() => undefined}>
+          <QueryEditor tab={createTab()} />
+        </I18nProvider>,
+      );
     });
 
     expect(textContent(renderer.toJSON())).not.toContain('等待执行 SQL');
@@ -679,7 +731,11 @@ describe('QueryEditor external SQL save', () => {
 
     let renderer!: ReactTestRenderer;
     await act(async () => {
-      renderer = create(<QueryEditor tab={createTab()} />);
+      renderer = create(
+        <I18nProvider preference="zh-CN" onPreferenceChange={() => undefined}>
+          <QueryEditor tab={createTab()} />
+        </I18nProvider>,
+      );
     });
 
     await act(async () => {
@@ -899,6 +955,90 @@ describe('QueryEditor external SQL save', () => {
     expect(storeState.updateQueryTabDraft).toHaveBeenLastCalledWith('tab-1', {
       resultPanelVisible: true,
     });
+
+    renderer.unmount();
+  });
+
+  it('opens the embedded sql execution log tab from the shared log toggle event in v2', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.sqlLogs = [{
+      id: 'log-1',
+      timestamp: Date.now(),
+      sql: 'select 1',
+      status: 'success',
+      duration: 12,
+    }];
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    expect(textContent(renderer.toJSON())).not.toContain('SQL 执行日志');
+
+    await act(async () => {
+      windowListeners['gonavi:show-sql-execution-log']?.forEach((listener) => listener());
+    });
+
+    expect(textContent(renderer.toJSON())).toContain('SQL 执行日志');
+    expect(storeState.updateQueryTabDraft).toHaveBeenCalledWith('tab-1', {
+      resultPanelVisible: true,
+    });
+
+    await act(async () => {
+      windowListeners['gonavi:show-sql-execution-log']?.forEach((listener) => listener());
+    });
+
+    expect(textContent(renderer.toJSON())).not.toContain('SQL 执行日志');
+    expect(storeState.updateQueryTabDraft).toHaveBeenLastCalledWith('tab-1', {
+      resultPanelVisible: false,
+    });
+
+    renderer.unmount();
+  });
+
+  it('shows execution failures inside the embedded sql log tab in v2', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: false,
+      message: 'driver exploded',
+      data: [],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: 'select 1;' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const rendered = textContent(renderer.toJSON());
+    expect(rendered).toContain('SQL 执行日志');
+    expect(rendered).toContain('driver exploded');
+    expect(renderer.root.findAll((node) => node.props?.['data-log-panel'] === 'embedded')).toHaveLength(1);
+    expect(renderer.root.findAll((node) => node.props?.['data-tab-key'] === '__gonavi_sql_execution_log__')).toHaveLength(1);
 
     renderer.unmount();
   });
@@ -2137,6 +2277,37 @@ describe('QueryEditor external SQL save', () => {
     expect(messageApi.info).not.toHaveBeenCalledWith('没有可选择的 SQL 语句。');
   });
 
+  it('selects only the current SQL statement when the editor content uses CRLF line endings', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
+    const sql = [
+      'SELECT * FROM first_table;',
+      '',
+      'SELECT * FROM second_table;',
+      '',
+      'SELECT a.id, a.name FROM third_table a ORDER BY a.id;',
+    ].join('\r\n');
+    editorState.position = { lineNumber: 5, column: 18 };
+    editorState.selection = null;
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: sql, readOnly: true })} />);
+    });
+
+    const selectCurrentStatementAction = findEditorAction('gonavi.selectCurrentStatement');
+    expect(selectCurrentStatementAction).toBeTruthy();
+
+    await act(async () => {
+      await selectCurrentStatementAction.run();
+    });
+
+    expect(editorState.selection).toMatchObject({
+      startLineNumber: 5,
+      startColumn: 1,
+      endLineNumber: 5,
+      endColumn: 'SELECT a.id, a.name FROM third_table a ORDER BY a.id;'.length,
+    });
+  });
+
   it('shows the object info miss toast in English when the cursor is not on a recognized table or column', async () => {
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
@@ -3230,6 +3401,97 @@ describe('QueryEditor external SQL save', () => {
     expect(lastDecorationCall?.[1]?.[0]?.options?.inlineClassName).toBe('gonavi-query-editor-link-hint');
   });
 
+  it('ignores IME candidate keydown events when syncing modifier hover state', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    editorState.value = 'select 1';
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value })} />);
+    });
+
+    editorState.editor.updateOptions.mockClear();
+    editorState.editor.deltaDecorations.mockClear();
+
+    await act(async () => {
+      const imeEvent = {
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        key: 'Process',
+        keyCode: 229,
+        which: 229,
+        isComposing: true,
+        nativeEvent: {
+          isComposing: true,
+          keyCode: 229,
+          which: 229,
+        },
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        target: null,
+      };
+      windowListeners.keydown?.forEach((listener) => listener(imeEvent));
+    });
+
+    expect(editorState.editor.updateOptions).not.toHaveBeenCalledWith({ mouseStyle: 'text' });
+    expect(editorState.editor.deltaDecorations).not.toHaveBeenCalled();
+  });
+
+  it('ignores candidate number keys while a composition session is active', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    editorState.value = 'select 1';
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value })} />);
+    });
+
+    setGlobalImeCompositionActive(true);
+    editorState.editor.updateOptions.mockClear();
+    editorState.editor.deltaDecorations.mockClear();
+
+    await act(async () => {
+      const candidateSelectEvent = {
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        key: '1',
+        keyCode: 49,
+        which: 49,
+        isComposing: false,
+        nativeEvent: {
+          isComposing: false,
+        },
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        target: null,
+      };
+      windowListeners.keydown?.forEach((listener) => listener(candidateSelectEvent));
+    });
+
+    expect(editorState.editor.updateOptions).not.toHaveBeenCalled();
+    expect(editorState.editor.deltaDecorations).not.toHaveBeenCalled();
+  });
+
   it('keeps query editor hyperlink decorations blue with a solid underline', () => {
     const css = readFileSync(new URL('../App.css', import.meta.url), 'utf8');
 
@@ -3710,6 +3972,183 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.editor.deltaDecorations).not.toHaveBeenCalled();
     expect(editorState.editor.getModel().getValueLength).not.toHaveBeenCalled();
     expect(editorState.editor.getModel().getValue).not.toHaveBeenCalled();
+  });
+
+  it('ignores focused local tab query echoes so IME candidate commits are not overwritten', async () => {
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    editorState.value = '';
+    editorState.hasTextFocus = true;
+    editorState.editor.setValue.mockClear();
+
+    await act(async () => {
+      editorState.latestOnChange?.('我');
+    });
+
+    editorState.editor.getValue.mockImplementationOnce(() => '');
+    await act(async () => {
+      renderer.update(<QueryEditor tab={createTab({ query: '我' })} />);
+    });
+
+    expect(getQueryTabDraft('tab-1')).toBe('我');
+    expect(editorState.editor.setValue).not.toHaveBeenCalled();
+  });
+
+  it('still applies true external tab query changes while the editor is focused', async () => {
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    editorState.value = '';
+    editorState.hasTextFocus = true;
+    editorState.editor.setValue.mockClear();
+
+    await act(async () => {
+      editorState.latestOnChange?.('我');
+    });
+
+    editorState.editor.getValue.mockImplementationOnce(() => '');
+    await act(async () => {
+      renderer.update(<QueryEditor tab={createTab({ query: 'SELECT 2;' })} />);
+    });
+
+    expect(editorState.editor.setValue).toHaveBeenCalledWith('SELECT 2;');
+  });
+
+  it('recovers committed IME text when Monaco composition end leaves the model unchanged', async () => {
+    vi.useFakeTimers();
+    const domListeners: Record<string, ((event?: any) => void)[]> = {};
+    editorState.domNode.addEventListener.mockImplementation((type: string, listener: (event?: any) => void) => {
+      domListeners[type] ||= [];
+      domListeners[type].push(listener);
+    });
+    editorState.editor.getValue.mockReset();
+    editorState.editor.getValue.mockImplementation(() => editorState.value);
+
+    try {
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: "select '';" })} />);
+      });
+
+      editorState.position = { lineNumber: 1, column: 9 };
+      editorState.selection = null;
+      editorState.editor.executeEdits.mockClear();
+
+      await act(async () => {
+        domListeners.compositionstart?.forEach((listener) => listener({ data: '' }));
+        domListeners.compositionend?.forEach((listener) => listener({ data: '我' }));
+      });
+
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+        'gonavi-ime-composition-fallback',
+        [{
+          range: expect.objectContaining({
+            startLineNumber: 1,
+            startColumn: 9,
+            endLineNumber: 1,
+            endColumn: 9,
+          }),
+          text: '我',
+          forceMoveMarkers: true,
+        }],
+      );
+      expect(editorState.value).toBe("select '我';");
+      expect(getQueryTabDraft('tab-1')).toBe("select '我';");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not duplicate IME text when Monaco already applied the composition commit', async () => {
+    vi.useFakeTimers();
+    const domListeners: Record<string, ((event?: any) => void)[]> = {};
+    editorState.domNode.addEventListener.mockImplementation((type: string, listener: (event?: any) => void) => {
+      domListeners[type] ||= [];
+      domListeners[type].push(listener);
+    });
+    editorState.editor.getValue.mockReset();
+    editorState.editor.getValue.mockImplementation(() => editorState.value);
+
+    try {
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: "select '';" })} />);
+      });
+
+      editorState.position = { lineNumber: 1, column: 9 };
+      editorState.selection = null;
+      editorState.editor.executeEdits.mockClear();
+
+      await act(async () => {
+        domListeners.compositionstart?.forEach((listener) => listener({ data: '' }));
+        editorState.value = "select '我';";
+        domListeners.compositionend?.forEach((listener) => listener({ data: '我' }));
+      });
+
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(editorState.editor.executeEdits).not.toHaveBeenCalledWith(
+        'gonavi-ime-composition-fallback',
+        expect.anything(),
+      );
+      expect(editorState.value).toBe("select '我';");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('uses beforeinput data as the IME fallback text when composition end data is empty', async () => {
+    vi.useFakeTimers();
+    const domListeners: Record<string, ((event?: any) => void)[]> = {};
+    editorState.domNode.addEventListener.mockImplementation((type: string, listener: (event?: any) => void) => {
+      domListeners[type] ||= [];
+      domListeners[type].push(listener);
+    });
+    editorState.editor.getValue.mockReset();
+    editorState.editor.getValue.mockImplementation(() => editorState.value);
+
+    try {
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: "select '';" })} />);
+      });
+
+      editorState.position = { lineNumber: 1, column: 9 };
+      editorState.selection = null;
+      editorState.editor.executeEdits.mockClear();
+
+      await act(async () => {
+        domListeners.compositionstart?.forEach((listener) => listener({ data: '' }));
+        domListeners.beforeinput?.forEach((listener) => listener({
+          data: '我',
+          inputType: 'insertCompositionText',
+          isComposing: true,
+        }));
+        domListeners.compositionend?.forEach((listener) => listener({ data: '' }));
+      });
+
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+        'gonavi-ime-composition-fallback',
+        [expect.objectContaining({ text: '我' })],
+      );
+      expect(editorState.value).toBe("select '我';");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps short regular query typing on the Monaco fast path without rerender side effects', async () => {

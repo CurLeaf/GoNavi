@@ -82,7 +82,7 @@ type ProviderConfig struct {
 	BaseURL     string            `json:"baseUrl"`
 	Model       string            `json:"model"`
 	Models      []string          `json:"models,omitempty"`
-	APIFormat   string            `json:"apiFormat,omitempty"` // custom 专用: openai | anthropic | gemini | claude-cli
+	APIFormat   string            `json:"apiFormat,omitempty"` // custom 专用: openai | anthropic | gemini | cursor-agent | claude-cli | codebuddy-cli
 	Headers     map[string]string `json:"headers,omitempty"`
 	MaxTokens   int               `json:"maxTokens"`
 	Temperature float64           `json:"temperature"`

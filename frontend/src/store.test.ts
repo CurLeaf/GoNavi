@@ -417,6 +417,30 @@ describe('store appearance persistence', () => {
     );
   });
 
+  it('normalizes keepalive settings when replacing saved connections', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'postgres-keepalive',
+        name: 'Postgres KeepAlive',
+        config: {
+          id: 'postgres-keepalive',
+          type: 'postgres',
+          host: 'db.local',
+          port: 5432,
+          user: 'postgres',
+          keepAliveEnabled: true,
+          keepAliveIntervalMinutes: 0,
+        },
+      },
+    ]);
+
+    const config = useStore.getState().connections[0]?.config;
+    expect(config?.keepAliveEnabled).toBe(true);
+    expect(config?.keepAliveIntervalMinutes).toBe(240);
+  });
+
   it('keeps StarRocks saved connections as independent datasource type', async () => {
     const { useStore } = await importStore();
 
@@ -1192,6 +1216,79 @@ describe('store appearance persistence', () => {
       connectionId: 'conn-1',
       dbName: 'sys',
     });
+  });
+
+  it('reuses the same table-export tab for the same connection and table identity', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'table-export-conn-1-main-users',
+      title: '导出 users',
+      type: 'table-export',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'users',
+      initialTab: 'config',
+    });
+    useStore.getState().addTab({
+      id: 'another-id-that-should-collapse',
+      title: '导出 users',
+      type: 'table-export',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'users',
+      initialTab: 'progress',
+    });
+
+    expect(useStore.getState().tabs).toHaveLength(1);
+    expect(useStore.getState().tabs[0]).toEqual(expect.objectContaining({
+      id: 'table-export-conn-1-main-users',
+      type: 'table-export',
+      initialTab: 'progress',
+    }));
+    expect(useStore.getState().activeTabId).toBe('table-export-conn-1-main-users');
+  });
+
+  it('persists table export history across store reloads', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().upsertTableExportHistory('conn-1::main::users', {
+      jobId: 'job-1',
+      targetName: 'users',
+      startedAt: 1_000,
+      finishedAt: 61_000,
+      format: 'XLSX',
+      scope: 'all',
+      scopeLabel: '全表数据',
+      strategyLabel: '整表导出链路',
+      status: 'done',
+      stage: '导出完成',
+      current: 500_000,
+      total: 500_000,
+      totalRowsKnown: true,
+      filePath: '/tmp/users.xlsx',
+      message: '',
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.tableExportHistories['conn-1::main::users']).toEqual([
+      expect.objectContaining({
+        jobId: 'job-1',
+        status: 'done',
+        filePath: '/tmp/users.xlsx',
+      }),
+    ]);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().tableExportHistories['conn-1::main::users']).toEqual([
+      expect.objectContaining({
+        jobId: 'job-1',
+        current: 500_000,
+        total: 500_000,
+        status: 'done',
+      }),
+    ]);
   });
 
   it('only restores persisted query tabs with useful SQL state', async () => {

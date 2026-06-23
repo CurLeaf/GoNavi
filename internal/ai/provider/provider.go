@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 
 	"GoNavi-Wails/internal/ai"
 )
@@ -16,4 +17,25 @@ type Provider interface {
 	Name() string
 	// Validate 校验配置是否有效
 	Validate() error
+}
+
+// SessionStreamProvider 表示支持按会话复用上游状态的流式 Provider。
+// state 为 Provider 自己维护的持久化状态；返回值为更新后的状态快照。
+type SessionStreamProvider interface {
+	ChatStreamWithState(
+		ctx context.Context,
+		state json.RawMessage,
+		req ai.ChatRequest,
+		callback func(ai.StreamChunk),
+	) (json.RawMessage, error)
+}
+
+// SessionChatProvider 表示支持按会话复用上游状态的非流式 Provider。
+// state 为 Provider 自己维护的持久化状态；返回值为响应体和更新后的状态快照。
+type SessionChatProvider interface {
+	ChatWithState(
+		ctx context.Context,
+		state json.RawMessage,
+		req ai.ChatRequest,
+	) (*ai.ChatResponse, json.RawMessage, error)
 }

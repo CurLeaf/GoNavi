@@ -96,6 +96,7 @@ func (t *TDengineDB) Connect(config connection.ConnectionConfig) error {
 			failures = append(failures, fmt.Sprintf("第%d次连接打开失败: %v", idx+1, err))
 			continue
 		}
+		configureSQLConnectionPool(db, "tdengine")
 		t.conn = db
 		t.pingTimeout = getConnectTimeout(attempt)
 
@@ -166,6 +167,24 @@ func (t *TDengineDB) Query(query string) ([]map[string]interface{}, []string, er
 	defer rows.Close()
 
 	return scanRows(rows)
+}
+
+func (t *TDengineDB) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	if t.conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+
+	rows, err := t.conn.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	return streamRows(rows, consumer)
+}
+
+func (t *TDengineDB) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return t.StreamQueryContext(context.Background(), query, consumer)
 }
 
 func (t *TDengineDB) ExecContext(ctx context.Context, query string) (int64, error) {

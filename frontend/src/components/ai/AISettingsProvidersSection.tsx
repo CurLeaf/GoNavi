@@ -110,6 +110,9 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
   const i18n = useOptionalI18n();
   const copy = (key: string) => (i18n?.t ?? ((catalogKey) => catalogTranslate('en-US', catalogKey)))(key);
   const presetKeyFromForm = watchedPresetKey || (editingProvider as (AIProviderConfig & { presetKey?: string }) | null)?.presetKey || 'openai';
+  const supportsAdvancedEndpoint = presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama' || presetKeyFromForm === 'codebuddy' || presetKeyFromForm === 'cursor';
+  const codeBuddyUsesOptionalSecret = presetKeyFromForm === 'codebuddy';
+  const cursorUsesOptionalModel = presetKeyFromForm === 'cursor';
   const sectionLabelColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
   const currentFieldGroupStyle = fieldGroupStyle(cardBorder, cardBg);
   const currentFieldLabelStyle = fieldLabelStyle(sectionLabelColor);
@@ -136,6 +139,10 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
         {providers.map((provider) => {
           const matchedPreset = resolveProviderPreset(provider);
           const isActive = provider.id === activeProviderId;
+          const modelLabel = provider.model
+            || (provider.apiFormat === 'codebuddy-cli' || provider.apiFormat === 'cursor-agent'
+              ? copy('ai_settings.provider.auto_model')
+              : copy('ai_settings.provider.no_model'));
           return (
             <div
               key={provider.id}
@@ -174,7 +181,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
                 <div style={{ fontSize: 12, color: overlayTheme.mutedText, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span>{matchedPreset.label}</span>
                   <span style={{ opacity: 0.4 }}>·</span>
-                  <span style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12 }}>{provider.model || copy('ai_settings.provider.no_model')}</span>
+                  <span style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12 }}>{modelLabel}</span>
                 </div>
               </div>
               <Space size={2}>
@@ -271,19 +278,21 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
           <Form.Item name="type" hidden><Input /></Form.Item>
         </div>
 
-        {(presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama') && (
+        {supportsAdvancedEndpoint && (
           <div style={{ ...currentFieldGroupStyle, marginTop: 16 }}>
             <div style={currentFieldLabelStyle}>
               <RobotOutlined style={{ fontSize: 14 }} /> {copy('ai_settings.form.section.basic')}
             </div>
 
-            <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.provider_name')}</span>} name="name" rules={[{ required: true, message: copy('ai_settings.form.provider_name_required') }]} style={{ marginBottom: 16 }}>
-              <Input
-                placeholder={copy('ai_settings.form.provider_name_placeholder')}
-                size="middle"
-                style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }}
-              />
-            </Form.Item>
+            {presetKeyFromForm === 'custom' && (
+              <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.provider_name')}</span>} name="name" rules={[{ required: true, message: copy('ai_settings.form.provider_name_required') }]} style={{ marginBottom: 16 }}>
+                <Input
+                  placeholder={copy('ai_settings.form.provider_name_placeholder')}
+                  size="middle"
+                  style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }}
+                />
+              </Form.Item>
+            )}
 
             {presetKeyFromForm === 'custom' && (
               <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.api_format')}</span>} name="apiFormat" style={{ marginBottom: 16 }}>
@@ -294,7 +303,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
                   borderRadius: 8,
                   gap: 4,
                 }}>
-                  {[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }, { value: 'gemini', label: 'Gemini' }, { value: 'claude-cli', label: 'Claude CLI' }].map((format) => (
+                  {[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }, { value: 'gemini', label: 'Gemini' }, { value: 'cursor-agent', label: 'Cursor Agent' }, { value: 'claude-cli', label: 'Claude CLI' }].map((format) => (
                     <div
                       key={format.value}
                       onClick={() => form.setFieldsValue({ apiFormat: format.value })}
@@ -318,7 +327,16 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
             )}
 
             <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.model_list')}</span>} name="models" style={{ marginBottom: 0 }}>
-              <Select mode="tags" size="middle" placeholder={copy('ai_settings.form.model_list_placeholder')} style={{ width: '100%' }} />
+              <Select
+                mode="tags"
+                size="middle"
+                placeholder={codeBuddyUsesOptionalSecret
+                  ? copy('ai_settings.form.model_list_placeholder.codebuddy')
+                  : cursorUsesOptionalModel
+                    ? copy('ai_settings.form.model_list_placeholder.cursor')
+                    : copy('ai_settings.form.model_list_placeholder')}
+                style={{ width: '100%' }}
+              />
             </Form.Item>
           </div>
         )}
@@ -330,21 +348,22 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
             <KeyOutlined style={{ fontSize: 14 }} /> {copy('ai_settings.form.section.auth_connection')}
           </div>
           <Form.Item
-            label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.api_key')}</span>}
+            label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{codeBuddyUsesOptionalSecret ? copy('ai_settings.form.api_key.codebuddy_optional') : copy('ai_settings.form.api_key')}</span>}
             name="apiKey"
             rules={[{
               validator: (_, value) => {
                 const apiKey = String(value || '').trim();
-                if (apiKey || editingProvider?.id) {
+                if (apiKey || editingProvider?.id || codeBuddyUsesOptionalSecret) {
                   return Promise.resolve();
                 }
                 return Promise.reject(new Error(copy('ai_settings.form.api_key_required')));
               },
             }]}
+            extra={codeBuddyUsesOptionalSecret ? copy('ai_settings.form.api_key.codebuddy_hint') : undefined}
             style={{ marginBottom: 16 }}
           >
             <Input.Password
-              placeholder={copy('ai_settings.form.api_key_placeholder')}
+              placeholder={codeBuddyUsesOptionalSecret ? copy('ai_settings.form.api_key_placeholder.codebuddy') : copy('ai_settings.form.api_key_placeholder')}
               size="middle"
               visibilityToggle={{
                 visible: primaryPasswordVisible,
@@ -354,10 +373,15 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
             />
           </Form.Item>
 
-          {(presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama') && (
-            <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.api_endpoint')}</span>} name="baseUrl" rules={[{ required: true, message: copy('ai_settings.form.api_endpoint_required') }]} style={{ marginBottom: 0 }}>
+          {supportsAdvancedEndpoint && (
+            <Form.Item
+              label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{copy('ai_settings.form.api_endpoint')}</span>}
+              name="baseUrl"
+              rules={presetKeyFromForm === 'codebuddy' ? [] : [{ required: true, message: copy('ai_settings.form.api_endpoint_required') }]}
+              style={{ marginBottom: 0 }}
+            >
               <Input
-                placeholder={resolvePresetByKey(presetKeyFromForm).defaultBaseUrl || 'https://...'}
+                placeholder={presetKeyFromForm === 'codebuddy' ? copy('ai_settings.form.api_endpoint_placeholder.codebuddy') : (resolvePresetByKey(presetKeyFromForm).defaultBaseUrl || 'https://...')}
                 size="middle"
                 suffix={<LinkOutlined style={{ color: overlayTheme.mutedText }} />}
                 style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }}

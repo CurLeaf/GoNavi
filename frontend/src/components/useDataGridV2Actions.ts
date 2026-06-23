@@ -1,0 +1,927 @@
+import { useCallback, useEffect, useMemo } from 'react';
+import { message } from 'antd';
+import { ExportQueryWithOptions } from '../../wailsjs/go/app/App';
+import type { CopySqlError } from './dataGridCopyInsert';
+import type { V2CellContextMenuActionKey, V2ColumnHeaderContextMenuActionKey } from './V2TableContextMenu';
+import {
+  DEFAULT_DATA_EXPORT_FORMAT,
+  DEFAULT_XLSX_ROWS_PER_SHEET,
+  showDataExportDialog,
+  type DataExportDialogValues,
+  type DataExportFileOptions,
+  type DataExportScopeOption,
+} from './DataExportDialog';
+import type { DataGridExportScope } from './DataGridCore';
+
+type DataGridV2ActionsContext = Record<string, any>;
+
+export const useDataGridV2Actions = (ctx: DataGridV2ActionsContext) => {
+  const {
+    GONAVI_ROW_KEY,
+    addTab,
+    allTableColumnNames,
+    applyColumnSort,
+    autoFitColumnWidth,
+    buildClipboardCsv,
+    buildClipboardJson,
+    buildClipboardMarkdown,
+    buildClipboardTsv,
+    buildCopyDeleteSQL,
+    buildCopyInsertSQL,
+    buildCopyUpdateSQL,
+    buildDataGridSelectBaseSql,
+    buildEffectiveFilterConditions,
+    buildOrderBySQL,
+    buildPaginatedSelectSQL,
+    buildRpcConnectionConfig,
+    buildSelectedCellClipboardText,
+    buildTableExportTab,
+    buildWhereSQL,
+    cellContextMenu,
+    cellEditMode,
+    closeCellEditMode,
+    columnMetaMap,
+    columnMetaMapByLowerName,
+    columnTypeMapByLowerName,
+    connectionId,
+    connections,
+    copiedCellPatch,
+    copyRowsForPaste,
+    copyToClipboard,
+    currentConnConfig,
+    currentSelectionRef,
+    dbName,
+    dbType,
+    ddlText,
+    displayColumnNames,
+    displayData,
+    displayDataRef,
+    displayOutputColumnNames,
+    escapeLiteral,
+    exportData,
+    filterConditions,
+    handleBatchFillToSelected,
+    handleCellSetNull,
+    handleCopyColumnData,
+    handleCopyContextMenuFieldName,
+    handleOpenContextMenuRowEditor,
+    handlePasteCopiedColumnsToSelectedRows,
+    handlePasteCopiedRowsAsNew,
+    handleUndoContextMenuCellChange,
+    hasChanges,
+    hasExplicitSort,
+    hasFilteredExportSql,
+    isQueryResultExport,
+    mergedDisplayData,
+    modal,
+    navigator,
+    objectType,
+    pagination,
+    pickDataGridOutputRows,
+    pickRowsForClipboard,
+    pkColumns,
+    quickWhereCondition,
+    quoteIdentPart,
+    resetCellSelection,
+    resolveContextMenuFieldName,
+    resolveDataSourceType,
+    resultExportAllSql,
+    resultSql,
+    rootRef,
+    rowKeyStr,
+    runExportWithProgress,
+    selectedCells,
+    selectedRowKeys,
+    selectedRowKeysRef,
+    setCellContextMenu,
+    setQueryOptions,
+    setSelectedRowKeys,
+    sortInfo,
+    splitCellKey,
+    supportsCopyInsert,
+    supportsSqlQueryExport,
+    tableName,
+    toggleColumnVisibility,
+    translateDataGrid,
+    uniqueKeyGroups,
+    withSortBufferTuningSQL,
+  } = ctx;
+
+const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeaderContextMenuActionKey) => {
+      const columnName = resolveContextMenuFieldName(cellContextMenu.dataIndex, cellContextMenu.title);
+      if (!columnName) {
+          void message.info(translateDataGrid('data_grid.message.no_field_name'));
+          setCellContextMenu((prev: any) => ({ ...prev, visible: false }));
+          return;
+      }
+
+      switch (action) {
+          case 'copy-field-name':
+              copyToClipboard(columnName);
+              break;
+          case 'copy-column-data':
+              handleCopyColumnData(columnName);
+              break;
+          case 'sort-asc':
+              applyColumnSort(columnName, 'ascend');
+              break;
+          case 'sort-desc':
+              applyColumnSort(columnName, 'descend');
+              break;
+          case 'clear-sort':
+              applyColumnSort(columnName, null);
+              break;
+          case 'auto-fit-column':
+              autoFitColumnWidth(columnName);
+              break;
+          case 'hide-column':
+              if (displayColumnNames.length <= 1) {
+                  void message.info(translateDataGrid('data_grid.message.keep_one_visible_column'));
+                  break;
+              }
+              toggleColumnVisibility(columnName, false);
+              break;
+          case 'show-column-type':
+              setQueryOptions({ showColumnType: true });
+              break;
+          case 'hide-column-type':
+              setQueryOptions({ showColumnType: false });
+              break;
+          case 'show-column-comment':
+              setQueryOptions({ showColumnComment: true });
+              break;
+          case 'hide-column-comment':
+              setQueryOptions({ showColumnComment: false });
+              break;
+          default:
+              break;
+      }
+      setCellContextMenu((prev: any) => ({ ...prev, visible: false }));
+  }, [
+      applyColumnSort,
+      autoFitColumnWidth,
+      cellContextMenu.dataIndex,
+      cellContextMenu.title,
+      copyToClipboard,
+      displayColumnNames.length,
+      handleCopyColumnData,
+      setQueryOptions,
+      translateDataGrid,
+      toggleColumnVisibility,
+  ]);
+
+  const getClipboardRows = useCallback(() => (
+      pickRowsForClipboard({
+          rows: mergedDisplayData as Array<Record<string, unknown>>,
+          selectedRowKeys,
+          columnNames: displayOutputColumnNames,
+          rowKeyField: GONAVI_ROW_KEY,
+          rowKeyToString: rowKeyStr,
+      })
+  ), [mergedDisplayData, selectedRowKeys, displayOutputColumnNames, rowKeyStr]);
+
+  const getClipboardColumnNames = useCallback((rows: Array<Record<string, unknown>>) => {
+      if (rows.length === 0) return [];
+      return displayOutputColumnNames;
+  }, [displayOutputColumnNames]);
+
+  const handleCopyQueryResultCsv = useCallback(() => {
+      const rows = getClipboardRows();
+      const columns = getClipboardColumnNames(rows);
+      const text = buildClipboardCsv(rows, columns);
+      if (!text) {
+          void message.info(translateDataGrid('data_grid.message.result_set_no_copyable_content'));
+          return;
+      }
+      copyToClipboard(text);
+  }, [copyToClipboard, getClipboardColumnNames, getClipboardRows, translateDataGrid]);
+
+  const handleCopyQueryResultJson = useCallback(() => {
+      const rows = getClipboardRows();
+      const text = buildClipboardJson(rows);
+      if (!text) {
+          void message.info(translateDataGrid('data_grid.message.result_set_no_copyable_content'));
+          return;
+      }
+      copyToClipboard(text);
+  }, [copyToClipboard, getClipboardRows, translateDataGrid]);
+
+  const handleCopyQueryResultMarkdown = useCallback(() => {
+      const rows = getClipboardRows();
+      const columns = getClipboardColumnNames(rows);
+      const text = buildClipboardMarkdown(rows, columns);
+      if (!text) {
+          void message.info(translateDataGrid('data_grid.message.result_set_no_copyable_content'));
+          return;
+      }
+      copyToClipboard(text);
+  }, [copyToClipboard, getClipboardColumnNames, getClipboardRows, translateDataGrid]);
+
+  const handleCopyDdl = useCallback(() => {
+      if (!ddlText.trim()) {
+          void message.info(translateDataGrid('data_grid.message.no_ddl_to_copy'));
+          return;
+      }
+      navigator.clipboard.writeText(ddlText)
+          .then(() => message.success(translateDataGrid('data_grid.message.ddl_copied')))
+          .catch(() => message.error(translateDataGrid('data_grid.message.ddl_copy_failed')));
+  }, [ddlText, translateDataGrid]);
+
+  const handleCopySelectedCellsToClipboard = useCallback(() => {
+      const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
+      if (activeSelection.size === 0) {
+          void message.info(translateDataGrid('data_grid.message.drag_select_cells_to_copy'));
+          return;
+      }
+
+      const parsed = Array.from(activeSelection)
+          .map((cellKey) => splitCellKey(cellKey))
+          .filter((item): item is { rowKey: string; colName: string } => !!item);
+      if (parsed.length === 0) {
+          void message.info(translateDataGrid('data_grid.message.no_copyable_cells'));
+          return;
+      }
+
+      const text = buildSelectedCellClipboardText({
+          selectedCells: parsed,
+          rows: mergedDisplayData as Array<Record<string, any>>,
+          columnOrder: displayColumnNames,
+          rowKeyField: GONAVI_ROW_KEY,
+      });
+      if (!text) {
+          void message.info(translateDataGrid('data_grid.message.selection_no_copyable_content'));
+          return;
+      }
+
+      copyToClipboard(text);
+  }, [selectedCells, mergedDisplayData, displayColumnNames, copyToClipboard, translateDataGrid]);
+
+  useEffect(() => {
+      if (!cellEditMode) return;
+
+      const onKeyDown = (event: KeyboardEvent) => {
+          const activeElement = document.activeElement as HTMLElement | null;
+          const tagName = String(activeElement?.tagName || '').toLowerCase();
+          if (tagName === 'input' || tagName === 'textarea' || activeElement?.isContentEditable) {
+              return;
+          }
+
+          if (event.key === 'Escape') {
+              const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
+              event.preventDefault();
+              if (activeSelection.size === 0) {
+                  closeCellEditMode();
+                  return;
+              }
+              resetCellSelection();
+              return;
+          }
+
+          const isCopy = (event.ctrlKey || event.metaKey) && !event.altKey && String(event.key || '').toLowerCase() === 'c';
+          if (!isCopy) return;
+
+          const activeSelection = currentSelectionRef.current.size > 0 ? currentSelectionRef.current : selectedCells;
+          if (activeSelection.size === 0) return;
+
+          event.preventDefault();
+          handleCopySelectedCellsToClipboard();
+      };
+
+      window.addEventListener('keydown', onKeyDown);
+      return () => window.removeEventListener('keydown', onKeyDown);
+  }, [cellEditMode, selectedCells, handleCopySelectedCellsToClipboard, resetCellSelection, closeCellEditMode]);
+
+  useEffect(() => {
+      if (!cellEditMode) return;
+
+      const onPointerDown = (event: MouseEvent) => {
+          const root = rootRef.current;
+          const target = event.target instanceof Node ? event.target : null;
+          if (!root || !target || root.contains(target)) return;
+          if (target instanceof HTMLElement
+              && target.closest('.ant-modal, .ant-dropdown, .ant-select-dropdown, .ant-picker-dropdown, .ant-popover')) {
+              return;
+          }
+          closeCellEditMode();
+      };
+
+      document.addEventListener('mousedown', onPointerDown);
+      return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [cellEditMode, closeCellEditMode]);
+  
+  const getTargets = useCallback((clickedRecord: any) => {
+      const selKeys = selectedRowKeysRef.current;
+      const currentData = displayDataRef.current;
+      const clickedKey = clickedRecord?.[GONAVI_ROW_KEY];
+      if (clickedKey !== undefined && selKeys.includes(clickedKey)) {
+          return currentData.filter((d: any) => selKeys.includes(d?.[GONAVI_ROW_KEY]));
+      }
+      return [clickedRecord];
+  }, []);
+
+  const getContextMenuTargetRows = useCallback((clickedRecord: any) => {
+      if (!clickedRecord) return [];
+      const selKeys = selectedRowKeysRef.current;
+      const clickedKey = clickedRecord?.[GONAVI_ROW_KEY];
+      const clickedKeyStr = clickedKey === undefined || clickedKey === null ? '' : rowKeyStr(clickedKey);
+      const selectedKeyStrSet = new Set(selKeys.map(rowKeyStr));
+      if (clickedKeyStr && selectedKeyStrSet.has(clickedKeyStr)) {
+          return mergedDisplayData.filter((row: any) => {
+              const rowKey = row?.[GONAVI_ROW_KEY];
+              return rowKey !== undefined && rowKey !== null && selectedKeyStrSet.has(rowKeyStr(rowKey));
+          });
+      }
+      return [clickedRecord];
+  }, [mergedDisplayData, rowKeyStr]);
+
+  const translateCopySqlError = useCallback((error: CopySqlError): string => {
+      if (typeof error === 'string') {
+          return error;
+      }
+      switch (error.key) {
+          case 'data_grid.copy_sql.error.missing_table_name':
+              return translateDataGrid('data_grid.copy_sql.error.missing_table_name', error.params);
+          case 'data_grid.copy_sql.error.no_copyable_fields':
+              return translateDataGrid('data_grid.copy_sql.error.no_copyable_fields');
+          case 'data_grid.copy_sql.error.missing_safe_where':
+          default:
+              return translateDataGrid('data_grid.copy_sql.error.missing_safe_where');
+      }
+  }, [translateDataGrid]);
+
+  const buildCopySqlBatchText = useCallback((mode: 'insert' | 'update' | 'delete', record: any): string | null => {
+      if (!supportsCopyInsert) {
+          void message.warning(translateDataGrid('data_grid.message.copy_sql_not_supported'));
+          return null;
+      }
+      const records = getTargets(record);
+      const orderedCols = displayOutputColumnNames;
+      if (mode === 'insert') {
+          return records.map((row: any) => buildCopyInsertSQL({
+              dbType,
+              tableName,
+              orderedCols,
+              record: row,
+              columnTypesByLowerName: columnTypeMapByLowerName,
+          })).join('\n\n');
+      }
+
+      const sqlResults = records.map((row: any) => (
+          mode === 'update'
+              ? buildCopyUpdateSQL({
+                  dbType,
+                  tableName,
+                  orderedCols,
+                  record: row,
+                  pkColumns,
+                  uniqueKeyGroups,
+                  allTableColumns: allTableColumnNames,
+                  columnTypesByLowerName: columnTypeMapByLowerName,
+              })
+              : buildCopyDeleteSQL({
+                  dbType,
+                  tableName,
+                  orderedCols,
+                  record: row,
+                  pkColumns,
+                  uniqueKeyGroups,
+                  allTableColumns: allTableColumnNames,
+                  columnTypesByLowerName: columnTypeMapByLowerName,
+              })
+      ));
+      const failedResult = sqlResults.find((result: any) => result.ok === false);
+      if (failedResult && failedResult.ok === false) {
+          void message.warning(translateCopySqlError(failedResult.error));
+          return null;
+      }
+      const sqlTexts: string[] = [];
+      sqlResults.forEach((result: any) => {
+          if (result.ok) {
+              sqlTexts.push(result.sql);
+          }
+      });
+      return sqlTexts.join('\n\n');
+  }, [
+      supportsCopyInsert,
+      getTargets,
+      displayOutputColumnNames,
+      dbType,
+      tableName,
+      columnTypeMapByLowerName,
+      pkColumns,
+      uniqueKeyGroups,
+      allTableColumnNames,
+      translateCopySqlError,
+      translateDataGrid,
+  ]);
+
+  const handleCopyInsert = useCallback((record: any) => {
+      const batchText = buildCopySqlBatchText('insert', record);
+      if (!batchText) return;
+      copyToClipboard(batchText);
+  }, [buildCopySqlBatchText, copyToClipboard]);
+
+  const handleCopyUpdate = useCallback((record: any) => {
+      const batchText = buildCopySqlBatchText('update', record);
+      if (!batchText) return;
+      copyToClipboard(batchText);
+  }, [buildCopySqlBatchText, copyToClipboard]);
+
+  const handleCopyDelete = useCallback((record: any) => {
+      const batchText = buildCopySqlBatchText('delete', record);
+      if (!batchText) return;
+      copyToClipboard(batchText);
+  }, [buildCopySqlBatchText, copyToClipboard]);
+
+  const handleCopyJson = useCallback((record: any) => {
+      const records = getTargets(record);
+      const cleanRecords = pickDataGridOutputRows(records, displayOutputColumnNames);
+      copyToClipboard(JSON.stringify(cleanRecords, null, 2));
+  }, [getTargets, displayOutputColumnNames, copyToClipboard]);
+
+  const handleCopyCsv = useCallback((record: any) => {
+      const records = getTargets(record);
+      const orderedCols = displayOutputColumnNames;
+      const header = orderedCols.map((c: string) => `"${c}"`).join(',');
+      const lines = records.map((r: any) => {
+          const values = orderedCols.map((c: string) => {
+              const v = r[c];
+              if (v === null || v === undefined) return 'NULL';
+              // CSV 标准：值中的双引号转义为两个双引号
+              const escaped = String(v).replace(/"/g, '""');
+              return `"${escaped}"`;
+          });
+          return values.join(',');
+      });
+      copyToClipboard([header, ...lines].join('\n'));
+  }, [getTargets, displayOutputColumnNames, copyToClipboard]);
+
+  const handleCopyRowData = useCallback((record: any) => {
+      const rows = getContextMenuTargetRows(record);
+      const columns = displayOutputColumnNames;
+      const text = buildClipboardTsv(
+          rows,
+          columns,
+          (columnName: string) => (columnMetaMap[columnName] || columnMetaMapByLowerName[columnName.toLowerCase()])?.type,
+          currentConnConfig,
+      );
+      if (!text) {
+          void message.info(translateDataGrid('data_grid.message.current_row_no_copyable_content'));
+          return;
+      }
+      copyToClipboard(text);
+  }, [columnMetaMap, columnMetaMapByLowerName, copyToClipboard, currentConnConfig, displayOutputColumnNames, getContextMenuTargetRows, translateDataGrid]);
+
+  const buildConnConfig = useCallback(() => {
+      if (!connectionId) return null;
+      const conn = connections.find((c: any) => c.id === connectionId);
+      if (!conn) return null;
+      return {
+          ...conn.config,
+          port: Number(conn.config.port),
+          password: conn.config.password || "",
+          database: conn.config.database || "",
+          useSSH: conn.config.useSSH || false,
+          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
+      };
+  }, [connections, connectionId]);
+
+  const exportByQuery = useCallback(async (sql: string, defaultName: string, options: DataExportFileOptions, totalRows?: number) => {
+      const config = buildConnConfig();
+      if (!config) return;
+      const totalRowsKnown = Number.isFinite(totalRows) && Number(totalRows) >= 0;
+      await runExportWithProgress({
+          title: `导出 ${defaultName || '查询结果'}`,
+          targetName: defaultName || 'export',
+          format: options.format,
+          totalRows: totalRowsKnown ? Number(totalRows) : undefined,
+          run: (jobId: string) => ExportQueryWithOptions(
+              buildRpcConnectionConfig(config) as any,
+              dbName || '',
+              sql,
+              defaultName || 'export',
+              {
+                  ...options,
+                  jobId,
+                  totalRowsHint: totalRowsKnown ? Number(totalRows) : 0,
+                  totalRowsKnown,
+              } as any,
+          ),
+      });
+  }, [buildConnConfig, dbName, runExportWithProgress]);
+
+  const buildPkWhereSql = useCallback((rows: any[], dbType: string) => {
+      if (!tableName || pkColumns.length === 0) return '';
+      const targets = (rows || []).filter(Boolean);
+      if (targets.length === 0) return '';
+
+      const clauses: string[] = [];
+      for (const r of targets) {
+          const andParts: string[] = [];
+          for (const pk of pkColumns) {
+              const col = quoteIdentPart(dbType, pk);
+              const v = r?.[pk];
+              if (v === null || v === undefined) return '';
+              andParts.push(`${col} = '${escapeLiteral(String(v))}'`);
+          }
+          if (andParts.length === pkColumns.length) {
+              clauses.push(`(${andParts.join(' AND ')})`);
+          }
+      }
+      if (clauses.length === 0) return '';
+      return clauses.join(' OR ');
+  }, [pkColumns, tableName]);
+
+  const buildCurrentPageSql = useCallback((dbType: string) => {
+      if (!tableName || !pagination) return '';
+      const effectiveFilterConditions = buildEffectiveFilterConditions(filterConditions, quickWhereCondition);
+      const whereSQL = buildWhereSQL(dbType, effectiveFilterConditions);
+      const baseSql = buildDataGridSelectBaseSql({
+          dbType,
+          tableName,
+          columnNames: displayOutputColumnNames,
+          whereSql: whereSQL,
+      });
+      const orderBySQL = buildOrderBySQL(dbType, sortInfo, pkColumns);
+      const normalizedType = String(dbType || '').trim().toLowerCase();
+      const hasSortForBuffer = hasExplicitSort(sortInfo);
+      const offset = (pagination.current - 1) * pagination.pageSize;
+      let sql = buildPaginatedSelectSQL(dbType, baseSql, orderBySQL, pagination.pageSize, offset);
+      if (hasSortForBuffer && (normalizedType === 'mysql' || normalizedType === 'mariadb')) {
+          sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
+      }
+      return sql;
+  }, [tableName, pagination, filterConditions, quickWhereCondition, sortInfo, pkColumns, displayOutputColumnNames]);
+
+  const buildAllRowsSql = useCallback((dbType: string) => {
+      if (!tableName) return '';
+      return buildDataGridSelectBaseSql({
+          dbType,
+          tableName,
+          columnNames: displayOutputColumnNames,
+      });
+  }, [tableName, displayOutputColumnNames]);
+
+  const buildFilteredAllSql = useCallback((dbType: string) => {
+      if (!tableName) return '';
+      const effectiveFilterConditions = buildEffectiveFilterConditions(filterConditions, quickWhereCondition);
+      const whereSQL = buildWhereSQL(dbType, effectiveFilterConditions);
+      if (!whereSQL) return '';
+      let sql = buildDataGridSelectBaseSql({
+          dbType,
+          tableName,
+          columnNames: displayOutputColumnNames,
+          whereSql: whereSQL,
+      });
+      sql += buildOrderBySQL(dbType, sortInfo, pkColumns);
+      const normalizedType = String(dbType || '').trim().toLowerCase();
+      const hasSortForBuffer = hasExplicitSort(sortInfo);
+      if (hasSortForBuffer && (normalizedType === 'mysql' || normalizedType === 'mariadb')) {
+          sql = withSortBufferTuningSQL(normalizedType, sql, 32 * 1024 * 1024);
+      }
+      return sql;
+  }, [tableName, filterConditions, quickWhereCondition, sortInfo, pkColumns, displayOutputColumnNames]);
+
+  const queryResultCurrentPageRows = useMemo(() => {
+      if (isQueryResultExport) {
+          return mergedDisplayData;
+      }
+      if (!pagination) {
+          return mergedDisplayData;
+      }
+      const offset = Math.max(0, (pagination.current - 1) * pagination.pageSize);
+      return mergedDisplayData.slice(offset, offset + pagination.pageSize);
+  }, [isQueryResultExport, mergedDisplayData, pagination]);
+
+  const exportQueryResultRows = useCallback(async (options: DataExportFileOptions, scope: Exclude<DataGridExportScope, 'filteredAll'>) => {
+      if (scope === 'selected') {
+          const selectedKeySet = new Set(selectedRowKeys.map((key: any) => rowKeyStr(key)));
+          const rows = mergedDisplayData.filter((row: any) => {
+              const key = row?.[GONAVI_ROW_KEY];
+              return key !== undefined && key !== null && selectedKeySet.has(rowKeyStr(key));
+          });
+          if (rows.length === 0) {
+              void message.info(translateDataGrid('data_grid.message.no_rows_selected'));
+              return;
+          }
+          await exportData(rows, options);
+          return;
+      }
+      if (scope === 'page') {
+          await exportData(queryResultCurrentPageRows, options);
+          return;
+      }
+      const exportAllSql = String(resultExportAllSql || '').trim();
+      const fallbackAllSql = String(resultSql || '').trim();
+      const backendExportSql = exportAllSql || fallbackAllSql;
+      if (backendExportSql && connectionId) {
+          const totalRows = pagination && pagination.totalKnown !== false ? Number(pagination.total) : undefined;
+          await exportByQuery(backendExportSql, tableName || 'query_result', options, totalRows);
+          return;
+      }
+      await exportData(mergedDisplayData, options);
+  }, [connectionId, exportByQuery, exportData, mergedDisplayData, pagination, queryResultCurrentPageRows, resultExportAllSql, resultSql, rowKeyStr, selectedRowKeys, tableName]);
+
+  // Context Menu Export
+  const handleExportSelected = useCallback(async (options: DataExportFileOptions, record: any) => {
+      if (isQueryResultExport) {
+          await exportData(getContextMenuTargetRows(record), options);
+          return;
+      }
+      const records = getTargets(record);
+      if (!connectionId || !tableName) {
+          await exportData(records, options);
+          return;
+      }
+
+      // 有未提交修改时，优先按界面数据导出，避免与数据库不一致。
+      if (hasChanges) {
+          await exportData(records, options);
+          void message.warning(translateDataGrid('data_grid.message.export_with_uncommitted_changes'));
+          return;
+      }
+
+      const config = buildConnConfig();
+      if (!config) {
+          await exportData(records, options);
+          return;
+      }
+
+      const dbType = resolveDataSourceType(config);
+      const pkWhere = buildPkWhereSql(records, dbType);
+      if (!pkWhere) {
+          await exportData(records, options);
+          return;
+      }
+
+      const sql = buildDataGridSelectBaseSql({
+          dbType,
+          tableName,
+          columnNames: displayOutputColumnNames,
+          whereSql: `WHERE ${pkWhere}`,
+      });
+      await exportByQuery(sql, tableName || 'export', options, records.length);
+  }, [getTargets, isQueryResultExport, connectionId, tableName, hasChanges, exportData, buildConnConfig, buildPkWhereSql, exportByQuery, displayOutputColumnNames, translateDataGrid]);
+
+  const handleV2CellContextMenuAction = useCallback((action: V2CellContextMenuActionKey) => {
+      const record = cellContextMenu.record;
+      const closeMenu = () => setCellContextMenu((prev: any) => ({ ...prev, visible: false }));
+
+      switch (action) {
+          case 'copy-field-name':
+              handleCopyContextMenuFieldName();
+              return;
+          case 'copy-row-data':
+              if (record) handleCopyRowData(record);
+              closeMenu();
+              return;
+          case 'copy-row-for-paste':
+              if (record) {
+                  const rowKey = record?.[GONAVI_ROW_KEY];
+                  if (rowKey === undefined || rowKey === null) {
+                      void message.info(translateDataGrid('data_grid.message.no_copyable_rows'));
+                  } else {
+                      setSelectedRowKeys([rowKey]);
+                      copyRowsForPaste([rowKey]);
+                  }
+              }
+              closeMenu();
+              return;
+          case 'paste-row-as-new':
+              handlePasteCopiedRowsAsNew();
+              closeMenu();
+              return;
+          case 'copy-column-data':
+              handleCopyColumnData(cellContextMenu.dataIndex);
+              closeMenu();
+              return;
+          case 'undo-cell-change':
+              handleUndoContextMenuCellChange();
+              return;
+          case 'set-null':
+              handleCellSetNull();
+              return;
+          case 'edit-row':
+              handleOpenContextMenuRowEditor();
+              return;
+          case 'fill-selected':
+              if (selectedRowKeys.length > 0 && record) {
+                  handleBatchFillToSelected(record, cellContextMenu.dataIndex);
+              }
+              closeMenu();
+              return;
+          case 'paste-copied-columns':
+              if (copiedCellPatch) {
+                  handlePasteCopiedColumnsToSelectedRows(record?.[GONAVI_ROW_KEY]);
+              }
+              closeMenu();
+              return;
+          case 'copy-insert':
+              if (record) handleCopyInsert(record);
+              closeMenu();
+              return;
+          case 'copy-update':
+              if (record) handleCopyUpdate(record);
+              closeMenu();
+              return;
+          case 'copy-delete':
+              if (record) handleCopyDelete(record);
+              closeMenu();
+              return;
+          case 'copy-json':
+              if (record) handleCopyJson(record);
+              closeMenu();
+              return;
+          case 'copy-csv':
+              if (record) handleCopyCsv(record);
+              closeMenu();
+              return;
+          case 'copy-markdown':
+              if (record) {
+                  const records = getTargets(record);
+                  const columns = getClipboardColumnNames(records);
+                  copyToClipboard(buildClipboardMarkdown(records, columns));
+              }
+              closeMenu();
+              return;
+          case 'export-csv':
+          case 'export-xlsx':
+          case 'export-json':
+          case 'export-html':
+              if (record) {
+                  const format = action.replace('export-', '') as DataExportDialogValues['format'];
+                  handleExportSelected({ format }, record).catch(console.error);
+              }
+              closeMenu();
+              return;
+          default:
+              closeMenu();
+      }
+  }, [
+      cellContextMenu.record,
+      cellContextMenu.dataIndex,
+      copiedCellPatch,
+      copyRowsForPaste,
+      copyToClipboard,
+      getClipboardColumnNames,
+      getTargets,
+      handleBatchFillToSelected,
+      handleCellSetNull,
+      handleUndoContextMenuCellChange,
+      handleCopyContextMenuFieldName,
+      handleCopyCsv,
+      handleCopyDelete,
+      handleCopyInsert,
+      handleCopyJson,
+      handleCopyColumnData,
+      handleCopyRowData,
+      handleCopyUpdate,
+      handleExportSelected,
+      handleOpenContextMenuRowEditor,
+      handlePasteCopiedColumnsToSelectedRows,
+      handlePasteCopiedRowsAsNew,
+      selectedRowKeys.length,
+      translateDataGrid,
+  ]);
+
+  // Export
+  const handleOpenExportDialog = useCallback(async () => {
+      const selectedCount = selectedRowKeys.length;
+      const allRowsLabel = (resultExportAllSql || resultSql)
+          ? '全部结果（重新查询）'
+          : `全部结果（当前缓存 ${mergedDisplayData.length} 条）`;
+      const commonInitialValues: Partial<DataExportDialogValues> = {
+          format: DEFAULT_DATA_EXPORT_FORMAT,
+          xlsxMaxRowsPerSheet: DEFAULT_XLSX_ROWS_PER_SHEET,
+      };
+
+      if (isQueryResultExport) {
+          const scopeOptions: DataExportScopeOption[] = [
+              {
+                  value: 'selected',
+                  label: selectedCount > 0 ? `选中行 (${selectedCount} 条)` : '选中行',
+                  description: '仅导出当前结果集中已勾选的行。',
+                  disabled: selectedCount <= 0,
+              },
+              {
+                  value: 'page',
+                  label: `当前页 (${queryResultCurrentPageRows.length} 条)`,
+                  description: '直接按当前结果页缓存导出。',
+              },
+              {
+                  value: 'all',
+                  label: allRowsLabel,
+                  description: (resultExportAllSql || resultSql)
+                      ? '后台会重新执行 SQL，避免只导出当前页或当前缓存。'
+                      : '当前查询缺少可重放 SQL 时，将导出当前缓存的全部结果。',
+              },
+          ];
+          const values = await showDataExportDialog(modal, {
+              title: '导出查询结果',
+              scopeOptions,
+              initialValues: {
+                  ...commonInitialValues,
+                  scope: (resultExportAllSql || resultSql) ? 'all' : (selectedCount > 0 ? 'selected' : 'page'),
+              },
+          });
+          if (!values) return;
+          await exportQueryResultRows(values, values.scope as Exclude<DataGridExportScope, 'filteredAll'>);
+          return;
+      }
+
+      if (!connectionId) return;
+      const config = buildConnConfig();
+      const dbType = config ? resolveDataSourceType(config) : '';
+      const currentPageSql = config && !hasChanges ? buildCurrentPageSql(dbType) : '';
+      const filteredAllSql = config && supportsSqlQueryExport ? buildFilteredAllSql(dbType) : '';
+      const allRowsSql = config && objectType !== 'table' ? buildAllRowsSql(dbType) : '';
+      const hasKnownFilteredTotal = hasFilteredExportSql && pagination && pagination.totalKnown !== false;
+      const hasKnownAllTotal = !hasFilteredExportSql && pagination && pagination.totalKnown !== false;
+
+      addTab(buildTableExportTab({
+          connectionId,
+          dbName,
+          tableName: tableName || 'export',
+          title: `导出 ${tableName || '数据'}`,
+          objectType,
+          scopeOptions: [
+              {
+                  value: 'page',
+                  label: `当前页 (${displayData.length} 条)`,
+                  description: currentPageSql
+                      ? '后台按当前分页条件重新查询后导出当前页。'
+                      : '当前页依赖前端临时状态，建议直接使用快捷导出。',
+                  disabled: !currentPageSql,
+              },
+              ...(hasFilteredExportSql ? [{
+                  value: 'filteredAll' as const,
+                  label: '筛选结果（全部）',
+                  description: filteredAllSql
+                      ? '按当前筛选条件重新查询数据库并导出全部筛选结果。'
+                      : '当前数据源或当前状态暂不支持在工作台重放筛选导出。',
+                  disabled: !filteredAllSql,
+              }] : []),
+              {
+                  value: 'all',
+                  label: '全表数据',
+                  description: '后台重新查询整张表并导出全部数据。',
+              },
+          ],
+          initialScope: hasFilteredExportSql && filteredAllSql ? 'filteredAll' : 'all',
+          queryByScope: {
+              ...(currentPageSql ? { page: currentPageSql } : {}),
+              ...(filteredAllSql ? { filteredAll: filteredAllSql } : {}),
+              ...(allRowsSql ? { all: allRowsSql } : {}),
+          },
+          rowCountByScope: {
+              page: displayData.length,
+              ...(hasKnownFilteredTotal ? { filteredAll: Number(pagination?.total) } : {}),
+              ...(hasKnownAllTotal ? { all: Number(pagination?.total) } : {}),
+          },
+      }));
+  }, [
+      addTab,
+      buildAllRowsSql,
+      buildConnConfig,
+      buildCurrentPageSql,
+      buildFilteredAllSql,
+      connectionId,
+      dbName,
+      displayData.length,
+      exportQueryResultRows,
+      hasFilteredExportSql,
+      objectType,
+      isQueryResultExport,
+      mergedDisplayData.length,
+      modal,
+      pagination,
+      queryResultCurrentPageRows.length,
+      resultExportAllSql,
+      resultSql,
+      selectedRowKeys.length,
+      supportsSqlQueryExport,
+      tableName,
+      hasChanges,
+  ]);
+
+  return {
+    handleV2ColumnHeaderContextMenuAction,
+    buildConnConfig,
+    buildCopySqlBatchText,
+    getTargets,
+    handleCopyCsv,
+    handleCopyDdl,
+    handleCopyDelete,
+    handleCopyInsert,
+    handleCopyJson,
+    handleCopyQueryResultCsv,
+    handleCopyQueryResultJson,
+    handleCopyQueryResultMarkdown,
+    handleCopyRowData,
+    handleCopySelectedCellsToClipboard,
+    handleCopyUpdate,
+    handleExportSelected,
+    handleV2CellContextMenuAction,
+    handleOpenExportDialog,
+  };
+};

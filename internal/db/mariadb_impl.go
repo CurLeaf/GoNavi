@@ -49,10 +49,13 @@ func (m *MariaDB) Connect(config connection.ConnectionConfig) error {
 	if err != nil {
 		return wrapDatabaseConnectionOpenError(err)
 	}
+	configureSQLConnectionPool(db, "mariadb")
 	m.conn = db
 	m.pingTimeout = getConnectTimeout(config)
 
 	if err := m.Ping(); err != nil {
+		_ = db.Close()
+		m.conn = nil
 		return wrapDatabaseConnectionVerifyError(err)
 	}
 	return nil

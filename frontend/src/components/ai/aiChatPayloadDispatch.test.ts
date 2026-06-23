@@ -39,8 +39,8 @@ describe('aiChatPayloadDispatch', () => {
     expect(setSending).not.toHaveBeenCalled();
   });
 
-  it('appends a non-stream assistant message when only AIChatSend is available', async () => {
-    const AIChatSend = vi.fn().mockResolvedValue({
+  it('appends a non-stream assistant message when session-aware send is available', async () => {
+    const AIChatSendInSession = vi.fn().mockResolvedValue({
       success: true,
       content: 'done',
       reasoning_content: 'thinking',
@@ -52,7 +52,7 @@ describe('aiChatPayloadDispatch', () => {
     (globalThis as any).window = {
       go: {
         aiservice: {
-          Service: { AIChatSend },
+          Service: { AIChatSendInSession },
         },
       },
     };
@@ -68,6 +68,7 @@ describe('aiChatPayloadDispatch', () => {
     });
 
     expect(result).toBe('send');
+    expect(AIChatSendInSession).toHaveBeenCalledWith('session-1', [{ role: 'user', content: 'hello' }], []);
     expect(addAIChatMessage).toHaveBeenCalledWith('session-1', expect.objectContaining({
       id: 'msg-send',
       role: 'assistant',
@@ -80,7 +81,7 @@ describe('aiChatPayloadDispatch', () => {
   });
 
   it('settles the pending assistant message when falling back to non-stream send', async () => {
-    const AIChatSend = vi.fn().mockResolvedValue({
+    const AIChatSendInSession = vi.fn().mockResolvedValue({
       success: true,
       content: 'done',
       reasoning_content: 'thinking',
@@ -92,7 +93,7 @@ describe('aiChatPayloadDispatch', () => {
     (globalThis as any).window = {
       go: {
         aiservice: {
-          Service: { AIChatSend },
+          Service: { AIChatSendInSession },
         },
       },
     };
@@ -109,6 +110,7 @@ describe('aiChatPayloadDispatch', () => {
     });
 
     expect(result).toBe('send');
+    expect(AIChatSendInSession).toHaveBeenCalledWith('session-1', [{ role: 'user', content: 'hello' }], []);
     expect(addAIChatMessage).not.toHaveBeenCalled();
     expect(updateAIChatMessage).toHaveBeenCalledWith('session-1', 'assistant-connecting', expect.objectContaining({
       content: 'done',
@@ -116,6 +118,44 @@ describe('aiChatPayloadDispatch', () => {
       reasoning_content: 'thinking',
       loading: false,
       phase: 'idle',
+    }));
+    expect(setSending).toHaveBeenCalledWith(false);
+  });
+
+  it('falls back to stateless AIChatSend when session-aware send is unavailable', async () => {
+    const AIChatSend = vi.fn().mockResolvedValue({
+      success: true,
+      content: 'done',
+      reasoning_content: 'thinking',
+    });
+    const addAIChatMessage = vi.fn();
+    const setSending = vi.fn();
+
+    (globalThis as any).window = {
+      go: {
+        aiservice: {
+          Service: { AIChatSend },
+        },
+      },
+    };
+
+    const result = await dispatchAIChatPayload({
+      sid: 'session-1',
+      messages: [{ role: 'user', content: 'hello' }],
+      tools: [],
+      addAIChatMessage,
+      setSending,
+      nextMessageId: () => 'msg-send',
+    });
+
+    expect(result).toBe('send');
+    expect(AIChatSend).toHaveBeenCalledWith([{ role: 'user', content: 'hello' }], []);
+    expect(addAIChatMessage).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      id: 'msg-send',
+      role: 'assistant',
+      content: 'done',
+      thinking: 'thinking',
+      reasoning_content: 'thinking',
     }));
     expect(setSending).toHaveBeenCalledWith(false);
   });

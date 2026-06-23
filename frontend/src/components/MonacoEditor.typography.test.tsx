@@ -57,6 +57,7 @@ describe('MonacoEditor typography', () => {
       <MonacoEditor options={{ minimap: { enabled: false } }} />,
     );
 
+    expect(markup).toContain('&quot;editContext&quot;:false');
     expect(markup).toContain('JetBrains Mono');
     expect(markup).toContain('ui-monospace');
     expect(markup).toContain('&quot;fontSize&quot;:13');
@@ -83,6 +84,7 @@ describe('MonacoEditor typography', () => {
       <MonacoEditor options={{ fontFamily: 'Consolas', fontSize: 18 }} />,
     );
 
+    expect(markup).toContain('&quot;editContext&quot;:false');
     expect(markup).toContain('&quot;fontFamily&quot;:&quot;Consolas&quot;');
     expect(markup).toContain('&quot;fontSize&quot;:18');
     expect(markup).not.toContain('JetBrains Mono');

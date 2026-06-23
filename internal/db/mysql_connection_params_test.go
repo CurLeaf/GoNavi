@@ -45,6 +45,21 @@ func parseMySQLDriverCharsetsForTest(t *testing.T, dsn string) []string {
 	return charsets
 }
 
+func TestConfigureSQLConnectionPoolCapsOpenConnections(t *testing.T) {
+	dbConn, err := sql.Open("mysql", "root@tcp(127.0.0.1:1)/test")
+	if err != nil {
+		t.Fatalf("sql.Open failed: %v", err)
+	}
+	defer dbConn.Close()
+
+	configureSQLConnectionPool(dbConn, "mysql")
+
+	stats := dbConn.Stats()
+	if stats.MaxOpenConnections != defaultSQLMaxOpenConns {
+		t.Fatalf("expected max open connections %d, got %d", defaultSQLMaxOpenConns, stats.MaxOpenConnections)
+	}
+}
+
 func TestMySQLDSN_MergesConnectionParamsWithDefaults(t *testing.T) {
 	t.Parallel()
 

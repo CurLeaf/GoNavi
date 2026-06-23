@@ -193,6 +193,24 @@ func TestNormalizeSchemaAndTableByType_RabbitMQPreservesDottedQueueName(t *testi
 	}
 }
 
+func TestNormalizeSchemaAndTableByType_TrinoPreservesDottedTableName(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTableByType("trino", "hive.default", "orders.events.v1")
+	if schema != "hive.default" || table != "orders.events.v1" {
+		t.Fatalf("expected trino table name to stay intact, got %q.%q", schema, table)
+	}
+}
+
+func TestQuoteTableIdentByType_TrinoKeepsCatalogSchemaAndDottedTable(t *testing.T) {
+	t.Parallel()
+
+	got := quoteTableIdentByType("trino", "hive.default", "orders.events.v1")
+	if got != `"hive"."default"."orders.events.v1"` {
+		t.Fatalf("unexpected trino quoted table: %s", got)
+	}
+}
+
 func TestBuildRunConfigForDDL_CustomHighGoUsesDatabase(t *testing.T) {
 	t.Parallel()
 

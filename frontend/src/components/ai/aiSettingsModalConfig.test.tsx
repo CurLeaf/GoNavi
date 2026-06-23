@@ -30,6 +30,26 @@ describe('aiSettingsModalConfig', () => {
     expect(preset.key).toBe('qwen-coding-plan');
   });
 
+  it('matches a CodeBuddy CLI provider back to the dedicated preset', () => {
+    const preset = matchProviderPreset({
+      type: 'custom',
+      baseUrl: '',
+      apiFormat: 'codebuddy-cli',
+    });
+
+    expect(preset.key).toBe('codebuddy');
+  });
+
+  it('matches a Cursor Agent provider back to the dedicated preset', () => {
+    const preset = matchProviderPreset({
+      type: 'custom',
+      baseUrl: 'https://api.cursor.com/v1',
+      apiFormat: 'cursor-agent',
+    });
+
+    expect(preset.key).toBe('cursor');
+  });
+
   it('creates MCP server drafts and skill drafts with stable defaults', () => {
     const server = EMPTY_MCP_SERVER({ name: 'Browser', args: ['stdio'] });
     const skill = EMPTY_SKILL();
@@ -43,6 +63,8 @@ describe('aiSettingsModalConfig', () => {
 
   it('keeps the provider preset list available for the settings modal', () => {
     expect(PROVIDER_PRESETS.some((item) => item.key === 'codex')).toBe(false);
+    expect(PROVIDER_PRESETS.some((item) => item.key === 'codebuddy')).toBe(true);
+    expect(PROVIDER_PRESETS.some((item) => item.key === 'cursor')).toBe(true);
     expect(PROVIDER_PRESETS.some((item) => item.key === 'openai')).toBe(true);
     expect(PROVIDER_PRESETS.some((item) => item.key === 'custom')).toBe(true);
   });
@@ -59,6 +81,14 @@ describe('aiSettingsModalConfig', () => {
     expect(custom).toMatchObject({
       label: 'Custom',
       desc: 'Custom API endpoint',
+    });
+    expect(localized.find((item) => item.key === 'codebuddy')).toMatchObject({
+      label: 'CodeBuddy',
+      desc: 'Local CodeBuddy CLI / official login session',
+    });
+    expect(localized.find((item) => item.key === 'cursor')).toMatchObject({
+      label: 'Cursor',
+      desc: 'Cloud Agents API / official API Key',
     });
     expect(localized.find((item) => item.key === 'minimax')).toMatchObject({
       desc: 'M3 / M2.7 series (Anthropic-compatible)',
@@ -84,6 +114,8 @@ describe('aiSettingsModalConfig', () => {
       '火山方舟',
       'Ark 通用推理 / 豆包模型',
       '火山 Coding Plan',
+      '本地 CodeBuddy CLI / 官方登录态',
+      'Cloud Agents API / 官方 API Key',
       '本地部署开源模型',
       '自定义',
       '自定义 API 端点',

@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Modal, Form, message as antdMessage } from 'antd';
+import { Form, message as antdMessage } from 'antd';
 import { RobotOutlined } from '@ant-design/icons';
 import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AIMCPClientInstallStatus, AIMCPHTTPServerStatus, AISkillConfig } from '../types';
 import {
@@ -361,7 +362,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             // 构建 payload，处理 model/models 逻辑
             const preset = findPreset(values.presetKey);
             const localizedPreset = localizeProviderPreset(preset, t);
-            const isCustomLike = values.presetKey === 'custom' || values.presetKey === 'ollama';
+            const isCustomLike = ['custom', 'ollama', 'codebuddy', 'cursor'].includes(values.presetKey);
             const { model: finalModel, models: resolvedModels } = resolvePresetModelSelection({
                 presetKey: values.presetKey,
                 presetDefaultModel: preset.defaultModel,
@@ -646,10 +647,11 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 presetFixedApiFormat: preset.fixedApiFormat,
                 valuesApiFormat: values.apiFormat,
             });
+            const allowEmptySecret = values.presetKey === 'codebuddy';
             const secretDraft = resolveProviderSecretDraft({
                 apiKeyInput: values.apiKey,
             });
-            if (secretDraft.mode === 'clear') {
+            if (secretDraft.mode === 'clear' && !allowEmptySecret) {
                 throw new Error(t('ai_settings.message.test_requires_new_api_key'));
             }
             const res = await Service?.AITestProvider?.({

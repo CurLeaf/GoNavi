@@ -58,6 +58,19 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('treats Trino as an editable SQL datasource without database-level DDL shortcuts', () => {
+    expect(getDataSourceCapabilities({ type: 'trino' })).toMatchObject({
+      type: 'trino',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: true,
+      supportsCopyInsert: true,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
+    });
+  });
+
   it('keeps InterSystems IRIS as an editable SQL datasource capability', () => {
     expect(getDataSourceCapabilities({ type: 'iris' })).toMatchObject({
       type: 'iris',

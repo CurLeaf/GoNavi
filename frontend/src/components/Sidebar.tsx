@@ -1,10 +1,75 @@
-﻿import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
+﻿import SidebarConnectionRail from './sidebar/SidebarConnectionRail';
+import SidebarSearchPanel, { type SidebarSearchPanelProps } from './sidebar/SidebarSearchPanel';
+import SlowQueryRailButton from './sidebar/SlowQueryRailButton';
+import { buildSidebarLegacyNodeMenuItems } from './sidebar/sidebarLegacyNodeMenu';
+import {
+  getMetadataDialect,
+  shouldHideSchemaPrefix,
+  splitQualifiedName,
+} from './sidebar/sidebarMetadataLoaders';
+import {
+  useSidebarBatchExport,
+} from './sidebar/useSidebarBatchExport';
+import { SidebarBatchExportModals } from './sidebar/SidebarBatchExportModals';
+import { SidebarEntityModals } from './sidebar/SidebarEntityModals';
+import { renderSidebarV2TreeTitle } from './sidebar/SidebarTreeTitle';
+import {
+  useSidebarV2ContextMenu,
+} from './sidebar/useSidebarV2ContextMenu';
+import {
+  useSidebarObjectActions,
+  type SidebarMessagePublishTarget,
+} from './sidebar/useSidebarObjectActions';
+import { useSidebarSearchModel } from './sidebar/useSidebarSearchModel';
+import { useSidebarV2ActionHandlers } from './sidebar/useSidebarV2ActionHandlers';
+import { useSidebarCommandSearchRunner } from './sidebar/useSidebarCommandSearchRunner';
+import { useSidebarTitleRender } from './sidebar/useSidebarTitleRender';
+import {
+  normalizeDriverType,
+  useSidebarTreeLoaders,
+} from './sidebar/useSidebarTreeLoaders';
+export { formatSidebarDriverAgentUpdateWarning } from './sidebar/useSidebarTreeLoaders';
+import {
+  ExternalSQLFileModal,
+  SQLFileExecutionModal,
+  useSidebarExternalSqlWorkflow,
+} from './sidebar/SidebarExternalSqlWorkflow';
+export {
+  buildSQLFileExecutionFooter,
+  SQLFileExecutionProgressContent,
+} from './sidebar/SidebarExternalSqlWorkflow';
+export type {
+  SQLFileExecutionProgressState,
+  SQLFileExecutionStatus,
+} from './sidebar/SidebarExternalSqlWorkflow';
+import {
+  V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID,
+  formatSidebarRowCount,
+  hasSidebarLazyChildren,
+  shouldClearSidebarActiveContextOnEmptySelect,
+  shouldLoadSidebarNodeOnExpand,
+  getV2RailConnectionGroupBadgeText,
+  type V2ExplorerFilter,
+} from './sidebar/sidebarHelpers';
+// 重新导出，保持外部测试文件的 `from './Sidebar'` 兼容
+export {
+  V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID,
+  formatSidebarRowCount,
+  hasSidebarLazyChildren,
+  shouldClearSidebarActiveContextOnEmptySelect,
+  shouldLoadSidebarNodeOnExpand,
+  getV2RailConnectionGroupBadgeText,
+  isV2SidebarObjectNode,
+  resolveV2ObjectGroupTitle,
+  resolveSidebarTableNameForCopy,
+  parseV2CommandSearchQuery,
+} from './sidebar/sidebarHelpers';
+import React, { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
-import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, Checkbox, Space, Select, Popover, Tooltip, Progress, Switch } from 'antd';
+import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Popover, Tooltip } from 'antd';
 	import {
 	  DatabaseOutlined,
 	  TableOutlined,
-	  EyeOutlined,
 	  ConsoleSqlOutlined,
   HddOutlined,
   FolderOutlined,
@@ -15,7 +80,6 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   FolderAddOutlined,
   SaveOutlined,
   EditOutlined,
-  DownOutlined,
   SearchOutlined,
   KeyOutlined,
   ThunderboltOutlined,
@@ -28,55 +92,37 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Modal, Form, Badge, 
   SendOutlined,
   DeleteOutlined,
   DisconnectOutlined,
-  CloudOutlined,
   CheckSquareOutlined,
-  CodeOutlined,
-  TagOutlined,
-  CheckOutlined,
   FilterOutlined,
   DashboardOutlined,
   WarningOutlined,
-  ClockCircleOutlined,
-  RobotOutlined,
   AimOutlined,
   MoreOutlined,
   ToolOutlined,
   SettingOutlined,
-  BarsOutlined,
-  StarFilled,
-  StarOutlined
+  BarsOutlined
 	} from '@ant-design/icons';
 import {
     buildSidebarRootConnectionToken,
     buildSidebarRootTagToken,
-    buildSidebarTablePinKey,
     resolveSidebarRootOrderTokens,
     useStore,
 } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-		import { ConnectionTag, SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTreeEntry, JVMCapability, JVMResourceSummary } from '../types';
+		import { SavedConnection, SavedQuery, ExternalSQLDirectory, ExternalSQLTreeEntry } from '../types';
 import { getDbIcon } from './DatabaseIcons';
-		import { DBGetDatabases, DBGetTables, DBQuery, DBShowCreateTable, DBReleaseConnection, ExportTable, OpenSQLFile, ExecuteSQLFile, CancelSQLFileExecution, CreateDatabase, CreateSchema, RenameDatabase, DropDatabase, RenameTable, DropTable, DropView, DropFunction, RenameView, SelectSQLDirectory, ListSQLDirectory, ReadSQLFile, CreateSQLFile, CreateSQLDirectory, DeleteSQLFile, DeleteSQLDirectory, RenameSQLFile, RenameSQLDirectory, JVMProbeCapabilities, GetDriverStatusList } from '../../wailsjs/go/app/App';
-import { getTableDataDangerActionMeta, supportsTableTruncateAction, type TableDataDangerActionKind } from './tableDataDangerActions';
+		import { ListSQLDirectory } from '../../wailsjs/go/app/App';
+import { supportsTableTruncateAction } from './tableDataDangerActions';
   import { EventsOn } from '../../wailsjs/runtime/runtime';
   import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
-import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
+import { resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import {
-  buildMySQLCompatibleViewMetadataSqls,
-  isSidebarViewTableType,
-  normalizeSidebarViewMetadataEntry,
-  resolveSidebarMetadataDialect,
   resolveSidebarRuntimeDatabase,
-  type SidebarViewMetadataEntry,
 } from '../utils/sidebarMetadata';
-import { splitQualifiedNameLast } from '../utils/qualifiedName';
-import { buildStarRocksMaterializedViewPreviewSql } from './tableDesignerSchemaSql';
-import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
-import { resolveConnectionHostSummary, resolveConnectionHostTokens } from '../utils/tabDisplay';
 import {
     findSidebarNodePathByKey,
     findSidebarNodePathForLocate,
@@ -88,316 +134,83 @@ import {
 import { resolveConnectionAccentColor, resolveConnectionIconType } from '../utils/connectionVisual';
 import { buildJVMTabTitle } from '../utils/jvmRuntimePresentation';
 import { buildJVMDiagnosticActionDescriptor, buildJVMMonitoringActionDescriptors } from '../utils/jvmSidebarActions';
-import { buildTableSelectQuery } from '../utils/objectQueryTemplates';
+import {
+    buildBatchDatabaseExportWorkbenchTab,
+    buildBatchTableExportWorkbenchTab,
+} from '../utils/tableExportTab';
+import { useExportProgressDialog } from './ExportProgressModal';
 import { getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
-import { buildExternalSQLDirectoryId, buildExternalSQLRootNode, buildExternalSQLTabId, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
-import { getCurrentLanguage, t } from '../i18n';
-import { SIDEBAR_SQL_EDITOR_DRAG_MIME, encodeSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
-import { buildSqlServerObjectDefinitionQueries } from '../utils/sqlServerObjectDefinition';
-import JVMModeBadge from './jvm/JVMModeBadge';
+import { buildExternalSQLRootNode, type ExternalSQLTreeNode } from '../utils/externalSqlTree';
+import { t } from '../i18n';
 import MessagePublishModal from './MessagePublishModal';
 import {
   SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT,
   SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH,
-  isExternalSQLDirectoryModalMode,
-  normalizeMySQLViewDDLForEditing,
   resolveSidebarContextMenuPosition,
-  resolveSidebarObjectDragText,
-  type ExternalSQLFileModalMode,
   type SearchScope,
 } from './sidebarCoreUtils';
 export { resolveSidebarContextMenuPosition } from './sidebarCoreUtils';
 export type { ExternalSQLFileModalMode, SearchScope } from './sidebarCoreUtils';
 import {
-    V2DatabaseContextMenuView,
-    V2ConnectionGroupContextMenuView,
-    V2ConnectionContextMenuView,
-    V2SchemaContextMenuView,
-    V2TableContextMenuView,
-    V2TableGroupContextMenuView,
-    type V2DatabaseContextMenuActionKey,
-    type V2ConnectionGroupContextMenuActionKey,
-    type V2ConnectionContextMenuActionKey,
-    type V2SchemaContextMenuActionKey,
-    type V2TableContextMenuActionKey,
-    type V2TableContextMenuStats,
-    type V2TableGroupContextMenuActionKey,
-} from './V2TableContextMenu';
-import {
-  V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE,
+  buildSidebarTableChildrenForUi,
+  buildV2RailConnectionGroups,
+  buildV2SidebarTableSectionedChildren,
   estimateV2TreeHorizontalScrollWidth,
   filterV2CommandSearchTreeItems,
+  filterV2ExplorerTreeByKind,
+  isSidebarTablePinned,
+  normalizeSidebarTreeRelativeDropPosition,
+  resolveSidebarConnectionIdFromKey,
+  resolveSidebarDropInsertBefore,
+  resolveSidebarDropNodeFromDomEvent,
+  resolveSidebarDropTargetMetricsFromDomEvent,
+  resolveSidebarNodeConnectionId,
+  resolveSidebarTagDropInsertBefore,
+  resolveV2ActiveConnectionId,
   resolveV2CommandSearchPersistentFilter,
+  shouldSkipSidebarLoadOnExpandWhileDragging,
+  shouldSkipSidebarSelectWhileDragging,
   shouldCloseV2CommandSearchOnGlobalKey,
   shouldRunV2CommandSearchEnter,
+  sortSidebarTableEntries,
+  type SidebarTreeNode as TreeNode,
+  type V2CommandSearchItem,
 } from './sidebarV2Utils';
 
 export {
+  buildSidebarTableChildrenForUi,
+  buildV2RailConnectionGroups,
+  buildV2SidebarTableSectionedChildren,
   estimateV2TreeHorizontalScrollWidth,
   filterV2CommandSearchTreeItems,
+  filterV2ExplorerTreeByKind,
+  isSidebarTablePinned,
+  normalizeSidebarTreeRelativeDropPosition,
+  resolveSidebarConnectionIdFromKey,
+  resolveSidebarDropInsertBefore,
+  resolveSidebarDropNodeFromDomEvent,
+  resolveSidebarDropTargetMetricsFromDomEvent,
+  resolveSidebarNodeConnectionId,
+  resolveSidebarTagDropInsertBefore,
+  resolveV2ActiveConnectionId,
   resolveV2CommandSearchPersistentFilter,
+  shouldSkipSidebarLoadOnExpandWhileDragging,
+  shouldSkipSidebarSelectWhileDragging,
   shouldCloseV2CommandSearchOnGlobalKey,
   shouldRunV2CommandSearchEnter,
+  sortSidebarTableEntries,
 };
+export type { V2CommandSearchItem, V2RailConnectionGroup } from './sidebarV2Utils';
 
 const { Search } = Input;
-type SidebarContextMenuState = {
-  x: number;
-  y: number;
-  sourceX?: number;
-  sourceY?: number;
-  items: MenuProps['items'];
-  kind?: 'v2-table' | 'v2-database' | 'v2-schema' | 'v2-table-group' | 'v2-connection' | 'v2-connection-group';
-  node?: any;
-  rootClassName?: string;
-  overlayStyle?: React.CSSProperties;
-  maxHeight?: number;
-};
-
 const SIDEBAR_LOCATE_LOAD_WAIT_INTERVAL_MS = 50;
 const SIDEBAR_LOCATE_LOAD_WAIT_ATTEMPTS = 160;
 
-interface TreeNode {
-  title: string;
-  key: string;
-  isLeaf?: boolean;
-  selectable?: boolean;
-  children?: TreeNode[];
-  icon?: React.ReactNode;
-  dataRef?: any;
-  type?: 'connection' | 'database' | 'table' | 'view' | 'materialized-view' | 'db-trigger' | 'db-event' | 'routine' | 'object-group' | 'v2-table-section' | 'queries-folder' | 'saved-query' | 'all-saved-queries' | 'saved-query-group' | 'unmatched-saved-queries' | 'external-sql-root' | 'external-sql-directory' | 'external-sql-folder' | 'external-sql-file' | 'folder-columns' | 'folder-indexes' | 'folder-fks' | 'folder-triggers' | 'redis-db' | 'tag' | 'jvm-mode' | 'jvm-resource' | 'jvm-diagnostic' | 'jvm-monitoring';
-}
+// resolveV2ObjectGroupTitle 已迁移到 ./sidebar/sidebarHelpers
 
-export const resolveV2ObjectGroupTitle = (node: Pick<TreeNode, 'type' | 'dataRef'> | null | undefined): string | null => {
-  if (node?.type !== 'object-group') return null;
-  const groupKey = String(node?.dataRef?.groupKey || '');
-  if (groupKey === 'tables') return t('sidebar.v2_table_group_menu.title');
-  if (groupKey === 'views') return t('sidebar.object_group.views');
-  if (groupKey === 'routines') return t('sidebar.object_group.routines');
-  if (groupKey === 'triggers') return t('sidebar.object_group.triggers');
-  if (groupKey === 'events') return t('sidebar.object_group.events');
-  if (groupKey === 'materializedViews') return t('sidebar.object_group.materialized_views');
-  return null;
-};
+// shouldLoadSidebarNodeOnExpand 已迁移到 ./sidebar/sidebarHelpers
 
-export type SQLFileExecutionStatus = 'running' | 'done' | 'cancelled' | 'error';
-
-export type SQLFileExecutionProgressState = {
-  fileSizeMB: string;
-  status: SQLFileExecutionStatus;
-  executed: number;
-  failed: number;
-  percent: number;
-  currentSQL: string;
-  resultMessage: string;
-};
-
-const resolveSQLFileExecutionStatusLabel = (status: SQLFileExecutionStatus): string => {
-  switch (status) {
-    case 'done':
-      return `✅ ${t('sidebar.sql_file_exec.status.done')}`;
-    case 'cancelled':
-      return `⚠️ ${t('sidebar.sql_file_exec.status.cancelled')}`;
-    case 'error':
-      return `❌ ${t('sidebar.sql_file_exec.status.error')}`;
-    case 'running':
-    default:
-      return t('sidebar.sql_file_exec.status.running');
-  }
-};
-
-export const buildSQLFileExecutionFooter = ({
-  status,
-  onCancelExecution,
-  onClose,
-}: {
-  status: SQLFileExecutionStatus;
-  onCancelExecution: () => void;
-  onClose: () => void;
-}): React.ReactNode[] => {
-  if (status === 'running') {
-    return [
-      <Button key="cancel" danger onClick={onCancelExecution}>
-        {t('sidebar.sql_file_exec.cancel')}
-      </Button>,
-    ];
-  }
-
-  return [
-    <Button key="close" type="primary" onClick={onClose}>
-      {t('sidebar.action.close')}
-    </Button>,
-  ];
-};
-
-export const SQLFileExecutionProgressContent: React.FC<SQLFileExecutionProgressState> = ({
-  fileSizeMB,
-  status,
-  executed,
-  failed,
-  percent,
-  currentSQL,
-  resultMessage,
-}) => (
-  <>
-    <div style={{ marginBottom: 16 }}>
-      <Progress
-        percent={Math.round(percent)}
-        status={status === 'error' ? 'exception' : status === 'done' ? 'success' : 'active'}
-        strokeColor={status === 'cancelled' ? '#faad14' : undefined}
-      />
-    </div>
-    <div style={{ fontSize: 13, lineHeight: '22px', marginBottom: 8 }}>
-      <div>{t('sidebar.sql_file_exec.file_size')}<strong>{fileSizeMB} MB</strong></div>
-      <div>{t('sidebar.sql_file_exec.status_label')}<strong>{resolveSQLFileExecutionStatusLabel(status)}</strong></div>
-      <div>
-        {t('sidebar.sql_file_exec.executed_label')}
-        <strong style={{ color: '#52c41a' }}>{executed}</strong>
-        {t('sidebar.sql_file_exec.rows_separator')}
-        <strong style={{ color: failed > 0 ? '#ff4d4f' : undefined }}>{failed}</strong>
-        {t('sidebar.sql_file_exec.rows_suffix')}
-      </div>
-    </div>
-    {currentSQL && status === 'running' && (
-      <div style={{ fontSize: 12, color: 'rgba(128,128,128,0.8)', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '6px 10px', marginTop: 8, fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all', maxHeight: 60, overflow: 'hidden' }}>
-        {currentSQL}
-      </div>
-    )}
-    {resultMessage && status !== 'running' && (
-      <div style={{ fontSize: 12, marginTop: 12, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap', background: 'rgba(128,128,128,0.06)', borderRadius: 6, padding: '8px 12px' }}>
-        {resultMessage}
-      </div>
-    )}
-  </>
-);
-
-const isV2SidebarObjectNode = (node: Pick<TreeNode, 'type'> | null | undefined): boolean => {
-  return node?.type === 'table'
-      || node?.type === 'view'
-      || node?.type === 'materialized-view'
-      || node?.type === 'db-trigger'
-      || node?.type === 'db-event'
-      || node?.type === 'routine';
-};
-
-export const hasSidebarLazyChildren = (children: unknown): boolean => {
-  return Array.isArray(children) && children.length > 0;
-};
-
-export const shouldLoadSidebarNodeOnExpand = (
-  node: Pick<TreeNode, 'type' | 'children' | 'isLeaf'> | null | undefined,
-): boolean => {
-  if (!node || node.isLeaf === true || hasSidebarLazyChildren(node.children)) return false;
-  return node.type === 'connection'
-      || node.type === 'database'
-      || node.type === 'external-sql-root'
-      || node.type === 'table'
-      || node.type === 'jvm-mode'
-      || node.type === 'jvm-resource';
-};
-
-export const resolveSidebarTableNameForCopy = (node: Pick<TreeNode, 'title' | 'dataRef'> | null | undefined): string => {
-  return String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || node?.title || '').trim();
-};
-
-type SidebarTableSortPreference = 'name' | 'frequency';
-
-type SidebarTableEntryForSort = {
-  tableName: string;
-  schemaName?: string;
-  displayName: string;
-  rowCount?: number;
-};
-
-export const isSidebarTablePinned = (
-  pinnedKeys: string[],
-  connectionId: string,
-  dbName: string,
-  tableName: string,
-  schemaName = '',
-): boolean => {
-  const key = buildSidebarTablePinKey(connectionId, dbName, tableName, schemaName);
-  return !!key && pinnedKeys.includes(key);
-};
-
-export const sortSidebarTableEntries = <T extends SidebarTableEntryForSort>(
-  entries: T[],
-  options: {
-    connectionId: string;
-    dbName: string;
-    sortBy: SidebarTableSortPreference;
-    tableAccessCount?: Record<string, number>;
-    pinnedSidebarTables?: string[];
-  },
-): T[] => {
-  const pinnedKeys = options.pinnedSidebarTables || [];
-  const accessCount = options.tableAccessCount || {};
-  const compareByName = (a: T, b: T) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase());
-  const compareWithinPinnedGroup = (a: T, b: T) => {
-    if (options.sortBy === 'frequency') {
-      const keyA = `${options.connectionId}-${options.dbName}-${a.tableName}`;
-      const keyB = `${options.connectionId}-${options.dbName}-${b.tableName}`;
-      const countA = accessCount[keyA] || 0;
-      const countB = accessCount[keyB] || 0;
-      if (countA !== countB) {
-        return countB - countA;
-      }
-    }
-    return compareByName(a, b);
-  };
-
-  return [...entries].sort((a, b) => {
-    const pinnedA = isSidebarTablePinned(pinnedKeys, options.connectionId, options.dbName, a.tableName, a.schemaName || '');
-    const pinnedB = isSidebarTablePinned(pinnedKeys, options.connectionId, options.dbName, b.tableName, b.schemaName || '');
-    if (pinnedA !== pinnedB) {
-      return pinnedA ? -1 : 1;
-    }
-    return compareWithinPinnedGroup(a, b);
-  });
-};
-
-export const buildV2SidebarTableSectionedChildren = (
-  parentKey: string,
-  tableNodes: TreeNode[],
-): TreeNode[] => {
-  const pinnedTables = tableNodes.filter((node) => node?.dataRef?.pinnedSidebarTable);
-  if (pinnedTables.length === 0) return tableNodes;
-
-  const regularTables = tableNodes.filter((node) => !node?.dataRef?.pinnedSidebarTable);
-  const buildSectionNode = (kind: 'pinned' | 'all', title: string): TreeNode => ({
-    title,
-    key: `${parentKey}-v2-${kind}-tables-section`,
-    type: 'v2-table-section',
-    isLeaf: true,
-    selectable: false,
-    dataRef: {
-      sectionKind: kind,
-    },
-  });
-
-  return [
-    buildSectionNode('pinned', t('table_overview.section.pinned')),
-    ...pinnedTables,
-    buildSectionNode('all', t('table_overview.section.all')),
-    ...regularTables,
-  ];
-};
-
-export const buildSidebarTableChildrenForUi = (
-  parentKey: string,
-  tableNodes: TreeNode[],
-  isV2Ui: boolean,
-): TreeNode[] => {
-  if (!isV2Ui) return tableNodes;
-  return buildV2SidebarTableSectionedChildren(parentKey, tableNodes);
-};
-
-export const formatSidebarRowCount = (count: number): string => {
-  if (!Number.isFinite(count) || count < 0) return '';
-  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
-  return String(Math.round(count));
-};
+// resolveSidebarTableNameForCopy 已迁移到 ./sidebar/sidebarHelpers
 
 const buildConnectionRootQueryTabTitle = () => t('query.new');
 
@@ -407,128 +220,6 @@ const buildConnectionRootRedisCommandTabTitle = (redisDbLabel = 'db0') =>
 const buildConnectionRootRedisMonitorTabTitle = (redisDbLabel = 'db0') =>
   t('sidebar.tab.redis_monitor', { database: redisDbLabel });
 
-type BatchTableExportMode = 'schema' | 'backup' | 'dataOnly';
-type BatchObjectType = 'table' | 'view';
-type BatchObjectFilterType = 'all' | BatchObjectType;
-type BatchSelectionScope = 'filtered' | 'all';
-export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines' | 'events';
-
-export const V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID = '__gonavi-v2-ungrouped-connections__';
-
-export interface V2RailConnectionGroup {
-  id: string;
-  name: string;
-  connections: SavedConnection[];
-  isUngrouped?: boolean;
-  rootToken: string;
-}
-
-export const buildV2RailConnectionGroups = (
-  connections: SavedConnection[],
-  connectionTags: ConnectionTag[],
-  sidebarRootOrder: string[] = [],
-): V2RailConnectionGroup[] => {
-  const connectionById = new Map(connections.map((conn) => [conn.id, conn]));
-  const groupedConnectionIds = new Set<string>();
-  const tagGroups = new Map<string, V2RailConnectionGroup>();
-
-  connectionTags.forEach((tag) => {
-    const tagConnections: SavedConnection[] = [];
-    tag.connectionIds.forEach((connectionId) => {
-      const conn = connectionById.get(connectionId);
-      if (!conn || groupedConnectionIds.has(conn.id)) return;
-      groupedConnectionIds.add(conn.id);
-      tagConnections.push(conn);
-    });
-    if (tagConnections.length === 0) return;
-    tagGroups.set(tag.id, {
-      id: tag.id,
-      name: tag.name || t('connection.sidebar.group.untitled'),
-      connections: tagConnections,
-      rootToken: buildSidebarRootTagToken(tag.id),
-    });
-  });
-
-  const ungroupedConnectionMap = new Map(
-    connections
-      .filter((conn) => !groupedConnectionIds.has(conn.id))
-      .map((conn) => [conn.id, conn]),
-  );
-  const orderedRootTokens = resolveSidebarRootOrderTokens(
-    sidebarRootOrder,
-    connectionTags,
-    connections,
-  );
-  const groups: V2RailConnectionGroup[] = [];
-
-  orderedRootTokens.forEach((token) => {
-    if (token.startsWith('tag:')) {
-      const tagId = token.slice('tag:'.length);
-      const group = tagGroups.get(tagId);
-      if (!group) return;
-      groups.push(group);
-      tagGroups.delete(tagId);
-      return;
-    }
-    if (token.startsWith('connection:')) {
-      const connectionId = token.slice('connection:'.length);
-      const conn = ungroupedConnectionMap.get(connectionId);
-      if (!conn) return;
-      groups.push({
-        id: connectionId,
-        name: conn.name,
-        connections: [conn],
-        isUngrouped: true,
-        rootToken: buildSidebarRootConnectionToken(connectionId),
-      });
-      ungroupedConnectionMap.delete(connectionId);
-    }
-  });
-
-  tagGroups.forEach((group) => {
-    groups.push(group);
-  });
-  ungroupedConnectionMap.forEach((conn) => {
-    groups.push({
-      id: conn.id,
-      name: conn.name,
-      connections: [conn],
-      isUngrouped: true,
-      rootToken: buildSidebarRootConnectionToken(conn.id),
-    });
-  });
-
-  return groups;
-};
-
-export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = t('connection.sidebar.group.badge')): string => {
-  const trimmed = String(name ?? '').trim();
-  if (!trimmed) return fallback;
-  const cjkParts = trimmed.match(/[\u4e00-\u9fa5]/g);
-  if (cjkParts && cjkParts.length > 0) {
-    return cjkParts.slice(0, 1).join('');
-  }
-  const latinTokens = trimmed.match(/[a-z0-9]+/gi) || [];
-  if (latinTokens.length >= 2) {
-    const firstToken = latinTokens[0] || '';
-    const secondToken = latinTokens[1] || '';
-    return `${firstToken[0] || ''}${secondToken[0] || ''}`.toUpperCase();
-  }
-  if (latinTokens.length === 1) {
-    const token = latinTokens[0] || '';
-    const alphaPrefix = token.match(/^[a-z]+/i)?.[0] || '';
-    if (alphaPrefix) {
-      return alphaPrefix.slice(0, 2).toUpperCase();
-    }
-    const trailingDigits = token.match(/(\d{2,})$/)?.[1];
-    if (trailingDigits) {
-      return trailingDigits.slice(-2).toUpperCase();
-    }
-    return token.slice(0, 2).toUpperCase();
-  }
-  return trimmed.slice(0, 2);
-};
-
 const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; labelKey: string }> = [
   { key: 'all', labelKey: 'sidebar.command_search.object_kind.all' },
   { key: 'tables', labelKey: 'sidebar.command_search.object_kind.tables' },
@@ -536,383 +227,6 @@ const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; labelKey: strin
   { key: 'routines', labelKey: 'sidebar.command_search.object_kind.routines' },
   { key: 'events', labelKey: 'sidebar.command_search.object_kind.events' },
 ];
-
-const V2_EXPLORER_FILTER_GROUP_KEYS: Record<Exclude<V2ExplorerFilter, 'all'>, string[]> = {
-  tables: ['tables'],
-  views: ['views', 'materializedViews'],
-  routines: ['routines'],
-  events: ['events'],
-};
-
-export const filterV2ExplorerTreeByKind = (
-  nodes: TreeNode[],
-  filter: V2ExplorerFilter,
-): TreeNode[] => {
-  if (filter === 'all') return nodes;
-  const allowedGroupKeys = new Set(V2_EXPLORER_FILTER_GROUP_KEYS[filter]);
-  const objectTypeMatches = (node: TreeNode): boolean => {
-    if (filter === 'tables') return node.type === 'table';
-    if (filter === 'views') return node.type === 'view' || node.type === 'materialized-view';
-    if (filter === 'routines') return node.type === 'routine';
-    if (filter === 'events') return node.type === 'db-event';
-    return false;
-  };
-
-  const visit = (node: TreeNode): TreeNode | null => {
-    if (node.type === 'external-sql-root') {
-      return null;
-    }
-    const groupKey = String(node?.dataRef?.groupKey || '');
-    if (node.type === 'object-group') {
-      if (allowedGroupKeys.has(groupKey)) {
-        return node;
-      }
-      if (groupKey === 'schema') {
-        const schemaChildren = (node.children || []).map(visit).filter(Boolean) as TreeNode[];
-        return schemaChildren.length > 0 ? { ...node, children: schemaChildren, isLeaf: false } : null;
-      }
-      return null;
-    }
-    if (objectTypeMatches(node)) {
-      return node;
-    }
-    if (node.type === 'database') {
-      const filteredChildren = (node.children || []).map(visit).filter(Boolean) as TreeNode[];
-      return filteredChildren.length > 0 ? { ...node, children: filteredChildren, isLeaf: false } : null;
-    }
-    return null;
-  };
-
-  return nodes.map(visit).filter(Boolean) as TreeNode[];
-};
-
-type SidebarMessagePublishTarget = {
-  connection: SavedConnection;
-  executionDbName: string;
-  destination: string;
-};
-
-interface BatchObjectItem {
-  title: string;
-  key: string;
-  objectName: string;
-  objectType: BatchObjectType;
-  dataRef: any;
-}
-
-export type V2CommandSearchItem =
-  | {
-      key: string;
-      kind: 'node';
-      title: string;
-      meta: string;
-      icon: React.ReactNode;
-      node: TreeNode;
-    }
-  | {
-      key: string;
-      kind: 'action';
-      title: string;
-      meta: string;
-      shortcut?: string;
-      icon: React.ReactNode;
-      onRun: () => void;
-    }
-  | {
-      key: string;
-      kind: 'recent';
-      title: string;
-      meta: string;
-      icon: React.ReactNode;
-      sql: string;
-      connectionId?: string;
-      dbName?: string;
-    };
-
-export type V2CommandSearchMode = 'default' | 'object' | 'ai';
-
-export interface V2CommandSearchQuery {
-  mode: V2CommandSearchMode;
-  rawValue: string;
-  keyword: string;
-  normalizedKeyword: string;
-  aiPrompt: string;
-}
-
-export const parseV2CommandSearchQuery = (value: unknown): V2CommandSearchQuery => {
-  const rawValue = String(value ?? '');
-  const trimmedValue = rawValue.trim();
-  const firstChar = trimmedValue.charAt(0);
-
-  if (firstChar === '@' || firstChar === '＠') {
-    const keyword = trimmedValue.slice(1).trim();
-    return {
-      mode: 'object',
-      rawValue,
-      keyword,
-      normalizedKeyword: keyword.toLowerCase(),
-      aiPrompt: '',
-    };
-  }
-
-  if (firstChar === '?' || firstChar === '？') {
-    const aiPrompt = trimmedValue.slice(1).trim();
-    return {
-      mode: 'ai',
-      rawValue,
-      keyword: aiPrompt,
-      normalizedKeyword: aiPrompt.toLowerCase(),
-      aiPrompt,
-    };
-  }
-
-  return {
-    mode: 'default',
-    rawValue,
-    keyword: trimmedValue,
-    normalizedKeyword: trimmedValue.toLowerCase(),
-    aiPrompt: '',
-  };
-};
-
-export const resolveSidebarConnectionIdFromKey = (
-  key: unknown,
-  connectionIds: string[],
-): string => {
-  const keyText = String(key ?? '').trim();
-  if (!keyText) return '';
-
-  const sortedIds = Array.from(new Set(connectionIds.filter(Boolean)))
-      .sort((a, b) => b.length - a.length);
-  return sortedIds.find((id) => keyText === id || keyText.startsWith(`${id}-`)) || '';
-};
-
-export const resolveSidebarNodeConnectionId = (
-  node: { key?: unknown; dataRef?: Record<string, unknown> } | null | undefined,
-  connectionIds: string[],
-): string => {
-  const directId = String(node?.dataRef?.id || node?.dataRef?.connectionId || '').trim();
-  if (directId && connectionIds.includes(directId)) return directId;
-  return resolveSidebarConnectionIdFromKey(node?.key, connectionIds);
-};
-
-export const normalizeSidebarTreeRelativeDropPosition = (
-  absoluteDropPosition: number,
-  nodePos: unknown,
-): number => {
-  const segments = String(nodePos || '').split('-');
-  const tailIndex = Number(segments[segments.length - 1] || 0);
-  return absoluteDropPosition - tailIndex;
-};
-
-export const resolveSidebarDropInsertBefore = (
-  relativeDropPosition: number,
-  metrics?: {
-    clientY?: number;
-    top?: number;
-    height?: number;
-  } | null,
-): boolean => {
-  if (relativeDropPosition < 0) return true;
-  if (relativeDropPosition > 0) return false;
-  const clientY = metrics?.clientY;
-  const top = metrics?.top;
-  const height = metrics?.height;
-  if (
-    typeof clientY !== 'number'
-    || typeof top !== 'number'
-    || typeof height !== 'number'
-    || !Number.isFinite(clientY)
-    || !Number.isFinite(top)
-    || !Number.isFinite(height)
-    || height <= 0
-  ) {
-    return false;
-  }
-  return clientY < (top + height / 2);
-};
-
-const resolveSidebarDropBaseElementFromDomEvent = (
-  event: {
-    clientX?: number;
-    clientY?: number;
-    target?: EventTarget | null;
-  } | null | undefined,
-): Element | null => {
-  if (typeof document === 'undefined') return null;
-  const fallbackTarget = event?.target && typeof (event.target as any).closest === 'function'
-    ? (event.target as unknown as Element)
-    : null;
-  const pointTarget = (
-    typeof event?.clientX === 'number'
-    && typeof event?.clientY === 'number'
-  )
-    ? document.elementFromPoint(event.clientX, event.clientY)
-    : null;
-  const baseElement = pointTarget || fallbackTarget;
-  if (!baseElement || typeof baseElement.closest !== 'function') return null;
-  return baseElement;
-};
-
-export const resolveSidebarDropNodeFromDomEvent = (
-  event: {
-    clientX?: number;
-    clientY?: number;
-    target?: EventTarget | null;
-  } | null | undefined,
-): { key: string; type: string } | null => {
-  const baseElement = resolveSidebarDropBaseElementFromDomEvent(event);
-  if (!baseElement) return null;
-  const marker = baseElement.closest('[data-sidebar-node-key]') as HTMLElement | null;
-  if (!marker) return null;
-  const key = String(marker.getAttribute('data-sidebar-node-key') || '').trim();
-  const type = String(marker.getAttribute('data-sidebar-node-type') || '').trim();
-  if (!key || !type) return null;
-  return { key, type };
-};
-
-export const resolveSidebarDropTargetMetricsFromDomEvent = (
-  event: {
-    clientX?: number;
-    clientY?: number;
-    target?: EventTarget | null;
-  } | null | undefined,
-): { top: number; height: number } | null => {
-  const baseElement = resolveSidebarDropBaseElementFromDomEvent(event);
-  if (!baseElement) return null;
-  const treeNode = baseElement.closest('.ant-tree-treenode') as HTMLElement | null;
-  if (!treeNode || typeof treeNode.getBoundingClientRect !== 'function') return null;
-  const rect = treeNode.getBoundingClientRect();
-  if (!Number.isFinite(rect.top) || !Number.isFinite(rect.height) || rect.height <= 0) {
-    return null;
-  }
-  return {
-    top: rect.top,
-    height: rect.height,
-  };
-};
-
-export const resolveSidebarTagDropInsertBefore = (options: {
-  currentTagOrder: string[];
-  dragTagId: string;
-  dropTagId: string;
-  relativeDropPosition: number;
-  fallbackInsertBefore: boolean;
-  metrics?: {
-    clientY?: number;
-    top?: number;
-    height?: number;
-  } | null;
-}): boolean => {
-  const {
-    currentTagOrder,
-    dragTagId,
-    dropTagId,
-    relativeDropPosition,
-    fallbackInsertBefore,
-    metrics,
-  } = options;
-
-  if (relativeDropPosition !== 0) {
-    return fallbackInsertBefore;
-  }
-
-  const clientY = metrics?.clientY;
-  const top = metrics?.top;
-  const height = metrics?.height;
-  if (
-    typeof clientY !== 'number'
-    || typeof top !== 'number'
-    || typeof height !== 'number'
-    || !Number.isFinite(clientY)
-    || !Number.isFinite(top)
-    || !Number.isFinite(height)
-    || height <= 0
-  ) {
-    return fallbackInsertBefore;
-  }
-
-  const ratio = (clientY - top) / height;
-  if (ratio < 0.35) return true;
-  if (ratio > 0.65) return false;
-
-  const dragIndex = currentTagOrder.indexOf(dragTagId);
-  const dropIndex = currentTagOrder.indexOf(dropTagId);
-  if (dragIndex === -1 || dropIndex === -1 || dragIndex === dropIndex) {
-    return fallbackInsertBefore;
-  }
-  return dragIndex > dropIndex;
-};
-
-export const shouldSkipSidebarSelectWhileDragging = (
-  isTreeDragging: boolean,
-  info: { selected?: boolean } | null | undefined,
-): boolean => isTreeDragging || !info?.selected;
-
-export const shouldSkipSidebarLoadOnExpandWhileDragging = (
-  isTreeDragging: boolean,
-  info: { expanded?: boolean; node?: Pick<TreeNode, 'type' | 'children' | 'isLeaf'> | null } | null | undefined,
-): boolean => {
-  if (isTreeDragging) return true;
-  if (!info?.expanded) return true;
-  return !shouldLoadSidebarNodeOnExpand(info.node);
-};
-
-export const resolveV2ActiveConnectionId = ({
-  activeContextConnectionId,
-  activeTabConnectionId,
-  selectedKeys,
-  connectionIds,
-  fallbackConnectionId,
-}: {
-  activeContextConnectionId?: unknown;
-  activeTabConnectionId?: unknown;
-  selectedKeys: unknown[];
-  connectionIds: string[];
-  fallbackConnectionId?: unknown;
-}): string => {
-  const connectionIdSet = new Set(connectionIds);
-  const normalizeDirectId = (value: unknown): string => {
-    const text = String(value || '').trim();
-    return text && connectionIdSet.has(text) ? text : '';
-  };
-  const selectedConnectionId = selectedKeys
-      .map((key) => resolveSidebarConnectionIdFromKey(key, connectionIds))
-      .find(Boolean) || '';
-
-  return normalizeDirectId(activeContextConnectionId)
-      || selectedConnectionId
-      || normalizeDirectId(fallbackConnectionId)
-      || normalizeDirectId(activeTabConnectionId)
-      || '';
-};
-
-export const shouldClearSidebarActiveContextOnEmptySelect = (isV2Ui: boolean): boolean => !isV2Ui;
-
-type DriverStatusSnapshot = {
-  type: string;
-  name: string;
-  connectable: boolean;
-  expectedRevision?: string;
-  needsUpdate?: boolean;
-  updateReason?: string;
-  message?: string;
-};
-
-export const formatSidebarDriverAgentUpdateWarning = (
-  driverName: string,
-  status: Pick<DriverStatusSnapshot, 'message' | 'updateReason'>,
-): string => {
-  const rawMessage = String(status.message || '').trim();
-  if (rawMessage) {
-    return rawMessage;
-  }
-  const rawUpdateReason = String(status.updateReason || '').trim();
-  if (rawUpdateReason) {
-    return rawUpdateReason;
-  }
-  return t('connection.modal.driver.updateFallback', { name: driverName });
-};
 
 const buildConnectionReloadSignature = (conn?: SavedConnection | null): string => {
   if (!conn) return '';
@@ -928,57 +242,9 @@ const isConnectionTreeKey = (key: React.Key, connectionId: string): boolean => {
   return text === connectionId || text.startsWith(`${connectionId}-`);
 };
 
-const DRIVER_STATUS_CACHE_TTL_MS = 30_000;
-
-const normalizeDriverType = (value: string): string => {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'postgresql' || normalized === 'pg' || normalized === 'pq' || normalized === 'pgx') return 'postgres';
-  if (normalized === 'doris') return 'diros';
-  if (
-    normalized === 'open_gauss' ||
-    normalized === 'open-gauss' ||
-    normalized === 'opengauss'
-  ) return 'opengauss';
-  if (
-    normalized === 'intersystems' ||
-    normalized === 'intersystemsiris' ||
-    normalized === 'inter-systems' ||
-    normalized === 'inter-systems-iris'
-  ) return 'iris';
-  return normalized;
-};
-
-const resolveSavedConnectionDriverType = (conn: SavedConnection | undefined): string => {
-  const type = normalizeDriverType(conn?.config?.type || '');
-  if (type !== 'custom') {
-    return type;
-  }
-  return normalizeDriverType(conn?.config?.driver || '');
-};
-
 const isPostgresSchemaDialect = (dialect: string): boolean => (
   ['postgres', 'kingbase', 'highgo', 'vastbase', 'opengauss'].includes(normalizeDriverType(dialect))
 );
-
-const SEARCH_SCOPE_OPTIONS: Array<{ value: SearchScope; labelKey: string }> = [
-  { value: 'smart', labelKey: 'sidebar.command_search.scope.smart' },
-  { value: 'object', labelKey: 'sidebar.command_search.scope.object' },
-  { value: 'database', labelKey: 'sidebar.command_search.scope.database' },
-  { value: 'host', labelKey: 'sidebar.command_search.scope.host' },
-  { value: 'tag', labelKey: 'sidebar.command_search.scope.tag' },
-];
-
-const SEARCH_SCOPE_LABEL_KEY_MAP: Record<SearchScope, string> = SEARCH_SCOPE_OPTIONS.reduce((acc, option) => {
-  acc[option.value] = option.labelKey;
-  return acc;
-}, {} as Record<SearchScope, string>);
-const SEARCH_SCOPE_ICON_MAP: Record<SearchScope, React.ReactNode> = {
-  smart: <ThunderboltOutlined />,
-  object: <TableOutlined />,
-  database: <DatabaseOutlined />,
-  host: <CloudOutlined />,
-  tag: <TagOutlined />,
-};
 
 const isSavedQueryUnmatchedForConnectionIds = (query: SavedQuery, connectionIds: Set<string>): boolean => (
   query.bindingStatus === 'orphan' || !connectionIds.has(query.connectionId)
@@ -1155,6 +421,7 @@ const Sidebar: React.FC<{
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const { exportProgressModal, runExportWithProgress } = useExportProgressDialog();
   const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
   const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
@@ -1251,14 +518,6 @@ const Sidebar: React.FC<{
       activeContext: null,
   });
   const connectionReloadSignaturesRef = useRef<Record<string, string>>({});
-  const driverStatusCacheRef = useRef<{
-      fetchedAt: number;
-      items: Record<string, DriverStatusSnapshot>;
-  } | null>(null);
-  const driverUpdateWarningKeysRef = useRef<Set<string>>(new Set());
-  const [contextMenu, setContextMenu] = useState<SidebarContextMenuState | null>(null);
-  const contextMenuPortalRef = useRef<HTMLDivElement | null>(null);
-  const [v2TableContextMenuStats, setV2TableContextMenuStats] = useState<Record<string, V2TableContextMenuStats>>({});
   const connectionIds = useMemo(() => connections.map((conn) => conn.id), [connections]);
   const connectionIdSet = useMemo(() => new Set(connectionIds), [connectionIds]);
   const unmatchedSavedQueries = useMemo(
@@ -1268,18 +527,6 @@ const Sidebar: React.FC<{
   const allSavedQueriesNode = useMemo<TreeNode | null>(() => {
       return buildAllSavedQueriesTreeNode(savedQueries, connections);
   }, [connections, savedQueries]);
-  const v2RailConnectionGroups = useMemo(
-      () => buildV2RailConnectionGroups(connections, connectionTags, sidebarRootOrder),
-      [connections, connectionTags, sidebarRootOrder],
-  );
-  const [collapsedV2RailGroupIds, setCollapsedV2RailGroupIds] = useState<string[]>([]);
-  const collapsedV2RailGroupIdSet = useMemo(
-      () => new Set(collapsedV2RailGroupIds),
-      [collapsedV2RailGroupIds],
-  );
-  const hasV2RailConnectionGroups = v2RailConnectionGroups.some((group) => !group.isUngrouped);
-  const [draggingV2RailRootToken, setDraggingV2RailRootToken] = useState('');
-
   const snapshotTreeSelectionBeforeDrag = useCallback(() => {
       treeDragSelectionSnapshotRef.current = {
           selectedKeys: [...selectedKeys],
@@ -1475,72 +722,56 @@ const Sidebar: React.FC<{
   const [isRenameSavedQueryModalOpen, setIsRenameSavedQueryModalOpen] = useState(false);
   const [renameSavedQueryForm] = Form.useForm();
   const [renameSavedQueryTarget, setRenameSavedQueryTarget] = useState<SavedQuery | null>(null);
-  const [isExternalSQLFileModalOpen, setIsExternalSQLFileModalOpen] = useState(false);
-  const [externalSQLFileForm] = Form.useForm();
-  const [externalSQLFileModalMode, setExternalSQLFileModalMode] = useState<ExternalSQLFileModalMode>('create');
-  const [externalSQLFileTarget, setExternalSQLFileTarget] = useState<any>(null);
-
   // Connection Tag Modals
   const [isCreateTagModalOpen, setIsCreateTagModalOpen] = useState(false);
   const [createTagForm] = Form.useForm();
 
-  // Batch Operations Modal
-  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
-  const [batchTables, setBatchTables] = useState<BatchObjectItem[]>([]);
-  const [checkedTableKeys, setCheckedTableKeys] = useState<string[]>([]);
-  const [batchDbContext, setBatchDbContext] = useState<any>(null);
-  const [selectedConnection, setSelectedConnection] = useState<string>('');
-  const [selectedDatabase, setSelectedDatabase] = useState<string>('');
-  const [availableDatabases, setAvailableDatabases] = useState<any[]>([]);
-  const [batchFilterKeyword, setBatchFilterKeyword] = useState<string>('');
-  const [batchFilterType, setBatchFilterType] = useState<BatchObjectFilterType>('all');
-  const [batchSelectionScope, setBatchSelectionScope] = useState<BatchSelectionScope>('filtered');
-  const filteredBatchObjects = useMemo(() => {
-      const keyword = batchFilterKeyword.trim().toLowerCase();
-      return batchTables.filter((item) => {
-          if (batchFilterType !== 'all' && item.objectType !== batchFilterType) {
-              return false;
-          }
-          if (!keyword) {
-              return true;
-          }
-          return item.title.toLowerCase().includes(keyword) || item.objectName.toLowerCase().includes(keyword);
-      });
-  }, [batchFilterKeyword, batchFilterType, batchTables]);
-  const groupedBatchObjects = useMemo(() => {
-      const tables = filteredBatchObjects.filter(item => item.objectType === 'table');
-      const views = filteredBatchObjects.filter(item => item.objectType === 'view');
-      return { tables, views };
-  }, [filteredBatchObjects]);
-  const allBatchObjectKeys = useMemo(() => batchTables.map(item => item.key), [batchTables]);
-  const allBatchObjectKeysByType = useMemo(() => {
-      if (batchFilterType === 'all') {
-          return allBatchObjectKeys;
-      }
-      return batchTables
-          .filter((item) => item.objectType === batchFilterType)
-          .map((item) => item.key);
-  }, [allBatchObjectKeys, batchFilterType, batchTables]);
-  const filteredBatchObjectKeys = useMemo(() => filteredBatchObjects.map(item => item.key), [filteredBatchObjects]);
-  const selectionScopeTargetKeys = useMemo(
-      () => (batchSelectionScope === 'filtered' ? filteredBatchObjectKeys : allBatchObjectKeysByType),
-      [allBatchObjectKeysByType, batchSelectionScope, filteredBatchObjectKeys]
-  );
-  useEffect(() => {
-      if (batchFilterType === 'all') {
-          return;
-      }
-      const allowed = new Set(allBatchObjectKeysByType);
-      setCheckedTableKeys((prev) => prev.filter((key) => allowed.has(key)));
-  }, [allBatchObjectKeysByType, batchFilterType]);
-
-  // Batch Database Operations Modal
-  const [isBatchDbModalOpen, setIsBatchDbModalOpen] = useState(false);
-  const [batchDatabases, setBatchDatabases] = useState<any[]>([]);
-  const [checkedDbKeys, setCheckedDbKeys] = useState<string[]>([]);
-  const [batchConnContext, setBatchConnContext] = useState<any>(null);
-  const [selectedDbConnection, setSelectedDbConnection] = useState<string>('');
-
+  const {
+      isBatchModalOpen,
+      setIsBatchModalOpen,
+      batchTables,
+      checkedTableKeys,
+      setCheckedTableKeys,
+      selectedConnection,
+      selectedDatabase,
+      availableDatabases,
+      batchFilterKeyword,
+      setBatchFilterKeyword,
+      batchFilterType,
+      setBatchFilterType,
+      batchSelectionScope,
+      setBatchSelectionScope,
+      filteredBatchObjects,
+      groupedBatchObjects,
+      selectionScopeTargetKeys,
+      isBatchDbModalOpen,
+      setIsBatchDbModalOpen,
+      batchDatabases,
+      checkedDbKeys,
+      setCheckedDbKeys,
+      selectedDbConnection,
+      handleExportDatabaseSQL,
+      handleExportSchemaSQL,
+      openBatchOperationModal,
+      openBatchTableExportWorkbench,
+      handleConnectionChange,
+      handleDatabaseChange,
+      handleBatchExport,
+      handleBatchClear,
+      handleCheckAll,
+      handleInvertSelection,
+      openBatchDatabaseModal,
+      openBatchDatabaseExportWorkbench,
+      handleDbConnectionChange,
+      handleBatchDbExport,
+      handleCheckAllDb,
+      handleInvertSelectionDb,
+  } = useSidebarBatchExport({
+      connections,
+      selectedNodesRef,
+      addTab,
+      addSqlLog,
+  });
   // Find in Database Modal
   const [findInDbContext, setFindInDbContext] = useState<{ open: boolean; connectionId: string; dbName: string }>({ open: false, connectionId: '', dbName: '' });
 
@@ -1847,6 +1078,36 @@ const Sidebar: React.FC<{
       void refreshGlobalExternalSQLRootNode(false);
   }, [refreshGlobalExternalSQLRootNode]);
 
+  const {
+      handleRunSQLFile,
+      handleOpenSQLFileFromToolbar,
+      openExternalSQLFile,
+      openCreateExternalSQLFileModal,
+      openRenameExternalSQLFileModal,
+      openCreateExternalSQLDirectoryModal,
+      openRenameExternalSQLDirectoryModal,
+      handleDeleteExternalSQLFile,
+      handleDeleteExternalSQLDirectory,
+      handleAddExternalSQLDirectory,
+      handleRemoveExternalSQLDirectory,
+      handleRefreshExternalSQLDirectory,
+      externalSQLFileModalProps,
+      sqlFileExecutionModalProps,
+  } = useSidebarExternalSqlWorkflow({
+      connections,
+      externalSQLDirectories,
+      activeTab,
+      connectionIds,
+      selectedNodesRef,
+      addTab,
+      saveExternalSQLDirectory,
+      deleteExternalSQLDirectory,
+      refreshGlobalExternalSQLRootNode,
+      setExpandedKeys,
+      setAutoExpandParent,
+      getActiveContext: () => useStore.getState().activeContext,
+  });
+
   const getNodeDatabaseContext = (node: any): { connectionId: string; dbName: string; dbNodeKey: string } | null => {
     if (!node) return null;
     if (node.type === 'database') {
@@ -1871,1412 +1132,6 @@ const Sidebar: React.FC<{
     }
 
     return null;
-  };
-
-  const SIDEBAR_SCHEMA_DB_TYPES = new Set([
-      'postgres',
-      'kingbase',
-      'highgo',
-      'vastbase',
-      'opengauss',
-      'gaussdb',
-      'open_gauss',
-      'open-gauss',
-      'sqlserver',
-      'iris',
-      'oracle',
-      'dameng',
-  ]);
-
-  const SIDEBAR_SCHEMA_CUSTOM_DRIVERS = new Set([
-      'postgres',
-      'kingbase',
-      'highgo',
-      'vastbase',
-      'opengauss',
-      'gaussdb',
-      'open_gauss',
-      'open-gauss',
-      'sqlserver',
-      'iris',
-      'oracle',
-      'dm',
-  ]);
-
-  const shouldHideSchemaPrefix = (conn: SavedConnection | undefined): boolean => {
-      const dbType = String(conn?.config?.type || '').trim().toLowerCase();
-      if (SIDEBAR_SCHEMA_DB_TYPES.has(dbType)) return true;
-      if (dbType !== 'custom') return false;
-
-      const customDriver = String(conn?.config?.driver || '').trim().toLowerCase();
-      return SIDEBAR_SCHEMA_CUSTOM_DRIVERS.has(customDriver);
-  };
-
-  const getSidebarTableDisplayName = (conn: SavedConnection | undefined, tableName: string): string => {
-      const rawName = String(tableName || '').trim();
-      if (!rawName) return rawName;
-      if (!shouldHideSchemaPrefix(conn)) return rawName;
-      const parsed = splitQualifiedName(rawName);
-      return parsed.objectName || rawName;
-  };
-
-  const getMetadataDialect = (conn: SavedConnection | undefined): string => {
-      return resolveSidebarMetadataDialect(
-          conn?.config?.type || '',
-          conn?.config?.driver || '',
-          conn?.config?.oceanBaseProtocol,
-      );
-  };
-
-  const supportsDatabaseEvents = (conn: SavedConnection | undefined): boolean => {
-      return getMetadataDialect(conn) === 'mysql';
-  };
-
-  const escapeSQLLiteral = (raw: string): string => String(raw || '').replace(/'/g, "''");
-  const quoteSqlServerIdentifier = (raw: string): string => `[${String(raw || '').replace(/]/g, ']]')}]`;
-
-  type MetadataQuerySpec = {
-      sql: string;
-      inferredType?: 'FUNCTION' | 'PROCEDURE';
-  };
-
-  type MetadataQueryResult = {
-      rows: Record<string, any>[];
-      inferredType?: 'FUNCTION' | 'PROCEDURE';
-  };
-
-  const isSphinxConnection = (conn: SavedConnection | undefined): boolean => {
-      const type = String(conn?.config?.type || '').trim().toLowerCase();
-      if (type === 'sphinx') return true;
-      if (type !== 'custom') return false;
-      const driver = String(conn?.config?.driver || '').trim().toLowerCase();
-      return driver === 'sphinx' || driver === 'sphinxql';
-  };
-
-  const normalizeMetadataQuerySpecs = (specs: MetadataQuerySpec[]): MetadataQuerySpec[] => {
-      const seen = new Set<string>();
-      const normalized: MetadataQuerySpec[] = [];
-      specs.forEach((spec) => {
-          const sql = String(spec.sql || '').trim();
-          if (!sql) return;
-          const key = `${spec.inferredType || ''}@@${sql}`;
-          if (seen.has(key)) return;
-          seen.add(key);
-          normalized.push({ sql, inferredType: spec.inferredType });
-      });
-      return normalized;
-  };
-
-  const getCaseInsensitiveValue = (row: Record<string, any>, candidateKeys: string[]): string => {
-      const keyMap = new Map<string, any>();
-      Object.keys(row || {}).forEach((key) => keyMap.set(key.toLowerCase(), row[key]));
-      for (const key of candidateKeys) {
-          const value = keyMap.get(key.toLowerCase());
-          if (value !== undefined && value !== null) {
-              const normalized = String(value).trim();
-              if (normalized !== '') return normalized;
-          }
-      }
-      return '';
-  };
-
-  const getCaseInsensitiveRawValue = (row: Record<string, any>, candidateKeys: string[]): any => {
-      const keyMap = new Map<string, any>();
-      Object.keys(row || {}).forEach((key) => keyMap.set(key.toLowerCase(), row[key]));
-      for (const key of candidateKeys) {
-          const value = keyMap.get(key.toLowerCase());
-          if (value !== undefined && value !== null) {
-              return value;
-          }
-      }
-      return undefined;
-  };
-
-  const getFirstRowValue = (row: Record<string, any>): string => {
-      for (const value of Object.values(row || {})) {
-          if (value !== undefined && value !== null) {
-              const normalized = String(value).trim();
-              if (normalized !== '') return normalized;
-          }
-      }
-      return '';
-  };
-
-  const extractSqlServerDefinitionRows = (rows: any[], definitionKeys: string[]): string => {
-      if (!Array.isArray(rows) || rows.length === 0) return '';
-      const directDefinition = getCaseInsensitiveRawValue(rows[0] as Record<string, any>, definitionKeys);
-      if (directDefinition !== undefined && directDefinition !== null && String(directDefinition).trim() !== '') {
-          return String(directDefinition);
-      }
-      return rows
-          .map((row) => getCaseInsensitiveRawValue(row as Record<string, any>, ['Text', 'text']))
-          .filter((value) => value !== undefined && value !== null)
-          .map((value) => String(value))
-          .join('');
-  };
-
-  const getMySQLShowTablesName = (row: Record<string, any>): string => {
-      for (const key of Object.keys(row || {})) {
-          if (!key.toLowerCase().startsWith('tables_in_')) continue;
-          const value = row[key];
-          if (value === undefined || value === null) continue;
-          const normalized = String(value).trim();
-          if (normalized !== '') return normalized;
-      }
-      return '';
-  };
-
-  const parseMetadataRowCount = (row: Record<string, any>): number | undefined => {
-      const rawValue = getCaseInsensitiveRawValue(row, ['Rows', 'table_rows', 'TABLE_ROWS', 'num_rows', 'reltuples', 'total_rows']);
-      if (rawValue === undefined || rawValue === null || rawValue === '') {
-          return undefined;
-      }
-      const parsed = Number(String(rawValue).replace(/,/g, ''));
-      if (!Number.isFinite(parsed) || parsed < 0) {
-          return undefined;
-      }
-      return Math.round(parsed);
-  };
-
-  const buildSidebarTableStatusSQL = (conn: SavedConnection, dbName: string): string => {
-      const dialect = getMetadataDialect(conn);
-      const safeDbName = escapeSQLLiteral(dbName);
-      switch (dialect) {
-          case 'mysql':
-          case 'starrocks':
-              return [
-                  'SELECT TABLE_NAME AS table_name, TABLE_ROWS AS table_rows',
-                  'FROM information_schema.tables',
-                  `WHERE table_schema = '${safeDbName}'`,
-                  "AND table_type = 'BASE TABLE'",
-                  'ORDER BY table_name',
-              ].join('\n');
-          case 'postgres':
-          case 'kingbase':
-          case 'vastbase':
-          case 'highgo':
-          case 'opengauss':
-          case 'gaussdb':
-              return [
-                  "SELECT n.nspname || '.' || c.relname AS table_name, c.reltuples::bigint AS table_rows",
-                  'FROM pg_class c',
-                  'JOIN pg_namespace n ON n.oid = c.relnamespace',
-                  "WHERE c.relkind = 'r'",
-                  "AND n.nspname NOT IN ('information_schema', 'pg_catalog')",
-                  "AND n.nspname NOT LIKE 'pg\\_%' ESCAPE '\\'",
-                  'ORDER BY n.nspname, c.relname',
-              ].join('\n');
-          case 'sqlserver': {
-              const safeDb = quoteSqlServerIdentifier(dbName);
-              return [
-                  'SELECT s.name + \'.\' + t.name AS table_name, SUM(p.rows) AS table_rows',
-                  `FROM ${safeDb}.sys.tables t`,
-                  `JOIN ${safeDb}.sys.schemas s ON t.schema_id = s.schema_id`,
-                  `LEFT JOIN ${safeDb}.sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)`,
-                  'WHERE t.type = \'U\'',
-                  'GROUP BY s.name, t.name',
-                  'ORDER BY s.name, t.name',
-              ].join('\n');
-          }
-          case 'clickhouse':
-              return [
-                  'SELECT name AS table_name, total_rows AS table_rows',
-                  'FROM system.tables',
-                  `WHERE database = '${safeDbName}'`,
-                  "AND engine NOT IN ('View', 'MaterializedView')",
-                  'ORDER BY name',
-              ].join('\n');
-          case 'oracle':
-          case 'dm': {
-              const owner = escapeSQLLiteral(dbName).toUpperCase();
-              return [
-                  'SELECT table_name, num_rows AS table_rows',
-                  'FROM all_tables',
-                  `WHERE owner = '${owner}'`,
-                  'ORDER BY table_name',
-              ].join('\n');
-          }
-          default:
-              return '';
-      }
-  };
-
-  const buildQualifiedName = (schemaName: string, objectName: string): string => {
-      const schema = String(schemaName || '').trim();
-      const name = String(objectName || '').trim();
-      if (!name) return '';
-      if (!schema) return name;
-      if (name.includes('.')) return name;
-      return `${schema}.${name}`;
-  };
-
-  const buildSidebarObjectKeyName = (dbName: string, schemaName: string, objectName: string): string => {
-      const schema = String(schemaName || '').trim();
-      const name = String(objectName || '').trim();
-      if (!schema || !name || name.includes('.')) return name;
-      if (schema.toLowerCase() === String(dbName || '').trim().toLowerCase()) return name;
-      return `${schema}.${name}`;
-  };
-
-  const splitQualifiedName = (qualifiedName: string): { schemaName: string; objectName: string } => {
-      const parsed = splitQualifiedNameLast(qualifiedName);
-      return {
-          schemaName: parsed.parentPath,
-          objectName: parsed.objectName,
-      };
-  };
-
-  const parseDuckDBParameterNames = (raw: any): string[] => {
-      if (Array.isArray(raw)) {
-          return raw
-              .map((item) => String(item ?? '').trim())
-              .filter((item) => item !== '' && item.toLowerCase() !== '<nil>');
-      }
-
-      const text = String(raw ?? '').trim();
-      if (!text) return [];
-      const normalized = text.startsWith('[') && text.endsWith(']')
-          ? text.slice(1, -1)
-          : text;
-      return normalized
-          .split(',')
-          .map((part) => part.trim())
-          .filter((part) => part !== '' && part.toLowerCase() !== '<nil>');
-  };
-
-  const buildDuckDBMacroDDL = (
-      schemaName: string,
-      functionName: string,
-      parametersRaw: any,
-      macroDefinitionRaw: any
-  ): string => {
-      const schema = String(schemaName || '').trim();
-      const name = String(functionName || '').trim();
-      const macroDefinition = String(macroDefinitionRaw || '').trim();
-      if (!name || !macroDefinition) return '';
-
-      const parameters = parseDuckDBParameterNames(parametersRaw).join(', ');
-      const qualifiedName = schema ? `${schema}.${name}` : name;
-      const isTableMacro = !macroDefinition.startsWith('(');
-      if (isTableMacro) {
-          return `CREATE OR REPLACE MACRO ${qualifiedName}(${parameters}) AS TABLE ${macroDefinition};`;
-      }
-      return `CREATE OR REPLACE MACRO ${qualifiedName}(${parameters}) AS ${macroDefinition};`;
-  };
-
-  const buildViewsMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
-      const safeDbName = escapeSQLLiteral(dbName);
-      switch (dialect) {
-          case 'mysql':
-          case 'starrocks': {
-              return normalizeMetadataQuerySpecs(
-                  buildMySQLCompatibleViewMetadataSqls(dbName).map((sql) => ({ sql })),
-              );
-          }
-          case 'postgres':
-          case 'kingbase':
-          case 'highgo':
-          case 'vastbase':
-          case 'opengauss':
-          case 'gaussdb':
-              return [{ sql: `SELECT schemaname AS schema_name, viewname AS view_name FROM pg_catalog.pg_views WHERE schemaname != 'information_schema' AND schemaname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY schemaname, viewname` }];
-          case 'sqlserver': {
-              const safeDb = quoteSqlServerIdentifier(dbName || 'master');
-              return [{ sql: `SELECT s.name AS schema_name, v.name AS view_name FROM ${safeDb}.sys.views v JOIN ${safeDb}.sys.schemas s ON v.schema_id = s.schema_id ORDER BY s.name, v.name` }];
-          }
-          case 'oracle':
-          case 'dm':
-              return normalizeMetadataQuerySpecs([
-                  { sql: `SELECT VIEW_NAME AS view_name FROM USER_VIEWS ORDER BY VIEW_NAME` },
-                  { sql: `SELECT OWNER AS schema_name, VIEW_NAME AS view_name FROM ALL_VIEWS WHERE OWNER = USER ORDER BY VIEW_NAME` },
-                  {
-                      sql: safeDbName
-                          ? `SELECT OWNER AS schema_name, VIEW_NAME AS view_name FROM ALL_VIEWS WHERE OWNER = '${safeDbName.toUpperCase()}' ORDER BY VIEW_NAME`
-                          : '',
-                  },
-              ]);
-          case 'sqlite':
-              return [{ sql: `SELECT name AS view_name FROM sqlite_master WHERE type = 'view' ORDER BY name` }];
-          case 'duckdb':
-              return [{ sql: `SELECT table_schema AS schema_name, table_name AS view_name FROM information_schema.views WHERE table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY table_schema, table_name` }];
-          default:
-              return [];
-      }
-  };
-
-  const buildTriggersMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
-      const safeDbName = escapeSQLLiteral(dbName);
-      switch (dialect) {
-          case 'mysql':
-          case 'starrocks': {
-              const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
-              return normalizeMetadataQuerySpecs([
-                  {
-                      sql: safeDbName
-                          ? `SELECT TRIGGER_NAME AS trigger_name, EVENT_OBJECT_TABLE AS table_name, TRIGGER_SCHEMA AS schema_name FROM information_schema.triggers WHERE trigger_schema = '${safeDbName}' ORDER BY EVENT_OBJECT_TABLE, TRIGGER_NAME`
-                          : '',
-                  },
-                  { sql: dbIdent ? `SHOW TRIGGERS FROM \`${dbIdent}\`` : '' },
-                  { sql: `SHOW TRIGGERS` },
-              ]);
-          }
-          case 'postgres':
-          case 'kingbase':
-          case 'highgo':
-          case 'vastbase':
-          case 'opengauss':
-          case 'gaussdb':
-              return [{ sql: `SELECT DISTINCT event_object_schema AS schema_name, event_object_table AS table_name, trigger_name FROM information_schema.triggers WHERE trigger_schema NOT IN ('pg_catalog', 'information_schema') AND trigger_schema NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY event_object_schema, event_object_table, trigger_name` }];
-          case 'sqlserver': {
-              const safeDb = quoteSqlServerIdentifier(dbName || 'master');
-              return [{ sql: `SELECT s.name AS schema_name, t.name AS table_name, tr.name AS trigger_name FROM ${safeDb}.sys.triggers tr JOIN ${safeDb}.sys.tables t ON tr.parent_id = t.object_id JOIN ${safeDb}.sys.schemas s ON t.schema_id = s.schema_id WHERE tr.parent_class = 1 ORDER BY s.name, t.name, tr.name` }];
-          }
-          case 'oracle':
-          case 'dm':
-              if (!safeDbName) {
-                  return [{ sql: `SELECT TRIGGER_NAME AS trigger_name, TABLE_NAME AS table_name FROM USER_TRIGGERS ORDER BY TABLE_NAME, TRIGGER_NAME` }];
-              }
-              return [{ sql: `SELECT OWNER AS schema_name, TABLE_NAME AS table_name, TRIGGER_NAME AS trigger_name FROM ALL_TRIGGERS WHERE OWNER = '${safeDbName.toUpperCase()}' ORDER BY TABLE_NAME, TRIGGER_NAME` }];
-          case 'sqlite':
-              return [{ sql: `SELECT name AS trigger_name, tbl_name AS table_name FROM sqlite_master WHERE type = 'trigger' ORDER BY tbl_name, name` }];
-          case 'duckdb':
-              return [];
-          default:
-              return [];
-      }
-  };
-
-  const buildFunctionsMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
-      const safeDbName = escapeSQLLiteral(dbName);
-      switch (dialect) {
-          case 'mysql':
-          case 'starrocks':
-              return normalizeMetadataQuerySpecs([
-                  {
-                      sql: safeDbName
-                          ? `SELECT ROUTINE_NAME AS routine_name, ROUTINE_TYPE AS routine_type, ROUTINE_SCHEMA AS schema_name FROM information_schema.routines WHERE routine_schema = '${safeDbName}' ORDER BY ROUTINE_TYPE, ROUTINE_NAME`
-                          : '',
-                  },
-                  {
-                      sql: safeDbName
-                          ? `SHOW FUNCTION STATUS WHERE Db = '${safeDbName}'`
-                          : `SHOW FUNCTION STATUS`,
-                      inferredType: 'FUNCTION',
-                  },
-                  {
-                      sql: safeDbName
-                          ? `SHOW PROCEDURE STATUS WHERE Db = '${safeDbName}'`
-                          : `SHOW PROCEDURE STATUS`,
-                      inferredType: 'PROCEDURE',
-                  },
-              ]);
-          case 'postgres':
-          case 'kingbase':
-          case 'highgo':
-          case 'vastbase':
-          case 'opengauss':
-          case 'gaussdb':
-              return normalizeMetadataQuerySpecs([
-                  {
-                      // PostgreSQL 11+ / 部分 PG-like：通过 prokind 区分 FUNCTION/PROCEDURE
-                      sql: `SELECT n.nspname AS schema_name, p.proname AS routine_name, CASE WHEN p.prokind = 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END AS routine_type FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY n.nspname, routine_type, p.proname`,
-                  },
-                  {
-                      // PostgreSQL 10 / 不支持 prokind 的兼容路径
-                      sql: `SELECT r.routine_schema AS schema_name, r.routine_name AS routine_name, COALESCE(NULLIF(UPPER(r.routine_type), ''), 'FUNCTION') AS routine_type FROM information_schema.routines r WHERE r.routine_schema NOT IN ('pg_catalog', 'information_schema') AND r.routine_schema NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY r.routine_schema, routine_type, r.routine_name`,
-                  },
-                  {
-                      // 最后兜底：仅函数列表，确保 prokind/routines 视图异常时仍可展示
-                      sql: `SELECT n.nspname AS schema_name, p.proname AS routine_name, 'FUNCTION' AS routine_type FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY n.nspname, p.proname`,
-                  },
-              ]);
-          case 'sqlserver': {
-              const safeDb = quoteSqlServerIdentifier(dbName || 'master');
-              return [{ sql: `SELECT s.name AS schema_name, o.name AS routine_name, CASE o.type WHEN 'P' THEN 'PROCEDURE' WHEN 'FN' THEN 'FUNCTION' WHEN 'IF' THEN 'FUNCTION' WHEN 'TF' THEN 'FUNCTION' END AS routine_type FROM ${safeDb}.sys.objects o JOIN ${safeDb}.sys.schemas s ON o.schema_id = s.schema_id WHERE o.type IN ('P','FN','IF','TF') ORDER BY o.type, s.name, o.name` }];
-          }
-          case 'oracle':
-          case 'dm':
-              return normalizeMetadataQuerySpecs([
-                  { sql: `SELECT OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM USER_OBJECTS WHERE OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME` },
-                  { sql: `SELECT OWNER AS schema_name, OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM ALL_OBJECTS WHERE OWNER = USER AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME` },
-                  {
-                      sql: safeDbName
-                          ? `SELECT OWNER AS schema_name, OBJECT_NAME AS routine_name, OBJECT_TYPE AS routine_type FROM ALL_OBJECTS WHERE OWNER = '${safeDbName.toUpperCase()}' AND OBJECT_TYPE IN ('FUNCTION','PROCEDURE') ORDER BY OBJECT_TYPE, OBJECT_NAME`
-                          : '',
-                  },
-              ]);
-          case 'duckdb':
-              return [{
-                  sql: `SELECT schema_name, function_name AS routine_name, 'FUNCTION' AS routine_type FROM duckdb_functions() WHERE internal = false AND lower(function_type) = 'macro' AND COALESCE(macro_definition, '') <> '' ORDER BY schema_name, function_name`,
-                  inferredType: 'FUNCTION',
-              }];
-          default:
-              return [];
-      }
-  };
-
-  const buildEventsMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
-      if (dialect !== 'mysql') {
-          return [];
-      }
-      const safeDbName = escapeSQLLiteral(dbName);
-      const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
-      return normalizeMetadataQuerySpecs([
-          {
-              sql: safeDbName
-                  ? `SELECT EVENT_SCHEMA AS schema_name, EVENT_NAME AS event_name, EVENT_TYPE AS event_type, STATUS AS status FROM information_schema.events WHERE event_schema = '${safeDbName}' ORDER BY EVENT_NAME`
-                  : '',
-          },
-          { sql: dbIdent ? `SHOW EVENTS FROM \`${dbIdent}\`` : '' },
-          { sql: `SHOW EVENTS` },
-      ]);
-  };
-
-  const buildSchemasMetadataQuerySpecs = (dialect: string): MetadataQuerySpec[] => {
-      if (!isPostgresSchemaDialect(dialect)) {
-          return [];
-      }
-      return [{
-          sql: `SELECT nspname AS schema_name FROM pg_namespace WHERE nspname NOT IN ('pg_catalog', 'information_schema') AND nspname NOT LIKE 'pg|_%' ESCAPE '|' ORDER BY nspname`,
-      }];
-  };
-
-  const queryMetadataRowsBySpecs = async (
-      conn: any,
-      dbName: string,
-      specs: MetadataQuerySpec[]
-  ): Promise<{ results: MetadataQueryResult[]; hasSuccessfulQuery: boolean }> => {
-      const normalizedSpecs = normalizeMetadataQuerySpecs(specs);
-      if (normalizedSpecs.length === 0) {
-          return { results: [], hasSuccessfulQuery: false };
-      }
-      const config = buildRuntimeConfig(conn, dbName);
-      const results: MetadataQueryResult[] = [];
-      let hasSuccessfulQuery = false;
-
-      for (const spec of normalizedSpecs) {
-          try {
-              const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, spec.sql);
-              if (!result.success || !Array.isArray(result.data)) {
-                  continue;
-              }
-              hasSuccessfulQuery = true;
-              results.push({
-                  rows: result.data as Record<string, any>[],
-                  inferredType: spec.inferredType,
-              });
-          } catch {
-              // 忽略单条查询失败，继续尝试后续回退语句
-          }
-      }
-      return { results, hasSuccessfulQuery };
-  };
-
-  const loadViews = async (conn: any, dbName: string): Promise<{ views: SidebarViewMetadataEntry[]; supported: boolean }> => {
-      const savedConn = conn as SavedConnection;
-      const dialect = getMetadataDialect(savedConn);
-      const querySpecs = buildViewsMetadataQuerySpecs(dialect, dbName);
-      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
-      const seen = new Set<string>();
-      const views: SidebarViewMetadataEntry[] = [];
-
-      results.forEach((queryResult) => {
-          queryResult.rows.forEach((row) => {
-              const tableType = getCaseInsensitiveValue(row, ['table_type', 'table type', 'type']);
-              if (!isSidebarViewTableType(tableType)) return;
-              const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'schemaname', 'owner', 'table_schema', 'db']);
-              const viewName =
-                  getCaseInsensitiveValue(row, ['view_name', 'viewname', 'table_name', 'name'])
-                  || getMySQLShowTablesName(row)
-                  || getFirstRowValue(row);
-              const entry = normalizeSidebarViewMetadataEntry(dialect, dbName, schemaName, viewName);
-              if (!entry) return;
-              const uniqueKey = `${entry.schemaName.toLowerCase()}@@${entry.viewName.toLowerCase()}`;
-              if (seen.has(uniqueKey)) return;
-              seen.add(uniqueKey);
-              views.push(entry);
-          });
-      });
-      return { views, supported: hasSuccessfulQuery };
-  };
-
-  const loadStarRocksMaterializedViews = async (
-      conn: any,
-      dbName: string
-  ): Promise<{ views: SidebarViewMetadataEntry[]; supported: boolean }> => {
-      const dialect = getMetadataDialect(conn as SavedConnection);
-      if (dialect !== 'starrocks') {
-          return { views: [], supported: false };
-      }
-
-      const safeDbName = escapeSQLLiteral(dbName);
-      const dbIdent = String(dbName || '').replace(/`/g, '``').trim();
-      const querySpecs = normalizeMetadataQuerySpecs([
-          {
-              sql: safeDbName
-                  ? `SELECT TABLE_SCHEMA AS schema_name, TABLE_NAME AS object_name FROM information_schema.tables WHERE TABLE_SCHEMA = '${safeDbName}' AND UPPER(TABLE_TYPE) LIKE '%MATERIALIZED%' ORDER BY TABLE_NAME`
-                  : '',
-          },
-          { sql: dbIdent ? `SHOW MATERIALIZED VIEWS FROM \`${dbIdent}\`` : '' },
-          { sql: `SHOW MATERIALIZED VIEWS` },
-      ]);
-      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
-      const seen = new Set<string>();
-      const views: SidebarViewMetadataEntry[] = [];
-
-      results.forEach((queryResult) => {
-          queryResult.rows.forEach((row) => {
-              const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'table_schema', 'db', 'database']);
-              const viewName =
-                  getCaseInsensitiveValue(row, ['object_name', 'view_name', 'table_name', 'name', 'materialized_view_name', 'mv_name'])
-                  || getFirstRowValue(row);
-              const entry = normalizeSidebarViewMetadataEntry(dialect, dbName, schemaName, viewName);
-              if (!entry) return;
-              const uniqueKey = `${entry.schemaName.toLowerCase()}@@${entry.viewName.toLowerCase()}`;
-              if (seen.has(uniqueKey)) return;
-              seen.add(uniqueKey);
-              views.push(entry);
-          });
-      });
-
-      return { views, supported: hasSuccessfulQuery };
-  };
-
-  const loadDatabaseTriggers = async (
-      conn: any,
-      dbName: string
-  ): Promise<{ triggers: Array<{ displayName: string; triggerName: string; tableName: string }>; supported: boolean }> => {
-      const dialect = getMetadataDialect(conn as SavedConnection);
-      const querySpecs = buildTriggersMetadataQuerySpecs(dialect, dbName);
-      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
-      const seen = new Set<string>();
-      const triggers: Array<{ displayName: string; triggerName: string; tableName: string }> = [];
-
-      results.forEach((queryResult) => {
-          queryResult.rows.forEach((row) => {
-              const rawTriggerName = getCaseInsensitiveValue(row, ['trigger_name', 'triggername', 'trigger', 'name']) || getFirstRowValue(row);
-              if (!rawTriggerName) return;
-
-              const rawSchemaName = getCaseInsensitiveValue(row, ['schema_name', 'schemaname', 'owner', 'event_object_schema', 'trigger_schema', 'db']);
-              const rawTableName = getCaseInsensitiveValue(row, ['table_name', 'event_object_table', 'tbl_name', 'table']);
-
-              const triggerParts = splitQualifiedName(rawTriggerName);
-              const tableParts = splitQualifiedName(rawTableName);
-
-              const resolvedSchema = (
-                  rawSchemaName
-                  || tableParts.schemaName
-                  || triggerParts.schemaName
-                  || dbName
-              ).trim();
-              const resolvedTriggerName = (triggerParts.objectName || rawTriggerName).trim();
-              const resolvedTableName = (tableParts.objectName || rawTableName).trim();
-              const fullTableName = buildQualifiedName(resolvedSchema, resolvedTableName);
-
-              // MySQL 下 trigger 名在同 schema 内唯一，直接按 schema+trigger 去重可彻底规避多元数据查询导致的重复
-              const uniqueKey = dialect === 'mysql'
-                  ? `${resolvedSchema.toLowerCase()}@@${resolvedTriggerName.toLowerCase()}`
-                  : `${resolvedSchema.toLowerCase()}@@${resolvedTriggerName.toLowerCase()}@@${resolvedTableName.toLowerCase()}`;
-              if (seen.has(uniqueKey)) return;
-              seen.add(uniqueKey);
-              const displayName = fullTableName ? `${resolvedTriggerName} (${fullTableName})` : resolvedTriggerName;
-              triggers.push({ displayName, triggerName: resolvedTriggerName, tableName: fullTableName || resolvedTableName });
-          });
-      });
-      return { triggers, supported: hasSuccessfulQuery };
-  };
-
-  const loadFunctions = async (
-      conn: any,
-      dbName: string
-  ): Promise<{ routines: Array<{ displayName: string; routineName: string; routineType: string }>; supported: boolean }> => {
-      const dialect = getMetadataDialect(conn as SavedConnection);
-      const querySpecs = buildFunctionsMetadataQuerySpecs(dialect, dbName);
-      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
-      const seen = new Set<string>();
-      const routines: Array<{ displayName: string; routineName: string; routineType: string }> = [];
-
-      results.forEach((queryResult) => {
-          queryResult.rows.forEach((row) => {
-              const routineName = getCaseInsensitiveValue(row, ['routine_name', 'object_name', 'proname', 'name']);
-              if (!routineName) return;
-              const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'nspname', 'owner', 'db', 'database']);
-              const rawType = getCaseInsensitiveValue(row, ['routine_type', 'object_type', 'type']) || queryResult.inferredType || 'FUNCTION';
-              const normalizedType = rawType.toUpperCase().includes('PROC') ? 'PROCEDURE' : 'FUNCTION';
-              const fullName = buildQualifiedName(schemaName, routineName);
-              const uniqueKey = `${fullName}@@${normalizedType}`;
-              if (!fullName || seen.has(uniqueKey)) return;
-              seen.add(uniqueKey);
-              const typeLabel = normalizedType === 'PROCEDURE' ? 'P' : 'F';
-              routines.push({ displayName: `${fullName} [${typeLabel}]`, routineName: fullName, routineType: normalizedType });
-          });
-	      });
-	      return { routines, supported: hasSuccessfulQuery };
-  };
-
-  const loadDatabaseEvents = async (
-      conn: any,
-      dbName: string
-  ): Promise<{ events: Array<{ displayName: string; eventName: string; schemaName: string; eventType: string; status: string }>; supported: boolean }> => {
-      const dialect = getMetadataDialect(conn as SavedConnection);
-      const querySpecs = buildEventsMetadataQuerySpecs(dialect, dbName);
-      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
-      const seen = new Set<string>();
-      const events: Array<{ displayName: string; eventName: string; schemaName: string; eventType: string; status: string }> = [];
-
-      results.forEach((queryResult) => {
-          queryResult.rows.forEach((row) => {
-              const rawEventName = getCaseInsensitiveValue(row, ['event_name', 'eventname', 'name', 'event']);
-              if (!rawEventName) return;
-
-              const rawSchemaName = getCaseInsensitiveValue(row, ['schema_name', 'event_schema', 'db', 'database']);
-              const parsed = splitQualifiedName(rawEventName);
-              const schemaName = (rawSchemaName || parsed.schemaName || dbName).trim();
-              const eventName = (parsed.objectName || rawEventName).trim();
-              if (!eventName) return;
-
-              const uniqueKey = `${schemaName.toLowerCase()}@@${eventName.toLowerCase()}`;
-              if (seen.has(uniqueKey)) return;
-              seen.add(uniqueKey);
-
-              const eventType = getCaseInsensitiveValue(row, ['event_type', 'type']);
-              const status = getCaseInsensitiveValue(row, ['status']);
-              events.push({
-                  displayName: eventName,
-                  eventName,
-                  schemaName,
-                  eventType,
-                  status,
-              });
-          });
-      });
-
-      return { events, supported: hasSuccessfulQuery };
-  };
-
-  const loadSchemas = async (conn: any, dbName: string): Promise<{ schemas: string[]; supported: boolean }> => {
-      const dialect = getMetadataDialect(conn as SavedConnection);
-      const querySpecs = buildSchemasMetadataQuerySpecs(dialect);
-      const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(conn, dbName, querySpecs);
-      const seen = new Set<string>();
-      const schemas: string[] = [];
-
-      results.forEach((queryResult) => {
-          queryResult.rows.forEach((row) => {
-              const schemaName = getCaseInsensitiveValue(row, ['schema_name', 'nspname', 'schemaname']) || getFirstRowValue(row);
-              if (!schemaName) return;
-              const key = schemaName.toLowerCase();
-              if (seen.has(key)) return;
-              seen.add(key);
-              schemas.push(schemaName);
-          });
-      });
-
-      return { schemas, supported: hasSuccessfulQuery };
-  };
-
-	  const fetchDriverStatusMap = async (): Promise<Record<string, DriverStatusSnapshot>> => {
-	      const cached = driverStatusCacheRef.current;
-	      if (cached && Date.now() - cached.fetchedAt < DRIVER_STATUS_CACHE_TTL_MS) {
-	          return cached.items;
-	      }
-	      const result: Record<string, DriverStatusSnapshot> = {};
-	      const res = await GetDriverStatusList('', '');
-	      if (!res?.success) {
-	          return result;
-	      }
-	      const data = (res.data || {}) as any;
-	      const drivers = Array.isArray(data.drivers) ? data.drivers : [];
-	      drivers.forEach((item: any) => {
-	          const type = normalizeDriverType(String(item.type || '').trim());
-	          if (!type) return;
-	          result[type] = {
-	              type,
-	              name: String(item.name || item.type || type).trim(),
-	              connectable: !!item.connectable,
-	              expectedRevision: String(item.expectedRevision || '').trim() || undefined,
-	              needsUpdate: !!item.needsUpdate,
-	              updateReason: String(item.updateReason || '').trim() || undefined,
-	              message: String(item.message || '').trim() || undefined,
-	          };
-	      });
-	      driverStatusCacheRef.current = { fetchedAt: Date.now(), items: result };
-	      return result;
-	  };
-
-	  const warnIfConnectionDriverAgentNeedsUpdate = async (conn: SavedConnection) => {
-	      try {
-	          const driverType = resolveSavedConnectionDriverType(conn);
-	          if (!driverType || driverType === 'custom') {
-	              return;
-	          }
-	          const statusMap = await fetchDriverStatusMap();
-	          const status = statusMap[driverType];
-	          if (!status?.connectable || !status.needsUpdate) {
-	              return;
-	          }
-	          const revisionKey = status.expectedRevision || status.updateReason || status.message || 'unknown';
-	          const warningKey = `${conn.id}:${driverType}:${revisionKey}`;
-	          if (driverUpdateWarningKeysRef.current.has(warningKey)) {
-	              return;
-	          }
-	          driverUpdateWarningKeysRef.current.add(warningKey);
-	          const driverName = status.name || driverType;
-	          message.warning({
-	              content: formatSidebarDriverAgentUpdateWarning(driverName, status),
-	              key: `driver-agent-update-${conn.id}`,
-	              duration: 10,
-	          });
-	      } catch (error) {
-	          console.warn('检查驱动代理更新状态失败', error);
-	      }
-	  };
-		  const loadDatabases = async (node: any) => {
-		      const conn = node.dataRef as SavedConnection;
-		      const loadKey = `dbs-${conn.id}`;
-	      if (loadingNodesRef.current.has(loadKey)) return;
-	      loadingNodesRef.current.add(loadKey);
-	      const config = {
-	          ...conn.config,
-          port: Number(conn.config.port),
-          password: conn.config.password || "",
-          database: conn.config.database || "",
-	          useSSH: conn.config.useSSH || false,
-	          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
-	      };
-
-          if (conn.config.type === 'jvm') {
-              try {
-                  const res = await JVMProbeCapabilities(buildRuntimeConfig(conn) as any);
-                  if (res.success) {
-                      setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
-                      const capabilities: JVMCapability[] = Array.isArray(res.data) ? res.data as JVMCapability[] : [];
-                      const modeNodes: TreeNode[] = capabilities.map((capability) => ({
-                          title: capability.displayLabel || capability.mode,
-                          key: `${conn.id}-jvm-mode-${capability.mode}`,
-                          icon: <HddOutlined />,
-                          type: 'jvm-mode',
-                          dataRef: {
-                              ...conn,
-                              providerMode: capability.mode,
-                              canBrowse: capability.canBrowse,
-                              canWrite: capability.canWrite,
-                              reason: capability.reason,
-                              displayLabel: capability.displayLabel,
-                          },
-                          isLeaf: capability.canBrowse !== true,
-                      }));
-                      const monitoringNodes: TreeNode[] = buildJVMMonitoringActionDescriptors(conn.id, capabilities, t).map((item) => ({
-                          title: item.title,
-                          key: item.key,
-                          icon: <DashboardOutlined />,
-                          type: 'jvm-monitoring',
-                          dataRef: {
-                              ...conn,
-                              providerMode: item.providerMode,
-                          },
-                          isLeaf: true,
-                      }));
-                      const diagnosticNode = buildJVMDiagnosticTreeNodes(conn);
-                      replaceTreeNodeChildren(node.key, [...monitoringNodes, ...modeNodes, ...diagnosticNode]);
-                  } else {
-                      const diagnosticNode = buildJVMDiagnosticTreeNodes(conn);
-                      setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
-                      if (diagnosticNode.length > 0) {
-                          replaceTreeNodeChildren(node.key, diagnosticNode);
-                          message.warning({
-                              content: t('sidebar.message.jvm_provider_probe_failed_with_diagnostic', {
-                                  error: res.message || t('sidebar.error.unknown'),
-                              }),
-                              key: `conn-${conn.id}-jvm-caps`,
-                          });
-                      } else {
-                          setLoadedKeys(prev => prev.filter(k => k !== node.key));
-                          message.error({ content: res.message, key: `conn-${conn.id}-jvm-caps` });
-                      }
-                  }
-              } catch (e: any) {
-                  const diagnosticNode = buildJVMDiagnosticTreeNodes(conn);
-                  setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
-                  if (diagnosticNode.length > 0) {
-                      replaceTreeNodeChildren(node.key, diagnosticNode);
-                      message.warning({
-                          content: t('sidebar.message.jvm_provider_probe_exception_with_diagnostic', {
-                              error: e?.message || String(e),
-                          }),
-                          key: `conn-${conn.id}-jvm-caps`,
-                      });
-                  } else {
-                      setLoadedKeys(prev => prev.filter(k => k !== node.key));
-                      message.error({
-                          content: t('sidebar.message.connection_failed', { error: e?.message || String(e) }),
-                          key: `conn-${conn.id}-jvm-caps`,
-                      });
-                  }
-              } finally {
-                  loadingNodesRef.current.delete(loadKey);
-              }
-              return;
-          }
-
-          // Handle Redis connections differently
-          if (conn.config.type === 'redis') {
-              try {
-                  const res = await (window as any).go.app.App.RedisGetDatabases(buildRpcConnectionConfig(config));
-                  if (res.success) {
-                      setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
-                      const redisRows: any[] = Array.isArray(res.data) ? res.data : [];
-                      let dbs = redisRows.map((db: any) => ({
-                          title: `db${db.index}${db.keys > 0 ? ` (${db.keys})` : ''}`,
-                          key: `${conn.id}-db${db.index}`,
-                          icon: <DatabaseOutlined style={{ color: '#DC382D' }} />,
-                          type: 'redis-db' as const,
-                          dataRef: { ...conn, redisDB: db.index },
-                          isLeaf: true,
-                          dbIndex: db.index,
-                      }));
-                      // Filter Redis databases if configured
-                      if (conn.includeRedisDatabases && conn.includeRedisDatabases.length > 0) {
-                          dbs = dbs.filter(db => conn.includeRedisDatabases!.includes(db.dbIndex));
-                      }
-                      replaceTreeNodeChildren(node.key, dbs);
-                  } else {
-                      setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
-                      message.error({ content: res.message, key: `conn-${conn.id}-dbs` });
-                  }
-              } catch (e: any) {
-                  setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
-                  message.error({
-                      content: t('sidebar.message.connection_failed', { error: e?.message || String(e) }),
-                      key: `conn-${conn.id}-dbs`,
-                  });
-              } finally {
-                  loadingNodesRef.current.delete(loadKey);
-              }
-              return;
-          }
-
-	      try {
-	          const res = await DBGetDatabases(buildRpcConnectionConfig(config) as any);
-	          if (res.success) {
-	            setConnectionStates(prev => ({ ...prev, [conn.id]: 'success' }));
-                const dbRows: any[] = Array.isArray(res.data) ? res.data : [];
-	            let dbs = dbRows.map((row: any) => ({
-	              title: row.Database || row.database,
-              key: `${conn.id}-${row.Database || row.database}`,
-              icon: <DatabaseOutlined />,
-              type: 'database' as const,
-              dataRef: { ...conn, dbName: row.Database || row.database },
-              isLeaf: false,
-            }));
-
-            // Filter databases if configured
-            if (conn.includeDatabases && conn.includeDatabases.length > 0) {
-                dbs = dbs.filter(db => conn.includeDatabases!.includes(db.title));
-            }
-
-            if (dbs.length > 0) {
-                replaceTreeNodeChildren(node.key, dbs);
-            } else {
-                // 空列表：清理 loadedKeys 以允许重新加载，不设置 children = []
-                setLoadedKeys(prev => prev.filter(k => k !== node.key));
-                message.warning({ content: t('sidebar.message.no_visible_databases'), key: `conn-${conn.id}-dbs` });
-            }
-	          } else {
-	            setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
-	            setLoadedKeys(prev => prev.filter(k => k !== node.key));
-	            message.error({ content: res.message, key: `conn-${conn.id}-dbs` });
-	          }
-	      } catch (e: any) {
-	          setConnectionStates(prev => ({ ...prev, [conn.id]: 'error' }));
-	          setLoadedKeys(prev => prev.filter(k => k !== node.key));
-	          message.error({
-                content: t('sidebar.message.connection_failed', { error: e?.message || String(e) }),
-                key: `conn-${conn.id}-dbs`,
-            });
-	      } finally {
-	          loadingNodesRef.current.delete(loadKey);
-	      }
-  };
-
-  const loadJVMResources = async (node: any) => {
-      const conn = node.dataRef as SavedConnection & { providerMode?: string; resourcePath?: string };
-      const providerMode = String(conn.providerMode || '').trim().toLowerCase();
-      const parentPath = String(conn.resourcePath || '').trim();
-      const loadKey = `jvm-resources-${conn.id}-${providerMode}-${parentPath}`;
-      if (loadingNodesRef.current.has(loadKey)) return;
-      loadingNodesRef.current.add(loadKey);
-
-      try {
-          const backendApp = (window as any).go?.app?.App;
-          if (typeof backendApp?.JVMListResources !== 'function') {
-              throw new Error(t('sidebar.message.jvm_resources_backend_unavailable'));
-          }
-
-          const res = await backendApp.JVMListResources(buildJVMRuntimeConfig(conn, providerMode), parentPath);
-          if (res.success) {
-              const resourceRows: JVMResourceSummary[] = Array.isArray(res.data) ? res.data as JVMResourceSummary[] : [];
-              const resourceNodes: TreeNode[] = resourceRows.map((item) => ({
-                  title: item.name || item.path || item.id,
-                  key: `${conn.id}-jvm-resource-${providerMode}-${item.path}`,
-                  icon: item.hasChildren ? <FolderOpenOutlined /> : <HddOutlined />,
-                  type: 'jvm-resource',
-                  dataRef: {
-                      ...conn,
-                      providerMode: item.providerMode || providerMode,
-                      resourcePath: item.path,
-                      resourceKind: item.kind,
-                      canRead: item.canRead,
-                      canWrite: item.canWrite,
-                      hasChildren: item.hasChildren,
-                      sensitive: item.sensitive,
-                  },
-                  isLeaf: item.hasChildren !== true,
-              }));
-              replaceTreeNodeChildren(node.key, resourceNodes);
-          } else {
-              setLoadedKeys(prev => prev.filter(k => k !== node.key));
-              message.error({ content: res.message, key: `jvm-resource-${node.key}` });
-          }
-      } catch (e: any) {
-          setLoadedKeys(prev => prev.filter(k => k !== node.key));
-          message.error({
-              content: t('sidebar.message.load_jvm_resources_failed', { error: e?.message || String(e) }),
-              key: `jvm-resource-${node.key}`,
-          });
-      } finally {
-          loadingNodesRef.current.delete(loadKey);
-      }
-  };
-
-	  const loadTables = async (node: any) => {
-	      const conn = node.dataRef; // has dbName
-	      const dbName = conn.dbName;
-      const key = node.key;
-      const loadKey = `tables-${conn.id}-${dbName}`;
-      if (loadingNodesRef.current.has(loadKey)) return;
-      loadingNodesRef.current.add(loadKey);
-      
-      const dbQueries = savedQueries.filter(q => q.connectionId === conn.id && q.dbName === dbName);
-      const queriesNode: TreeNode = {
-          title: t('sidebar.tree.saved_queries'),
-          key: `${key}-queries`,
-          icon: <FolderOpenOutlined />,
-          type: 'queries-folder',
-          isLeaf: dbQueries.length === 0,
-          children: dbQueries.map(q => ({
-              title: resolveSavedQueryDisplayName(q.name),
-              key: q.id,
-              icon: <FileTextOutlined />,
-              type: 'saved-query',
-              dataRef: q,
-              isLeaf: true
-          }))
-      };
-
-      const config = { 
-          ...conn.config, 
-          port: Number(conn.config.port),
-          password: conn.config.password || "",
-          database: conn.config.database || "",
-	          useSSH: conn.config.useSSH || false,
-	          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
-	      };
-	      try {
-	          const res = await DBGetTables(buildRpcConnectionConfig(config) as any, conn.dbName);
-	          if (res.success) {
-	            setConnectionStates(prev => ({ ...prev, [key as string]: 'success' }));
-
-                const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
-                const tableStatusSql = buildSidebarTableStatusSQL(conn as SavedConnection, conn.dbName);
-                const tableStatsResult = tableStatusSql
-                    ? await DBQuery(buildRpcConnectionConfig(config) as any, conn.dbName, tableStatusSql).catch(() => ({ success: false, data: [] as any[] }))
-                    : { success: false, data: [] as any[] };
-                const tableRowCountMap = new Map<string, number>();
-                if (tableStatsResult?.success && Array.isArray(tableStatsResult.data)) {
-                    tableStatsResult.data.forEach((row: Record<string, any>) => {
-                        const rawTableName = String(
-                            getCaseInsensitiveValue(row, ['table_name', 'TABLE_NAME', 'Name', 'name'])
-                            || getMySQLShowTablesName(row)
-                            || ''
-                        ).trim();
-                        if (!rawTableName) return;
-                        const rowCount = parseMetadataRowCount(row);
-                        if (rowCount === undefined) return;
-                        tableRowCountMap.set(rawTableName.toLowerCase(), rowCount);
-                    });
-                }
-	            const tableEntries = tableRows.map((row: any) => {
-	                const tableName = Object.values(row)[0] as string;
-	                const parsed = splitQualifiedName(tableName);
-	                return {
-	                    tableName,
-	                    schemaName: parsed.schemaName,
-	                    displayName: getSidebarTableDisplayName(conn, tableName),
-                        rowCount: tableRowCountMap.get(String(tableName || '').trim().toLowerCase()),
-	                };
-	            });
-
-	            const [schemasResult, viewsResult, materializedViewsResult, triggersResult, routinesResult, eventsResult] = await Promise.all([
-	                loadSchemas(conn, conn.dbName),
-	                loadViews(conn, conn.dbName),
-	                loadStarRocksMaterializedViews(conn, conn.dbName),
-	                loadDatabaseTriggers(conn, conn.dbName),
-	                loadFunctions(conn, conn.dbName),
-	                loadDatabaseEvents(conn, conn.dbName),
-	            ]);
-                const externalSQLDirectoryResults = await Promise.all(
-                    externalSQLDirectories.map(async (directory: ExternalSQLDirectory) => {
-                        const directoryRes = await ListSQLDirectory(directory.path);
-                        if (!directoryRes.success) {
-                            message.warning({
-                                key: `external-sql-${directory.id}`,
-                                content: t('sidebar.message.external_sql_directory_read_failed', {
-                                    name: directory.name,
-                                    error: directoryRes.message,
-                                }),
-                            });
-                            return { id: directory.id, entries: [] as ExternalSQLTreeEntry[] };
-                        }
-                        return {
-                            id: directory.id,
-                            entries: Array.isArray(directoryRes.data) ? directoryRes.data as ExternalSQLTreeEntry[] : [],
-                        };
-                    }),
-                );
-                const externalSQLTrees = externalSQLDirectoryResults.reduce<Record<string, ExternalSQLTreeEntry[]>>((accumulator, item) => {
-                    accumulator[item.id] = item.entries;
-                    return accumulator;
-                }, {});
-                const externalSQLRootNode = decorateExternalSQLTreeNode(buildExternalSQLRootNode({
-                    dbNodeKey: String(key),
-                    connectionId: String(conn.id),
-                    dbName: String(conn.dbName),
-                    directories: externalSQLDirectories,
-                    directoryTrees: externalSQLTrees,
-                    labels: {
-                        root: t('sidebar.external_sql.root'),
-                        directoryFallback: t('sidebar.external_sql.directory_fallback'),
-                    },
-                }));
-            const viewRows: SidebarViewMetadataEntry[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
-            const materializedViewRows: SidebarViewMetadataEntry[] = Array.isArray(materializedViewsResult.views) ? materializedViewsResult.views : [];
-            const triggerRows: any[] = Array.isArray(triggersResult.triggers) ? triggersResult.triggers : [];
-            const routineRows: any[] = Array.isArray(routinesResult.routines) ? routinesResult.routines : [];
-            const eventRows: any[] = Array.isArray(eventsResult.events) ? eventsResult.events : [];
-            const schemaRows: string[] = Array.isArray(schemasResult.schemas) ? schemasResult.schemas : [];
-
-            const viewEntries = viewRows.map((entry: SidebarViewMetadataEntry) => {
-                const parsed = splitQualifiedName(entry.viewName);
-                return {
-                    viewName: entry.viewName,
-	                    schemaName: entry.schemaName || parsed.schemaName,
-	                    displayName: getSidebarTableDisplayName(conn, entry.viewName),
-	                };
-	            });
-
-            const materializedViewEntries = materializedViewRows.map((entry: SidebarViewMetadataEntry) => {
-                const parsed = splitQualifiedName(entry.viewName);
-                return {
-                    viewName: entry.viewName,
-                    schemaName: entry.schemaName || parsed.schemaName,
-                    displayName: getSidebarTableDisplayName(conn, entry.viewName),
-                };
-            });
-
-            const triggerEntries = (() => {
-                const deduped: Array<{ displayName: string; triggerName: string; tableName: string; schemaName: string }> = [];
-                const triggerSeen = new Set<string>();
-                const metadataDialect = getMetadataDialect(conn as SavedConnection);
-
-                triggerRows.forEach((trigger: any) => {
-                    const triggerParsed = splitQualifiedName(trigger.triggerName);
-                    const tableParsed = splitQualifiedName(trigger.tableName);
-                    const schemaName = tableParsed.schemaName || triggerParsed.schemaName || String(conn.dbName || '').trim();
-                    const triggerObjectName = (triggerParsed.objectName || trigger.triggerName).trim();
-                    const tableObjectName = (tableParsed.objectName || trigger.tableName).trim();
-                    const displayName = tableObjectName ? `${triggerObjectName} (${tableObjectName})` : triggerObjectName;
-                    const dedupeKey = metadataDialect === 'mysql'
-                        ? `${schemaName.toLowerCase()}@@${triggerObjectName.toLowerCase()}`
-                        : `${schemaName.toLowerCase()}@@${triggerObjectName.toLowerCase()}@@${tableObjectName.toLowerCase()}`;
-
-                    if (triggerSeen.has(dedupeKey)) return;
-                    triggerSeen.add(dedupeKey);
-                    deduped.push({
-                        ...trigger,
-                        schemaName,
-                        triggerName: triggerObjectName,
-                        tableName: buildQualifiedName(schemaName, tableObjectName) || tableObjectName,
-                        displayName,
-                    });
-                });
-
-                return deduped;
-            })();
-
-            const routineEntries = routineRows.map((routine: any) => {
-                const parsed = splitQualifiedName(routine.routineName);
-                const typeLabel = routine.routineType === 'PROCEDURE' ? 'P' : 'F';
-                return {
-	                    ...routine,
-	                    schemaName: parsed.schemaName,
-                    displayName: `${parsed.objectName || routine.routineName} [${typeLabel}]`,
-                };
-            });
-
-            const eventEntries = eventRows.map((event: any) => ({
-                ...event,
-                schemaName: String(event.schemaName || conn.dbName || '').trim(),
-                displayName: String(event.displayName || event.eventName || '').trim(),
-            })).filter((event: any) => event.eventName && event.displayName);
-
-            if (isSphinxConnection(conn as SavedConnection)) {
-                const unsupportedObjects: string[] = [];
-                if (!viewsResult.supported) unsupportedObjects.push(t('sidebar.object_group.views'));
-                if (!routinesResult.supported) unsupportedObjects.push(t('sidebar.object_group.routines'));
-                if (!triggersResult.supported) unsupportedObjects.push(t('sidebar.object_group.triggers'));
-                if (unsupportedObjects.length > 0) {
-                    message.info({
-                        key: `sphinx-capability-${conn.id}-${conn.dbName}`,
-                        content: t('sidebar.message.sphinx_unsupported_objects', {
-                            objects: unsupportedObjects.join(t('sidebar.punctuation.list_separator')),
-                        }),
-                    });
-                }
-            }
-
-	            const currentStoreState = useStore.getState();
-	            const currentTableSortPreference = currentStoreState.tableSortPreference || tableSortPreference;
-	            const currentTableAccessCount = currentStoreState.tableAccessCount || tableAccessCount;
-	            const currentPinnedSidebarTables = currentStoreState.pinnedSidebarTables || pinnedSidebarTables;
-
-	            // 获取当前数据库的排序偏好
-	            const sortPreferenceKey = `${conn.id}-${conn.dbName}`;
-	            const sortBy = currentTableSortPreference[sortPreferenceKey] || 'name';
-
-	            const sortedTableEntries = sortSidebarTableEntries(tableEntries, {
-	                connectionId: conn.id,
-	                dbName: conn.dbName,
-	                sortBy,
-	                tableAccessCount: currentTableAccessCount,
-	                pinnedSidebarTables: isV2Ui ? currentPinnedSidebarTables : [],
-	            });
-
-	            // Sort views by name (case-insensitive)
-	            viewEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
-
-	            materializedViewEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
-
-	            // Sort triggers by display name (case-insensitive)
-	            triggerEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
-
-	            // Sort routines by display name (case-insensitive)
-	            routineEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
-
-	            eventEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
-
-	            const buildTableNode = (entry: { tableName: string; schemaName: string; displayName: string; rowCount?: number }): TreeNode => {
-	                const isPinned = isV2Ui && isSidebarTablePinned(
-	                    currentPinnedSidebarTables,
-	                    conn.id,
-	                    conn.dbName,
-	                    entry.tableName,
-	                    entry.schemaName,
-	                );
-	                return {
-	                    title: entry.displayName,
-	                    key: `${conn.id}-${conn.dbName}-${entry.tableName}`,
-	                    icon: <TableOutlined />,
-	                    type: 'table',
-	                    dataRef: {
-	                        ...conn,
-	                        tableName: entry.tableName,
-	                        schemaName: entry.schemaName,
-	                        rowCount: entry.rowCount,
-	                        ...(isPinned ? { pinnedSidebarTable: true } : {}),
-	                    },
-	                    isLeaf: false,
-	                };
-	            };
-
-	            const buildViewNode = (entry: { viewName: string; schemaName: string; displayName: string }): TreeNode => {
-	                const keyName = buildSidebarObjectKeyName(conn.dbName, entry.schemaName, entry.viewName);
-	                return {
-	                    title: entry.displayName,
-	                    key: `${conn.id}-${conn.dbName}-view-${keyName}`,
-	                    icon: <EyeOutlined />,
-	                    type: 'view',
-	                    dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName },
-	                    isLeaf: true,
-	                };
-	            };
-
-	            const buildMaterializedViewNode = (entry: { viewName: string; schemaName: string; displayName: string }): TreeNode => {
-	                const keyName = buildSidebarObjectKeyName(conn.dbName, entry.schemaName, entry.viewName);
-	                return {
-	                    title: entry.displayName,
-	                    key: `${conn.id}-${conn.dbName}-materialized-view-${keyName}`,
-	                    icon: <ThunderboltOutlined />,
-	                    type: 'materialized-view',
-	                    dataRef: { ...conn, viewName: entry.viewName, tableName: entry.viewName, schemaName: entry.schemaName, objectKind: 'materialized-view' },
-	                    isLeaf: true,
-	                };
-	            };
-
-	            const buildTriggerNode = (entry: { triggerName: string; tableName: string; schemaName: string; displayName: string }): TreeNode => ({
-	                title: entry.displayName,
-	                key: `${conn.id}-${conn.dbName}-trigger-${entry.triggerName}-${entry.tableName}`,
-	                icon: <FunctionOutlined />,
-	                type: 'db-trigger',
-	                dataRef: { ...conn, triggerName: entry.triggerName, triggerTableName: entry.tableName, tableName: entry.tableName, schemaName: entry.schemaName },
-	                isLeaf: true,
-	            });
-
-	            const buildRoutineNode = (entry: { routineName: string; routineType: string; schemaName: string; displayName: string }): TreeNode => ({
-	                title: entry.displayName,
-	                key: `${conn.id}-${conn.dbName}-routine-${entry.routineName}`,
-	                icon: <CodeOutlined />,
-	                type: 'routine',
-	                dataRef: { ...conn, routineName: entry.routineName, routineType: entry.routineType, schemaName: entry.schemaName },
-	                isLeaf: true,
-	            });
-
-	            const buildEventNode = (entry: { eventName: string; schemaName: string; displayName: string; eventType?: string; status?: string }): TreeNode => ({
-	                title: entry.displayName,
-	                key: `${conn.id}-${conn.dbName}-event-${entry.schemaName}-${entry.eventName}`,
-	                icon: <ClockCircleOutlined />,
-	                type: 'db-event',
-	                dataRef: { ...conn, eventName: entry.eventName, schemaName: entry.schemaName, eventType: entry.eventType, eventStatus: entry.status },
-	                isLeaf: true,
-	            });
-
-	            const buildObjectGroup = (
-	                parentKey: string,
-	                groupKey: string,
-	                groupTitle: string,
-	                groupIcon: React.ReactNode,
-	                children: TreeNode[],
-	                extraData: Record<string, any> = {}
-	            ): TreeNode => {
-	                const groupNodeKey = `${parentKey}-${groupKey}`;
-	                const groupedChildren = groupKey === 'tables'
-	                    ? buildSidebarTableChildrenForUi(groupNodeKey, children, isV2Ui)
-	                    : children;
-	                return {
-	                    title: groupTitle,
-	                    key: groupNodeKey,
-	                    icon: groupIcon,
-	                    type: 'object-group',
-	                    isLeaf: children.length === 0,
-	                    children: groupedChildren.length > 0 ? groupedChildren : undefined,
-	                    dataRef: { ...conn, dbName: conn.dbName, groupKey, ...extraData }
-	                };
-	            };
-
-	            const shouldGroupBySchema = shouldHideSchemaPrefix(conn as SavedConnection);
-	            if (shouldGroupBySchema) {
-	                type SchemaBucket = {
-	                    schemaName: string;
-	                    tables: TreeNode[];
-	                    views: TreeNode[];
-	                    materializedViews: TreeNode[];
-	                    routines: TreeNode[];
-	                    triggers: TreeNode[];
-	                    events: TreeNode[];
-	                };
-
-	                const schemaMap = new Map<string, SchemaBucket>();
-	                const getSchemaBucket = (rawSchemaName: string): SchemaBucket => {
-	                    const schemaName = String(rawSchemaName || '').trim();
-	                    const schemaKey = schemaName || '__default__';
-	                    let bucket = schemaMap.get(schemaKey);
-	                    if (!bucket) {
-	                        bucket = {
-	                            schemaName,
-	                            tables: [],
-	                            views: [],
-	                            materializedViews: [],
-	                            routines: [],
-	                            triggers: [],
-	                            events: [],
-	                        };
-	                        schemaMap.set(schemaKey, bucket);
-	                    }
-	                    return bucket;
-	                };
-
-	                schemaRows.forEach((schemaName) => getSchemaBucket(schemaName));
-	                sortedTableEntries.forEach((entry) => getSchemaBucket(entry.schemaName).tables.push(buildTableNode(entry)));
-	                viewEntries.forEach((entry) => getSchemaBucket(entry.schemaName).views.push(buildViewNode(entry)));
-	                materializedViewEntries.forEach((entry) => getSchemaBucket(entry.schemaName).materializedViews.push(buildMaterializedViewNode(entry)));
-	                routineEntries.forEach((entry) => getSchemaBucket(entry.schemaName).routines.push(buildRoutineNode(entry)));
-	                triggerEntries.forEach((entry) => getSchemaBucket(entry.schemaName).triggers.push(buildTriggerNode(entry)));
-	                eventEntries.forEach((entry) => getSchemaBucket(entry.schemaName).events.push(buildEventNode(entry)));
-
-	                const dialect = getMetadataDialect(conn as SavedConnection);
-	                const isOracleLike = (dialect === 'oracle' || dialect === 'dm');
-	                const includeMaterializedViews = dialect === 'starrocks';
-	                const includeEvents = supportsDatabaseEvents(conn as SavedConnection);
-
-	                const schemaNodes: TreeNode[] = Array.from(schemaMap.values())
-	                    .filter((bucket) => !(isOracleLike && !bucket.schemaName))
-	                    .sort((a, b) => {
-	                        if (!a.schemaName && !b.schemaName) return 0;
-	                        if (!a.schemaName) return -1;
-	                        if (!b.schemaName) return 1;
-	                        return a.schemaName.toLowerCase().localeCompare(b.schemaName.toLowerCase());
-	                    })
-	                    .map((bucket) => {
-	                    const schemaNodeKey = `${key}-schema-${bucket.schemaName || 'default'}`;
-	                    const schemaTitle = bucket.schemaName || t('sidebar.tree.default_schema');
-	                        const groupedNodes: TreeNode[] = [
-	                            buildObjectGroup(schemaNodeKey, 'tables', t('sidebar.object_group.tables'), <TableOutlined />, bucket.tables, { schemaName: bucket.schemaName }),
-	                            buildObjectGroup(schemaNodeKey, 'views', t('sidebar.object_group.views'), <EyeOutlined />, bucket.views, { schemaName: bucket.schemaName }),
-	                            ...(includeMaterializedViews ? [buildObjectGroup(schemaNodeKey, 'materializedViews', t('sidebar.object_group.materialized_views'), <ThunderboltOutlined />, bucket.materializedViews, { schemaName: bucket.schemaName })] : []),
-	                            buildObjectGroup(schemaNodeKey, 'routines', t('sidebar.object_group.routines'), <CodeOutlined />, bucket.routines, { schemaName: bucket.schemaName }),
-	                            buildObjectGroup(schemaNodeKey, 'triggers', t('sidebar.object_group.triggers'), <FunctionOutlined />, bucket.triggers, { schemaName: bucket.schemaName }),
-	                            ...(includeEvents ? [buildObjectGroup(schemaNodeKey, 'events', t('sidebar.object_group.events'), <ClockCircleOutlined />, bucket.events, { schemaName: bucket.schemaName })] : []),
-	                        ];
-
-	                        return {
-	                            title: schemaTitle,
-	                            key: schemaNodeKey,
-	                            icon: <FolderOpenOutlined />,
-	                            type: 'object-group' as const,
-	                            isLeaf: groupedNodes.length === 0,
-	                            children: groupedNodes,
-	                            dataRef: { ...conn, dbName: conn.dbName, groupKey: 'schema', schemaName: bucket.schemaName }
-	                        };
-	                    });
-
-	                replaceTreeNodeChildren(key, [queriesNode, ...schemaNodes]);
-	            } else {
-	                const includeMaterializedViews = getMetadataDialect(conn as SavedConnection) === 'starrocks';
-	                const includeEvents = supportsDatabaseEvents(conn as SavedConnection);
-	                const groupedNodes: TreeNode[] = [
-	                    buildObjectGroup(key as string, 'tables', t('sidebar.object_group.tables'), <TableOutlined />, sortedTableEntries.map(buildTableNode)),
-	                    buildObjectGroup(key as string, 'views', t('sidebar.object_group.views'), <EyeOutlined />, viewEntries.map(buildViewNode)),
-	                    ...(includeMaterializedViews ? [buildObjectGroup(key as string, 'materializedViews', t('sidebar.object_group.materialized_views'), <ThunderboltOutlined />, materializedViewEntries.map(buildMaterializedViewNode))] : []),
-	                    buildObjectGroup(key as string, 'routines', t('sidebar.object_group.routines'), <CodeOutlined />, routineEntries.map(buildRoutineNode)),
-	                    buildObjectGroup(key as string, 'triggers', t('sidebar.object_group.triggers'), <FunctionOutlined />, triggerEntries.map(buildTriggerNode)),
-	                    ...(includeEvents ? [buildObjectGroup(key as string, 'events', t('sidebar.object_group.events'), <ClockCircleOutlined />, eventEntries.map(buildEventNode))] : []),
-	                ];
-
-	                replaceTreeNodeChildren(key, [queriesNode, ...groupedNodes]);
-	            }
-	          } else {
-	            setConnectionStates(prev => ({ ...prev, [key as string]: 'error' }));
-	            message.error({ content: res.message, key: `db-${key}-tables` });
-          }
-	      } catch (e: any) {
-	          setConnectionStates(prev => ({ ...prev, [key as string]: 'error' }));
-	          message.error({
-	              content: t('sidebar.message.load_table_list_failed', { error: e?.message || String(e) }),
-	              key: `db-${key}-tables`,
-	          });
-	      } finally {
-	          loadingNodesRef.current.delete(loadKey);
-	      }
   };
 
   const locateObjectInSidebarRef = useRef<(detail: unknown) => Promise<void>>(async () => {});
@@ -3754,1321 +1609,6 @@ const Sidebar: React.FC<{
       }
   };
   
-	  const handleCopyStructure = async (node: any) => {
-	      const { config, dbName, tableName } = node.dataRef;
-	      const res = await DBShowCreateTable(buildRpcConnectionConfig(config) as any, dbName, tableName);
-      if (res.success) {
-          navigator.clipboard.writeText(res.data as string);
-          message.success(t('table_overview.message.copy_structure_success'));
-      } else {
-          message.error(res.message);
-      }
-  };
-
-  const resolveCopyObjectNameLabel = (node: any): string => {
-      if (node?.type === 'view') return t('sidebar.copy_object_name.label.view');
-      if (node?.type === 'materialized-view') return t('sidebar.copy_object_name.label.materialized_view');
-      if (node?.type === 'db-event') return t('sidebar.copy_object_name.label.event');
-      return t('sidebar.copy_object_name.label.table');
-  };
-
-  const handleCopyTableName = async (node: any) => {
-      const objectName = resolveSidebarTableNameForCopy(node);
-      const label = resolveCopyObjectNameLabel(node);
-      if (!objectName) {
-          message.warning(t('sidebar.copy_object_name.empty', { label }));
-          return;
-      }
-      try {
-          await navigator.clipboard.writeText(objectName);
-          message.success(t('sidebar.copy_object_name.copied', { label }));
-      } catch (e: any) {
-          message.error(t('sidebar.copy_object_name.failed', { label, error: e?.message || String(e) }));
-      }
-  };
-
-  const handleExport = async (node: any, format: string) => {
-      const { config, dbName, tableName } = node.dataRef;
-      const hide = message.loading(t('sidebar.message.exporting_table_format', {
-          table: tableName,
-          format: format.toUpperCase(),
-      }), 0);
-      const res = await ExportTable(buildRpcConnectionConfig(config) as any, dbName, tableName, format);
-      hide();
-      if (res.success) {
-          message.success(t('sidebar.message.export_success'));
-      } else if (res.message !== '已取消') {
-          message.error(t('sidebar.message.export_failed', { error: res.message }));
-      }
-  };
-
-  const handleCopyTableAsInsert = async (node: any) => {
-      await handleExport(node, 'sql');
-  };
-
-  const openTableDdlInDesigner = (node: any) => {
-      openDesign(node, 'ddl', true);
-  };
-
-  const openTableInERView = (node: any) => {
-      onDoubleClick(null, node);
-      setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('gonavi:data-grid:set-view-mode', {
-              detail: {
-                  connectionId: node.dataRef?.id,
-                  dbName: node.dataRef?.dbName,
-                  tableName: node.dataRef?.tableName,
-                  viewMode: 'er',
-              },
-          }));
-      }, 0);
-  };
-
-  const injectTablePromptToAI = async (node: any, promptKind: 'explain' | 'query') => {
-      const conn = node.dataRef;
-      const tableName = String(conn?.tableName || node?.title || '').trim();
-      if (!conn?.id || !conn?.dbName || !tableName) {
-          message.warning(t('sidebar.message.ai_table_context_missing'));
-          return;
-      }
-      const tableRef = `${conn.dbName}.${tableName}`;
-
-      let ddl = '';
-      try {
-          const res = await DBShowCreateTable(buildRpcConnectionConfig(conn.config) as any, conn.dbName, tableName);
-          if (res.success) {
-              ddl = String(res.data || '').trim();
-              addAIContext(conn.id, { dbName: conn.dbName, tableName, ddl });
-          }
-      } catch {
-          // AI 入口仍可基于表名工作，DDL 获取失败不阻断打开面板。
-      }
-
-      const prompt = promptKind === 'explain'
-          ? [
-              t('sidebar.ai_prompt.explain.intro', { table: tableRef }),
-              t('sidebar.ai_prompt.explain.detail'),
-              ddl ? `\n\`\`\`sql\n${ddl}\n\`\`\`` : '',
-          ].filter(Boolean).join('\n')
-          : [
-              t('sidebar.ai_prompt.query.intro', { table: tableRef }),
-              t('sidebar.ai_prompt.query.detail'),
-              ddl ? `\n\`\`\`sql\n${ddl}\n\`\`\`` : '',
-          ].filter(Boolean).join('\n');
-
-      const wasClosed = !useStore.getState().aiPanelVisible;
-      if (wasClosed) setAIPanelVisible(true);
-      setTimeout(() => {
-          window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', { detail: { prompt } }));
-      }, wasClosed ? 350 : 0);
-  };
-
-  const normalizeConnConfig = (raw: any) => (
-      buildRpcConnectionConfig(raw)
-  );
-
-  const handleExportDatabaseSQL = async (node: any, includeData: boolean) => {
-      const conn = node.dataRef;
-      const dbName = conn.dbName || node.title;
-      const hide = message.loading(
-          includeData
-              ? t('sidebar.message.exporting_database_backup', { database: dbName })
-              : t('sidebar.message.exporting_database_schema', { database: dbName }),
-          0,
-      );
-      try {
-          const res = await (window as any).go.app.App.ExportDatabaseSQL(normalizeConnConfig(conn.config), dbName, includeData);
-          hide();
-          if (res.success) {
-              message.success(t('sidebar.message.export_success'));
-          } else if (res.message !== '已取消') {
-              message.error(t('sidebar.message.export_failed', { error: res.message }));
-          }
-      } catch (e: any) {
-          hide();
-          message.error(t('sidebar.message.export_failed', { error: e?.message || String(e) }));
-      }
-  };
-
-  const handleExportSchemaSQL = async (node: any, includeData: boolean) => {
-      const conn = node?.dataRef;
-      const dbName = String(conn?.dbName || '').trim();
-      const schemaName = String(conn?.schemaName || '').trim();
-      if (!conn || !dbName || !schemaName) {
-          message.error(t('sidebar.message.schema_export_target_missing'));
-          return;
-      }
-      const hide = message.loading(
-          includeData
-              ? t('sidebar.message.exporting_schema_backup', { schema: schemaName })
-              : t('sidebar.message.exporting_schema_structure', { schema: schemaName }),
-          0,
-      );
-      try {
-          const res = await (window as any).go.app.App.ExportSchemaSQL(
-              buildRpcConnectionConfig(conn.config, { database: dbName }) as any,
-              dbName,
-              schemaName,
-              includeData,
-          );
-          hide();
-          if (res.success) {
-              message.success(t('sidebar.message.export_success'));
-          } else if (res.message !== '已取消') {
-              message.error(t('sidebar.message.export_failed', { error: res.message }));
-          }
-      } catch (e: any) {
-          hide();
-          message.error(t('sidebar.message.export_failed', { error: e?.message || String(e) }));
-      }
-  };
-
-  const handleExportTablesSQL = async (nodes: any[], includeData: boolean) => {
-      if (!nodes || nodes.length === 0) return;
-      const first = nodes[0].dataRef;
-      const dbName = first.dbName;
-      const connId = first.id;
-      const allSame = nodes.every(n => n?.dataRef?.id === connId && n?.dataRef?.dbName === dbName);
-      if (!allSame) {
-          message.error(t('sidebar.message.export_tables_same_database_required'));
-          return;
-      }
-
-      const tableNames = nodes.map(n => n.dataRef.tableName).filter(Boolean);
-      const hide = message.loading(
-          includeData
-              ? t('sidebar.message.backing_up_selected_tables', { count: tableNames.length })
-              : t('sidebar.message.exporting_selected_table_schema', { count: tableNames.length }),
-          0,
-      );
-      try {
-          const res = await (window as any).go.app.App.ExportTablesSQL(normalizeConnConfig(first.config), dbName, tableNames, includeData);
-          hide();
-          if (res.success) {
-              message.success(t('sidebar.message.export_success'));
-          } else if (res.message !== '已取消') {
-              message.error(t('sidebar.message.export_failed', { error: res.message }));
-          }
-      } catch (e: any) {
-          hide();
-          message.error(t('sidebar.message.export_failed', { error: e?.message || String(e) }));
-      }
-  };
-
-  const openBatchOperationModal = async () => {
-      // Check if current selected node is database or table
-      let connId = '';
-      let dbName = '';
-
-      if (selectedNodesRef.current.length > 0) {
-          const node = selectedNodesRef.current[0];
-          if (node.type === 'database') {
-              connId = node.dataRef.id;
-              dbName = node.title;
-          } else if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
-              connId = node.dataRef.id;
-              dbName = node.dataRef.dbName;
-          }
-      }
-
-      setSelectedConnection(connId);
-      setSelectedDatabase(dbName);
-      setBatchTables([]);
-      setCheckedTableKeys([]);
-      setAvailableDatabases([]);
-      setBatchFilterKeyword('');
-      setBatchFilterType('all');
-      setBatchSelectionScope('filtered');
-
-      if (connId) {
-          const conn = connections.find(c => c.id === connId);
-          if (conn) {
-              await loadDatabasesForBatch(conn);
-              if (dbName) {
-                  await loadTablesForBatch(conn, dbName);
-              }
-          }
-      }
-
-      setIsBatchModalOpen(true);
-  };
-
-	  const loadDatabasesForBatch = async (conn: SavedConnection) => {
-	      const config = {
-          ...conn.config,
-          port: Number(conn.config.port),
-          password: conn.config.password || "",
-          database: conn.config.database || "",
-          useSSH: conn.config.useSSH || false,
-          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
-      };
-
-      const res = await DBGetDatabases(buildRpcConnectionConfig(config) as any);
-      if (res.success) {
-          const dbRows: any[] = Array.isArray(res.data) ? res.data : [];
-          let dbs = dbRows.map((row: any) => {
-              const dbName = row.Database || row.database;
-              return {
-                  title: dbName,
-                  key: `${conn.id}-${dbName}`,
-                  dbName: dbName
-              };
-          });
-
-          if (conn.includeDatabases && conn.includeDatabases.length > 0) {
-              dbs = dbs.filter(db => conn.includeDatabases!.includes(db.dbName));
-          }
-
-          setAvailableDatabases(dbs);
-      } else {
-          message.error(t('sidebar.message.load_database_list_failed', { error: res.message }));
-      }
-  };
-
-  const loadTablesForBatch = async (conn: SavedConnection, dbName: string) => {
-      setBatchDbContext({ conn, dbName });
-
-      const config = {
-          ...conn.config,
-          port: Number(conn.config.port),
-          password: conn.config.password || "",
-          database: conn.config.database || "",
-          useSSH: conn.config.useSSH || false,
-          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
-      };
-
-      const [res, viewResult] = await Promise.all([
-          DBGetTables(buildRpcConnectionConfig(config) as any, dbName),
-          loadViews(conn, dbName).catch(() => ({ views: [], supported: false })),
-      ]);
-
-      if (!res.success) {
-          message.error(t('sidebar.message.load_table_list_failed', { error: res.message }));
-          return;
-      }
-
-      const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
-      const viewRows: SidebarViewMetadataEntry[] = Array.isArray(viewResult.views) ? viewResult.views : [];
-      const viewSet = new Set(
-          viewRows.flatMap((view) => {
-              const names = [view.viewName.toLowerCase()];
-              if (view.schemaName && !view.viewName.includes('.')) {
-                  names.push(`${view.schemaName}.${view.viewName}`.toLowerCase());
-              }
-              return names;
-          })
-      );
-
-      const tableObjects: BatchObjectItem[] = tableRows
-          .map((row: any) => Object.values(row)[0] as string)
-          .filter((tableName: string) => !viewSet.has(tableName.toLowerCase()))
-          .map((tableName: string) => ({
-              title: getSidebarTableDisplayName(conn, tableName),
-              key: `${conn.id}-${dbName}-table-${tableName}`,
-              objectName: tableName,
-              objectType: 'table' as const,
-              dataRef: { ...conn, tableName, dbName, objectType: 'table' },
-          }));
-
-      const viewObjects: BatchObjectItem[] = viewRows.map((view) => {
-          const keyName = buildSidebarObjectKeyName(dbName, view.schemaName, view.viewName);
-          return {
-              title: getSidebarTableDisplayName(conn, view.viewName),
-              key: `${conn.id}-${dbName}-view-${keyName}`,
-              objectName: view.viewName,
-              objectType: 'view' as const,
-              dataRef: { ...conn, tableName: view.viewName, schemaName: view.schemaName, dbName, objectType: 'view' },
-          };
-      });
-
-      tableObjects.sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase()));
-      viewObjects.sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase()));
-
-      setBatchTables([...tableObjects, ...viewObjects]);
-      setCheckedTableKeys([]);
-  };
-
-  const handleConnectionChange = async (connId: string) => {
-      setSelectedConnection(connId);
-      setSelectedDatabase('');
-      setBatchTables([]);
-      setCheckedTableKeys([]);
-      setBatchFilterKeyword('');
-      setBatchFilterType('all');
-      setBatchSelectionScope('filtered');
-
-      const conn = connections.find(c => c.id === connId);
-      if (conn) {
-          await loadDatabasesForBatch(conn);
-      }
-  };
-
-  const handleDatabaseChange = async (dbName: string) => {
-      setSelectedDatabase(dbName);
-      setBatchFilterKeyword('');
-      setBatchFilterType('all');
-      setBatchSelectionScope('filtered');
-
-      const conn = connections.find(c => c.id === selectedConnection);
-      if (conn && dbName) {
-          await loadTablesForBatch(conn, dbName);
-      }
-  };
-
-  const handleBatchExport = async (mode: BatchTableExportMode) => {
-      const selectedObjects = batchTables.filter(t => checkedTableKeys.includes(t.key));
-      if (selectedObjects.length === 0) {
-          message.warning(t('sidebar.message.select_object_required'));
-          return;
-      }
-
-      setIsBatchModalOpen(false);
-
-      const { conn, dbName } = batchDbContext;
-      const objectNames = selectedObjects.map(t => t.objectName);
-      const selectedViewCount = selectedObjects.filter(item => item.objectType === 'view').length;
-
-      const loadingText = mode === 'backup'
-          ? t('sidebar.message.backing_up_selected_objects', { count: objectNames.length })
-          : mode === 'dataOnly'
-              ? t('sidebar.message.exporting_selected_object_data', { count: objectNames.length, format: 'INSERT' })
-              : t('sidebar.message.exporting_selected_object_schema', { count: objectNames.length });
-      const hide = message.loading(loadingText, 0);
-      try {
-          const app = (window as any).go.app.App;
-          const res = mode === 'dataOnly'
-              ? await app.ExportTablesDataSQL(normalizeConnConfig(conn.config), dbName, objectNames)
-              : await app.ExportTablesSQL(normalizeConnConfig(conn.config), dbName, objectNames, mode === 'backup');
-          hide();
-          if (res.success) {
-              if (mode !== 'schema' && selectedViewCount > 0) {
-                  message.success(t('sidebar.message.export_success_skipped_views', { count: selectedViewCount }));
-              } else {
-                  message.success(t('sidebar.message.export_success'));
-              }
-          } else if (res.message !== '已取消') {
-              message.error(t('sidebar.message.export_failed', { error: res.message }));
-          }
-      } catch (e: any) {
-          hide();
-          message.error(t('sidebar.message.export_failed', { error: e?.message || String(e) }));
-      }
-  };
-
-  const handleBatchClear = async () => {
-      const selectedObjects = batchTables.filter(t => checkedTableKeys.includes(t.key));
-      if (selectedObjects.length === 0) {
-          message.warning(t('sidebar.message.select_object_required'));
-          return;
-      }
-
-      const { conn, dbName } = batchDbContext;
-      const objectNames = selectedObjects.map(t => t.objectName);
-
-      const ok = await new Promise<boolean>((resolve) => {
-          Modal.confirm({
-              title: t('sidebar.modal.confirm_clear_selected_tables.title'),
-              content: t('sidebar.modal.confirm_clear_selected_tables.content', {
-                  connection: conn.name,
-                  database: dbName,
-              }),
-              okText: t('sidebar.action.continue'),
-              cancelText: t('sidebar.action.cancel'),
-              onOk: () => resolve(true),
-              onCancel: () => resolve(false),
-          });
-      });
-      if (!ok) return;
-
-      setIsBatchModalOpen(false);
-      const hide = message.loading(t('sidebar.message.clearing_selected_tables', { count: objectNames.length }), 0);
-      const startTime = Date.now();
-      try {
-          const app = (window as any).go.app.App;
-          const res = await app.ClearTables(normalizeConnConfig(conn.config), dbName, objectNames);
-          hide();
-          const duration = Date.now() - startTime;
-          if (res.success) {
-              message.success(t('sidebar.message.clear_success'));
-              // 构造 SQL 日志
-              let logSql = `/* Clear Tables (${objectNames.length} tables) */\n`;
-              if (res.data && res.data.executedSQLs && Array.isArray(res.data.executedSQLs)) {
-                  logSql += res.data.executedSQLs.join(';\n') + ';';
-              } else {
-                  logSql += objectNames.map(name => name).join('; ');
-              }
-              addSqlLog({
-                  id: Date.now().toString(),
-                  timestamp: Date.now(),
-                  sql: logSql,
-                  status: 'success',
-                  duration,
-                  message: res.message,
-                  dbName,
-                  affectedRows: res.data?.count || 0
-              });
-          } else if (res.message !== '已取消') {
-              message.error(t('sidebar.message.clear_failed', { error: res.message }));
-              // 记录失败的日志
-              let logSql = `/* Clear Tables (${objectNames.length} tables) - FAILED */\n`;
-              if (res.data && res.data.executedSQLs && Array.isArray(res.data.executedSQLs)) {
-                  logSql += res.data.executedSQLs.join(';\n') + ';';
-              } else {
-                  logSql += objectNames.map(name => name).join('; ');
-              }
-              addSqlLog({
-                  id: Date.now().toString(),
-                  timestamp: Date.now(),
-                  sql: logSql,
-                  status: 'error',
-                  duration,
-                  message: res.message,
-                  dbName
-              });
-          }
-      } catch (e: any) {
-          const duration = Date.now() - startTime;
-          hide();
-          const errMsg = e?.message || String(e);
-          message.error(t('sidebar.message.clear_failed', { error: errMsg }));
-          // 记录异常的日志
-          let logSql = `/* Clear Tables (${objectNames.length} tables) - ERROR */\n`;
-          logSql += objectNames.map(name => name).join('; ');
-          addSqlLog({
-              id: Date.now().toString(),
-              timestamp: Date.now(),
-              sql: logSql,
-              status: 'error',
-              duration,
-              message: errMsg,
-              dbName
-          });
-      }
-  };
-
-  const handleCheckAll = (checked: boolean) => {
-      if (batchSelectionScope === 'all') {
-          setCheckedTableKeys(checked ? allBatchObjectKeys : []);
-          return;
-      }
-      if (filteredBatchObjectKeys.length === 0) {
-          return;
-      }
-      if (checked) {
-          setCheckedTableKeys(prev => {
-              const nextSet = new Set(prev);
-              filteredBatchObjectKeys.forEach((key) => nextSet.add(key));
-              return allBatchObjectKeys.filter((key) => nextSet.has(key));
-          });
-          return;
-      }
-      const filteredKeySet = new Set(filteredBatchObjectKeys);
-      setCheckedTableKeys(prev => prev.filter((key) => !filteredKeySet.has(key)));
-  };
-
-  const handleInvertSelection = () => {
-      if (batchSelectionScope === 'all') {
-          setCheckedTableKeys(prev => allBatchObjectKeys.filter((key) => !prev.includes(key)));
-          return;
-      }
-      if (filteredBatchObjectKeys.length === 0) {
-          return;
-      }
-      setCheckedTableKeys(prev => {
-          const nextSet = new Set(prev);
-          filteredBatchObjectKeys.forEach((key) => {
-              if (nextSet.has(key)) {
-                  nextSet.delete(key);
-              } else {
-                  nextSet.add(key);
-              }
-          });
-          return allBatchObjectKeys.filter((key) => nextSet.has(key));
-      });
-  };
-
-  const openBatchDatabaseModal = async () => {
-      // Check if current selected node is connection or database
-      let connId = '';
-
-      if (selectedNodesRef.current.length > 0) {
-          const node = selectedNodesRef.current[0];
-          if (node.type === 'connection' && node.dataRef?.config?.type !== 'redis') {
-              connId = node.key as string;
-          } else if (node.type === 'database') {
-              connId = node.dataRef.id;
-          } else if (node.type === 'table') {
-              connId = node.dataRef.id;
-          }
-      }
-
-      setSelectedDbConnection(connId);
-      setBatchDatabases([]);
-      setCheckedDbKeys([]);
-
-      if (connId) {
-          const conn = connections.find(c => c.id === connId);
-          if (conn) {
-              await loadDatabasesForDbBatch(conn);
-          }
-      }
-
-      setIsBatchDbModalOpen(true);
-  };
-
-	  const loadDatabasesForDbBatch = async (conn: SavedConnection) => {
-	      setBatchConnContext(conn);
-
-	      const config = {
-          ...conn.config,
-          port: Number(conn.config.port),
-          password: conn.config.password || "",
-          database: conn.config.database || "",
-          useSSH: conn.config.useSSH || false,
-          ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
-      };
-
-      const res = await DBGetDatabases(buildRpcConnectionConfig(config) as any);
-      if (res.success) {
-          const dbRows: any[] = Array.isArray(res.data) ? res.data : [];
-          let dbs = dbRows.map((row: any) => {
-              const dbName = row.Database || row.database;
-              return {
-                  title: dbName,
-                  key: `${conn.id}-${dbName}`,
-                  dbName: dbName,
-                  dataRef: { ...conn, dbName }
-              };
-          });
-
-          if (conn.includeDatabases && conn.includeDatabases.length > 0) {
-              dbs = dbs.filter(db => conn.includeDatabases!.includes(db.dbName));
-          }
-
-          setBatchDatabases(dbs);
-          setCheckedDbKeys([]);
-      } else {
-          message.error(t('sidebar.message.load_database_list_failed', { error: res.message }));
-      }
-  };
-
-  const handleDbConnectionChange = async (connId: string) => {
-      setSelectedDbConnection(connId);
-
-      const conn = connections.find(c => c.id === connId);
-      if (conn) {
-          await loadDatabasesForDbBatch(conn);
-      }
-  };
-
-  const handleBatchDbExport = async (includeData: boolean) => {
-      const selectedDbs = batchDatabases.filter(db => checkedDbKeys.includes(db.key));
-      if (selectedDbs.length === 0) {
-          message.warning(t('sidebar.message.select_database_required'));
-          return;
-      }
-
-      setIsBatchDbModalOpen(false);
-
-      for (const db of selectedDbs) {
-          const hide = message.loading(
-              includeData
-                  ? t('sidebar.message.exporting_database_backup', { database: db.dbName })
-                  : t('sidebar.message.exporting_database_schema', { database: db.dbName }),
-              0,
-          );
-          try {
-              const res = await (window as any).go.app.App.ExportDatabaseSQL(normalizeConnConfig(batchConnContext.config), db.dbName, includeData);
-              hide();
-              if (res.success) {
-                  message.success(t('sidebar.message.database_export_success', { database: db.dbName }));
-              } else if (res.message !== '已取消') {
-                  message.error(t('sidebar.message.database_export_failed', { database: db.dbName, error: res.message }));
-                  break;
-              } else {
-                  break; // User cancelled
-              }
-          } catch (e: any) {
-              hide();
-              message.error(t('sidebar.message.database_export_failed', { database: db.dbName, error: e?.message || String(e) }));
-              break;
-          }
-      }
-  };
-
-  const handleCheckAllDb = (checked: boolean) => {
-      if (checked) {
-          setCheckedDbKeys(batchDatabases.map(db => db.key));
-      } else {
-          setCheckedDbKeys([]);
-      }
-  };
-
-  const handleInvertSelectionDb = () => {
-      const allKeys = batchDatabases.map(db => db.key);
-      const newChecked = allKeys.filter(k => !checkedDbKeys.includes(k));
-      setCheckedDbKeys(newChecked);
-  };
-
-  const handleRunSQLFile = async (node: any) => {
-      const res = await OpenSQLFile();
-      if (res.success) {
-          const data = normalizeSQLFileDialogData(res.data);
-          // 大文件：后端返回文件路径，走流式执行
-          if (data.isLargeFile) {
-              const connId = node.type === 'connection' ? node.key : node.dataRef?.id;
-              const dbName = node.dataRef?.dbName || '';
-              const conn = connections.find(c => c.id === connId);
-              if (!conn) {
-                  message.error(t('sidebar.message.connection_config_not_found'));
-                  return;
-              }
-              startSQLFileExecution(conn.config, dbName, data.filePath, data.fileSizeMB || '');
-              return;
-          }
-          // 小文件：加载到编辑器
-          const { dbName, id } = node.dataRef;
-          const connectionId = node.type === 'connection' ? String(node.key) : String(id || node.dataRef.id || '');
-          addTab({
-              id: data.filePath ? buildExternalSQLTabId(connectionId, dbName || '', data.filePath) : `query-${Date.now()}`,
-              title: data.fileName || t('sidebar.sql_file_exec.title'),
-              type: 'query',
-              connectionId,
-              dbName: dbName,
-              query: data.content,
-              filePath: data.filePath || undefined,
-          });
-      } else if (res.message !== '已取消') {
-          message.error(t('sidebar.message.read_file_failed', { error: res.message }));
-      }
-  };
-
-  const handleOpenSQLFileFromToolbar = async () => {
-      const ctx = useStore.getState().activeContext;
-      if (!ctx?.connectionId) {
-          message.warning(t('sidebar.message.select_connection_or_database_first'));
-          return;
-      }
-      const res = await OpenSQLFile();
-      if (res.success) {
-          const data = normalizeSQLFileDialogData(res.data);
-          // 大文件：后端流式执行
-          if (data.isLargeFile) {
-              const conn = connections.find(c => c.id === ctx.connectionId);
-              if (!conn) {
-                  message.error(t('sidebar.message.connection_config_not_found'));
-                  return;
-              }
-              startSQLFileExecution(conn.config, ctx.dbName || '', data.filePath, data.fileSizeMB || '');
-              return;
-          }
-          // 小文件
-          addTab({
-              id: data.filePath ? buildExternalSQLTabId(ctx.connectionId, ctx.dbName || '', data.filePath) : `query-${Date.now()}`,
-              title: data.fileName || t('sidebar.sql_file_exec.title'),
-              type: 'query',
-              connectionId: ctx.connectionId,
-              dbName: ctx.dbName || undefined,
-              query: data.content,
-              filePath: data.filePath || undefined,
-          });
-      } else if (res.message !== '已取消') {
-          message.error(t('sidebar.message.read_file_failed', { error: res.message }));
-      }
-  };
-
-  // SQL 文件流式执行状态
-  const [sqlFileExecState, setSqlFileExecState] = useState<{
-      open: boolean;
-      jobId: string;
-      fileSizeMB: string;
-      status: SQLFileExecutionStatus;
-      executed: number;
-      failed: number;
-      total: number;
-      percent: number;
-      currentSQL: string;
-      resultMessage: string;
-  }>({
-      open: false, jobId: '', fileSizeMB: '', status: 'running',
-      executed: 0, failed: 0, total: 0, percent: 0, currentSQL: '', resultMessage: ''
-  });
-
-  const startSQLFileExecution = (config: any, dbName: string, filePath: string, fileSizeMB: string) => {
-      const jobId = `sqlfile-${Date.now()}`;
-      setSqlFileExecState({
-          open: true, jobId, fileSizeMB, status: 'running',
-          executed: 0, failed: 0, total: 0, percent: 0, currentSQL: '', resultMessage: ''
-      });
-
-      // 监听进度事件
-      const offProgress = EventsOn('sqlfile:progress', (event: any) => {
-          if (!event || event.jobId !== jobId) return;
-          setSqlFileExecState(prev => ({
-              ...prev,
-              status: event.status || prev.status,
-              executed: typeof event.executed === 'number' ? event.executed : prev.executed,
-              failed: typeof event.failed === 'number' ? event.failed : prev.failed,
-              total: typeof event.total === 'number' ? event.total : prev.total,
-              percent: typeof event.percent === 'number' ? Math.min(100, event.percent) : prev.percent,
-              currentSQL: typeof event.currentSQL === 'string' ? event.currentSQL : prev.currentSQL,
-          }));
-      });
-
-      // 异步执行
-      ExecuteSQLFile(config, dbName, filePath, jobId).then(res => {
-          offProgress();
-          setSqlFileExecState(prev => ({
-              ...prev,
-              status: res.success ? 'done' : (prev.status === 'cancelled' ? 'cancelled' : 'error'),
-              percent: 100,
-              resultMessage: res.message || '',
-          }));
-      }).catch(err => {
-          offProgress();
-          setSqlFileExecState(prev => ({
-              ...prev,
-              status: 'error',
-              resultMessage: String(err?.message || err),
-          }));
-      });
-  };
-
-  const refreshDatabaseNode = async (dbNodeKey: string) => {
-      if (!dbNodeKey) {
-          return;
-      }
-      const dbNode = findTreeNodeByKey(treeData, dbNodeKey);
-      if (dbNode && dbNode.type === 'database') {
-          await loadTables(dbNode);
-      }
-  };
-
-  const normalizeExternalSQLFileName = (rawName: unknown): string => {
-      const name = String(rawName || '').trim();
-      if (!name) return '';
-      return /\.sql$/i.test(name) ? name : `${name}.sql`;
-  };
-
-  const normalizeExternalSQLDirectoryName = (rawName: unknown): string => {
-      return String(rawName || '').trim();
-  };
-
-  const getExternalSQLParentDirectoryPath = (node: any): string => {
-      const path = String(node?.dataRef?.path || '').trim();
-      if (node?.type === 'external-sql-directory' || node?.type === 'external-sql-folder') {
-          return path;
-      }
-      if (node?.type === 'external-sql-file') {
-          const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
-          return index > 0 ? path.slice(0, index) : '';
-      }
-      return '';
-  };
-
-  const resolveExternalSQLExecutionContext = (): { connectionId: string; dbName: string } => {
-      const activeStoreContext = useStore.getState().activeContext;
-      const selectedConnectionId = selectedNodesRef.current
-          .map((node) => resolveSidebarNodeConnectionId(node, connectionIds))
-          .find(Boolean) || '';
-      return {
-          connectionId: String(
-              activeStoreContext?.connectionId
-              || activeTab?.connectionId
-              || selectedConnectionId
-              || '',
-          ).trim(),
-          dbName: String(
-              activeStoreContext?.dbName
-              || activeTab?.dbName
-              || '',
-          ).trim(),
-      };
-  };
-
-  const normalizeSQLFileDialogData = (data: unknown): { content: string; filePath: string; fileName: string; isLargeFile: boolean; fileSizeMB?: string } => {
-      if (data && typeof data === 'object') {
-          const payload = data as Record<string, unknown>;
-          const filePath = String(payload.filePath || '').trim();
-          return {
-              content: String(payload.content ?? ''),
-              filePath,
-              fileName: String(payload.name || filePath.split(/[\\/]/).filter(Boolean).pop() || t('sidebar.sql_file_exec.title')).trim(),
-              isLargeFile: payload.isLargeFile === true,
-              fileSizeMB: String(payload.fileSizeMB || '').trim() || undefined,
-          };
-      }
-      return {
-          content: String(data || ''),
-          filePath: '',
-          fileName: t('sidebar.sql_file_exec.title'),
-          isLargeFile: false,
-      };
-  };
-
-  const openExternalSQLFile = async (fileNode: any) => {
-      const fileContext = {
-          connectionId: String(fileNode?.dataRef?.connectionId || '').trim(),
-          dbName: String(fileNode?.dataRef?.dbName || '').trim(),
-      };
-      const fallbackContext = resolveExternalSQLExecutionContext();
-      const connectionId = fileContext.connectionId || fallbackContext.connectionId;
-      const dbName = fileContext.dbName || fallbackContext.dbName;
-      const filePath = String(fileNode?.dataRef?.path || '').trim();
-      const fileName = String(fileNode?.dataRef?.name || fileNode?.title || t('sidebar.sql_file.default_name')).trim() || t('sidebar.sql_file.default_name');
-      if (!filePath) {
-          message.error(t('sidebar.message.sql_file_path_incomplete'));
-          return;
-      }
-
-      const res = await ReadSQLFile(filePath);
-      if (!res.success) {
-          if (res.message !== '已取消') {
-              message.error(t('sidebar.message.read_sql_file_failed', { error: res.message }));
-          }
-          return;
-      }
-
-      const data = res.data;
-      if (data && typeof data === 'object' && data.isLargeFile) {
-          if (!connectionId) {
-              message.warning(t('sidebar.message.select_host_before_large_sql_file'));
-              return;
-          }
-          const conn = connections.find((item) => item.id === connectionId);
-          if (!conn) {
-              message.error(t('sidebar.message.connection_config_not_found'));
-              return;
-          }
-          startSQLFileExecution(conn.config, dbName, data.filePath, data.fileSizeMB);
-          return;
-      }
-
-      addTab({
-          id: buildExternalSQLTabId(connectionId, dbName, filePath),
-          title: fileName,
-          type: 'query',
-          connectionId,
-          dbName: dbName || undefined,
-          query: String(data || ''),
-          filePath,
-      });
-  };
-
-  const openCreateExternalSQLFileModal = (node: any) => {
-      const directoryPath = getExternalSQLParentDirectoryPath(node);
-      if (!directoryPath) {
-          message.error(t('sidebar.message.external_sql_file_parent_missing'));
-          return;
-      }
-      setExternalSQLFileModalMode('create');
-      setExternalSQLFileTarget(node);
-      externalSQLFileForm.setFieldsValue({ name: 'new-query.sql' });
-      setIsExternalSQLFileModalOpen(true);
-  };
-
-  const openRenameExternalSQLFileModal = (node: any) => {
-      const currentName = String(node?.dataRef?.name || node?.title || '').trim();
-      if (!currentName) {
-          message.error(t('sidebar.message.external_sql_file_rename_target_missing'));
-          return;
-      }
-      setExternalSQLFileModalMode('rename');
-      setExternalSQLFileTarget(node);
-      externalSQLFileForm.setFieldsValue({ name: currentName });
-      setIsExternalSQLFileModalOpen(true);
-  };
-
-  const openCreateExternalSQLDirectoryModal = (node: any) => {
-      const directoryPath = getExternalSQLParentDirectoryPath(node);
-      if (!directoryPath) {
-          message.error(t('sidebar.message.external_sql_directory_parent_missing'));
-          return;
-      }
-      setExternalSQLFileModalMode('create-directory');
-      setExternalSQLFileTarget(node);
-      externalSQLFileForm.setFieldsValue({ name: 'new-folder' });
-      setIsExternalSQLFileModalOpen(true);
-  };
-
-  const openRenameExternalSQLDirectoryModal = (node: any) => {
-      const currentName = String(node?.dataRef?.name || node?.title || '').trim();
-      if (!currentName) {
-          message.error(t('sidebar.message.external_sql_directory_rename_target_missing'));
-          return;
-      }
-      setExternalSQLFileModalMode('rename-directory');
-      setExternalSQLFileTarget(node);
-      externalSQLFileForm.setFieldsValue({ name: currentName });
-      setIsExternalSQLFileModalOpen(true);
-  };
-
-  const handleExternalSQLFileModalOk = async () => {
-      try {
-          const values = await externalSQLFileForm.validateFields();
-          const isDirectoryMode = isExternalSQLDirectoryModalMode(externalSQLFileModalMode);
-          const name = isDirectoryMode
-              ? normalizeExternalSQLDirectoryName(values.name)
-              : normalizeExternalSQLFileName(values.name);
-          if (!name) {
-              message.error(t(isDirectoryMode ? 'sidebar.message.sql_directory_name_required' : 'sidebar.message.sql_file_name_required'));
-              return;
-          }
-
-          if (externalSQLFileModalMode === 'create') {
-              const directoryPath = getExternalSQLParentDirectoryPath(externalSQLFileTarget);
-              if (!directoryPath) {
-                  message.error(t('sidebar.message.external_sql_file_parent_missing'));
-                  return;
-              }
-              const res = await CreateSQLFile(directoryPath, name);
-              if (!res.success) {
-                  message.error(t('sidebar.message.create_sql_file_failed', { error: res.message }));
-                  return;
-              }
-              await refreshGlobalExternalSQLRootNode(false);
-              message.success(t('sidebar.message.sql_file_created'));
-          } else if (externalSQLFileModalMode === 'rename') {
-              const filePath = String(externalSQLFileTarget?.dataRef?.path || '').trim();
-              if (!filePath) {
-                  message.error(t('sidebar.message.external_sql_file_rename_target_missing'));
-                  return;
-              }
-              const res = await RenameSQLFile(filePath, name);
-              if (!res.success) {
-                  message.error(t('sidebar.message.rename_sql_file_failed', { error: res.message }));
-                  return;
-              }
-              await refreshGlobalExternalSQLRootNode(false);
-              message.success(t('sidebar.message.sql_file_renamed'));
-          } else if (externalSQLFileModalMode === 'create-directory') {
-              const directoryPath = getExternalSQLParentDirectoryPath(externalSQLFileTarget);
-              if (!directoryPath) {
-                  message.error(t('sidebar.message.external_sql_directory_parent_missing'));
-                  return;
-              }
-              const res = await CreateSQLDirectory(directoryPath, name);
-              if (!res.success) {
-                  message.error(t('sidebar.message.create_sql_directory_failed', { error: res.message }));
-                  return;
-              }
-              await refreshGlobalExternalSQLRootNode(false);
-              message.success(t('sidebar.message.sql_directory_created'));
-          } else {
-              const directoryPath = String(externalSQLFileTarget?.dataRef?.path || '').trim();
-              if (!directoryPath) {
-                  message.error(t('sidebar.message.external_sql_directory_rename_target_missing'));
-                  return;
-              }
-              const res = await RenameSQLDirectory(directoryPath, name);
-              if (!res.success) {
-                  message.error(t('sidebar.message.rename_sql_directory_failed', { error: res.message }));
-                  return;
-              }
-
-              if (externalSQLFileTarget?.type === 'external-sql-directory') {
-                  const payload = (res.data && typeof res.data === 'object') ? res.data as Record<string, unknown> : {};
-                  const nextPath = String(payload.directoryPath || payload.path || '').trim();
-                  const nextName = String(payload.name || name).trim();
-                  const oldDirectoryId = String(externalSQLFileTarget?.dataRef?.id || '').trim();
-                  if (!nextPath || !oldDirectoryId) {
-                      message.error(t('sidebar.message.external_sql_directory_rename_sync_failed'));
-                      await refreshGlobalExternalSQLRootNode(false);
-                      return;
-                  }
-                  const nextDirectory: ExternalSQLDirectory = {
-                      id: buildExternalSQLDirectoryId('', '', nextPath),
-                      name: nextName || nextPath.split(/[\\/]/).filter(Boolean).pop() || t('sidebar.sql_directory.default_name'),
-                      path: nextPath,
-                      createdAt: Number(externalSQLFileTarget?.dataRef?.createdAt) || Date.now(),
-                  };
-                  deleteExternalSQLDirectory(oldDirectoryId);
-                  saveExternalSQLDirectory(nextDirectory);
-                  const nextDirectories = [
-                      ...externalSQLDirectories.filter((item) => item.id !== oldDirectoryId),
-                      nextDirectory,
-                  ];
-                  await refreshGlobalExternalSQLRootNode(false, nextDirectories);
-              } else {
-                  await refreshGlobalExternalSQLRootNode(false);
-              }
-              message.success(t('sidebar.message.sql_directory_renamed'));
-          }
-
-          setIsExternalSQLFileModalOpen(false);
-          setExternalSQLFileTarget(null);
-          externalSQLFileForm.resetFields();
-      } catch {
-          // Validate failed
-      }
-  };
-
-  const handleDeleteExternalSQLFile = (node: any) => {
-      const filePath = String(node?.dataRef?.path || '').trim();
-      const fileName = String(node?.dataRef?.name || node?.title || t('sidebar.sql_file.default_name')).trim();
-      if (!filePath) {
-          message.error(t('sidebar.message.external_sql_file_delete_target_missing'));
-          return;
-      }
-
-      Modal.confirm({
-          title: t('sidebar.modal.confirm_delete_sql_file.title'),
-          content: t('sidebar.modal.confirm_delete_sql_file.content', { name: fileName }),
-          okText: t('sidebar.action.delete'),
-          cancelText: t('sidebar.action.cancel'),
-          okButtonProps: { danger: true },
-          onOk: async () => {
-              const res = await DeleteSQLFile(filePath);
-              if (!res.success) {
-                  message.error(t('sidebar.message.delete_sql_file_failed', { error: res.message }));
-                  return;
-              }
-              await refreshGlobalExternalSQLRootNode(false);
-              message.success(t('sidebar.message.sql_file_deleted'));
-          },
-      });
-  };
-
-  const handleDeleteExternalSQLDirectory = (node: any) => {
-      const directoryPath = String(node?.dataRef?.path || '').trim();
-      const directoryName = String(node?.dataRef?.name || node?.title || t('sidebar.sql_directory.default_name')).trim();
-      if (!directoryPath) {
-          message.error(t('sidebar.message.external_sql_directory_delete_target_missing'));
-          return;
-      }
-
-      Modal.confirm({
-          title: t('sidebar.modal.confirm_delete_sql_directory.title'),
-          content: t('sidebar.modal.confirm_delete_sql_directory.content', { name: directoryName }),
-          okText: t('sidebar.action.delete'),
-          cancelText: t('sidebar.action.cancel'),
-          okButtonProps: { danger: true },
-          onOk: async () => {
-              const res = await DeleteSQLDirectory(directoryPath);
-              if (!res.success) {
-                  message.error(t('sidebar.message.delete_sql_directory_failed', { error: res.message }));
-                  return;
-              }
-
-              if (node?.type === 'external-sql-directory') {
-                  const directoryId = String(node?.dataRef?.id || '').trim();
-                  if (directoryId) {
-                      deleteExternalSQLDirectory(directoryId);
-                      const nextDirectories = externalSQLDirectories.filter((item) => item.id !== directoryId);
-                      await refreshGlobalExternalSQLRootNode(false, nextDirectories);
-                  } else {
-                      await refreshGlobalExternalSQLRootNode(false);
-                  }
-              } else {
-                  await refreshGlobalExternalSQLRootNode(false);
-              }
-              message.success(t('sidebar.message.sql_directory_deleted'));
-          },
-      });
-  };
-
-  const handleAddExternalSQLDirectory = async (node: any) => {
-      const currentDirectory = externalSQLDirectories[0]?.path || '';
-      const selection = await SelectSQLDirectory(currentDirectory);
-      if (!selection.success) {
-          if (selection.message !== '已取消') {
-              message.error(t('sidebar.message.select_sql_directory_failed', { error: selection.message }));
-          }
-          return;
-      }
-
-      const payload = (selection.data && typeof selection.data === 'object') ? selection.data as Record<string, unknown> : {};
-      const path = String(payload.path || '').trim();
-      const name = String(payload.name || '').trim();
-      if (!path) {
-          message.error(t('sidebar.message.sql_directory_path_invalid'));
-          return;
-      }
-
-      const directoryId = buildExternalSQLDirectoryId('', '', path);
-      const nextDirectory: ExternalSQLDirectory = {
-          id: directoryId,
-          name: name || path.split(/[\\/]/).filter(Boolean).pop() || t('sidebar.sql_directory.default_name'),
-          path,
-          createdAt: Date.now(),
-      };
-      saveExternalSQLDirectory(nextDirectory);
-
-      const nextDirectories = [
-          ...externalSQLDirectories.filter((item) => item.path.replace(/\\/g, '/').toLowerCase() !== path.replace(/\\/g, '/').toLowerCase()),
-          nextDirectory,
-      ];
-      setExpandedKeys((prev) => Array.from(new Set([...prev, 'external-sql-root'])));
-      setAutoExpandParent(false);
-      await refreshGlobalExternalSQLRootNode(false, nextDirectories);
-      message.success(t('sidebar.message.external_sql_directory_added'));
-  };
-
-  const handleRemoveExternalSQLDirectory = async (node: any) => {
-      const directoryId = String(node?.dataRef?.id || '').trim();
-      if (!directoryId) {
-          message.error(t('sidebar.message.external_sql_directory_not_found'));
-          return;
-      }
-      deleteExternalSQLDirectory(directoryId);
-      const nextDirectories = externalSQLDirectories.filter((item) => item.id !== directoryId);
-      await refreshGlobalExternalSQLRootNode(false, nextDirectories);
-      message.success(t('sidebar.message.external_sql_directory_removed'));
-  };
-
-  const handleRefreshExternalSQLDirectory = async (node: any) => {
-      void node;
-      await refreshGlobalExternalSQLRootNode(true);
-      message.success(t('sidebar.message.external_sql_directory_refreshed'));
-  };
-
-  const handleCreateDatabase = async () => {
-      try {
-          const values = await createDbForm.validateFields();
-          const conn = targetConnection.dataRef;
-          const config = { 
-              ...conn.config, 
-              port: Number(conn.config.port),
-              password: conn.config.password || "",
-              database: (conn.config.type === 'oracle' || conn.config.type === 'dameng') ? (conn.config.database || "") : "",
-              useSSH: conn.config.useSSH || false,
-              ssh: conn.config.ssh || { host: "", port: 22, user: "", password: "", keyPath: "" }
-          };
-          
-          const res = await CreateDatabase(buildRpcConnectionConfig(config) as any, values.name);
-          if (res.success) {
-              message.success(t('sidebar.message.database_created'));
-              setIsCreateDbModalOpen(false);
-              createDbForm.resetFields();
-              // Refresh node
-              loadDatabases(targetConnection);
-          } else {
-              message.error(t('sidebar.message.operation_create_failed', { error: res.message }));
-          }
-      } catch (e) {
-          // Validate failed
-      }
-  };
-
-  const openCreateSchemaModal = (node: any) => {
-      const dialect = getMetadataDialect(node?.dataRef as SavedConnection);
-      if (!isPostgresSchemaDialect(dialect)) {
-          message.warning(t('sidebar.message.schema_create_unsupported'));
-          return;
-      }
-      setCreateSchemaTarget(node);
-      createSchemaForm.resetFields();
-      setIsCreateSchemaModalOpen(true);
-  };
-
-  const handleCreateSchema = async () => {
-      try {
-          const values = await createSchemaForm.validateFields();
-          const node = createSchemaTarget;
-          const conn = node?.dataRef;
-          const dbName = String(conn?.dbName || node?.title || '').trim();
-          if (!conn || !dbName) {
-              message.error(t('sidebar.message.schema_target_missing'));
-              return;
-          }
-
-          const res = await CreateSchema(buildRpcConnectionConfig(conn.config, { database: dbName }) as any, dbName, values.name);
-          if (res.success) {
-              message.success(t('sidebar.message.schema_created'));
-              setIsCreateSchemaModalOpen(false);
-              setCreateSchemaTarget(null);
-              createSchemaForm.resetFields();
-              await loadTables(node);
-          } else {
-              message.error(t('sidebar.message.operation_create_failed', { error: res.message }));
-          }
-      } catch (e) {
-          // Validate failed
-      }
-  };
-
-  const openRenameSchemaModal = (node: any) => {
-      const dialect = getMetadataDialect(node?.dataRef as SavedConnection);
-      const schemaName = String(node?.dataRef?.schemaName || '').trim();
-      if (!isPostgresSchemaDialect(dialect) || !schemaName) {
-          message.warning(t('sidebar.message.schema_edit_unsupported'));
-          return;
-      }
-      setRenameSchemaTarget(node);
-      renameSchemaForm.setFieldsValue({ newName: schemaName });
-      setIsRenameSchemaModalOpen(true);
-  };
-
-  const handleRenameSchema = async () => {
-      try {
-          const values = await renameSchemaForm.validateFields();
-          const node = renameSchemaTarget;
-          const conn = node?.dataRef;
-          const dbName = String(conn?.dbName || '').trim();
-          const oldSchemaName = String(conn?.schemaName || '').trim();
-          const newSchemaName = String(values?.newName || '').trim();
-          if (!conn || !dbName || !oldSchemaName || !newSchemaName) {
-              message.error(t('sidebar.message.schema_target_edit_missing'));
-              return;
-          }
-          if (oldSchemaName === newSchemaName) {
-              message.warning(t('sidebar.message.schema_name_unchanged'));
-              return;
-          }
-
-          const res = await (window as any).go.app.App.RenameSchema(
-              buildRpcConnectionConfig(conn.config, { database: dbName }) as any,
-              dbName,
-              oldSchemaName,
-              newSchemaName,
-          );
-          if (res.success) {
-              message.success(t('sidebar.message.schema_renamed'));
-              const schemaKeyPrefix = `${conn.id}-${dbName}-schema-${oldSchemaName || 'default'}`;
-              setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
-              setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
-              await loadTables(getDatabaseNodeRef(conn, dbName));
-              setIsRenameSchemaModalOpen(false);
-              setRenameSchemaTarget(null);
-              renameSchemaForm.resetFields();
-          } else {
-              message.error(t('sidebar.message.rename_failed', { error: res.message }));
-          }
-      } catch (e) {
-          // Validate failed
-      }
-  };
-
-  const handleDeleteSchema = (node: any) => {
-      const conn = node?.dataRef;
-      const dbName = String(conn?.dbName || '').trim();
-      const schemaName = String(conn?.schemaName || '').trim();
-      if (!conn || !dbName || !schemaName) {
-          message.error(t('sidebar.message.schema_target_delete_missing'));
-          return;
-      }
-      Modal.confirm({
-          title: t('sidebar.modal.confirm_delete_schema.title'),
-          content: t('sidebar.modal.confirm_delete_schema.content', { name: schemaName }),
-          okButtonProps: { danger: true },
-          onOk: async () => {
-              const res = await (window as any).go.app.App.DropSchema(
-                  buildRpcConnectionConfig(conn.config, { database: dbName }) as any,
-                  dbName,
-                  schemaName,
-              );
-              if (res.success) {
-                  message.success(t('sidebar.message.schema_deleted'));
-                  const schemaKeyPrefix = `${conn.id}-${dbName}-schema-${schemaName || 'default'}`;
-                  setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
-                  setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
-                  await loadTables(getDatabaseNodeRef(conn, dbName));
-              } else {
-                  message.error(t('sidebar.message.delete_failed', { error: res.message }));
-              }
-          }
-      });
-  };
 
   const buildRuntimeConfig = (conn: any, overrideDatabase?: string, clearDatabase: boolean = false) => {
       return buildRpcConnectionConfig(conn.config, {
@@ -5175,1624 +1715,258 @@ const Sidebar: React.FC<{
       return splitQualifiedName(String(fullName || '').trim()).objectName || String(fullName || '').trim();
   };
 
-  const handleRenameDatabase = async () => {
-      if (!renameDbTarget) return;
-      try {
-          const values = await renameDbForm.validateFields();
-          const conn = renameDbTarget.dataRef;
-          const oldDbName = String(conn.dbName || '').trim();
-          const newDbName = String(values.newName || '').trim();
-          if (!oldDbName || !newDbName) {
-              message.error(t('sidebar.message.database_name_required'));
-              return;
-          }
-          if (oldDbName === newDbName) {
-              message.warning(t('sidebar.message.database_name_unchanged'));
-              return;
-          }
-
-          const config = buildRuntimeConfig(conn, conn.dbName);
-          const res = await RenameDatabase(buildRpcConnectionConfig(config) as any, oldDbName, newDbName);
-          if (res.success) {
-              message.success(t('sidebar.message.database_renamed'));
-              setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${oldDbName}`)));
-              setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${oldDbName}`)));
-              await loadDatabases(getConnectionNodeRef(conn));
-              setIsRenameDbModalOpen(false);
-              setRenameDbTarget(null);
-              renameDbForm.resetFields();
-          } else {
-              message.error(t('sidebar.message.operation_rename_failed', { error: res.message }));
-          }
-      } catch (e) {
-          // Validate failed
-      }
-  };
-
-  const handleDeleteDatabase = (node: any) => {
-      const conn = node.dataRef;
-      const dbName = String(conn.dbName || '').trim();
-      if (!dbName) return;
-      Modal.confirm({
-          title: t('sidebar.modal.confirm_delete_database.title'),
-          content: t('sidebar.modal.confirm_delete_database.content', { name: dbName }),
-          okButtonProps: { danger: true },
-          onOk: async () => {
-              const config = buildRuntimeConfig(conn, conn.dbName);
-              const res = await DropDatabase(buildRpcConnectionConfig(config) as any, dbName);
-              if (res.success) {
-                  message.success(t('sidebar.message.database_deleted'));
-                  closeTabsByDatabase(conn.id, dbName);
-                  setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${dbName}`)));
-                  setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(`${conn.id}-${dbName}`)));
-                  await loadDatabases(getConnectionNodeRef(conn));
-              } else {
-                  message.error(t('sidebar.message.operation_drop_failed', { error: res.message }));
-              }
-          }
-      });
-  };
-
-  const handleRenameTable = async () => {
-      if (!renameTableTarget) return;
-      try {
-          const values = await renameTableForm.validateFields();
-          const conn = renameTableTarget.dataRef;
-          const oldTableName = String(conn.tableName || '').trim();
-          const newTableName = String(values.newName || '').trim();
-          if (!oldTableName || !newTableName) {
-              message.error(t('sidebar.message.table_name_required'));
-              return;
-          }
-          if (extractObjectName(oldTableName) === newTableName || oldTableName === newTableName) {
-              message.warning(t('sidebar.message.table_name_unchanged'));
-              return;
-          }
-          const config = buildRuntimeConfig(conn, conn.dbName);
-          const res = await RenameTable(buildRpcConnectionConfig(config) as any, conn.dbName, oldTableName, newTableName);
-          if (res.success) {
-              message.success(t('sidebar.message.table_renamed'));
-              await loadTables(getDatabaseNodeRef(conn, conn.dbName));
-              setIsRenameTableModalOpen(false);
-              setRenameTableTarget(null);
-              renameTableForm.resetFields();
-          } else {
-              message.error(t('sidebar.message.rename_failed', { error: res.message }));
-          }
-      } catch (e) {
-          // Validate failed
-      }
-  };
-
-  const handleDeleteTable = (node: any) => {
-      const conn = node.dataRef;
-      const tableName = String(conn.tableName || '').trim();
-      if (!tableName) return;
-      Modal.confirm({
-          title: t('sidebar.modal.confirm_delete_table.title'),
-          content: t('sidebar.modal.confirm_delete_table.content', { name: tableName }),
-          okButtonProps: { danger: true },
-          onOk: async () => {
-              const config = buildRuntimeConfig(conn, conn.dbName);
-              const res = await DropTable(buildRpcConnectionConfig(config) as any, conn.dbName, tableName);
-              if (res.success) {
-                  message.success(t('sidebar.message.table_deleted'));
-                  await loadTables(getDatabaseNodeRef(conn, conn.dbName));
-              } else {
-                  message.error(t('sidebar.message.delete_failed', { error: res.message }));
-              }
-          }
-      });
-  };
-
-  const handleTableDataDangerAction = async (node: any, action: TableDataDangerActionKind) => {
-      const conn = node.dataRef;
-      const tableName = String(conn.tableName || '').trim();
-      if (!tableName) return;
-
-      const { label, progressLabel } = getTableDataDangerActionMeta(action, t);
-      const confirmed = await new Promise<boolean>((resolve) => {
-          Modal.confirm({
-              title: t('sidebar.modal.confirm_table_data_action.title', { action: label }),
-              content: t('sidebar.modal.confirm_table_data_action.content', { action: label, table: tableName }),
-              okText: t('common.continue'),
-              cancelText: t('common.cancel'),
-              okButtonProps: { danger: true },
-              onOk: () => resolve(true),
-              onCancel: () => resolve(false),
-          });
-      });
-      if (!confirmed) return;
-
-      const config = buildRuntimeConfig(conn, conn.dbName);
-      const app = (window as any).go.app.App;
-      const methodName = action === 'truncate' ? 'TruncateTables' : 'ClearTables';
-      const hide = message.loading(t('sidebar.message.table_data_action_loading', { action: progressLabel, table: tableName }), 0);
-      const startTime = Date.now();
-      try {
-          const res = await app[methodName](buildRpcConnectionConfig(config) as any, conn.dbName, [tableName]);
-          hide();
-          const duration = Date.now() - startTime;
-          const executedSQLs = Array.isArray(res.data?.executedSQLs) ? res.data.executedSQLs : [];
-          const logSql = executedSQLs.length > 0
-              ? executedSQLs.join(';\n') + ';'
-              : `/* ${label} ${tableName} */`;
-
-          if (res.success) {
-              message.success(t('sidebar.message.table_data_action_success', { action: progressLabel }));
-              addSqlLog({
-                  id: Date.now().toString(),
-                  timestamp: Date.now(),
-                  sql: logSql,
-                  status: 'success',
-                  duration,
-                  message: res.message,
-                  dbName: conn.dbName,
-                  affectedRows: res.data?.count || 0,
-              });
-              await loadTables(getDatabaseNodeRef(conn, conn.dbName));
-              return;
-          }
-
-          addSqlLog({
-              id: Date.now().toString(),
-              timestamp: Date.now(),
-              sql: logSql,
-              status: 'error',
-              duration,
-              message: res.message,
-              dbName: conn.dbName,
-          });
-          if (res.message !== '已取消') {
-              message.error(t('sidebar.message.table_data_action_failed', { action: progressLabel, error: res.message }));
-          }
-      } catch (e: any) {
-          const duration = Date.now() - startTime;
-          const errMsg = e?.message || String(e);
-          hide();
-          addSqlLog({
-              id: Date.now().toString(),
-              timestamp: Date.now(),
-              sql: `/* ${label} ${tableName} - ERROR */`,
-              status: 'error',
-              duration,
-              message: errMsg,
-              dbName: conn.dbName,
-          });
-          message.error(t('sidebar.message.table_data_action_failed', { action: progressLabel, error: errMsg }));
-      }
-  };
-
-  // --- 视图操作 ---
-  const openViewDefinition = (node: any) => {
-      const { viewName, dbName, id, schemaName } = node.dataRef;
-      const isMaterialized = node.type === 'materialized-view' || node.dataRef?.objectKind === 'materialized-view';
-      addTab({
-          id: `view-def-${id}-${dbName}-${viewName}`,
-          title: t(isMaterialized ? 'sidebar.tab.materialized_view_definition' : 'sidebar.tab.view_definition', { name: viewName }),
-          type: 'view-def',
-          connectionId: id,
-          dbName,
-          viewName,
-          viewKind: isMaterialized ? 'materialized' : 'view',
-          schemaName,
-          sidebarLocateKey: String(node.key || ''),
-      });
-  };
-
-  const openEditView = async (node: any) => {
-      const conn = node.dataRef;
-      const { viewName, dbName, id } = conn;
-      // 获取视图定义后打开查询编辑器
-      const dialect = getMetadataDialect(conn as SavedConnection);
-      const sqlTemplateHeader = `-- ${t('sidebar.sql_template.edit_view', { name: viewName })}`;
-      let template = `${sqlTemplateHeader}\n-- ${t('sidebar.sql_template.modify_then_execute')}\nCREATE OR REPLACE VIEW ${viewName} AS\nSELECT * FROM your_table;`;
-
-      try {
-          const config = buildRuntimeConfig(conn, dbName);
-          let queries: string[] = [];
-          switch (dialect) {
-              case 'mysql':
-              case 'starrocks':
-                  queries = [`SHOW CREATE VIEW \`${viewName.replace(/`/g, '``')}\``];
-                  break;
-              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb': {
-                  const parts = splitQualifiedName(viewName);
-                  const schema = parts.schemaName || 'public';
-                  const name = parts.objectName || viewName;
-                  queries = [`SELECT pg_get_viewdef('${escapeSQLLiteral(schema)}.${escapeSQLLiteral(name)}'::regclass, true) AS view_definition`];
-                  break;
-              }
-              case 'sqlserver':
-                  queries = buildSqlServerObjectDefinitionQueries('view', viewName, dbName, 'view_definition');
-                  break;
-              case 'sqlite':
-                  queries = [`SELECT sql AS view_definition FROM sqlite_master WHERE type='view' AND name='${escapeSQLLiteral(viewName)}'`];
-                  break;
-              case 'duckdb': {
-                  const parts = splitQualifiedName(viewName);
-                  const viewSchema = escapeSQLLiteral(parts.schemaName || 'main');
-                  const viewObject = escapeSQLLiteral(parts.objectName || viewName);
-                  queries = [`SELECT view_definition FROM information_schema.views WHERE table_schema='${viewSchema}' AND table_name='${viewObject}' LIMIT 1`];
-                  break;
-              }
-          }
-          for (const query of queries) {
-              const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, query);
-              if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-                  const row = result.data[0] as Record<string, any>;
-                  const def = dialect === 'sqlserver'
-                      ? extractSqlServerDefinitionRows(result.data, ['view_definition', 'definition'])
-                      : row.view_definition || row.VIEW_DEFINITION || Object.values(row).find(v => typeof v === 'string' && String(v).length > 10) || '';
-                  if (def) {
-                      if (dialect === 'mysql') {
-                          template = `${sqlTemplateHeader}\n${normalizeMySQLViewDDLForEditing(viewName, def)}`;
-                      } else if (dialect === 'sqlserver') {
-                          template = /^\s*create\s+view\b/i.test(String(def))
-                              ? `${sqlTemplateHeader}\n${def}`
-                              : `${sqlTemplateHeader}\nCREATE VIEW ${viewName} AS\n${def}`;
-                      } else {
-                          template = `${sqlTemplateHeader}\nCREATE OR REPLACE VIEW ${viewName} AS\n${def}`;
-                      }
-                      break;
-                  }
-              }
-          }
-      } catch { /* 降级使用模板 */ }
-
-      addTab({
-          id: `query-edit-view-${Date.now()}`,
-          title: t('sidebar.tab.edit_view', { name: viewName }),
-          type: 'query',
-          connectionId: id,
-          dbName,
-          query: template
-      });
-  };
-
-  const openCreateView = (node: any) => {
-      const conn = node.dataRef;
-      const { dbName, id } = conn;
-      const dialect = getMetadataDialect(conn as SavedConnection);
-      let template: string;
-      switch (dialect) {
-          case 'mysql':
-          case 'starrocks':
-              template = `CREATE VIEW \`view_name\` AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
-              break;
-          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb':
-              template = `CREATE OR REPLACE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
-              break;
-          case 'sqlserver':
-              template = `CREATE VIEW dbo.view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
-              break;
-          case 'oracle': case 'dm':
-              template = `CREATE OR REPLACE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
-              break;
-          case 'sqlite':
-          case 'duckdb':
-              template = `CREATE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
-              break;
-          default:
-              template = `CREATE VIEW view_name AS\nSELECT column1, column2\nFROM table_name\nWHERE condition;`;
-      }
-      addTab({
-          id: `query-create-view-${Date.now()}`,
-          title: t('sidebar.tab.create_view'),
-          type: 'query',
-          connectionId: id,
-          dbName,
-          query: template
-      });
-  };
-
-  const openCreateStarRocksMaterializedView = (node: any) => {
-      const conn = node.dataRef;
-      const { dbName, id } = conn;
-      const schemaPrefix = String(conn.schemaName || dbName || '').trim();
-      const mvName = schemaPrefix ? `${schemaPrefix}.mv_name` : 'mv_name';
-      const template = buildStarRocksMaterializedViewPreviewSql({
-          name: mvName,
-          query: 'SELECT\n  column1,\n  COUNT(*) AS cnt\nFROM table_name\nGROUP BY column1',
-          distributionColumnNames: ['column1'],
-          refreshClause: 'REFRESH ASYNC',
-          properties: '"replication_num" = "1"',
-      });
-      addTab({
-          id: `query-create-starrocks-mv-${Date.now()}`,
-          title: t('sidebar.v2_database_menu.new_materialized_view'),
-          type: 'query',
-          connectionId: id,
-          dbName,
-          query: template,
-      });
-  };
-
-  const openCreateStarRocksExternalCatalog = (node: any) => {
-      const conn = node.dataRef;
-      const { dbName, id } = conn;
-      addTab({
-          id: `query-create-starrocks-catalog-${Date.now()}`,
-          title: t('sidebar.v2_database_menu.new_external_catalog'),
-          type: 'query',
-          connectionId: id,
-          dbName,
-          query: `CREATE EXTERNAL CATALOG catalog_name\nPROPERTIES (\n  "type" = "hive",\n  "hive.metastore.uris" = "thrift://127.0.0.1:9083"\n);`,
-      });
-  };
-
-  const openCreateStarRocksRollup = (node: any) => {
-      const conn = node.dataRef;
-      const { tableName, dbName, id } = conn;
-      const safeTable = String(tableName || 'table_name').trim();
-      const safeTableParts = [splitQualifiedName(safeTable).schemaName, splitQualifiedName(safeTable).objectName].filter(Boolean);
-      const quotedTable = safeTable.includes('`')
-          ? safeTable
-          : (safeTableParts.length > 0 ? safeTableParts : [safeTable]).map(part => `\`${part.replace(/`/g, '``')}\``).join('.');
-      addTab({
-          id: `query-create-starrocks-rollup-${Date.now()}`,
-          title: t('sidebar.v2_table_menu.new_rollup', { keyword: 'Rollup' }),
-          type: 'query',
-          connectionId: id,
-          dbName,
-          query: `ALTER TABLE ${quotedTable}\nADD ROLLUP rollup_name (column1, column2);`,
-      });
-  };
-
-  const handleDropView = (node: any) => {
-      const conn = node.dataRef;
-      const viewName = String(conn.viewName || '').trim();
-      if (!viewName) return;
-      Modal.confirm({
-          title: t('sidebar.modal.confirm_delete_view.title'),
-          content: t('sidebar.modal.confirm_delete_view.content', { name: viewName }),
-          okButtonProps: { danger: true },
-          onOk: async () => {
-              const config = buildRuntimeConfig(conn, conn.dbName);
-              const res = await DropView(buildRpcConnectionConfig(config) as any, conn.dbName, viewName);
-              if (res.success) {
-                  message.success(t('sidebar.message.view_deleted'));
-                  await loadTables(getDatabaseNodeRef(conn, conn.dbName));
-              } else {
-                  message.error(t('sidebar.message.delete_failed', { error: res.message }));
-              }
-          }
-      });
-  };
-
-  const handleRenameView = async () => {
-      if (!renameViewTarget) return;
-      try {
-          const values = await renameViewForm.validateFields();
-          const conn = renameViewTarget.dataRef;
-          const oldViewName = String(conn.viewName || '').trim();
-          const newViewName = String(values.newName || '').trim();
-          if (!oldViewName || !newViewName) {
-              message.error(t('sidebar.message.view_name_required'));
-              return;
-          }
-          if (extractObjectName(oldViewName) === newViewName || oldViewName === newViewName) {
-              message.warning(t('sidebar.message.view_name_unchanged'));
-              return;
-          }
-          const config = buildRuntimeConfig(conn, conn.dbName);
-          const res = await RenameView(buildRpcConnectionConfig(config) as any, conn.dbName, oldViewName, newViewName);
-          if (res.success) {
-              message.success(t('sidebar.message.view_renamed'));
-              await loadTables(getDatabaseNodeRef(conn, conn.dbName));
-              setIsRenameViewModalOpen(false);
-              setRenameViewTarget(null);
-              renameViewForm.resetFields();
-          } else {
-              message.error(t('sidebar.message.rename_failed', { error: res.message }));
-          }
-      } catch (e) {
-          // Validate failed
-      }
-  };
-
-  const openRenameSavedQueryModal = (query: SavedQuery) => {
-      setRenameSavedQueryTarget(query);
-      renameSavedQueryForm.setFieldsValue({ name: query.name || t('query_editor.save_modal.unnamed') });
-      setIsRenameSavedQueryModalOpen(true);
-  };
 
   const resolveSavedQueryDisplayName = (name: string | null | undefined) => {
       const rawName = String(name || '').trim();
       return rawName || t('query_editor.save_modal.unnamed');
   };
 
-  const handleRenameSavedQuery = async () => {
-      if (!renameSavedQueryTarget) return;
-      try {
-          const values = await renameSavedQueryForm.validateFields();
-          const nextName = String(values.name || '').trim();
-          if (!nextName) {
-              message.error(t('query_editor.save_modal.name_required'));
-              return;
-          }
-          if (nextName === renameSavedQueryTarget.name) {
-              message.warning(t('sidebar.message.saved_query_name_unchanged'));
-              return;
-          }
-
-          const persisted = await saveQuery({
-              ...renameSavedQueryTarget,
-              name: nextName,
-          });
-          const updateSavedQueryNode = (list: TreeNode[]): TreeNode[] =>
-              list.map(node => {
-                  if (node.type === 'saved-query' && node.dataRef?.id === renameSavedQueryTarget.id) {
-                      return {
-                          ...node,
-                          title: persisted.name,
-                          dataRef: { ...(node.dataRef || renameSavedQueryTarget), ...persisted },
-                      };
-                  }
-                  return node.children ? { ...node, children: updateSavedQueryNode(node.children) } : node;
-              });
-          const nextTreeData = updateSavedQueryNode(treeDataRef.current);
-          treeDataRef.current = nextTreeData;
-          setTreeData(nextTreeData);
-          tabs
-              .filter(tab => tab.type === 'query' && (tab.savedQueryId === renameSavedQueryTarget.id || tab.id === renameSavedQueryTarget.id))
-              .forEach(tab => updateQueryTabDraft(tab.id, { title: persisted.name }));
-          message.success(t('sidebar.message.saved_query_renamed'));
-          setIsRenameSavedQueryModalOpen(false);
-          setRenameSavedQueryTarget(null);
-          renameSavedQueryForm.resetFields();
-      } catch (e) {
-          if (e instanceof Error) {
-              message.error(t('sidebar.message.saved_query_rename_failed', { error: e.message }));
-          }
-      }
-  };
-
-  const isSavedQueryUnmatched = useCallback((query: SavedQuery): boolean => {
-      return query.bindingStatus === 'orphan' || !connectionIdSet.has(query.connectionId);
-  }, [connectionIdSet]);
-
-  const handleRebindSavedQuery = useCallback(async (query: SavedQuery, target: SavedConnection) => {
-      if (!query?.id || !target?.id) return;
-      try {
-          const backendApp = (window as any).go?.app?.App;
-          let persisted: SavedQuery;
-          if (typeof backendApp?.RebindSavedQuery === 'function') {
-              persisted = await backendApp.RebindSavedQuery(query.id, target.id);
-              await saveQuery(persisted);
-          } else {
-              persisted = await saveQuery({
-                  ...query,
-                  connectionId: target.id,
-                  originalConnectionId: query.originalConnectionId || query.connectionId,
-                  bindingStatus: 'active',
-              });
-          }
-          message.success(t('sidebar.message.saved_query_rebind_success', { name: target.name || target.id }));
-          tabs
-              .filter(tab => tab.type === 'query' && (tab.savedQueryId === query.id || tab.id === query.id))
-              .forEach(tab => updateQueryTabDraft(tab.id, {
-                  title: persisted.name,
-                  connectionId: persisted.connectionId,
-                  dbName: persisted.dbName,
-              }));
-      } catch (error) {
-          message.error(t('sidebar.message.saved_query_rebind_failed', { error: error instanceof Error ? error.message : String(error) }));
-      }
-  }, [saveQuery, tabs, updateQueryTabDraft]);
-
-  // --- 函数/存储过程操作 ---
-  const openRoutineDefinition = (node: any) => {
-      const { routineName, routineType, dbName, id } = node.dataRef;
-      const typeLabel = t(routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function');
-      addTab({
-          id: `routine-def-${id}-${dbName}-${routineName}`,
-          title: t('sidebar.tab.routine_definition', { type: typeLabel, name: routineName }),
-          type: 'routine-def',
-          connectionId: id,
-          dbName,
-          routineName,
-          routineType
-      });
-  };
-
-  const openEventDefinition = (node: any) => {
-      const { eventName, dbName, id } = node.dataRef;
-      addTab({
-          id: `event-def-${id}-${dbName}-${eventName}`,
-          title: t('sidebar.tab.event', { name: eventName }),
-          type: 'event-def',
-          connectionId: id,
-          dbName,
-          eventName,
-      });
-  };
-
-  const openEditRoutine = async (node: any) => {
-      const conn = node.dataRef;
-      const { routineName, routineType, dbName, id } = conn;
-      const dialect = getMetadataDialect(conn as SavedConnection);
-      const tabTypeKey = routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function';
-      const tabTypeLabel = t(tabTypeKey);
-      const sqlTemplateHeader = `-- ${t('sidebar.sql_template.edit_routine', { type: tabTypeLabel, name: routineName })}`;
-      let template = sqlTemplateHeader;
-
-      try {
-          const config = buildRuntimeConfig(conn, dbName);
-          let query = '';
-          const parsedRoutine = splitQualifiedName(routineName);
-          const name = parsedRoutine.objectName || routineName;
-          const schema = parsedRoutine.schemaName;
-
-          switch (dialect) {
-              case 'mysql':
-              case 'starrocks':
-                  query = `SHOW CREATE ${routineType} \`${name.replace(/`/g, '``')}\``;
-                  break;
-              case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb': {
-                  const schemaRef = schema || 'public';
-                  query = `SELECT pg_get_functiondef(p.oid) AS routine_definition FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = '${escapeSQLLiteral(schemaRef)}' AND p.proname = '${escapeSQLLiteral(name)}' LIMIT 1`;
-                  break;
-              }
-              case 'sqlserver':
-                  query = '';
-                  break;
-              case 'oracle': case 'dm': {
-                  const owner = schema ? escapeSQLLiteral(schema).toUpperCase() : '';
-                  if (owner) {
-                      query = `SELECT TEXT FROM ALL_SOURCE WHERE OWNER = '${owner}' AND NAME = '${escapeSQLLiteral(name).toUpperCase()}' AND TYPE = '${routineType}' ORDER BY LINE`;
-                  } else {
-                      query = `SELECT TEXT FROM USER_SOURCE WHERE NAME = '${escapeSQLLiteral(name).toUpperCase()}' AND TYPE = '${routineType}' ORDER BY LINE`;
-                  }
-                  break;
-              }
-              case 'duckdb': {
-                  const schemaRef = schema || 'main';
-                  query = `SELECT schema_name, function_name, parameters, macro_definition FROM duckdb_functions() WHERE internal = false AND lower(function_type) = 'macro' AND schema_name = '${escapeSQLLiteral(schemaRef)}' AND function_name = '${escapeSQLLiteral(name)}' LIMIT 1`;
-                  break;
-              }
-          }
-          const queries = dialect === 'sqlserver'
-              ? buildSqlServerObjectDefinitionQueries('routine', routineName, dbName, 'routine_definition')
-              : [query].filter(Boolean);
-          for (const queryText of queries) {
-              const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, queryText);
-              if (result.success && Array.isArray(result.data) && result.data.length > 0) {
-                  if (dialect === 'oracle' || dialect === 'dm') {
-                      const lines = result.data.map((row: any) => row.text || row.TEXT || Object.values(row)[0] || '').join('');
-                      if (lines) {
-                          template = `${sqlTemplateHeader}\nCREATE OR REPLACE ${lines}`;
-                          break;
-                      }
-                  } else if (dialect === 'duckdb') {
-                      const row = result.data[0] as Record<string, any>;
-                      const ddl = buildDuckDBMacroDDL(
-                          String(getCaseInsensitiveRawValue(row, ['schema_name']) || schema || '').trim(),
-                          String(getCaseInsensitiveRawValue(row, ['function_name']) || name || '').trim(),
-                          getCaseInsensitiveRawValue(row, ['parameters']),
-                          getCaseInsensitiveRawValue(row, ['macro_definition'])
-                      );
-                      if (ddl) {
-                          template = `${sqlTemplateHeader}\n${ddl}`;
-                          break;
-                      }
-                  } else {
-                      const row = result.data[0] as Record<string, any>;
-                      const def = dialect === 'sqlserver'
-                          ? extractSqlServerDefinitionRows(result.data, ['routine_definition', 'definition'])
-                          : row.routine_definition || row.ROUTINE_DEFINITION || Object.values(row).find(v => typeof v === 'string' && String(v).length > 10) || '';
-                      if (def) {
-                          template = `${sqlTemplateHeader}\n${def}`;
-                          break;
-                      }
-                  }
-              }
-          }
-      } catch { /* 降级使用模板 */ }
-
-      addTab({
-          id: `query-edit-routine-${Date.now()}`,
-          title: t('sidebar.tab.edit_routine', { type: tabTypeLabel, name: routineName }),
-          type: 'query',
-          connectionId: id,
-          dbName,
-          query: template
-      });
-  };
-
-  const openCreateRoutine = (node: any, type: 'FUNCTION' | 'PROCEDURE') => {
-      const conn = node.dataRef;
-      const { dbName, id } = conn;
-      const dialect = getMetadataDialect(conn as SavedConnection);
-      const isProc = type === 'PROCEDURE';
-      let template: string;
-
-      switch (dialect) {
-          case 'mysql':
-          case 'starrocks':
-              template = isProc
-                  ? `DELIMITER $$\nCREATE PROCEDURE proc_name(IN param1 INT)\nBEGIN\n    SELECT * FROM table_name WHERE id = param1;\nEND$$\nDELIMITER ;`
-                  : `DELIMITER $$\nCREATE FUNCTION func_name(param1 INT)\nRETURNS INT\nDETERMINISTIC\nBEGIN\n    RETURN param1 * 2;\nEND$$\nDELIMITER ;`;
-              break;
-          case 'postgres': case 'kingbase': case 'highgo': case 'vastbase': case 'opengauss': case 'gaussdb':
-              template = isProc
-                  ? `CREATE OR REPLACE PROCEDURE proc_name(param1 integer)\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    -- procedure body\nEND;\n$$;`
-                  : `CREATE OR REPLACE FUNCTION func_name(param1 integer)\nRETURNS integer\nLANGUAGE plpgsql\nAS $$\nBEGIN\n    RETURN param1 * 2;\nEND;\n$$;`;
-              break;
-          case 'sqlserver':
-              template = isProc
-                  ? `CREATE PROCEDURE dbo.proc_name\n    @param1 INT\nAS\nBEGIN\n    SELECT * FROM table_name WHERE id = @param1;\nEND;`
-                  : `CREATE FUNCTION dbo.func_name(@param1 INT)\nRETURNS INT\nAS\nBEGIN\n    RETURN @param1 * 2;\nEND;`;
-              break;
-          case 'oracle': case 'dm':
-              template = isProc
-                  ? `CREATE OR REPLACE PROCEDURE proc_name(param1 IN NUMBER)\nIS\nBEGIN\n    -- procedure body\n    NULL;\nEND;`
-                  : `CREATE OR REPLACE FUNCTION func_name(param1 IN NUMBER)\nRETURN NUMBER\nIS\nBEGIN\n    RETURN param1 * 2;\nEND;`;
-              break;
-          case 'duckdb':
-              template = isProc
-                  ? `-- ${t('sidebar.sql_template.duckdb_procedure_unsupported')}\n-- ${t('sidebar.sql_template.duckdb_macro_hint')}\nCREATE MACRO func_name(param1) AS (param1 * 2);`
-                  : `CREATE MACRO func_name(param1) AS (param1 * 2);`;
-              break;
-          default:
-              template = isProc
-                  ? `CREATE PROCEDURE proc_name()\nBEGIN\n    -- procedure body\nEND;`
-                  : `CREATE FUNCTION func_name()\nRETURNS INTEGER\nBEGIN\n    RETURN 0;\nEND;`;
-      }
-
-      addTab({
-          id: `query-create-routine-${Date.now()}`,
-          title: isProc ? t('sidebar.tab.create_procedure') : t('sidebar.tab.create_function'),
-          type: 'query',
-          connectionId: id,
-          dbName,
-          query: template
-      });
-  };
-
-  const handleDropRoutine = (node: any) => {
-      const conn = node.dataRef;
-      const routineName = String(conn.routineName || '').trim();
-      const routineType = String(conn.routineType || 'FUNCTION').trim();
-      if (!routineName) return;
-      const typeLabel = t(routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function');
-      Modal.confirm({
-          title: t('sidebar.modal.confirm_delete_routine.title', { type: typeLabel }),
-          content: t('sidebar.modal.confirm_delete_routine.content', { type: typeLabel, name: routineName }),
-          okButtonProps: { danger: true },
-          onOk: async () => {
-              const config = buildRuntimeConfig(conn, conn.dbName);
-              const res = await DropFunction(buildRpcConnectionConfig(config) as any, conn.dbName, routineName, routineType);
-              if (res.success) {
-                  message.success(t('sidebar.message.routine_deleted', { type: typeLabel }));
-                  await loadTables(getDatabaseNodeRef(conn, conn.dbName));
-              } else {
-                  message.error(t('sidebar.message.delete_failed', { error: res.message }));
-              }
-          }
-      });
-  };
-
-  const resolveMessagePublishTarget = (node: any): SidebarMessagePublishTarget | null => {
-      const connectionId = String(node?.dataRef?.id || '').trim();
-      const liveConnection = connections.find((item) => item.id === connectionId);
-      const sourceConnection = (liveConnection || node?.dataRef) as SavedConnection | undefined;
-      if (!sourceConnection?.config) return null;
-      const capabilities = getDataSourceCapabilities(sourceConnection.config);
-      if (!capabilities.supportsMessagePublish) return null;
-
-      return {
-          connection: sourceConnection,
-          executionDbName: String(node?.dataRef?.dbName || ''),
-          destination: String(node?.dataRef?.tableName || node?.title || '').trim(),
-      };
-  };
-
-  const openMessagePublishModal = (node: any) => {
-      const target = resolveMessagePublishTarget(node);
-      if (!target) {
-          message.warning(t('sidebar.message.message_publish_unsupported'));
-          return;
-      }
-      setMessagePublishTarget(target);
-  };
-
-  const handleMessagePublishSuccess = (result: { destination: string; affectedRows: number }) => {
-      const destination = String(result.destination || '').trim();
-      const destinationLabel = destination || t('sidebar.message.message_publish_target_fallback');
-      message.success(result.affectedRows > 0
-          ? t('sidebar.message.message_publish_success_with_count', { destination: destinationLabel, count: result.affectedRows })
-          : t('sidebar.message.message_publish_success', { destination: destinationLabel }));
-      setMessagePublishTarget(null);
-  };
-
-  const handleV2TableContextMenuAction = (node: any, action: V2TableContextMenuActionKey) => {
-      switch (action) {
-          case 'pin-table':
-          case 'unpin-table': {
-              toggleSidebarTablePinned(node, action === 'pin-table');
-              return;
-          }
-          case 'open-data':
-          case 'open-new-tab':
-              onDoubleClick(null, node);
-              return;
-          case 'design-table':
-              openDesign(node, 'columns', false);
-              return;
-          case 'new-query': {
-              const tableName = String(node.dataRef?.tableName || '').trim();
-              const queryTemplate = buildTableSelectQuery(getMetadataDialect(node.dataRef as SavedConnection), tableName);
-              addTab({
-                  id: `query-${Date.now()}`,
-                  title: t('query.new'),
-                  type: 'query',
-                  connectionId: node.dataRef.id,
-                  dbName: node.dataRef.dbName,
-                  query: queryTemplate
-              });
-              return;
-          }
-          case 'publish-message':
-              openMessagePublishModal(node);
-              return;
-          case 'view-ddl':
-              openTableDdlInDesigner(node);
-              return;
-          case 'view-er':
-              openTableInERView(node);
-              return;
-          case 'copy-table-name':
-              void handleCopyTableName(node);
-              return;
-          case 'copy-structure':
-              void handleCopyStructure(node);
-              return;
-          case 'copy-insert':
-              void handleCopyTableAsInsert(node);
-              return;
-          case 'rename-table':
-              setRenameTableTarget(node);
-              renameTableForm.setFieldsValue({ newName: extractObjectName(node.dataRef?.tableName || node.title) });
-              setIsRenameTableModalOpen(true);
-              return;
-          case 'new-rollup':
-              openCreateStarRocksRollup(node);
-              return;
-          case 'backup-table':
-              void handleExport(node, 'sql');
-              return;
-          case 'refresh-stats':
-              refreshV2TableContextMenuStats(node);
-              return;
-          case 'export-xlsx':
-              void handleExport(node, 'xlsx');
-              return;
-          case 'export-csv':
-              void handleExport(node, 'csv');
-              return;
-          case 'export-json':
-              void handleExport(node, 'json');
-              return;
-          case 'ai-explain':
-              void injectTablePromptToAI(node, 'explain');
-              return;
-          case 'ai-generate-query':
-              void injectTablePromptToAI(node, 'query');
-              return;
-          case 'truncate-table':
-              void handleTableDataDangerAction(node, 'truncate');
-              return;
-          case 'drop-table':
-              handleDeleteTable(node);
-              return;
-          default:
-              return;
-      }
-  };
-
-  const toggleSidebarTablePinned = (node: any, pinned?: boolean) => {
-      const conn = node?.dataRef || {};
-      const tableName = String(conn.tableName || node?.title || '').trim();
-      const dbName = String(conn.dbName || '').trim();
-      if (!conn.id || !dbName || !tableName) return;
-      const currentlyPinned = isSidebarTablePinned(
-          pinnedSidebarTables,
-          String(conn.id || ''),
-          dbName,
-          tableName,
-          String(conn.schemaName || ''),
-      );
-      const shouldPin = pinned ?? !currentlyPinned;
-      setSidebarTablePinned(conn.id, dbName, tableName, conn.schemaName || '', shouldPin);
-      void loadTables(getDatabaseNodeRef(conn, dbName));
-      message.success(shouldPin ? t('sidebar.message.table_pinned') : t('sidebar.message.table_unpinned'));
-  };
-
-  const handleTableGroupSortAction = (node: any, sortBy: 'name' | 'frequency') => {
-      const groupData = node.dataRef;
-      setTableSortPreference(groupData.id, groupData.dbName, sortBy);
-      const dbNode = {
-          key: `${groupData.id}-${groupData.dbName}`,
-          dataRef: groupData
-      };
-      loadTables(dbNode);
-  };
-
-  const handleV2TableGroupContextMenuAction = (node: any, action: V2TableGroupContextMenuActionKey) => {
-      switch (action) {
-          case 'new-table':
-              openNewTableDesign(node);
-              return;
-          case 'sort-by-name':
-              handleTableGroupSortAction(node, 'name');
-              return;
-          case 'sort-by-frequency':
-              handleTableGroupSortAction(node, 'frequency');
-              return;
-          default:
-              return;
-      }
-  };
-
-  const closeDatabaseNode = (node: any) => {
-      const dbConnId = String(node.dataRef?.id || '');
-      const dbName = String(node.dataRef?.dbName || node.title || '').trim();
-      loadingNodesRef.current.delete(`tables-${dbConnId}-${dbName}`);
-      setConnectionStates(prev => {
-          const next = { ...prev };
-          delete next[node.key];
-          return next;
-      });
-      setExpandedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-      setLoadedKeys(prev => prev.filter(k => k !== node.key && !k.toString().startsWith(`${node.key}-`)));
-      replaceTreeNodeChildren(node.key, undefined);
-      if (dbConnId && dbName) {
-          closeTabsByDatabase(dbConnId, dbName);
-      }
-      message.success(t('sidebar.message.database_closed'));
-  };
-
-  const openDatabaseQuery = (node: any) => {
-      addTab({
-          id: `query-${Date.now()}`,
-          title: t('sidebar.tab.new_query_database', { database: node.title }),
-          type: 'query',
-          connectionId: node.dataRef.id,
-          dbName: node.title,
-          query: ''
-      });
-  };
-
-  const handleV2DatabaseContextMenuAction = (node: any, action: V2DatabaseContextMenuActionKey) => {
-      switch (action) {
-          case 'new-table':
-              openNewTableDesign(node);
-              return;
-          case 'new-schema':
-              openCreateSchemaModal(node);
-              return;
-          case 'new-materialized-view':
-              openCreateStarRocksMaterializedView(node);
-              return;
-          case 'new-external-catalog':
-              openCreateStarRocksExternalCatalog(node);
-              return;
-          case 'rename-db':
-              setRenameDbTarget(node);
-              renameDbForm.setFieldsValue({ newName: node.dataRef?.dbName || '' });
-              setIsRenameDbModalOpen(true);
-              return;
-          case 'refresh':
-              loadTables(node);
-              return;
-          case 'export-db-schema':
-              void handleExportDatabaseSQL(node, false);
-              return;
-          case 'backup-db-sql':
-              void handleExportDatabaseSQL(node, true);
-              return;
-          case 'disconnect-db':
-              closeDatabaseNode(node);
-              return;
-          case 'new-query':
-              openDatabaseQuery(node);
-              return;
-          case 'run-sql':
-              handleRunSQLFile(node);
-              return;
-          case 'drop-db':
-              handleDeleteDatabase(node);
-              return;
-          default:
-              return;
-      }
-  };
-
-  const refreshConnectionNode = (node: any) => {
-      const connKey = String(node?.key || node?.dataRef?.id || '');
-      if (!connKey) return;
-      setExpandedKeys(prev => prev.filter(k => k !== connKey && !k.toString().startsWith(`${connKey}-`)));
-      setLoadedKeys(prev => prev.filter(k => k !== connKey && !k.toString().startsWith(`${connKey}-`)));
-      Array.from(loadingNodesRef.current).forEach((loadingKey) => {
-          if (loadingKey === `dbs-${connKey}` || loadingKey.startsWith(`tables-${connKey}-`)) {
-              loadingNodesRef.current.delete(loadingKey);
-          }
-      });
-      loadDatabases(node);
-  };
-
-  const releaseConnectionResources = async (conn: SavedConnection | undefined) => {
-      if (!conn?.config) return;
-      const res = await DBReleaseConnection(buildRpcConnectionConfig(conn.config, { id: conn.id }) as any);
-      if (res && res.success === false) {
-          throw new Error(res.message || t('sidebar.message.connection_release_failed'));
-      }
-  };
-
-  const disconnectConnectionNode = async (node: any) => {
-      const connKey = String(node?.key || node?.dataRef?.id || '');
-      if (!connKey) return;
-      const conn = (connections.find((item) => item.id === connKey) || node?.dataRef) as SavedConnection | undefined;
-      Array.from(loadingNodesRef.current).forEach((loadingKey) => {
-          if (loadingKey === `dbs-${connKey}` || loadingKey.startsWith(`tables-${connKey}-`)) {
-              loadingNodesRef.current.delete(loadingKey);
-          }
-      });
-      setConnectionStates(prev => {
-          const next = { ...prev };
-          Object.keys(next).forEach(k => {
-              if (k === connKey || k.startsWith(`${connKey}-`)) {
-                  delete next[k];
-              }
-          });
-          return next;
-      });
-      setExpandedKeys(prev => prev.filter(k => k !== connKey && !k.toString().startsWith(`${connKey}-`)));
-      setLoadedKeys(prev => prev.filter(k => k !== connKey && !k.toString().startsWith(`${connKey}-`)));
-      replaceTreeNodeChildren(connKey, undefined);
-      closeTabsByConnection(connKey);
-      try {
-          await releaseConnectionResources(conn);
-      } catch (error: any) {
-          message.warning(error?.message || t('sidebar.message.connection_release_failed_from_sidebar'));
-      }
-      message.success(t('connection.sidebar.disconnect.success'));
-  };
-
-  const deleteConnectionNode = (node: any) => {
-      Modal.confirm({
-          title: t('connection.sidebar.delete.confirmTitle'),
-          content: t('connection.sidebar.delete.confirmContent', { name: node.title }),
-          onOk: async () => {
-              const connId = String(node.key);
-              const backendApp = (window as any).go?.app?.App;
-              if (typeof backendApp?.DeleteConnection !== 'function') {
-                  message.error(t('connection.sidebar.delete.backendUnavailable'));
-                  throw new Error('DeleteConnection unavailable');
-              }
-              try {
-                  await backendApp.DeleteConnection(connId);
-                  closeTabsByConnection(connId);
-                  removeConnection(connId);
-                  message.success(t('connection.sidebar.delete.success'));
-              } catch (error: any) {
-                  message.error(error?.message || t('connection.sidebar.delete.failureFallback'));
-                  throw error;
-              }
-          }
-      });
-  };
-
-  const createConnectionTreeNode = (conn: SavedConnection): TreeNode => ({
-      title: conn.name,
-      key: conn.id,
-      icon: getDbIcon(resolveConnectionIconType(conn), resolveConnectionAccentColor(conn), 22),
-      type: 'connection',
-      dataRef: conn,
-      isLeaf: false,
+  const {
+      loadDatabases,
+      loadJVMResources,
+      loadTables,
+  } = useSidebarTreeLoaders({
+      savedQueries,
+      externalSQLDirectories,
+      tableSortPreference,
+      tableAccessCount,
+      pinnedSidebarTables,
+      isV2Ui,
+      loadingNodesRef,
+      setConnectionStates,
+      setLoadedKeys,
+      replaceTreeNodeChildren,
+      buildRuntimeConfig,
+      buildJVMRuntimeConfig,
+      buildJVMDiagnosticTreeNodes,
+      resolveSavedQueryDisplayName,
+      decorateExternalSQLTreeNode,
   });
 
-  const getConnectionNodeForAction = (conn: SavedConnection): TreeNode => {
-      return findTreeNodeByKeyRef.current(treeDataRef.current, conn.id) || createConnectionTreeNode(conn);
-  };
-
-  const handleV2ConnectionContextMenuAction = (node: any, action: V2ConnectionContextMenuActionKey) => {
-      const connId = String(node?.key || node?.dataRef?.id || '');
-      if (!connId) return;
-      switch (action) {
-          case 'new-db':
-              setTargetConnection(node);
-              setIsCreateDbModalOpen(true);
-              return;
-          case 'refresh':
-              refreshConnectionNode(node);
-              return;
-          case 'new-query':
-              addTab({
-                  id: `query-${Date.now()}`,
-                  title: buildConnectionRootQueryTabTitle(),
-                  type: 'query',
-                  connectionId: connId,
-                  dbName: undefined,
-                  query: ''
-              });
-              return;
-          case 'open-sql-file':
-              handleRunSQLFile(node);
-              return;
-          case 'new-command':
-              addTab({
-                  id: `redis-cmd-${connId}-${Date.now()}`,
-                  title: buildConnectionRootRedisCommandTabTitle(),
-                  type: 'redis-command',
-                  connectionId: connId,
-                  redisDB: 0
-              });
-              return;
-          case 'open-monitor':
-              addTab({
-                  id: `redis-monitor-${connId}-${Date.now()}`,
-                  title: buildConnectionRootRedisMonitorTabTitle(),
-                  type: 'redis-monitor',
-                  connectionId: connId,
-                  redisDB: 0
-              });
-              return;
-          case 'edit':
-              if (onEditConnection) onEditConnection(node.dataRef);
-              return;
-          case 'copy-connection':
-              void handleDuplicateConnection(node.dataRef as SavedConnection);
-              return;
-          case 'disconnect':
-              void disconnectConnectionNode(node);
-              return;
-          case 'delete':
-              deleteConnectionNode(node);
-              return;
-          case 'move-to-ungrouped':
-              moveConnectionToTag(connId, null);
-              return;
-          default:
-              if (action.startsWith('move-to-tag:')) {
-                  moveConnectionToTag(connId, action.slice('move-to-tag:'.length));
-              }
-      }
-  };
-
-  const handleV2ConnectionGroupContextMenuAction = (group: V2RailConnectionGroup, action: V2ConnectionGroupContextMenuActionKey) => {
-      const tag = connectionTags.find((item) => item.id === group.id);
-      if (!tag) return;
-      if (action === 'edit-group') {
-          createTagForm.setFieldsValue({ name: tag.name, connectionIds: tag.connectionIds });
-          setRenameViewTarget({
-              title: tag.name,
-              key: `tag-${tag.id}`,
-              type: 'tag',
-              dataRef: tag,
-          });
-          setIsCreateTagModalOpen(true);
-          return;
-      }
-      if (action === 'delete-group') {
-          Modal.confirm({
-              title: t('connection.sidebar.group.deleteConfirmTitle'),
-              content: t('connection.sidebar.group.deleteConfirmContent', { name: tag.name }),
-              onOk: () => {
-                  removeConnectionTag(tag.id);
-              },
-          });
-      }
-  };
-
-  const onSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { value } = e.target;
-    setSearchValue(value);
-  };
-
-  const toggleSearchScope = (scope: SearchScope) => {
-      setSearchScopes((prev) => {
-          if (scope === 'smart') {
-              return ['smart'];
-          }
-          const withoutSmart = prev.filter((item) => item !== 'smart');
-          if (withoutSmart.includes(scope)) {
-              const next = withoutSmart.filter((item) => item !== scope);
-              return next.length > 0 ? next : ['smart'];
-          }
-          return [...withoutSmart, scope];
-      });
-  };
-
-  const setSearchScopeChecked = (scope: SearchScope, checked: boolean) => {
-      if (scope === 'smart') {
-          if (checked) {
-              setSearchScopes(['smart']);
-          } else if (searchScopes.length === 1 && searchScopes[0] === 'smart') {
-              setSearchScopes(['smart']);
-          } else {
-              setSearchScopes((prev) => {
-                  const next = prev.filter((item) => item !== 'smart');
-                  return next.length > 0 ? next : ['smart'];
-              });
-          }
-          return;
-      }
-
-      if (checked) {
-          setSearchScopes((prev) => {
-              const withoutSmart = prev.filter((item) => item !== 'smart');
-              if (withoutSmart.includes(scope)) {
-                  return withoutSmart;
-              }
-              return [...withoutSmart, scope];
-          });
-      } else {
-          setSearchScopes((prev) => {
-              const next = prev.filter((item) => item !== scope && item !== 'smart');
-              return next.length > 0 ? next : ['smart'];
-          });
-      }
-  };
-
-  const currentLanguage = getCurrentLanguage();
-
-  const searchScopeSummary = useMemo(() => {
-      if (searchScopes.includes('smart')) {
-          return t('sidebar.command_search.scope.summary_smart');
-      }
-      return searchScopes.map((scope) => t(SEARCH_SCOPE_LABEL_KEY_MAP[scope])).join(' + ');
-  }, [searchScopes, currentLanguage]);
-
-  const searchScopePopoverContent = useMemo(() => {
-      const smartSelected = searchScopes.includes('smart');
-      const scopedOptions = SEARCH_SCOPE_OPTIONS.filter((option) => option.value !== 'smart');
-      const borderColor = overlayTheme.sectionBorder.replace('1px solid ', '');
-      const mutedTextColor = overlayTheme.mutedText;
-      const titleColor = overlayTheme.titleText;
-      const panelBg = overlayTheme.shellBg;
-      const smartBg = smartSelected
-          ? (darkMode ? 'linear-gradient(135deg, rgba(255,214,102,0.22) 0%, rgba(255,179,71,0.16) 100%)' : 'linear-gradient(135deg, rgba(255,214,102,0.26) 0%, rgba(255,244,204,0.92) 100%)')
-          : (darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.72)');
-      const smartBorder = smartSelected
-          ? (darkMode ? 'rgba(255,214,102,0.42)' : 'rgba(245,176,65,0.34)')
-          : borderColor;
-      const getOptionCardStyle = (checked: boolean) => ({
-          display: 'flex',
-          alignItems: 'center' as const,
-          justifyContent: 'space-between' as const,
-          gap: 12,
-          padding: '10px 12px',
-          borderRadius: 12,
-          border: `1px solid ${checked ? (darkMode ? 'rgba(118,169,250,0.44)' : 'rgba(24,144,255,0.32)') : borderColor}`,
-          background: checked
-              ? (darkMode ? 'rgba(64,124,255,0.18)' : 'rgba(24,144,255,0.08)')
-              : (darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)'),
-          transition: 'all 120ms ease',
-      });
-      return (
-          <div style={{ minWidth: 280, display: 'flex', flexDirection: 'column', background: panelBg, padding: 14, gap: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                  <div>
-                      <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.4, color: mutedTextColor, textTransform: 'uppercase' }}>{t('sidebar.command_search.scope.title')}</div>
-                      <div style={{ marginTop: 4, fontSize: 13, lineHeight: 1.5, color: mutedTextColor }}>{t('sidebar.command_search.scope.description')}</div>
-                  </div>
-                  <div style={{ width: 32, height: 32, borderRadius: 10, display: 'grid', placeItems: 'center', background: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(17,24,39,0.06)', color: darkMode ? '#ffd666' : '#1677ff', flexShrink: 0 }}>
-                      <FilterOutlined />
-                  </div>
-              </div>
-
-              <label style={{ display: 'block', cursor: 'pointer' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 14, border: `1px solid ${smartBorder}`, background: smartBg, boxShadow: smartSelected ? (darkMode ? '0 10px 24px rgba(0,0,0,0.24)' : '0 10px 24px rgba(245,176,65,0.14)') : 'none' }}>
-                      <Checkbox
-                          checked={smartSelected}
-                          onChange={(e) => setSearchScopeChecked('smart', e.target.checked)}
-                      />
-                      <div style={{ width: 30, height: 30, borderRadius: 10, display: 'grid', placeItems: 'center', background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(255,214,102,0.3)', color: darkMode ? '#ffd666' : '#ad6800', flexShrink: 0 }}>
-                          {SEARCH_SCOPE_ICON_MAP.smart}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                              <span style={{ fontSize: 14, fontWeight: 700, color: titleColor }}>{t('sidebar.command_search.scope.smart')}</span>
-                              <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, color: darkMode ? '#ffe58f' : '#ad6800', background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(255,214,102,0.35)' }}>{t('sidebar.command_search.scope.recommended')}</span>
-                          </div>
-                          <div style={{ marginTop: 3, fontSize: 12, lineHeight: 1.5, color: mutedTextColor }}>{t('sidebar.command_search.scope.smart_help')}</div>
-                      </div>
-                  </div>
-              </label>
-
-              <div style={{ height: 1, background: overlayTheme.divider, opacity: 0.9 }} />
-
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 0.3, color: mutedTextColor, textTransform: 'uppercase' }}>{t('sidebar.command_search.scope.manual_title')}</div>
-                  <div style={{ fontSize: 12, color: mutedTextColor }}>{t('sidebar.command_search.scope.multi_select')}</div>
-              </div>
-
-              <div style={{ display: 'grid', gap: 8 }}>
-                  {scopedOptions.map((option) => {
-                      const checked = searchScopes.includes(option.value);
-                      return (
-                          <label key={option.value} style={{ display: 'block', cursor: 'pointer' }}>
-                              <div style={getOptionCardStyle(checked)}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                                      <Checkbox
-                                          checked={checked}
-                                          onChange={(e) => setSearchScopeChecked(option.value, e.target.checked)}
-                                      />
-                                      <div style={{ width: 28, height: 28, borderRadius: 9, display: 'grid', placeItems: 'center', background: checked ? (darkMode ? 'rgba(118,169,250,0.2)' : 'rgba(24,144,255,0.12)') : (darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(17,24,39,0.06)'), color: checked ? (darkMode ? '#91caff' : '#1677ff') : mutedTextColor, flexShrink: 0 }}>
-                                          {SEARCH_SCOPE_ICON_MAP[option.value]}
-                                      </div>
-                                      <span style={{ fontSize: 14, fontWeight: 600, color: titleColor, whiteSpace: 'nowrap' }}>{t(option.labelKey)}</span>
-                                  </div>
-                                  <div style={{ width: 18, display: 'flex', justifyContent: 'center', color: checked ? (darkMode ? '#91caff' : '#1677ff') : 'transparent', flexShrink: 0 }}>
-                                      <CheckOutlined />
-                                  </div>
-                              </div>
-                          </label>
-                      );
-                  })}
-              </div>
-
-              <div style={{ padding: '10px 12px', borderRadius: 12, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(17,24,39,0.04)', color: mutedTextColor, fontSize: 12, lineHeight: 1.6 }}>
-                  {t('sidebar.command_search.scope.manual_help')}
-              </div>
-          </div>
-      );
-  }, [darkMode, overlayTheme, searchScopes, currentLanguage]);
-
-  const getConnectionHostSearchText = (node: TreeNode): string => {
-      if (node.type !== 'connection') return '';
-      const config = node.dataRef?.config || {};
-      return resolveConnectionHostTokens(config).join(' ');
-  };
-
-  const getConnectionNameSearchText = (node: TreeNode): string => {
-      if (node.type !== 'connection') return '';
-      const name = node.dataRef?.name ?? node.title;
-      return String(name || '').toLowerCase();
-  };
-
-  const matchByScopes = (node: TreeNode, keyword: string, scopes: SearchScope[]): boolean => {
-      const title = String(node.title || '').toLowerCase();
-      if (scopes.includes('database') && node.type === 'database' && title.includes(keyword)) {
-          return true;
-      }
-      if (scopes.includes('tag') && node.type === 'tag' && title.includes(keyword)) {
-          return true;
-      }
-      if (scopes.includes('host') && node.type === 'connection' && getConnectionHostSearchText(node).includes(keyword)) {
-          return true;
-      }
-      if (scopes.includes('object') && (isV2SidebarObjectNode(node) || node.type === 'object-group') && title.includes(keyword)) {
-          return true;
-      }
-      if (node.type === 'external-sql-root' || node.type === 'external-sql-directory' || node.type === 'external-sql-folder' || node.type === 'external-sql-file') {
-          const pathText = String(node?.dataRef?.path || '').toLowerCase();
-          return title.includes(keyword) || pathText.includes(keyword);
-      }
-      return false;
-  };
-
-  const loop = (data: TreeNode[], keyword: string): TreeNode[] => {
-      const isSmartMode = searchScopes.includes('smart');
-      const result: TreeNode[] = [];
-      data.forEach((item) => {
-          const titleMatch = String(item.title || '').toLowerCase().includes(keyword);
-          const smartMatch = item.type === 'connection'
-              ? getConnectionNameSearchText(item).includes(keyword) || getConnectionHostSearchText(item).includes(keyword)
-              : titleMatch;
-          const scopedMatch = matchByScopes(item, keyword, searchScopes);
-          const selfMatch = isSmartMode ? smartMatch : scopedMatch;
-          const filteredChildren = item.children ? loop(item.children, keyword) : [];
-
-          if (selfMatch) {
-              const shouldKeepFullSubtree = isSmartMode
-                  || item.type === 'connection'
-                  || item.type === 'database'
-                  || item.type === 'tag'
-                  || item.type === 'external-sql-root'
-                  || item.type === 'external-sql-directory'
-                  || item.type === 'external-sql-folder';
-              if (item.children && shouldKeepFullSubtree) {
-                  result.push(item);
-              } else if (item.children && filteredChildren.length > 0) {
-                  result.push({ ...item, children: filteredChildren });
-              } else {
-                  result.push(item);
-              }
-              return;
-          }
-
-          if (filteredChildren.length > 0) {
-              result.push({ ...item, children: filteredChildren });
-          }
-      });
-      return result;
-  };
-
-  const displayTreeData = useMemo(() => {
-      const keyword = deferredSearchValue.trim().toLowerCase();
-      if (!keyword) return treeData;
-      return loop(treeData, keyword);
-  }, [deferredSearchValue, searchScopes, treeData]);
-
-  const commandSearchTreeItems = useMemo(() => {
-      const result: V2CommandSearchItem[] = [];
-      const visit = (nodes: TreeNode[]) => {
-          nodes.forEach((node) => {
-              const dataRef = node.dataRef || {};
-              if (node.type === 'connection') {
-                  const conn = dataRef as SavedConnection;
-                  result.push({
-                      key: `node-${node.key}`,
-                      kind: 'node',
-                      title: String(node.title || conn.name || t('connection.unnamed')),
-                      meta: resolveConnectionHostSummary(conn.config) || conn.config?.type || t('connection.sidebar.menu.section'),
-                      icon: getDbIcon(resolveConnectionIconType(conn), resolveConnectionAccentColor(conn), 16),
-                      node,
-                  });
-              } else if (node.type === 'database') {
-                  const conn = connections.find((item) => item.id === dataRef.id);
-                  result.push({
-                      key: `node-${node.key}`,
-                      kind: 'node',
-                      title: String(node.title || dataRef.dbName || t('database.unnamed')),
-                      meta: conn?.name || dataRef.id || t('database.label'),
-                      icon: <DatabaseOutlined />,
-                      node,
-                  });
-              } else if (
-                  node.type === 'table'
-                  || node.type === 'view'
-                  || node.type === 'materialized-view'
-                  || node.type === 'db-trigger'
-                  || node.type === 'db-event'
-                  || node.type === 'routine'
-              ) {
-                  const conn = connections.find((item) => item.id === dataRef.id);
-                  const objectName = String(dataRef.tableName || dataRef.viewName || dataRef.triggerName || dataRef.eventName || dataRef.routineName || node.title || '').trim();
-                  const displayName = String(node.title || extractObjectName(objectName) || objectName).trim();
-                  result.push({
-                      key: `node-${node.key}`,
-                      kind: 'node',
-                      title: displayName,
-                      meta: [conn?.name || dataRef.id, dataRef.dbName].filter(Boolean).join(' · '),
-                      icon: node.type === 'table'
-                          ? <TableOutlined />
-                          : (node.type === 'db-event' ? <ClockCircleOutlined /> : (node.type === 'routine' ? <CodeOutlined /> : <EyeOutlined />)),
-                      node,
-                  });
-              }
-              if (node.children) visit(node.children);
-          });
-      };
-
-      visit(treeData);
-      return result;
-  }, [connections, treeData]);
-
-  const commandSearchRecentItems = useMemo<V2CommandSearchItem[]>(() => {
-      return sqlLogs.slice(0, 5).map((log) => ({
-          key: `recent-${log.id}`,
-          kind: 'recent',
-          title: log.sql.replace(/\s+/g, ' ').trim() || t('sidebar.command_search.recent_sql_fallback'),
-          meta: `${new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${log.duration}ms${log.dbName ? ` · ${log.dbName}` : ''}`,
-          icon: <ClockCircleOutlined />,
-          sql: log.sql,
-          dbName: log.dbName,
-      }));
-  }, [sqlLogs]);
-
-	  const commandSearchActionItems = useMemo<V2CommandSearchItem[]>(() => [
-      {
-          key: 'action-new-query',
-	          kind: 'action',
-	          title: t('query.new'),
-	          meta: t('sidebar.command_search.action.new_query.meta'),
-	          shortcut: resolveShortcutDisplay(shortcutOptions, 'newQueryTab', activeShortcutPlatform),
-	          icon: <PlusOutlined />,
-	          onRun: () => window.dispatchEvent(new CustomEvent('gonavi:create-query-tab')),
-	      },
-      {
-          key: 'action-new-connection',
-	          kind: 'action',
-	          title: t('sidebar.command_search.action.new_connection.title'),
-	          meta: t('sidebar.command_search.action.new_connection.meta'),
-	          shortcut: resolveShortcutDisplay(shortcutOptions, 'newConnection', activeShortcutPlatform),
-	          icon: <ThunderboltOutlined />,
-	          onRun: () => onCreateConnection?.(),
-	      },
-      {
-          key: 'action-open-ai',
-	          kind: 'action',
-	          title: t('sidebar.command_search.action.open_ai.title'),
-	          meta: t('sidebar.command_search.action.open_ai.meta'),
-	          shortcut: resolveShortcutDisplay(shortcutOptions, 'toggleAIPanel', activeShortcutPlatform),
-	          icon: <RobotOutlined />,
-	          onRun: () => onToggleAI?.(),
-	      },
-      {
-          key: 'action-open-sql-log',
-	          kind: 'action',
-	          title: t('sidebar.command_search.action.open_sql_log.title'),
-	          meta: t('sidebar.command_search.action.open_sql_log.meta'),
-	          shortcut: resolveShortcutDisplay(shortcutOptions, 'toggleLogPanel', activeShortcutPlatform),
-	          icon: <BarsOutlined />,
-	          onRun: () => onToggleLogPanel?.(),
-	      },
-		  ], [activeShortcutPlatform, onCreateConnection, onToggleAI, onToggleLogPanel, shortcutOptions]);
-
-	  const v2CommandSearchQuery = useMemo(
-	      () => parseV2CommandSearchQuery(deferredV2CommandSearchValue),
-	      [deferredV2CommandSearchValue],
-	  );
-	  const normalizedV2CommandSearchValue = v2CommandSearchQuery.normalizedKeyword;
-	  const v2CommandSearchObjectMode = v2CommandSearchQuery.mode === 'object';
-	  const v2CommandSearchAiMode = v2CommandSearchQuery.mode === 'ai';
-	  const filteredCommandSearchTreeItems = useMemo(() => {
-	      return filterV2CommandSearchTreeItems(commandSearchTreeItems, v2CommandSearchQuery);
-	  }, [commandSearchTreeItems, v2CommandSearchQuery]);
-
-	  const filteredCommandSearchActionItems = useMemo(() => {
-	      if (v2CommandSearchObjectMode || v2CommandSearchAiMode) return [];
-	      if (!normalizedV2CommandSearchValue) return commandSearchActionItems;
-	      return commandSearchActionItems.filter((item) => {
-	          const haystack = `${item.title} ${item.meta}`.toLowerCase();
-	          return haystack.includes(normalizedV2CommandSearchValue);
-	      });
-	  }, [commandSearchActionItems, normalizedV2CommandSearchValue, v2CommandSearchAiMode, v2CommandSearchObjectMode]);
-
-	  const filteredCommandSearchRecentItems = useMemo(() => {
-	      if (v2CommandSearchObjectMode || v2CommandSearchAiMode) return [];
-	      if (!normalizedV2CommandSearchValue) return commandSearchRecentItems;
-	      return commandSearchRecentItems.filter((item) => {
-	          const haystack = `${item.title} ${item.meta}`.toLowerCase();
-	          return haystack.includes(normalizedV2CommandSearchValue);
-	      });
-	  }, [commandSearchRecentItems, normalizedV2CommandSearchValue, v2CommandSearchAiMode, v2CommandSearchObjectMode]);
-
-	  const commandSearchAiItem = useMemo<V2CommandSearchItem[]>(() => {
-	      if (!v2CommandSearchAiMode || !v2CommandSearchQuery.aiPrompt) return [];
-	      return [{
-	          key: 'action-ask-ai',
-	          kind: 'action',
-	          title: t('sidebar.command_search.action.ask_ai.title'),
-	          meta: v2CommandSearchQuery.aiPrompt,
-	          shortcut: '↵',
-	          icon: <RobotOutlined />,
-	          onRun: () => {
-	              const wasClosed = !useStore.getState().aiPanelVisible;
-	              if (wasClosed) setAIPanelVisible(true);
-	              window.setTimeout(() => {
-	                  window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt', {
-	                      detail: { prompt: v2CommandSearchQuery.aiPrompt },
-	                  }));
-	              }, wasClosed ? 350 : 0);
-	          },
-	      }];
-	  }, [setAIPanelVisible, v2CommandSearchAiMode, v2CommandSearchQuery.aiPrompt]);
-
-	  const commandSearchFlatItems = useMemo(
-	      () => [
-	          ...commandSearchAiItem,
-	          ...filteredCommandSearchTreeItems,
-	          ...filteredCommandSearchActionItems,
-	          ...filteredCommandSearchRecentItems,
-	      ],
-	      [commandSearchAiItem, filteredCommandSearchActionItems, filteredCommandSearchRecentItems, filteredCommandSearchTreeItems],
-	  );
-
-  useEffect(() => {
-      setV2CommandActiveIndex(0);
-  }, [v2CommandSearchValue, commandSearchFlatItems.length]);
-
-  const flattenConnectionNodes = useCallback((nodes: TreeNode[]): TreeNode[] => {
-      const result: TreeNode[] = [];
-      nodes.forEach((node) => {
-          if (node.type === 'connection') {
-              result.push(node);
-          }
-          if (node.children) {
-              result.push(...flattenConnectionNodes(node.children));
-          }
-      });
-      return result;
-  }, []);
-
-  const activeConnectionId = resolveV2ActiveConnectionId({
-      activeContextConnectionId: activeContext?.connectionId,
-      activeTabConnectionId: activeTab?.connectionId,
-      selectedKeys,
+  const {
+      handleCopyStructure,
+      handleCopyTableName,
+      handleExport,
+      openExportDialog,
+      handleCopyTableAsInsert,
+      openTableDdlInDesigner,
+      openTableInERView,
+      injectTablePromptToAI,
+      handleCreateDatabase,
+      openCreateSchemaModal,
+      handleCreateSchema,
+      openRenameSchemaModal,
+      handleRenameSchema,
+      handleDeleteSchema,
+      handleRenameDatabase,
+      handleDeleteDatabase,
+      handleRenameTable,
+      handleDeleteTable,
+      handleTableDataDangerAction,
+      openViewDefinition,
+      openEditView,
+      openCreateView,
+      openCreateStarRocksMaterializedView,
+      openCreateStarRocksExternalCatalog,
+      openCreateStarRocksRollup,
+      handleDropView,
+      handleRenameView,
+      openRenameSavedQueryModal,
+      handleRenameSavedQuery,
+      isSavedQueryUnmatched,
+      handleRebindSavedQuery,
+      openRoutineDefinition,
+      openEventDefinition,
+      openEditRoutine,
+      openCreateRoutine,
+      handleDropRoutine,
+      resolveMessagePublishTarget,
+      openMessagePublishModal,
+      handleMessagePublishSuccess,
+  } = useSidebarObjectActions({
+      connections,
       connectionIds,
-      fallbackConnectionId: selectedNodesRef.current
-          .map((node) => resolveSidebarNodeConnectionId(node, connectionIds))
-          .find(Boolean),
+      connectionIdSet,
+      tabs,
+      treeDataRef,
+      setTreeData,
+      setExpandedKeys,
+      setLoadedKeys,
+      addTab,
+      updateQueryTabDraft,
+      saveQuery,
+      addSqlLog,
+      closeTabsByDatabase,
+      createDbForm,
+      targetConnection,
+      setIsCreateDbModalOpen,
+      createSchemaForm,
+      createSchemaTarget,
+      setCreateSchemaTarget,
+      setIsCreateSchemaModalOpen,
+      renameSchemaForm,
+      renameSchemaTarget,
+      setRenameSchemaTarget,
+      setIsRenameSchemaModalOpen,
+      renameDbForm,
+      renameDbTarget,
+      setRenameDbTarget,
+      setIsRenameDbModalOpen,
+      renameTableForm,
+      renameTableTarget,
+      setRenameTableTarget,
+      setIsRenameTableModalOpen,
+      renameViewForm,
+      renameViewTarget,
+      setRenameViewTarget,
+      setIsRenameViewModalOpen,
+      renameSavedQueryForm,
+      renameSavedQueryTarget,
+      setRenameSavedQueryTarget,
+      setIsRenameSavedQueryModalOpen,
+      setMessagePublishTarget,
+      buildRuntimeConfig,
+      getConnectionNodeRef,
+      getDatabaseNodeRef,
+      extractObjectName,
+      isPostgresSchemaDialect,
+      loadDatabases,
+      loadTables,
+      openDesign,
+      onDoubleClick,
+      runExportWithProgress,
+      setAIPanelVisible,
+      addAIContext,
   });
-  const activeConnection = connections.find((conn) => conn.id === activeConnectionId) || null;
-  const activeConnectionDisplayName = String(activeConnection?.name || '').trim() || t('sidebar.active_connection.no_host_selected');
-  const activeDatabaseDisplayName = useMemo(() => {
-      if (activeContext && typeof activeContext === 'object' && 'dbName' in activeContext) {
-          return String(activeContext.dbName || '').trim();
-      }
-      return String(activeTab?.dbName || '').trim();
-  }, [activeContext, activeTab?.dbName]);
-  const activeConnectionTreeData = useMemo(() => {
-      const externalSQLNodes = displayTreeData.filter((node) => node.type === 'external-sql-root');
-      if (!activeConnection) return displayTreeData;
-      const activeConnectionNode = displayTreeData.find((node) => node.type === 'connection' && node.key === activeConnection.id);
-      if (activeConnectionNode) {
-          return [
-              ...(activeConnectionNode.children && activeConnectionNode.children.length > 0 ? activeConnectionNode.children : []),
-              ...externalSQLNodes,
-          ];
-      }
-      const filterTree = (nodes: TreeNode[]): TreeNode[] => nodes.flatMap((node) => {
-          if (node.type === 'tag') {
-              return filterTree(node.children || []);
-          }
-          if (node.type === 'connection') {
-              if (node.key !== activeConnection.id) return [];
-              return node.children && node.children.length > 0 ? filterTree(node.children) : [];
-          }
-          return [{ ...node, children: node.children ? filterTree(node.children) : undefined }];
-      });
 
-      const filtered = filterTree(displayTreeData);
-      return [...filtered, ...externalSQLNodes];
-  }, [activeConnection, displayTreeData]);
-  const v2VisibleTreeData = useMemo(() => {
-      if (v2ExplorerFilter === 'all') {
-          return displayTreeData;
-      }
-      return filterV2ExplorerTreeByKind(activeConnectionTreeData, v2ExplorerFilter);
-  }, [activeConnectionTreeData, displayTreeData, v2ExplorerFilter]);
-  const v2TreeHorizontalScrollWidth = useMemo(
-      () => estimateV2TreeHorizontalScrollWidth(v2VisibleTreeData, treeViewportWidth),
-      [treeViewportWidth, v2VisibleTreeData],
-  );
-  const effectiveTreeHeight = isV2Ui && v2TreeHorizontalScrollWidth
-      ? Math.max(1, treeHeight - V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE)
-      : treeHeight;
-  const v2TreeMetrics = useMemo(() => {
-      const databaseTableCounts = new Map<React.Key, number>();
-      const objectGroupCounts = new Map<React.Key, number>();
-      let activeObjectCount = 0;
 
-      const visitAndCount = (node: TreeNode): number => {
-          const childCount = (node.children || []).reduce((total, child) => total + visitAndCount(child), 0);
-          const totalCount = (isV2SidebarObjectNode(node) ? 1 : 0) + childCount;
-          if (node.type === 'database') {
-              const tableCount = (node.children || []).reduce((total, child) => {
-                  if (child.type === 'object-group' && child?.dataRef?.groupKey === 'tables') {
-                      return total + (Array.isArray(child.children) ? child.children.filter((item) => item.type === 'table').length : 0);
-                  }
-                  if (child?.dataRef?.groupKey === 'schema' && Array.isArray(child.children)) {
-                      return total + child.children.reduce((schemaTotal, schemaChild) => {
-                          if (schemaChild.type === 'object-group' && schemaChild?.dataRef?.groupKey === 'tables') {
-                              return schemaTotal + (Array.isArray(schemaChild.children) ? schemaChild.children.filter((item) => item.type === 'table').length : 0);
-                          }
-                          return schemaTotal;
-                      }, 0);
-                  }
-                  return total;
-              }, 0);
-              databaseTableCounts.set(node.key, tableCount);
-          } else if (node.type === 'object-group') {
-              objectGroupCounts.set(node.key, childCount);
-          }
-          return totalCount;
-      };
 
-      activeObjectCount = v2VisibleTreeData.reduce((total, node) => total + visitAndCount(node), 0);
+  const refreshV2TableContextMenuStatsRef = useRef<(node: any) => void>(() => {});
 
-      return {
-          activeObjectCount,
-          databaseTableCounts,
-          objectGroupCounts,
-      };
-  }, [v2VisibleTreeData]);
-  const activeConnectionObjectCount = v2TreeMetrics.activeObjectCount;
+  const {
+      getConnectionNodeForAction,
+      toggleSidebarTablePinned,
+      handleV2TableContextMenuAction,
+      handleTableGroupSortAction,
+      handleV2TableGroupContextMenuAction,
+      handleV2DatabaseContextMenuAction,
+      disconnectConnectionNode,
+      deleteConnectionNode,
+      handleV2ConnectionContextMenuAction,
+      handleV2ConnectionGroupContextMenuAction,
+  } = useSidebarV2ActionHandlers({
+      connections,
+      connectionTags,
+      pinnedSidebarTables,
+      loadingNodesRef,
+      treeDataRef,
+      findTreeNodeByKeyRef,
+      refreshV2TableContextMenuStatsRef,
+      setConnectionStates,
+      setExpandedKeys,
+      setLoadedKeys,
+      setTargetConnection,
+      setIsCreateDbModalOpen,
+      setRenameDbTarget,
+      setIsRenameDbModalOpen,
+      setRenameTableTarget,
+      setIsRenameTableModalOpen,
+      setRenameViewTarget,
+      setIsCreateTagModalOpen,
+      renameDbForm,
+      renameTableForm,
+      createTagForm,
+      addTab,
+      closeTabsByDatabase,
+      closeTabsByConnection,
+      removeConnection,
+      removeConnectionTag,
+      moveConnectionToTag,
+      setSidebarTablePinned,
+      setTableSortPreference,
+      replaceTreeNodeChildren,
+      loadDatabases,
+      loadTables,
+      getDatabaseNodeRef,
+      extractObjectName,
+      openDesign,
+      openNewTableDesign,
+      onDoubleClick,
+      openMessagePublishModal,
+      openTableDdlInDesigner,
+      openTableInERView,
+      handleCopyTableName,
+      handleCopyStructure,
+      handleCopyTableAsInsert,
+      openCreateStarRocksRollup,
+      handleExport,
+      openExportDialog,
+      injectTablePromptToAI,
+      handleTableDataDangerAction,
+      handleDeleteTable,
+      openCreateSchemaModal,
+      openCreateStarRocksMaterializedView,
+      openCreateStarRocksExternalCatalog,
+      handleExportDatabaseSQL,
+      handleRunSQLFile,
+      handleDeleteDatabase,
+      onEditConnection,
+      handleDuplicateConnection,
+      buildConnectionRootQueryTabTitle,
+      buildConnectionRootRedisCommandTabTitle,
+      buildConnectionRootRedisMonitorTabTitle,
+  });
+  const {
+      onSearch,
+      searchScopeSummary,
+      searchScopePopoverContent,
+      displayTreeData,
+      v2CommandSearchObjectMode,
+      v2CommandSearchAiMode,
+      filteredCommandSearchTreeItems,
+      filteredCommandSearchActionItems,
+      filteredCommandSearchRecentItems,
+      commandSearchAiItem,
+      commandSearchFlatItems,
+      flattenConnectionNodes,
+      activeConnection,
+      activeConnectionDisplayName,
+      activeDatabaseDisplayName,
+      v2VisibleTreeData,
+      v2TreeHorizontalScrollWidth,
+      effectiveTreeHeight,
+      v2TreeMetrics,
+      activeConnectionObjectCount,
+  } = useSidebarSearchModel({
+      searchScopes,
+      setSearchScopes,
+      setSearchValue,
+      deferredSearchValue,
+      deferredV2CommandSearchValue,
+      v2CommandSearchValue,
+      setV2CommandActiveIndex,
+      v2ExplorerFilter,
+      treeData,
+      treeViewportWidth,
+      treeHeight,
+      isV2Ui,
+      connections,
+      connectionIds,
+      selectedKeys,
+      selectedNodesRef,
+      activeContext,
+      activeTab,
+      sqlLogs,
+      shortcutOptions,
+      activeShortcutPlatform,
+      overlayTheme,
+      darkMode,
+      onCreateConnection,
+      onToggleAI,
+      onToggleLogPanel,
+      setAIPanelVisible,
+      extractObjectName,
+  });
   const legacyToolbarButtonColor = darkMode ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.65)';
   const legacyToolbarStyle: React.CSSProperties = {
       padding: '6px 16px',
@@ -6817,828 +1991,80 @@ const Sidebar: React.FC<{
       justifyContent: 'center',
   };
 
-  const connectionStatusMap = useMemo(() => {
-      const statusMap = new Map<string, 'live' | 'error' | 'idle'>();
-      const sortedConnectionIds = connections
-          .map((conn) => conn.id)
-          .sort((a, b) => b.length - a.length);
-      connections.forEach((conn) => {
-          statusMap.set(conn.id, 'idle');
-      });
-      Object.entries(connectionStates).forEach(([key, value]) => {
-          const ownState = statusMap.get(key);
-          if (ownState !== undefined) {
-              statusMap.set(key, value === 'success' ? 'live' : 'error');
-              return;
-          }
-          if (value !== 'success') return;
-          const ownerId = sortedConnectionIds.find((id) => key.startsWith(`${id}-`));
-          if (ownerId && statusMap.get(ownerId) === 'idle') {
-              statusMap.set(ownerId, 'live');
-          }
-      });
-      return statusMap;
-  }, [connectionStates, connections]);
+  const {
+      contextMenu,
+      setContextMenu,
+      contextMenuPortalRef,
+      buildRailConnectionStatus,
+      openV2ConnectionContextMenu,
+      getV2TreeMetaText,
+      renderV2SidebarContextMenuContent,
+      fetchV2TableContextMenuStats,
+      refreshV2TableContextMenuStats,
+  } = useSidebarV2ContextMenu({
+      connections,
+      connectionStates,
+      connectionTags,
+      activeShortcutPlatform,
+      flattenConnectionNodes,
+      v2TreeMetrics,
+      tableSortPreference,
+      pinnedSidebarTables,
+      getConnectionNodeForAction,
+      buildRuntimeConfig,
+      extractObjectName,
+      isPostgresSchemaDialect,
+      loadTables,
+      getDatabaseNodeRef,
+      handleExportSchemaSQL,
+      handleDeleteSchema,
+      openRenameSchemaModal,
+      resolveMessagePublishTarget,
+      addSqlLog,
+      handleV2TableContextMenuAction,
+      handleV2TableGroupContextMenuAction,
+      handleV2DatabaseContextMenuAction,
+      handleV2ConnectionContextMenuAction,
+      handleV2ConnectionGroupContextMenuAction,
+  });
+  refreshV2TableContextMenuStatsRef.current = refreshV2TableContextMenuStats;
 
-  const buildRailConnectionStatus = useCallback((connectionId: string): 'live' | 'error' | 'idle' => {
-      return connectionStatusMap.get(connectionId) || 'idle';
-  }, [connectionStatusMap]);
+  const renderV2TreeTitle = (node: any, hoverTitle: string, statusBadge: React.ReactNode) => renderSidebarV2TreeTitle({
+      node,
+      hoverTitle,
+      statusBadge,
+      getV2TreeMetaText,
+      toggleSidebarTablePinned,
+      snapshotTreeSelectionBeforeDrag,
+      restoreTreeSelectionAfterDrag,
+      treeDragSelectSuppressUntilRef,
+      setIsTreeDragging,
+  });
 
-  const toggleV2RailConnectionGroup = useCallback((groupId: string) => {
-      setCollapsedV2RailGroupIds((prev) => (
-          prev.includes(groupId)
-              ? prev.filter((id) => id !== groupId)
-              : [...prev, groupId]
-      ));
-  }, []);
-
-  const handleV2RailRootDrop = useCallback((
-      sourceToken: string,
-      targetToken: string,
-      insertBefore: boolean,
-  ) => {
-      if (!sourceToken || !targetToken || sourceToken === targetToken) {
-          return;
-      }
-      reorderSidebarRoot(sourceToken, targetToken, insertBefore);
-  }, [reorderSidebarRoot]);
-
-  const getRailConnectionTypeLabel = (conn: SavedConnection): string => {
-      const iconType = resolveConnectionIconType(conn);
-      if (iconType === 'mysql' || iconType === 'mariadb' || iconType === 'oceanbase') return 'MY';
-      if (iconType === 'postgres') return 'PG';
-      if (iconType === 'gaussdb') return 'GS';
-      if (iconType === 'redis') return 'R';
-      if (iconType === 'mongodb') return 'MO';
-      if (iconType === 'oracle') return 'OR';
-      if (iconType === 'sqlserver') return 'SS';
-      if (iconType === 'starrocks') return 'SR';
-      if (iconType === 'sqlite') return 'SQ';
-      if (iconType === 'jvm') return 'JV';
-      return iconType.slice(0, 2).toUpperCase() || 'DB';
-  };
-
-  const getRailConnectionHostLabel = (conn: SavedConnection): string => {
-      const hostTokens = resolveConnectionHostTokens(conn.config);
-      const primaryHost = String(hostTokens[0] || '').trim().replace(/^\[|\]$/g, '');
-      if (primaryHost) {
-          if (/^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)$/i.test(primaryHost)) {
-              return 'LO';
-          }
-          if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(primaryHost)) {
-              const lastSegment = primaryHost.split('.').pop() || '';
-              return lastSegment.slice(-3).toUpperCase() || 'IP';
-          }
-          if (primaryHost.includes(':') && /^[a-f0-9:]+$/i.test(primaryHost)) {
-              const lastSegment = primaryHost.split(':').filter(Boolean).pop() || '';
-              return lastSegment.slice(-3).toUpperCase() || 'IP';
-          }
-
-          const hostFragments = primaryHost
-              .split(/[^a-z0-9\u4e00-\u9fa5]+/i)
-              .map((entry) => entry.trim())
-              .filter(Boolean);
-          if (hostFragments.length >= 2) {
-              return `${hostFragments[0][0] || ''}${hostFragments[1][0] || ''}`.toUpperCase();
-          }
-          const hostToken = hostFragments[0] || primaryHost.split('.')[0] || '';
-          if (hostToken) {
-              return hostToken.replace(/[^a-z0-9\u4e00-\u9fa5]/gi, '').slice(0, 3).toUpperCase() || 'DB';
-          }
-      }
-
-      return getRailConnectionTypeLabel(conn);
-  };
-
-  const getRailConnectionBadgeLabel = (conn: SavedConnection): string => {
-      const connectionName = String(conn.name || '').trim();
-      const cjkParts = connectionName.match(/[\u4e00-\u9fa5]/g);
-      if (cjkParts && cjkParts.length > 0) {
-          return cjkParts.slice(0, 2).join('');
-      }
-
-      const latinTokens = connectionName.match(/[a-z0-9]+/gi) || [];
-      if (latinTokens.length >= 2) {
-          const firstToken = latinTokens[0] || '';
-          const secondToken = latinTokens[1] || '';
-          return `${firstToken[0] || ''}${secondToken[0] || ''}`.toUpperCase();
-      }
-      if (latinTokens.length === 1) {
-          const token = latinTokens[0];
-          const alphaPrefix = token.match(/^[a-z]+/i)?.[0] || '';
-          if (alphaPrefix) {
-              return alphaPrefix.slice(0, 3).toUpperCase();
-          }
-          const trailingDigits = token.match(/(\d{2,})$/)?.[1];
-          if (trailingDigits) {
-              return trailingDigits.slice(-3).toUpperCase();
-          }
-          return token.slice(0, 3).toUpperCase();
-      }
-
-      return getRailConnectionTypeLabel(conn);
-  };
-
-  const openV2ConnectionContextMenu = (
-      event: React.MouseEvent,
-      connOrNode: SavedConnection | TreeNode,
-  ) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const node = (connOrNode as TreeNode).type === 'connection'
-          ? connOrNode as TreeNode
-          : getConnectionNodeForAction(connOrNode as SavedConnection);
-      if (!node?.key || !node?.dataRef) return;
-      const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
-      setContextMenu({
-          x: position.x,
-          y: position.y,
-          sourceX: event.clientX,
-          sourceY: event.clientY,
-          items: [],
-          kind: 'v2-connection',
-          node,
-          rootClassName: 'gn-v2-table-context-menu-popup',
-          overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
-          maxHeight: position.maxHeight,
-      });
-  };
-
-  const getV2TreeMetaText = (node: any): string => {
-      if (node.type === 'tag') {
-          const count = flattenConnectionNodes(node.children || []).length;
-          return count > 0 ? count.toLocaleString() : '';
-      }
-      if (node.type === 'database') {
-          const count = v2TreeMetrics.databaseTableCounts.get(node.key) || 0;
-          return count > 0 ? count.toLocaleString() : '';
-      }
-      if (node.type === 'object-group') {
-          const count = v2TreeMetrics.objectGroupCounts.get(node.key) || 0;
-          return count > 0 ? count.toLocaleString() : '';
-      }
-      if (node.type === 'redis-db') {
-          const match = String(node.title || '').match(/\((\d+)\)/);
-          return match?.[1] || '';
-      }
-      if (node.type === 'table') {
-          const rowCount = Number(node?.dataRef?.rowCount);
-          return Number.isFinite(rowCount) && rowCount >= 0 ? formatSidebarRowCount(rowCount) : '';
-      }
-      return '';
-  };
-
-  const getV2TableContextMenuStatsKey = (node: any): string => {
-      const id = String(node?.dataRef?.id || '');
-      const dbName = String(node?.dataRef?.dbName || '');
-      const tableName = String(node?.dataRef?.tableName || node?.title || '');
-      return `${id}::${dbName}::${tableName}`;
-  };
-
-  const readNumericMetadataValue = (row: Record<string, any>, keys: string[]): number | undefined => {
-      const value = getCaseInsensitiveRawValue(row, keys);
-      if (value === undefined || value === null || value === '') return undefined;
-      const normalized = Number(String(value).replace(/,/g, ''));
-      return Number.isFinite(normalized) ? normalized : undefined;
-  };
-
-  const buildV2TableStatusSQL = (node: any): string => {
-      const conn = node.dataRef as SavedConnection & { dbName?: string; tableName?: string; schemaName?: string };
-      const dialect = getMetadataDialect(conn);
-      const dbName = String(conn?.dbName || '').trim();
-      const tableName = String(conn?.tableName || node?.title || '').trim();
-      const objectName = extractObjectName(tableName);
-      const schemaName = String(conn?.schemaName || splitQualifiedName(tableName).schemaName || '').trim();
-      switch (dialect) {
-          case 'mysql':
-          case 'starrocks':
-              return [
-                  'SELECT TABLE_ROWS AS table_rows, DATA_LENGTH AS data_length, INDEX_LENGTH AS index_length, ENGINE AS engine',
-                  'FROM information_schema.tables',
-                  `WHERE table_schema = '${escapeSQLLiteral(dbName)}'`,
-                  `AND table_name = '${escapeSQLLiteral(objectName)}'`,
-                  'LIMIT 1',
-              ].join('\n');
-          case 'postgres':
-          case 'kingbase':
-          case 'vastbase':
-          case 'highgo':
-          case 'opengauss':
-          case 'gaussdb': {
-              const schema = schemaName || 'public';
-              return [
-                  "SELECT c.reltuples::bigint AS table_rows, pg_total_relation_size(c.oid) AS data_length, pg_indexes_size(c.oid) AS index_length, 'heap' AS engine",
-                  'FROM pg_class c',
-                  'JOIN pg_namespace n ON n.oid = c.relnamespace',
-                  "WHERE c.relkind = 'r'",
-                  `AND n.nspname = '${escapeSQLLiteral(schema)}'`,
-                  `AND c.relname = '${escapeSQLLiteral(objectName)}'`,
-                  'LIMIT 1',
-              ].join('\n');
-          }
-          case 'sqlserver': {
-              const safeTable = tableName.replace(/'/g, "''");
-              return [
-                  'SELECT SUM(p.rows) AS table_rows, SUM(a.total_pages) * 8 * 1024 AS data_length, SUM(a.used_pages) * 8 * 1024 AS index_length, NULL AS engine',
-                  'FROM sys.tables t',
-                  'JOIN sys.indexes i ON t.object_id = i.object_id',
-                  'JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id',
-                  'JOIN sys.allocation_units a ON p.partition_id = a.container_id',
-                  `WHERE t.object_id = OBJECT_ID('${safeTable}')`,
-              ].join('\n');
-          }
-          case 'clickhouse':
-              return [
-                  'SELECT total_rows AS table_rows, total_bytes AS data_length, 0 AS index_length, engine AS engine',
-                  'FROM system.tables',
-                  `WHERE database = '${escapeSQLLiteral(dbName)}'`,
-                  `AND name = '${escapeSQLLiteral(objectName)}'`,
-                  'LIMIT 1',
-              ].join('\n');
-          case 'oracle':
-          case 'dm': {
-              const owner = (schemaName || dbName || '').toUpperCase();
-              return [
-                  'SELECT num_rows AS table_rows, 0 AS data_length, 0 AS index_length, NULL AS engine',
-                  'FROM all_tables',
-                  `WHERE owner = '${escapeSQLLiteral(owner)}'`,
-                  `AND table_name = '${escapeSQLLiteral(objectName.toUpperCase())}'`,
-                  'FETCH FIRST 1 ROWS ONLY',
-              ].join('\n');
-          }
-          case 'sqlite':
-          case 'duckdb':
-              return `SELECT COUNT(*) AS table_rows, 0 AS data_length, 0 AS index_length, NULL AS engine FROM ${tableName}`;
-          default:
-              return '';
-      }
-  };
-
-  const renderV2TableContextMenu = (node: any) => {
-      const tableName = String(node?.dataRef?.tableName || node?.title || '').trim();
-      const statsKey = getV2TableContextMenuStatsKey(node);
-      const stats = v2TableContextMenuStats[statsKey];
-      const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
-      const supportsMessagePublish = Boolean(resolveMessagePublishTarget(node));
-      const isPinned = isSidebarTablePinned(
-          pinnedSidebarTables,
-          String(node?.dataRef?.id || ''),
-          String(node?.dataRef?.dbName || ''),
-          tableName,
-          String(node?.dataRef?.schemaName || ''),
-      );
-      return (
-          <V2TableContextMenuView
-              tableName={tableName}
-              shortcutPlatform={activeShortcutPlatform}
-              stats={stats}
-              isPinned={isPinned}
-              supportsTruncate={supportsTableTruncateAction(node.dataRef?.config?.type, node.dataRef?.config?.driver)}
-              supportsStarRocksRollup={isStarRocks}
-              supportsMessagePublish={supportsMessagePublish}
-              onAction={(action) => {
-                  setContextMenu(null);
-                  handleV2TableContextMenuAction(node, action);
-              }}
-          />
-      );
-  };
-
-  const renderV2TableGroupContextMenu = (node: any) => {
-      const groupData = node.dataRef || {};
-      const sortPreferenceKey = `${groupData.id}-${groupData.dbName}`;
-      const currentSort = tableSortPreference[sortPreferenceKey] || 'name';
-      return (
-          <V2TableGroupContextMenuView
-              shortcutPlatform={activeShortcutPlatform}
-              dbName={String(groupData.dbName || '')}
-              count={Array.isArray(node.children) ? node.children.length : 0}
-              currentSort={currentSort}
-              onAction={(action) => {
-                  setContextMenu(null);
-                  handleV2TableGroupContextMenuAction(node, action);
-              }}
-          />
-      );
-  };
-
-  const renderV2DatabaseContextMenu = (node: any) => {
-      const dialect = getMetadataDialect(node.dataRef as SavedConnection);
-      const capabilities = getDataSourceCapabilities((node.dataRef as SavedConnection)?.config);
-      return (
-          <V2DatabaseContextMenuView
-              dbName={String(node.dataRef?.dbName || node.title || '')}
-              shortcutPlatform={activeShortcutPlatform}
-              dialect={dialect}
-              supportsSchemaActions={isPostgresSchemaDialect(dialect)}
-              supportsStarRocksActions={dialect === 'starrocks'}
-              supportsRenameDatabase={capabilities.supportsRenameDatabase}
-              supportsDropDatabase={capabilities.supportsDropDatabase}
-              onAction={(action) => {
-                  setContextMenu(null);
-                  handleV2DatabaseContextMenuAction(node, action);
-              }}
-          />
-      );
-  };
-
-  const handleV2SchemaContextMenuAction = (node: any, action: V2SchemaContextMenuActionKey) => {
-      switch (action) {
-          case 'rename-schema':
-              openRenameSchemaModal(node);
-              return;
-          case 'refresh-schema':
-              void loadTables(getDatabaseNodeRef(node?.dataRef, String(node?.dataRef?.dbName || '').trim()));
-              return;
-          case 'export-schema':
-              void handleExportSchemaSQL(node, false);
-              return;
-          case 'backup-schema-sql':
-              void handleExportSchemaSQL(node, true);
-              return;
-          case 'drop-schema':
-              handleDeleteSchema(node);
-              return;
-          default:
-              return;
-      }
-  };
-
-  const renderV2SchemaContextMenu = (node: any) => (
-      <V2SchemaContextMenuView
-          dbName={String(node?.dataRef?.dbName || '')}
-          schemaName={String(node?.dataRef?.schemaName || node?.title || '')}
-          shortcutPlatform={activeShortcutPlatform}
-          onAction={(action) => {
-              setContextMenu(null);
-              handleV2SchemaContextMenuAction(node, action);
-          }}
-      />
-  );
-
-  const renderV2ConnectionContextMenu = (node: any) => {
-      const conn = node.dataRef as SavedConnection;
-      const capabilities = getDataSourceCapabilities(conn?.config);
-      const currentTagId = connectionTags.find((tag) => tag.connectionIds.includes(String(conn.id || node.key)))?.id || '';
-      return (
-          <V2ConnectionContextMenuView
-              connectionName={String(conn?.name || node.title || t('connection.unnamed'))}
-              shortcutPlatform={activeShortcutPlatform}
-              hostSummary={resolveConnectionHostSummary(conn?.config)}
-              driverLabel={resolveConnectionIconType(conn)}
-              isRedis={conn?.config?.type === 'redis'}
-              supportsCreateDatabase={capabilities.supportsCreateDatabase}
-              tags={connectionTags.map((tag) => ({
-                  id: tag.id,
-                  name: tag.name,
-                  selected: tag.id === currentTagId,
-              }))}
-              onAction={(action) => {
-                  setContextMenu(null);
-                  handleV2ConnectionContextMenuAction(node, action);
-              }}
-          />
-      );
-  };
-
-  const renderV2ConnectionGroupContextMenu = (group: V2RailConnectionGroup) => (
-      <V2ConnectionGroupContextMenuView
-          groupName={group.name}
-          count={group.connections.length}
-          onAction={(action) => {
-              setContextMenu(null);
-              handleV2ConnectionGroupContextMenuAction(group, action);
-          }}
-      />
-  );
-
-  const renderV2SidebarContextMenuContent = (menu: SidebarContextMenuState) => {
-      if (!menu.node) return null;
-      if (menu.kind === 'v2-table') return renderV2TableContextMenu(menu.node);
-      if (menu.kind === 'v2-database') return renderV2DatabaseContextMenu(menu.node);
-      if (menu.kind === 'v2-schema') return renderV2SchemaContextMenu(menu.node);
-      if (menu.kind === 'v2-table-group') return renderV2TableGroupContextMenu(menu.node);
-      if (menu.kind === 'v2-connection') return renderV2ConnectionContextMenu(menu.node);
-      if (menu.kind === 'v2-connection-group') return renderV2ConnectionGroupContextMenu(menu.node);
-      return null;
-  };
-
-  useEffect(() => {
-      if (!contextMenu?.kind) return;
-      const onPointerDown = (event: MouseEvent) => {
-          const target = event.target instanceof Node ? event.target : null;
-          if (target && contextMenuPortalRef.current?.contains(target)) return;
-          setContextMenu(null);
-      };
-      const onKeyDown = (event: KeyboardEvent) => {
-          if (event.key === 'Escape') setContextMenu(null);
-      };
-      document.addEventListener('mousedown', onPointerDown);
-      document.addEventListener('keydown', onKeyDown);
-      return () => {
-          document.removeEventListener('mousedown', onPointerDown);
-          document.removeEventListener('keydown', onKeyDown);
-      };
-  }, [contextMenu?.kind]);
-
-  useEffect(() => {
-      if (!contextMenu?.kind) return;
-      const frame = requestAnimationFrame(() => {
-          const portal = contextMenuPortalRef.current;
-          if (!portal) return;
-          const rect = portal.getBoundingClientRect();
-          const content = portal.querySelector('.gn-v2-table-context-menu') as HTMLElement | null;
-          const measuredHeight = Math.max(rect.height, content?.scrollHeight || 0);
-          const position = resolveSidebarContextMenuPosition(contextMenu.sourceX ?? contextMenu.x, contextMenu.sourceY ?? contextMenu.y, {
-              width: rect.width || SIDEBAR_CONTEXT_MENU_FALLBACK_WIDTH,
-              height: measuredHeight || SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT,
-          });
-          setContextMenu(prev => {
-              if (!prev?.kind) return prev;
-              if (prev.x === position.x && prev.y === position.y && prev.maxHeight === position.maxHeight) return prev;
-              return { ...prev, x: position.x, y: position.y, maxHeight: position.maxHeight };
-          });
-      });
-      return () => cancelAnimationFrame(frame);
-  }, [contextMenu?.kind, contextMenu?.x, contextMenu?.y]);
-
-  const fetchV2TableContextMenuStats = async (node: any) => {
-      const statsKey = getV2TableContextMenuStatsKey(node);
-      if (!statsKey || v2TableContextMenuStats[statsKey]?.loading) return;
-      const sql = buildV2TableStatusSQL(node);
-      if (!sql) {
-          setV2TableContextMenuStats(prev => ({ ...prev, [statsKey]: { unavailable: true } }));
-          return;
-      }
-
-      setV2TableContextMenuStats(prev => ({ ...prev, [statsKey]: { ...prev[statsKey], loading: true } }));
-      const startTime = Date.now();
-      try {
-          const conn = node.dataRef;
-          const res = await DBQuery(buildRuntimeConfig(conn, conn.dbName) as any, conn.dbName || '', sql);
-          if (!res.success || !Array.isArray(res.data) || res.data.length === 0) {
-              setV2TableContextMenuStats(prev => ({ ...prev, [statsKey]: { unavailable: true } }));
-              return;
-          }
-          const row = res.data[0] as Record<string, any>;
-          setV2TableContextMenuStats(prev => ({
-              ...prev,
-              [statsKey]: {
-                  rowCount: readNumericMetadataValue(row, ['table_rows', 'TABLE_ROWS', 'rows', 'num_rows', 'reltuples', 'total_rows']),
-                  dataLength: readNumericMetadataValue(row, ['data_length', 'DATA_LENGTH', 'total_bytes']),
-                  indexLength: readNumericMetadataValue(row, ['index_length', 'INDEX_LENGTH']),
-                  engine: getCaseInsensitiveValue(row, ['engine', 'ENGINE']),
-              },
-          }));
-          addSqlLog({
-              id: `${Date.now()}-table-stats`,
-              timestamp: Date.now(),
-              sql,
-              status: 'success',
-              duration: Date.now() - startTime,
-              dbName: conn.dbName,
-          });
-      } catch (error: any) {
-          setV2TableContextMenuStats(prev => ({ ...prev, [statsKey]: { unavailable: true } }));
-          addSqlLog({
-              id: `${Date.now()}-table-stats-error`,
-              timestamp: Date.now(),
-              sql,
-              status: 'error',
-              duration: Date.now() - startTime,
-              message: error?.message || String(error),
-              dbName: node?.dataRef?.dbName,
-          });
-      }
-  };
-
-  const refreshV2TableContextMenuStats = (node: any) => {
-      const statsKey = getV2TableContextMenuStatsKey(node);
-      setV2TableContextMenuStats(prev => ({ ...prev, [statsKey]: { loading: true } }));
-      void fetchV2TableContextMenuStats(node);
-  };
-
-  const renderV2TreeTitle = (node: any, hoverTitle: string, statusBadge: React.ReactNode) => {
-      const rawTitle = String(node.title ?? '');
-      const groupKey = String(node?.dataRef?.groupKey || '');
-      const dragText = resolveSidebarObjectDragText(node);
-      if (node.type === 'v2-table-section') {
-          return (
-              <span
-                  className="gn-v2-tree-section-title"
-                  data-section-kind={node?.dataRef?.sectionKind || undefined}
-                  title={rawTitle}
-              >
-                  {rawTitle}
-              </span>
-          );
-      }
-      const displayTitle = (() => {
-           if (node.type === 'queries-folder') return t('sidebar.tree.saved_queries');
-           if (node.type === 'external-sql-root') return t('sidebar.external_sql.root');
-           if (node.type === 'object-group') {
-              const objectGroupTitle = resolveV2ObjectGroupTitle(node);
-              if (objectGroupTitle) return objectGroupTitle;
-           }
-           return rawTitle;
-       })();
-      const metaText = getV2TreeMetaText(node);
-      const isMono = node.type === 'table'
-          || node.type === 'view'
-          || node.type === 'materialized-view'
-          || node.type === 'db-trigger'
-          || node.type === 'db-event'
-          || node.type === 'routine'
-          || node.type === 'saved-query'
-          || node.type === 'external-sql-file';
-      const titleClassName = [
-          'gn-v2-tree-title',
-          isMono ? 'is-mono' : '',
-          node.type === 'object-group' ? 'is-group' : '',
-          node.type === 'table' && node?.dataRef?.pinnedSidebarTable ? 'is-pinned-table' : '',
-      ].filter(Boolean).join(' ');
-      const tablePinAction = node.type === 'table' ? (
-          <button
-              type="button"
-              className={[
-                  'gn-v2-table-pin-action',
-                  node?.dataRef?.pinnedSidebarTable ? 'is-pinned' : '',
-              ].filter(Boolean).join(' ')}
-              title={node?.dataRef?.pinnedSidebarTable ? t('sidebar.action.unpin_table') : t('sidebar.action.pin_table')}
-              aria-label={node?.dataRef?.pinnedSidebarTable ? t('sidebar.action.unpin_table') : t('sidebar.action.pin_table')}
-              aria-pressed={node?.dataRef?.pinnedSidebarTable ? true : false}
-              data-v2-sidebar-table-pin-action="true"
-              onMouseDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-              }}
-              onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  toggleSidebarTablePinned(node);
-              }}
-              onDoubleClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-              }}
-          >
-              {node?.dataRef?.pinnedSidebarTable ? <StarFilled /> : <StarOutlined />}
-          </button>
-      ) : null;
-      if (node.type === 'connection') {
-          return (
-            <span
-                className={`${titleClassName} is-connection`}
-                title={hoverTitle}
-                data-node-type={node.type}
-                data-sidebar-node-key={String(node.key || '')}
-                data-sidebar-node-type={String(node.type || '')}
-            >
-                {statusBadge}
-                <span className="gn-v2-tree-connection-copy">
-                    <span className="gn-v2-tree-label">{displayTitle}</span>
-                </span>
-            </span>
-          );
-      }
-      return (
-        <>
-          <span
-              className={titleClassName}
-              title={hoverTitle}
-              draggable={!!dragText}
-              data-node-type={node.type}
-              data-group-key={groupKey || undefined}
-              data-sidebar-node-key={String(node.key || '')}
-              data-sidebar-node-type={String(node.type || '')}
-              onDragStart={dragText ? (event) => {
-                  snapshotTreeSelectionBeforeDrag();
-                  treeDragSelectSuppressUntilRef.current = Date.now() + 600;
-                  setIsTreeDragging(true);
-                  event.stopPropagation();
-                  event.dataTransfer.effectAllowed = 'copy';
-                  event.dataTransfer.setData('text/plain', dragText);
-                  event.dataTransfer.setData(
-                      SIDEBAR_SQL_EDITOR_DRAG_MIME,
-                      encodeSidebarSqlEditorDragPayload({
-                          text: dragText,
-                          nodeType: node.type,
-                          connectionId: String(node?.dataRef?.id || ''),
-                          dbName: String(node?.dataRef?.dbName || ''),
-                      }),
-                  );
-              } : undefined}
-              onDragEnd={dragText ? () => {
-                  restoreTreeSelectionAfterDrag();
-                  setIsTreeDragging(false);
-              } : undefined}
-          >
-              {statusBadge}
-              <span className="gn-v2-tree-label">{displayTitle}</span>
-              {metaText && <span className="gn-v2-tree-count">{metaText}</span>}
-          </span>
-          {tablePinAction}
-        </>
-      );
-  };
-
-  const selectConnectionFromRail = useCallback((conn: SavedConnection) => {
-      const key = conn.id;
-      const connectionNode = findTreeNodeByKeyRef.current(treeDataRef.current, key);
-      setSelectedKeys([key]);
-      selectedNodesRef.current = connectionNode ? [connectionNode] : [];
-      setActiveContext({ connectionId: key, dbName: '' });
-      mergeExpandedTreeKeys([key]);
-      const targetNode = connectionNode || {
-          key,
-          dataRef: conn,
-          type: 'connection',
-      };
-      void loadDatabases(targetNode);
-  }, [setActiveContext]);
-
-  const runCommandSearchItem = useCallback((item?: V2CommandSearchItem) => {
-      if (!item) return;
-      closeV2CommandSearch();
-      if (item.kind === 'action') {
-          item.onRun();
-          return;
-      }
-      if (item.kind === 'recent') {
-          addTab({
-              id: `query-${Date.now()}`,
-              title: t('sidebar.tab.recent_query'),
-              type: 'query',
-              connectionId: item.connectionId || activeContext?.connectionId || activeTab?.connectionId || '',
-              dbName: item.dbName || activeContext?.dbName || activeTab?.dbName || '',
-              query: item.sql,
-          });
-          return;
-      }
-
-      const node = item.node;
-      const dataRef = node.dataRef || {};
-      if (node.type === 'connection') {
-          selectConnectionFromRail(dataRef as SavedConnection);
-          return;
-      }
-	      if (node.type === 'database') {
-	          setActiveContext({ connectionId: resolveSidebarNodeConnectionId(node, connectionIds) || dataRef.id, dbName: dataRef.dbName });
-	          mergeExpandedTreeKeys([dataRef.id, node.key]);
-	          setSelectedKeys([node.key]);
-	          selectedNodesRef.current = [node];
-          scrollSidebarTreeToKey(node.key);
-          return;
-      }
-      if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view') {
-          void locateObjectInSidebar({
-              tabId: String(node.key || ''),
-              connectionId: dataRef.id,
-              dbName: dataRef.dbName,
-              tableName: dataRef.tableName || dataRef.viewName,
-              schemaName: dataRef.schemaName,
-              objectGroup: node.type === 'table' ? 'tables' : (node.type === 'materialized-view' ? 'materializedViews' : 'views'),
-          });
-          onDoubleClick(null, node);
-          return;
-      }
-      if (node.type === 'db-trigger' || node.type === 'db-event' || node.type === 'routine') {
-          setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
-          setSelectedKeys([node.key]);
-          selectedNodesRef.current = [node];
-          scrollSidebarTreeToKey(node.key);
-          onDoubleClick(null, node);
-      }
-  }, [activeContext, activeTab, addTab, closeV2CommandSearch, selectConnectionFromRail, setActiveContext]);
-
-  const handleV2CommandSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-      if (event.key === 'ArrowDown') {
-          event.preventDefault();
-          setV2CommandActiveIndex((prev) => {
-              if (commandSearchFlatItems.length === 0) return 0;
-              return Math.min(prev + 1, commandSearchFlatItems.length - 1);
-          });
-          return;
-      }
-      if (event.key === 'ArrowUp') {
-          event.preventDefault();
-          setV2CommandActiveIndex((prev) => Math.max(prev - 1, 0));
-          return;
-      }
-      if (event.key === 'Enter') {
-          if (!shouldRunV2CommandSearchEnter({
-              key: event.key,
-              isComposing: event.nativeEvent.isComposing,
-              keyCode: event.nativeEvent.keyCode,
-              activeItemCount: commandSearchFlatItems.length,
-          })) {
-              return;
-          }
-          event.preventDefault();
-          runCommandSearchItem(commandSearchFlatItems[v2CommandActiveIndex]);
-          return;
-      }
-      if (event.key === 'Escape') {
-          event.preventDefault();
-          closeV2CommandSearch();
-      }
-  };
-
-  const renderV2CommandSearchRow = (item: V2CommandSearchItem, active: boolean) => (
-      <button
-          key={item.key}
-          type="button"
-          className={`gn-v2-command-row${active ? ' is-active' : ''}`}
-          onMouseEnter={() => setV2CommandActiveIndex(commandSearchFlatItems.findIndex((entry) => entry.key === item.key))}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => runCommandSearchItem(item)}
-      >
-          <span className={`gn-v2-command-row-icon is-${item.kind}`}>{item.icon}</span>
-          <span className="gn-v2-command-row-main">
-              <strong>{item.title}</strong>
-              {item.meta ? <small>{item.meta}</small> : null}
-          </span>
-          {item.kind === 'action' && item.shortcut ? <kbd>{item.shortcut}</kbd> : null}
-      </button>
-  );
-
-  const renderV2CommandSearchSection = (title: string, items: V2CommandSearchItem[]) => {
-      if (items.length === 0) return null;
-      return (
-          <section className="gn-v2-command-section">
-              <div className="gn-v2-command-section-title">{title}</div>
-              {items.map((item) => renderV2CommandSearchRow(
-                  item,
-                  commandSearchFlatItems[v2CommandActiveIndex]?.key === item.key,
-              ))}
-          </section>
-      );
-  };
-
-	  const renderV2CommandSearchOverlay = () => {
-	      if (!isV2CommandSearchOpen) return null;
-	      const emptyCopy = v2CommandSearchAiMode
-	          ? t('sidebar.command_search.empty.ai')
-	          : (v2CommandSearchObjectMode
-	              ? t('sidebar.command_search.empty.object')
-	              : t('sidebar.command_search.empty.default'));
-	      return (
-	          <div className="gn-v2-command-backdrop" data-v2-command-search="true" onMouseDown={closeV2CommandSearch}>
-              <div className="gn-v2-command-palette" role="dialog" aria-modal="true" aria-label={v2CommandSearchLabel} onMouseDown={(event) => event.stopPropagation()}>
-                  <div className="gn-v2-command-searchbar">
-                      <SearchOutlined />
-                      <Input
-                          {...noAutoCapInputProps}
-                          ref={commandSearchInputRef}
-                          variant="borderless"
-                          value={v2CommandSearchValue}
-                          onChange={(event) => handleV2CommandSearchValueChange(event.target.value)}
-                          onKeyDown={handleV2CommandSearchKeyDown}
-                          placeholder={v2CommandSearchPlaceholder}
-                      />
-                      <Tooltip title={t('sidebar.command_search.sync_to_filter_tooltip')}>
-                          <span className="gn-v2-command-filter-switch" aria-label={t('sidebar.command_search.sync_to_filter_aria')}>
-                              <Switch
-                                  size="small"
-                                  checked={v2CommandSearchPersistentFilterEnabled}
-                                  onChange={toggleV2CommandSearchPersistentFilter}
-                              />
-                          </span>
-                      </Tooltip>
-                      <Tooltip title={v2PersistedSidebarFilter ? t('sidebar.command_search.reset_filter') : t('sidebar.command_search.no_synced_filter')}>
-                          <Button
-                              size="small"
-                              type="text"
-                              icon={<ReloadOutlined />}
-                              aria-label={t('sidebar.command_search.reset_filter')}
-                              disabled={!v2PersistedSidebarFilter}
-                              onClick={resetV2SidebarFilter}
-                          />
-                      </Tooltip>
-                      <kbd>esc</kbd>
-                  </div>
-                  <div className="gn-v2-command-list">
-	                      {renderV2CommandSearchSection(t('sidebar.command_search.section.goto'), filteredCommandSearchTreeItems)}
-	                      {renderV2CommandSearchSection(t('sidebar.command_search.section.ai'), commandSearchAiItem)}
-	                      {renderV2CommandSearchSection(t('sidebar.command_search.section.actions'), filteredCommandSearchActionItems)}
-	                      {renderV2CommandSearchSection(t('sidebar.command_search.section.recent'), filteredCommandSearchRecentItems)}
-	                      {commandSearchFlatItems.length === 0 ? (
-	                          <div className="gn-v2-command-empty">
-	                              {emptyCopy}
-	                          </div>
-	                      ) : null}
-	                  </div>
-	                  <div className="gn-v2-command-footer">
-	                      <span><kbd>↑</kbd><kbd>↓</kbd>{t('sidebar.command_search.footer.navigate')}</span>
-	                      <span><kbd>↵</kbd>{t('sidebar.command_search.footer.select')}</span>
-	                      <span><TableOutlined /> <kbd>@</kbd>{t('sidebar.command_search.footer.object_only')}</span>
-	                      <span><RobotOutlined /> <kbd>?</kbd>{t('sidebar.command_search.footer.ask_ai')}</span>
-	                  </div>
-	              </div>
-	          </div>
-      );
-  };
-
+  const {
+      selectConnectionFromRail,
+      runCommandSearchItem,
+      handleV2CommandSearchKeyDown,
+  } = useSidebarCommandSearchRunner({
+      activeContext,
+      activeTab,
+      addTab,
+      closeV2CommandSearch,
+      commandSearchFlatItems,
+      connectionIds,
+      findTreeNodeByKeyRef,
+      locateObjectInSidebar,
+      loadDatabases,
+      mergeExpandedTreeKeys,
+      onDoubleClick,
+      scrollSidebarTreeToKey,
+      selectedNodesRef,
+      setActiveContext,
+      setSelectedKeys,
+      setV2CommandActiveIndex,
+      treeDataRef,
+      v2CommandActiveIndex,
+  });
   expandConnectionFromRailRef.current = (connectionId: string) => {
       const conn = connections.find((item) => item.id === connectionId);
       if (conn) {
@@ -7646,1142 +2072,98 @@ const Sidebar: React.FC<{
       }
   };
 
-  const getNodeMenuItems = (node: any): MenuProps['items'] => {
-    const conn = node.dataRef as SavedConnection;
-    const isRedis = conn?.config?.type === 'redis';
+  const getNodeMenuItems = (node: any): MenuProps['items'] => buildSidebarLegacyNodeMenuItems(node, {
+    addTab,
+    getMetadataDialect,
+    handleV2DatabaseContextMenuAction,
+    isPostgresSchemaDialect,
+    handleExportSchemaSQL,
+    openRenameSchemaModal,
+    loadTables,
+    getDatabaseNodeRef,
+    handleDeleteSchema,
+    tableSortPreference,
+    isStructureOnlyDbType,
+    openNewTableDesign,
+    handleTableGroupSortAction,
+    openCreateView,
+    openCreateStarRocksMaterializedView,
+    openCreateRoutine,
+    createTagForm,
+    setRenameViewTarget,
+    setIsCreateTagModalOpen,
+    removeConnectionTag,
+    setExpandedKeys,
+    setLoadedKeys,
+    loadingNodesRef,
+    loadDatabases,
+    buildConnectionRootRedisCommandTabTitle,
+    buildConnectionRootRedisMonitorTabTitle,
+    onEditConnection,
+    handleDuplicateConnection,
+    disconnectConnectionNode,
+    deleteConnectionNode,
+    connectionTags,
+    moveConnectionToTag,
+    setTargetConnection,
+    setIsCreateDbModalOpen,
+    buildConnectionRootQueryTabTitle,
+    handleRunSQLFile,
+    openCreateStarRocksExternalCatalog,
+    openEditView,
+    renameViewForm,
+    setIsRenameViewModalOpen,
+    handleDropView,
+    onDoubleClick,
+    openViewDefinition,
+    openRoutineDefinition,
+    openEditRoutine,
+    handleDropRoutine,
+    openEventDefinition,
+    resolveMessagePublishTarget,
+    openMessagePublishModal,
+    openDesign,
+    openCreateStarRocksRollup,
+    handleCopyTableName,
+    handleCopyStructure,
+    handleExport,
+    setRenameTableTarget,
+    renameTableForm,
+    setIsRenameTableModalOpen,
+    handleTableDataDangerAction,
+    handleDeleteTable,
+    openExportDialog,
+    isSavedQueryUnmatched,
+    connections,
+    handleRebindSavedQuery,
+    openRenameSavedQueryModal,
+    resolveSavedQueryDisplayName,
+    deleteQuery,
+    treeDataRef,
+    setTreeData,
+    handleAddExternalSQLDirectory,
+    openCreateExternalSQLFileModal,
+    openCreateExternalSQLDirectoryModal,
+    openRenameExternalSQLDirectoryModal,
+    handleRefreshExternalSQLDirectory,
+    handleDeleteExternalSQLDirectory,
+    handleRemoveExternalSQLDirectory,
+    openExternalSQLFile,
+    openRenameExternalSQLFileModal,
+    handleDeleteExternalSQLFile,
+    extractObjectName,
+  });
 
-    if (node.type === 'object-group' && node.dataRef?.groupKey === 'schema') {
-        const dialect = getMetadataDialect(node.dataRef as SavedConnection);
-        const schemaName = String(node?.dataRef?.schemaName || '').trim();
-        if (!isPostgresSchemaDialect(dialect) || !schemaName) {
-            return [];
-        }
-        return [
-            {
-                key: 'rename-schema',
-                label: t('sidebar.menu.edit_schema'),
-                icon: <EditOutlined />,
-                onClick: () => openRenameSchemaModal(node)
-            },
-            {
-                key: 'refresh-schema',
-                label: t('sidebar.menu.refresh'),
-                icon: <ReloadOutlined />,
-                onClick: () => void loadTables(getDatabaseNodeRef(node.dataRef, node.dataRef.dbName))
-            },
-            {
-                key: 'export-schema',
-                label: t('sidebar.menu.export_current_schema_sql'),
-                icon: <ExportOutlined />,
-                onClick: () => void handleExportSchemaSQL(node, false)
-            },
-            {
-                key: 'backup-schema-sql',
-                label: t('sidebar.menu.backup_current_schema_sql'),
-                icon: <SaveOutlined />,
-                onClick: () => void handleExportSchemaSQL(node, true)
-            },
-            { type: 'divider' },
-            {
-                key: 'drop-schema',
-                label: t('sidebar.menu.delete_schema'),
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => handleDeleteSchema(node)
-            },
-        ];
-    }
-
-    // 表分组节点的右键菜单
-    if (node.type === 'object-group' && node.dataRef?.groupKey === 'tables') {
-        const groupData = node.dataRef; // { ...conn, dbName, groupKey }
-        const sortPreferenceKey = `${groupData.id}-${groupData.dbName}`;
-        const currentSort = tableSortPreference[sortPreferenceKey] || 'name';
-        const canCreateTable = !isStructureOnlyDbType(String(groupData.id || ''));
-
-        return [
-            ...(canCreateTable ? [{
-                key: 'new-table',
-                label: t('sidebar.menu.new_table'),
-                icon: <TableOutlined />,
-                onClick: () => openNewTableDesign(node)
-            }] : []),
-            { type: 'divider' },
-            {
-                key: 'sort-by-name',
-                label: t('sidebar.menu.sort_by_name'),
-                icon: currentSort === 'name' ? <CheckSquareOutlined /> : null,
-                onClick: () => handleTableGroupSortAction(node, 'name')
-            },
-            {
-                key: 'sort-by-frequency',
-                label: t('sidebar.menu.sort_by_frequency'),
-                icon: currentSort === 'frequency' ? <CheckSquareOutlined /> : null,
-                onClick: () => handleTableGroupSortAction(node, 'frequency')
-            }
-        ];
-    }
-
-    // 视图分组节点的右键菜单
-    if (node.type === 'object-group' && node.dataRef?.groupKey === 'views') {
-        return [
-            {
-                key: 'create-view',
-                label: t('sidebar.menu.create_view'),
-                icon: <PlusOutlined />,
-                onClick: () => openCreateView(node)
-            },
-        ];
-    }
-
-    if (node.type === 'object-group' && node.dataRef?.groupKey === 'materializedViews') {
-        return [
-            {
-                key: 'create-materialized-view',
-                label: t('sidebar.v2_database_menu.new_materialized_view'),
-                icon: <PlusOutlined />,
-                onClick: () => openCreateStarRocksMaterializedView(node)
-            },
-        ];
-    }
-
-    // 函数分组节点的右键菜单
-    if (node.type === 'object-group' && node.dataRef?.groupKey === 'routines') {
-        const dialect = getMetadataDialect(node.dataRef as SavedConnection);
-        const routineMenu: MenuProps['items'] = [
-            {
-                key: 'create-function',
-                label: t('sidebar.tab.create_function'),
-                icon: <PlusOutlined />,
-                onClick: () => openCreateRoutine(node, 'FUNCTION')
-            },
-        ];
-        if (dialect !== 'duckdb') {
-            routineMenu.push({
-                key: 'create-procedure',
-                label: t('sidebar.tab.create_procedure'),
-                icon: <PlusOutlined />,
-                onClick: () => openCreateRoutine(node, 'PROCEDURE')
-            });
-        }
-        return routineMenu;
-    }
-
-    if (node.type === 'object-group' && node.dataRef?.groupKey === 'events') {
-        return [
-            {
-                key: 'create-event-query',
-                label: t('sidebar.menu.create_event'),
-                icon: <PlusOutlined />,
-                onClick: () => {
-                    addTab({
-                        id: `query-create-event-${Date.now()}`,
-                        title: t('sidebar.tab.new_event'),
-                        type: 'query',
-                        connectionId: node.dataRef.id,
-                        dbName: node.dataRef.dbName,
-                        query: `CREATE EVENT event_name\nON SCHEDULE EVERY 1 DAY\nDO\nBEGIN\n    -- event body\nEND;`
-                    });
-                }
-            },
-        ];
-    }
-
-    // Connection Tag Menu — must be BEFORE the connection check
-    if (node.type === 'tag') {
-        return [
-            {
-                key: 'edit-tag',
-                label: t('sidebar.menu.edit_tag'),
-                icon: <EditOutlined />,
-                onClick: () => {
-                    createTagForm.setFieldsValue({ name: node.title, connectionIds: node.dataRef.connectionIds });
-                    setRenameViewTarget(node);
-                    setIsCreateTagModalOpen(true);
-                }
-            },
-            { type: 'divider' },
-            {
-                key: 'delete-tag',
-                label: t('sidebar.menu.delete_tag'),
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => {
-                    Modal.confirm({
-                        title: t('sidebar.modal.confirm_delete.title'),
-                        content: t('sidebar.modal.confirm_delete_tag.content', { name: node.title }),
-                        onOk: () => {
-                            removeConnectionTag(node.dataRef.id);
-                        }
-                    });
-                }
-            }
-        ];
-    }
-
-    if (node.type === 'connection') {
-        // Redis connection menu
-        if (isRedis) {
-            return [
-                {
-                    key: 'refresh',
-                    label: t('sidebar.menu.refresh'),
-                    icon: <ReloadOutlined />,
-                    onClick: () => {
-                        const connKey = String(node.key);
-                        // 清除子节点的展开/已加载状态，确保刷新后重新展开时能触发 onLoadData
-                        setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${connKey}-`)));
-                        setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(`${connKey}-`)));
-                        // 清除 loadingNodesRef 中残留的子节点加载标记
-                        Array.from(loadingNodesRef.current).forEach(lk => {
-                            if (lk.startsWith(`tables-${connKey}-`)) loadingNodesRef.current.delete(lk);
-                        });
-                        loadDatabases(node);
-                    }
-                },
-                { type: 'divider' },
-                {
-                    key: 'new-command',
-                    label: t('sidebar.menu.new_command_window'),
-                    icon: <ConsoleSqlOutlined />,
-                    onClick: () => {
-                        addTab({
-                            id: `redis-cmd-${node.key}-${Date.now()}`,
-                            title: buildConnectionRootRedisCommandTabTitle(),
-                            type: 'redis-command',
-                            connectionId: node.key,
-                            redisDB: 0
-                        });
-                    }
-                },
-                {
-                    key: 'open-monitor',
-                    label: t('redis_monitor.title.instance'),
-                    icon: <DashboardOutlined />,
-                    onClick: () => {
-                        addTab({
-                            id: `redis-monitor-${node.key}-${Date.now()}`,
-                            title: buildConnectionRootRedisMonitorTabTitle(),
-                            type: 'redis-monitor',
-                            connectionId: node.key,
-                            redisDB: 0
-                        });
-                    }
-                },
-                { type: 'divider' },
-                {
-                    key: 'edit',
-                    label: t('sidebar.menu.edit_connection'),
-                    icon: <EditOutlined />,
-                    onClick: () => {
-                        if (onEditConnection) onEditConnection(node.dataRef);
-                    }
-                },
-                {
-                    key: 'copy-connection',
-                    label: t('connection.sidebar.menu.copy'),
-                    icon: <CopyOutlined />,
-                    onClick: () => handleDuplicateConnection(node.dataRef as SavedConnection)
-                },
-                {
-                    key: 'disconnect',
-                    label: t('connection.sidebar.menu.disconnect'),
-                    icon: <DisconnectOutlined />,
-                    onClick: () => void disconnectConnectionNode(node)
-                },
-                {
-                    key: 'delete',
-                    label: t('connection.sidebar.menu.delete'),
-                    icon: <DeleteOutlined />,
-                    danger: true,
-                    onClick: () => deleteConnectionNode(node)
-                }
-            ];
-        }
-
-        // Tag submenu for connection
-        const tagSubMenuItems: MenuProps['items'] = connectionTags.map(tag => ({
-            key: `move-to-tag-${tag.id}`,
-            label: tag.name,
-            icon: <FolderOutlined />,
-            onClick: () => moveConnectionToTag(node.key, tag.id)
-        }));
-        if (connectionTags.length > 0) {
-            tagSubMenuItems.push({ type: 'divider' });
-        }
-        tagSubMenuItems.push({
-            key: 'move-to-ungrouped',
-            label: t('connection.sidebar.menu.moveOutTag'),
-            onClick: () => moveConnectionToTag(node.key, null)
-        });
-
-        // Regular database connection menu
-        const connectionCapabilities = getDataSourceCapabilities((node.dataRef as SavedConnection)?.config);
-        return [
-            ...(connectionCapabilities.supportsCreateDatabase ? [{
-                key: 'new-db',
-                label: t('connection.sidebar.menu.createDatabase'),
-                icon: <DatabaseOutlined />,
-                onClick: () => {
-                    setTargetConnection(node);
-                    setIsCreateDbModalOpen(true);
-                }
-            }] : []),
-            {
-                key: 'refresh',
-                label: t('sidebar.menu.refresh'),
-                icon: <ReloadOutlined />,
-                onClick: () => {
-                    const connKey = String(node.key);
-                    // 清除子节点的展开/已加载状态，确保刷新后重新展开时能触发 onLoadData
-                    setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(`${connKey}-`)));
-                    setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(`${connKey}-`)));
-                    // 清除 loadingNodesRef 中残留的子节点加载标记
-                    Array.from(loadingNodesRef.current).forEach(lk => {
-                        if (lk.startsWith(`tables-${connKey}-`)) loadingNodesRef.current.delete(lk);
-                    });
-                    loadDatabases(node);
-                }
-            },
-            { type: 'divider' },
-             {
-               key: 'new-query',
-               label: t('sidebar.menu.new_query'),
-               icon: <ConsoleSqlOutlined />,
-               onClick: () => {
-                   addTab({
-                       id: `query-${Date.now()}`,
-                       title: buildConnectionRootQueryTabTitle(),
-                       type: 'query',
-                       connectionId: node.key,
-                       dbName: undefined,
-                       query: ''
-                   });
-               }
-             },
-             {
-                 key: 'open-sql-file',
-                 label: t('sidebar.sql_file_exec.title'),
-                 icon: <FileAddOutlined />,
-                 onClick: () => handleRunSQLFile(node)
-             },
-             { type: 'divider' },
-             {
-                 key: 'edit',
-                 label: t('sidebar.menu.edit_connection'),
-                 icon: <EditOutlined />,
-                 onClick: () => {
-                     if (onEditConnection) onEditConnection(node.dataRef);
-                 }
-             },
-             {
-                 key: 'copy-connection',
-                 label: t('connection.sidebar.menu.copy'),
-                 icon: <CopyOutlined />,
-                 onClick: () => handleDuplicateConnection(node.dataRef as SavedConnection)
-             },
-             {
-                 key: 'move-to-tag',
-                 label: t('connection.sidebar.menu.moveToTag'),
-                 icon: <FolderOpenOutlined />,
-                 children: tagSubMenuItems
-             },
-             {
-                 key: 'disconnect',
-                 label: t('connection.sidebar.menu.disconnect'),
-                 icon: <DisconnectOutlined />,
-                 onClick: () => void disconnectConnectionNode(node)
-             },
-             {
-                 key: 'delete',
-                 label: t('connection.sidebar.menu.delete'),
-                 icon: <DeleteOutlined />,
-                 danger: true,
-                 onClick: () => deleteConnectionNode(node)
-             }
-        ];
-    } else if (node.type === 'redis-db') {
-        // Redis database menu
-        const { id, redisDB } = node.dataRef;
-        return [
-            {
-                key: 'open-keys',
-                label: t('redis_viewer.title.key_explorer'),
-                icon: <KeyOutlined />,
-                onClick: () => {
-                    addTab({
-                        id: `redis-keys-${id}-db${redisDB}`,
-                        title: `db${redisDB}`,
-                        type: 'redis-keys',
-                        connectionId: id,
-                        redisDB: redisDB
-                    });
-                }
-            },
-            {
-                key: 'new-command',
-                label: t('sidebar.menu.new_command_window'),
-                icon: <ConsoleSqlOutlined />,
-                onClick: () => {
-                    addTab({
-                        id: `redis-cmd-${id}-db${redisDB}-${Date.now()}`,
-                        title: buildConnectionRootRedisCommandTabTitle(`db${redisDB}`),
-                        type: 'redis-command',
-                        connectionId: id,
-                        redisDB: redisDB
-                    });
-                }
-            },
-            {
-                key: 'open-monitor',
-                label: t('redis_monitor.title.instance'),
-                icon: <DashboardOutlined />,
-                onClick: () => {
-                    addTab({
-                        id: `redis-monitor-${id}-db${redisDB}-${Date.now()}`,
-                        title: buildConnectionRootRedisMonitorTabTitle(`db${redisDB}`),
-                        type: 'redis-monitor',
-                        connectionId: id,
-                        redisDB: redisDB
-                    });
-                }
-            }
-        ];
-    } else if (node.type === 'database') {
-       const databaseConn = node.dataRef as SavedConnection;
-       const dialect = getMetadataDialect(databaseConn);
-       const capabilities = getDataSourceCapabilities(databaseConn?.config);
-       const isStarRocks = dialect === 'starrocks';
-       const supportsSchemaActions = isPostgresSchemaDialect(dialect);
-       const canCreateTable = !isStructureOnlyDbType(String(databaseConn?.id || ''));
-       return [
-           ...(canCreateTable ? [{
-                key: 'new-table',
-                label: t('sidebar.menu.create_table'),
-                icon: <TableOutlined />,
-                onClick: () => openNewTableDesign(node)
-            }] : []),
-            ...(supportsSchemaActions ? [
-                {
-                    key: 'new-schema',
-                    label: t('sidebar.v2_database_menu.new_schema'),
-                    icon: <FolderAddOutlined />,
-                    onClick: () => handleV2DatabaseContextMenuAction(node, 'new-schema')
-                },
-            ] : []),
-            ...(isStarRocks ? [
-                {
-                    key: 'new-materialized-view',
-                    label: t('sidebar.v2_database_menu.new_materialized_view'),
-                    icon: <ThunderboltOutlined />,
-                    onClick: () => openCreateStarRocksMaterializedView(node)
-                },
-                {
-                    key: 'new-external-catalog',
-                    label: t('sidebar.v2_database_menu.new_external_catalog'),
-                    icon: <CloudOutlined />,
-                    onClick: () => openCreateStarRocksExternalCatalog(node)
-                },
-            ] : []),
-            ...(capabilities.supportsRenameDatabase ? [{
-                key: 'rename-db',
-                label: t('sidebar.menu.rename_database'),
-                icon: <EditOutlined />,
-                onClick: () => handleV2DatabaseContextMenuAction(node, 'rename-db')
-            }] : []),
-            ...(capabilities.supportsDropDatabase ? [{
-                key: 'danger-zone',
-                label: t('sidebar.menu.danger_operations'),
-                icon: <WarningOutlined />,
-                children: [
-                    {
-                        key: 'drop-db',
-                        label: t('sidebar.v2_table_menu.item_with_suffix', { label: t('sidebar.menu.delete_database'), suffix: 'DROP' }),
-                        icon: <DeleteOutlined />,
-                        danger: true,
-                        onClick: () => handleV2DatabaseContextMenuAction(node, 'drop-db')
-                    }
-                ]
-            }] : []),
-            {
-                key: 'refresh',
-                label: t('sidebar.v2_database_menu.refresh_object_tree'),
-                icon: <ReloadOutlined />,
-                onClick: () => handleV2DatabaseContextMenuAction(node, 'refresh')
-            },
-            {
-                key: 'export-db-schema',
-                label: t('sidebar.v2_database_menu.export_all_table_schema_sql'),
-                icon: <ExportOutlined />,
-                onClick: () => handleV2DatabaseContextMenuAction(node, 'export-db-schema')
-            },
-            {
-                key: 'backup-db-sql',
-                label: t('sidebar.v2_database_menu.backup_all_tables_sql'),
-                icon: <SaveOutlined />,
-                onClick: () => handleV2DatabaseContextMenuAction(node, 'backup-db-sql')
-            },
-            { type: 'divider' },
-            {
-                key: 'disconnect-db',
-                label: t('sidebar.menu.close_database'),
-                icon: <DisconnectOutlined />,
-                onClick: () => handleV2DatabaseContextMenuAction(node, 'disconnect-db')
-            },
-             {
-                 key: 'new-query',
-                 label: t('sidebar.menu.new_query'),
-                 icon: <ConsoleSqlOutlined />,
-                 onClick: () => handleV2DatabaseContextMenuAction(node, 'new-query')
-              },
-             {
-                  key: 'run-sql',
-                  label: t('sidebar.sql_file_exec.title'),
-                  icon: <FileAddOutlined />,
-                  onClick: () => handleV2DatabaseContextMenuAction(node, 'run-sql')
-              }
-       ];
-    } else if (node.type === 'view') {
-        return [
-            {
-                key: 'open-view',
-                label: t('sidebar.menu.browse_view_data'),
-                icon: <EyeOutlined />,
-                onClick: () => onDoubleClick(null, node)
-            },
-            {
-                key: 'view-definition',
-                label: t('sidebar.menu.view_definition'),
-                icon: <CodeOutlined />,
-                onClick: () => openViewDefinition(node)
-            },
-            {
-                key: 'copy-view-name',
-                label: t('sidebar.menu.copy_object_name'),
-                icon: <CopyOutlined />,
-                onClick: () => handleCopyTableName(node)
-            },
-            { type: 'divider' },
-            {
-                key: 'edit-view',
-                label: t('sidebar.menu.edit_view'),
-                icon: <EditOutlined />,
-                onClick: () => openEditView(node)
-            },
-            {
-                key: 'new-query',
-                label: t('sidebar.menu.new_query'),
-                icon: <ConsoleSqlOutlined />,
-                onClick: () => {
-                    addTab({
-                        id: `query-${Date.now()}`,
-                        title: t('query.new'),
-                        type: 'query',
-                        connectionId: node.dataRef.id,
-                        dbName: node.dataRef.dbName,
-                        query: ''
-                    });
-                }
-            },
-            { type: 'divider' },
-            {
-                key: 'rename-view',
-                label: t('sidebar.menu.rename_view'),
-                icon: <EditOutlined />,
-                onClick: () => {
-                    setRenameViewTarget(node);
-                    renameViewForm.setFieldsValue({ newName: extractObjectName(node.dataRef?.viewName || node.title) });
-                    setIsRenameViewModalOpen(true);
-                }
-            },
-            {
-                key: 'danger-zone',
-                label: t('sidebar.menu.danger_operations'),
-                icon: <WarningOutlined />,
-                children: [
-                    {
-                        key: 'drop-view',
-                        label: t('sidebar.menu.delete_view'),
-                        icon: <DeleteOutlined />,
-                        danger: true,
-                        onClick: () => handleDropView(node)
-                    }
-                ]
-            },
-        ];
-    } else if (node.type === 'materialized-view') {
-        return [
-            {
-                key: 'open-materialized-view',
-                label: t('sidebar.menu.browse_materialized_view_data'),
-                icon: <EyeOutlined />,
-                onClick: () => onDoubleClick(null, node)
-            },
-            {
-                key: 'materialized-view-definition',
-                label: t('sidebar.menu.materialized_view_definition'),
-                icon: <CodeOutlined />,
-                onClick: () => openViewDefinition(node)
-            },
-            {
-                key: 'copy-materialized-view-name',
-                label: t('sidebar.menu.copy_object_name'),
-                icon: <CopyOutlined />,
-                onClick: () => handleCopyTableName(node)
-            },
-            {
-                key: 'new-query',
-                label: t('sidebar.menu.new_query'),
-                icon: <ConsoleSqlOutlined />,
-                onClick: () => {
-                    addTab({
-                        id: `query-${Date.now()}`,
-                        title: t('query.new'),
-                        type: 'query',
-                        connectionId: node.dataRef.id,
-                        dbName: node.dataRef.dbName,
-                        query: buildTableSelectQuery('starrocks', String(node.dataRef?.tableName || node.dataRef?.viewName || ''))
-                    });
-                }
-            },
-        ];
-    } else if (node.type === 'routine') {
-        const routineType = node.dataRef?.routineType || 'FUNCTION';
-        const typeLabel = t(routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function');
-        return [
-            {
-                key: 'view-routine-def',
-                label: t('sidebar.menu.view_object_definition'),
-                icon: <CodeOutlined />,
-                onClick: () => openRoutineDefinition(node)
-            },
-            {
-                key: 'edit-routine',
-                label: t('sidebar.menu.edit_definition'),
-                icon: <EditOutlined />,
-                onClick: () => openEditRoutine(node)
-            },
-            { type: 'divider' },
-            {
-                key: 'danger-zone',
-                label: t('sidebar.menu.danger_operations'),
-                icon: <WarningOutlined />,
-                children: [
-                    {
-                        key: 'drop-routine',
-                        label: t('sidebar.menu.delete_routine', { type: typeLabel }),
-                        icon: <DeleteOutlined />,
-                        danger: true,
-                        onClick: () => handleDropRoutine(node)
-                    }
-                ]
-            },
-        ];
-    } else if (node.type === 'db-event') {
-        return [
-            {
-                key: 'view-event-def',
-                label: t('sidebar.menu.view_object_definition'),
-                icon: <CodeOutlined />,
-                onClick: () => openEventDefinition(node)
-            },
-            {
-                key: 'edit-event-query',
-                label: t('sidebar.menu.edit_definition'),
-                icon: <EditOutlined />,
-                onClick: () => {
-                    const { eventName, dbName, id } = node.dataRef;
-                    addTab({
-                        id: `query-edit-event-${Date.now()}`,
-                        title: t('sidebar.tab.edit_event', { name: eventName }),
-                        type: 'query',
-                        connectionId: id,
-                        dbName,
-                        query: `SHOW CREATE EVENT \`${String(eventName || '').replace(/`/g, '``')}\`;`
-                    });
-                }
-            },
-        ];
-    } else if (node.type === 'table') {
-        const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
-        const messagePublishTarget = resolveMessagePublishTarget(node);
-        return [
-            {
-                key: 'new-query',
-                label: t('sidebar.menu.new_query'),
-                icon: <ConsoleSqlOutlined />,
-                onClick: () => {
-                   const tableName = String(node.dataRef?.tableName || '').trim();
-                   const queryTemplate = buildTableSelectQuery(getMetadataDialect(node.dataRef as SavedConnection), tableName);
-                   addTab({
-                       id: `query-${Date.now()}`,
-                       title: t('query.new'),
-                       type: 'query',
-                       connectionId: node.dataRef.id,
-                       dbName: node.dataRef.dbName,
-                       query: queryTemplate
-                   });
-                }
-            },
-            ...(messagePublishTarget ? [{
-                key: 'publish-message',
-                label: t('message_publish_modal.title'),
-                icon: <SendOutlined />,
-                onClick: () => openMessagePublishModal(node),
-            }] : []),
-            { type: 'divider' },
-            {
-                key: 'design-table',
-                label: isStructureOnlyDbType(String(node.dataRef?.id || '')) ? t('sidebar.menu.table_structure') : t('sidebar.menu.design_table'),
-                icon: <EditOutlined />,
-                onClick: () => openDesign(node, 'columns', false)
-            },
-            ...(isStarRocks ? [{
-                key: 'new-rollup',
-                label: t('sidebar.v2_table_menu.new_rollup', { keyword: 'Rollup' }),
-                icon: <ThunderboltOutlined />,
-                onClick: () => openCreateStarRocksRollup(node)
-            }] : []),
-            {
-                key: 'copy-table-name',
-                label: t('sidebar.menu.copy_table_name'),
-                icon: <CopyOutlined />,
-                onClick: () => handleCopyTableName(node)
-            },
-            {
-                key: 'copy-structure',
-                label: t('sidebar.menu.copy_table_structure'),
-                icon: <CopyOutlined />,
-                onClick: () => handleCopyStructure(node)
-            },
-            {
-                key: 'backup-table',
-                label: t('sidebar.menu.backup_table_sql'),
-                icon: <SaveOutlined />,
-                onClick: () => handleExport(node, 'sql')
-            },
-            {
-                key: 'rename-table',
-                label: t('sidebar.menu.rename_table'),
-                icon: <EditOutlined />,
-                onClick: () => {
-                    setRenameTableTarget(node);
-                    renameTableForm.setFieldsValue({ newName: extractObjectName(node.dataRef?.tableName || node.title) });
-                    setIsRenameTableModalOpen(true);
-                }
-            },
-            {
-                key: 'danger-zone',
-                label: t('sidebar.menu.danger_operations'),
-                icon: <WarningOutlined />,
-                children: [
-                    ...(supportsTableTruncateAction(node.dataRef?.config?.type, node.dataRef?.config?.driver) ? [{
-                        key: 'truncate-table',
-                        label: t('sidebar.menu.truncate_table'),
-                        danger: true,
-                        onClick: () => handleTableDataDangerAction(node, 'truncate')
-                    }] : []),
-                    {
-                        key: 'clear-table',
-                        label: t('sidebar.menu.clear_table'),
-                        danger: true,
-                        onClick: () => handleTableDataDangerAction(node, 'clear')
-                    },
-                    {
-                        key: 'drop-table',
-                        label: t('sidebar.menu.delete_table'),
-                        icon: <DeleteOutlined />,
-                        danger: true,
-                        onClick: () => handleDeleteTable(node)
-                    }
-                ]
-            },
-            {
-                type: 'divider'
-            },
-            {
-                key: 'export',
-                label: t('sidebar.menu.export_table_data'),
-                icon: <ExportOutlined />,
-                children: [
-                    { key: 'export-csv', label: t('sidebar.menu.export_csv'), onClick: () => handleExport(node, 'csv') },
-                    { key: 'export-xlsx', label: t('sidebar.menu.export_xlsx'), onClick: () => handleExport(node, 'xlsx') },
-                    { key: 'export-json', label: t('sidebar.menu.export_json'), onClick: () => handleExport(node, 'json') },
-                    { key: 'export-md', label: t('sidebar.menu.export_markdown'), onClick: () => handleExport(node, 'md') },
-                    { key: 'export-html', label: t('sidebar.menu.export_html'), onClick: () => handleExport(node, 'html') },
-                ]
-            }
-        ];
-    }
-
-    // 已存查询节点的右键菜单
-    if (node.type === 'saved-query') {
-        const q = node.dataRef as SavedQuery;
-        const rebindMenuItems: MenuProps['items'] = isSavedQueryUnmatched(q)
-            ? [
-                {
-                    key: 'rebind-query',
-                    label: t('sidebar.menu.bind_to_connection'),
-                    icon: <LinkOutlined />,
-                    disabled: connections.length === 0,
-                    children: connections.length > 0
-                        ? connections.map((conn) => ({
-                            key: `rebind-query-${conn.id}`,
-                            label: conn.name || conn.id,
-                            onClick: () => void handleRebindSavedQuery(q, conn),
-                        }))
-                        : undefined,
-                },
-            ]
-            : [];
-        return [
-            {
-                key: 'open-query',
-                label: t('sidebar.menu.open_query'),
-                icon: <ConsoleSqlOutlined />,
-                onClick: () => {
-                    addTab({
-                        id: q.id,
-                        title: resolveSavedQueryDisplayName(q.name),
-                        type: 'query',
-                        connectionId: q.connectionId,
-                        dbName: q.dbName,
-                        query: q.sql,
-                        savedQueryId: q.id,
-                    });
-                }
-            },
-            ...rebindMenuItems,
-            { type: 'divider' },
-            {
-                key: 'rename-query',
-                label: t('sidebar.menu.rename_query'),
-                icon: <EditOutlined />,
-                onClick: () => openRenameSavedQueryModal(q),
-            },
-            {
-                key: 'delete-query',
-                label: t('sidebar.menu.delete_query'),
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => {
-                    Modal.confirm({
-                        title: t('sidebar.modal.confirm_delete.title'),
-                        content: t('sidebar.modal.confirm_delete_saved_query.content', { name: resolveSavedQueryDisplayName(q.name) }),
-                        okButtonProps: { danger: true },
-                        onOk: async () => {
-                            try {
-                                await deleteQuery(q.id);
-                            } catch (e) {
-                                message.error(t('sidebar.message.saved_query_delete_failed', { error: e instanceof Error ? e.message : String(e) }));
-                                throw e;
-                            }
-                            // 从树中移除节点
-                            const removeNode = (list: TreeNode[]): TreeNode[] =>
-                                list
-                                    .filter(n => !(n.type === 'saved-query' && n.dataRef?.id === q.id))
-                                    .map(n => n.children ? { ...n, children: removeNode(n.children) } : n);
-                            const nextTreeData = removeNode(treeDataRef.current);
-                            treeDataRef.current = nextTreeData;
-                            setTreeData(nextTreeData);
-                            message.success(t('sidebar.message.saved_query_deleted'));
-                        }
-                    });
-                }
-            }
-        ];
-    }
-
-    if (node.type === 'external-sql-root') {
-        return [
-            {
-                key: 'add-external-sql-directory',
-                label: t('sidebar.menu.add_sql_directory'),
-                icon: <PlusOutlined />,
-                onClick: () => {
-                    void handleAddExternalSQLDirectory(node);
-                }
-            }
-        ];
-    }
-
-    if (node.type === 'external-sql-directory') {
-        return [
-            {
-                key: 'new-external-sql-file',
-                label: t('sidebar.menu.new_sql_file'),
-                icon: <FileAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLFileModal(node);
-                }
-            },
-            {
-                key: 'new-external-sql-directory',
-                label: t('sidebar.menu.new_sql_directory'),
-                icon: <FolderAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLDirectoryModal(node);
-                }
-            },
-            {
-                key: 'rename-external-sql-directory',
-                label: t('sidebar.menu.rename_sql_directory'),
-                icon: <EditOutlined />,
-                onClick: () => {
-                    openRenameExternalSQLDirectoryModal(node);
-                }
-            },
-            { type: 'divider' },
-            {
-                key: 'refresh-external-sql-directory',
-                label: t('sidebar.menu.refresh_directory'),
-                icon: <ReloadOutlined />,
-                onClick: () => {
-                    void handleRefreshExternalSQLDirectory(node);
-                }
-            },
-            { type: 'divider' },
-            {
-                key: 'remove-external-sql-directory',
-                label: t('sidebar.menu.remove_directory'),
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => {
-                    void handleRemoveExternalSQLDirectory(node);
-                }
-            },
-            {
-                key: 'delete-external-sql-directory',
-                label: t('sidebar.menu.delete_local_directory'),
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => {
-                    handleDeleteExternalSQLDirectory(node);
-                }
-            }
-        ];
-    }
-
-    if (node.type === 'external-sql-folder') {
-        return [
-            {
-                key: 'new-external-sql-file',
-                label: t('sidebar.menu.new_sql_file'),
-                icon: <FileAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLFileModal(node);
-                }
-            },
-            {
-                key: 'new-external-sql-directory',
-                label: t('sidebar.menu.new_sql_directory'),
-                icon: <FolderAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLDirectoryModal(node);
-                }
-            },
-            {
-                key: 'rename-external-sql-directory',
-                label: t('sidebar.menu.rename_sql_directory'),
-                icon: <EditOutlined />,
-                onClick: () => {
-                    openRenameExternalSQLDirectoryModal(node);
-                }
-            },
-            {
-                key: 'refresh-external-sql-directory',
-                label: t('sidebar.menu.refresh_directory'),
-                icon: <ReloadOutlined />,
-                onClick: () => {
-                    void handleRefreshExternalSQLDirectory(node);
-                }
-            },
-            { type: 'divider' },
-            {
-                key: 'delete-external-sql-directory',
-                label: t('sidebar.menu.delete_sql_directory'),
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => {
-                    handleDeleteExternalSQLDirectory(node);
-                }
-            }
-        ];
-    }
-
-    if (node.type === 'external-sql-file') {
-        return [
-            {
-                key: 'open-external-sql-file',
-                label: t('sidebar.menu.open_sql_file'),
-                icon: <ConsoleSqlOutlined />,
-                onClick: () => {
-                    void openExternalSQLFile(node);
-                }
-            },
-            {
-                key: 'rename-external-sql-file',
-                label: t('sidebar.menu.rename_sql_file'),
-                icon: <EditOutlined />,
-                onClick: () => {
-                    openRenameExternalSQLFileModal(node);
-                }
-            },
-            {
-                key: 'new-external-sql-file-sibling',
-                label: t('sidebar.menu.new_sql_file_in_directory'),
-                icon: <FileAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLFileModal(node);
-                }
-            },
-            {
-                key: 'new-external-sql-directory-sibling',
-                label: t('sidebar.menu.new_sql_directory_in_directory'),
-                icon: <FolderAddOutlined />,
-                onClick: () => {
-                    openCreateExternalSQLDirectoryModal(node);
-                }
-            },
-            { type: 'divider' },
-            {
-                key: 'delete-external-sql-file',
-                label: t('sidebar.menu.delete_sql_file'),
-                icon: <DeleteOutlined />,
-                danger: true,
-                onClick: () => {
-                    handleDeleteExternalSQLFile(node);
-                }
-            }
-        ];
-    }
-
-    return [];
-  };
-
-  const titleRender = (node: any) => {
-    let status: 'success' | 'error' | 'default' = 'default';
-    if (node.type === 'connection' || node.type === 'database') {
-        if (connectionStates[node.key] === 'success') status = 'success';
-        else if (connectionStates[node.key] === 'error') status = 'error';
-    }
-
-    const statusBadge = node.type === 'connection' || node.type === 'database' ? (
-        isV2Ui
-            ? <span className={`gn-v2-tree-status is-${status}`} aria-hidden="true" />
-            : <Badge status={status} style={{ marginLeft: 4, marginRight: 8 }} />
-    ) : null;
-
-    const displayTitle = String(node.title ?? '');
-    const dragText = resolveSidebarObjectDragText(node);
-    let hoverTitle = displayTitle;
-    if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view' || node.type === 'db-event') {
-        const rawTableName = String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || '').trim();
-        const conn = node?.dataRef as SavedConnection | undefined;
-        if (rawTableName && shouldHideSchemaPrefix(conn)) {
-            if (splitQualifiedName(rawTableName).schemaName) {
-                hoverTitle = rawTableName;
-            }
-        }
-    } else if (node.type === 'object-group') {
-        const objectGroupTitle = resolveV2ObjectGroupTitle(node);
-        if (objectGroupTitle) {
-            hoverTitle = objectGroupTitle;
-        }
-    } else if (node.type === 'external-sql-directory' || node.type === 'external-sql-folder' || node.type === 'external-sql-file') {
-        hoverTitle = String(node?.dataRef?.path || displayTitle);
-    }
-
-    if (node.type === 'jvm-mode') {
-        return (
-            <span
-                title={hoverTitle}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}
-            >
-                <JVMModeBadge
-                    mode={String(node?.dataRef?.providerMode || displayTitle)}
-                    label={displayTitle}
-                    reason={String(node?.dataRef?.reason || '').trim() || undefined}
-                />
-            </span>
-        );
-    }
-
-    if (node.type === 'external-sql-root') {
-        const externalSqlRootTitle = t('sidebar.external_sql.root');
-        const addSqlDirectoryLabel = t('sidebar.menu.add_sql_directory');
-        return (
-            <span
-                title={externalSqlRootTitle}
-                className="gn-v2-tree-external-root"
-            >
-                <span
-                    className="gn-v2-tree-title"
-                    data-node-type={node.type}
-                    data-sidebar-node-key={String(node.key || '')}
-                    data-sidebar-node-type={String(node.type || '')}
-                >
-                    <span className="gn-v2-tree-label">
-                        {statusBadge}
-                        {externalSqlRootTitle}
-                    </span>
-                </span>
-                <Button
-                    size="small"
-                    type="text"
-                    icon={<PlusOutlined />}
-                    title={addSqlDirectoryLabel}
-                    aria-label={addSqlDirectoryLabel}
-                    onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        void handleAddExternalSQLDirectory(node);
-                    }}
-                    className="gn-v2-tree-external-root-action"
-                />
-            </span>
-        );
-    }
-
-    if (isV2Ui) {
-        return renderV2TreeTitle(node, hoverTitle, statusBadge);
-    }
-
-    if (dragText) {
-        return (
-            <span
-                title={hoverTitle}
-                draggable
-                onDragStart={(event) => {
-                    snapshotTreeSelectionBeforeDrag();
-                    treeDragSelectSuppressUntilRef.current = Date.now() + 600;
-                    setIsTreeDragging(true);
-                    event.stopPropagation();
-                    event.dataTransfer.effectAllowed = 'copy';
-                    event.dataTransfer.setData('text/plain', dragText);
-                    event.dataTransfer.setData(
-                        SIDEBAR_SQL_EDITOR_DRAG_MIME,
-                        encodeSidebarSqlEditorDragPayload({
-                            text: dragText,
-                            nodeType: node.type,
-                            connectionId: String(node?.dataRef?.id || ''),
-                            dbName: String(node?.dataRef?.dbName || ''),
-                        }),
-                    );
-                }}
-                onDragEnd={() => {
-                    restoreTreeSelectionAfterDrag();
-                    setIsTreeDragging(false);
-                }}
-            >
-                {statusBadge}{displayTitle}
-            </span>
-        );
-    }
-
-    return <span title={hoverTitle}>{statusBadge}{displayTitle}</span>;
-  };
-
+  const titleRender = useSidebarTitleRender({
+      connectionStates,
+      isV2Ui,
+      renderV2TreeTitle,
+      handleAddExternalSQLDirectory,
+      snapshotTreeSelectionBeforeDrag,
+      restoreTreeSelectionAfterDrag,
+      treeDragSelectSuppressUntilRef,
+      setIsTreeDragging,
+  });
   const handleDrop = (info: any) => {
       setIsTreeDragging(false);
       const dropPosition = normalizeSidebarTreeRelativeDropPosition(
@@ -9010,165 +2392,6 @@ const Sidebar: React.FC<{
       }
   };
 
-  const renderV2RailConnectionButton = (conn: SavedConnection) => {
-      const accent = resolveConnectionAccentColor(conn);
-      const status = buildRailConnectionStatus(conn.id);
-      const badgeLabel = getRailConnectionBadgeLabel(conn);
-      const hostLabel = getRailConnectionHostLabel(conn);
-      const title = `${conn.name} · ${resolveConnectionHostSummary(conn.config) || conn.config.type}`;
-      const rootToken = buildSidebarRootConnectionToken(conn.id);
-
-      return (
-          <Tooltip key={conn.id} title={title} placement="right">
-              <button
-                  type="button"
-                  className={`gn-v2-rail-item${conn.id === activeConnectionId ? ' is-active' : ''}`}
-                  draggable
-                  onDragStart={(event) => {
-                      snapshotTreeSelectionBeforeDrag();
-                      treeDragSelectSuppressUntilRef.current = Date.now() + 600;
-                      setDraggingV2RailRootToken(rootToken);
-                      setIsTreeDragging(true);
-                      event.dataTransfer.effectAllowed = 'move';
-                      event.dataTransfer.setData('text/plain', rootToken);
-                  }}
-                  onDragEnd={() => {
-                      restoreTreeSelectionAfterDrag();
-                      setDraggingV2RailRootToken('');
-                      setIsTreeDragging(false);
-                  }}
-                  onDragOver={(event) => {
-                      if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
-                          return;
-                      }
-                      event.preventDefault();
-                      event.stopPropagation();
-                      event.dataTransfer.dropEffect = 'move';
-                  }}
-                  onDrop={(event) => {
-                      if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
-                          return;
-                      }
-                      event.preventDefault();
-                      event.stopPropagation();
-                      const rect = event.currentTarget.getBoundingClientRect();
-                      const insertBefore = event.clientY < rect.top + rect.height / 2;
-                      handleV2RailRootDrop(draggingV2RailRootToken, rootToken, insertBefore);
-                      restoreTreeSelectionAfterDrag();
-                      setDraggingV2RailRootToken('');
-                      setIsTreeDragging(false);
-                  }}
-                  onClick={() => selectConnectionFromRail(conn)}
-                  onContextMenu={(event) => openV2ConnectionContextMenu(event, conn)}
-                  aria-label={t('sidebar.aria.switch_connection', { name: conn.name || conn.id })}
-                  title={title}
-                  data-v2-rail-host-context-menu-trigger="true"
-              >
-                  <span className="gn-v2-rail-active-bar" />
-                  <span className="gn-v2-rail-badge-wrap">
-                      <span className="gn-v2-rail-badge" style={{ background: accent }}>
-                          {badgeLabel}
-                      </span>
-                      <span className={`gn-v2-rail-status is-${status}`} />
-                  </span>
-                  <span className="gn-v2-rail-fallback">{hostLabel}</span>
-              </button>
-          </Tooltip>
-      );
-  };
-
-  const renderV2RailConnectionGroup = (group: V2RailConnectionGroup) => {
-      const collapsed = collapsedV2RailGroupIdSet.has(group.id);
-      const groupTitle = group.name || t('connection.sidebar.group.untitled');
-      const rootToken = group.rootToken;
-
-      return (
-          <div
-              key={group.id}
-              className={`gn-v2-rail-group${group.isUngrouped ? ' is-ungrouped' : ''}${collapsed ? ' is-collapsed' : ''}`}
-              data-v2-rail-connection-group="true"
-              draggable
-              onDragStart={(event) => {
-                  snapshotTreeSelectionBeforeDrag();
-                  treeDragSelectSuppressUntilRef.current = Date.now() + 600;
-                  setDraggingV2RailRootToken(rootToken);
-                  setIsTreeDragging(true);
-                  event.dataTransfer.effectAllowed = 'move';
-                  event.dataTransfer.setData('text/plain', rootToken);
-              }}
-              onDragEnd={() => {
-                  restoreTreeSelectionAfterDrag();
-                  setDraggingV2RailRootToken('');
-                  setIsTreeDragging(false);
-              }}
-              onDragOver={(event) => {
-                  if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
-                      return;
-                  }
-                  event.preventDefault();
-                  event.stopPropagation();
-                  event.dataTransfer.dropEffect = 'move';
-              }}
-              onDrop={(event) => {
-                  if (!draggingV2RailRootToken || draggingV2RailRootToken === rootToken) {
-                      return;
-                  }
-                  event.preventDefault();
-                  event.stopPropagation();
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  const insertBefore = event.clientY < rect.top + rect.height / 2;
-                  handleV2RailRootDrop(draggingV2RailRootToken, rootToken, insertBefore);
-                  restoreTreeSelectionAfterDrag();
-                  setDraggingV2RailRootToken('');
-                  setIsTreeDragging(false);
-              }}
-          >
-              {hasV2RailConnectionGroups && (
-                  <Tooltip title={t('connection.sidebar.group.meta', { count: group.connections.length.toLocaleString() })} placement="right">
-                      <button
-                          type="button"
-                          className={`gn-v2-rail-group-header${group.isUngrouped ? ' is-ungrouped' : ''}`}
-                          onClick={() => toggleV2RailConnectionGroup(group.id)}
-                          onContextMenu={(event) => {
-                              if (group.isUngrouped) return;
-                              event.preventDefault();
-                              event.stopPropagation();
-                              const position = resolveSidebarContextMenuPosition(event.clientX, event.clientY);
-                              setContextMenu({
-                                  x: position.x,
-                                  y: position.y,
-                                  sourceX: event.clientX,
-                                  sourceY: event.clientY,
-                                  items: [],
-                                  kind: 'v2-connection-group',
-                                  node: group,
-                                  rootClassName: 'gn-v2-table-context-menu-popup',
-                                  overlayStyle: { width: 264, maxWidth: 'calc(100vw - 24px)' },
-                                  maxHeight: position.maxHeight,
-                              });
-                          }}
-                          aria-label={t(collapsed ? 'connection.sidebar.group.expandAria' : 'connection.sidebar.group.collapseAria', { name: groupTitle })}
-                          aria-expanded={!collapsed}
-                          title={t('connection.sidebar.group.meta', { count: group.connections.length.toLocaleString() })}
-                          data-v2-rail-connection-group-header="true"
-                      >
-                          <span className="gn-v2-rail-group-chevron">
-                              <DownOutlined />
-                          </span>
-                          <span className="gn-v2-rail-group-title">{groupTitle}</span>
-                          <span className="gn-v2-rail-group-count">{group.connections.length}</span>
-                      </button>
-                  </Tooltip>
-              )}
-              {!collapsed && (
-                  <div className="gn-v2-rail-group-items">
-                      {group.connections.map(renderV2RailConnectionButton)}
-                  </div>
-              )}
-          </div>
-      );
-  };
-
   const v2RailObjectActionsLabel = t('sidebar.rail.object_actions');
   const v2RailSystemActionsLabel = t('sidebar.rail.system_actions');
   const v2NewGroupLabel = t('sidebar.action.new_group');
@@ -9186,103 +2409,67 @@ const Sidebar: React.FC<{
   const v2CommandSearchLabel = t('sidebar.command_search.label');
   const v2CommandSearchPlaceholder = t('sidebar.command_search.placeholder');
 
-  const renderV2ConnectionRail = () => (
-      <div className="gn-v2-connection-rail" aria-label={v2RailSystemActionsLabel}>
-          <div className="gn-v2-rail-primary-actions" aria-label={v2RailObjectActionsLabel}>
-              <Tooltip title={v2NewGroupLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool gn-v2-rail-action"
-                      onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
-                      aria-label={v2NewGroupLabel}
-                      data-sidebar-create-group-action="true"
-                  >
-                      <FolderOpenOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={v2BatchTablesLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool gn-v2-rail-action"
-                      onClick={() => openBatchOperationModal()}
-                      aria-label={v2BatchTablesLabel}
-                      data-sidebar-batch-table-action="true"
-                  >
-                      <TableOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={v2BatchDatabasesLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool gn-v2-rail-action"
-                      onClick={() => openBatchDatabaseModal()}
-                      aria-label={v2BatchDatabasesLabel}
-                      data-sidebar-batch-database-action="true"
-                  >
-                      <DatabaseOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={v2OpenExternalSqlFileLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool gn-v2-rail-action"
-                      onClick={handleOpenSQLFileFromToolbar}
-                      aria-label={v2OpenExternalSqlFileLabel}
-                      data-sidebar-open-external-sql-file-action="true"
-                  >
-                      <FileAddOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={canLocateActiveTab ? v2LocateCurrentTableLabel : v2LocateCurrentTableUnavailableLabel} placement="right">
-                  <span className="gn-v2-rail-action-wrap">
-                      <button
-                           type="button"
-                           className="gn-v2-rail-tool gn-v2-rail-action"
-                           onClick={handleLocateActiveTabInSidebar}
-                           aria-label={v2LocateCurrentTableLabel}
-                           data-sidebar-locate-current-tab-action="true"
-                           disabled={!canLocateActiveTab}
-                       >
-                          <AimOutlined />
-                      </button>
-                  </span>
-              </Tooltip>
-          </div>
-          <div className="gn-v2-rail-secondary-actions" aria-label={v2RailSystemActionsLabel}>
-              <Tooltip title={v2AiAssistantLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool"
-                      onClick={onToggleAI}
-                      aria-label={v2AiAssistantLabel}
-                      data-gonavi-ai-entry-action="true"
-                  >
-                      <RobotOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={v2ToolsLabel} placement="right">
-                  <button
-                      type="button"
-                      className="gn-v2-rail-tool"
-                      onClick={onOpenTools}
-                      aria-label={v2ToolsLabel}
-                      data-gonavi-open-tools-action="true"
-                  >
-                      <ToolOutlined />
-                  </button>
-              </Tooltip>
-              <Tooltip title={v2SettingsLabel} placement="right">
-                  <button type="button" className="gn-v2-rail-tool" onClick={onOpenSettings} aria-label={v2SettingsLabel}>
-                      <SettingOutlined />
-                  </button>
-              </Tooltip>
-          </div>
-      </div>
-  );
+  const v2CommandSearchPanelProps: SidebarSearchPanelProps<V2CommandSearchItem> = {
+    isOpen: isV2CommandSearchOpen,
+    searchValue: v2CommandSearchValue,
+    activeIndex: v2CommandActiveIndex,
+    label: v2CommandSearchLabel,
+    placeholder: v2CommandSearchPlaceholder,
+    persistedFilter: v2PersistedSidebarFilter,
+    persistentFilterEnabled: v2CommandSearchPersistentFilterEnabled,
+    aiMode: v2CommandSearchAiMode,
+    objectMode: v2CommandSearchObjectMode,
+    flatItems: commandSearchFlatItems,
+    sections: {
+      goTo: filteredCommandSearchTreeItems,
+      ai: commandSearchAiItem,
+      actions: filteredCommandSearchActionItems,
+      recent: filteredCommandSearchRecentItems,
+    },
+    inputRef: commandSearchInputRef,
+    handlers: {
+      onSearchValueChange: handleV2CommandSearchValueChange,
+      onKeyDown: handleV2CommandSearchKeyDown,
+      onClose: closeV2CommandSearch,
+      onItemSelect: (item: V2CommandSearchItem) => runCommandSearchItem(item),
+      onItemHover: (key: string) => setV2CommandActiveIndex(commandSearchFlatItems.findIndex((entry) => entry.key === key)),
+      onTogglePersistentFilter: toggleV2CommandSearchPersistentFilter,
+      onResetFilter: resetV2SidebarFilter,
+    },
+  };
+
+  // V2 Connection Rail 子组件 props（从原 renderV2ConnectionRail 抽出，保留所有原行为）
+  const v2ConnectionRailProps = {
+    labels: {
+      railSystemActions: v2RailSystemActionsLabel,
+      railObjectActions: v2RailObjectActionsLabel,
+      newGroup: v2NewGroupLabel,
+      batchTables: v2BatchTablesLabel,
+      batchDatabases: v2BatchDatabasesLabel,
+      openExternalSqlFile: v2OpenExternalSqlFileLabel,
+      locateCurrentTable: v2LocateCurrentTableLabel,
+      locateCurrentTableUnavailable: v2LocateCurrentTableUnavailableLabel,
+      aiAssistant: v2AiAssistantLabel,
+      tools: v2ToolsLabel,
+      settings: v2SettingsLabel,
+    },
+    handlers: {
+      openCreateTagModal: () => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); },
+      openBatchTableExport: () => openBatchTableExportWorkbench(),
+      openBatchDatabaseExport: () => openBatchDatabaseExportWorkbench(),
+      openExternalSqlFile: handleOpenSQLFileFromToolbar,
+      locateActiveTab: handleLocateActiveTabInSidebar,
+      toggleAI: onToggleAI ?? (() => {}),
+      openTools: onOpenTools ?? (() => {}),
+      openSettings: onOpenSettings ?? (() => {}),
+    },
+    canLocateActiveTab,
+  };
 
   return (
     <div className={isV2Ui ? 'gn-v2-sidebar-redesign' : undefined} style={{ display: 'flex', height: '100%', minHeight: 0 }}>
-        {isV2Ui && renderV2ConnectionRail()}
+        {exportProgressModal}
+        {isV2Ui && <SidebarConnectionRail {...v2ConnectionRailProps} />}
         <div className={isV2Ui ? 'gn-v2-object-explorer' : undefined} style={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0, flex: 1 }}>
         {isV2Ui && (
             <div className="gn-v2-active-connection-header" data-object-count={activeConnectionObjectCount}>
@@ -9489,7 +2676,7 @@ const Sidebar: React.FC<{
                         icon={<TableOutlined />}
                         aria-label={t('sidebar.action.batch_tables')}
                         data-sidebar-batch-table-action="true"
-                        onClick={() => openBatchOperationModal()}
+                        onClick={() => openBatchTableExportWorkbench()}
                         style={{ color: legacyToolbarButtonColor }}
                     />
                 </Tooltip>
@@ -9502,7 +2689,7 @@ const Sidebar: React.FC<{
                         icon={<DatabaseOutlined />}
                         aria-label={t('sidebar.action.batch_databases')}
                         data-sidebar-batch-database-action="true"
-                        onClick={() => openBatchDatabaseModal()}
+                        onClick={() => openBatchDatabaseExportWorkbench()}
                         style={{ color: legacyToolbarButtonColor }}
                     />
                 </Tooltip>
@@ -9596,10 +2783,14 @@ const Sidebar: React.FC<{
                     <span>{t('app.sidebar.sql_execution_log')}</span>
                     <small>{sqlLogCount.toLocaleString()}</small>
                 </button>
+                <SlowQueryRailButton
+                    className="gn-v2-sidebar-slow-query-button"
+                    tooltipPlacement="top"
+                />
             </div>
         )}
         </div>
-        {renderV2CommandSearchOverlay()}
+        <SidebarSearchPanel {...v2CommandSearchPanelProps} />
 
         {contextMenu?.kind && typeof document !== 'undefined' && createPortal(
             <div
@@ -9636,565 +2827,112 @@ const Sidebar: React.FC<{
             </Dropdown>
         )}
 
-        <Modal
-            title={renderSidebarModalTitle(
-                <FolderOpenOutlined />,
-                renameViewTarget?.type === 'tag' ? t('sidebar.modal.tag.edit_title') : t('sidebar.modal.tag.create_title'),
-                renameViewTarget?.type === 'tag' ? t('sidebar.modal.tag.edit_description') : t('sidebar.modal.tag.create_description')
-            )}
-            open={isCreateTagModalOpen}
-            centered
-            styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 } }}
-            onOk={() => {
-                createTagForm.validateFields().then(values => {
-                    if (renameViewTarget?.type === 'tag') {
-                        // Rename
-                        updateConnectionTag({
-                            ...renameViewTarget.dataRef,
-                            name: values.name,
-                            connectionIds: values.connectionIds || []
-                        });
-                        // update cross-connections
-                        const allOtherTagsIds = connectionTags.filter(t => t.id !== renameViewTarget.dataRef.id).flatMap(t => t.connectionIds);
-                        (values.connectionIds || []).forEach((cid: string) => {
-                           if (allOtherTagsIds.includes(cid)) {
-                               moveConnectionToTag(cid, renameViewTarget.dataRef.id);
-                           }
-                        });
-                    } else {
-                        // Create
-                        const tagId = Date.now().toString();
-                        addConnectionTag({
-                            id: tagId,
-                            name: values.name,
-                            connectionIds: values.connectionIds || []
-                        });
-                        (values.connectionIds || []).forEach((cid: string) => {
-                            moveConnectionToTag(cid, tagId);
-                        });
-                    }
-                    setIsCreateTagModalOpen(false);
-                });
-            }}
-            onCancel={() => setIsCreateTagModalOpen(false)}
-        >
-            <Form form={createTagForm} layout="vertical">
-                <div style={modalSectionStyle}>
-                    <Form.Item name="name" label={t('sidebar.field.tag_name')} rules={[{ required: true, message: t('sidebar.validation.tag_name_required') }]}>
-                        <Input placeholder={t('sidebar.placeholder.tag_name')} />
-                    </Form.Item>
-                    <Form.Item name="connectionIds" label={t('sidebar.field.select_connections')} style={{ marginBottom: 0 }}>
-                        <Checkbox.Group style={{ width: '100%' }}>
-                            <div style={modalScrollSectionStyle}>
-                                <Space direction="vertical" style={{ width: '100%' }}>
-                                    {connections.map(conn => (
-                                        <Checkbox key={conn.id} value={conn.id}>
-                                            {conn.name} {conn.config.host ? `(${conn.config.host})` : ''}
-                                        </Checkbox>
-                                    ))}
-                                </Space>
-                            </div>
-                        </Checkbox.Group>
-                    </Form.Item>
-                </div>
-            </Form>
-        </Modal>
+        <SidebarEntityModals
+            connections={connections}
+            connectionTags={connectionTags}
+            modalPanelStyle={modalPanelStyle}
+            modalSectionStyle={modalSectionStyle}
+            modalScrollSectionStyle={modalScrollSectionStyle}
+            renderSidebarModalTitle={renderSidebarModalTitle}
+            isCreateTagModalOpen={isCreateTagModalOpen}
+            setIsCreateTagModalOpen={setIsCreateTagModalOpen}
+            createTagForm={createTagForm}
+            renameViewTarget={renameViewTarget}
+            updateConnectionTag={updateConnectionTag}
+            addConnectionTag={addConnectionTag}
+            moveConnectionToTag={moveConnectionToTag}
+            isCreateDbModalOpen={isCreateDbModalOpen}
+            setIsCreateDbModalOpen={setIsCreateDbModalOpen}
+            createDbForm={createDbForm}
+            handleCreateDatabase={handleCreateDatabase}
+            isCreateSchemaModalOpen={isCreateSchemaModalOpen}
+            setIsCreateSchemaModalOpen={setIsCreateSchemaModalOpen}
+            createSchemaForm={createSchemaForm}
+            createSchemaTarget={createSchemaTarget}
+            setCreateSchemaTarget={setCreateSchemaTarget}
+            handleCreateSchema={handleCreateSchema}
+            isRenameSchemaModalOpen={isRenameSchemaModalOpen}
+            setIsRenameSchemaModalOpen={setIsRenameSchemaModalOpen}
+            renameSchemaForm={renameSchemaForm}
+            renameSchemaTarget={renameSchemaTarget}
+            setRenameSchemaTarget={setRenameSchemaTarget}
+            handleRenameSchema={handleRenameSchema}
+            isRenameDbModalOpen={isRenameDbModalOpen}
+            setIsRenameDbModalOpen={setIsRenameDbModalOpen}
+            renameDbForm={renameDbForm}
+            renameDbTarget={renameDbTarget}
+            setRenameDbTarget={setRenameDbTarget}
+            handleRenameDatabase={handleRenameDatabase}
+            isRenameTableModalOpen={isRenameTableModalOpen}
+            setIsRenameTableModalOpen={setIsRenameTableModalOpen}
+            renameTableForm={renameTableForm}
+            renameTableTarget={renameTableTarget}
+            setRenameTableTarget={setRenameTableTarget}
+            handleRenameTable={handleRenameTable}
+            isRenameViewModalOpen={isRenameViewModalOpen}
+            setIsRenameViewModalOpen={setIsRenameViewModalOpen}
+            renameViewForm={renameViewForm}
+            setRenameViewTarget={setRenameViewTarget}
+            handleRenameView={handleRenameView}
+            isRenameSavedQueryModalOpen={isRenameSavedQueryModalOpen}
+            setIsRenameSavedQueryModalOpen={setIsRenameSavedQueryModalOpen}
+            renameSavedQueryForm={renameSavedQueryForm}
+            renameSavedQueryTarget={renameSavedQueryTarget}
+            setRenameSavedQueryTarget={setRenameSavedQueryTarget}
+            handleRenameSavedQuery={handleRenameSavedQuery}
+        />
 
-        <Modal
-            title={t('sidebar.modal.create_database.title')}
-            open={isCreateDbModalOpen}
-            onOk={handleCreateDatabase}
-            onCancel={() => setIsCreateDbModalOpen(false)}
-        >
-            <Form form={createDbForm} layout="vertical">
-                <Form.Item name="name" label={t('sidebar.field.database_name')} rules={[{ required: true, message: t('sidebar.validation.name_required') }]}>
-                    <Input {...noAutoCapInputProps} />
-                </Form.Item>
-                {/* Charset option could be added here */}
-            </Form>
-        </Modal>
+        <ExternalSQLFileModal {...externalSQLFileModalProps} />
 
-        <Modal
-            title={`${t('sidebar.v2_database_menu.new_schema')}${createSchemaTarget?.dataRef?.dbName ? ` (${createSchemaTarget.dataRef.dbName})` : ''}`}
-            open={isCreateSchemaModalOpen}
-            onOk={handleCreateSchema}
-            onCancel={() => {
-                setIsCreateSchemaModalOpen(false);
-                setCreateSchemaTarget(null);
-                createSchemaForm.resetFields();
-            }}
-        >
-            <Form form={createSchemaForm} layout="vertical">
-                <Form.Item name="name" label={t('sidebar.field.schema_name')} rules={[{ required: true, message: t('sidebar.validation.schema_name_required') }]}>
-                    <Input {...noAutoCapInputProps} />
-                </Form.Item>
-            </Form>
-        </Modal>
+        <SidebarBatchExportModals
+            connections={connections}
+            modalPanelStyle={modalPanelStyle}
+            modalSectionStyle={modalSectionStyle}
+            modalScrollSectionStyle={modalScrollSectionStyle}
+            modalHintTextStyle={modalHintTextStyle}
+            darkMode={darkMode}
+            tableModalTitle={renderSidebarModalTitle(<TableOutlined />, "批量操作表", "按对象批量导出结构、数据或完整备份。")}
+            databaseModalTitle={renderSidebarModalTitle(<DatabaseOutlined />, "批量操作库", "按数据库批量导出结构，或生成结构加数据的备份。")}
+            isBatchModalOpen={isBatchModalOpen}
+            setIsBatchModalOpen={setIsBatchModalOpen}
+            selectedConnection={selectedConnection}
+            selectedDatabase={selectedDatabase}
+            availableDatabases={availableDatabases}
+            batchTables={batchTables}
+            checkedTableKeys={checkedTableKeys}
+            setCheckedTableKeys={setCheckedTableKeys}
+            batchFilterKeyword={batchFilterKeyword}
+            setBatchFilterKeyword={setBatchFilterKeyword}
+            batchFilterType={batchFilterType}
+            setBatchFilterType={setBatchFilterType}
+            batchSelectionScope={batchSelectionScope}
+            setBatchSelectionScope={setBatchSelectionScope}
+            filteredBatchObjects={filteredBatchObjects}
+            groupedBatchObjects={groupedBatchObjects}
+            selectionScopeTargetKeys={selectionScopeTargetKeys}
+            handleConnectionChange={handleConnectionChange}
+            handleDatabaseChange={handleDatabaseChange}
+            handleBatchClear={handleBatchClear}
+            handleBatchExport={handleBatchExport}
+            handleCheckAll={handleCheckAll}
+            handleInvertSelection={handleInvertSelection}
+            isBatchDbModalOpen={isBatchDbModalOpen}
+            setIsBatchDbModalOpen={setIsBatchDbModalOpen}
+            selectedDbConnection={selectedDbConnection}
+            batchDatabases={batchDatabases}
+            checkedDbKeys={checkedDbKeys}
+            setCheckedDbKeys={setCheckedDbKeys}
+            handleDbConnectionChange={handleDbConnectionChange}
+            handleBatchDbExport={handleBatchDbExport}
+            handleCheckAllDb={handleCheckAllDb}
+            handleInvertSelectionDb={handleInvertSelectionDb}
+        />
 
-        <Modal
-            title={renameSchemaTarget?.dataRef?.dbName && renameSchemaTarget?.dataRef?.schemaName
-                ? t('sidebar.modal.rename_schema.title', { name: `${renameSchemaTarget.dataRef.dbName}.${renameSchemaTarget.dataRef.schemaName}` })
-                : t('sidebar.menu.edit_schema')}
-            open={isRenameSchemaModalOpen}
-            onOk={handleRenameSchema}
-            onCancel={() => {
-                setIsRenameSchemaModalOpen(false);
-                setRenameSchemaTarget(null);
-                renameSchemaForm.resetFields();
-            }}
-        >
-            <Form form={renameSchemaForm} layout="vertical">
-                <Form.Item name="newName" label={t('sidebar.field.schema_name')} rules={[{ required: true, message: t('sidebar.validation.schema_name_required') }]}>
-                    <Input {...noAutoCapInputProps} />
-                </Form.Item>
-            </Form>
-        </Modal>
-
-        <Modal
-            title={renameDbTarget?.dataRef?.dbName ? t('sidebar.modal.rename_database.title', { name: renameDbTarget.dataRef.dbName }) : t('sidebar.menu.rename_database')}
-            open={isRenameDbModalOpen}
-            onOk={handleRenameDatabase}
-            onCancel={() => {
-                setIsRenameDbModalOpen(false);
-                setRenameDbTarget(null);
-                renameDbForm.resetFields();
-            }}
-        >
-            <Form form={renameDbForm} layout="vertical">
-                <Form.Item name="newName" label={t('sidebar.field.new_database_name')} rules={[{ required: true, message: t('sidebar.validation.new_database_name_required') }]}>
-                    <Input {...noAutoCapInputProps} />
-                </Form.Item>
-            </Form>
-        </Modal>
-
-        <Modal
-            title={renameTableTarget?.dataRef?.tableName
-                ? t('sidebar.modal.rename_table.title', { name: renameTableTarget.dataRef.tableName })
-                : t('sidebar.menu.rename_table')}
-            open={isRenameTableModalOpen}
-            onOk={handleRenameTable}
-            onCancel={() => {
-                setIsRenameTableModalOpen(false);
-                setRenameTableTarget(null);
-                renameTableForm.resetFields();
-            }}
-        >
-            <Form form={renameTableForm} layout="vertical">
-                <Form.Item name="newName" label={t('sidebar.field.new_table_name')} rules={[{ required: true, message: t('sidebar.validation.new_table_name_required') }]}>
-                    <Input {...noAutoCapInputProps} />
-                </Form.Item>
-            </Form>
-        </Modal>
-
-        <Modal
-            title={renameViewTarget?.dataRef?.viewName
-                ? t('sidebar.modal.rename_view.title', { name: renameViewTarget.dataRef.viewName })
-                : t('sidebar.menu.rename_view')}
-            open={isRenameViewModalOpen}
-            onOk={handleRenameView}
-            onCancel={() => {
-                setIsRenameViewModalOpen(false);
-                setRenameViewTarget(null);
-                renameViewForm.resetFields();
-            }}
-        >
-            <Form form={renameViewForm} layout="vertical">
-                <Form.Item name="newName" label={t('sidebar.field.new_view_name')} rules={[{ required: true, message: t('sidebar.validation.new_view_name_required') }]}>
-                    <Input {...noAutoCapInputProps} />
-                </Form.Item>
-            </Form>
-        </Modal>
-
-        <Modal
-            title={`${t('query_editor.save_modal.rename_title')}${renameSavedQueryTarget?.name ? ` (${renameSavedQueryTarget.name})` : ''}`}
-            open={isRenameSavedQueryModalOpen}
-            onOk={handleRenameSavedQuery}
-            onCancel={() => {
-                setIsRenameSavedQueryModalOpen(false);
-                setRenameSavedQueryTarget(null);
-                renameSavedQueryForm.resetFields();
-            }}
-            okText={t('query_editor.action.rename_query')}
-            cancelText={t('common.cancel')}
-        >
-            <Form form={renameSavedQueryForm} layout="vertical">
-                <Form.Item name="name" label={t('query_editor.save_modal.name_label')} rules={[{ required: true, message: t('query_editor.save_modal.name_required') }]}>
-                    <Input {...noAutoCapInputProps} />
-                </Form.Item>
-            </Form>
-        </Modal>
-
-        <Modal
-            title={
-                externalSQLFileModalMode === 'create'
-                    ? t('sidebar.external_sql_modal.title.create_file')
-                    : externalSQLFileModalMode === 'rename'
-                        ? t('sidebar.external_sql_modal.title.rename_file')
-                        : externalSQLFileModalMode === 'create-directory'
-                            ? t('sidebar.external_sql_modal.title.create_directory')
-                            : t('sidebar.external_sql_modal.title.rename_directory')
-            }
-            open={isExternalSQLFileModalOpen}
-            onOk={handleExternalSQLFileModalOk}
-            onCancel={() => {
-                setIsExternalSQLFileModalOpen(false);
-                setExternalSQLFileTarget(null);
-                externalSQLFileForm.resetFields();
-            }}
-            okText={t(externalSQLFileModalMode === 'create' || externalSQLFileModalMode === 'create-directory' ? 'sidebar.external_sql_modal.action.create' : 'sidebar.external_sql_modal.action.rename')}
-            cancelText={t('common.cancel')}
-        >
-            <Form form={externalSQLFileForm} layout="vertical">
-                <Form.Item
-                    name="name"
-                    label={isExternalSQLDirectoryModalMode(externalSQLFileModalMode) ? t('sidebar.external_sql_modal.field.directory_name') : t('sidebar.external_sql_modal.field.sql_file_name')}
-                    rules={[
-                        { required: true, message: isExternalSQLDirectoryModalMode(externalSQLFileModalMode) ? t('sidebar.external_sql_modal.validation.directory_name_required') : t('sidebar.external_sql_modal.validation.sql_file_name_required') },
-                        {
-                            validator: async (_, value) => {
-                                const name = String(value || '').trim();
-                                if (!name) return;
-                                if (/[\\/]/.test(name) || name === '.' || name === '..') {
-                                    throw new Error(isExternalSQLDirectoryModalMode(externalSQLFileModalMode) ? t('sidebar.external_sql_modal.validation.directory_name_no_separator') : t('sidebar.external_sql_modal.validation.sql_file_name_no_separator'));
-                                }
-                            },
-                        },
-                    ]}
-                    extra={isExternalSQLDirectoryModalMode(externalSQLFileModalMode) ? t('sidebar.external_sql_modal.help.directory') : t('sidebar.external_sql_modal.help.sql_file')}
-                >
-                    <Input {...noAutoCapInputProps} placeholder={isExternalSQLDirectoryModalMode(externalSQLFileModalMode) ? t('sidebar.external_sql_modal.placeholder.directory_name') : t('sidebar.external_sql_modal.placeholder.sql_file_name')} />
-                </Form.Item>
-            </Form>
-        </Modal>
-
-        <Modal
-            title={renderSidebarModalTitle(<TableOutlined />, t('sidebar.modal.batch_tables.title'), t('sidebar.modal.batch_tables.description'))}
-            open={isBatchModalOpen}
-            onCancel={() => setIsBatchModalOpen(false)}
-            width={720}
-            centered
-            styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 } }}
-            footer={
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <Button key="cancel" onClick={() => setIsBatchModalOpen(false)}>
-                        {t('sidebar.action.cancel')}
-                    </Button>
-                    <Space size={8} wrap style={{ marginLeft: 'auto' }}>
-                        <Button
-                            key="clear"
-                            danger
-                            icon={<DeleteOutlined />}
-                            onClick={() => handleBatchClear()}
-                            disabled={checkedTableKeys.length === 0}
-                        >
-                            {t('sidebar.action.clear_tables')}
-                        </Button>
-                        <Button
-                            key="export-schema"
-                            icon={<ExportOutlined />}
-                            onClick={() => handleBatchExport('schema')}
-                            disabled={checkedTableKeys.length === 0}
-                        >
-                            {t('sidebar.action.export_schema')}
-                        </Button>
-                        <Button
-                            key="export-data-only"
-                            icon={<SaveOutlined />}
-                            onClick={() => handleBatchExport('dataOnly')}
-                            disabled={checkedTableKeys.length === 0}
-                        >
-                            {t('sidebar.action.export_data_only')}
-                        </Button>
-                        <Button
-                            key="backup"
-                            type="primary"
-                            icon={<SaveOutlined />}
-                            onClick={() => handleBatchExport('backup')}
-                            disabled={checkedTableKeys.length === 0}
-                        >
-                            {t('sidebar.action.backup_schema_data')}
-                        </Button>
-                    </Space>
-                </div>
-            }
-        >
-            <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
-                <div style={{ marginBottom: 8 }}>
-                    <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>{t('sidebar.field.select_connection')}</label>
-                    <Select
-                        value={selectedConnection}
-                        onChange={handleConnectionChange}
-                        style={{ width: '100%' }}
-                        placeholder={t('sidebar.placeholder.select_connection')}
-                    >
-                        {connections.filter(c => c.config.type !== 'redis').map(conn => (
-                            <Select.Option key={conn.id} value={conn.id}>
-                                {conn.name}
-                            </Select.Option>
-                        ))}
-                    </Select>
-                </div>
-                <div style={{ marginBottom: 8 }}>
-                    <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>{t('sidebar.field.select_database')}</label>
-                    <Select
-                        value={selectedDatabase}
-                        onChange={handleDatabaseChange}
-                        style={{ width: '100%' }}
-                        placeholder={t('sidebar.placeholder.select_connection_first')}
-                        disabled={!selectedConnection}
-                    >
-                        {availableDatabases.map(db => (
-                            <Select.Option key={db.key} value={db.dbName}>
-                                {db.title}
-                            </Select.Option>
-                        ))}
-                    </Select>
-                </div>
-                <div style={modalHintTextStyle}>{t('sidebar.modal.batch_tables.selection_hint')}</div>
-            </div>
-
-            {batchTables.length > 0 && (
-                <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
-                    <Space wrap size={8} style={{ width: '100%' }}>
-                        <Input
-                            allowClear
-                            value={batchFilterKeyword}
-                            onChange={(e) => setBatchFilterKeyword(e.target.value)}
-                            placeholder={t('sidebar.placeholder.filter_table_view')}
-                            prefix={<SearchOutlined />}
-                            style={{ width: 260 }}
-                        />
-                        <Select
-                            value={batchFilterType}
-                            onChange={(value) => setBatchFilterType(value as BatchObjectFilterType)}
-                            style={{ width: 140 }}
-                            options={[
-                                { label: t('sidebar.filter.all_objects'), value: 'all' },
-                                { label: t('sidebar.filter.tables_only'), value: 'table' },
-                                { label: t('sidebar.filter.views_only'), value: 'view' },
-                            ]}
-                        />
-                        <Select
-                            value={batchSelectionScope}
-                            onChange={(value) => setBatchSelectionScope(value as BatchSelectionScope)}
-                            style={{ width: 220 }}
-                            options={[
-                                { label: t('sidebar.filter.scope_filtered'), value: 'filtered' },
-                                { label: t('sidebar.filter.scope_all'), value: 'all' },
-                            ]}
-                        />
-                    </Space>
-                    <div style={{ marginTop: 6, color: '#999', fontSize: 12 }}>
-                        {t('sidebar.batch.filtered_count', { filtered: filteredBatchObjects.length, total: batchTables.length })}
-                    </div>
-                </div>
-            )}
-
-            {batchTables.length > 0 && (
-                <>
-                    <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
-                        <Space>
-                            <Button
-                                size="small"
-                                onClick={() => handleCheckAll(true)}
-                                disabled={selectionScopeTargetKeys.length === 0}
-                            >
-                                {t('sidebar.action.select_all')}
-                            </Button>
-                            <Button
-                                size="small"
-                                onClick={() => handleCheckAll(false)}
-                                disabled={selectionScopeTargetKeys.length === 0}
-                            >
-                                {t('sidebar.action.clear_selection')}
-                            </Button>
-                            <Button
-                                size="small"
-                                onClick={handleInvertSelection}
-                                disabled={selectionScopeTargetKeys.length === 0}
-                            >
-                                {t('sidebar.action.invert_selection')}
-                            </Button>
-                            <span style={{ color: '#999' }}>
-                                {t('sidebar.batch.selected_objects', { selected: checkedTableKeys.length, total: batchTables.length })}
-                            </span>
-                        </Space>
-                    </div>
-                    <div style={modalScrollSectionStyle}>
-                        <Checkbox.Group
-                            value={checkedTableKeys}
-                            onChange={(values) => setCheckedTableKeys(values as string[])}
-                            style={{ width: '100%' }}
-                        >
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                {groupedBatchObjects.tables.length > 0 && (
-                                    <div>
-                                        <div style={{ marginBottom: 6, color: darkMode ? '#bfbfbf' : '#595959', fontSize: 12 }}>
-                                            {t('sidebar.batch.group.tables')} ({groupedBatchObjects.tables.length})
-                                        </div>
-                                        <Space direction="vertical" style={{ width: '100%' }}>
-                                            {groupedBatchObjects.tables.map(table => (
-                                                <Checkbox key={table.key} value={table.key}>
-                                                    <TableOutlined style={{ marginRight: 8 }} />
-                                                    {table.title}
-                                                </Checkbox>
-                                            ))}
-                                        </Space>
-                                    </div>
-                                )}
-                                {groupedBatchObjects.views.length > 0 && (
-                                    <div>
-                                        <div style={{ marginBottom: 6, color: darkMode ? '#bfbfbf' : '#595959', fontSize: 12 }}>
-                                            {t('sidebar.batch.group.views')} ({groupedBatchObjects.views.length})
-                                        </div>
-                                        <Space direction="vertical" style={{ width: '100%' }}>
-                                            {groupedBatchObjects.views.map(view => (
-                                                <Checkbox key={view.key} value={view.key}>
-                                                    <EyeOutlined style={{ marginRight: 8 }} />
-                                                    {view.title}
-                                                </Checkbox>
-                                            ))}
-                                        </Space>
-                                    </div>
-                                )}
-                                {groupedBatchObjects.tables.length === 0 && groupedBatchObjects.views.length === 0 && (
-                                    <div style={{ color: '#999', padding: '8px 0' }}>
-                                        {t('sidebar.batch.no_matching_objects')}
-                                    </div>
-                                )}
-                            </div>
-                        </Checkbox.Group>
-                    </div>
-                </>
-            )}
-        </Modal>
-
-        <Modal
-            title={renderSidebarModalTitle(<DatabaseOutlined />, t('sidebar.modal.batch_databases.title'), t('sidebar.modal.batch_databases.description'))}
-            open={isBatchDbModalOpen}
-            onCancel={() => setIsBatchDbModalOpen(false)}
-            width={640}
-            centered
-            styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 } }}
-            footer={[
-                <Button key="cancel" onClick={() => setIsBatchDbModalOpen(false)}>
-                    {t('sidebar.action.cancel')}
-                </Button>,
-                <Button
-                    key="export-schema"
-                    icon={<ExportOutlined />}
-                    onClick={() => handleBatchDbExport(false)}
-                    disabled={checkedDbKeys.length === 0}
-                >
-                    {t('sidebar.action.export_database_schema_count', { count: checkedDbKeys.length })}
-                </Button>,
-                <Button
-                    key="backup"
-                    type="primary"
-                    icon={<SaveOutlined />}
-                    onClick={() => handleBatchDbExport(true)}
-                    disabled={checkedDbKeys.length === 0}
-                >
-                    {t('sidebar.action.backup_database_count', { count: checkedDbKeys.length })}
-                </Button>
-            ]}
-        >
-            <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
-                <label style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: darkMode ? '#f5f7ff' : '#162033' }}>{t('sidebar.field.select_connection')}</label>
-                <Select
-                    value={selectedDbConnection}
-                    onChange={handleDbConnectionChange}
-                    style={{ width: '100%' }}
-                    placeholder={t('sidebar.placeholder.select_connection')}
-                >
-                    {connections.filter(c => c.config.type !== 'redis').map(conn => (
-                        <Select.Option key={conn.id} value={conn.id}>
-                            {conn.name}
-                        </Select.Option>
-                    ))}
-                </Select>
-                <div style={{ ...modalHintTextStyle, marginTop: 10 }}>{t('sidebar.modal.batch_databases.selection_hint')}</div>
-            </div>
-
-            {batchDatabases.length > 0 && (
-                <>
-                    <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
-                        <Space>
-                            <Button
-                                size="small"
-                                onClick={() => handleCheckAllDb(true)}
-                            >
-                                {t('sidebar.action.select_all')}
-                            </Button>
-                            <Button
-                                size="small"
-                                onClick={() => handleCheckAllDb(false)}
-                            >
-                                {t('sidebar.action.clear_selection')}
-                            </Button>
-                            <Button
-                                size="small"
-                                onClick={handleInvertSelectionDb}
-                            >
-                                {t('sidebar.action.invert_selection')}
-                            </Button>
-                            <span style={{ color: '#999' }}>
-                                {t('sidebar.batch.selected_databases', { selected: checkedDbKeys.length, total: batchDatabases.length })}
-                            </span>
-                        </Space>
-                    </div>
-                    <div style={modalScrollSectionStyle}>
-                        <Checkbox.Group
-                            value={checkedDbKeys}
-                            onChange={(values) => setCheckedDbKeys(values as string[])}
-                            style={{ width: '100%' }}
-                        >
-                            <Space direction="vertical" style={{ width: '100%' }}>
-                                {batchDatabases.map(db => (
-                                    <Checkbox key={db.key} value={db.key}>
-                                        <DatabaseOutlined style={{ marginRight: 8 }} />
-                                        {db.title}
-                                    </Checkbox>
-                                ))}
-                            </Space>
-                        </Checkbox.Group>
-                    </div>
-                </>
-            )}
-        </Modal>
-
-        {/* SQL 文件流式执行进度 Modal */}
-        <Modal
+        <SQLFileExecutionModal
             title={v2OpenExternalSqlFileLabel}
-            open={sqlFileExecState.open}
-            centered
-            closable={sqlFileExecState.status !== 'running'}
-            maskClosable={false}
-            footer={buildSQLFileExecutionFooter({
-                status: sqlFileExecState.status,
-                onCancelExecution: () => {
-                    CancelSQLFileExecution(sqlFileExecState.jobId);
-                    setSqlFileExecState(prev => ({ ...prev, status: 'cancelled' }));
-                },
-                onClose: () => setSqlFileExecState(prev => ({ ...prev, open: false })),
-            })}
-            onCancel={() => {
-                if (sqlFileExecState.status !== 'running') {
-                    setSqlFileExecState(prev => ({ ...prev, open: false }));
-                }
-            }}
-            styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none' }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none' } }}
-        >
-            <SQLFileExecutionProgressContent
-                fileSizeMB={sqlFileExecState.fileSizeMB}
-                status={sqlFileExecState.status}
-                executed={sqlFileExecState.executed}
-                failed={sqlFileExecState.failed}
-                percent={sqlFileExecState.percent}
-                currentSQL={sqlFileExecState.currentSQL}
-                resultMessage={sqlFileExecState.resultMessage}
-            />
-        </Modal>
+            modalPanelStyle={modalPanelStyle}
+            {...sqlFileExecutionModalProps}
+        />
         <FindInDatabaseModal
             open={findInDbContext.open}
             onClose={() => setFindInDbContext({ open: false, connectionId: '', dbName: '' })}

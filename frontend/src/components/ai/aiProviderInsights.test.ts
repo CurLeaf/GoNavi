@@ -110,4 +110,26 @@ describe('aiProviderInsights', () => {
     expect(JSON.stringify(snapshot)).not.toContain('apiKey');
     expect(JSON.stringify(snapshot)).not.toContain('secret-token');
   });
+
+  it('does not flag Cursor Agent for a missing selected model', () => {
+    const snapshot = buildAIProviderSnapshot({
+      providers: [{
+        id: 'provider-cursor',
+        type: 'custom',
+        name: 'Cursor',
+        apiKey: '',
+        hasSecret: true,
+        baseUrl: 'https://api.cursor.com/v1',
+        model: '',
+        models: [],
+        apiFormat: 'cursor-agent',
+        maxTokens: 4096,
+        temperature: 0.2,
+      }],
+      activeProviderId: 'provider-cursor',
+    });
+
+    expect(snapshot.missingSelectedModelCount).toBe(0);
+    expect(snapshot.providers[0].issues).toEqual(['missing_declared_models']);
+  });
 });

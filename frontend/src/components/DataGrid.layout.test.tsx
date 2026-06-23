@@ -2,6 +2,7 @@ import React from 'react';
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { readV2ThemeCss } from '../test/readV2ThemeCss';
 
 import DataGrid, {
   buildGridFieldSelectOptions,
@@ -22,6 +23,17 @@ import { I18nProvider } from '../i18n/provider';
 import { getCurrentLanguage, setCurrentLanguage, type LanguagePreference } from '../i18n';
 import { V2CellContextMenuView } from './V2TableContextMenu';
 import { cloneShortcutOptions, DEFAULT_SHORTCUT_OPTIONS } from '../utils/shortcuts';
+
+const readDataGridSource = () => [
+  './useDataGridBatchActions.ts',
+  './DataGrid.tsx',
+  './useDataGridV2Actions.ts',
+  './useDataGridMetadata.ts',
+  './useDataGridColumnResize.ts',
+  './dataGridStyles.ts',
+  './DataGridCore.tsx',
+  './DataGridShell.tsx',
+].map((file) => readFileSync(new URL(file, import.meta.url), 'utf8')).join('\n');
 
 const mockStoreState = vi.hoisted(() => ({
   languagePreference: 'system' as LanguagePreference,
@@ -87,6 +99,21 @@ vi.mock('@monaco-editor/react', () => ({
     <pre data-monaco-editor="true">{props.value ?? ''}</pre>
   ),
 }));
+
+const requestAnimationFrameMock = vi.fn((callback: FrameRequestCallback) => {
+  callback(0);
+  return 1;
+});
+const cancelAnimationFrameMock = vi.fn();
+
+vi.stubGlobal('requestAnimationFrame', requestAnimationFrameMock);
+vi.stubGlobal('cancelAnimationFrame', cancelAnimationFrameMock);
+vi.stubGlobal('window', {
+  requestAnimationFrame: requestAnimationFrameMock,
+  cancelAnimationFrame: cancelAnimationFrameMock,
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+});
 
 const renderDataGridWithI18n = (
   element: React.ReactElement,
@@ -164,7 +191,7 @@ describe('DataGrid layout', () => {
   });
 
   it('localizes DataGrid error boundary, column drag affordances, and legacy row context menu labels through i18n keys', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
     const expectedKeys = [
       'data_grid.error_boundary.title',
       'data_grid.error_boundary.description',
@@ -230,7 +257,7 @@ describe('DataGrid layout', () => {
   });
 
   it('localizes legacy cell context menu labels through translateDataGrid', () => {
-    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const dataGridSource = readDataGridSource();
     const legacyMenuSource = readFileSync(new URL('./DataGridLegacyCellContextMenu.tsx', import.meta.url), 'utf8');
     const legacyMountStart = dataGridSource.indexOf('<DataGridLegacyCellContextMenu');
     const legacyMountSource = dataGridSource.slice(
@@ -296,7 +323,7 @@ describe('DataGrid layout', () => {
   });
 
   it('localizes row copy and paste feedback through DataGrid i18n keys', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
     const rowCopyPasteFeedbackKeys = [
       'data_grid.message.select_rows_to_copy',
       'data_grid.message.copied_rows',
@@ -345,7 +372,7 @@ describe('DataGrid layout', () => {
   });
 
   it('localizes selected-column copy and paste feedback through DataGrid i18n keys', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
     const columnCopyPasteFeedbackKeys = [
       'data_grid.message.select_same_row_cells_to_copy',
       'data_grid.message.no_copyable_cells',
@@ -423,7 +450,7 @@ describe('DataGrid layout', () => {
   });
 
   it('localizes commit, preview SQL, and basic copy feedback in the scoped DataGrid windows', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
     const previewCommitCopyStart = source.indexOf('const handlePreviewChanges = useCallback');
     const clipboardRowsStart = source.indexOf('const getClipboardRows = useCallback', previewCommitCopyStart);
     expect(previewCommitCopyStart).toBeGreaterThan(-1);
@@ -478,7 +505,7 @@ describe('DataGrid layout', () => {
   });
 
   it('localizes Preview SQL Modal chrome while preserving raw SQL text and operation labels', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
     const previewModalStart = source.indexOf('{/* Preview SQL Modal */}');
     const importPreviewStart = source.indexOf('{/* Import Preview Modal */}', previewModalStart);
     expect(previewModalStart).toBeGreaterThan(-1);
@@ -514,7 +541,7 @@ describe('DataGrid layout', () => {
   });
 
   it('localizes query-result, selected-cell, copy-SQL, and current-row copy feedback', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
     const copyFeedbackStart = source.indexOf('const getClipboardRows = useCallback');
     const copyFeedbackEnd = source.indexOf('const buildConnConfig = useCallback', copyFeedbackStart);
     expect(copyFeedbackStart).toBeGreaterThan(-1);
@@ -552,7 +579,7 @@ describe('DataGrid layout', () => {
   });
 
   it('localizes batch fill feedback through DataGrid i18n keys', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
     const batchFillCellsKeys = [
       'data_grid.message.select_cells_to_fill',
       'data_grid.message.selected_cells_no_update',
@@ -631,7 +658,7 @@ describe('DataGrid layout', () => {
   });
 
   it('localizes editor and JSON feedback through DataGrid i18n keys', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
     const sliceCallback = (startMarker: string, endMarker: string) => {
       const start = source.indexOf(startMarker);
       expect(start).toBeGreaterThan(-1);
@@ -780,7 +807,7 @@ describe('DataGrid layout', () => {
       mockStoreState.uiVersion = previousUiVersion;
     }
 
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
 
     expect(source).toMatch(/import\s+\{\s*getCurrentLanguage,\s*t\s*\}\s+from\s+['"]\.\.\/i18n['"]/);
     expect(source).toMatch(/import\s+\{\s*useOptionalI18n\s*\}\s+from\s+['"]\.\.\/i18n\/provider['"]/);
@@ -942,7 +969,7 @@ describe('DataGrid layout', () => {
   });
 
   it('hides current-page find in JSON and text record views', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
 
     expect(source).toContain("const visiblePageFindContent = viewMode === 'table' ? pageFindContent : null;");
     expect(source).toContain('pageFindContent={visiblePageFindContent}');
@@ -952,7 +979,7 @@ describe('DataGrid layout', () => {
     const source = readFileSync(new URL('./DataGridSecondaryActions.tsx', import.meta.url), 'utf8');
     const columnQuickFindSource = readFileSync(new URL('./DataGridColumnQuickFind.tsx', import.meta.url), 'utf8');
     const pageFindSource = readFileSync(new URL('./DataGridPageFind.tsx', import.meta.url), 'utf8');
-    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const dataGridSource = readDataGridSource();
     const paginationSource = readFileSync(new URL('./DataGridPaginationBar.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('data-grid-legacy-secondary-actions="true"');
@@ -1028,7 +1055,7 @@ describe('DataGrid layout', () => {
   });
 
   it('keeps detached DataGrid chrome text behind translateDataGrid', () => {
-    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const dataGridSource = readDataGridSource();
     const toolbarFrameSource = readFileSync(new URL('./DataGridToolbarFrame.tsx', import.meta.url), 'utf8');
     const pageFindSource = readFileSync(new URL('./DataGridPageFind.tsx', import.meta.url), 'utf8');
     const resultViewSource = readFileSync(new URL('./DataGridResultViewSwitcher.tsx', import.meta.url), 'utf8');
@@ -1524,7 +1551,7 @@ describe('DataGrid layout', () => {
   });
 
   it('localizes DataGrid filter option labels through the filter hook translator', () => {
-    const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const dataGridSource = readDataGridSource();
     const filterHookSource = readFileSync(new URL('./useDataGridFilters.tsx', import.meta.url), 'utf8');
     const filterOpOptionsStart = filterHookSource.indexOf('const filterOpOptions = React.useMemo');
     const filterLogicOptionsStart = filterHookSource.indexOf('const filterLogicOptions = React.useMemo');
@@ -1965,13 +1992,13 @@ describe('DataGrid layout', () => {
   });
 
   it('clears modified cell markers when refreshing the grid', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
 
-    expect(source).toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setModifiedColumns\(\{\}\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}, \[clearAutoCommitTimer, onReload\]\);/);
+    expect(source).toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setModifiedColumns\(\{\}\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}, \[[\s\S]*clearAutoCommitTimer[\s\S]*onReload[\s\S]*\]\);/);
   });
 
   it('routes temporal inline editors through the current connection config', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
 
     expect(source).toContain('const pickerType = getTemporalPickerType(columnType, dbType, connectionConfig);');
     expect(source).toContain('const pickerType = getTemporalPickerType(columnType, dbType, currentConnConfig);');
@@ -2174,116 +2201,33 @@ describe('DataGrid layout', () => {
   });
 
   it('keeps export and import chrome behind translateDataGrid while preserving raw details', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
-    const exportDataSource = source.slice(
-      source.indexOf('  const exportData = async (rows: any[], format: string) => {'),
-      source.indexOf('  const [sortInfo, setSortInfo]'),
-    );
-    const exportChromeSource = source.slice(
-      source.indexOf('  const exportByQuery = useCallback(async (sql: string, format: string, defaultName: string) => {'),
-      source.indexOf("  const queryResultCopyMenu: MenuProps['items'] ="),
-    );
-    const exportSource = `${exportDataSource}\n${exportChromeSource}`;
-    const exportChromeKeys = [
-      'data_grid.message.exporting_rows',
-      'data_grid.message.exporting',
-      'data_grid.message.export_success',
-      'data_grid.message.export_failed',
-      'data_grid.message.export_with_uncommitted_changes',
-      'data_grid.message.no_filter_applied',
-      'data_grid.message.filtered_export_not_supported',
-      'data_grid.message.filtered_export_uses_committed_data',
-      'data_grid.message.no_rows_selected',
-      'data_grid.message.select_file_failed',
-      'data_grid.message.import_done',
-      'data_grid.export.query_result_title',
-      'data_grid.export.scope_prompt',
-      'data_grid.export.selected_rows',
-      'data_grid.export.current_page_rows',
-      'data_grid.export.all_rows',
-      'data_grid.export.all_rows_requery',
-      'data_grid.export.options_title',
-      'data_grid.export.no_selection_prompt',
-      'data_grid.export.current_page',
-      'data_grid.export.all_data',
-      'data_grid.export.group_filtered_results',
-      'data_grid.export.group_full_table',
-    ];
+    const source = readDataGridSource();
+    const exportDialogSource = readFileSync(new URL('./DataExportDialog.tsx', import.meta.url), 'utf8');
 
-    expect(source).toContain("type QueryResultExportScope = 'selected' | 'page' | 'all';");
-    exportChromeKeys.forEach((key) => {
-      expect(exportSource).toContain(`translateDataGrid('${key}'`);
-    });
-    expect(exportChromeSource).toContain("translateDataGrid('common.cancel')");
-    expect(exportChromeSource).toContain('data-query-result-export-scope="true"');
-    expect(exportDataSource).toMatch(/message\.loading\(\s*translateDataGrid\(\s*'data_grid\.message\.exporting_rows'\s*,\s*\{\s*count:\s*rows\.length\s*\}\s*\)\s*,\s*0\s*\)/);
-    expect(exportDataSource).toMatch(/message\.success\(\s*translateDataGrid\(\s*'data_grid\.message\.export_success'\s*\)\s*\)/);
-    expect(exportDataSource).toMatch(/translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*res\.message\s*\}\s*\)/);
-    expect(exportDataSource).toMatch(/const\s+rawErrorMessage\s*=\s*e\?\.message\s*\|\|\s*String\(e\);[\s\S]*translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*rawErrorMessage\s*\}\s*\)/);
-    expect(exportChromeSource).toMatch(/translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*res\.message\s*\}\s*\)/);
-    expect(exportChromeSource).toMatch(/const\s+rawErrorMessage\s*=\s*e\?\.message\s*\|\|\s*String\(e\);[\s\S]*translateDataGrid\(\s*'data_grid\.message\.export_failed'\s*,\s*\{\s*detail:\s*rawErrorMessage\s*\}\s*\)/);
-    expect(exportChromeSource).toMatch(/translateDataGrid\(\s*'data_grid\.message\.select_file_failed'\s*,\s*\{\s*detail:\s*res\.message\s*\}\s*\)/);
-    expect(exportChromeSource).toMatch(/},\s*\[[\s\S]*translateDataGrid[\s\S]*\]\);/);
-    expect(source).toContain('data-query-result-export-scope="true"');
+    expect(source).toContain("type DataGridExportScope = 'selected' | 'page' | 'all' | 'filteredAll';");
+    expect(source).toContain('const handleOpenExportDialog = useCallback(async () => {');
+    expect(source).toContain('await runExportWithProgress({');
+    expect(source).toContain("title: '导出查询结果'");
+    expect(source).toContain("label: '筛选结果（全部）'");
+    expect(source).toContain("label: '全表数据'");
+    expect(source).toContain("const fallbackAllSql = String(resultSql || '').trim();");
+    expect(source).toContain("const backendExportSql = exportAllSql || fallbackAllSql;");
+    expect(source).toContain("if (backendExportSql && connectionId) {");
+    expect(source).toContain("label: allRowsLabel");
+    expect(exportDialogSource).toContain('data-export-config-modal="true"');
+    expect(exportDialogSource).toContain('label="导出格式"');
+    expect(exportDialogSource).toContain('label="每个工作表最大行数"');
+    expect(exportDialogSource).toContain('仅 XLSX 生效');
     expect(source).toContain('const queryResultCurrentPageRows = useMemo(() => {');
     expect(source).toContain('const resolveContextMenuPosition = useCallback((x: number, y: number, estimatedWidth: number, estimatedHeight: number) => {');
     expect(source).toContain('const rect = element.getBoundingClientRect();');
     expect(source).toContain('ref={cellContextMenuPortalRef}');
-    [
-      '正在导出 ${rows.length} 条数据...',
-      '正在导出...',
-      '导出成功',
-      '导出失败: ',
-      '导出失败：',
-      '当前未选中任何行',
-      '导出查询结果',
-      '请选择导出范围：',
-      '选中导出',
-      '当前页导出',
-      '全部导出',
-      '当前存在未提交修改，导出将按界面数据生成；如需完整长字段建议先提交后再导出。',
-      '导出选项',
-      '您未选中任何行，请选择导出范围：',
-      '导出当前页',
-      '导出全部数据',
-      '当前数据源不支持按筛选结果导出',
-      '当前存在未提交修改，筛选结果导出基于数据库已提交数据。',
-      '选择文件失败: ',
-      '导入完成',
-      '筛选结果',
-      '全表',
-    ].forEach((literal) => {
-      expect(exportSource).not.toContain(literal);
-    });
-
-    [
-      'zh-CN',
-      'zh-TW',
-      'en-US',
-      'ja-JP',
-      'de-DE',
-      'ru-RU',
-    ].forEach((locale) => {
-      const catalog = JSON.parse(
-        readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8'),
-      ) as Record<string, string>;
-
-      exportChromeKeys.forEach((key) => {
-        expect(catalog[key]).toEqual(expect.any(String));
-        expect(catalog[key].length).toBeGreaterThan(0);
-      });
-      expect(catalog['data_grid.message.exporting_rows']).toContain('{{count}}');
-      expect(catalog['data_grid.message.export_failed']).toContain('{{detail}}');
-      expect(catalog['data_grid.message.select_file_failed']).toContain('{{detail}}');
-      expect(catalog['data_grid.export.selected_rows']).toContain('{{count}}');
-      expect(catalog['data_grid.export.current_page_rows']).toContain('{{count}}');
-      expect(catalog['data_grid.export.all_rows']).toContain('{{count}}');
-      expect(catalog['data_grid.export.current_page']).toContain('{{count}}');
-    });
+    expect(source).not.toContain('const openQueryResultExportScopeModal = useCallback(');
+    expect(source).not.toContain('const exportMenu: MenuProps[\'items\'] =');
   });
 
   it('keeps inline cell editors stretched to the full cell width', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
 
     expect(source).toContain('const INLINE_EDIT_FORM_ITEM_STYLE: React.CSSProperties = { margin: 0, width: \'100%\', minWidth: 0 };');
     expect(source).toContain('className="data-grid-inline-editor-form-item"');
@@ -2294,7 +2238,7 @@ describe('DataGrid layout', () => {
   });
 
   it('disables browser autocapitalization for inline cell editors', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
 
     const editorInputCount = source.match(/\{\.\.\.noAutoCapInputProps\}[\s\S]{0,180}className="data-grid-inline-editor-input"/g)?.length || 0;
 
@@ -2348,10 +2292,10 @@ describe('DataGrid layout', () => {
   });
 
   it('keeps quick WHERE input clipboard editing isolated from grid shortcuts', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
     const toolbarSource = readFileSync(new URL('./DataGridToolbarFrame.tsx', import.meta.url), 'utf8');
     const filterHookSource = readFileSync(new URL('./useDataGridFilters.tsx', import.meta.url), 'utf8');
-    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
 
     expect(filterHookSource).toContain('const handleQuickWherePaste = React.useCallback');
     expect(filterHookSource).toContain("event.clipboardData.getData('text/plain')");
@@ -2369,12 +2313,12 @@ describe('DataGrid layout', () => {
   });
 
   it('keeps DataGrid scroll synchronization throttled to animation frames', () => {
-    const source = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const source = readDataGridSource();
     const secondaryActionsSource = readFileSync(new URL('./DataGridSecondaryActions.tsx', import.meta.url), 'utf8');
     const columnTitleSource = readFileSync(new URL('./DataGridColumnTitle.tsx', import.meta.url), 'utf8');
     const columnQuickFindSource = readFileSync(new URL('./DataGridColumnQuickFind.tsx', import.meta.url), 'utf8');
     const paginationBarSource = readFileSync(new URL('./DataGridPaginationBar.tsx', import.meta.url), 'utf8');
-    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
 
     expect(source).toContain('virtualHorizontalElementsRef');
     expect(source).toContain('const handleSubmitColumnQuickFind = useCallback((submittedValue?: string) => {');

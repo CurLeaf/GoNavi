@@ -1,5 +1,6 @@
 import React from 'react';
 import { t as defaultTranslate, type I18nParams } from '../i18n';
+import DataGridErDiagram from './DataGridErDiagram';
 
 type DataGridMetadataTranslate = (key: string, params?: I18nParams) => string;
 
@@ -62,14 +63,18 @@ export const DataGridV2FieldsView: React.FC<DataGridV2FieldsViewProps> = ({
 );
 
 export interface DataGridV2ErViewProps {
+  connections?: any[];
+  connectionId?: string;
+  dbName?: string;
   tableName?: string;
   displayOutputColumnNames: string[];
   columnMetaMap: Record<string, { type?: string; comment?: string }>;
   columnMetaMapByLowerName: Record<string, { type?: string; comment?: string }>;
+  onOpenTable?: (tableName: string) => void;
   translate?: DataGridMetadataTranslate;
 }
 
-export const DataGridV2ErView: React.FC<DataGridV2ErViewProps> = ({
+const StaticErPreview: React.FC<Omit<DataGridV2ErViewProps, 'connections' | 'connectionId' | 'dbName' | 'onOpenTable'>> = ({
   tableName,
   displayOutputColumnNames,
   columnMetaMap,
@@ -97,3 +102,38 @@ export const DataGridV2ErView: React.FC<DataGridV2ErViewProps> = ({
     </div>
   </div>
 );
+
+export const DataGridV2ErView: React.FC<DataGridV2ErViewProps> = ({
+  connections,
+  connectionId,
+  dbName,
+  tableName,
+  displayOutputColumnNames,
+  columnMetaMap,
+  columnMetaMapByLowerName,
+  onOpenTable,
+  translate = defaultTranslate,
+}) => {
+  if (!connectionId || !tableName || !Array.isArray(connections) || connections.length === 0) {
+    return (
+      <StaticErPreview
+        tableName={tableName}
+        displayOutputColumnNames={displayOutputColumnNames}
+        columnMetaMap={columnMetaMap}
+        columnMetaMapByLowerName={columnMetaMapByLowerName}
+        translate={translate}
+      />
+    );
+  }
+
+  return (
+    <DataGridErDiagram
+      connections={connections}
+      connectionId={connectionId}
+      dbName={dbName}
+      tableName={tableName}
+      translate={translate}
+      onOpenTable={onOpenTable}
+    />
+  );
+};

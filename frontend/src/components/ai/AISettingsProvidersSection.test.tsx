@@ -16,6 +16,7 @@ const REQUIRED_PROVIDER_KEYS = [
   'ai_settings.provider.empty.title',
   'ai_settings.provider.empty.description',
   'ai_settings.provider.no_model',
+  'ai_settings.provider.auto_model',
   'ai_settings.provider.action.add',
   'ai_settings.provider.action.edit',
   'ai_settings.provider.action.delete',
@@ -35,11 +36,17 @@ const REQUIRED_PROVIDER_FORM_KEYS = [
   'ai_settings.form.api_format',
   'ai_settings.form.model_list',
   'ai_settings.form.model_list_placeholder',
+  'ai_settings.form.model_list_placeholder.codebuddy',
+  'ai_settings.form.model_list_placeholder.cursor',
   'ai_settings.form.api_key',
+  'ai_settings.form.api_key.codebuddy_optional',
+  'ai_settings.form.api_key.codebuddy_hint',
   'ai_settings.form.api_key_required',
   'ai_settings.form.api_key_placeholder',
+  'ai_settings.form.api_key_placeholder.codebuddy',
   'ai_settings.form.api_endpoint',
   'ai_settings.form.api_endpoint_required',
+  'ai_settings.form.api_endpoint_placeholder.codebuddy',
   'ai_settings.action.back',
   'ai_settings.action.save',
   'ai_settings.action.test',
@@ -49,6 +56,8 @@ const REQUIRED_PROVIDER_FORM_KEYS = [
 
 const providerPresets = [
   { key: 'openai', label: 'OpenAI', icon: <span>O</span>, desc: 'GPT', defaultBaseUrl: 'https://api.openai.com/v1' },
+  { key: 'codebuddy', label: 'CodeBuddy', icon: <span>B</span>, desc: 'CodeBuddy CLI', defaultBaseUrl: '' },
+  { key: 'cursor', label: 'Cursor', icon: <span>R</span>, desc: 'Cursor API', defaultBaseUrl: 'https://api.cursor.com/v1' },
   { key: 'custom', label: '自定义', icon: <span>C</span>, desc: '自定义接口', defaultBaseUrl: 'https://example.com' },
 ];
 
@@ -176,19 +185,108 @@ describe('AISettingsProvidersSection', () => {
       '供应商名称',
       '请输入名称',
       '例如：我的自建 OpenAI / 专属大模型',
-      'API 格式',
-      '可用模型列表（可选配置）',
-      '配置指定的模型ID，留空则默认去服务端拉取',
-      '认证 & 连接',
-      '请输入 API Key',
-      '你的 API Key',
-      '请输入有效的接口地址',
-      '连接正常',
+       'API 格式',
+       '可用模型列表（可选配置）',
+       '配置指定的模型ID，留空则默认去服务端拉取',
+       '可选：预填常用模型；留空则由 CodeBuddy CLI 或服务端自动选择',
+       '可选：预填常用 Cursor 模型 ID；留空则由 Cursor 默认模型自动选择',
+       '认证 & 连接',
+       '自动选择',
+       'API Key / Auth Token（可选）',
+       '留空则使用本机 CodeBuddy CLI 已登录账号；填写后优先使用当前凭证。',
+       '留空走本机登录态，或填写 API Key / Token 覆盖',
+       '留空则使用 CodeBuddy CLI 默认网关',
+       '请输入 API Key',
+       '你的 API Key',
+       '请输入有效的接口地址',
+       '连接正常',
       '重新测试',
       '测试连接',
       '保存',
     ]) {
       expect(providerSectionSource).not.toContain(oldCopy);
     }
+  });
+
+  it('renders CodeBuddy optional-login copy when editing the CodeBuddy preset', () => {
+    const Wrap = () => {
+      const [form] = Form.useForm();
+      return (
+        <AISettingsProvidersSection
+          providers={[provider]}
+          activeProviderId="provider-1"
+          editingProvider={{ ...provider, apiFormat: 'codebuddy-cli' }}
+          isEditing
+          form={form}
+          providerPresets={providerPresets}
+          watchedPresetKey="codebuddy"
+          watchedApiFormat="codebuddy-cli"
+          loading={false}
+          testStatus="idle"
+          primaryPasswordVisible={false}
+          darkMode={false}
+          overlayTheme={overlayTheme}
+          cardBg="#fff"
+          cardBorder="rgba(0,0,0,0.08)"
+          inputBg="#fff"
+          onPrimaryPasswordVisibleChange={() => {}}
+          resolveProviderPreset={() => ({ label: 'CodeBuddy', icon: <span>C</span> })}
+          resolvePresetByKey={(key) => providerPresets.find((item) => item.key === key) || providerPresets[0]}
+          onAddProvider={() => {}}
+          onEditProvider={() => {}}
+          onDeleteProvider={() => {}}
+          onSetActiveProvider={() => {}}
+          onCancelEdit={() => {}}
+          onPresetChange={() => {}}
+          onTestProvider={() => {}}
+          onSaveProvider={() => {}}
+        />
+      );
+    };
+
+    const markup = renderToStaticMarkup(<Wrap />);
+    expect(markup).toContain('API Key / Auth Token (optional)');
+    expect(markup).toContain('signed-in CodeBuddy CLI account on this machine');
+    expect(markup).toContain('Leave blank to use the default CodeBuddy CLI gateway');
+  });
+
+  it('renders automatic-model copy for the Cursor preset', () => {
+    const Wrap = () => {
+      const [form] = Form.useForm();
+      return (
+        <AISettingsProvidersSection
+          providers={[provider]}
+          activeProviderId="provider-1"
+          editingProvider={{ ...provider, apiFormat: 'cursor-agent', baseUrl: 'https://api.cursor.com/v1' }}
+          isEditing
+          form={form}
+          providerPresets={providerPresets}
+          watchedPresetKey="cursor"
+          watchedApiFormat="cursor-agent"
+          loading={false}
+          testStatus="idle"
+          primaryPasswordVisible={false}
+          darkMode={false}
+          overlayTheme={overlayTheme}
+          cardBg="#fff"
+          cardBorder="rgba(0,0,0,0.08)"
+          inputBg="#fff"
+          onPrimaryPasswordVisibleChange={() => {}}
+          resolveProviderPreset={() => ({ label: 'Cursor', icon: <span>R</span> })}
+          resolvePresetByKey={(key) => providerPresets.find((item) => item.key === key) || providerPresets[0]}
+          onAddProvider={() => {}}
+          onEditProvider={() => {}}
+          onDeleteProvider={() => {}}
+          onSetActiveProvider={() => {}}
+          onCancelEdit={() => {}}
+          onPresetChange={() => {}}
+          onTestProvider={() => {}}
+          onSaveProvider={() => {}}
+        />
+      );
+    };
+
+    const markup = renderToStaticMarkup(<Wrap />);
+    expect(markup).toContain("Optional: prefill common Cursor model IDs; leave blank to use Cursor&#x27;s default model automatically");
   });
 });

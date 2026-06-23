@@ -18,7 +18,9 @@ export type ShortcutAction =
   | 'toggleTheme'
   | 'openShortcutManager'
   | 'toggleMacFullscreen'
-  | 'resetWindowZoom';
+  | 'resetWindowZoom'
+  | 'diagnoseQuery'
+  | 'showSlowQueries';
 
 export type ShortcutPlatform = 'mac' | 'windows';
 
@@ -111,6 +113,8 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'toggleAIPanel',
   'toggleLogPanel',
   'toggleTheme',
+  'diagnoseQuery',
+  'showSlowQueries',
   'openShortcutManager',
   'toggleMacFullscreen',
   'resetWindowZoom',
@@ -202,6 +206,18 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
     labelKey: 'app.shortcuts.action.toggleTheme.label',
     descriptionKey: 'app.shortcuts.action.toggleTheme.description',
   },
+  diagnoseQuery: {
+    labelKey: 'app.shortcuts.action.diagnoseQuery.label',
+    descriptionKey: 'app.shortcuts.action.diagnoseQuery.description',
+    scope: 'queryEditor',
+    allowInEditable: true,
+  },
+  showSlowQueries: {
+    labelKey: 'app.shortcuts.action.showSlowQueries.label',
+    descriptionKey: 'app.shortcuts.action.showSlowQueries.description',
+    scope: 'queryEditor',
+    allowInEditable: true,
+  },
   openShortcutManager: {
     labelKey: 'app.shortcuts.action.openShortcutManager.label',
     descriptionKey: 'app.shortcuts.action.openShortcutManager.description',
@@ -279,6 +295,16 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
     mac: { combo: 'Meta+Shift+D', enabled: true },
     windows: { combo: 'Ctrl+Shift+D', enabled: true },
   },
+  // SQL 诊断：避开 toggleTheme 的 Ctrl+Shift+D，用 Ctrl+Shift+P（P = Plan）
+  diagnoseQuery: {
+    mac: { combo: 'Meta+Shift+P', enabled: true },
+    windows: { combo: 'Ctrl+Shift+P', enabled: true },
+  },
+  // 慢查询历史：避开 toggleLogPanel 的 Ctrl+H / Meta+Shift+H，用 Ctrl+Shift+L（L = Log）
+  showSlowQueries: {
+    mac: { combo: 'Meta+Shift+L', enabled: true },
+    windows: { combo: 'Ctrl+Shift+L', enabled: true },
+  },
   openShortcutManager: {
     mac: { combo: 'Meta+,', enabled: true },
     windows: { combo: 'Ctrl+,', enabled: true },
@@ -353,7 +379,106 @@ const normalizeKeyboardKey = (key: string): string => {
   return token.length > 1 ? token[0].toUpperCase() + token.slice(1) : token;
 };
 
+let globalImeCompositionActive = false;
+
+export const setGlobalImeCompositionActive = (active: boolean): void => {
+  globalImeCompositionActive = active === true;
+};
+
+export const isGlobalImeCompositionActive = (): boolean => globalImeCompositionActive;
+
+type ImeCompositionEventTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>;
+type ImeCompositionDocumentTarget = Pick<Document, 'addEventListener' | 'removeEventListener'> & {
+  visibilityState?: DocumentVisibilityState;
+};
+
+export const installGlobalImeCompositionTracking = (
+  eventTarget: ImeCompositionEventTarget = window,
+  documentTarget: ImeCompositionDocumentTarget | null = document,
+): (() => void) => {
+  const handleCompositionStart = () => setGlobalImeCompositionActive(true);
+  const handleCompositionEnd = () => setGlobalImeCompositionActive(false);
+  const handleBlur = () => setGlobalImeCompositionActive(false);
+  const handleVisibilityChange = () => {
+    if (!documentTarget || documentTarget.visibilityState === 'hidden') {
+      setGlobalImeCompositionActive(false);
+    }
+  };
+
+  eventTarget.addEventListener('compositionstart', handleCompositionStart, true);
+  eventTarget.addEventListener('compositionend', handleCompositionEnd, true);
+  eventTarget.addEventListener('blur', handleBlur, true);
+  documentTarget?.addEventListener('visibilitychange', handleVisibilityChange, true);
+
+  return () => {
+    eventTarget.removeEventListener('compositionstart', handleCompositionStart, true);
+    eventTarget.removeEventListener('compositionend', handleCompositionEnd, true);
+    eventTarget.removeEventListener('blur', handleBlur, true);
+    documentTarget?.removeEventListener('visibilitychange', handleVisibilityChange, true);
+    setGlobalImeCompositionActive(false);
+  };
+};
+
+const isMonacoImeInputTarget = (target: EventTarget | null | undefined): boolean => {
+  if (!target || typeof target !== 'object') {
+    return false;
+  }
+
+  const element = target as Element & {
+    className?: unknown;
+    classList?: { contains?: (name: string) => boolean };
+    closest?: (selector: string) => Element | null;
+  };
+  if (typeof element.classList?.contains === 'function' && element.classList.contains('ime-input')) {
+    return true;
+  }
+  if (typeof element.className === 'string' && /\bime-input\b/.test(element.className)) {
+    return true;
+  }
+  if (typeof element.closest === 'function') {
+    return Boolean(element.closest('.monaco-editor .inputarea.ime-input, .monaco-editor textarea.ime-input, .ime-input'));
+  }
+  return false;
+};
+
+export const isImeComposingKeyEvent = (
+  event: (KeyboardEvent | ReactKeyboardEvent | null | undefined) & {
+    nativeEvent?: {
+      isComposing?: boolean;
+      keyCode?: number;
+      which?: number;
+    };
+    keyCode?: number;
+    which?: number;
+    isComposing?: boolean;
+    key?: string;
+    target?: EventTarget | null;
+  },
+): boolean => {
+  if (!event) {
+    return false;
+  }
+
+  const nativeEvent = event.nativeEvent;
+  const key = String(event.key || '').trim();
+  const keyCode = Number(event.keyCode ?? nativeEvent?.keyCode ?? 0);
+  const which = Number(event.which ?? nativeEvent?.which ?? 0);
+
+  return Boolean(
+    globalImeCompositionActive
+    || event.isComposing
+    || nativeEvent?.isComposing
+    || isMonacoImeInputTarget(event.target)
+    || key === 'Process'
+    || keyCode === 229
+    || which === 229,
+  );
+};
+
 export const eventToShortcut = (event: KeyboardEvent | ReactKeyboardEvent): string => {
+  if (isImeComposingKeyEvent(event)) {
+    return '';
+  }
   const key = normalizeKeyboardKey(event.key);
   if (!key || MODIFIER_SET.has(key as typeof MODIFIER_ORDER[number])) {
     return '';

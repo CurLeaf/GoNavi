@@ -50,6 +50,18 @@ func TestNormalizeSchemaAndTable_PostgresStillSplitsQualifiedName(t *testing.T) 
 	}
 }
 
+func TestNormalizeSchemaAndTable_TrinoPreservesDottedTableName(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTable(connection.ConnectionConfig{
+		Type: "trino",
+	}, "hive.default", "daily.events.v1")
+
+	if schema != "hive.default" || table != "daily.events.v1" {
+		t.Fatalf("expected trino table name to stay intact, got %q.%q", schema, table)
+	}
+}
+
 func TestNormalizeSchemaAndTable_KingbaseNormalizesEscapedQualifiedName(t *testing.T) {
 	t.Parallel()
 
@@ -158,6 +170,18 @@ func TestNormalizeMetadataSchemaAndTable_NonPGLikeKeepsNormalBehavior(t *testing
 	}
 }
 
+func TestNormalizeMetadataSchemaAndTable_TrinoPreservesDottedTableName(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeMetadataSchemaAndTable(connection.ConnectionConfig{
+		Type: "trino",
+	}, "iceberg.analytics", "ods.orders.v1")
+
+	if schema != "iceberg.analytics" || table != "ods.orders.v1" {
+		t.Fatalf("expected trino metadata table to stay intact, got %q.%q", schema, table)
+	}
+}
+
 func TestNormalizeSchemaAndTable_PGLikePureTableStillSplitsKingbaseSearchPathOnlyInMetadata(t *testing.T) {
 	t.Parallel()
 
@@ -213,6 +237,19 @@ func TestNormalizeRunConfig_StarRocksUsesDatabaseFromTree(t *testing.T) {
 
 	if runConfig.Database != "analytics" {
 		t.Fatalf("expected StarRocks database from tree, got %q", runConfig.Database)
+	}
+}
+
+func TestNormalizeRunConfig_TrinoUsesNamespaceFromTree(t *testing.T) {
+	t.Parallel()
+
+	runConfig := normalizeRunConfig(connection.ConnectionConfig{
+		Type:     "trino",
+		Database: "hive.default",
+	}, "iceberg.analytics")
+
+	if runConfig.Database != "iceberg.analytics" {
+		t.Fatalf("expected trino namespace from tree, got %q", runConfig.Database)
 	}
 }
 

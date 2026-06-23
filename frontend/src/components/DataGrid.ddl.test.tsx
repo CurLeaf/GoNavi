@@ -9,6 +9,7 @@ import DataGrid, {
   GONAVI_ROW_KEY,
   hasDataGridVirtualEditRenderVersionChanged,
 } from './DataGrid';
+import DataGridToolbarFrame from './DataGridToolbarFrame';
 import { V2CellContextMenuView, V2ColumnHeaderContextMenuView, V2TableGroupContextMenuView } from './V2TableContextMenu';
 import { setCurrentLanguage, t } from '../i18n';
 import { DUCKDB_ROWID_LOCATOR_COLUMN, ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
@@ -68,8 +69,11 @@ const backendApp = vi.hoisted(() => ({
   ImportData: vi.fn(),
   ExportTable: vi.fn(),
   ExportData: vi.fn(),
+  ExportDataWithOptions: vi.fn(),
   ExportQuery: vi.fn(),
+  ExportQueryWithOptions: vi.fn(),
   ApplyChanges: vi.fn(),
+  PreviewChanges: vi.fn(),
   DBGetColumns: vi.fn(),
   DBGetIndexes: vi.fn(),
   DBGetForeignKeys: vi.fn(),
@@ -96,6 +100,9 @@ vi.mock('../store', () => ({
 }));
 
 vi.mock('../../wailsjs/go/app/App', () => backendApp);
+vi.mock('../../wailsjs/runtime/runtime', () => ({
+  EventsOn: vi.fn(() => vi.fn()),
+}));
 
 vi.mock('react-dom', async () => {
   const actual = await vi.importActual<any>('react-dom');
@@ -245,6 +252,7 @@ vi.mock('antd', () => {
   );
   Modal.useModal = () => {
     const [infoConfig, setInfoConfig] = React.useState<any>(null);
+    const [confirmConfig, setConfirmConfig] = React.useState<any>(null);
     return [{
       info: vi.fn((config: any) => {
         setInfoConfig(config);
@@ -252,9 +260,53 @@ vi.mock('antd', () => {
           destroy: vi.fn(() => {
             setInfoConfig(null);
           }),
+          update: vi.fn(),
         };
       }),
-    }, infoConfig ? <section data-modal-use-holder="true">{infoConfig.content}</section> : null];
+      confirm: vi.fn((config: any) => {
+        setConfirmConfig(config);
+        return {
+          destroy: vi.fn(() => {
+            setConfirmConfig(null);
+          }),
+          update: vi.fn(),
+        };
+      }),
+    }, (
+      <>
+        {infoConfig ? <section data-modal-use-holder="true">{infoConfig.content}</section> : null}
+        {confirmConfig ? (
+          <section data-modal-confirm-holder="true">
+            <h2>{confirmConfig.title}</h2>
+            {confirmConfig.content}
+            <div>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await confirmConfig.onOk?.();
+                    setConfirmConfig(null);
+                  } catch {
+                    // keep dialog open when validation fails
+                  }
+                }}
+              >
+                {confirmConfig.okText || 'OK'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  confirmConfig.onCancel?.();
+                  setConfirmConfig(null);
+                }}
+              >
+                {confirmConfig.cancelText || 'Cancel'}
+              </button>
+            </div>
+          </section>
+        ) : null}
+      </>
+    )];
   };
 
   const passthrough = ({ children }: any) => <>{children}</>;
@@ -291,6 +343,9 @@ vi.mock('antd', () => {
   const Radio: any = ({ children }: any) => <span>{children}</span>;
   Radio.Group = ({ children }: any) => <div>{children}</div>;
   Radio.Button = ({ children }: any) => <button type="button">{children}</button>;
+  const Typography: any = ({ children }: any) => <>{children}</>;
+  Typography.Text = ({ children }: any) => <span>{children}</span>;
+  Typography.Paragraph = ({ children }: any) => <p>{children}</p>;
   const Segmented = ({ value, options, onChange }: any) => (
     <div data-segmented-value={value}>
       {(options || []).map((option: any) => (
@@ -323,7 +378,31 @@ vi.mock('antd', () => {
     Dropdown,
     Form,
     Pagination: () => null,
-    Select: ({ children }: any) => <div>{children}</div>,
+    Select: ({ children, options, onChange, disabled, value }: any) => (
+      <div data-select-value={String(value ?? '')}>
+        {children}
+        {(options || []).map((option: any) => (
+          <button
+            key={String(option.value)}
+            type="button"
+            data-select-option={String(option.value)}
+            disabled={disabled || option.disabled}
+            onClick={() => onChange?.(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    ),
+    InputNumber: ({ value, onChange, min, max }: any) => (
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        onChange={(event) => onChange?.(Number(event.target.value))}
+      />
+    ),
     Modal,
     Checkbox: ({ checked, onChange }: any) => <input type="checkbox" checked={checked} onChange={onChange} />,
     Segmented,
@@ -337,6 +416,12 @@ vi.mock('antd', () => {
     Space,
     Tag,
     Radio,
+    Typography,
+    Progress: ({ percent, status, format }: any) => (
+      <div data-progress-percent={String(percent)} data-progress-status={String(status)}>
+        {typeof format === 'function' ? format(percent) : null}
+      </div>
+    ),
   };
 });
 
@@ -347,6 +432,15 @@ const textContent = (node: any): string =>
 
 const findButton = (renderer: ReactTestRenderer, text: string) =>
   renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text))[0];
+
+const renderHeaderText = (columnKey: string): string => {
+  const column = testRenderState.latestColumns.find((item) => item.key === columnKey);
+  expect(column).toBeTruthy();
+  const headerRenderer = create(<>{column.title}</>);
+  const content = textContent(headerRenderer.root);
+  headerRenderer.unmount();
+  return content;
+};
 
 const waitForEffects = async () => {
   await act(async () => {
@@ -622,9 +716,10 @@ describe('DataGrid commit change set', () => {
 
   it('keeps DataGrid AI insight prompt wrapper localized', () => {
     const dataGridSource = readFileSync(new URL('./DataGrid.tsx', import.meta.url), 'utf8');
+    const dataGridShellSource = readFileSync(new URL('./DataGridShell.tsx', import.meta.url), 'utf8');
 
-    expect(dataGridSource).not.toMatch(/请帮我分析以下查询结果数据|请分析数据特征|业务上的洞察/);
-    expect(dataGridSource).toContain('data_grid.ai_insight.prompt');
+    expect(`${dataGridSource}\n${dataGridShellSource}`).not.toMatch(/请帮我分析以下查询结果数据|请分析数据特征|业务上的洞察/);
+    expect(dataGridShellSource).toContain('data_grid.ai_insight.prompt');
   });
 
   it('marks the active virtual editing row so shouldCellUpdate can reopen inline editors', () => {
@@ -651,6 +746,8 @@ describe('DataGrid DDL interactions', () => {
     backendApp.DBQuery.mockResolvedValue({ success: true, data: [] });
     backendApp.DBShowCreateTable.mockResolvedValue({ success: true, data: 'CREATE TABLE users' });
     setCurrentLanguage('zh-CN');
+    storeState.queryOptions.showColumnComment = false;
+    storeState.queryOptions.showColumnType = false;
     storeState.appearance.uiVersion = 'legacy';
     storeState.dataEditTransactionOptions = {
       commitMode: 'manual',
@@ -705,8 +802,11 @@ describe('DataGrid DDL interactions', () => {
     backendApp.ImportData.mockReset();
     backendApp.ExportTable.mockReset();
     backendApp.ExportData.mockReset();
+    backendApp.ExportDataWithOptions.mockReset();
     backendApp.ExportQuery.mockReset();
+    backendApp.ExportQueryWithOptions.mockReset();
     backendApp.ApplyChanges.mockReset();
+    backendApp.PreviewChanges.mockReset();
     backendApp.DBGetColumns.mockReset();
     backendApp.DBGetIndexes.mockReset();
     backendApp.DBGetForeignKeys.mockReset();
@@ -733,6 +833,7 @@ describe('DataGrid DDL interactions', () => {
           dbName="main"
           connectionId="conn-1"
           pkColumns={['id']}
+          onReload={() => {}}
         />,
       );
     });
@@ -863,6 +964,88 @@ describe('DataGrid DDL interactions', () => {
     expect(textContent(renderer!.root)).toContain(t('data_grid.context_menu.hide_column_comment'));
     expect(textContent(renderer!.root)).toContain('bigint');
     expect(textContent(renderer!.root)).toContain('主键 ID');
+    renderer!.unmount();
+  });
+
+  it('retries column metadata loading when the first response has no usable type or comment', async () => {
+    storeState.queryOptions.showColumnComment = true;
+    storeState.queryOptions.showColumnType = true;
+    backendApp.DBGetColumns
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ Name: 'id', Type: '', Comment: '' }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ Name: 'id', Type: 'bigint', Comment: '主键 ID' }],
+      });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+    await waitForEffects();
+
+    expect(backendApp.DBGetColumns).toHaveBeenCalledTimes(2);
+    const headerText = renderHeaderText('id');
+    expect(headerText).toContain('bigint');
+    expect(headerText).toContain('主键 ID');
+    renderer!.unmount();
+  });
+
+  it('reloads column metadata after clicking refresh', async () => {
+    storeState.queryOptions.showColumnComment = true;
+    storeState.queryOptions.showColumnType = true;
+    backendApp.DBGetColumns
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ Name: 'id', Type: 'bigint', Comment: '旧备注' }],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [{ Name: 'id', Type: 'varchar(64)', Comment: '新备注' }],
+      });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1 }]}
+          columnNames={['id']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+        />,
+      );
+    });
+    await waitForEffects();
+
+    expect(backendApp.DBGetColumns).toHaveBeenCalledTimes(1);
+    expect(renderHeaderText('id')).toContain('旧备注');
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onRefresh();
+    });
+    await waitForEffects();
+    await waitForEffects();
+
+    expect(backendApp.DBGetColumns).toHaveBeenCalledTimes(2);
+    const headerText = renderHeaderText('id');
+    expect(headerText).toContain('varchar(64)');
+    expect(headerText).toContain('新备注');
     renderer!.unmount();
   });
 
@@ -1157,8 +1340,8 @@ describe('DataGrid DDL interactions', () => {
   });
 
   it('exports query-result rows from in-memory data without rerunning ExportQuery', async () => {
-    backendApp.ExportData.mockResolvedValue({ success: true });
-    backendApp.ExportQuery.mockResolvedValue({ success: true });
+    backendApp.ExportDataWithOptions.mockResolvedValue({ success: true });
+    backendApp.ExportQueryWithOptions.mockResolvedValue({ success: true });
 
     let renderer: ReactTestRenderer;
     await act(async () => {
@@ -1179,24 +1362,34 @@ describe('DataGrid DDL interactions', () => {
     });
     await waitForEffects();
 
-    await act(async () => {
-      await findButton(renderer!, 'HTML').props.onClick();
-    });
-
-    const exportAllButton = findButton(renderer!, t('data_grid.export.all_rows', { count: 2 }));
-    await act(async () => {
-      await exportAllButton.props.onClick();
+    act(() => {
+      findButton(renderer!, t('data_grid.toolbar.export')).props.onClick();
     });
     await waitForEffects();
 
-    expect(backendApp.ExportData).toHaveBeenCalledTimes(1);
-    expect(backendApp.ExportData).toHaveBeenCalledWith(
+    await act(async () => {
+      await renderer!.root.findByProps({ 'data-select-option': 'html' }).props.onClick();
+    });
+    await act(async () => {
+      await renderer!.root.findByProps({ 'data-select-option': 'page' }).props.onClick();
+    });
+    await act(async () => {
+      await findButton(renderer!, '开始导出').props.onClick();
+    });
+    await waitForEffects();
+
+    expect(backendApp.ExportDataWithOptions).toHaveBeenCalledTimes(1);
+    expect(backendApp.ExportDataWithOptions).toHaveBeenCalledWith(
       [{ owner: 'sa' }, { owner: 'dbo' }],
       ['owner'],
       'export',
-      'html',
+      expect.objectContaining({
+        format: 'html',
+        totalRowsHint: 2,
+        totalRowsKnown: true,
+      }),
     );
-    expect(backendApp.ExportQuery).not.toHaveBeenCalled();
+    expect(backendApp.ExportQueryWithOptions).not.toHaveBeenCalled();
   });
 
   it('copies loaded column data from the v2 column header context menu', async () => {

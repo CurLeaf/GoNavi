@@ -74,6 +74,12 @@ const getProviderHost = (baseUrl: string): string => {
 const hasProviderSecret = (provider: AIProviderConfig): boolean =>
   provider.hasSecret ?? Boolean(provider.secretRef || provider.apiKey);
 
+const isBaseURLOptionalProvider = (provider: AIProviderConfig): boolean =>
+  provider.type === 'custom' && trimText(provider.apiFormat) === 'codebuddy-cli';
+
+const isModelOptionalProvider = (provider: AIProviderConfig): boolean =>
+  provider.type === 'custom' && ['codebuddy-cli', 'cursor-agent'].includes(trimText(provider.apiFormat));
+
 const getSelectedProvider = (params: {
   providers?: AIProviderConfig[];
   activeProvider?: AIProviderConfig | null;
@@ -161,10 +167,10 @@ export const buildAIChatReadinessSnapshot = (params: {
   if (!hasProviderSecret(activeProvider)) {
     issues.push('missing_secret');
   }
-  if (!trimText(activeProvider.baseUrl)) {
+  if (!isBaseURLOptionalProvider(activeProvider) && !trimText(activeProvider.baseUrl)) {
     issues.push('missing_base_url');
   }
-  if (!trimText(activeProvider.model)) {
+  if (!isModelOptionalProvider(activeProvider) && !trimText(activeProvider.model)) {
     issues.push('missing_selected_model');
   }
 
@@ -210,7 +216,7 @@ export const buildAIChatReadinessSnapshot = (params: {
     };
   }
 
-  if (!providerSummary.model) {
+  if (!providerSummary.model && !isModelOptionalProvider(activeProvider)) {
     const title = params.loadingModels
       ? translate('ai_chat.input.status.missing_model.title.loading', {
         provider: providerSummary.name || providerSummary.id || fallbackProviderName,
@@ -247,7 +253,7 @@ export const buildAIChatReadinessSnapshot = (params: {
 
   const title = translate('ai_chat.input.status.ready.title', {
     provider: providerSummary.name || providerSummary.id || fallbackProviderName,
-    model: providerSummary.model,
+    model: providerSummary.model || (isModelOptionalProvider(activeProvider) ? translate('ai_chat.input.status.ready.auto_model') : ''),
   });
   const description = contextAttachedCount > 0
     ? translate('ai_chat.input.status.ready.description.with_context', { count: contextAttachedCount })

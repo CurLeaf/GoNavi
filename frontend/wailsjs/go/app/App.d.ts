@@ -20,6 +20,8 @@ export function CheckForUpdates():Promise<connection.QueryResult>;
 
 export function CheckForUpdatesSilently():Promise<connection.QueryResult>;
 
+export function ClearSlowQueries(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
+
 export function ClearTables(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
 
 export function ConfigureDriverRuntimeDirectory(arg1:string):Promise<connection.QueryResult>;
@@ -82,6 +84,8 @@ export function DeleteSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function DeleteSQLFile(arg1:string):Promise<connection.QueryResult>;
 
+export function DiagnoseQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
 export function DismissSecurityUpdateReminder():Promise<app.SecurityUpdateStatus>;
 
 export function DownloadDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
@@ -106,9 +110,15 @@ export function ExportConnectionsPackage(arg1:app.ConnectionExportOptions):Promi
 
 export function ExportData(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function ExportDataWithOptions(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:app.ExportFileOptions):Promise<connection.QueryResult>;
+
 export function ExportDatabaseSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:boolean):Promise<connection.QueryResult>;
 
+export function ExportDatabasesSQLWithOptions(arg1:connection.ConnectionConfig,arg2:Array<string>,arg3:boolean,arg4:app.ExportFileOptions):Promise<connection.QueryResult>;
+
 export function ExportQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:string):Promise<connection.QueryResult>;
+
+export function ExportQueryWithOptions(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:app.ExportFileOptions):Promise<connection.QueryResult>;
 
 export function ExportSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
@@ -116,9 +126,13 @@ export function ExportSchemaSQL(arg1:connection.ConnectionConfig,arg2:string,arg
 
 export function ExportTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function ExportTableWithOptions(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:app.ExportFileOptions):Promise<connection.QueryResult>;
+
 export function ExportTablesDataSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
 
 export function ExportTablesSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>,arg4:boolean):Promise<connection.QueryResult>;
+
+export function ExportTablesSQLWithOptions(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>,arg4:boolean,arg5:boolean,arg6:app.ExportFileOptions):Promise<connection.QueryResult>;
 
 export function GenerateQueryID():Promise<string>;
 
@@ -141,6 +155,8 @@ export function GetSavedConnections():Promise<Array<connection.SavedConnectionVi
 export function GetSavedQueries():Promise<Array<connection.SavedQuery>>;
 
 export function GetSecurityUpdateStatus():Promise<app.SecurityUpdateStatus>;
+
+export function GetSlowQueries(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:number):Promise<connection.QueryResult>;
 
 export function GetUnboundSavedQueries():Promise<Array<connection.SavedQuery>>;
 

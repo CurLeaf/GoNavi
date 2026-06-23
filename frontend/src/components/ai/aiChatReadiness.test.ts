@@ -103,4 +103,52 @@ describe('buildAIChatReadinessSnapshot', () => {
     expect(snapshot.title).toBe('AI is ready: OpenAI Primary / gpt-5.5');
     expect(snapshot.description).toBe('1 table schema contexts are attached. You can send now.');
   });
+
+  it('treats CodeBuddy CLI as ready without explicit base url or model', () => {
+    const snapshot = buildAIChatReadinessSnapshot({
+      providers: [{
+        id: 'provider-1',
+        type: 'custom',
+        name: 'CodeBuddy',
+        apiKey: '',
+        hasSecret: true,
+        baseUrl: '',
+        model: '',
+        apiFormat: 'codebuddy-cli',
+        models: [],
+        maxTokens: 4096,
+        temperature: 0.2,
+      }],
+      activeProviderId: 'provider-1',
+    });
+
+    expect(snapshot.status).toBe('ready');
+    expect(snapshot.ready).toBe(true);
+    expect(snapshot.title).toContain('CodeBuddy');
+    expect(snapshot.title).toContain('Auto-selected');
+  });
+
+  it('treats Cursor Agent as ready without an explicit model', () => {
+    const snapshot = buildAIChatReadinessSnapshot({
+      providers: [{
+        id: 'provider-1',
+        type: 'custom',
+        name: 'Cursor',
+        apiKey: '',
+        hasSecret: true,
+        baseUrl: 'https://api.cursor.com/v1',
+        model: '',
+        apiFormat: 'cursor-agent',
+        models: [],
+        maxTokens: 4096,
+        temperature: 0.2,
+      }],
+      activeProviderId: 'provider-1',
+    });
+
+    expect(snapshot.status).toBe('ready');
+    expect(snapshot.ready).toBe(true);
+    expect(snapshot.title).toContain('Cursor');
+    expect(snapshot.title).toContain('Auto-selected');
+  });
 });

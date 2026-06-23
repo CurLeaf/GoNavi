@@ -30,6 +30,10 @@ export function CheckForUpdatesSilently() {
   return window['go']['app']['App']['CheckForUpdatesSilently']();
 }
 
+export function ClearSlowQueries(arg1, arg2) {
+  return window['go']['app']['App']['ClearSlowQueries'](arg1, arg2);
+}
+
 export function ClearTables(arg1, arg2, arg3) {
   return window['go']['app']['App']['ClearTables'](arg1, arg2, arg3);
 }
@@ -154,6 +158,10 @@ export function DeleteSQLFile(arg1) {
   return window['go']['app']['App']['DeleteSQLFile'](arg1);
 }
 
+export function DiagnoseQuery(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DiagnoseQuery'](arg1, arg2, arg3);
+}
+
 export function DismissSecurityUpdateReminder() {
   return window['go']['app']['App']['DismissSecurityUpdateReminder']();
 }
@@ -202,12 +210,24 @@ export function ExportData(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportData'](arg1, arg2, arg3, arg4);
 }
 
+export function ExportDataWithOptions(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExportDataWithOptions'](arg1, arg2, arg3, arg4);
+}
+
 export function ExportDatabaseSQL(arg1, arg2, arg3) {
   return window['go']['app']['App']['ExportDatabaseSQL'](arg1, arg2, arg3);
 }
 
+export function ExportDatabasesSQLWithOptions(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExportDatabasesSQLWithOptions'](arg1, arg2, arg3, arg4);
+}
+
 export function ExportQuery(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['ExportQuery'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function ExportQueryWithOptions(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['ExportQueryWithOptions'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function ExportSQLFile(arg1, arg2) {
@@ -222,12 +242,20 @@ export function ExportTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportTable'](arg1, arg2, arg3, arg4);
 }
 
+export function ExportTableWithOptions(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExportTableWithOptions'](arg1, arg2, arg3, arg4);
+}
+
 export function ExportTablesDataSQL(arg1, arg2, arg3) {
   return window['go']['app']['App']['ExportTablesDataSQL'](arg1, arg2, arg3);
 }
 
 export function ExportTablesSQL(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportTablesSQL'](arg1, arg2, arg3, arg4);
+}
+
+export function ExportTablesSQLWithOptions(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['app']['App']['ExportTablesSQLWithOptions'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function GenerateQueryID() {
@@ -272,6 +300,10 @@ export function GetSavedQueries() {
 
 export function GetSecurityUpdateStatus() {
   return window['go']['app']['App']['GetSecurityUpdateStatus']();
+}
+
+export function GetSlowQueries(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['GetSlowQueries'](arg1, arg2, arg3, arg4);
 }
 
 export function GetUnboundSavedQueries() {

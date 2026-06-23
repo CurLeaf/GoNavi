@@ -8,6 +8,7 @@ import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { t as catalogTranslate } from '../../../i18n/catalog';
 import type { I18nParams } from '../../../i18n/types';
 import { useOptionalI18n } from '../../../i18n/provider';
+import Modal from '../../common/ResizableDraggableModal';
 import type { OverlayWorkbenchTheme } from '../../../utils/overlayWorkbenchTheme';
 import { buildAIReadonlyPreviewSQL } from '../../../utils/aiSqlLimit';
 
@@ -129,7 +130,6 @@ const CodeRunButton: React.FC<{ text: string; connectionId?: string; dbName?: st
           return;
         }
         if (result.requiresConfirm) {
-          const { Modal } = await import('antd');
           Modal.confirm({
             title: copy('ai_chat.message.security.confirm_title'),
             content: result.warningMessage || copy('ai_chat.message.security.default_warning', { operationType: result.operationType }),

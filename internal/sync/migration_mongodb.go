@@ -30,8 +30,8 @@ func buildTabularToMongoPlan(config SyncConfig, tableName string, sourceDB db.Da
 	plan := SchemaMigrationPlan{}
 	sourceType := resolveMigrationDBType(config.SourceConfig)
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(config), tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSyncSourceSchemaAndTable(config, tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSyncTargetSchemaAndTable(config, tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标集合导入"
@@ -93,8 +93,8 @@ func buildMongoToMongoPlan(config SyncConfig, tableName string, sourceDB db.Data
 	plan := SchemaMigrationPlan{}
 	sourceType := resolveMigrationDBType(config.SourceConfig)
 	targetType := resolveMigrationDBType(config.TargetConfig)
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(sourceType, selectedSyncSourceDatabase(config), tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(targetType, selectedSyncTargetDatabase(config), tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSyncSourceSchemaAndTable(config, tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSyncTargetSchemaAndTable(config, tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(sourceType, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(targetType, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标集合导入"
@@ -158,8 +158,8 @@ func buildMongoToMongoPlan(config SyncConfig, tableName string, sourceDB db.Data
 
 func buildMongoToMySQLPlan(config SyncConfig, tableName string, sourceDB db.Database, targetDB db.Database) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
 	plan := SchemaMigrationPlan{}
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(config.SourceConfig.Type, selectedSyncSourceDatabase(config), tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(config.TargetConfig.Type, selectedSyncTargetDatabase(config), tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSyncSourceSchemaAndTable(config, tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSyncTargetSchemaAndTable(config, tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(config.SourceConfig.Type, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(config.TargetConfig.Type, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"
@@ -503,8 +503,8 @@ func moveStringToFront(items []string, target string) []string {
 func buildMongoToPGLikePlan(config SyncConfig, tableName string, sourceDB db.Database, targetDB db.Database) (SchemaMigrationPlan, []connection.ColumnDefinition, []connection.ColumnDefinition, error) {
 	plan := SchemaMigrationPlan{}
 	targetType := strings.ToLower(strings.TrimSpace(config.TargetConfig.Type))
-	plan.SourceSchema, plan.SourceTable = normalizeSchemaAndTable(config.SourceConfig.Type, selectedSyncSourceDatabase(config), tableName)
-	plan.TargetSchema, plan.TargetTable = normalizeSchemaAndTable(config.TargetConfig.Type, selectedSyncTargetDatabase(config), tableName)
+	plan.SourceSchema, plan.SourceTable = normalizeSyncSourceSchemaAndTable(config, tableName)
+	plan.TargetSchema, plan.TargetTable = normalizeSyncTargetSchemaAndTable(config, tableName)
 	plan.SourceQueryTable = qualifiedNameForQuery(config.SourceConfig.Type, plan.SourceSchema, plan.SourceTable, tableName)
 	plan.TargetQueryTable = qualifiedNameForQuery(config.TargetConfig.Type, plan.TargetSchema, plan.TargetTable, tableName)
 	plan.PlannedAction = "使用已有目标表导入"

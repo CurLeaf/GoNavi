@@ -270,6 +270,7 @@ func (s *StarRocksDB) Connect(config connection.ConnectionConfig) error {
 			errorDetails = append(errorDetails, fmt.Sprintf("%s 打开失败: %v", address, err))
 			continue
 		}
+		configureSQLConnectionPool(db, "starrocks")
 
 		timeout := getConnectTimeout(candidateConfig)
 		ctx, cancel := utils.ContextWithTimeout(timeout)

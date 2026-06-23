@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Collapse, Empty, Input, Modal, Progress, Select, Space, Switch, Tag, Typography, message } from 'antd';
+import { Alert, Button, Collapse, Empty, Input, Progress, Select, Space, Switch, Tag, Typography, message } from 'antd';
 import { DeleteOutlined, DownloadOutlined, FileSearchOutlined, FolderOpenOutlined, InfoCircleFilled, ReloadOutlined } from '@ant-design/icons';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { messages } from '../../../shared/i18n/messages';
@@ -453,10 +454,12 @@ const buildVersionSelectOptions = (options: DriverVersionOption[]) => {
   return grouped;
 };
 
-const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenGlobalProxySettings?: () => void }> = ({
+const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onBack?: () => void; onOpenGlobalProxySettings?: () => void; embedded?: boolean }> = ({
   open,
   onClose,
+  onBack,
   onOpenGlobalProxySettings,
+  embedded = false,
 }) => {
   const theme = useStore((state) => state.theme);
   const appearance = useStore((state) => state.appearance);
@@ -1833,32 +1836,8 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
   const logBlockBorderColor = darkMode ? 'rgba(255, 255, 255, 0.16)' : 'rgba(0, 0, 0, 0.12)';
   const logBlockTextColor = darkMode ? 'rgba(255, 255, 255, 0.88)' : 'rgba(0, 0, 0, 0.88)';
 
-  return (
-      <Modal
-      title={t('driver.modal.title')}
-      open={open}
-      onCancel={onClose}
-      width={1120}
-      style={{ top: 24 }}
-      className="driver-manager-modal"
-      styles={{
-        body: modalBodyStyle,
-      }}
-      destroyOnHidden
-      footer={(
-        <Space className="driver-manager-footer-actions" size={8}>
-          <Button key="refresh" icon={<ReloadOutlined />} onClick={() => refreshStatus(true)} loading={loading}>
-            {t('driver.modal.footer.refresh')}
-          </Button>
-          <Button key="network" onClick={() => checkNetworkStatus(true)} loading={networkChecking}>
-            {t('driver.modal.footer.networkCheck')}
-          </Button>
-          <Button key="close" type="primary" onClick={onClose}>
-            {installMutatingBusy ? t('driver.modal.footer.background') : t('driver.modal.footer.close')}
-          </Button>
-        </Space>
-      )}
-    >
+  const driverManagerContent = (
+    <>
       <div className="driver-manager-shell" data-driver-theme={driverManagerTheme.isDark ? 'dark' : 'light'}>
         <div className="driver-manager-header" style={managerSectionStyle}>
           <div className="driver-manager-heading">
@@ -2087,6 +2066,24 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
         </div>
         </Space>
       </div>
+      {embedded ? (
+        <Space className="driver-manager-footer-actions" size={8} wrap style={{ justifyContent: 'flex-end', width: '100%' }}>
+          <Button key="refresh" icon={<ReloadOutlined />} onClick={() => refreshStatus(true)} loading={loading}>
+            {t('driver.modal.footer.refresh')}
+          </Button>
+          <Button key="network" onClick={() => checkNetworkStatus(true)} loading={networkChecking}>
+            {t('driver.modal.footer.networkCheck')}
+          </Button>
+          <Button key="close" type="primary" onClick={onClose}>
+            {installMutatingBusy ? t('driver.modal.footer.background') : t('driver.modal.footer.close')}
+          </Button>
+          {onBack ? (
+            <Button key="back" onClick={onBack}>
+              {t('common.back_to_previous')}
+            </Button>
+          ) : null}
+        </Space>
+      ) : null}
       <Modal
         title={t('driver_manager.log_modal.title', { name: activeLogRow?.name || logDriverType })}
         open={logModalOpen}
@@ -2118,6 +2115,45 @@ const DriverManagerModal: React.FC<{ open: boolean; onClose: () => void; onOpenG
           )}
         </Space>
       </Modal>
+    </>
+  );
+
+  return embedded ? driverManagerContent : (
+      <Modal
+      title={(
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span>{t('driver.modal.title')}</span>
+        </div>
+      )}
+      open={open}
+      onCancel={onClose}
+      width={1120}
+      style={{ top: 24 }}
+      className="driver-manager-modal"
+      styles={{
+        body: modalBodyStyle,
+      }}
+      destroyOnHidden
+      footer={(
+        <Space className="driver-manager-footer-actions" size={8}>
+          <Button key="refresh" icon={<ReloadOutlined />} onClick={() => refreshStatus(true)} loading={loading}>
+            {t('driver.modal.footer.refresh')}
+          </Button>
+          <Button key="network" onClick={() => checkNetworkStatus(true)} loading={networkChecking}>
+            {t('driver.modal.footer.networkCheck')}
+          </Button>
+          <Button key="close" type="primary" onClick={onClose}>
+            {installMutatingBusy ? t('driver.modal.footer.background') : t('driver.modal.footer.close')}
+          </Button>
+          {onBack ? (
+            <Button key="back" onClick={onBack}>
+              {t('common.back_to_previous')}
+            </Button>
+          ) : null}
+        </Space>
+      )}
+    >
+      {driverManagerContent}
     </Modal>
   );
 };

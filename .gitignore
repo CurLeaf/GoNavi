@@ -17,6 +17,8 @@ dist/
 .gemini-clipboard
 GoNavi-Wails
 GoNavi-Wails.exe
+optional-driver-agent
+optional-driver-agent.exe
 .ace-tool/
 .superpowers/
 .claude/

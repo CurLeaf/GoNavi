@@ -117,6 +117,7 @@ describe('connectionModalPresentation', () => {
       'starrocks',
       'sphinx',
       'clickhouse',
+      'trino',
       'postgres',
       'sqlserver',
       'sqlite',
@@ -230,6 +231,14 @@ describe('connectionModalPresentation', () => {
       'databaseScope',
     ]);
     expect(resolveConnectionConfigLayout('iotdb').sections).toEqual([
+      'identity',
+      'uri',
+      'target',
+      'service',
+      'credentials',
+      'databaseScope',
+    ]);
+    expect(resolveConnectionConfigLayout('trino').sections).toEqual([
       'identity',
       'uri',
       'target',

@@ -297,6 +297,8 @@ export interface ConnectionConfig {
   dsn?: string;
   connectionParams?: string;
   timeout?: number;
+  keepAliveEnabled?: boolean;
+  keepAliveIntervalMinutes?: number;
   redisDB?: number; // Redis database index
   uri?: string; // Connection URI for copy/paste
   clickHouseProtocol?: "auto" | "http" | "native"; // ClickHouse connection protocol override
@@ -392,6 +394,41 @@ export interface TriggerDefinition {
   statement: string;
 }
 
+export type TableExportScope = "selected" | "page" | "all" | "filteredAll";
+
+export interface TableExportScopeOption {
+  value: TableExportScope;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+}
+
+export type TableExportHistoryStatus =
+  | "idle"
+  | "start"
+  | "running"
+  | "finalizing"
+  | "done"
+  | "error";
+
+export interface TableExportHistoryEntry {
+  jobId: string;
+  targetName: string;
+  startedAt: number;
+  finishedAt: number;
+  format: string;
+  scope: string;
+  scopeLabel: string;
+  strategyLabel: string;
+  status: TableExportHistoryStatus;
+  stage: string;
+  current: number;
+  total: number;
+  totalRowsKnown: boolean;
+  filePath: string;
+  message: string;
+}
+
 export interface TabData {
   id: string;
   title: string;
@@ -399,6 +436,7 @@ export interface TabData {
     | "query"
     | "table"
     | "design"
+    | "sql-analysis"
     | "redis-keys"
     | "redis-command"
     | "redis-monitor"
@@ -407,6 +445,7 @@ export interface TabData {
     | "event-def"
     | "routine-def"
     | "table-overview"
+    | "table-export"
     | "jvm-overview"
     | "jvm-resource"
     | "jvm-audit"
@@ -436,6 +475,13 @@ export interface TabData {
   sidebarLocateKey?: string; // Precise sidebar tree key for locating an object node
   savedQueryId?: string; // Saved query identity for quick-save behavior
   objectType?: 'table' | 'view' | 'materialized-view'; // Table-like object type for shared viewers
+  exportWorkbenchMode?: 'single' | 'batch-tables' | 'batch-databases';
+  tableExportScopeOptions?: TableExportScopeOption[];
+  tableExportInitialScope?: TableExportScope;
+  tableExportQueryByScope?: Partial<Record<TableExportScope, string>>;
+  tableExportRowCountByScope?: Partial<Record<TableExportScope, number>>;
+  sqlAnalysisView?: "diagnose" | "slow-query";
+  sqlAnalysisRequestKey?: string;
   formatRestoreSnapshot?: {
     query: string;
     createdAt: number;
@@ -559,7 +605,7 @@ export interface AIProviderConfig {
   baseUrl: string;
   model: string;
   models?: string[];
-  apiFormat?: string; // custom 专用: openai | anthropic | gemini | claude-cli
+  apiFormat?: string; // custom 专用: openai | anthropic | gemini | cursor-agent | claude-cli | codebuddy-cli
   headers?: Record<string, string>;
   maxTokens: number;
   temperature: number;

@@ -159,6 +159,7 @@ func (p *PostgresDB) Connect(config connection.ConnectionConfig) error {
 				failures = append(failures, fmt.Sprintf("%s 数据库=%s 打开连接失败: %v", sslLabel, dbName, err))
 				continue
 			}
+			configureSQLConnectionPool(dbConn, "postgres")
 			p.conn = dbConn
 
 			// Force verification
@@ -604,6 +605,7 @@ func (p *PostgresDB) ensureSearchPath(baseDSN string) {
 
 		newDB, err := sql.Open("postgres", newDSN)
 		if err == nil {
+			configureSQLConnectionPool(newDB, "postgres")
 			newDB.SetConnMaxLifetime(5 * time.Minute)
 			oldConn := p.conn
 			p.conn = newDB

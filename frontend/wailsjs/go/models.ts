@@ -432,6 +432,26 @@ export namespace app {
 	        this.filePassword = source["filePassword"];
 	    }
 	}
+	export class ExportFileOptions {
+	    format: string;
+	    xlsxMaxRowsPerSheet?: number;
+	    jobId?: string;
+	    totalRowsHint?: number;
+	    totalRowsKnown?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportFileOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.format = source["format"];
+	        this.xlsxMaxRowsPerSheet = source["xlsxMaxRowsPerSheet"];
+	        this.jobId = source["jobId"];
+	        this.totalRowsHint = source["totalRowsHint"];
+	        this.totalRowsKnown = source["totalRowsKnown"];
+	    }
+	}
 	export class SecurityUpdateOptions {
 	    allowPartial?: boolean;
 	    writeBackup?: boolean;
@@ -907,6 +927,8 @@ export namespace connection {
 	    dsn?: string;
 	    connectionParams?: string;
 	    timeout?: number;
+	    keepAliveEnabled?: boolean;
+	    keepAliveIntervalMinutes?: number;
 	    redisDB?: number;
 	    redisSentinelMaster?: string;
 	    redisSentinelUser?: string;
@@ -956,6 +978,8 @@ export namespace connection {
 	        this.dsn = source["dsn"];
 	        this.connectionParams = source["connectionParams"];
 	        this.timeout = source["timeout"];
+	        this.keepAliveEnabled = source["keepAliveEnabled"];
+	        this.keepAliveIntervalMinutes = source["keepAliveIntervalMinutes"];
 	        this.redisDB = source["redisDB"];
 	        this.redisSentinelMaster = source["redisSentinelMaster"];
 	        this.redisSentinelUser = source["redisSentinelUser"];

@@ -19,6 +19,12 @@ const trimText = (value: unknown): string => String(value || '').trim();
 const hasProviderSecret = (provider: AIProviderConfig): boolean =>
   provider.hasSecret ?? Boolean(provider.secretRef || provider.apiKey);
 
+const isBaseURLOptionalProvider = (provider: AIProviderConfig): boolean =>
+  provider.type === 'custom' && trimText(provider.apiFormat) === 'codebuddy-cli';
+
+const isModelOptionalProvider = (provider: AIProviderConfig): boolean =>
+  provider.type === 'custom' && ['codebuddy-cli', 'cursor-agent'].includes(trimText(provider.apiFormat));
+
 const getProviderHost = (baseUrl: string): string => {
   const normalized = trimText(baseUrl);
   if (!normalized) {
@@ -43,10 +49,10 @@ const buildProviderIssues = (provider: AIProviderConfig): string[] => {
   if (!hasSecret) {
     issues.push('missing_secret');
   }
-  if (!baseUrl) {
+  if (!isBaseURLOptionalProvider(provider) && !baseUrl) {
     issues.push('missing_base_url');
   }
-  if (!model) {
+  if (!isModelOptionalProvider(provider) && !model) {
     issues.push('missing_selected_model');
   }
   if (declaredModels.length === 0) {

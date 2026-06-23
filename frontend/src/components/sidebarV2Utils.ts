@@ -12,6 +12,7 @@ import { t as catalogTranslate } from '../i18n/catalog';
 
 type SidebarV2Translate = (key: string) => string;
 
+const translateSidebarV2Current: SidebarV2Translate = (key) => t(key);
 const translateSidebarV2ZhCN: SidebarV2Translate = (key) => catalogTranslate('zh-CN', key);
 
 export type SidebarTreeNodeType =
@@ -137,7 +138,7 @@ export const sortSidebarTableEntries = <T extends SidebarTableEntryForSort>(
 export const buildV2SidebarTableSectionedChildren = (
   parentKey: string,
   tableNodes: SidebarTreeNode[],
-  translate: SidebarV2Translate = translateSidebarV2ZhCN,
+  translate: SidebarV2Translate = translateSidebarV2Current,
 ): SidebarTreeNode[] => {
   const pinnedTables = tableNodes.filter((node) => node?.dataRef?.pinnedSidebarTable);
   if (pinnedTables.length === 0) return tableNodes;
@@ -166,7 +167,7 @@ export const buildSidebarTableChildrenForUi = (
   parentKey: string,
   tableNodes: SidebarTreeNode[],
   isV2Ui: boolean,
-  translate: SidebarV2Translate = translateSidebarV2ZhCN,
+  translate: SidebarV2Translate = translateSidebarV2Current,
 ): SidebarTreeNode[] => {
   if (!isV2Ui) return tableNodes;
   return buildV2SidebarTableSectionedChildren(parentKey, tableNodes, translate);
@@ -296,7 +297,7 @@ export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = t('c
 export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines' | 'events';
 
 export const buildV2ExplorerFilterOptions = (
-  translate: SidebarV2Translate = translateSidebarV2ZhCN,
+  translate: SidebarV2Translate = translateSidebarV2Current,
 ): Array<{ key: V2ExplorerFilter; label: string }> => [
   { key: 'all', label: translate('sidebar.command_search.object_kind.all') },
   { key: 'tables', label: translate('sidebar.command_search.object_kind.tables') },
@@ -305,7 +306,7 @@ export const buildV2ExplorerFilterOptions = (
   { key: 'events', label: translate('sidebar.command_search.object_kind.events') },
 ];
 
-export const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: string }> = buildV2ExplorerFilterOptions();
+export const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: string }> = buildV2ExplorerFilterOptions(translateSidebarV2ZhCN);
 
 const V2_EXPLORER_FILTER_GROUP_KEYS: Record<Exclude<V2ExplorerFilter, 'all'>, string[]> = {
   tables: ['tables'],

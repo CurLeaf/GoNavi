@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Modal, Button, Input, List, Tag, Popconfirm, message, Collapse, Typography } from 'antd';
+import Modal from './common/ResizableDraggableModal';
+import { Button, Input, List, Tag, Popconfirm, message, Collapse, Typography } from 'antd';
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -16,8 +17,10 @@ import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 interface SnippetSettingsModalProps {
   open: boolean;
   onClose: () => void;
+  onBack?: () => void;
   darkMode: boolean;
   overlayTheme: OverlayWorkbenchTheme;
+  embedded?: boolean;
 }
 
 type DraftSnippet = Omit<SqlSnippet, 'createdAt'> & { createdAt?: number };
@@ -35,8 +38,10 @@ const emptyDraft = (): DraftSnippet => ({
 export default function SnippetSettingsModal({
   open,
   onClose,
+  onBack,
   darkMode,
   overlayTheme,
+  embedded = false,
 }: SnippetSettingsModalProps) {
   const { t } = useI18n();
   const sqlSnippets = useStore((s) => s.sqlSnippets);
@@ -213,7 +218,7 @@ export default function SnippetSettingsModal({
   return (
     <Modal
       title={
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
           <div
             style={{
               width: 36,
@@ -228,7 +233,7 @@ export default function SnippetSettingsModal({
           >
             <CodeOutlined />
           </div>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 600, color: textColor }}>{t('app.tools.entry.snippets.title')}</div>
             <div style={{ fontSize: 12, color: mutedColor, lineHeight: 1.5 }}>
               {t('app.tools.entry.snippets.description')}
@@ -237,6 +242,7 @@ export default function SnippetSettingsModal({
         </div>
       }
       open={open}
+      embedded={embedded}
       onCancel={onClose}
       width={820}
       styles={{
@@ -454,6 +460,11 @@ export default function SnippetSettingsModal({
         <Button size="large" style={{ minWidth: 96 }} onClick={onClose}>
           {t('snippet_settings.action.close')}
         </Button>
+        {onBack ? (
+          <Button size="large" style={{ minWidth: 124 }} onClick={onBack}>
+            {t('common.back_to_previous')}
+          </Button>
+        ) : null}
       </div>
     </Modal>
   );

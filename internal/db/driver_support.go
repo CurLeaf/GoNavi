@@ -49,6 +49,7 @@ var optionalGoDrivers = map[string]struct{}{
 	"iotdb":         {},
 	"clickhouse":    {},
 	"elasticsearch": {},
+	"trino":         {},
 }
 
 // optionalDriverAgentRevisions 记录 GoNavi 对各可选 driver-agent 包装逻辑的兼容版本。
@@ -151,6 +152,8 @@ func driverDisplayName(driverType string) string {
 		return "ClickHouse"
 	case "elasticsearch":
 		return "Elasticsearch"
+	case "trino":
+		return "Trino"
 	case "chroma":
 		return "Chroma"
 	case "qdrant":

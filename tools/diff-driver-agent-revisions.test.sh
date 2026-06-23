@@ -35,6 +35,18 @@ rsync -a --exclude .git ./ "$tmpdir/" >/dev/null
     echo "expected duckdb-specific source change to include duckdb revision rebuild, got: ${actual:-<empty>}" >&2
     exit 1
   fi
+
+  filtered_actual="$(bash ./tools/diff-driver-agent-revisions.sh --base "$base" --head HEAD --platform darwin/arm64 --drivers duckdb)"
+  if [[ "$filtered_actual" != "duckdb" ]]; then
+    echo "expected --drivers duckdb to keep duckdb revision rebuild only, got: ${filtered_actual:-<empty>}" >&2
+    exit 1
+  fi
+
+  ignored_actual="$(bash ./tools/diff-driver-agent-revisions.sh --base "$base" --head HEAD --platform darwin/arm64 --drivers mariadb)"
+  if [[ -n "$ignored_actual" ]]; then
+    echo "expected --drivers mariadb to ignore unrelated duckdb revision diff, got: ${ignored_actual}" >&2
+    exit 1
+  fi
 )
 
 tmpdir_frontend="$(mktemp -d "${TMPDIR:-/tmp}/gonavi-diff-driver-revisions-frontend.XXXXXX")"

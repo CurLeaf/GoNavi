@@ -241,6 +241,7 @@ func optionalDriverAgentRevisionTestDrivers(t *testing.T) []string {
 		"iotdb",
 		"clickhouse",
 		"elasticsearch",
+		"trino",
 	}
 	for _, driverType := range drivers {
 		if db.OptionalDriverAgentRevision(driverType) == "" {

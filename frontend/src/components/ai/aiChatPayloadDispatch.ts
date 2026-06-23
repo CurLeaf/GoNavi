@@ -9,6 +9,7 @@ import { t as translateCatalog, type I18nParams } from '../../i18n';
 
 interface AIChatService {
   AIChatStream?: (sid: string, messages: any[], tools: AIChatToolDefinition[]) => Promise<any>;
+  AIChatSendInSession?: (sid: string, messages: any[], tools: AIChatToolDefinition[]) => Promise<any>;
   AIChatSend?: (messages: any[], tools: AIChatToolDefinition[]) => Promise<any>;
 }
 
@@ -95,8 +96,10 @@ export const dispatchAIChatPayload = async ({
       return 'stream';
     }
 
-    if (service?.AIChatSend) {
-      const result = await service.AIChatSend(messages, tools);
+    if (service?.AIChatSendInSession || service?.AIChatSend) {
+      const result = service?.AIChatSendInSession
+        ? await service.AIChatSendInSession(sid, messages, tools)
+        : await service!.AIChatSend!(messages, tools);
       const rawError = result?.error || translate('common.unknown');
       const cleanError = sanitizeErrorMsg(rawError, translate);
 

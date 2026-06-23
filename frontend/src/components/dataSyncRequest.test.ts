@@ -42,6 +42,7 @@ describe('buildDataSyncRequest', () => {
       targetConfig: { type: 'mysql' },
       sourceDatabase: ' app ',
       targetDatabase: ' warehouse ',
+      targetSchema: ' reporting ',
       selectedTables: ['users'],
       sourceDatasetMode: 'query',
       sourceQuery: '  SELECT id, name FROM active_users  ',
@@ -65,6 +66,7 @@ describe('buildDataSyncRequest', () => {
       createIndexes: false,
       sourceDatabase: 'app',
       targetDatabase: 'warehouse',
+      targetSchema: 'reporting',
       jobId: 'job-1',
     });
   });

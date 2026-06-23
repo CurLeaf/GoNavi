@@ -78,6 +78,31 @@ func (a *App) getRedisClient(config connection.ConnectionConfig) (redis.RedisCli
 	return client, nil
 }
 
+func (a *App) openRedisClientIsolated(config connection.ConnectionConfig) (redis.RedisClient, error) {
+	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	if err != nil {
+		wrapped := wrapConnectError(config, err)
+		logger.Error(wrapped, "Redis 密文解析失败：%s", formatRedisConnSummary(config))
+		return nil, wrapped
+	}
+
+	effectiveConfig := applyGlobalProxyToConnection(resolvedConfig)
+	connectConfig, proxyErr := resolveDialConfigWithProxyFunc(effectiveConfig)
+	if proxyErr != nil {
+		wrapped := wrapConnectError(effectiveConfig, proxyErr)
+		logger.Error(wrapped, "Redis 代理准备失败：%s", formatRedisConnSummary(effectiveConfig))
+		return nil, wrapped
+	}
+
+	client, connectedConfig, connectErr := connectRedisClientWithLegacyRootFallback(connectConfig)
+	if connectErr != nil {
+		wrapped := wrapConnectError(connectedConfig, connectErr)
+		logger.Error(wrapped, "Redis 临时连接失败：%s", formatRedisConnSummary(connectedConfig))
+		return nil, wrapped
+	}
+	return client, nil
+}
+
 func connectRedisClientWithLegacyRootFallback(config connection.ConnectionConfig) (redis.RedisClient, connection.ConnectionConfig, error) {
 	client := newRedisClientFunc()
 	if err := client.Connect(config); err == nil {
@@ -237,7 +262,20 @@ func (a *App) RedisConnect(config connection.ConnectionConfig) connection.QueryR
 
 // RedisTestConnection tests a Redis connection (alias for RedisConnect)
 func (a *App) RedisTestConnection(config connection.ConnectionConfig) connection.QueryResult {
-	return a.RedisConnect(config)
+	config.Type = "redis"
+	client, err := a.openRedisClientIsolated(config)
+	if err != nil {
+		logger.Error(err, "RedisTestConnection 连接失败：%s", formatRedisConnSummary(config))
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+	if client != nil {
+		if closeErr := client.Close(); closeErr != nil {
+			logger.Error(closeErr, "RedisTestConnection 释放临时连接失败：%s", formatRedisConnSummary(config))
+			return connection.QueryResult{Success: false, Message: fmt.Sprintf("连接成功但释放测试连接失败：%v", closeErr)}
+		}
+	}
+	logger.Infof("RedisTestConnection 连接成功：%s", formatRedisConnSummary(config))
+	return connection.QueryResult{Success: true, Message: "连接成功"}
 }
 
 // RedisScanKeys scans keys matching a pattern

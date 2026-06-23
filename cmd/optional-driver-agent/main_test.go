@@ -190,6 +190,64 @@ func (f *fakeAgentStatementSession) Close() error {
 	return nil
 }
 
+type fakeAgentStreamSession struct {
+	closed      bool
+	streamCalls int
+	deadlineSet bool
+}
+
+func (f *fakeAgentStreamSession) Exec(query string) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeAgentStreamSession) ExecContext(ctx context.Context, query string) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeAgentStreamSession) Close() error {
+	f.closed = true
+	return nil
+}
+
+func (f *fakeAgentStreamSession) StreamQuery(query string, consumer db.QueryStreamConsumer) error {
+	return f.StreamQueryContext(context.Background(), query, consumer)
+}
+
+func (f *fakeAgentStreamSession) StreamQueryContext(ctx context.Context, query string, consumer db.QueryStreamConsumer) error {
+	f.streamCalls++
+	if _, ok := ctx.Deadline(); ok {
+		f.deadlineSet = true
+	}
+	if err := consumer.SetColumns([]string{"id", "name"}); err != nil {
+		return err
+	}
+	if valueConsumer, ok := consumer.(db.QueryStreamValueConsumer); ok {
+		if err := valueConsumer.ConsumeRowValues([]interface{}{1, "alice"}); err != nil {
+			return err
+		}
+		if err := valueConsumer.ConsumeRowValues([]interface{}{2, "bob"}); err != nil {
+			return err
+		}
+		return nil
+	}
+	if err := consumer.ConsumeRow(map[string]interface{}{"id": 1, "name": "alice"}); err != nil {
+		return err
+	}
+	return consumer.ConsumeRow(map[string]interface{}{"id": 2, "name": "bob"})
+}
+
+type fakeAgentSessionStreamDB struct {
+	fakeAgentTimeoutDB
+	session   *fakeAgentStreamSession
+	openCalls int
+}
+
+func (f *fakeAgentSessionStreamDB) OpenSessionExecer(ctx context.Context) (db.StatementExecer, error) {
+	f.openCalls++
+	f.session = &fakeAgentStreamSession{}
+	return f.session, nil
+}
+
 func TestQueryWithOptionalTimeout_UsesQueryContext(t *testing.T) {
 	fake := &fakeAgentTimeoutDB{}
 	data, fields, err := queryWithOptionalTimeout(fake, "SELECT 1", int64((2 * time.Second).Milliseconds()))
@@ -304,5 +362,137 @@ func TestHandleRequest_UsesPinnedSessionForSessionScopedQueryAndExec(t *testing.
 	}
 	if !fake.session.closed {
 		t.Fatal("expected pinned session to close")
+	}
+}
+
+func TestHandleStreamRequest_UsesSessionStreamerAndWritesChunks(t *testing.T) {
+	old := agentDriverType
+	originalAsync := runAgentMemoryTrimAsync
+	originalTrim := agentMemoryTrimFn
+	originalLastAt := agentMemoryTrimLastAt.Load()
+	defer func() { agentDriverType = old }()
+	defer func() {
+		runAgentMemoryTrimAsync = originalAsync
+		agentMemoryTrimFn = originalTrim
+		agentMemoryTrimRunning.Store(false)
+		agentMemoryTrimLastAt.Store(originalLastAt)
+	}()
+	agentDriverType = "oceanbase"
+	agentMemoryTrimRunning.Store(false)
+	agentMemoryTrimLastAt.Store(0)
+
+	fake := &fakeAgentSessionStreamDB{}
+	runtimeState := &agentRuntime{
+		inst:     fake,
+		sessions: make(map[string]db.StatementExecer),
+	}
+
+	trimmed := 0
+	runAgentMemoryTrimAsync = func(fn func()) {
+		fn()
+	}
+	agentMemoryTrimFn = func() {
+		trimmed++
+	}
+
+	var out bytes.Buffer
+	writer := bufio.NewWriter(&out)
+	if err := handleStreamRequest(runtimeState, agentRequest{
+		ID:        9,
+		Method:    agentMethodStreamQuery,
+		Query:     "SELECT * FROM person_info",
+		TimeoutMs: int64((2 * time.Second).Milliseconds()),
+	}, writer); err != nil {
+		t.Fatalf("handleStreamRequest 返回错误: %v", err)
+	}
+
+	if fake.openCalls != 1 {
+		t.Fatalf("expected OpenSessionExecer called once, got %d", fake.openCalls)
+	}
+	if fake.session == nil || fake.session.streamCalls != 1 {
+		t.Fatalf("expected session streamer used once, session=%#v", fake.session)
+	}
+	if !fake.session.deadlineSet {
+		t.Fatal("expected stream query context deadline to be set")
+	}
+	if !fake.session.closed {
+		t.Fatal("expected session to close after streaming")
+	}
+	if fake.queryCalled || fake.queryContextCalled {
+		t.Fatalf("unexpected fallback query path, Query=%v QueryContext=%v", fake.queryCalled, fake.queryContextCalled)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 stream responses, got %d: %q", len(lines), out.String())
+	}
+
+	var columnsResp struct {
+		Success   bool     `json:"success"`
+		ChunkType string   `json:"chunkType"`
+		Fields    []string `json:"fields"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &columnsResp); err != nil {
+		t.Fatalf("decode columns response failed: %v", err)
+	}
+	if !columnsResp.Success || columnsResp.ChunkType != agentChunkColumns || len(columnsResp.Fields) != 2 {
+		t.Fatalf("unexpected columns response: %#v", columnsResp)
+	}
+
+	var rowsResp struct {
+		Success   bool            `json:"success"`
+		ChunkType string          `json:"chunkType"`
+		Data      [][]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &rowsResp); err != nil {
+		t.Fatalf("decode rows response failed: %v", err)
+	}
+	if !rowsResp.Success || rowsResp.ChunkType != agentChunkRows || len(rowsResp.Data) != 2 {
+		t.Fatalf("unexpected rows response: %#v", rowsResp)
+	}
+	if got := rowsResp.Data[1][1]; got != "bob" {
+		t.Fatalf("unexpected streamed row payload: %v", rowsResp.Data)
+	}
+
+	var doneResp struct {
+		Success   bool   `json:"success"`
+		ChunkType string `json:"chunkType"`
+	}
+	if err := json.Unmarshal([]byte(lines[2]), &doneResp); err != nil {
+		t.Fatalf("decode done response failed: %v", err)
+	}
+	if !doneResp.Success || doneResp.ChunkType != agentChunkDone {
+		t.Fatalf("unexpected done response: %#v", doneResp)
+	}
+	if trimmed != 0 {
+		t.Fatalf("小流式任务不应触发内存回收，got=%d", trimmed)
+	}
+}
+
+func TestMaybeReleaseAgentMemory_TriggersTrimForLargeJobs(t *testing.T) {
+	originalAsync := runAgentMemoryTrimAsync
+	originalTrim := agentMemoryTrimFn
+	originalLastAt := agentMemoryTrimLastAt.Load()
+	t.Cleanup(func() {
+		runAgentMemoryTrimAsync = originalAsync
+		agentMemoryTrimFn = originalTrim
+		agentMemoryTrimRunning.Store(false)
+		agentMemoryTrimLastAt.Store(originalLastAt)
+	})
+
+	agentMemoryTrimRunning.Store(false)
+	agentMemoryTrimLastAt.Store(0)
+	triggered := 0
+	runAgentMemoryTrimAsync = func(fn func()) {
+		fn()
+	}
+	agentMemoryTrimFn = func() {
+		triggered++
+	}
+
+	maybeReleaseAgentMemory("test-large-query", agentMemoryTrimRowsThreshold)
+
+	if triggered != 1 {
+		t.Fatalf("大查询完成后应触发一次内存回收，got=%d", triggered)
 	}
 }

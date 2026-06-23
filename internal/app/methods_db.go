@@ -97,27 +97,7 @@ func (a *App) DBReleaseConnection(config connection.ConnectionConfig) connection
 		logger.Error(wrapped, "DBReleaseConnection 解析连接密文失败：%s", formatConnSummary(config))
 		return connection.QueryResult{Success: false, Message: wrapped.Error()}
 	}
-	targetKey := getConnectionReleaseMatchKey(applyGlobalProxyToConnection(resolvedConfig))
-	closed := 0
-
-	a.mu.Lock()
-	for key, entry := range a.dbCache {
-		entryConfig := entry.config
-		if strings.TrimSpace(entryConfig.Type) == "" {
-			continue
-		}
-		if getConnectionReleaseMatchKey(entryConfig) != targetKey {
-			continue
-		}
-		if entry.inst != nil {
-			if closeErr := entry.inst.Close(); closeErr != nil {
-				logger.Error(closeErr, "DBReleaseConnection 关闭缓存连接失败：缓存Key=%s", shortCacheKey(key))
-			}
-		}
-		delete(a.dbCache, key)
-		closed++
-	}
-	a.mu.Unlock()
+	closed := a.releaseCachedDatabaseConnectionsForConfig(applyGlobalProxyToConnection(resolvedConfig))
 
 	logger.Infof("DBReleaseConnection 已释放数据库连接：%s 数量=%d", formatConnSummary(resolvedConfig), closed)
 	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.release_success", nil), Data: map[string]int{"closed": closed}}
@@ -131,14 +111,48 @@ func (a *App) TestConnection(config connection.ConnectionConfig) connection.Quer
 		logger.Warnf("TestConnection 参数校验失败：耗时=%s %s 原因=%s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig), err.Error())
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	_, err := a.getDatabaseForcePing(testConfig)
+	dbInst, err := a.openDatabaseIsolated(testConfig)
+	if err != nil {
+		dbInst, err = a.retryIsolatedTestConnectionAfterMySQLMaxUserConnections(testConfig, err)
+	}
 	if err != nil {
 		logger.Error(err, "TestConnection 连接测试失败：耗时=%s %s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig))
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
+	if dbInst != nil {
+		if closeErr := dbInst.Close(); closeErr != nil {
+			logger.Error(closeErr, "TestConnection 释放临时连接失败：耗时=%s %s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig))
+			return connection.QueryResult{Success: false, Message: fmt.Sprintf("连接成功但释放测试连接失败：%v", closeErr)}
+		}
+	}
 
 	logger.Infof("TestConnection 连接测试成功：耗时=%s %s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig))
 	return connection.QueryResult{Success: true, Message: a.appText("db.backend.message.connect_success", nil)}
+}
+
+func (a *App) retryIsolatedTestConnectionAfterMySQLMaxUserConnections(config connection.ConnectionConfig, err error) (db.Database, error) {
+	if !isMySQLMaxUserConnectionsError(err) {
+		return nil, err
+	}
+
+	effectiveConfig, resolveErr := a.resolveEffectiveConnectionConfig(config)
+	if resolveErr != nil {
+		return nil, err
+	}
+	released := a.releaseCachedDatabaseConnectionsForConfig(effectiveConfig)
+	logger.Warnf("测试连接检测到 MySQL 用户连接数超限，已释放同实例缓存连接：%s 数量=%d", formatConnSummary(effectiveConfig), released)
+	if released <= 0 {
+		return nil, withMySQLMaxUserConnectionsHint(err, released)
+	}
+
+	dbInst, retryErr := a.openDatabaseIsolated(config)
+	if retryErr != nil {
+		if isMySQLMaxUserConnectionsError(retryErr) {
+			return nil, withMySQLMaxUserConnectionsHint(retryErr, released)
+		}
+		return nil, retryErr
+	}
+	return dbInst, nil
 }
 
 func (a *App) MongoDiscoverMembers(config connection.ConnectionConfig) connection.QueryResult {
@@ -526,8 +540,8 @@ func normalizeSchemaAndTableByType(dbType string, dbName string, tableName strin
 		return rawDB, rawTable
 	}
 
-	// Elasticsearch / RocketMQ / MQTT / RabbitMQ / Kafka：对象名可能含多个点或路径，不能按点分割
-	if dbType == "elasticsearch" || dbType == "rocketmq" || dbType == "mqtt" || dbType == "kafka" || dbType == "rabbitmq" {
+	// Elasticsearch / RocketMQ / MQTT / RabbitMQ / Kafka / Trino：对象名可能含多个点或路径，不能按点分割
+	if dbType == "elasticsearch" || dbType == "rocketmq" || dbType == "mqtt" || dbType == "kafka" || dbType == "rabbitmq" || dbType == "trino" {
 		return rawDB, rawTable
 	}
 
@@ -605,10 +619,33 @@ func resolveCreateStatementTargets(config connection.ConnectionConfig, dbType st
 func quoteTableIdentByType(dbType string, schema string, table string) string {
 	s := strings.TrimSpace(schema)
 	t := strings.TrimSpace(table)
+	if dbType == "trino" {
+		catalog, namespace := splitTrinoNamespace(s)
+		switch {
+		case catalog == "" && namespace == "":
+			return quoteIdentByType(dbType, t)
+		case namespace == "":
+			return fmt.Sprintf("%s.%s", quoteIdentByType(dbType, catalog), quoteIdentByType(dbType, t))
+		default:
+			return fmt.Sprintf("%s.%s.%s", quoteIdentByType(dbType, catalog), quoteIdentByType(dbType, namespace), quoteIdentByType(dbType, t))
+		}
+	}
 	if s == "" {
 		return quoteIdentByType(dbType, t)
 	}
 	return fmt.Sprintf("%s.%s", quoteIdentByType(dbType, s), quoteIdentByType(dbType, t))
+}
+
+func splitTrinoNamespace(raw string) (string, string) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(text, ".", 2)
+	if len(parts) == 1 {
+		return strings.TrimSpace(parts[0]), ""
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
 }
 
 func buildRunConfigForDDL(config connection.ConnectionConfig, dbType string, dbName string) connection.ConnectionConfig {
@@ -919,7 +956,18 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 // DBQueryMulti 执行可能包含多条 SQL 语句的查询，返回多个结果集。
 // 如果底层驱动支持 MultiResultQuerier，一次性执行所有语句；
 // 否则按分号拆分后逐条执行，模拟多结果集。
-func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, query string, queryID string) connection.QueryResult {
+func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, query string, queryID string) (result connection.QueryResult) {
+	// 慢 SQL 埋点：成功执行后异步记录（低于阈值 500ms 自动跳过），不阻塞返回。
+	// 用 named return + defer 覆盖所有 return path，避免遗漏。
+	queryStartedAt := time.Now()
+	defer func() {
+		if !result.Success {
+			return
+		}
+		durationMs := time.Since(queryStartedAt).Milliseconds()
+		a.recordQueryExecutionAsync(config, resolveDDLDBType(config), query, durationMs, 0, 0)
+	}()
+
 	runConfig := normalizeRunConfig(config, dbName)
 	buildStatementExecutionFailedMessage := func(index int, err error, previousSuccessCount int) string {
 		message := a.appText("db.backend.error.multi_statement_execution_failed", map[string]any{

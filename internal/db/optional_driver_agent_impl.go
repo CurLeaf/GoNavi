@@ -2,6 +2,7 @@ package db
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,7 @@ const (
 	optionalAgentMethodOpenSession      = "openSession"
 	optionalAgentMethodCloseSession     = "closeSession"
 	optionalAgentMethodQuery            = "query"
+	optionalAgentMethodStreamQuery      = "streamQuery"
 	optionalAgentMethodExec             = "exec"
 	optionalAgentMethodGetDatabases     = "getDatabases"
 	optionalAgentMethodGetTables        = "getTables"
@@ -40,6 +42,19 @@ const (
 	optionalAgentMethodApplyChanges     = "applyChanges"
 	optionalAgentDefaultScannerMaxBytes = 8 << 20
 	optionalAgentMetadataProbeTimeout   = 5 * time.Second
+	// callStreamQueryGCInterval 控制 callStreamQuery 每接收多少行 driver-agent 数据触发一次 runtime.GC。
+	//
+	// 该路径不走 sql.Rows（scan_rows.go 的周期 GC 覆盖不到），但每个 chunk 解码
+	// [][]interface{} + normalizeQueryValue 转换会产生大量临时字符串，需要主动回收。
+	// 取 50000 与 scan_rows.go 的 streamRowsPeriodicGCInterval 保持一致，
+	// 让两端在相近节奏下分别 GC，避免内存峰值叠加。
+	callStreamQueryGCInterval = 50000
+)
+
+const (
+	optionalAgentChunkColumns = "columns"
+	optionalAgentChunkRows    = "rows"
+	optionalAgentChunkDone    = "done"
 )
 
 type optionalAgentRequest struct {
@@ -60,6 +75,7 @@ type optionalAgentResponse struct {
 	Error        string          `json:"error,omitempty"`
 	Data         json.RawMessage `json:"data,omitempty"`
 	Fields       []string        `json:"fields,omitempty"`
+	ChunkType    string          `json:"chunkType,omitempty"`
 	RowsAffected int64           `json:"rowsAffected,omitempty"`
 }
 
@@ -269,6 +285,125 @@ func (c *optionalDriverAgentClient) callWithTimeout(req optionalAgentRequest, ou
 	}
 }
 
+func (c *optionalDriverAgentClient) callStreamQuery(req optionalAgentRequest, consumer QueryStreamConsumer) error {
+	if consumer == nil {
+		return fmt.Errorf("query stream consumer required")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.nextID++
+	req.ID = c.nextID
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	payload = append(payload, '\n')
+	if _, err := c.stdin.Write(payload); err != nil {
+		stderrText := c.stderrText()
+		if stderrText == "" {
+			return fmt.Errorf("调用 %s 驱动代理失败：%w", driverDisplayName(c.driver), err)
+		}
+		return fmt.Errorf("调用 %s 驱动代理失败：%w（stderr: %s）", driverDisplayName(c.driver), err, stderrText)
+	}
+
+	var columns []string
+	valueConsumer, useValueConsumer := consumer.(QueryStreamValueConsumer)
+
+	// processedRows 用于周期性触发 GC。
+	// 该路径不走 sql.Rows，scan_rows.go 的周期 GC 覆盖不到。
+	// 每个 chunk 解码会分配 [][]interface{} + normalizeQueryValue 转换副本，
+	// 88W 行场景下不主动 GC 会让主进程 RSS 单调爬升。
+	var processedRows int64
+
+	for {
+		line, err := c.reader.ReadBytes('\n')
+		if err != nil {
+			stderrText := c.stderrText()
+			if stderrText == "" {
+				return fmt.Errorf("读取 %s 驱动代理响应失败：%w", driverDisplayName(c.driver), err)
+			}
+			return fmt.Errorf("读取 %s 驱动代理响应失败：%w（stderr: %s）", driverDisplayName(c.driver), err, stderrText)
+		}
+
+		var resp optionalAgentResponse
+		if err := json.Unmarshal(line, &resp); err != nil {
+			return fmt.Errorf("解析 %s 驱动代理响应失败：%w", driverDisplayName(c.driver), err)
+		}
+		if !resp.Success {
+			errText := strings.TrimSpace(resp.Error)
+			if errText == "" {
+				errText = fmt.Sprintf("%s 驱动代理返回失败", driverDisplayName(c.driver))
+			}
+			return errors.New(errText)
+		}
+
+		switch resp.ChunkType {
+		case optionalAgentChunkColumns:
+			columns = append(columns[:0], resp.Fields...)
+			if err := consumer.SetColumns(columns); err != nil {
+				return err
+			}
+		case optionalAgentChunkRows:
+			if len(columns) == 0 {
+				return fmt.Errorf("%s 驱动代理流式响应缺少列信息", driverDisplayName(c.driver))
+			}
+			rows, err := decodeOptionalAgentRowValueBatch(resp.Data)
+			if err != nil {
+				return fmt.Errorf("解析 %s 驱动代理流式数据失败：%w", driverDisplayName(c.driver), err)
+			}
+			for _, row := range rows {
+				if useValueConsumer {
+					if err := valueConsumer.ConsumeRowValues(row); err != nil {
+						return err
+					}
+					continue
+				}
+				entry := make(map[string]interface{}, len(columns))
+				for i, column := range columns {
+					if i < len(row) {
+						entry[column] = row[i]
+					} else {
+						entry[column] = nil
+					}
+				}
+				if err := consumer.ConsumeRow(entry); err != nil {
+					return err
+				}
+			}
+			processedRows += int64(len(rows))
+			if processedRows >= callStreamQueryGCInterval {
+				runtime.GC()
+				processedRows = 0
+			}
+		case optionalAgentChunkDone:
+			return nil
+		default:
+			return fmt.Errorf("%s 驱动代理返回未知流式分片类型：%s", driverDisplayName(c.driver), strings.TrimSpace(resp.ChunkType))
+		}
+	}
+}
+
+func decodeOptionalAgentRowValueBatch(data []byte) ([][]interface{}, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var rows [][]interface{}
+	if err := decoder.Decode(&rows); err != nil {
+		return nil, err
+	}
+	for rowIdx := range rows {
+		for colIdx := range rows[rowIdx] {
+			rows[rowIdx][colIdx] = normalizeQueryValue(rows[rowIdx][colIdx])
+		}
+	}
+	return rows, nil
+}
+
 func (c *optionalDriverAgentClient) forceTerminate() {
 	if c.stdin != nil {
 		_ = c.stdin.Close()
@@ -397,6 +532,42 @@ func (d *OptionalDriverAgentDB) Query(query string) ([]map[string]interface{}, [
 	return data, fields, nil
 }
 
+func (d *OptionalDriverAgentDB) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return d.StreamQueryContext(context.Background(), query, consumer)
+}
+
+func (d *OptionalDriverAgentDB) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	client, err := d.requireClient()
+	if err != nil {
+		return err
+	}
+	err = client.callStreamQuery(optionalAgentRequest{
+		Method:    optionalAgentMethodStreamQuery,
+		Query:     query,
+		TimeoutMs: timeoutMsFromContext(ctx),
+	}, consumer)
+	if isOptionalAgentStreamUnsupportedError(err) {
+		logger.Warnf("%s 驱动代理暂不支持流式查询，回退到缓冲模式：err=%v", driverDisplayName(d.driverType), err)
+		data, columns, queryErr := d.QueryContext(ctx, query)
+		if queryErr != nil {
+			return queryErr
+		}
+		if err := consumer.SetColumns(columns); err != nil {
+			return err
+		}
+		for _, row := range data {
+			if err := consumer.ConsumeRow(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return err
+}
+
 func (d *OptionalDriverAgentDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
@@ -456,6 +627,39 @@ func (d *OptionalDriverAgentDB) OpenSessionExecer(ctx context.Context) (Statemen
 
 func (s *optionalDriverAgentSession) Query(query string) ([]map[string]interface{}, []string, error) {
 	return s.QueryContext(context.Background(), query)
+}
+
+func (s *optionalDriverAgentSession) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return s.StreamQueryContext(context.Background(), query, consumer)
+}
+
+func (s *optionalDriverAgentSession) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	if err := s.ensureOpen(); err != nil {
+		return err
+	}
+	err := s.client.callStreamQuery(optionalAgentRequest{
+		Method:    optionalAgentMethodStreamQuery,
+		SessionID: s.sessionID,
+		Query:     query,
+		TimeoutMs: timeoutMsFromContext(ctx),
+	}, consumer)
+	if isOptionalAgentStreamUnsupportedError(err) {
+		logger.Warnf("%s 驱动代理事务会话暂不支持流式查询，回退到缓冲模式：err=%v", driverDisplayName(s.driver), err)
+		data, columns, queryErr := s.QueryContext(ctx, query)
+		if queryErr != nil {
+			return queryErr
+		}
+		if err := consumer.SetColumns(columns); err != nil {
+			return err
+		}
+		for _, row := range data {
+			if err := consumer.ConsumeRow(row); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return err
 }
 
 func (s *optionalDriverAgentSession) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
@@ -523,6 +727,17 @@ func (s *optionalDriverAgentSession) ensureOpen() error {
 		return fmt.Errorf("%s 事务会话已关闭", driverDisplayName(s.driver))
 	}
 	return nil
+}
+
+func isOptionalAgentStreamUnsupportedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.TrimSpace(err.Error())
+	if text == "" {
+		return false
+	}
+	return strings.Contains(text, "不支持的方法") || strings.Contains(text, "不支持流式查询")
 }
 
 func (d *OptionalDriverAgentDB) GetDatabases() ([]string, error) {

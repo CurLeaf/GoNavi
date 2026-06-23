@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -9,7 +10,7 @@ import (
 )
 
 // CustomProvider 自定义 Provider，根据 apiFormat 选择底层协议
-// 支持 openai / anthropic / gemini 三种 API 格式
+// 支持 openai / anthropic / gemini / cursor-agent 等 API 格式
 type CustomProvider struct {
 	inner Provider
 	name  string
@@ -17,14 +18,13 @@ type CustomProvider struct {
 
 // NewCustomProvider 创建自定义 Provider 实例
 func NewCustomProvider(config ai.ProviderConfig) (Provider, error) {
-	if strings.TrimSpace(config.BaseURL) == "" {
-		return nil, fmt.Errorf("custom provider Base URL is required")
-	}
-
 	// 根据 apiFormat 决定使用哪个底层协议，默认 openai
 	apiFormat := strings.ToLower(strings.TrimSpace(config.APIFormat))
 	if apiFormat == "" {
 		apiFormat = "openai"
+	}
+	if strings.TrimSpace(config.BaseURL) == "" && apiFormat != "claude-cli" && apiFormat != "codebuddy-cli" {
+		return nil, fmt.Errorf("自定义 Provider 必须指定 Base URL")
 	}
 
 	var innerProvider Provider
@@ -34,8 +34,12 @@ func NewCustomProvider(config ai.ProviderConfig) (Provider, error) {
 		innerProvider, err = NewAnthropicProvider(config)
 	case "gemini":
 		innerProvider, err = NewGeminiProvider(config)
+	case "cursor-agent":
+		innerProvider, err = NewCursorAgentProvider(config)
 	case "claude-cli":
 		innerProvider, err = NewClaudeCLIProvider(config)
+	case "codebuddy-cli":
+		innerProvider, err = NewCodeBuddyCLIProvider(config)
 	default: // "openai" 及其他
 		innerProvider, err = NewOpenAIProvider(config)
 	}
@@ -71,4 +75,21 @@ func (p *CustomProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.Chat
 
 func (p *CustomProvider) ChatStream(ctx context.Context, req ai.ChatRequest, callback func(ai.StreamChunk)) error {
 	return p.inner.ChatStream(ctx, req, callback)
+}
+
+func (p *CustomProvider) ChatWithState(ctx context.Context, state json.RawMessage, req ai.ChatRequest) (*ai.ChatResponse, json.RawMessage, error) {
+	sessionProvider, ok := p.inner.(SessionChatProvider)
+	if !ok {
+		resp, err := p.inner.Chat(ctx, req)
+		return resp, nil, err
+	}
+	return sessionProvider.ChatWithState(ctx, state, req)
+}
+
+func (p *CustomProvider) ChatStreamWithState(ctx context.Context, state json.RawMessage, req ai.ChatRequest, callback func(ai.StreamChunk)) (json.RawMessage, error) {
+	sessionProvider, ok := p.inner.(SessionStreamProvider)
+	if !ok {
+		return nil, p.inner.ChatStream(ctx, req, callback)
+	}
+	return sessionProvider.ChatStreamWithState(ctx, state, req, callback)
 }

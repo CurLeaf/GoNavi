@@ -241,6 +241,8 @@ func defaultPortByType(driverType string) int {
 		return 27017
 	case "clickhouse":
 		return 9000
+	case "trino":
+		return 8080
 	case "highgo":
 		return 5866
 	case "iris":

@@ -165,6 +165,7 @@ func (o *OracleDB) Connect(config connection.ConnectionConfig) error {
 			failures = append(failures, fmt.Sprintf("第%d次连接打开失败: %v", idx+1, err))
 			continue
 		}
+		configureSQLConnectionPool(db, "oracle")
 		o.conn = db
 		o.pingTimeout = getConnectTimeout(attempt)
 		if err := o.Ping(); err != nil {

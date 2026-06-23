@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 const connectionModalSource = readFileSync(new URL('./ConnectionModal.tsx', import.meta.url), 'utf8');
+const connectionModalConfigSource = readFileSync(new URL('./connectionModal/connectionModalConfig.ts', import.meta.url), 'utf8');
+const connectionModalStep2Source = readFileSync(new URL('./connectionModal/ConnectionModalStep2.tsx', import.meta.url), 'utf8');
+const connectionModalNetworkSecuritySource = readFileSync(new URL('./connectionModal/ConnectionModalNetworkSecuritySection.tsx', import.meta.url), 'utf8');
+const connectionModalUriSource = readFileSync(new URL('./connectionModal/connectionModalUri.ts', import.meta.url), 'utf8');
 const redisSectionsSource = readFileSync(new URL('./ConnectionModalRedisSections.tsx', import.meta.url), 'utf8');
 const mongoSectionsSource = readFileSync(new URL('./ConnectionModalMongoSections.tsx', import.meta.url), 'utf8');
 const connectionTypeCatalogSource = readFileSync(new URL('../utils/connectionTypeCatalog.ts', import.meta.url), 'utf8');
 const connectionTypeCapabilitiesSource = readFileSync(new URL('../utils/connectionTypeCapabilities.ts', import.meta.url), 'utf8');
-const source = `${connectionModalSource}\n${redisSectionsSource}\n${mongoSectionsSource}\n${connectionTypeCatalogSource}\n${connectionTypeCapabilitiesSource}`;
+const source = `${connectionModalSource}\n${connectionModalConfigSource}\n${connectionModalStep2Source}\n${connectionModalNetworkSecuritySource}\n${connectionModalUriSource}\n${redisSectionsSource}\n${mongoSectionsSource}\n${connectionTypeCatalogSource}\n${connectionTypeCapabilitiesSource}`;
 
 describe('ConnectionModal edit password behavior', () => {
   it('keeps the prefilled primary password masked by default', () => {
@@ -313,7 +317,7 @@ describe('ConnectionModal Redis Sentinel configuration', () => {
       'connection.modal.error.unknown',
       'connection.modal.field.username.optional_placeholder',
     ].forEach((key) => {
-      expect(connectionModalSource).toContain(key);
+      expect(source).toContain(key);
     });
   });
 

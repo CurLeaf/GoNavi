@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React, { useState, useRef, useCallback, useMemo } from 'react';
-import { Modal, Input, Button, Table, Progress, Space, Tag, message, Tooltip, Select, Empty } from 'antd';
+import { Input, Button, Table, Progress, Space, Tag, message, Tooltip, Select, Empty } from 'antd';
 import { SearchOutlined, StopOutlined, EyeOutlined, DatabaseOutlined } from '@ant-design/icons';
 import { DBQuery, DBGetTables, DBGetAllColumns } from '../../wailsjs/go/app/App';
 import { quoteIdentPart, escapeLiteral } from '../utils/sql';

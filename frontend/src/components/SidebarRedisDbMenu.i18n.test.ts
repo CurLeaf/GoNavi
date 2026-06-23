@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+const source = [
+  readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('./sidebar/sidebarLegacyNodeMenu.tsx', import.meta.url), 'utf8'),
+].join('\n');
 
 describe('Sidebar Redis DB menu i18n', () => {
   it('localizes Redis database context menu labels and tab titles', () => {

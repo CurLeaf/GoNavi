@@ -157,6 +157,7 @@ func (k *KingbaseDB) Connect(config connection.ConnectionConfig) error {
 			failures = append(failures, fmt.Sprintf("第%d次连接打开失败: %v", idx+1, err))
 			continue
 		}
+		configureSQLConnectionPool(db, "kingbase")
 		k.conn = db
 		k.pingTimeout = getConnectTimeout(attempt)
 		if err := k.Ping(); err != nil {
@@ -175,8 +176,9 @@ func (k *KingbaseDB) Connect(config connection.ConnectionConfig) error {
 			// 将 search_path 参数拼入 DSN
 			finalDSN := dsn + " search_path=" + quoteConnValue(searchPathStr)
 			if finalDB, err := sql.Open("kingbase", finalDSN); err == nil {
-				k.pingTimeout = getConnectTimeout(attempt)
+				configureSQLConnectionPool(finalDB, "kingbase")
 				finalDB.SetConnMaxLifetime(5 * time.Minute)
+				k.pingTimeout = getConnectTimeout(attempt)
 
 				// 临时将 k.conn 指向 finalDB 来做 ping 测试
 				oldConn := k.conn

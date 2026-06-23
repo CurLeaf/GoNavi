@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+const readSourceFile = (relativePath: string) => readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+const source = [
+  readSourceFile('./Sidebar.tsx'),
+  readSourceFile('./sidebar/SidebarSearchPanel.tsx'),
+  readSourceFile('./sidebar/useSidebarSearchModel.tsx'),
+  readSourceFile('./sidebar/useSidebarCommandSearchRunner.ts'),
+].join('\n');
 const locales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
 const requiredKeys = [
   'sidebar.command_search.recent_sql_fallback',
@@ -71,4 +77,3 @@ describe('Sidebar command search i18n', () => {
     });
   });
 });
-
