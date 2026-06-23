@@ -436,8 +436,8 @@ func sqlServerControlFlowMayReturnMessages(query string) bool {
 }
 
 func isReadOnlySQLQuery(dbType string, query string) bool {
-	if strings.ToLower(strings.TrimSpace(dbType)) == "mongodb" && strings.HasPrefix(strings.TrimSpace(query), "{") {
-		return true
+	if strings.ToLower(strings.TrimSpace(dbType)) == "mongodb" {
+		return isReadOnlyMongoCommand(query)
 	}
 
 	keyword, withHasWrite := sqlDataOperationInfo(query)

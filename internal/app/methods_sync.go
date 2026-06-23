@@ -60,6 +60,13 @@ func (a *App) resolveDataSyncEndpointConfig(raw connection.ConnectionConfig, sel
 
 // DataSync executes a data synchronization task
 func (a *App) DataSync(config sync.SyncConfig) sync.SyncResult {
+	if err := ensureReadOnlyConnectionAllowsAction(config.TargetConfig, "数据同步写入"); err != nil {
+		return sync.SyncResult{
+			Success: false,
+			Message: err.Error(),
+			Logs:    []string{err.Error()},
+		}
+	}
 	jobID := strings.TrimSpace(config.JobID)
 	if jobID == "" {
 		jobID = fmt.Sprintf("sync-%d", time.Now().UnixNano())

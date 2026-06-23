@@ -808,6 +808,7 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     password: savePassword ? toTrimmedString(raw.password) : "",
     savePassword,
     database: toTrimmedString(raw.database),
+    readOnly: raw.readOnly === true,
     useSSL: sslCapable ? !!raw.useSSL : false,
     sslMode: sslCapable ? sslMode : "disable",
     sslCAPath: sslCapable ? toTrimmedString(raw.sslCAPath) : "",

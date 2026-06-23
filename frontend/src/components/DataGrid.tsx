@@ -539,7 +539,7 @@ const DataGrid: React.FC<DataGridProps> = ({
   const supportsCopyInsert = dataSourceCaps.supportsCopyInsert;
   const supportsSqlQueryExport = dataSourceCaps.supportsSqlQueryExport;
   const isQueryResultExport = exportScope === 'queryResult';
-  const canImport = exportScope === 'table' && !!tableName;
+  const canImport = exportScope === 'table' && !!tableName && !readOnly;
   const canExport = !!connectionId && (isQueryResultExport || !!tableName);
   const canViewDdl = exportScope === 'table' && !!connectionId && !!tableName;
   const canOpenObjectDesigner = exportScope === 'table' && objectType === 'table' && !!connectionId && !!tableName;
