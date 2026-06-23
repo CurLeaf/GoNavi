@@ -210,7 +210,13 @@ export const getLastIdentifierPart = (path: string): string => {
     return parts[parts.length - 1] || '';
 };
 
-export const resolveSimpleSelectItemColumn = (item: string): { resultName: string; sourceName: string } | 'all' | undefined => {
+export type SelectItemInfo = {
+    expression: string;
+    resultName: string;
+    sourceName?: string;
+};
+
+export const resolveSelectItemInfo = (item: string): SelectItemInfo | 'all' | undefined => {
     const text = String(item || '').trim();
     if (!text) return undefined;
     if (text === '*' || /\.\s*\*$/.test(text)) return 'all';
@@ -232,10 +238,16 @@ export const resolveSimpleSelectItemColumn = (item: string): { resultName: strin
         }
     }
 
-    if (!SIMPLE_IDENTIFIER_PATH_RE.test(expr)) return undefined;
-    const sourceName = getLastIdentifierPart(expr);
+    if (!alias && !SIMPLE_IDENTIFIER_PATH_RE.test(expr)) return undefined;
+    const sourceName = SIMPLE_IDENTIFIER_PATH_RE.test(expr) ? getLastIdentifierPart(expr) : '';
     const resultName = alias || sourceName;
-    return sourceName && resultName ? { resultName, sourceName } : undefined;
+    return resultName ? { expression: expr, resultName, sourceName: sourceName || undefined } : undefined;
+};
+
+export const resolveSimpleSelectItemColumn = (item: string): { resultName: string; sourceName: string } | 'all' | undefined => {
+    const resolved = resolveSelectItemInfo(item);
+    if (!resolved || resolved === 'all' || !resolved.sourceName) return resolved === 'all' ? 'all' : undefined;
+    return { resultName: resolved.resultName, sourceName: resolved.sourceName };
 };
 
 export const parseSimpleSelectInfo = (sql: string): SimpleSelectInfo | undefined => {
@@ -352,6 +364,57 @@ export const rewriteOracleSelectAllWithExpressions = (sql: string, expressions: 
     const aliasClause = parsedAlias.alias ? ` ${parsedAlias.alias}` : ` ${sourceAlias}`;
     const finalSelectItems = [...rewrittenSelectItems, ...qualifiedExpressions];
     return `${prefix}${finalSelectItems.join(', ')}${fromKeyword}${tableText}${aliasClause}${parsedAlias.remainder}`;
+};
+
+export const rewriteOracleDuplicateSelectColumns = (sql: string, tableColumnNames: string[]): string | undefined => {
+    const metadataNames = new Set(
+        tableColumnNames
+            .map((name) => String(name || '').trim().toLowerCase())
+            .filter(Boolean),
+    );
+    if (metadataNames.size === 0) return undefined;
+
+    const match = String(sql || '').match(/^(\s*SELECT\s+)([\s\S]+?)(\s+FROM\s+[\s\S]*)$/i);
+    if (!match) return undefined;
+
+    const prefix = match[1];
+    const selectList = match[2].trim();
+    const rest = match[3];
+    const selectItems = splitTopLevelComma(selectList);
+    if (selectItems.length === 0) return undefined;
+
+    const parsedItems = selectItems.map((item) => ({
+        raw: String(item || '').trimEnd(),
+        info: resolveSelectItemInfo(item),
+    }));
+    const hasWildcard = parsedItems.some(({ info }) => info === 'all');
+    if (!hasWildcard) return undefined;
+
+    const usedResultNames = new Set<string>(metadataNames);
+    parsedItems.forEach(({ info }) => {
+        if (!info || info === 'all') return;
+        const normalizedResult = String(info.resultName || '').trim().toLowerCase();
+        if (normalizedResult) usedResultNames.add(normalizedResult);
+    });
+
+    let changed = false;
+    const rewrittenItems = parsedItems.map(({ raw, info }) => {
+        if (!info || info === 'all') return raw;
+        const normalizedResult = String(info.resultName || '').trim().toLowerCase();
+        if (!metadataNames.has(normalizedResult)) return raw;
+
+        let nextIndex = 1;
+        let alias = `${info.resultName}_${nextIndex}`;
+        while (usedResultNames.has(alias.toLowerCase())) {
+            nextIndex++;
+            alias = `${info.resultName}_${nextIndex}`;
+        }
+        usedResultNames.add(alias.toLowerCase());
+        changed = true;
+        return `${info.expression} AS ${alias}`;
+    });
+
+    return changed ? `${prefix}${rewrittenItems.join(', ')}${rest}` : undefined;
 };
 
 export const findWritableResultColumnForSource = (writableColumns: Record<string, string>, target: string): string | undefined => {
@@ -1968,6 +2031,11 @@ export const resolveQueryLocatorPlan = async ({
 
         const tableColumns = resCols.data as ColumnDefinition[];
         const tableColumnNames = tableColumns.map(getColumnDefinitionName).filter(Boolean);
+        let executableStatement = statement;
+        if (isOracleLikeDialect(dbType) && selectInfo.selectsAll) {
+            const rewritten = rewriteOracleDuplicateSelectColumns(executableStatement, tableColumnNames);
+            if (rewritten) executableStatement = rewritten;
+        }
         const primaryKeys = tableColumns
             .filter((column: any) => getColumnDefinitionKey(column) === 'PRI')
             .map(getColumnDefinitionName)
@@ -2058,7 +2126,7 @@ export const resolveQueryLocatorPlan = async ({
         ];
 
         if (executableAppendExpressions.length > 0 && isOracleLikeDialect(dbType) && selectInfo.selectsBareAll) {
-            const rewritten = rewriteOracleSelectAllWithExpressions(statement, executableAppendExpressions);
+            const rewritten = rewriteOracleSelectAllWithExpressions(executableStatement, executableAppendExpressions);
             if (rewritten) {
                 plan.executedSql = rewritten;
                 return plan;
@@ -2070,7 +2138,7 @@ export const resolveQueryLocatorPlan = async ({
             return plan;
         }
 
-        plan.executedSql = appendQuerySelectExpressions(statement, executableAppendExpressions);
+        plan.executedSql = appendQuerySelectExpressions(executableStatement, executableAppendExpressions);
         return plan;
     } catch {
         const reason = translate('query_editor.message.read_only_table_locator_metadata_unavailable', {
