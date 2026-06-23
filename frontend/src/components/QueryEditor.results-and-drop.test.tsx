@@ -843,6 +843,43 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.columnNames).toEqual(['name']);
   });
 
+  it('hides redundant sqlserver affected-row status result after a query result', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'hydee';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [
+        {
+          statementIndex: 1,
+          columns: ['dddwno', 'dddwlist'],
+          rows: [{ dddwno: '001', dddwlist: 'demo' }],
+        },
+        { statementIndex: 1, columns: ['affectedRows'], rows: [{ affectedRows: 846 }] },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'hydee', query: 'select * from c_dddw' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const rendered = textContent(renderer!.toJSON());
+    expect(rendered).toContain('结果 1');
+    expect(rendered).not.toContain('结果 2');
+    expect(rendered).not.toContain('影响行数：846');
+    expect(dataGridState.latestProps?.columnNames).toEqual(['dddwno', 'dddwlist']);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ dddwno: '001', dddwlist: 'demo' });
+    expect(messageApi.success).toHaveBeenCalledWith('已执行完成，生成 1 个结果集。');
+  });
+
   it('prefers the first displayable sqlserver procedure result when empty result sets are returned', async () => {
     storeState.connections[0].config.type = 'sqlserver';
     storeState.connections[0].config.database = 'hydee';
@@ -953,7 +990,7 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(textContent(renderer!.toJSON())).toContain('消息 2');
+    expect(textContent(renderer!.toJSON())).toContain('消息 1');
     expect(findResultMessageTextarea(renderer!).props.value).toBe([
       "insert into c_dyscript(projectid,name) values (1,'demo')",
       "insert into c_dyscript(projectid,name) values (2,'next')",
@@ -1033,7 +1070,7 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(textContent(renderer!.toJSON())).toContain('消息 2');
+    expect(textContent(renderer!.toJSON())).toContain('消息 1');
     expect(findResultMessageTextarea(renderer!).props.value).toBe("insert into c_dyscript(projectid,name) values (1,'demo')");
     expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
     expect(dataGridState.latestProps).toBeNull();
