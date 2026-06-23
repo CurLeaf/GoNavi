@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyMongoQueryAutoLimit, buildMongoFindCommand, convertMongoShellToJsonCommand } from './mongodb';
+import {
+  applyMongoQueryAutoLimit,
+  buildMongoFindCommand,
+  convertMongoShellToJsonCommand,
+  formatMongoEditableValue,
+  parseMongoEditedValue,
+} from './mongodb';
 
 const parseCommand = (command: string | undefined) => JSON.parse(command || '{}');
 
@@ -131,6 +137,40 @@ describe('buildMongoFindCommand', () => {
       find: 'users',
       filter: {},
       __gonaviIncludeObjectIDLocator: true,
+    });
+  });
+});
+
+describe('Mongo edit value helpers', () => {
+  it('formats common extended JSON wrappers to editable literals', () => {
+    expect(formatMongoEditableValue({ $oid: '507f1f77bcf86cd799439011' })).toBe('ObjectId("507f1f77bcf86cd799439011")');
+    expect(formatMongoEditableValue({ $date: { $numberLong: '1719100800000' } })).toBe('ISODate("2024-06-23T00:00:00.000Z")');
+    expect(formatMongoEditableValue({ $numberInt: '7' })).toBe('NumberInt(7)');
+    expect(formatMongoEditableValue({ $numberLong: '8' })).toBe('NumberLong("8")');
+    expect(formatMongoEditableValue({ $numberDouble: '1.5' })).toBe('1.5');
+    expect(formatMongoEditableValue({ $numberDecimal: '9.99' })).toBe('NumberDecimal("9.99")');
+    expect(formatMongoEditableValue({
+      $binary: {
+        base64: 'EjRWeBI0RniSNFZ4EjRWeA==',
+        subType: '04',
+      },
+    })).toBe('UUID("12345678-1234-4678-9234-567812345678")');
+  });
+
+  it('parses typed Mongo edit text back to extended JSON wrappers', () => {
+    expect(parseMongoEditedValue('_id', '507f1f77bcf86cd799439011')).toEqual({ $oid: '507f1f77bcf86cd799439011' });
+    expect(parseMongoEditedValue('createdAt', '2024-06-23T00:00:00.000Z', { $date: { $numberLong: '1719100800000' } })).toEqual({
+      $date: { $numberLong: '1719100800000' },
+    });
+    expect(parseMongoEditedValue('count32', '7', { $numberInt: '1' })).toEqual({ $numberInt: '7' });
+    expect(parseMongoEditedValue('count64', '8', { $numberLong: '1' })).toEqual({ $numberLong: '8' });
+    expect(parseMongoEditedValue('ratio', '1.5', { $numberDouble: '0.5' })).toEqual({ $numberDouble: '1.5' });
+    expect(parseMongoEditedValue('price', '9.99', { $numberDecimal: '1.23' })).toEqual({ $numberDecimal: '9.99' });
+    expect(parseMongoEditedValue('uid', 'UUID("12345678-1234-4678-9234-567812345678")')).toEqual({
+      $binary: {
+        base64: 'EjRWeBI0RniSNFZ4EjRWeA==',
+        subType: '04',
+      },
     });
   });
 });
