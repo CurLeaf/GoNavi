@@ -3116,6 +3116,48 @@ describe('QueryEditor external SQL save', () => {
       expect(tableSuggestion.detail).not.toContain('Table (analytics)');
     });
 
+    it('deduplicates Oracle-style database qualified table completion labels when schema matches the qualifier', async () => {
+      storeState.languagePreference = 'zh-CN';
+      setCurrentLanguage('zh-CN');
+      storeState.connections[0].config.type = 'oracle';
+      storeState.connections[0].config.database = 'ORCLPDB1';
+      editorState.value = 'select * from sbdev.AA';
+      autoFetchState.visible = true;
+      backendApp.DBGetDatabases.mockResolvedValueOnce({
+        success: true,
+        data: [{ Database: 'ORCLPDB1' }, { Database: 'sbdev' }],
+      });
+      backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => {
+        if (String(dbName || '').toLowerCase() === 'sbdev') {
+          return { success: true, data: [{ Table: 'SBDEV.AAA3_NJ' }] };
+        }
+        return { success: true, data: [] };
+      });
+      backendApp.DBGetAllColumns.mockResolvedValue({ success: true, data: [] });
+
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'ORCLPDB1' })} />);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const completionProvider = editorState.providers[0];
+      expect(completionProvider).toBeTruthy();
+
+      const completionItems = await completionProvider.provideCompletionItems(
+        editorState.editor.getModel(),
+        { lineNumber: 1, column: editorState.value.length + 1 },
+      );
+      const tableSuggestion = completionItems?.suggestions?.find((item: any) => item?.label === 'AAA3_NJ');
+
+      expect(tableSuggestion).toBeTruthy();
+      expect(tableSuggestion.insertText).toBe('AAA3_NJ');
+      expect(tableSuggestion.detail).toContain('表 (sbdev)');
+      expect(completionItems?.suggestions?.some((item: any) => item?.label === 'sbdev.SBDEV.AAA3_NJ')).toBe(false);
+    });
+
     it('localizes schema-qualified table completion detail in zh-CN while preserving the raw database and schema names', async () => {
       storeState.languagePreference = 'zh-CN';
       setCurrentLanguage('zh-CN');

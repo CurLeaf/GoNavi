@@ -62,6 +62,7 @@ import {
 import { getCustomConnectionDsnValidationMessage } from "../utils/customConnectionDsn";
 import { mergeParsedUriValuesForForm } from "../utils/connectionUriMerge";
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
+import { resolveConnectionProtectionConfig } from "../utils/connectionReadOnly";
 import { getCustomConnectionDriverHelp } from "../utils/driverImportGuidance";
 import { isBackendCancelledResult } from "../utils/connectionExport";
 import {
@@ -1379,6 +1380,7 @@ const ConnectionModal: React.FC<{
           : Number(config.timeout || 30);
         const hasHttpTunnel = !!config.useHttpTunnel;
         const hasProxy = !hasHttpTunnel && !!config.useProxy;
+        const protection = resolveConnectionProtectionConfig(config);
         form.setFieldsValue({
           type: configType,
           name: initialValues.name,
@@ -1387,7 +1389,11 @@ const ConnectionModal: React.FC<{
           user: config.user,
           password: config.password,
           database: config.database,
-          readOnly: config.readOnly === true,
+          restrictDataEdit: protection.restrictDataEdit === true,
+          restrictStructureEdit: protection.restrictStructureEdit === true,
+          restrictScriptExecution:
+            protection.restrictScriptExecution === true,
+          restrictDataImport: protection.restrictDataImport === true,
           uri: config.uri || "",
           connectionParams:
             config.connectionParams ||

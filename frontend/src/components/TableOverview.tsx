@@ -26,6 +26,7 @@ import { isMacLikePlatform } from '../utils/appearance';
 import { getShortcutPlatform } from '../utils/shortcuts';
 import { t } from '../i18n';
 import { buildTableExportTab } from '../utils/tableExportTab';
+import { getDataSourceCapabilities } from '../utils/dataSourceCapabilities';
 import { V2TableContextMenuView, type V2TableContextMenuActionKey } from './V2TableContextMenu';
 import { useExportProgressDialog } from './ExportProgressModal';
 
@@ -279,7 +280,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         [connection?.config?.driver, connection?.config?.oceanBaseProtocol, connection?.config?.type]
     );
     const schemaName = String((tab as any).schemaName || '').trim();
-    const supportsDesignWrite = metadataDialect !== 'iotdb';
+    const supportsDesignWrite = !getDataSourceCapabilities(connection?.config).forceReadOnlyStructureDesigner;
     const autoFetchVisible = useAutoFetchVisibility();
 
     const loadData = useCallback(async () => {

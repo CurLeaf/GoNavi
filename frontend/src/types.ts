@@ -21,6 +21,13 @@ export interface HTTPTunnelConfig {
   password?: string;
 }
 
+export interface ConnectionProtectionConfig {
+  restrictDataEdit?: boolean;
+  restrictStructureEdit?: boolean;
+  restrictScriptExecution?: boolean;
+  restrictDataImport?: boolean;
+}
+
 export interface JVMJMXConfig {
   enabled?: boolean;
   host?: string;
@@ -283,6 +290,7 @@ export interface ConnectionConfig {
   savePassword?: boolean;
   database?: string;
   readOnly?: boolean;
+  protection?: ConnectionProtectionConfig;
   useSSL?: boolean;
   sslMode?: "preferred" | "required" | "skip-verify" | "disable";
   sslCAPath?: string;

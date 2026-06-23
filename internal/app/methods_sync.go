@@ -11,6 +11,29 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+func ensureDataSyncTargetProtection(config sync.SyncConfig) error {
+	content := strings.ToLower(strings.TrimSpace(config.Content))
+	strategy := strings.ToLower(strings.TrimSpace(config.TargetTableStrategy))
+	touchesStructure := content == "schema" ||
+		content == "both" ||
+		config.AutoAddColumns ||
+		config.CreateIndexes ||
+		(strategy != "" && strategy != "existing_only")
+	touchesData := content == "" || content == "data" || content == "both"
+
+	if touchesStructure {
+		if err := ensureConnectionAllowsStructureEdit(config.TargetConfig, "同步目标结构"); err != nil {
+			return err
+		}
+	}
+	if touchesData {
+		if err := ensureConnectionAllowsDataImport(config.TargetConfig, "数据同步写入"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *App) resolveDataSyncConfigSecrets(config sync.SyncConfig) (sync.SyncConfig, error) {
 	resolved := config
 	sourceConfig, sourceDatabase, err := a.resolveDataSyncEndpointConfig(config.SourceConfig, config.SourceDatabase)
@@ -60,7 +83,7 @@ func (a *App) resolveDataSyncEndpointConfig(raw connection.ConnectionConfig, sel
 
 // DataSync executes a data synchronization task
 func (a *App) DataSync(config sync.SyncConfig) sync.SyncResult {
-	if err := ensureReadOnlyConnectionAllowsAction(config.TargetConfig, "数据同步写入"); err != nil {
+	if err := ensureDataSyncTargetProtection(config); err != nil {
 		return sync.SyncResult{
 			Success: false,
 			Message: err.Error(),

@@ -179,7 +179,7 @@ func (a *App) CreateDatabase(config connection.ConnectionConfig, dbName string) 
 	if dbName == "" {
 		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
 	}
-	if err := ensureReadOnlyConnectionAllowsAction(config, "创建数据库"); err != nil {
+	if err := ensureConnectionAllowsStructureEdit(config, "创建数据库"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
@@ -324,7 +324,7 @@ func resolveSchemaDDLTargetDatabase(config connection.ConnectionConfig, dbName s
 }
 
 func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
-	if err := ensureReadOnlyConnectionAllowsAction(config, "创建模式"); err != nil {
+	if err := ensureConnectionAllowsStructureEdit(config, "创建模式"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	dbType := resolveDDLDBType(config)
@@ -352,7 +352,7 @@ func (a *App) CreateSchema(config connection.ConnectionConfig, dbName string, sc
 }
 
 func (a *App) RenameSchema(config connection.ConnectionConfig, dbName string, oldSchemaName string, newSchemaName string) connection.QueryResult {
-	if err := ensureReadOnlyConnectionAllowsAction(config, "重命名模式"); err != nil {
+	if err := ensureConnectionAllowsStructureEdit(config, "重命名模式"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	dbType := resolveDDLDBType(config)
@@ -378,7 +378,7 @@ func (a *App) RenameSchema(config connection.ConnectionConfig, dbName string, ol
 }
 
 func (a *App) DropSchema(config connection.ConnectionConfig, dbName string, schemaName string) connection.QueryResult {
-	if err := ensureReadOnlyConnectionAllowsAction(config, "删除模式"); err != nil {
+	if err := ensureConnectionAllowsStructureEdit(config, "删除模式"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	dbType := resolveDDLDBType(config)
@@ -636,7 +636,7 @@ func (a *App) RenameDatabase(config connection.ConnectionConfig, oldName string,
 	if oldName == "" || newName == "" {
 		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
 	}
-	if err := ensureReadOnlyConnectionAllowsAction(config, "重命名数据库"); err != nil {
+	if err := ensureConnectionAllowsStructureEdit(config, "重命名数据库"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.EqualFold(oldName, newName) {
@@ -682,7 +682,7 @@ func (a *App) DropDatabase(config connection.ConnectionConfig, dbName string) co
 	if dbName == "" {
 		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
 	}
-	if err := ensureReadOnlyConnectionAllowsAction(config, "删除数据库"); err != nil {
+	if err := ensureConnectionAllowsStructureEdit(config, "删除数据库"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
@@ -719,7 +719,7 @@ func (a *App) RenameTable(config connection.ConnectionConfig, dbName string, old
 	if oldTableName == "" || newTableName == "" {
 		return connection.QueryResult{Success: false, Message: "表名不能为空"}
 	}
-	if err := ensureReadOnlyConnectionAllowsAction(config, "重命名表"); err != nil {
+	if err := ensureConnectionAllowsStructureEdit(config, "重命名表"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.EqualFold(oldTableName, newTableName) {
@@ -774,7 +774,7 @@ func (a *App) DropTable(config connection.ConnectionConfig, dbName string, table
 	if tableName == "" {
 		return connection.QueryResult{Success: false, Message: "表名不能为空"}
 	}
-	if err := ensureReadOnlyConnectionAllowsAction(config, "删除表"); err != nil {
+	if err := ensureConnectionAllowsStructureEdit(config, "删除表"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
@@ -841,7 +841,7 @@ func (a *App) DBQueryWithCancel(config connection.ConnectionConfig, dbName strin
 	}
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	if err := ensureReadOnlyConnectionAllowsQuery(config, query); err != nil {
+	if err := ensureConnectionAllowsQuery(config, query); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 
@@ -959,7 +959,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	}
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	if err := ensureReadOnlyConnectionAllowsQuery(config, query); err != nil {
+	if err := ensureConnectionAllowsQuery(config, query); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 
@@ -1373,7 +1373,7 @@ func (a *App) DBQueryIsolated(config connection.ConnectionConfig, dbName string,
 	runConfig := normalizeRunConfig(config, dbName)
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
-	if err := ensureReadOnlyConnectionAllowsQuery(config, query); err != nil {
+	if err := ensureConnectionAllowsQuery(config, query); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
@@ -2241,7 +2241,7 @@ func (a *App) DropView(config connection.ConnectionConfig, dbName string, viewNa
 	if viewName == "" {
 		return connection.QueryResult{Success: false, Message: "视图名称不能为空"}
 	}
-	if err := ensureReadOnlyConnectionAllowsAction(config, "删除视图"); err != nil {
+	if err := ensureConnectionAllowsStructureEdit(config, "删除视图"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
@@ -2276,7 +2276,7 @@ func (a *App) DropFunction(config connection.ConnectionConfig, dbName string, ro
 	if routineName == "" {
 		return connection.QueryResult{Success: false, Message: "函数/存储过程名称不能为空"}
 	}
-	if err := ensureReadOnlyConnectionAllowsAction(config, "删除函数或存储过程"); err != nil {
+	if err := ensureConnectionAllowsStructureEdit(config, "删除函数或存储过程"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if routineType != "FUNCTION" && routineType != "PROCEDURE" {
@@ -2322,7 +2322,7 @@ func (a *App) RenameView(config connection.ConnectionConfig, dbName string, oldN
 	if oldName == "" || newName == "" {
 		return connection.QueryResult{Success: false, Message: "视图名称不能为空"}
 	}
-	if err := ensureReadOnlyConnectionAllowsAction(config, "重命名视图"); err != nil {
+	if err := ensureConnectionAllowsStructureEdit(config, "重命名视图"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if strings.EqualFold(oldName, newName) {

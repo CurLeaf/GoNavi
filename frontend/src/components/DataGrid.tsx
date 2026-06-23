@@ -32,6 +32,7 @@ import { v4 as generateUuid } from 'uuid';
 import 'react-resizable/css/styles.css';
 import { buildOrderBySQL, buildPaginatedSelectSQL, buildWhereSQL, escapeLiteral, hasExplicitSort, quoteIdentPart, withSortBufferTuningSQL, type FilterCondition } from '../utils/sql';
 import { isMacLikePlatform, normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
+import { isConnectionDataImportRestricted } from '../utils/connectionReadOnly';
 import { getDataSourceCapabilities, resolveDataSourceType } from '../utils/dataSourceCapabilities';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
@@ -533,13 +534,15 @@ const DataGrid: React.FC<DataGridProps> = ({
   const prefersManualTotalCount = dataSourceCaps.preferManualTotalCount;
   const supportsApproximateTableCount = dataSourceCaps.supportsApproximateTableCount;
   const supportsApproximateTotalPages = dataSourceCaps.supportsApproximateTotalPages;
+  const designerReadOnly = dataSourceCaps.forceReadOnlyStructureDesigner;
+  const importRestricted = isConnectionDataImportRestricted(currentConnConfig);
   const dbType = dataSourceCaps.type;
   const isMongoDBConnection = dbType === 'mongodb';
   const isDuckDBConnection = dataSourceCaps.type === 'duckdb';
   const supportsCopyInsert = dataSourceCaps.supportsCopyInsert;
   const supportsSqlQueryExport = dataSourceCaps.supportsSqlQueryExport;
   const isQueryResultExport = exportScope === 'queryResult';
-  const canImport = exportScope === 'table' && !!tableName && !readOnly;
+  const canImport = exportScope === 'table' && !!tableName && !importRestricted;
   const canExport = !!connectionId && (isQueryResultExport || !!tableName);
   const canViewDdl = exportScope === 'table' && !!connectionId && !!tableName;
   const canOpenObjectDesigner = exportScope === 'table' && objectType === 'table' && !!connectionId && !!tableName;
@@ -4176,6 +4179,7 @@ const DataGrid: React.FC<DataGridProps> = ({
         copyRowsForPaste,
         copyToClipboard,
         currentConnConfig,
+        designerReadOnly,
         currentTextRow,
         darkMode,
         dataContextValue,

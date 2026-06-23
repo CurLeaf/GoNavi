@@ -459,6 +459,69 @@ describe("ConnectionModal i18n", () => {
     },
   );
 
+  it.each([
+    {
+      language: "zh-CN" as const,
+      sourceLabel: "MySQL",
+      expectations: [
+        "生产连接保护",
+        "按需勾选限制项",
+        "限制数据编辑",
+        "限制结构编辑",
+        "限制脚本执行",
+        "限制数据导入",
+        "当前策略",
+      ],
+    },
+    {
+      language: "en-US" as const,
+      sourceLabel: "MySQL",
+      expectations: [
+        "Production guard",
+        "Select only the restrictions you need",
+        "Restrict data edits",
+        "Restrict structure edits",
+        "Restrict script execution",
+        "Restrict data import",
+        "Current policy",
+      ],
+    },
+  ])(
+    "renders a detailed production-guard card in $language",
+    async ({ language, sourceLabel, expectations }) => {
+      setCurrentLanguage(language);
+      storeState.languagePreference = language;
+      mockFormValues = {
+        type: "mysql",
+        restrictDataEdit: true,
+        restrictStructureEdit: true,
+        restrictScriptExecution: false,
+        restrictDataImport: false,
+        useSSL: true,
+        sslMode: "preferred",
+        timeout: 30,
+      };
+
+      const { default: ConnectionModal } = await import("./ConnectionModal");
+
+      let renderer: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<ConnectionModal open onClose={vi.fn()} />);
+      });
+
+      await act(async () => {
+        findClickableCard(renderer!, sourceLabel).props.onClick();
+      });
+
+      const pageText = textContent(renderer!.toJSON());
+      expectations.forEach((expected) => {
+        expect(pageText).toContain(expected);
+      });
+      expect(pageText).not.toContain("connection.modal.section.undefined.title");
+      expect(pageText).not.toContain("connection.modal.section.undefined.description");
+    },
+  );
+
   it("renders English topology and authentication copy for legacy mysql, mongodb, and redis sections", async () => {
     storeState.appearance.uiVersion = "legacy";
     setCurrentLanguage("en-US");

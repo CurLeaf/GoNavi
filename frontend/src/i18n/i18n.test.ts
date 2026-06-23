@@ -94,6 +94,76 @@ const remainingConnectionModalSliceExpectations: LocalizedExpectation[] = [
     catalogKey: "connection_modal.field.dsn.placeholder",
   },
   {
+    key: "connection.modal.section.readOnly.title",
+    catalogKey: "connection_modal.section.readOnly.title",
+  },
+  {
+    key: "connection.modal.section.readOnly.description",
+    catalogKey: "connection_modal.section.readOnly.description",
+  },
+  {
+    key: "connection.modal.field.readOnly.label",
+    catalogKey: "connection_modal.field.readOnly.label",
+  },
+  {
+    key: "connection.modal.field.readOnly.help",
+    catalogKey: "connection_modal.field.readOnly.help",
+  },
+  {
+    key: "connection.modal.field.readOnly.status.enabledCount",
+    catalogKey: "connection_modal.field.readOnly.status.enabledCount",
+    params: { count: "2" },
+  },
+  {
+    key: "connection.modal.field.readOnly.compatibility",
+    catalogKey: "connection_modal.field.readOnly.compatibility",
+  },
+  {
+    key: "connection.modal.field.readOnly.option.dataEdit.label",
+    catalogKey: "connection_modal.field.readOnly.option.dataEdit.label",
+  },
+  {
+    key: "connection.modal.field.readOnly.option.dataEdit.help",
+    catalogKey: "connection_modal.field.readOnly.option.dataEdit.help",
+  },
+  {
+    key: "connection.modal.field.readOnly.option.structureEdit.label",
+    catalogKey: "connection_modal.field.readOnly.option.structureEdit.label",
+  },
+  {
+    key: "connection.modal.field.readOnly.option.structureEdit.help",
+    catalogKey: "connection_modal.field.readOnly.option.structureEdit.help",
+  },
+  {
+    key: "connection.modal.field.readOnly.option.scriptExecution.label",
+    catalogKey: "connection_modal.field.readOnly.option.scriptExecution.label",
+  },
+  {
+    key: "connection.modal.field.readOnly.option.scriptExecution.help",
+    catalogKey: "connection_modal.field.readOnly.option.scriptExecution.help",
+  },
+  {
+    key: "connection.modal.field.readOnly.option.dataImport.label",
+    catalogKey: "connection_modal.field.readOnly.option.dataImport.label",
+  },
+  {
+    key: "connection.modal.field.readOnly.option.dataImport.help",
+    catalogKey: "connection_modal.field.readOnly.option.dataImport.help",
+  },
+  {
+    key: "connection.modal.field.readOnly.summary.title",
+    catalogKey: "connection_modal.field.readOnly.summary.title",
+  },
+  {
+    key: "connection.modal.field.readOnly.summary.selected",
+    catalogKey: "connection_modal.field.readOnly.summary.selected",
+    params: { count: "2" },
+  },
+  {
+    key: "connection.modal.field.readOnly.summary.empty",
+    catalogKey: "connection_modal.field.readOnly.summary.empty",
+  },
+  {
     key: "driver.guidance.customConnectionDriverHelp",
     catalogKey: "driver.guidance.customConnectionDriverHelp",
   },

@@ -248,6 +248,39 @@ describe('dataSourceCapabilities', () => {
       supportsDropDatabase: false,
       supportsMessagePublish: false,
       forceReadOnlyQueryResult: true,
+      forceReadOnlyStructureDesigner: true,
+    });
+  });
+
+  it('allows script execution while still disabling result edits when only data-edit protection is enabled', () => {
+    expect(getDataSourceCapabilities({
+      type: 'postgres',
+      protection: {
+        restrictDataEdit: true,
+      },
+    })).toMatchObject({
+      type: 'postgres',
+      supportsCreateDatabase: true,
+      supportsRenameDatabase: true,
+      supportsDropDatabase: true,
+      forceReadOnlyQueryResult: true,
+      forceReadOnlyStructureDesigner: false,
+    });
+  });
+
+  it('keeps query results editable while disabling DDL shortcuts when only structure protection is enabled', () => {
+    expect(getDataSourceCapabilities({
+      type: 'postgres',
+      protection: {
+        restrictStructureEdit: true,
+      },
+    })).toMatchObject({
+      type: 'postgres',
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
+      forceReadOnlyStructureDesigner: true,
     });
   });
 
@@ -258,6 +291,7 @@ describe('dataSourceCapabilities', () => {
       supportsCreateDatabase: false,
       supportsDropDatabase: false,
       forceReadOnlyQueryResult: false,
+      forceReadOnlyStructureDesigner: true,
     });
   });
 
