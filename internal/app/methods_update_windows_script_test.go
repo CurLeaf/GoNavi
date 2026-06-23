@@ -102,11 +102,31 @@ func TestBuildWindowsScriptUsesDelayedErrorlevelInsideBlocks(t *testing.T) {
 
 	for _, token := range []string{
 		`if !ERRORLEVEL! NEQ 0 (`,
-		`powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%TARGET%'" >> "%LOG_FILE%" 2>&1`,
+		`powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%TARGET%' -WorkingDirectory '%TARGET_DIR%'" >> "%LOG_FILE%" 2>&1`,
 		`set "TARGET_OLD=%TARGET%.old"`,
 	} {
 		if !strings.Contains(script, token) {
 			t.Fatalf("windows update script missing token: %s\nscript:\n%s", token, script)
+		}
+	}
+}
+
+func TestBuildWindowsScriptRelaunchUsesTargetDirectory(t *testing.T) {
+	script := buildWindowsScript(
+		`C:\tmp\GoNavi-v0.5.0-windows-amd64.exe`,
+		`C:\Program Files\GoNavi\GoNavi.exe`,
+		`C:\Program Files\GoNavi\.gonavi-update-windows-v0.5.0`,
+		`C:\Program Files\GoNavi\logs\update-install.log`,
+		99999,
+	)
+
+	for _, token := range []string{
+		`for %%I in ("%TARGET%") do set "TARGET_DIR=%%~dpI"`,
+		`start "" /D "%TARGET_DIR%" "%TARGET%" >> "%LOG_FILE%" 2>&1`,
+		`Start-Process -FilePath '%TARGET%' -WorkingDirectory '%TARGET_DIR%'`,
+	} {
+		if !strings.Contains(script, token) {
+			t.Fatalf("windows update relaunch missing token: %s\nscript:\n%s", token, script)
 		}
 	}
 }

@@ -4114,7 +4114,7 @@ function App() {
                 ) : null,
                 isLatestUpdateDownloaded ? (
                     <Button key="install-direct" type="primary" icon={<DownloadOutlined />} onClick={handleInstallFromProgress}>
-                        {isMacRuntime ? t('app.about.action.open_install_directory') : t('app.about.action.install_update')}
+                        {t('app.about.action.install_update')}
                     </Button>
                 ) : null,
             ].filter(Boolean)}
@@ -5111,7 +5111,7 @@ function App() {
               ] : (updateDownloadProgress.status === 'done' ? [
                   <Button key="close" onClick={hideUpdateDownloadProgress}>{t('common.close')}</Button>,
                   <Button key="install" type="primary" onClick={handleInstallFromProgress}>
-                      {isMacRuntime ? t('app.about.action.open_install_directory') : t('app.about.action.install_update')}
+                      {t('app.about.action.install_update')}
                   </Button>
               ] : (updateDownloadProgress.status === 'error' ? [
                   <Button key="close" onClick={hideUpdateDownloadProgress}>{t('common.close')}</Button>

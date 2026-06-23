@@ -167,16 +167,6 @@ export const useAppUpdateManager = ({
         void message.success({ content: t('app.about.message.download_completed'), duration: 2 });
       }
       setAboutUpdateStatus(formatAboutUpdateStatus({ ...info, downloaded: true }));
-      if (isMacRuntime && !updateUserDismissedRef.current) {
-        try {
-          const openRes = await (window as any).go.app.App.OpenDownloadedUpdateDirectory();
-          if (openRes?.success) {
-            void message.success(openRes?.message || t('app.about.message.install_directory_opened_manual_replace'));
-          }
-        } catch (e) {
-          console.warn('自动打开下载目录失败', e);
-        }
-      }
     } else {
       setUpdateDownloadProgress((prev) => ({
         ...prev,
@@ -218,28 +208,6 @@ export const useAppUpdateManager = ({
     if (!canInstall) {
       return;
     }
-    if (isMacRuntime) {
-      const res = await (window as any).go.app.App.OpenDownloadedUpdateDirectory();
-      if (!res?.success) {
-        void message.error(t('app.about.message.open_install_directory_failed_with_error', { error: res?.message || t('common.unknown') }));
-        updateDownloadedVersionRef.current = null;
-        updateDownloadMetaRef.current = null;
-        setUpdateDownloadProgress((prev) => ({
-          ...prev,
-          status: 'idle',
-          percent: 0,
-          downloaded: 0,
-          open: false,
-        }));
-        setLastUpdateInfo((prev) => prev ? { ...prev, downloaded: false, downloadPath: undefined } : prev);
-        setAboutUpdateStatus((prev) => lastUpdateInfo ? formatAboutUpdateStatus({ ...lastUpdateInfo, downloaded: false, downloadPath: undefined }) : prev);
-        return;
-      }
-      updateInstallTriggeredVersionRef.current = updateDownloadProgress.version || lastUpdateInfo?.latestVersion || null;
-      hideUpdateDownloadProgress();
-      void message.success(res?.message || t('app.about.message.install_directory_opened_manual_replace'));
-      return;
-    }
     const res = await (window as any).go.app.App.InstallUpdateAndRestart();
     if (!res?.success) {
       void message.error(t('app.about.message.install_failed_with_error', { error: res?.message || t('common.unknown') }));
@@ -247,7 +215,7 @@ export const useAppUpdateManager = ({
     }
     updateInstallTriggeredVersionRef.current = updateDownloadProgress.version || lastUpdateInfo?.latestVersion || null;
     hideUpdateDownloadProgress();
-  }, [formatAboutUpdateStatus, hideUpdateDownloadProgress, isMacRuntime, lastUpdateInfo, updateDownloadProgress.status, updateDownloadProgress.version, t]);
+  }, [hideUpdateDownloadProgress, lastUpdateInfo, updateDownloadProgress.status, updateDownloadProgress.version, t]);
 
   const checkForUpdates = useCallback(async (silent: boolean) => {
     if (updateCheckInFlightRef.current) return;
