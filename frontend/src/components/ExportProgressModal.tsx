@@ -4,6 +4,7 @@ import { Button, Typography } from 'antd';
 import {
   formatExportProgressRows,
 } from '../utils/exportProgress';
+import { t } from '../i18n';
 import ExportProgressBar from './ExportProgressBar';
 import { useExportProgressRunner } from './useExportProgressRunner';
 
@@ -16,7 +17,9 @@ export function useExportProgressDialog() {
 
   const modalNode = (
     <Modal
-      title={state.status === 'error' ? '导出失败' : (state.status === 'done' ? '导出完成' : '正在导出')}
+      title={state.status === 'error'
+        ? t('data_export.progress.title.error')
+        : (state.status === 'done' ? t('data_export.progress.title.done') : t('data_export.progress.title.running'))}
       open={state.open}
       width={560}
       mask={false}
@@ -24,26 +27,26 @@ export function useExportProgressDialog() {
       closable={canClose}
       onCancel={reset}
       footer={canClose ? [
-        <Button key="close" onClick={reset}>关闭</Button>,
+        <Button key="close" onClick={reset}>{t('common.close')}</Button>,
       ] : null}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '72px 1fr', rowGap: 8, columnGap: 8 }}>
-          <Text type="secondary">任务</Text>
-          <Text>{state.title || state.targetName || '导出任务'}</Text>
+          <Text type="secondary">{t('data_export.progress.label.task')}</Text>
+          <Text>{state.title || state.targetName || t('data_export.progress.value.task_fallback')}</Text>
 
-          <Text type="secondary">对象</Text>
-          <Text>{state.targetName || '未命名对象'}</Text>
+          <Text type="secondary">{t('data_export.label.object')}</Text>
+          <Text>{state.targetName || t('data_export.progress.value.target_fallback')}</Text>
 
-          <Text type="secondary">格式</Text>
+          <Text type="secondary">{t('data_export.label.format')}</Text>
           <Text>{state.format || '-'}</Text>
 
-          <Text type="secondary">状态</Text>
-          <Text>{state.stage || '准备中'}</Text>
+          <Text type="secondary">{t('data_export.label.status')}</Text>
+          <Text>{state.stage || t('data_export.progress.status.start')}</Text>
 
           {state.filePath ? (
             <>
-              <Text type="secondary">文件</Text>
+              <Text type="secondary">{t('data_export.label.file')}</Text>
               <Paragraph style={{ marginBottom: 0, wordBreak: 'break-all' }}>{state.filePath}</Paragraph>
             </>
           ) : null}
@@ -59,7 +62,7 @@ export function useExportProgressDialog() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <Text type="secondary">{formatExportProgressRows(state.current, state.total, state.totalRowsKnown)}</Text>
           {!state.totalRowsKnown && state.status !== 'done' && state.status !== 'error' ? (
-            <Text type="secondary">当前未预先统计总行数，暂不显示百分比，写入行数为实时值。</Text>
+            <Text type="secondary">{t('data_export.hint.rows_unknown')}</Text>
           ) : null}
           {state.message ? (
             <Text type="danger">{state.message}</Text>

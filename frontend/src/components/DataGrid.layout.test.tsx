@@ -1951,44 +1951,51 @@ describe('DataGrid layout', () => {
   });
 
   it('renders a non-data row number column when enabled', () => {
-    const markup = renderToStaticMarkup(
-      <DataGrid
-        data={[
-          {
-            __gonavi_row_key__: 'row-1',
-            id: 1,
-            name: 'alpha',
-          },
-        ]}
-        columnNames={['id', 'name']}
-        loading={false}
-        tableName="events"
-        dbName="main"
-        connectionId="conn-1"
-        readOnly
-        showRowNumberColumn
-        pagination={{
-          current: 2,
-          pageSize: 50,
-          total: 51,
-        }}
-        onPageChange={() => {}}
-      />,
-    );
+    const previousLanguage = getCurrentLanguage();
+    setCurrentLanguage('zh-CN');
 
-    expect(markup).toContain('aria-label="行号"');
-    expect(markup).toContain('<span aria-label="行号">#</span>');
-    expect(markup).not.toContain('>行号<');
-    expect(markup).toContain('data-grid-row-number-title="true"');
-    expect(markup).toContain('data-grid-column-title-single-line="true"');
-    expect(markup).toContain('justify-content:center');
-    expect(markup).toContain('align-items:center');
-    expect(markup).toContain('min-height:var(--gonavi-header-min-height, 40px)');
-    expect(markup).toContain('text-align:center');
-    expect(markup).toContain('padding-inline:0');
-    expect(markup).toContain('vertical-align:middle');
-    expect(markup).toContain('data-grid-row-number="true"');
-    expect(markup).toContain('51');
+    try {
+      const markup = renderToStaticMarkup(
+        <DataGrid
+          data={[
+            {
+              __gonavi_row_key__: 'row-1',
+              id: 1,
+              name: 'alpha',
+            },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="events"
+          dbName="main"
+          connectionId="conn-1"
+          readOnly
+          showRowNumberColumn
+          pagination={{
+            current: 2,
+            pageSize: 50,
+            total: 51,
+          }}
+          onPageChange={() => {}}
+        />,
+      );
+
+      expect(markup).toContain('aria-label="行号"');
+      expect(markup).toContain('<span aria-label="行号">#</span>');
+      expect(markup).not.toContain('>行号<');
+      expect(markup).toContain('data-grid-row-number-title="true"');
+      expect(markup).toContain('data-grid-column-title-single-line="true"');
+      expect(markup).toContain('justify-content:center');
+      expect(markup).toContain('align-items:center');
+      expect(markup).toContain('min-height:var(--gonavi-header-min-height, 40px)');
+      expect(markup).toContain('text-align:center');
+      expect(markup).toContain('padding-inline:0');
+      expect(markup).toContain('vertical-align:middle');
+      expect(markup).toContain('data-grid-row-number="true"');
+      expect(markup).toContain('51');
+    } finally {
+      setCurrentLanguage(previousLanguage);
+    }
   });
 
   it('clears modified cell markers when refreshing the grid', () => {
@@ -2215,9 +2222,10 @@ describe('DataGrid layout', () => {
     expect(source).toContain("if (backendExportSql && connectionId) {");
     expect(source).toContain("label: allRowsLabel");
     expect(exportDialogSource).toContain('data-export-config-modal="true"');
-    expect(exportDialogSource).toContain('label="导出格式"');
-    expect(exportDialogSource).toContain('label="每个工作表最大行数"');
-    expect(exportDialogSource).toContain('仅 XLSX 生效');
+    expect(exportDialogSource).toContain("import { t } from '../i18n';");
+    expect(exportDialogSource).toContain("label={t('data_export.dialog.field.format')}");
+    expect(exportDialogSource).toContain("label={t('data_export.dialog.field.xlsx_max_rows')}");
+    expect(exportDialogSource).toContain("t('data_export.dialog.field.xlsx_max_rows_help'");
     expect(source).toContain('const queryResultCurrentPageRows = useMemo(() => {');
     expect(source).toContain('const resolveContextMenuPosition = useCallback((x: number, y: number, estimatedWidth: number, estimatedHeight: number) => {');
     expect(source).toContain('const rect = element.getBoundingClientRect();');
