@@ -22,18 +22,18 @@ func TestSupportsConnectionReadOnlyMode(t *testing.T) {
 
 func TestEnsureReadOnlyConnectionAllowsQuery(t *testing.T) {
 	sqlConfig := connection.ConnectionConfig{Type: "postgres", ReadOnly: true}
-	if err := ensureReadOnlyConnectionAllowsQuery(sqlConfig, "SELECT * FROM users"); err != nil {
+	if err := ensureConnectionAllowsQuery(sqlConfig, "SELECT * FROM users"); err != nil {
 		t.Fatalf("read-only postgres connection should allow select: %v", err)
 	}
-	if err := ensureReadOnlyConnectionAllowsQuery(sqlConfig, "UPDATE users SET name = 'next'"); err == nil {
+	if err := ensureConnectionAllowsQuery(sqlConfig, "UPDATE users SET name = 'next'"); err == nil {
 		t.Fatal("read-only postgres connection should block update")
 	}
 
 	mongoConfig := connection.ConnectionConfig{Type: "mongodb", ReadOnly: true}
-	if err := ensureReadOnlyConnectionAllowsQuery(mongoConfig, `{"find":"users","filter":{"active":true}}`); err != nil {
+	if err := ensureConnectionAllowsQuery(mongoConfig, `{"find":"users","filter":{"active":true}}`); err != nil {
 		t.Fatalf("read-only mongodb connection should allow find: %v", err)
 	}
-	if err := ensureReadOnlyConnectionAllowsQuery(mongoConfig, `{"delete":"users","deletes":[{"q":{"active":false},"limit":0}]}`); err == nil {
+	if err := ensureConnectionAllowsQuery(mongoConfig, `{"delete":"users","deletes":[{"q":{"active":false},"limit":0}]}`); err == nil {
 		t.Fatal("read-only mongodb connection should block delete")
 	}
 }
@@ -45,11 +45,35 @@ func TestEnsureReadOnlyConnectionAllowsAction(t *testing.T) {
 	})
 
 	config := connection.ConnectionConfig{Type: "postgres", ReadOnly: true}
-	err := ensureReadOnlyConnectionAllowsAction(config, "connection.backend.action.drop_database")
+	err := ensureConnectionAllowsStructureEdit(config, "connection.backend.action.drop_database")
 	if err == nil {
 		t.Fatal("read-only connection should block mutating actions")
 	}
 	if !strings.Contains(err.Error(), defaultAppText("connection.backend.action.drop_database", nil)) {
 		t.Fatalf("blocked action message should include action label, got %q", err.Error())
+	}
+}
+
+func TestEnsureConnectionProtectionSeparatesActionCategories(t *testing.T) {
+	config := connection.ConnectionConfig{
+		Type: "postgres",
+		Protection: connection.ConnectionProtectionConfig{
+			RestrictDataEdit:      true,
+			RestrictDataImport:    true,
+			RestrictStructureEdit: false,
+		},
+	}
+
+	if err := ensureConnectionAllowsQuery(config, "UPDATE users SET name = 'next'"); err != nil {
+		t.Fatalf("script execution should remain allowed when only data-edit/import restrictions are enabled: %v", err)
+	}
+	if err := ensureConnectionAllowsDataEdit(config, "connection.backend.action.apply_result_changes"); err == nil {
+		t.Fatal("data edit restriction should block result changes")
+	}
+	if err := ensureConnectionAllowsDataImport(config, "connection.backend.action.import_data"); err == nil {
+		t.Fatal("data import restriction should block imports")
+	}
+	if err := ensureConnectionAllowsStructureEdit(config, "connection.backend.action.drop_database"); err != nil {
+		t.Fatalf("structure edits should remain allowed when structure restriction is disabled: %v", err)
 	}
 }

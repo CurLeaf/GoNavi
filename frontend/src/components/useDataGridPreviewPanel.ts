@@ -9,7 +9,7 @@ export interface DataGridFocusedCellInfo {
 }
 
 interface UseDataGridPreviewPanelParams {
-  toEditableText: (value: any) => string;
+  toEditableText: (value: any, columnName?: string) => string;
   looksLikeJsonText: (text: string) => boolean;
   normalizeDateTimeString: (value: string) => string;
 }
@@ -44,8 +44,8 @@ export const useDataGridPreviewPanel = ({
   const updateFocusedCell = React.useCallback((record: GridRecord, dataIndex: string) => {
     if (!record || !dataIndex) return;
     const raw = record?.[dataIndex];
-    let text = toEditableText(raw);
-    if (typeof raw === 'string') {
+    let text = toEditableText(raw, dataIndex);
+    if (typeof raw === 'string' && text === raw) {
       text = normalizeDateTimeString(raw);
     }
     const isJson = looksLikeJsonText(text);

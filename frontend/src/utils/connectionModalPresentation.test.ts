@@ -19,6 +19,7 @@ const sectionKeyEntries = [
   ['uri', 'uri'],
   ['target', 'target'],
   ['fileTarget', 'fileTarget'],
+  ['readOnly', 'readOnly'],
   ['connectionMode', 'connectionMode'],
   ['oceanBaseProtocol', 'oceanBaseProtocol'],
   ['mongoDiscovery', 'mongoDiscovery'],

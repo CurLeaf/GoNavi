@@ -1,5 +1,5 @@
 export namespace ai {
-	
+
 	export class MCPClientInstallResult {
 	    success: boolean;
 	    client?: string;
@@ -7,11 +7,11 @@ export namespace ai {
 	    configPath?: string;
 	    command?: string;
 	    args?: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MCPClientInstallResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
@@ -903,6 +903,24 @@ export namespace connection {
 	        this.keyPath = source["keyPath"];
 	    }
 	}
+	export class ConnectionProtectionConfig {
+	    restrictDataEdit?: boolean;
+	    restrictStructureEdit?: boolean;
+	    restrictScriptExecution?: boolean;
+	    restrictDataImport?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new ConnectionProtectionConfig(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.restrictDataEdit = source["restrictDataEdit"];
+	        this.restrictStructureEdit = source["restrictStructureEdit"];
+	        this.restrictScriptExecution = source["restrictScriptExecution"];
+	        this.restrictDataImport = source["restrictDataImport"];
+	    }
+	}
 	export class ConnectionConfig {
 	    id?: string;
 	    type: string;
@@ -913,6 +931,7 @@ export namespace connection {
 	    savePassword?: boolean;
 	    database: string;
 	    readOnly?: boolean;
+	    protection?: ConnectionProtectionConfig;
 	    useSSL?: boolean;
 	    sslMode?: string;
 	    sslCAPath?: string;
@@ -965,6 +984,7 @@ export namespace connection {
 	        this.savePassword = source["savePassword"];
 	        this.database = source["database"];
 	        this.readOnly = source["readOnly"];
+	        this.protection = this.convertValues(source["protection"], ConnectionProtectionConfig);
 	        this.useSSL = source["useSSL"];
 	        this.sslMode = source["sslMode"];
 	        this.sslCAPath = source["sslCAPath"];
@@ -1019,8 +1039,9 @@ export namespace connection {
 		        return new classs(a);
 		    }
 		    return a;
-		}
+	    }
 	}
+
 	export class GlobalProxyView {
 	    enabled: boolean;
 	    type: string;

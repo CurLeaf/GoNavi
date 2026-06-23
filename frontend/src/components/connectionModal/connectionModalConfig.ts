@@ -1,5 +1,9 @@
 import type { ConnectionConfig, SavedConnection } from "../../types";
-import { supportsConnectionReadOnlyMode } from "../../utils/connectionReadOnly";
+import {
+  deriveLegacyConnectionReadOnlyFlag,
+  normalizeConnectionProtectionConfig,
+  supportsConnectionReadOnlyMode,
+} from "../../utils/connectionReadOnly";
 import { resolveConnectionSecretDraft } from "../../utils/connectionSecretDraft";
 import {
   getConnectionTypeDefaultPort as getDefaultPortByType,
@@ -797,6 +801,19 @@ export const buildConnectionConfig = async ({
         )
       : normalizeConnectionParamsText(mergedValues.connectionParams)
     : "";
+  const supportsProductionGuard = supportsConnectionReadOnlyMode({
+    type,
+    driver: mergedValues.driver,
+    oceanBaseProtocol: selectedOceanBaseProtocol,
+  });
+  const protection = supportsProductionGuard
+    ? normalizeConnectionProtectionConfig({
+        restrictDataEdit: mergedValues.restrictDataEdit === true,
+        restrictStructureEdit: mergedValues.restrictStructureEdit === true,
+        restrictScriptExecution: mergedValues.restrictScriptExecution === true,
+        restrictDataImport: mergedValues.restrictDataImport === true,
+      })
+    : undefined;
 
   return {
     type: mergedValues.type,
@@ -806,12 +823,10 @@ export const buildConnectionConfig = async ({
     password: keepPassword ? mergedValues.password || "" : "",
     savePassword: savePassword,
     database: mergedValues.database || "",
-    readOnly:
-      supportsConnectionReadOnlyMode({
-        type,
-        driver: mergedValues.driver,
-        oceanBaseProtocol: selectedOceanBaseProtocol,
-      }) && mergedValues.readOnly === true,
+    readOnly: protection
+      ? deriveLegacyConnectionReadOnlyFlag(protection)
+      : false,
+    protection,
     useSSL: effectiveUseSSL,
     sslMode: effectiveUseSSL ? sslMode : "disable",
     sslCAPath: sslCAPath,

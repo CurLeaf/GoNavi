@@ -37,7 +37,9 @@ import {
 import ConnectionModalMongoSections from "../ConnectionModalMongoSections";
 import ConnectionModalRedisSections from "../ConnectionModalRedisSections";
 import { t } from "../../i18n";
-import { supportsConnectionReadOnlyMode } from "../../utils/connectionReadOnly";
+import {
+  supportsConnectionReadOnlyMode,
+} from "../../utils/connectionReadOnly";
 import {
   getConnectionConfigLayoutKindLabel,
   getStoredSecretPlaceholder,
@@ -198,6 +200,19 @@ const renderStep2 = () => {
     driver: form.getFieldValue("driver"),
     oceanBaseProtocol,
   });
+  const restrictDataEdit = Form.useWatch("restrictDataEdit", form) === true;
+  const restrictStructureEdit =
+    Form.useWatch("restrictStructureEdit", form) === true;
+  const restrictScriptExecution =
+    Form.useWatch("restrictScriptExecution", form) === true;
+  const restrictDataImport =
+    Form.useWatch("restrictDataImport", form) === true;
+  const connectionProtectionEnabledCount = [
+    restrictDataEdit,
+    restrictStructureEdit,
+    restrictScriptExecution,
+    restrictDataImport,
+  ].filter(Boolean).length;
   const baseInfoSection = (
     <div style={modalInnerSectionStyle}>
       <div
@@ -1349,20 +1364,252 @@ const renderStep2 = () => {
               renderConfigSectionCard({
                 sectionKey: "readOnly",
                 icon: <SafetyCertificateOutlined />,
-                children: (
-                  <Form.Item
-                    name="readOnly"
-                    label={t("connection.modal.field.readOnly.label")}
-                    help={t("connection.modal.field.readOnly.help")}
-                    valuePropName="checked"
-                    style={{ marginBottom: 0 }}
+                badge: (
+                  <Tag
+                    color={
+                      connectionProtectionEnabledCount > 0 ? "red" : "default"
+                    }
                   >
-                    <Checkbox
-                      onChange={() => clearConnectionTestResultForChoice()}
+                    {connectionProtectionEnabledCount > 0
+                      ? t(
+                          "connection.modal.field.readOnly.status.enabledCount",
+                          {
+                            count: connectionProtectionEnabledCount,
+                          },
+                        )
+                      : t("connection.modal.field.readOnly.status.disabled")}
+                  </Tag>
+                ),
+                children: (
+                  <div style={{ display: "grid", gap: 14 }}>
+                    <div
+                      style={{
+                        padding: 16,
+                        borderRadius: 16,
+                        border: connectionProtectionEnabledCount > 0
+                          ? darkMode
+                            ? "1px solid rgba(255,120,117,0.34)"
+                            : "1px solid rgba(245,34,45,0.18)"
+                          : darkMode
+                            ? "1px solid rgba(255,214,102,0.24)"
+                            : "1px solid rgba(250,173,20,0.18)",
+                        background: connectionProtectionEnabledCount > 0
+                          ? darkMode
+                            ? "linear-gradient(180deg, rgba(255,120,117,0.12) 0%, rgba(255,120,117,0.05) 100%)"
+                            : "linear-gradient(180deg, rgba(255,245,245,0.96) 0%, rgba(255,240,240,0.92) 100%)"
+                          : darkMode
+                            ? "linear-gradient(180deg, rgba(255,214,102,0.10) 0%, rgba(255,214,102,0.04) 100%)"
+                            : "linear-gradient(180deg, rgba(255,251,230,0.98) 0%, rgba(255,247,214,0.94) 100%)",
+                        boxShadow: darkMode
+                          ? "inset 0 1px 0 rgba(255,255,255,0.04)"
+                          : "inset 0 1px 0 rgba(255,255,255,0.92)",
+                      }}
                     >
-                      {t("connection.modal.field.readOnly.checkbox")}
-                    </Checkbox>
-                  </Form.Item>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "minmax(0, 1fr) auto",
+                          gap: 16,
+                          alignItems: "start",
+                        }}
+                      >
+                        <div>
+                          <div
+                            style={{
+                              fontSize: 15,
+                              fontWeight: 700,
+                              color: darkMode ? "#f5f7ff" : "#162033",
+                            }}
+                          >
+                            {t("connection.modal.field.readOnly.label")}
+                          </div>
+                          <div style={{ ...modalMutedTextStyle, marginTop: 6 }}>
+                            {t("connection.modal.field.readOnly.help")}
+                          </div>
+                        </div>
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            color: darkMode ? "#ffd591" : "#ad4e00",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {t("connection.modal.field.readOnly.compatibility")}
+                        </Text>
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                        gap: 12,
+                      }}
+                    >
+                      {[
+                        {
+                          field: "restrictDataEdit",
+                          checked: restrictDataEdit,
+                          label: t(
+                            "connection.modal.field.readOnly.option.dataEdit.label",
+                          ),
+                          help: t(
+                            "connection.modal.field.readOnly.option.dataEdit.help",
+                          ),
+                        },
+                        {
+                          field: "restrictStructureEdit",
+                          checked: restrictStructureEdit,
+                          label: t(
+                            "connection.modal.field.readOnly.option.structureEdit.label",
+                          ),
+                          help: t(
+                            "connection.modal.field.readOnly.option.structureEdit.help",
+                          ),
+                        },
+                        {
+                          field: "restrictScriptExecution",
+                          checked: restrictScriptExecution,
+                          label: t(
+                            "connection.modal.field.readOnly.option.scriptExecution.label",
+                          ),
+                          help: t(
+                            "connection.modal.field.readOnly.option.scriptExecution.help",
+                          ),
+                        },
+                        {
+                          field: "restrictDataImport",
+                          checked: restrictDataImport,
+                          label: t(
+                            "connection.modal.field.readOnly.option.dataImport.label",
+                          ),
+                          help: t(
+                            "connection.modal.field.readOnly.option.dataImport.help",
+                          ),
+                        },
+                      ].map((item) => (
+                        <div
+                          key={item.field}
+                          onClick={() =>
+                            setChoiceFieldValue(item.field, !item.checked)
+                          }
+                          style={{
+                            padding: 14,
+                            borderRadius: 14,
+                            border: item.checked
+                              ? darkMode
+                                ? "1px solid rgba(255,120,117,0.22)"
+                                : "1px solid rgba(245,34,45,0.14)"
+                              : darkMode
+                                ? "1px solid rgba(255,255,255,0.08)"
+                                : "1px solid rgba(5,5,5,0.08)",
+                            background: item.checked
+                              ? darkMode
+                                ? "rgba(255,120,117,0.08)"
+                                : "rgba(255,241,240,0.92)"
+                              : darkMode
+                                ? "rgba(255,255,255,0.02)"
+                                : "rgba(255,255,255,0.9)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "auto minmax(0, 1fr)",
+                              gap: 12,
+                              alignItems: "start",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "flex-start",
+                                paddingTop: 2,
+                              }}
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              <Form.Item
+                                name={item.field}
+                                valuePropName="checked"
+                                noStyle
+                              >
+                                <Checkbox
+                                  onChange={() =>
+                                    clearConnectionTestResultForChoice()
+                                  }
+                                  style={{
+                                    marginInlineStart: 0,
+                                  }}
+                                />
+                              </Form.Item>
+                            </div>
+                            <div>
+                              <div
+                                style={{
+                                  fontSize: 13,
+                                  fontWeight: 700,
+                                  color: darkMode ? "#f5f7ff" : "#162033",
+                                }}
+                              >
+                                {item.label}
+                              </div>
+                              <div
+                                style={{
+                                  ...modalMutedTextStyle,
+                                  marginTop: 6,
+                                  whiteSpace: "normal",
+                                }}
+                              >
+                                {item.help}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div
+                      style={{
+                        padding: 14,
+                        borderRadius: 14,
+                        border: darkMode
+                          ? "1px solid rgba(82,196,26,0.22)"
+                          : "1px solid rgba(82,196,26,0.18)",
+                        background: darkMode
+                          ? "rgba(82,196,26,0.08)"
+                          : "rgba(246,255,237,0.92)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: darkMode ? "#f5f7ff" : "#162033",
+                        }}
+                      >
+                        {t("connection.modal.field.readOnly.summary.title")}
+                      </div>
+                      <div style={{ ...modalMutedTextStyle, marginTop: 6 }}>
+                        {connectionProtectionEnabledCount > 0
+                          ? t(
+                              "connection.modal.field.readOnly.summary.selected",
+                              { count: connectionProtectionEnabledCount },
+                            )
+                          : t(
+                              "connection.modal.field.readOnly.summary.empty",
+                            )}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        ...modalMutedTextStyle,
+                        fontSize: 12,
+                        lineHeight: 1.7,
+                        padding: "0 4px",
+                      }}
+                    >
+                      {t("connection.modal.field.readOnly.tip")}
+                    </div>
+                  </div>
                 ),
               })}
 
@@ -2333,7 +2580,10 @@ const renderStep2 = () => {
         keepAliveIntervalMinutes: 240,
         uri: "",
         connectionParams: "",
-        readOnly: false,
+        restrictDataEdit: false,
+        restrictStructureEdit: false,
+        restrictScriptExecution: false,
+        restrictDataImport: false,
         oceanBaseProtocol: "mysql",
         mysqlTopology: "single",
         rocketmqTopology: "single",

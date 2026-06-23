@@ -191,6 +191,7 @@ let sharedMaterializedViewsData: CompletionViewMeta[] = [];
 let sharedTriggersData: CompletionTriggerMeta[] = [];
 let sharedRoutinesData: CompletionRoutineMeta[] = [];
 let sharedColumnsCacheData: Record<string, any[]> = {};
+const QUERY_EDITOR_LAZY_VISIBLE_DB_COMPLETION_LIMIT = 10;
 const sharedLazyTablesCache: Record<string, CompletionTableMeta[] | undefined> = {};
 const sharedLazyTablesInFlight: Record<string, Promise<CompletionTableMeta[]> | undefined> = {};
 const createEmptySqlCompletionResult = () => ({ suggestions: [] as any[] });
@@ -204,6 +205,7 @@ const clearRecord = (record: Record<string, unknown>) => {
 const resetSharedQueryEditorMetadata = () => {
     sharedTablesData = [];
     sharedAllColumnsData = [];
+    sharedVisibleDbs = [];
     sharedViewsData = [];
     sharedMaterializedViewsData = [];
     sharedTriggersData = [];
@@ -1943,6 +1945,26 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               const stripQuotes = stripCompletionIdentifierQuotes;
               const normalizeQualifiedName = normalizeCompletionQualifiedName;
               const splitSchemaAndTable = splitCompletionSchemaAndTable;
+              const buildDbQualifiedTableSuggestionMeta = (dbName: string, tableName: string) => {
+                  const rawDbName = String(dbName || '').trim();
+                  const rawTableName = String(tableName || '').trim();
+                  const parsed = splitSchemaAndTable(rawTableName);
+                  const schemaMatchesDb = !!parsed.schema
+                      && !!parsed.table
+                      && parsed.schema.toLowerCase() === rawDbName.toLowerCase();
+                  const displayName = schemaMatchesDb ? parsed.table : rawTableName;
+                  const insertText = schemaMatchesDb
+                      ? quoteCompletionPart(parsed.table)
+                      : quoteCompletionPath(rawTableName);
+                  const dbQualifiedLabel = rawDbName
+                      ? `${rawDbName}.${displayName || rawTableName}`
+                      : (displayName || rawTableName);
+                  return {
+                      displayName: displayName || rawTableName,
+                      insertText,
+                      dbQualifiedLabel,
+                  };
+              };
 
               const buildConnConfig = () => {
                   const connId = sharedCurrentConnectionId;
@@ -2132,18 +2154,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           }
                       }
                       const filtered = prefix
-                          ? tables.filter(t => (t.tableName || '').toLowerCase().startsWith(prefix))
+                          ? tables.filter(t => {
+                              const suggestionMeta = buildDbQualifiedTableSuggestionMeta(t.dbName || qualifier, t.tableName || '');
+                              return String(suggestionMeta.displayName || '').toLowerCase().startsWith(prefix)
+                                  || String(t.tableName || '').toLowerCase().startsWith(prefix);
+                          })
                           : tables;
 
-                      const suggestions = filtered.map(t => ({
-                          label: t.tableName,
+                      const suggestions = filtered.map(t => {
+                          const suggestionMeta = buildDbQualifiedTableSuggestionMeta(t.dbName || qualifier, t.tableName || '');
+                          return {
+                          label: suggestionMeta.displayName,
                           kind: monaco.languages.CompletionItemKind.Class,
-                          insertText: quoteCompletionPath(t.tableName),
+                          insertText: suggestionMeta.insertText,
                           detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${t.dbName})`, t.comment),
                           documentation: buildCompletionDocumentation(t.comment),
                           range,
-                          sortText: '0' + t.tableName
-                      }));
+                          sortText: '0' + suggestionMeta.displayName
+                      };
+                      });
                       return { suggestions };
                   }
 
@@ -2232,7 +2261,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   if (normalized.some((candidate) => candidate.includes(wordPrefix))) return '1';
                   return '9';
               };
-              const expectsTableName = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TABLE|DESCRIBE|DESC|EXPLAIN)\s+[`"]?[\w.]*$/i.test(linePrefix.trim());
+              const expectsTableName = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TABLE|DESCRIBE|DESC|EXPLAIN)\s+[`"]?[\w.]*$/i.test(linePrefix);
               const shouldBoostKeywords = !expectsTableName
                   && wordPrefix.length > 0
                   && dialectKeywords.some((keyword) => keyword.toLowerCase().startsWith(wordPrefix));
@@ -2254,6 +2283,38 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   if (lazyTables.length > 0) {
                       const seenTableKeys = new Set<string>();
                       completionTables = [...sharedTablesData, ...lazyTables].filter((table) => {
+                          const key = `${String(table.dbName || '').toLowerCase()}.${String(table.tableName || '').toLowerCase()}`;
+                          if (seenTableKeys.has(key)) return false;
+                          seenTableKeys.add(key);
+                          return true;
+                      });
+                  }
+              }
+              if (expectsTableName && sharedVisibleDbs.length > 1) {
+                  const loadedDbKeys = new Set(
+                      completionTables
+                          .map((table) => String(table.dbName || '').toLowerCase())
+                          .filter(Boolean),
+                  );
+                  const missingVisibleDbs = sharedVisibleDbs.filter((dbName) => {
+                      const normalizedDbName = String(dbName || '').trim();
+                      const dbKey = normalizedDbName.toLowerCase();
+                      return normalizedDbName
+                          && dbKey !== currentDatabase.toLowerCase()
+                          && !loadedDbKeys.has(dbKey);
+                  });
+                  if (
+                      missingVisibleDbs.length > 0
+                      && missingVisibleDbs.length <= QUERY_EDITOR_LAZY_VISIBLE_DB_COMPLETION_LIMIT
+                  ) {
+                      const lazyTableGroups = await Promise.all(
+                          missingVisibleDbs.map((dbName) => getLazyTablesByDB(dbName)),
+                      );
+                      if (isSqlCompletionRequestCancelled(token)) {
+                          return createEmptySqlCompletionResult();
+                      }
+                      const seenTableKeys = new Set<string>();
+                      completionTables = [...completionTables, ...lazyTableGroups.flat()].filter((table) => {
                           const key = `${String(table.dbName || '').toLowerCase()}.${String(table.tableName || '').toLowerCase()}`;
                           if (seenTableKeys.has(key)) return false;
                           seenTableKeys.add(key);
@@ -2327,9 +2388,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     const isCurrentDb = (t.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
                     const parsed = splitSchemaAndTable(t.tableName || '');
                     const pureTable = parsed.table || t.tableName || '';
-                    if (!isCurrentDb) {
-                        // 跨库：用 db.table 格式匹配
-                        return includesWordPrefix(`${t.dbName}.${t.tableName}`)
+                  if (!isCurrentDb) {
+                      const suggestionMeta = buildDbQualifiedTableSuggestionMeta(t.dbName || '', t.tableName || '');
+                      const label = suggestionMeta.dbQualifiedLabel;
+                      // 跨库：用 db.table 格式匹配
+                        return includesWordPrefix(label)
                             || includesWordPrefix(t.tableName || '')
                             || includesWordPrefix(pureTable);
                     }
@@ -2341,7 +2404,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   const parsed = splitSchemaAndTable(t.tableName || '');
                   const pureTable = parsed.table || t.tableName || '';
                   if (!isCurrentDb) {
-                      const label = `${t.dbName}.${t.tableName}`;
+                      const suggestionMeta = buildDbQualifiedTableSuggestionMeta(t.dbName || '', t.tableName || '');
+                      const label = suggestionMeta.dbQualifiedLabel;
                       return {
                           label,
                           kind: monaco.languages.CompletionItemKind.Class,
@@ -2349,7 +2413,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           detail: appendCommentToDetail(`${translate('query_editor.object_info.table')} (${t.dbName})`, t.comment),
                           documentation: buildCompletionDocumentation(t.comment),
                           range,
-                          sortText: sortGroups.tableOther + getPrefixMatchRank(`${t.dbName}.${t.tableName}`, t.tableName || '', pureTable) + t.tableName,
+                          sortText: sortGroups.tableOther + getPrefixMatchRank(label, t.tableName || '', pureTable) + label,
                       };
                   }
                   // 当前库：检查是否有跨 schema 同名表
@@ -4117,7 +4181,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const targetNode = resolveEventTargetNode(event.target);
           const editorHasFocus = !!editor?.hasTextFocus?.();
           const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
-          if (!editorHasFocus && !inQueryEditor) {
+          if (!editorHasFocus && !inQueryEditor && !isDocumentLevelShortcutTarget(targetNode)) {
               return;
           }
 

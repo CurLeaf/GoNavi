@@ -22,6 +22,7 @@ export type ConnectionConfigSectionKey =
   | 'uri'
   | 'target'
   | 'fileTarget'
+  | 'readOnly'
   | 'connectionMode'
   | 'oceanBaseProtocol'
   | 'mongoDiscovery'
@@ -86,6 +87,7 @@ const connectionConfigSectionKeyMap: Record<
   uri: 'uri',
   target: 'target',
   fileTarget: 'fileTarget',
+  readOnly: 'readOnly',
   connectionMode: 'connectionMode',
   oceanBaseProtocol: 'oceanBaseProtocol',
   mongoDiscovery: 'mongoDiscovery',

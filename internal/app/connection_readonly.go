@@ -8,6 +8,15 @@ import (
 	"GoNavi-Wails/internal/connection"
 )
 
+type connectionProtectionKey string
+
+const (
+	connectionProtectionDataEdit        connectionProtectionKey = "restrictDataEdit"
+	connectionProtectionStructureEdit   connectionProtectionKey = "restrictStructureEdit"
+	connectionProtectionScriptExecution connectionProtectionKey = "restrictScriptExecution"
+	connectionProtectionDataImport      connectionProtectionKey = "restrictDataImport"
+)
+
 var connectionReadOnlySupportedTypes = map[string]struct{}{
 	"clickhouse": {},
 	"dameng":     {},
@@ -88,40 +97,41 @@ var mongoMetaCommandKeys = map[string]struct{}{
 }
 
 var readOnlyConnectionActionTextKeys = map[string]string{
-	"创建数据库":                                       "connection.backend.action.create_database",
-	"connection.backend.action.create_database":       "connection.backend.action.create_database",
-	"创建模式":                                        "connection.backend.action.create_schema",
-	"connection.backend.action.create_schema":         "connection.backend.action.create_schema",
-	"重命名模式":                                       "connection.backend.action.rename_schema",
-	"connection.backend.action.rename_schema":         "connection.backend.action.rename_schema",
-	"删除模式":                                        "connection.backend.action.drop_schema",
-	"connection.backend.action.drop_schema":           "connection.backend.action.drop_schema",
-	"重命名数据库":                                      "connection.backend.action.rename_database",
-	"connection.backend.action.rename_database":       "connection.backend.action.rename_database",
-	"删除数据库":                                       "connection.backend.action.drop_database",
-	"connection.backend.action.drop_database":         "connection.backend.action.drop_database",
-	"重命名表":                                        "connection.backend.action.rename_table",
-	"connection.backend.action.rename_table":          "connection.backend.action.rename_table",
-	"删除表":                                         "connection.backend.action.drop_table",
-	"connection.backend.action.drop_table":            "connection.backend.action.drop_table",
-	"删除视图":                                        "connection.backend.action.drop_view",
-	"connection.backend.action.drop_view":             "connection.backend.action.drop_view",
-	"删除函数或存储过程":                                   "connection.backend.action.drop_function_or_procedure",
+	"创建数据库": "connection.backend.action.create_database",
+	"connection.backend.action.create_database": "connection.backend.action.create_database",
+	"创建模式": "connection.backend.action.create_schema",
+	"connection.backend.action.create_schema":              "connection.backend.action.create_schema",
+	"重命名模式":                                                "connection.backend.action.rename_schema",
+	"connection.backend.action.rename_schema":              "connection.backend.action.rename_schema",
+	"删除模式":                                                 "connection.backend.action.drop_schema",
+	"connection.backend.action.drop_schema":                "connection.backend.action.drop_schema",
+	"重命名数据库":                                               "connection.backend.action.rename_database",
+	"connection.backend.action.rename_database":            "connection.backend.action.rename_database",
+	"删除数据库":                                                "connection.backend.action.drop_database",
+	"connection.backend.action.drop_database":              "connection.backend.action.drop_database",
+	"重命名表":                                                 "connection.backend.action.rename_table",
+	"connection.backend.action.rename_table":               "connection.backend.action.rename_table",
+	"删除表":                                                  "connection.backend.action.drop_table",
+	"connection.backend.action.drop_table":                 "connection.backend.action.drop_table",
+	"删除视图":                                                 "connection.backend.action.drop_view",
+	"connection.backend.action.drop_view":                  "connection.backend.action.drop_view",
+	"删除函数或存储过程":                                            "connection.backend.action.drop_function_or_procedure",
 	"connection.backend.action.drop_function_or_procedure": "connection.backend.action.drop_function_or_procedure",
-	"重命名视图":                                       "connection.backend.action.rename_view",
-	"connection.backend.action.rename_view":           "connection.backend.action.rename_view",
-	"导入数据":                                        "connection.backend.action.import_data",
-	"connection.backend.action.import_data":           "connection.backend.action.import_data",
-	"提交结果修改":                                      "connection.backend.action.apply_result_changes",
-	"connection.backend.action.apply_result_changes":  "connection.backend.action.apply_result_changes",
-	"预览结果修改":                                      "connection.backend.action.preview_result_changes",
-	"connection.backend.action.preview_result_changes": "connection.backend.action.preview_result_changes",
-	"clear_table":                                    "connection.backend.action.clear_table",
-	"connection.backend.action.clear_table":           "connection.backend.action.clear_table",
-	"truncate_table":                                 "connection.backend.action.truncate_table",
-	"connection.backend.action.truncate_table":        "connection.backend.action.truncate_table",
-	"数据同步写入":                                       "connection.backend.action.data_sync_write",
-	"connection.backend.action.data_sync_write":       "connection.backend.action.data_sync_write",
+	"重命名视图":                                                "connection.backend.action.rename_view",
+	"connection.backend.action.rename_view":                "connection.backend.action.rename_view",
+	"导入数据":                                                 "connection.backend.action.import_data",
+	"connection.backend.action.import_data":                "connection.backend.action.import_data",
+	"提交结果修改":                                               "connection.backend.action.apply_result_changes",
+	"connection.backend.action.apply_result_changes":       "connection.backend.action.apply_result_changes",
+	"预览结果修改":                                               "connection.backend.action.preview_result_changes",
+	"connection.backend.action.preview_result_changes":     "connection.backend.action.preview_result_changes",
+	"clear_table":                                          "connection.backend.action.clear_table",
+	"connection.backend.action.clear_table":                "connection.backend.action.clear_table",
+	"truncate_table":                                       "connection.backend.action.truncate_table",
+	"connection.backend.action.truncate_table":             "connection.backend.action.truncate_table",
+	"connection.backend.action.data_sync_structure":        "connection.backend.action.data_sync_structure",
+	"数据同步写入":                                               "connection.backend.action.data_sync_write",
+	"connection.backend.action.data_sync_write":            "connection.backend.action.data_sync_write",
 }
 
 func supportsConnectionReadOnlyMode(config connection.ConnectionConfig) bool {
@@ -129,8 +139,57 @@ func supportsConnectionReadOnlyMode(config connection.ConnectionConfig) bool {
 	return ok
 }
 
+func hasAnyConnectionProtection(config connection.ConnectionProtectionConfig) bool {
+	return config.RestrictDataEdit ||
+		config.RestrictStructureEdit ||
+		config.RestrictScriptExecution ||
+		config.RestrictDataImport
+}
+
+func resolveConnectionProtectionConfig(config connection.ConnectionConfig) connection.ConnectionProtectionConfig {
+	if !supportsConnectionReadOnlyMode(config) {
+		return connection.ConnectionProtectionConfig{}
+	}
+	if hasAnyConnectionProtection(config.Protection) {
+		return config.Protection
+	}
+	if config.ReadOnly {
+		return connection.ConnectionProtectionConfig{
+			RestrictDataEdit:        true,
+			RestrictStructureEdit:   true,
+			RestrictScriptExecution: true,
+			RestrictDataImport:      true,
+		}
+	}
+	return connection.ConnectionProtectionConfig{}
+}
+
+func isConnectionProtectionEnabled(config connection.ConnectionConfig, key connectionProtectionKey) bool {
+	protection := resolveConnectionProtectionConfig(config)
+	switch key {
+	case connectionProtectionDataEdit:
+		return protection.RestrictDataEdit
+	case connectionProtectionStructureEdit:
+		return protection.RestrictStructureEdit
+	case connectionProtectionScriptExecution:
+		return protection.RestrictScriptExecution
+	case connectionProtectionDataImport:
+		return protection.RestrictDataImport
+	default:
+		return false
+	}
+}
+
 func isConnectionForcedReadOnly(config connection.ConnectionConfig) bool {
-	return config.ReadOnly && supportsConnectionReadOnlyMode(config)
+	protection := resolveConnectionProtectionConfig(config)
+	return protection.RestrictDataEdit &&
+		protection.RestrictStructureEdit &&
+		protection.RestrictScriptExecution &&
+		protection.RestrictDataImport
+}
+
+func isConnectionScriptExecutionRestricted(config connection.ConnectionConfig) bool {
+	return isConnectionProtectionEnabled(config, connectionProtectionScriptExecution)
 }
 
 func normalizeReadOnlyConnectionText(text func(string, map[string]any) string) func(string, map[string]any) string {
@@ -174,9 +233,9 @@ func readOnlyConnectionActionBlockedMessage(action string) string {
 	return readOnlyConnectionActionBlockedMessageWithText(action, defaultAppText)
 }
 
-func ensureReadOnlyConnectionAllowsQueryWithText(config connection.ConnectionConfig, query string, text func(string, map[string]any) string) error {
+func ensureConnectionAllowsQueryWithText(config connection.ConnectionConfig, query string, text func(string, map[string]any) string) error {
 	text = normalizeReadOnlyConnectionText(text)
-	if !isConnectionForcedReadOnly(config) {
+	if !isConnectionScriptExecutionRestricted(config) {
 		return nil
 	}
 	for _, statement := range splitSQLStatements(query) {
@@ -187,20 +246,32 @@ func ensureReadOnlyConnectionAllowsQueryWithText(config connection.ConnectionCon
 	return nil
 }
 
-func ensureReadOnlyConnectionAllowsQuery(config connection.ConnectionConfig, query string) error {
-	return ensureReadOnlyConnectionAllowsQueryWithText(config, query, defaultAppText)
+func ensureConnectionAllowsQuery(config connection.ConnectionConfig, query string) error {
+	return ensureConnectionAllowsQueryWithText(config, query, defaultAppText)
 }
 
-func ensureReadOnlyConnectionAllowsActionWithText(config connection.ConnectionConfig, action string, text func(string, map[string]any) string) error {
+func ensureConnectionAllowsActionWithText(config connection.ConnectionConfig, key connectionProtectionKey, action string, text func(string, map[string]any) string) error {
 	text = normalizeReadOnlyConnectionText(text)
-	if !isConnectionForcedReadOnly(config) {
+	if !isConnectionProtectionEnabled(config, key) {
 		return nil
 	}
 	return errors.New(readOnlyConnectionActionBlockedMessageWithText(action, text))
 }
 
-func ensureReadOnlyConnectionAllowsAction(config connection.ConnectionConfig, action string) error {
-	return ensureReadOnlyConnectionAllowsActionWithText(config, action, defaultAppText)
+func ensureConnectionAllowsAction(config connection.ConnectionConfig, key connectionProtectionKey, action string) error {
+	return ensureConnectionAllowsActionWithText(config, key, action, defaultAppText)
+}
+
+func ensureConnectionAllowsDataEdit(config connection.ConnectionConfig, action string) error {
+	return ensureConnectionAllowsAction(config, connectionProtectionDataEdit, action)
+}
+
+func ensureConnectionAllowsStructureEdit(config connection.ConnectionConfig, action string) error {
+	return ensureConnectionAllowsAction(config, connectionProtectionStructureEdit, action)
+}
+
+func ensureConnectionAllowsDataImport(config connection.ConnectionConfig, action string) error {
+	return ensureConnectionAllowsAction(config, connectionProtectionDataImport, action)
 }
 
 func isReadOnlyMongoCommand(query string) bool {

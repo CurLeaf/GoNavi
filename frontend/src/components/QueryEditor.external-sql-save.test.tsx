@@ -3129,6 +3129,48 @@ describe('QueryEditor external SQL save', () => {
       expect(tableSuggestion.detail).not.toContain('Table (analytics)');
     });
 
+    it('deduplicates Oracle-style database qualified table completion labels when schema matches the qualifier', async () => {
+      storeState.languagePreference = 'zh-CN';
+      setCurrentLanguage('zh-CN');
+      storeState.connections[0].config.type = 'oracle';
+      storeState.connections[0].config.database = 'ORCLPDB1';
+      editorState.value = 'select * from sbdev.AA';
+      autoFetchState.visible = true;
+      backendApp.DBGetDatabases.mockResolvedValueOnce({
+        success: true,
+        data: [{ Database: 'ORCLPDB1' }, { Database: 'sbdev' }],
+      });
+      backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => {
+        if (String(dbName || '').toLowerCase() === 'sbdev') {
+          return { success: true, data: [{ Table: 'SBDEV.AAA3_NJ' }] };
+        }
+        return { success: true, data: [] };
+      });
+      backendApp.DBGetAllColumns.mockResolvedValue({ success: true, data: [] });
+
+      await act(async () => {
+        create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'ORCLPDB1' })} />);
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      const completionProvider = editorState.providers[0];
+      expect(completionProvider).toBeTruthy();
+
+      const completionItems = await completionProvider.provideCompletionItems(
+        editorState.editor.getModel(),
+        { lineNumber: 1, column: editorState.value.length + 1 },
+      );
+      const tableSuggestion = completionItems?.suggestions?.find((item: any) => item?.label === 'AAA3_NJ');
+
+      expect(tableSuggestion).toBeTruthy();
+      expect(tableSuggestion.insertText).toBe('AAA3_NJ');
+      expect(tableSuggestion.detail).toContain('表 (sbdev)');
+      expect(completionItems?.suggestions?.some((item: any) => item?.label === 'sbdev.SBDEV.AAA3_NJ')).toBe(false);
+    });
+
     it('localizes schema-qualified table completion detail in zh-CN while preserving the raw database and schema names', async () => {
       storeState.languagePreference = 'zh-CN';
       setCurrentLanguage('zh-CN');
@@ -4305,6 +4347,47 @@ describe('QueryEditor external SQL save', () => {
       createdAt: 100,
     }));
     expect(messageApi.success).toHaveBeenCalledWith('查询已保存。');
+  });
+
+  it('allows Ctrl/Cmd+S to save external SQL files from document-level targets', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    const filePath = '/Users/me/Documents/gonavi-queries/report.sql';
+    editorState.hasTextFocus = false;
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ filePath })} />);
+    });
+
+    editorState.value = 'select 6;';
+    const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+    const event = {
+      ctrlKey: !isMacRuntime,
+      metaKey: isMacRuntime,
+      altKey: false,
+      shiftKey: false,
+      key: 's',
+      target: document.body,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(backendApp.WriteSQLFile).toHaveBeenCalledWith(filePath, 'select 6;');
+    expect(messageApi.success).toHaveBeenCalledWith(expect.stringContaining('SQL 文件已保存'));
   });
 
   it('does not create saved queries when external SQL file writes fail', async () => {

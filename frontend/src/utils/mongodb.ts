@@ -85,6 +85,37 @@ const buildMongoBinaryUUID = (uuidText: string): { $binary: { base64: string; su
   },
 });
 
+const isMongoObjectIdFieldName = (fieldName: string): boolean => {
+  const text = String(fieldName || '').trim();
+  if (!text) return false;
+  return text === '_id'
+    || text === 'id'
+    || text.endsWith('Id')
+    || text.endsWith('ID')
+    || text.endsWith('_id')
+    || text.endsWith('-id');
+};
+
+const isMongoDateFieldName = (fieldName: string): boolean => {
+  const text = String(fieldName || '').trim();
+  if (!text) return false;
+  return text === 'date'
+    || text === 'time'
+    || text === 'timestamp'
+    || text.endsWith('Date')
+    || text.endsWith('Time')
+    || text.endsWith('At')
+    || text.endsWith('Timestamp')
+    || text.endsWith('_date')
+    || text.endsWith('_time')
+    || text.endsWith('_at')
+    || text.endsWith('_timestamp')
+    || text.endsWith('-date')
+    || text.endsWith('-time')
+    || text.endsWith('-at')
+    || text.endsWith('-timestamp');
+};
+
 const buildMongoDateLiteralText = (raw?: unknown): string => {
   const millis = typeof raw === 'object' && raw && !Array.isArray(raw)
     ? parseMongoDateToMillis((raw as Record<string, unknown>)?.$numberLong ?? raw)
@@ -199,6 +230,17 @@ const parseMongoDateToMillis = (raw: unknown): number | null => {
   if (INTEGER_RE.test(text)) {
     const n = Number(text);
     if (Number.isFinite(n)) return Math.trunc(n);
+  }
+
+  const naiveMatch = text.match(
+    /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}:\d{2})(\.\d{1,9})?)?$/
+  );
+  if (naiveMatch) {
+    const [, datePart, timePart = '00:00:00', fractionPart = ''] = naiveMatch;
+    const fractionDigits = fractionPart ? `${fractionPart.slice(1)}000`.slice(0, 3) : '000';
+    const utcText = `${datePart}T${timePart}.${fractionDigits}Z`;
+    const utcMillis = Date.parse(utcText);
+    if (!Number.isNaN(utcMillis)) return utcMillis;
   }
 
   const direct = new Date(text);
@@ -379,6 +421,56 @@ const parseMongoJSONValue = (raw: string): unknown => {
   }
 };
 
+const relaxMongoDateValue = (raw: unknown): { $date: string } => ({
+  $date: buildMongoDateLiteralText(raw),
+});
+
+const normalizeMongoFieldValueForEditing = (fieldName: string, value: unknown): unknown => {
+  if (value === null || typeof value === 'undefined') return value;
+
+  const singleEntry = getSingleMongoOperatorEntry(value);
+  if (singleEntry) {
+    if (singleEntry[0] === '$date') {
+      return relaxMongoDateValue(singleEntry[1]);
+    }
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeMongoFieldValueForEditing(fieldName, item));
+  }
+
+  if (isPlainMongoObject(value)) {
+    const next: Record<string, unknown> = {};
+    Object.entries(value).forEach(([key, nestedValue]) => {
+      next[key] = normalizeMongoFieldValueForEditing(key, nestedValue);
+    });
+    return next;
+  }
+
+  if (typeof value !== 'string') return value;
+
+  const text = value.trim();
+  if (!text) return value;
+
+  if (isMongoObjectIdFieldName(fieldName) && HEX24_RE.test(text)) {
+    return { $oid: text.toLowerCase() };
+  }
+
+  if (isMongoDateFieldName(fieldName)) {
+    const millis = parseMongoDateToMillis(text);
+    if (millis !== null) {
+      return relaxMongoDateValue(millis);
+    }
+  }
+
+  return value;
+};
+
+export const normalizeMongoDocumentForEditing = <T>(value: T): T => (
+  normalizeMongoFieldValueForEditing('', value) as T
+);
+
 export const formatMongoValueForDisplay = (value: unknown): string => {
   if (value === null) return 'NULL';
   if (typeof value === 'undefined') return '';
@@ -420,20 +512,21 @@ export const formatMongoValueForDisplay = (value: unknown): string => {
   return String(value);
 };
 
-export const formatMongoEditableValue = (value: unknown): string => {
-  if (value === null || typeof value === 'undefined') return '';
-  const singleEntry = getSingleMongoOperatorEntry(value);
+export const formatMongoEditableValue = (value: unknown, columnName = ''): string => {
+  const normalizedValue = normalizeMongoFieldValueForEditing(columnName, value);
+  if (normalizedValue === null || typeof normalizedValue === 'undefined') return '';
+  const singleEntry = getSingleMongoOperatorEntry(normalizedValue);
   if (singleEntry) {
-    return formatMongoValueForDisplay(value);
+    return formatMongoValueForDisplay(normalizedValue);
   }
-  if (Array.isArray(value) || isPlainMongoObject(value)) {
+  if (Array.isArray(normalizedValue) || isPlainMongoObject(normalizedValue)) {
     try {
-      return JSON.stringify(value, null, 2);
+      return JSON.stringify(normalizedValue, null, 2);
     } catch {
-      return String(value);
+      return String(normalizedValue);
     }
   }
-  return String(value);
+  return String(normalizedValue);
 };
 
 export const parseMongoEditedValue = (
@@ -443,7 +536,9 @@ export const parseMongoEditedValue = (
 ): unknown => {
   if (typeof rawValue !== 'string') return rawValue;
 
-  const currentKind = resolveMongoValueKind(currentValue);
+  const normalizedCurrentValue = normalizeMongoFieldValueForEditing(columnName, currentValue);
+  const inferredRawValue = normalizeMongoFieldValueForEditing(columnName, rawValue);
+  const currentKind = resolveMongoValueKind(normalizedCurrentValue);
   const text = rawValue.trim();
   const structuredLiteral = looksLikeMongoStructuredLiteral(rawValue);
   const explicitLiteral = looksLikeExplicitMongoTypedLiteral(rawValue);
@@ -501,9 +596,7 @@ export const parseMongoEditedValue = (
     case 'string':
     case 'nullish':
     default:
-      if (String(columnName || '').trim() === '_id' && HEX24_RE.test(text)) {
-        return { $oid: text.toLowerCase() };
-      }
+      if (inferredRawValue !== rawValue) return inferredRawValue;
       return rawValue;
   }
 };

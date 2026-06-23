@@ -119,6 +119,7 @@ import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import FindInDatabaseModal from './FindInDatabaseModal';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { resolveDataSourceType } from '../utils/dataSourceCapabilities';
+import { isConnectionStructureEditRestricted } from '../utils/connectionReadOnly';
 import { noAutoCapInputProps } from '../utils/inputAutoCap';
 import {
   resolveSidebarRuntimeDatabase,
@@ -1412,7 +1413,10 @@ const Sidebar: React.FC<{
 
   const openDesign = (node: any, initialTab: string, readOnly: boolean = false) => {
       const { tableName, dbName, id } = node.dataRef;
-      const forceReadOnly = readOnly || isStructureOnlyDbType(id);
+      const conn = connections.find(c => c.id === id);
+      const forceReadOnly = readOnly
+          || isStructureOnlyDbType(id)
+          || isConnectionStructureEditRestricted(conn?.config);
       addTab({
           id: `design-${id}-${dbName}-${tableName}`,
           title: forceReadOnly
@@ -1429,7 +1433,8 @@ const Sidebar: React.FC<{
 
   const openNewTableDesign = (node: any) => {
       const { dbName, id } = node.dataRef;
-      if (isStructureOnlyDbType(id)) {
+      const conn = connections.find(c => c.id === id);
+      if (isStructureOnlyDbType(id) || isConnectionStructureEditRestricted(conn?.config)) {
           message.warning(t('sidebar.message.visual_new_table_unsupported'));
           return;
       }

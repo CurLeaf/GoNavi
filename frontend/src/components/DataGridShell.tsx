@@ -100,6 +100,7 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     copyRowsForPaste,
     copyToClipboard,
     currentConnConfig,
+    designerReadOnly,
     currentTextRow,
     darkMode,
     dataContextValue,
@@ -734,7 +735,7 @@ const renderDataTableView = () => (
                         dbName,
                         tableName,
                         initialTab: 'columns',
-                        readOnly,
+                        readOnly: designerReadOnly,
                         objectType: 'table',
                     }}
                 />

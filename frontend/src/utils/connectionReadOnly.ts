@@ -3,10 +3,41 @@ import { convertMongoShellToJsonCommand } from "./mongodb";
 import { resolveSqlDialect } from "./sqlDialect";
 import { findSqlStatementRanges } from "./sqlStatementSelection";
 
+export type ConnectionProtectionKey =
+  | "restrictDataEdit"
+  | "restrictStructureEdit"
+  | "restrictScriptExecution"
+  | "restrictDataImport";
+
+export type ConnectionProtectionConfig = NonNullable<
+  ConnectionConfig["protection"]
+>;
+
 type ConnectionReadOnlyLike = Pick<
   ConnectionConfig,
-  "type" | "driver" | "oceanBaseProtocol" | "readOnly"
+  "type" | "driver" | "oceanBaseProtocol" | "readOnly" | "protection"
 > | null | undefined;
+
+export const CONNECTION_PROTECTION_KEYS: ConnectionProtectionKey[] = [
+  "restrictDataEdit",
+  "restrictStructureEdit",
+  "restrictScriptExecution",
+  "restrictDataImport",
+];
+
+const EMPTY_CONNECTION_PROTECTION: ConnectionProtectionConfig = {
+  restrictDataEdit: false,
+  restrictStructureEdit: false,
+  restrictScriptExecution: false,
+  restrictDataImport: false,
+};
+
+const FULL_CONNECTION_PROTECTION: ConnectionProtectionConfig = {
+  restrictDataEdit: true,
+  restrictStructureEdit: true,
+  restrictScriptExecution: true,
+  restrictDataImport: true,
+};
 
 const CONNECTION_READ_ONLY_TYPES = new Set([
   "mysql",
@@ -230,17 +261,109 @@ export const supportsConnectionReadOnlyMode = (
   return CONNECTION_READ_ONLY_TYPES.has(resolveConnectionReadOnlyType(config));
 };
 
+export const normalizeConnectionProtectionConfig = (
+  value: unknown,
+): ConnectionProtectionConfig => {
+  const raw =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    restrictDataEdit: raw.restrictDataEdit === true,
+    restrictStructureEdit: raw.restrictStructureEdit === true,
+    restrictScriptExecution: raw.restrictScriptExecution === true,
+    restrictDataImport: raw.restrictDataImport === true,
+  };
+};
+
+export const createEmptyConnectionProtectionConfig =
+  (): ConnectionProtectionConfig => ({ ...EMPTY_CONNECTION_PROTECTION });
+
+export const deriveLegacyConnectionReadOnlyFlag = (
+  protection: unknown,
+): boolean => {
+  const normalized = normalizeConnectionProtectionConfig(protection);
+  return CONNECTION_PROTECTION_KEYS.every((key) => normalized[key] === true);
+};
+
+export const resolveConnectionProtectionConfig = (
+  config: ConnectionReadOnlyLike,
+): ConnectionProtectionConfig => {
+  if (!supportsConnectionReadOnlyMode(config)) {
+    return createEmptyConnectionProtectionConfig();
+  }
+  const normalized = normalizeConnectionProtectionConfig(config?.protection);
+  const hasExplicitRestriction = CONNECTION_PROTECTION_KEYS.some(
+    (key) => normalized[key] === true,
+  );
+  if (hasExplicitRestriction) {
+    return normalized;
+  }
+  if (config?.readOnly === true) {
+    return { ...FULL_CONNECTION_PROTECTION };
+  }
+  return createEmptyConnectionProtectionConfig();
+};
+
+export const isConnectionProtectionEnabled = (
+  config: ConnectionReadOnlyLike,
+  key: ConnectionProtectionKey,
+): boolean => {
+  return resolveConnectionProtectionConfig(config)[key] === true;
+};
+
+export const getConnectionProtectionEnabledCount = (
+  config: ConnectionReadOnlyLike,
+): number => {
+  const protection = resolveConnectionProtectionConfig(config);
+  return CONNECTION_PROTECTION_KEYS.filter(
+    (key) => protection[key] === true,
+  ).length;
+};
+
+export const hasAnyConnectionProtection = (
+  config: ConnectionReadOnlyLike,
+): boolean => {
+  return getConnectionProtectionEnabledCount(config) > 0;
+};
+
+export const isConnectionDataEditRestricted = (
+  config: ConnectionReadOnlyLike,
+): boolean => {
+  return isConnectionProtectionEnabled(config, "restrictDataEdit");
+};
+
+export const isConnectionStructureEditRestricted = (
+  config: ConnectionReadOnlyLike,
+): boolean => {
+  return isConnectionProtectionEnabled(config, "restrictStructureEdit");
+};
+
+export const isConnectionScriptExecutionRestricted = (
+  config: ConnectionReadOnlyLike,
+): boolean => {
+  return isConnectionProtectionEnabled(config, "restrictScriptExecution");
+};
+
+export const isConnectionDataImportRestricted = (
+  config: ConnectionReadOnlyLike,
+): boolean => {
+  return isConnectionProtectionEnabled(config, "restrictDataImport");
+};
+
 export const isConnectionForcedReadOnly = (
   config: ConnectionReadOnlyLike,
 ): boolean => {
-  return supportsConnectionReadOnlyMode(config) && config?.readOnly === true;
+  return deriveLegacyConnectionReadOnlyFlag(
+    resolveConnectionProtectionConfig(config),
+  );
 };
 
 export const findConnectionMutatingStatements = (
   config: ConnectionReadOnlyLike,
   sql: string,
 ): string[] => {
-  if (!isConnectionForcedReadOnly(config)) {
+  if (!isConnectionScriptExecutionRestricted(config)) {
     return [];
   }
   return findSqlStatementRanges(String(sql || ""))

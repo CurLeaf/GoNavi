@@ -32,6 +32,7 @@ func TestConnectionReadOnlyMessagesUseLocalizedText(t *testing.T) {
 		"connection.backend.error.readonly_action_blocked",
 		"connection.backend.action.create_database",
 		"connection.backend.action.import_data",
+		"connection.backend.action.data_sync_structure",
 		"connection.backend.action.data_sync_write",
 		"connection.backend.action.clear_table",
 		"connection.backend.action.truncate_table",
@@ -67,6 +68,7 @@ func TestConnectionReadOnlyCatalogKeysExist(t *testing.T) {
 		"connection.backend.action.preview_result_changes",
 		"connection.backend.action.clear_table",
 		"connection.backend.action.truncate_table",
+		"connection.backend.action.data_sync_structure",
 		"connection.backend.action.data_sync_write",
 	}
 

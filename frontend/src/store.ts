@@ -73,6 +73,11 @@ import {
   saveSavedQueryToBackend,
   type SavedQueryBackend,
 } from "./utils/savedQueryPersistence";
+import {
+  deriveLegacyConnectionReadOnlyFlag,
+  normalizeConnectionProtectionConfig,
+  resolveConnectionProtectionConfig,
+} from "./utils/connectionReadOnly";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
@@ -797,6 +802,9 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     supportsNetworkTunnel &&
     (raw.useHttpTunnel === true || raw.UseHTTPTunnel === true);
   const useProxy = supportsNetworkTunnel && !!raw.useProxy && !useHttpTunnel;
+  const normalizedProtection = normalizeConnectionProtectionConfig(
+    raw.protection,
+  );
 
   const safeConfig: ConnectionConfig & Record<string, unknown> = {
     ...raw,
@@ -809,6 +817,7 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     savePassword,
     database: toTrimmedString(raw.database),
     readOnly: raw.readOnly === true,
+    protection: normalizedProtection,
     useSSL: sslCapable ? !!raw.useSSL : false,
     sslMode: sslCapable ? sslMode : "disable",
     sslCAPath: sslCapable ? toTrimmedString(raw.sslCAPath) : "",
@@ -861,6 +870,10 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
       MAX_KEEPALIVE_INTERVAL_MINUTES,
     ),
   };
+
+  const resolvedProtection = resolveConnectionProtectionConfig(safeConfig);
+  safeConfig.protection = resolvedProtection;
+  safeConfig.readOnly = deriveLegacyConnectionReadOnlyFlag(resolvedProtection);
 
   if (type === "redis") {
     safeConfig.redisDB = normalizeIntegerInRange(
