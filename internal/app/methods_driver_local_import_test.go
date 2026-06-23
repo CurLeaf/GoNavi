@@ -75,11 +75,7 @@ func TestInstallLocalDriverPackageUsesCurrentLanguageForEmptyLocalPath(t *testin
 }
 
 func TestLocalDriverImportErrorsUseI18nWrappers(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	functionNames := []string{
 		"(*App) InstallLocalDriverPackage",
@@ -243,11 +239,7 @@ func TestDriverOperationFailureDetailUsesCurrentLanguageForRuntimeDependencyWrap
 }
 
 func TestInstallLocalDriverPackageProgressUsesLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 	start := strings.Index(source, "func (a *App) InstallLocalDriverPackage")
 	if start < 0 {
 		t.Fatal("methods_driver.go missing InstallLocalDriverPackage")

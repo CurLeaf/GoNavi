@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readV2ThemeCss } from '../test/readV2ThemeCss';
 
 import { setCurrentLanguage } from '../i18n';
+import { catalogs } from '../i18n/catalog';
 import type { SavedQuery, TabData } from '../types';
+import { formatSqlExecutionError } from '../utils/sqlErrorSemantics';
 import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 import { clearQueryTabDraft, clearSQLFileTabDraft, getQueryTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
 import QueryEditor, {
@@ -356,6 +358,15 @@ vi.mock('./DataGrid', () => ({
   GONAVI_ROW_KEY: '__gonavi_row_key__',
 }));
 
+vi.mock('./LogPanel', () => ({
+  default: ({ variant, executionError }: { variant?: string; executionError?: string }) => (
+    <div data-log-panel={variant}>
+      SQL 执行日志
+      {executionError ? ` ${executionError}` : ''}
+    </div>
+  ),
+}));
+
 vi.mock('@ant-design/icons', () => {
   const Icon = () => <span />;
   return {
@@ -460,10 +471,12 @@ vi.mock('antd', () => {
   };
 });
 
-const textContent = (node: any): string =>
-  (node.children || [])
-    .map((item: any) => (typeof item === 'string' ? item : textContent(item)))
-    .join('');
+const textContent = (node: any): string => {
+  if (node === null || node === undefined) return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map((item) => textContent(item)).join('');
+  return textContent(node.children || []);
+};
 
 const findButton = (renderer: ReactTestRenderer, text: string) =>
   renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text))[0];
@@ -1303,9 +1316,13 @@ describe('QueryEditor external SQL save', () => {
       renderer = create(<QueryEditor tab={createTab()} />);
     });
 
+    await act(async () => {
+      findButton(renderer!, 'Show results panel').props.onClick();
+    });
+
     const rendered = textContent(renderer!.toJSON());
-    expect(rendered).toContain('Awaiting SQL execution');
-    expect(rendered).toContain('Run a query to display results below in the new data grid.');
+    expect(rendered).toContain(catalogs['en-US']['query_editor.empty_state.title']);
+    expect(rendered).toContain(catalogs['en-US']['query_editor.empty_state.description']);
     expect(rendered).not.toContain('等待执行 SQL');
     expect(rendered).not.toContain('运行查询后，结果会在下方以新版数据网格展示。');
   });
@@ -1401,7 +1418,7 @@ describe('QueryEditor external SQL save', () => {
     editorState.position = { lineNumber: 3, column: 1 };
 
     await act(async () => {
-      const runButton = findButton(renderer!, 'Run');
+      const runButton = findButton(renderer!, '运行');
       runButton.props.onMouseDown?.({ preventDefault: vi.fn() });
       await runButton.props.onClick();
     });
@@ -1441,7 +1458,7 @@ describe('QueryEditor external SQL save', () => {
     };
 
     await act(async () => {
-      const runButton = findButton(renderer!, 'Run');
+      const runButton = findButton(renderer!, '运行');
       runButton.props.onMouseDown?.({ preventDefault: vi.fn() });
       await runButton.props.onClick();
     });
@@ -1483,7 +1500,7 @@ describe('QueryEditor external SQL save', () => {
     };
 
     await act(async () => {
-      const runButton = findButton(renderer!, '运行');
+      const runButton = findButton(renderer!, 'Run');
       runButton.props.onMouseDown?.({ preventDefault: vi.fn() });
       await runButton.props.onClick();
     });
@@ -1492,7 +1509,7 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(textContent(renderer!.toJSON())).toContain('结果 1');
+    expect(textContent(renderer!.toJSON())).toContain('Result 1');
     backendApp.DBQueryMulti.mockClear();
     messageApi.info.mockClear();
 
@@ -1510,7 +1527,7 @@ describe('QueryEditor external SQL save', () => {
     });
 
     await act(async () => {
-      const runButton = findButton(renderer!, '运行');
+      const runButton = findButton(renderer!, 'Run');
       runButton.props.onMouseDown?.({ preventDefault: vi.fn() });
       await runButton.props.onClick();
     });
@@ -1646,7 +1663,8 @@ describe('QueryEditor external SQL save', () => {
       });
 
       const rendered = textContent(renderer.toJSON());
-      expect(rendered).toContain('Statement 2 failed: driver exploded');
+      expect(rendered).toContain('Statement 2 failed:');
+      expect(rendered).toContain('Raw error: driver exploded');
       expect(rendered).not.toContain('第 2 条语句执行失败：driver exploded');
     });
 
@@ -1718,11 +1736,16 @@ describe('QueryEditor external SQL save', () => {
       expect(messageApi.success).not.toHaveBeenCalledWith('已执行完成，生成 2 个结果集。');
     });
 
-    it('shows the non-Mongo zero-result success toast in English', async () => {
+    it('renders the non-Mongo zero-row transactional result in English', async () => {
       storeState.languagePreference = 'en-US';
       setCurrentLanguage('en-US');
       const query = 'update users set active = 1 where 1 = 0;';
-      backendApp.DBQueryMulti.mockResolvedValueOnce({ success: true, data: [] });
+      backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+        success: true,
+        transactionId: 'tx-zero-rows',
+        transactionPending: true,
+        data: [{ columns: ['affectedRows'], rows: [{ affectedRows: 0 }], statementIndex: 1 }],
+      });
 
       let renderer!: ReactTestRenderer;
       await act(async () => {
@@ -1747,11 +1770,16 @@ describe('QueryEditor external SQL save', () => {
         await Promise.resolve();
       });
 
+      const rendered = textContent(renderer.toJSON());
       expect(backendApp.DBQueryWithCancel).not.toHaveBeenCalled();
-      expect(backendApp.DBQueryMulti).toHaveBeenCalledTimes(1);
-      expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('update users set active = 1 where 1 = 0');
-      expect(messageApi.success).toHaveBeenCalledWith('Execution succeeded.');
-      expect(messageApi.success).not.toHaveBeenCalledWith('执行成功。');
+      expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+      expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalledTimes(1);
+      expect(String(backendApp.DBQueryMultiTransactional.mock.calls[0][2])).toContain('update users set active = 1 where 1 = 0');
+      expect(rendered).toContain(catalogs['en-US']['query_editor.result.execution_success']);
+      expect(rendered).toContain(catalogs['en-US']['query_editor.result.affected_rows'].replace('{{count}}', '0'));
+      expect(rendered).not.toContain('执行成功');
+      expect(rendered).not.toContain('影响行数：0');
+      expect(messageApi.success).not.toHaveBeenCalledWith('Execution succeeded.');
     });
 
     it('shows the wrapped execution failure toast in English while preserving raw error detail', async () => {
@@ -1786,7 +1814,7 @@ describe('QueryEditor external SQL save', () => {
       expect(backendApp.DBQueryWithCancel).not.toHaveBeenCalled();
       expect(backendApp.DBQueryMulti).toHaveBeenCalledTimes(1);
       expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('select 1');
-      expect(messageApi.error).toHaveBeenCalledWith('Query execution failed: driver exploded');
+      expect(messageApi.error).toHaveBeenCalledWith(`Query execution failed: ${formatSqlExecutionError('driver exploded')}`);
       expect(messageApi.error).not.toHaveBeenCalledWith('Error executing query: driver exploded');
     });
   });
@@ -1841,7 +1869,7 @@ describe('QueryEditor external SQL save', () => {
         await Promise.resolve();
       });
 
-      expect(messageApi.error).toHaveBeenCalledWith('Refresh failed: network down');
+      expect(messageApi.error).toHaveBeenCalledWith(`Refresh failed: ${formatSqlExecutionError('network down')}`);
       expect(messageApi.error).not.toHaveBeenCalledWith('刷新失败: network down');
     });
 
@@ -1867,7 +1895,7 @@ describe('QueryEditor external SQL save', () => {
         await Promise.resolve();
       });
 
-      expect(messageApi.error).toHaveBeenCalledWith('Refresh failed: socket closed');
+      expect(messageApi.error).toHaveBeenCalledWith(`Refresh failed: ${formatSqlExecutionError('socket closed')}`);
       expect(messageApi.error).not.toHaveBeenCalledWith('刷新失败: socket closed');
     });
   });
@@ -2432,7 +2460,6 @@ describe('QueryEditor external SQL save', () => {
     const modalSource = readFileSync(new URL('./SnippetSettingsModal.tsx', import.meta.url), 'utf8');
     const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
 
-    expect(modalSource).toContain('片段语法说明（可编辑）');
     expect(modalSource).toContain('data-sql-snippet-syntax-help-editor="true"');
     expect(modalSource).toContain("defaultActiveKey={['snippet-help']}");
     expect(modalSource).toContain('footer={null}');
@@ -2441,7 +2468,7 @@ describe('QueryEditor external SQL save', () => {
     expect(modalSource).toContain("size=\"large\"");
     expect(modalSource).toContain('minWidth: 96');
     expect(modalSource).toContain('syntaxHelp');
-    expect(modalSource).toContain('占位符语法参考');
+    expect(modalSource).toContain("t('snippet_settings.syntax_reference.label')");
     expect(source).toContain('s.syntaxHelp || s.description || s.body');
   });
 

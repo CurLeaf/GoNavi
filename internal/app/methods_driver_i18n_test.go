@@ -20,7 +20,7 @@ func methodsDriverFunctionSource(t *testing.T, source string, signature string) 
 	t.Helper()
 	start := strings.Index(source, signature)
 	if start < 0 {
-		t.Fatalf("methods_driver.go missing function signature %q", signature)
+		t.Fatalf("methods driver source missing function signature %q", signature)
 	}
 	rest := source[start+len(signature):]
 	end := strings.Index(rest, "\nfunc ")
@@ -39,11 +39,7 @@ func (timeoutDriverNetworkError) Temporary() bool { return true }
 var _ net.Error = timeoutDriverNetworkError{}
 
 func TestMethodsDriverNetworkBackendMessagesUseLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	checks := map[string]struct {
 		rawMessages []string
@@ -116,11 +112,7 @@ func TestMethodsDriverNetworkBackendCatalogKeysExist(t *testing.T) {
 }
 
 func TestMethodsDriverReleaseHelpersUseLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	checks := map[string]struct {
 		rawMessages []string
@@ -188,11 +180,7 @@ func TestMethodsDriverReleaseHelpersUseLocalizedText(t *testing.T) {
 }
 
 func TestMethodsDriverInstallActionDetailsUseEnglishInternalWrappers(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	checks := map[string]struct {
 		rawMessages     []string
@@ -388,6 +376,7 @@ func TestLoadReleaseAssetSizesCachedUsesCurrentLanguageForEmptyCacheKey(t *testi
 func TestFetchDriverBundleAssetSizeIndexUsesCurrentLanguageForStructuredErrors(t *testing.T) {
 	app := NewApp()
 	app.SetLanguage(string(i18n.LanguageEnUS))
+	disableGlobalProxyForTest(t)
 
 	makeRelease := func(downloadURL string) *githubRelease {
 		return &githubRelease{
@@ -486,6 +475,7 @@ func TestFetchReleaseByTagUsesCurrentLanguageForEmptyTag(t *testing.T) {
 func TestFetchDriverReleaseByURLUsesCurrentLanguageForStructuredErrors(t *testing.T) {
 	app := NewApp()
 	app.SetLanguage(string(i18n.LanguageEnUS))
+	disableGlobalProxyForTest(t)
 
 	_, err := fetchDriverReleaseByURL("   ")
 	if err == nil {
@@ -517,11 +507,7 @@ func TestFetchDriverReleaseByURLUsesCurrentLanguageForStructuredErrors(t *testin
 }
 
 func TestMethodsDriverVersionOptionErrorsUseLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	functionSource := methodsDriverFunctionSource(t, source, "func resolveDriverVersionOptions")
 	for _, rawMessage := range []string{
@@ -628,11 +614,7 @@ func TestResolveDriverVersionOptionsUsesCurrentLanguageForStructuredErrors(t *te
 }
 
 func TestMethodsDriverModuleVersionFetchErrorsUseLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	functionSource := methodsDriverFunctionSource(t, source, "func fetchGoModuleVersionMetas(modulePath string)")
 	for _, rawMessage := range []string{
@@ -699,11 +681,7 @@ func TestFetchGoModuleVersionMetasUsesCurrentLanguageForEmptyModulePath(t *testi
 }
 
 func TestMethodsDriverBundleAcquireErrorsUseLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	functionSource := methodsDriverFunctionSource(t, source, "func acquireOptionalDriverBundlePath(bundleURL string, onProgress func(downloaded, total int64), onWaiting func()) (string, error)")
 	if strings.Contains(functionSource, `fmt.Errorf("驱动总包下载地址为空")`) {
@@ -734,11 +712,7 @@ func TestAcquireOptionalDriverBundlePathUsesCurrentLanguageForEmptyURL(t *testin
 }
 
 func TestMethodsDriverManifestErrorsUseLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	checks := map[string]struct {
 		rawMessages []string
@@ -852,6 +826,7 @@ func TestResolveDriverRepositoryURLUsesCurrentLanguageForStructuredErrors(t *tes
 func TestGetDriverStatusListUsesCurrentLanguageForManifestErrors(t *testing.T) {
 	app := NewApp()
 	app.SetLanguage(string(i18n.LanguageEnUS))
+	disableGlobalProxyForTest(t)
 	t.Cleanup(func() {
 		app.SetLanguage(string(i18n.LanguageZhCN))
 	})
@@ -948,11 +923,7 @@ func TestGetDriverStatusListUsesCurrentLanguageForManifestErrors(t *testing.T) {
 }
 
 func TestMethodsDriverUnsupportedVersionErrorsUseLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	functionSource := methodsDriverFunctionSource(t, source, "func (a *App) localizeDriverSelectionError")
 	for _, key := range []string{
@@ -966,11 +937,7 @@ func TestMethodsDriverUnsupportedVersionErrorsUseLocalizedText(t *testing.T) {
 }
 
 func TestMethodsDriverUnsupportedVersionErrorTypesUseLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	checks := map[string]struct {
 		rawMessages []string
@@ -1136,11 +1103,7 @@ func TestLocalizeDriverSelectionErrorUsesCurrentLanguageForUnsupportedVersions(t
 }
 
 func TestMethodsDriverRuntimeReasonCompatibilityUsesLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	checks := map[string]struct {
 		rawMessages []string
@@ -1335,11 +1298,7 @@ func TestResolveDriverDisplayNameUsesCurrentLanguageFallbackName(t *testing.T) {
 }
 
 func TestMethodsDriverUpdateStatusUsesLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	checks := map[string]struct {
 		rawMessages []string
@@ -1460,11 +1419,7 @@ func TestOptionalDriverPackageUpdateStatusUsesCurrentLanguageForMongoCompatibili
 }
 
 func TestMethodsDriverSourceBuildHelperErrorsUseLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	checks := map[string]struct {
 		rawMessages []string

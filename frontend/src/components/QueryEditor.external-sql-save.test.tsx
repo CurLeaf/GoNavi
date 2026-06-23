@@ -364,10 +364,19 @@ vi.mock('./DataGrid', () => ({
 }));
 
 vi.mock('./LogPanel', () => ({
-  default: ({ variant, executionError }: { variant?: string; executionError?: string }) => (
+  default: ({
+    variant,
+    executionError,
+    onDiagnoseExecutionError,
+  }: {
+    variant?: string;
+    executionError?: string;
+    onDiagnoseExecutionError?: () => void;
+  }) => (
     <div data-log-panel={variant}>
       SQL 执行日志
-      {executionError ? ` ${executionError}` : ''}
+      {executionError ? ` 执行失败 ${executionError}` : ''}
+      {onDiagnoseExecutionError ? <button onClick={onDiagnoseExecutionError}>AI diagnose</button> : null}
     </div>
   ),
 }));
@@ -2514,6 +2523,7 @@ describe('QueryEditor external SQL save', () => {
     vi.useFakeTimers();
     try {
       storeState.aiPanelVisible = true;
+      storeState.appearance.uiVersion = 'v2';
 
       let renderer!: ReactTestRenderer;
       await act(async () => {
@@ -2553,6 +2563,8 @@ describe('QueryEditor external SQL save', () => {
         await Promise.resolve();
         await Promise.resolve();
       });
+
+      expect(textContent(renderer.toJSON())).toContain('SQL 执行日志');
 
       await act(async () => {
         findButton(renderer, 'AI diagnose').props.onClick();
@@ -4573,6 +4585,7 @@ describe('QueryEditor external SQL save', () => {
   });
 
   it('shows Chinese semantic meaning for SQL execution errors', async () => {
+    storeState.appearance.uiVersion = 'v2';
     backendApp.DBQueryMulti.mockResolvedValueOnce({
       success: false,
       message: 'pq: syntax error at or near "from"',
@@ -4592,6 +4605,7 @@ describe('QueryEditor external SQL save', () => {
     });
 
     const pageText = textContent(renderer!.root);
+    expect(pageText).toContain('SQL 执行日志');
     expect(pageText).toContain('执行失败');
     expect(pageText).toContain('中文语义：SQL 语法错误');
     expect(pageText).toContain('处理建议：');
@@ -7014,7 +7028,7 @@ describe('QueryEditor external SQL save', () => {
 
   it('keeps query result tabs compact, centered, and readable in v2 UI', () => {
     const source = readFileSync(new URL('./QueryEditorResultsPanel.tsx', import.meta.url), 'utf8');
-    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
 
     expect(source).toContain('.query-result-tabs .ant-tabs-tab {');
     expect(source).toContain('width: auto !important;');
@@ -7037,7 +7051,7 @@ describe('QueryEditor external SQL save', () => {
     const resultsPanelSource = readFileSync(new URL('./QueryEditorResultsPanel.tsx', import.meta.url), 'utf8');
     const transactionSettingsSource = readFileSync(new URL('./QueryEditorTransactionSettings.tsx', import.meta.url), 'utf8');
     const transactionToolbarSource = readFileSync(new URL('./QueryEditorTransactionToolbar.tsx', import.meta.url), 'utf8');
-    const css = readFileSync(new URL('../v2-theme.css', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
 
     expect(source).toContain('QueryEditorToolbar');
     expect(toolbarSource).toContain('gn-v2-query-toolbar-selects');

@@ -180,11 +180,7 @@ func TestOptionalDriverDownloadZipURLAcceptsAssetAPIFragment(t *testing.T) {
 }
 
 func TestOptionalDriverAgentDownloadAndBuildErrorsUseI18nWrappers(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	functionNames := []string{
 		"ensureOptionalDriverAgentBinary",
@@ -257,11 +253,7 @@ func TestOptionalDriverAgentDownloadAndBuildErrorsUseI18nWrappers(t *testing.T) 
 }
 
 func TestInstallOptionalDriverAgentPackageUsesLocalizedNamedHashFailure(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	start := strings.Index(source, "func installOptionalDriverAgentPackage")
 	if start < 0 {
@@ -627,11 +619,7 @@ func TestVerifyInstalledOptionalDriverAgentRevisionLocalizesRevisionMismatch(t *
 }
 
 func TestVerifyInstalledOptionalDriverAgentRevisionUsesI18nWrappers(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 	start := strings.Index(source, "func verifyInstalledOptionalDriverAgentRevision")
 	if start < 0 {
 		t.Fatal("methods_driver.go missing verifyInstalledOptionalDriverAgentRevision")
@@ -999,11 +987,7 @@ func zhCNDriverProgressText(t *testing.T) func(string, map[string]any) string {
 }
 
 func TestOptionalDriverAgentProgressMessagesUseLocalizedText(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	rawMessages := []string{
 		`"准备安装 %s 驱动代理`,
@@ -1317,11 +1301,7 @@ func TestResolveDriverPackageSizeTextUsesLocalizedStatusText(t *testing.T) {
 }
 
 func TestDriverVersionDisplayLabelsAndPackageSizeStatusesUseI18nKeys(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	if !strings.Contains(source, "resolveDriverVersionOptions(definition, repositoryURL, a.appText)") {
 		t.Fatal("expected GetDriverVersionList to pass app localizer into resolveDriverVersionOptions")
@@ -2068,11 +2048,7 @@ func resetOptionalDriverBundleDownloadCacheForTest(t *testing.T) {
 }
 
 func TestOptionalDriverBundleCacheHelpersDoNotContainLegacyChineseWrappers(t *testing.T) {
-	sourceBytes, err := os.ReadFile("methods_driver.go")
-	if err != nil {
-		t.Fatalf("read methods_driver.go: %v", err)
-	}
-	source := string(sourceBytes)
+	source := methodsDriverSource(t)
 
 	functionNames := []string{
 		"downloadOptionalDriverBundleToCache",
