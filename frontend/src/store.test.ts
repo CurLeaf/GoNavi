@@ -1030,6 +1030,27 @@ describe('store appearance persistence', () => {
             query: 'select 1;',
           },
         ],
+        tableExportHistories: {
+          'conn-1::main::users': [
+            {
+              jobId: 'job-1',
+              targetName: '   ',
+              startedAt: 1,
+              finishedAt: 0,
+              format: 'csv',
+              scope: 'table',
+              scopeLabel: 'Table',
+              strategyLabel: 'Export',
+              status: 'running',
+              stage: '',
+              current: 0,
+              total: 0,
+              totalRowsKnown: false,
+              filePath: '',
+              message: '',
+            },
+          ],
+        },
         activeTabId: 'query-empty-title',
       },
       version: 11,
@@ -1048,6 +1069,11 @@ describe('store appearance persistence', () => {
     );
     expect(reloaded.useStore.getState().tabs[0]?.title).toBe(
       reloadedI18n.t('sidebar.tab.new_query'),
+    );
+    expect(
+      reloaded.useStore.getState().tableExportHistories['conn-1::main::users']?.[0]?.targetName,
+    ).toBe(
+      reloadedI18n.t('data_export.progress.value.target_fallback'),
     );
   });
 
@@ -1080,6 +1106,7 @@ describe('store appearance persistence', () => {
     expect(source).not.toContain('`连接-${index + 1}`');
     expect(source).not.toContain('`标签-${index + 1}`');
     expect(source).not.toContain('`片段-${index + 1}`');
+    expect(source).not.toContain('"未命名对象"');
     expect(source).not.toContain('"新建查询"');
     expect(source).not.toContain('"新的对话"');
   });

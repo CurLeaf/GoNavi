@@ -205,6 +205,37 @@ func TestExternalSQLFileBackendCatalogKeysExist(t *testing.T) {
 	}
 }
 
+func TestExportDriverAgentGuardUsesLocalizedText(t *testing.T) {
+	sourceBytes, err := os.ReadFile("methods_file.go")
+	if err != nil {
+		t.Fatalf("read methods_file.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	functionSource := methodsFileFunctionSource(t, source, "func verifyOptionalDriverAgentReadyForExport(config connection.ConnectionConfig) error {")
+	rawLiteral := `fmt.Errorf("当前导出依赖最新的 %s driver-agent 流式协议；为避免大结果集回退到高内存缓冲模式，请在驱动管理中重装后重试：%w", displayName, err)`
+	if strings.Contains(functionSource, rawLiteral) {
+		t.Fatalf("verifyOptionalDriverAgentReadyForExport still contains raw export driver-agent guard text %q", rawLiteral)
+	}
+	if !strings.Contains(functionSource, "file.backend.error.export_driver_agent_streaming_required") {
+		t.Fatal("verifyOptionalDriverAgentReadyForExport does not reference export driver-agent streaming i18n key")
+	}
+}
+
+func TestExportDriverAgentGuardCatalogKeyExists(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		if strings.TrimSpace(catalog["file.backend.error.export_driver_agent_streaming_required"]) == "" {
+			t.Fatalf("%s catalog missing export driver-agent streaming key", language)
+		}
+	}
+}
+
 func TestFileSelectorDialogCatalogKeysExist(t *testing.T) {
 	catalogs, err := i18n.LoadCatalogs()
 	if err != nil {
@@ -434,11 +465,14 @@ func TestExportBackendMessagesUseLocalizedText(t *testing.T) {
 			"Export %s",
 			"\u5bfc\u51fa\u5b8c\u6210",
 			"Message: \"\u5199\u5165\u5931\u8d25\uff1a",
+			"\u6b63\u5728\u51c6\u5907\u5bfc\u51fa",
+			"\u6b63\u5728\u5bfc\u51fa SQL \u6587\u4ef6",
 		},
 		"func (a *App) exportTablesSQL": {
 			"\u65e0\u6548\u7684\u5bfc\u51fa\u6a21\u5f0f",
 			"Export Tables (SQL)",
 			"\u5bfc\u51fa\u5b8c\u6210",
+			"\u6b63\u5728\u51c6\u5907\u6279\u91cf\u5bf9\u8c61\u5bfc\u51fa",
 		},
 		"func (a *App) ExportDatabaseSQL": {
 			"\u6570\u636e\u5e93\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a",
@@ -456,6 +490,7 @@ func TestExportBackendMessagesUseLocalizedText(t *testing.T) {
 			"Export Data",
 			"Message: \"\u5199\u5165\u5931\u8d25\uff1a",
 			"\u5bfc\u51fa\u5b8c\u6210",
+			"\u6b63\u5728\u51c6\u5907\u5bfc\u51fa",
 		},
 		"func (a *App) ExportQuery": {
 			"\u67e5\u8be2\u8bed\u53e5\u4e0d\u80fd\u4e3a\u7a7a",
@@ -463,6 +498,48 @@ func TestExportBackendMessagesUseLocalizedText(t *testing.T) {
 			"\u4ec5\u652f\u6301 SELECT/WITH \u67e5\u8be2\u5bfc\u51fa",
 			"Message: \"\u5199\u5165\u5931\u8d25\uff1a",
 			"\u5bfc\u51fa\u5b8c\u6210",
+			"\u6b63\u5728\u51c6\u5907\u5bfc\u51fa",
+		},
+		"func (r *exportProgressReporter) Finalizing": {
+			"\u6b63\u5728\u5b8c\u6210\u6587\u4ef6\u5199\u5165",
+			"\u6b63\u5728\u5c01\u88c5\u5e76\u538b\u7f29 XLSX \u6587\u4ef6",
+			"\u6b63\u5728\u5b8c\u6210 CSV \u5199\u5165",
+		},
+		"func (r *exportProgressReporter) Done": {
+			"\u5bfc\u51fa\u5b8c\u6210",
+		},
+		"func (r *exportProgressReporter) Error": {
+			"\u5bfc\u51fa\u5931\u8d25",
+		},
+		"func resolveBatchObjectsTargetName": {
+			"\u5f53\u524d\u6570\u636e\u5e93",
+			`fmt.Sprintf("%s · %d 个对象", safeDbName, len(objectNames))`,
+		},
+		"func (a *App) ExportDatabasesSQLWithOptions": {
+			"\u8bf7\u81f3\u5c11\u9009\u62e9\u4e00\u4e2a\u6570\u636e\u5e93",
+			"Title: \"\u9009\u62e9\u6279\u91cf\u5bfc\u51fa\u76ee\u5f55\"",
+			`fmt.Sprintf("%d 个数据库", len(normalizedDbNames))`,
+			"\u6b63\u5728\u51c6\u5907\u6279\u91cf\u5e93\u5bfc\u51fa",
+			`fmt.Sprintf("正在导出 %s (%d/%d)", name, index+1, len(normalizedDbNames))`,
+			"Message: \"\u5bfc\u51fa\u5b8c\u6210\"",
+		},
+		"func (a *App) exportDatabaseSQLToFile": {
+			"\u6570\u636e\u5e93\u540d\u79f0\u4e0d\u80fd\u4e3a\u7a7a",
+		},
+		"func (c *countingExportConsumer) SetColumns": {
+			"\u6b63\u5728\u5199\u5165\u6587\u4ef6",
+		},
+		"func (c *countingExportConsumer) ConsumeRow": {
+			"\u6b63\u5728\u5199\u5165\u6587\u4ef6",
+		},
+		"func (c *countingExportConsumer) ConsumeRowValues": {
+			"\u6b63\u5728\u5199\u5165\u6587\u4ef6",
+		},
+		"func exportQueryResultToFile": {
+			"\u6b63\u5728\u67e5\u8be2\u6570\u636e",
+		},
+		"func writeRowsToFileWithReporter": {
+			"\u6b63\u5728\u5199\u5165\u6587\u4ef6",
 		},
 	}
 
@@ -495,9 +572,25 @@ func TestExportBackendCatalogKeysExist(t *testing.T) {
 		"file.backend.error.schema_export_no_objects",
 		"file.backend.error.schema_name_required",
 		"file.backend.error.select_with_query_required",
+		"file.backend.dialog.select_batch_export_directory",
 		"file.backend.error.write_failed",
 		"file.backend.filter.connection_package",
 		"file.backend.message.export_completed",
+		"data_export.progress.stage.preparing_export",
+		"data_export.progress.stage.exporting_sql_file",
+		"data_export.progress.stage.preparing_batch_tables_export",
+		"data_export.progress.stage.preparing_batch_databases_export",
+		"data_export.progress.stage.exporting_item_with_progress",
+		"data_export.progress.stage.querying_data",
+		"data_export.progress.stage.writing_file",
+		"data_export.progress.stage.finalizing_file_write",
+		"data_export.progress.stage.finalizing_xlsx_package",
+		"data_export.progress.stage.finalizing_csv_write",
+		"data_export.progress.stage.export_failed",
+		"data_export.workbench.target.batch_databases",
+		"data_export.workbench.target.batch_tables",
+		"data_export.workbench.target.current_database",
+		"sidebar.message.select_database_required",
 	}
 	for _, language := range i18n.SupportedLanguages() {
 		catalog := catalogs[language]

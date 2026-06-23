@@ -1579,7 +1579,9 @@ const sanitizeTableExportHistoryEntry = (
       : "idle";
   return {
     jobId,
-    targetName: toTrimmedString(raw.targetName, "未命名对象") || "未命名对象",
+    targetName:
+      toTrimmedString(raw.targetName, translate("data_export.progress.value.target_fallback")) ||
+      translate("data_export.progress.value.target_fallback"),
     startedAt: normalizeTimestamp(raw.startedAt),
     finishedAt: normalizeTimestamp(raw.finishedAt),
     format: toTrimmedString(raw.format).slice(0, 32),

@@ -811,11 +811,11 @@ func resolveModelsURL(config ai.ProviderConfig) string {
 	}
 }
 
-func newModelsRequest(config ai.ProviderConfig) (*http.Request, error) {
+func newModelsRequest(config ai.ProviderConfig, localizer *i18n.Localizer) (*http.Request, error) {
 	config = normalizeProviderConfig(config)
 	url := resolveModelsURL(config)
 	if strings.TrimSpace(url) == "" {
-		return nil, fmt.Errorf("当前供应商不支持远端模型列表")
+		return nil, fmt.Errorf("create request failed: %s", serviceTextFromLocalizer(localizer, "ai_service.backend.error.models_remote_unsupported", nil))
 	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -863,7 +863,7 @@ func newProviderHealthCheckRequest(config ai.ProviderConfig) (*http.Request, err
 	if isMiniMaxAnthropicProvider(config) || isDashScopeBailianAnthropicProvider(config) || isDashScopeCodingPlanAnthropicProvider(config) {
 		return newAnthropicMessagesHealthCheckRequest(config)
 	}
-	return newModelsRequest(config)
+	return newModelsRequest(config, nil)
 }
 
 func newAnthropicMessagesHealthCheckRequest(config ai.ProviderConfig) (*http.Request, error) {
@@ -998,7 +998,7 @@ func fetchModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string,
 	case "gemini":
 		return fetchGeminiModels(config, localizer)
 	case "cursor-agent":
-		return fetchCursorModels(config)
+		return fetchCursorModels(config, localizer)
 	case "codebuddy-cli":
 		return append([]string(nil), config.Models...), nil
 	default:
@@ -1008,7 +1008,7 @@ func fetchModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string,
 
 // fetchOpenAIModels 获取 OpenAI 兼容 API 的模型列表
 func fetchOpenAIModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {
-	req, err := newModelsRequest(config)
+	req, err := newModelsRequest(config, localizer)
 	if err != nil {
 		return nil, localizeModelListRequestCreateError(localizer, err)
 	}
@@ -1043,7 +1043,7 @@ func fetchOpenAIModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]s
 
 // fetchAnthropicModels 获取 Anthropic API 的模型列表
 func fetchAnthropicModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {
-	req, err := newModelsRequest(config)
+	req, err := newModelsRequest(config, localizer)
 	if err != nil {
 		return nil, localizeModelListRequestCreateError(localizer, err)
 	}
@@ -1121,22 +1121,22 @@ func fetchGeminiModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]s
 	return models, nil
 }
 
-func fetchCursorModels(config ai.ProviderConfig) ([]string, error) {
-	req, err := newModelsRequest(config)
+func fetchCursorModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {
+	req, err := newModelsRequest(config, localizer)
 	if err != nil {
-		return nil, err
+		return nil, localizeModelListRequestCreateError(localizer, err)
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求模型列表失败: %w", err)
+		return nil, localizeModelListRequestError(localizer, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("获取模型列表失败 (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, localizeModelListHTTPStatusError(localizer, resp.StatusCode, body)
 	}
 
 	var result struct {
@@ -1145,7 +1145,7 @@ func fetchCursorModels(config ai.ProviderConfig) ([]string, error) {
 		} `json:"items"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("解析模型列表失败: %w", err)
+		return nil, localizeModelListParseError(localizer, err)
 	}
 
 	models := make([]string, 0, len(result.Items))
@@ -1670,7 +1670,7 @@ func (s *Service) storeSessionProviderRuntime(sessionID string, providerKey stri
 	} else {
 		messageBytes, err := json.Marshal(messages)
 		if err != nil {
-			return fmt.Errorf("序列化会话 Provider 消息失败: %w", err)
+			return s.serviceError("ai_service.backend.error.session_provider_messages_serialize_failed", nil, err)
 		}
 		sessionData.ProviderMessages = json.RawMessage(messageBytes)
 	}
@@ -1771,7 +1771,7 @@ func (s *Service) loadOrCreateSessionFile(sessionID string) (sessionFileData, er
 	}
 	return sessionFileData{
 		ID:        sessionID,
-		Title:     "新的对话",
+		Title:     s.serviceText("ai_chat.panel.session.default_title", nil),
 		UpdatedAt: time.Now().UnixMilli(),
 		Messages:  json.RawMessage("[]"),
 	}, nil

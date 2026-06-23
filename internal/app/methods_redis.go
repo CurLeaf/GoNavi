@@ -271,11 +271,11 @@ func (a *App) RedisTestConnection(config connection.ConnectionConfig) connection
 	if client != nil {
 		if closeErr := client.Close(); closeErr != nil {
 			logger.Error(closeErr, "RedisTestConnection 释放临时连接失败：%s", formatRedisConnSummary(config))
-			return connection.QueryResult{Success: false, Message: fmt.Sprintf("连接成功但释放测试连接失败：%v", closeErr)}
+			return connection.QueryResult{Success: false, Message: a.appText("redis.backend.error.test_connection_close_failed", map[string]any{"detail": closeErr.Error()})}
 		}
 	}
 	logger.Infof("RedisTestConnection 连接成功：%s", formatRedisConnSummary(config))
-	return connection.QueryResult{Success: true, Message: "连接成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.connect_success", nil)}
 }
 
 // RedisScanKeys scans keys matching a pattern

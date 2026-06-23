@@ -149,8 +149,14 @@ func TestMethodsDBConnectionAndMongoMessagesUseLocalizedText(t *testing.T) {
 			keys:        []string{"db.backend.message.release_success"},
 		},
 		"func (a *App) TestConnection": {
-			rawMessages: []string{`Message: "连接成功"`},
-			keys:        []string{"db.backend.message.connect_success"},
+			rawMessages: []string{
+				`Message: "连接成功"`,
+				`fmt.Sprintf("连接成功但释放测试连接失败：%v", closeErr)`,
+			},
+			keys: []string{
+				"db.backend.message.connect_success",
+				"db.backend.error.test_connection_close_failed",
+			},
 		},
 		"func (a *App) MongoDiscoverMembers": {
 			rawMessages: []string{
@@ -280,6 +286,7 @@ func TestMethodsDBConnectionAndMongoCatalogKeysExist(t *testing.T) {
 		"db.backend.error.clickhouse_address_required",
 		"db.backend.error.mongo_member_discovery_unsupported",
 		"db.backend.message.connect_success",
+		"db.backend.error.test_connection_close_failed",
 		"db.backend.message.release_success",
 		"db.backend.message.mongo_members_discovered",
 		"db.backend.error.schema_name_required",

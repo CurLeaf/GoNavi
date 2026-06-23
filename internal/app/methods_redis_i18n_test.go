@@ -40,6 +40,16 @@ func TestRedisBackendOperationMessagesUseLocalizedText(t *testing.T) {
 			rawMessages: []string{`Message: "连接成功"`},
 			keys:        []string{"redis.backend.message.connect_success"},
 		},
+		"func (a *App) RedisTestConnection": {
+			rawMessages: []string{
+				`Message: "连接成功"`,
+				`fmt.Sprintf("连接成功但释放测试连接失败：%v", closeErr)`,
+			},
+			keys: []string{
+				"redis.backend.message.connect_success",
+				"redis.backend.error.test_connection_close_failed",
+			},
+		},
 		"func (a *App) RedisSetString": {
 			rawMessages: []string{`Message: "设置成功"`},
 			keys:        []string{"redis.backend.message.set_success"},
@@ -129,6 +139,7 @@ func TestRedisBackendOperationMessageCatalogKeysExist(t *testing.T) {
 
 	keys := []string{
 		"redis.backend.message.connect_success",
+		"redis.backend.error.test_connection_close_failed",
 		"redis.backend.message.set_success",
 		"redis.backend.message.select_db_success",
 		"redis.backend.message.rename_success",

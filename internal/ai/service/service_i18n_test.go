@@ -157,7 +157,7 @@ func TestAIServiceHealthCheckRequestErrorsUseLocalizedText(t *testing.T) {
 			rawMessages:   []string{`"创建请求失败: "`},
 			requiredTexts: []string{`"create request failed: "`},
 		},
-		"func newModelsRequest(config ai.ProviderConfig) (*http.Request, error) {": {
+		"func newModelsRequest(config ai.ProviderConfig, localizer *i18n.Localizer) (*http.Request, error) {": {
 			rawMessages:   []string{`fmt.Errorf("创建请求失败: %w", err)`},
 			requiredTexts: []string{`fmt.Errorf("create request failed: %w", err)`},
 		},

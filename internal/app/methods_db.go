@@ -122,7 +122,7 @@ func (a *App) TestConnection(config connection.ConnectionConfig) connection.Quer
 	if dbInst != nil {
 		if closeErr := dbInst.Close(); closeErr != nil {
 			logger.Error(closeErr, "TestConnection 释放临时连接失败：耗时=%s %s", time.Since(started).Round(time.Millisecond), formatConnSummary(testConfig))
-			return connection.QueryResult{Success: false, Message: fmt.Sprintf("连接成功但释放测试连接失败：%v", closeErr)}
+			return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.test_connection_close_failed", map[string]any{"detail": closeErr.Error()})}
 		}
 	}
 
@@ -1908,6 +1908,7 @@ func buildFallbackColumnCommentStatement(dbType string, schemaName string, table
 
 func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
 	runConfig := normalizeRunConfig(config, dbName)
+	text := a.appText
 
 	dbInst, err := a.getDatabase(runConfig)
 	if err != nil {
@@ -1932,11 +1933,11 @@ func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, ta
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if len(columns) == 0 && resolveDDLDBType(config) == "oracle" {
-		if inferred, inferErr := inferOracleColumnsFromDictionary(dbInst, schemaName, pureTableName); inferErr == nil && len(inferred) > 0 {
+		if inferred, inferErr := inferOracleColumnsFromDictionary(dbInst, schemaName, pureTableName, text); inferErr == nil && len(inferred) > 0 {
 			columns = inferred
 		}
 		if len(columns) == 0 {
-			if inferred, inferErr := inferOracleColumnsFromEmptySelect(dbInst, schemaName, pureTableName); inferErr == nil && len(inferred) > 0 {
+			if inferred, inferErr := inferOracleColumnsFromEmptySelect(dbInst, schemaName, pureTableName, text); inferErr == nil && len(inferred) > 0 {
 				columns = inferred
 			}
 		}
@@ -1945,7 +1946,10 @@ func (a *App) DBGetColumns(config connection.ConnectionConfig, dbName string, ta
 	return connection.QueryResult{Success: true, Data: ensureNonNilSlice(columns)}
 }
 
-func inferOracleColumnsFromDictionary(dbInst db.Database, schemaName string, tableName string) ([]connection.ColumnDefinition, error) {
+func inferOracleColumnsFromDictionary(dbInst db.Database, schemaName string, tableName string, text func(string, map[string]any) string) ([]connection.ColumnDefinition, error) {
+	if text == nil {
+		text = defaultDBBackendText
+	}
 	var lastErr error
 	for _, candidate := range appOracleMetadataNamePairs(schemaName, tableName) {
 		data, _, err := dbInst.Query(buildAppOracleColumnsQuery(candidate.schema, candidate.table))
@@ -1961,7 +1965,7 @@ func inferOracleColumnsFromDictionary(dbInst db.Database, schemaName string, tab
 	if lastErr != nil {
 		return nil, lastErr
 	}
-	return nil, fmt.Errorf("未获取到字段定义")
+	return nil, fmt.Errorf("%s", text("db.backend.error.column_definitions_missing", nil))
 }
 
 type appOracleMetadataNamePair struct {
@@ -2196,10 +2200,13 @@ func escapeAppOracleMetadataLiteral(text string) string {
 	return strings.ReplaceAll(strings.TrimSpace(text), "'", "''")
 }
 
-func inferOracleColumnsFromEmptySelect(dbInst db.Database, schemaName string, tableName string) ([]connection.ColumnDefinition, error) {
+func inferOracleColumnsFromEmptySelect(dbInst db.Database, schemaName string, tableName string, text func(string, map[string]any) string) ([]connection.ColumnDefinition, error) {
+	if text == nil {
+		text = defaultDBBackendText
+	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, fmt.Errorf("%s", text("db.backend.error.table_name_required", nil))
 	}
 
 	query := "SELECT * FROM " + quoteOracleMetadataTableRef(schemaName, table) + " WHERE 1 = 0"
@@ -2208,7 +2215,7 @@ func inferOracleColumnsFromEmptySelect(dbInst db.Database, schemaName string, ta
 		return nil, err
 	}
 	if len(fields) == 0 {
-		return nil, fmt.Errorf("未获取到字段定义")
+		return nil, fmt.Errorf("%s", text("db.backend.error.column_definitions_missing", nil))
 	}
 
 	columns := make([]connection.ColumnDefinition, 0, len(fields))
@@ -2226,7 +2233,7 @@ func inferOracleColumnsFromEmptySelect(dbInst db.Database, schemaName string, ta
 		})
 	}
 	if len(columns) == 0 {
-		return nil, fmt.Errorf("未获取到字段定义")
+		return nil, fmt.Errorf("%s", text("db.backend.error.column_definitions_missing", nil))
 	}
 	return columns, nil
 }

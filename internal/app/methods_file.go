@@ -219,25 +219,32 @@ func (r *exportProgressReporter) ForceRunning(current int64, stage string) {
 	r.emit("running", stage, current, "", true)
 }
 
+func (r *exportProgressReporter) text(key string, params map[string]any) string {
+	if r == nil || r.app == nil {
+		return key
+	}
+	return r.app.appText(key, params)
+}
+
 func (r *exportProgressReporter) Finalizing(current int64) {
-	stage := "正在完成文件写入"
+	stageKey := "data_export.progress.stage.finalizing_file_write"
 	if r != nil {
 		switch strings.ToLower(strings.TrimSpace(r.format)) {
 		case "xlsx":
-			stage = "正在封装并压缩 XLSX 文件"
+			stageKey = "data_export.progress.stage.finalizing_xlsx_package"
 		case "csv":
-			stage = "正在完成 CSV 写入"
+			stageKey = "data_export.progress.stage.finalizing_csv_write"
 		}
 	}
-	r.emit("finalizing", stage, current, "", true)
+	r.emit("finalizing", r.text(stageKey, nil), current, "", true)
 }
 
 func (r *exportProgressReporter) Done(current int64) {
-	r.emit("done", "导出完成", current, "", true)
+	r.emit("done", r.text("file.backend.message.export_completed", nil), current, "", true)
 }
 
 func (r *exportProgressReporter) Error(current int64, message string) {
-	r.emit("error", "导出失败", current, message, true)
+	r.emit("error", r.text("data_export.progress.stage.export_failed", nil), current, message, true)
 }
 
 func resolveExportTotalRowValue(value interface{}) (int64, bool) {
@@ -364,7 +371,10 @@ func verifyOptionalDriverAgentReadyForExport(config connection.ConnectionConfig)
 	}
 	if _, err := verifyInstalledOptionalDriverAgentRevision(driverType, executablePath); err != nil {
 		displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
-		return fmt.Errorf("当前导出依赖最新的 %s driver-agent 流式协议；为避免大结果集回退到高内存缓冲模式，请在驱动管理中重装后重试：%w", displayName, err)
+		return fmt.Errorf("%s", defaultAppText("file.backend.error.export_driver_agent_streaming_required", map[string]any{
+			"driver": displayName,
+			"detail": err.Error(),
+		}))
 	}
 	return nil
 }
@@ -442,14 +452,21 @@ func buildDatabaseExportDefaultFilename(dbName string, includeData bool) string 
 }
 
 func resolveBatchObjectsTargetName(dbName string, objectNames []string) string {
+	return resolveBatchObjectsTargetNameWithText(dbName, objectNames, nil)
+}
+
+func resolveBatchObjectsTargetNameWithText(dbName string, objectNames []string, text fileBackendTextFunc) string {
 	if len(objectNames) == 1 {
 		return objectNames[0]
 	}
 	safeDbName := strings.TrimSpace(dbName)
 	if safeDbName == "" {
-		safeDbName = "当前数据库"
+		safeDbName = fileBackendText(text, "data_export.workbench.target.current_database", nil)
 	}
-	return fmt.Sprintf("%s · %d 个对象", safeDbName, len(objectNames))
+	return fileBackendText(text, "data_export.workbench.target.batch_tables", map[string]any{
+		"database": safeDbName,
+		"count":    len(objectNames),
+	})
 }
 
 func normalizeSQLDirectoryPath(directoryPath string) (string, error) {
@@ -2397,7 +2414,7 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 	}
 
 	reporter := newExportProgressReporter(a, options, tableName, filename)
-	reporter.Start("正在准备导出")
+	reporter.Start(a.appText("data_export.progress.stage.preparing_export", nil))
 	runConfig := normalizeRunConfig(config, dbName)
 
 	dbInst, err := a.getDatabase(runConfig)
@@ -2413,13 +2430,13 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 			if reporter != nil {
 				reporter.totalRows = totalRows
 				reporter.totalRowsKnown = true
-				reporter.Start("正在准备导出")
+				reporter.Start(a.appText("data_export.progress.stage.preparing_export", nil))
 			}
 		}
 	}
 
 	if format == "sql" {
-		reporter.Start("正在导出 SQL 文件")
+		reporter.Start(a.appText("data_export.progress.stage.exporting_sql_file", nil))
 		f, err := os.Create(filename)
 		if err != nil {
 			reporter.Error(0, err.Error())
@@ -2505,9 +2522,9 @@ func (a *App) ExportTablesSQLWithOptions(
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
-	reporter := newExportProgressReporter(a, options, resolveBatchObjectsTargetName(dbName, objects), filename)
+	reporter := newExportProgressReporter(a, options, resolveBatchObjectsTargetNameWithText(dbName, objects, a.appText), filename)
 	if reporter != nil {
-		reporter.Start("正在准备批量对象导出")
+		reporter.Start(a.appText("data_export.progress.stage.preparing_batch_tables_export", nil))
 	}
 	return a.exportTablesSQLToFile(config, dbName, objects, includeSchema, includeData, filename, reporter)
 }
@@ -2574,7 +2591,11 @@ func (a *App) exportTablesSQLToFile(
 	}
 	for index, objectName := range objects {
 		if reporter != nil {
-			reporter.ForceRunning(int64(index), fmt.Sprintf("正在导出 %s (%d/%d)", objectName, index+1, len(objects)))
+			reporter.ForceRunning(int64(index), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
+				"name":    objectName,
+				"current": index + 1,
+				"total":   len(objects),
+			}))
 		}
 		if err := dumpTableSQL(w, dbInst, runConfig, dbName, objectName, includeSchema, includeData, viewLookup); err != nil {
 			if reporter != nil {
@@ -2583,7 +2604,11 @@ func (a *App) exportTablesSQLToFile(
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 		if reporter != nil {
-			reporter.ForceRunning(int64(index+1), fmt.Sprintf("正在导出 %s (%d/%d)", objectName, index+1, len(objects)))
+			reporter.ForceRunning(int64(index+1), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
+				"name":    objectName,
+				"current": index + 1,
+				"total":   len(objects),
+			}))
 		}
 	}
 	if err := writeSQLFooter(w, runConfig); err != nil {
@@ -2632,11 +2657,11 @@ func (a *App) ExportDatabasesSQLWithOptions(
 ) connection.QueryResult {
 	normalizedDbNames := normalizeExportNameList(dbNames)
 	if len(normalizedDbNames) == 0 {
-		return connection.QueryResult{Success: false, Message: "请至少选择一个数据库"}
+		return connection.QueryResult{Success: false, Message: a.appText("sidebar.message.select_database_required", nil)}
 	}
 
 	directory, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "选择批量导出目录",
+		Title:            a.appText("file.backend.dialog.select_batch_export_directory", nil),
 		DefaultDirectory: normalizeDirectoryDialogPath(""),
 	})
 	if err != nil || strings.TrimSpace(directory) == "" {
@@ -2646,14 +2671,18 @@ func (a *App) ExportDatabasesSQLWithOptions(
 	options = normalizeExportFileOptions("sql", options)
 	options.TotalRowsHint = int64(len(normalizedDbNames))
 	options.TotalRowsKnown = true
-	reporter := newExportProgressReporter(a, options, fmt.Sprintf("%d 个数据库", len(normalizedDbNames)), directory)
+	reporter := newExportProgressReporter(a, options, a.appText("data_export.workbench.target.batch_databases", map[string]any{"count": len(normalizedDbNames)}), directory)
 	if reporter != nil {
-		reporter.Start("正在准备批量库导出")
+		reporter.Start(a.appText("data_export.progress.stage.preparing_batch_databases_export", nil))
 	}
 
 	for index, name := range normalizedDbNames {
 		if reporter != nil {
-			reporter.ForceRunning(int64(index), fmt.Sprintf("正在导出 %s (%d/%d)", name, index+1, len(normalizedDbNames)))
+			reporter.ForceRunning(int64(index), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
+				"name":    name,
+				"current": index + 1,
+				"total":   len(normalizedDbNames),
+			}))
 		}
 		targetFile := filepath.Join(directory, buildDatabaseExportDefaultFilename(name, includeData))
 		result := a.exportDatabaseSQLToFile(config, name, includeData, targetFile)
@@ -2664,7 +2693,11 @@ func (a *App) ExportDatabasesSQLWithOptions(
 			return result
 		}
 		if reporter != nil {
-			reporter.ForceRunning(int64(index+1), fmt.Sprintf("正在导出 %s (%d/%d)", name, index+1, len(normalizedDbNames)))
+			reporter.ForceRunning(int64(index+1), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
+				"name":    name,
+				"current": index + 1,
+				"total":   len(normalizedDbNames),
+			}))
 		}
 	}
 
@@ -2674,7 +2707,7 @@ func (a *App) ExportDatabasesSQLWithOptions(
 	}
 	return connection.QueryResult{
 		Success: true,
-		Message: "导出完成",
+		Message: a.appText("file.backend.message.export_completed", nil),
 		Data: map[string]interface{}{
 			"directoryPath": directory,
 			"fileCount":     len(normalizedDbNames),
@@ -2690,7 +2723,7 @@ func (a *App) exportDatabaseSQLToFile(
 ) connection.QueryResult {
 	safeDbName := strings.TrimSpace(dbName)
 	if safeDbName == "" {
-		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.database_name_required", nil)}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -3791,7 +3824,7 @@ func (a *App) ExportDataWithOptions(data []map[string]interface{}, columns []str
 	}
 	logger.Infof("ExportData 选定文件：%s", filename)
 	reporter := newExportProgressReporter(a, options, defaultName, filename)
-	reporter.Start("正在准备导出")
+	reporter.Start(a.appText("data_export.progress.stage.preparing_export", nil))
 
 	f, err := os.Create(filename)
 	if err != nil {
@@ -3847,7 +3880,7 @@ func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName 
 	}
 	logger.Infof("ExportQuery 开始：type=%s db=%s format=%s file=%s sql=%q", strings.TrimSpace(config.Type), strings.TrimSpace(dbName), strings.ToLower(strings.TrimSpace(format)), filename, sqlSnippet(query))
 	reporter := newExportProgressReporter(a, options, defaultName, filename)
-	reporter.Start("正在准备导出")
+	reporter.Start(a.appText("data_export.progress.stage.preparing_export", nil))
 
 	runConfig := normalizeRunConfig(config, dbName)
 	dbInst, err := a.getDatabase(runConfig)
@@ -3947,7 +3980,7 @@ func (c *countingExportConsumer) SetColumns(columns []string) error {
 		}
 	}
 	if c.reporter != nil {
-		c.reporter.ForceRunning(c.rowCount, "正在写入文件")
+		c.reporter.ForceRunning(c.rowCount, c.reporter.text("data_export.progress.stage.writing_file", nil))
 	}
 	return nil
 }
@@ -3960,7 +3993,7 @@ func (c *countingExportConsumer) ConsumeRow(row map[string]interface{}) error {
 	}
 	c.rowCount++
 	if c.reporter != nil {
-		c.reporter.Rows(c.rowCount, "正在写入文件")
+		c.reporter.Rows(c.rowCount, c.reporter.text("data_export.progress.stage.writing_file", nil))
 	}
 	return nil
 }
@@ -3987,7 +4020,7 @@ func (c *countingExportConsumer) ConsumeRowValues(values []interface{}) error {
 	}
 	c.rowCount++
 	if c.reporter != nil {
-		c.reporter.Rows(c.rowCount, "正在写入文件")
+		c.reporter.Rows(c.rowCount, c.reporter.text("data_export.progress.stage.writing_file", nil))
 	}
 	return nil
 }
@@ -4561,7 +4594,7 @@ func exportQueryResultToFile(f *os.File, dbInst db.Database, config connection.C
 	}
 
 	if reporter != nil {
-		reporter.Start("正在查询数据")
+		reporter.Start(reporter.text("data_export.progress.stage.querying_data", nil))
 	}
 	consumer := &countingExportConsumer{delegate: writer, reporter: reporter}
 	streamErr := streamQueryDataForExport(dbInst, config, query, consumer)
@@ -4629,7 +4662,7 @@ func writeRowsToFileWithReporter(f *os.File, data []map[string]interface{}, colu
 		return 0, err
 	}
 	if reporter != nil {
-		reporter.ForceRunning(0, "正在写入文件")
+		reporter.ForceRunning(0, reporter.text("data_export.progress.stage.writing_file", nil))
 	}
 	for index, row := range data {
 		if err := writer.ConsumeRow(row); err != nil {
@@ -4637,7 +4670,7 @@ func writeRowsToFileWithReporter(f *os.File, data []map[string]interface{}, colu
 			return int64(index), err
 		}
 		if reporter != nil {
-			reporter.Rows(int64(index+1), "正在写入文件")
+			reporter.Rows(int64(index+1), reporter.text("data_export.progress.stage.writing_file", nil))
 		}
 	}
 	if reporter != nil {
