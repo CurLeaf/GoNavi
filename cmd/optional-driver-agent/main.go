@@ -36,6 +36,7 @@ type agentResponse struct {
 	Error        string      `json:"error,omitempty"`
 	Data         interface{} `json:"data,omitempty"`
 	Fields       []string    `json:"fields,omitempty"`
+	Messages     []string    `json:"messages,omitempty"`
 	ChunkType    string      `json:"chunkType,omitempty"`
 	RowsAffected int64       `json:"rowsAffected,omitempty"`
 }
@@ -48,6 +49,7 @@ const (
 	agentMethodOpenSession   = "openSession"
 	agentMethodCloseSession  = "closeSession"
 	agentMethodQuery         = "query"
+	agentMethodQueryMulti    = "queryMulti"
 	agentMethodStreamQuery   = "streamQuery"
 	agentMethodExec          = "exec"
 	agentMethodGetDatabases  = "getDatabases"
@@ -64,9 +66,9 @@ const (
 const legacyClickHouseDefaultTimeout = 2 * time.Hour
 
 const (
-	agentChunkColumns            = "columns"
-	agentChunkRows               = "rows"
-	agentChunkDone               = "done"
+	agentChunkColumns = "columns"
+	agentChunkRows    = "rows"
+	agentChunkDone    = "done"
 	// agentStreamBatchSize 控制 driver-agent 向主进程发送 row chunk 的批次大小。
 	// 调小到 64：单批 JSON 编码 + 主进程解码的瞬时内存峰值降为原来的 1/4，
 	// 代价是 IPC 次数变为 4 倍，但每批仅一次 stdin/stdout 行读写，整体影响可忽略。
@@ -236,12 +238,23 @@ func handleRequest(runtimeState *agentRuntime, req agentRequest) agentResponse {
 	} else if ok {
 		switch method {
 		case agentMethodQuery:
-			data, fields, err := queryStatementWithOptionalTimeout(session, req.Query, req.TimeoutMs)
+			data, fields, messages, err := queryStatementWithMessagesOptionalTimeout(session, req.Query, req.TimeoutMs)
 			if err != nil {
 				return fail(resp, err.Error())
 			}
 			resp.Data = data
 			resp.Fields = fields
+			resp.Messages = messages
+		case agentMethodQueryMulti:
+			data, messages, supported, err := queryMultiStatementWithMessagesOptionalTimeout(session, req.Query, req.TimeoutMs)
+			if err != nil {
+				return fail(resp, err.Error())
+			}
+			if !supported {
+				return fail(resp, "当前事务会话不支持多结果集查询")
+			}
+			resp.Data = data
+			resp.Messages = messages
 		case agentMethodExec:
 			affected, err := execStatementWithOptionalTimeout(session, req.Query, req.TimeoutMs)
 			if err != nil {
@@ -260,12 +273,23 @@ func handleRequest(runtimeState *agentRuntime, req agentRequest) agentResponse {
 			return fail(resp, err.Error())
 		}
 	case agentMethodQuery:
-		data, fields, err := queryWithOptionalTimeout(runtimeState.inst, req.Query, req.TimeoutMs)
+		data, fields, messages, err := queryWithMessagesOptionalTimeout(runtimeState.inst, req.Query, req.TimeoutMs)
 		if err != nil {
 			return fail(resp, err.Error())
 		}
 		resp.Data = data
 		resp.Fields = fields
+		resp.Messages = messages
+	case agentMethodQueryMulti:
+		data, messages, supported, err := queryMultiWithMessagesOptionalTimeout(runtimeState.inst, req.Query, req.TimeoutMs)
+		if err != nil {
+			return fail(resp, err.Error())
+		}
+		if !supported {
+			return fail(resp, "当前驱动不支持原生多结果集查询")
+		}
+		resp.Data = data
+		resp.Messages = messages
 	case agentMethodExec:
 		affected, err := execWithOptionalTimeout(runtimeState.inst, req.Query, req.TimeoutMs)
 		if err != nil {
@@ -581,6 +605,30 @@ type agentQueryContextRunner interface {
 	QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
 }
 
+type agentQueryMessageRunner interface {
+	QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error)
+}
+
+type agentQueryMessageContextRunner interface {
+	QueryContextWithMessages(context.Context, string) ([]map[string]interface{}, []string, []string, error)
+}
+
+type agentMultiResultMessageRunner interface {
+	QueryMultiWithMessages(query string) ([]connection.ResultSetData, []string, error)
+}
+
+type agentMultiResultMessageContextRunner interface {
+	QueryMultiContextWithMessages(context.Context, string) ([]connection.ResultSetData, []string, error)
+}
+
+type agentMultiResultRunner interface {
+	QueryMulti(query string) ([]connection.ResultSetData, error)
+}
+
+type agentMultiResultContextRunner interface {
+	QueryMultiContext(context.Context, string) ([]connection.ResultSetData, error)
+}
+
 type agentExecRunner interface {
 	Exec(string) (int64, error)
 }
@@ -589,20 +637,39 @@ type agentExecContextRunner interface {
 	ExecContext(context.Context, string) (int64, error)
 }
 
-func queryWithOptionalTimeout(inst agentQueryRunner, query string, timeoutMs int64) ([]map[string]interface{}, []string, error) {
+func queryWithMessagesOptionalTimeout(inst agentQueryRunner, query string, timeoutMs int64) ([]map[string]interface{}, []string, []string, error) {
 	effectiveTimeoutMs := timeoutMs
 	if effectiveTimeoutMs <= 0 && strings.EqualFold(strings.TrimSpace(agentDriverType), "clickhouse") {
 		effectiveTimeoutMs = int64(legacyClickHouseDefaultTimeout / time.Millisecond)
 	}
 	if effectiveTimeoutMs <= 0 {
-		return inst.Query(query)
+		if q, ok := inst.(agentQueryMessageRunner); ok {
+			return q.QueryWithMessages(query)
+		}
+		data, fields, err := inst.Query(query)
+		return data, fields, nil, err
+	}
+	if q, ok := inst.(agentQueryMessageContextRunner); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(effectiveTimeoutMs)*time.Millisecond)
+		defer cancel()
+		return q.QueryContextWithMessages(ctx, query)
 	}
 	if q, ok := inst.(agentQueryContextRunner); ok {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(effectiveTimeoutMs)*time.Millisecond)
 		defer cancel()
-		return q.QueryContext(ctx, query)
+		data, fields, err := q.QueryContext(ctx, query)
+		return data, fields, nil, err
 	}
-	return inst.Query(query)
+	if q, ok := inst.(agentQueryMessageRunner); ok {
+		return q.QueryWithMessages(query)
+	}
+	data, fields, err := inst.Query(query)
+	return data, fields, nil, err
+}
+
+func queryWithOptionalTimeout(inst agentQueryRunner, query string, timeoutMs int64) ([]map[string]interface{}, []string, error) {
+	data, fields, _, err := queryWithMessagesOptionalTimeout(inst, query, timeoutMs)
+	return data, fields, err
 }
 
 func queryStatementWithOptionalTimeout(inst db.StatementExecer, query string, timeoutMs int64) ([]map[string]interface{}, []string, error) {
@@ -611,6 +678,74 @@ func queryStatementWithOptionalTimeout(inst db.StatementExecer, query string, ti
 		return nil, nil, fmt.Errorf("当前事务会话不支持查询语句")
 	}
 	return queryWithOptionalTimeout(queryRunner, query, timeoutMs)
+}
+
+func queryStatementWithMessagesOptionalTimeout(inst db.StatementExecer, query string, timeoutMs int64) ([]map[string]interface{}, []string, []string, error) {
+	queryRunner, ok := inst.(agentQueryRunner)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("当前事务会话不支持查询语句")
+	}
+	return queryWithMessagesOptionalTimeout(queryRunner, query, timeoutMs)
+}
+
+func queryMultiWithMessagesOptionalTimeout(inst db.Database, query string, timeoutMs int64) ([]connection.ResultSetData, []string, bool, error) {
+	effectiveTimeoutMs := timeoutMs
+	if effectiveTimeoutMs <= 0 && strings.EqualFold(strings.TrimSpace(agentDriverType), "clickhouse") {
+		effectiveTimeoutMs = int64(legacyClickHouseDefaultTimeout / time.Millisecond)
+	}
+	if effectiveTimeoutMs > 0 {
+		if q, ok := inst.(agentMultiResultMessageContextRunner); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(effectiveTimeoutMs)*time.Millisecond)
+			defer cancel()
+			data, messages, err := q.QueryMultiContextWithMessages(ctx, query)
+			return data, messages, true, err
+		}
+		if q, ok := inst.(agentMultiResultContextRunner); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(effectiveTimeoutMs)*time.Millisecond)
+			defer cancel()
+			data, err := q.QueryMultiContext(ctx, query)
+			return data, nil, true, err
+		}
+	}
+	if q, ok := inst.(agentMultiResultMessageRunner); ok {
+		data, messages, err := q.QueryMultiWithMessages(query)
+		return data, messages, true, err
+	}
+	if q, ok := inst.(agentMultiResultRunner); ok {
+		data, err := q.QueryMulti(query)
+		return data, nil, true, err
+	}
+	return nil, nil, false, nil
+}
+
+func queryMultiStatementWithMessagesOptionalTimeout(inst db.StatementExecer, query string, timeoutMs int64) ([]connection.ResultSetData, []string, bool, error) {
+	effectiveTimeoutMs := timeoutMs
+	if effectiveTimeoutMs <= 0 && strings.EqualFold(strings.TrimSpace(agentDriverType), "clickhouse") {
+		effectiveTimeoutMs = int64(legacyClickHouseDefaultTimeout / time.Millisecond)
+	}
+	if effectiveTimeoutMs > 0 {
+		if q, ok := inst.(agentMultiResultMessageContextRunner); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(effectiveTimeoutMs)*time.Millisecond)
+			defer cancel()
+			data, messages, err := q.QueryMultiContextWithMessages(ctx, query)
+			return data, messages, true, err
+		}
+		if q, ok := inst.(agentMultiResultContextRunner); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(effectiveTimeoutMs)*time.Millisecond)
+			defer cancel()
+			data, err := q.QueryMultiContext(ctx, query)
+			return data, nil, true, err
+		}
+	}
+	if q, ok := inst.(agentMultiResultMessageRunner); ok {
+		data, messages, err := q.QueryMultiWithMessages(query)
+		return data, messages, true, err
+	}
+	if q, ok := inst.(agentMultiResultRunner); ok {
+		data, err := q.QueryMulti(query)
+		return data, nil, true, err
+	}
+	return nil, nil, false, nil
 }
 
 func streamWithOptionalTimeout(inst db.StreamQueryExecer, query string, timeoutMs int64, consumer db.QueryStreamConsumer) error {
