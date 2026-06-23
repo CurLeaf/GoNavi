@@ -25,7 +25,19 @@ export type CompletionTriggerMeta = {dbName: string, triggerName: string, tableN
 export type CompletionRoutineMeta = {dbName: string, routineName: string, routineType: string, schemaName?: string};
 
 export const QUERY_LOCATOR_ALIAS_PREFIX = '__gonavi_locator_';
-const SQLSERVER_MESSAGE_PREFIX_RE = /^\s*mssql:\s*/i;
+const SQLSERVER_MESSAGE_PREFIX_RE = /^\s*mssql:/i;
+
+const trimBoundaryBlankEntries = (entries: string[]): string[] => {
+    let start = 0;
+    let end = entries.length;
+    while (start < end && !String(entries[start] || '').trim()) start++;
+    while (end > start && !String(entries[end - 1] || '').trim()) end--;
+    return entries.slice(start, end);
+};
+
+const stripSqlServerMessagePrefix = (line: string): string => (
+    line.replace(SQLSERVER_MESSAGE_PREFIX_RE, '').replace(/^[ \t]/, '')
+);
 
 export const buildQueryReadOnlyLocator = (reason: string): EditRowLocator => ({
     strategy: 'none',
@@ -121,33 +133,33 @@ export const stripQueryIdentifierQuotes = (part: string): string => {
     return text;
 };
 
-export const normalizeQueryResultMessageText = (message: unknown): string => {
+export const normalizeQueryResultMessageText = (
+    message: unknown,
+    options?: { preserveIndentation?: boolean },
+): string => {
     const text = String(message ?? '').replace(/\r\n?/g, '\n');
-    if (!text.trim()) return '';
+    if (!text) return '';
 
-    let prefixRemoved = false;
-    const normalizedLines = text
-        .split('\n')
-        .map((line) => {
-            if (!line.trim()) return '';
+    const preserveIndentation = options?.preserveIndentation === true;
+    const normalizedLines = trimBoundaryBlankEntries(
+        text.split('\n').map((line) => {
             if (SQLSERVER_MESSAGE_PREFIX_RE.test(line)) {
-                prefixRemoved = true;
-                return line.replace(SQLSERVER_MESSAGE_PREFIX_RE, '').trimStart();
+                return stripSqlServerMessagePrefix(line);
             }
-            return line;
-        });
-
-    const normalized = (prefixRemoved
-        ? normalizedLines.map((line) => line.trim() ? line.trimStart() : '').join('\n')
-        : normalizedLines.join('\n'))
-        .trim();
-
-    return prefixRemoved ? normalized : text.trim();
+            return preserveIndentation ? line : (line.trim() ? line : '');
+        }),
+    );
+    if (normalizedLines.length === 0) return '';
+    return preserveIndentation ? normalizedLines.join('\n') : normalizedLines.join('\n').trim();
 };
 
 export const normalizeQueryResultMessages = (messages: unknown): string[] => (
     Array.isArray(messages)
-        ? messages.map((item) => normalizeQueryResultMessageText(item)).filter(Boolean)
+        ? (() => {
+            const preserveIndentation = messages.some((item) => SQLSERVER_MESSAGE_PREFIX_RE.test(String(item ?? '')));
+            const normalized = messages.map((item) => normalizeQueryResultMessageText(item, { preserveIndentation }));
+            return preserveIndentation ? trimBoundaryBlankEntries(normalized) : normalized.filter(Boolean);
+        })()
         : []
 );
 

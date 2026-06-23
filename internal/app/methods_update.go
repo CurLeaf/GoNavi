@@ -1076,6 +1076,7 @@ if not exist "%SOURCE%" (
 )
 
 for %%I in ("%TARGET%") do set "TARGET_NAME=%%~nxI"
+for %%I in ("%TARGET%") do set "TARGET_DIR=%%~dpI"
 for %%I in ("%SOURCE%") do set "SOURCE_EXT=%%~xI"
 set "SOURCE_EXE="
 
@@ -1161,10 +1162,10 @@ exit /b 1
 
 :move_done
 del /F /Q "%TARGET_OLD%" >> "%LOG_FILE%" 2>&1
-start "" "%TARGET%" >> "%LOG_FILE%" 2>&1
+start "" /D "%TARGET_DIR%" "%TARGET%" >> "%LOG_FILE%" 2>&1
 if %ERRORLEVEL% NEQ 0 (
   call :log cmd start failed, trying powershell Start-Process
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%TARGET%'" >> "%LOG_FILE%" 2>&1
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%TARGET%' -WorkingDirectory '%TARGET_DIR%'" >> "%LOG_FILE%" 2>&1
   if !ERRORLEVEL! NEQ 0 (
     call :log relaunch failed
     exit /b 1
