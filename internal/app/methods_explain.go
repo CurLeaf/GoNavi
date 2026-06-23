@@ -59,10 +59,10 @@ const explainStatementTimeoutFloor = 5 * time.Minute
 func (a *App) DiagnoseQuery(config connection.ConnectionConfig, dbName, query string) connection.QueryResult {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return connection.QueryResult{Success: false, Message: "查询语句不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("sql_analysis.backend.error.query_required", nil)}
 	}
 	if !looksLikeSelectOrWith(query) {
-		return connection.QueryResult{Success: false, Message: "诊断仅支持 SELECT / WITH 查询；写操作请使用 EXPLAIN PLAN 模式（PR2 支持）"}
+		return connection.QueryResult{Success: false, Message: a.appText("sql_analysis.backend.error.select_only", nil)}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -70,7 +70,7 @@ func (a *App) DiagnoseQuery(config connection.ConnectionConfig, dbName, query st
 	if !explainSupportedDBTypes[dbType] {
 		return connection.QueryResult{
 			Success: false,
-			Message: fmt.Sprintf("当前数据源（%s）暂不支持 SQL 诊断；一期支持 MySQL/PostgreSQL/SQLite/ClickHouse/Oracle/SQLServer/OceanBase", dbType),
+			Message: a.appText("sql_analysis.backend.error.unsupported_db_type", map[string]any{"dbType": dbType}),
 		}
 	}
 
@@ -88,7 +88,7 @@ func (a *App) DiagnoseQuery(config connection.ConnectionConfig, dbName, query st
 	suggestions := runExplainRules(plan)
 	report := connection.DiagnoseReport{Plan: plan, Suggestions: suggestions}
 	logger.Infof("DiagnoseQuery 完成：type=%s nodes=%d suggestions=%d", dbType, len(plan.Nodes), len(suggestions))
-	return connection.QueryResult{Success: true, Message: "诊断完成", Data: report}
+	return connection.QueryResult{Success: true, Message: a.appText("sql_analysis.backend.message.completed", nil), Data: report}
 }
 
 // executeExplain 决定走哪条 EXPLAIN 执行路径：

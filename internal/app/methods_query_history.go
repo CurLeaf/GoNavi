@@ -21,7 +21,7 @@ func (a *App) GetSlowQueries(config connection.ConnectionConfig, dbName, sortBy 
 	runConfig := normalizeRunConfig(config, dbName)
 	connFP, ok := buildConnectionFingerprint(runConfig)
 	if !ok || connFP == "" {
-		return connection.QueryResult{Success: false, Message: "无法解析连接指纹"}
+		return connection.QueryResult{Success: false, Message: a.appText("query_history.backend.error.connection_fingerprint_invalid", nil)}
 	}
 
 	if limit <= 0 {
@@ -33,7 +33,7 @@ func (a *App) GetSlowQueries(config connection.ConnectionConfig, dbName, sortBy 
 		logger.Warnf("GetSlowQueries 加载失败：connFp=%s err=%v", connFP, err)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	return connection.QueryResult{Success: true, Message: "加载完成", Data: records}
+	return connection.QueryResult{Success: true, Message: a.appText("query_history.backend.message.loaded", nil), Data: records}
 }
 
 // ClearSlowQueries 清空当前连接的慢 SQL 历史。
@@ -42,14 +42,14 @@ func (a *App) ClearSlowQueries(config connection.ConnectionConfig, dbName string
 	runConfig := normalizeRunConfig(config, dbName)
 	connFP, ok := buildConnectionFingerprint(runConfig)
 	if !ok || connFP == "" {
-		return connection.QueryResult{Success: false, Message: "无法解析连接指纹"}
+		return connection.QueryResult{Success: false, Message: a.appText("query_history.backend.error.connection_fingerprint_invalid", nil)}
 	}
 	store := newQueryHistoryStore(a.configDir, connFP)
 	if err := store.Clear(); err != nil {
 		logger.Warnf("ClearSlowQueries 失败：connFp=%s err=%v", connFP, err)
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	return connection.QueryResult{Success: true, Message: "已清空慢查询历史"}
+	return connection.QueryResult{Success: true, Message: a.appText("query_history.backend.message.cleared", nil)}
 }
 
 // recordQueryExecutionAsync 异步追加一条慢查询记录，不阻塞主查询返回。

@@ -1921,7 +1921,7 @@ func (a *App) PreviewImportFile(filePath string) connection.QueryResult {
 }
 
 func (a *App) ImportData(config connection.ConnectionConfig, dbName, tableName string) connection.QueryResult {
-	if err := ensureReadOnlyConnectionAllowsAction(config, "导入数据"); err != nil {
+	if err := ensureReadOnlyConnectionAllowsAction(config, "connection.backend.action.import_data"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
@@ -2267,7 +2267,7 @@ func formatImportSQLValue(dbType, columnType string, value interface{}) string {
 
 // ImportDataWithProgress 执行导入并发送进度事件
 func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName, tableName, filePath string) connection.QueryResult {
-	if err := ensureReadOnlyConnectionAllowsAction(config, "导入数据"); err != nil {
+	if err := ensureReadOnlyConnectionAllowsAction(config, "connection.backend.action.import_data"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	runConfig := normalizeRunConfig(config, dbName)
@@ -2321,7 +2321,7 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 }
 
 func (a *App) ApplyChanges(config connection.ConnectionConfig, dbName, tableName string, changes connection.ChangeSet) connection.QueryResult {
-	if err := ensureReadOnlyConnectionAllowsAction(config, "提交结果修改"); err != nil {
+	if err := ensureReadOnlyConnectionAllowsAction(config, "connection.backend.action.apply_result_changes"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	runConfig := normalizeRunConfig(config, dbName)
@@ -2350,7 +2350,7 @@ type ChangePreview struct {
 }
 
 func (a *App) PreviewChanges(config connection.ConnectionConfig, dbName, tableName string, changes connection.ChangeSet) connection.QueryResult {
-	if err := ensureReadOnlyConnectionAllowsAction(config, "预览结果修改"); err != nil {
+	if err := ensureReadOnlyConnectionAllowsAction(config, "connection.backend.action.preview_result_changes"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	runConfig := normalizeRunConfig(config, dbName)

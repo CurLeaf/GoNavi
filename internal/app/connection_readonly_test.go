@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/shared/i18n"
 )
 
 func TestSupportsConnectionReadOnlyMode(t *testing.T) {
@@ -38,12 +39,17 @@ func TestEnsureReadOnlyConnectionAllowsQuery(t *testing.T) {
 }
 
 func TestEnsureReadOnlyConnectionAllowsAction(t *testing.T) {
+	setDefaultAppLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		setDefaultAppLanguage(i18n.LanguageEnUS)
+	})
+
 	config := connection.ConnectionConfig{Type: "postgres", ReadOnly: true}
-	err := ensureReadOnlyConnectionAllowsAction(config, "删除数据库")
+	err := ensureReadOnlyConnectionAllowsAction(config, "connection.backend.action.drop_database")
 	if err == nil {
 		t.Fatal("read-only connection should block mutating actions")
 	}
-	if !strings.Contains(err.Error(), "删除数据库") {
+	if !strings.Contains(err.Error(), defaultAppText("connection.backend.action.drop_database", nil)) {
 		t.Fatalf("blocked action message should include action label, got %q", err.Error())
 	}
 }

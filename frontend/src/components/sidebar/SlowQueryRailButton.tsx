@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { Tooltip } from 'antd'
 import { HistoryOutlined } from '@ant-design/icons'
 import { useStore } from '../../store'
+import { useI18n } from '../../i18n/provider'
 import { buildSqlAnalysisWorkbenchTab } from '../../utils/sqlAnalysisTab'
 
 // Sidebar 底部的慢 SQL 工作台入口。
@@ -40,6 +41,7 @@ export default function SlowQueryRailButton({
   style,
   tooltipPlacement = 'right',
 }: SlowQueryRailButtonProps) {
+  const { t } = useI18n()
   const tabs = useStore(s => s.tabs)
   const activeTabId = useStore(s => s.activeTabId)
   const connections = useStore(s => s.connections)
@@ -60,8 +62,8 @@ export default function SlowQueryRailButton({
 
   const buttonDisabled = !hasActiveConnection
   const tooltipText = buttonDisabled
-    ? '请先打开一个数据库连接的标签页'
-    : '打开当前连接的 SQL 分析工作台'
+    ? t('sql_analysis.slow_query.rail.tooltip.no_connection')
+    : t('sql_analysis.slow_query.rail.tooltip.open')
 
   return (
     <Tooltip title={tooltipText} placement={tooltipPlacement}>
@@ -95,7 +97,7 @@ export default function SlowQueryRailButton({
           transition: 'opacity 0.15s, color 0.15s',
           ...style,
         }}
-        aria-label="慢 SQL 工作台"
+        aria-label={t('sql_analysis.slow_query.rail.aria_label')}
       >
         <HistoryOutlined style={{ fontSize: 16 }} />
       </button>

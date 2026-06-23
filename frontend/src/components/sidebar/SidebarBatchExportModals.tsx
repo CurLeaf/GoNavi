@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import Modal from '../common/ResizableDraggableModal';
 import type { SavedConnection } from '../../types';
+import { t } from '../../i18n';
 import type {
   BatchObjectFilterType,
   BatchSelectionScope,
@@ -126,7 +127,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
       footer={
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <Button key="cancel" onClick={() => setIsBatchModalOpen(false)}>
-            取消
+            {t('sidebar.action.cancel')}
           </Button>
           <Space size={8} wrap style={{ marginLeft: 'auto' }}>
             <Button
@@ -136,7 +137,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
               onClick={() => handleBatchClear()}
               disabled={checkedTableKeys.length === 0}
             >
-              清空表
+              {t('sidebar.action.clear_tables')}
             </Button>
             <Button
               key="export-schema"
@@ -144,7 +145,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
               onClick={() => handleBatchExport('schema')}
               disabled={checkedTableKeys.length === 0}
             >
-              导出结构
+              {t('sidebar.action.export_schema')}
             </Button>
             <Button
               key="export-data-only"
@@ -152,7 +153,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
               onClick={() => handleBatchExport('dataOnly')}
               disabled={checkedTableKeys.length === 0}
             >
-              仅数据(INSERT)
+              {t('sidebar.action.export_data_only')}
             </Button>
             <Button
               key="backup"
@@ -161,7 +162,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
               onClick={() => handleBatchExport('backup')}
               disabled={checkedTableKeys.length === 0}
             >
-              备份(结构+数据)
+              {t('sidebar.action.backup_schema_data')}
             </Button>
           </Space>
         </div>
@@ -169,12 +170,14 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
     >
       <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
         <div style={{ marginBottom: 8 }}>
-          <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>选择连接：</label>
+          <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
+            {t('sidebar.field.select_connection')}：
+          </label>
           <Select
             value={selectedConnection}
             onChange={handleConnectionChange}
             style={{ width: '100%' }}
-            placeholder="请选择连接"
+            placeholder={t('sidebar.placeholder.select_connection')}
           >
             {nonRedisConnections(connections).map(conn => (
               <Select.Option key={conn.id} value={conn.id}>
@@ -184,12 +187,14 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
           </Select>
         </div>
         <div style={{ marginBottom: 8 }}>
-          <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>选择数据库：</label>
+          <label style={{ display: 'block', marginBottom: 4, fontWeight: 500 }}>
+            {t('sidebar.field.select_database')}：
+          </label>
           <Select
             value={selectedDatabase}
             onChange={handleDatabaseChange}
             style={{ width: '100%' }}
-            placeholder="请先选择连接"
+            placeholder={t('sidebar.placeholder.select_connection_first')}
             disabled={!selectedConnection}
           >
             {availableDatabases.map(db => (
@@ -199,7 +204,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
             ))}
           </Select>
         </div>
-        <div style={modalHintTextStyle}>先选择连接与数据库，再决定导出范围和目标对象。</div>
+        <div style={modalHintTextStyle}>{t('sidebar.modal.batch_tables.selection_hint')}</div>
       </div>
 
       {batchTables.length > 0 && (
@@ -209,7 +214,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
               allowClear
               value={batchFilterKeyword}
               onChange={(e) => setBatchFilterKeyword(e.target.value)}
-              placeholder="筛选表/视图名称"
+              placeholder={t('sidebar.placeholder.filter_table_view')}
               prefix={<SearchOutlined />}
               style={{ width: 260 }}
             />
@@ -218,9 +223,9 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
               onChange={(value) => setBatchFilterType(value as BatchObjectFilterType)}
               style={{ width: 140 }}
               options={[
-                { label: '全部对象', value: 'all' },
-                { label: '仅表', value: 'table' },
-                { label: '仅视图', value: 'view' },
+                { label: t('sidebar.filter.all_objects'), value: 'all' },
+                { label: t('sidebar.filter.tables_only'), value: 'table' },
+                { label: t('sidebar.filter.views_only'), value: 'view' },
               ]}
             />
             <Select
@@ -228,13 +233,16 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
               onChange={(value) => setBatchSelectionScope(value as BatchSelectionScope)}
               style={{ width: 220 }}
               options={[
-                { label: '勾选作用于：当前筛选结果', value: 'filtered' },
-                { label: '勾选作用于：全部对象', value: 'all' },
+                { label: t('sidebar.filter.scope_filtered'), value: 'filtered' },
+                { label: t('sidebar.filter.scope_all'), value: 'all' },
               ]}
             />
           </Space>
           <div style={{ marginTop: 6, color: '#999', fontSize: 12 }}>
-            当前筛选命中 {filteredBatchObjects.length} / {batchTables.length} 个对象
+            {t('sidebar.batch.filtered_count', {
+              filtered: filteredBatchObjects.length,
+              total: batchTables.length,
+            })}
           </div>
         </div>
       )}
@@ -248,24 +256,27 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
                 onClick={() => handleCheckAll(true)}
                 disabled={selectionScopeTargetKeys.length === 0}
               >
-                全选
+                {t('sidebar.action.select_all')}
               </Button>
               <Button
                 size="small"
                 onClick={() => handleCheckAll(false)}
                 disabled={selectionScopeTargetKeys.length === 0}
               >
-                取消全选
+                {t('sidebar.action.clear_selection')}
               </Button>
               <Button
                 size="small"
                 onClick={handleInvertSelection}
                 disabled={selectionScopeTargetKeys.length === 0}
               >
-                反选
+                {t('sidebar.action.invert_selection')}
               </Button>
               <span style={{ color: '#999' }}>
-                已选择 {checkedTableKeys.length} / {batchTables.length} 个对象
+                {t('sidebar.batch.selected_objects', {
+                  selected: checkedTableKeys.length,
+                  total: batchTables.length,
+                })}
               </span>
             </Space>
           </div>
@@ -279,7 +290,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
                 {groupedBatchObjects.tables.length > 0 && (
                   <div>
                     <div style={{ marginBottom: 6, color: darkMode ? '#bfbfbf' : '#595959', fontSize: 12 }}>
-                      表 ({groupedBatchObjects.tables.length})
+                      {t('sidebar.batch.group.tables')} ({groupedBatchObjects.tables.length})
                     </div>
                     <Space direction="vertical" style={{ width: '100%' }}>
                       {groupedBatchObjects.tables.map(table => (
@@ -294,7 +305,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
                 {groupedBatchObjects.views.length > 0 && (
                   <div>
                     <div style={{ marginBottom: 6, color: darkMode ? '#bfbfbf' : '#595959', fontSize: 12 }}>
-                      视图 ({groupedBatchObjects.views.length})
+                      {t('sidebar.batch.group.views')} ({groupedBatchObjects.views.length})
                     </div>
                     <Space direction="vertical" style={{ width: '100%' }}>
                       {groupedBatchObjects.views.map(view => (
@@ -308,7 +319,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
                 )}
                 {groupedBatchObjects.tables.length === 0 && groupedBatchObjects.views.length === 0 && (
                   <div style={{ color: '#999', padding: '8px 0' }}>
-                    无匹配对象
+                    {t('sidebar.batch.no_matching_objects')}
                   </div>
                 )}
               </div>
@@ -327,7 +338,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
       styles={{ content: modalPanelStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 10 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 12 } }}
       footer={[
         <Button key="cancel" onClick={() => setIsBatchDbModalOpen(false)}>
-          取消
+          {t('sidebar.action.cancel')}
         </Button>,
         <Button
           key="export-schema"
@@ -335,7 +346,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
           onClick={() => handleBatchDbExport(false)}
           disabled={checkedDbKeys.length === 0}
         >
-          导出库结构 ({checkedDbKeys.length})
+          {t('sidebar.action.export_database_schema_count', { count: checkedDbKeys.length })}
         </Button>,
         <Button
           key="backup"
@@ -344,17 +355,19 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
           onClick={() => handleBatchDbExport(true)}
           disabled={checkedDbKeys.length === 0}
         >
-          备份库 ({checkedDbKeys.length})
+          {t('sidebar.action.backup_database_count', { count: checkedDbKeys.length })}
         </Button>,
       ]}
     >
       <div style={{ ...modalSectionStyle, marginBottom: 16 }}>
-        <label style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: darkMode ? '#f5f7ff' : '#162033' }}>选择连接：</label>
+        <label style={{ display: 'block', marginBottom: 4, fontWeight: 600, color: darkMode ? '#f5f7ff' : '#162033' }}>
+          {t('sidebar.field.select_connection')}：
+        </label>
         <Select
           value={selectedDbConnection}
           onChange={handleDbConnectionChange}
           style={{ width: '100%' }}
-          placeholder="请选择连接"
+          placeholder={t('sidebar.placeholder.select_connection')}
         >
           {nonRedisConnections(connections).map(conn => (
             <Select.Option key={conn.id} value={conn.id}>
@@ -362,7 +375,9 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
             </Select.Option>
           ))}
         </Select>
-        <div style={{ ...modalHintTextStyle, marginTop: 10 }}>连接选定后会加载当前连接下可批量导出的数据库列表。</div>
+        <div style={{ ...modalHintTextStyle, marginTop: 10 }}>
+          {t('sidebar.modal.batch_databases.selection_hint')}
+        </div>
       </div>
 
       {batchDatabases.length > 0 && (
@@ -373,22 +388,25 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
                 size="small"
                 onClick={() => handleCheckAllDb(true)}
               >
-                全选
+                {t('sidebar.action.select_all')}
               </Button>
               <Button
                 size="small"
                 onClick={() => handleCheckAllDb(false)}
               >
-                取消全选
+                {t('sidebar.action.clear_selection')}
               </Button>
               <Button
                 size="small"
                 onClick={handleInvertSelectionDb}
               >
-                反选
+                {t('sidebar.action.invert_selection')}
               </Button>
               <span style={{ color: '#999' }}>
-                已选择 {checkedDbKeys.length} / {batchDatabases.length} 个库
+                {t('sidebar.batch.selected_databases', {
+                  selected: checkedDbKeys.length,
+                  total: batchDatabases.length,
+                })}
               </span>
             </Space>
           </div>

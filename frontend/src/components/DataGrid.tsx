@@ -913,8 +913,11 @@ const DataGrid: React.FC<DataGridProps> = ({
   // Helper to export specific data
   const exportData = async (rows: any[], options: DataExportFileOptions) => {
       const cleanRows = pickDataGridOutputRows(rows, displayOutputColumnNames);
+      const exportTitle = String(tableName || '').trim()
+          ? translateDataGrid('file.backend.dialog.export_table', { table: tableName })
+          : translateDataGrid('file.backend.dialog.export_data');
       await runExportWithProgress({
-          title: `导出 ${tableName || '数据'}`,
+          title: exportTitle,
           targetName: tableName || 'export',
           format: options.format,
           totalRows: cleanRows.length,

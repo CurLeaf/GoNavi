@@ -2,6 +2,7 @@ import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { setCurrentLanguage } from '../i18n';
 import { useExportProgressRunner } from './useExportProgressRunner';
 
 const runtimeApi = vi.hoisted(() => {
@@ -58,6 +59,7 @@ describe('useExportProgressRunner', () => {
     runner = null;
     renderer = null;
     now = 1_000;
+    setCurrentLanguage('zh-CN');
     runtimeApi.reset();
     runtimeApi.EventsOn.mockClear();
     messageApi.warning.mockReset();
@@ -70,6 +72,7 @@ describe('useExportProgressRunner', () => {
     act(() => {
       renderer?.unmount();
     });
+    setCurrentLanguage('en-US');
     vi.restoreAllMocks();
   });
 

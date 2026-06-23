@@ -579,7 +579,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             connectionId: tab.connectionId,
             dbName: tab.dbName,
             tableName,
-            title: `导出 ${tableName}`,
+            title: t('file.backend.dialog.export_table', { table: tableName }),
             objectType: 'table',
             rowCountByScope: Number.isFinite(Number(totalRows)) && Number(totalRows) > 0
                 ? { all: Math.trunc(Number(totalRows)) }

@@ -4073,7 +4073,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           key: 'diagnose-query',
           label: (
               <span>
-                  {translate('app.shortcuts.action.diagnoseQuery.label' as any) || 'SQL 诊断'}
+                  {translate('app.shortcuts.action.diagnoseQuery.label' as any)}
                   {diagnoseQueryShortcutBinding?.enabled && diagnoseQueryShortcutBinding.combo && (
                       <span style={{ marginLeft: 8, color: 'var(--gn-text-muted, #6c757d)', fontSize: 11 }}>
                           {getShortcutDisplayLabel(diagnoseQueryShortcutBinding.combo, activeShortcutPlatform)}
@@ -4087,7 +4087,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           key: 'show-slow-queries',
           label: (
               <span>
-                  {translate('app.shortcuts.action.showSlowQueries.label' as any) || '慢 SQL 历史'}
+                  {translate('app.shortcuts.action.showSlowQueries.label' as any)}
                   {showSlowQueriesShortcutBinding?.enabled && showSlowQueriesShortcutBinding.combo && (
                       <span style={{ marginLeft: 8, color: 'var(--gn-text-muted, #6c757d)', fontSize: 11 }}>
                           {getShortcutDisplayLabel(showSlowQueriesShortcutBinding.combo, activeShortcutPlatform)}

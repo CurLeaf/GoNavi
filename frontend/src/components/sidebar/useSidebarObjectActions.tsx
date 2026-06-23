@@ -198,7 +198,7 @@ export const useSidebarObjectActions = ({
     const rowCount = Number(node?.dataRef?.rowCount);
     const totalRowsKnown = Number.isFinite(rowCount) && rowCount > 0;
     await runExportWithProgress({
-      title: `导出 ${tableName}`,
+      title: t('file.backend.dialog.export_table', { table: tableName }),
       targetName: tableName,
       format: options.format,
       totalRows: totalRowsKnown ? rowCount : undefined,
@@ -219,7 +219,7 @@ export const useSidebarObjectActions = ({
   const openExportDialog = async (node: any) => {
     const tableName = String(node?.dataRef?.tableName || node?.title || '').trim();
     if (!tableName) {
-      message.warning('未识别到表名，无法导出');
+      message.warning(t('sidebar.message.table_export_target_missing'));
       return;
     }
     const connectionId = resolveSidebarNodeConnectionId(node, connectionIds) || String(node?.dataRef?.id || '').trim();
@@ -228,7 +228,7 @@ export const useSidebarObjectActions = ({
       connectionId,
       dbName,
       tableName,
-      title: `导出 ${tableName}`,
+      title: t('file.backend.dialog.export_table', { table: tableName }),
       objectType: node?.type === 'view' ? 'view' : (node?.type === 'materialized-view' ? 'materialized-view' : 'table'),
       schemaName: typeof node?.dataRef?.schemaName === 'string' ? node.dataRef.schemaName : undefined,
       sidebarLocateKey: typeof node?.key === 'string' ? node.key : undefined,
@@ -264,9 +264,10 @@ export const useSidebarObjectActions = ({
     const conn = node.dataRef;
     const tableName = String(conn?.tableName || node?.title || '').trim();
     if (!conn?.id || !conn?.dbName || !tableName) {
-      message.warning('当前表缺少连接上下文，无法发送给 AI');
+      message.warning(t('sidebar.message.ai_table_context_missing'));
       return;
     }
+    const tableRef = `${conn.dbName}.${tableName}`;
 
     let ddl = '';
     try {
@@ -281,13 +282,13 @@ export const useSidebarObjectActions = ({
 
     const prompt = promptKind === 'explain'
       ? [
-        `请解释数据表 ${conn.dbName}.${tableName} 的结构和业务含义。`,
-        '重点说明字段含义、主键/索引、潜在关联关系、典型查询场景和风险点。',
+        t('sidebar.ai_prompt.explain.intro', { table: tableRef }),
+        t('sidebar.ai_prompt.explain.detail'),
         ddl ? `\n\`\`\`sql\n${ddl}\n\`\`\`` : '',
       ].filter(Boolean).join('\n')
       : [
-        `请基于数据表 ${conn.dbName}.${tableName} 生成 3 条常用查询 SQL。`,
-        '要求包含：数据预览查询、按关键字段过滤查询、一个聚合或统计查询。',
+        t('sidebar.ai_prompt.query.intro', { table: tableRef }),
+        t('sidebar.ai_prompt.query.detail'),
         ddl ? `\n\`\`\`sql\n${ddl}\n\`\`\`` : '',
       ].filter(Boolean).join('\n');
 
@@ -313,12 +314,12 @@ export const useSidebarObjectActions = ({
 
       const res = await CreateDatabase(buildRpcConnectionConfig(config) as any, values.name);
       if (res.success) {
-        message.success('数据库创建成功');
+        message.success(t('sidebar.message.database_created'));
         setIsCreateDbModalOpen(false);
         createDbForm.resetFields();
         loadDatabases(targetConnection);
       } else {
-        message.error('创建失败: ' + res.message);
+        message.error(t('sidebar.message.operation_create_failed', { error: res.message }));
       }
     } catch (e) {
       // Validate failed
@@ -366,7 +367,7 @@ export const useSidebarObjectActions = ({
     const dialect = getMetadataDialect(node?.dataRef as SavedConnection);
     const schemaName = String(node?.dataRef?.schemaName || '').trim();
     if (!isPostgresSchemaDialect(dialect) || !schemaName) {
-      message.warning('当前节点不支持通过此入口编辑模式');
+      message.warning(t('sidebar.message.schema_edit_unsupported'));
       return;
     }
     setRenameSchemaTarget(node);
@@ -383,11 +384,11 @@ export const useSidebarObjectActions = ({
       const oldSchemaName = String(conn?.schemaName || '').trim();
       const newSchemaName = String(values?.newName || '').trim();
       if (!conn || !dbName || !oldSchemaName || !newSchemaName) {
-        message.error('未找到目标模式，无法编辑');
+        message.error(t('sidebar.message.schema_target_edit_missing'));
         return;
       }
       if (oldSchemaName === newSchemaName) {
-        message.warning('新旧模式名称相同，无需修改');
+        message.warning(t('sidebar.message.schema_name_unchanged'));
         return;
       }
 
@@ -398,7 +399,7 @@ export const useSidebarObjectActions = ({
         newSchemaName,
       );
       if (res.success) {
-        message.success('模式重命名成功');
+        message.success(t('sidebar.message.schema_renamed'));
         const schemaKeyPrefix = `${conn.id}-${dbName}-schema-${oldSchemaName || 'default'}`;
         setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
         setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
@@ -407,7 +408,7 @@ export const useSidebarObjectActions = ({
         setRenameSchemaTarget(null);
         renameSchemaForm.resetFields();
       } else {
-        message.error('编辑失败: ' + res.message);
+        message.error(t('sidebar.message.rename_failed', { error: res.message }));
       }
     } catch (e) {
       // Validate failed
@@ -419,12 +420,12 @@ export const useSidebarObjectActions = ({
     const dbName = String(conn?.dbName || '').trim();
     const schemaName = String(conn?.schemaName || '').trim();
     if (!conn || !dbName || !schemaName) {
-      message.error('未找到目标模式，无法删除');
+      message.error(t('sidebar.message.schema_target_delete_missing'));
       return;
     }
     Modal.confirm({
-      title: '确认删除模式',
-      content: `确定删除模式 "${schemaName}" 吗？这将删除该模式及其中所有对象，操作不可恢复。`,
+      title: t('sidebar.modal.confirm_delete_schema.title'),
+      content: t('sidebar.modal.confirm_delete_schema.content', { name: schemaName }),
       okButtonProps: { danger: true },
       onOk: async () => {
         const res = await (window as any).go.app.App.DropSchema(
@@ -433,13 +434,13 @@ export const useSidebarObjectActions = ({
           schemaName,
         );
         if (res.success) {
-          message.success('模式删除成功');
+          message.success(t('sidebar.message.schema_deleted'));
           const schemaKeyPrefix = `${conn.id}-${dbName}-schema-${schemaName || 'default'}`;
           setExpandedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
           setLoadedKeys(prev => prev.filter(k => !k.toString().startsWith(schemaKeyPrefix)));
           await loadTables(getDatabaseNodeRef(conn, dbName));
         } else {
-          message.error('删除失败: ' + res.message);
+          message.error(t('sidebar.message.delete_failed', { error: res.message }));
         }
       },
     });
@@ -511,23 +512,23 @@ export const useSidebarObjectActions = ({
       const oldTableName = String(conn.tableName || '').trim();
       const newTableName = String(values.newName || '').trim();
       if (!oldTableName || !newTableName) {
-        message.error('表名不能为空');
+        message.error(t('sidebar.message.table_name_required'));
         return;
       }
       if (extractObjectName(oldTableName) === newTableName || oldTableName === newTableName) {
-        message.warning('新旧表名相同，无需修改');
+        message.warning(t('sidebar.message.table_name_unchanged'));
         return;
       }
       const config = buildRuntimeConfig(conn, conn.dbName);
       const res = await RenameTable(buildRpcConnectionConfig(config) as any, conn.dbName, oldTableName, newTableName);
       if (res.success) {
-        message.success('表重命名成功');
+        message.success(t('sidebar.message.table_renamed'));
         await loadTables(getDatabaseNodeRef(conn, conn.dbName));
         setIsRenameTableModalOpen(false);
         setRenameTableTarget(null);
         renameTableForm.resetFields();
       } else {
-        message.error('重命名失败: ' + res.message);
+        message.error(t('sidebar.message.rename_failed', { error: res.message }));
       }
     } catch (e) {
       // Validate failed
@@ -539,17 +540,17 @@ export const useSidebarObjectActions = ({
     const tableName = String(conn.tableName || '').trim();
     if (!tableName) return;
     Modal.confirm({
-      title: '确认删除表',
-      content: `确定删除表 "${tableName}" 吗？该操作不可恢复。`,
+      title: t('sidebar.modal.confirm_delete_table.title'),
+      content: t('sidebar.modal.confirm_delete_table.content', { name: tableName }),
       okButtonProps: { danger: true },
       onOk: async () => {
         const config = buildRuntimeConfig(conn, conn.dbName);
         const res = await DropTable(buildRpcConnectionConfig(config) as any, conn.dbName, tableName);
         if (res.success) {
-          message.success('表删除成功');
+          message.success(t('sidebar.message.table_deleted'));
           await loadTables(getDatabaseNodeRef(conn, conn.dbName));
         } else {
-          message.error('删除失败: ' + res.message);
+          message.error(t('sidebar.message.delete_failed', { error: res.message }));
         }
       },
     });
@@ -563,10 +564,10 @@ export const useSidebarObjectActions = ({
     const { label, progressLabel } = getTableDataDangerActionMeta(action);
     const confirmed = await new Promise<boolean>((resolve) => {
       Modal.confirm({
-        title: `确认${label}`,
-        content: `${label}会永久删除表 "${tableName}" 中的所有数据，操作不可逆，是否继续？`,
-        okText: '继续',
-        cancelText: '取消',
+        title: t('sidebar.modal.confirm_table_data_action.title', { action: label }),
+        content: t('sidebar.modal.confirm_table_data_action.content', { action: label, table: tableName }),
+        okText: t('sidebar.action.continue'),
+        cancelText: t('common.cancel'),
         okButtonProps: { danger: true },
         onOk: () => resolve(true),
         onCancel: () => resolve(false),
@@ -577,7 +578,10 @@ export const useSidebarObjectActions = ({
     const config = buildRuntimeConfig(conn, conn.dbName);
     const app = (window as any).go.app.App;
     const methodName = action === 'truncate' ? 'TruncateTables' : 'ClearTables';
-    const hide = message.loading(`正在${progressLabel} ${tableName}...`, 0);
+    const hide = message.loading(t('sidebar.message.table_data_action_loading', {
+      action: progressLabel,
+      table: tableName,
+    }), 0);
     const startTime = Date.now();
     try {
       const res = await app[methodName](buildRpcConnectionConfig(config) as any, conn.dbName, [tableName]);
@@ -589,7 +593,7 @@ export const useSidebarObjectActions = ({
         : `/* ${label} ${tableName} */`;
 
       if (res.success) {
-        message.success(`${progressLabel}成功`);
+        message.success(t('sidebar.message.table_data_action_success', { action: progressLabel }));
         addSqlLog({
           id: Date.now().toString(),
           timestamp: Date.now(),
@@ -614,7 +618,10 @@ export const useSidebarObjectActions = ({
         dbName: conn.dbName,
       });
       if (res.message !== '已取消') {
-        message.error(`${progressLabel}失败: ${res.message}`);
+        message.error(t('sidebar.message.table_data_action_failed', {
+          action: progressLabel,
+          error: res.message,
+        }));
       }
     } catch (e: any) {
       const duration = Date.now() - startTime;
@@ -629,7 +636,10 @@ export const useSidebarObjectActions = ({
         message: errMsg,
         dbName: conn.dbName,
       });
-      message.error(`${progressLabel}失败: ${errMsg}`);
+      message.error(t('sidebar.message.table_data_action_failed', {
+        action: progressLabel,
+        error: errMsg,
+      }));
     }
   };
 
@@ -799,7 +809,7 @@ export const useSidebarObjectActions = ({
       : (safeTableParts.length > 0 ? safeTableParts : [safeTable]).map(part => `\`${part.replace(/`/g, '``')}\``).join('.');
     addTab({
       id: `query-create-starrocks-rollup-${Date.now()}`,
-      title: '新增 Rollup',
+      title: t('sidebar.v2_table_menu.new_rollup', { keyword: 'Rollup' }),
       type: 'query',
       connectionId: id,
       dbName,
@@ -812,17 +822,17 @@ export const useSidebarObjectActions = ({
     const viewName = String(conn.viewName || '').trim();
     if (!viewName) return;
     Modal.confirm({
-      title: '确认删除视图',
-      content: `确定删除视图 "${viewName}" 吗？该操作不可恢复。`,
+      title: t('sidebar.modal.confirm_delete_view.title'),
+      content: t('sidebar.modal.confirm_delete_view.content', { name: viewName }),
       okButtonProps: { danger: true },
       onOk: async () => {
         const config = buildRuntimeConfig(conn, conn.dbName);
         const res = await DropView(buildRpcConnectionConfig(config) as any, conn.dbName, viewName);
         if (res.success) {
-          message.success('视图删除成功');
+          message.success(t('sidebar.message.view_deleted'));
           await loadTables(getDatabaseNodeRef(conn, conn.dbName));
         } else {
-          message.error('删除失败: ' + res.message);
+          message.error(t('sidebar.message.delete_failed', { error: res.message }));
         }
       },
     });
@@ -836,23 +846,23 @@ export const useSidebarObjectActions = ({
       const oldViewName = String(conn.viewName || '').trim();
       const newViewName = String(values.newName || '').trim();
       if (!oldViewName || !newViewName) {
-        message.error('视图名称不能为空');
+        message.error(t('sidebar.message.view_name_required'));
         return;
       }
       if (extractObjectName(oldViewName) === newViewName || oldViewName === newViewName) {
-        message.warning('新旧视图名相同，无需修改');
+        message.warning(t('sidebar.message.view_name_unchanged'));
         return;
       }
       const config = buildRuntimeConfig(conn, conn.dbName);
       const res = await RenameView(buildRpcConnectionConfig(config) as any, conn.dbName, oldViewName, newViewName);
       if (res.success) {
-        message.success('视图重命名成功');
+        message.success(t('sidebar.message.view_renamed'));
         await loadTables(getDatabaseNodeRef(conn, conn.dbName));
         setIsRenameViewModalOpen(false);
         setRenameViewTarget(null);
         renameViewForm.resetFields();
       } else {
-        message.error('重命名失败: ' + res.message);
+        message.error(t('sidebar.message.rename_failed', { error: res.message }));
       }
     } catch (e) {
       // Validate failed
@@ -905,9 +915,9 @@ export const useSidebarObjectActions = ({
       setRenameSavedQueryTarget(null);
       renameSavedQueryForm.resetFields();
     } catch (e) {
-      if (e instanceof Error) {
-        message.error('重命名查询失败: ' + e.message);
-      }
+      message.error(t('sidebar.message.saved_query_rename_failed', {
+        error: e instanceof Error ? e.message : String(e),
+      }));
     }
   };
 
@@ -931,7 +941,9 @@ export const useSidebarObjectActions = ({
           bindingStatus: 'active',
         });
       }
-      message.success(`查询已绑定到 ${target.name || target.id}`);
+      message.success(t('sidebar.message.saved_query_rebind_success', {
+        name: target.name || target.id,
+      }));
       tabs
         .filter(tab => tab.type === 'query' && (tab.savedQueryId === query.id || tab.id === query.id))
         .forEach(tab => updateQueryTabDraft(tab.id, {
@@ -940,7 +952,9 @@ export const useSidebarObjectActions = ({
           dbName: persisted.dbName,
         }));
     } catch (error) {
-      message.error('绑定查询失败: ' + (error instanceof Error ? error.message : String(error)));
+      message.error(t('sidebar.message.saved_query_rebind_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      }));
     }
   }, [saveQuery, tabs, updateQueryTabDraft]);
 
@@ -1153,16 +1167,22 @@ export const useSidebarObjectActions = ({
   const openMessagePublishModal = (node: any) => {
     const target = resolveMessagePublishTarget(node);
     if (!target) {
-      message.warning('当前对象不支持测试发送消息');
+      message.warning(t('sidebar.message.message_publish_unsupported'));
       return;
     }
     setMessagePublishTarget(target);
   };
 
   const handleMessagePublishSuccess = (result: { destination: string; affectedRows: number }) => {
-    const destination = String(result.destination || '').trim();
-    const suffix = result.affectedRows > 0 ? `（已提交 ${result.affectedRows} 条）` : '';
-    message.success(`测试消息已发送到 ${destination || '目标'}${suffix}`);
+    const destination = String(result.destination || '').trim() || t('sidebar.message.message_publish_target_fallback');
+    if (result.affectedRows > 0) {
+      message.success(t('sidebar.message.message_publish_success_with_count', {
+        destination,
+        count: result.affectedRows,
+      }));
+    } else {
+      message.success(t('sidebar.message.message_publish_success', { destination }));
+    }
     setMessagePublishTarget(null);
   };
 

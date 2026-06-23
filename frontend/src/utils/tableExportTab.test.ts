@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   buildBatchDatabaseExportWorkbenchTab,
@@ -8,8 +8,13 @@ import {
   buildTableExportTab,
   DEFAULT_TABLE_EXPORT_SCOPE_OPTION,
 } from './tableExportTab';
+import { setCurrentLanguage } from '../i18n';
 
 describe('tableExportTab', () => {
+  afterEach(() => {
+    setCurrentLanguage('en-US');
+  });
+
   it('builds a stable history key for persisted export records', () => {
     expect(buildTableExportHistoryKey(' conn-1 ', ' app ', ' public.orders ')).toBe('conn-1::app::public.orders');
   });
@@ -29,6 +34,7 @@ describe('tableExportTab', () => {
   });
 
   it('builds a stable table export tab with normalized defaults', () => {
+    setCurrentLanguage('zh-CN');
     const tab = buildTableExportTab({
       connectionId: 'conn-1',
       dbName: 'app',
@@ -39,7 +45,7 @@ describe('tableExportTab', () => {
     expect(tab.type).toBe('table-export');
     expect(tab.title).toBe('导出 public.orders');
     expect(tab.exportWorkbenchMode).toBe('single');
-    expect(tab.tableExportScopeOptions).toEqual([DEFAULT_TABLE_EXPORT_SCOPE_OPTION]);
+    expect(tab.tableExportScopeOptions).toEqual([{ ...DEFAULT_TABLE_EXPORT_SCOPE_OPTION }]);
     expect(tab.tableExportInitialScope).toBe('all');
     expect(tab.tableExportQueryByScope).toBeUndefined();
     expect(tab.tableExportRowCountByScope).toBeUndefined();
@@ -80,6 +86,7 @@ describe('tableExportTab', () => {
   });
 
   it('builds batch table export workbench tabs with stable ids', () => {
+    setCurrentLanguage('zh-CN');
     const tab = buildBatchTableExportWorkbenchTab({
       connectionId: 'conn-1',
       dbName: 'SYS',
@@ -93,6 +100,7 @@ describe('tableExportTab', () => {
   });
 
   it('builds batch database export workbench tabs with stable ids', () => {
+    setCurrentLanguage('zh-CN');
     const tab = buildBatchDatabaseExportWorkbenchTab({
       connectionId: 'conn-1',
     });
@@ -101,5 +109,16 @@ describe('tableExportTab', () => {
     expect(tab.type).toBe('table-export');
     expect(tab.title).toBe('批量导出库');
     expect(tab.exportWorkbenchMode).toBe('batch-databases');
+  });
+
+  it('uses the current language for batch workbench fallback titles', () => {
+    setCurrentLanguage('en-US');
+
+    expect(buildBatchTableExportWorkbenchTab({
+      connectionId: 'conn-1',
+    }).title).toBe('Batch export objects');
+    expect(buildBatchDatabaseExportWorkbenchTab({
+      connectionId: 'conn-1',
+    }).title).toBe('Batch export databases');
   });
 });

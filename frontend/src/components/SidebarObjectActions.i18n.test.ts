@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const sidebarSource = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+const objectActionsSource = readFileSync(new URL('./sidebar/useSidebarObjectActions.tsx', import.meta.url), 'utf8');
+const legacyMenuSource = readFileSync(new URL('./sidebar/sidebarLegacyNodeMenu.tsx', import.meta.url), 'utf8');
 const tableDataDangerActionsSource = readFileSync(new URL('./tableDataDangerActions.ts', import.meta.url), 'utf8');
 const locales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
 
@@ -12,6 +13,7 @@ const requiredKeys = [
   'sidebar.message.schema_renamed',
   'sidebar.message.schema_target_delete_missing',
   'sidebar.message.schema_deleted',
+  'sidebar.message.table_export_target_missing',
   'sidebar.modal.confirm_delete_schema.title',
   'sidebar.modal.confirm_delete_schema.content',
   'sidebar.menu.edit_schema',
@@ -20,6 +22,7 @@ const requiredKeys = [
   'sidebar.menu.delete_schema',
   'sidebar.menu.copy_object_name',
   'sidebar.menu.table_structure',
+  'sidebar.menu.design_table',
   'sidebar.menu.copy_table_name',
   'sidebar.menu.copy_table_structure',
   'sidebar.menu.backup_table_sql',
@@ -28,24 +31,26 @@ const requiredKeys = [
   'sidebar.menu.clear_table',
   'sidebar.menu.delete_table',
   'sidebar.menu.export_table_data',
-  'sidebar.menu.export_csv',
-  'sidebar.menu.export_xlsx',
-  'sidebar.menu.export_json',
-  'sidebar.menu.export_markdown',
-  'sidebar.menu.export_html',
+  'sidebar.v2_table_menu.new_rollup',
   'sidebar.message.table_name_required',
   'sidebar.message.table_name_unchanged',
   'sidebar.message.table_renamed',
   'sidebar.message.table_deleted',
+  'sidebar.modal.confirm_delete_table.title',
+  'sidebar.modal.confirm_delete_table.content',
   'sidebar.message.view_name_required',
   'sidebar.message.view_name_unchanged',
   'sidebar.message.view_renamed',
   'sidebar.message.view_deleted',
+  'sidebar.modal.confirm_delete_view.title',
+  'sidebar.modal.confirm_delete_view.content',
   'sidebar.message.rename_failed',
   'sidebar.message.delete_failed',
   'sidebar.message.table_data_action_loading',
   'sidebar.message.table_data_action_success',
   'sidebar.message.table_data_action_failed',
+  'sidebar.modal.confirm_table_data_action.title',
+  'sidebar.modal.confirm_table_data_action.content',
   'sidebar.table_action.truncate.label',
   'sidebar.table_action.truncate.progress',
   'sidebar.table_action.clear.label',
@@ -65,7 +70,10 @@ describe('Sidebar object actions i18n', () => {
       '确定删除模式',
       '模式删除成功',
       '删除失败: ',
+      '未识别到表名，无法导出',
+      '新增 Rollup',
       '表名不能为空',
+      '新旧表名相同，无需修改',
       '表重命名成功',
       '确认删除表',
       '确定删除表',
@@ -76,10 +84,16 @@ describe('Sidebar object actions i18n', () => {
       '${progressLabel}成功',
       '${progressLabel}失败',
       '视图名称不能为空',
+      '新旧视图名相同，无需修改',
       '视图重命名成功',
       '确认删除视图',
       '确定删除视图',
       '视图删除成功',
+    ].forEach((rawSnippet) => {
+      expect(objectActionsSource).not.toContain(rawSnippet);
+    });
+
+    [
       "label: '编辑模式'",
       "label: '导出当前模式表结构 (SQL)'",
       "label: '备份当前模式全部表 (结构+数据 SQL)'",
@@ -96,9 +110,8 @@ describe('Sidebar object actions i18n', () => {
       "label: '清空表'",
       "label: '删除表'",
       "label: '导出表数据'",
-      "label: '导出 CSV'",
     ].forEach((rawSnippet) => {
-      expect(sidebarSource).not.toContain(rawSnippet);
+      expect(legacyMenuSource).not.toContain(rawSnippet);
     });
 
     [
@@ -107,9 +120,35 @@ describe('Sidebar object actions i18n', () => {
       "t('sidebar.message.schema_name_unchanged')",
       "t('sidebar.message.schema_renamed')",
       "t('sidebar.message.schema_target_delete_missing')",
+      "t('sidebar.message.table_export_target_missing')",
       "t('sidebar.message.schema_deleted')",
+      "t('sidebar.v2_table_menu.new_rollup'",
       "t('sidebar.modal.confirm_delete_schema.title')",
       "t('sidebar.modal.confirm_delete_schema.content'",
+      "t('sidebar.message.table_name_required')",
+      "t('sidebar.message.table_name_unchanged')",
+      "t('sidebar.message.table_renamed')",
+      "t('sidebar.message.table_deleted')",
+      "t('sidebar.modal.confirm_delete_table.title')",
+      "t('sidebar.modal.confirm_delete_table.content'",
+      "t('sidebar.message.view_name_required')",
+      "t('sidebar.message.view_name_unchanged')",
+      "t('sidebar.message.view_renamed')",
+      "t('sidebar.message.view_deleted')",
+      "t('sidebar.modal.confirm_delete_view.title')",
+      "t('sidebar.modal.confirm_delete_view.content'",
+      "t('sidebar.message.rename_failed'",
+      "t('sidebar.message.delete_failed'",
+      "t('sidebar.message.table_data_action_loading'",
+      "t('sidebar.message.table_data_action_success'",
+      "t('sidebar.message.table_data_action_failed'",
+      "t('sidebar.modal.confirm_table_data_action.title'",
+      "t('sidebar.modal.confirm_table_data_action.content'",
+    ].forEach((lookup) => {
+      expect(objectActionsSource).toContain(lookup);
+    });
+
+    [
       "t('sidebar.menu.edit_schema')",
       "t('sidebar.menu.export_current_schema_sql')",
       "t('sidebar.menu.backup_current_schema_sql')",
@@ -117,6 +156,7 @@ describe('Sidebar object actions i18n', () => {
       "t('sidebar.menu.copy_object_name')",
       "t('message_publish_modal.title')",
       "t('sidebar.menu.table_structure')",
+      "t('sidebar.menu.design_table')",
       "t('sidebar.menu.copy_table_name')",
       "t('sidebar.menu.copy_table_structure')",
       "t('sidebar.menu.backup_table_sql')",
@@ -125,26 +165,8 @@ describe('Sidebar object actions i18n', () => {
       "t('sidebar.menu.clear_table')",
       "t('sidebar.menu.delete_table')",
       "t('sidebar.menu.export_table_data')",
-      "t('sidebar.menu.export_csv')",
-      "t('sidebar.menu.export_xlsx')",
-      "t('sidebar.menu.export_json')",
-      "t('sidebar.menu.export_markdown')",
-      "t('sidebar.menu.export_html')",
-      "t('sidebar.message.table_name_required')",
-      "t('sidebar.message.table_name_unchanged')",
-      "t('sidebar.message.table_renamed')",
-      "t('sidebar.message.table_deleted')",
-      "t('sidebar.message.view_name_required')",
-      "t('sidebar.message.view_name_unchanged')",
-      "t('sidebar.message.view_renamed')",
-      "t('sidebar.message.view_deleted')",
-      "t('sidebar.message.rename_failed'",
-      "t('sidebar.message.delete_failed'",
-      "t('sidebar.message.table_data_action_loading'",
-      "t('sidebar.message.table_data_action_success'",
-      "t('sidebar.message.table_data_action_failed'",
     ].forEach((lookup) => {
-      expect(sidebarSource).toContain(lookup);
+      expect(legacyMenuSource).toContain(lookup);
     });
   });
 

@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+const objectActionsSource = readFileSync(new URL('./sidebar/useSidebarObjectActions.tsx', import.meta.url), 'utf8');
+const searchModelSource = readFileSync(new URL('./sidebar/useSidebarSearchModel.tsx', import.meta.url), 'utf8');
 const locales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
 const requiredKeys = [
   'sidebar.message.ai_table_context_missing',
@@ -9,7 +11,6 @@ const requiredKeys = [
   'sidebar.ai_prompt.explain.detail',
   'sidebar.ai_prompt.query.intro',
   'sidebar.ai_prompt.query.detail',
-  'sidebar.command_search.action.ask_ai.title',
 ];
 
 describe('Sidebar AI prompt i18n', () => {
@@ -23,18 +24,21 @@ describe('Sidebar AI prompt i18n', () => {
       "title: '让 AI 回答'",
     ].forEach((legacyCopy) => {
       expect(source).not.toContain(legacyCopy);
+      expect(objectActionsSource).not.toContain(legacyCopy);
+      expect(searchModelSource).not.toContain(legacyCopy);
     });
 
     requiredKeys.forEach((key) => {
-      expect(source).toContain(`t('${key}'`);
+      expect(objectActionsSource).toContain(`t('${key}'`);
     });
 
-    expect(source).toContain('DBShowCreateTable');
-    expect(source).toContain('conn.dbName');
-    expect(source).toContain('tableName');
-    expect(source).toContain('ddl ? `\\n\\`\\`\\`sql');
-    expect(source).toContain('${ddl}');
-    expect(source).toContain('v2CommandSearchQuery.aiPrompt');
+    expect(objectActionsSource).toContain('DBShowCreateTable');
+    expect(objectActionsSource).toContain('conn.dbName');
+    expect(objectActionsSource).toContain('tableName');
+    expect(objectActionsSource).toContain('ddl ? `\\n\\`\\`\\`sql');
+    expect(objectActionsSource).toContain('${ddl}');
+    expect(searchModelSource).toContain("t('sidebar.command_search.action.ask_ai.title')");
+    expect(searchModelSource).toContain('v2CommandSearchQuery.aiPrompt');
   });
 
   it('keeps AI prompt keys available in every locale', () => {

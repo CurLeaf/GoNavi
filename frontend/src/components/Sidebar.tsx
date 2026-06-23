@@ -2949,8 +2949,16 @@ const Sidebar: React.FC<{
             modalScrollSectionStyle={modalScrollSectionStyle}
             modalHintTextStyle={modalHintTextStyle}
             darkMode={darkMode}
-            tableModalTitle={renderSidebarModalTitle(<TableOutlined />, "批量操作表", "按对象批量导出结构、数据或完整备份。")}
-            databaseModalTitle={renderSidebarModalTitle(<DatabaseOutlined />, "批量操作库", "按数据库批量导出结构，或生成结构加数据的备份。")}
+            tableModalTitle={renderSidebarModalTitle(
+              <TableOutlined />,
+              t('sidebar.modal.batch_tables.title'),
+              t('sidebar.modal.batch_tables.description'),
+            )}
+            databaseModalTitle={renderSidebarModalTitle(
+              <DatabaseOutlined />,
+              t('sidebar.modal.batch_databases.title'),
+              t('sidebar.modal.batch_databases.description'),
+            )}
             isBatchModalOpen={isBatchModalOpen}
             setIsBatchModalOpen={setIsBatchModalOpen}
             selectedConnection={selectedConnection}

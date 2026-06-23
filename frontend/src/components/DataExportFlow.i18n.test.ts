@@ -5,6 +5,8 @@ const componentFiles = [
   './DataExportDialog.tsx',
   './ExportProgressModal.tsx',
   './TableExportWorkbench.tsx',
+  './useExportProgressRunner.ts',
+  '../utils/tableExportTab.ts',
 ] as const;
 
 const localeFiles = [
@@ -36,6 +38,12 @@ describe('data export i18n', () => {
     expect(sources[0]).toContain("t('data_export.dialog.field.format')");
     expect(sources[1]).toContain("t('data_export.progress.title.error')");
     expect(sources[2]).toContain("t('data_export.workbench.title')");
+    expect(sources[3]).toContain("t('data_export.progress.title.done')");
+    expect(sources[3]).toContain("t('data_export.progress.title.error')");
+    expect(sources[4]).toContain("t('data_export.workbench.scope.all.label')");
+    expect(sources[4]).toContain("t('data_export.workbench.scope.all.description')");
+    expect(sources[4]).toContain("t('data_export.progress.value.target_fallback')");
+    expect(sources[4]).toContain("t('data_export.workbench.task.export_target'");
     expect(combinedSource).not.toMatch(/\p{Script=Han}/u);
   });
 

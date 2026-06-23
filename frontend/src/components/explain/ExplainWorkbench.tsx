@@ -3,6 +3,7 @@ import { ApartmentOutlined, CodeOutlined } from '@ant-design/icons'
 import { Empty, Modal, Segmented, Spin, Typography } from 'antd'
 import { DiagnoseQuery } from '../../../wailsjs/go/app/App'
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig'
+import { useI18n } from '../../i18n/provider'
 import type { ConnectionConfig } from '../../types'
 import type { DiagnoseReport, ExplainNode, IndexSuggestion } from '../../utils/explainTypes'
 import ExplainGraph from './ExplainGraph'
@@ -40,6 +41,7 @@ interface ExplainReportViewProps {
 }
 
 export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReportViewProps) {
+  const { t } = useI18n()
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState<DiagnoseReport | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -49,7 +51,7 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
 
   const runDiagnose = useCallback(async () => {
     if (!sql.trim()) {
-      setError('查询语句为空')
+      setError(t('sql_analysis.explain.error.query_required'))
       return
     }
     setLoading(true)
@@ -59,7 +61,7 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
     try {
       const result = await DiagnoseQuery(buildRpcConnectionConfig(config), dbName, sql)
       if (!result.success) {
-        setError(result.message || '诊断失败')
+        setError(result.message || t('sql_analysis.explain.error.run_failed'))
       } else {
         const data = result.data as DiagnoseReport
         setReport(data)
@@ -69,7 +71,7 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
     } finally {
       setLoading(false)
     }
-  }, [config, dbName, sql])
+  }, [config, dbName, sql, t])
 
   useEffect(() => {
     if (!hasRequestedRun) {
@@ -100,17 +102,17 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
       <style>{reportViewStyles}</style>
       {loading && (
         <div style={{ textAlign: 'center', padding: '60px 0' }}>
-          <Spin tip="正在执行 EXPLAIN 并解析计划..." />
+          <Spin tip={t('sql_analysis.explain.loading')} />
         </div>
       )}
       {error && (
         <Paragraph type="danger" style={{ padding: 16 }}>
-          <Text strong>诊断失败：</Text>
+          <Text strong>{t('sql_analysis.explain.error.title')}</Text>
           {error}
         </Paragraph>
       )}
       {!loading && !error && !report && !hasRequestedRun && (
-        <Empty description="输入 SQL 后运行诊断" style={{ padding: '48px 0' }} />
+        <Empty description={t('sql_analysis.explain.empty')} style={{ padding: '48px 0' }} />
       )}
       {!loading && !error && report && (
         <div className="gn-explain-report-shell">
@@ -125,7 +127,7 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
                   label: (
                     <span className="gn-explain-report-switcher-label">
                       <ApartmentOutlined />
-                      <span>执行计划</span>
+                      <span>{t('sql_analysis.explain.view.plan')}</span>
                     </span>
                   ),
                 },
@@ -134,14 +136,14 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
                   label: (
                     <span className="gn-explain-report-switcher-label">
                       <CodeOutlined />
-                      <span>原文</span>
+                      <span>{t('sql_analysis.explain.view.raw')}</span>
                     </span>
                   ),
                 },
               ]}
             />
             <Text type="secondary" className="gn-explain-report-switcher-meta">
-              {report.plan.nodes.length} 节点
+              {t('sql_analysis.explain.meta.node_count', { count: report.plan.nodes.length })}
               <span className="gn-explain-report-switcher-meta-separator">/</span>
               {report.plan.rawFormat}
             </Text>
@@ -184,7 +186,7 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
                   boxSizing: 'border-box',
                 }}
               >
-                {report.plan.rawPayload || '(无原文)'}
+                {report.plan.rawPayload || t('sql_analysis.explain.raw.empty')}
               </pre>
             )}
           </div>
@@ -195,6 +197,7 @@ export function ExplainReportView({ config, dbName, sql, runKey }: ExplainReport
 }
 
 export default function ExplainWorkbench({ open, onClose, config, dbName, sql }: ExplainWorkbenchProps) {
+  const { t } = useI18n()
   return (
     <Modal
       open={open}
@@ -202,7 +205,7 @@ export default function ExplainWorkbench({ open, onClose, config, dbName, sql }:
       footer={null}
       width="90%"
       style={{ top: 20 }}
-      title={<Title level={5} style={{ margin: 0 }}>SQL 诊断工作台</Title>}
+      title={<Title level={5} style={{ margin: 0 }}>{t('sql_analysis.workbench.title')}</Title>}
       destroyOnClose
     >
       <div style={{ minHeight: 480, height: '70vh' }}>

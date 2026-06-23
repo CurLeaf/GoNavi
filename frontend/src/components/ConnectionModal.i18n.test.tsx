@@ -77,6 +77,19 @@ const flushConnectionTestTick = async () => {
 };
 
 const source = readFileSync(new URL("./ConnectionModal.tsx", import.meta.url), "utf8");
+const step2Source = readFileSync(new URL("./connectionModal/ConnectionModalStep2.tsx", import.meta.url), "utf8");
+const networkSecuritySource = readFileSync(
+  new URL("./connectionModal/ConnectionModalNetworkSecuritySection.tsx", import.meta.url),
+  "utf8",
+);
+const uriSource = readFileSync(new URL("./connectionModal/connectionModalUri.ts", import.meta.url), "utf8");
+const typeCatalogSource = readFileSync(new URL("../utils/connectionTypeCatalog.ts", import.meta.url), "utf8");
+const combinedConnectionModalSource = [
+  source,
+  step2Source,
+  networkSecuritySource,
+  uriSource,
+].join("\n");
 
 const initialConnection = (type: string, config: Record<string, any> = {}) =>
   ({
@@ -856,12 +869,12 @@ describe("ConnectionModal i18n", () => {
   });
 
   it("localizes the Redis URI example separator while preserving URI examples as raw text", () => {
-    expect(source).not.toContain(`topology=cluster ${"\u6216"} redis://`);
-    expect(source).toContain('t("connection.modal.example.or"');
-    expect(source).toContain(
+    expect(uriSource).not.toContain(`topology=cluster ${"\u6216"} redis://`);
+    expect(uriSource).toContain('t("connection.modal.example.or"');
+    expect(uriSource).toContain(
       '"redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster"',
     );
-    expect(source).toContain(
+    expect(uriSource).toContain(
       '"redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster"',
     );
   });
@@ -884,11 +897,11 @@ describe("ConnectionModal i18n", () => {
       'label: "NoSQL"',
       'name: "Custom (自定义)"',
     ].forEach((snippet) => {
-      expect(source).not.toContain(snippet);
+      expect(combinedConnectionModalSource).not.toContain(snippet);
     });
-    expect(source).not.toContain('res?.message !== "已取消"');
-    expect(source.match(/isBackendCancelledResult\(res\)/g) ?? []).toHaveLength(3);
-    expect(source).toContain('name: "Dameng (达梦)"');
+    expect(combinedConnectionModalSource).not.toContain('res?.message !== "已取消"');
+    expect(combinedConnectionModalSource.match(/isBackendCancelledResult\(res\)/g) ?? []).toHaveLength(3);
+    expect(typeCatalogSource).toContain("name: 'Dameng (达梦)'");
   });
 
   it("renders English URI feedback and file picker error shell while preserving raw detail", async () => {
