@@ -386,6 +386,7 @@ vi.mock('@ant-design/icons', () => {
   return {
     BugOutlined: Icon,
     ClearOutlined: Icon,
+    CopyOutlined: Icon,
     PlayCircleOutlined: Icon,
     SaveOutlined: Icon,
     FormatPainterOutlined: Icon,
@@ -489,6 +490,24 @@ const textContent = (node: any): string =>
   (node.children || [])
     .map((item: any) => (typeof item === 'string' ? item : textContent(item)))
     .join('');
+
+const queryResultMessageText = (renderer: ReactTestRenderer): string => {
+  const values: string[] = [];
+  const walk = (node: any) => {
+    if (!node) return;
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    if (typeof node !== 'object') return;
+    if (typeof node.props?.['data-query-result-message-textarea'] === 'string') {
+      values.push(String(node.props.value || ''));
+    }
+    walk(node.children || []);
+  };
+  walk(renderer.toJSON());
+  return values.join('\n');
+};
 
 const findButton = (renderer: ReactTestRenderer, text: string) =>
   renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text))[0];
@@ -5554,7 +5573,7 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(textContent(renderer!.toJSON())).toContain('消息 1');
-    expect(textContent(renderer!.toJSON())).toContain("Table 'users'. Scan count 1, logical reads 3.");
+    expect(queryResultMessageText(renderer!)).toContain("Table 'users'. Scan count 1, logical reads 3.");
     expect(dataGridState.latestProps?.columnNames).not.toEqual([]);
   });
 
@@ -5698,7 +5717,7 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(textContent(renderer!.toJSON())).toContain('消息 2');
-    expect(textContent(renderer!.toJSON())).toContain("insert into c_dyscript(projectid,name) values (1,'demo')");
+    expect(queryResultMessageText(renderer!)).toContain("insert into c_dyscript(projectid,name) values (1,'demo')");
     expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
     expect(dataGridState.latestProps).toBeNull();
   });
@@ -5730,7 +5749,7 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(textContent(renderer!.toJSON())).toContain('消息 2');
-    expect(textContent(renderer!.toJSON())).toContain("insert into c_dyscript(projectid,name) values (1,'demo')");
+    expect(queryResultMessageText(renderer!)).toContain("insert into c_dyscript(projectid,name) values (1,'demo')");
     expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
     expect(dataGridState.latestProps).toBeNull();
   });
