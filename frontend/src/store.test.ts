@@ -107,6 +107,47 @@ describe('store appearance persistence', () => {
     expect(appearance.dataTableDensity).toBe('compact');
   });
 
+  it('persists language preference and sanitizes unsupported persisted values', async () => {
+    const { useStore } = await importStore();
+
+    expect(useStore.getState().languagePreference).toBe('system');
+
+    useStore.getState().setLanguagePreference('ja-JP');
+    expect(useStore.getState().languagePreference).toBe('ja-JP');
+
+    let persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.languagePreference).toBe('ja-JP');
+
+    vi.resetModules();
+    let reloaded = await importStore();
+    expect(reloaded.useStore.getState().languagePreference).toBe('ja-JP');
+
+    reloaded.useStore.getState().setLanguagePreference('system');
+    expect(reloaded.useStore.getState().languagePreference).toBe('system');
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        languagePreference: 'fr-FR',
+      },
+      version: 10,
+    }));
+
+    vi.resetModules();
+    reloaded = await importStore();
+    expect(reloaded.useStore.getState().languagePreference).toBe('system');
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        languagePreference: 'zh-CN',
+      },
+      version: 10,
+    }));
+
+    vi.resetModules();
+    reloaded = await importStore();
+    expect(reloaded.useStore.getState().languagePreference).toBe('zh-CN');
+  });
+
   it('persists custom font families and sanitizes blank values', async () => {
     const { useStore } = await importStore();
 
@@ -374,6 +415,30 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().connections[0]?.config.clickHouseProtocol).toBe(
       'http',
     );
+  });
+
+  it('normalizes keepalive settings when replacing saved connections', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().replaceConnections([
+      {
+        id: 'postgres-keepalive',
+        name: 'Postgres KeepAlive',
+        config: {
+          id: 'postgres-keepalive',
+          type: 'postgres',
+          host: 'db.local',
+          port: 5432,
+          user: 'postgres',
+          keepAliveEnabled: true,
+          keepAliveIntervalMinutes: 0,
+        },
+      },
+    ]);
+
+    const config = useStore.getState().connections[0]?.config;
+    expect(config?.keepAliveEnabled).toBe(true);
+    expect(config?.keepAliveIntervalMinutes).toBe(240);
   });
 
   it('keeps StarRocks saved connections as independent datasource type', async () => {
@@ -864,6 +929,77 @@ describe('store appearance persistence', () => {
     ]);
   });
 
+  it('uses localized external SQL directory fallback names without overriding explicit names or path segments', async () => {
+    const i18n = await import('./i18n');
+    i18n.setCurrentLanguage('de-DE');
+    const { useStore } = await importStore();
+
+    useStore.getState().saveExternalSQLDirectory({
+      id: 'ext-fallback',
+      name: '   ',
+      path: '/',
+      connectionId: 'conn-1',
+      dbName: 'demo',
+      createdAt: 1,
+    });
+    useStore.getState().saveExternalSQLDirectory({
+      id: 'ext-segment',
+      name: '',
+      path: 'D:/sql/reports',
+      connectionId: 'conn-1',
+      dbName: 'demo',
+      createdAt: 2,
+    });
+    useStore.getState().saveExternalSQLDirectory({
+      id: 'ext-explicit',
+      name: 'Handwritten scripts',
+      path: 'D:/sql/handwritten',
+      connectionId: 'conn-1',
+      dbName: 'demo',
+      createdAt: 3,
+    });
+
+    expect(useStore.getState().externalSQLDirectories.map((directory) => directory.name)).toEqual([
+      i18n.t('sidebar.sql_directory.default_name'),
+      'reports',
+      'Handwritten scripts',
+    ]);
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        externalSQLDirectories: [
+          {
+            id: 'ext-reloaded-fallback',
+            name: '',
+            path: '/',
+            connectionId: 'conn-2',
+            dbName: 'demo2',
+            createdAt: 4,
+          },
+          {
+            id: 'ext-reloaded-segment',
+            name: '  ',
+            path: 'D:/sql/migrations',
+            connectionId: 'conn-2',
+            dbName: 'demo2',
+            createdAt: 5,
+          },
+        ],
+      },
+      version: 10,
+    }));
+
+    vi.resetModules();
+    const reloadedI18n = await import('./i18n');
+    reloadedI18n.setCurrentLanguage('ja-JP');
+    const reloaded = await importStore();
+
+    expect(reloaded.useStore.getState().externalSQLDirectories.map((directory) => directory.name)).toEqual([
+      reloadedI18n.t('sidebar.sql_directory.default_name'),
+      'migrations',
+    ]);
+  });
+
   it('persists open query tab drafts and restores them after reload', async () => {
     const { useStore } = await importStore();
 
@@ -879,6 +1015,10 @@ describe('store appearance persistence', () => {
       query: 'select * from orders where status = "paid";',
       connectionId: 'conn-2',
       dbName: 'reporting',
+      formatRestoreSnapshot: {
+        query: 'select * from orders where status="paid";',
+        createdAt: 123,
+      },
     });
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
@@ -890,6 +1030,10 @@ describe('store appearance persistence', () => {
         connectionId: 'conn-2',
         dbName: 'reporting',
         query: 'select * from orders where status = "paid";',
+        formatRestoreSnapshot: {
+          query: 'select * from orders where status="paid";',
+          createdAt: 123,
+        },
       }),
     ]);
     expect(persisted.state.activeTabId).toBe('query-tab-1');
@@ -903,9 +1047,19 @@ describe('store appearance persistence', () => {
         connectionId: 'conn-2',
         dbName: 'reporting',
         query: 'select * from orders where status = "paid";',
+        formatRestoreSnapshot: {
+          query: 'select * from orders where status="paid";',
+          createdAt: 123,
+        },
       }),
     ]);
     expect(reloaded.useStore.getState().activeTabId).toBe('query-tab-1');
+
+    reloaded.useStore.getState().updateQueryTabDraft('query-tab-1', {
+      formatRestoreSnapshot: undefined,
+    });
+
+    expect(reloaded.useStore.getState().tabs[0].formatRestoreSnapshot).toBeUndefined();
   });
 
   it('updates activeContext when switching between tabs with different host or database', async () => {
@@ -980,6 +1134,79 @@ describe('store appearance persistence', () => {
     });
   });
 
+  it('reuses the same table-export tab for the same connection and table identity', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'table-export-conn-1-main-users',
+      title: '导出 users',
+      type: 'table-export',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'users',
+      initialTab: 'config',
+    });
+    useStore.getState().addTab({
+      id: 'another-id-that-should-collapse',
+      title: '导出 users',
+      type: 'table-export',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      tableName: 'users',
+      initialTab: 'progress',
+    });
+
+    expect(useStore.getState().tabs).toHaveLength(1);
+    expect(useStore.getState().tabs[0]).toEqual(expect.objectContaining({
+      id: 'table-export-conn-1-main-users',
+      type: 'table-export',
+      initialTab: 'progress',
+    }));
+    expect(useStore.getState().activeTabId).toBe('table-export-conn-1-main-users');
+  });
+
+  it('persists table export history across store reloads', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().upsertTableExportHistory('conn-1::main::users', {
+      jobId: 'job-1',
+      targetName: 'users',
+      startedAt: 1_000,
+      finishedAt: 61_000,
+      format: 'XLSX',
+      scope: 'all',
+      scopeLabel: '全表数据',
+      strategyLabel: '整表导出链路',
+      status: 'done',
+      stage: '导出完成',
+      current: 500_000,
+      total: 500_000,
+      totalRowsKnown: true,
+      filePath: '/tmp/users.xlsx',
+      message: '',
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.tableExportHistories['conn-1::main::users']).toEqual([
+      expect.objectContaining({
+        jobId: 'job-1',
+        status: 'done',
+        filePath: '/tmp/users.xlsx',
+      }),
+    ]);
+
+    vi.resetModules();
+    const reloaded = await importStore();
+    expect(reloaded.useStore.getState().tableExportHistories['conn-1::main::users']).toEqual([
+      expect.objectContaining({
+        jobId: 'job-1',
+        current: 500_000,
+        total: 500_000,
+        status: 'done',
+      }),
+    ]);
+  });
+
   it('only restores persisted query tabs with useful SQL state', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {
@@ -1026,33 +1253,80 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().activeTabId).toBe('query-1');
   });
 
-  it('persists recent SQL execution logs and trims oversized entries', async () => {
+  it('keeps only the most recent runtime SQL logs and trims oversized entries', async () => {
     const { useStore } = await importStore();
-    const longSql = `select '${'x'.repeat(120 * 1024)}'`;
+    const longSql = `select '${'x'.repeat(20 * 1024)}'`;
 
-    useStore.getState().addSqlLog({
-      id: 'log-1',
-      timestamp: 100,
-      sql: longSql,
-      status: 'success',
-      duration: 12,
+    for (let i = 0; i < 140; i += 1) {
+      useStore.getState().addSqlLog({
+        id: `log-${i}`,
+        timestamp: 100 + i,
+        sql: longSql,
+        status: 'success',
+        duration: 12 + i,
+        dbName: 'main',
+      });
+    }
+
+    expect(useStore.getState().sqlLogs).toHaveLength(120);
+    expect(useStore.getState().sqlLogs[0]).toEqual(expect.objectContaining({
+      id: 'log-139',
       dbName: 'main',
-    });
+    }));
+    expect(useStore.getState().sqlLogs[119]).toEqual(expect.objectContaining({
+      id: 'log-20',
+    }));
+    expect(useStore.getState().sqlLogs[0]?.sql.length).toBe(12 * 1024);
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
-    expect(persisted.state.sqlLogs).toHaveLength(1);
-    expect(persisted.state.sqlLogs[0].sql.length).toBe(100 * 1024);
+    expect(persisted.state.sqlLogs).toHaveLength(120);
+    expect(persisted.state.sqlLogs[0].sql.length).toBe(12 * 1024);
     expect(persisted.state.sqlLogs[0].dbName).toBe('main');
 
     vi.resetModules();
     const reloaded = await importStore();
     expect(reloaded.useStore.getState().sqlLogs[0]).toEqual(expect.objectContaining({
-      id: 'log-1',
+      id: 'log-139',
       status: 'success',
-      duration: 12,
+      duration: 151,
       dbName: 'main',
     }));
-    expect(reloaded.useStore.getState().sqlLogs[0]?.sql.length).toBe(100 * 1024);
+    expect(reloaded.useStore.getState().sqlLogs).toHaveLength(120);
+    expect(reloaded.useStore.getState().sqlLogs[119]).toEqual(expect.objectContaining({
+      id: 'log-20',
+    }));
+    expect(reloaded.useStore.getState().sqlLogs[0]?.sql.length).toBe(12 * 1024);
+  });
+
+  it('shrinks oversized SQL logs from older persisted snapshots during hydration', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        sqlLogs: Array.from({ length: 200 }, (_, index) => ({
+          id: `legacy-log-${index}`,
+          timestamp: 500 + index,
+          sql: `select '${'x'.repeat(18 * 1024)}'`,
+          status: index % 2 === 0 ? 'success' : 'error',
+          duration: index,
+          dbName: 'legacy',
+          message: 'm'.repeat(3 * 1024),
+        })),
+      },
+      version: 12,
+    }));
+
+    const { useStore } = await importStore();
+    const sqlLogs = useStore.getState().sqlLogs;
+
+    expect(sqlLogs).toHaveLength(120);
+    expect(sqlLogs[0]).toEqual(expect.objectContaining({
+      id: 'legacy-log-0',
+      dbName: 'legacy',
+    }));
+    expect(sqlLogs[119]).toEqual(expect.objectContaining({
+      id: 'legacy-log-119',
+    }));
+    expect(sqlLogs[0]?.sql.length).toBe(12 * 1024);
+    expect(sqlLogs[0]?.message?.length).toBe(1024);
   });
 
   it('defaults AI chat send shortcut to Enter in shared shortcut options', async () => {
@@ -1194,5 +1468,42 @@ describe('store appearance persistence', () => {
       mac: { combo: 'Meta+Enter', enabled: true },
       windows: { combo: 'Enter', enabled: true },
     });
+  });
+
+  it('updates an existing custom SQL snippet by id and persists editable syntax help', async () => {
+    const { useStore } = await importStore();
+    const original = {
+      id: 'custom-merge',
+      prefix: 'mrg',
+      name: 'MERGE INTO',
+      description: 'Oracle merge 模板',
+      syntaxHelp: '旧说明',
+      body: 'MERGE INTO t USING s ON (t.id = s.id)$0',
+      isBuiltin: false,
+      createdAt: 1710000000000,
+    };
+
+    useStore.getState().saveSqlSnippet(original);
+    useStore.getState().saveSqlSnippet({
+      ...original,
+      name: 'MERGE INTO 更新',
+      syntaxHelp: '新说明：目标表、数据源、关联字段均可修改',
+      body: 'MERGE INTO ${1:目标表} t USING ${2:源表} s ON (${3:关联条件})$0',
+    });
+
+    const snippets = useStore.getState().sqlSnippets.filter((s) => s.id === original.id);
+    expect(snippets).toHaveLength(1);
+    expect(snippets[0]).toMatchObject({
+      prefix: 'mrg',
+      name: 'MERGE INTO 更新',
+      syntaxHelp: '新说明：目标表、数据源、关联字段均可修改',
+      body: 'MERGE INTO ${1:目标表} t USING ${2:源表} s ON (${3:关联条件})$0',
+      isBuiltin: false,
+    });
+
+    const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    const persistedSnippets = persisted.state.sqlSnippets.filter((s: { id: string }) => s.id === original.id);
+    expect(persistedSnippets).toHaveLength(1);
+    expect(persistedSnippets[0].syntaxHelp).toBe('新说明：目标表、数据源、关联字段均可修改');
   });
 });

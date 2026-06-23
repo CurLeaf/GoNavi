@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   resolveSqlEditorOperationKeyword,
   shouldUseSqlEditorManagedTransaction,
+  shouldUseSqlEditorManagedTransactionForType,
 } from './sqlEditorTransaction';
 
 describe('sqlEditorTransaction', () => {
@@ -42,6 +43,12 @@ describe('sqlEditorTransaction', () => {
     expect(shouldUseSqlEditorManagedTransaction([
       'START TRANSACTION',
       'DELETE FROM users WHERE id = 1',
+    ])).toBe(false);
+  });
+
+  it('keeps Trino DML on the plain multi-statement execution path', () => {
+    expect(shouldUseSqlEditorManagedTransactionForType('trino', [
+      'UPDATE hive.default.orders SET status = \'done\'',
     ])).toBe(false);
   });
 });

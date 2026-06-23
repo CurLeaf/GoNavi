@@ -1,15 +1,27 @@
-import React, { useRef, useEffect } from 'react';
+import React from 'react';
 import { Table, Tag, Button, Tooltip, Empty } from 'antd';
-import { ClearOutlined, CloseOutlined, BugOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import { ClearOutlined, CloseOutlined, BugOutlined, RobotOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
+import { useI18n } from '../i18n/provider';
 import { normalizeOpacityForPlatform, resolveAppearanceValues } from '../utils/appearance';
 interface LogPanelProps {
-    height: number;
-    onClose: () => void;
-    onResizeStart: (e: React.MouseEvent) => void;
+    height?: number;
+    onClose?: () => void;
+    onResizeStart?: (e: React.MouseEvent) => void;
+    variant?: 'panel' | 'embedded';
+    executionError?: string;
+    onDiagnoseExecutionError?: () => void;
 }
 
-const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) => {
+const LogPanel: React.FC<LogPanelProps> = ({
+    height = 260,
+    onClose,
+    onResizeStart,
+    variant = 'panel',
+    executionError,
+    onDiagnoseExecutionError,
+}) => {
+    const { t } = useI18n();
     const sqlLogs = useStore(state => state.sqlLogs);
     const clearSqlLogs = useStore(state => state.clearSqlLogs);
     const theme = useStore(state => state.theme);
@@ -47,16 +59,18 @@ const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) =
     const logScrollbarThumbHover = darkMode
         ? `rgba(255, 255, 255, ${Math.max(0.28, opacity * 0.48)})`
         : `rgba(0, 0, 0, ${Math.max(0.18, opacity * 0.36)})`;
+    const isEmbedded = variant === 'embedded';
+    const logCountLabel = sqlLogs.length.toLocaleString();
 
     const columns = [
         {
-            title: 'Time',
+            title: t('log_panel.column.time'),
             dataIndex: 'timestamp',
             width: 80,
             render: (ts: number) => <span style={{ color: panelMutedTextColor, fontSize: '12px' }}>{new Date(ts).toLocaleTimeString()}</span>
         },
         {
-            title: 'Status',
+            title: t('log_panel.column.status'),
             dataIndex: 'status',
             width: 70,
             render: (status: string) => (
@@ -66,23 +80,206 @@ const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) =
             )
         },
         {
-            title: 'Duration',
+            title: t('log_panel.column.duration'),
             dataIndex: 'duration',
             width: 70,
             render: (d: number) => <span style={{ color: d > 1000 ? 'orange' : 'inherit', fontSize: '12px' }}>{d}ms</span>
         },
         {
-            title: 'SQL / Message',
+            title: t('log_panel.column.sql_message'),
             dataIndex: 'sql',
             render: (text: string, record: any) => (
                 <div style={{ fontFamily: 'var(--gn-font-mono)', wordBreak: 'break-all', fontSize: '12px', lineHeight: '1.45' }}>
                     <div style={{ color: darkMode ? '#a6e22e' : '#005cc5' }}>{text}</div>
                     {record.message && <div style={{ color: '#ff4d4f', marginTop: 2 }}>{record.message}</div>}
-                    {record.affectedRows !== undefined && <div style={{ color: panelMutedTextColor, marginTop: 1 }}>Affected: {record.affectedRows}</div>}
+                    {record.affectedRows !== undefined && <div style={{ color: panelMutedTextColor, marginTop: 1 }}>{t('log_panel.affected_rows', { count: record.affectedRows })}</div>}
                 </div>
             )
         }
     ];
+
+    const logTable = (
+        <div
+            className="log-panel-scroll"
+            style={{
+                flex: 1,
+                overflow: 'auto',
+                padding: isEmbedded ? '0 12px 12px' : '8px 10px 10px',
+            }}
+        >
+            {sqlLogs.length === 0 ? (
+                <div style={{ height: '100%', minHeight: 160, display: 'grid', placeItems: 'center' }}>
+                    <Empty
+                        image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        description={<span style={{ color: panelMutedTextColor }}>{t('log_panel.empty')}</span>}
+                    />
+                </div>
+            ) : (
+                <Table
+                    className="log-panel-table"
+                    dataSource={sqlLogs}
+                    columns={columns}
+                    size="small"
+                    pagination={false}
+                    rowKey="id"
+                    showHeader={false}
+                />
+            )}
+        </div>
+    );
+
+    const sharedStyles = (
+        <style>{`
+            .log-panel-scroll {
+                scrollbar-width: thin;
+                scrollbar-color: ${logScrollbarThumb} transparent;
+            }
+            .log-panel-scroll::-webkit-scrollbar {
+                width: 10px;
+                height: 10px;
+            }
+            .log-panel-scroll::-webkit-scrollbar-track,
+            .log-panel-scroll::-webkit-scrollbar-corner {
+                background: transparent;
+            }
+            .log-panel-scroll::-webkit-scrollbar-thumb {
+                background: ${logScrollbarThumb};
+                border-radius: 8px;
+                border: 2px solid transparent;
+                background-clip: padding-box;
+            }
+            .log-panel-scroll::-webkit-scrollbar-thumb:hover {
+                background: ${logScrollbarThumbHover};
+                background-clip: padding-box;
+            }
+            .log-panel-table .ant-table,
+            .log-panel-table .ant-table-container,
+            .log-panel-table .ant-table-tbody > tr > td {
+                background: transparent !important;
+            }
+            .log-panel-table .ant-table-tbody > tr > td {
+                padding: 8px 10px !important;
+                border-bottom: 1px solid ${panelDividerColor} !important;
+            }
+            .log-panel-table .ant-table-tbody > tr:last-child > td {
+                border-bottom: none !important;
+            }
+            .log-panel-table .ant-table-row:hover > td {
+                background: ${darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(16,24,40,0.03)'} !important;
+            }
+        `}</style>
+    );
+
+    if (isEmbedded) {
+        return (
+            <div
+                style={{
+                    flex: 1,
+                    minHeight: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                }}
+            >
+                <div
+                    style={{
+                        flex: '0 0 auto',
+                        padding: '8px 12px',
+                        borderBottom: `1px solid ${panelDividerColor}`,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 12,
+                        minHeight: 40,
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                        <div
+                            style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 8,
+                                display: 'grid',
+                                placeItems: 'center',
+                                background: darkMode
+                                    ? `rgba(255,214,102,${Math.max(0.08, Math.min(0.14, opacity * 0.14))})`
+                                    : `rgba(24,144,255,${Math.max(0.06, Math.min(0.12, opacity * 0.12))})`,
+                                color: panelAccentColor,
+                                flexShrink: 0,
+                            }}
+                        >
+                            <BugOutlined />
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: darkMode ? '#f5f7ff' : '#162033' }}>
+                                {t('log_panel.description')}
+                            </div>
+                            <div style={{ fontSize: 11, color: panelMutedTextColor }}>
+                                {logCountLabel}
+                            </div>
+                        </div>
+                    </div>
+                    <Tooltip title={t('log_panel.action.clear')}>
+                        <Button
+                            type="text"
+                            size="small"
+                            icon={<ClearOutlined />}
+                            onClick={clearSqlLogs}
+                            style={{ color: panelMutedTextColor }}
+                        />
+                    </Tooltip>
+                </div>
+                {executionError && (
+                    <div style={{ padding: '12px 12px 0' }}>
+                        <div style={{
+                            padding: 14,
+                            borderRadius: 8,
+                            border: `1px solid ${darkMode ? '#5c2020' : '#ffccc7'}`,
+                            background: darkMode ? '#2d1a1a' : '#fff2f0',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 12,
+                        }}>
+                            <div style={{ color: '#ff7875', fontWeight: 700, fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <CloseOutlined />
+                                <span>{t('query_editor.result.execution_failed')}</span>
+                            </div>
+                            <div
+                                className="log-panel-scroll"
+                                style={{
+                                    paddingRight: 4,
+                                    maxHeight: 220,
+                                    overflow: 'auto',
+                                    color: darkMode ? '#ffa39e' : '#cf1322',
+                                    fontFamily: 'var(--gn-font-mono)',
+                                    fontSize: 'var(--gn-font-size-mono, 12px)',
+                                    whiteSpace: 'pre-wrap',
+                                    wordBreak: 'break-all',
+                                    lineHeight: 1.55,
+                                }}
+                            >
+                                {executionError}
+                            </div>
+                            {onDiagnoseExecutionError && (
+                                <div>
+                                    <Button
+                                        type="primary"
+                                        icon={<RobotOutlined />}
+                                        onClick={onDiagnoseExecutionError}
+                                        style={{ background: '#818cf8', borderColor: '#818cf8', boxShadow: '0 2px 0 rgba(129, 140, 248, 0.2)' }}
+                                    >
+                                        {t('query_editor.result.ai_diagnose')}
+                                    </Button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+                {logTable}
+                {sharedStyles}
+            </div>
+        );
+    }
 
     return (
         <div style={{ 
@@ -101,18 +298,20 @@ const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) =
             zIndex: 100
         }}>
             {/* Resize Handle */}
-            <div 
-                onMouseDown={onResizeStart}
-                style={{
-                    position: 'absolute',
-                    top: -4,
-                    left: 0,
-                    right: 0,
-                    height: 8,
-                    cursor: 'row-resize',
-                    zIndex: 10
-                }}
-            />
+            {onResizeStart && (
+                <div
+                    onMouseDown={onResizeStart}
+                    style={{
+                        position: 'absolute',
+                        top: -4,
+                        left: 0,
+                        right: 0,
+                        height: 8,
+                        cursor: 'row-resize',
+                        zIndex: 10
+                    }}
+                />
+            )}
 
             {/* Toolbar */}
             <div style={{ 
@@ -129,80 +328,24 @@ const LogPanel: React.FC<LogPanelProps> = ({ height, onClose, onResizeStart }) =
                         <BugOutlined />
                     </div>
                     <div style={{ minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: 13, color: darkMode ? '#f5f7ff' : '#162033' }}>SQL 执行日志</div>
-                        <div style={{ fontSize: 12, color: panelMutedTextColor }}>记录执行状态、耗时与错误信息，便于快速回溯。</div>
+                        <div style={{ fontWeight: 700, fontSize: 13, color: darkMode ? '#f5f7ff' : '#162033' }}>{t('log_panel.title')}</div>
+                        <div style={{ fontSize: 12, color: panelMutedTextColor }}>{t('log_panel.description')}</div>
                     </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Tooltip title="清空日志">
+                    <Tooltip title={t('log_panel.action.clear')}>
                         <Button type="text" size="small" icon={<ClearOutlined />} onClick={clearSqlLogs} style={{ color: panelMutedTextColor }} />
                     </Tooltip>
-                    <Tooltip title="关闭面板">
-                        <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} style={{ color: panelMutedTextColor }} />
-                    </Tooltip>
+                    {onClose && (
+                        <Tooltip title={t('log_panel.action.close')}>
+                            <Button type="text" size="small" icon={<CloseOutlined />} onClick={onClose} style={{ color: panelMutedTextColor }} />
+                        </Tooltip>
+                    )}
                 </div>
             </div>
 
-            {/* List */}
-            <div className="log-panel-scroll" style={{ flex: 1, overflow: 'auto', padding: '8px 10px 10px' }}>
-                {sqlLogs.length === 0 ? (
-                    <div style={{ height: '100%', minHeight: 160, display: 'grid', placeItems: 'center' }}>
-                        <Empty
-                            image={Empty.PRESENTED_IMAGE_SIMPLE}
-                            description={<span style={{ color: panelMutedTextColor }}>暂无 SQL 执行日志</span>}
-                        />
-                    </div>
-                ) : (
-                    <Table 
-                        className="log-panel-table"
-                        dataSource={sqlLogs} 
-                        columns={columns} 
-                        size="small" 
-                        pagination={false} 
-                        rowKey="id"
-                        showHeader={false}
-                    />
-                )}
-            </div>
-            <style>{`
-                .log-panel-scroll {
-                    scrollbar-width: thin;
-                    scrollbar-color: ${logScrollbarThumb} transparent;
-                }
-                .log-panel-scroll::-webkit-scrollbar {
-                    width: 10px;
-                    height: 10px;
-                }
-                .log-panel-scroll::-webkit-scrollbar-track,
-                .log-panel-scroll::-webkit-scrollbar-corner {
-                    background: transparent;
-                }
-                .log-panel-scroll::-webkit-scrollbar-thumb {
-                    background: ${logScrollbarThumb};
-                    border-radius: 8px;
-                    border: 2px solid transparent;
-                    background-clip: padding-box;
-                }
-                .log-panel-scroll::-webkit-scrollbar-thumb:hover {
-                    background: ${logScrollbarThumbHover};
-                    background-clip: padding-box;
-                }
-                .log-panel-table .ant-table,
-                .log-panel-table .ant-table-container,
-                .log-panel-table .ant-table-tbody > tr > td {
-                    background: transparent !important;
-                }
-                .log-panel-table .ant-table-tbody > tr > td {
-                    padding: 8px 10px !important;
-                    border-bottom: 1px solid ${panelDividerColor} !important;
-                }
-                .log-panel-table .ant-table-tbody > tr:last-child > td {
-                    border-bottom: none !important;
-                }
-                .log-panel-table .ant-table-row:hover > td {
-                    background: ${darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(16,24,40,0.03)'} !important;
-                }
-            `}</style>
+            {logTable}
+            {sharedStyles}
         </div>
     );
 };

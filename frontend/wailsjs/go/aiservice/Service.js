@@ -14,6 +14,10 @@ export function AIChatSend(arg1, arg2) {
   return window['go']['aiservice']['Service']['AIChatSend'](arg1, arg2);
 }
 
+export function AIChatSendInSession(arg1, arg2, arg3) {
+  return window['go']['aiservice']['Service']['AIChatSendInSession'](arg1, arg2, arg3);
+}
+
 export function AIChatStream(arg1, arg2, arg3) {
   return window['go']['aiservice']['Service']['AIChatStream'](arg1, arg2, arg3);
 }
@@ -132,6 +136,10 @@ export function AISetActiveProvider(arg1) {
 
 export function AISetContextLevel(arg1) {
   return window['go']['aiservice']['Service']['AISetContextLevel'](arg1);
+}
+
+export function AISetLanguage(arg1) {
+  return window['go']['aiservice']['Service']['AISetLanguage'](arg1);
 }
 
 export function AISetSafetyLevel(arg1) {

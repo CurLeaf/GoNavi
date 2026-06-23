@@ -1,14 +1,15 @@
-﻿import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Layout, Button, ConfigProvider, theme, message, Modal, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
-import zhCN from 'antd/locale/zh_CN';
-import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined } from '@ant-design/icons';
-import { BrowserOpenURL, Environment, EventsOn, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
+﻿import Modal from './components/common/ResizableDraggableModal';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
+import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined } from '@ant-design/icons';
+import { BrowserOpenURL, Environment, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
 import SnippetSettingsModal from './components/SnippetSettingsModal';
 import ConnectionPackagePasswordModal from './components/ConnectionPackagePasswordModal';
 import DataSyncModal from './components/DataSyncModal';
+import { type DataSyncEntryMode } from './components/dataSyncEntryMode';
 import DriverManagerModal from './components/DriverManagerModal';
 import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';
 import LogPanel from './components/LogPanel';
@@ -19,9 +20,10 @@ import SecurityUpdateBanner from './components/SecurityUpdateBanner';
 import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
 import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModal';
 import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModal';
+import LanguageSettingsPanel from './components/LanguageSettingsPanel';
 import { DEFAULT_APPEARANCE, useStore } from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
-import { blurToFilter, isMacLikePlatform, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
+import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, getLinuxCJKFontInstallHint, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
 import {
   DENSITY_OPTIONS,
@@ -42,8 +44,6 @@ import {
 } from './utils/tabDisplay';
 import { getMacNativeTitlebarPaddingLeft, getMacNativeTitlebarPaddingRight, shouldHandleMacNativeFullscreenShortcut, shouldSuppressMacNativeEscapeExit } from './utils/macWindow';
 import { shouldEnableMacWindowDiagnostics } from './utils/macWindowDiagnostics';
-import { resolveAboutDisplayVersion } from './utils/appVersionDisplay';
-import { buildOverlayWorkbenchTheme } from './utils/overlayWorkbenchTheme';
 import { getConnectionWorkbenchState } from './utils/startupReadiness';
 import { toSaveGlobalProxyInput } from './utils/globalProxyDraft';
 import {
@@ -58,6 +58,7 @@ import {
   mergeSecurityUpdateStatusWithLegacySource,
   startSecurityUpdateFromBootstrap,
 } from './utils/secureConfigBootstrap';
+import { bootstrapSavedQueries } from './utils/savedQueryPersistence';
 import {
   LEGACY_PERSIST_KEY,
   hasLegacyMigratableSensitiveItems,
@@ -88,6 +89,7 @@ import {
   getShortcutDisplay,
   getShortcutDisplayLabel,
   getShortcutPlatform,
+  installGlobalImeCompositionTracking,
   isEditableElement,
   isShortcutMatch,
   normalizeShortcutCombo,
@@ -106,13 +108,18 @@ import {
 } from './utils/aiEntryLayout';
 import { DEFAULT_AI_PANEL_WIDTH, resolveOverlayAIPanelWidth, shouldOverlayAIPanel } from './utils/aiPanelLayout';
 import { safeWindowRuntimeCall } from './utils/wailsRuntime';
+import { useAppUpdateManager } from './hooks/useAppUpdateManager';
+import { useAppLogPanelResize } from './hooks/useAppLogPanelResize';
+import { useAppSidebarResize } from './hooks/useAppSidebarResize';
+import { useAppUtilityStyles } from './hooks/useAppUtilityStyles';
 import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { getAntdLocale } from './i18n/frameworkLocale';
+import { useI18n } from './i18n/provider';
 import './App.css';
 import './v2-theme.css';
+import './styles/v2-theme-workbench.css';
 
 const { Sider, Content } = Layout;
-const SIDEBAR_RESIZE_MIN_WIDTH = 200;
-const SIDEBAR_RESIZE_MAX_WIDTH = 600;
 const MIN_UI_SCALE = 0.8;
 const MAX_UI_SCALE = 1.25;
 const MIN_FONT_SIZE = 12;
@@ -120,33 +127,6 @@ const MAX_FONT_SIZE = 20;
 const DEFAULT_UI_SCALE = 1.0;
 const DEFAULT_FONT_SIZE = 14;
 const EMPTY_INSTALLED_FONT_FAMILIES: InstalledFontFamily[] = [];
-type SidebarResizeBounds = { minWidth: number; maxWidth: number };
-type SidebarResizeDragState = SidebarResizeBounds & {
-  startX: number;
-  startWidth: number;
-  startGuideLeft: number;
-};
-
-const parseCssPixelValue = (value: string | null | undefined): number | null => {
-  const parsed = Number.parseFloat(String(value || ''));
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const resolveSidebarResizeBounds = (siderElement: Element | null): SidebarResizeBounds => {
-  if (typeof window === 'undefined' || !(siderElement instanceof HTMLElement)) {
-    return { minWidth: SIDEBAR_RESIZE_MIN_WIDTH, maxWidth: SIDEBAR_RESIZE_MAX_WIDTH };
-  }
-  const computed = window.getComputedStyle(siderElement);
-  const cssMinWidth = parseCssPixelValue(computed.minWidth);
-  const cssMaxWidth = parseCssPixelValue(computed.maxWidth);
-  const minWidth = Math.max(SIDEBAR_RESIZE_MIN_WIDTH, cssMinWidth && cssMinWidth > 0 ? cssMinWidth : SIDEBAR_RESIZE_MIN_WIDTH);
-  const maxWidth = Math.max(minWidth, Math.min(SIDEBAR_RESIZE_MAX_WIDTH, cssMaxWidth && cssMaxWidth > 0 ? cssMaxWidth : SIDEBAR_RESIZE_MAX_WIDTH));
-  return { minWidth, maxWidth };
-};
-
-const clampSidebarResizeWidth = (width: number, bounds: SidebarResizeBounds): number => (
-  Math.max(bounds.minWidth, Math.min(bounds.maxWidth, width))
-);
 
 const createEmptySecurityUpdateStatus = (): SecurityUpdateStatus => ({
   overallStatus: 'not_detected',
@@ -182,6 +162,22 @@ const mergeSavedConnections = (current: SavedConnection[], imported: SavedConnec
 };
 
 type ConnectionPackageDialogMode = 'import' | 'export';
+type ToolCenterGroupKey = 'config' | 'workflow' | 'workspace';
+type ToolCenterPaneKey =
+  | 'connection-package'
+  | 'data-root'
+  | 'security-update'
+  | 'schema-compare'
+  | 'data-compare'
+  | 'sync'
+  | 'drivers'
+  | 'snippet-settings'
+  | 'shortcut-settings';
+
+type ToolCenterPaneState = {
+  key: ToolCenterPaneKey;
+  group: ToolCenterGroupKey;
+};
 
 type ConnectionPackageDialogState = {
   open: boolean;
@@ -204,9 +200,11 @@ const createClosedConnectionPackageDialogState = (): ConnectionPackageDialogStat
 });
 
 function App() {
+  const { language, t } = useI18n();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isConnectionModalMounted, setIsConnectionModalMounted] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [syncModalEntryMode, setSyncModalEntryMode] = useState<DataSyncEntryMode>('sync');
   const [isDriverModalOpen, setIsDriverModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<SavedConnection | null>(null);
   const connectionModalWarmupDoneRef = useRef(false);
@@ -225,6 +223,7 @@ function App() {
   const setGlobalProxy = useStore(state => state.setGlobalProxy);
   const replaceConnections = useStore(state => state.replaceConnections);
   const replaceGlobalProxy = useStore(state => state.replaceGlobalProxy);
+  const replaceSavedQueries = useStore(state => state.replaceSavedQueries);
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const updateShortcut = useStore(state => state.updateShortcut);
   const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
@@ -263,6 +262,14 @@ function App() {
           ...tabDisplaySettings.secondaryElements,
       ]),
       [tabDisplaySettings],
+  );
+  const getTabDisplayElementLabel = useCallback(
+      (key: TabDisplayElementKey) => t(TAB_DISPLAY_ELEMENT_META[key].labelKey),
+      [t],
+  );
+  const getTabDisplayElementDescription = useCallback(
+      (key: TabDisplayElementKey) => t(TAB_DISPLAY_ELEMENT_META[key].descriptionKey),
+      [t],
   );
   const setTabDisplaySettings = useCallback((settings: Partial<TabDisplaySettings>) => {
       setAppearance({
@@ -371,7 +378,7 @@ function App() {
   const [securityUpdateSettingsFocusTarget, setSecurityUpdateSettingsFocusTarget] = useState<SecurityUpdateSettingsFocusTarget | null>(null);
   const [securityUpdateSettingsFocusRequest, setSecurityUpdateSettingsFocusRequest] = useState(0);
   const [isSecurityUpdateProgressOpen, setIsSecurityUpdateProgressOpen] = useState(false);
-  const [securityUpdateProgressStage, setSecurityUpdateProgressStage] = useState('正在检查已保存配置');
+  const [securityUpdateProgressStage, setSecurityUpdateProgressStage] = useState(() => t('app.security_update.stage.checking_saved_config'));
   const [securityUpdateRepairSource, setSecurityUpdateRepairSource] = useState<SecurityUpdateRepairSource | null>(null);
   const [focusedTabDisplayElementKey, setFocusedTabDisplayElementKey] = useState<TabDisplayElementKey | null>(null);
   const [focusedAIProviderId, setFocusedAIProviderId] = useState<string | undefined>(undefined);
@@ -390,8 +397,8 @@ function App() {
   const windowDiagLastAtRef = React.useRef(0);
   const connectionWorkbenchState = getConnectionWorkbenchState(isStoreHydrated, hasLoadedSecureConfig);
   const securityUpdateStatusMeta = useMemo(
-      () => getSecurityUpdateStatusMeta(securityUpdateStatus),
-      [securityUpdateStatus],
+      () => getSecurityUpdateStatusMeta(securityUpdateStatus, t),
+      [securityUpdateStatus, t],
   );
   const securityUpdateEntryVisibility = useMemo(
       () => resolveSecurityUpdateEntryVisibility(securityUpdateStatus),
@@ -480,6 +487,33 @@ function App() {
       };
   }, [isStoreHydrated]);
 
+  useEffect(() => {
+      if (!isStoreHydrated) {
+          return;
+      }
+
+      let cancelled = false;
+      const loadSavedQueries = async () => {
+          try {
+              await bootstrapSavedQueries({
+                  backend: (window as any).go?.app?.App,
+                  replaceSavedQueries: (queries) => {
+                      if (!cancelled) {
+                          replaceSavedQueries(queries);
+                      }
+                  },
+              });
+          } catch (err) {
+              console.warn('Failed to bootstrap saved queries', err);
+          }
+      };
+
+      void loadSavedQueries();
+      return () => {
+          cancelled = true;
+      };
+  }, [isStoreHydrated, replaceSavedQueries]);
+
   const normalizeSecurityUpdateStatus = useCallback((status?: Partial<SecurityUpdateStatus> | null): SecurityUpdateStatus => {
       const fallback = createEmptySecurityUpdateStatus();
       return {
@@ -530,6 +564,7 @@ function App() {
                   backend: (window as any).go?.app?.App,
                   replaceConnections,
                   replaceGlobalProxy,
+                  t,
               });
               if (cancelled) {
                   return;
@@ -550,7 +585,7 @@ function App() {
       return () => {
           cancelled = true;
       };
-  }, [applySecurityUpdateStatus, isStoreHydrated, replaceConnections, replaceGlobalProxy]);
+  }, [applySecurityUpdateStatus, isStoreHydrated, replaceConnections, replaceGlobalProxy, t]);
 
   useEffect(() => {
       if (!isStoreHydrated || !hasLoadedSecureConfig) {
@@ -565,7 +600,7 @@ function App() {
       if (invalidWhenEnabled) {
           if (!globalProxyInvalidHintShownRef.current) {
               void message.warning({
-                  content: '全局代理已开启，但地址或端口无效，当前按未启用处理',
+                  content: t('app.proxy.message.invalid_enabled'),
                   key: 'global-proxy-invalid',
               });
               globalProxyInvalidHintShownRef.current = true;
@@ -595,9 +630,9 @@ function App() {
               if (cancelled) {
                   return;
               }
-              const errMsg = err instanceof Error ? err.message : String(err || '未知错误');
+              const errMsg = err instanceof Error ? err.message : String(err || t('common.unknown'));
               void message.error({
-                  content: '全局代理配置失败: ' + errMsg,
+                  content: t('app.proxy.message.save_failed', { error: errMsg }),
                   key: 'global-proxy-sync-error',
               });
           });
@@ -614,6 +649,7 @@ function App() {
       globalProxy.port,
       globalProxy.user,
       globalProxy.password,
+      t,
   ]);
 
   useEffect(() => {
@@ -1120,161 +1156,25 @@ function App() {
       };
   }, []);
 
-  // Background Helper
-  const getBg = (darkHex: string) => {
-      if (!darkMode) return `rgba(255, 255, 255, ${effectiveOpacity})`; // Light mode usually white
-      
-      // Parse hex to rgb
-      const hex = darkHex.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-      return `rgba(${r}, ${g}, ${b}, ${effectiveOpacity})`;
-  };
-  // Specific colors
-  const bgMain = getBg('#141414');
-  const bgContent = getBg('#1d1d1d');
-  const floatingLogButtonBorderColor = darkMode ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.16)';
-  const floatingLogButtonTextColor = darkMode ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.82)';
-  const floatingLogButtonBgColor = darkMode
-      ? `rgba(34, 34, 34, ${Math.max(effectiveOpacity, 0.82)})`
-      : `rgba(255, 255, 255, ${Math.max(effectiveOpacity, 0.9)})`;
-  const floatingLogButtonShadow = darkMode
-      ? '0 8px 22px rgba(0,0,0,0.38)'
-      : '0 8px 20px rgba(0,0,0,0.16)';
-  const isOpaqueUtilityMode = resolvedAppearance.opacity >= 0.999 && resolvedAppearance.blur <= 0;
-  const utilityButtonBgAlpha = darkMode
-      ? Math.max(0.28, Math.min(0.76, effectiveOpacity * 0.72))
-      : Math.max(0.52, Math.min(0.92, effectiveOpacity * 0.9));
-  const utilityButtonBgColor = isOpaqueUtilityMode
-      ? 'transparent'
-      : (darkMode
-          ? `rgba(20, 26, 38, ${utilityButtonBgAlpha})`
-          : `rgba(255, 255, 255, ${utilityButtonBgAlpha})`);
-  const utilityButtonBorderColor = isOpaqueUtilityMode
-      ? (darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(16,24,40,0.10)')
-      : (darkMode
-          ? `rgba(255,255,255,${Math.max(0.08, Math.min(0.18, effectiveOpacity * 0.16))})`
-          : `rgba(16,24,40,${Math.max(0.06, Math.min(0.14, effectiveOpacity * 0.12))})`);
-  const utilityButtonShadow = isOpaqueUtilityMode
-      ? 'none'
-      : (darkMode
-          ? `0 8px 18px rgba(0,0,0,${Math.max(0.10, Math.min(0.22, effectiveOpacity * 0.24))})`
-          : `0 8px 18px rgba(15,23,42,${Math.max(0.04, Math.min(0.12, effectiveOpacity * 0.12))})`);
-  const isSidebarNarrow = sidebarWidth < 360;
-  const isSidebarCompact = sidebarWidth < 320;
-  const isSidebarUltraCompact = sidebarWidth < 260;
-  const utilityButtonStyle = useMemo(() => ({
-      height: Math.max(30, Math.round(32 * effectiveUiScale)),
-      width: '100%',
-      paddingInline: isSidebarCompact ? Math.max(8, Math.round(9 * effectiveUiScale)) : Math.max(10, Math.round(12 * effectiveUiScale)),
-      borderRadius: 10,
-      border: `1px solid ${utilityButtonBorderColor}`,
-      background: utilityButtonBgColor,
-      color: darkMode ? 'rgba(255,255,255,0.94)' : '#162033',
-      boxShadow: utilityButtonShadow,
-      backdropFilter: isOpaqueUtilityMode ? 'none' : blurFilter,
-      WebkitBackdropFilter: isOpaqueUtilityMode ? 'none' : blurFilter,
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: isSidebarCompact ? 4 : 6,
-      minWidth: 0,
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap',
-      fontSize: isSidebarCompact ? 13 : 14,
-  }), [blurFilter, darkMode, effectiveUiScale, isOpaqueUtilityMode, isSidebarCompact, utilityButtonBgColor, utilityButtonBorderColor, utilityButtonShadow]);
-  const disableLocalBackdropFilter = isMacLikePlatform();
-  const overlayTheme = useMemo(
-      () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
-      [darkMode, disableLocalBackdropFilter],
-  );
-
-  const sidebarQuickActionBaseStyle = useMemo(() => ({
-      height: Math.max(34, Math.round(36 * effectiveUiScale)),
-      borderRadius: 12,
-      display: 'inline-flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      paddingInline: Math.max(12, Math.round(14 * effectiveUiScale)),
-      fontWeight: 700,
-      boxShadow: darkMode ? '0 8px 18px rgba(0,0,0,0.16)' : '0 8px 16px rgba(15,23,42,0.08)',
-      backdropFilter: blurFilter,
-      WebkitBackdropFilter: blurFilter,
-      minWidth: 0,
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap',
-    }), [blurFilter, darkMode, effectiveUiScale]);
-  const sidebarQueryActionStyle = useMemo(() => ({
-      ...sidebarQuickActionBaseStyle,
-      flex: '1 1 0',
-      border: `1px solid ${darkMode ? 'rgba(255,255,255,0.12)' : 'rgba(16,24,40,0.10)'}`,
-      background: darkMode ? `rgba(255,255,255,0.05)` : 'rgba(255,255,255,0.88)',
-      color: darkMode ? 'rgba(255,255,255,0.92)' : '#162033',
-    }), [darkMode, sidebarQuickActionBaseStyle]);
-  const sidebarCreateConnectionActionStyle = useMemo(() => ({
-      ...sidebarQuickActionBaseStyle,
-      flex: '1 1 0',
-      border: 'none',
-      background: 'linear-gradient(135deg, rgba(34,197,94,0.96) 0%, rgba(22,163,74,0.92) 100%)',
-      color: '#f3fff7',
-    }), [sidebarQuickActionBaseStyle]);
-
-  const utilityModalShellStyle = useMemo(() => ({
-      background: overlayTheme.shellBg,
-      border: overlayTheme.shellBorder,
-      boxShadow: overlayTheme.shellShadow,
-      backdropFilter: overlayTheme.shellBackdropFilter,
-  }), [overlayTheme]);
-  const utilityPanelStyle = useMemo(() => ({
-      padding: 16,
-      borderRadius: 14,
-      border: overlayTheme.sectionBorder,
-      background: overlayTheme.sectionBg,
-  }), [overlayTheme]);
-  const utilityMutedTextStyle = useMemo(() => ({
-      color: overlayTheme.mutedText,
-      fontSize: 12,
-      lineHeight: 1.6,
-  }), [overlayTheme]);
-  const renderUtilityModalTitle = (icon: React.ReactNode, title: string, description: string) => (
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
-              {icon}
-          </div>
-          <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>{title}</div>
-              <div style={{ marginTop: 4, color: overlayTheme.mutedText, fontSize: 12, lineHeight: 1.6 }}>{description}</div>
-          </div>
-      </div>
-  );
-  const utilityActionCardStyle = useMemo(() => ({
-      width: '100%',
-      minHeight: 68,
-      borderRadius: 14,
-      border: overlayTheme.sectionBorder,
-      background: overlayTheme.sectionBg,
-      color: overlayTheme.titleText,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'flex-start',
-      gap: 14,
-      paddingInline: 16,
-      boxShadow: 'none',
-      fontSize: 15,
-      fontWeight: 600,
-  }), [overlayTheme]);
-  const utilityActionHintStyle = useMemo(() => ({
-      fontSize: 12,
-      color: overlayTheme.mutedText,
-      fontWeight: 400,
-      marginTop: 2,
-  }), [overlayTheme]);
-
-  const sidebarHorizontalPadding = isSidebarCompact ? 8 : 10;
+  const {
+      bgContent, bgMain,
+      floatingLogButtonBgColor, floatingLogButtonBorderColor, floatingLogButtonShadow, floatingLogButtonTextColor,
+      isSidebarCompact, isSidebarNarrow, isSidebarUltraCompact,
+      overlayTheme, renderUtilityModalTitle,
+      sidebarCreateConnectionActionStyle, sidebarHorizontalPadding, sidebarQueryActionStyle,
+      toolCenterContentPanelStyle, toolCenterDetailBodyStyle, toolCenterDetailPanelStyle,
+      toolCenterModalContentStyle, toolCenterModalSplitStyle, toolCenterModalWorkspaceStyle,
+      toolCenterNavPanelStyle, toolCenterNavScrollStyle, toolCenterRowDescriptionStyle, toolCenterRowStyle,
+      toolCenterScrollableListStyle, utilityActionCardStyle, utilityActionHintStyle, utilityButtonStyle,
+      utilityModalShellStyle, utilityMutedTextStyle, utilityPanelStyle,
+  } = useAppUtilityStyles({
+      blurFilter,
+      darkMode,
+      effectiveOpacity,
+      effectiveUiScale,
+      resolvedAppearance,
+      sidebarWidth,
+  });
   
   const addTab = useStore(state => state.addTab);
   const activeContext = useStore(state => state.activeContext);
@@ -1293,9 +1193,11 @@ function App() {
   }, [openSecurityUpdateSettings]);
   const runSecurityUpdateRound = useCallback(async (mode: 'start' | 'retry' | 'restart') => {
       const backendApp = (window as any).go?.app?.App;
-      const stageText = mode === 'retry'
-          ? '正在校验更新结果'
-          : '正在更新安全存储';
+      const stageText = mode === 'start'
+          ? t('app.security_update.stage.checking_saved_config')
+          : (mode === 'retry'
+              ? t('app.security_update.stage.verifying_result')
+              : t('app.security_update.stage.updating_secure_storage'));
       const detailsWereOpen = isSecurityUpdateSettingsOpen;
       setSecurityUpdateProgressStage(stageText);
       setIsSecurityUpdateProgressOpen(true);
@@ -1311,6 +1213,7 @@ function App() {
                   backend: backendApp,
                   replaceConnections,
                   replaceGlobalProxy,
+                  t,
               });
               if (result.error) {
                   throw result.error;
@@ -1318,14 +1221,14 @@ function App() {
               nextStatus = normalizeSecurityUpdateStatus(result.status);
           } else if (mode === 'retry') {
               if (typeof backendApp?.RetrySecurityUpdateCurrentRound !== 'function') {
-                  throw new Error('安全更新能力不可用');
+                  throw new Error(t('app.security_update.error.capability_unavailable'));
               }
               nextStatus = normalizeSecurityUpdateStatus(await backendApp.RetrySecurityUpdateCurrentRound({
                   migrationId: securityUpdateStatus.migrationId,
               }));
           } else {
               if (typeof backendApp?.RestartSecurityUpdate !== 'function') {
-                  throw new Error('安全更新能力不可用');
+                  throw new Error(t('app.security_update.error.capability_unavailable'));
               }
               nextStatus = normalizeSecurityUpdateStatus(await backendApp.RestartSecurityUpdate({
                   migrationId: securityUpdateStatus.migrationId,
@@ -1343,6 +1246,7 @@ function App() {
                   backend: backendApp,
                   replaceConnections,
                   replaceGlobalProxy,
+                  t,
               }, nextStatus);
           }
 
@@ -1357,7 +1261,7 @@ function App() {
           if (detailsWereOpen) {
               setIsSecurityUpdateSettingsOpen(true);
           }
-          void message.error(err?.message || '安全更新未完成，请稍后重试');
+          void message.error(err?.message || t('app.security_update.message.not_finished_retry_later'));
           return;
       }
 
@@ -1375,11 +1279,11 @@ function App() {
           setSecurityUpdateHasLegacySensitiveItems(false);
           setSecurityUpdateRawPayload(null);
           setIsSecurityUpdateSettingsOpen(false);
-          void message.success('已保存配置已完成安全更新');
+          void message.success(t('app.security_update.message.completed'));
       } else if (nextStatus.overallStatus === 'needs_attention') {
-          void message.warning('更新尚未完成，有少量配置需要你处理');
+          void message.warning(t('app.security_update.message.needs_attention'));
       } else if (nextStatus.overallStatus === 'rolled_back') {
-          void message.warning('本次更新未完成，系统已保留当前可用配置');
+          void message.warning(t('app.security_update.message.rolled_back'));
       }
   }, [
       applySecurityUpdateStatus,
@@ -1389,6 +1293,7 @@ function App() {
       replaceGlobalProxy,
       securityUpdateRawPayload,
       securityUpdateStatus.migrationId,
+      t,
   ]);
   const handleStartSecurityUpdate = useCallback(() => {
       void runSecurityUpdateRound('start');
@@ -1407,6 +1312,7 @@ function App() {
               const nextStatus = mergeSecurityUpdateStatusWithLegacySource(
                   await backendApp.DismissSecurityUpdateReminder(),
                   securityUpdateRawPayload,
+                  { t },
               );
               applySecurityUpdateStatus(nextStatus);
               return;
@@ -1420,16 +1326,17 @@ function App() {
           });
       } catch (err: any) {
           console.warn('Failed to dismiss security update reminder', err);
-          void message.error(err?.message || '暂时无法延后本次安全更新');
+          void message.error(err?.message || t('app.security_update.message.postpone_failed'));
       }
   }, [
       applySecurityUpdateStatus,
       securityUpdateRawPayload,
       securityUpdateStatus.issues,
       securityUpdateStatus.summary,
+      t,
   ]);
   const handleSecurityUpdateIssueAction = useCallback((issue: SecurityUpdateIssue) => {
-      const repairEntry = resolveSecurityUpdateRepairEntry(issue, connections, securityUpdateStatus);
+      const repairEntry = resolveSecurityUpdateRepairEntry(issue, connections, securityUpdateStatus, t);
       if (repairEntry.type === 'warning') {
           void message.warning(repairEntry.message);
           return;
@@ -1460,71 +1367,7 @@ function App() {
       }
       setSecurityUpdateRepairSource(null);
       openSecurityUpdateSettings(repairEntry.focusTarget);
-  }, [connections, openSecurityUpdateSettings, runSecurityUpdateRound, securityUpdateStatus]);
-  const updateCheckInFlightRef = React.useRef(false);
-  const updateDownloadInFlightRef = React.useRef(false);
-  const updateUserDismissedRef = React.useRef(false);
-  const updateDownloadedVersionRef = React.useRef<string | null>(null);
-  const updateInstallTriggeredVersionRef = React.useRef<string | null>(null);
-  const updateDownloadMetaRef = React.useRef<UpdateDownloadResultData | null>(null);
-  const updateNotifiedVersionRef = React.useRef<string | null>(null);
-  const updateMutedVersionRef = React.useRef<string | null>(null);
-  const [isAboutOpen, setIsAboutOpen] = useState(false);
-  const isAboutOpenRef = React.useRef(false);
-  const [aboutLoading, setAboutLoading] = useState(false);
-  const [aboutInfo, setAboutInfo] = useState<{ version: string; author: string; buildTime?: string; repoUrl?: string; issueUrl?: string; releaseUrl?: string; communityUrl?: string } | null>(null);
-  const aboutDisplayVersion = resolveAboutDisplayVersion(runtimeBuildType, aboutInfo?.version);
-  const [aboutUpdateStatus, setAboutUpdateStatus] = useState<string>('');
-  const [lastUpdateInfo, setLastUpdateInfo] = useState<UpdateInfo | null>(null);
-  const [updateDownloadProgress, setUpdateDownloadProgress] = useState<{
-      open: boolean;
-      version: string;
-      status: 'idle' | 'start' | 'downloading' | 'done' | 'error';
-      percent: number;
-      downloaded: number;
-      total: number;
-      message: string;
-  }>({
-      open: false,
-      version: '',
-      status: 'idle',
-      percent: 0,
-      downloaded: 0,
-      total: 0,
-      message: ''
-  });
-
-  type UpdateInfo = {
-      hasUpdate: boolean;
-      currentVersion: string;
-      latestVersion: string;
-      releaseName?: string;
-      releaseNotesUrl?: string;
-      assetName?: string;
-      assetUrl?: string;
-      assetSize?: number;
-      sha256?: string;
-      downloaded?: boolean;
-      downloadPath?: string;
-  };
-
-  type UpdateDownloadProgressEvent = {
-      status?: 'start' | 'downloading' | 'done' | 'error';
-      percent?: number;
-      downloaded?: number;
-      total?: number;
-      message?: string;
-  };
-
-  type UpdateDownloadResultData = {
-      info?: UpdateInfo;
-      downloadPath?: string;
-      installLogPath?: string;
-      installTarget?: string;
-      platform?: string;
-      autoRelaunch?: boolean;
-  };
-
+  }, [connections, openSecurityUpdateSettings, runSecurityUpdateRound, securityUpdateStatus, t]);
   const isMacRuntime = runtimePlatform === 'darwin'
       || (runtimePlatform === '' && /mac/i.test(detectNavigatorPlatform()));
   const isWindowsRuntime = runtimePlatform === 'windows'
@@ -1536,6 +1379,34 @@ function App() {
       import.meta.env.DEV,
       import.meta.env.VITE_GONAVI_ENABLE_MAC_WINDOW_DIAGNOSTICS,
   );
+  useEffect(() => {
+      return installGlobalImeCompositionTracking(window, document);
+  }, []);
+  const {
+      aboutDisplayVersion,
+      aboutInfo,
+      aboutLoading,
+      aboutUpdateStatus,
+      canShowProgressEntry,
+      checkForUpdates,
+      downloadUpdate,
+      formatBytes,
+      handleInstallFromProgress,
+      hideUpdateDownloadProgress,
+      isAboutOpen,
+      isBackgroundProgressForLatestUpdate,
+      isLatestUpdateDownloaded,
+      lastUpdateInfo,
+      markUpdateProgressDismissed,
+      muteLatestUpdate,
+      setIsAboutOpen,
+      showUpdateDownloadProgress,
+      updateDownloadProgress,
+  } = useAppUpdateManager({
+      isMacRuntime,
+      runtimeBuildType,
+      t,
+  });
 
   const emitWindowDiagnostic = useCallback(async (stage: string, extra: Record<string, unknown> = {}) => {
       if (!macWindowDiagnosticsEnabled) {
@@ -1703,307 +1574,6 @@ function App() {
       };
   }, [emitWindowDiagnostic, macWindowDiagnosticsEnabled]);
 
-  const formatBytes = (bytes?: number) => {
-      if (!bytes || bytes <= 0) return '0 B';
-      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-      let value = bytes;
-      let idx = 0;
-      while (value >= 1024 && idx < units.length - 1) {
-          value /= 1024;
-          idx++;
-      }
-      return `${value.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
-  };
-
-  const downloadUpdate = React.useCallback(async (info: UpdateInfo, silent: boolean) => {
-      if (updateDownloadInFlightRef.current) return;
-      if (updateDownloadedVersionRef.current === info.latestVersion) {
-          if (!silent) {
-              const cachedDownloadPath = updateDownloadMetaRef.current?.downloadPath;
-              void message.info(cachedDownloadPath ? `更新包已就绪（${info.latestVersion}），路径：${cachedDownloadPath}` : `更新包已就绪（${info.latestVersion}）`);
-              showUpdateDownloadProgress();
-          }
-          return;
-      }
-      updateDownloadInFlightRef.current = true;
-      updateUserDismissedRef.current = false;
-      updateDownloadMetaRef.current = null;
-      setUpdateDownloadProgress({
-          open: true,
-          version: info.latestVersion,
-          status: 'start',
-          percent: 0,
-          downloaded: 0,
-          total: info.assetSize || 0,
-          message: ''
-      });
-      let res: any = null;
-      try {
-          res = await (window as any).go.app.App.DownloadUpdate();
-      } catch (e) {
-          console.warn("Wails API: DownloadUpdate unavailable", e);
-      }
-      updateDownloadInFlightRef.current = false;
-      if (res?.success) {
-          const resultData = (res?.data || {}) as UpdateDownloadResultData;
-          updateDownloadMetaRef.current = resultData;
-          updateDownloadedVersionRef.current = info.latestVersion;
-          setUpdateDownloadProgress(prev => {
-              const total = prev.total > 0 ? prev.total : (info.assetSize || 0);
-              return { ...prev, status: 'done', percent: 100, downloaded: total, total, message: '', open: false };
-          });
-          setLastUpdateInfo((prev) => {
-              if (!prev || prev.latestVersion !== info.latestVersion) {
-                  return {
-                      ...info,
-                      downloaded: true,
-                      downloadPath: resultData?.downloadPath || info.downloadPath,
-                  };
-              }
-              return {
-                  ...prev,
-                  downloaded: true,
-                  downloadPath: resultData?.downloadPath || prev.downloadPath || info.downloadPath,
-              };
-          });
-          if (resultData?.downloadPath) {
-              void message.success({ content: `更新下载完成，更新包路径：${resultData.downloadPath}`, duration: 5 });
-          } else {
-              void message.success({ content: '更新下载完成', duration: 2 });
-          }
-          setAboutUpdateStatus(`发现新版本 ${info.latestVersion}（已下载，请点击"下载进度"后安装）`);
-          // macOS：如果用户没有主动隐藏进度弹窗，则下载完成后自动打开下载目录
-          if (isMacRuntime && !updateUserDismissedRef.current) {
-              try {
-                  const openRes = await (window as any).go.app.App.OpenDownloadedUpdateDirectory();
-                  if (openRes?.success) {
-                      void message.success(openRes?.message || '已打开安装目录，请手动完成替换');
-                  }
-              } catch (e) {
-                  console.warn('自动打开下载目录失败', e);
-              }
-          }
-      } else {
-          setUpdateDownloadProgress(prev => ({
-              ...prev,
-              status: 'error',
-              message: res?.message || '未知错误'
-          }));
-          void message.error({ content: '更新下载失败: ' + (res?.message || '未知错误'), duration: 4 });
-      }
-  }, []);
-
-  const showUpdateDownloadProgress = React.useCallback(() => {
-      setUpdateDownloadProgress((prev) => {
-          if (prev.status === 'idle') return prev;
-          return { ...prev, open: true };
-      });
-  }, []);
-
-  const hideUpdateDownloadProgress = React.useCallback(() => {
-      setUpdateDownloadProgress((prev) => ({ ...prev, open: false }));
-  }, []);
-
-  const isLatestUpdateDownloaded = Boolean(lastUpdateInfo?.hasUpdate) && (
-      Boolean(lastUpdateInfo?.downloaded)
-      || (Boolean(lastUpdateInfo?.latestVersion) && updateDownloadedVersionRef.current === lastUpdateInfo?.latestVersion)
-  );
-  const isBackgroundProgressForLatestUpdate = Boolean(lastUpdateInfo?.hasUpdate)
-      && Boolean(lastUpdateInfo?.latestVersion)
-      && updateDownloadProgress.version === lastUpdateInfo?.latestVersion
-      && (updateDownloadProgress.status === 'start'
-          || updateDownloadProgress.status === 'downloading'
-          || updateDownloadProgress.status === 'done'
-          || updateDownloadProgress.status === 'error');
-  const canShowProgressEntry = (isLatestUpdateDownloaded || isBackgroundProgressForLatestUpdate)
-      && updateInstallTriggeredVersionRef.current !== (lastUpdateInfo?.latestVersion || null);
-
-  const handleInstallFromProgress = React.useCallback(async () => {
-      // 允许从下载进度弹窗（status=done）或关于弹窗（isLatestUpdateDownloaded=true）触发
-      const canInstall = updateDownloadProgress.status === 'done'
-          || (Boolean(lastUpdateInfo?.hasUpdate) && (Boolean(lastUpdateInfo?.downloaded) || updateDownloadedVersionRef.current === lastUpdateInfo?.latestVersion));
-      if (!canInstall) {
-          return;
-      }
-      if (isMacRuntime) {
-          const res = await (window as any).go.app.App.OpenDownloadedUpdateDirectory();
-          if (!res?.success) {
-              void message.error('打开安装目录失败: ' + (res?.message || '未知错误'));
-              // 文件可能已被用户删除，清除已下载状态以允许重新下载
-              updateDownloadedVersionRef.current = null;
-              updateDownloadMetaRef.current = null;
-              setUpdateDownloadProgress(prev => ({
-                  ...prev,
-                  status: 'idle',
-                  percent: 0,
-                  downloaded: 0,
-                  open: false,
-              }));
-              setLastUpdateInfo(prev => prev ? { ...prev, downloaded: false, downloadPath: undefined } : prev);
-              setAboutUpdateStatus(prev => prev.replace('已下载', '未下载'));
-              return;
-          }
-          updateInstallTriggeredVersionRef.current = updateDownloadProgress.version || lastUpdateInfo?.latestVersion || null;
-          hideUpdateDownloadProgress();
-          void message.success(res?.message || '已打开安装目录，请手动完成替换');
-          return;
-      }
-      const res = await (window as any).go.app.App.InstallUpdateAndRestart();
-      if (!res?.success) {
-          void message.error('更新安装失败: ' + (res?.message || '未知错误'));
-          return;
-      }
-      updateInstallTriggeredVersionRef.current = updateDownloadProgress.version || lastUpdateInfo?.latestVersion || null;
-      hideUpdateDownloadProgress();
-  }, [hideUpdateDownloadProgress, isMacRuntime, lastUpdateInfo?.latestVersion, lastUpdateInfo?.hasUpdate, lastUpdateInfo?.downloaded, updateDownloadProgress.status, updateDownloadProgress.version]);
-
-  const checkForUpdates = React.useCallback(async (silent: boolean) => {
-      if (updateCheckInFlightRef.current) return;
-      updateCheckInFlightRef.current = true;
-      if (!silent) {
-          setAboutUpdateStatus('正在检查更新...');
-      }
-      const updateAPI = (window as any).go.app.App;
-      const checkFn = silent && typeof updateAPI.CheckForUpdatesSilently === 'function'
-          ? updateAPI.CheckForUpdatesSilently
-          : updateAPI.CheckForUpdates;
-      const res = await checkFn();
-      updateCheckInFlightRef.current = false;
-      if (!res?.success) {
-          if (!silent) {
-              void message.error('检查更新失败: ' + (res?.message || '未知错误'));
-              setAboutUpdateStatus('检查更新失败: ' + (res?.message || '未知错误'));
-          }
-          return;
-      }
-      const info: UpdateInfo = res.data;
-      if (!info) return;
-      const aboutOpen = isAboutOpenRef.current;
-      if (info.hasUpdate) {
-          // 以后端校验为准：如果后端确认文件不存在（downloaded=false），清除本地 ref
-          if (!info.downloaded && updateDownloadedVersionRef.current === info.latestVersion) {
-              updateDownloadedVersionRef.current = null;
-              updateDownloadMetaRef.current = null;
-          }
-          const localDownloaded = updateDownloadedVersionRef.current === info.latestVersion;
-          const hasDownloaded = Boolean(info.downloaded) || localDownloaded;
-          if (hasDownloaded) {
-              const downloadPath = info.downloadPath || updateDownloadMetaRef.current?.downloadPath || '';
-              updateDownloadedVersionRef.current = info.latestVersion;
-              updateDownloadMetaRef.current = {
-                  ...(updateDownloadMetaRef.current || {}),
-                  info,
-                  downloadPath: downloadPath || undefined,
-              };
-              setUpdateDownloadProgress((prev) => {
-                  if (prev.status === 'start' || prev.status === 'downloading') {
-                      return prev;
-                  }
-                  const total = info.assetSize || prev.total || 0;
-                  return {
-                      ...prev,
-                      open: prev.open && prev.version === info.latestVersion,
-                      version: info.latestVersion,
-                      status: 'done',
-                      percent: 100,
-                      downloaded: total,
-                      total,
-                      message: '',
-                  };
-              });
-              setLastUpdateInfo({
-                  ...info,
-                  downloaded: true,
-                  downloadPath: downloadPath || undefined,
-              });
-          } else {
-              if (updateDownloadedVersionRef.current !== info.latestVersion) {
-                  updateDownloadMetaRef.current = null;
-              }
-              setUpdateDownloadProgress((prev) => {
-                  if (prev.status === 'start' || prev.status === 'downloading') {
-                      return prev;
-                  }
-                  return {
-                      ...prev,
-                      open: false,
-                      version: info.latestVersion,
-                      status: 'idle',
-                      percent: 0,
-                      downloaded: 0,
-                      total: info.assetSize || 0,
-                      message: '',
-                  };
-              });
-              setLastUpdateInfo(info);
-          }
-          const statusText = hasDownloaded
-              ? `发现新版本 ${info.latestVersion}（已下载，请点击“下载进度”后安装）`
-              : `发现新版本 ${info.latestVersion}（未下载）`;
-          if (!silent) {
-              void message.info(`发现新版本 ${info.latestVersion}`);
-              setAboutUpdateStatus(statusText);
-          }
-          if (silent && aboutOpen) {
-              setAboutUpdateStatus(statusText);
-          }
-          if (silent && !aboutOpen && updateMutedVersionRef.current !== info.latestVersion && updateNotifiedVersionRef.current !== info.latestVersion) {
-              updateNotifiedVersionRef.current = info.latestVersion;
-              setIsAboutOpen(true);
-          }
-      } else if (!silent) {
-          setUpdateDownloadProgress((prev) => {
-              if (prev.status === 'start' || prev.status === 'downloading') {
-                  return prev;
-              }
-              return {
-                  open: false,
-                  version: '',
-                  status: 'idle',
-                  percent: 0,
-                  downloaded: 0,
-                  total: 0,
-                  message: '',
-              };
-          });
-          setLastUpdateInfo(info);
-          const text = `当前已是最新版本（${info.currentVersion || '未知'}）`;
-          void message.success(text);
-          setAboutUpdateStatus(text);
-      } else if (silent && aboutOpen) {
-          setUpdateDownloadProgress((prev) => {
-              if (prev.status === 'start' || prev.status === 'downloading') {
-                  return prev;
-              }
-              return {
-                  open: false,
-                  version: '',
-                  status: 'idle',
-                  percent: 0,
-                  downloaded: 0,
-                  total: 0,
-                  message: '',
-              };
-          });
-          setLastUpdateInfo(info);
-          const text = `当前已是最新版本（${info.currentVersion || '未知'}）`;
-          setAboutUpdateStatus(text);
-      } else {
-          setLastUpdateInfo(info);
-      }
-  }, []);
-
-  const loadAboutInfo = React.useCallback(async () => {
-      setAboutLoading(true);
-      const res = await (window as any).go.app.App.GetAppInfo();
-      if (res?.success) {
-          setAboutInfo(res.data);
-      } else {
-          void message.error('获取应用信息失败: ' + (res?.message || '未知错误'));
-      }
-      setAboutLoading(false);
-  }, []);
-
   const handleNewQuery = useCallback(() => {
       let connId = '';
       let db = '';
@@ -2025,13 +1595,13 @@ function App() {
 
       addTab({
           id: `query-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          title: '新建查询',
+          title: t('query.new'),
           type: 'query',
           connectionId: connId,
           dbName: db,
           query: ''
       });
-  }, [activeTabId, tabs, connections, activeContext, addTab]);
+  }, [activeTabId, tabs, connections, activeContext, addTab, t]);
 
   const switchActiveTabByOffset = useCallback((offset: 1 | -1) => {
       if (tabs.length < 2) return;
@@ -2044,14 +1614,26 @@ function App() {
   const closeConnectionPackageDialog = useCallback(() => {
       setConnectionPackageDialog(createClosedConnectionPackageDialogState());
       setPendingConnectionImportPayload(null);
+      setToolCenterBackGroupKey(null);
+      setActiveToolCenterPane((current) => (current?.key === 'connection-package' ? null : current));
   }, []);
 
   const refreshConnectionsAfterImport = useCallback(async (importedViews: SavedConnection[]) => {
       const backendApp = (window as any).go?.app?.App;
       if (typeof backendApp?.GetSavedConnections === 'function') {
-          const latestConnections = await GetSavedConnections();
+          let latestConnections: unknown;
+          try {
+              latestConnections = await GetSavedConnections();
+          } catch (error) {
+              const detail = error instanceof Error ? error.message : String(error ?? '').trim();
+              throw new Error(
+                  detail
+                      ? t('app.connection_package.message.import_failed_with_error', { error: detail })
+                      : t('app.connection_package.message.import_failed'),
+              );
+          }
           if (!Array.isArray(latestConnections)) {
-              throw new Error('导入成功，但刷新连接列表失败：后端未返回连接列表');
+              throw new Error(t('app.connection_package.error.refresh_failed_no_connections'));
           }
           replaceConnections(latestConnections as SavedConnection[]);
           return;
@@ -2064,22 +1646,36 @@ function App() {
   const importConnectionsPayload = useCallback(async (raw: string, password: string) => {
       const backendApp = (window as any).go?.app?.App;
       if (typeof backendApp?.ImportConnectionsPayload !== 'function') {
-          throw new Error('导入失败：当前后端未提供新版导入能力');
+          throw new Error(t('app.connection_package.error.import_capability_unavailable'));
       }
 
-      const importedViews = await backendApp.ImportConnectionsPayload(raw, password);
+      let importedViews: unknown;
+      try {
+          importedViews = await backendApp.ImportConnectionsPayload(raw, password);
+      } catch (error) {
+          if (isConnectionPackagePasswordRequiredError(error)) {
+              throw error;
+          }
+          const detail = error instanceof Error ? error.message : String(error ?? '').trim();
+          throw new Error(
+              detail
+                  ? t('app.connection_package.message.import_failed_with_error', { error: detail })
+                  : t('app.connection_package.message.import_failed'),
+          );
+      }
       if (!Array.isArray(importedViews)) {
-          throw new Error('导入失败：后端未返回连接列表');
+          throw new Error(t('app.connection_package.error.import_no_connections'));
       }
       await refreshConnectionsAfterImport(importedViews as SavedConnection[]);
       return importedViews as SavedConnection[];
-  }, [refreshConnectionsAfterImport]);
+  }, [refreshConnectionsAfterImport, t]);
 
-  const handleImportConnections = async () => {
+  const handleImportConnections = async (sourceGroup?: ToolCenterGroupKey) => {
+      setToolCenterBackGroupKey(sourceGroup ?? null);
       const res = await (window as any).go.app.App.ImportConfigFile();
       if (!res.success) {
           if (res.message !== "已取消") {
-              void message.error("导入失败: " + res.message);
+              void message.error(t('app.connection_package.message.import_failed_with_error', { error: res.message }));
           }
           return;
       }
@@ -2088,7 +1684,7 @@ function App() {
       const importKind = detectConnectionImportKind(raw);
 
       if (importKind === 'invalid') {
-          void message.error('文件格式错误：仅支持 GoNavi 恢复包、历史 JSON 连接数组、MySQL Workbench XML 或 Navicat NCX');
+          void message.error(t('app.connection_package.message.unsupported_file_format'));
           return;
       }
 
@@ -2096,12 +1692,16 @@ function App() {
           setPendingConnectionImportPayload(null);
           const importedViews = await importConnectionsPayload(raw, '');
           if ((importKind === 'mysql-workbench-xml' || importKind === 'navicat-ncx') && importedViews.some(v => !v.hasPrimaryPassword)) {
-              void message.warning(`成功导入 ${importedViews.length} 个连接，部分连接未包含密码，请编辑对应连接并输入密码后保存`);
+              void message.warning(t('app.connection_package.message.imported_with_missing_passwords', { count: importedViews.length }));
           } else {
-              void message.success(`成功导入 ${importedViews.length} 个连接`);
+              void message.success(t('app.connection_package.message.imported_connections', { count: importedViews.length }));
           }
       } catch (e: any) {
           if (isConnectionPackagePasswordRequiredError(e)) {
+              if (sourceGroup) {
+                  setToolCenterBackGroupKey(sourceGroup);
+                  setActiveToolCenterPane({ key: 'connection-package', group: sourceGroup });
+              }
               setPendingConnectionImportPayload(raw);
               setConnectionPackageDialog({
                   open: true,
@@ -2114,16 +1714,20 @@ function App() {
               });
               return;
           }
-          void message.error(e?.message || '导入失败');
+          void message.error(e?.message || t('app.connection_package.message.import_failed'));
       }
   };
 
-  const handleExportConnections = async () => {
+  const handleExportConnections = async (sourceGroup?: ToolCenterGroupKey) => {
       if (connections.length === 0) {
-          void message.warning("没有连接可导出");
+          void message.warning(t('app.connection_package.message.no_connections_to_export'));
           return;
       }
 
+      setToolCenterBackGroupKey(sourceGroup ?? null);
+      if (sourceGroup) {
+          setActiveToolCenterPane({ key: 'connection-package', group: sourceGroup });
+      }
       setConnectionPackageDialog({
           open: true,
           mode: 'export',
@@ -2142,7 +1746,7 @@ function App() {
       if (connectionPackageDialog.mode === 'import' && !password) {
           setConnectionPackageDialog((current) => ({
               ...current,
-              error: '恢复包密码不能为空',
+              error: t('app.connection_package.error.restore_password_required'),
           }));
           return;
       }
@@ -2155,7 +1759,7 @@ function App() {
       ) {
           setConnectionPackageDialog((current) => ({
               ...current,
-              error: '文件保护密码不能为空',
+              error: t('app.connection_package.error.file_password_required'),
           }));
           return;
       }
@@ -2173,16 +1777,26 @@ function App() {
       try {
           if (connectionPackageDialog.mode === 'export') {
               if (typeof backendApp?.ExportConnectionsPackage !== 'function') {
-                  throw new Error('导出失败：当前后端未提供新版导出能力');
+                  throw new Error(t('app.connection_package.error.export_capability_unavailable'));
               }
 
-              const res = await backendApp.ExportConnectionsPackage({
-                  includeSecrets: connectionPackageDialog.includeSecrets,
-                  filePassword: (
-                      connectionPackageDialog.includeSecrets
-                      && connectionPackageDialog.useFilePassword
-                  ) ? password : '',
-              });
+              let res: unknown;
+              try {
+                  res = await backendApp.ExportConnectionsPackage({
+                      includeSecrets: connectionPackageDialog.includeSecrets,
+                      filePassword: (
+                          connectionPackageDialog.includeSecrets
+                          && connectionPackageDialog.useFilePassword
+                      ) ? password : '',
+                  });
+              } catch (error) {
+                  const detail = error instanceof Error ? error.message : String(error ?? '').trim();
+                  throw new Error(
+                      detail
+                          ? `${t('app.connection_package.message.export_failed')}: ${detail}`
+                          : t('app.connection_package.message.export_failed'),
+                  );
+              }
               const exportResult = resolveConnectionPackageExportResult(connectionPackageDialog, res);
               if (exportResult.kind === 'canceled') {
                   setConnectionPackageDialog(exportResult.nextDialog);
@@ -2193,28 +1807,36 @@ function App() {
               }
 
               closeConnectionPackageDialog();
-              void message.success('导出成功');
+              void message.success(t('app.connection_package.message.export_succeeded'));
               return;
           }
 
           if (!pendingConnectionImportPayload) {
-              throw new Error('导入失败：未找到待导入的恢复包内容');
+              throw new Error(t('app.connection_package.error.missing_import_payload'));
           }
 
           const importedViews = await importConnectionsPayload(pendingConnectionImportPayload, password);
           closeConnectionPackageDialog();
-          void message.success(`成功导入 ${importedViews.length} 个连接`);
+          void message.success(t('app.connection_package.message.imported_connections', { count: importedViews.length }));
       } catch (e: any) {
           setConnectionPackageDialog((current) => ({
               ...current,
               confirmLoading: false,
-              error: e?.message || (current.mode === 'export' ? '导出失败' : '导入失败'),
+              error: e?.message || t(
+                  current.mode === 'export'
+                      ? 'app.connection_package.message.export_failed'
+                      : 'app.connection_package.message.import_failed',
+              ),
           }));
       }
   };
 
   const [isToolsModalOpen, setIsToolsModalOpen] = useState(false);
+  const [activeToolCenterGroupKey, setActiveToolCenterGroupKey] = useState<ToolCenterGroupKey>('config');
+  const [toolCenterBackGroupKey, setToolCenterBackGroupKey] = useState<ToolCenterGroupKey | null>(null);
+  const [activeToolCenterPane, setActiveToolCenterPane] = useState<ToolCenterPaneState | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isLanguageModalOpen, setIsLanguageModalOpen] = useState(false);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [themeModalSection, setThemeModalSection] = useState<'theme' | 'appearance'>('theme');
   const [isLinuxCJKFontBannerDismissed, setIsLinuxCJKFontBannerDismissed] = useState(false);
@@ -2245,7 +1867,7 @@ function App() {
                   return;
               }
               if (!result?.success) {
-                  throw new Error(String(result?.message || '加载系统字体失败'));
+                  throw new Error(String(result?.message || t('app.theme.font_family.load_failed')));
               }
               const nextFonts = Array.isArray(result?.data)
                   ? result.data
@@ -2264,7 +1886,7 @@ function App() {
                   return;
               }
               hasLoadedInstalledFontsRef.current = false;
-              setFontFamiliesLoadError(String(error instanceof Error ? error.message : error || '加载系统字体失败'));
+              setFontFamiliesLoadError(String(error instanceof Error ? error.message : error || t('app.theme.font_family.load_failed')));
           })
           .finally(() => {
               if (!cancelled) {
@@ -2275,7 +1897,7 @@ function App() {
       return () => {
           cancelled = true;
       };
-  }, [isThemeModalOpen, runtimePlatform, themeModalSection]);
+  }, [isThemeModalOpen, runtimePlatform, t, themeModalSection]);
 
   useEffect(() => {
       if (!isThemeModalOpen || themeModalSection !== 'appearance' || tabDisplaySettingsFocusRequest === 0) {
@@ -2298,7 +1920,7 @@ function App() {
           }
       }
       return map;
-  }, [activeShortcutPlatform, shortcutOptions]);
+  }, [activeShortcutPlatform, language, shortcutOptions]);
   const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
   const [isDataRootModalOpen, setIsDataRootModalOpen] = useState(false);
   const [dataRootInfo, setDataRootInfo] = useState<any>(null);
@@ -2332,35 +1954,51 @@ function App() {
           effectiveUiScale,
       })
   ), [aiPanelVisible, darkMode, effectiveUiScale]);
-  const sidebarUtilityItems = useMemo(() => {
-      const itemMap = {
-          tools: {
-              key: 'tools',
-              title: '工具',
-              icon: <ToolOutlined />,
-              onClick: () => setIsToolsModalOpen(true),
-          },
-          settings: {
-              key: 'settings',
-              title: '设置',
-              icon: <SettingOutlined />,
-              onClick: () => setIsSettingsModalOpen(true),
-          },
-      } as const;
-
-      return SIDEBAR_UTILITY_ITEM_KEYS.map((key) => itemMap[key]);
-  }, []);
-  const handleOpenToolsModal = useCallback(() => {
+  const handleOpenToolsModal = useCallback((group: ToolCenterGroupKey = 'config') => {
+      setToolCenterBackGroupKey(null);
+      setActiveToolCenterPane(null);
+      setActiveToolCenterGroupKey(group);
       setIsToolsModalOpen(true);
   }, []);
   const handleOpenSettingsModal = useCallback(() => {
       setIsSettingsModalOpen(true);
   }, []);
+  const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {
+      setToolCenterBackGroupKey(group);
+      setActiveToolCenterGroupKey(group);
+      setActiveToolCenterPane({ key, group });
+  }, []);
+  const handleReturnToToolCenter = useCallback((closeChild?: () => void) => {
+      const returnGroup = toolCenterBackGroupKey ?? 'config';
+      closeChild?.();
+      setToolCenterBackGroupKey(null);
+      setActiveToolCenterGroupKey(returnGroup);
+      setActiveToolCenterPane(null);
+      setIsToolsModalOpen(true);
+  }, [toolCenterBackGroupKey]);
+  const sidebarUtilityItems = useMemo(() => {
+      const itemMap = {
+          tools: {
+              key: 'tools',
+              title: t('app.sidebar.tools'),
+              icon: <ToolOutlined />,
+              onClick: () => handleOpenToolsModal(),
+          },
+          settings: {
+              key: 'settings',
+              title: t('app.sidebar.settings'),
+              icon: <SettingOutlined />,
+              onClick: () => handleOpenSettingsModal(),
+          },
+      } as const;
+
+      return SIDEBAR_UTILITY_ITEM_KEYS.map((key) => itemMap[key]);
+  }, [handleOpenSettingsModal, handleOpenToolsModal, t]);
   const handleFocusSidebarSearch = useCallback(() => {
       window.dispatchEvent(new CustomEvent('gonavi:focus-sidebar-search'));
   }, []);
   const renderLegacyAIEdgeHandle = () => (
-      <Tooltip title="AI 助手">
+      <Tooltip title={t('app.sidebar.ai_assistant')}>
           <Button
               type="text"
               icon={<RobotOutlined />}
@@ -2378,133 +2016,98 @@ function App() {
       try {
           const res = await GetDataRootDirectoryInfo();
           if (!res?.success) {
-              throw new Error(res?.message || '加载数据目录信息失败');
+              throw new Error(res?.message || t('app.data_root.message.load_failed'));
           }
           const data = (res?.data || {}) as any;
           setDataRootInfo(data);
           setSelectedDataRootPath(String(data.path || ''));
       } catch (error) {
-          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
-          void message.error(`加载数据目录信息失败: ${errMsg}`);
+          const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
+          void message.error(t('app.data_root.message.load_failed_with_error', { error: errMsg }));
       } finally {
           setDataRootLoading(false);
       }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
-      if (!isDataRootModalOpen) {
+      if (!isDataRootModalOpen && activeToolCenterPane?.key !== 'data-root') {
           return;
       }
       void loadDataRootInfo();
-  }, [isDataRootModalOpen, loadDataRootInfo]);
+  }, [activeToolCenterPane?.key, isDataRootModalOpen, loadDataRootInfo]);
 
   const handleSelectDataRoot = useCallback(async () => {
       try {
           const res = await SelectDataRootDirectory(selectedDataRootPath || dataRootInfo?.path || '');
           if (!res?.success) {
               if (String(res?.message || '') !== '已取消') {
-                  throw new Error(res?.message || '选择数据目录失败');
+                  throw new Error(res?.message || t('app.data_root.message.select_failed'));
               }
               return;
           }
           const data = (res?.data || {}) as any;
           setSelectedDataRootPath(String(data.path || ''));
       } catch (error) {
-          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
-          void message.error(`选择数据目录失败: ${errMsg}`);
+          const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
+          void message.error(t('app.data_root.message.select_failed_with_error', { error: errMsg }));
       }
-  }, [dataRootInfo?.path, selectedDataRootPath]);
+  }, [dataRootInfo?.path, selectedDataRootPath, t]);
 
   const handleApplyDataRoot = useCallback(async (migrate: boolean, useDefaultPath = false) => {
       const nextPath = useDefaultPath ? String(dataRootInfo?.defaultPath || '') : String(selectedDataRootPath || '').trim();
       if (!nextPath) {
-          void message.warning('请先选择有效的数据目录');
+          void message.warning(t('app.data_root.message.select_valid_first'));
           return;
       }
       setDataRootApplying(true);
       try {
           const res = await ApplyDataRootDirectory(nextPath, migrate);
           if (!res?.success) {
-              throw new Error(res?.message || '应用数据目录失败');
+              throw new Error(res?.message || t('app.data_root.message.apply_failed'));
           }
           const data = (res?.data || {}) as any;
           setDataRootInfo(data);
           setSelectedDataRootPath(String(data.path || nextPath));
-          void message.success(res?.message || '数据目录已更新');
+          void message.success(res?.message || t('app.data_root.message.updated'));
       } catch (error) {
-          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
-          void message.error(`应用数据目录失败: ${errMsg}`);
+          const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
+          void message.error(t('app.data_root.message.apply_failed_with_error', { error: errMsg }));
       } finally {
           setDataRootApplying(false);
       }
-  }, [dataRootInfo?.defaultPath, selectedDataRootPath]);
+  }, [dataRootInfo?.defaultPath, selectedDataRootPath, t]);
 
   const handleOpenDataRoot = useCallback(async () => {
       try {
           const res = await OpenDataRootDirectory();
           if (!res?.success) {
-              throw new Error(res?.message || '打开数据目录失败');
+              throw new Error(res?.message || t('app.data_root.message.open_failed'));
           }
       } catch (error) {
-          const errMsg = error instanceof Error ? error.message : String(error || '未知错误');
-          void message.error(`打开数据目录失败: ${errMsg}`);
+          const errMsg = error instanceof Error ? error.message : String(error || t('common.unknown'));
+          void message.error(t('app.data_root.message.open_failed_with_error', { error: errMsg }));
       }
-  }, []);
+  }, [t]);
 
 
-  // Log Panel: 最小高度按“工具栏 + 1 条日志行（微增）”限制
-  const LOG_PANEL_TOOLBAR_HEIGHT = 32;
-  const LOG_PANEL_SINGLE_ROW_HEIGHT = 39;
-  const LOG_PANEL_MIN_VISIBLE_ROWS = 1;
-  const LOG_PANEL_MIN_HEIGHT = LOG_PANEL_TOOLBAR_HEIGHT + (LOG_PANEL_SINGLE_ROW_HEIGHT * LOG_PANEL_MIN_VISIBLE_ROWS);
-  const LOG_PANEL_MAX_HEIGHT = 800;
-  const [logPanelHeight, setLogPanelHeight] = useState(Math.max(200, LOG_PANEL_MIN_HEIGHT));
-  const [isLogPanelOpen, setIsLogPanelOpen] = useState(false);
-  const logResizeRef = React.useRef<{ startY: number, startHeight: number } | null>(null);
-  const logGhostRef = React.useRef<HTMLDivElement>(null);
+  const {
+      handleCloseLogPanel: handleCloseLegacyLogPanel,
+      handleLogResizeStart,
+      handleToggleLogPanel: toggleLegacyLogPanel,
+      isLogPanelOpen,
+      logGhostRef,
+      logPanelHeight,
+  } = useAppLogPanelResize();
   const handleToggleLogPanel = useCallback(() => {
-      setIsLogPanelOpen((prev) => !prev);
-  }, []);
-
-  const handleLogResizeStart = (e: React.MouseEvent) => {
-      e.preventDefault();
-      logResizeRef.current = { startY: e.clientY, startHeight: logPanelHeight };
-      
-      if (logGhostRef.current) {
-          logGhostRef.current.style.top = `${e.clientY}px`;
-          logGhostRef.current.style.display = 'block';
+      if (isV2Ui) {
+          window.dispatchEvent(new CustomEvent('gonavi:show-sql-execution-log'));
+          return;
       }
-
-      document.addEventListener('mousemove', handleLogResizeMove);
-      document.addEventListener('mouseup', handleLogResizeUp);
-  };
-
-  const handleLogResizeMove = (e: MouseEvent) => {
-      if (!logResizeRef.current) return;
-      // Just update ghost line, no state update
-      if (logGhostRef.current) {
-          logGhostRef.current.style.top = `${e.clientY}px`;
-      }
-  };
-
-  const handleLogResizeUp = (e: MouseEvent) => {
-      if (logResizeRef.current) {
-          const delta = logResizeRef.current.startY - e.clientY; 
-          const newHeight = Math.max(
-              LOG_PANEL_MIN_HEIGHT,
-              Math.min(LOG_PANEL_MAX_HEIGHT, logResizeRef.current.startHeight + delta)
-          );
-          setLogPanelHeight(newHeight);
-      }
-      
-      if (logGhostRef.current) {
-          logGhostRef.current.style.display = 'none';
-      }
-
-      logResizeRef.current = null;
-      document.removeEventListener('mousemove', handleLogResizeMove);
-      document.removeEventListener('mouseup', handleLogResizeUp);
-  };
+      toggleLegacyLogPanel();
+  }, [isV2Ui, toggleLegacyLogPanel]);
+  const handleCloseLogPanel = useCallback(() => {
+      handleCloseLegacyLogPanel();
+  }, [handleCloseLegacyLogPanel]);
   
   const handleCreateConnection = useCallback(() => {
       setSecurityUpdateRepairSource(null);
@@ -2526,13 +2129,28 @@ function App() {
                       nextConnection = editableConnection;
                   }
               } catch (error: any) {
-                  message.warning(error?.message || '读取已保存连接详情失败，当前将打开脱敏配置');
+                  const errorMessage = error?.message;
+                  const detail = (
+                      typeof errorMessage === 'string'
+                          ? errorMessage
+                          : (
+                              typeof errorMessage === 'number'
+                              || typeof errorMessage === 'boolean'
+                                  ? String(errorMessage)
+                                  : String(error ?? '')
+                          )
+                  ).trim();
+                  void message.warning(
+                      detail
+                          ? t('app.connection.message.editable_load_failed_with_detail', { detail })
+                          : t('app.connection.message.editable_load_failed')
+                  );
               }
           }
           setEditingConnection(nextConnection);
           setIsModalOpen(true);
       })();
-  }, []);
+  }, [t]);
 
   useEffect(() => {
       if (connectionModalWarmupDoneRef.current) {
@@ -2570,6 +2188,7 @@ function App() {
               backend: backendApp,
               replaceConnections,
               replaceGlobalProxy,
+              t,
           }, normalizeSecurityUpdateStatus(rawStatus));
 
           applySecurityUpdateStatus(nextStatus, {
@@ -2599,6 +2218,7 @@ function App() {
           : securityUpdateStatus;
       const nextStatus = mergeSecurityUpdateStatusWithLegacySource(rawStatus, nextRawPayload, {
           previousStatus: securityUpdateStatus,
+          t,
       });
       const nextHasLegacySensitiveItems = hasLegacyMigratableSensitiveItems(nextRawPayload);
 
@@ -2616,6 +2236,7 @@ function App() {
       securityUpdateRepairSource,
       securityUpdateStatus,
       securityUpdateStatus.migrationId,
+      t,
   ]);
 
   const handleCloseModal = () => {
@@ -2631,12 +2252,14 @@ function App() {
   const handleOpenDriverManagerFromConnection = () => {
       setIsModalOpen(false);
       setEditingConnection(null);
+      setToolCenterBackGroupKey(null);
       setIsDriverModalOpen(true);
   };
 
   const handleCloseDriverManager = useCallback(() => {
       const reopenSecurityUpdateDetails = shouldReopenSecurityUpdateDetails(securityUpdateRepairSource);
       setIsDriverModalOpen(false);
+      setToolCenterBackGroupKey(null);
       setSecurityUpdateRepairSource(null);
       if (reopenSecurityUpdateDetails) {
           setIsSecurityUpdateSettingsOpen(true);
@@ -2747,14 +2370,14 @@ function App() {
   // 失败时回退到 Unmaximise→Maximise toggle —— 用户主动按了快捷键，预期看见动画。
   const handleManualResetWindowZoom = React.useCallback(async () => {
       if (!isWindowsPlatform()) {
-          message.info('该功能仅在 Windows 平台生效');
+          message.info(t('app.window_zoom.message.windows_only'));
           return;
       }
       try {
           const res = await (window as any).go?.app?.App?.ResetWebViewZoom?.();
           if (res?.success) {
               window.dispatchEvent(new Event('resize'));
-              message.success('已重置窗口缩放');
+              message.success(t('app.window_zoom.message.reset_success'));
               return;
           }
           console.warn('ResetWebViewZoom backend reported failure, falling back to maximise toggle:', res?.message);
@@ -2764,7 +2387,7 @@ function App() {
       try {
           const isFullscreen = await safeWindowRuntimeCall(() => WindowIsFullscreen(), false);
           if (isFullscreen) {
-              message.info('全屏状态下无法重置缩放，请先退出全屏');
+              message.info(t('app.window_zoom.message.fullscreen_exit_first'));
               return;
           }
           const isMaximised = await safeWindowRuntimeCall(() => WindowIsMaximised(), false);
@@ -2784,118 +2407,23 @@ function App() {
               }
           }
           window.dispatchEvent(new Event('resize'));
-          message.success('已重置窗口缩放（回退方案）');
+          message.success(t('app.window_zoom.message.reset_success_fallback'));
       } catch (e) {
-          console.warn('重置窗口缩放失败', e);
-          message.error('重置窗口缩放失败');
+          console.warn('Failed to reset window zoom', e);
+          message.error(t('app.window_zoom.message.reset_failed'));
       }
-  }, []);
+  }, [t]);
   
-  // Sidebar Resizing
-  const sidebarDragRef = React.useRef<SidebarResizeDragState | null>(null);
-  const rafRef = React.useRef<number | null>(null);
-  const ghostRef = React.useRef<HTMLDivElement>(null);
-  const siderRef = React.useRef<HTMLDivElement | null>(null);
-  const sidebarDragBodyStyleRef = React.useRef<{ cursor: string; userSelect: string; webkitUserSelect: string } | null>(null);
-  const latestMouseX = React.useRef<number>(0); // Store latest mouse position
-  const sidebarResizeHandleWidth = Math.max(16, Math.round(16 * effectiveUiScale));
-
-  const restoreSidebarDragBodyStyles = () => {
-      if (!sidebarDragBodyStyleRef.current || typeof document === 'undefined') {
-          sidebarDragBodyStyleRef.current = null;
-          return;
-      }
-
-      const previous = sidebarDragBodyStyleRef.current;
-      document.body.style.cursor = previous.cursor;
-      document.body.style.userSelect = previous.userSelect;
-      (document.body.style as any).WebkitUserSelect = previous.webkitUserSelect;
-      sidebarDragBodyStyleRef.current = null;
-  };
-
-  const handleSidebarMouseDown = (e: React.MouseEvent) => {
-      if (e.button !== 0) {
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-      }
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (typeof document !== 'undefined') {
-          sidebarDragBodyStyleRef.current = {
-              cursor: document.body.style.cursor,
-              userSelect: document.body.style.userSelect,
-              webkitUserSelect: (document.body.style as any).WebkitUserSelect || '',
-          };
-          document.body.style.cursor = 'col-resize';
-          document.body.style.userSelect = 'none';
-          (document.body.style as any).WebkitUserSelect = 'none';
-      }
-      
-      const siderRect = siderRef.current?.getBoundingClientRect();
-      const startGuideLeft = siderRect?.right ?? sidebarWidth;
-      const startWidth = siderRect?.width ?? sidebarWidth;
-      const resizeBounds = resolveSidebarResizeBounds(siderRef.current);
-
-      if (ghostRef.current) {
-          ghostRef.current.style.left = `${startGuideLeft}px`;
-          ghostRef.current.style.display = 'block';
-      }
-
-      sidebarDragRef.current = {
-          startX: e.clientX,
-          startWidth,
-          startGuideLeft,
-          ...resizeBounds,
-      };
-      latestMouseX.current = e.clientX; // Init
-      document.addEventListener('mousemove', handleSidebarMouseMove);
-      document.addEventListener('mouseup', handleSidebarMouseUp);
-  };
-
-  const handleSidebarMouseMove = (e: MouseEvent) => {
-      if (!sidebarDragRef.current) return;
-      
-      latestMouseX.current = e.clientX; // Always update latest pos
-
-      if (rafRef.current) return; // Schedule once per frame
-
-      rafRef.current = requestAnimationFrame(() => {
-          if (!sidebarDragRef.current || !ghostRef.current) return;
-          // Use latestMouseX.current instead of stale closure 'e.clientX'
-          const { startX, startWidth, startGuideLeft, minWidth, maxWidth } = sidebarDragRef.current;
-          const delta = latestMouseX.current - startX;
-          const newWidth = clampSidebarResizeWidth(startWidth + delta, { minWidth, maxWidth });
-          ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;
-          rafRef.current = null;
-      });
-  };
-
-  const handleSidebarMouseUp = (e: MouseEvent) => {
-      if (rafRef.current) {
-          cancelAnimationFrame(rafRef.current);
-          rafRef.current = null;
-      }
-      
-      if (sidebarDragRef.current) {
-          // Use latest position for final commit too
-          const { startX, startWidth, minWidth, maxWidth } = sidebarDragRef.current;
-          const delta = e.clientX - startX;
-          const newWidth = clampSidebarResizeWidth(startWidth + delta, { minWidth, maxWidth });
-          setSidebarWidth(newWidth);
-      }
-
-      if (ghostRef.current) {
-          ghostRef.current.style.display = 'none';
-      }
-      restoreSidebarDragBodyStyles();
-      
-      sidebarDragRef.current = null;
-      document.removeEventListener('mousemove', handleSidebarMouseMove);
-      document.removeEventListener('mouseup', handleSidebarMouseUp);
-  };
+  const {
+      ghostRef,
+      handleSidebarMouseDown,
+      sidebarResizeHandleWidth,
+      siderRef,
+  } = useAppSidebarResize({
+      effectiveUiScale,
+      setSidebarWidth,
+      sidebarWidth,
+  });
 
   useEffect(() => {
     document.body.style.backgroundColor = 'transparent';
@@ -2931,76 +2459,6 @@ function App() {
     tokenControlHeight,
     tokenControlHeightSM,
   ]);
-
-  useEffect(() => {
-      isAboutOpenRef.current = isAboutOpen;
-  }, [isAboutOpen]);
-
-  useEffect(() => {
-      if (isAboutOpen) {
-          if (lastUpdateInfo?.hasUpdate) {
-              const localDownloaded = updateDownloadedVersionRef.current === lastUpdateInfo.latestVersion;
-              const hasDownloaded = Boolean(lastUpdateInfo.downloaded) || localDownloaded;
-              setAboutUpdateStatus(
-                  hasDownloaded
-                      ? `发现新版本 ${lastUpdateInfo.latestVersion}（已下载，请点击“下载进度”后安装）`
-                      : `发现新版本 ${lastUpdateInfo.latestVersion}（未下载）`
-              );
-          } else if (lastUpdateInfo) {
-              setAboutUpdateStatus(`当前已是最新版本（${lastUpdateInfo.currentVersion || '未知'}）`);
-          } else {
-              setAboutUpdateStatus('未检查');
-          }
-          void loadAboutInfo();
-      }
-  }, [isAboutOpen, lastUpdateInfo, loadAboutInfo]);
-
-  useEffect(() => {
-      const startupTimer = window.setTimeout(() => {
-          void checkForUpdates(true);
-      }, 2000);
-      const interval = window.setInterval(() => {
-          void checkForUpdates(true);
-      }, 30 * 60 * 1000);
-      return () => {
-          window.clearTimeout(startupTimer);
-          window.clearInterval(interval);
-      };
-  }, [checkForUpdates]);
-
-  useEffect(() => {
-      let offDownloadProgress: any = null;
-      try {
-          offDownloadProgress = EventsOn('update:download-progress', (event: UpdateDownloadProgressEvent) => {
-          if (!event) return;
-          const status = event.status || 'downloading';
-          const nextStatus: 'idle' | 'start' | 'downloading' | 'done' | 'error' =
-              status === 'start' || status === 'downloading' || status === 'done' || status === 'error'
-                  ? status
-                  : 'downloading';
-          const downloaded = typeof event.downloaded === 'number' ? event.downloaded : 0;
-          const total = typeof event.total === 'number' ? event.total : 0;
-          const percentRaw = typeof event.percent === 'number'
-              ? event.percent
-              : (total > 0 ? (downloaded / total) * 100 : 0);
-          const percent = Math.max(0, Math.min(100, percentRaw));
-          setUpdateDownloadProgress(prev => ({
-              open: prev.open,
-              version: prev.version,
-              status: nextStatus,
-              percent,
-              downloaded,
-              total,
-              message: String(event.message || '')
-          }));
-      });
-      } catch (e) {
-          console.warn("Wails API: EventsOn unavailable", e);
-      }
-      return () => {
-          if (offDownloadProgress) offDownloadProgress();
-      };
-  }, []);
 
   useEffect(() => {
       const handleOpenShortcutSettingsEvent = () => {
@@ -3165,8 +2623,8 @@ function App() {
           if (!canRecordShortcutForAction(capturingShortcutAction, normalizedCombo)) {
               const meta = SHORTCUT_ACTION_META[capturingShortcutAction];
               void message.warning(meta.scope === 'aiComposer'
-                  ? 'AI 聊天发送快捷键仅支持 Enter / Ctrl+Enter / Cmd+Enter / Alt+Enter，Shift+Enter 保留换行'
-                  : '快捷键至少包含 Ctrl / Alt / Shift / Meta 之一');
+                  ? t('app.shortcuts.message.ai_send_limit')
+                  : t('app.shortcuts.message.modifier_required'));
               return;
           }
           const conflictAction = SHORTCUT_ACTION_ORDER.find((action) => {
@@ -3180,7 +2638,7 @@ function App() {
               return normalizeShortcutCombo(binding.combo) === normalizedCombo;
           });
           if (conflictAction) {
-              void message.warning(`与「${SHORTCUT_ACTION_META[conflictAction].label}」冲突，请换一个快捷键`);
+              void message.warning(t('app.shortcuts.message.conflict', { action: SHORTCUT_ACTION_META[conflictAction].label }));
               return;
           }
 
@@ -3188,10 +2646,10 @@ function App() {
           if (reservedConflicts.length > 0) {
               const { hasMonaco, hasOther, monacoLabels, otherLabels, otherContexts } = splitConflictsByContext(reservedConflicts);
               if (hasMonaco) {
-                  void message.info(`已覆盖编辑器「${monacoLabels}」默认快捷键`, 4);
+                  void message.info(t('app.shortcuts.message.reserved_conflict_info', { labels: monacoLabels }), 4);
               }
               if (hasOther) {
-                  void message.warning(`与${otherContexts}「${otherLabels}」冲突，可能失效`, 4);
+                  void message.warning(t('app.shortcuts.message.reserved_conflict_warning', { contexts: otherContexts, labels: otherLabels }), 4);
               }
           }
 
@@ -3203,7 +2661,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleShortcutCapture, true);
       };
-  }, [activeShortcutPlatform, capturingShortcutAction, shortcutOptions, updateShortcut]);
+  }, [activeShortcutPlatform, capturingShortcutAction, shortcutOptions, t, updateShortcut]);
 
   const linuxResizeHandleStyleBase = {
       position: 'fixed',
@@ -3310,7 +2768,7 @@ function App() {
 
   return (
     <ConfigProvider
-        locale={zhCN}
+        locale={getAntdLocale(language)}
         componentSize={appComponentSize}
         theme={antdTheme}
     >
@@ -3417,11 +2875,11 @@ function App() {
                 </div>
                 <div style={{ padding: `0 ${sidebarHorizontalPadding}px 10px`, borderBottom: 'none', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: isSidebarCompact ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) minmax(0, 1fr)', gap: 8, width: '100%' }}>
-                        <Button icon={<PlusOutlined />} onClick={handleCreateConnection} title="新建连接" style={sidebarCreateConnectionActionStyle}>
-                            新建连接
+                        <Button icon={<PlusOutlined />} onClick={handleCreateConnection} title={t('connection.new')} style={sidebarCreateConnectionActionStyle}>
+                            {t('connection.new')}
                         </Button>
-                        <Button icon={<ConsoleSqlOutlined />} onClick={handleNewQuery} title="新建查询" style={sidebarQueryActionStyle}>
-                            新建查询
+                        <Button icon={<ConsoleSqlOutlined />} onClick={handleNewQuery} title={t('query.new')} style={sidebarQueryActionStyle}>
+                            {t('query.new')}
                         </Button>
                     </div>
                 </div>
@@ -3484,7 +2942,7 @@ function App() {
                         }}
                         role="separator"
                         aria-orientation="vertical"
-                        title="拖动调整宽度"
+                        title={t('app.sidebar.resize_width')}
                         style={{
                             position: 'absolute',
                             right: 0,
@@ -3535,7 +2993,7 @@ function App() {
                             pointerEvents: 'auto'
                         }}
                     >
-                        SQL 执行日志
+                        {t('app.sidebar.sql_execution_log')}
                     </Button>
                 </div>
                 )}
@@ -3581,7 +3039,7 @@ function App() {
                           <button
                             type="button"
                             className="gn-v2-ai-panel-backdrop"
-                            aria-label="关闭 AI 面板"
+                            aria-label={t('app.ai_panel.aria.close')}
                             onClick={() => setAIPanelVisible(false)}
                             style={{
                               position: 'absolute',
@@ -3646,9 +3104,9 @@ function App() {
                                 boxShadow: darkMode ? '0 16px 36px rgba(0,0,0,0.32)' : '0 16px 36px rgba(15,23,42,0.12)',
                               }}
                             >
-                              <div style={{ fontSize: 15, fontWeight: 600 }}>AI 面板加载失败</div>
+                              <div style={{ fontSize: 15, fontWeight: 600 }}>{t('app.ai_panel.error.title')}</div>
                               <div style={{ fontSize: 12, lineHeight: 1.6, color: darkMode ? 'rgba(255,255,255,0.68)' : '#526075' }}>
-                                这通常是开发环境热更新后懒加载资源失效导致的。已阻止整页白屏，你可以直接重试。
+                                {t('app.ai_panel.error.description')}
                               </div>
                               {error?.message && (
                                 <div
@@ -3666,8 +3124,8 @@ function App() {
                                 </div>
                               )}
                               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-                                <Button onClick={() => setAIPanelVisible(false)}>关闭面板</Button>
-                                <Button type="primary" onClick={handleRetryAIPanelRender}>重新加载</Button>
+                                <Button aria-label={t('app.ai_panel.aria.close')} onClick={() => setAIPanelVisible(false)}>{t('app.ai_panel.action.close')}</Button>
+                                <Button type="primary" onClick={handleRetryAIPanelRender}>{t('app.ai_panel.action.reload')}</Button>
                               </div>
                             </div>
                           </div>
@@ -3681,10 +3139,10 @@ function App() {
                   </div>
                )}
              </div>
-             {isLogPanelOpen && (
-                 <LogPanel 
-                    height={logPanelHeight} 
-                    onClose={() => setIsLogPanelOpen(false)} 
+             {!isV2Ui && isLogPanelOpen && (
+                  <LogPanel
+                     height={logPanelHeight}
+                     onClose={handleCloseLogPanel}
                     onResizeStart={handleLogResizeStart} 
                 />
             )}
@@ -3699,116 +3157,657 @@ function App() {
             onSaved={handleConnectionSaved}
           />
           )}
-          {isToolsModalOpen && (
-          <Modal
-            title={renderUtilityModalTitle(<ToolOutlined />, '工具中心', '集中处理连接配置、同步、驱动和快捷键相关操作。')}
-            open={isToolsModalOpen}
-            onCancel={() => setIsToolsModalOpen(false)}
-            footer={null}
-            width={560}
-            styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
-          >
-            <div style={{ display: 'grid', gap: 12, padding: '12px 0' }}>
-              {[
-                {
-                  key: 'import',
-                  icon: <UploadOutlined />,
-                  title: '导入连接配置',
-                  description: '从本地文件恢复连接列表。',
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    void handleImportConnections();
+          {isToolsModalOpen && (() => {
+            const toolCenterGroups = [
+              {
+                key: 'config',
+                icon: <SettingOutlined />,
+                title: t('app.tools.group.config.title'),
+                description: t('app.tools.group.config.description'),
+                items: [
+                  {
+                    key: 'import',
+                    icon: <UploadOutlined />,
+                    title: t('app.tools.entry.import.title'),
+                    description: t('app.tools.entry.import.description'),
+                    onClick: () => {
+                      void handleImportConnections('config');
+                    },
                   },
-                },
-                {
-                  key: 'export',
-                  icon: <DownloadOutlined />,
-                  title: '导出连接配置',
-                  description: '导出当前连接与可见配置字段。',
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    void handleExportConnections();
+                  {
+                    key: 'export',
+                    icon: <DownloadOutlined />,
+                    title: t('app.tools.entry.export.title'),
+                    description: t('app.tools.entry.export.description'),
+                    onClick: () => {
+                      void handleExportConnections('config');
+                    },
                   },
-                },
-                {
-                  key: 'sync',
-                  icon: <UploadOutlined rotate={90} />,
-                  title: '数据同步',
-                  description: '进入跨源同步工作流。',
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setIsSyncModalOpen(true);
+                  {
+                    key: 'data-root',
+                    icon: <HddOutlined />,
+                    title: t('app.tools.entry.data_root.title'),
+                    description: t('app.tools.entry.data_root.description'),
+                    onClick: () => {
+                      handleOpenToolCenterPane('config', 'data-root');
+                    },
                   },
-                },
-                {
-                  key: 'drivers',
-                  icon: <SettingOutlined />,
-                  title: '驱动管理',
-                  description: '安装、更新或移除数据库驱动。',
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setIsDriverModalOpen(true);
+                  {
+                    key: 'security-update',
+                    icon: <SafetyCertificateOutlined />,
+                    title: t('app.tools.entry.security_update.title'),
+                    description: securityUpdateEntryVisibility.showDetailEntry || securityUpdateHasLegacySensitiveItems
+                      ? t('app.tools.entry.security_update.status_description', { status: securityUpdateStatusMeta.label })
+                      : t('app.tools.entry.security_update.description'),
+                    onClick: () => {
+                      handleOpenToolCenterPane('config', 'security-update');
+                    },
                   },
-                },
-                {
-                  key: 'data-root',
-                  icon: <HddOutlined />,
-                  title: '数据目录',
-                  description: '查看、切换或迁移本地数据存储位置。',
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setIsDataRootModalOpen(true);
+                ],
+              },
+              {
+                key: 'workflow',
+                icon: <SwitcherOutlined />,
+                title: t('app.tools.group.workflow.title'),
+                description: t('app.tools.group.workflow.description'),
+                items: [
+                  {
+                    key: 'schema-compare',
+                    icon: <AppstoreOutlined />,
+                    title: t('app.tools.entry.schema_compare.title'),
+                    description: t('app.tools.entry.schema_compare.description'),
+                    onClick: () => {
+                      setSyncModalEntryMode('schemaCompare');
+                      handleOpenToolCenterPane('workflow', 'schema-compare');
+                    },
                   },
-                },
-                {
-                  key: 'snippet-settings',
-                  icon: <CodeOutlined />,
-                  title: '代码片段管理',
-                  description: '管理 SQL 代码片段和前缀补全。',
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setIsSnippetModalOpen(true);
+                  {
+                    key: 'data-compare',
+                    icon: <SwitcherOutlined />,
+                    title: t('app.tools.entry.data_compare.title'),
+                    description: t('app.tools.entry.data_compare.description'),
+                    onClick: () => {
+                      setSyncModalEntryMode('dataCompare');
+                      handleOpenToolCenterPane('workflow', 'data-compare');
+                    },
                   },
-                },
-                {
-                  key: 'shortcut-settings',
-                  icon: <LinkOutlined />,
-                  title: '快捷键管理',
-                  description: '查看并调整全局快捷键绑定。',
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setIsShortcutModalOpen(true);
+                  {
+                    key: 'sync',
+                    icon: <UploadOutlined rotate={90} />,
+                    title: t('app.tools.entry.sync.title'),
+                    description: t('app.tools.entry.sync.description'),
+                    onClick: () => {
+                      setSyncModalEntryMode('sync');
+                      handleOpenToolCenterPane('workflow', 'sync');
+                    },
                   },
-                },
-                {
-                  key: 'security-update',
-                  icon: <SafetyCertificateOutlined />,
-                  title: '安全更新',
-                  description: securityUpdateEntryVisibility.showDetailEntry || securityUpdateHasLegacySensitiveItems
-                    ? `当前状态：${securityUpdateStatusMeta.label}`
-                    : '查看已保存配置的安全更新状态。',
-                  onClick: () => {
-                    setIsToolsModalOpen(false);
-                    setIsSecurityUpdateSettingsOpen(true);
+                ],
+              },
+              {
+                key: 'workspace',
+                icon: <CodeOutlined />,
+                title: t('app.tools.group.workspace.title'),
+                description: t('app.tools.group.workspace.description'),
+                items: [
+                  {
+                    key: 'drivers',
+                    icon: <SettingOutlined />,
+                    title: t('app.tools.entry.drivers.title'),
+                    description: t('app.tools.entry.drivers.description'),
+                    onClick: () => {
+                      handleOpenToolCenterPane('workspace', 'drivers');
+                    },
                   },
-                },
-              ].map((item) => (
-                <Button key={item.key} type="text" style={utilityActionCardStyle} onClick={item.onClick}>
-                  <span style={{ width: 36, height: 36, borderRadius: 12, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
-                    {item.icon}
-                  </span>
-                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
-                    <span>{item.title}</span>
-                    <span style={utilityActionHintStyle}>{item.description}</span>
-                  </span>
-                </Button>
-              ))}
-            </div>
-          </Modal>
-          )}
+                  {
+                    key: 'snippet-settings',
+                    icon: <CodeOutlined />,
+                    title: t('app.tools.entry.snippets.title'),
+                    description: t('app.tools.entry.snippets.description'),
+                    onClick: () => {
+                      handleOpenToolCenterPane('workspace', 'snippet-settings');
+                    },
+                  },
+                  {
+                    key: 'shortcut-settings',
+                    icon: <LinkOutlined />,
+                    title: t('app.tools.entry.shortcuts.title'),
+                    description: t('app.tools.entry.shortcuts.description'),
+                    onClick: () => {
+                      handleOpenToolCenterPane('workspace', 'shortcut-settings');
+                    },
+                  },
+                ],
+              },
+            ] as const;
+            const activeToolCenterGroup = toolCenterGroups.find((group) => group.key === activeToolCenterGroupKey) ?? toolCenterGroups[0];
+            const activeToolCenterPaneItem = activeToolCenterPane
+              ? toolCenterGroups
+                  .find((group) => group.key === activeToolCenterPane.group)
+                  ?.items.find((item) => item.key === activeToolCenterPane.key)
+              : null;
+            const closeToolCenterPane = () => {
+              if (activeToolCenterPane?.key === 'connection-package') {
+                closeConnectionPackageDialog();
+                return;
+              }
+              setToolCenterBackGroupKey(null);
+              setActiveToolCenterPane(null);
+            };
+            const renderToolCenterPane = () => {
+              if (!activeToolCenterPane) {
+                return null;
+              }
+
+              if (activeToolCenterPane.key === 'connection-package') {
+                return (
+                  <ConnectionPackagePasswordModal
+                    embedded
+                    open={connectionPackageDialog.open}
+                    title={connectionPackageDialog.mode === 'export'
+                        ? t('app.connection_package.dialog.export_title')
+                        : t('app.connection_package.dialog.import_password_title')}
+                    mode={connectionPackageDialog.mode}
+                    includeSecrets={connectionPackageDialog.includeSecrets}
+                    useFilePassword={connectionPackageDialog.useFilePassword}
+                    password={connectionPackageDialog.password}
+                    error={connectionPackageDialog.error}
+                    confirmLoading={connectionPackageDialog.confirmLoading}
+                    confirmText={connectionPackageDialog.mode === 'export'
+                        ? t('app.connection_package.action.start_export')
+                        : t('app.connection_package.action.start_import')}
+                    cancelText={t('common.close')}
+                    onBack={closeToolCenterPane}
+                    onIncludeSecretsChange={(value) => {
+                        setConnectionPackageDialog((current) => ({
+                            ...current,
+                            includeSecrets: value,
+                            useFilePassword: value ? current.useFilePassword : false,
+                            password: value ? current.password : '',
+                            error: '',
+                        }));
+                    }}
+                    onUseFilePasswordChange={(value) => {
+                        setConnectionPackageDialog((current) => ({
+                            ...current,
+                            useFilePassword: value,
+                            password: value ? current.password : '',
+                            error: '',
+                        }));
+                    }}
+                    onPasswordChange={(value) => {
+                        setConnectionPackageDialog((current) => ({
+                            ...current,
+                            password: value,
+                            error: '',
+                        }));
+                    }}
+                    onConfirm={() => {
+                        void handleConfirmConnectionPackageDialog();
+                    }}
+                    onCancel={closeConnectionPackageDialog}
+                  />
+                );
+              }
+
+              if (activeToolCenterPane.key === 'data-root') {
+                return (
+                  <Modal
+                    embedded
+                    open
+                    title={renderUtilityModalTitle(
+                      <HddOutlined />,
+                      t('app.data_root.title'),
+                      t('app.data_root.description'),
+                    )}
+                    onCancel={closeToolCenterPane}
+                    footer={[
+                      <Button key="close" onClick={closeToolCenterPane}>
+                        {t('common.close')}
+                      </Button>,
+                      <Button key="back" onClick={closeToolCenterPane}>
+                        {t('common.back_to_previous')}
+                      </Button>,
+                    ]}
+                    styles={{
+                      header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
+                      body: { paddingTop: 8 },
+                      footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },
+                    }}
+                  >
+                    {dataRootLoading ? (
+                      <div style={{ padding: '16px 0', textAlign: 'center' }}>
+                        <Spin />
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
+                        <div style={utilityPanelStyle}>
+                          <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.current_directory')}</div>
+                          <div style={{ display: 'grid', gap: 10 }}>
+                            <Input readOnly value={dataRootInfo?.path || ''} />
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                              <div>
+                                <div style={{ marginBottom: 6, fontWeight: 500 }}>{t('app.data_root.default_directory')}</div>
+                                <div style={utilityMutedTextStyle}>{dataRootInfo?.defaultPath || '-'}</div>
+                              </div>
+                              <div>
+                                <div style={{ marginBottom: 6, fontWeight: 500 }}>{t('app.data_root.driver_directory')}</div>
+                                <div style={utilityMutedTextStyle}>{dataRootInfo?.driverPath || '-'}</div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={utilityPanelStyle}>
+                          <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.switch_target')}</div>
+                          <div style={{ display: 'grid', gap: 10 }}>
+                            <Input
+                              readOnly
+                              value={selectedDataRootPath}
+                              placeholder={t('app.data_root.placeholder.select_new_directory')}
+                            />
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                              <Button icon={<FolderOpenOutlined />} onClick={() => void handleSelectDataRoot()}>
+                                {t('app.data_root.action.select')}
+                              </Button>
+                              <Button onClick={() => void handleOpenDataRoot()}>
+                                {t('app.data_root.action.open_current')}
+                              </Button>
+                              <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false, true)}>
+                                {t('app.data_root.action.restore_default_directory')}
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={utilityPanelStyle}>
+                          <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.apply_method')}</div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                            <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false)}>
+                              {t('app.data_root.action.switch_only')}
+                            </Button>
+                            <Button type="primary" loading={dataRootApplying} onClick={() => void handleApplyDataRoot(true)}>
+                              {t('app.data_root.action.migrate_and_switch')}
+                            </Button>
+                          </div>
+                          <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
+                            {t('app.data_root.restart_hint')}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </Modal>
+                );
+              }
+
+              if (activeToolCenterPane.key === 'security-update') {
+                return (
+                  <SecurityUpdateSettingsModal
+                    embedded
+                    open
+                    darkMode={darkMode}
+                    overlayTheme={overlayTheme}
+                    surfaceOpacity={effectiveOpacity}
+                    status={securityUpdateStatus}
+                    focusTarget={securityUpdateSettingsFocusTarget}
+                    focusRequest={securityUpdateSettingsFocusRequest}
+                    onClose={closeToolCenterPane}
+                    onBack={closeToolCenterPane}
+                    onStart={handleStartSecurityUpdate}
+                    onRetry={handleRetrySecurityUpdate}
+                    onRestart={handleRestartSecurityUpdate}
+                    onIssueAction={handleSecurityUpdateIssueAction}
+                  />
+                );
+              }
+
+              if (
+                activeToolCenterPane.key === 'schema-compare'
+                || activeToolCenterPane.key === 'data-compare'
+                || activeToolCenterPane.key === 'sync'
+              ) {
+                return (
+                  <DataSyncModal
+                    embedded
+                    open
+                    onClose={closeToolCenterPane}
+                    onBack={closeToolCenterPane}
+                    entryMode={syncModalEntryMode}
+                  />
+                );
+              }
+
+              if (activeToolCenterPane.key === 'drivers') {
+                return (
+                  <DriverManagerModal
+                    embedded
+                    open
+                    onClose={closeToolCenterPane}
+                    onBack={closeToolCenterPane}
+                    onOpenGlobalProxySettings={handleOpenGlobalProxySettings}
+                  />
+                );
+              }
+
+              if (activeToolCenterPane.key === 'snippet-settings') {
+                return (
+                  <SnippetSettingsModal
+                    embedded
+                    open
+                    onClose={closeToolCenterPane}
+                    onBack={closeToolCenterPane}
+                    darkMode={darkMode}
+                    overlayTheme={overlayTheme}
+                  />
+                );
+              }
+
+              if (activeToolCenterPane.key === 'shortcut-settings') {
+                return (
+                  <Modal
+                    embedded
+                    open
+                    title={renderUtilityModalTitle(
+                      <LinkOutlined />,
+                      t('app.shortcuts.title'),
+                      t('app.shortcuts.description'),
+                    )}
+                    onCancel={() => {
+                      setCapturingShortcutAction(null);
+                      closeToolCenterPane();
+                    }}
+                    footer={[
+                      <Button
+                        key="reset"
+                        onClick={() => {
+                           resetShortcutOptions();
+                           setCapturingShortcutAction(null);
+                           void message.success(t('app.shortcuts.message.restored_defaults'));
+                        }}
+                      >
+                        {t('app.shortcuts.action.restore_defaults')}
+                      </Button>,
+                      <Button
+                        key="close"
+                        type="primary"
+                        onClick={() => {
+                          setCapturingShortcutAction(null);
+                          closeToolCenterPane();
+                        }}
+                      >
+                         {t('common.close')}
+                      </Button>,
+                      <Button
+                        key="back"
+                        onClick={() => {
+                          setCapturingShortcutAction(null);
+                          closeToolCenterPane();
+                        }}
+                      >
+                        {t('common.back_to_previous')}
+                      </Button>,
+                    ]}
+                    styles={{
+                      header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
+                      body: { paddingTop: 8, overflow: 'hidden', flex: 1, minHeight: 0 },
+                      footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },
+                    }}
+                  >
+                    <div data-gonavi-shortcut-modal-scroll="true" style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8, paddingRight: 8 }}>
+                      <div style={utilityPanelStyle}>
+                        <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
+                             {t('app.shortcuts.capture_hint')}
+                        </div>
+                      </div>
+                      {SHORTCUT_ACTION_ORDER.map((action) => {
+                        const meta = SHORTCUT_ACTION_META[action];
+                        if (meta.platformOnly === 'mac' && !isMacRuntime) {
+                            return null;
+                        }
+                        const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
+                        const isCapturing = capturingShortcutAction === action;
+                        const conflicts = shortcutConflictMap[action];
+                        const conflictInfo = conflicts?.length ? splitConflictsByContext(conflicts) : null;
+                        return (
+                            <div
+                                key={action}
+                                style={{
+                                    ...utilityPanelStyle,
+                                    display: 'grid',
+                                    gridTemplateColumns: '1fr auto',
+                                    gap: 12,
+                                    alignItems: 'center',
+                                    padding: '10px 12px',
+                                }}
+                            >
+                                <div>
+                                    <div style={{ fontWeight: 500 }}>{meta.label}</div>
+                                    <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{meta.description}</div>
+                                    {conflictInfo && (
+                                        <div style={{ fontSize: 11, color: darkMode ? '#faad14' : '#d48806', marginTop: 2 }}>
+                                            {conflictInfo.hasMonaco && (
+                                                <>⚠ {t('app.shortcuts.message.reserved_conflict_info', { labels: conflictInfo.monacoLabels })}</>
+                                             )}
+                                             {conflictInfo.hasOther && (
+                                                <>⚠ {t('app.shortcuts.message.reserved_conflict_warning', { contexts: conflictInfo.otherContexts, labels: conflictInfo.otherLabels })}</>
+                                             )}
+                                        </div>
+                                    )}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <Input
+                                        readOnly
+                                        value={isCapturing ? t('app.shortcuts.capture_waiting') : getShortcutDisplayLabel(binding.combo, activeShortcutPlatform)}
+                                        style={{ width: 180, fontFamily: resolvedMonoFontFamily }}
+                                    />
+                                    <Button
+                                        size="small"
+                                        onClick={() => setCapturingShortcutAction((prev) => (prev === action ? null : action))}
+                                    >
+                                        {isCapturing ? t('common.cancel') : t('app.shortcuts.action.record')}
+                                    </Button>
+                                    <Switch
+                                        checked={binding.enabled}
+                                        onChange={(checked) => updateShortcut(action, { enabled: checked }, activeShortcutPlatform)}
+                                    />
+                                </div>
+                            </div>
+                        );
+                      })}
+                    </div>
+                  </Modal>
+                );
+              }
+
+              return null;
+            };
+
+            return (
+              <Modal
+                title={renderUtilityModalTitle(<ToolOutlined />, t('app.tools.title'), t('app.tools.description'))}
+                open={isToolsModalOpen}
+                onCancel={() => {
+                  if (activeToolCenterPane?.key === 'connection-package') {
+                    closeConnectionPackageDialog();
+                  }
+                  setActiveToolCenterPane(null);
+                  setToolCenterBackGroupKey(null);
+                  setIsToolsModalOpen(false);
+                }}
+                footer={null}
+                centered
+                width={1080}
+                styles={{
+                  content: toolCenterModalContentStyle,
+                  header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
+                  body: { paddingTop: 8, paddingBottom: 8, overflow: 'hidden', flex: 1, minHeight: 0 },
+                  footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 },
+                }}
+              >
+                <div style={toolCenterModalWorkspaceStyle}>
+                  <div style={toolCenterModalSplitStyle}>
+                    <div style={toolCenterNavPanelStyle}>
+                      <div style={toolCenterNavScrollStyle} role="tablist" aria-orientation="vertical">
+                        {toolCenterGroups.map((group) => {
+                          const active = group.key === activeToolCenterGroup.key;
+                          return (
+                            <button
+                              key={group.key}
+                              type="button"
+                              role="tab"
+                              aria-selected={active}
+                              title={`${group.title} - ${group.description}`}
+                              onClick={() => {
+                                setActiveToolCenterGroupKey(group.key);
+                                setActiveToolCenterPane(null);
+                              }}
+                              style={{
+                                position: 'relative',
+                                textAlign: 'left',
+                                width: '100%',
+                                padding: '11px 10px 11px 14px',
+                                borderRadius: 8,
+                                border: 'none',
+                                background: active
+                                  ? (darkMode ? 'rgba(255,214,102,0.10)' : 'rgba(24,144,255,0.08)')
+                                  : 'transparent',
+                                color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <span
+                                aria-hidden="true"
+                                style={{
+                                  position: 'absolute',
+                                  left: 0,
+                                  top: 10,
+                                  bottom: 10,
+                                  width: 3,
+                                  borderRadius: 999,
+                                  background: active
+                                    ? (darkMode ? '#ffd666' : '#1677ff')
+                                    : 'transparent',
+                                }}
+                              />
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, minWidth: 0 }}>
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                                  <span
+                                    style={{
+                                      width: 28,
+                                      height: 28,
+                                      borderRadius: 8,
+                                      display: 'grid',
+                                      placeItems: 'center',
+                                      fontSize: 15,
+                                      flexShrink: 0,
+                                      background: active
+                                        ? (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.12)')
+                                        : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)'),
+                                      color: active
+                                        ? (darkMode ? '#ffe58f' : '#1677ff')
+                                        : overlayTheme.mutedText,
+                                    }}
+                                  >
+                                    {group.icon}
+                                  </span>
+                                  <span
+                                    style={{
+                                      fontSize: 13,
+                                      fontWeight: active ? 700 : 600,
+                                      minWidth: 0,
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {group.title}
+                                  </span>
+                                </span>
+                                <span
+                                  style={{
+                                    minWidth: 20,
+                                    height: 20,
+                                    paddingInline: 6,
+                                    borderRadius: 999,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    background: active
+                                      ? (darkMode ? 'rgba(255,255,255,0.14)' : 'rgba(24,144,255,0.14)')
+                                      : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)'),
+                                    color: active ? (darkMode ? '#f8fafc' : '#0f172a') : overlayTheme.mutedText,
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {group.items.length}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div style={toolCenterContentPanelStyle}>
+                      {activeToolCenterPane ? (
+                        <div style={toolCenterDetailPanelStyle}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, paddingBottom: 10, borderBottom: `1px solid ${overlayTheme.divider}` }}>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>
+                                {activeToolCenterPaneItem?.title ?? activeToolCenterGroup.title}
+                              </div>
+                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
+                                {activeToolCenterPaneItem?.description ?? activeToolCenterGroup.description}
+                              </div>
+                            </div>
+                            <Button onClick={closeToolCenterPane}>
+                              {t('common.back_to_previous')}
+                            </Button>
+                          </div>
+                          <div style={toolCenterDetailBodyStyle}>
+                            {renderToolCenterPane()}
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ display: 'grid', gap: 4 }}>
+                            <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>{activeToolCenterGroup.title}</div>
+                            <div style={utilityMutedTextStyle}>{activeToolCenterGroup.description}</div>
+                          </div>
+                          <div style={toolCenterScrollableListStyle}>
+                            {activeToolCenterGroup.items.map((item, index) => (
+                              <Button
+                                key={item.key}
+                                type="text"
+                                style={{
+                                  ...toolCenterRowStyle,
+                                  borderTop: index === 0 ? `1px solid ${overlayTheme.divider}` : 'none',
+                                  borderBottom: `1px solid ${overlayTheme.divider}`,
+                                }}
+                                onClick={item.onClick}
+                              >
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                                  <span style={{ width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', background: overlayTheme.iconBg, color: overlayTheme.iconColor, flexShrink: 0 }}>
+                                    {item.icon}
+                                  </span>
+                                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+                                    <span>{item.title}</span>
+                                    <span style={toolCenterRowDescriptionStyle}>{item.description}</span>
+                                  </span>
+                                </span>
+                                <RightOutlined style={{ color: overlayTheme.mutedText, fontSize: 12, flexShrink: 0 }} />
+                              </Button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </Modal>
+            );
+          })()}
           {isSettingsModalOpen && (
           <Modal
-            title={renderUtilityModalTitle(<SettingOutlined />, '设置中心', '集中处理代理、主题、AI 与关于等通用配置入口。')}
+            title={renderUtilityModalTitle(<SettingOutlined />, t('app.settings.title'), t('app.settings.description'))}
             open={isSettingsModalOpen}
             onCancel={() => setIsSettingsModalOpen(false)}
             footer={null}
@@ -3818,10 +3817,20 @@ function App() {
             <div style={{ display: 'grid', gap: 12, padding: '12px 0' }}>
               {[
                 {
+                  key: 'language',
+                  icon: <GlobalOutlined />,
+                  title: t('settings.language.title'),
+                  description: t('settings.language.description'),
+                  onClick: () => {
+                    setIsSettingsModalOpen(false);
+                    setIsLanguageModalOpen(true);
+                  },
+                },
+                {
                   key: 'theme',
                   icon: <SkinOutlined />,
-                  title: '主题与外观',
-                  description: '切换亮暗主题并调整界面观感。',
+                  title: t('app.settings.entry.theme.title'),
+                  description: t('app.settings.entry.theme.description'),
                   onClick: () => {
                     setIsSettingsModalOpen(false);
                     setThemeModalSection('theme');
@@ -3831,8 +3840,8 @@ function App() {
                 {
                   key: 'proxy',
                   icon: <GlobalOutlined />,
-                  title: '全局代理',
-                  description: '统一配置更新检查、驱动管理和公共网络出口。',
+                  title: t('app.settings.entry.proxy.title'),
+                  description: t('app.settings.entry.proxy.description'),
                   onClick: () => {
                     setIsSettingsModalOpen(false);
                     setSecurityUpdateRepairSource(null);
@@ -3842,8 +3851,8 @@ function App() {
                 {
                   key: 'ai',
                   icon: <RobotOutlined />,
-                  title: 'AI 设置',
-                  description: '管理模型供应商、密钥和默认行为。',
+                  title: t('app.settings.entry.ai.title'),
+                  description: t('app.settings.entry.ai.description'),
                   onClick: () => {
                     setIsSettingsModalOpen(false);
                     handleOpenAISettings();
@@ -3852,8 +3861,8 @@ function App() {
                 {
                   key: 'about',
                   icon: <InfoCircleOutlined />,
-                  title: '关于 GoNavi',
-                  description: '查看版本信息、仓库地址和更新状态。',
+                  title: t('app.settings.entry.about.title'),
+                  description: t('app.settings.entry.about.description'),
                   onClick: () => {
                     setIsSettingsModalOpen(false);
                     setIsAboutOpen(true);
@@ -3873,12 +3882,49 @@ function App() {
             </div>
           </Modal>
           )}
+          {isLanguageModalOpen && (
+          <Modal
+            title={renderUtilityModalTitle(<GlobalOutlined />, t('settings.language.title'), t('settings.language.description'))}
+            open={isLanguageModalOpen}
+            onCancel={() => setIsLanguageModalOpen(false)}
+            footer={null}
+            width={520}
+            styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
+          >
+            <LanguageSettingsPanel />
+          </Modal>
+          )}
           {isDataRootModalOpen && (
           <Modal
-            title={renderUtilityModalTitle(<HddOutlined />, '数据存储位置', '统一管理连接、代理、AI 配置与驱动等文件型数据的根目录。')}
+            title={renderUtilityModalTitle(
+              <HddOutlined />,
+              t('app.data_root.title'),
+              t('app.data_root.description'),
+            )}
             open={isDataRootModalOpen}
-            onCancel={() => setIsDataRootModalOpen(false)}
-            footer={null}
+            onCancel={() => {
+              setIsDataRootModalOpen(false);
+              setToolCenterBackGroupKey(null);
+            }}
+            footer={[
+              <Button
+                key="close"
+                onClick={() => {
+                  setIsDataRootModalOpen(false);
+                  setToolCenterBackGroupKey(null);
+                }}
+              >
+                {t('common.close')}
+              </Button>,
+              toolCenterBackGroupKey === 'config' ? (
+                <Button
+                  key="back"
+                  onClick={() => handleReturnToToolCenter(() => setIsDataRootModalOpen(false))}
+                >
+                  {t('common.back_to_previous')}
+                </Button>
+              ) : null,
+            ]}
             width={720}
             styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10 } }}
           >
@@ -3889,54 +3935,54 @@ function App() {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
                 <div style={utilityPanelStyle}>
-                  <div style={{ marginBottom: 10, fontWeight: 600 }}>当前目录</div>
+                  <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.current_directory')}</div>
                   <div style={{ display: 'grid', gap: 10 }}>
                     <Input readOnly value={dataRootInfo?.path || ''} />
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                       <div>
-                        <div style={{ marginBottom: 6, fontWeight: 500 }}>默认目录</div>
+                        <div style={{ marginBottom: 6, fontWeight: 500 }}>{t('app.data_root.default_directory')}</div>
                         <div style={utilityMutedTextStyle}>{dataRootInfo?.defaultPath || '-'}</div>
                       </div>
                       <div>
-                        <div style={{ marginBottom: 6, fontWeight: 500 }}>驱动目录</div>
+                        <div style={{ marginBottom: 6, fontWeight: 500 }}>{t('app.data_root.driver_directory')}</div>
                         <div style={utilityMutedTextStyle}>{dataRootInfo?.driverPath || '-'}</div>
                       </div>
                     </div>
                   </div>
                 </div>
                 <div style={utilityPanelStyle}>
-                  <div style={{ marginBottom: 10, fontWeight: 600 }}>切换目标</div>
+                  <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.switch_target')}</div>
                   <div style={{ display: 'grid', gap: 10 }}>
                     <Input
                       readOnly
                       value={selectedDataRootPath}
-                      placeholder="选择新的数据目录"
+                      placeholder={t('app.data_root.placeholder.select_new_directory')}
                     />
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                       <Button icon={<FolderOpenOutlined />} onClick={() => void handleSelectDataRoot()}>
-                        选择目录
+                        {t('app.data_root.action.select')}
                       </Button>
                       <Button onClick={() => void handleOpenDataRoot()}>
-                        打开当前目录
+                        {t('app.data_root.action.open_current')}
                       </Button>
                       <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false, true)}>
-                        恢复默认目录
+                        {t('app.data_root.action.restore_default_directory')}
                       </Button>
                     </div>
                   </div>
                 </div>
                 <div style={utilityPanelStyle}>
-                  <div style={{ marginBottom: 10, fontWeight: 600 }}>应用方式</div>
+                  <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.data_root.apply_method')}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
                     <Button loading={dataRootApplying} onClick={() => void handleApplyDataRoot(false)}>
-                      仅切换到所选目录
+                      {t('app.data_root.action.switch_only')}
                     </Button>
                     <Button type="primary" loading={dataRootApplying} onClick={() => void handleApplyDataRoot(true)}>
-                      迁移现有数据并切换
+                      {t('app.data_root.action.migrate_and_switch')}
                     </Button>
                   </div>
                   <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
-                    切换后建议重启应用，以确保 AI 与其他长生命周期模块完全切换到新目录。敏感密码仍保存在系统 secret store，不会随文件目录迁移。
+                    {t('app.data_root.restart_hint')}
                   </div>
                 </div>
               </div>
@@ -3946,13 +3992,19 @@ function App() {
           {isSyncModalOpen && (
           <DataSyncModal
             open={isSyncModalOpen}
-            onClose={() => setIsSyncModalOpen(false)}
+            onClose={() => {
+              setIsSyncModalOpen(false);
+              setToolCenterBackGroupKey(null);
+            }}
+            onBack={toolCenterBackGroupKey === 'workflow' ? () => handleReturnToToolCenter(() => setIsSyncModalOpen(false)) : undefined}
+            entryMode={syncModalEntryMode}
           />
           )}
           {isDriverModalOpen && (
           <DriverManagerModal
             open={isDriverModalOpen}
             onClose={handleCloseDriverManager}
+            onBack={toolCenterBackGroupKey === 'workspace' ? () => handleReturnToToolCenter(() => setIsDriverModalOpen(false)) : undefined}
             onOpenGlobalProxySettings={handleOpenGlobalProxySettings}
           />
           )}
@@ -3974,7 +4026,11 @@ function App() {
             status={securityUpdateStatus}
             focusTarget={securityUpdateSettingsFocusTarget}
             focusRequest={securityUpdateSettingsFocusRequest}
-            onClose={() => setIsSecurityUpdateSettingsOpen(false)}
+            onClose={() => {
+              setIsSecurityUpdateSettingsOpen(false);
+              setToolCenterBackGroupKey(null);
+            }}
+            onBack={toolCenterBackGroupKey === 'config' ? () => handleReturnToToolCenter(() => setIsSecurityUpdateSettingsOpen(false)) : undefined}
             onStart={handleStartSecurityUpdate}
             onRetry={handleRetrySecurityUpdate}
             onRestart={handleRestartSecurityUpdate}
@@ -3996,15 +4052,20 @@ function App() {
           />
           )}
           <ConnectionPackagePasswordModal
-            open={connectionPackageDialog.open}
-            title={connectionPackageDialog.mode === 'export' ? '导出连接' : '输入导入密码'}
+            open={connectionPackageDialog.open && !(isToolsModalOpen && activeToolCenterPane?.key === 'connection-package')}
+            title={connectionPackageDialog.mode === 'export'
+                ? t('app.connection_package.dialog.export_title')
+                : t('app.connection_package.dialog.import_password_title')}
             mode={connectionPackageDialog.mode}
             includeSecrets={connectionPackageDialog.includeSecrets}
             useFilePassword={connectionPackageDialog.useFilePassword}
             password={connectionPackageDialog.password}
             error={connectionPackageDialog.error}
             confirmLoading={connectionPackageDialog.confirmLoading}
-            confirmText={connectionPackageDialog.mode === 'export' ? '开始导出' : '开始导入'}
+            confirmText={connectionPackageDialog.mode === 'export'
+                ? t('app.connection_package.action.start_export')
+                : t('app.connection_package.action.start_import')}
+            onBack={toolCenterBackGroupKey === 'config' ? () => handleReturnToToolCenter(closeConnectionPackageDialog) : undefined}
             onIncludeSecretsChange={(value) => {
                 setConnectionPackageDialog((current) => ({
                     ...current,
@@ -4035,25 +4096,25 @@ function App() {
             onCancel={closeConnectionPackageDialog}
           />
           <Modal
-            title={renderUtilityModalTitle(<InfoCircleOutlined />, '关于 GoNavi', '查看版本信息、仓库地址、更新状态与下载入口。')}
+            title={renderUtilityModalTitle(<InfoCircleOutlined />, t('app.about.title'), t('app.about.description'))}
             open={isAboutOpen}
             onCancel={() => setIsAboutOpen(false)}
             styles={{ content: utilityModalShellStyle, header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 }, body: { paddingTop: 8 }, footer: { background: 'transparent', borderTop: 'none', paddingTop: 10, display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end' } }}
             footer={[
                 isBackgroundProgressForLatestUpdate && !isLatestUpdateDownloaded ? (
-                    <Button key="progress" icon={<DownloadOutlined />} onClick={showUpdateDownloadProgress}>下载进度</Button>
+                    <Button key="progress" icon={<DownloadOutlined />} onClick={showUpdateDownloadProgress}>{t('app.about.action.download_progress')}</Button>
                 ) : null,
                 lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded && !isBackgroundProgressForLatestUpdate ? (
-                    <Button key="mute" onClick={() => { updateMutedVersionRef.current = lastUpdateInfo.latestVersion; setIsAboutOpen(false); }}>本次不再提示</Button>
+                    <Button key="mute" onClick={muteLatestUpdate}>{t('app.about.action.mute_this_version')}</Button>
                 ) : null,
-                <Button key="check" icon={<CloudDownloadOutlined />} onClick={() => checkForUpdates(false)}>检查更新</Button>,
-                <Button key="close" onClick={() => setIsAboutOpen(false)}>关闭</Button>,
+                <Button key="check" icon={<CloudDownloadOutlined />} onClick={() => checkForUpdates(false)}>{t('app.about.action.check_updates')}</Button>,
+                <Button key="close" onClick={() => setIsAboutOpen(false)}>{t('common.close')}</Button>,
                 lastUpdateInfo?.hasUpdate && !isLatestUpdateDownloaded && !isBackgroundProgressForLatestUpdate ? (
-                    <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>下载更新</Button>
+                    <Button key="download" type="primary" icon={<DownloadOutlined />} onClick={() => downloadUpdate(lastUpdateInfo, false)}>{t('app.about.action.download_update')}</Button>
                 ) : null,
                 isLatestUpdateDownloaded ? (
                     <Button key="install-direct" type="primary" icon={<DownloadOutlined />} onClick={handleInstallFromProgress}>
-                        {isMacRuntime ? '打开安装目录' : '安装更新'}
+                        {isMacRuntime ? t('app.about.action.open_install_directory') : t('app.about.action.install_update')}
                     </Button>
                 ) : null,
             ].filter(Boolean)}
@@ -4067,45 +4128,45 @@ function App() {
                     <div style={utilityPanelStyle}>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
                             <div>
-                                <div style={{ marginBottom: 6, fontWeight: 600 }}>版本</div>
+                                <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.version')}</div>
                                 <div style={utilityMutedTextStyle}>{aboutDisplayVersion}</div>
                             </div>
                             <div>
-                                <div style={{ marginBottom: 6, fontWeight: 600 }}>作者</div>
-                                <div style={utilityMutedTextStyle}>{aboutInfo?.author || '未知'}</div>
+                                <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.author')}</div>
+                                <div style={utilityMutedTextStyle}>{aboutInfo?.author || t('common.unknown')}</div>
                             </div>
                             <div style={{ gridColumn: '1 / -1' }}>
-                                <div style={{ marginBottom: 6, fontWeight: 600 }}>更新状态</div>
-                                <div style={utilityMutedTextStyle}>{aboutUpdateStatus || '未检查'}</div>
+                                <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.update_status')}</div>
+                                <div style={utilityMutedTextStyle}>{aboutUpdateStatus || t('app.about.update_status.not_checked')}</div>
                             </div>
                             {aboutInfo?.communityUrl ? (
                                 <div style={{ gridColumn: '1 / -1' }}>
-                                    <div style={{ marginBottom: 6, fontWeight: 600 }}>技术圈</div>
-                                    <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.communityUrl) BrowserOpenURL(aboutInfo.communityUrl); }} href={aboutInfo.communityUrl}>AI全书</a>
+                                    <div style={{ marginBottom: 6, fontWeight: 600 }}>{t('app.about.field.community')}</div>
+                                    <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.communityUrl) BrowserOpenURL(aboutInfo.communityUrl); }} href={aboutInfo.communityUrl}>{t('app.about.community.ai_book')}</a>
                                 </div>
                             ) : null}
                         </div>
                     </div>
                     <div style={utilityPanelStyle}>
-                        <div style={{ marginBottom: 10, fontWeight: 600 }}>项目入口</div>
+                        <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.about.project_links')}</div>
                         <div style={{ display: 'grid', gap: 10 }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <GithubOutlined />
                                 {aboutInfo?.repoUrl ? (
                                     <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.repoUrl) BrowserOpenURL(aboutInfo.repoUrl); }} href={aboutInfo.repoUrl}>{aboutInfo.repoUrl}</a>
-                                ) : '未知'}
+                                ) : t('common.unknown')}
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <BugOutlined />
                                 {aboutInfo?.issueUrl ? (
                                     <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.issueUrl) BrowserOpenURL(aboutInfo.issueUrl); }} href={aboutInfo.issueUrl}>{aboutInfo.issueUrl}</a>
-                                ) : '未知'}
+                                ) : t('common.unknown')}
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <CloudDownloadOutlined />
                                 {aboutInfo?.releaseUrl ? (
                                     <a onClick={(e) => { e.preventDefault(); if (aboutInfo?.releaseUrl) BrowserOpenURL(aboutInfo.releaseUrl); }} href={aboutInfo.releaseUrl}>{aboutInfo.releaseUrl}</a>
-                                ) : '未知'}
+                                ) : t('common.unknown')}
                             </div>
                         </div>
                     </div>
@@ -4117,10 +4178,10 @@ function App() {
           <Modal
               title={renderUtilityModalTitle(
                   themeModalSection === 'theme' ? <SkinOutlined /> : <BgColorsOutlined />,
-                  themeModalSection === 'theme' ? '主题设置' : '外观设置',
+                  themeModalSection === 'theme' ? t('app.theme.theme_settings_title') : t('app.theme.appearance_settings_title'),
                   themeModalSection === 'theme'
-                      ? '切换亮暗主题，保持整体视觉风格统一。'
-                      : '统一调整缩放、字体、透明度与模糊效果。'
+                      ? t('app.theme.theme_settings_description')
+                      : t('app.theme.appearance_settings_description')
               )}
               open={isThemeModalOpen}
               onCancel={() => { setIsThemeModalOpen(false); setThemeModalSection('theme'); }}
@@ -4130,11 +4191,11 @@ function App() {
           >
               <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 16, padding: '12px 0', height: '100%', minHeight: 0, overflow: 'hidden', alignItems: 'stretch' }}>
                   <div style={{ ...utilityPanelStyle, padding: 12, height: 'fit-content' }}>
-                      <div style={{ marginBottom: 12, fontWeight: 600 }}>设置导航</div>
+                      <div style={{ marginBottom: 12, fontWeight: 600 }}>{t('app.theme.navigation_title')}</div>
                       <div style={{ display: 'grid', gap: 10 }}>
                           {[
-                              { key: 'theme', title: '主题模式', description: '亮色与暗色切换', icon: <SkinOutlined /> },
-                              { key: 'appearance', title: '外观参数', description: '缩放、字体与透明度', icon: <BgColorsOutlined /> },
+                              { key: 'theme', title: t('app.theme.nav.theme.title'), description: t('app.theme.nav.theme.description'), icon: <SkinOutlined /> },
+                              { key: 'appearance', title: t('app.theme.nav.appearance.title'), description: t('app.theme.nav.appearance.description'), icon: <BgColorsOutlined /> },
                           ].map((item) => {
                               const active = themeModalSection === item.key;
                               return (
@@ -4173,7 +4234,7 @@ function App() {
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                               <div style={utilityPanelStyle}>
                                   <div style={{ marginBottom: 10, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                      <span>界面版本</span>
+                                      <span>{t('app.theme.ui_version.title')}</span>
                                       <span style={{
                                           fontSize: 10,
                                           fontWeight: 700,
@@ -4182,16 +4243,16 @@ function App() {
                                           color: darkMode ? '#7dd3fc' : '#0284c7',
                                           borderRadius: 4,
                                       }}>
-                                          NEW
+                                          {t('app.theme.ui_version.badge.new')}
                                       </span>
                                   </div>
                                   <div style={{ ...utilityMutedTextStyle, marginBottom: 12 }}>
-                                      在保留全部功能的前提下切换整体外观，新版采用更紧凑的信息层级与更现代的视觉语言。
+                                      {t('app.theme.ui_version.description')}
                                   </div>
                                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
                                       {[
-                                          { key: 'legacy', label: '旧版 UI', description: '当前稳定界面，所有功能完整可用。', badge: '默认' },
-                                          { key: 'v2', label: '新版 UI', description: '重新设计的紧凑界面，强化 AI 入口与表概览。', badge: 'Beta' },
+                                          { key: 'legacy', label: t('app.theme.ui_version.legacy.label'), description: t('app.theme.ui_version.legacy.description'), badge: t('app.theme.ui_version.legacy.badge') },
+                                          { key: 'v2', label: t('app.theme.ui_version.v2.label'), description: t('app.theme.ui_version.v2.description'), badge: t('app.theme.ui_version.v2.badge') },
                                       ].map((item) => {
                                           const active = (appearance.uiVersion ?? 'legacy') === item.key;
                                           return (
@@ -4246,7 +4307,7 @@ function App() {
                                       })}
                                   </div>
                                   <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
-                                      Windows、macOS 与 Linux 均可切换；切换后立即生效，部分弹窗会在下次打开时使用新样式。
+                                      {t('app.theme.ui_version.platform_hint')}
                                   </div>
                                   {appearance.uiVersion === 'v2' && (
                                       <div style={{
@@ -4259,33 +4320,33 @@ function App() {
                                           color: darkMode ? 'rgba(252,211,77,0.92)' : 'rgba(120,53,15,0.85)',
                                           lineHeight: 1.55,
                                       }}>
-                                          新版 UI 仍在 Beta，部分屏幕样式可能与旧版有差异，遇到问题可随时切回。
+                                          {t('app.theme.ui_version.beta_warning')}
                                       </div>
                                   )}
                                   {appearance.uiVersion === 'v2' && (
                                       <div style={{ marginTop: 14 }}>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>新版左侧搜索模式</div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.ui_version.sidebar_search.title')}</div>
                                           <Segmented
                                               block
                                               options={[
-                                                  { label: '新版命令搜索', value: 'command' },
-                                                  { label: '旧版侧栏筛选', value: 'filter' },
+                                                  { label: t('app.theme.ui_version.sidebar_search.command'), value: 'command' },
+                                                  { label: t('app.theme.ui_version.sidebar_search.filter'), value: 'filter' },
                                               ]}
                                               value={appearance.v2SidebarSearchMode ?? 'command'}
                                               onChange={(value) => setAppearance({ v2SidebarSearchMode: value as 'command' | 'filter' })}
                                           />
                                           <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
-                                              新版命令搜索适合跳转连接、表和动作，可在面板中开启同步开关持续过滤左侧树；旧版侧栏筛选会直接显示输入框并持久保留筛选内容。
+                                              {t('app.theme.ui_version.sidebar_search.hint')}
                                           </div>
                                       </div>
                                   )}
                               </div>
                               <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 10, fontWeight: 600 }}>主题模式</div>
+                                  <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.theme.mode_title')}</div>
                                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
                                       {[
-                                          { key: 'light', label: '亮色主题', description: '适合明亮环境，层次更轻。' },
-                                          { key: 'dark', label: '暗色主题', description: '适合低光环境，视觉更沉稳。' },
+                                          { key: 'light', label: t('app.theme.mode.light.label'), description: t('app.theme.mode.light.description') },
+                                          { key: 'dark', label: t('app.theme.mode.dark.label'), description: t('app.theme.mode.dark.description') },
                                       ].map((item) => {
                                           const active = themeMode === item.key;
                                           return (
@@ -4323,7 +4384,7 @@ function App() {
                       ) : (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                               <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>界面缩放 (UI Scale)</div>
+                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.ui_scale_title')}</div>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                       <Slider
                                         min={MIN_UI_SCALE}
@@ -4336,11 +4397,11 @@ function App() {
                                       <span style={{ width: 56 }}>{Math.round(effectiveUiScale * 100)}%</span>
                                   </div>
                                   <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
-                                      * 建议小屏设备设置为 85%-95%
+                                      {t('app.theme.appearance.ui_scale_hint')}
                                   </div>
                               </div>
                               <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>基础字体大小 (Font Size)</div>
+                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.font_size_title')}</div>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                       <Slider
                                         min={MIN_FONT_SIZE}
@@ -4354,10 +4415,10 @@ function App() {
                                   </div>
                               </div>
                               <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>字体族</div>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.font_family.title')}</div>
                                   <div style={{ display: 'grid', gap: 14 }}>
                                       <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>界面字体 (UI Font Family)</div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.font_family.ui_title')}</div>
                                           <Select
                                               allowClear
                                               showSearch
@@ -4383,10 +4444,10 @@ function App() {
                                           />
                                           <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>
                                               {fontFamiliesLoadError
-                                                  ? `系统字体加载失败，当前回退常见字体预置：${fontFamiliesLoadError}`
+                                                  ? t('app.theme.font_family.load_failed_fallback', { error: fontFamiliesLoadError })
                                                   : (installedFontFamilies.length > 0
-                                                      ? `已读取当前系统 ${installedFontFamilies.length} 个字体族，支持输入搜索匹配。清空后回退默认 UI 字体。`
-                                                      : '按当前系统实时加载已安装字体，支持输入搜索匹配。清空后回退默认 UI 字体。')}
+                                                      ? t('app.theme.font_family.loaded_ui_hint', { count: installedFontFamilies.length })
+                                                      : t('app.theme.font_family.loading_ui_hint'))}
                                           </div>
                                           {linuxCJKFontInstallHint && hasLoadedInstalledFontsRef.current && !isFontFamiliesLoading && !fontFamiliesLoadError && (
                                               <div
@@ -4401,14 +4462,14 @@ function App() {
                                                       lineHeight: 1.7,
                                                   }}
                                               >
-                                                  Ubuntu/Linux 未检测到中文 CJK 字体，界面可能显示方框。请安装：
+                                                  {t('app.theme.font_family.linux_cjk_install_prefix')}
                                                   <span style={{ fontFamily: 'var(--gn-font-mono)', marginLeft: 6 }}>{linuxCJKFontInstallHint}</span>
-                                                  ，然后重启 GoNavi。
+                                                  {t('app.theme.font_family.linux_cjk_install_suffix')}
                                               </div>
                                           )}
                                       </div>
                                       <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>代码字体 (Mono Font Family)</div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.font_family.mono_title')}</div>
                                           <Select
                                               allowClear
                                               showSearch
@@ -4434,8 +4495,8 @@ function App() {
                                           />
                                           <div style={{ ...utilityMutedTextStyle, marginTop: 6 }}>
                                               {fontFamiliesLoadError
-                                                  ? '当前已回退常见代码字体预置。作用于 SQL 编辑器、AI 代码块、日志、DDL 与数据表等宽内容。'
-                                                  : '优先展示当前系统已安装字体，名称接近 Mono/Code/Console 的字体会靠前。作用于 SQL 编辑器、AI 代码块、日志、DDL 与数据表等宽内容。'}
+                                                  ? t('app.theme.font_family.mono_fallback_hint')
+                                                  : t('app.theme.font_family.mono_hint')}
                                           </div>
                                       </div>
                                   </div>
@@ -4443,16 +4504,16 @@ function App() {
                               <div ref={tabDisplaySettingsPanelRef} style={utilityPanelStyle}>
                                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
                                       <div style={{ minWidth: 0 }}>
-                                          <div style={{ fontWeight: 500 }}>Tab 标签展示</div>
+                                          <div style={{ fontWeight: 500 }}>{t('app.theme.tab_display.title')}</div>
                                           <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
-                                              自定义连接名、对象类型、对象名、数据库、Schema 和 Host/IP 的展示顺序；双行模式可把上下文放到副行。
+                                              {t('app.theme.tab_display.description')}
                                           </div>
                                       </div>
                                       <Segmented
                                           size="small"
                                           options={[
-                                              { label: '单行', value: 'single' },
-                                              { label: '双行', value: 'double' },
+                                              { label: t('app.theme.tab_display.layout.single'), value: 'single' },
+                                              { label: t('app.theme.tab_display.layout.double'), value: 'double' },
                                           ]}
                                           value={tabDisplaySettings.layout}
                                           onChange={(value) => setTabDisplayLayout(value as TabDisplayLayout)}
@@ -4460,7 +4521,6 @@ function App() {
                                   </div>
                                   <div style={{ display: 'grid', gap: 8 }}>
                                       {tabDisplayElementOrder.map((key) => {
-                                          const meta = TAB_DISPLAY_ELEMENT_META[key];
                                           const checked = visibleTabDisplayElementKeys.has(key);
                                           const row = tabDisplaySettings.secondaryElements.includes(key) ? 'secondary' : 'primary';
                                           const currentRowElements = row === 'secondary'
@@ -4533,7 +4593,7 @@ function App() {
                                                       />
                                                       <div style={{ minWidth: 0 }}>
                                                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                                                              <span style={{ fontWeight: 600 }}>{meta.label}</span>
+                                                              <span style={{ fontWeight: 600 }}>{getTabDisplayElementLabel(key)}</span>
                                                               {isFocused ? (
                                                                   <span style={{
                                                                       fontSize: 10,
@@ -4543,7 +4603,7 @@ function App() {
                                                                       background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)',
                                                                       color: darkMode ? '#ffd666' : '#1677ff',
                                                                   }}>
-                                                                      当前
+                                                                      {t('app.theme.tab_display.badge.current')}
                                                                   </span>
                                                               ) : null}
                                                               {checked && tabDisplaySettings.layout === 'double' ? (
@@ -4559,11 +4619,13 @@ function App() {
                                                                           ? (darkMode ? '#7dd3fc' : '#0369a1')
                                                                           : (darkMode ? '#86efac' : '#15803d'),
                                                                   }}>
-                                                                      {row === 'secondary' ? '副行' : '主行'}
+                                                                      {row === 'secondary'
+                                                                          ? t('app.theme.tab_display.row.secondary')
+                                                                          : t('app.theme.tab_display.row.primary')}
                                                                   </span>
                                                               ) : null}
                                                           </div>
-                                                          <div style={{ ...utilityMutedTextStyle, marginTop: 2 }}>{meta.description}</div>
+                                                          <div style={{ ...utilityMutedTextStyle, marginTop: 2 }}>{getTabDisplayElementDescription(key)}</div>
                                                       </div>
                                                   </div>
                                                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -4571,8 +4633,8 @@ function App() {
                                                           <Segmented
                                                               size="small"
                                                               options={[
-                                                                  { label: '主行', value: 'primary' },
-                                                                  { label: '副行', value: 'secondary' },
+                                                                  { label: t('app.theme.tab_display.row.primary'), value: 'primary' },
+                                                                  { label: t('app.theme.tab_display.row.secondary'), value: 'secondary' },
                                                               ]}
                                                               value={row}
                                                               onChange={(value) => setTabDisplayElementRow(key, value as 'primary' | 'secondary')}
@@ -4587,7 +4649,7 @@ function App() {
                                                               moveTabDisplayElement(key, -1);
                                                           }}
                                                       >
-                                                          上移
+                                                          {t('app.theme.tab_display.action.move_up')}
                                                       </Button>
                                                       <Button
                                                           size="small"
@@ -4597,7 +4659,7 @@ function App() {
                                                               moveTabDisplayElement(key, 1);
                                                           }}
                                                       >
-                                                          下移
+                                                          {t('app.theme.tab_display.action.move_down')}
                                                       </Button>
                                                   </div>
                                               </div>
@@ -4605,28 +4667,33 @@ function App() {
                                       })}
                                   </div>
                                   <div style={{ ...utilityMutedTextStyle, marginTop: 10 }}>
-                                      当前预览：{tabDisplaySettings.layout === 'double' ? '主行 ' : ''}
-                                      {tabDisplaySettings.primaryElements.map((key) => TAB_DISPLAY_ELEMENT_META[key].label).join(' / ') || '默认标签'}
+                                      {t('app.theme.tab_display.preview.prefix')}
+                                      {tabDisplaySettings.layout === 'double' ? `${t('app.theme.tab_display.row.primary')} ` : ''}
+                                      {tabDisplaySettings.primaryElements.map(getTabDisplayElementLabel).join(' / ') || t('app.theme.tab_display.preview.default_label')}
                                       {tabDisplaySettings.layout === 'double' && tabDisplaySettings.secondaryElements.length > 0
-                                          ? `，副行 ${tabDisplaySettings.secondaryElements.map((key) => TAB_DISPLAY_ELEMENT_META[key].label).join(' / ')}`
+                                          ? t('app.theme.tab_display.preview.secondary', {
+                                              labels: tabDisplaySettings.secondaryElements.map(getTabDisplayElementLabel).join(' / '),
+                                          })
                                           : ''}
                                       {focusedTabDisplayElementKey
-                                          ? `；当前选中 ${TAB_DISPLAY_ELEMENT_META[focusedTabDisplayElementKey].label}`
+                                          ? t('app.theme.tab_display.preview.focused', {
+                                              label: getTabDisplayElementLabel(focusedTabDisplayElementKey),
+                                          })
                                           : ''}
                                   </div>
                               </div>
                               <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>透明与模糊效果</div>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.appearance.transparency_blur_title')}</div>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
                                       <div>
-                                          <div style={{ fontWeight: 500 }}>启用透明与模糊</div>
-                                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>关闭后保留当前阈值，重新开启时直接恢复之前的设置。</div>
+                                          <div style={{ fontWeight: 500 }}>{t('app.theme.appearance.enable_transparency_blur')}</div>
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.theme.appearance.enable_transparency_blur_hint')}</div>
                                       </div>
                                       <Switch checked={appearance.enabled !== false} onChange={(checked) => setAppearance({ enabled: checked })} />
                                   </div>
                                   <div style={{ display: 'grid', gap: 14, opacity: appearance.enabled !== false ? 1 : 0.6 }}>
                                       <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>背景不透明度 (Opacity)</div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.opacity_title')}</div>
                                           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                                               <Slider 
                                                 min={0.1} 
@@ -4641,10 +4708,10 @@ function App() {
                                           </div>
                                       </div>
                                       <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>高斯模糊 (Blur)</div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.blur_title')}</div>
                                           {isWindowsPlatform() ? (
                                               <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
-                                                  Windows 使用系统 Acrylic 效果，模糊程度由系统控制
+                                                  {t('app.theme.appearance.windows_acrylic_hint')}
                                               </div>
                                           ) : (
                                               <>
@@ -4660,7 +4727,7 @@ function App() {
                                                       <span style={{ width: 40 }}>{appearance.blur}px</span>
                                                   </div>
                                                   <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
-                                                      * 仅控制应用内覆盖层的模糊效果
+                                                      {t('app.theme.appearance.blur_hint')}
                                                   </div>
                                               </>
                                           )}
@@ -4668,12 +4735,12 @@ function App() {
                                   </div>
                               </div>
                               <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>数据表显示</div>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.data_table.title')}</div>
                                   <div style={{ display: 'grid', gap: 14 }}>
                                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                                           <div>
-                                              <div style={{ fontWeight: 500 }}>显示数据表竖向分隔线</div>
-                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>仅作用于数据表页面 DataGrid，不影响其他表格组件。</div>
+                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.vertical_borders')}</div>
+                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.theme.data_table.vertical_borders_hint')}</div>
                                           </div>
                                           <Switch
                                               checked={appearance.showDataTableVerticalBorders === true}
@@ -4681,20 +4748,23 @@ function App() {
                                           />
                                       </div>
                                       <div>
-                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>表格密度</div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.data_table.density')}</div>
                                           <Segmented
                                               block
-                                              options={DENSITY_OPTIONS}
+                                              options={DENSITY_OPTIONS.map((option) => ({
+                                                  ...option,
+                                                  label: t(`app.theme.data_table.density.${option.value}`),
+                                              }))}
                                               value={appearance.dataTableDensity}
                                               onChange={(value) => setAppearance({ dataTableDensity: sanitizeDataTableDensity(value) })}
                                           />
                                           <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
-                                              控制行高、列宽和内边距。舒适适合大屏细看；紧凑适合最大化信息密度。已手动拖拽的列宽优先保留。
+                                              {t('app.theme.data_table.density_hint')}
                                           </div>
                                       </div>
                                       <div>
                                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-                                              <div style={{ fontWeight: 500 }}>数据表字体大小</div>
+                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.font_size')}</div>
                                               <Button
                                                   size="small"
                                                   type={dataTableFontSizeFollowsGlobal ? 'primary' : 'default'}
@@ -4705,7 +4775,7 @@ function App() {
                                                           : null,
                                                   })}
                                               >
-                                                  跟随全局
+                                                  {t('app.theme.data_table.follow_global')}
                                               </Button>
                                           </div>
                                           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -4726,7 +4796,7 @@ function App() {
                                       </div>
                                       <div>
                                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-                                              <div style={{ fontWeight: 500 }}>左侧库表字体大小</div>
+                                              <div style={{ fontWeight: 500 }}>{t('app.theme.data_table.sidebar_tree_font_size')}</div>
                                               <Button
                                                   size="small"
                                                   type={sidebarTreeFontSizeFollowsGlobal ? 'primary' : 'default'}
@@ -4737,7 +4807,7 @@ function App() {
                                                           : null,
                                                   })}
                                               >
-                                                  跟随全局
+                                                  {t('app.theme.data_table.follow_global')}
                                               </Button>
                                           </div>
                                           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
@@ -4760,11 +4830,11 @@ function App() {
                               </div>
                               {isMacRuntime ? (
                                   <div style={utilityPanelStyle}>
-                                      <div style={{ marginBottom: 8, fontWeight: 500 }}>macOS 窗口控制</div>
+                                      <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.mac_window.title')}</div>
                                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                                           <div>
-                                              <div style={{ fontWeight: 500 }}>使用 macOS 原生窗口控制</div>
-                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>启用后显示左上角红黄绿按钮，并优先使用 macOS 原生全屏行为。</div>
+                                              <div style={{ fontWeight: 500 }}>{t('app.theme.mac_window.use_native_controls')}</div>
+                                              <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>{t('app.theme.mac_window.use_native_controls_hint')}</div>
                                           </div>
                                           <Switch
                                               checked={appearance.useNativeMacWindowControls === true}
@@ -4772,18 +4842,18 @@ function App() {
                                           />
                                       </div>
                                       <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 8 }}>
-                                          * 已同步隐藏右上角自定义按钮；如系统窗口样式未立即刷新，可重启应用后再确认
+                                          {t('app.theme.mac_window.restart_hint')}
                                       </div>
                                   </div>
                               ) : null}
                               <div style={utilityPanelStyle}>
-                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>启动窗口</div>
+                                  <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.startup_window.title')}</div>
                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                                      <span>{isWindowsRuntime ? '启动时全屏（Windows 按最大化处理）' : '启动时全屏'}</span>
+                                      <span>{isWindowsRuntime ? t('app.theme.startup_window.fullscreen_windows') : t('app.theme.startup_window.fullscreen')}</span>
                                       <Switch checked={startupFullscreen} onChange={(checked) => setStartupFullscreen(checked)} />
                                   </div>
                                   <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 4 }}>
-                                      {isWindowsRuntime ? '* Windows 下该选项按“启动时最大化”处理，修改后下次启动生效' : '* 修改后下次启动生效'}
+                                      {isWindowsRuntime ? t('app.theme.startup_window.windows_hint') : t('app.theme.startup_window.hint')}
                                   </div>
                               </div>
                               <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, paddingTop: 8, paddingBottom: 12 }}>
@@ -4794,7 +4864,7 @@ function App() {
                                            setAppearance({ ...DEFAULT_APPEARANCE });
                                        }}
                                    >
-                                       恢复默认
+                                       {t('app.theme.action.restore_defaults')}
                                   </Button>
                               </div>
                           </div>
@@ -4806,11 +4876,16 @@ function App() {
 
           {isShortcutModalOpen && (
           <Modal
-              title={renderUtilityModalTitle(<LinkOutlined />, '快捷键管理', '统一查看、录制与启停常用快捷键，保持操作习惯一致。')}
+              title={renderUtilityModalTitle(
+                  <LinkOutlined />,
+                  t('app.shortcuts.title'),
+                  t('app.shortcuts.description'),
+              )}
               open={isShortcutModalOpen}
               onCancel={() => {
                   setIsShortcutModalOpen(false);
                   setCapturingShortcutAction(null);
+                  setToolCenterBackGroupKey(null);
               }}
               width={760}
               centered
@@ -4830,13 +4905,13 @@ function App() {
                   <Button
                       key="reset"
                       onClick={() => {
-                          resetShortcutOptions();
-                          setCapturingShortcutAction(null);
-                          void message.success('已恢复默认快捷键');
-                      }}
-                  >
-                      恢复默认
-                  </Button>,
+                           resetShortcutOptions();
+                           setCapturingShortcutAction(null);
+                           void message.success(t('app.shortcuts.message.restored_defaults'));
+                       }}
+                   >
+                       {t('app.shortcuts.action.restore_defaults')}
+                   </Button>,
                   <Button
                       key="close"
                       type="primary"
@@ -4845,14 +4920,25 @@ function App() {
                           setCapturingShortcutAction(null);
                       }}
                   >
-                      关闭
+                       {t('common.close')}
                   </Button>,
+                  toolCenterBackGroupKey === 'workspace' ? (
+                    <Button
+                        key="back"
+                        onClick={() => handleReturnToToolCenter(() => {
+                            setIsShortcutModalOpen(false);
+                            setCapturingShortcutAction(null);
+                        })}
+                    >
+                        {t('common.back_to_previous')}
+                    </Button>
+                  ) : null,
               ]}
           >
               <div data-gonavi-shortcut-modal-scroll="true" style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column', gap: 16, paddingTop: 8, paddingRight: 8 }}>
                   <div style={utilityPanelStyle}>
                       <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>
-                          点击“录制”后按下快捷键。按 Esc 可取消录制。全局快捷键建议包含修饰键；AI 聊天发送仅支持 Enter 相关组合，Shift+Enter 保留换行。
+                           {t('app.shortcuts.capture_hint')}
                       </div>
                   </div>
                   {SHORTCUT_ACTION_ORDER.map((action) => {
@@ -4882,25 +4968,25 @@ function App() {
                                   {conflictInfo && (
                                       <div style={{ fontSize: 11, color: darkMode ? '#faad14' : '#d48806', marginTop: 2 }}>
                                           {conflictInfo.hasMonaco && (
-                                              <>⚠ 已覆盖编辑器「{conflictInfo.monacoLabels}」默认快捷键</>
-                                          )}
-                                          {conflictInfo.hasOther && (
-                                              <>⚠ 与{conflictInfo.otherContexts}「{conflictInfo.otherLabels}」冲突，可能失效</>
-                                          )}
+                                              <>⚠ {t('app.shortcuts.message.reserved_conflict_info', { labels: conflictInfo.monacoLabels })}</>
+                                           )}
+                                           {conflictInfo.hasOther && (
+                                              <>⚠ {t('app.shortcuts.message.reserved_conflict_warning', { contexts: conflictInfo.otherContexts, labels: conflictInfo.otherLabels })}</>
+                                           )}
                                       </div>
                                   )}
                               </div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                   <Input
                                       readOnly
-                                      value={isCapturing ? '请按下快捷键...' : getShortcutDisplayLabel(binding.combo, activeShortcutPlatform)}
+                                      value={isCapturing ? t('app.shortcuts.capture_waiting') : getShortcutDisplayLabel(binding.combo, activeShortcutPlatform)}
                                       style={{ width: 180, fontFamily: resolvedMonoFontFamily }}
                                   />
                                   <Button
                                       size="small"
                                       onClick={() => setCapturingShortcutAction((prev) => (prev === action ? null : action))}
                                   >
-                                      {isCapturing ? '取消' : '录制'}
+                                      {isCapturing ? t('common.cancel') : t('app.shortcuts.action.record')}
                                   </Button>
                                   <Switch
                                       checked={binding.enabled}
@@ -4916,14 +5002,18 @@ function App() {
           {isSnippetModalOpen && (
           <SnippetSettingsModal
               open={isSnippetModalOpen}
-              onClose={() => setIsSnippetModalOpen(false)}
+              onClose={() => {
+                  setIsSnippetModalOpen(false);
+                  setToolCenterBackGroupKey(null);
+              }}
+              onBack={toolCenterBackGroupKey === 'workspace' ? () => handleReturnToToolCenter(() => setIsSnippetModalOpen(false)) : undefined}
               darkMode={darkMode}
               overlayTheme={overlayTheme}
           />
           )}
           {isProxyModalOpen && (
           <Modal
-              title={renderUtilityModalTitle(<GlobalOutlined />, '全局代理设置', '统一配置更新检查、驱动管理与未单独指定代理的连接网络出口。')}
+              title={renderUtilityModalTitle(<GlobalOutlined />, t('app.proxy.title'), t('app.proxy.description'))}
               open={isProxyModalOpen}
               onCancel={handleCloseGlobalProxySettings}
               footer={null}
@@ -4932,14 +5022,14 @@ function App() {
           >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: '12px 0' }}>
                   <div style={utilityPanelStyle}>
-                      <div style={{ marginBottom: 8, fontWeight: 500 }}>全局代理</div>
+                      <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.proxy.section_title')}</div>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                          <span>启用全局代理</span>
+                          <span>{t('app.proxy.enable')}</span>
                           <Switch checked={globalProxy.enabled} onChange={(checked) => setGlobalProxy({ enabled: checked })} />
                       </div>
                       <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, opacity: globalProxy.enabled ? 1 : 0.7 }}>
                           <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>代理类型</div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.type')}</div>
                               <Select
                                   value={globalProxy.type}
                                   disabled={!globalProxy.enabled}
@@ -4951,7 +5041,7 @@ function App() {
                               />
                           </div>
                           <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>端口</div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.port')}</div>
                               <InputNumber
                                   min={1}
                                   max={65535}
@@ -4964,16 +5054,16 @@ function App() {
                               />
                           </div>
                           <div style={{ gridColumn: '1 / span 2' }}>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>代理地址</div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.host')}</div>
                               <Input
-                                  placeholder="例如：127.0.0.1"
+                                  placeholder={t('app.proxy.host_placeholder')}
                                   value={globalProxy.host}
                                   disabled={!globalProxy.enabled}
                                   onChange={(e) => setGlobalProxy({ host: e.target.value })}
                               />
                           </div>
                           <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>用户名（可选）</div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.username_optional')}</div>
                               <Input
                                   placeholder="proxy-user"
                                   value={globalProxy.user}
@@ -4982,7 +5072,7 @@ function App() {
                               />
                           </div>
                           <div>
-                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>密码（可选）</div>
+                              <div style={{ marginBottom: 6, fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)' }}>{t('app.proxy.password_optional')}</div>
                               <Input.Password
                                   placeholder="proxy-password"
                                   value={globalProxy.password}
@@ -4992,7 +5082,7 @@ function App() {
                           </div>
                       </div>
                       <div style={{ fontSize: 12, color: darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)', marginTop: 6 }}>
-                          * 作用于更新检查、驱动管理网络请求，以及未单独配置代理的数据库连接
+                          {t('app.proxy.scope_hint')}
                       </div>
                   </div>
               </div>
@@ -5000,7 +5090,9 @@ function App() {
           )}
 
           <Modal
-              title={updateDownloadProgress.version ? `下载更新 ${updateDownloadProgress.version}` : '下载更新'}
+              title={updateDownloadProgress.version
+                  ? t('app.about.download_progress.title_with_version', { version: updateDownloadProgress.version })
+                  : t('app.about.download_progress.title')}
               open={updateDownloadProgress.open}
               closable
               maskClosable
@@ -5010,19 +5102,19 @@ function App() {
                   <Button
                       key="background"
                       onClick={() => {
-                          updateUserDismissedRef.current = true;
+                          markUpdateProgressDismissed();
                           hideUpdateDownloadProgress();
                       }}
                   >
-                      隐藏到后台
+                      {t('app.about.action.hide_to_background')}
                   </Button>
               ] : (updateDownloadProgress.status === 'done' ? [
-                  <Button key="close" onClick={hideUpdateDownloadProgress}>关闭</Button>,
+                  <Button key="close" onClick={hideUpdateDownloadProgress}>{t('common.close')}</Button>,
                   <Button key="install" type="primary" onClick={handleInstallFromProgress}>
-                      {isMacRuntime ? '打开安装目录' : '安装更新'}
+                      {isMacRuntime ? t('app.about.action.open_install_directory') : t('app.about.action.install_update')}
                   </Button>
               ] : (updateDownloadProgress.status === 'error' ? [
-                  <Button key="close" onClick={hideUpdateDownloadProgress}>关闭</Button>
+                  <Button key="close" onClick={hideUpdateDownloadProgress}>{t('common.close')}</Button>
               ] : null))}
           >
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

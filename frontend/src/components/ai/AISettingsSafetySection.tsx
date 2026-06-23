@@ -7,7 +7,7 @@ import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 const SAFETY_OPTIONS: { label: string; value: AISafetyLevel; desc: string; color: string; icon: string }[] = [
   { label: '只读模式', value: 'readonly', desc: 'AI 仅可执行 SELECT 等查询操作，最安全', color: '#22c55e', icon: '🔒' },
   { label: '读写模式', value: 'readwrite', desc: 'AI 可执行 INSERT/UPDATE/DELETE，危险操作需二次确认', color: '#f59e0b', icon: '⚠️' },
-  { label: '完全模式', value: 'full', desc: 'AI 可执行所有操作（含 DDL），高危操作自动告警', color: '#ef4444', icon: '🔓' },
+  { label: '完全模式', value: 'full', desc: 'AI 可执行所有操作（含 DDL/过程调用），高危或未识别操作会告警', color: '#ef4444', icon: '🔓' },
 ];
 
 interface AISettingsSafetySectionProps {

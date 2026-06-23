@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import { BUILTIN_AI_TOOL_INFO, buildAvailableAIChatTools } from './aiToolRegistry';
+
+const source = readFileSync(new URL('./aiToolRegistry.ts', import.meta.url), 'utf8');
 
 describe('aiToolRegistry', () => {
   it('registers the ai-runtime inspector as a builtin tool', () => {
@@ -306,5 +309,28 @@ describe('aiToolRegistry', () => {
     expect(tools.some((item) => item.function.name === 'inspect_sql_snippets')).toBe(true);
     expect(tools.some((item) => item.function.name === 'inspect_shortcuts')).toBe(true);
     expect(tools.some((item) => item.function.name === 'custom_probe')).toBe(true);
+  });
+
+  it('localizes MCP fallback descriptions while preserving raw server and tool names', () => {
+    const tools = buildAvailableAIChatTools([{
+      alias: 'raw_alias',
+      originalName: 'raw_original_name',
+      serverId: 'server-raw',
+      serverName: 'raw-server.local',
+      title: 'raw_tool_title',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+        },
+      },
+    }], (key, params) => `${key}: ${params?.toolName} @ ${params?.serverName}`);
+
+    const mcpTool = tools.find((item) => item.function.name === 'raw_alias');
+
+    expect(source).not.toContain('提供的 MCP 工具');
+    expect(mcpTool?.function.description).toBe(
+      'ai_chat.tools.mcp_fallback_description: raw_tool_title @ raw-server.local',
+    );
   });
 });

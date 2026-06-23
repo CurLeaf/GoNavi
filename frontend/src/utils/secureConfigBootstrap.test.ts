@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
+import { t as translate } from '../i18n';
 import { LEGACY_PERSIST_KEY } from './legacyConnectionStorage';
 import {
   bootstrapSecureConfig,
@@ -8,6 +10,7 @@ import {
   startSecurityUpdateFromBootstrap,
 } from './secureConfigBootstrap';
 import { stripLegacyPersistedConnectionById } from './legacyConnectionStorage';
+import { stripLegacySavedQueries } from './savedQueryPersistence';
 
 const legacyPayload = JSON.stringify({
   state: {
@@ -35,6 +38,8 @@ const legacyPayload = JSON.stringify({
     },
   },
 });
+
+const en = (key: string) => translate(key, undefined, 'en-US');
 
 const createMemoryStorage = () => {
   const data = new Map<string, string>();
@@ -96,6 +101,46 @@ describe('secureConfigBootstrap', () => {
         action: 'open_proxy_settings',
       }),
     ]));
+  });
+
+  it('uses catalog text for local legacy security update issues when a translator is provided', async () => {
+    const args = createBaseArgs();
+
+    const result = await bootstrapSecureConfig({
+      ...args,
+      t: en,
+      backend: {
+        GetSecurityUpdateStatus: vi.fn().mockResolvedValue({
+          overallStatus: 'not_detected',
+          summary: { total: 0, updated: 0, pending: 0, skipped: 0, failed: 0 },
+          issues: [],
+        }),
+      },
+    });
+
+    expect(result.status.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        scope: 'connection',
+        title: 'Legacy',
+        message: "This connection is still saved in the current app's local configuration. After the security update completes, it will be moved to the new secure storage.",
+      }),
+      expect.objectContaining({
+        scope: 'global_proxy',
+        title: 'Global Proxy',
+        message: "Global proxy settings are still saved in the current app's local configuration. After the security update completes, they will be moved to the new secure storage.",
+      }),
+    ]));
+  });
+
+  it('keeps local legacy security update text out of production source literals', () => {
+    const source = readFileSync(new URL('./secureConfigBootstrap.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('该连接仍保存在当前应用的本地配置中');
+    expect(source).not.toContain('全局代理仍保存在当前应用的本地配置中');
+    expect(source).not.toContain('安全更新能力不可用');
+    expect(source).toContain('security_update.bootstrap.legacy.connection.message');
+    expect(source).toContain('security_update.bootstrap.legacy.global_proxy.message');
+    expect(source).toContain('security_update.error.capability_unavailable');
   });
 
   it('shows intro when legacy sensitive items exist and backend status is pending', async () => {
@@ -534,6 +579,69 @@ describe('secureConfigBootstrap', () => {
     expect(args.replaceConnections).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'secure-1' })]),
     );
+  });
+
+  it('does not restore legacy saved queries when security cleanup runs after saved-query cleanup', async () => {
+    const args = createBaseArgs();
+    args.storage.setItem(LEGACY_PERSIST_KEY, JSON.stringify({
+      state: {
+        connections: [
+          {
+            id: 'legacy-1',
+            name: 'Legacy',
+            config: {
+              id: 'legacy-1',
+              type: 'postgres',
+              host: 'db.local',
+              port: 5432,
+              user: 'postgres',
+              password: 'secret',
+            },
+          },
+        ],
+        globalProxy: {
+          enabled: true,
+          type: 'http',
+          host: '127.0.0.1',
+          port: 8080,
+          user: 'ops',
+          password: 'proxy-secret',
+        },
+        savedQueries: [
+          {
+            id: 'saved-1',
+            name: 'Orders',
+            sql: 'select * from orders',
+            connectionId: 'legacy-1',
+            dbName: 'app',
+            createdAt: 100,
+          },
+        ],
+      },
+    }));
+
+    await startSecurityUpdateFromBootstrap({
+      ...args,
+      backend: {
+        StartSecurityUpdate: vi.fn().mockImplementation(async () => {
+          args.storage.setItem(
+            LEGACY_PERSIST_KEY,
+            stripLegacySavedQueries(args.storage.getItem(LEGACY_PERSIST_KEY)),
+          );
+          return {
+            overallStatus: 'completed',
+            summary: { total: 3, updated: 3, pending: 0, skipped: 0, failed: 0 },
+            issues: [],
+          };
+        }),
+        GetSavedConnections: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    const cleaned = JSON.parse(args.storage.getItem(LEGACY_PERSIST_KEY) || '{}');
+    expect(cleaned.state.savedQueries).toBeUndefined();
+    expect(cleaned.state.connections).toEqual([]);
+    expect(cleaned.state.globalProxy).toBeUndefined();
   });
 
   it('refreshes backend config and strips source-side secrets when a later round finishes as completed', async () => {

@@ -3,6 +3,7 @@ export const singleHostUriSchemesByType: Record<string, string[]> = {
   opengauss: ["opengauss", "jdbc:opengauss", "postgresql", "postgres"],
   gaussdb: ["gaussdb", "postgresql", "postgres"],
   clickhouse: ["clickhouse"],
+  trino: ["trino", "http", "https"],
   oracle: ["oracle"],
   sqlserver: ["sqlserver"],
   iris: ["iris", "intersystems"],
@@ -55,6 +56,7 @@ const sslSupportedTypes = new Set([
   "sphinx",
   "dameng",
   "clickhouse",
+  "trino",
   "postgres",
   "sqlserver",
   "oracle",
@@ -86,6 +88,7 @@ const sslCAPathSupportedTypes = new Set([
   "starrocks",
   "sphinx",
   "clickhouse",
+  "trino",
   "postgres",
   "sqlserver",
   "kingbase",
@@ -113,6 +116,7 @@ const sslClientCertificateSupportedTypes = new Set([
   "sphinx",
   "dameng",
   "clickhouse",
+  "trino",
   "postgres",
   "kingbase",
   "highgo",
@@ -167,6 +171,7 @@ export const supportsConnectionParamsForType = (type: string) =>
   type === "sqlserver" ||
   type === "iris" ||
   type === "clickhouse" ||
+  type === "trino" ||
   type === "mongodb" ||
   type === "dameng" ||
   type === "tdengine" ||

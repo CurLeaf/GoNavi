@@ -12,12 +12,16 @@ func normalizeMigrationDBType(dbType string) string {
 		return "diros"
 	case "postgresql":
 		return "postgres"
+	case "mssql", "sql_server", "sql-server":
+		return "sqlserver"
 	case "kingbase8", "kingbasees", "kingbasev8":
 		return "kingbase"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
 	case "gaussdb", "gauss_db", "gauss-db":
 		return "gaussdb"
+	case "intersystems", "intersystemsiris", "inter-systems", "inter-systems-iris":
+		return "iris"
 	case "dm", "dm8":
 		return "dameng"
 	case "sqlite3":
@@ -37,10 +41,14 @@ func resolveMigrationDBType(config connection.ConnectionConfig) string {
 	switch driver {
 	case "postgresql", "postgres", "pg", "pq", "pgx":
 		return "postgres"
+	case "mssql", "sqlserver", "sql_server", "sql-server":
+		return "sqlserver"
 	case "opengauss", "open_gauss", "open-gauss":
 		return "opengauss"
 	case "gaussdb", "gauss_db", "gauss-db":
 		return "gaussdb"
+	case "intersystems", "intersystemsiris", "inter-systems", "inter-systems-iris", "iris":
+		return "iris"
 	case "dm", "dameng", "dm8":
 		return "dameng"
 	case "sqlite3", "sqlite":

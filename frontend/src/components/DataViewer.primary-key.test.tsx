@@ -22,6 +22,7 @@ const storeState = vi.hoisted(() => ({
       },
     },
   ],
+  languagePreference: 'zh-CN',
   addSqlLog: vi.fn(),
 }));
 
@@ -107,6 +108,21 @@ describe('DataViewer safe editing locator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dataGridState.latestProps = null;
+    storeState.connections = [
+      {
+        id: 'conn-1',
+        name: 'oracle',
+        config: {
+          type: 'oracle',
+          host: '127.0.0.1',
+          port: 1521,
+          user: 'scott',
+          password: '',
+          database: 'ORCLPDB1',
+        },
+      },
+    ];
+    storeState.languagePreference = 'zh-CN';
     storeState.connections[0].config.type = 'oracle';
     storeState.connections[0].config.database = 'ORCLPDB1';
     backendApp.DBQuery.mockResolvedValue({
@@ -115,6 +131,45 @@ describe('DataViewer safe editing locator', () => {
       data: [{ ID: 7, NAME: 'old-name' }],
     });
     backendApp.DBGetIndexes.mockResolvedValue({ success: true, data: [] });
+  });
+
+  it('localizes the missing connection message through DataViewer catalog keys', async () => {
+    storeState.connections = [];
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<DataViewer tab={createTab({ connectionId: 'missing-conn' })} />);
+      await Promise.resolve();
+    });
+    await flushPromises();
+
+    expect(messageApi.error).toHaveBeenCalledWith('未找到连接');
+    renderer!.unmount();
+  });
+
+  it('keeps DataViewer message wrappers and SQL log phase labels keyed', () => {
+    const source = readFileSync(new URL('./DataViewer.tsx', import.meta.url), 'utf8');
+
+    expect(source).not.toMatch(/当前结果集尚未就绪|统计失败|统计总数失败|统计结果解析失败|Mongo 筛选条件无效|解析失败|主查询|复杂类型降级重试|重试\(32MB sort_buffer\)|重试\(128MB sort_buffer\)|已自动提升排序缓冲并重试成功|查询失败|查询超过连接超时时间|DuckDB 查询超过连接超时时间|超时|MongoDB 结果集中缺少 _id|加载索引失败|无法加载主键\/唯一索引元数据|无法加载唯一索引元数据|保持只读|当前结果没有可用的安全行定位方式/);
+    expect(source).toContain('data_viewer.message.connection_not_found');
+    expect(source).toContain('data_viewer.message.result_not_ready');
+    expect(source).toContain('data_viewer.message.query_failed');
+    expect(source).toContain('data_viewer.message.query_timeout');
+    expect(source).toContain('data_viewer.message.duckdb_query_timeout');
+    expect(source).toContain('data_viewer.read_only.reason.mongo_id_missing');
+    expect(source).toContain('data_viewer.read_only.reason.no_safe_locator');
+    expect(source).toContain('data_viewer.read_only.warning.table');
+    expect(source).toContain('data_viewer.read_only.warning.collection');
+    expect(source).toContain('data_viewer.sql_log.phase.main_query');
+    expect(source).toContain('data_viewer.sql_log.phase.sort_buffer_retry');
+  });
+
+  it('caps viewer filter snapshots so long-running sessions do not retain unbounded table state', () => {
+    const source = readFileSync(new URL('./DataViewer.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain('const MAX_VIEWER_FILTER_SNAPSHOTS = 64;');
+    expect(source).toContain('const trimViewerFilterSnapshots = () => {');
+    expect(source).toContain('setViewerFilterSnapshot(normalizedTabId, {');
   });
 
   it('enables table preview editing after primary keys are loaded', async () => {
@@ -283,6 +338,7 @@ describe('DataViewer safe editing locator', () => {
   });
 
   it('keeps MongoDB results read-only when _id is missing', async () => {
+    storeState.languagePreference = 'en-US';
     storeState.connections[0].config.type = 'mongodb';
     storeState.connections[0].config.database = 'app';
     backendApp.DBQuery.mockResolvedValue({
@@ -297,10 +353,10 @@ describe('DataViewer safe editing locator', () => {
     expect(dataGridState.latestProps?.editLocator).toMatchObject({
       strategy: 'none',
       readOnly: true,
-      reason: 'MongoDB 结果集中缺少 _id，无法安全提交修改。',
+      reason: 'MongoDB result set is missing _id, so changes cannot be submitted safely.',
     });
     expect(dataGridState.latestProps?.readOnly).toBe(true);
-    expect(messageApi.warning).toHaveBeenCalledWith('集合 app.users 保持只读：MongoDB 结果集中缺少 _id，无法安全提交修改。');
+    expect(messageApi.warning).toHaveBeenCalledWith('Collection app.users remains read-only: MongoDB result set is missing _id, so changes cannot be submitted safely.');
     renderer.unmount();
   });
 
@@ -326,6 +382,38 @@ describe('DataViewer safe editing locator', () => {
       readOnly: false,
     });
     expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+    expect(backendApp.DBQuery.mock.calls.some((call: any[]) => String(call[2]).includes(`ROWID AS "${ORACLE_ROWID_LOCATOR_COLUMN}"`))).toBe(true);
+    renderer.unmount();
+  });
+
+  it('uses hidden OceanBase Oracle ROWID when no primary or unique key is available', async () => {
+    storeState.connections[0].config.type = 'oceanbase';
+    (storeState.connections[0].config as any).oceanBaseProtocol = 'oracle';
+    storeState.connections[0].config.user = 'dev';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'ID', key: '' }, { name: 'NAME', key: '' }],
+    });
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      fields: ['ID', 'NAME', ORACLE_ROWID_LOCATOR_COLUMN],
+      data: [{ ID: 7, NAME: 'old-name', [ORACLE_ROWID_LOCATOR_COLUMN]: 'AAAA' }],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: 'tab-ob-oracle-rowid', dbName: 'ORCLPDB1', tableName: 'EDC_LOG', title: 'EDC_LOG' }));
+
+    expect(dataGridState.latestProps?.pkColumns).toEqual([]);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'oracle-rowid',
+      columns: ['ROWID'],
+      valueColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+      hiddenColumns: [ORACLE_ROWID_LOCATOR_COLUMN],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(dataGridState.latestProps?.showRowNumberColumn).toBe(true);
     expect(messageApi.warning).not.toHaveBeenCalled();
     expect(backendApp.DBQuery.mock.calls.some((call: any[]) => String(call[2]).includes(`ROWID AS "${ORACLE_ROWID_LOCATOR_COLUMN}"`))).toBe(true);
     renderer.unmount();
@@ -425,6 +513,7 @@ describe('DataViewer safe editing locator', () => {
   });
 
   it('shows an actionable message for DuckDB timeout interruption errors', async () => {
+    storeState.languagePreference = 'en-US';
     storeState.connections[0].config.type = 'duckdb';
     storeState.connections[0].config.database = 'main';
     backendApp.DBGetColumns.mockResolvedValue({
@@ -440,12 +529,13 @@ describe('DataViewer safe editing locator', () => {
 
     const renderer = await renderAndReload(createTab({ id: 'tab-duckdb-timeout', dbName: 'main', tableName: 'events', title: 'events' }));
 
-    expect(messageApi.error).toHaveBeenCalledWith('DuckDB 查询超过连接超时时间，已中断。请调大连接超时时间，或减少排序/筛选范围后重试。');
+    expect(messageApi.error).toHaveBeenCalledWith('DuckDB query exceeded the connection timeout and was interrupted. Increase the connection timeout, or reduce the sort/filter scope and retry.');
     expect(storeState.addSqlLog.mock.calls.some((call: any[]) => String(call[0]?.message || '').includes('context deadline exceeded'))).toBe(true);
     renderer.unmount();
   });
 
   it('keeps non-Oracle table preview read-only when no safe locator exists', async () => {
+    storeState.languagePreference = 'en-US';
     storeState.connections[0].config.type = 'mysql';
     storeState.connections[0].config.database = 'main';
     backendApp.DBGetColumns.mockResolvedValue({
@@ -459,10 +549,10 @@ describe('DataViewer safe editing locator', () => {
     expect(dataGridState.latestProps?.editLocator).toMatchObject({
       strategy: 'none',
       readOnly: true,
-      reason: '未检测到主键或可用唯一索引，无法安全提交修改。',
+      reason: 'No primary key or usable unique index was found, so changes cannot be submitted safely.',
     });
     expect(dataGridState.latestProps?.readOnly).toBe(true);
-    expect(messageApi.warning).toHaveBeenCalledWith('表 main.users 保持只读：未检测到主键或可用唯一索引，无法安全提交修改。');
+    expect(messageApi.warning).toHaveBeenCalledWith('Table main.users remains read-only: No primary key or usable unique index was found, so changes cannot be submitted safely.');
     renderer.unmount();
   });
 });

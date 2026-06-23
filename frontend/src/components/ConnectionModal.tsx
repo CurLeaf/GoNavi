@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import Modal from './common/ResizableDraggableModal';
 import {
-  Modal,
   Form,
   Input,
   InputNumber,
@@ -49,25 +49,49 @@ import {
   normalizeOpacityForPlatform,
   resolveAppearanceValues,
 } from "../utils/appearance";
+import { t } from "../i18n";
 import {
   getConnectionConfigLayoutKindLabel,
   getConnectionConfigSectionCopy,
   getStoredSecretPlaceholder,
   normalizeConnectionSecretErrorMessage,
-  resolveConnectionTestFailureFeedback,
   resolveConnectionConfigLayout,
   summarizeConnectionTestFailureMessage,
   type ConnectionConfigSectionKey,
 } from "../utils/connectionModalPresentation";
-import { resolveConnectionSecretDraft } from "../utils/connectionSecretDraft";
 import { getCustomConnectionDsnValidationMessage } from "../utils/customConnectionDsn";
 import { mergeParsedUriValuesForForm } from "../utils/connectionUriMerge";
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
+import { resolveConnectionProtectionConfig } from "../utils/connectionReadOnly";
+import { getCustomConnectionDriverHelp } from "../utils/driverImportGuidance";
+import { isBackendCancelledResult } from "../utils/connectionExport";
 import {
-  buildRedisUriFromValues,
-  parseRedisUriToFormValues,
-  resolveRedisConfigDraft,
-} from "../utils/redisConnectionUri";
+  buildUriFromValues,
+  getConnectionParamsPlaceholder,
+  getUriPlaceholder,
+  normalizeAddressList,
+  normalizeClickHouseProtocolValue,
+  normalizeConnectionParamsText,
+  normalizeFileDbPath,
+  normalizeMongoSrvHostList,
+  normalizeOceanBaseConnectionParamsText,
+  normalizeOceanBaseProtocolValue,
+  parseClickHouseHTTPUriToValues,
+  parseHostPort,
+  parseUriToValues,
+  toAddress,
+  type ClickHouseProtocolChoice,
+  type OceanBaseProtocolChoice,
+} from "./connectionModal/connectionModalUri";
+import {
+  buildConnectionConfig,
+  buildSavedConnectionInput,
+  createEmptyConnectionSecretClearState,
+  getBlockingSecretClearMessage,
+  type ConnectionSecretClearState,
+  type ConnectionSecretKey,
+} from "./connectionModal/connectionModalConfig";
+import ConnectionModalStep2 from "./connectionModal/ConnectionModalStep2";
 import {
   CONNECTION_TYPE_GROUPS,
   getAllConnectionTypeCatalogItems,
@@ -77,8 +101,6 @@ import {
 import {
   isFileDatabaseType,
   isMySQLCompatibleType,
-  isPostgresCompatibleSSLType,
-  singleHostUriSchemesByType,
   supportsConnectionParamsForType,
   supportsSSLCAPathForType,
   supportsSSLClientCertificateForType,
@@ -89,13 +111,9 @@ import {
   resolveConnectionDriverType,
   type DriverStatusSnapshot,
 } from "../utils/connectionDriverType";
-import { CUSTOM_CONNECTION_DRIVER_HELP } from "../utils/driverImportGuidance";
 import {
-  describeUnsupportedOceanBaseProtocol,
   normalizeOceanBaseProtocol,
-  OCEANBASE_PROTOCOL_PARAM_KEYS,
   resolveOceanBaseProtocolFromQueryText as resolveOceanBaseProtocolQueryText,
-  type OceanBaseProtocol,
 } from "../utils/oceanBaseProtocol";
 import {
   applyNoAutoCapAttributes,
@@ -103,8 +121,6 @@ import {
 } from "../utils/inputAutoCap";
 import {
   buildDefaultJVMConnectionValues,
-  buildJVMConnectionConfig,
-  hasUnsupportedJVMDiagnosticTransport,
   hasUnsupportedJVMEditableModes,
   JVM_EDITABLE_MODES,
   normalizeEditableJVMModes,
@@ -124,8 +140,6 @@ import {
   TestJVMConnection,
 } from "../../wailsjs/go/app/App";
 import { ConnectionConfig, MongoMemberInfo, SavedConnection } from "../types";
-import ConnectionModalMongoSections from "./ConnectionModalMongoSections";
-import ConnectionModalRedisSections from "./ConnectionModalRedisSections";
 
 const { Text } = Typography;
 type EditableJVMMode = (typeof JVM_EDITABLE_MODES)[number];
@@ -134,12 +148,8 @@ type ChoiceCardOption = {
   label: string;
   description?: string;
 };
-type ClickHouseProtocolChoice = "auto" | "http" | "native";
-type OceanBaseProtocolChoice = OceanBaseProtocol;
-const MAX_URI_LENGTH = 4096;
-const MAX_CONNECTION_PARAMS_LENGTH = 4096;
-const MAX_URI_HOSTS = 32;
 const MAX_TIMEOUT_SECONDS = 3600;
+const DEFAULT_KEEPALIVE_INTERVAL_MINUTES = 240;
 const PRIMARY_USERNAME_OPTIONAL_TYPES = new Set([
   "mongodb",
   "elasticsearch",
@@ -157,9 +167,10 @@ const STEP1_SIDEBAR_DIVIDER_DARK = "rgba(255, 255, 255, 0.16)";
 const STEP1_SIDEBAR_DIVIDER_LIGHT = "rgba(0, 0, 0, 0.08)";
 const CLICKHOUSE_PROTOCOL_OPTIONS: Array<{
   value: ClickHouseProtocolChoice;
-  label: string;
+  label?: string;
+  labelKey?: string;
 }> = [
-  { value: "auto", label: "自动" },
+  { value: "auto", labelKey: "connection.modal.field.clickHouseProtocol.auto" },
   { value: "http", label: "HTTP" },
   { value: "native", label: "Native" },
 ];
@@ -226,21 +237,6 @@ const normalizeRedisDatabaseSelection = (
   return selected.length > 0 ? selected : undefined;
 };
 
-const normalizeClickHouseProtocolValue = (
-  value: unknown,
-): ClickHouseProtocolChoice => {
-  const text = String(value || "")
-    .trim()
-    .toLowerCase();
-  if (text === "http" || text === "https") return "http";
-  if (text === "native" || text === "tcp") return "native";
-  return "auto";
-};
-const normalizeOceanBaseProtocolValue = (
-  value: unknown,
-): OceanBaseProtocolChoice => {
-  return normalizeOceanBaseProtocol(value) || "mysql";
-};
 const resolveOceanBaseProtocolValue = (
   value: unknown,
 ): OceanBaseProtocolChoice | undefined => {
@@ -265,31 +261,28 @@ const resolveOceanBaseProtocolForConfig = (
     "mysql"
   );
 };
-type ConnectionSecretKey =
-  | "primaryPassword"
-  | "sshPassword"
-  | "proxyPassword"
-  | "httpTunnelPassword"
-  | "mysqlReplicaPassword"
-  | "mongoReplicaPassword"
-  | "redisSentinelPassword"
-  | "opaqueURI"
-  | "opaqueDSN";
+type UriFeedbackState = {
+  type: "success" | "warning" | "error";
+  messageKey: string;
+};
 
-type ConnectionSecretClearState = Record<ConnectionSecretKey, boolean>;
+type TestFailureKind =
+  | "validation"
+  | "runtime"
+  | "driver_unavailable"
+  | "secret_blocked";
 
-const createEmptyConnectionSecretClearState =
-  (): ConnectionSecretClearState => ({
-    primaryPassword: false,
-    sshPassword: false,
-    proxyPassword: false,
-    httpTunnelPassword: false,
-    mysqlReplicaPassword: false,
-    mongoReplicaPassword: false,
-    redisSentinelPassword: false,
-    opaqueURI: false,
-    opaqueDSN: false,
-  });
+type TestResultState =
+  | {
+      type: "success";
+      message: string;
+    }
+  | {
+      type: "error";
+      kind: TestFailureKind;
+      reason: string;
+      fallbackKey: string;
+    };
 
 const resolveInitialSecretFieldValue = (
   initialValues: SavedConnection | null | undefined,
@@ -352,19 +345,13 @@ const ConnectionModal: React.FC<{
   const [activeNetworkConfig, setActiveNetworkConfig] = useState<
     "ssl" | "ssh" | "proxy" | "httpTunnel"
   >("ssl");
-  const [testResult, setTestResult] = useState<{
-    type: "success" | "error";
-    message: string;
-  } | null>(null);
+  const [testResult, setTestResult] = useState<TestResultState | null>(null);
   const [testErrorLogOpen, setTestErrorLogOpen] = useState(false);
   const [dbList, setDbList] = useState<string[]>([]);
   const [redisDbList, setRedisDbList] = useState<number[]>([]);
   const [mongoMembers, setMongoMembers] = useState<MongoMemberInfo[]>([]);
   const [discoveringMembers, setDiscoveringMembers] = useState(false);
-  const [uriFeedback, setUriFeedback] = useState<{
-    type: "success" | "warning" | "error";
-    message: string;
-  } | null>(null);
+  const [uriFeedback, setUriFeedback] = useState<UriFeedbackState | null>(null);
   const [typeSelectWarning, setTypeSelectWarning] = useState<{
     driverName: string;
     reason: string;
@@ -388,6 +375,8 @@ const ConnectionModal: React.FC<{
   const updateConnection = useStore((state) => state.updateConnection);
   const theme = useStore((state) => state.theme);
   const appearance = useStore((state) => state.appearance);
+  const languagePreference = useStore((state) => state.languagePreference);
+  void languagePreference;
   const darkMode = theme === "dark";
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const effectiveOpacity = normalizeOpacityForPlatform(
@@ -441,20 +430,35 @@ const ConnectionModal: React.FC<{
   const supportsSSLClientCertificate =
     supportsSSLClientCertificateForType(dbType);
   const sslHintText = isMySQLLike
-    ? "MySQL 兼容数据源支持 CA 证书、客户端证书与私钥；本地自签证书场景可先用 Preferred 或 Skip Verify。"
+    ? t("connection.modal.network.ssl.hint.mysqlCompatible")
     : isOceanBaseOracle
-      ? "OceanBase Oracle 租户使用 Oracle 协议连接；如需 Wallet，请在高级参数中配置 Oracle 驱动参数。"
+      ? t("connection.modal.network.ssl.hint.oceanBaseOracle")
       : dbType === "dameng"
-      ? "达梦驱动启用 SSL 需要客户端证书与私钥路径（sslCertPath / sslKeyPath）。"
+      ? t("connection.modal.network.ssl.hint.dameng")
       : dbType === "sqlserver"
-        ? "SQL Server 可配置服务端证书/CA 文件；生产环境建议使用 Required，并关闭 TrustServerCertificate。"
+        ? t("connection.modal.network.ssl.hint.sqlserver")
         : dbType === "mongodb"
-          ? "MongoDB 支持 CA 证书、客户端证书与私钥；证书校验异常时可先用 Skip Verify 验证连通性。"
+          ? t("connection.modal.network.ssl.hint.mongodb")
           : dbType === "oracle"
-            ? "Oracle PEM 证书请优先使用 Wallet 并在高级参数中配置 WALLET；这里仅控制 SSL 开关与校验策略。"
+            ? t("connection.modal.network.ssl.hint.oracle")
             : dbType === "tdengine"
-              ? "TDengine 当前仅配置 WSS 与校验策略；证书文件请通过服务端信任链处理。"
-              : "支持的驱动可配置 CA 证书、客户端证书与私钥；仅在测试环境或自签证书场景使用 Skip Verify。";
+              ? t("connection.modal.network.ssl.hint.tdengine")
+              : t("connection.modal.network.ssl.hint.default");
+  const resolvedUriFeedbackMessage = uriFeedback
+    ? t(uriFeedback.messageKey)
+    : "";
+  const resolvedTestResultMessage = !testResult
+    ? ""
+    : testResult.type === "success"
+      ? String(testResult.message || "")
+      : testResult.kind === "validation"
+        ? t("connection.modal.test.validation")
+        : t("connection.modal.test.failure", {
+            reason: normalizeConnectionSecretErrorMessage(
+              testResult.reason,
+              t(testResult.fallbackKey),
+            ),
+          });
 
   const getSectionBg = (darkHex: string) => {
     if (!darkMode) {
@@ -599,7 +603,7 @@ const ConnectionModal: React.FC<{
                 }}
               >
                 {hasDraftValue
-                  ? "已输入新值，保存时会替换当前已保存内容。"
+                  ? t("connection.modal.secret.draftReplacement")
                   : description}
               </div>
               <Checkbox
@@ -895,7 +899,7 @@ const ConnectionModal: React.FC<{
             >
               <Space size={8} wrap>
                 <Text strong>{option.label}</Text>
-                {active ? <Tag color="blue">当前</Tag> : null}
+                {active ? <Tag color="blue">{t("connection.modal.choice.current")}</Tag> : null}
               </Space>
               {option.description ? (
                 <div style={{ ...modalMutedTextStyle, marginTop: 6 }}>
@@ -1013,1027 +1017,32 @@ const ConnectionModal: React.FC<{
     }
     return (
       status.message ||
-      `${status.name || normalized} 驱动未安装启用，请先在驱动管理中安装`
+      t("connection.modal.driver.unavailableFallback", {
+        name: status.name || normalized,
+      })
     );
   };
 
   const promptInstallDriver = (driverType: string, reason: string) => {
     const normalized = normalizeDriverType(driverType);
     const snapshot = driverStatusMap[normalized];
-    const driverName = snapshot?.name || normalized || "当前";
+    const driverName =
+      snapshot?.name || normalized || t("connection.modal.driver.currentFallback");
     Modal.confirm({
-      title: `${driverName} 驱动不可用`,
-      content: reason || `${driverName} 驱动未安装启用，请先在驱动管理中安装`,
-      okText: "去驱动管理安装",
-      cancelText: "取消",
+      title: t("connection.modal.driver.unavailableTitle", {
+        name: driverName,
+      }),
+      content:
+        reason ||
+        t("connection.modal.driver.unavailableFallback", {
+          name: driverName,
+        }),
+      okText: t("connection.modal.driver.installAction"),
+      cancelText: t("common.action.cancel"),
       onOk: () => {
         onOpenDriverManager?.();
       },
     });
-  };
-
-  const parseHostPort = (
-    raw: string,
-    defaultPort: number,
-  ): { host: string; port: number } | null => {
-    const text = String(raw || "").trim();
-    if (!text) {
-      return null;
-    }
-    if (text.startsWith("[")) {
-      const closingBracket = text.indexOf("]");
-      if (closingBracket > 0) {
-        const host = text.slice(1, closingBracket).trim();
-        const portText = text
-          .slice(closingBracket + 1)
-          .trim()
-          .replace(/^:/, "");
-        const parsedPort = Number(portText);
-        return {
-          host: host || "localhost",
-          port:
-            Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535
-              ? parsedPort
-              : defaultPort,
-        };
-      }
-    }
-
-    const colonCount = (text.match(/:/g) || []).length;
-    if (colonCount === 1) {
-      const splitIndex = text.lastIndexOf(":");
-      const host = text.slice(0, splitIndex).trim();
-      const portText = text.slice(splitIndex + 1).trim();
-      const parsedPort = Number(portText);
-      return {
-        host: host || "localhost",
-        port:
-          Number.isFinite(parsedPort) && parsedPort > 0 && parsedPort <= 65535
-            ? parsedPort
-            : defaultPort,
-      };
-    }
-
-    return { host: text, port: defaultPort };
-  };
-
-  const toAddress = (host: string, port: number, defaultPort: number) => {
-    const safeHost = String(host || "").trim() || "localhost";
-    const safePort =
-      Number.isFinite(Number(port)) && Number(port) > 0
-        ? Number(port)
-        : defaultPort;
-    return `${safeHost}:${safePort}`;
-  };
-
-  const normalizeAddressList = (
-    rawList: unknown,
-    defaultPort: number,
-  ): string[] => {
-    const list = Array.isArray(rawList) ? rawList : [];
-    const seen = new Set<string>();
-    const result: string[] = [];
-    list.forEach((entry) => {
-      const parsed = parseHostPort(String(entry || ""), defaultPort);
-      if (!parsed) {
-        return;
-      }
-      const normalized = toAddress(parsed.host, parsed.port, defaultPort);
-      if (seen.has(normalized)) {
-        return;
-      }
-      seen.add(normalized);
-      result.push(normalized);
-    });
-    return result;
-  };
-
-  const isValidUriHostEntry = (entry: string): boolean => {
-    const text = String(entry || "").trim();
-    if (!text) return false;
-    if (text.length > 255) return false;
-    // 拒绝明显的 DSN 片段或路径/空白，避免把非 URI 主机段误判为合法地址。
-    if (/[()\\/\s]/.test(text)) return false;
-    return true;
-  };
-
-  const normalizeMongoSrvHostList = (
-    rawList: unknown,
-    defaultPort: number,
-  ): string[] => {
-    const list = Array.isArray(rawList) ? rawList : [];
-    const seen = new Set<string>();
-    const result: string[] = [];
-    list.forEach((entry) => {
-      const parsed = parseHostPort(String(entry || ""), defaultPort);
-      if (!parsed?.host) {
-        return;
-      }
-      const host = String(parsed.host).trim();
-      if (!host || seen.has(host)) {
-        return;
-      }
-      seen.add(host);
-      result.push(host);
-    });
-    return result;
-  };
-
-  const safeDecode = (text: string) => {
-    try {
-      return decodeURIComponent(text);
-    } catch {
-      return text;
-    }
-  };
-
-  const normalizeUriBool = (raw: unknown) => {
-    const text = String(raw ?? "")
-      .trim()
-      .toLowerCase();
-    return text === "1" || text === "true" || text === "yes" || text === "on";
-  };
-
-  const normalizeConnectionParamsText = (raw: unknown) => {
-    let text = String(raw || "").trim();
-    if (!text) return "";
-    const queryIndex = text.indexOf("?");
-    if (queryIndex >= 0) {
-      text = text.slice(queryIndex + 1);
-    }
-    const hashIndex = text.indexOf("#");
-    if (hashIndex >= 0) {
-      text = text.slice(0, hashIndex);
-    }
-    return text.replace(/^[?&]+/, "").trim().slice(0, MAX_CONNECTION_PARAMS_LENGTH);
-  };
-
-  const serializeConnectionParams = (params: URLSearchParams) => {
-    const cloned = new URLSearchParams();
-    params.forEach((value, key) => {
-      if (String(key || "").trim()) {
-        cloned.append(key, value);
-      }
-    });
-    return cloned.toString().slice(0, MAX_CONNECTION_PARAMS_LENGTH);
-  };
-
-  const normalizeOceanBaseConnectionParamsText = (
-    rawParams: unknown,
-    selectedProtocol: OceanBaseProtocolChoice,
-  ) => {
-    const normalizedParamsText = normalizeConnectionParamsText(rawParams);
-    const protocolFromParams = resolveOceanBaseProtocolQueryText(normalizedParamsText);
-    if (protocolFromParams.unsupportedValue) {
-      throw new Error(describeUnsupportedOceanBaseProtocol(protocolFromParams.unsupportedValue));
-    }
-    const params = new URLSearchParams(normalizedParamsText);
-    for (const key of OCEANBASE_PROTOCOL_PARAM_KEYS) {
-      params.delete(key);
-    }
-    params.set("protocol", selectedProtocol);
-    return params.toString().slice(0, MAX_CONNECTION_PARAMS_LENGTH);
-  };
-
-  const mergeConnectionParams = (
-    params: URLSearchParams,
-    rawParams: unknown,
-  ) => {
-    const text = normalizeConnectionParamsText(rawParams);
-    if (!text) return;
-    const extra = new URLSearchParams(text);
-    extra.forEach((value, key) => {
-      if (String(key || "").trim()) {
-        params.set(key, value);
-      }
-    });
-  };
-
-  const normalizeFileDbPath = (rawPath: string): string => {
-    let pathText = String(rawPath || "").trim();
-    if (!pathText) {
-      return "";
-    }
-    // 兼容 sqlite:///C:/... 或 sqlite:///C:\... 解析后多出的前导斜杠。
-    if (/^\/[a-zA-Z]:[\\/]/.test(pathText)) {
-      pathText = pathText.slice(1);
-    }
-    // 兼容历史版本把 Windows 文件路径误拼成 :3306:3306。
-    const legacyMatch = pathText.match(/^([a-zA-Z]:[\\/].*?)(?::\d+)+$/);
-    if (legacyMatch?.[1]) {
-      return legacyMatch[1];
-    }
-    return pathText;
-  };
-
-  const parseMultiHostUri = (uriText: string, expectedScheme: string) => {
-    const prefix = `${expectedScheme}://`;
-    if (!uriText.toLowerCase().startsWith(prefix)) {
-      return null;
-    }
-    let rest = uriText.slice(prefix.length);
-    const hashIndex = rest.indexOf("#");
-    if (hashIndex >= 0) {
-      rest = rest.slice(0, hashIndex);
-    }
-    let queryText = "";
-    const queryIndex = rest.indexOf("?");
-    if (queryIndex >= 0) {
-      queryText = rest.slice(queryIndex + 1);
-      rest = rest.slice(0, queryIndex);
-    }
-
-    let pathText = "";
-    const slashIndex = rest.indexOf("/");
-    if (slashIndex >= 0) {
-      pathText = rest.slice(slashIndex + 1);
-      rest = rest.slice(0, slashIndex);
-    }
-
-    let hostText = rest;
-    let username = "";
-    let password = "";
-    const atIndex = rest.lastIndexOf("@");
-    if (atIndex >= 0) {
-      const userInfo = rest.slice(0, atIndex);
-      hostText = rest.slice(atIndex + 1);
-      const colonIndex = userInfo.indexOf(":");
-      if (colonIndex >= 0) {
-        username = safeDecode(userInfo.slice(0, colonIndex));
-        password = safeDecode(userInfo.slice(colonIndex + 1));
-      } else {
-        username = safeDecode(userInfo);
-      }
-    }
-
-    const hosts = hostText
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    return {
-      username,
-      password,
-      hosts,
-      database: safeDecode(pathText),
-      params: new URLSearchParams(queryText),
-    };
-  };
-
-  const parseSingleHostUri = (
-    uriText: string,
-    expectedSchemes: string[],
-    defaultPort: number,
-  ): {
-    host: string;
-    port: number;
-    username: string;
-    password: string;
-    database: string;
-    params: URLSearchParams;
-  } | null => {
-    let parsed: ReturnType<typeof parseMultiHostUri> | null = null;
-    for (const scheme of expectedSchemes) {
-      parsed = parseMultiHostUri(uriText, scheme);
-      if (parsed) {
-        break;
-      }
-    }
-    if (!parsed) {
-      return null;
-    }
-    if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
-      return null;
-    }
-    if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
-      return null;
-    }
-    const hostList = normalizeAddressList(parsed.hosts, defaultPort);
-    if (!hostList.length) {
-      return null;
-    }
-    const primary = parseHostPort(
-      hostList[0] || `localhost:${defaultPort}`,
-      defaultPort,
-    );
-    return {
-      host: primary?.host || "localhost",
-      port: primary?.port || defaultPort,
-      username: parsed.username,
-      password: parsed.password,
-      database: parsed.database || "",
-      params: parsed.params,
-    };
-  };
-
-  const parseClickHouseHTTPUriToValues = (
-    uriText: string,
-    fallbackPort?: number,
-  ): Record<string, any> | null => {
-    const trimmed = String(uriText || "").trim();
-    const lower = trimmed.toLowerCase();
-    const isHttps = lower.startsWith("https://");
-    const isHttp = lower.startsWith("http://");
-    if (!isHttp && !isHttps) {
-      return null;
-    }
-    const defaultPort =
-      Number.isFinite(Number(fallbackPort)) && Number(fallbackPort) > 0
-        ? Number(fallbackPort)
-        : isHttps
-          ? 8443
-          : 8123;
-    const parsed = parseSingleHostUri(
-      trimmed,
-      [isHttps ? "https" : "http"],
-      defaultPort,
-    );
-    if (!parsed) {
-      return null;
-    }
-    const skipVerify = normalizeUriBool(parsed.params.get("skip_verify"));
-    return {
-      host: parsed.host,
-      port: parsed.port,
-      user: parsed.username,
-      password: parsed.password,
-      database: parsed.database || "",
-      clickHouseProtocol: "http",
-      useSSL: isHttps,
-      sslMode: isHttps ? (skipVerify ? "skip-verify" : "required") : "disable",
-      ...extractSSLPathValuesFromParams(parsed.params, "clickhouse"),
-      connectionParams: serializeConnectionParams(parsed.params),
-    };
-  };
-
-  const firstConnectionParamValue = (
-    params: URLSearchParams,
-    names: string[],
-  ): string => {
-    for (const name of names) {
-      const value = String(params.get(name) || "").trim();
-      if (value) return value;
-    }
-    return "";
-  };
-
-  const extractSSLPathValuesFromParams = (
-    params: URLSearchParams,
-    type: string,
-  ): Record<string, string> => {
-    const caPath = firstConnectionParamValue(params, [
-      "sslCAPath",
-      "ssl_ca_path",
-      "sslrootcert",
-      "sslRootCert",
-      "tlsCAFile",
-      "caFile",
-      "certificate",
-      "servercertificate",
-      "serverCertificate",
-    ]);
-    const certPath = firstConnectionParamValue(params, [
-      "sslCertPath",
-      "ssl_cert_path",
-      "SSL_CERT_PATH",
-      "sslcert",
-      "sslCert",
-      "tlsCertificateFile",
-    ]);
-    const keyPath = firstConnectionParamValue(params, [
-      "sslKeyPath",
-      "ssl_key_path",
-      "SSL_KEY_PATH",
-      "sslkey",
-      "sslKey",
-      "tlsKeyFile",
-    ]);
-    return {
-      ...(supportsSSLCAPathForType(type) && caPath ? { sslCAPath: caPath } : {}),
-      ...(supportsSSLClientCertificateForType(type) && certPath ? { sslCertPath: certPath } : {}),
-      ...(supportsSSLClientCertificateForType(type) && keyPath ? { sslKeyPath: keyPath } : {}),
-    };
-  };
-
-  const appendSSLPathParamsForUri = (
-    params: URLSearchParams,
-    type: string,
-    values: Record<string, any>,
-  ) => {
-    const caPath = String(values.sslCAPath || "").trim();
-    const certPath = String(values.sslCertPath || "").trim();
-    const keyPath = String(values.sslKeyPath || "").trim();
-    const mode = String(values.sslMode || "preferred")
-      .trim()
-      .toLowerCase();
-    if (supportsSSLCAPathForType(type) && caPath) {
-      if (isPostgresCompatibleSSLType(type)) {
-        if (mode !== "skip-verify" && mode !== "disable") {
-          params.set("sslrootcert", caPath);
-        }
-      } else if (type === "sqlserver") {
-        params.set("certificate", caPath);
-      } else {
-        params.set("sslCAPath", caPath);
-      }
-    }
-    if (supportsSSLClientCertificateForType(type) && certPath) {
-      if (type === "dameng") {
-        params.set("SSL_CERT_PATH", certPath);
-      } else if (isPostgresCompatibleSSLType(type)) {
-        params.set("sslcert", certPath);
-      } else {
-        params.set("sslCertPath", certPath);
-      }
-    }
-    if (supportsSSLClientCertificateForType(type) && keyPath) {
-      if (type === "dameng") {
-        params.set("SSL_KEY_PATH", keyPath);
-      } else if (isPostgresCompatibleSSLType(type)) {
-        params.set("sslkey", keyPath);
-      } else {
-        params.set("sslKeyPath", keyPath);
-      }
-    }
-  };
-
-  const parseUriToValues = (
-    uriText: string,
-    type: string,
-  ): Record<string, any> | null => {
-    const trimmedUri = String(uriText || "").trim();
-    if (!trimmedUri) {
-      return null;
-    }
-    if (trimmedUri.length > MAX_URI_LENGTH) {
-      return null;
-    }
-
-    if (isMySQLCompatibleType(type)) {
-      const mysqlDefaultPort = getDefaultPortByType(type);
-      const parsed =
-        parseMultiHostUri(trimmedUri, "mysql") ||
-        parseMultiHostUri(trimmedUri, "goldendb") ||
-        parseMultiHostUri(trimmedUri, "greatdb") ||
-        parseMultiHostUri(trimmedUri, "gdb") ||
-        parseMultiHostUri(trimmedUri, "jdbc:mysql") ||
-        parseMultiHostUri(trimmedUri, "oceanbase") ||
-        parseMultiHostUri(trimmedUri, "jdbc:oceanbase") ||
-        parseMultiHostUri(trimmedUri, "starrocks") ||
-        parseMultiHostUri(trimmedUri, "jdbc:starrocks") ||
-        parseMultiHostUri(trimmedUri, "diros") ||
-        parseMultiHostUri(trimmedUri, "doris");
-      if (!parsed) {
-        return null;
-      }
-      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
-        return null;
-      }
-      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
-        return null;
-      }
-      const hostList = normalizeAddressList(parsed.hosts, mysqlDefaultPort);
-      if (!hostList.length) {
-        return null;
-      }
-      const primary = parseHostPort(
-        hostList[0] || `localhost:${mysqlDefaultPort}`,
-        mysqlDefaultPort,
-      );
-      const timeoutValue = Number(parsed.params.get("timeout"));
-      const topology = String(
-        parsed.params.get("topology") || "",
-      ).toLowerCase();
-      const tlsValue = String(
-        parsed.params.get("tls") || parsed.params.get("useSSL") || "",
-      )
-        .trim()
-        .toLowerCase();
-      const parsedOceanBaseProtocol =
-        type === "oceanbase"
-          ? normalizeOceanBaseProtocolValue(
-              parsed.params.get("protocol") ||
-                parsed.params.get("oceanBaseProtocol") ||
-                parsed.params.get("oceanbaseProtocol") ||
-                parsed.params.get("tenantMode") ||
-                parsed.params.get("compatMode") ||
-                parsed.params.get("mode"),
-            )
-          : undefined;
-      const sslMode =
-        tlsValue === "true"
-          ? "required"
-          : tlsValue === "skip-verify"
-            ? "skip-verify"
-            : tlsValue === "preferred"
-              ? "preferred"
-              : "disable";
-      return {
-        host: primary?.host || "localhost",
-        port: primary?.port || mysqlDefaultPort,
-        user: parsed.username,
-        password: parsed.password,
-        database: parsed.database || "",
-        useSSL: sslMode !== "disable",
-        sslMode,
-        ...extractSSLPathValuesFromParams(parsed.params, type),
-        oceanBaseProtocol: parsedOceanBaseProtocol,
-        mysqlTopology:
-          parsedOceanBaseProtocol === "oracle"
-            ? "single"
-            : hostList.length > 1 || topology === "replica"
-              ? "replica"
-              : "single",
-        mysqlReplicaHosts: hostList.slice(1),
-        connectionParams: serializeConnectionParams(parsed.params),
-        timeout:
-          Number.isFinite(timeoutValue) && timeoutValue > 0
-            ? Math.min(3600, Math.trunc(timeoutValue))
-            : undefined,
-      };
-    }
-
-    if (isFileDatabaseType(type)) {
-      const rawPath = trimmedUri
-        .replace(/^sqlite:\/\//i, "")
-        .replace(/^duckdb:\/\//i, "")
-        .trim();
-      if (!rawPath) {
-        return null;
-      }
-      return { host: normalizeFileDbPath(safeDecode(rawPath)) };
-    }
-
-    if (type === "redis") {
-      return parseRedisUriToFormValues(trimmedUri);
-    }
-
-    if (type === "mongodb") {
-      const parsed =
-        parseMultiHostUri(trimmedUri, "mongodb") ||
-        parseMultiHostUri(trimmedUri, "mongodb+srv");
-      if (!parsed) {
-        return null;
-      }
-      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
-        return null;
-      }
-      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
-        return null;
-      }
-      const isSrv = trimmedUri.toLowerCase().startsWith("mongodb+srv://");
-      const hostList = isSrv
-        ? normalizeMongoSrvHostList(parsed.hosts, 27017)
-        : normalizeAddressList(parsed.hosts, 27017);
-      if (!hostList.length) {
-        return null;
-      }
-      const primary = isSrv
-        ? { host: hostList[0] || "localhost", port: 27017 }
-        : parseHostPort(hostList[0] || "localhost:27017", 27017);
-      const timeoutMs = Number(
-        parsed.params.get("connectTimeoutMS") ||
-          parsed.params.get("serverSelectionTimeoutMS"),
-      );
-      const tlsText = String(
-        parsed.params.get("tls") || parsed.params.get("ssl") || "",
-      )
-        .trim()
-        .toLowerCase();
-      const tlsInsecureText = String(
-        parsed.params.get("tlsInsecure") ||
-          parsed.params.get("sslInsecure") ||
-          "",
-      )
-        .trim()
-        .toLowerCase();
-      const tlsEnabled =
-        tlsText === "1" ||
-        tlsText === "true" ||
-        tlsText === "yes" ||
-        tlsText === "on";
-      const tlsInsecure =
-        tlsInsecureText === "1" ||
-        tlsInsecureText === "true" ||
-        tlsInsecureText === "yes" ||
-        tlsInsecureText === "on";
-      return {
-        host: primary?.host || "localhost",
-        port: primary?.port || 27017,
-        user: parsed.username,
-        password: parsed.password,
-        database: parsed.database || "",
-        useSSL: tlsEnabled,
-        sslMode: tlsEnabled
-          ? tlsInsecure
-            ? "skip-verify"
-            : "required"
-          : "disable",
-        ...extractSSLPathValuesFromParams(parsed.params, type),
-        mongoTopology:
-          hostList.length > 1 || !!parsed.params.get("replicaSet")
-            ? "replica"
-            : "single",
-        mongoHosts: hostList.slice(1),
-        mongoSrv: isSrv,
-        mongoReplicaSet: parsed.params.get("replicaSet") || "",
-        mongoAuthSource: parsed.params.get("authSource") || "",
-        mongoReadPreference: parsed.params.get("readPreference") || "primary",
-        mongoAuthMechanism: parsed.params.get("authMechanism") || "",
-        connectionParams: serializeConnectionParams(parsed.params),
-        timeout:
-          Number.isFinite(timeoutMs) && timeoutMs > 0
-            ? Math.min(MAX_TIMEOUT_SECONDS, Math.ceil(timeoutMs / 1000))
-            : undefined,
-        savePassword: true,
-      };
-    }
-
-    if (type === "kafka") {
-      const defaultPort = getDefaultPortByType(type);
-      const parsed =
-        parseMultiHostUri(trimmedUri, "kafka") ||
-        parseMultiHostUri(trimmedUri, "apache-kafka") ||
-        parseMultiHostUri(trimmedUri, "apache_kafka");
-      if (!parsed) {
-        return null;
-      }
-      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
-        return null;
-      }
-      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
-        return null;
-      }
-      const hostList = normalizeAddressList(parsed.hosts, defaultPort);
-      if (!hostList.length) {
-        return null;
-      }
-      const primary = parseHostPort(
-        hostList[0] || `localhost:${defaultPort}`,
-        defaultPort,
-      );
-      const tlsEnabled = normalizeUriBool(
-        parsed.params.get("tls") ||
-          parsed.params.get("ssl") ||
-          parsed.params.get("useSSL") ||
-          parsed.params.get("use_ssl"),
-      );
-      const skipVerify = normalizeUriBool(
-        parsed.params.get("skip_verify") || parsed.params.get("skipVerify"),
-      );
-      const topology = String(parsed.params.get("topology") || "")
-        .trim()
-        .toLowerCase();
-      const timeoutValue = Number(parsed.params.get("timeout"));
-      return {
-        host: primary?.host || "localhost",
-        port: primary?.port || defaultPort,
-        user: parsed.username,
-        password: parsed.password,
-        database: parsed.database || "",
-        useSSL: tlsEnabled,
-        sslMode: tlsEnabled ? (skipVerify ? "skip-verify" : "required") : "disable",
-        ...extractSSLPathValuesFromParams(parsed.params, type),
-        kafkaTopology:
-          topology === "cluster" || hostList.length > 1 ? "cluster" : "single",
-        kafkaHosts: hostList.slice(1),
-        connectionParams: serializeConnectionParams(parsed.params),
-        timeout:
-          Number.isFinite(timeoutValue) && timeoutValue > 0
-            ? Math.min(MAX_TIMEOUT_SECONDS, Math.trunc(timeoutValue))
-            : undefined,
-      };
-    }
-
-    if (type === "mqtt") {
-      const defaultPort = getDefaultPortByType(type);
-      const parsed =
-        parseMultiHostUri(trimmedUri, "mqtt") ||
-        parseMultiHostUri(trimmedUri, "mqtts") ||
-        parseMultiHostUri(trimmedUri, "tcp") ||
-        parseMultiHostUri(trimmedUri, "ssl") ||
-        parseMultiHostUri(trimmedUri, "tls");
-      if (!parsed) {
-        return null;
-      }
-      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
-        return null;
-      }
-      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
-        return null;
-      }
-      const hostList = normalizeAddressList(parsed.hosts, defaultPort);
-      if (!hostList.length) {
-        return null;
-      }
-      const primary = parseHostPort(
-        hostList[0] || `localhost:${defaultPort}`,
-        defaultPort,
-      );
-      const lowerUri = trimmedUri.toLowerCase();
-      const tlsEnabled =
-        lowerUri.startsWith("mqtts://") ||
-        lowerUri.startsWith("ssl://") ||
-        lowerUri.startsWith("tls://") ||
-        normalizeUriBool(
-          parsed.params.get("tls") ||
-            parsed.params.get("ssl") ||
-            parsed.params.get("useSSL") ||
-            parsed.params.get("use_ssl"),
-        );
-      const skipVerify = normalizeUriBool(
-        parsed.params.get("skip_verify") || parsed.params.get("skipVerify"),
-      );
-      const topology = String(parsed.params.get("topology") || "")
-        .trim()
-        .toLowerCase();
-      const timeoutValue = Number(parsed.params.get("timeout"));
-      return {
-        host: primary?.host || "localhost",
-        port: primary?.port || defaultPort,
-        user: parsed.username,
-        password: parsed.password,
-        database: parsed.database || "",
-        useSSL: tlsEnabled,
-        sslMode: tlsEnabled ? (skipVerify ? "skip-verify" : "required") : "disable",
-        ...extractSSLPathValuesFromParams(parsed.params, type),
-        mqttTopology:
-          topology === "cluster" || hostList.length > 1 ? "cluster" : "single",
-        mqttHosts: hostList.slice(1),
-        connectionParams: serializeConnectionParams(parsed.params),
-        timeout:
-          Number.isFinite(timeoutValue) && timeoutValue > 0
-            ? Math.min(MAX_TIMEOUT_SECONDS, Math.trunc(timeoutValue))
-            : undefined,
-      };
-    }
-
-    if (type === "rocketmq") {
-      const defaultPort = getDefaultPortByType(type);
-      const parsed =
-        parseMultiHostUri(trimmedUri, "rocketmq") ||
-        parseMultiHostUri(trimmedUri, "rmq");
-      if (!parsed) {
-        return null;
-      }
-      if (!parsed.hosts.length || parsed.hosts.length > MAX_URI_HOSTS) {
-        return null;
-      }
-      if (parsed.hosts.some((entry) => !isValidUriHostEntry(entry))) {
-        return null;
-      }
-      const hostList = normalizeAddressList(parsed.hosts, defaultPort);
-      if (!hostList.length) {
-        return null;
-      }
-      const primary = parseHostPort(
-        hostList[0] || `localhost:${defaultPort}`,
-        defaultPort,
-      );
-      const topology = String(parsed.params.get("topology") || "")
-        .trim()
-        .toLowerCase();
-      const timeoutValue = Number(parsed.params.get("timeout"));
-      return {
-        host: primary?.host || "localhost",
-        port: primary?.port || defaultPort,
-        user: parsed.username,
-        password: parsed.password,
-        database: parsed.database || "",
-        rocketmqTopology:
-          topology === "cluster" || hostList.length > 1 ? "cluster" : "single",
-        rocketmqHosts: hostList.slice(1),
-        connectionParams: serializeConnectionParams(parsed.params),
-        timeout:
-          Number.isFinite(timeoutValue) && timeoutValue > 0
-            ? Math.min(MAX_TIMEOUT_SECONDS, Math.trunc(timeoutValue))
-            : undefined,
-      };
-    }
-
-    if (type === "rabbitmq") {
-      const defaultPort = getDefaultPortByType(type);
-      const parsed = parseSingleHostUri(
-        trimmedUri,
-        ["rabbitmq", "http", "https"],
-        defaultPort,
-      );
-      if (!parsed) {
-        return null;
-      }
-      const lowerUri = trimmedUri.toLowerCase();
-      const tlsEnabled =
-        lowerUri.startsWith("https://") ||
-        normalizeUriBool(
-          parsed.params.get("tls") ||
-            parsed.params.get("ssl") ||
-            parsed.params.get("useSSL") ||
-            parsed.params.get("use_ssl"),
-        );
-      const skipVerify = normalizeUriBool(
-        parsed.params.get("skip_verify") || parsed.params.get("skipVerify"),
-      );
-      const timeoutValue = Number(parsed.params.get("timeout"));
-      return {
-        host: parsed.host,
-        port: parsed.port,
-        user: parsed.username,
-        password: parsed.password,
-        database: parsed.database || "",
-        useSSL: tlsEnabled,
-        sslMode: tlsEnabled ? (skipVerify ? "skip-verify" : "required") : "disable",
-        ...extractSSLPathValuesFromParams(parsed.params, type),
-        connectionParams: serializeConnectionParams(parsed.params),
-        timeout:
-          Number.isFinite(timeoutValue) && timeoutValue > 0
-            ? Math.min(MAX_TIMEOUT_SECONDS, Math.trunc(timeoutValue))
-            : undefined,
-      };
-    }
-
-    if (type === "clickhouse") {
-      const httpValues = parseClickHouseHTTPUriToValues(trimmedUri);
-      if (httpValues) {
-        return httpValues;
-      }
-    }
-
-    const singleHostSchemes = singleHostUriSchemesByType[type];
-    if (singleHostSchemes && singleHostSchemes.length > 0) {
-      const parsed = parseSingleHostUri(
-        trimmedUri,
-        singleHostSchemes,
-        getDefaultPortByType(type),
-      );
-      if (!parsed) {
-        return null;
-      }
-      if (type === "oracle" && !String(parsed.database || "").trim()) {
-        // Oracle 需要显式 service name，避免 URI 解析后放过必填校验。
-        return null;
-      }
-      const parsedValues: Record<string, any> = {
-        host: parsed.host,
-        port: parsed.port,
-        user: parsed.username,
-        password: parsed.password,
-        database: parsed.database,
-      };
-      if (supportsConnectionParamsForType(type)) {
-        parsedValues.connectionParams = serializeConnectionParams(parsed.params);
-      }
-
-      if (supportsSSLForType(type)) {
-        Object.assign(parsedValues, extractSSLPathValuesFromParams(parsed.params, type));
-        const normalizeBool = (raw: unknown) => {
-          const text = String(raw ?? "")
-            .trim()
-            .toLowerCase();
-          return (
-            text === "1" || text === "true" || text === "yes" || text === "on"
-          );
-        };
-        if (
-          type === "postgres" ||
-          type === "kingbase" ||
-          type === "highgo" ||
-          type === "vastbase" ||
-          type === "opengauss" ||
-          type === "gaussdb"
-        ) {
-          const sslMode = String(parsed.params.get("sslmode") || "")
-            .trim()
-            .toLowerCase();
-          if (sslMode) {
-            parsedValues.useSSL = sslMode !== "disable" && sslMode !== "false";
-            parsedValues.sslMode =
-              sslMode === "disable" || sslMode === "false"
-                ? "disable"
-                : "required";
-          }
-        } else if (type === "sqlserver") {
-          const encrypt = String(parsed.params.get("encrypt") || "")
-            .trim()
-            .toLowerCase();
-          const trust = String(
-            parsed.params.get("TrustServerCertificate") ||
-              parsed.params.get("trustservercertificate") ||
-              "",
-          )
-            .trim()
-            .toLowerCase();
-          const encrypted =
-            encrypt === "true" ||
-            encrypt === "mandatory" ||
-            encrypt === "yes" ||
-            encrypt === "1" ||
-            encrypt === "strict";
-          if (encrypted) {
-            parsedValues.useSSL = true;
-            parsedValues.sslMode =
-              trust === "true" || trust === "1" || trust === "yes"
-                ? "skip-verify"
-                : "required";
-          } else if (encrypt) {
-            parsedValues.useSSL = false;
-            parsedValues.sslMode = "disable";
-          }
-        } else if (type === "clickhouse") {
-          parsedValues.clickHouseProtocol = normalizeClickHouseProtocolValue(
-            parsed.params.get("protocol"),
-          );
-          const secure = String(
-            parsed.params.get("secure") || parsed.params.get("tls") || "",
-          )
-            .trim()
-            .toLowerCase();
-          const skipVerify = normalizeBool(parsed.params.get("skip_verify"));
-          if (secure) {
-            parsedValues.useSSL = normalizeBool(secure);
-            parsedValues.sslMode = skipVerify
-              ? "skip-verify"
-              : parsedValues.useSSL
-                ? "required"
-                : "disable";
-          }
-        } else if (type === "dameng") {
-          const certPath = String(
-            parsed.params.get("SSL_CERT_PATH") ||
-              parsed.params.get("ssl_cert_path") ||
-              parsed.params.get("sslCertPath") ||
-              "",
-          ).trim();
-          const keyPath = String(
-            parsed.params.get("SSL_KEY_PATH") ||
-              parsed.params.get("ssl_key_path") ||
-              parsed.params.get("sslKeyPath") ||
-              "",
-          ).trim();
-          parsedValues.sslCertPath = certPath;
-          parsedValues.sslKeyPath = keyPath;
-          if (certPath || keyPath) {
-            parsedValues.useSSL = true;
-            parsedValues.sslMode = "required";
-          }
-        } else if (type === "oracle") {
-          const ssl = String(
-            parsed.params.get("SSL") || parsed.params.get("ssl") || "",
-          )
-            .trim()
-            .toLowerCase();
-          const sslVerify = String(
-            parsed.params.get("SSL VERIFY") ||
-              parsed.params.get("ssl verify") ||
-              parsed.params.get("SSL_VERIFY") ||
-              parsed.params.get("ssl_verify") ||
-              "",
-          )
-            .trim()
-            .toLowerCase();
-          if (ssl) {
-            parsedValues.useSSL = normalizeBool(ssl);
-            if (!parsedValues.useSSL) {
-              parsedValues.sslMode = "disable";
-            } else {
-              parsedValues.sslMode = normalizeBool(sslVerify || "true")
-                ? "required"
-                : "skip-verify";
-            }
-          }
-        } else if (type === "tdengine") {
-          const protocol = String(parsed.params.get("protocol") || "")
-            .trim()
-            .toLowerCase();
-          const skipVerify = normalizeBool(parsed.params.get("skip_verify"));
-          if (protocol === "wss") {
-            parsedValues.useSSL = true;
-            parsedValues.sslMode = skipVerify ? "skip-verify" : "required";
-          } else if (protocol === "ws") {
-            parsedValues.useSSL = false;
-            parsedValues.sslMode = "disable";
-          }
-        } else if (type === "chroma" || type === "qdrant") {
-          const tls = String(
-            parsed.params.get("tls") ||
-              parsed.params.get("ssl") ||
-              parsed.params.get("useSSL") ||
-              parsed.params.get("use_ssl") ||
-              "",
-          )
-            .trim()
-            .toLowerCase();
-          const skipVerify = normalizeBool(
-            parsed.params.get("skip_verify") || parsed.params.get("skipVerify"),
-          );
-          const enabled = tls ? normalizeBool(tls) : trimmedUri.toLowerCase().startsWith("https://");
-          parsedValues.useSSL = enabled;
-          parsedValues.sslMode = enabled ? (skipVerify ? "skip-verify" : "required") : "disable";
-        }
-      }
-      return parsedValues;
-    }
-
-    return null;
   };
 
   const createUriAwareRequiredRule =
@@ -2069,440 +1078,20 @@ const ConnectionModal: React.FC<{
     },
   });
 
-  const getUriPlaceholder = () => {
-    if (isMySQLCompatibleType(dbType)) {
-      const defaultPort = getDefaultPortByType(dbType);
-      const scheme =
-        dbType === "diros" ? "doris" : dbType === "starrocks" ? "starrocks" : dbType === "oceanbase" ? "oceanbase" : dbType === "goldendb" ? "goldendb" : "mysql";
-      if (dbType === "oceanbase") {
-        return `${scheme}://sys%40oracle001:pass@127.0.0.1:${defaultPort}/SERVICE_NAME?protocol=oracle`;
-      }
-      return `${scheme}://user:pass@127.0.0.1:${defaultPort},127.0.0.2:${defaultPort}/db_name?topology=replica`;
-    }
-    if (isFileDatabaseType(dbType)) {
-      return dbType === "duckdb"
-        ? "duckdb:///Users/name/demo.duckdb"
-        : "sqlite:///Users/name/demo.sqlite";
-    }
-    if (dbType === "mongodb") {
-      return "mongodb+srv://user:pass@cluster0.example.com/db_name?authSource=admin&authMechanism=SCRAM-SHA-256";
-    }
-    if (dbType === "clickhouse") {
-      return "clickhouse://default:pass@127.0.0.1:9000/default";
-    }
-    if (dbType === "chroma") {
-      return "http://127.0.0.1:8000/default_database?tenant=default_tenant";
-    }
-    if (dbType === "qdrant") {
-      return "http://127.0.0.1:6333";
-    }
-    if (dbType === "iotdb") {
-      return "iotdb://root:root@127.0.0.1:6667/root.sg";
-    }
-    if (dbType === "rocketmq") {
-      return "rocketmq://accessKey:secretKey@127.0.0.1:9876,127.0.0.2:9876/orders.events?topology=cluster&groupId=gonavi&namespace=prod&tag=TagA&pullBatchSize=32&startOffset=latest";
-    }
-    if (dbType === "mqtt") {
-      return "mqtt://user:pass@127.0.0.1:1883/devices%2F%2B%2Ftelemetry?topology=cluster&clientId=gonavi-desktop&qos=1";
-    }
-    if (dbType === "kafka") {
-      return "kafka://user:pass@127.0.0.1:9092,127.0.0.2:9092/orders.events?topology=cluster&groupId=analytics&mechanism=scram-sha-256";
-    }
-    if (dbType === "rabbitmq") {
-      return "rabbitmq://guest:guest@127.0.0.1:15672/%2F?defaultQueue=orders.queue&exchange=events.topic&timeout=30";
-    }
-    if (dbType === "redis") {
-      return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster 或 redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster";
-    }
-    if (dbType === "oracle") {
-      return "oracle://user:pass@127.0.0.1:1521/ORCLPDB1";
-    }
-    if (dbType === "iris") {
-      return "iris://user:pass@127.0.0.1:1972/USER";
-    }
-    if (dbType === "opengauss") {
-      return "opengauss://user:pass@127.0.0.1:5432/db_name";
-    }
-    if (dbType === "gaussdb") {
-      return "gaussdb://user:pass@127.0.0.1:5432/db_name";
-    }
-    return "例如: postgres://user:pass@127.0.0.1:5432/db_name";
-  };
-
-  const getConnectionParamsPlaceholder = () => {
-    if (dbType === "oceanbase") {
-      return oceanBaseProtocol === "oracle"
-        ? "PREFETCH_ROWS=5000"
-        : "useUnicode=true&characterEncoding=utf8&autoReconnect=true&useSSL=false";
-    }
-    if (isMySQLCompatibleType(dbType)) {
-      return "useUnicode=true&characterEncoding=utf8&autoReconnect=true&useSSL=false";
-    }
-    switch (dbType) {
-      case "postgres":
-      case "kingbase":
-      case "highgo":
-      case "vastbase":
-      case "opengauss":
-      case "gaussdb":
-        return "application_name=GoNavi&statement_timeout=30000";
-      case "oracle":
-        return "PREFETCH_ROWS=5000&TRACE FILE=/tmp/go-ora.trc";
-      case "sqlserver":
-        return "app name=GoNavi&packet size=32767";
-      case "iris":
-        return "timeout=30";
-      case "clickhouse":
-        return "max_execution_time=60&compress=lz4";
-      case "mongodb":
-        return "retryWrites=true&readPreference=secondaryPreferred";
-      case "chroma":
-        return "tenant=default_tenant&apiKey=...";
-      case "qdrant":
-        return "apiKey=...";
-      case "dameng":
-        return "schema=SYSDBA";
-      case "tdengine":
-        return "timezone=Asia%2FShanghai";
-      case "iotdb":
-        return "fetchSize=1024&timeZone=Asia%2FShanghai";
-      case "rocketmq":
-        return "groupId=gonavi&namespace=prod&tag=TagA&pullBatchSize=32&startOffset=latest";
-      case "mqtt":
-        return "topics=devices%2F%2B%2Ftelemetry,%24SYS%2F%23&clientId=gonavi-desktop&qos=1&cleanSession=true&fetchWaitMs=4000";
-      case "kafka":
-        return "groupId=gonavi&mechanism=scram-sha-256&clientId=gonavi-desktop&startOffset=latest";
-      case "rabbitmq":
-        return "defaultQueue=orders.queue&exchange=events.topic&managementPathPrefix=/rabbitmq";
-      default:
-        return "key=value&another=value";
-    }
-  };
-
-  const buildUriFromValues = (values: any) => {
-    const type = String(values.type || "")
-      .trim()
-      .toLowerCase();
-    const defaultPort = getDefaultPortByType(type);
-    const host = String(values.host || "localhost").trim();
-    const port = Number(values.port || defaultPort);
-    const user = String(values.user || "").trim();
-    const password = String(values.password || "");
-    const database = String(values.database || "").trim();
-    const timeout = Number(values.timeout || 30);
-    const encodedAuth = user
-      ? `${encodeURIComponent(user)}${password ? `:${encodeURIComponent(password)}` : ""}@`
-      : "";
-
-    if (isMySQLCompatibleType(type)) {
-      const selectedOceanBaseProtocol =
-        type === "oceanbase"
-          ? normalizeOceanBaseProtocolValue(values.oceanBaseProtocol)
-          : "mysql";
-      const primary = toAddress(host, port, defaultPort);
-      const replicas =
-        selectedOceanBaseProtocol !== "oracle" && values.mysqlTopology === "replica"
-          ? normalizeAddressList(values.mysqlReplicaHosts, defaultPort)
-          : [];
-      const hosts = normalizeAddressList([primary, ...replicas], defaultPort);
-      const params = new URLSearchParams();
-      if (hosts.length > 1 || values.mysqlTopology === "replica") {
-        params.set("topology", "replica");
-      }
-      if (values.useSSL) {
-        const mode = String(values.sslMode || "preferred")
-          .trim()
-          .toLowerCase();
-        if (mode === "required") {
-          params.set("tls", "true");
-        } else if (mode === "skip-verify") {
-          params.set("tls", "skip-verify");
-        } else {
-          params.set("tls", "preferred");
-        }
-      }
-      appendSSLPathParamsForUri(params, type, values);
-      if (Number.isFinite(timeout) && timeout > 0) {
-        params.set("timeout", String(timeout));
-      }
-      mergeConnectionParams(params, values.connectionParams);
-      if (type === "oceanbase") {
-        params.set("protocol", selectedOceanBaseProtocol);
-      }
-      const dbPath = database ? `/${encodeURIComponent(database)}` : "/";
-      const query = params.toString();
-      const scheme =
-        type === "diros" ? "doris" : type === "starrocks" ? "starrocks" : type === "oceanbase" ? "oceanbase" : type === "goldendb" ? "goldendb" : "mysql";
-      return `${scheme}://${encodedAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
-    }
-
-    if (type === "kafka") {
-      const primary = toAddress(host, port, defaultPort);
-      const brokers =
-        values.kafkaTopology === "cluster"
-          ? normalizeAddressList(values.kafkaHosts, defaultPort)
-          : [];
-      const allBrokers = normalizeAddressList([primary, ...brokers], defaultPort);
-      const params = new URLSearchParams();
-      if (allBrokers.length > 1 || values.kafkaTopology === "cluster") {
-        params.set("topology", "cluster");
-      }
-      if (values.useSSL) {
-        const mode = String(values.sslMode || "preferred")
-          .trim()
-          .toLowerCase();
-        params.set("tls", "true");
-        if (mode === "skip-verify" || mode === "preferred") {
-          params.set("skip_verify", "true");
-        }
-        appendSSLPathParamsForUri(params, type, values);
-      }
-      if (Number.isFinite(timeout) && timeout > 0) {
-        params.set("timeout", String(timeout));
-      }
-      mergeConnectionParams(params, values.connectionParams);
-      const topicPath = database ? `/${encodeURIComponent(database)}` : "";
-      const query = params.toString();
-      return `kafka://${encodedAuth}${allBrokers.join(",")}${topicPath}${query ? `?${query}` : ""}`;
-    }
-
-    if (type === "mqtt") {
-      const primary = toAddress(host, port, defaultPort);
-      const brokers =
-        values.mqttTopology === "cluster"
-          ? normalizeAddressList(values.mqttHosts, defaultPort)
-          : [];
-      const allBrokers = normalizeAddressList([primary, ...brokers], defaultPort);
-      const params = new URLSearchParams();
-      if (allBrokers.length > 1 || values.mqttTopology === "cluster") {
-        params.set("topology", "cluster");
-      }
-      if (values.useSSL) {
-        const mode = String(values.sslMode || "preferred")
-          .trim()
-          .toLowerCase();
-        params.set("tls", "true");
-        if (mode === "skip-verify" || mode === "preferred") {
-          params.set("skip_verify", "true");
-        }
-        appendSSLPathParamsForUri(params, type, values);
-      }
-      if (Number.isFinite(timeout) && timeout > 0) {
-        params.set("timeout", String(timeout));
-      }
-      mergeConnectionParams(params, values.connectionParams);
-      const topicPath = database ? `/${encodeURIComponent(database)}` : "";
-      const query = params.toString();
-      return `mqtt://${encodedAuth}${allBrokers.join(",")}${topicPath}${query ? `?${query}` : ""}`;
-    }
-
-    if (type === "rocketmq") {
-      const primary = toAddress(host, port, defaultPort);
-      const nameservers =
-        values.rocketmqTopology === "cluster"
-          ? normalizeAddressList(values.rocketmqHosts, defaultPort)
-          : [];
-      const allNameServers = normalizeAddressList([primary, ...nameservers], defaultPort);
-      const params = new URLSearchParams();
-      if (allNameServers.length > 1 || values.rocketmqTopology === "cluster") {
-        params.set("topology", "cluster");
-      }
-      if (Number.isFinite(timeout) && timeout > 0) {
-        params.set("timeout", String(timeout));
-      }
-      mergeConnectionParams(params, values.connectionParams);
-      const topicPath = database ? `/${encodeURIComponent(database)}` : "";
-      const query = params.toString();
-      return `rocketmq://${encodedAuth}${allNameServers.join(",")}${topicPath}${query ? `?${query}` : ""}`;
-    }
-
-    if (type === "rabbitmq") {
-      const address = toAddress(host, port, defaultPort);
-      const params = new URLSearchParams();
-      if (values.useSSL) {
-        const mode = String(values.sslMode || "preferred")
-          .trim()
-          .toLowerCase();
-        params.set("tls", "true");
-        if (mode === "skip-verify" || mode === "preferred") {
-          params.set("skip_verify", "true");
-        }
-        appendSSLPathParamsForUri(params, type, values);
-      }
-      if (Number.isFinite(timeout) && timeout > 0) {
-        params.set("timeout", String(timeout));
-      }
-      mergeConnectionParams(params, values.connectionParams);
-      const vhostPath = database ? `/${encodeURIComponent(database)}` : "";
-      const query = params.toString();
-      return `rabbitmq://${encodedAuth}${address}${vhostPath}${query ? `?${query}` : ""}`;
-    }
-
-    if (type === "redis") {
-      return buildRedisUriFromValues(values);
-    }
-
-    if (isFileDatabaseType(type)) {
-      const pathText = normalizeFileDbPath(String(values.host || "").trim());
-      if (!pathText) {
-        return `${type}://`;
-      }
-      return `${type}://${encodeURI(pathText)}`;
-    }
-
-    if (type === "mongodb") {
-      const useSrv = !!values.mongoSrv;
-      const primaryAddress = useSrv
-        ? parseHostPort(host, 27017)?.host || host || "localhost"
-        : toAddress(host, port, 27017);
-      const extraNodes =
-        values.mongoTopology === "replica"
-          ? useSrv
-            ? normalizeMongoSrvHostList(values.mongoHosts, 27017)
-            : normalizeAddressList(values.mongoHosts, 27017)
-          : [];
-      const hosts = useSrv
-        ? normalizeMongoSrvHostList([primaryAddress, ...extraNodes], 27017)
-        : normalizeAddressList([primaryAddress, ...extraNodes], 27017);
-      const scheme = useSrv ? "mongodb+srv" : "mongodb";
-      const params = new URLSearchParams();
-      const authSource = String(
-        values.mongoAuthSource || database || "admin",
-      ).trim();
-      if (authSource) {
-        params.set("authSource", authSource);
-      }
-      const replicaSet = String(values.mongoReplicaSet || "").trim();
-      if (replicaSet) {
-        params.set("replicaSet", replicaSet);
-      }
-      const readPreference = String(values.mongoReadPreference || "").trim();
-      if (readPreference) {
-        params.set("readPreference", readPreference);
-      }
-      const authMechanism = String(values.mongoAuthMechanism || "").trim();
-      if (authMechanism) {
-        params.set("authMechanism", authMechanism);
-      }
-      if (values.useSSL) {
-        const mode = String(values.sslMode || "preferred")
-          .trim()
-          .toLowerCase();
-        params.set("tls", "true");
-        if (mode === "skip-verify" || mode === "preferred") {
-          params.set("tlsInsecure", "true");
-        } else {
-          params.delete("tlsInsecure");
-        }
-      }
-      appendSSLPathParamsForUri(params, type, values);
-      if (Number.isFinite(timeout) && timeout > 0) {
-        params.set("connectTimeoutMS", String(timeout * 1000));
-        params.set("serverSelectionTimeoutMS", String(timeout * 1000));
-      }
-      mergeConnectionParams(params, values.connectionParams);
-      const dbPath = database ? `/${encodeURIComponent(database)}` : "/";
-      const query = params.toString();
-      return `${scheme}://${encodedAuth}${hosts.join(",")}${dbPath}${query ? `?${query}` : ""}`;
-    }
-
-    const clickHouseProtocol =
-      type === "clickhouse"
-        ? normalizeClickHouseProtocolValue(values.clickHouseProtocol)
-        : "auto";
-    const scheme =
-      type === "gaussdb"
-        ? "gaussdb"
-        : type === "postgres"
-        ? "postgresql"
-        : type === "chroma" || type === "qdrant"
-          ? values.useSSL
-            ? "https"
-            : "http"
-        : type === "clickhouse" && clickHouseProtocol === "http"
-          ? values.useSSL
-            ? "https"
-            : "http"
-          : type;
-    const dbPath = database ? `/${encodeURIComponent(database)}` : "";
-    const params = new URLSearchParams();
-    if (supportsSSLForType(type) && values.useSSL) {
-      const mode = String(values.sslMode || "preferred")
-        .trim()
-        .toLowerCase();
-      if (isPostgresCompatibleSSLType(type)) {
-        params.set(
-          "sslmode",
-          mode === "skip-verify"
-            ? "require"
-            : String(values.sslCAPath || "").trim()
-              ? "verify-ca"
-              : "require",
-        );
-        appendSSLPathParamsForUri(params, type, values);
-      } else if (type === "sqlserver") {
-        params.set("encrypt", "true");
-        params.set(
-          "TrustServerCertificate",
-          mode === "skip-verify" || mode === "preferred" ? "true" : "false",
-        );
-        appendSSLPathParamsForUri(params, type, values);
-      } else if (type === "clickhouse") {
-        if (clickHouseProtocol === "http") {
-          if (mode === "skip-verify" || mode === "preferred") {
-            params.set("skip_verify", "true");
-          }
-        } else {
-          params.set("secure", "true");
-          if (mode === "skip-verify" || mode === "preferred") {
-            params.set("skip_verify", "true");
-          }
-        }
-        appendSSLPathParamsForUri(params, type, values);
-      } else if (type === "dameng") {
-        appendSSLPathParamsForUri(params, type, values);
-      } else if (type === "oracle") {
-        params.set("SSL", "TRUE");
-        params.set("SSL VERIFY", mode === "required" ? "TRUE" : "FALSE");
-      } else if (type === "tdengine") {
-        params.set("protocol", "wss");
-        if (mode === "skip-verify" || mode === "preferred") {
-          params.set("skip_verify", "true");
-        }
-      } else if (type === "chroma" || type === "qdrant") {
-        if (mode === "skip-verify" || mode === "preferred") {
-          params.set("skip_verify", "true");
-        }
-        appendSSLPathParamsForUri(params, type, values);
-      }
-    } else if (supportsSSLForType(type)) {
-      if (isPostgresCompatibleSSLType(type)) {
-        params.set("sslmode", "disable");
-      } else if (type === "sqlserver") {
-        params.set("encrypt", "disable");
-        params.set("TrustServerCertificate", "true");
-      } else if (type === "tdengine") {
-        params.set("protocol", "ws");
-      }
-    }
-    if (type === "clickhouse" && clickHouseProtocol !== "auto") {
-      params.set("protocol", clickHouseProtocol);
-    }
-    if (supportsConnectionParamsForType(type)) {
-      mergeConnectionParams(params, values.connectionParams);
-    }
-    const query = params.toString();
-    return `${scheme}://${encodedAuth}${toAddress(host, port, defaultPort)}${dbPath}${query ? `?${query}` : ""}`;
-  };
-
   const handleGenerateURI = () => {
     try {
       const values = form.getFieldsValue(true);
       const uri = buildUriFromValues(values);
       form.setFieldValue("uri", uri);
-      setUriFeedback({ type: "success", message: "URI 已生成" });
+      setUriFeedback({
+        type: "success",
+        messageKey: "connection.modal.uri.feedback.generated",
+      });
     } catch {
-      setUriFeedback({ type: "error", message: "生成 URI 失败" });
+      setUriFeedback({
+        type: "error",
+        messageKey: "connection.modal.uri.feedback.generateFailed",
+      });
     }
   };
 
@@ -2513,14 +1102,17 @@ const ConnectionModal: React.FC<{
         .trim()
         .toLowerCase();
       if (!uriText) {
-        setUriFeedback({ type: "warning", message: "请先输入 URI" });
+        setUriFeedback({
+          type: "warning",
+          messageKey: "connection.modal.uri.feedback.emptyInput",
+        });
         return;
       }
       const parsedValues = parseUriToValues(uriText, type);
       if (!parsedValues) {
         setUriFeedback({
           type: "error",
-          message: "当前 URI 与数据源类型不匹配，或 URI 格式不支持",
+          messageKey: "connection.modal.uri.feedback.unsupported",
         });
         return;
       }
@@ -2534,11 +1126,14 @@ const ConnectionModal: React.FC<{
       if (testResult) {
         setTestResult(null);
       }
-      setUriFeedback({ type: "success", message: "已根据 URI 回填连接参数" });
+      setUriFeedback({
+        type: "success",
+        messageKey: "connection.modal.uri.feedback.parsed",
+      });
     } catch {
       setUriFeedback({
         type: "error",
-        message: "URI 解析失败，请检查格式后重试",
+        messageKey: "connection.modal.uri.feedback.parseFailed",
       });
     }
   };
@@ -2551,14 +1146,23 @@ const ConnectionModal: React.FC<{
       form.setFieldValue("uri", uriText);
     }
     if (!uriText) {
-      setUriFeedback({ type: "warning", message: "没有可复制的 URI" });
+      setUriFeedback({
+        type: "warning",
+        messageKey: "connection.modal.uri.feedback.emptyCopy",
+      });
       return;
     }
     try {
       await navigator.clipboard.writeText(uriText);
-      setUriFeedback({ type: "success", message: "URI 已复制" });
+      setUriFeedback({
+        type: "success",
+        messageKey: "connection.modal.uri.feedback.copied",
+      });
     } catch {
-      setUriFeedback({ type: "error", message: "复制失败" });
+      setUriFeedback({
+        type: "error",
+        messageKey: "connection.modal.uri.feedback.copyFailed",
+      });
     }
   };
 
@@ -2577,11 +1181,19 @@ const ConnectionModal: React.FC<{
         if (selectedPath) {
           form.setFieldValue("sshKeyPath", selectedPath);
         }
-      } else if (res?.message !== "已取消") {
-        message.error(`选择私钥文件失败: ${res?.message || "未知错误"}`);
+      } else if (!isBackendCancelledResult(res)) {
+        message.error(
+          t("connection.modal.filePicker.sshKeyFailure", {
+            detail: res?.message || t("connection.modal.error.unknown"),
+          }),
+        );
       }
     } catch (e: any) {
-      message.error(`选择私钥文件失败: ${e?.message || String(e)}`);
+      message.error(
+        t("connection.modal.filePicker.sshKeyFailure", {
+          detail: e?.message || String(e),
+        }),
+      );
     } finally {
       setSelectingSSHKey(false);
     }
@@ -2605,11 +1217,19 @@ const ConnectionModal: React.FC<{
         if (selectedPath) {
           form.setFieldValue(fieldName, selectedPath);
         }
-      } else if (res?.message !== "已取消") {
-        message.error(`选择证书文件失败: ${res?.message || "未知错误"}`);
+      } else if (!isBackendCancelledResult(res)) {
+        message.error(
+          t("connection.modal.filePicker.certificateFailure", {
+            detail: res?.message || t("connection.modal.error.unknown"),
+          }),
+        );
       }
     } catch (e: any) {
-      message.error(`选择证书文件失败: ${e?.message || String(e)}`);
+      message.error(
+        t("connection.modal.filePicker.certificateFailure", {
+          detail: e?.message || String(e),
+        }),
+      );
     } finally {
       setSelectingCertificateField(null);
     }
@@ -2630,11 +1250,19 @@ const ConnectionModal: React.FC<{
         if (selectedPath) {
           form.setFieldValue("host", normalizeFileDbPath(selectedPath));
         }
-      } else if (res?.message !== "已取消") {
-        message.error(`选择数据库文件失败: ${res?.message || "未知错误"}`);
+      } else if (!isBackendCancelledResult(res)) {
+        message.error(
+          t("connection.modal.filePicker.databaseFailure", {
+            detail: res?.message || t("connection.modal.error.unknown"),
+          }),
+        );
       }
     } catch (e: any) {
-      message.error(`选择数据库文件失败: ${e?.message || String(e)}`);
+      message.error(
+        t("connection.modal.filePicker.databaseFailure", {
+          detail: e?.message || String(e),
+        }),
+      );
     } finally {
       setSelectingDbFile(false);
     }
@@ -2752,6 +1380,7 @@ const ConnectionModal: React.FC<{
           : Number(config.timeout || 30);
         const hasHttpTunnel = !!config.useHttpTunnel;
         const hasProxy = !hasHttpTunnel && !!config.useProxy;
+        const protection = resolveConnectionProtectionConfig(config);
         form.setFieldsValue({
           type: configType,
           name: initialValues.name,
@@ -2760,6 +1389,11 @@ const ConnectionModal: React.FC<{
           user: config.user,
           password: config.password,
           database: config.database,
+          restrictDataEdit: protection.restrictDataEdit === true,
+          restrictStructureEdit: protection.restrictStructureEdit === true,
+          restrictScriptExecution:
+            protection.restrictScriptExecution === true,
+          restrictDataImport: protection.restrictDataImport === true,
           uri: config.uri || "",
           connectionParams:
             config.connectionParams ||
@@ -2801,6 +1435,11 @@ const ConnectionModal: React.FC<{
           driver: config.driver,
           dsn: config.dsn,
           timeout: resolvedJvmTimeout,
+          keepAliveEnabled: !!config.keepAliveEnabled,
+          keepAliveIntervalMinutes:
+            Number(config.keepAliveIntervalMinutes) > 0
+              ? Number(config.keepAliveIntervalMinutes)
+              : DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
           mysqlTopology: mysqlIsReplica ? "replica" : "single",
           mysqlReplicaHosts: mysqlReplicaHosts,
           rocketmqTopology: rocketmqIsCluster ? "cluster" : "single",
@@ -2975,151 +1614,6 @@ const ConnectionModal: React.FC<{
     };
   }, []);
 
-  const buildSavedConnectionInput = (config: ConnectionConfig, values: any) => {
-    const connectionId =
-      initialValues?.id || config.id || Date.now().toString();
-    const primaryDraft = resolveConnectionSecretDraft({
-      hasSecret: initialValues?.hasPrimaryPassword,
-      valueInput: config.password,
-      clearSecret:
-        clearSecrets.primaryPassword ||
-        (initialValues?.hasPrimaryPassword === true &&
-          String(config.password || "") === ""),
-      forceClear: values.type === "mongodb" && values.savePassword === false,
-    });
-    const sshDraft = resolveConnectionSecretDraft({
-      hasSecret: initialValues?.hasSSHPassword,
-      valueInput: config.ssh?.password,
-      clearSecret: clearSecrets.sshPassword,
-      forceClear: !config.useSSH,
-    });
-    const proxyDraft = resolveConnectionSecretDraft({
-      hasSecret: initialValues?.hasProxyPassword,
-      valueInput: config.proxy?.password,
-      clearSecret: clearSecrets.proxyPassword,
-      forceClear: !config.useProxy,
-    });
-    const httpTunnelDraft = resolveConnectionSecretDraft({
-      hasSecret: initialValues?.hasHttpTunnelPassword,
-      valueInput: config.httpTunnel?.password,
-      clearSecret: clearSecrets.httpTunnelPassword,
-      forceClear: !config.useHttpTunnel,
-    });
-    const mysqlReplicaEnabled =
-      isMySQLCompatibleType(config.type) && config.topology === "replica";
-    const mysqlReplicaDraft = resolveConnectionSecretDraft({
-      hasSecret: initialValues?.hasMySQLReplicaPassword,
-      valueInput: config.mysqlReplicaPassword,
-      clearSecret: clearSecrets.mysqlReplicaPassword,
-      forceClear: !mysqlReplicaEnabled,
-    });
-    const mongoReplicaEnabled =
-      config.type === "mongodb" &&
-      config.topology === "replica" &&
-      values.savePassword !== false;
-    const mongoReplicaDraft = resolveConnectionSecretDraft({
-      hasSecret: initialValues?.hasMongoReplicaPassword,
-      valueInput: config.mongoReplicaPassword,
-      clearSecret: clearSecrets.mongoReplicaPassword,
-      forceClear: !mongoReplicaEnabled,
-    });
-    const redisSentinelEnabled =
-      config.type === "redis" &&
-      config.topology === "sentinel" &&
-      values.savePassword !== false;
-    const redisSentinelDraft = resolveConnectionSecretDraft({
-      hasSecret: initialValues?.hasRedisSentinelPassword,
-      valueInput: config.redisSentinelPassword,
-      clearSecret: clearSecrets.redisSentinelPassword,
-      forceClear: !redisSentinelEnabled,
-    });
-    const opaqueUriDraft = resolveConnectionSecretDraft({
-      hasSecret: initialValues?.hasOpaqueURI,
-      valueInput: config.uri,
-      clearSecret: clearSecrets.opaqueURI,
-      forceClear: values.type === "custom",
-      trimInput: true,
-    });
-    const opaqueDsnDraft = resolveConnectionSecretDraft({
-      hasSecret: initialValues?.hasOpaqueDSN,
-      valueInput: config.dsn,
-      clearSecret: clearSecrets.opaqueDSN,
-      forceClear: values.type !== "custom",
-      trimInput: true,
-    });
-    const isRedisType = values.type === "redis";
-    const displayHost = String(
-      (config as any).host || values.host || "",
-    ).trim();
-    const nextName =
-      values.name ||
-      (isFileDatabaseType(values.type)
-        ? values.type === "duckdb"
-          ? "DuckDB DB"
-          : "SQLite DB"
-        : values.type === "redis"
-          ? `Redis ${displayHost}`
-          : displayHost);
-
-    return {
-      id: connectionId,
-      name: nextName,
-      config: {
-        ...config,
-        id: connectionId,
-        password: primaryDraft.value,
-        ssh: {
-          ...(config.ssh || {
-            host: "",
-            port: 22,
-            user: "",
-            password: "",
-            keyPath: "",
-          }),
-          password: sshDraft.value,
-        },
-        proxy: {
-          ...(config.proxy || {
-            type: "socks5",
-            host: "",
-            port: 1080,
-            user: "",
-            password: "",
-          }),
-          password: proxyDraft.value,
-        },
-        httpTunnel: {
-          ...(config.httpTunnel || {
-            host: "",
-            port: 8080,
-            user: "",
-            password: "",
-          }),
-          password: httpTunnelDraft.value,
-        },
-        uri: opaqueUriDraft.value,
-        dsn: opaqueDsnDraft.value,
-        mysqlReplicaPassword: mysqlReplicaDraft.value,
-        mongoReplicaPassword: mongoReplicaDraft.value,
-        redisSentinelPassword: redisSentinelDraft.value,
-      },
-      includeDatabases: values.includeDatabases,
-      includeRedisDatabases: isRedisType
-        ? values.includeRedisDatabases
-        : undefined,
-      iconType: customIconType || "",
-      iconColor: customIconColor || "",
-      clearPrimaryPassword: primaryDraft.clearStoredSecret,
-      clearSSHPassword: sshDraft.clearStoredSecret,
-      clearProxyPassword: proxyDraft.clearStoredSecret,
-      clearHttpTunnelPassword: httpTunnelDraft.clearStoredSecret,
-      clearMySQLReplicaPassword: mysqlReplicaDraft.clearStoredSecret,
-      clearMongoReplicaPassword: mongoReplicaDraft.clearStoredSecret,
-      clearRedisSentinelPassword: redisSentinelDraft.clearStoredSecret,
-      clearOpaqueURI: opaqueUriDraft.clearStoredSecret,
-      clearOpaqueDSN: opaqueDsnDraft.clearStoredSecret,
-    };
-  };
   const handleOk = async () => {
     try {
       await form.validateFields();
@@ -3138,20 +1632,32 @@ const ConnectionModal: React.FC<{
       }
       setLoading(true);
 
-      const config = await buildConfig(values, true);
-      const payload = buildSavedConnectionInput(config, values);
+      const config = await buildConnectionConfig({
+        values,
+        forPersist: true,
+        initialValues,
+        translate: t,
+      });
+      const payload = buildSavedConnectionInput({
+        config,
+        values,
+        initialValues,
+        clearSecrets,
+        customIconType,
+        customIconColor,
+      });
       const backendApp = (window as any).go?.app?.App;
       const savedConnection = await backendApp?.SaveConnection?.(payload);
       if (!savedConnection) {
-        throw new Error("保存连接失败：后端接口不可用");
+        throw new Error(t("connection.modal.save.backendUnavailable"));
       }
 
       if (initialValues) {
         updateConnection(savedConnection);
-        message.success("配置已更新（未连接）");
+        message.success(t("connection.modal.save.updatedUnconnected"));
       } else {
         addConnection(savedConnection);
-        message.success("配置已保存（未连接）");
+        message.success(t("connection.modal.save.savedUnconnected"));
       }
 
       if (onSaved) {
@@ -3159,7 +1665,7 @@ const ConnectionModal: React.FC<{
           (error: unknown) => {
             console.warn("Failed to refresh post-save state", error);
             void message.warning(
-              "配置已保存，但安全更新状态暂未刷新，请稍后重新检查",
+              t("connection.modal.save.refreshWarning"),
             );
           },
         );
@@ -3176,7 +1682,10 @@ const ConnectionModal: React.FC<{
       onClose();
     } catch (e: any) {
       message.error(
-        normalizeConnectionSecretErrorMessage(e?.message || e, "保存失败"),
+        normalizeConnectionSecretErrorMessage(
+          e?.message || e,
+          t("connection.modal.save.failureFallback"),
+        ),
       );
     } finally {
       setLoading(false);
@@ -3215,74 +1724,22 @@ const ConnectionModal: React.FC<{
     }
   };
 
-  const getBlockingSecretClearMessage = (values: any): string | null => {
-    if (
-      clearSecrets.primaryPassword &&
-      values.type !== "custom" &&
-      !isFileDatabaseType(values.type) &&
-      String(values.password ?? "") === ""
-    ) {
-      return "测试连接前请填写新的密码，或取消清除已保存密码";
-    }
-    if (
-      clearSecrets.sshPassword &&
-      values.useSSH &&
-      String(values.sshPassword ?? "") === ""
-    ) {
-      return "测试连接前请填写新的 SSH 密码，或取消清除已保存 SSH 密码";
-    }
-    if (
-      clearSecrets.proxyPassword &&
-      values.useProxy &&
-      !values.useHttpTunnel &&
-      String(values.proxyPassword ?? "") === ""
-    ) {
-      return "测试连接前请填写新的代理密码，或取消清除已保存代理密码";
-    }
-    if (
-      clearSecrets.httpTunnelPassword &&
-      values.useHttpTunnel &&
-      String(values.httpTunnelPassword ?? "") === ""
-    ) {
-      return "测试连接前请填写新的隧道密码，或取消清除已保存隧道密码";
-    }
-    if (
-      clearSecrets.mysqlReplicaPassword &&
-      isMySQLCompatibleType(values.type) &&
-      values.mysqlTopology === "replica" &&
-      String(values.mysqlReplicaPassword ?? "") === ""
-    ) {
-      return "测试连接前请填写新的从库密码，或取消清除已保存从库密码";
-    }
-    if (
-      clearSecrets.mongoReplicaPassword &&
-      values.type === "mongodb" &&
-      values.mongoTopology === "replica" &&
-      String(values.mongoReplicaPassword ?? "") === ""
-    ) {
-      return "测试连接前请填写新的副本集密码，或取消清除已保存副本集密码";
-    }
-    if (
-      clearSecrets.redisSentinelPassword &&
-      values.type === "redis" &&
-      values.redisTopology === "sentinel" &&
-      String(values.redisSentinelPassword ?? "") === ""
-    ) {
-      return "测试连接前请填写新的 Sentinel 密码，或取消清除已保存 Sentinel 密码";
-    }
-    if (
-      values.type === "mongodb" &&
-      values.savePassword === false &&
-      initialValues?.hasPrimaryPassword &&
-      String(values.password ?? "") === ""
-    ) {
-      return "测试连接前请填写新的 MongoDB 密码，或重新勾选保存密码";
-    }
-    return null;
-  };
-  const applyTestFailureFeedback = (feedback: { message: string }) => {
+  const applyTestFailureFeedback = ({
+    kind,
+    reason,
+    fallbackKey,
+  }: {
+    kind: TestFailureKind;
+    reason?: unknown;
+    fallbackKey: string;
+  }) => {
     void message.destroy("connection-test-failure");
-    setTestResult({ type: "error", message: feedback.message });
+    setTestResult({
+      type: "error",
+      kind,
+      reason: String(reason ?? ""),
+      fallbackKey,
+    });
   };
 
   const handleTest = async () => {
@@ -3296,33 +1753,39 @@ const ConnectionModal: React.FC<{
         values.driver,
       );
       if (unavailableReason) {
-        applyTestFailureFeedback(
-          resolveConnectionTestFailureFeedback({
-            kind: "driver_unavailable",
-            reason: unavailableReason,
-            fallback: "驱动未安装启用",
-          }),
-        );
+        applyTestFailureFeedback({
+          kind: "driver_unavailable",
+          reason: unavailableReason,
+          fallbackKey: "connection.modal.test.fallback.driverUnavailable",
+        });
         promptInstallDriver(
           resolveConnectionDriverType(values.type, values.driver) || values.type,
           unavailableReason,
         );
         return;
       }
-      const blockingSecretClearMessage = getBlockingSecretClearMessage(values);
+      const blockingSecretClearMessage = getBlockingSecretClearMessage({
+        values,
+        clearSecrets,
+        initialValues,
+        translate: t,
+      });
       if (blockingSecretClearMessage) {
-        applyTestFailureFeedback(
-          resolveConnectionTestFailureFeedback({
-            kind: "secret_blocked",
-            reason: blockingSecretClearMessage,
-            fallback: "连接参数不完整",
-          }),
-        );
+        applyTestFailureFeedback({
+          kind: "secret_blocked",
+          reason: blockingSecretClearMessage,
+          fallbackKey: "connection.modal.test.fallback.incompleteParams",
+        });
         return;
       }
       setLoading(true);
       setTestResult(null);
-      const config = await buildConfig(values, false);
+      const config = await buildConnectionConfig({
+        values,
+        forPersist: false,
+        initialValues,
+        translate: t,
+      });
       if (initialValues?.id) {
         config.id = initialValues.id;
       }
@@ -3345,7 +1808,7 @@ const ConnectionModal: React.FC<{
             ? RedisConnect(config as any)
             : TestConnection(dbTestConfig as any),
         rpcTimeoutMs,
-        `连接测试超时（>${timeoutSeconds} 秒），请检查网络/代理/SSH配置后重试`,
+        t("connection.modal.test.timeout", { seconds: timeoutSeconds }),
       );
 
       if (res.success) {
@@ -3355,7 +1818,9 @@ const ConnectionModal: React.FC<{
           const dbRes = await withClientTimeout(
             RedisGetDatabases(config as any),
             rpcTimeoutMs,
-            `连接成功但拉取 Redis 数据库列表超时（>${timeoutSeconds} 秒）`,
+            t("connection.modal.test.redis_database_list_timeout", {
+              seconds: timeoutSeconds,
+            }),
           );
           if (dbRes.success) {
             const supportedDbs = extractRedisDatabaseList(dbRes.data);
@@ -3375,7 +1840,12 @@ const ConnectionModal: React.FC<{
               ),
             );
             message.warning(
-              `连接成功，但获取 Redis 数据库列表失败：${normalizeConnectionSecretErrorMessage(dbRes.message, "未知错误")}`,
+              t("connection.modal.test.redis_database_list_failure", {
+                detail: normalizeConnectionSecretErrorMessage(
+                  dbRes.message,
+                  t("connection.modal.error.unknown"),
+                ),
+              }),
             );
           }
         } else if (!isJVMType) {
@@ -3383,7 +1853,9 @@ const ConnectionModal: React.FC<{
           const dbRes = await withClientTimeout(
             DBGetDatabases(dbTestConfig as any),
             rpcTimeoutMs,
-            `连接成功但拉取数据库列表超时（>${timeoutSeconds} 秒）`,
+            t("connection.modal.test.databaseListTimeout", {
+              seconds: timeoutSeconds,
+            }),
           );
           if (dbRes.success) {
             const dbRows = Array.isArray(dbRes.data) ? dbRes.data : [];
@@ -3396,46 +1868,48 @@ const ConnectionModal: React.FC<{
             if (dbs.length === 0) {
               message.warning(
                 values.type === "dameng"
-                  ? "连接成功，但未获取到可见 schema；请检查当前账号权限或默认 schema 配置"
-                  : "连接成功，但未获取到可见数据库列表",
+                  ? t("connection.modal.test.noVisibleSchema")
+                  : t("connection.modal.test.noVisibleDatabaseList"),
               );
             }
           } else {
             setDbList([]);
             message.warning(
-              `连接成功，但获取数据库列表失败：${normalizeConnectionSecretErrorMessage(dbRes.message, "未知错误")}`,
+              t("connection.modal.test.databaseListFailure", {
+                detail: normalizeConnectionSecretErrorMessage(
+                  dbRes.message,
+                  t("connection.modal.error.unknown"),
+                ),
+              }),
             );
           }
         }
       } else {
-        applyTestFailureFeedback(
-          resolveConnectionTestFailureFeedback({
-            kind: "runtime",
-            reason: res?.message,
-            fallback: "连接被拒绝或参数无效，请检查后重试",
-          }),
-        );
+        applyTestFailureFeedback({
+          kind: "runtime",
+          reason: res?.message,
+          fallbackKey: "connection.modal.test.fallback.rejected",
+        });
       }
     } catch (e: unknown) {
       if (e && typeof e === "object" && "errorFields" in e) {
-        applyTestFailureFeedback(
-          resolveConnectionTestFailureFeedback({
-            kind: "validation",
-            reason: "",
-            fallback: "请先完善必填项后再测试连接",
-          }),
-        );
+        applyTestFailureFeedback({
+          kind: "validation",
+          fallbackKey: "connection.modal.test.fallback.validation",
+        });
         return;
       }
       const reason =
-        e instanceof Error ? e.message : typeof e === "string" ? e : "未知异常";
-      applyTestFailureFeedback(
-        resolveConnectionTestFailureFeedback({
-          kind: "runtime",
-          reason,
-          fallback: "未知异常",
-        }),
-      );
+        e instanceof Error
+          ? e.message
+          : typeof e === "string"
+            ? e
+            : t("connection.modal.test.fallback.unknownException");
+      applyTestFailureFeedback({
+        kind: "runtime",
+        reason,
+        fallbackKey: "connection.modal.test.fallback.unknownException",
+      });
     } finally {
       testInFlightRef.current = false;
       setLoading(false);
@@ -3450,19 +1924,32 @@ const ConnectionModal: React.FC<{
       await form.validateFields();
       const values = form.getFieldsValue(true);
       setDiscoveringMembers(true);
-      const blockingSecretClearMessage = getBlockingSecretClearMessage(values);
+      const blockingSecretClearMessage = getBlockingSecretClearMessage({
+        values,
+        clearSecrets,
+        initialValues,
+        translate: t,
+      });
       if (blockingSecretClearMessage) {
         message.error(blockingSecretClearMessage);
         return;
       }
-      const config = await buildConfig(values, false);
+      const config = await buildConnectionConfig({
+        values,
+        forPersist: false,
+        initialValues,
+        translate: t,
+      });
       if (initialValues?.id) {
         config.id = initialValues.id;
       }
       const result = await MongoDiscoverMembers(config as any);
       if (!result.success) {
         message.error(
-          normalizeConnectionSecretErrorMessage(result.message, "成员发现失败"),
+          normalizeConnectionSecretErrorMessage(
+            result.message,
+            t("connection.modal.mongo.discover.failure"),
+          ),
         );
         return;
       }
@@ -3471,8 +1958,8 @@ const ConnectionModal: React.FC<{
       const members: MongoMemberInfo[] = membersRaw
         .map((item: any) => ({
           host: String(item.host || "").trim(),
-          role: String(item.role || item.state || "UNKNOWN").trim(),
-          state: String(item.state || item.role || "UNKNOWN").trim(),
+          role: String(item.role || item.state || "").trim(),
+          state: String(item.state || item.role || "").trim(),
           stateCode: Number(item.stateCode || 0),
           healthy: !!item.healthy,
           isSelf: !!item.isSelf,
@@ -3482,517 +1969,25 @@ const ConnectionModal: React.FC<{
       if (!form.getFieldValue("mongoReplicaSet") && data.replicaSet) {
         form.setFieldValue("mongoReplicaSet", String(data.replicaSet));
       }
-      message.success(result.message || `发现 ${members.length} 个成员`);
+      message.success(
+        result.message ||
+          t(
+            members.length === 1
+              ? "connection.modal.mongo.discover.successOne"
+              : "connection.modal.mongo.discover.successMany",
+            { count: members.length },
+          ),
+      );
     } catch (error: any) {
       message.error(
         normalizeConnectionSecretErrorMessage(
           error?.message || error,
-          "成员发现失败",
+          t("connection.modal.mongo.discover.failure"),
         ),
       );
     } finally {
       setDiscoveringMembers(false);
     }
-  };
-
-  const buildConfig = async (
-    values: any,
-    forPersist: boolean,
-  ): Promise<ConnectionConfig> => {
-    const mergedValues = { ...values };
-    if (
-      String(mergedValues.type || "")
-        .trim()
-        .toLowerCase() === "jvm"
-    ) {
-      if (
-        hasUnsupportedJVMEditableModes({
-          allowedModes: mergedValues.jvmAllowedModes,
-          preferredMode: mergedValues.jvmPreferredMode,
-        })
-      ) {
-        throw new Error(
-          "当前连接包含未支持的 JVM 模式；请先调整为 JMX、Endpoint 或 Agent 后再测试或保存",
-        );
-      }
-      if (
-        hasUnsupportedJVMDiagnosticTransport(
-          mergedValues.jvmDiagnosticTransport,
-        )
-      ) {
-        throw new Error(
-          "当前连接包含未支持的 JVM 诊断 transport；请先调整为 agent-bridge 或 arthas-tunnel 后再测试或保存",
-        );
-      }
-      const existingDiagnostic = initialValues?.config?.jvm?.diagnostic;
-      if (
-        mergedValues.jvmDiagnosticEnabled === undefined &&
-        existingDiagnostic?.enabled !== undefined
-      ) {
-        mergedValues.jvmDiagnosticEnabled = existingDiagnostic.enabled;
-      }
-      if (
-        String(mergedValues.jvmDiagnosticTransport || "").trim() === "" &&
-        existingDiagnostic?.transport
-      ) {
-        mergedValues.jvmDiagnosticTransport = existingDiagnostic.transport;
-      }
-      if (
-        String(mergedValues.jvmDiagnosticBaseUrl || "").trim() === "" &&
-        existingDiagnostic?.baseUrl
-      ) {
-        mergedValues.jvmDiagnosticBaseUrl = existingDiagnostic.baseUrl;
-      }
-      if (
-        String(mergedValues.jvmDiagnosticTargetId || "").trim() === "" &&
-        existingDiagnostic?.targetId
-      ) {
-        mergedValues.jvmDiagnosticTargetId = existingDiagnostic.targetId;
-      }
-      if (
-        String(mergedValues.jvmDiagnosticApiKey || "").trim() === "" &&
-        existingDiagnostic?.apiKey
-      ) {
-        mergedValues.jvmDiagnosticApiKey = existingDiagnostic.apiKey;
-      }
-      if (
-        mergedValues.jvmDiagnosticAllowObserveCommands === undefined &&
-        existingDiagnostic?.allowObserveCommands !== undefined
-      ) {
-        mergedValues.jvmDiagnosticAllowObserveCommands =
-          existingDiagnostic.allowObserveCommands;
-      }
-      if (
-        mergedValues.jvmDiagnosticAllowTraceCommands === undefined &&
-        existingDiagnostic?.allowTraceCommands !== undefined
-      ) {
-        mergedValues.jvmDiagnosticAllowTraceCommands =
-          existingDiagnostic.allowTraceCommands;
-      }
-      if (
-        mergedValues.jvmDiagnosticAllowMutatingCommands === undefined &&
-        existingDiagnostic?.allowMutatingCommands !== undefined
-      ) {
-        mergedValues.jvmDiagnosticAllowMutatingCommands =
-          existingDiagnostic.allowMutatingCommands;
-      }
-      if (
-        (mergedValues.jvmDiagnosticTimeoutSeconds === undefined ||
-          mergedValues.jvmDiagnosticTimeoutSeconds === null ||
-          mergedValues.jvmDiagnosticTimeoutSeconds === "") &&
-        Number(existingDiagnostic?.timeoutSeconds) > 0
-      ) {
-        mergedValues.jvmDiagnosticTimeoutSeconds = Number(
-          existingDiagnostic?.timeoutSeconds,
-        );
-      }
-      const resolvedJvmAllowedModes = normalizeEditableJVMModes(
-        mergedValues.jvmAllowedModes,
-      );
-      const resolvedJvmTimeout = Number(mergedValues.timeout || 30);
-      const preferredJvmMode = String(mergedValues.jvmPreferredMode || "")
-        .trim()
-        .toLowerCase();
-      const resolvedJvmPreferredMode =
-        resolvedJvmAllowedModes.find((mode) => mode === preferredJvmMode) ||
-        resolvedJvmAllowedModes[0];
-      return buildJVMConnectionConfig({
-        ...buildDefaultJVMConnectionValues(),
-        ...mergedValues,
-        jvmAllowedModes: resolvedJvmAllowedModes,
-        jvmPreferredMode: resolvedJvmPreferredMode,
-        jvmEndpointEnabled: resolvedJvmAllowedModes.includes("endpoint"),
-        jvmAgentEnabled: resolvedJvmAllowedModes.includes("agent"),
-        timeout: resolvedJvmTimeout,
-        jvmEndpointTimeoutSeconds: resolvedJvmTimeout,
-      });
-    }
-    const parsedUriValues = parseUriToValues(
-      mergedValues.uri,
-      mergedValues.type,
-    );
-    const isEmptyField = (value: unknown) =>
-      value === undefined ||
-      value === null ||
-      value === "" ||
-      value === 0 ||
-      (Array.isArray(value) && value.length === 0);
-    if (parsedUriValues) {
-      Object.entries(parsedUriValues).forEach(([key, value]) => {
-        if (
-          key === "clickHouseProtocol" &&
-          normalizeClickHouseProtocolValue((mergedValues as any)[key]) ===
-            "auto" &&
-          normalizeClickHouseProtocolValue(value) !== "auto"
-        ) {
-          (mergedValues as any)[key] = value;
-          return;
-        }
-        if (isEmptyField((mergedValues as any)[key])) {
-          (mergedValues as any)[key] = value;
-        }
-      });
-    }
-
-    const type = String(mergedValues.type || "").toLowerCase();
-    const defaultPort = getDefaultPortByType(type);
-    const selectedOceanBaseProtocol =
-      type === "oceanbase"
-        ? normalizeOceanBaseProtocolValue(mergedValues.oceanBaseProtocol)
-        : "mysql";
-    if (type === "clickhouse") {
-      const requestedProtocol = normalizeClickHouseProtocolValue(
-        mergedValues.clickHouseProtocol,
-      );
-      const hostSchemeValues = parseClickHouseHTTPUriToValues(
-        mergedValues.host,
-        Number(mergedValues.port || defaultPort),
-      );
-      if (hostSchemeValues) {
-        mergedValues.host = hostSchemeValues.host;
-        mergedValues.port = hostSchemeValues.port;
-        if (requestedProtocol !== "native") {
-          mergedValues.clickHouseProtocol = "http";
-          mergedValues.useSSL = hostSchemeValues.useSSL;
-          mergedValues.sslMode = hostSchemeValues.sslMode;
-        } else {
-          mergedValues.clickHouseProtocol = "native";
-        }
-        if (isEmptyField(mergedValues.user)) {
-          mergedValues.user = hostSchemeValues.user;
-        }
-        if (isEmptyField(mergedValues.password)) {
-          mergedValues.password = hostSchemeValues.password;
-        }
-        if (isEmptyField(mergedValues.database)) {
-          mergedValues.database = hostSchemeValues.database;
-        }
-      }
-    }
-    const isFileDbType = isFileDatabaseType(type);
-    const sslCapableType = supportsSSLForType(type);
-
-    // Redis 默认不展示用户名字段；若 URI 可解析则以 URI 为准覆盖 user，
-    // 同时清理历史默认值 root，避免 go-redis 发送 ACL AUTH(user, pass) 导致 WRONGPASS。
-    if (type === "redis") {
-      if (
-        parsedUriValues &&
-        Object.prototype.hasOwnProperty.call(parsedUriValues, "user")
-      ) {
-        mergedValues.user = String((parsedUriValues as any).user || "");
-      } else if (String(mergedValues.user || "").trim() === "root") {
-        mergedValues.user = "";
-      }
-    }
-    const sslModeRaw = String(mergedValues.sslMode || "preferred")
-      .trim()
-      .toLowerCase();
-    const sslMode: "preferred" | "required" | "skip-verify" | "disable" =
-      sslModeRaw === "required"
-        ? "required"
-        : sslModeRaw === "skip-verify"
-          ? "skip-verify"
-          : sslModeRaw === "disable"
-            ? "disable"
-            : "preferred";
-    const effectiveUseSSL = sslCapableType && !!mergedValues.useSSL;
-    const sslCAPath = sslCapableType
-      ? String(mergedValues.sslCAPath || "").trim()
-      : "";
-    const sslCertPath = sslCapableType
-      ? String(mergedValues.sslCertPath || "").trim()
-      : "";
-    const sslKeyPath = sslCapableType
-      ? String(mergedValues.sslKeyPath || "").trim()
-      : "";
-    if (type === "dameng" && effectiveUseSSL && (!sslCertPath || !sslKeyPath)) {
-      throw new Error("达梦启用 SSL 时必须填写证书路径与私钥路径");
-    }
-    if (effectiveUseSSL && supportsSSLClientCertificateForType(type) && (!!sslCertPath !== !!sslKeyPath)) {
-      throw new Error("TLS 客户端证书与私钥路径需要同时填写");
-    }
-
-    let primaryHost = "localhost";
-    let primaryPort = defaultPort;
-    if (isFileDbType) {
-      // 文件型数据库（sqlite/duckdb）这里的 host 即数据库文件路径，不应参与 host:port 拼接与解析。
-      primaryHost = normalizeFileDbPath(String(mergedValues.host || "").trim());
-      primaryPort = 0;
-    } else {
-      const parsedPrimary = parseHostPort(
-        toAddress(
-          mergedValues.host || "localhost",
-          Number(mergedValues.port || defaultPort),
-          defaultPort,
-        ),
-        defaultPort,
-      );
-      primaryHost = parsedPrimary?.host || "localhost";
-      primaryPort = parsedPrimary?.port || defaultPort;
-    }
-
-    let hosts: string[] = [];
-    let topology: "single" | "replica" | "cluster" | "sentinel" | undefined;
-    let replicaSet = "";
-    let authSource = "";
-    let readPreference = "";
-    let mysqlReplicaUser = "";
-    let mysqlReplicaPassword = "";
-    let mongoSrvEnabled = false;
-    let mongoAuthMechanism = "";
-    let mongoReplicaUser = "";
-    let mongoReplicaPassword = "";
-    let redisSentinelMaster = "";
-    let redisSentinelUser = "";
-    let redisSentinelPassword = "";
-    const savePassword =
-      type === "mongodb" ? mergedValues.savePassword !== false : true;
-
-    if (isMySQLCompatibleType(type) && selectedOceanBaseProtocol !== "oracle") {
-      const replicas =
-        mergedValues.mysqlTopology === "replica"
-          ? normalizeAddressList(mergedValues.mysqlReplicaHosts, defaultPort)
-          : [];
-      const allHosts = normalizeAddressList(
-        [`${primaryHost}:${primaryPort}`, ...replicas],
-        defaultPort,
-      );
-      if (mergedValues.mysqlTopology === "replica" || allHosts.length > 1) {
-        hosts = allHosts;
-        topology = "replica";
-        mysqlReplicaUser = String(mergedValues.mysqlReplicaUser || "").trim();
-        mysqlReplicaPassword = String(mergedValues.mysqlReplicaPassword || "");
-      } else {
-        topology = "single";
-      }
-    }
-
-    if (type === "kafka") {
-      const brokers =
-        mergedValues.kafkaTopology === "cluster"
-          ? normalizeAddressList(mergedValues.kafkaHosts, defaultPort)
-          : [];
-      const allHosts = normalizeAddressList(
-        [`${primaryHost}:${primaryPort}`, ...brokers],
-        defaultPort,
-      );
-      if (mergedValues.kafkaTopology === "cluster" || allHosts.length > 1) {
-        hosts = allHosts;
-        topology = "cluster";
-      } else {
-        topology = "single";
-      }
-    }
-
-    if (type === "mqtt") {
-      const brokers =
-        mergedValues.mqttTopology === "cluster"
-          ? normalizeAddressList(mergedValues.mqttHosts, defaultPort)
-          : [];
-      const allHosts = normalizeAddressList(
-        [`${primaryHost}:${primaryPort}`, ...brokers],
-        defaultPort,
-      );
-      if (mergedValues.mqttTopology === "cluster" || allHosts.length > 1) {
-        hosts = allHosts;
-        topology = "cluster";
-      } else {
-        topology = "single";
-      }
-    }
-
-    if (type === "rocketmq") {
-      const nameservers =
-        mergedValues.rocketmqTopology === "cluster"
-          ? normalizeAddressList(mergedValues.rocketmqHosts, defaultPort)
-          : [];
-      const allHosts = normalizeAddressList(
-        [`${primaryHost}:${primaryPort}`, ...nameservers],
-        defaultPort,
-      );
-      if (mergedValues.rocketmqTopology === "cluster" || allHosts.length > 1) {
-        hosts = allHosts;
-        topology = "cluster";
-      } else {
-        topology = "single";
-      }
-    }
-
-    if (type === "mongodb") {
-      mongoSrvEnabled = !!mergedValues.mongoSrv;
-      const extraHosts =
-        mergedValues.mongoTopology === "replica"
-          ? mongoSrvEnabled
-            ? normalizeMongoSrvHostList(mergedValues.mongoHosts, defaultPort)
-            : normalizeAddressList(mergedValues.mongoHosts, defaultPort)
-          : [];
-      const primarySeed = mongoSrvEnabled
-        ? primaryHost
-        : `${primaryHost}:${primaryPort}`;
-      const allHosts = mongoSrvEnabled
-        ? normalizeMongoSrvHostList([primarySeed, ...extraHosts], defaultPort)
-        : normalizeAddressList([primarySeed, ...extraHosts], defaultPort);
-      if (
-        mergedValues.mongoTopology === "replica" ||
-        allHosts.length > 1 ||
-        mergedValues.mongoReplicaSet
-      ) {
-        hosts = allHosts;
-        topology = "replica";
-        mongoReplicaUser = String(mergedValues.mongoReplicaUser || "").trim();
-        mongoReplicaPassword = String(mergedValues.mongoReplicaPassword || "");
-      } else {
-        topology = "single";
-      }
-      replicaSet = String(mergedValues.mongoReplicaSet || "").trim();
-      authSource = String(
-        mergedValues.mongoAuthSource || mergedValues.database || "admin",
-      ).trim();
-      readPreference = String(
-        mergedValues.mongoReadPreference || "primary",
-      ).trim();
-      mongoAuthMechanism = String(mergedValues.mongoAuthMechanism || "")
-        .trim()
-        .toUpperCase();
-    }
-
-    if (type === "redis") {
-      const redisDraft = resolveRedisConfigDraft(
-        mergedValues,
-        primaryHost,
-        primaryPort,
-        defaultPort,
-      );
-      primaryPort = redisDraft.primaryPort;
-      hosts = redisDraft.hosts;
-      topology = redisDraft.topology;
-      redisSentinelMaster = redisDraft.redisSentinelMaster;
-      redisSentinelUser = redisDraft.redisSentinelUser;
-      redisSentinelPassword = redisDraft.redisSentinelPassword;
-      mergedValues.redisDB = redisDraft.redisDB;
-    }
-
-    const sshConfig = mergedValues.useSSH
-      ? {
-          host: mergedValues.sshHost,
-          port: Number(mergedValues.sshPort),
-          user: mergedValues.sshUser,
-          password: mergedValues.sshPassword || "",
-          keyPath: mergedValues.sshKeyPath || "",
-        }
-      : { host: "", port: 22, user: "", password: "", keyPath: "" };
-    const effectiveUseHttpTunnel =
-      !isFileDbType && !!mergedValues.useHttpTunnel;
-    const effectiveUseProxy =
-      !isFileDbType && !!mergedValues.useProxy && !effectiveUseHttpTunnel;
-    const proxyTypeRaw = String(
-      mergedValues.proxyType || "socks5",
-    ).toLowerCase();
-    const proxyType: "socks5" | "http" =
-      proxyTypeRaw === "http" ? "http" : "socks5";
-    const proxyConfig: NonNullable<ConnectionConfig["proxy"]> =
-      effectiveUseProxy
-        ? {
-            type: proxyType,
-            host: String(mergedValues.proxyHost || "").trim(),
-            port: Number(
-              mergedValues.proxyPort || (proxyTypeRaw === "http" ? 8080 : 1080),
-            ),
-            user: String(mergedValues.proxyUser || "").trim(),
-            password: mergedValues.proxyPassword || "",
-          }
-        : {
-            type: "socks5",
-            host: "",
-            port: 1080,
-            user: "",
-            password: "",
-          };
-    const httpTunnelConfig: NonNullable<ConnectionConfig["httpTunnel"]> =
-      effectiveUseHttpTunnel
-        ? {
-            host: String(mergedValues.httpTunnelHost || "").trim(),
-            port: Number(mergedValues.httpTunnelPort || 8080),
-            user: String(mergedValues.httpTunnelUser || "").trim(),
-            password: mergedValues.httpTunnelPassword || "",
-          }
-        : {
-            host: "",
-            port: 8080,
-            user: "",
-            password: "",
-          };
-    if (effectiveUseHttpTunnel) {
-      if (!httpTunnelConfig.host) {
-        throw new Error("HTTP 隧道主机不能为空");
-      }
-      if (
-        !Number.isFinite(httpTunnelConfig.port) ||
-        httpTunnelConfig.port <= 0 ||
-        httpTunnelConfig.port > 65535
-      ) {
-        throw new Error("HTTP 隧道端口必须在 1-65535 之间");
-      }
-    }
-
-    const keepPassword = !forPersist || savePassword;
-    const normalizedConnectionParams = supportsConnectionParamsForType(type)
-      ? type === "oceanbase"
-        ? normalizeOceanBaseConnectionParamsText(
-            mergedValues.connectionParams,
-            selectedOceanBaseProtocol,
-          )
-        : normalizeConnectionParamsText(mergedValues.connectionParams)
-      : "";
-
-    return {
-      type: mergedValues.type,
-      host: primaryHost,
-      port: Number(primaryPort || 0),
-      user: mergedValues.user || "",
-      password: keepPassword ? mergedValues.password || "" : "",
-      savePassword: savePassword,
-      database: mergedValues.database || "",
-      useSSL: effectiveUseSSL,
-      sslMode: effectiveUseSSL ? sslMode : "disable",
-      sslCAPath: sslCAPath,
-      sslCertPath: sslCertPath,
-      sslKeyPath: sslKeyPath,
-      useSSH: !!mergedValues.useSSH,
-      ssh: sshConfig,
-      useProxy: effectiveUseProxy,
-      proxy: proxyConfig,
-      useHttpTunnel: effectiveUseHttpTunnel,
-      httpTunnel: httpTunnelConfig,
-      driver: mergedValues.driver,
-      dsn: mergedValues.dsn,
-      connectionParams: normalizedConnectionParams,
-      timeout: Number(mergedValues.timeout || 30),
-      redisDB: Number.isFinite(Number(mergedValues.redisDB))
-        ? Math.max(0, Math.trunc(Number(mergedValues.redisDB)))
-        : 0,
-      redisSentinelMaster: redisSentinelMaster,
-      redisSentinelUser: redisSentinelUser,
-      redisSentinelPassword: keepPassword ? redisSentinelPassword : "",
-      uri: String(mergedValues.uri || "").trim(),
-      clickHouseProtocol:
-        type === "clickhouse"
-          ? normalizeClickHouseProtocolValue(mergedValues.clickHouseProtocol)
-          : undefined,
-      oceanBaseProtocol:
-        type === "oceanbase" ? selectedOceanBaseProtocol : undefined,
-      hosts: hosts,
-      topology: topology,
-      mysqlReplicaUser: mysqlReplicaUser,
-      mysqlReplicaPassword: keepPassword ? mysqlReplicaPassword : "",
-      replicaSet: replicaSet,
-      authSource: authSource,
-      readPreference: readPreference,
-      mongoSrv: mongoSrvEnabled,
-      mongoAuthMechanism: mongoAuthMechanism,
-      mongoReplicaUser: mongoReplicaUser,
-      mongoReplicaPassword: keepPassword ? mongoReplicaPassword : "",
-    };
   };
 
   const handleTypeSelect = (type: string) => {
@@ -4002,7 +1997,9 @@ const ConnectionModal: React.FC<{
       const driverName = snapshot.name || type;
       const reason =
         snapshot.message ||
-        `${driverName} 驱动未安装启用，请先在驱动管理中安装`;
+        t("connection.modal.driver.unavailableFallback", {
+          name: driverName,
+        });
       setTypeSelectWarning({ driverName, reason });
       return;
     }
@@ -4049,6 +2046,8 @@ const ConnectionModal: React.FC<{
         httpTunnelUser: "",
         httpTunnelPassword: "",
         timeout: 30,
+        keepAliveEnabled: false,
+        keepAliveIntervalMinutes: DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
         uri: "",
         connectionParams: "",
         includeDatabases: undefined,
@@ -4121,6 +2120,8 @@ const ConnectionModal: React.FC<{
         httpTunnelPort: 8080,
         httpTunnelUser: "",
         httpTunnelPassword: "",
+        keepAliveEnabled: false,
+        keepAliveIntervalMinutes: DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
         mysqlTopology: "single",
         rocketmqTopology: "single",
         mqttTopology: "single",
@@ -4169,6 +2170,8 @@ const ConnectionModal: React.FC<{
         httpTunnelPort: 8080,
         httpTunnelUser: "",
         httpTunnelPassword: "",
+        keepAliveEnabled: false,
+        keepAliveIntervalMinutes: DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
         mysqlTopology: "single",
         rocketmqTopology: "single",
         mqttTopology: "single",
@@ -4214,7 +2217,7 @@ const ConnectionModal: React.FC<{
   const connectionConfigLayout = resolveConnectionConfigLayout(dbType);
   const unsupportedJvmModeMessage =
     isJVM && hasUnsupportedJvmModeSelection
-      ? "当前连接包含未支持的 JVM 模式。此版本只支持 JMX / Endpoint / Agent，请先调整允许模式和首选模式后再继续。"
+      ? t("connection.modal.jvm.unsupportedMode.banner")
       : "";
   const currentDriverType = resolveConnectionDriverType(dbType, customDriver);
   const hasCurrentDriverType =
@@ -4225,7 +2228,9 @@ const ConnectionModal: React.FC<{
     currentDriverSnapshot &&
     !currentDriverSnapshot.connectable
       ? currentDriverSnapshot.message ||
-        `${currentDriverSnapshot.name || dbType} 驱动未安装启用`
+        t("connection.modal.driver.unavailableFallback", {
+          name: currentDriverSnapshot.name || dbType,
+        })
       : "";
   const currentDriverUpdateReason =
     hasCurrentDriverType &&
@@ -4233,7 +2238,9 @@ const ConnectionModal: React.FC<{
     currentDriverSnapshot.needsUpdate
       ? currentDriverSnapshot.message ||
         currentDriverSnapshot.updateReason ||
-        `${currentDriverSnapshot.name || dbType} 驱动代理需要重装后才能应用当前版本的驱动侧更新`
+        t("connection.modal.driver.updateFallback", {
+          name: currentDriverSnapshot.name || dbType,
+        })
       : "";
   const driverStatusChecking =
     hasCurrentDriverType && !driverStatusLoaded && step === 2;
@@ -4270,10 +2277,10 @@ const ConnectionModal: React.FC<{
             fontWeight: 700,
           }}
         >
-          选择数据源
+          {t("connection.modal.step1.sectionTitle")}
         </div>
         <div style={modalMutedTextStyle}>
-          先选择目标数据库或中间件类型，再进入详细连接参数配置。
+          {t("connection.modal.step1.sectionDescription")}
         </div>
       </div>
       {typeSelectWarning && (
@@ -4281,7 +2288,9 @@ const ConnectionModal: React.FC<{
           type="warning"
           showIcon
           closable
-          message={`${typeSelectWarning.driverName} 驱动未启用`}
+          message={t("connection.modal.typeWarning.unavailable", {
+            name: typeSelectWarning.driverName,
+          })}
           description={
             <Space size={8}>
               <span>{typeSelectWarning.reason}</span>
@@ -4290,7 +2299,7 @@ const ConnectionModal: React.FC<{
                 size="small"
                 onClick={() => onOpenDriverManager?.()}
               >
-                去驱动管理安装
+                {t("connection.modal.driver.installAction")}
               </Button>
             </Space>
           }
@@ -4419,2796 +2428,127 @@ const ConnectionModal: React.FC<{
     </div>
   );
 
-  const renderStep2 = () => {
-    const baseInfoSection = (
-      <div style={modalInnerSectionStyle}>
-        <div
-          style={{
-            marginBottom: 12,
-            color: darkMode ? "#f5f7ff" : "#162033",
-            fontSize: 14,
-            fontWeight: 700,
-          }}
-        >
-          基础信息
-        </div>
-        <div style={{ ...modalMutedTextStyle, marginBottom: 16 }}>
-          常用参数集中在左侧，优先完成连接建立所需的最小输入。
-        </div>
-
-        <div style={{ display: "grid", gap: 16 }}>
-          {renderConfigSectionCard({
-            sectionKey: "identity",
-            icon: <ApiOutlined />,
-            badge: (
-              <Tag>
-                {getConnectionConfigLayoutKindLabel(connectionConfigLayout.kind)}
-              </Tag>
-            ),
-            children: (
-              <Form.Item name="name" label="连接名称" style={{ marginBottom: 0 }}>
-                <Input
-                  {...noAutoCapInputProps}
-                  placeholder={
-                    isJVM
-                      ? "例如：本地 JVM / 订单服务 JVM"
-                      : "例如：本地测试库"
-                  }
-                />
-              </Form.Item>
-            ),
-          })}
-
-          {!isCustom &&
-            !isJVM &&
-            renderConfigSectionCard({
-              sectionKey: "uri",
-              icon: <LinkOutlined />,
-              children: (
-                <>
-                  <Form.Item
-                    name="uri"
-                    label="连接 URI（可复制粘贴）"
-                    help="支持从参数生成、复制到剪贴板，或粘贴后一键解析回填参数"
-                  >
-                    <Input.TextArea
-                      {...noAutoCapInputProps}
-                      rows={3}
-                      placeholder={getUriPlaceholder()}
-                    />
-                  </Form.Item>
-                  {supportsConnectionParams && (
-                    <Form.Item
-                      name="connectionParams"
-                      label="额外连接参数"
-                      help="按当前数据源驱动支持的 URI/DSN query 格式填写；认证密码请使用上方密码字段。"
-                    >
-                      <Input.TextArea
-                        {...noAutoCapInputProps}
-                        rows={2}
-                        placeholder={getConnectionParamsPlaceholder()}
-                      />
-                    </Form.Item>
-                  )}
-                  <Space
-                    size={8}
-                    style={{ marginBottom: uriFeedback ? 12 : 16 }}
-                    wrap
-                  >
-                    <Button onClick={handleGenerateURI}>生成 URI</Button>
-                    <Button onClick={handleParseURI}>从 URI 解析</Button>
-                    <Button onClick={handleCopyURI}>复制 URI</Button>
-                  </Space>
-                  {uriFeedback && (
-                    <Alert
-                      showIcon
-                      closable
-                      type={uriFeedback.type}
-                      message={uriFeedback.message}
-                      onClose={() => setUriFeedback(null)}
-                      style={{ marginBottom: 16 }}
-                    />
-                  )}
-                  {renderStoredSecretControls({
-                    fieldName: "uri",
-                    clearKey: "opaqueURI",
-                    hasStoredSecret: initialValues?.hasOpaqueURI,
-                    clearLabel: "清除已保存 URI",
-                    description:
-                      "当前已保存连接 URI。留空表示继续沿用，输入新值表示替换。",
-                  })}
-                </>
-              ),
-            })}
-
-          {isCustom ? (
-            <>
-              {renderConfigSectionCard({
-                sectionKey: "customDriver",
-                icon: <CodeOutlined />,
-                children: (
-                  <Form.Item
-                    name="driver"
-                    label="驱动名称 (Driver Name)"
-                    rules={[{ required: true, message: "请输入驱动名称" }]}
-                    help={CUSTOM_CONNECTION_DRIVER_HELP}
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Input
-                      {...noAutoCapInputProps}
-                      placeholder="例如: mysql, postgres"
-                    />
-                  </Form.Item>
-                ),
-              })}
-              {renderConfigSectionCard({
-                sectionKey: "customDsn",
-                icon: <FileTextOutlined />,
-                children: (
-                  <>
-                    <Form.Item
-                      name="dsn"
-                      label="连接字符串 (DSN)"
-                      rules={[createCustomDsnRule()]}
-                    >
-                      <Input.TextArea
-                        {...noAutoCapInputProps}
-                        rows={4}
-                        placeholder="例如: user:pass@tcp(localhost:3306)/dbname?charset=utf8"
-                      />
-                    </Form.Item>
-                    {renderStoredSecretControls({
-                      fieldName: "dsn",
-                      clearKey: "opaqueDSN",
-                      hasStoredSecret: initialValues?.hasOpaqueDSN,
-                      clearLabel: "清除已保存 DSN",
-                      description:
-                        "当前已保存连接字符串。留空表示继续沿用，输入新值表示替换。",
-                    })}
-                  </>
-                ),
-              })}
-            </>
-          ) : isJVM ? (
-          <>
-            {unsupportedJvmModeMessage && (
-              <Alert
-                type="warning"
-                showIcon
-                style={{ marginBottom: 16 }}
-                message="检测到未支持的 JVM 模式"
-                description={unsupportedJvmModeMessage}
-              />
-            )}
-            <div style={{ display: "grid", gap: 16 }}>
-              <div style={jvmSectionCardStyle()}>
-                {renderJvmSectionHeader(
-                  <GatewayOutlined />,
-                  "目标 JVM",
-                  "定义连接树中的主机入口和基础运行环境。",
-                )}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "minmax(0, 1fr) 120px",
-                    gap: 16,
-                    alignItems: "start",
-                  }}
-                >
-                  <Form.Item
-                    name="host"
-                    label="主机地址"
-                    rules={[{ required: true, message: "请输入 JVM 主机地址" }]}
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Input {...noAutoCapInputProps} placeholder="localhost" />
-                  </Form.Item>
-                  <Form.Item
-                    name="port"
-                    label="主端口"
-                    rules={[{ required: true, message: "请输入 JVM 端口号" }]}
-                    style={{ marginBottom: 0 }}
-                  >
-                    <InputNumber style={{ width: "100%" }} min={1} max={65535} />
-                  </Form.Item>
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 16,
-                    marginTop: 16,
-                  }}
-                >
-                  <div style={{ display: "grid", gap: 8 }}>
-                    <Text strong>环境</Text>
-                    {renderChoiceCards({
-                      fieldName: "jvmEnvironment",
-                      value: String(jvmEnvironment),
-                      minWidth: 120,
-                      options: [
-                        {
-                          value: "dev",
-                          label: "开发 / 测试",
-                          description: "本地或测试环境。",
-                        },
-                        {
-                          value: "uat",
-                          label: "预发 / 验收",
-                          description: "上线前验证环境。",
-                        },
-                        {
-                          value: "prod",
-                          label: "生产",
-                          description: "生产 JVM，默认更谨慎。",
-                        },
-                      ],
-                    })}
-                  </div>
-                  <Form.Item
-                    name="timeout"
-                    label="连接超时（秒）"
-                    rules={[
-                      {
-                        type: "number",
-                        min: 1,
-                        max: 300,
-                        message: "超时时间范围: 1-300 秒",
-                      },
-                    ]}
-                    style={{ marginBottom: 0 }}
-                  >
-                    <InputNumber
-                      style={{ width: "100%" }}
-                      min={1}
-                      max={300}
-                      placeholder="30"
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    name="jvmReadOnly"
-                    label="安全策略"
-                    valuePropName="checked"
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Checkbox>只读优先</Checkbox>
-                  </Form.Item>
-                </div>
-              </div>
-
-              <div style={jvmSectionCardStyle()}>
-                {renderJvmSectionHeader(
-                  <ClusterOutlined />,
-                  "接入模式",
-                  "通过卡片选择允许使用的 JVM 通道；已启用卡片再次点击会设为首选。",
-                )}
-                <Form.Item
-                  name="jvmAllowedModes"
-                  hidden
-                  rules={[
-                    {
-                      required: true,
-                      message: "请至少选择一种 JVM 接入模式",
-                    },
-                  ]}
-                >
-                  <Select mode="multiple" />
-                </Form.Item>
-                <Form.Item
-                  name="jvmPreferredMode"
-                  hidden
-                  rules={[
-                    {
-                      required: true,
-                      message: "请选择首选 JVM 接入模式",
-                    },
-                  ]}
-                >
-                  <Input {...noAutoCapInputProps} />
-                </Form.Item>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                    gap: 14,
-                  }}
-                >
-                  {JVM_EDITABLE_MODES.map((mode) => {
-                    const meta = resolveJVMModeMeta(mode);
-                    const enabled = normalizedJvmAllowedModes.includes(mode);
-                    const preferred = jvmPreferredMode === mode;
-                    return (
-                      <div
-                        key={mode}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => handleJvmModeCardSelect(mode)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            handleJvmModeCardSelect(mode);
-                          }
-                        }}
-                        aria-pressed={enabled}
-                        style={{
-                          textAlign: "left",
-                          padding: 14,
-                          borderRadius: 16,
-                          border: enabled
-                            ? darkMode
-                              ? "1px solid rgba(255,214,102,0.36)"
-                              : "1px solid rgba(22,119,255,0.34)"
-                            : darkMode
-                              ? "1px solid rgba(255,255,255,0.08)"
-                              : "1px solid rgba(16,24,40,0.08)",
-                          background: enabled
-                            ? darkMode
-                              ? "rgba(255,214,102,0.08)"
-                              : "rgba(22,119,255,0.06)"
-                            : darkMode
-                              ? "rgba(255,255,255,0.03)"
-                              : "rgba(16,24,40,0.03)",
-                          boxShadow: preferred
-                            ? darkMode
-                              ? "0 0 0 2px rgba(255,214,102,0.12)"
-                              : "0 0 0 2px rgba(22,119,255,0.10)"
-                            : "none",
-                          color: darkMode ? "#f5f7ff" : "#162033",
-                          cursor: "pointer",
-                          transition: "all 120ms ease",
-                        }}
-                      >
-                        <Space size={8} wrap>
-                          <Tag color={enabled ? "blue" : "default"}>
-                            {meta.label}
-                          </Tag>
-                          {preferred ? <Tag color="green">首选</Tag> : null}
-                          {!enabled ? <Tag>未启用</Tag> : null}
-                        </Space>
-                        <div style={{ ...modalMutedTextStyle, marginTop: 8 }}>
-                          {mode === "jmx"
-                            ? "标准 MBean 与线程、内存、类加载等运行时指标。"
-                            : mode === "endpoint"
-                              ? "通过服务端管理接口读取 JVM 资源与配置。"
-                              : "通过 GoNavi Java Agent 提供更完整的增强能力。"}
-                        </div>
-                        <Button
-                          size="small"
-                          type={enabled ? "default" : "primary"}
-                          disabled={enabled && normalizedJvmAllowedModes.length <= 1}
-                          onClick={(event) => handleJvmModeToggle(mode, event)}
-                          style={{ marginTop: 12, borderRadius: 999 }}
-                        >
-                          {enabled ? "停用" : "启用并设为首选"}
-                        </Button>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{ ...modalMutedTextStyle, marginTop: 12 }}>
-                  当前首选：
-                  {resolveJVMModeMeta(String(jvmPreferredMode || "jmx")).label}
-                  。至少保留一种接入模式，停用首选模式时会自动切换到剩余模式。
-                </div>
-              </div>
-
-              <div style={jvmSectionCardStyle()}>
-                {renderJvmSectionHeader(
-                  <ApiOutlined />,
-                  "JMX",
-                  "标准 JVM 管理通道，可覆盖主机/端口并配置认证。",
-                  <Tag color={normalizedJvmAllowedModes.includes("jmx") ? "green" : "default"}>
-                    {normalizedJvmAllowedModes.includes("jmx") ? "已启用" : "未启用"}
-                  </Tag>,
-                )}
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "minmax(0, 1fr) 120px",
-                    gap: 16,
-                  }}
-                >
-                  <Form.Item
-                    name="jvmJmxHost"
-                    label="JMX 主机覆盖（可选）"
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Input
-                      {...noAutoCapInputProps}
-                      disabled={!normalizedJvmAllowedModes.includes("jmx")}
-                      placeholder="留空沿用主机地址"
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    name="jvmJmxPort"
-                    label="JMX 端口"
-                    style={{ marginBottom: 0 }}
-                  >
-                    <InputNumber
-                      style={{ width: "100%" }}
-                      min={1}
-                      max={65535}
-                      disabled={!normalizedJvmAllowedModes.includes("jmx")}
-                      placeholder="沿用主端口"
-                    />
-                  </Form.Item>
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: 16,
-                    marginTop: 16,
-                  }}
-                >
-                  <Form.Item
-                    name="jvmJmxUsername"
-                    label="JMX 用户名（可选）"
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Input
-                      {...noAutoCapInputProps}
-                      disabled={!normalizedJvmAllowedModes.includes("jmx")}
-                      placeholder="未开启认证可留空"
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    name="jvmJmxPassword"
-                    label="JMX 密码（可选）"
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Input.Password
-                      {...noAutoCapInputProps}
-                      disabled={!normalizedJvmAllowedModes.includes("jmx")}
-                      placeholder="未开启认证可留空"
-                    />
-                  </Form.Item>
-                </div>
-              </div>
-
-              <div style={jvmSectionCardStyle()}>
-                {renderJvmSectionHeader(
-                  <CodeOutlined />,
-                  "Endpoint",
-                  "连接应用暴露的 JVM 管理端点，适合已有运维 API 的服务。",
-                  <Tag
-                    color={
-                      normalizedJvmAllowedModes.includes("endpoint")
-                        ? "green"
-                        : "default"
-                    }
-                  >
-                    {normalizedJvmAllowedModes.includes("endpoint")
-                      ? "已启用"
-                      : "未启用"}
-                  </Tag>,
-                )}
-                <Form.Item
-                  name="jvmEndpointBaseUrl"
-                  label="Endpoint 地址"
-                  rules={[
-                    {
-                      required: jvmPreferredMode === "endpoint",
-                      message: "启用 Endpoint 模式时请输入 Endpoint 地址",
-                    },
-                  ]}
-                  help="例如 Spring Boot Actuator 或自定义管理接口地址。"
-                >
-                  <Input
-                    {...noAutoCapInputProps}
-                    disabled={!normalizedJvmAllowedModes.includes("endpoint")}
-                    placeholder="例如：https://orders.internal/manage/jvm"
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="jvmEndpointApiKey"
-                  label="Endpoint API Key（可选）"
-                  style={{ marginBottom: 0 }}
-                >
-                  <Input.Password
-                    {...noAutoCapInputProps}
-                    disabled={!normalizedJvmAllowedModes.includes("endpoint")}
-                    placeholder="端点受 Token 保护时填写"
-                  />
-                </Form.Item>
-              </div>
-
-              <div style={jvmSectionCardStyle()}>
-                {renderJvmSectionHeader(
-                  <ThunderboltOutlined />,
-                  "Agent",
-                  "连接 GoNavi Java Agent 管理端口，用于增强采集和诊断链路。",
-                  <Tag color={normalizedJvmAllowedModes.includes("agent") ? "green" : "default"}>
-                    {normalizedJvmAllowedModes.includes("agent") ? "已启用" : "未启用"}
-                  </Tag>,
-                )}
-                <Form.Item
-                  name="jvmAgentBaseUrl"
-                  label="Agent 地址"
-                  rules={[
-                    {
-                      required: jvmPreferredMode === "agent",
-                      message: "启用 Agent 模式时请输入 Agent 地址",
-                    },
-                  ]}
-                  help="目标 Java 服务需要以 -javaagent 方式启动 GoNavi Agent。"
-                >
-                  <Input
-                    {...noAutoCapInputProps}
-                    disabled={!normalizedJvmAllowedModes.includes("agent")}
-                    placeholder="例如：http://127.0.0.1:19090/gonavi/agent/jvm"
-                  />
-                </Form.Item>
-                <Form.Item
-                  name="jvmAgentApiKey"
-                  label="Agent API Key（可选）"
-                  style={{ marginBottom: 0 }}
-                >
-                  <Input.Password
-                    {...noAutoCapInputProps}
-                    disabled={!normalizedJvmAllowedModes.includes("agent")}
-                    placeholder="Agent 启用 Token 校验时填写"
-                  />
-                </Form.Item>
-              </div>
-
-              <div style={jvmSectionCardStyle()}>
-                {renderJvmSectionHeader(
-                  <SafetyCertificateOutlined />,
-                  "诊断增强",
-                  "开启后可创建 JVM 诊断会话并执行受控 Arthas/诊断命令。",
-                  <Form.Item
-                    name="jvmDiagnosticEnabled"
-                    valuePropName="checked"
-                    style={{ marginBottom: 0 }}
-                  >
-                    <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-                  </Form.Item>,
-                )}
-                {jvmDiagnosticEnabled ? (
-                  <>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "220px minmax(0, 1fr)",
-                        gap: 16,
-                      }}
-                    >
-                      <div style={{ display: "grid", gap: 8 }}>
-                        <Text strong>诊断传输</Text>
-                        {renderChoiceCards({
-                          fieldName: "jvmDiagnosticTransport",
-                          value: String(jvmDiagnosticTransport),
-                          options: [
-                            {
-                              value: "agent-bridge",
-                              label: "Agent Bridge",
-                              description: "通过 GoNavi Agent 桥接诊断命令。",
-                            },
-                            {
-                              value: "arthas-tunnel",
-                              label: "Arthas Tunnel",
-                              description: "连接官方 Tunnel / Web Console。",
-                            },
-                          ],
-                        })}
-                      </div>
-                      <Form.Item
-                        name="jvmDiagnosticBaseUrl"
-                        label={
-                          jvmDiagnosticTransport === "arthas-tunnel"
-                            ? "Arthas Tunnel 地址"
-                            : "诊断 Bridge 地址"
-                        }
-                        rules={[
-                          {
-                            required: true,
-                            message:
-                              jvmDiagnosticTransport === "arthas-tunnel"
-                                ? "请输入 Arthas Tunnel Server 地址"
-                                : "请输入诊断 Bridge 地址",
-                          },
-                        ]}
-                        help={
-                          jvmDiagnosticTransport === "arthas-tunnel"
-                            ? "例如：http://127.0.0.1:7777，支持反向代理后的访问前缀。"
-                            : "例如：http://127.0.0.1:19091/gonavi/diag"
-                        }
-                      >
-                        <Input
-                          {...noAutoCapInputProps}
-                          placeholder={
-                            jvmDiagnosticTransport === "arthas-tunnel"
-                              ? "http://127.0.0.1:7777"
-                              : "http://127.0.0.1:19091/gonavi/diag"
-                          }
-                        />
-                      </Form.Item>
-                    </div>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "minmax(0, 1fr) 220px",
-                        gap: 16,
-                      }}
-                    >
-                      <Form.Item
-                        name="jvmDiagnosticTargetId"
-                        label={
-                          jvmDiagnosticTransport === "arthas-tunnel"
-                            ? "目标实例标识（AgentId）"
-                            : "目标实例标识"
-                        }
-                        rules={
-                          jvmDiagnosticTransport === "arthas-tunnel"
-                            ? [
-                                {
-                                  required: true,
-                                  message:
-                                    "Arthas Tunnel 模式必须填写目标实例标识",
-                                },
-                              ]
-                            : undefined
-                        }
-                        help={
-                          jvmDiagnosticTransport === "arthas-tunnel"
-                            ? "填写 Arthas Tunnel 中目标 JVM 的 agentId。"
-                            : "可选，用于在桥接端区分具体 JVM 实例。"
-                        }
-                      >
-                        <Input
-                          {...noAutoCapInputProps}
-                          placeholder={
-                            jvmDiagnosticTransport === "arthas-tunnel"
-                              ? "例如：orders-app_A1B2C3D4E5"
-                              : "例如：orders-prod-01"
-                          }
-                        />
-                      </Form.Item>
-                      <Form.Item
-                        name="jvmDiagnosticTimeoutSeconds"
-                        label="诊断超时（秒）"
-                        rules={[
-                          {
-                            type: "number",
-                            min: 1,
-                            max: 300,
-                            message: "诊断超时时间范围: 1-300 秒",
-                          },
-                        ]}
-                      >
-                        <InputNumber style={{ width: "100%" }} min={1} max={300} />
-                      </Form.Item>
-                    </div>
-                    <Form.Item
-                      name="jvmDiagnosticApiKey"
-                      label="诊断 API Key（可选）"
-                    >
-                      <Input.Password
-                        {...noAutoCapInputProps}
-                        placeholder="诊断桥接端启用 Token 校验时填写"
-                      />
-                    </Form.Item>
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns:
-                          "repeat(auto-fit, minmax(180px, 1fr))",
-                        gap: 10,
-                      }}
-                    >
-                      {[
-                        {
-                          name: "jvmDiagnosticAllowObserveCommands",
-                          label: "观察类命令",
-                          description: "thread、dashboard、jvm 等只读排查命令。",
-                        },
-                        {
-                          name: "jvmDiagnosticAllowTraceCommands",
-                          label: "跟踪类命令",
-                          description: "trace、watch 等对目标有额外开销的命令。",
-                        },
-                        {
-                          name: "jvmDiagnosticAllowMutatingCommands",
-                          label: "高风险命令",
-                          description: "可能改变运行态或造成明显性能影响的命令。",
-                        },
-                      ].map((item) => (
-                        <div
-                          key={item.name}
-                          style={{
-                            padding: 12,
-                            borderRadius: 14,
-                            background: darkMode
-                              ? "rgba(255,255,255,0.04)"
-                              : "rgba(16,24,40,0.04)",
-                          }}
-                        >
-                          <Form.Item
-                            name={item.name}
-                            valuePropName="checked"
-                            style={{ marginBottom: 6 }}
-                          >
-                            <Checkbox>{item.label}</Checkbox>
-                          </Form.Item>
-                          <div style={modalMutedTextStyle}>
-                            {item.description}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <div
-                    style={{
-                      ...modalMutedTextStyle,
-                      padding: "10px 12px",
-                      borderRadius: 12,
-                      background: darkMode
-                        ? "rgba(255,255,255,0.04)"
-                        : "rgba(16,24,40,0.04)",
-                    }}
-                  >
-                    关闭时只保存 JVM 连接与监控能力，不显示诊断会话入口。
-                  </div>
-                )}
-              </div>
-            </div>
-          </>
-          ) : (
-            <>
-              {renderConfigSectionCard({
-                sectionKey: isFileDb ? "fileTarget" : "target",
-                icon: isFileDb ? <FileTextOutlined /> : <GatewayOutlined />,
-                children: (
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "minmax(0, 1fr) 120px",
-                      gap: 16,
-                      alignItems: "start",
-                    }}
-                  >
-                    <Form.Item
-                      name="host"
-                      label={
-                        isFileDb ? "文件路径 (绝对路径)" : "主机地址 (Host)"
-                      }
-                      rules={[createUriAwareRequiredRule("请输入地址/路径")]}
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input
-                        {...noAutoCapInputProps}
-                        placeholder={
-                          isFileDb
-                            ? dbType === "duckdb"
-                              ? "/path/to/db.duckdb"
-                              : "/path/to/db.sqlite"
-                            : "localhost"
-                        }
-                      />
-                    </Form.Item>
-                    {isFileDb ? (
-                      <Form.Item label=" " style={{ marginBottom: 0 }}>
-                        <Button
-                          style={{ width: "100%" }}
-                          onClick={handleSelectDatabaseFile}
-                          loading={selectingDbFile}
-                        >
-                          浏览...
-                        </Button>
-                      </Form.Item>
-                    ) : (
-                      <Form.Item
-                        name="port"
-                        label="端口 (Port)"
-                        rules={[
-                          createUriAwareRequiredRule(
-                            "请输入端口号",
-                            (value) => Number(value) > 0,
-                          ),
-                        ]}
-                        style={{ marginBottom: 0 }}
-                      >
-                        <InputNumber style={{ width: "100%" }} />
-                      </Form.Item>
-                    )}
-                  </div>
-                ),
-              })}
-
-              {dbType === "clickhouse" &&
-                renderConfigSectionCard({
-                  sectionKey: "connectionMode",
-                  icon: <ClusterOutlined />,
-                  children: (
-                    <Form.Item
-                      name="clickHouseProtocol"
-                      label="连接协议"
-                      help="自动模式按 URI scheme 和常见端口判断；非标 HTTP/Native 端口可手动指定。"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Select
-                        options={CLICKHOUSE_PROTOCOL_OPTIONS}
-                        onChange={() => clearConnectionTestResultForChoice()}
-                      />
-                    </Form.Item>
-                  ),
-                })}
-
-              {dbType === "oceanbase" &&
-                renderConfigSectionCard({
-                  sectionKey: "oceanBaseProtocol",
-                  icon: <ClusterOutlined />,
-                  children: (
-                    <Form.Item
-                      name="oceanBaseProtocol"
-                      label="OceanBase 协议"
-                      help={
-                        <span>
-                          MySQL 租户选择 MySQL；Oracle 租户选择 Oracle。GoNavi 会根据端口自动选择：OB MySQL wire 端口走 OBClient capability 注入（与 Navicat 相同路径），OBProxy Oracle listener 端口走标准 TNS。
-                          <br />
-                          如果 Oracle 租户连接报「Error 1235」或 OBClient 握手失败，可在「连接参数」字段通过 <code>connectionAttributes=key1:value1,key2:value2</code> 覆盖 GoNavi 默认注入的 OBClient capability。
-                        </span>
-                      }
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Select
-                        options={OCEANBASE_PROTOCOL_OPTIONS}
-                        onChange={() => {
-                          form.setFieldsValue({ mysqlTopology: "single" });
-                          clearConnectionTestResultForChoice();
-                        }}
-                      />
-                    </Form.Item>
-                  ),
-                })}
-
-              {(dbType === "postgres" ||
-                dbType === "kingbase" ||
-                dbType === "highgo" ||
-                dbType === "vastbase" ||
-                dbType === "opengauss" ||
-                dbType === "gaussdb") &&
-                renderConfigSectionCard({
-                  sectionKey: "service",
-                  icon: <DatabaseOutlined />,
-                  children: (
-                    <Form.Item
-                      name="database"
-                      label="默认连接数据库（可选）"
-                      help="留空会自动尝试 postgres、template1、与当前用户名同名数据库"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input {...noAutoCapInputProps} placeholder="例如：appdb" />
-                    </Form.Item>
-                  ),
-                })}
-
-              {dbType === "kafka" &&
-                renderConfigSectionCard({
-                  sectionKey: "service",
-                  icon: <DatabaseOutlined />,
-                  children: (
-                    <Form.Item
-                      name="database"
-                      label="默认 Topic（可选）"
-                      help="留空时必须在 SQL 中显式指定 Topic；填写后可直接执行 SHOW、CONSUME 或 SELECT 预览。"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input {...noAutoCapInputProps} placeholder="例如：orders.events" />
-                    </Form.Item>
-                  ),
-                })}
-
-              {dbType === "rocketmq" &&
-                renderConfigSectionCard({
-                  sectionKey: "service",
-                  icon: <DatabaseOutlined />,
-                  children: (
-                    <Form.Item
-                      name="database"
-                      label="默认 Topic（可选）"
-                      help="留空时必须在 SQL 中显式指定 Topic；连接参数可继续补充 groupId、namespace、tag、pullBatchSize 与 startOffset。"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input {...noAutoCapInputProps} placeholder="例如：orders.events" />
-                    </Form.Item>
-                  ),
-                })}
-
-              {dbType === "mqtt" &&
-                renderConfigSectionCard({
-                  sectionKey: "service",
-                  icon: <DatabaseOutlined />,
-                  children: (
-                    <Form.Item
-                      name="database"
-                      label="默认 Topic / Filter（可选）"
-                      help="留空时必须在 SQL 中显式指定 Topic；填写后可直接执行 SHOW、CONSUME 或 SELECT 预览。支持使用 /、+、#。"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input {...noAutoCapInputProps} placeholder="例如：devices/+/telemetry" />
-                    </Form.Item>
-                  ),
-                })}
-
-              {dbType === "rabbitmq" &&
-                renderConfigSectionCard({
-                  sectionKey: "service",
-                  icon: <DatabaseOutlined />,
-                  children: (
-                    <Form.Item
-                      name="database"
-                      label="默认 Virtual Host（可选）"
-                      help="留空默认使用 /；填写后查询编辑器会以当前 vhost 作为 Queue 浏览与测试发送上下文。"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input {...noAutoCapInputProps} placeholder="例如：/ 或 orders-vhost" />
-                    </Form.Item>
-                  ),
-                })}
-
-              {(dbType === "oracle" || isOceanBaseOracle) &&
-                renderConfigSectionCard({
-                  sectionKey: "service",
-                  icon: <DatabaseOutlined />,
-                  children: (
-                    <Form.Item
-                      name="database"
-                      label={isOceanBaseOracle ? "OceanBase Oracle 服务名 (Service Name)" : "服务名 (Service Name)"}
-                      rules={[
-                        createUriAwareRequiredRule(
-                          isOceanBaseOracle
-                            ? "请输入 OceanBase Oracle 服务名"
-                            : "请输入 Oracle 服务名（例如 ORCLPDB1）",
-                        ),
-                      ]}
-                      help={
-                        isOceanBaseOracle
-                          ? "Oracle 租户必须填写监听器注册的 SERVICE_NAME；用户名仍按 OceanBase 租户格式填写。"
-                          : "请填写监听器注册的 SERVICE_NAME（不是用户名）。例如：ORCLPDB1"
-                      }
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Input
-                        {...noAutoCapInputProps}
-                        placeholder="例如：ORCLPDB1"
-                      />
-                    </Form.Item>
-                  ),
-                })}
-
-              {isMySQLLike &&
-                renderConfigSectionCard({
-                  sectionKey: "connectionMode",
-                  icon: <ClusterOutlined />,
-                  children: renderChoiceCards({
-                    fieldName: "mysqlTopology",
-                    value: String(mysqlTopology),
-                    options: [
-                      {
-                        value: "single",
-                        label: "单机模式",
-                        description: "只连接一个主库地址，适合本地和单实例。",
-                      },
-                      {
-                        value: "replica",
-                        label: "主从模式",
-                        description: "主库优先，可配置从库地址用于切换。",
-                      },
-                    ],
-                  }),
-                })}
-
-              {isKafka &&
-                renderConfigSectionCard({
-                  sectionKey: "connectionMode",
-                  icon: <ClusterOutlined />,
-                  children: renderChoiceCards({
-                    fieldName: "kafkaTopology",
-                    value: String(kafkaTopology),
-                    options: [
-                      {
-                        value: "single",
-                        label: "单 Broker",
-                        description: "只配置一个 bootstrap broker，适合本地或简单环境。",
-                      },
-                      {
-                        value: "cluster",
-                        label: "集群模式",
-                        description: "配置多个 bootstrap broker，提高发现与故障切换成功率。",
-                      },
-                    ],
-                  }),
-                })}
-
-              {isRocketMQ &&
-                renderConfigSectionCard({
-                  sectionKey: "connectionMode",
-                  icon: <ClusterOutlined />,
-                  children: renderChoiceCards({
-                    fieldName: "rocketmqTopology",
-                    value: String(rocketmqTopology),
-                    options: [
-                      {
-                        value: "single",
-                        label: "单 NameServer",
-                        description: "只配置一个 NameServer，适合本地或简单环境。",
-                      },
-                      {
-                        value: "cluster",
-                        label: "集群模式",
-                        description: "配置多个 NameServer，提高路由发现与故障切换成功率。",
-                      },
-                    ],
-                  }),
-                })}
-
-              {isMQTT &&
-                renderConfigSectionCard({
-                  sectionKey: "connectionMode",
-                  icon: <ClusterOutlined />,
-                  children: renderChoiceCards({
-                    fieldName: "mqttTopology",
-                    value: String(mqttTopology),
-                    options: [
-                      {
-                        value: "single",
-                        label: "单 Broker",
-                        description: "只配置一个 broker，适合本地或简单环境。",
-                      },
-                      {
-                        value: "cluster",
-                        label: "集群模式",
-                        description: "配置多个 broker，提高连接发现与故障切换成功率。",
-                      },
-                    ],
-                  }),
-                })}
-
-              {isKafka &&
-                kafkaTopology === "cluster" &&
-                renderConfigSectionCard({
-                  sectionKey: "replica",
-                  icon: <ClusterOutlined />,
-                  children: (
-                    <Form.Item
-                      name="kafkaHosts"
-                      label="额外 Broker 地址"
-                      help="可输入多个 broker 地址，格式：host:port（回车确认）"
-                    >
-                      <Select
-                        mode="tags"
-                        placeholder="例如：10.10.0.12:9092、10.10.0.13:9092"
-                        tokenSeparators={[",", ";", " "]}
-                      />
-                    </Form.Item>
-                  ),
-                })}
-
-              {isRocketMQ &&
-                rocketmqTopology === "cluster" &&
-                renderConfigSectionCard({
-                  sectionKey: "replica",
-                  icon: <ClusterOutlined />,
-                  children: (
-                    <Form.Item
-                      name="rocketmqHosts"
-                      label="额外 NameServer 地址"
-                      help="可输入多个 NameServer 地址，格式：host:port（回车确认）"
-                    >
-                      <Select
-                        mode="tags"
-                        placeholder="例如：10.10.0.12:9876、10.10.0.13:9876"
-                        tokenSeparators={[",", ";", " "]}
-                      />
-                    </Form.Item>
-                  ),
-                })}
-
-              {isMQTT &&
-                mqttTopology === "cluster" &&
-                renderConfigSectionCard({
-                  sectionKey: "replica",
-                  icon: <ClusterOutlined />,
-                  children: (
-                    <Form.Item
-                      name="mqttHosts"
-                      label="额外 Broker 地址"
-                      help="可输入多个 broker 地址，格式：host:port（回车确认）"
-                    >
-                      <Select
-                        mode="tags"
-                        placeholder="例如：10.10.0.12:1883、10.10.0.13:1883"
-                        tokenSeparators={[",", ";", " "]}
-                      />
-                    </Form.Item>
-                  ),
-                })}
-
-              {isMySQLLike &&
-                mysqlTopology === "replica" &&
-                renderConfigSectionCard({
-                  sectionKey: "replica",
-                  icon: <ClusterOutlined />,
-                  children: (
-                    <>
-                      <Form.Item
-                        name="mysqlReplicaHosts"
-                        label="从库地址列表"
-                        help="可输入多个从库地址，格式：host:port（回车确认）"
-                      >
-                        <Select
-                          mode="tags"
-                          placeholder="例如：10.10.0.12:3306、10.10.0.13:3306"
-                          tokenSeparators={[",", ";", " "]}
-                        />
-                      </Form.Item>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                          gap: 16,
-                        }}
-                      >
-                        <Form.Item
-                          name="mysqlReplicaUser"
-                          label="从库用户名（可选）"
-                          style={{ marginBottom: 0 }}
-                        >
-                          <Input
-                            {...noAutoCapInputProps}
-                            placeholder="留空沿用主库用户名"
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          name="mysqlReplicaPassword"
-                          label="从库密码（可选）"
-                          style={{ marginBottom: 0 }}
-                        >
-                          <Input.Password
-                            {...noAutoCapInputProps}
-                            placeholder={getStoredSecretPlaceholder({
-                              hasStoredSecret:
-                                initialValues?.hasMySQLReplicaPassword,
-                              emptyPlaceholder: "留空沿用主库密码",
-                              retainedLabel: "已保存从库密码",
-                            })}
-                          />
-                        </Form.Item>
-                      </div>
-                      {renderStoredSecretControls({
-                        fieldName: "mysqlReplicaPassword",
-                        clearKey: "mysqlReplicaPassword",
-                        hasStoredSecret: initialValues?.hasMySQLReplicaPassword,
-                        clearLabel: "清除已保存从库密码",
-                        description:
-                          "当前已保存从库密码。留空表示继续沿用，输入新值表示替换。",
-                      })}
-                    </>
-                  ),
-                })}
-
-              {dbType === "mongodb" && (
-                <ConnectionModalMongoSections
-                  mongoTopology={String(mongoTopology)}
-                  mongoSrv={Boolean(mongoSrv)}
-                  useSSH={useSSH}
-                  darkMode={darkMode}
-                  modalMutedTextStyle={modalMutedTextStyle}
-                  mongoReadPreference={String(mongoReadPreference)}
-                  mongoMembers={mongoMembers}
-                  discoveringMembers={discoveringMembers}
-                  initialValues={initialValues}
-                  renderChoiceCards={renderChoiceCards}
-                  renderConfigSectionCard={renderConfigSectionCard}
-                  renderStoredSecretControls={renderStoredSecretControls}
-                  setChoiceFieldValue={setChoiceFieldValue}
-                  handleDiscoverMongoMembers={handleDiscoverMongoMembers}
-                />
-              )}
-
-              {isRedis && (
-                <ConnectionModalRedisSections
-                  redisTopology={String(redisTopology)}
-                  redisDbList={redisDbList}
-                  initialValues={initialValues}
-                  primaryPasswordVisible={primaryPasswordVisible}
-                  setPrimaryPasswordVisible={setPrimaryPasswordVisible}
-                  renderChoiceCards={renderChoiceCards}
-                  renderConfigSectionCard={renderConfigSectionCard}
-                  renderStoredSecretControls={renderStoredSecretControls}
-                  createUriAwareRequiredRule={createUriAwareRequiredRule}
-                />
-              )}
-
-              {!isFileDb &&
-                !isRedis &&
-                renderConfigSectionCard({
-                  sectionKey: "credentials",
-                  icon: <SafetyCertificateOutlined />,
-                  children: (
-                    <>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns:
-                            dbType === "mongodb"
-                              ? "minmax(0, 1fr) minmax(0, 1fr) 180px"
-                              : "repeat(2, minmax(0, 1fr))",
-                          gap: 16,
-                        }}
-                      >
-                        <Form.Item
-                          name="user"
-                          label={dbType === "rocketmq" ? "Access Key" : "用户名"}
-                          rules={
-                            PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)
-                              ? []
-                              : [createUriAwareRequiredRule("请输入用户名")]
-                          }
-                          style={{ marginBottom: 0 }}
-                        >
-                          <Input
-                            {...noAutoCapInputProps}
-                            placeholder={
-                              PRIMARY_USERNAME_OPTIONAL_TYPES.has(dbType)
-                                ? "未开启认证可留空"
-                                : undefined
-                            }
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          name="password"
-                          label={dbType === "rocketmq" ? "Secret Key" : "密码"}
-                          style={{ marginBottom: 0 }}
-                        >
-                          <Input.Password
-                            {...noAutoCapInputProps}
-                            visibilityToggle={{
-                              visible: primaryPasswordVisible,
-                              onVisibleChange: setPrimaryPasswordVisible,
-                            }}
-                            placeholder={getStoredSecretPlaceholder({
-                              hasStoredSecret:
-                                initialValues?.hasPrimaryPassword,
-                              emptyPlaceholder: dbType === "rocketmq" ? "未开启认证可留空" : "密码",
-                              retainedLabel: dbType === "rocketmq" ? "已保存 Secret Key" : "已保存密码",
-                            })}
-                          />
-                        </Form.Item>
-                        {dbType === "mongodb" && (
-                          <div style={{ display: "grid", gap: 8 }}>
-                            <Text strong>验证方式</Text>
-                            {renderChoiceCards({
-                              fieldName: "mongoAuthMechanism",
-                              value: String(mongoAuthMechanism),
-                              minWidth: 150,
-                              options: [
-                                {
-                                  value: "",
-                                  label: "自动协商",
-                                  description: "交给驱动按服务端能力选择。",
-                                },
-                                {
-                                  value: "NONE",
-                                  label: "无认证",
-                                  description: "不发送认证信息。",
-                                },
-                                {
-                                  value: "SCRAM-SHA-1",
-                                  label: "SCRAM-SHA-1",
-                                  description: "兼容旧版本 MongoDB。",
-                                },
-                                {
-                                  value: "SCRAM-SHA-256",
-                                  label: "SCRAM-SHA-256",
-                                  description: "推荐的 SCRAM 认证。",
-                                },
-                                {
-                                  value: "MONGODB-AWS",
-                                  label: "MONGODB-AWS",
-                                  description: "AWS IAM 认证。",
-                                },
-                              ],
-                            })}
-                          </div>
-                        )}
-                      </div>
-                      {dbType === "mongodb" && (
-                        <Form.Item
-                          name="savePassword"
-                          valuePropName="checked"
-                          style={{ marginTop: 12, marginBottom: 0 }}
-                        >
-                          <Checkbox>保存密码</Checkbox>
-                        </Form.Item>
-                      )}
-                    </>
-                  ),
-                })}
-
-              {!isFileDb &&
-                !isRedis &&
-                !isKafka &&
-                renderConfigSectionCard({
-                  sectionKey: "databaseScope",
-                  icon: <DatabaseOutlined />,
-                  children: (
-                    <Form.Item
-                      name="includeDatabases"
-                      label="显示数据库 (留空显示全部)"
-                      help="连接测试成功后可选择"
-                      style={{ marginBottom: 0 }}
-                    >
-                      <Select
-                        mode="multiple"
-                        placeholder="选择显示的数据库"
-                        allowClear
-                      >
-                        {dbList.map((db) => (
-                          <Select.Option key={db} value={db}>
-                            {db}
-                          </Select.Option>
-                        ))}
-                      </Select>
-                    </Form.Item>
-                  ),
-                })}
-            </>
-          )}
-        </div>
-      </div>
-    );
-
-    const networkSecuritySection =
-      !isFileDb && !isJVM
-        ? (() => {
-            const networkItems: Array<{
-              key: "ssl" | "ssh" | "proxy" | "httpTunnel";
-              title: string;
-              description: string;
-              enabled: boolean;
-            }> = [
-              ...(isSSLType
-                ? [
-                    {
-                      key: "ssl" as const,
-                      title: "SSL/TLS",
-                      description: "加密与证书校验",
-                      enabled: useSSL,
-                    },
-                  ]
-                : []),
-              {
-                key: "ssh",
-                title: "SSH 隧道",
-                description: "跳板机 / 堡垒机转发",
-                enabled: useSSH,
-              },
-              {
-                key: "proxy",
-                title: "代理",
-                description: "SOCKS5 / HTTP CONNECT",
-                enabled: useProxy,
-              },
-              {
-                key: "httpTunnel",
-                title: "HTTP 隧道",
-                description: "独立 HTTP CONNECT 路由",
-                enabled: useHttpTunnel,
-              },
-            ];
-            const resolvedNetworkConfig = networkItems.some(
-              (item) => item.key === activeNetworkConfig,
-            )
-              ? activeNetworkConfig
-              : networkItems[0]?.key || "ssh";
-            const renderNetworkPanel = () => {
-              if (resolvedNetworkConfig === "ssl") {
-                return (
-                  <div style={{ ...modalInnerSectionStyle, padding: 14 }}>
-                    <div
-                      style={{
-                        marginBottom: 8,
-                        color: darkMode ? "#f5f7ff" : "#162033",
-                        fontSize: 14,
-                        fontWeight: 700,
-                      }}
-                    >
-                      SSL/TLS
-                    </div>
-                    <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>
-                      为连接链路增加加密与证书校验控制，适合生产或跨网络访问场景。
-                    </div>
-                    {!useSSL ? (
-                      <div
-                        style={{
-                          ...modalMutedTextStyle,
-                          padding: "10px 12px",
-                          borderRadius: 12,
-                          background: darkMode
-                            ? "rgba(255,255,255,0.03)"
-                            : "rgba(16,24,40,0.04)",
-                        }}
-                      >
-                        左侧勾选“SSL/TLS”后，可在这里配置模式、证书与校验策略。
-                      </div>
-                    ) : (
-                      <div style={tunnelSectionStyle}>
-                        <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
-                          <Text strong>SSL 模式</Text>
-                          {renderChoiceCards({
-                            fieldName: "sslMode",
-                            value: String(sslMode),
-                            options: [
-                              {
-                                value: "preferred",
-                                label: "Preferred",
-                                description: "优先使用 SSL，失败后按驱动策略处理。",
-                              },
-                              {
-                                value: "required",
-                                label: "Required",
-                                description: "必须使用 SSL，并进行证书校验。",
-                              },
-                              {
-                                value: "skip-verify",
-                                label: "Skip Verify",
-                                description: "必须使用 SSL，但跳过证书校验。",
-                              },
-                            ],
-                          })}
-                        </div>
-                        {(supportsSSLCAPath || supportsSSLClientCertificate) && (
-                          <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
-                            {supportsSSLCAPath && (
-                              <Form.Item
-                                label={dbType === "sqlserver" ? "服务端证书/CA 路径" : "CA 证书路径"}
-                                style={{ marginBottom: 0 }}
-                              >
-                                <Space.Compact style={{ width: "100%" }}>
-                                  <Form.Item name="sslCAPath" noStyle>
-                                    <Input
-                                      {...noAutoCapInputProps}
-                                      placeholder="例如: C:\certs\ca.pem"
-                                    />
-                                  </Form.Item>
-                                  <Button
-                                    onClick={() => handleSelectCertificateFile("sslCAPath", "ca")}
-                                    loading={selectingCertificateField === "sslCAPath"}
-                                  >
-                                    浏览...
-                                  </Button>
-                                </Space.Compact>
-                              </Form.Item>
-                            )}
-                            {supportsSSLClientCertificate && (
-                              <>
-                                <Form.Item
-                                  label={dbType === "dameng" ? "客户端证书路径 (SSL_CERT_PATH)" : "客户端证书路径"}
-                                  rules={[
-                                    {
-                                      required: dbType === "dameng",
-                                      message: "达梦 SSL 需要证书路径",
-                                    },
-                                  ]}
-                                  style={{ marginBottom: 0 }}
-                                >
-                                  <Space.Compact style={{ width: "100%" }}>
-                                    <Form.Item name="sslCertPath" noStyle>
-                                      <Input
-                                        {...noAutoCapInputProps}
-                                        placeholder="例如: C:\certs\client-cert.pem"
-                                      />
-                                    </Form.Item>
-                                    <Button
-                                      onClick={() => handleSelectCertificateFile("sslCertPath", "client-cert")}
-                                      loading={selectingCertificateField === "sslCertPath"}
-                                    >
-                                      浏览...
-                                    </Button>
-                                  </Space.Compact>
-                                </Form.Item>
-                                <Form.Item
-                                  label={dbType === "dameng" ? "客户端私钥路径 (SSL_KEY_PATH)" : "客户端私钥路径"}
-                                  rules={[
-                                    {
-                                      required: dbType === "dameng",
-                                      message: "达梦 SSL 需要私钥路径",
-                                    },
-                                  ]}
-                                  style={{ marginBottom: 0 }}
-                                >
-                                  <Space.Compact style={{ width: "100%" }}>
-                                    <Form.Item name="sslKeyPath" noStyle>
-                                      <Input
-                                        {...noAutoCapInputProps}
-                                        placeholder="例如: C:\certs\client-key.pem"
-                                      />
-                                    </Form.Item>
-                                    <Button
-                                      onClick={() => handleSelectCertificateFile("sslKeyPath", "client-key")}
-                                      loading={selectingCertificateField === "sslKeyPath"}
-                                    >
-                                      浏览...
-                                    </Button>
-                                  </Space.Compact>
-                                </Form.Item>
-                              </>
-                            )}
-                          </div>
-                        )}
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {sslHintText}
-                        </Text>
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-              if (resolvedNetworkConfig === "ssh") {
-                return (
-                  <div style={{ ...modalInnerSectionStyle, padding: 14 }}>
-                    <div
-                      style={{
-                        marginBottom: 8,
-                        color: darkMode ? "#f5f7ff" : "#162033",
-                        fontSize: 14,
-                        fontWeight: 700,
-                      }}
-                    >
-                      SSH 隧道
-                    </div>
-                    <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>
-                      通过跳板机或堡垒机转发数据库连接，适合内网或受限网络环境。
-                    </div>
-                    {!useSSH ? (
-                      <div
-                        style={{
-                          ...modalMutedTextStyle,
-                          padding: "10px 12px",
-                          borderRadius: 12,
-                          background: darkMode
-                            ? "rgba(255,255,255,0.03)"
-                            : "rgba(16,24,40,0.04)",
-                        }}
-                      >
-                        左侧勾选“SSH
-                        隧道”后，可在这里填写主机、端口、用户名、密码和私钥路径。
-                      </div>
-                    ) : (
-                      <div style={tunnelSectionStyle}>
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "minmax(0, 1fr) 120px",
-                            gap: 16,
-                          }}
-                        >
-                          <Form.Item
-                            name="sshHost"
-                            label="SSH 主机 (域名或IP)"
-                            rules={[
-                              { required: useSSH, message: "请输入SSH主机" },
-                            ]}
-                            style={{ flex: 1 }}
-                          >
-                            <Input
-                              {...noAutoCapInputProps}
-                              placeholder="例如: ssh.example.com 或 192.168.1.100"
-                            />
-                          </Form.Item>
-                          <Form.Item
-                            name="sshPort"
-                            label="端口"
-                            rules={[
-                              { required: useSSH, message: "请输入SSH端口" },
-                            ]}
-                            style={{ width: 100 }}
-                          >
-                            <InputNumber style={{ width: "100%" }} />
-                          </Form.Item>
-                        </div>
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                            gap: 16,
-                          }}
-                        >
-                          <Form.Item
-                            name="sshUser"
-                            label="SSH 用户"
-                            rules={[
-                              { required: useSSH, message: "请输入SSH用户" },
-                            ]}
-                            style={{ flex: 1 }}
-                          >
-                            <Input
-                              {...noAutoCapInputProps}
-                              placeholder="root"
-                            />
-                          </Form.Item>
-                          <Form.Item
-                            name="sshPassword"
-                            label="SSH 密码"
-                            style={{ flex: 1 }}
-                          >
-                            <Input.Password
-                              {...noAutoCapInputProps}
-                              placeholder={getStoredSecretPlaceholder({
-                                hasStoredSecret: initialValues?.hasSSHPassword,
-                                emptyPlaceholder: "密码",
-                                retainedLabel: "已保存 SSH 密码",
-                              })}
-                            />
-                          </Form.Item>
-                        </div>
-                        <Form.Item
-                          label="私钥路径 (可选)"
-                          help="例如: /Users/name/.ssh/id_rsa"
-                        >
-                          <Space.Compact style={{ width: "100%" }}>
-                            <Form.Item name="sshKeyPath" noStyle>
-                              <Input
-                                {...noAutoCapInputProps}
-                                placeholder="绝对路径"
-                              />
-                            </Form.Item>
-                            <Button
-                              onClick={handleSelectSSHKeyFile}
-                              loading={selectingSSHKey}
-                            >
-                              浏览...
-                            </Button>
-                          </Space.Compact>
-                        </Form.Item>
-                        {renderStoredSecretControls({
-                          fieldName: "sshPassword",
-                          clearKey: "sshPassword",
-                          hasStoredSecret: initialValues?.hasSSHPassword,
-                          clearLabel: "清除已保存 SSH 密码",
-                          description:
-                            "当前已保存 SSH 密码。留空表示继续沿用，输入新值表示替换。",
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-              if (resolvedNetworkConfig === "proxy") {
-                return (
-                  <div style={{ ...modalInnerSectionStyle, padding: 14 }}>
-                    <div
-                      style={{
-                        marginBottom: 8,
-                        color: darkMode ? "#f5f7ff" : "#162033",
-                        fontSize: 14,
-                        fontWeight: 700,
-                      }}
-                    >
-                      代理
-                    </div>
-                    <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>
-                      适合借助本地代理软件或中间网关转发数据库流量。
-                    </div>
-                    {!useProxy ? (
-                      <div
-                        style={{
-                          ...modalMutedTextStyle,
-                          padding: "10px 12px",
-                          borderRadius: 12,
-                          background: darkMode
-                            ? "rgba(255,255,255,0.03)"
-                            : "rgba(16,24,40,0.04)",
-                        }}
-                      >
-                        左侧勾选“代理”后，可在这里选择代理类型并填写主机、端口与认证信息。
-                      </div>
-                    ) : (
-                      <div style={tunnelSectionStyle}>
-                        <Form.Item
-                          name="proxyHost"
-                          label="代理主机"
-                          rules={[
-                            { required: useProxy, message: "请输入代理主机" },
-                          ]}
-                        >
-                          <Input
-                            {...noAutoCapInputProps}
-                            placeholder="例如: 127.0.0.1 或 proxy.company.com"
-                          />
-                        </Form.Item>
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "minmax(0, 1fr) 120px",
-                            gap: 16,
-                          }}
-                        >
-                          <div style={{ display: "grid", gap: 8 }}>
-                            <Text strong>代理类型</Text>
-                            {renderChoiceCards({
-                              fieldName: "proxyType",
-                              value: String(proxyType),
-                              minWidth: 150,
-                              options: [
-                                {
-                                  value: "socks5",
-                                  label: "SOCKS5",
-                                  description: "常见本地代理和网关代理。",
-                                },
-                                {
-                                  value: "http",
-                                  label: "HTTP CONNECT",
-                                  description: "通过 HTTP CONNECT 建立隧道。",
-                                },
-                              ],
-                            })}
-                          </div>
-                          <Form.Item
-                            name="proxyPort"
-                            label="端口"
-                            rules={[
-                              { required: useProxy, message: "请输入代理端口" },
-                            ]}
-                            style={{ marginBottom: 0 }}
-                          >
-                            <InputNumber
-                              style={{ width: "100%" }}
-                              min={1}
-                              max={65535}
-                            />
-                          </Form.Item>
-                        </div>
-                        <div
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                            gap: 16,
-                          }}
-                        >
-                          <Form.Item
-                            name="proxyUser"
-                            label="代理用户名（可选）"
-                            style={{ flex: 1 }}
-                          >
-                            <Input
-                              {...noAutoCapInputProps}
-                              placeholder="留空表示无认证"
-                            />
-                          </Form.Item>
-                          <Form.Item
-                            name="proxyPassword"
-                            label="代理密码（可选）"
-                            style={{ flex: 1 }}
-                          >
-                            <Input.Password
-                              {...noAutoCapInputProps}
-                              placeholder={getStoredSecretPlaceholder({
-                                hasStoredSecret:
-                                  initialValues?.hasProxyPassword,
-                                emptyPlaceholder: "留空表示无认证",
-                                retainedLabel: "已保存代理密码",
-                              })}
-                            />
-                          </Form.Item>
-                        </div>
-                        {renderStoredSecretControls({
-                          fieldName: "proxyPassword",
-                          clearKey: "proxyPassword",
-                          hasStoredSecret: initialValues?.hasProxyPassword,
-                          clearLabel: "清除已保存代理密码",
-                          description:
-                            "当前已保存代理密码。留空表示继续沿用，输入新值表示替换。",
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-              return (
-                <div style={{ ...modalInnerSectionStyle, padding: 14 }}>
-                  <div
-                    style={{
-                      marginBottom: 8,
-                      color: darkMode ? "#f5f7ff" : "#162033",
-                      fontSize: 14,
-                      fontWeight: 700,
-                    }}
-                  >
-                    HTTP 隧道
-                  </div>
-                  <div style={{ ...modalMutedTextStyle, marginBottom: 14 }}>
-                    与代理模式互斥，适合单独指定一条 HTTP CONNECT 隧道路由。
-                  </div>
-                  {!useHttpTunnel ? (
-                    <div
-                      style={{
-                        ...modalMutedTextStyle,
-                        padding: "10px 12px",
-                        borderRadius: 12,
-                        background: darkMode
-                          ? "rgba(255,255,255,0.03)"
-                          : "rgba(16,24,40,0.04)",
-                      }}
-                    >
-                      左侧勾选“HTTP 隧道”后，可在这里填写隧道目标与认证信息。
-                    </div>
-                  ) : (
-                    <div style={tunnelSectionStyle}>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "minmax(0, 1fr) 120px",
-                          gap: 16,
-                        }}
-                      >
-                        <Form.Item
-                          name="httpTunnelHost"
-                          label="隧道主机"
-                          rules={[
-                            {
-                              required: useHttpTunnel,
-                              message: "请输入隧道主机",
-                            },
-                          ]}
-                          style={{ flex: 1 }}
-                        >
-                          <Input
-                            {...noAutoCapInputProps}
-                            placeholder="例如: tunnel.company.com 或 127.0.0.1"
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          name="httpTunnelPort"
-                          label="端口"
-                          rules={[
-                            {
-                              required: useHttpTunnel,
-                              message: "请输入隧道端口",
-                            },
-                          ]}
-                          style={{ width: 120 }}
-                        >
-                          <InputNumber
-                            style={{ width: "100%" }}
-                            min={1}
-                            max={65535}
-                          />
-                        </Form.Item>
-                      </div>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                          gap: 16,
-                        }}
-                      >
-                        <Form.Item
-                          name="httpTunnelUser"
-                          label="隧道用户名（可选）"
-                          style={{ flex: 1 }}
-                        >
-                          <Input
-                            {...noAutoCapInputProps}
-                            placeholder="留空表示无认证"
-                          />
-                        </Form.Item>
-                        <Form.Item
-                          name="httpTunnelPassword"
-                          label="隧道密码（可选）"
-                          style={{ flex: 1 }}
-                        >
-                          <Input.Password
-                            {...noAutoCapInputProps}
-                            placeholder={getStoredSecretPlaceholder({
-                              hasStoredSecret:
-                                initialValues?.hasHttpTunnelPassword,
-                              emptyPlaceholder: "留空表示无认证",
-                              retainedLabel: "已保存隧道密码",
-                            })}
-                          />
-                        </Form.Item>
-                      </div>
-                      {renderStoredSecretControls({
-                        fieldName: "httpTunnelPassword",
-                        clearKey: "httpTunnelPassword",
-                        hasStoredSecret: initialValues?.hasHttpTunnelPassword,
-                        clearLabel: "清除已保存隧道密码",
-                        description:
-                          "当前已保存隧道密码。留空表示继续沿用，输入新值表示替换。",
-                      })}
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        与“使用代理”互斥，启用后将通过 HTTP CONNECT
-                        建立独立隧道。
-                      </Text>
-                    </div>
-                  )}
-                </div>
-              );
-            };
-
-            return (
-              <div style={modalInnerSectionStyle}>
-                <div
-                  style={{
-                    marginBottom: 12,
-                    color: darkMode ? "#f5f7ff" : "#162033",
-                    fontSize: 14,
-                    fontWeight: 700,
-                  }}
-                >
-                  网络与安全
-                </div>
-                <div style={{ ...modalMutedTextStyle, marginBottom: 16 }}>
-                  上方稳定列出所有连接方式，下方固定展示当前方式的配置详情，避免启用后页面重新排布，同时给详情区留出足够宽度。
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                    gap: 12,
-                    marginBottom: 16,
-                  }}
-                >
-                  {networkItems.map((item) => {
-                    const active = item.key === resolvedNetworkConfig;
-                    const activeColor = darkMode ? "#ffd666" : "#1677ff";
-                    return (
-                      <div
-                        key={item.key}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setActiveNetworkConfig(item.key)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            setActiveNetworkConfig(item.key);
-                          }
-                        }}
-                        style={{
-                          ...getConnectionOptionCardStyle(item.enabled),
-                          borderColor: active
-                            ? darkMode
-                              ? "rgba(255,214,102,0.46)"
-                              : "rgba(24,144,255,0.36)"
-                            : "transparent",
-                          background: active
-                            ? darkMode
-                              ? "linear-gradient(180deg, rgba(255,214,102,0.14) 0%, rgba(255,214,102,0.08) 100%)"
-                              : "linear-gradient(180deg, rgba(24,144,255,0.12) 0%, rgba(24,144,255,0.06) 100%)"
-                            : getConnectionOptionCardStyle(item.enabled)
-                                .background,
-                          boxShadow: active
-                            ? darkMode
-                              ? "0 0 0 1px rgba(255,214,102,0.18) inset, 0 12px 26px rgba(0,0,0,0.16)"
-                              : "0 0 0 1px rgba(24,144,255,0.14) inset, 0 12px 22px rgba(24,144,255,0.10)"
-                            : "none",
-                          cursor: "pointer",
-                          outline: "none",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            gap: 10,
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: 8,
-                              height: 8,
-                              marginTop: 8,
-                              borderRadius: 999,
-                              background: active ? activeColor : "transparent",
-                              border: active
-                                ? "none"
-                                : darkMode
-                                  ? "1px solid rgba(255,255,255,0.12)"
-                                  : "1px solid rgba(16,24,40,0.12)",
-                              flexShrink: 0,
-                            }}
-                          />
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "flex-start",
-                              gap: 10,
-                              minWidth: 0,
-                              flex: 1,
-                            }}
-                          >
-                            <Form.Item
-                              name={
-                                item.key === "ssl"
-                                  ? "useSSL"
-                                  : item.key === "ssh"
-                                    ? "useSSH"
-                                    : item.key === "proxy"
-                                      ? "useProxy"
-                                      : "useHttpTunnel"
-                              }
-                              valuePropName="checked"
-                              noStyle
-                            >
-                              <Checkbox />
-                            </Form.Item>
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "space-between",
-                                  gap: 8,
-                                }}
-                              >
-                                <span
-                                  style={{
-                                    fontSize: 14,
-                                    fontWeight: 700,
-                                    color: darkMode ? "#f5f7ff" : "#162033",
-                                  }}
-                                >
-                                  {item.title}
-                                </span>
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 8,
-                                  }}
-                                >
-                                  {active && (
-                                    <span
-                                      style={{
-                                        padding: "2px 8px",
-                                        borderRadius: 999,
-                                        fontSize: 11,
-                                        fontWeight: 700,
-                                        color: activeColor,
-                                        background: darkMode
-                                          ? "rgba(255,214,102,0.16)"
-                                          : "rgba(24,144,255,0.12)",
-                                      }}
-                                    >
-                                      当前编辑
-                                    </span>
-                                  )}
-                                  <span
-                                    style={{
-                                      fontSize: 11,
-                                      fontWeight: 700,
-                                      color: item.enabled
-                                        ? activeColor
-                                        : darkMode
-                                          ? "rgba(255,255,255,0.38)"
-                                          : "rgba(16,24,40,0.36)",
-                                    }}
-                                  >
-                                    {item.enabled ? "已启用" : "未启用"}
-                                  </span>
-                                </div>
-                              </div>
-                              <div
-                                style={{
-                                  marginTop: 4,
-                                  ...modalMutedTextStyle,
-                                  color: active
-                                    ? darkMode
-                                      ? "rgba(255,255,255,0.72)"
-                                      : "rgba(22,32,51,0.68)"
-                                    : modalMutedTextStyle.color,
-                                }}
-                              >
-                                {item.description}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{ marginBottom: 16 }}>{renderNetworkPanel()}</div>
-                <div style={{ ...modalInnerSectionStyle, padding: 12 }}>
-                  <div
-                    style={{
-                      marginBottom: 10,
-                      color: darkMode ? "#f5f7ff" : "#162033",
-                      fontSize: 13,
-                      fontWeight: 700,
-                    }}
-                  >
-                    高级连接
-                  </div>
-                  <Form.Item
-                    name="timeout"
-                    label="连接超时 (秒)"
-                    help="数据库连接超时时间，默认 30 秒"
-                    rules={[
-                      {
-                        type: "number",
-                        min: 1,
-                        max: 300,
-                        message: "超时时间范围: 1-300 秒",
-                      },
-                    ]}
-                    style={{ marginBottom: 0 }}
-                  >
-                    <InputNumber
-                      style={{ width: "100%" }}
-                      min={1}
-                      max={300}
-                      placeholder="30"
-                    />
-                  </Form.Item>
-                </div>
-              </div>
-            );
-          })()
-        : null;
-
-    return (
-      <Form
-        form={form}
-        layout="vertical"
-        initialValues={{
-          type: "mysql",
-          host: "localhost",
-          port: 3306,
-          database: "",
-          user: "root",
-          useSSL: false,
-          sslMode: "preferred",
-          sslCAPath: "",
-          sslCertPath: "",
-          sslKeyPath: "",
-          useSSH: false,
-          sshPort: 22,
-          useProxy: false,
-          proxyType: "socks5",
-          proxyPort: 1080,
-          useHttpTunnel: false,
-          httpTunnelPort: 8080,
-          timeout: 30,
-          uri: "",
-          connectionParams: "",
-          oceanBaseProtocol: "mysql",
-          mysqlTopology: "single",
-          rocketmqTopology: "single",
-          mqttTopology: "single",
-          kafkaTopology: "single",
-          redisTopology: "single",
-          mongoTopology: "single",
-          mongoSrv: false,
-          mongoReadPreference: "primary",
-          mongoAuthMechanism: "",
-          savePassword: true,
-          mysqlReplicaHosts: [],
-          rocketmqHosts: [],
-          mqttHosts: [],
-          kafkaHosts: [],
-          redisHosts: [],
-          redisSentinelMaster: "",
-          redisSentinelUser: "",
-          redisSentinelPassword: "",
-          mongoHosts: [],
-          mysqlReplicaUser: "",
-          mysqlReplicaPassword: "",
-          mongoReplicaUser: "",
-          mongoReplicaPassword: "",
-          redisDB: 0,
-          jvmReadOnly: true,
-          jvmAllowedModes: ["jmx"],
-          jvmPreferredMode: "jmx",
-          jvmEnvironment: "dev",
-          jvmEndpointEnabled: false,
-          jvmEndpointBaseUrl: "",
-          jvmEndpointApiKey: "",
-          jvmAgentEnabled: false,
-          jvmAgentBaseUrl: "",
-          jvmAgentApiKey: "",
-          jvmDiagnosticEnabled: false,
-          jvmDiagnosticTransport: "agent-bridge",
-          jvmDiagnosticBaseUrl: "",
-          jvmDiagnosticTargetId: "",
-          jvmDiagnosticApiKey: "",
-          jvmDiagnosticAllowObserveCommands: true,
-          jvmDiagnosticAllowTraceCommands: false,
-          jvmDiagnosticAllowMutatingCommands: false,
-          jvmDiagnosticTimeoutSeconds: 15,
-          jvmEndpointTimeoutSeconds: 30,
-          jvmJmxHost: "",
-          jvmJmxPort: undefined,
-          jvmJmxUsername: "",
-          jvmJmxPassword: "",
-        }}
-        onValuesChange={(changed) => {
-          if (testResult) {
-            setTestResult(null);
-            setTestErrorLogOpen(false);
-          }
-          if (
-            changed.uri !== undefined ||
-            changed.connectionParams !== undefined ||
-            changed.type !== undefined ||
-            changed.oceanBaseProtocol !== undefined
-          ) {
-            setUriFeedback(null);
-          }
-          if (changed.useSSL !== undefined) {
-            setUseSSL(changed.useSSL);
-            if (changed.useSSL) setActiveNetworkConfig("ssl");
-          }
-          if (changed.useSSH !== undefined) {
-            setUseSSH(changed.useSSH);
-            if (changed.useSSH) setActiveNetworkConfig("ssh");
-          }
-          if (changed.useProxy !== undefined) {
-            const enabledProxy = !!changed.useProxy;
-            setUseProxy(enabledProxy);
-            if (enabledProxy) setActiveNetworkConfig("proxy");
-            if (enabledProxy && form.getFieldValue("useHttpTunnel")) {
-              form.setFieldValue("useHttpTunnel", false);
-              setUseHttpTunnel(false);
-            }
-          }
-          if (changed.proxyType !== undefined) {
-            const nextType = String(
-              changed.proxyType || "socks5",
-            ).toLowerCase();
-            if (nextType === "http") {
-              const currentPort = Number(form.getFieldValue("proxyPort") || 0);
-              if (!currentPort || currentPort === 1080) {
-                form.setFieldValue("proxyPort", 8080);
-              }
-            } else {
-              const currentPort = Number(form.getFieldValue("proxyPort") || 0);
-              if (!currentPort || currentPort === 8080) {
-                form.setFieldValue("proxyPort", 1080);
-              }
-            }
-          }
-          if (changed.useHttpTunnel !== undefined) {
-            const enabledHttpTunnel = !!changed.useHttpTunnel;
-            setUseHttpTunnel(enabledHttpTunnel);
-            if (enabledHttpTunnel) setActiveNetworkConfig("httpTunnel");
-            if (enabledHttpTunnel && form.getFieldValue("useProxy")) {
-              form.setFieldValue("useProxy", false);
-              setUseProxy(false);
-            }
-            if (enabledHttpTunnel) {
-              const currentPort = Number(
-                form.getFieldValue("httpTunnelPort") || 0,
-              );
-              if (!currentPort || currentPort <= 0) {
-                form.setFieldValue("httpTunnelPort", 8080);
-              }
-            }
-          }
-          if (changed.type !== undefined) setDbType(changed.type);
-          if (changed.jvmAllowedModes !== undefined) {
-            const resolvedModes = normalizeEditableJVMModes(
-              changed.jvmAllowedModes,
-            );
-            const currentPreferredMode = String(
-              form.getFieldValue("jvmPreferredMode") || "",
-            )
-              .trim()
-              .toLowerCase();
-            const resolvedPreferredMode =
-              resolvedModes.find((mode) => mode === currentPreferredMode) ||
-              resolvedModes[0];
-            form.setFieldValue("jvmAllowedModes", resolvedModes);
-            form.setFieldValue("jvmPreferredMode", resolvedPreferredMode);
-            form.setFieldValue(
-              "jvmEndpointEnabled",
-              resolvedModes.includes("endpoint"),
-            );
-            form.setFieldValue(
-              "jvmAgentEnabled",
-              resolvedModes.includes("agent"),
-            );
-          }
-          if (changed.redisTopology !== undefined) {
-            const nextRedisTopology = String(
-              changed.redisTopology || "single",
-            ).toLowerCase();
-            const currentRedisPort = Number(form.getFieldValue("port") || 0);
-            if (
-              nextRedisTopology === "sentinel" &&
-              (!currentRedisPort || currentRedisPort === 6379)
-            ) {
-              form.setFieldValue("port", 26379);
-            } else if (
-              nextRedisTopology !== "sentinel" &&
-              currentRedisPort === 26379
-            ) {
-              form.setFieldValue("port", 6379);
-            }
-            const supportedDbs = buildRedisDatabaseList(
-              form.getFieldValue("redisDB"),
-              form.getFieldValue("includeRedisDatabases"),
-            );
-            setRedisDbList(supportedDbs);
-            form.setFieldValue(
-              "includeRedisDatabases",
-              normalizeRedisDatabaseSelection(
-                form.getFieldValue("includeRedisDatabases"),
-                supportedDbs,
-              ),
-            );
-          }
-          if (
-            changed.type !== undefined ||
-            changed.host !== undefined ||
-            changed.port !== undefined ||
-            changed.mongoHosts !== undefined ||
-            changed.mongoTopology !== undefined ||
-            changed.mongoSrv !== undefined
-          ) {
-            setMongoMembers([]);
-          }
-        }}
-      >
-        <Form.Item name="type" hidden>
-          <Input {...noAutoCapInputProps} />
-        </Form.Item>
-        {currentDriverUnavailableReason && (
-          <Alert
-            showIcon
-            type="warning"
-            style={{ marginBottom: 12 }}
-            message="当前数据源驱动未启用"
-            description={
-              <Space size={8}>
-                <span>{currentDriverUnavailableReason}</span>
-                <Button
-                  type="link"
-                  size="small"
-                  onClick={() => onOpenDriverManager?.()}
-                >
-                  去驱动管理安装
-                </Button>
-              </Space>
-            }
-          />
-        )}
-        {currentDriverUpdateReason && (
-          <Alert
-            showIcon
-            type="warning"
-            style={{ marginBottom: 12 }}
-            message="当前数据源驱动代理建议重装"
-            description={
-              <Space size={8}>
-                <span>{currentDriverUpdateReason}</span>
-                <Button
-                  type="link"
-                  size="small"
-                  onClick={() => onOpenDriverManager?.()}
-                >
-                  去驱动管理重装
-                </Button>
-              </Space>
-            }
-          />
-        )}
-        {(() => {
-          const sectionItems: Array<{
-            key: "basic" | "network" | "appearance";
-            title: string;
-            description: string;
-            icon: React.ReactNode;
-          }> = [
-            {
-              key: "basic",
-              title: "基础信息",
-              description: isJVM
-                ? "JVM 目标、接入模式、JMX、Endpoint、Agent 与诊断增强"
-                : "名称、地址、认证、URI 与数据库范围",
-              icon: <DatabaseOutlined />,
-            },
-            ...(!isCustom && !isFileDb && !isJVM
-              ? [
-                  {
-                    key: "network" as const,
-                    title: "网络与安全",
-                    description: "SSL、SSH、代理与高级连接",
-                    icon: <CloudOutlined />,
-                  },
-                ]
-              : []),
-            {
-              key: "appearance",
-              title: "外观",
-              description: "自定义图标与颜色",
-              icon: <BgColorsOutlined />,
-            },
-          ];
-          const resolvedSection = sectionItems.some(
-            (item) => item.key === activeConfigSection,
-          )
-            ? activeConfigSection
-            : sectionItems[0]?.key || "basic";
-
-          const effectiveIconType = customIconType || dbType;
-          const effectiveIconColor =
-            customIconColor || getDbDefaultColor(effectiveIconType);
-
-          const appearanceSection = (
-            <div style={{ display: "grid", gap: 18 }}>
-              <div style={{ ...modalInnerSectionStyle, padding: 16 }}>
-                <div
-                  style={{
-                    marginBottom: 12,
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: darkMode ? "#f5f7ff" : "#162033",
-                  }}
-                >
-                  图标
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {DB_ICON_TYPES.map((iconKey) => {
-                    const isActive = effectiveIconType === iconKey;
-                    return (
-                      <button
-                        key={iconKey}
-                        type="button"
-                        title={getDbIconLabel(iconKey)}
-                        onClick={() =>
-                          setCustomIconType(
-                            iconKey === dbType ? undefined : iconKey,
-                          )
-                        }
-                        style={{
-                          width: 44,
-                          height: 44,
-                          borderRadius: 10,
-                          display: "grid",
-                          placeItems: "center",
-                          border: `2px solid ${isActive ? effectiveIconColor : darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)"}`,
-                          background: isActive
-                            ? darkMode
-                              ? "rgba(255,255,255,0.08)"
-                              : "rgba(24,144,255,0.06)"
-                            : "transparent",
-                          cursor: "pointer",
-                          transition: "all 120ms ease",
-                        }}
-                      >
-                        {getDbIcon(
-                          iconKey,
-                          isActive ? effectiveIconColor : undefined,
-                          22,
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div
-                  style={{
-                    marginTop: 6,
-                    fontSize: 11,
-                    color: darkMode
-                      ? "rgba(255,255,255,0.45)"
-                      : "rgba(0,0,0,0.35)",
-                  }}
-                >
-                  当前：{getDbIconLabel(effectiveIconType)}
-                </div>
-              </div>
-              <div style={{ ...modalInnerSectionStyle, padding: 16 }}>
-                <div
-                  style={{
-                    marginBottom: 12,
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: darkMode ? "#f5f7ff" : "#162033",
-                  }}
-                >
-                  颜色
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 8,
-                    alignItems: "center",
-                  }}
-                >
-                  {PRESET_ICON_COLORS.map((presetColor) => {
-                    const isActive = effectiveIconColor === presetColor;
-                    return (
-                      <button
-                        key={presetColor}
-                        type="button"
-                        onClick={() =>
-                          setCustomIconColor(
-                            presetColor === getDbDefaultColor(effectiveIconType)
-                              ? undefined
-                              : presetColor,
-                          )
-                        }
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 8,
-                          background: presetColor,
-                          border: isActive
-                            ? `2.5px solid ${darkMode ? "#fff" : "#162033"}`
-                            : "2px solid transparent",
-                          cursor: "pointer",
-                          transition: "all 120ms ease",
-                          boxShadow: isActive
-                            ? `0 0 0 2px ${presetColor}40`
-                            : "none",
-                        }}
-                      />
-                    );
-                  })}
-                  <input
-                    type="color"
-                    value={effectiveIconColor}
-                    onChange={(e) =>
-                      setCustomIconColor(
-                        e.target.value === getDbDefaultColor(effectiveIconType)
-                          ? undefined
-                          : e.target.value,
-                      )
-                    }
-                    title="自定义颜色"
-                    style={{
-                      width: 28,
-                      height: 28,
-                      border: "none",
-                      padding: 0,
-                      cursor: "pointer",
-                      borderRadius: 6,
-                      background: "transparent",
-                    }}
-                  />
-                </div>
-              </div>
-              <div
-                style={{
-                  ...modalInnerSectionStyle,
-                  padding: 16,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 14,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 700,
-                    color: darkMode ? "#f5f7ff" : "#162033",
-                  }}
-                >
-                  预览
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  {getDbIcon(effectiveIconType, effectiveIconColor, 24)}
-                  <span
-                    style={{
-                      fontSize: 14,
-                      color: darkMode ? "#e0e0e0" : "#333",
-                    }}
-                  >
-                    {form.getFieldValue("name") || "连接名称"}
-                  </span>
-                </div>
-                {(customIconType || customIconColor) && (
-                  <Button
-                    size="small"
-                    type="link"
-                    onClick={() => {
-                      setCustomIconType(undefined);
-                      setCustomIconColor(undefined);
-                    }}
-                  >
-                    重置为默认
-                  </Button>
-                )}
-              </div>
-            </div>
-          );
-
-          const currentSectionContent =
-            resolvedSection === "basic"
-              ? baseInfoSection
-              : resolvedSection === "appearance"
-                ? appearanceSection
-                : networkSecuritySection;
-
-          if (sectionItems.length <= 1) {
-            return currentSectionContent;
-          }
-
-          return (
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "220px minmax(0, 1fr)",
-                gap: 18,
-                alignItems: "start",
-              }}
-            >
-              <div
-                style={{
-                  ...modalInnerSectionStyle,
-                  padding: 12,
-                  position: "sticky",
-                  top: 0,
-                }}
-              >
-                <div
-                  style={{
-                    marginBottom: 12,
-                    color: darkMode ? "#f5f7ff" : "#162033",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    letterSpacing: 0.2,
-                  }}
-                >
-                  配置分区
-                </div>
-                <div style={{ display: "grid", gap: 10 }}>
-                  {sectionItems.map((item) => {
-                    const active = item.key === resolvedSection;
-                    return (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={() => setActiveConfigSection(item.key)}
-                        style={{
-                          textAlign: "left",
-                          padding: "12px 12px 12px 14px",
-                          borderRadius: 14,
-                          border: `1px solid ${
-                            active
-                              ? darkMode
-                                ? "rgba(255,214,102,0.3)"
-                                : "rgba(24,144,255,0.24)"
-                              : darkMode
-                                ? "rgba(255,255,255,0.045)"
-                                : "rgba(16,24,40,0.055)"
-                          }`,
-                          background: active
-                            ? darkMode
-                              ? "linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)"
-                              : "linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)"
-                            : darkMode
-                              ? "rgba(255,255,255,0.02)"
-                              : "rgba(255,255,255,0.7)",
-                          color: active
-                            ? darkMode
-                              ? "#f5f7ff"
-                              : "#162033"
-                            : darkMode
-                              ? "rgba(255,255,255,0.76)"
-                              : "#3f4b5e",
-                          cursor: "pointer",
-                          transition: "all 120ms ease",
-                          boxShadow: active
-                            ? darkMode
-                              ? "0 10px 24px rgba(0,0,0,0.18)"
-                              : "0 10px 22px rgba(24,144,255,0.08)"
-                            : "none",
-                        }}
-                      >
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            gap: 10,
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: 30,
-                              height: 30,
-                              borderRadius: 10,
-                              display: "grid",
-                              placeItems: "center",
-                              flexShrink: 0,
-                              background: active
-                                ? darkMode
-                                  ? "rgba(255,214,102,0.16)"
-                                  : "rgba(24,144,255,0.14)"
-                                : darkMode
-                                  ? "rgba(255,255,255,0.05)"
-                                  : "rgba(16,24,40,0.05)",
-                              color: active
-                                ? darkMode
-                                  ? "#ffd666"
-                                  : "#1677ff"
-                                : darkMode
-                                  ? "rgba(255,255,255,0.55)"
-                                  : "#627089",
-                            }}
-                          >
-                            {item.icon}
-                          </div>
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                gap: 8,
-                              }}
-                            >
-                              <span style={{ fontSize: 14, fontWeight: 700 }}>
-                                {item.title}
-                              </span>
-                              <span
-                                style={{
-                                  width: 8,
-                                  height: 8,
-                                  borderRadius: 999,
-                                  background: active
-                                    ? darkMode
-                                      ? "#ffd666"
-                                      : "#1677ff"
-                                    : "transparent",
-                                  border: active
-                                    ? "none"
-                                    : darkMode
-                                      ? "1px solid rgba(255,255,255,0.12)"
-                                      : "1px solid rgba(16,24,40,0.12)",
-                                }}
-                              />
-                            </div>
-                            <div
-                              style={{
-                                marginTop: 5,
-                                fontSize: 12,
-                                lineHeight: 1.55,
-                                color: active
-                                  ? darkMode
-                                    ? "rgba(255,255,255,0.68)"
-                                    : "rgba(22,32,51,0.68)"
-                                  : darkMode
-                                    ? "rgba(255,255,255,0.42)"
-                                    : "rgba(63,75,94,0.62)",
-                              }}
-                            >
-                              {item.description}
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-              <div style={{ minWidth: 0 }}>{currentSectionContent}</div>
-            </div>
-          );
-        })()}
-      </Form>
-    );
-  };
+  const renderStep2 = () => (
+    <ConnectionModalStep2
+      {...{
+        activeConfigSection,
+        activeNetworkConfig,
+        buildRedisDatabaseList,
+        clearConnectionTestResultForChoice,
+        connectionConfigLayout,
+        createCustomDsnRule,
+        createUriAwareRequiredRule,
+        currentDriverSnapshot,
+        currentDriverUnavailableReason,
+        currentDriverUpdateReason,
+        customIconColor,
+        customIconType,
+        darkMode,
+        dbList,
+        dbType,
+        discoveringMembers,
+        form,
+        getConnectionOptionCardStyle,
+        handleCopyURI,
+        handleDiscoverMongoMembers,
+        handleGenerateURI,
+        handleJvmModeCardSelect,
+        handleJvmModeToggle,
+        handleParseURI,
+        handleSelectCertificateFile,
+        handleSelectDatabaseFile,
+        handleSelectSSHKeyFile,
+        initialValues,
+        isCustom,
+        isFileDb,
+        isJVM,
+        isKafka,
+        isMQTT,
+        isMySQLLike,
+        isOceanBaseOracle,
+        isRedis,
+        isRocketMQ,
+        isSSLType,
+        jvmDiagnosticEnabled,
+        jvmDiagnosticTransport,
+        jvmEnvironment,
+        jvmPreferredMode,
+        jvmSectionCardStyle,
+        kafkaTopology,
+        modalInnerSectionStyle,
+        modalMutedTextStyle,
+        mongoAuthMechanism,
+        mongoMembers,
+        mongoReadPreference,
+        mongoSrv,
+        mongoTopology,
+        mqttTopology,
+        mysqlTopology,
+        normalizeRedisDatabaseSelection,
+        normalizedJvmAllowedModes,
+        oceanBaseProtocol,
+        onOpenDriverManager,
+        primaryPasswordVisible,
+        proxyType,
+        redisDbList,
+        redisTopology,
+        renderChoiceCards,
+        renderConfigSectionCard,
+        renderJvmSectionHeader,
+        renderStoredSecretControls,
+        resolvedUriFeedbackMessage,
+        rocketmqTopology,
+        selectingCertificateField,
+        selectingDbFile,
+        selectingSSHKey,
+        setActiveConfigSection,
+        setActiveNetworkConfig,
+        setChoiceFieldValue,
+        setCustomIconColor,
+        setCustomIconType,
+        setDbType,
+        setMongoMembers,
+        setPrimaryPasswordVisible,
+        setRedisDbList,
+        setTestErrorLogOpen,
+        setTestResult,
+        setUriFeedback,
+        setUseHttpTunnel,
+        setUseProxy,
+        setUseSSH,
+        setUseSSL,
+        sslHintText,
+        sslMode,
+        supportsConnectionParams,
+        supportsSSLCAPath,
+        supportsSSLClientCertificate,
+        testResult,
+        tunnelSectionStyle,
+        unsupportedJvmModeMessage,
+        uriFeedback,
+        useHttpTunnel,
+        useProxy,
+        useSSH,
+        useSSL,
+      }}
+    />
+  );
 
   const getFooter = () => {
     if (step === 1) {
       return [
         <Button key="cancel" onClick={onClose}>
-          取消
+          {t("common.action.cancel")}
         </Button>,
       ];
     }
     const isTestSuccess = testResult?.type === "success";
     const hasTestError = !!testResult && !isTestSuccess;
     const testFailureSummary = hasTestError
-      ? summarizeConnectionTestFailureMessage(testResult?.message, "连接失败")
+      ? summarizeConnectionTestFailureMessage(
+          resolvedTestResultMessage,
+          t("connection.status.failure"),
+        )
       : "";
     const operationBlocked =
       !!currentDriverUnavailableReason ||
@@ -7236,7 +2576,7 @@ const ConnectionModal: React.FC<{
         >
           {!initialValues && (
             <Button key="back" onClick={() => setStep(1)}>
-              上一步
+              {t("common.action.back")}
             </Button>
           )}
           {testResult ? (
@@ -7262,7 +2602,11 @@ const ConnectionModal: React.FC<{
               }}
             >
               {isTestSuccess ? <CheckCircleFilled /> : <CloseCircleFilled />}
-              <span>{isTestSuccess ? "连接成功" : "连接失败"}</span>
+              <span>
+                {isTestSuccess
+                  ? t("connection.status.success")
+                  : t("connection.status.failure")}
+              </span>
             </span>
           ) : null}
           {hasTestError && (
@@ -7297,7 +2641,7 @@ const ConnectionModal: React.FC<{
               }}
               onClick={() => setTestErrorLogOpen(true)}
             >
-              查看原因
+              {t("connection.action.viewDetails")}
             </Button>
           )}
         </div>
@@ -7308,10 +2652,10 @@ const ConnectionModal: React.FC<{
             disabled={operationBlocked}
             onClick={requestTest}
           >
-            测试连接
+            {t("connection.action.test")}
           </Button>
           <Button key="cancel" onClick={onClose}>
-            取消
+            {t("common.action.cancel")}
           </Button>
           <Button
             key="submit"
@@ -7320,7 +2664,7 @@ const ConnectionModal: React.FC<{
             disabled={operationBlocked}
             onClick={handleOk}
           >
-            保存
+            {t("common.action.save")}
           </Button>
         </Space>
       </div>
@@ -7331,21 +2675,21 @@ const ConnectionModal: React.FC<{
     if (step === 1) {
       return renderConnectionModalTitle(
         <AppstoreOutlined />,
-        "选择数据源类型",
-        "按数据库、中间件或文件类型快速进入对应的连接配置流程。",
+        t("connection.modal.title.step1"),
+        t("connection.modal.description.step1"),
       );
     }
     const typeName = dbTypes.find((t) => t.key === dbType)?.name || dbType;
     return initialValues
       ? renderConnectionModalTitle(
           <EditOutlined />,
-          "编辑连接",
-          `调整 ${typeName} 连接的参数、认证方式与网络选项。`,
+          t("connection.modal.title.edit"),
+          t("connection.modal.description.edit", { type: typeName }),
         )
       : renderConnectionModalTitle(
           <LinkOutlined />,
-          `新建 ${typeName} 连接`,
-          "填写连接参数、测试连通性，并保存到连接树中。",
+          t("connection.modal.title.create", { type: typeName }),
+          t("connection.modal.description.create"),
         );
   };
 
@@ -7389,8 +2733,8 @@ const ConnectionModal: React.FC<{
       <Modal
         title={renderConnectionModalTitle(
           <FileTextOutlined />,
-          "测试连接失败原因",
-          "查看本次测试连接的完整错误上下文，便于快速定位配置问题。",
+          t("connection.modal.failureDialog.title"),
+          t("connection.modal.failureDialog.description"),
         )}
         open={testErrorLogOpen}
         onCancel={() => setTestErrorLogOpen(false)}
@@ -7414,7 +2758,7 @@ const ConnectionModal: React.FC<{
         }}
         footer={[
           <Button key="close" onClick={() => setTestErrorLogOpen(false)}>
-            关闭
+            {t("common.action.close")}
           </Button>,
         ]}
       >
@@ -7435,7 +2779,10 @@ const ConnectionModal: React.FC<{
             fontFamily: "var(--gn-font-mono)",
           }}
         >
-          {String(testResult?.message || "暂无失败日志")}
+          {String(
+            resolvedTestResultMessage ||
+              t("connection.modal.failureDialog.emptyLog"),
+          )}
         </pre>
       </Modal>
     </>

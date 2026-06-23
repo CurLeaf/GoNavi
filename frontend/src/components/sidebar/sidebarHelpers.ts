@@ -1,0 +1,215 @@
+// Sidebar 工具函数集合（第一期：纯函数 + 共享常量/类型）。
+//
+// 本文件是 Sidebar.tsx 拆分的第一步，只搬迁完全独立、无内部类型依赖的工具函数。
+// 后续 PR 会继续搬迁更多工具函数和子组件。
+//
+// 设计原则：
+//   - 只放纯函数（无副作用、无 React state）
+//   - 不依赖 Sidebar.tsx 内部的 TreeNode 类型（用结构化类型参数代替）
+//   - 共享常量和类型集中管理，便于跨文件复用
+
+import { t } from '../../i18n';
+
+// === 共享常量 ===
+
+/** V2 Rail 中"未分组连接"组的固定 ID */
+export const V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID = '__gonavi-v2-ungrouped-connections__';
+
+// === 共享类型 ===
+
+/** V2 资源管理器过滤维度 */
+export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines' | 'events';
+
+// === 纯函数 ===
+
+/**
+ * formatSidebarRowCount 把行数格式化为人类可读的简短形式。
+ * - >= 1M 显示为 "1.2M"
+ * - >= 1K 显示为 "1.2K"
+ * - 否则显示原数字
+ * - 非法值（NaN/负数）返回空字符串
+ */
+export const formatSidebarRowCount = (count: number): string => {
+  if (!Number.isFinite(count) || count < 0) return '';
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
+  return String(Math.round(count));
+};
+
+/**
+ * hasSidebarLazyChildren 判断树节点的 children 是否已加载（用于按需展开）。
+ */
+export const hasSidebarLazyChildren = (children: unknown): boolean => {
+  return Array.isArray(children) && children.length > 0;
+};
+
+/**
+ * shouldClearSidebarActiveContextOnEmptySelect 判断在空选择时是否清空激活上下文。
+ * 仅 legacy UI 需要清空；V2 UI 保留上下文。
+ */
+export const shouldClearSidebarActiveContextOnEmptySelect = (isV2Ui: boolean): boolean => !isV2Ui;
+
+/**
+ * getV2RailConnectionGroupBadgeText 从组名生成 1-2 字符的徽章文本。
+ * 中文取首字；英文取前两个 token 的首字母大写；其他取前 2 字符。
+ */
+export const getV2RailConnectionGroupBadgeText = (
+  name: unknown,
+  fallback = t('connection.sidebar.group.badge'),
+): string => {
+  const trimmed = String(name ?? '').trim();
+  if (!trimmed) return fallback;
+  const cjkParts = trimmed.match(/[一-龥]/g);
+  if (cjkParts && cjkParts.length > 0) {
+    return cjkParts.slice(0, 1).join('');
+  }
+  const latinTokens = trimmed.match(/[a-z0-9]+/gi) || [];
+  if (latinTokens.length >= 2) {
+    const firstToken = latinTokens[0] || '';
+    const secondToken = latinTokens[1] || '';
+    return `${firstToken[0] || ''}${secondToken[0] || ''}`.toUpperCase();
+  }
+  if (latinTokens.length === 1) {
+    const token = latinTokens[0] || '';
+    const alphaPrefix = token.match(/^[a-z]+/i)?.[0] || '';
+    if (alphaPrefix) {
+      return alphaPrefix.slice(0, 2).toUpperCase();
+    }
+    const trailingDigits = token.match(/(\d{2,})$/)?.[1];
+    if (trailingDigits) {
+      return trailingDigits.slice(-2).toUpperCase();
+    }
+    return token.slice(0, 2).toUpperCase();
+  }
+  return trimmed.slice(0, 2);
+};
+
+/**
+ * isV2SidebarObjectNode 判断节点是否是 SQL 对象类型（表/视图/触发器/事件/存储过程）。
+ * 接收结构化类型而非 TreeNode，避免对 Sidebar 内部类型的硬依赖。
+ */
+export const isV2SidebarObjectNode = (
+  node: { type?: string } | null | undefined,
+): boolean => {
+  return node?.type === 'table'
+      || node?.type === 'view'
+      || node?.type === 'materialized-view'
+      || node?.type === 'db-trigger'
+      || node?.type === 'db-event'
+      || node?.type === 'routine';
+};
+
+// === 第二期：依赖 i18n 但不依赖 TreeNode 内部类型的工具函数 ===
+
+/**
+ * SidebarNodeLike 是 TreeNode 的结构化子集，用于工具函数签名。
+ * 让 sidebarHelpers 不依赖 Sidebar.tsx 内部的 TreeNode 定义，避免循环依赖。
+ */
+export interface SidebarNodeLike {
+  key?: string;
+  type?: string;
+  dataRef?: any;
+  title?: string;
+  children?: SidebarNodeLike[];
+  isLeaf?: boolean;
+}
+
+/**
+ * resolveV2ObjectGroupTitle 解析 V2 资源管理器中"对象分组"节点的本地化标题。
+ * 仅对 type === 'object-group' 的节点有效，其他返回 null。
+ */
+export const resolveV2ObjectGroupTitle = (
+  node: Pick<SidebarNodeLike, 'type' | 'dataRef'> | null | undefined,
+): string | null => {
+  if (node?.type !== 'object-group') return null;
+  const groupKey = String(node?.dataRef?.groupKey || '');
+  if (groupKey === 'tables') return t('sidebar.v2_table_group_menu.title');
+  if (groupKey === 'views') return t('sidebar.object_group.views');
+  if (groupKey === 'routines') return t('sidebar.object_group.routines');
+  if (groupKey === 'triggers') return t('sidebar.object_group.triggers');
+  if (groupKey === 'events') return t('sidebar.object_group.events');
+  if (groupKey === 'materializedViews') return t('sidebar.object_group.materialized_views');
+  return null;
+};
+
+/**
+ * resolveSidebarTableNameForCopy 从节点提取用于复制的表名。
+ * 优先级：dataRef.tableName > dataRef.viewName > dataRef.eventName > title。
+ */
+export const resolveSidebarTableNameForCopy = (
+  node: Pick<SidebarNodeLike, 'title' | 'dataRef'> | null | undefined,
+): string => {
+  return String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || node?.title || '').trim();
+};
+
+// === 命令搜索相关类型与解析（V2 Command Search）===
+
+/** 命令搜索模式：default（默认）/ object（@前缀，对象搜索）/ ai（?或？前缀，AI 提问） */
+export type V2CommandSearchMode = 'default' | 'object' | 'ai';
+
+/** 命令搜索查询解析结果 */
+export interface V2CommandSearchQuery {
+  mode: V2CommandSearchMode;
+  rawValue: string;
+  keyword: string;
+  normalizedKeyword: string;
+  aiPrompt: string;
+}
+
+/**
+ * parseV2CommandSearchQuery 解析命令搜索框的输入。
+ * - "@" 或 "＠" 前缀：对象搜索模式
+ * - "?" 或 "？" 前缀：AI 提问模式
+ * - 无前缀：默认模式
+ */
+export const parseV2CommandSearchQuery = (value: unknown): V2CommandSearchQuery => {
+  const rawValue = String(value ?? '');
+  const trimmedValue = rawValue.trim();
+  const firstChar = trimmedValue.charAt(0);
+
+  if (firstChar === '@' || firstChar === '＠') {
+    const keyword = trimmedValue.slice(1).trim();
+    return {
+      mode: 'object',
+      rawValue,
+      keyword,
+      normalizedKeyword: keyword.toLowerCase(),
+      aiPrompt: '',
+    };
+  }
+
+  if (firstChar === '?' || firstChar === '？') {
+    const aiPrompt = trimmedValue.slice(1).trim();
+    return {
+      mode: 'ai',
+      rawValue,
+      keyword: aiPrompt,
+      normalizedKeyword: aiPrompt.toLowerCase(),
+      aiPrompt,
+    };
+  }
+
+  return {
+    mode: 'default',
+    rawValue,
+    keyword: trimmedValue,
+    normalizedKeyword: trimmedValue.toLowerCase(),
+    aiPrompt: '',
+  };
+};
+
+/**
+ * shouldLoadSidebarNodeOnExpand 判断节点展开时是否需要懒加载子节点。
+ * 仅 connection/database/external-sql-root/table/jvm-mode/jvm-resource 类型且无已加载 children 时返回 true。
+ */
+export const shouldLoadSidebarNodeOnExpand = (
+  node: Pick<SidebarNodeLike, 'type' | 'children' | 'isLeaf'> | null | undefined,
+): boolean => {
+  if (!node || node.isLeaf === true || hasSidebarLazyChildren(node.children)) return false;
+  return node.type === 'connection'
+      || node.type === 'database'
+      || node.type === 'external-sql-root'
+      || node.type === 'table'
+      || node.type === 'jvm-mode'
+      || node.type === 'jvm-resource';
+};

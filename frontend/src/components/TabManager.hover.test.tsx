@@ -1,7 +1,7 @@
 import React from 'react';
 import { readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   TAB_WORKBENCH_CLASS_NAME,
@@ -11,8 +11,18 @@ import {
   TabHoverInfo,
   stopTabHoverDragPropagation,
 } from './TabManager';
+import { setCurrentLanguage } from '../i18n';
 import type { TabData } from '../types';
 import { buildTabDisplayModel } from '../utils/tabDisplay';
+
+const stripSourceComments = (source: string): string =>
+  source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+
+afterEach(() => {
+  setCurrentLanguage('zh-CN');
+});
 
 describe('TabManager hover info', () => {
   it('memoizes the tab workbench so parent-only modal state does not repaint open tabs', () => {
@@ -30,40 +40,46 @@ describe('TabManager hover info', () => {
     expect(source).toMatch(/\.\$\{TAB_WORKBENCH_CLASS_NAME\} \{[\s\S]*height: 100%;[\s\S]*flex: 1 1 auto;[\s\S]*min-height: 0;[\s\S]*display: flex;[\s\S]*flex-direction: column;[\s\S]*overflow: hidden;/);
   });
 
-  it('renders full v2 tab hover context for table tabs', () => {
+  it('renders en-US v2 tab hover context for table tabs while keeping raw values raw', () => {
+    setCurrentLanguage('en-US');
     const tab: TabData = {
       id: 'conn-1-main-users',
       title: 'users',
       type: 'table',
       connectionId: 'conn-1',
-      dbName: 'main',
-      tableName: 'users',
+      tableName: '客户表',
     };
 
     const markup = renderToStaticMarkup(
       <TabHoverInfo
         tab={tab}
         displayTitle="[开发240] 表概览"
-        connectionLabel="开发240"
-        hostSummary="192.168.1.240"
       />,
     );
 
     expect(markup).toContain('data-tab-hover-info="true"');
     expect(markup).toContain('[开发240] 表概览');
-    expect(markup).toContain('类型');
-    expect(markup).toContain('表数据');
-    expect(markup).toContain('连接');
-    expect(markup).toContain('开发240');
+    expect(markup).toContain('Type');
+    expect(markup).toContain('Table data');
+    expect(markup).toContain('Connection');
+    expect(markup).toContain('Unbound connection');
     expect(markup).toContain('Host');
-    expect(markup).toContain('192.168.1.240');
-    expect(markup).toContain('数据库');
-    expect(markup).toContain('main');
-    expect(markup).toContain('对象');
-    expect(markup).toContain('users');
+    expect(markup).toContain('Not configured');
+    expect(markup).toContain('Database');
+    expect(markup).toContain('Not specified');
+    expect(markup).toContain('Object');
+    expect(markup).toContain('客户表');
+    expect(markup).not.toContain('类型');
+    expect(markup).not.toContain('表数据');
+    expect(markup).not.toContain('未绑定连接');
+    expect(markup).not.toContain('未配置');
+    expect(markup).not.toContain('数据库');
+    expect(markup).not.toContain('未指定');
+    expect(markup).not.toContain('对象');
   });
 
   it('renders db identity for redis tabs without a database name', () => {
+    setCurrentLanguage('en-US');
     const tab: TabData = {
       id: 'redis-keys-conn-1-db2',
       title: 'db2',
@@ -81,10 +97,38 @@ describe('TabManager hover info', () => {
       />,
     );
 
-    expect(markup).toContain('REDIS');
+    expect(markup).toContain('<span>Redis</span><strong>[缓存 | 10.0.0.8] db2</strong>');
+    expect(markup).not.toContain('<span>REDIS</span>');
     expect(markup).toContain('Redis Key');
-    expect(markup).toContain('未指定');
+    expect(markup).toContain('Not specified');
     expect(markup).toContain('db2');
+  });
+
+  it('keeps compact v2 tab kind badges catalog-backed instead of raw source abbreviations', () => {
+    const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
+    const getTabKindLabelSource = source.slice(
+      source.indexOf('const getTabKindLabel = (tab: TabData): string => {'),
+      source.indexOf('export const TAB_WORKBENCH_CLASS_NAME'),
+    );
+
+    [
+      'query',
+      'table',
+      'design',
+      'table_overview',
+      'redis',
+      'jvm',
+      'trigger',
+      'materialized_view',
+      'view',
+      'event',
+      'routine',
+      'sql_analysis',
+      'fallback',
+    ].forEach((name) => {
+      expect(getTabKindLabelSource).toContain(`t('tab_manager.kind_badge.${name}')`);
+    });
+    expect(getTabKindLabelSource).not.toMatch(/return '(TABLE|DESIGN|DB|REDIS|JVM|TRG|MV|VIEW|EVT|FUNC|TAB)'/);
   });
 
   it('keeps v2 hover title focused on the tab object instead of appending secondary display fields', () => {
@@ -155,6 +199,62 @@ describe('TabManager hover info', () => {
     expect(source).not.toContain('resolveConnectionAccentColor');
   });
 
+  it('keeps v2 TabManager shell copy in the i18n catalog instead of hardcoded Chinese', () => {
+    const source = stripSourceComments(readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8'));
+
+    [
+      '类型',
+      '表数据',
+      '连接',
+      '未绑定连接',
+      '未配置',
+      '数据库',
+      '未指定',
+      '对象',
+      'SQL 查询',
+      '表设计',
+      '表概览',
+      'Redis 命令',
+      'Redis 监控',
+      'JVM 概览',
+      'JVM 资源',
+      'JVM 审计',
+      'JVM 诊断',
+      'JVM 监控',
+      '触发器',
+      '物化视图',
+      '视图',
+      '事件',
+      '函数 / 过程',
+      '标签页',
+      '关闭其他页',
+      '关闭左侧',
+      '关闭右侧',
+      '关闭所有',
+      '关闭 ',
+      'GoNavi 起始工作台',
+      '快捷工作流',
+      '连接、查询和分析从同一个工作台开始。',
+      '选择数据源、打开查询编辑器，或把上下文交给 AI 面板继续处理。',
+      '打开 AI',
+      '配置数据源',
+      'URI、SSH、代理和驱动集中设置',
+      '启动 SQL 工作区',
+      '按当前上下文打开查询编辑器',
+      '进入 AI 辅助',
+      '解释 SQL、生成查询、梳理结果',
+    ].forEach((text) => {
+      expect(source).not.toContain(text);
+    });
+  });
+
+  it('subscribes TabManager and memoized localized tab items to languagePreference', () => {
+    const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
+
+    expect(source).toMatch(/const languagePreference = useStore\(\(?state\)? => state\.languagePreference\);/);
+    expect(source).toMatch(/const items = useMemo\([\s\S]*\), \[[^\]]*languagePreference[^\]]*\]\);/);
+  });
+
   it('renders tab labels from appearance tab display settings', () => {
     const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
 
@@ -208,6 +308,11 @@ describe('TabManager hover info', () => {
     const source = readFileSync(new URL('./TabManager.tsx', import.meta.url), 'utf8');
 
     expect(source).toContain('ReadSQLFile(filePath)');
+    expect(source).toContain('isSQLFileMissingReadResult(res)');
+    expect(source).toContain('isSQLFileMissingErrorMessage(errorMessage)');
+    expect(source).toContain("title: '关闭已丢失的 SQL 文件标签？'");
+    expect(source).toContain('关闭后将丢弃标签内的本地草稿');
+    expect(source).toContain('confirmDirtyTabsOrClose();');
     expect(source).toContain("getSQLFileTabDraft(tab.id, String(tab.query ?? ''))");
     expect(source).toContain('hasSQLFileTabUnsavedChanges({ ...tab, query: draft }, normalizeSQLFileReadContent(res.data))');
     expect(source).toContain("title: '保存 SQL 文件修改？'");

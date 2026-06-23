@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 export interface CustomConnectionDsnState {
   dsnInput: unknown;
   hasStoredSecret?: boolean;
@@ -17,9 +19,9 @@ export const getCustomConnectionDsnValidationMessage = ({
     return null;
   }
   if (hasStoredSecret && clearStoredSecret) {
-    return '请输入新的连接字符串，或取消清除已保存 DSN';
+    return t("connection.modal.validation.custom_dsn_required_when_clearing_saved");
   }
-  return '请输入连接字符串';
+  return t("connection.modal.validation.custom_dsn_required");
 };
 
 export const shouldAllowBlankCustomDsn = (state: CustomConnectionDsnState): boolean => (

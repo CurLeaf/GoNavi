@@ -140,6 +140,26 @@ func quoteQualifiedIdentByType(dbType string, ident string) string {
 	return strings.Join(quotedParts, ".")
 }
 
+func qualifySchemaTableName(schema string, table string) string {
+	rawSchema := strings.TrimSpace(schema)
+	rawTable := strings.TrimSpace(table)
+	if rawTable == "" || rawSchema == "" || strings.Contains(rawTable, ".") {
+		return rawTable
+	}
+	return rawSchema + "." + rawTable
+}
+
+func lastSyncTableIdentifier(tableName string) string {
+	parts := strings.Split(strings.TrimSpace(tableName), ".")
+	for i := len(parts) - 1; i >= 0; i-- {
+		part := strings.TrimSpace(parts[i])
+		if part != "" {
+			return part
+		}
+	}
+	return strings.TrimSpace(tableName)
+}
+
 func normalizeSchemaAndTable(dbType string, dbName string, tableName string) (string, string) {
 	rawTable := strings.TrimSpace(tableName)
 	rawDB := strings.TrimSpace(dbName)
@@ -148,6 +168,10 @@ func normalizeSchemaAndTable(dbType string, dbName string, tableName string) (st
 	}
 
 	normalizedType := normalizeMigrationDBType(dbType)
+	switch normalizedType {
+	case "sqlserver", "duckdb":
+		return rawDB, rawTable
+	}
 	if normalizedType == "kingbase" {
 		schema, table := db.SplitKingbaseQualifiedName(rawTable)
 		if schema != "" && table != "" {
@@ -176,13 +200,85 @@ func normalizeSchemaAndTable(dbType string, dbName string, tableName string) (st
 	}
 }
 
+func normalizeSchemaAndTableWithDefaultSchema(dbType string, dbName string, defaultSchema string, tableName string) (string, string) {
+	rawDefaultSchema := strings.TrimSpace(defaultSchema)
+	if rawDefaultSchema == "" {
+		return normalizeSchemaAndTable(dbType, dbName, tableName)
+	}
+
+	rawTable := strings.TrimSpace(tableName)
+	if rawTable == "" {
+		switch normalizeMigrationDBType(dbType) {
+		case "sqlserver", "duckdb":
+			return strings.TrimSpace(dbName), rawTable
+		default:
+			return rawDefaultSchema, rawTable
+		}
+	}
+
+	switch normalizeMigrationDBType(dbType) {
+	case "sqlserver", "duckdb":
+		return strings.TrimSpace(dbName), qualifySchemaTableName(rawDefaultSchema, rawTable)
+	}
+
+	if parts := strings.SplitN(rawTable, ".", 2); len(parts) == 2 {
+		schema := strings.TrimSpace(parts[0])
+		table := strings.TrimSpace(parts[1])
+		if schema != "" && table != "" {
+			return schema, table
+		}
+	}
+
+	switch normalizeMigrationDBType(dbType) {
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "iris":
+		return rawDefaultSchema, rawTable
+	default:
+		return normalizeSchemaAndTable(dbType, dbName, tableName)
+	}
+}
+
+func normalizeSyncSourceSchemaAndTable(config SyncConfig, tableName string) (string, string) {
+	return normalizeSchemaAndTableWithDefaultSchema(config.SourceConfig.Type, selectedSyncSourceDatabase(config), "", tableName)
+}
+
+func normalizeSyncTargetSchemaAndTable(config SyncConfig, tableName string) (string, string) {
+	targetSchema := strings.TrimSpace(config.TargetSchema)
+	if targetSchema == "" || strings.TrimSpace(config.SourceQuery) != "" {
+		return normalizeSchemaAndTableWithDefaultSchema(config.TargetConfig.Type, selectedSyncTargetDatabase(config), targetSchema, tableName)
+	}
+	return normalizeSchemaAndTableWithDefaultSchema(
+		config.TargetConfig.Type,
+		selectedSyncTargetDatabase(config),
+		targetSchema,
+		lastSyncTableIdentifier(tableName),
+	)
+}
+
+func shouldUseQualifiedSyncApplyTable(config connection.ConnectionConfig) bool {
+	switch resolveMigrationDBType(config) {
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb", "sqlserver", "oracle", "dameng", "iris", "duckdb":
+		return true
+	case "oceanbase":
+		return isOceanBaseOracleSyncConnection(config)
+	default:
+		return false
+	}
+}
+
 func qualifiedNameForQuery(dbType string, schema string, table string, original string) string {
 	raw := strings.TrimSpace(original)
+	rawTable := strings.TrimSpace(table)
 	if raw == "" {
 		return raw
 	}
 	if strings.Contains(raw, ".") {
 		return raw
+	}
+	if rawTable == "" {
+		return raw
+	}
+	if strings.Contains(rawTable, ".") {
+		return rawTable
 	}
 
 	switch normalizeMigrationDBType(dbType) {
@@ -191,26 +287,24 @@ func qualifiedNameForQuery(dbType string, schema string, table string, original 
 		if s == "" {
 			s = "public"
 		}
-		if table == "" {
-			return raw
-		}
-		return s + "." + table
+		return s + "." + rawTable
 	case "duckdb":
+		return "main." + rawTable
+	case "sqlserver":
+		return "dbo." + rawTable
+	case "oracle", "dameng", "iris":
 		s := strings.TrimSpace(schema)
 		if s == "" {
-			s = "main"
+			return rawTable
 		}
-		if table == "" {
-			return raw
-		}
-		return s + "." + table
+		return s + "." + rawTable
 	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx", "clickhouse", "tdengine":
 		s := strings.TrimSpace(schema)
-		if s == "" || table == "" {
-			return table
+		if s == "" {
+			return rawTable
 		}
-		return s + "." + table
+		return s + "." + rawTable
 	default:
-		return table
+		return rawTable
 	}
 }

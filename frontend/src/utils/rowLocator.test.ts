@@ -141,9 +141,20 @@ describe('resolveRowLocatorValues', () => {
       indexes: [uniqueIndex('uk_email', 'EMAIL')],
     });
 
-    expect(resolveRowLocatorValues(locator, { EMAIL: null, NAME: 'A' })).toEqual({
+    expect(resolveRowLocatorValues(locator, { EMAIL: null, NAME: 'A' }, {
+      emptyLocatorValue: (column) => `Locator column ${column} is empty, so changes cannot be submitted safely.`,
+    })).toEqual({
       ok: false,
-      error: '定位列 EMAIL 的值为空，无法安全提交修改。',
+      error: 'Locator column EMAIL is empty, so changes cannot be submitted safely.',
+    });
+  });
+
+  it('uses injected messages when no safe locator is available', () => {
+    expect(resolveRowLocatorValues(undefined, { EMAIL: 'a@example.com' }, {
+      noSafeLocator: () => 'No safe row locator is available for this result set.',
+    })).toEqual({
+      ok: false,
+      error: 'No safe row locator is available for this result set.',
     });
   });
 

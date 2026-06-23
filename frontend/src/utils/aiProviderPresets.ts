@@ -17,7 +17,7 @@ export const QWEN_CODING_PLAN_MODELS = [
   'glm-4.7',
 ];
 
-const CUSTOM_LIKE_PRESET_KEYS = new Set(['custom', 'ollama']);
+const CUSTOM_LIKE_PRESET_KEYS = new Set(['custom', 'ollama', 'codebuddy', 'cursor']);
 
 export interface ResolvePresetModelSelectionInput {
   presetKey: string;
@@ -126,6 +126,17 @@ export const resolveProviderPresetKey = (
   }
 
   const fingerprint = getProviderFingerprint(provider.baseUrl);
+  const formatOnlyPreset = presets.find((preset) =>
+    preset.backendType === provider.type
+    && Boolean(preset.fixedApiFormat)
+    && preset.fixedApiFormat === provider.apiFormat
+    && getProviderFingerprint(preset.defaultBaseUrl) === ''
+    && fingerprint === '',
+  );
+  if (formatOnlyPreset) {
+    return formatOnlyPreset.key;
+  }
+
   const exactPreset = presets.find((preset) =>
     preset.backendType === provider.type
     && fingerprint !== ''
@@ -172,6 +183,12 @@ export const resolvePresetModelSelection = ({
 }: ResolvePresetModelSelectionInput): ResolvePresetModelSelectionResult => {
   const isCustomLike = CUSTOM_LIKE_PRESET_KEYS.has(presetKey);
   const resolvedModels = isCustomLike ? (customModels || []) : presetModels;
+  if (presetKey === 'cursor') {
+    return {
+      models: resolvedModels,
+      model: valuesModel || '',
+    };
+  }
   const fallbackModel = resolvedModels.length > 0 ? resolvedModels[0] : '';
   return {
     models: resolvedModels,

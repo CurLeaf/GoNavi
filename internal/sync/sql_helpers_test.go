@@ -52,6 +52,82 @@ func TestNormalizeSchemaAndTable_KingbaseNormalizesEscapedQualifiedName(t *testi
 	}
 }
 
+func TestNormalizeSyncTargetSchemaAndTable_UsesExplicitSchemaForPGLikeTargets(t *testing.T) {
+	t.Parallel()
+
+	config := SyncConfig{
+		TargetConfig:   connection.ConnectionConfig{Type: "opengauss", Database: "analytics"},
+		TargetDatabase: "analytics",
+		TargetSchema:   "reporting",
+	}
+
+	schema, table := normalizeSyncTargetSchemaAndTable(config, "orders")
+	if schema != "reporting" || table != "orders" {
+		t.Fatalf("unexpected opengauss target schema/table: %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeSyncTargetSchemaAndTable_UsesTargetSchemaWhenSourceTableIsQualified(t *testing.T) {
+	t.Parallel()
+
+	config := SyncConfig{
+		TargetConfig:   connection.ConnectionConfig{Type: "opengauss", Database: "analytics"},
+		TargetDatabase: "analytics",
+		TargetSchema:   "reporting",
+	}
+
+	schema, table := normalizeSyncTargetSchemaAndTable(config, "archive.orders")
+	if schema != "reporting" || table != "orders" {
+		t.Fatalf("unexpected qualified source table override result: %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeSyncTargetSchemaAndTable_KeepsQualifiedTargetTableInSourceQueryMode(t *testing.T) {
+	t.Parallel()
+
+	config := SyncConfig{
+		TargetConfig:   connection.ConnectionConfig{Type: "opengauss", Database: "analytics"},
+		TargetDatabase: "analytics",
+		TargetSchema:   "reporting",
+		SourceQuery:    "select * from archive.orders",
+	}
+
+	schema, table := normalizeSyncTargetSchemaAndTable(config, "archive.orders")
+	if schema != "archive" || table != "orders" {
+		t.Fatalf("unexpected qualified target schema/table: %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeSyncTargetSchemaAndTable_UsesQualifiedTableForSQLServerExplicitSchema(t *testing.T) {
+	t.Parallel()
+
+	config := SyncConfig{
+		TargetConfig:   connection.ConnectionConfig{Type: "sqlserver", Database: "warehouse"},
+		TargetDatabase: "warehouse",
+		TargetSchema:   "sales",
+	}
+
+	schema, table := normalizeSyncTargetSchemaAndTable(config, "archive.orders")
+	if schema != "warehouse" || table != "sales.orders" {
+		t.Fatalf("unexpected sqlserver target schema/table: %q.%q", schema, table)
+	}
+}
+
+func TestNormalizeSyncTargetSchemaAndTable_UsesQualifiedTableForDuckDBExplicitSchema(t *testing.T) {
+	t.Parallel()
+
+	config := SyncConfig{
+		TargetConfig:   connection.ConnectionConfig{Type: "duckdb", Database: "analytics"},
+		TargetDatabase: "analytics",
+		TargetSchema:   "reporting",
+	}
+
+	schema, table := normalizeSyncTargetSchemaAndTable(config, "orders")
+	if schema != "analytics" || table != "reporting.orders" {
+		t.Fatalf("unexpected duckdb target schema/table: %q.%q", schema, table)
+	}
+}
+
 func TestNormalizeSyncConnectionDatabasesKeepsOracleServiceName(t *testing.T) {
 	t.Parallel()
 
@@ -102,6 +178,57 @@ func TestNormalizeMigrationDBType_KingbaseAliases(t *testing.T) {
 		if got := normalizeMigrationDBType(in); got != "kingbase" {
 			t.Fatalf("normalizeMigrationDBType(%q)=%q, want kingbase", in, got)
 		}
+	}
+}
+
+func TestNormalizeMigrationDBType_SQLServerAndIRISAliases(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeMigrationDBType("mssql"); got != "sqlserver" {
+		t.Fatalf("normalizeMigrationDBType(%q)=%q, want sqlserver", "mssql", got)
+	}
+	if got := resolveMigrationDBType(connection.ConnectionConfig{Type: "custom", Driver: "inter-systems-iris"}); got != "iris" {
+		t.Fatalf("resolveMigrationDBType(custom iris)=%q, want iris", got)
+	}
+}
+
+func TestQualifiedNameForQuery_UsesSchemaAwareTargets(t *testing.T) {
+	t.Parallel()
+
+	if got := qualifiedNameForQuery("sqlserver", "warehouse", "orders", "orders"); got != "dbo.orders" {
+		t.Fatalf("unexpected sqlserver qualified name: %s", got)
+	}
+	if got := qualifiedNameForQuery("sqlserver", "warehouse", "sales.orders", "orders"); got != "sales.orders" {
+		t.Fatalf("unexpected sqlserver explicit qualified name: %s", got)
+	}
+	if got := qualifiedNameForQuery("oracle", "APP_SCHEMA", "orders", "orders"); got != "APP_SCHEMA.orders" {
+		t.Fatalf("unexpected oracle qualified name: %s", got)
+	}
+	if got := qualifiedNameForQuery("dameng", "APP_SCHEMA", "orders", "orders"); got != "APP_SCHEMA.orders" {
+		t.Fatalf("unexpected dameng qualified name: %s", got)
+	}
+	if got := qualifiedNameForQuery("iris", "APP_SCHEMA", "orders", "orders"); got != "APP_SCHEMA.orders" {
+		t.Fatalf("unexpected iris qualified name: %s", got)
+	}
+	if got := qualifiedNameForQuery("duckdb", "analytics", "reporting.orders", "orders"); got != "reporting.orders" {
+		t.Fatalf("unexpected duckdb qualified name: %s", got)
+	}
+}
+
+func TestShouldUseQualifiedSyncApplyTable(t *testing.T) {
+	t.Parallel()
+
+	if !shouldUseQualifiedSyncApplyTable(connection.ConnectionConfig{Type: "oracle"}) {
+		t.Fatal("oracle should apply against qualified target table")
+	}
+	if !shouldUseQualifiedSyncApplyTable(connection.ConnectionConfig{Type: "duckdb"}) {
+		t.Fatal("duckdb should apply against qualified target table")
+	}
+	if !shouldUseQualifiedSyncApplyTable(connection.ConnectionConfig{Type: "oceanbase", OceanBaseProtocol: "oracle"}) {
+		t.Fatal("oceanbase oracle should apply against qualified target table")
+	}
+	if shouldUseQualifiedSyncApplyTable(connection.ConnectionConfig{Type: "mysql"}) {
+		t.Fatal("mysql should keep raw target table for apply")
 	}
 }
 

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Empty, Space, Spin, Tag, Typography } from "antd";
 import { DashboardOutlined, PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
 
+import { useI18n } from "../i18n/provider";
 import { useStore } from "../store";
 import type { JVMMonitoringSessionState, TabData } from "../types";
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
@@ -63,6 +64,7 @@ const resolveBackendApp = () =>
   typeof window === "undefined" ? undefined : (window as any).go?.app?.App;
 
 const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) => {
+  const { t, language } = useI18n();
   const theme = useStore((state) => state.theme);
   const connection = useStore((state) =>
     state.connections.find((item) => item.id === tab.connectionId),
@@ -120,7 +122,7 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
       setLoading(true);
 
       if (typeof backendApp?.JVMGetMonitoringHistory !== "function") {
-        setError("JVMGetMonitoringHistory 后端方法不可用");
+        setError(t("jvm_monitoring_dashboard.error.history_unavailable"));
         setLoading(false);
         return;
       }
@@ -136,7 +138,9 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
         }
 
         if (result?.success === false) {
-          const message = String(result?.message || "读取监控历史失败");
+          const message = String(
+            result?.message || t("jvm_monitoring_dashboard.error.history_load_failed"),
+          );
           if (isMonitoringSessionMissing(message)) {
             setSession(createEmptySession(tab.connectionId, providerMode));
             setError("");
@@ -160,7 +164,10 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
         }
       } catch (fetchError: any) {
         if (!cancelled) {
-          setError(fetchError?.message || "读取监控历史失败");
+          setError(
+            fetchError?.message ||
+              t("jvm_monitoring_dashboard.error.history_load_failed"),
+          );
           setLoading(false);
         }
       }
@@ -174,20 +181,25 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
         clearTimeout(timer);
       }
     };
-  }, [connection, providerMode, rpcConnectionConfig, tab.connectionId, pollSeed]);
+  }, [connection, providerMode, rpcConnectionConfig, tab.connectionId, pollSeed, t]);
 
   if (!connection) {
-    return <Empty description="连接不存在或已被删除" style={{ marginTop: 80 }} />;
+    return (
+      <Empty
+        description={t("jvm_monitoring_dashboard.connection_missing.message")}
+        style={{ marginTop: 80 }}
+      />
+    );
   }
 
   const backendApp = resolveBackendApp();
-  const availabilityText = buildMonitoringAvailabilityText(session);
+  const availabilityText = buildMonitoringAvailabilityText(session, language);
   const modeMeta = resolveJVMModeMeta(providerMode);
   const emptyState = !session.running && (session.points || []).length === 0;
 
   const handleStart = async () => {
     if (!rpcConnectionConfig || typeof backendApp?.JVMStartMonitoring !== "function") {
-      setError("JVMStartMonitoring 后端方法不可用");
+      setError(t("jvm_monitoring_dashboard.error.start_unavailable"));
       return;
     }
 
@@ -196,14 +208,16 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
     try {
       const result = await backendApp.JVMStartMonitoring(rpcConnectionConfig);
       if (result?.success === false) {
-        throw new Error(String(result?.message || "开始监控失败"));
+        throw new Error(
+          String(result?.message || t("jvm_monitoring_dashboard.error.start_failed")),
+        );
       }
       setSession(
         normalizeMonitoringSession(result?.data, tab.connectionId, providerMode),
       );
       setPollSeed((current) => current + 1);
     } catch (startError: any) {
-      setError(startError?.message || "开始监控失败");
+      setError(startError?.message || t("jvm_monitoring_dashboard.error.start_failed"));
     } finally {
       setActionLoading(false);
     }
@@ -211,7 +225,7 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
 
   const handleStop = async () => {
     if (!rpcConnectionConfig || typeof backendApp?.JVMStopMonitoring !== "function") {
-      setError("JVMStopMonitoring 后端方法不可用");
+      setError(t("jvm_monitoring_dashboard.error.stop_unavailable"));
       return;
     }
 
@@ -223,12 +237,14 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
         providerMode,
       );
       if (result?.success === false) {
-        throw new Error(String(result?.message || "停止监控失败"));
+        throw new Error(
+          String(result?.message || t("jvm_monitoring_dashboard.error.stop_failed")),
+        );
       }
       setSession((current) => ({ ...current, running: false }));
       setPollSeed((current) => current + 1);
     } catch (stopError: any) {
-      setError(stopError?.message || "停止监控失败");
+      setError(stopError?.message || t("jvm_monitoring_dashboard.error.stop_failed"));
     } finally {
       setActionLoading(false);
     }
@@ -260,7 +276,7 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
             <div>
               <Title level={3} style={{ margin: 0 }}>
                 <DashboardOutlined style={{ color: "#1677ff", marginRight: 8 }} />
-                JVM 持续监控
+                {t("jvm_monitoring_dashboard.title")}
               </Title>
               <Paragraph type="secondary" style={{ marginBottom: 0 }}>
                 <Text strong>{connection.name}</Text>
@@ -275,15 +291,17 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
                 {modeMeta.label}
               </Tag>
               {session.running ? (
-                <Tag color="green">采样中</Tag>
+                <Tag color="green">
+                  {t("jvm_monitoring_dashboard.status.sampling")}
+                </Tag>
               ) : (
-                <Tag>未运行</Tag>
+                <Tag>{t("jvm_monitoring_dashboard.status.stopped")}</Tag>
               )}
               <Button
                 icon={<ReloadOutlined />}
                 onClick={() => setPollSeed((current) => current + 1)}
               >
-                刷新
+                {t("jvm_monitoring_dashboard.action.refresh")}
               </Button>
               {session.running ? (
                 <Button
@@ -293,7 +311,7 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
                   loading={actionLoading}
                   onClick={() => void handleStop()}
                 >
-                  停止监控
+                  {t("jvm_monitoring_dashboard.action.stop")}
                 </Button>
               ) : (
                 <Button
@@ -302,7 +320,7 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
                   loading={actionLoading}
                   onClick={() => void handleStart()}
                 >
-                  开始监控
+                  {t("jvm_monitoring_dashboard.action.start")}
                 </Button>
               )}
             </Space>
@@ -312,7 +330,7 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
             <Alert
               type="warning"
               showIcon
-              message="监控能力存在降级"
+              message={t("jvm_monitoring_dashboard.degraded.message")}
               description={availabilityText}
             />
           ) : null}
@@ -337,11 +355,11 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
         >
           <Card variant="borderless" style={{ borderRadius: 12 }}>
             <Empty
-              description="当前尚未开始持续监控"
+              description={t("jvm_monitoring_dashboard.empty.title")}
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             >
               <Paragraph type="secondary" style={{ maxWidth: 520, margin: "0 auto 16px" }}>
-                点击“开始监控”后，GoNavi 会在当前会话内持续保留该连接的采样结果；切换页签不会停止采样。
+                {t("jvm_monitoring_dashboard.empty.description")}
               </Paragraph>
               <Button
                 type="primary"
@@ -349,7 +367,7 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
                 loading={actionLoading}
                 onClick={() => void handleStart()}
               >
-                开始监控
+                {t("jvm_monitoring_dashboard.action.start")}
               </Button>
             </Empty>
           </Card>
@@ -357,6 +375,7 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
             points={session.points || []}
             session={session}
             darkMode={darkMode}
+            language={language}
           />
         </div>
       ) : (
@@ -372,16 +391,19 @@ const JVMMonitoringDashboard: React.FC<JVMMonitoringDashboardProps> = ({ tab }) 
             latestPoint={latestPoint}
             session={session}
             darkMode={darkMode}
+            language={language}
           />
           <JVMMonitoringCharts
             points={session.points || []}
             session={session}
             darkMode={darkMode}
+            language={language}
           />
           <JVMMonitoringDetailPanel
             session={session}
             latestPoint={latestPoint}
             darkMode={darkMode}
+            language={language}
           />
         </div>
       )}

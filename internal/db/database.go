@@ -76,6 +76,48 @@ type StatementQueryExecer interface {
 	QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error)
 }
 
+// QueryStreamConsumer receives query metadata and rows incrementally.
+// Implementations can stream rows directly to files to avoid buffering entire result sets in memory.
+type QueryStreamConsumer interface {
+	SetColumns(columns []string) error
+	ConsumeRow(row map[string]interface{}) error
+}
+
+// QueryStreamValueConsumer is an optional fast path for stream consumers that
+// can consume normalized row values in column order without requiring a
+// map[string]interface{} allocation per row.
+type QueryStreamValueConsumer interface {
+	SetColumns(columns []string) error
+	ConsumeRowValues(values []interface{}) error
+}
+
+// StreamQueryExecer is an optional interface for drivers or pinned sessions that can
+// stream query rows incrementally instead of materializing []map rows in memory.
+type StreamQueryExecer interface {
+	StreamQuery(query string, consumer QueryStreamConsumer) error
+	StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error
+}
+
+// ExplainExecer is an optional interface for drivers that can run EXPLAIN and
+// return the dialect-native output (JSON text, table rows as JSON, or XML).
+//
+// Drivers that implement this interface own the full EXPLAIN lifecycle:
+//   - MySQL: prefer EXPLAIN FORMAT=JSON, fallback to vanilla EXPLAIN on 5.7
+//   - PostgreSQL: EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+//   - Oracle: EXPLAIN PLAN SET STATEMENT_ID ... + DBMS_XPLAN.DISPLAY + cleanup
+//   - SQLServer: SET SHOWPLAN_XML ON + sql + SET OFF (defer cleanup mandatory)
+//   - SQLite: EXPLAIN QUERY PLAN
+//   - ClickHouse: EXPLAIN JSON
+//
+// The driver decides which format to use and returns the raw payload plus the
+// detected format tag; the app layer parses via the corresponding parser.
+//
+// Drivers that do NOT implement this interface fall back to the generic path
+// in app.DiagnoseQuery: wrap the SQL as "EXPLAIN <sql>" and run via QueryMulti.
+type ExplainExecer interface {
+	Explain(ctx context.Context, query string) (raw string, format connection.ExplainFormat, err error)
+}
+
 // StatementQueryMessageExecer can run queries on a pinned session and return
 // extra server messages/notices alongside rows.
 type StatementQueryMessageExecer interface {
@@ -135,11 +177,16 @@ type TransactionExecerProvider interface {
 }
 
 type sqlConnStatementExecer struct {
-	conn *sql.Conn
+	conn        *sql.Conn
+	scanDialect string
 }
 
 func NewSQLConnStatementExecer(conn *sql.Conn) StatementExecer {
-	return &sqlConnStatementExecer{conn: conn}
+	return NewSQLConnStatementExecerWithDialect(conn, "")
+}
+
+func NewSQLConnStatementExecerWithDialect(conn *sql.Conn, scanDialect string) StatementExecer {
+	return &sqlConnStatementExecer{conn: conn, scanDialect: scanDialect}
 }
 
 func (e *sqlConnStatementExecer) ExecContext(ctx context.Context, query string) (int64, error) {
@@ -166,11 +213,27 @@ func (e *sqlConnStatementExecer) QueryContext(ctx context.Context, query string)
 		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsForDialect(rows, e.scanDialect)
 }
 
 func (e *sqlConnStatementExecer) Query(query string) ([]map[string]interface{}, []string, error) {
 	return e.QueryContext(context.Background(), query)
+}
+
+func (e *sqlConnStatementExecer) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	if e == nil || e.conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+	rows, err := e.conn.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	return streamRowsForDialect(rows, e.scanDialect, consumer)
+}
+
+func (e *sqlConnStatementExecer) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return e.StreamQueryContext(context.Background(), query, consumer)
 }
 
 func (e *sqlConnStatementExecer) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
@@ -182,7 +245,7 @@ func (e *sqlConnStatementExecer) QueryMultiContext(ctx context.Context, query st
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanMultiRowsForDialect(rows, e.scanDialect)
 }
 
 func (e *sqlConnStatementExecer) QueryMulti(query string) ([]connection.ResultSetData, error) {
@@ -206,13 +269,19 @@ type sqlConnTransactionExecer struct {
 	done        bool
 	commitSQL   string
 	rollbackSQL string
+	scanDialect string
 }
 
 func NewSQLConnTransactionExecer(conn *sql.Conn, commitSQL string, rollbackSQL string) TransactionExecer {
+	return NewSQLConnTransactionExecerWithDialect(conn, commitSQL, rollbackSQL, "")
+}
+
+func NewSQLConnTransactionExecerWithDialect(conn *sql.Conn, commitSQL string, rollbackSQL string, scanDialect string) TransactionExecer {
 	return &sqlConnTransactionExecer{
 		conn:        conn,
 		commitSQL:   strings.TrimSpace(commitSQL),
 		rollbackSQL: strings.TrimSpace(rollbackSQL),
+		scanDialect: scanDialect,
 	}
 }
 
@@ -257,11 +326,28 @@ func (e *sqlConnTransactionExecer) QueryContext(ctx context.Context, query strin
 		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsForDialect(rows, e.scanDialect)
 }
 
 func (e *sqlConnTransactionExecer) Query(query string) ([]map[string]interface{}, []string, error) {
 	return e.QueryContext(context.Background(), query)
+}
+
+func (e *sqlConnTransactionExecer) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	conn, err := e.activeConn()
+	if err != nil {
+		return err
+	}
+	rows, err := conn.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	return streamRowsForDialect(rows, e.scanDialect, consumer)
+}
+
+func (e *sqlConnTransactionExecer) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return e.StreamQueryContext(context.Background(), query, consumer)
 }
 
 func (e *sqlConnTransactionExecer) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
@@ -274,7 +360,7 @@ func (e *sqlConnTransactionExecer) QueryMultiContext(ctx context.Context, query 
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanMultiRowsForDialect(rows, e.scanDialect)
 }
 
 func (e *sqlConnTransactionExecer) QueryMulti(query string) ([]connection.ResultSetData, error) {
@@ -388,6 +474,23 @@ func (e *sqlTxStatementExecer) QueryContext(ctx context.Context, query string) (
 
 func (e *sqlTxStatementExecer) Query(query string) ([]map[string]interface{}, []string, error) {
 	return e.QueryContext(context.Background(), query)
+}
+
+func (e *sqlTxStatementExecer) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	tx, err := e.activeTx()
+	if err != nil {
+		return err
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	return streamRows(rows, consumer)
+}
+
+func (e *sqlTxStatementExecer) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return e.StreamQueryContext(context.Background(), query, consumer)
 }
 
 func (e *sqlTxStatementExecer) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {

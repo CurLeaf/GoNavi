@@ -319,6 +319,125 @@ func TestAISaveProviderPersistsSecretlessConfigAndReturnsSecretlessView(t *testi
 	}
 }
 
+func TestAISettingsSecretFailuresUseEnglishWrappers(t *testing.T) {
+	configPathAsDirectory := filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(configPathAsDirectory, []byte("blocking file"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	testCases := []struct {
+		name              string
+		run               func(t *testing.T) error
+		unexpectedWrapper string
+		expectedPrefix    string
+		expectedRawDetail string
+	}{
+		{
+			name: "save provider secret",
+			run: func(t *testing.T) error {
+				t.Helper()
+				service := NewServiceWithSecretStore(failOnUseSecretStore{})
+				service.configDir = configPathAsDirectory
+				service.AISetLanguage("en-US")
+				return service.AISaveProvider(ai.ProviderConfig{
+					ID:      "openai-main",
+					Type:    "openai",
+					Name:    "OpenAI",
+					APIKey:  "sk-test",
+					BaseURL: "https://api.openai.com/v1",
+				})
+			},
+			unexpectedWrapper: "保存 Provider secret 失败",
+			expectedPrefix:    "Failed to save Provider secret: ",
+			expectedRawDetail: configPathAsDirectory,
+		},
+		{
+			name: "read editable provider secret",
+			run: func(t *testing.T) error {
+				t.Helper()
+				service := NewServiceWithSecretStore(failOnUseSecretStore{})
+				service.configDir = t.TempDir()
+				service.AISetLanguage("en-US")
+				service.providers = []ai.ProviderConfig{
+					{
+						ID:        "openai-main",
+						Type:      "openai",
+						Name:      "OpenAI",
+						HasSecret: true,
+					},
+				}
+				_, err := service.AIGetEditableProvider("openai-main")
+				return err
+			},
+			unexpectedWrapper: "读取 Provider secret 失败",
+			expectedPrefix:    "Failed to read Provider secret: ",
+			expectedRawDetail: "file does not exist",
+		},
+		{
+			name: "delete provider secret",
+			run: func(t *testing.T) error {
+				t.Helper()
+				service := NewServiceWithSecretStore(failOnUseSecretStore{})
+				service.configDir = t.TempDir()
+				service.AISetLanguage("en-US")
+				service.providers = []ai.ProviderConfig{
+					{
+						ID:        "openai-main",
+						Type:      "openai",
+						Name:      "OpenAI",
+						HasSecret: true,
+						SecretRef: "oskeyring://gonavi/ai-provider/openai-main",
+					},
+				}
+				return service.AIDeleteProvider("openai-main")
+			},
+			unexpectedWrapper: "删除 Provider secret 失败",
+			expectedPrefix:    "Failed to delete Provider secret: ",
+			expectedRawDetail: "secret store should not be used",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := testCase.run(t)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			message := err.Error()
+			if strings.Contains(message, testCase.unexpectedWrapper) {
+				t.Fatalf("expected English wrapper, got %q", message)
+			}
+			if !strings.HasPrefix(message, testCase.expectedPrefix) {
+				t.Fatalf("expected prefix %q, got %q", testCase.expectedPrefix, message)
+			}
+			if !strings.Contains(message, testCase.expectedRawDetail) {
+				t.Fatalf("expected raw detail %q to be preserved, got %q", testCase.expectedRawDetail, message)
+			}
+		})
+	}
+}
+
+func TestProviderSecretHelperUnavailableStoreUsesEnglishWrapper(t *testing.T) {
+	localizer := newServiceLocalizerForLanguage("en-US")
+	_, err := resolveProviderConfigSecretsWithLocalizer(nil, ai.ProviderConfig{
+		ID:        "openai-main",
+		HasSecret: true,
+	}, localizer)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	message := err.Error()
+	if strings.Contains(message, "不可用") {
+		t.Fatalf("expected English wrapper, got %q", message)
+	}
+	if !strings.HasPrefix(message, "Daily secret store is unavailable: ") {
+		t.Fatalf("expected English daily secret wrapper, got %q", message)
+	}
+	if !strings.Contains(message, "daily secret store unavailable") {
+		t.Fatalf("expected raw detail to be preserved, got %q", message)
+	}
+}
+
 func TestAIGetEditableProviderReturnsResolvedSecretsForEdit(t *testing.T) {
 	service := NewServiceWithSecretStore(failOnUseSecretStore{})
 	service.configDir = t.TempDir()
@@ -354,6 +473,25 @@ func TestAIGetEditableProviderReturnsResolvedSecretsForEdit(t *testing.T) {
 	}
 	if editable.Headers["Authorization"] != "Bearer test" {
 		t.Fatalf("expected editable provider to restore sensitive header, got %#v", editable.Headers)
+	}
+}
+
+func TestAIGetEditableProviderNotFoundUsesCurrentLanguageWrapper(t *testing.T) {
+	service := NewServiceWithSecretStore(failOnUseSecretStore{})
+	service.configDir = t.TempDir()
+	service.AISetLanguage("zh-CN")
+
+	_, err := service.AIGetEditableProvider("missing-provider")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	message := err.Error()
+	if message != "未找到要编辑的 AI Provider: missing-provider" {
+		t.Fatalf("expected localized wrapper with raw provider id detail, got %q", message)
+	}
+	if strings.Contains(message, "provider not found") {
+		t.Fatalf("expected no raw English provider-not-found wrapper, got %q", message)
 	}
 }
 

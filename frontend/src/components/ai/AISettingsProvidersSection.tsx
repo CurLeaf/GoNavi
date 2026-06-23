@@ -106,6 +106,9 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
   onSaveProvider,
 }) => {
   const presetKeyFromForm = watchedPresetKey || (editingProvider as (AIProviderConfig & { presetKey?: string }) | null)?.presetKey || 'openai';
+  const supportsAdvancedEndpoint = presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama' || presetKeyFromForm === 'codebuddy' || presetKeyFromForm === 'cursor';
+  const codeBuddyUsesOptionalSecret = presetKeyFromForm === 'codebuddy';
+  const cursorUsesOptionalModel = presetKeyFromForm === 'cursor';
   const sectionLabelColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)';
   const currentFieldGroupStyle = fieldGroupStyle(cardBorder, cardBg);
   const currentFieldLabelStyle = fieldLabelStyle(sectionLabelColor);
@@ -132,6 +135,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
         {providers.map((provider) => {
           const matchedPreset = resolveProviderPreset(provider);
           const isActive = provider.id === activeProviderId;
+          const modelLabel = provider.model || (provider.apiFormat === 'codebuddy-cli' || provider.apiFormat === 'cursor-agent' ? '自动选择' : '未选择模型');
           return (
             <div
               key={provider.id}
@@ -170,7 +174,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
                 <div style={{ fontSize: 12, color: overlayTheme.mutedText, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span>{matchedPreset.label}</span>
                   <span style={{ opacity: 0.4 }}>·</span>
-                  <span style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12 }}>{provider.model || '未选择模型'}</span>
+                  <span style={{ fontFamily: 'var(--gn-font-mono)', fontSize: 12 }}>{modelLabel}</span>
                 </div>
               </div>
               <Space size={2}>
@@ -267,19 +271,21 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
           <Form.Item name="type" hidden><Input /></Form.Item>
         </div>
 
-        {(presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama') && (
+        {supportsAdvancedEndpoint && (
           <div style={{ ...currentFieldGroupStyle, marginTop: 16 }}>
             <div style={currentFieldLabelStyle}>
               <RobotOutlined style={{ fontSize: 14 }} /> 基本信息
             </div>
 
-            <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>供应商名称</span>} name="name" rules={[{ required: true, message: '请输入名称' }]} style={{ marginBottom: 16 }}>
-              <Input
-                placeholder="例如：我的自建 OpenAI / 专属大模型"
-                size="middle"
-                style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }}
-              />
-            </Form.Item>
+            {presetKeyFromForm === 'custom' && (
+              <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>供应商名称</span>} name="name" rules={[{ required: true, message: '请输入名称' }]} style={{ marginBottom: 16 }}>
+                <Input
+                  placeholder="例如：我的自建 OpenAI / 专属大模型"
+                  size="middle"
+                  style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }}
+                />
+              </Form.Item>
+            )}
 
             {presetKeyFromForm === 'custom' && (
               <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API 格式</span>} name="apiFormat" style={{ marginBottom: 16 }}>
@@ -290,7 +296,7 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
                   borderRadius: 8,
                   gap: 4,
                 }}>
-                  {[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }, { value: 'gemini', label: 'Gemini' }, { value: 'claude-cli', label: 'Claude CLI' }].map((format) => (
+                  {[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }, { value: 'gemini', label: 'Gemini' }, { value: 'cursor-agent', label: 'Cursor Agent' }, { value: 'claude-cli', label: 'Claude CLI' }].map((format) => (
                     <div
                       key={format.value}
                       onClick={() => form.setFieldsValue({ apiFormat: format.value })}
@@ -314,7 +320,16 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
             )}
 
             <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>可用模型列表（可选配置）</span>} name="models" style={{ marginBottom: 0 }}>
-              <Select mode="tags" size="middle" placeholder="配置指定的模型ID，留空则默认去服务端拉取" style={{ width: '100%' }} />
+              <Select
+                mode="tags"
+                size="middle"
+                placeholder={codeBuddyUsesOptionalSecret
+                  ? '可选：预填常用模型；留空则由 CodeBuddy CLI 或服务端自动选择'
+                  : cursorUsesOptionalModel
+                    ? '可选：预填常用 Cursor 模型 ID；留空则由 Cursor 默认模型自动选择'
+                    : '配置指定的模型ID，留空则默认去服务端拉取'}
+                style={{ width: '100%' }}
+              />
             </Form.Item>
           </div>
         )}
@@ -326,21 +341,22 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
             <KeyOutlined style={{ fontSize: 14 }} /> 认证 & 连接
           </div>
           <Form.Item
-            label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API Key</span>}
+            label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>{codeBuddyUsesOptionalSecret ? 'API Key / Auth Token（可选）' : 'API Key'}</span>}
             name="apiKey"
             rules={[{
               validator: (_, value) => {
                 const apiKey = String(value || '').trim();
-                if (apiKey || editingProvider?.id) {
+                if (apiKey || editingProvider?.id || codeBuddyUsesOptionalSecret) {
                   return Promise.resolve();
                 }
                 return Promise.reject(new Error('请输入 API Key'));
               },
             }]}
+            extra={codeBuddyUsesOptionalSecret ? '留空则使用本机 CodeBuddy CLI 已登录账号；填写后优先使用当前凭证。' : undefined}
             style={{ marginBottom: 16 }}
           >
             <Input.Password
-              placeholder="sk-... / 你的 API Key"
+              placeholder={codeBuddyUsesOptionalSecret ? '留空走本机登录态，或填写 API Key / Token 覆盖' : 'sk-... / 你的 API Key'}
               size="middle"
               visibilityToggle={{
                 visible: primaryPasswordVisible,
@@ -350,10 +366,15 @@ const AISettingsProvidersSection: React.FC<AISettingsProvidersSectionProps> = ({
             />
           </Form.Item>
 
-          {(presetKeyFromForm === 'custom' || presetKeyFromForm === 'ollama') && (
-            <Form.Item label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API Endpoint (URL)</span>} name="baseUrl" rules={[{ required: true, message: '请输入有效的接口地址' }]} style={{ marginBottom: 0 }}>
+          {supportsAdvancedEndpoint && (
+            <Form.Item
+              label={<span style={{ fontWeight: 500, color: overlayTheme.titleText }}>API Endpoint (URL)</span>}
+              name="baseUrl"
+              rules={presetKeyFromForm === 'codebuddy' ? [] : [{ required: true, message: '请输入有效的接口地址' }]}
+              style={{ marginBottom: 0 }}
+            >
               <Input
-                placeholder={resolvePresetByKey(presetKeyFromForm).defaultBaseUrl || 'https://...'}
+                placeholder={presetKeyFromForm === 'codebuddy' ? '留空则使用 CodeBuddy CLI 默认网关' : (resolvePresetByKey(presetKeyFromForm).defaultBaseUrl || 'https://...')}
                 size="middle"
                 suffix={<LinkOutlined style={{ color: overlayTheme.mutedText }} />}
                 style={{ borderRadius: 8, background: inputBg, border: `1px solid ${cardBorder}` }}

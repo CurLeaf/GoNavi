@@ -113,7 +113,10 @@ const MonacoEditor: React.FC<MonacoEditorProps> = ({
 
   const resolvedOptions = useMemo(() => {
     if (uiVersion !== 'v2') {
-      return options;
+      return {
+        ...options,
+        editContext: false,
+      };
     }
 
     const effectiveGlobalFontSize = Math.min(
@@ -129,6 +132,7 @@ const MonacoEditor: React.FC<MonacoEditorProps> = ({
 
     return {
       ...options,
+      editContext: false,
       fontFamily: options?.fontFamily ?? monoFontFamily ?? DEFAULT_MONO_FONT_FAMILY,
       fontSize: options?.fontSize ?? resolvedFontSize,
       lineHeight: options?.lineHeight ?? Math.max(18, Math.round(resolvedFontSize * 1.62)),

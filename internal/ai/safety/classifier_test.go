@@ -124,6 +124,7 @@ func TestGuard_Full(t *testing.T) {
 		{"INSERT INTO t VALUES (1)", true},
 		{"DROP TABLE t", true},
 		{"CREATE TABLE t (id INT)", true},
+		{"CALL bulk_insert_users(100000)", true},
 	}
 	for _, tt := range tests {
 		result := g.Check(tt.sql)

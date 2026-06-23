@@ -1,5 +1,7 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 
+import { getCurrentLanguage, t } from '../i18n';
+
 export type ShortcutAction =
   | 'runQuery'
   | 'selectCurrentStatement'
@@ -16,7 +18,9 @@ export type ShortcutAction =
   | 'toggleTheme'
   | 'openShortcutManager'
   | 'toggleMacFullscreen'
-  | 'resetWindowZoom';
+  | 'resetWindowZoom'
+  | 'diagnoseQuery'
+  | 'showSlowQueries';
 
 export type ShortcutPlatform = 'mac' | 'windows';
 
@@ -38,6 +42,13 @@ export interface ShortcutActionMeta {
   requiredKey?: string;
   disallowShift?: boolean;
   platformOnly?: 'mac';
+}
+
+interface ShortcutActionMetaDefinition extends Omit<ShortcutActionMeta, 'label' | 'description'> {
+  label?: string;
+  description?: string;
+  labelKey?: string;
+  descriptionKey?: string;
 }
 
 const MODIFIER_ORDER = ['Ctrl', 'Meta', 'Alt', 'Shift'] as const;
@@ -102,24 +113,45 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'toggleAIPanel',
   'toggleLogPanel',
   'toggleTheme',
+  'diagnoseQuery',
+  'showSlowQueries',
   'openShortcutManager',
   'toggleMacFullscreen',
   'resetWindowZoom',
 ];
 
-export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = {
+const localizeShortcut = (key: string): string => t(key, undefined, getCurrentLanguage());
+
+const createShortcutActionMeta = (
+  definition: ShortcutActionMetaDefinition,
+): ShortcutActionMeta => ({
+  get label() {
+    return definition.label ?? localizeShortcut(definition.labelKey || '');
+  },
+  get description() {
+    return definition.description ?? localizeShortcut(definition.descriptionKey || '');
+  },
+  allowInEditable: definition.allowInEditable,
+  allowWithoutModifier: definition.allowWithoutModifier,
+  scope: definition.scope,
+  requiredKey: definition.requiredKey,
+  disallowShift: definition.disallowShift,
+  platformOnly: definition.platformOnly,
+});
+
+const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMetaDefinition> = {
   runQuery: {
-    label: '执行 SQL',
-    description: '在当前查询页执行 SQL',
+    labelKey: 'app.shortcuts.action.runQuery.label',
+    descriptionKey: 'app.shortcuts.action.runQuery.description',
   },
   selectCurrentStatement: {
-    label: '选择当前语句',
-    description: '在查询编辑器中选中光标所在 SQL 语句',
+    labelKey: 'app.shortcuts.action.selectCurrentStatement.label',
+    descriptionKey: 'app.shortcuts.action.selectCurrentStatement.description',
     scope: 'queryEditor',
   },
   saveQuery: {
-    label: '保存查询',
-    description: '保存当前查询页；未命名查询会打开保存弹窗',
+    labelKey: 'app.shortcuts.action.saveQuery.label',
+    descriptionKey: 'app.shortcuts.action.saveQuery.description',
     scope: 'queryEditor',
     allowInEditable: true,
   },
@@ -130,8 +162,8 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
     allowInEditable: true,
   },
   sendAIChatMessage: {
-    label: 'AI 聊天发送',
-    description: '在 AI 输入框中发送当前消息，Shift+Enter 始终换行',
+    labelKey: 'app.shortcuts.action.sendAIChatMessage.label',
+    descriptionKey: 'app.shortcuts.action.sendAIChatMessage.description',
     allowInEditable: true,
     allowWithoutModifier: true,
     scope: 'aiComposer',
@@ -139,57 +171,76 @@ export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = 
     disallowShift: true,
   },
   focusSidebarSearch: {
-    label: '聚焦侧边栏搜索',
-    description: '定位到左侧连接树搜索框',
+    labelKey: 'app.shortcuts.action.focusSidebarSearch.label',
+    descriptionKey: 'app.shortcuts.action.focusSidebarSearch.description',
     allowInEditable: true,
   },
   newQueryTab: {
-    label: '新建查询页',
-    description: '创建一个新的 SQL 查询标签页',
+    labelKey: 'app.shortcuts.action.newQueryTab.label',
+    descriptionKey: 'app.shortcuts.action.newQueryTab.description',
   },
   switchToNextTab: {
-    label: '切换到下一个标签页',
-    description: '在打开的标签页中向右切换',
+    labelKey: 'app.shortcuts.action.switchToNextTab.label',
+    descriptionKey: 'app.shortcuts.action.switchToNextTab.description',
     allowInEditable: true,
   },
   switchToPreviousTab: {
-    label: '切换到上一个标签页',
-    description: '在打开的标签页中向左切换',
+    labelKey: 'app.shortcuts.action.switchToPreviousTab.label',
+    descriptionKey: 'app.shortcuts.action.switchToPreviousTab.description',
     allowInEditable: true,
   },
   newConnection: {
-    label: '新建数据源',
-    description: '创建新的数据库、运行时或其他数据源连接',
+    labelKey: 'app.shortcuts.action.newConnection.label',
+    descriptionKey: 'app.shortcuts.action.newConnection.description',
   },
   toggleAIPanel: {
-    label: '打开 AI 数据洞察',
-    description: '打开右侧 AI 数据洞察面板',
+    labelKey: 'app.shortcuts.action.toggleAIPanel.label',
+    descriptionKey: 'app.shortcuts.action.toggleAIPanel.description',
     allowInEditable: true,
   },
   toggleLogPanel: {
-    label: '切换日志面板',
-    description: '打开或关闭 SQL 执行日志面板',
+    labelKey: 'app.shortcuts.action.toggleLogPanel.label',
+    descriptionKey: 'app.shortcuts.action.toggleLogPanel.description',
   },
   toggleTheme: {
-    label: '切换主题',
-    description: '在亮色和暗色主题之间切换',
+    labelKey: 'app.shortcuts.action.toggleTheme.label',
+    descriptionKey: 'app.shortcuts.action.toggleTheme.description',
+  },
+  diagnoseQuery: {
+    labelKey: 'app.shortcuts.action.diagnoseQuery.label',
+    descriptionKey: 'app.shortcuts.action.diagnoseQuery.description',
+    scope: 'queryEditor',
+    allowInEditable: true,
+  },
+  showSlowQueries: {
+    labelKey: 'app.shortcuts.action.showSlowQueries.label',
+    descriptionKey: 'app.shortcuts.action.showSlowQueries.description',
+    scope: 'queryEditor',
+    allowInEditable: true,
   },
   openShortcutManager: {
-    label: '打开快捷键管理',
-    description: '打开快捷键设置面板',
+    labelKey: 'app.shortcuts.action.openShortcutManager.label',
+    descriptionKey: 'app.shortcuts.action.openShortcutManager.description',
     allowInEditable: true,
   },
   toggleMacFullscreen: {
-    label: '切换原生全屏',
-    description: 'macOS 原生窗口控制模式下的全屏切换',
+    labelKey: 'app.shortcuts.action.toggleMacFullscreen.label',
+    descriptionKey: 'app.shortcuts.action.toggleMacFullscreen.description',
     platformOnly: 'mac',
   },
   resetWindowZoom: {
-    label: '重置窗口缩放',
-    description: 'Windows 任务栏恢复后字体异常变大时主动触发；会切一次最大化让 WebView2 重算字体度量',
+    labelKey: 'app.shortcuts.action.resetWindowZoom.label',
+    descriptionKey: 'app.shortcuts.action.resetWindowZoom.description',
     allowInEditable: true,
   },
 };
+
+export const SHORTCUT_ACTION_META: Record<ShortcutAction, ShortcutActionMeta> = Object.fromEntries(
+  SHORTCUT_ACTION_ORDER.map((action) => [
+    action,
+    createShortcutActionMeta(SHORTCUT_ACTION_META_DEFINITIONS[action]),
+  ]),
+) as Record<ShortcutAction, ShortcutActionMeta>;
 
 export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   runQuery: {
@@ -243,6 +294,16 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   toggleTheme: {
     mac: { combo: 'Meta+Shift+D', enabled: true },
     windows: { combo: 'Ctrl+Shift+D', enabled: true },
+  },
+  // SQL 诊断：避开 toggleTheme 的 Ctrl+Shift+D，用 Ctrl+Shift+P（P = Plan）
+  diagnoseQuery: {
+    mac: { combo: 'Meta+Shift+P', enabled: true },
+    windows: { combo: 'Ctrl+Shift+P', enabled: true },
+  },
+  // 慢查询历史：避开 toggleLogPanel 的 Ctrl+H / Meta+Shift+H，用 Ctrl+Shift+L（L = Log）
+  showSlowQueries: {
+    mac: { combo: 'Meta+Shift+L', enabled: true },
+    windows: { combo: 'Ctrl+Shift+L', enabled: true },
   },
   openShortcutManager: {
     mac: { combo: 'Meta+,', enabled: true },
@@ -318,7 +379,106 @@ const normalizeKeyboardKey = (key: string): string => {
   return token.length > 1 ? token[0].toUpperCase() + token.slice(1) : token;
 };
 
+let globalImeCompositionActive = false;
+
+export const setGlobalImeCompositionActive = (active: boolean): void => {
+  globalImeCompositionActive = active === true;
+};
+
+export const isGlobalImeCompositionActive = (): boolean => globalImeCompositionActive;
+
+type ImeCompositionEventTarget = Pick<Window, 'addEventListener' | 'removeEventListener'>;
+type ImeCompositionDocumentTarget = Pick<Document, 'addEventListener' | 'removeEventListener'> & {
+  visibilityState?: DocumentVisibilityState;
+};
+
+export const installGlobalImeCompositionTracking = (
+  eventTarget: ImeCompositionEventTarget = window,
+  documentTarget: ImeCompositionDocumentTarget | null = document,
+): (() => void) => {
+  const handleCompositionStart = () => setGlobalImeCompositionActive(true);
+  const handleCompositionEnd = () => setGlobalImeCompositionActive(false);
+  const handleBlur = () => setGlobalImeCompositionActive(false);
+  const handleVisibilityChange = () => {
+    if (!documentTarget || documentTarget.visibilityState === 'hidden') {
+      setGlobalImeCompositionActive(false);
+    }
+  };
+
+  eventTarget.addEventListener('compositionstart', handleCompositionStart, true);
+  eventTarget.addEventListener('compositionend', handleCompositionEnd, true);
+  eventTarget.addEventListener('blur', handleBlur, true);
+  documentTarget?.addEventListener('visibilitychange', handleVisibilityChange, true);
+
+  return () => {
+    eventTarget.removeEventListener('compositionstart', handleCompositionStart, true);
+    eventTarget.removeEventListener('compositionend', handleCompositionEnd, true);
+    eventTarget.removeEventListener('blur', handleBlur, true);
+    documentTarget?.removeEventListener('visibilitychange', handleVisibilityChange, true);
+    setGlobalImeCompositionActive(false);
+  };
+};
+
+const isMonacoImeInputTarget = (target: EventTarget | null | undefined): boolean => {
+  if (!target || typeof target !== 'object') {
+    return false;
+  }
+
+  const element = target as Element & {
+    className?: unknown;
+    classList?: { contains?: (name: string) => boolean };
+    closest?: (selector: string) => Element | null;
+  };
+  if (typeof element.classList?.contains === 'function' && element.classList.contains('ime-input')) {
+    return true;
+  }
+  if (typeof element.className === 'string' && /\bime-input\b/.test(element.className)) {
+    return true;
+  }
+  if (typeof element.closest === 'function') {
+    return Boolean(element.closest('.monaco-editor .inputarea.ime-input, .monaco-editor textarea.ime-input, .ime-input'));
+  }
+  return false;
+};
+
+export const isImeComposingKeyEvent = (
+  event: (KeyboardEvent | ReactKeyboardEvent | null | undefined) & {
+    nativeEvent?: {
+      isComposing?: boolean;
+      keyCode?: number;
+      which?: number;
+    };
+    keyCode?: number;
+    which?: number;
+    isComposing?: boolean;
+    key?: string;
+    target?: EventTarget | null;
+  },
+): boolean => {
+  if (!event) {
+    return false;
+  }
+
+  const nativeEvent = event.nativeEvent;
+  const key = String(event.key || '').trim();
+  const keyCode = Number(event.keyCode ?? nativeEvent?.keyCode ?? 0);
+  const which = Number(event.which ?? nativeEvent?.which ?? 0);
+
+  return Boolean(
+    globalImeCompositionActive
+    || event.isComposing
+    || nativeEvent?.isComposing
+    || isMonacoImeInputTarget(event.target)
+    || key === 'Process'
+    || keyCode === 229
+    || which === 229,
+  );
+};
+
 export const eventToShortcut = (event: KeyboardEvent | ReactKeyboardEvent): string => {
+  if (isImeComposingKeyEvent(event)) {
+    return '';
+  }
   const key = normalizeKeyboardKey(event.key);
   if (!key || MODIFIER_SET.has(key as typeof MODIFIER_ORDER[number])) {
     return '';
@@ -541,55 +701,67 @@ export interface ReservedShortcut {
   platforms?: ShortcutPlatform[];
 }
 
+interface ReservedShortcutDefinition extends Omit<ReservedShortcut, 'label'> {
+  labelKey: string;
+}
+
 export interface ConflictInfo {
   label: string;
   context: ConflictContext;
   monacoCommandId?: string;
 }
 
-export const RESERVED_SHORTCUTS: ReservedShortcut[] = [
+const RESERVED_SHORTCUT_DEFINITIONS: ReservedShortcutDefinition[] = [
   // Browser / WebView built-in shortcuts
-  { combo: 'Ctrl+S',           label: '浏览器保存',        context: 'global' },
-  { combo: 'Ctrl+P',           label: '浏览器打印',        context: 'global' },
-  { combo: 'Ctrl+W',           label: '浏览器关闭标签页',  context: 'global' },
-  { combo: 'Ctrl+T',           label: '浏览器新建标签页',  context: 'global' },
-  { combo: 'Ctrl+N',           label: '浏览器新建窗口',    context: 'global' },
-  { combo: 'Ctrl+Shift+N',     label: '浏览器新建隐身窗口', context: 'global' },
+  { combo: 'Ctrl+S',           labelKey: 'app.shortcuts.reserved.browser_save',                 context: 'global' },
+  { combo: 'Ctrl+P',           labelKey: 'app.shortcuts.reserved.browser_print',                context: 'global' },
+  { combo: 'Ctrl+W',           labelKey: 'app.shortcuts.reserved.browser_close_tab',            context: 'global' },
+  { combo: 'Ctrl+T',           labelKey: 'app.shortcuts.reserved.browser_new_tab',              context: 'global' },
+  { combo: 'Ctrl+N',           labelKey: 'app.shortcuts.reserved.browser_new_window',           context: 'global' },
+  { combo: 'Ctrl+Shift+N',     labelKey: 'app.shortcuts.reserved.browser_new_incognito_window', context: 'global' },
 
   // Monaco editor built-in shortcuts
-  { combo: 'Ctrl+F',           label: '编辑器查找',               context: 'monaco', monacoCommandId: 'actions.find', platforms: ['windows'] },
-  { combo: 'Meta+F',           label: '编辑器查找',               context: 'monaco', monacoCommandId: 'actions.find', platforms: ['mac'] },
-  { combo: 'Ctrl+H',           label: '编辑器替换',               context: 'monaco', monacoCommandId: 'editor.action.startFindReplaceAction', platforms: ['windows'] },
-  { combo: 'Meta+H',           label: '编辑器替换',               context: 'monaco', monacoCommandId: 'editor.action.startFindReplaceAction', platforms: ['mac'] },
-  { combo: 'Ctrl+G',           label: '编辑器跳转行',             context: 'monaco', monacoCommandId: 'editor.action.gotoLine', platforms: ['windows'] },
-  { combo: 'Meta+G',           label: '编辑器跳转行',             context: 'monaco', monacoCommandId: 'editor.action.gotoLine', platforms: ['mac'] },
-  { combo: 'Ctrl+P',           label: '编辑器快速打开',           context: 'monaco', monacoCommandId: 'actions.quickOpen', platforms: ['windows'] },
-  { combo: 'Meta+P',           label: '编辑器快速打开',           context: 'monaco', monacoCommandId: 'actions.quickOpen', platforms: ['mac'] },
-  { combo: 'Ctrl+Shift+F',     label: '编辑器全局查找',           context: 'monaco', monacoCommandId: 'actions.quickOpenNavigate', platforms: ['windows'] },
-  { combo: 'Meta+Shift+F',     label: '编辑器全局查找',           context: 'monaco', monacoCommandId: 'actions.quickOpenNavigate', platforms: ['mac'] },
-  { combo: 'Ctrl+D',           label: '编辑器添加选区',           context: 'monaco', monacoCommandId: 'editor.action.addSelectionToNextFindMatch', platforms: ['windows'] },
-  { combo: 'Meta+D',           label: '编辑器添加选区',           context: 'monaco', monacoCommandId: 'editor.action.addSelectionToNextFindMatch', platforms: ['mac'] },
-  { combo: 'Ctrl+Shift+K',     label: '编辑器删除行',             context: 'monaco', monacoCommandId: 'editor.action.deleteLines', platforms: ['windows'] },
-  { combo: 'Meta+Shift+K',     label: '编辑器删除行',             context: 'monaco', monacoCommandId: 'editor.action.deleteLines', platforms: ['mac'] },
-  { combo: 'Ctrl+Enter',       label: '编辑器在下方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineAfter', platforms: ['windows'] },
-  { combo: 'Meta+Enter',       label: '编辑器在下方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineAfter', platforms: ['mac'] },
-  { combo: 'Ctrl+Shift+Enter', label: '编辑器在上方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineBefore', platforms: ['windows'] },
-  { combo: 'Meta+Shift+Enter', label: '编辑器在上方插入行',       context: 'monaco', monacoCommandId: 'editor.action.insertLineBefore', platforms: ['mac'] },
-  { combo: 'F2',               label: '编辑器重命名符号',         context: 'monaco', monacoCommandId: 'editor.action.rename' },
+  { combo: 'Ctrl+F',           labelKey: 'app.shortcuts.reserved.editor_find',               context: 'monaco', monacoCommandId: 'actions.find', platforms: ['windows'] },
+  { combo: 'Meta+F',           labelKey: 'app.shortcuts.reserved.editor_find',               context: 'monaco', monacoCommandId: 'actions.find', platforms: ['mac'] },
+  { combo: 'Ctrl+H',           labelKey: 'app.shortcuts.reserved.editor_replace',            context: 'monaco', monacoCommandId: 'editor.action.startFindReplaceAction', platforms: ['windows'] },
+  { combo: 'Meta+H',           labelKey: 'app.shortcuts.reserved.editor_replace',            context: 'monaco', monacoCommandId: 'editor.action.startFindReplaceAction', platforms: ['mac'] },
+  { combo: 'Ctrl+G',           labelKey: 'app.shortcuts.reserved.editor_goto_line',          context: 'monaco', monacoCommandId: 'editor.action.gotoLine', platforms: ['windows'] },
+  { combo: 'Meta+G',           labelKey: 'app.shortcuts.reserved.editor_goto_line',          context: 'monaco', monacoCommandId: 'editor.action.gotoLine', platforms: ['mac'] },
+  { combo: 'Ctrl+P',           labelKey: 'app.shortcuts.reserved.editor_quick_open',         context: 'monaco', monacoCommandId: 'actions.quickOpen', platforms: ['windows'] },
+  { combo: 'Meta+P',           labelKey: 'app.shortcuts.reserved.editor_quick_open',         context: 'monaco', monacoCommandId: 'actions.quickOpen', platforms: ['mac'] },
+  { combo: 'Ctrl+Shift+F',     labelKey: 'app.shortcuts.reserved.editor_find_global',        context: 'monaco', monacoCommandId: 'actions.quickOpenNavigate', platforms: ['windows'] },
+  { combo: 'Meta+Shift+F',     labelKey: 'app.shortcuts.reserved.editor_find_global',        context: 'monaco', monacoCommandId: 'actions.quickOpenNavigate', platforms: ['mac'] },
+  { combo: 'Ctrl+D',           labelKey: 'app.shortcuts.reserved.editor_add_selection',      context: 'monaco', monacoCommandId: 'editor.action.addSelectionToNextFindMatch', platforms: ['windows'] },
+  { combo: 'Meta+D',           labelKey: 'app.shortcuts.reserved.editor_add_selection',      context: 'monaco', monacoCommandId: 'editor.action.addSelectionToNextFindMatch', platforms: ['mac'] },
+  { combo: 'Ctrl+Shift+K',     labelKey: 'app.shortcuts.reserved.editor_delete_line',        context: 'monaco', monacoCommandId: 'editor.action.deleteLines', platforms: ['windows'] },
+  { combo: 'Meta+Shift+K',     labelKey: 'app.shortcuts.reserved.editor_delete_line',        context: 'monaco', monacoCommandId: 'editor.action.deleteLines', platforms: ['mac'] },
+  { combo: 'Ctrl+Enter',       labelKey: 'app.shortcuts.reserved.editor_insert_line_after',  context: 'monaco', monacoCommandId: 'editor.action.insertLineAfter', platforms: ['windows'] },
+  { combo: 'Meta+Enter',       labelKey: 'app.shortcuts.reserved.editor_insert_line_after',  context: 'monaco', monacoCommandId: 'editor.action.insertLineAfter', platforms: ['mac'] },
+  { combo: 'Ctrl+Shift+Enter', labelKey: 'app.shortcuts.reserved.editor_insert_line_before', context: 'monaco', monacoCommandId: 'editor.action.insertLineBefore', platforms: ['windows'] },
+  { combo: 'Meta+Shift+Enter', labelKey: 'app.shortcuts.reserved.editor_insert_line_before', context: 'monaco', monacoCommandId: 'editor.action.insertLineBefore', platforms: ['mac'] },
+  { combo: 'F2',               labelKey: 'app.shortcuts.reserved.editor_rename_symbol',      context: 'monaco', monacoCommandId: 'editor.action.rename' },
 
   // DataGrid shortcuts
-  { combo: 'Ctrl+C',           label: '数据表格复制',     context: 'datagrid', platforms: ['windows'] },
-  { combo: 'Meta+C',           label: '数据表格复制',     context: 'datagrid', platforms: ['mac'] },
+  { combo: 'Ctrl+C',           labelKey: 'app.shortcuts.reserved.datagrid_copy', context: 'datagrid', platforms: ['windows'] },
+  { combo: 'Meta+C',           labelKey: 'app.shortcuts.reserved.datagrid_copy', context: 'datagrid', platforms: ['mac'] },
 ];
 
-const CONTEXT_DESCRIPTION: Record<ConflictContext, string> = {
-  global: '浏览器',
-  monaco: '编辑器',
-  datagrid: '数据表格',
+export const RESERVED_SHORTCUTS: ReservedShortcut[] = RESERVED_SHORTCUT_DEFINITIONS.map((definition) => ({
+  ...definition,
+  get label() {
+    return localizeShortcut(definition.labelKey);
+  },
+}));
+
+const CONTEXT_DESCRIPTION_KEYS: Record<ConflictContext, string> = {
+  global: 'app.shortcuts.context.global',
+  monaco: 'app.shortcuts.context.monaco',
+  datagrid: 'app.shortcuts.context.datagrid',
 };
 
 export const describeConflictContext = (context: ConflictContext): string => {
-  return CONTEXT_DESCRIPTION[context] || context;
+  const key = CONTEXT_DESCRIPTION_KEYS[context];
+  return key ? localizeShortcut(key) : context;
 };
 
 export const splitConflictsByContext = (conflicts: ConflictInfo[]) => {

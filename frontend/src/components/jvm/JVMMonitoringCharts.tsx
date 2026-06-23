@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { t, type SupportedLanguage } from "../../i18n";
 import type { JVMMonitoringPoint, JVMMonitoringSessionState } from "../../types";
 import {
   buildMonitoringChartPoints,
@@ -25,6 +26,7 @@ type JVMMonitoringChartsProps = {
   points: JVMMonitoringPoint[];
   session: JVMMonitoringSessionState;
   darkMode: boolean;
+  language?: SupportedLanguage;
 };
 
 const buildCardStyle = (darkMode: boolean): React.CSSProperties => ({
@@ -49,8 +51,10 @@ const JVMMonitoringCharts: React.FC<JVMMonitoringChartsProps> = ({
   points,
   session,
   darkMode,
+  language,
 }) => {
-  const data = buildMonitoringChartPoints(points);
+  const tr = (key: string) => t(key, undefined, language);
+  const data = buildMonitoringChartPoints(points, language);
   const textColor = darkMode ? "rgba(255,255,255,0.72)" : "rgba(0,0,0,0.65)";
   const gridColor = darkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)";
   const tooltipStyle = {
@@ -84,11 +88,11 @@ const JVMMonitoringCharts: React.FC<JVMMonitoringChartsProps> = ({
     <Row gutter={[24, 24]}>
       <Col xs={24} xl={12}>
         {renderCard(
-          "堆内存",
+          tr("jvm_monitoring_charts.title.heap"),
           !hasData
-            ? renderEmpty("暂无堆内存采样数据")
+            ? renderEmpty(tr("jvm_monitoring_charts.empty.heap.no_samples"))
             : !monitoringMetricAvailable(session, "heap.used")
-              ? renderEmpty("当前监控来源未提供堆内存指标")
+              ? renderEmpty(tr("jvm_monitoring_charts.empty.heap.metric_unavailable"))
               : (
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={data} margin={chartMargin}>
@@ -103,8 +107,8 @@ const JVMMonitoringCharts: React.FC<JVMMonitoringChartsProps> = ({
                     <YAxis tick={axisTickStyle(textColor)} axisLine={false} tickLine={false} tickFormatter={formatMonitoringAxisBytes} width={74} />
                     <RechartsTooltip contentStyle={tooltipStyle} />
                     <Legend {...legendProps} />
-                    <Area type="monotone" dataKey="heapUsedBytes" name="堆内存已使用" stroke="#fa8c16" fill="url(#jvmHeapGradient)" isAnimationActive={false} />
-                    <Line type="monotone" dataKey="heapCommittedBytes" name="堆内存已提交" stroke="#1677ff" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    <Area type="monotone" dataKey="heapUsedBytes" name={tr("jvm_monitoring_charts.legend.heap_used")} stroke="#fa8c16" fill="url(#jvmHeapGradient)" isAnimationActive={false} />
+                    <Line type="monotone" dataKey="heapCommittedBytes" name={tr("jvm_monitoring_charts.legend.heap_committed")} stroke="#1677ff" strokeWidth={2} dot={false} isAnimationActive={false} />
                   </AreaChart>
                 </ResponsiveContainer>
               ),
@@ -112,11 +116,11 @@ const JVMMonitoringCharts: React.FC<JVMMonitoringChartsProps> = ({
       </Col>
       <Col xs={24} xl={12}>
         {renderCard(
-          "垃圾回收",
+          tr("jvm_monitoring_charts.title.gc"),
           !hasData
-            ? renderEmpty("暂无垃圾回收采样数据")
+            ? renderEmpty(tr("jvm_monitoring_charts.empty.gc.no_samples"))
             : !monitoringMetricAvailable(session, "gc.count")
-              ? renderEmpty("当前监控来源未提供垃圾回收指标")
+              ? renderEmpty(tr("jvm_monitoring_charts.empty.gc.metric_unavailable"))
               : (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={data} margin={chartMargin}>
@@ -126,8 +130,8 @@ const JVMMonitoringCharts: React.FC<JVMMonitoringChartsProps> = ({
                     <YAxis yAxisId="right" orientation="right" tick={axisTickStyle(textColor)} axisLine={false} tickLine={false} width={42} />
                     <RechartsTooltip contentStyle={tooltipStyle} />
                     <Legend {...legendProps} />
-                    <Line yAxisId="left" type="monotone" dataKey="gcCollectionCount" name="垃圾回收次数" stroke="#52c41a" strokeWidth={2} dot={false} isAnimationActive={false} />
-                    <Line yAxisId="right" type="monotone" dataKey="gcCollectionTimeMs" name="垃圾回收耗时(ms)" stroke="#722ed1" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    <Line yAxisId="left" type="monotone" dataKey="gcCollectionCount" name={tr("jvm_monitoring_charts.legend.gc_count")} stroke="#52c41a" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    <Line yAxisId="right" type="monotone" dataKey="gcCollectionTimeMs" name={tr("jvm_monitoring_charts.legend.gc_time_ms")} stroke="#722ed1" strokeWidth={2} dot={false} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
               ),
@@ -135,11 +139,11 @@ const JVMMonitoringCharts: React.FC<JVMMonitoringChartsProps> = ({
       </Col>
       <Col xs={24} xl={12}>
         {renderCard(
-          "线程",
+          tr("jvm_monitoring_charts.title.threads"),
           !hasData
-            ? renderEmpty("暂无线程采样数据")
+            ? renderEmpty(tr("jvm_monitoring_charts.empty.threads.no_samples"))
             : !monitoringMetricAvailable(session, "thread.count")
-              ? renderEmpty("当前监控来源未提供线程指标")
+              ? renderEmpty(tr("jvm_monitoring_charts.empty.threads.metric_unavailable"))
               : (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={data} margin={chartMargin}>
@@ -148,9 +152,9 @@ const JVMMonitoringCharts: React.FC<JVMMonitoringChartsProps> = ({
                     <YAxis tick={axisTickStyle(textColor)} axisLine={false} tickLine={false} width={42} />
                     <RechartsTooltip contentStyle={tooltipStyle} />
                     <Legend {...legendProps} />
-                    <Line type="monotone" dataKey="threadCount" name="线程数" stroke="#1677ff" strokeWidth={2} dot={false} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="daemonThreadCount" name="守护线程数" stroke="#13c2c2" strokeWidth={2} dot={false} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="peakThreadCount" name="线程峰值" stroke="#faad14" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="threadCount" name={tr("jvm_monitoring_charts.legend.thread_count")} stroke="#1677ff" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="daemonThreadCount" name={tr("jvm_monitoring_charts.legend.daemon_thread_count")} stroke="#13c2c2" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="peakThreadCount" name={tr("jvm_monitoring_charts.legend.peak_thread_count")} stroke="#faad14" strokeWidth={2} dot={false} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
               ),
@@ -158,21 +162,21 @@ const JVMMonitoringCharts: React.FC<JVMMonitoringChartsProps> = ({
       </Col>
       <Col xs={24} xl={12}>
         {renderCard(
-          "类加载",
+          tr("jvm_monitoring_charts.title.classes"),
           !hasData
-            ? renderEmpty("暂无类加载采样数据")
+            ? renderEmpty(tr("jvm_monitoring_charts.empty.classes.no_samples"))
             : !monitoringMetricAvailable(session, "class.loading")
-              ? renderEmpty("当前监控来源未提供类加载指标")
+              ? renderEmpty(tr("jvm_monitoring_charts.empty.classes.metric_unavailable"))
               : (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={data} margin={chartMargin}>
                     <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
                     <XAxis dataKey="timeLabel" tick={axisTickStyle(textColor)} axisLine={false} tickLine={false} minTickGap={32} />
-                    <YAxis tick={axisTickStyle(textColor)} axisLine={false} tickLine={false} tickFormatter={formatCompactNumber} width={58} />
+                    <YAxis tick={axisTickStyle(textColor)} axisLine={false} tickLine={false} tickFormatter={(value) => formatCompactNumber(Number(value), language)} width={58} />
                     <RechartsTooltip contentStyle={tooltipStyle} />
                     <Legend {...legendProps} />
-                    <Line type="monotone" dataKey="loadedClassCount" name="已加载类" stroke="#eb2f96" strokeWidth={2} dot={false} isAnimationActive={false} />
-                    <Line type="monotone" dataKey="unloadedClassCount" name="已卸载类" stroke="#8c8c8c" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="loadedClassCount" name={tr("jvm_monitoring_charts.legend.loaded_classes")} stroke="#eb2f96" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    <Line type="monotone" dataKey="unloadedClassCount" name={tr("jvm_monitoring_charts.legend.unloaded_classes")} stroke="#8c8c8c" strokeWidth={2} dot={false} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
               ),

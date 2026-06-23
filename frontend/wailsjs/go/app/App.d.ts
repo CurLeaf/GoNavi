@@ -20,6 +20,8 @@ export function CheckForUpdates():Promise<connection.QueryResult>;
 
 export function CheckForUpdatesSilently():Promise<connection.QueryResult>;
 
+export function ClearSlowQueries(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
+
 export function ClearTables(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
 
 export function ConfigureDriverRuntimeDirectory(arg1:string):Promise<connection.QueryResult>;
@@ -76,9 +78,13 @@ export function DataSyncPreview(arg1:sync.SyncConfig,arg2:string,arg3:number):Pr
 
 export function DeleteConnection(arg1:string):Promise<void>;
 
+export function DeleteQuery(arg1:string):Promise<void>;
+
 export function DeleteSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function DeleteSQLFile(arg1:string):Promise<connection.QueryResult>;
+
+export function DiagnoseQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
 export function DismissSecurityUpdateReminder():Promise<app.SecurityUpdateStatus>;
 
@@ -104,9 +110,15 @@ export function ExportConnectionsPackage(arg1:app.ConnectionExportOptions):Promi
 
 export function ExportData(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function ExportDataWithOptions(arg1:Array<Record<string, any>>,arg2:Array<string>,arg3:string,arg4:app.ExportFileOptions):Promise<connection.QueryResult>;
+
 export function ExportDatabaseSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:boolean):Promise<connection.QueryResult>;
 
+export function ExportDatabasesSQLWithOptions(arg1:connection.ConnectionConfig,arg2:Array<string>,arg3:boolean,arg4:app.ExportFileOptions):Promise<connection.QueryResult>;
+
 export function ExportQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:string):Promise<connection.QueryResult>;
+
+export function ExportQueryWithOptions(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string,arg5:app.ExportFileOptions):Promise<connection.QueryResult>;
 
 export function ExportSQLFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
@@ -114,9 +126,13 @@ export function ExportSchemaSQL(arg1:connection.ConnectionConfig,arg2:string,arg
 
 export function ExportTable(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
+export function ExportTableWithOptions(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:app.ExportFileOptions):Promise<connection.QueryResult>;
+
 export function ExportTablesDataSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>):Promise<connection.QueryResult>;
 
 export function ExportTablesSQL(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>,arg4:boolean):Promise<connection.QueryResult>;
+
+export function ExportTablesSQLWithOptions(arg1:connection.ConnectionConfig,arg2:string,arg3:Array<string>,arg4:boolean,arg5:boolean,arg6:app.ExportFileOptions):Promise<connection.QueryResult>;
 
 export function GenerateQueryID():Promise<string>;
 
@@ -136,7 +152,13 @@ export function GetGlobalProxyConfig():Promise<connection.QueryResult>;
 
 export function GetSavedConnections():Promise<Array<connection.SavedConnectionView>>;
 
+export function GetSavedQueries():Promise<Array<connection.SavedQuery>>;
+
 export function GetSecurityUpdateStatus():Promise<app.SecurityUpdateStatus>;
+
+export function GetSlowQueries(arg1:connection.ConnectionConfig,arg2:string,arg3:string,arg4:number):Promise<connection.QueryResult>;
+
+export function GetUnboundSavedQueries():Promise<Array<connection.SavedQuery>>;
 
 export function ImportConfigFile():Promise<connection.QueryResult>;
 
@@ -149,6 +171,8 @@ export function ImportDataWithProgress(arg1:connection.ConnectionConfig,arg2:str
 export function ImportLegacyConnections(arg1:Array<connection.SavedConnectionInput>):Promise<Array<connection.SavedConnectionView>>;
 
 export function ImportLegacyGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
+
+export function ImportSavedQueries(arg1:connection.SavedQueryImportPayload):Promise<Array<connection.SavedQuery>>;
 
 export function InstallLocalDriverPackage(arg1:string,arg2:string,arg3:string,arg4:string):Promise<connection.QueryResult>;
 
@@ -215,6 +239,8 @@ export function PreviewImportFile(arg1:string):Promise<connection.QueryResult>;
 export function ReadAppLogTail(arg1:number,arg2:string):Promise<connection.QueryResult>;
 
 export function ReadSQLFile(arg1:string):Promise<connection.QueryResult>;
+
+export function RebindSavedQuery(arg1:string,arg2:string):Promise<connection.SavedQuery>;
 
 export function RedisConnect(arg1:connection.ConnectionConfig):Promise<connection.QueryResult>;
 
@@ -294,6 +320,8 @@ export function SaveConnection(arg1:connection.SavedConnectionInput):Promise<con
 
 export function SaveGlobalProxy(arg1:connection.SaveGlobalProxyInput):Promise<connection.GlobalProxyView>;
 
+export function SaveQuery(arg1:connection.SavedQuery):Promise<connection.SavedQuery>;
+
 export function SelectCertificateFile(arg1:string,arg2:string):Promise<connection.QueryResult>;
 
 export function SelectDataRootDirectory(arg1:string):Promise<connection.QueryResult>;
@@ -309,6 +337,8 @@ export function SelectDriverPackageFile(arg1:string):Promise<connection.QueryRes
 export function SelectSQLDirectory(arg1:string):Promise<connection.QueryResult>;
 
 export function SelectSSHKeyFile(arg1:string):Promise<connection.QueryResult>;
+
+export function SetLanguage(arg1:string):Promise<void>;
 
 export function SetMacNativeWindowControls(arg1:boolean):Promise<void>;
 

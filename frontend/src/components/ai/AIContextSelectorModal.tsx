@@ -1,5 +1,6 @@
+import Modal from '../common/ResizableDraggableModal';
 import React from 'react';
-import { Button, Checkbox, Input, Modal, Select, Spin } from 'antd';
+import { Button, Checkbox, Input, Select, Spin } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';

@@ -8,21 +8,21 @@ describe('validateDataSyncSelection', () => {
       selectedTables: [],
       sourceQuery: '',
       syncContent: 'data',
-    })).toBe('请输入源查询 SQL');
+    })).toBe('data_sync.validation.source_query_required');
 
     expect(validateDataSyncSelection({
       sourceDatasetMode: 'query',
       selectedTables: [],
       sourceQuery: 'select 1',
       syncContent: 'data',
-    })).toBe('SQL 结果集同步需要选择一个目标表');
+    })).toBe('data_sync.validation.single_target_table_required');
 
     expect(validateDataSyncSelection({
       sourceDatasetMode: 'query',
       selectedTables: ['users', 'orders'],
       sourceQuery: 'select 1',
       syncContent: 'data',
-    })).toBe('SQL 结果集同步需要选择一个目标表');
+    })).toBe('data_sync.validation.single_target_table_required');
   });
 
   it('forces data-only in query mode', () => {
@@ -31,7 +31,7 @@ describe('validateDataSyncSelection', () => {
       selectedTables: ['users'],
       sourceQuery: 'select 1',
       syncContent: 'both',
-    })).toBe('SQL 结果集同步仅支持仅同步数据');
+    })).toBe('data_sync.validation.query_mode_data_only');
   });
 });
 
@@ -42,6 +42,7 @@ describe('buildDataSyncRequest', () => {
       targetConfig: { type: 'mysql' },
       sourceDatabase: ' app ',
       targetDatabase: ' warehouse ',
+      targetSchema: ' reporting ',
       selectedTables: ['users'],
       sourceDatasetMode: 'query',
       sourceQuery: '  SELECT id, name FROM active_users  ',
@@ -65,6 +66,7 @@ describe('buildDataSyncRequest', () => {
       createIndexes: false,
       sourceDatabase: 'app',
       targetDatabase: 'warehouse',
+      targetSchema: 'reporting',
       jobId: 'job-1',
     });
   });

@@ -114,7 +114,7 @@ func TestVerifyInstalledOptionalDriverAgentRevisionRejectsProbeFailure(t *testin
 	}
 }
 
-func TestVerifyRuntimeOptionalDriverAgentRevisionAllowsStaleOceanBaseAgent(t *testing.T) {
+func TestVerifyRuntimeOptionalDriverAgentRevisionAllowsStaleOceanBaseMySQLAgent(t *testing.T) {
 	originalProbe := optionalDriverAgentMetadataProbe
 	t.Cleanup(func() {
 		optionalDriverAgentMetadataProbe = originalProbe
@@ -129,6 +129,45 @@ func TestVerifyRuntimeOptionalDriverAgentRevisionAllowsStaleOceanBaseAgent(t *te
 	err := verifyRuntimeOptionalDriverAgentRevision(connection.ConnectionConfig{Type: "oceanbase"})
 	if err != nil {
 		t.Fatalf("runtime revision mismatch should warn and continue, got %v", err)
+	}
+}
+
+func TestVerifyRuntimeOptionalDriverAgentRevisionAllowsStaleOceanBaseOracleAgent(t *testing.T) {
+	originalProbe := optionalDriverAgentMetadataProbe
+	t.Cleanup(func() {
+		optionalDriverAgentMetadataProbe = originalProbe
+	})
+	optionalDriverAgentMetadataProbe = func(driverType string, executablePath string) (db.OptionalDriverAgentMetadata, error) {
+		return db.OptionalDriverAgentMetadata{
+			DriverType:    driverType,
+			AgentRevision: "src-stale-agent",
+		}, nil
+	}
+
+	err := verifyRuntimeOptionalDriverAgentRevision(connection.ConnectionConfig{
+		Type:             "oceanbase",
+		ConnectionParams: "protocol=oracle",
+	})
+	if err != nil {
+		t.Fatalf("runtime revision mismatch should stay in driver manager only, got %v", err)
+	}
+}
+
+func TestVerifyRuntimeOptionalDriverAgentRevisionAllowsUnknownOceanBaseOracleAgent(t *testing.T) {
+	originalProbe := optionalDriverAgentMetadataProbe
+	t.Cleanup(func() {
+		optionalDriverAgentMetadataProbe = originalProbe
+	})
+	optionalDriverAgentMetadataProbe = func(driverType string, executablePath string) (db.OptionalDriverAgentMetadata, error) {
+		return db.OptionalDriverAgentMetadata{}, errOptionalDriverAgentMetadataUnavailable
+	}
+
+	err := verifyRuntimeOptionalDriverAgentRevision(connection.ConnectionConfig{
+		Type:              "oceanbase",
+		OceanBaseProtocol: "oracle",
+	})
+	if err != nil {
+		t.Fatalf("runtime metadata probe failure should stay in driver manager only, got %v", err)
 	}
 }
 
@@ -192,6 +231,7 @@ func optionalDriverAgentRevisionTestDrivers(t *testing.T) []string {
 		"iotdb",
 		"clickhouse",
 		"elasticsearch",
+		"trino",
 	}
 	for _, driverType := range drivers {
 		if db.OptionalDriverAgentRevision(driverType) == "" {

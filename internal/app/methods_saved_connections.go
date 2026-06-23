@@ -44,7 +44,11 @@ func (a *App) DeleteConnection(id string) error {
 }
 
 func (a *App) DuplicateConnection(id string) (connection.SavedConnectionView, error) {
-	view, err := a.savedConnectionRepository().Duplicate(id)
+	view, err := a.savedConnectionRepository().Duplicate(
+		id,
+		a.appText("connection.unnamed", nil),
+		a.appText("connection.copy_suffix", nil),
+	)
 	if err != nil {
 		return connection.SavedConnectionView{}, err
 	}

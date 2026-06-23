@@ -12,6 +12,7 @@ type capturingRedisClient struct {
 	connectConfig     connection.ConnectionConfig
 	deletedHashKey    string
 	deletedHashFields []string
+	closed            int
 }
 
 func (c *capturingRedisClient) Connect(config connection.ConnectionConfig) error {
@@ -19,7 +20,10 @@ func (c *capturingRedisClient) Connect(config connection.ConnectionConfig) error
 	return nil
 }
 
-func (c *capturingRedisClient) Close() error { return nil }
+func (c *capturingRedisClient) Close() error {
+	c.closed++
+	return nil
+}
 
 func (c *capturingRedisClient) Ping() error { return nil }
 
@@ -117,6 +121,49 @@ func (c *scriptedRedisClient) Connect(config connection.ConnectionConfig) error 
 		*c.connectCalls = append(*c.connectCalls, config)
 	}
 	return c.connectErr
+}
+
+func TestRedisTestConnectionUsesIsolatedClientAndClosesIt(t *testing.T) {
+	originalNewRedisClientFunc := newRedisClientFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	proxySnapshot := currentGlobalProxyConfig()
+	defer func() {
+		newRedisClientFunc = originalNewRedisClientFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		if _, err := setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy); err != nil {
+			t.Fatalf("restore global proxy failed: %v", err)
+		}
+		CloseAllRedisClients()
+	}()
+	CloseAllRedisClients()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
+	}
+
+	client := &capturingRedisClient{}
+	newRedisClientFunc = func() redislib.RedisClient {
+		return client
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewApp()
+	result := app.RedisTestConnection(connection.ConnectionConfig{
+		Type: "redis",
+		Host: "127.0.0.1",
+		Port: 6379,
+	})
+
+	if !result.Success {
+		t.Fatalf("expected redis test connection success, got %s", result.Message)
+	}
+	if client.closed != 1 {
+		t.Fatalf("expected isolated redis test client to be closed once, got %d", client.closed)
+	}
+	if len(redisCache) != 0 {
+		t.Fatalf("redis test connection must not write global redis cache, got %d entries", len(redisCache))
+	}
 }
 
 func TestRedisConnectResolvesSavedSecretsByConnectionID(t *testing.T) {

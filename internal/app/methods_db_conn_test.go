@@ -1,17 +1,25 @@
 package app
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/internal/db"
 )
 
 type releaseRecordingDB struct {
-	closed int
+	closed  int
+	connect func(config connection.ConnectionConfig) error
 }
 
-func (f *releaseRecordingDB) Connect(config connection.ConnectionConfig) error { return nil }
+func (f *releaseRecordingDB) Connect(config connection.ConnectionConfig) error {
+	if f.connect != nil {
+		return f.connect(config)
+	}
+	return nil
+}
 func (f *releaseRecordingDB) Close() error {
 	f.closed++
 	return nil
@@ -167,6 +175,14 @@ func TestFormatConnSummary_DefaultTimeout(t *testing.T) {
 }
 
 func TestDBReleaseConnectionClosesAllDatabaseCacheEntriesForSameInstance(t *testing.T) {
+	proxySnapshot := currentGlobalProxyConfig()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy)
+	})
+
 	app := NewApp()
 	mainConfig := connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, User: "root", Database: "main"}
 	analyticsConfig := mainConfig
@@ -204,5 +220,116 @@ func TestDBReleaseConnectionClosesAllDatabaseCacheEntriesForSameInstance(t *test
 	}
 	if len(app.dbCache) != 1 {
 		t.Fatalf("expected only unrelated cache entry to remain, got %d", len(app.dbCache))
+	}
+}
+
+func TestTestConnectionUsesIsolatedConnectionAndClosesIt(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	proxySnapshot := currentGlobalProxyConfig()
+	defer func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		if _, err := setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy); err != nil {
+			t.Fatalf("restore global proxy failed: %v", err)
+		}
+	}()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
+	}
+
+	testDB := &releaseRecordingDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return testDB, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewApp()
+	result := app.TestConnection(connection.ConnectionConfig{
+		Type:     "mysql",
+		Host:     "127.0.0.1",
+		Port:     3306,
+		User:     "root",
+		Database: "app",
+	})
+
+	if !result.Success {
+		t.Fatalf("expected test connection success, got %s", result.Message)
+	}
+	if testDB.closed != 1 {
+		t.Fatalf("expected isolated test connection to be closed once, got %d", testDB.closed)
+	}
+	if len(app.dbCache) != 0 {
+		t.Fatalf("test connection must not write global db cache, got %d entries", len(app.dbCache))
+	}
+}
+
+func TestGetDatabaseReleasesSameInstanceCacheAndRetriesOnMaxUserConnections(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	proxySnapshot := currentGlobalProxyConfig()
+	defer func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		if _, err := setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy); err != nil {
+			t.Fatalf("restore global proxy failed: %v", err)
+		}
+	}()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
+	}
+
+	connectCalls := 0
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return &releaseRecordingDB{
+			connect: func(config connection.ConnectionConfig) error {
+				connectCalls++
+				if connectCalls == 1 {
+					return errors.New("Error 1226 (42000): User 'yangguofeng' has exceeded the 'max_user_connections' resource (current value: 5)")
+				}
+				return nil
+			},
+		}, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewApp()
+	mainConfig := connection.ConnectionConfig{Type: "mysql", Host: "db.example.com", Port: 3306, User: "yangguofeng", Database: "main"}
+	analyticsConfig := mainConfig
+	analyticsConfig.Database = "analytics"
+	analyticsConfig.ConnectionParams = "charset=utf8mb4"
+	otherConfig := mainConfig
+	otherConfig.User = "other"
+
+	mainDB := &releaseRecordingDB{}
+	analyticsDB := &releaseRecordingDB{}
+	otherDB := &releaseRecordingDB{}
+	app.dbCache[getCacheKey(mainConfig)] = cachedDatabase{inst: mainDB, config: normalizeCacheKeyConfig(mainConfig)}
+	app.dbCache[getCacheKey(analyticsConfig)] = cachedDatabase{inst: analyticsDB, config: normalizeCacheKeyConfig(analyticsConfig)}
+	app.dbCache[getCacheKey(otherConfig)] = cachedDatabase{inst: otherDB, config: normalizeCacheKeyConfig(otherConfig)}
+
+	targetConfig := mainConfig
+	targetConfig.Database = "target"
+	targetConfig.ConnectionParams = "timeout=10"
+
+	inst, err := app.getDatabase(targetConfig)
+	if err != nil {
+		t.Fatalf("expected retry after releasing cached same-instance connections, got %v", err)
+	}
+	if inst == nil {
+		t.Fatal("expected database instance")
+	}
+	if connectCalls != 2 {
+		t.Fatalf("expected one failed connect and one retry, got %d calls", connectCalls)
+	}
+	if mainDB.closed != 1 || analyticsDB.closed != 1 {
+		t.Fatalf("expected same-instance cached connections closed, got main=%d analytics=%d", mainDB.closed, analyticsDB.closed)
+	}
+	if otherDB.closed != 0 {
+		t.Fatalf("expected other user cache to remain open, got closed=%d", otherDB.closed)
 	}
 }

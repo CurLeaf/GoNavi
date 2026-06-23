@@ -43,6 +43,28 @@ func TestGetCacheKey_IgnoreConnectionID(t *testing.T) {
 	}
 }
 
+func TestGetCacheKey_IgnoreKeepAliveSettings(t *testing.T) {
+	base := connection.ConnectionConfig{
+		Type:                     "postgres",
+		Host:                     "db.local",
+		Port:                     5432,
+		User:                     "postgres",
+		Password:                 "secret",
+		Database:                 "app",
+		KeepAliveEnabled:         false,
+		KeepAliveIntervalMinutes: 240,
+	}
+	modified := base
+	modified.KeepAliveEnabled = true
+	modified.KeepAliveIntervalMinutes = 15
+
+	left := getCacheKey(base)
+	right := getCacheKey(modified)
+	if left != right {
+		t.Fatalf("expected same cache key when only keepalive settings differ, got %s vs %s", left, right)
+	}
+}
+
 func TestGetCacheKey_DuckDBHostAndDatabaseEquivalent(t *testing.T) {
 	withHost := connection.ConnectionConfig{
 		Type: "duckdb",

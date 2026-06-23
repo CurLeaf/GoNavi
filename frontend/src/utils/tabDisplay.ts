@@ -20,13 +20,31 @@ export interface TabDisplaySettings {
 
 export const TAB_DISPLAY_SECONDARY_DEFAULT_KEYS: TabDisplayElementKey[] = ['connection', 'database', 'schema', 'host'];
 
-export const TAB_DISPLAY_ELEMENT_META: Record<TabDisplayElementKey, { label: string; description: string }> = {
-  connection: { label: '连接名', description: '连接简称或环境名，例如 DEV' },
-  kind: { label: '对象类型', description: 'SQL / TABLE / VIEW 等类型标签' },
-  object: { label: '对象名', description: '表名、查询名、资源名等核心名称' },
-  database: { label: '数据库', description: '当前 DB / catalog 名称' },
-  schema: { label: 'Schema', description: 'schema / owner 前缀' },
-  host: { label: 'Host/IP', description: '连接目标地址摘要' },
+export const TAB_DISPLAY_ELEMENT_META: Record<TabDisplayElementKey, { labelKey: string; descriptionKey: string }> = {
+  connection: {
+    labelKey: 'app.theme.tab_display.element.connection.label',
+    descriptionKey: 'app.theme.tab_display.element.connection.description',
+  },
+  kind: {
+    labelKey: 'app.theme.tab_display.element.kind.label',
+    descriptionKey: 'app.theme.tab_display.element.kind.description',
+  },
+  object: {
+    labelKey: 'app.theme.tab_display.element.object.label',
+    descriptionKey: 'app.theme.tab_display.element.object.description',
+  },
+  database: {
+    labelKey: 'app.theme.tab_display.element.database.label',
+    descriptionKey: 'app.theme.tab_display.element.database.description',
+  },
+  schema: {
+    labelKey: 'app.theme.tab_display.element.schema.label',
+    descriptionKey: 'app.theme.tab_display.element.schema.description',
+  },
+  host: {
+    labelKey: 'app.theme.tab_display.element.host.label',
+    descriptionKey: 'app.theme.tab_display.element.host.description',
+  },
 };
 
 export const DEFAULT_TAB_DISPLAY_SETTINGS: TabDisplaySettings = {
@@ -422,6 +440,9 @@ const buildCompactObjectTabTitle = (tab: TabData): string => {
   if (tab.type === 'table-overview') {
     return stripSchemaFromTableOverviewTitle(tab.title);
   }
+  if (tab.type === 'table-export') {
+    return replaceTitleObjectLabel(tab.title, tab.tableName);
+  }
   if (tab.type === 'view-def') {
     return replaceTitleObjectLabel(tab.title, tab.viewName);
   }
@@ -442,6 +463,8 @@ export const getTabDisplayKindLabel = (tab: TabData): string => {
   if (tab.type === 'table') return 'TABLE';
   if (tab.type === 'design') return 'DESIGN';
   if (tab.type === 'table-overview') return 'DB';
+  if (tab.type === 'table-export') return 'EXPORT';
+  if (tab.type === 'sql-analysis') return 'ANALYZE';
   if (tab.type.startsWith('redis')) return 'REDIS';
   if (tab.type.startsWith('jvm')) return 'JVM';
   if (tab.type === 'trigger') return 'TRG';
@@ -572,7 +595,12 @@ export const buildTabDisplayTitle = (
   }
 
   const baseTitle = buildCompactObjectTabTitle(tab);
-  if (tab.type !== 'table' && tab.type !== 'design' && tab.type !== 'table-overview') {
+  if (
+    tab.type !== 'table' &&
+    tab.type !== 'design' &&
+    tab.type !== 'table-overview' &&
+    tab.type !== 'table-export'
+  ) {
     return baseTitle;
   }
   if (!connectionName) {

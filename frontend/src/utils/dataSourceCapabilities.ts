@@ -1,7 +1,14 @@
 import type { ConnectionConfig } from '../types';
+import {
+  isConnectionDataEditRestricted,
+  isConnectionStructureEditRestricted,
+} from './connectionReadOnly';
 import { normalizeOceanBaseProtocol } from './oceanBaseProtocol';
 
-type ConnectionLike = Pick<ConnectionConfig, 'type' | 'driver' | 'oceanBaseProtocol'> | null | undefined;
+type ConnectionLike = Pick<
+  ConnectionConfig,
+  'type' | 'driver' | 'oceanBaseProtocol' | 'readOnly' | 'protection'
+> | null | undefined;
 
 const normalizeDataSourceToken = (raw: string): string => {
   const normalized = String(raw || '').trim().toLowerCase();
@@ -82,6 +89,13 @@ export const resolveDataSourceType = (config: ConnectionLike): string => {
   return type;
 };
 
+export const shouldShowOceanBaseRowNumberColumn = (config: ConnectionLike): boolean => {
+  if (!config) return false;
+  const type = normalizeDataSourceToken(String(config.type || ''));
+  const driver = normalizeDataSourceToken(String(config.driver || ''));
+  return type === 'oceanbase' || driver === 'oceanbase';
+};
+
 const SQL_QUERY_EXPORT_TYPES = new Set([
   'mysql',
   'goldendb',
@@ -104,6 +118,7 @@ const SQL_QUERY_EXPORT_TYPES = new Set([
   'dameng',
   'tdengine',
   'clickhouse',
+  'trino',
 ]);
 
 const COPY_INSERT_TYPES = new Set([
@@ -128,10 +143,12 @@ const COPY_INSERT_TYPES = new Set([
   'dameng',
   'tdengine',
   'clickhouse',
+  'trino',
 ]);
 
 const QUERY_EDITOR_DISABLED_TYPES = new Set(['redis']);
 const FORCE_READ_ONLY_QUERY_TYPES = new Set(['tdengine', 'iotdb', 'clickhouse', 'rocketmq', 'mqtt', 'kafka', 'rabbitmq']);
+const FORCE_READ_ONLY_STRUCTURE_DESIGNER_TYPES = new Set(['elasticsearch', 'mongodb', 'redis', 'iotdb']);
 const MESSAGE_PUBLISH_TYPES = new Set(['rocketmq', 'mqtt', 'kafka', 'rabbitmq']);
 const MANUAL_TOTAL_COUNT_TYPES = new Set(['duckdb', 'oracle', 'rocketmq', 'mqtt']);
 const APPROXIMATE_TABLE_COUNT_TYPES = new Set(['duckdb', 'oracle']);
@@ -147,6 +164,7 @@ export type DataSourceCapabilities = {
   supportsDropDatabase: boolean;
   supportsMessagePublish: boolean;
   forceReadOnlyQueryResult: boolean;
+  forceReadOnlyStructureDesigner: boolean;
   preferManualTotalCount: boolean;
   supportsApproximateTableCount: boolean;
   supportsApproximateTotalPages: boolean;
@@ -199,16 +217,20 @@ const DROP_DATABASE_TYPES = new Set([
 
 export const getDataSourceCapabilities = (config: ConnectionLike): DataSourceCapabilities => {
   const type = resolveDataSourceType(config);
+  const dataEditRestricted = isConnectionDataEditRestricted(config);
+  const structureEditRestricted = isConnectionStructureEditRestricted(config);
   return {
     type,
     supportsQueryEditor: !QUERY_EDITOR_DISABLED_TYPES.has(type),
     supportsSqlQueryExport: SQL_QUERY_EXPORT_TYPES.has(type),
     supportsCopyInsert: COPY_INSERT_TYPES.has(type),
-    supportsCreateDatabase: CREATE_DATABASE_TYPES.has(type),
-    supportsRenameDatabase: RENAME_DATABASE_TYPES.has(type),
-    supportsDropDatabase: DROP_DATABASE_TYPES.has(type),
-    supportsMessagePublish: MESSAGE_PUBLISH_TYPES.has(type),
-    forceReadOnlyQueryResult: FORCE_READ_ONLY_QUERY_TYPES.has(type),
+    supportsCreateDatabase: !structureEditRestricted && CREATE_DATABASE_TYPES.has(type),
+    supportsRenameDatabase: !structureEditRestricted && RENAME_DATABASE_TYPES.has(type),
+    supportsDropDatabase: !structureEditRestricted && DROP_DATABASE_TYPES.has(type),
+    supportsMessagePublish: !dataEditRestricted && MESSAGE_PUBLISH_TYPES.has(type),
+    forceReadOnlyQueryResult: dataEditRestricted || FORCE_READ_ONLY_QUERY_TYPES.has(type),
+    forceReadOnlyStructureDesigner:
+      structureEditRestricted || FORCE_READ_ONLY_STRUCTURE_DESIGNER_TYPES.has(type),
     preferManualTotalCount: MANUAL_TOTAL_COUNT_TYPES.has(type),
     supportsApproximateTableCount: APPROXIMATE_TABLE_COUNT_TYPES.has(type),
     supportsApproximateTotalPages: APPROXIMATE_TOTAL_PAGE_TYPES.has(type),

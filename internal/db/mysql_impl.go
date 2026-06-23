@@ -847,6 +847,7 @@ func (m *MySQLDB) Connect(config connection.ConnectionConfig) error {
 				}
 				continue
 			}
+			configureSQLConnectionPool(db, candidateConfig.Type)
 
 			timeout := getConnectTimeout(candidateConfig)
 			ctx, cancel := utils.ContextWithTimeout(timeout)
@@ -907,7 +908,7 @@ func (m *MySQLDB) QueryMulti(query string) ([]connection.ResultSetData, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanMultiRowsForDialect(rows, "mysql")
 }
 
 func (m *MySQLDB) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
@@ -919,7 +920,7 @@ func (m *MySQLDB) QueryMultiContext(ctx context.Context, query string) ([]connec
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanMultiRowsForDialect(rows, "mysql")
 }
 
 func (m *MySQLDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
@@ -933,7 +934,7 @@ func (m *MySQLDB) QueryContext(ctx context.Context, query string) ([]map[string]
 	}
 	defer rows.Close()
 
-	return scanRows(rows)
+	return scanRowsForDialect(rows, "mysql")
 }
 
 func (m *MySQLDB) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -946,7 +947,7 @@ func (m *MySQLDB) Query(query string) ([]map[string]interface{}, []string, error
 		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsForDialect(rows, "mysql")
 }
 
 func (m *MySQLDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {

@@ -11,6 +11,7 @@ const executeLocalAIToolCallMock = vi.hoisted(() => vi.fn(async ({ toolCall }: {
   content: `result:${toolCall.function.name}`,
   success: true,
   toolName: toolCall.function.name,
+  countsAsProbeFailure: true,
 })));
 
 vi.mock('./aiChatPayloadDispatch', () => ({
@@ -186,6 +187,37 @@ describe('useAIChatLocalTools', () => {
     expect(JSON.stringify(dispatchArgs.messages)).toContain('result:inspect_active_tab');
     expect(JSON.stringify(dispatchArgs.messages)).not.toContain('汇总探针执行结果中');
     expect(dispatchArgs.tools).toHaveLength(1);
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('does not auto-stop the probe after three recoverable SQL execution errors', async () => {
+    executeLocalAIToolCallMock.mockResolvedValue({
+      content: "oceanbase: error 900 (42000): ORA-00900 near '50 OFFSET 0'",
+      success: false,
+      toolName: 'execute_sql',
+      countsAsProbeFailure: false,
+    });
+
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(<LocalToolsHarness />);
+    });
+
+    expect(latestHook).toBeDefined();
+    for (let i = 0; i < 3; i += 1) {
+      const run = latestHook!.executeLocalTools([buildToolCall('execute_sql')], 'assistant-1');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(150);
+        await run;
+      });
+    }
+
+    const messages = useStore.getState().aiChatHistory[SESSION_ID] || [];
+    expect(messages.some((message) => message.content.includes('探针连续 3 轮执行失败'))).toBe(false);
+    expect(dispatchAIChatPayloadMock).toHaveBeenCalledTimes(3);
 
     await act(async () => {
       renderer?.unmount();

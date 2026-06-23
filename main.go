@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	aiservice "GoNavi-Wails/internal/ai/service"
@@ -19,6 +20,12 @@ import (
 )
 
 func main() {
+	// 大结果集导出（88W+ 行）时，JSON 编解码会产生 5-8 倍内存副本，
+	// Go 默认 GOGC=100 下堆翻倍才触发 GC，叠加 Windows MADV_FREE 不归还 RSS，
+	// 会导致 RSS 单调爬升到峰值后不下降。这里收紧到 50，让 GC 更早触发。
+	// 代价是 CPU 开销略增，但导出/导入场景属 I/O 密集型，GC 开销可忽略。
+	debug.SetGCPercent(50)
+
 	if runSpecialMode(os.Args[1:]) {
 		return
 	}

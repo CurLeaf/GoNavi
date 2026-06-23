@@ -1,4 +1,4 @@
-import { DEFAULT_SHORTCUT_OPTIONS, getShortcutDisplayLabel, isShortcutMatch, type ShortcutPlatform, type ShortcutPlatformBinding } from './shortcuts';
+import { DEFAULT_SHORTCUT_OPTIONS, getShortcutDisplayLabel, isImeComposingKeyEvent, isShortcutMatch, type ShortcutPlatform, type ShortcutPlatformBinding } from './shortcuts';
 
 export interface AIChatSendShortcutKeyEventLike {
   key?: string;
@@ -36,12 +36,7 @@ export const shouldSendAIChatOnKeyDown = (
   if (!binding?.enabled) {
     return false;
   }
-  // Some IMEs report Enter during an active candidate/composition as keyCode 229.
-  const isImeCandidateEvent = event.keyCode === 229
-    || event.which === 229
-    || event.nativeEvent?.keyCode === 229
-    || event.nativeEvent?.which === 229;
-  if (event.shiftKey || event.isComposing || event.nativeEvent?.isComposing || isImeCandidateEvent) {
+  if (event.shiftKey || isImeComposingKeyEvent(event as KeyboardEvent)) {
     return false;
   }
   return isShortcutMatch(event as KeyboardEvent, binding.combo);

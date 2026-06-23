@@ -28,6 +28,9 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	}
 
 	query = sanitizeSQLForPgLike(transactionDBType, query)
+	if err := ensureConnectionAllowsQuery(config, query); err != nil {
+		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
+	}
 	if !shouldUseManagedSQLTransaction(transactionDBType, query) {
 		return a.DBQueryMulti(config, dbName, query, queryID)
 	}
@@ -278,6 +281,9 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 }
 
 func shouldUseManagedSQLTransaction(dbType string, query string) bool {
+	if strings.EqualFold(strings.TrimSpace(dbType), "trino") {
+		return false
+	}
 	statements := splitSQLStatements(query)
 	hasManagedWrite := false
 	for _, stmt := range statements {

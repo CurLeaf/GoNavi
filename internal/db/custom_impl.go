@@ -34,10 +34,13 @@ func (c *CustomDB) Connect(config connection.ConnectionConfig) error {
 	if err != nil {
 		return formatCustomDriverOpenError(driver, err)
 	}
+	configureSQLConnectionPool(db, driver)
 	c.conn = db
 	c.driver = driver
 	c.pingTimeout = getConnectTimeout(config)
 	if err := c.Ping(); err != nil {
+		_ = db.Close()
+		c.conn = nil
 		return fmt.Errorf("连接建立后验证失败：%w", err)
 	}
 	return nil
@@ -95,7 +98,7 @@ func (c *CustomDB) QueryContext(ctx context.Context, query string) ([]map[string
 	}
 	defer rows.Close()
 
-	return scanRows(rows)
+	return scanRowsForDialect(rows, c.scanDialect())
 }
 
 func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -108,7 +111,32 @@ func (c *CustomDB) Query(query string) ([]map[string]interface{}, []string, erro
 		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsForDialect(rows, c.scanDialect())
+}
+
+func (c *CustomDB) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	if c.conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+
+	rows, err := c.conn.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	return streamRowsForDialect(rows, c.scanDialect(), consumer)
+}
+
+func (c *CustomDB) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return c.StreamQueryContext(context.Background(), query, consumer)
+}
+
+func (c *CustomDB) scanDialect() string {
+	if strings.EqualFold(strings.TrimSpace(c.driver), "mysql") {
+		return "mysql"
+	}
+	return ""
 }
 
 func (c *CustomDB) ExecContext(ctx context.Context, query string) (int64, error) {

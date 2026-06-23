@@ -21,17 +21,37 @@ type BuildExternalSQLRootNodeParams = {
   dbName?: string;
   directories: ExternalSQLDirectory[];
   directoryTrees: Record<string, ExternalSQLTreeEntry[]>;
+  labels?: Partial<ExternalSQLTreeLabels>;
+};
+
+export type ExternalSQLTreeLabels = {
+  root: string;
+  directoryFallback: string;
 };
 
 const normalizeExternalSQLPath = (value: string): string =>
   String(value || '').trim().replace(/\\/g, '/');
 
-const resolveDirectoryDisplayName = (directory: ExternalSQLDirectory): string => {
+const DEFAULT_EXTERNAL_SQL_TREE_LABELS: ExternalSQLTreeLabels = {
+  root: 'External SQL files',
+  directoryFallback: 'SQL directory',
+};
+
+const resolveExternalSQLTreeLabels = (labels?: Partial<ExternalSQLTreeLabels>): ExternalSQLTreeLabels => ({
+  root: String(labels?.root || '').trim() || DEFAULT_EXTERNAL_SQL_TREE_LABELS.root,
+  directoryFallback:
+    String(labels?.directoryFallback || '').trim() || DEFAULT_EXTERNAL_SQL_TREE_LABELS.directoryFallback,
+});
+
+const resolveDirectoryDisplayName = (
+  directory: ExternalSQLDirectory,
+  labels: ExternalSQLTreeLabels,
+): string => {
   const explicitName = String(directory.name || '').trim();
   if (explicitName) return explicitName;
   const normalizedPath = normalizeExternalSQLPath(directory.path);
   const segments = normalizedPath.split('/').filter(Boolean);
-  return segments[segments.length - 1] || 'SQL目录';
+  return segments[segments.length - 1] || labels.directoryFallback;
 };
 
 export const buildExternalSQLDirectoryId = (connectionId: string, dbName: string, directoryPath: string): string =>
@@ -99,9 +119,13 @@ export const buildExternalSQLRootNode = ({
   dbName = '',
   directories,
   directoryTrees,
+  labels,
 }: BuildExternalSQLRootNodeParams): ExternalSQLTreeNode => {
+  const resolvedLabels = resolveExternalSQLTreeLabels(labels);
   const sortedDirectories = [...directories].sort((left, right) =>
-    resolveDirectoryDisplayName(left).toLowerCase().localeCompare(resolveDirectoryDisplayName(right).toLowerCase()),
+    resolveDirectoryDisplayName(left, resolvedLabels)
+      .toLowerCase()
+      .localeCompare(resolveDirectoryDisplayName(right, resolvedLabels).toLowerCase()),
   );
 
   const children = sortedDirectories.map((directory) => {
@@ -112,7 +136,7 @@ export const buildExternalSQLRootNode = ({
       directoryId: directory.id,
     });
     return {
-      title: resolveDirectoryDisplayName(directory),
+      title: resolveDirectoryDisplayName(directory, resolvedLabels),
       key: buildExternalSQLNodeKey('external-sql-directory', directory.id),
       type: 'external-sql-directory' as const,
       isLeaf: directoryChildren.length === 0,
@@ -127,7 +151,7 @@ export const buildExternalSQLRootNode = ({
   });
 
   return {
-    title: children.length > 0 ? `外部 SQL 目录 (${children.length})` : '外部 SQL 目录',
+    title: children.length > 0 ? `${resolvedLabels.root} (${children.length})` : resolvedLabels.root,
     key: dbNodeKey === 'external-sql-root' ? 'external-sql-root' : `${dbNodeKey}-external-sql`,
     type: 'external-sql-root',
     isLeaf: children.length === 0,

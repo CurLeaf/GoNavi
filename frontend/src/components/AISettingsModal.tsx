@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Modal, Form, message as antdMessage } from 'antd';
+import { Form, message as antdMessage } from 'antd';
 import { RobotOutlined } from '@ant-design/icons';
 import type { AIProviderConfig, AIProviderType, AISafetyLevel, AIContextLevel, AIUserPromptSettings, AIMCPServerConfig, AIMCPToolDescriptor, AIMCPClientInstallStatus, AIMCPHTTPServerStatus, AISkillConfig } from '../types';
 import {
@@ -10,6 +11,7 @@ import {
 import { resolveProviderSecretDraft } from '../utils/providerSecretDraft';
 import { buildAddProviderEditorSession, buildClosedProviderEditorSession, buildEditProviderEditorSession, type ProviderEditorSession } from '../utils/aiProviderEditorState';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
+import { useI18n } from '../i18n/provider';
 import { BUILTIN_AI_TOOL_INFO } from '../utils/aiToolRegistry';
 import { EMPTY_MCP_CLIENT_STATUSES } from '../utils/mcpClientInstallStatus';
 import AIBuiltinToolsCatalog from './ai/AIBuiltinToolsCatalog';
@@ -46,7 +48,7 @@ const DEFAULT_MCP_HTTP_SERVER_STATUS: AIMCPHTTPServerStatus = {
     path: '/mcp',
     url: 'http://127.0.0.1:8765/mcp',
     schemaOnly: true,
-    message: 'GoNavi MCP HTTP 服务未启动',
+    message: '',
 };
 
 const DEFAULT_MCP_HTTP_SERVER_DRAFT: AIMCPHTTPServerDraft = {
@@ -77,13 +79,18 @@ const normalizeMCPHTTPAuthorizationToken = (value: string): string => {
 };
 
 const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId }) => {
+    const { t } = useI18n();
+    const defaultMCPHTTPServerStatus = useMemo<AIMCPHTTPServerStatus>(() => ({
+        ...DEFAULT_MCP_HTTP_SERVER_STATUS,
+        message: t('ai_settings.mcp_http.status.not_running'),
+    }), [t]);
     const [providers, setProviders] = useState<AIProviderConfig[]>([]);
     const [activeProviderId, setActiveProviderId] = useState<string>('');
     const [safetyLevel, setSafetyLevel] = useState<AISafetyLevel>('readonly');
     const [contextLevel, setContextLevel] = useState<AIContextLevel>('schema_only');
     const [mcpServers, setMCPServers] = useState<AIMCPServerConfig[]>([]);
     const [mcpTools, setMCPTools] = useState<AIMCPToolDescriptor[]>([]);
-    const [mcpHTTPServerStatus, setMCPHTTPServerStatus] = useState<AIMCPHTTPServerStatus>(DEFAULT_MCP_HTTP_SERVER_STATUS);
+    const [mcpHTTPServerStatus, setMCPHTTPServerStatus] = useState<AIMCPHTTPServerStatus>(() => defaultMCPHTTPServerStatus);
     const [mcpHTTPServerDraft, setMCPHTTPServerDraft] = useState<AIMCPHTTPServerDraft>(DEFAULT_MCP_HTTP_SERVER_DRAFT);
     const [mcpHTTPServerLoading, setMCPHTTPServerLoading] = useState(false);
     const [skills, setSkills] = useState<AISkillConfig[]>([]);
@@ -113,14 +120,14 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const watchedApiFormat = Form.useWatch('apiFormat', form) || 'openai';
     const skillRequiredToolOptions = useMemo(() => ([
         ...BUILTIN_AI_TOOL_INFO.map((tool) => ({
-            label: `${tool.name} · 内置工具`,
+            label: `${tool.name} · ${t('ai_settings.tools.builtin_tool_label')}`,
             value: tool.name,
         })),
         ...mcpTools.map((tool) => ({
             label: `${tool.alias} · ${tool.serverName}`,
             value: tool.alias,
         })),
-    ]), [mcpTools]);
+    ]), [mcpTools, t]);
 
     const resolveAIService = useCallback(async () => {
         const service = await waitForAIService();
@@ -137,11 +144,11 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
 
     const copyTextToClipboard = useCallback(async (text: string, successMessage: string) => {
         if (typeof navigator?.clipboard?.writeText !== 'function') {
-            throw new Error('当前环境不支持复制到剪贴板');
+            throw new Error(t('ai_settings.clipboard.error.unsupported'));
         }
         await navigator.clipboard.writeText(text);
         void messageApi.success(successMessage);
-    }, [messageApi]);
+    }, [messageApi, t]);
 
     const {
         handleCopySelectedMCPConfigPath,
@@ -190,7 +197,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 callOrFallback(() => Service.AIGetUserPromptSettings?.(), EMPTY_AI_USER_PROMPT_SETTINGS),
                 callOrFallback(() => Service.AIGetMCPServers?.(), []),
                 callOrFallback(() => Service.AIListMCPTools?.(), []),
-                callOrFallback<AIMCPHTTPServerStatus>(() => Service.AIGetMCPHTTPServerStatus?.(), DEFAULT_MCP_HTTP_SERVER_STATUS),
+                callOrFallback<AIMCPHTTPServerStatus>(() => Service.AIGetMCPHTTPServerStatus?.(), defaultMCPHTTPServerStatus),
                 callOrFallback(() => Service.AIGetSkills?.(), []),
                 callOrFallback<AIMCPClientInstallStatus[]>(() => Service.AIGetMCPClientInstallStatuses?.(), EMPTY_MCP_CLIENT_STATUSES),
             ]);
@@ -212,7 +219,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             if (Array.isArray(mcpToolsRes)) setMCPTools(mcpToolsRes);
             if (mcpHTTPServerStatusRes) {
                 const nextStatus = {
-                    ...DEFAULT_MCP_HTTP_SERVER_STATUS,
+                    ...defaultMCPHTTPServerStatus,
                     ...mcpHTTPServerStatusRes,
                 };
                 setMCPHTTPServerStatus(nextStatus);
@@ -223,7 +230,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 syncMCPClientStatuses(mcpClientStatusesRes);
             }
         } catch (e) { console.warn('Failed to load AI config', e); }
-    }, [resolveAIService, syncMCPClientStatuses]);
+    }, [defaultMCPHTTPServerStatus, resolveAIService, syncMCPClientStatuses]);
 
     useEffect(() => { if (open) void loadConfig(); }, [open, loadConfig]);
 
@@ -305,7 +312,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 },
             }));
         } catch (e: any) {
-            void messageApi.error(e?.message || '读取供应商配置失败');
+            void messageApi.error(e?.message || t('ai_settings.message.load_provider_failed'));
         }
     };
 
@@ -319,16 +326,16 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             if (wasActive) {
                 const newProviders: any[] = await Service?.AIGetProviders?.() || [];
                 if (newProviders.length > 0) {
-                    const newActiveName = newProviders[0]?.name || '下一个供应商';
-                    void messageApi.success(`已删除，自动切换到「${newActiveName}」`);
+                    const newActiveName = newProviders[0]?.name || t('ai_settings.provider.next_provider');
+                    void messageApi.success(t('ai_settings.message.deleted_and_switched', { name: newActiveName }));
                 } else {
-                    void messageApi.success('已删除');
+                    void messageApi.success(t('ai_settings.message.deleted'));
                 }
             } else {
-                void messageApi.success('已删除');
+                void messageApi.success(t('ai_settings.message.deleted'));
             }
             window.dispatchEvent(new CustomEvent('gonavi:ai:provider-changed'));
-        } catch (e: any) { void messageApi.error(e?.message || '删除失败'); }
+        } catch (e: any) { void messageApi.error(e?.message || t('ai_settings.message.delete_failed')); }
     };
 
     const handleSaveProvider = async () => {
@@ -339,7 +346,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             
             // 构建 payload，处理 model/models 逻辑
             const preset = findPreset(values.presetKey);
-            const isCustomLike = values.presetKey === 'custom' || values.presetKey === 'ollama';
+            const isCustomLike = values.presetKey === 'custom' || values.presetKey === 'ollama' || values.presetKey === 'codebuddy' || values.presetKey === 'cursor';
             const { model: finalModel, models: resolvedModels } = resolvePresetModelSelection({
                 presetKey: values.presetKey,
                 presetDefaultModel: preset.defaultModel,
@@ -377,11 +384,11 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             };
             // 后端 AISaveProvider 统一处理新增和更新，返回 void，失败抛异常
             await Service?.AISaveProvider?.(payload);
-            void messageApi.success('已保存'); resetProviderEditorSession(); void loadConfig();
+            void messageApi.success(t('ai_settings.message.saved')); resetProviderEditorSession(); void loadConfig();
             window.dispatchEvent(new CustomEvent('gonavi:ai:provider-changed'));
         } catch (e: any) {
             if (e?.errorFields) { /* antd form validation error, ignore */ }
-            else void messageApi.error(e?.message || '保存失败');
+            else void messageApi.error(e?.message || t('ai_settings.message.save_failed'));
         } finally { setLoading(false); }
     };
 
@@ -389,9 +396,9 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         try {
             const Service = (window as any).go?.aiservice?.Service;
             await Service?.AISetActiveProvider?.(id);
-            setActiveProviderId(id); void messageApi.success('已切换');
+            setActiveProviderId(id); void messageApi.success(t('ai_settings.message.switched'));
             window.dispatchEvent(new CustomEvent('gonavi:ai:provider-changed'));
-        } catch (e: any) { void messageApi.error(e?.message || '切换失败'); }
+        } catch (e: any) { void messageApi.error(e?.message || t('ai_settings.message.switch_failed')); }
     };
 
     const handleSafetyChange = async (level: AISafetyLevel) => {
@@ -422,10 +429,10 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             };
             await Service?.AISaveUserPromptSettings?.(payload);
             setUserPromptSettings(payload);
-            void messageApi.success('自定义提示词已保存');
+            void messageApi.success(t('ai_settings.prompts.message.saved'));
             window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
         } catch (e: any) {
-            void messageApi.error(e?.message || '保存自定义提示词失败');
+            void messageApi.error(e?.message || t('ai_settings.prompts.message.save_failed'));
         } finally {
             setLoading(false);
         }
@@ -445,10 +452,10 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             const Service = (window as any).go?.aiservice?.Service;
             await Service?.AISaveMCPServer?.(server);
             await loadConfig();
-            void messageApi.success('MCP 服务已保存');
+            void messageApi.success(t('ai_settings.mcp_server.message.saved'));
             window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
         } catch (e: any) {
-            void messageApi.error(e?.message || '保存 MCP 服务失败');
+            void messageApi.error(e?.message || t('ai_settings.mcp_server.message.save_failed'));
         } finally {
             setLoading(false);
         }
@@ -465,9 +472,9 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             } else {
                 setMCPServers((prev) => prev.filter((item) => item.id !== id));
             }
-            void messageApi.success('MCP 服务已删除');
+            void messageApi.success(t('ai_settings.mcp_server.message.deleted'));
         } catch (e: any) {
-            void messageApi.error(e?.message || '删除 MCP 服务失败');
+            void messageApi.error(e?.message || t('ai_settings.mcp_server.message.delete_failed'));
         } finally {
             setLoading(false);
         }
@@ -479,7 +486,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             const Service = (window as any).go?.aiservice?.Service;
             const res = await Service?.AITestMCPServer?.(server);
             if (res?.success) {
-                void messageApi.success(res?.message || 'MCP 服务连接成功');
+                void messageApi.success(res?.message || t('ai_settings.mcp_server.message.test_success'));
                 if (typeof Service?.AIListMCPTools === 'function') {
                     const nextTools = await Service.AIListMCPTools();
                     if (Array.isArray(nextTools)) setMCPTools(nextTools);
@@ -487,10 +494,10 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                     setMCPTools(res.tools);
                 }
             } else {
-                void messageApi.error(res?.message || 'MCP 服务测试失败');
+                void messageApi.error(res?.message || t('ai_settings.mcp_server.message.test_failed'));
             }
         } catch (e: any) {
-            void messageApi.error(e?.message || '测试 MCP 服务失败');
+            void messageApi.error(e?.message || t('ai_settings.mcp_server.message.test_request_failed'));
         } finally {
             setLoading(false);
         }
@@ -501,13 +508,13 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             setMCPHTTPServerLoading(true);
             const Service = await resolveAIService();
             if (!Service) {
-                throw new Error('当前运行时暂不支持 MCP HTTP 服务控制');
+                throw new Error(t('ai_settings.mcp_http.error.control_unsupported_runtime'));
             }
             if (checked && typeof Service.AIStartMCPHTTPServer !== 'function') {
-                throw new Error('当前版本暂不支持启动 MCP HTTP 服务');
+                throw new Error(t('ai_settings.mcp_http.error.start_unsupported_version'));
             }
             if (!checked && typeof Service.AIStopMCPHTTPServer !== 'function') {
-                throw new Error('当前版本暂不支持停止 MCP HTTP 服务');
+                throw new Error(t('ai_settings.mcp_http.error.stop_unsupported_version'));
             }
             const nextStatus = checked
                 ? await Service.AIStartMCPHTTPServer({
@@ -519,15 +526,15 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 : await Service.AIStopMCPHTTPServer();
             if (nextStatus) {
                 const normalizedStatus = {
-                    ...DEFAULT_MCP_HTTP_SERVER_STATUS,
+                    ...defaultMCPHTTPServerStatus,
                     ...nextStatus,
                 };
                 setMCPHTTPServerStatus(normalizedStatus);
                 setMCPHTTPServerDraft((prev) => buildMCPHTTPServerDraftFromStatus(normalizedStatus, prev));
             }
-            void messageApi.success(checked ? 'GoNavi MCP HTTP 服务已启动' : 'GoNavi MCP HTTP 服务已停止');
+            void messageApi.success(checked ? t('ai_settings.mcp_http.message.started') : t('ai_settings.mcp_http.message.stopped'));
         } catch (e: any) {
-            void messageApi.error(e?.message || '切换 GoNavi MCP HTTP 服务失败');
+            void messageApi.error(e?.message || t('ai_settings.mcp_http.message.toggle_failed'));
         } finally {
             setMCPHTTPServerLoading(false);
         }
@@ -543,19 +550,19 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const handleCopyMCPHTTPServerURL = async () => {
         const url = String(mcpHTTPServerStatus.url || '').trim();
         if (!url) {
-            void messageApi.error('当前没有可复制的 MCP HTTP URL');
+            void messageApi.error(t('ai_settings.mcp_http.message.url_unavailable'));
             return;
         }
-        await copyTextToClipboard(url, 'MCP HTTP URL 已复制');
+        await copyTextToClipboard(url, t('ai_settings.mcp_http.message.url_copied'));
     };
 
     const handleCopyMCPHTTPServerAuthorization = async () => {
         const authorizationHeader = String(mcpHTTPServerStatus.authorizationHeader || '').trim();
         if (!authorizationHeader) {
-            void messageApi.error('请先启动 MCP HTTP 服务生成 Authorization Header');
+            void messageApi.error(t('ai_settings.mcp_http.message.authorization_header_required'));
             return;
         }
-        await copyTextToClipboard(`Authorization: ${authorizationHeader}`, 'Authorization Header 已复制');
+        await copyTextToClipboard(`Authorization: ${authorizationHeader}`, t('ai_settings.mcp_http.message.authorization_header_copied'));
     };
 
     const updateSkillDraft = (id: string, patch: Partial<AISkillConfig>) => {
@@ -572,10 +579,10 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             const Service = (window as any).go?.aiservice?.Service;
             await Service?.AISaveSkill?.(skill);
             await loadConfig();
-            void messageApi.success('Skill 已保存');
+            void messageApi.success(t('ai_settings.skill.message.saved'));
             window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed'));
         } catch (e: any) {
-            void messageApi.error(e?.message || '保存 Skill 失败');
+            void messageApi.error(e?.message || t('ai_settings.skill.message.save_failed'));
         } finally {
             setLoading(false);
         }
@@ -592,9 +599,9 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             } else {
                 setSkills((prev) => prev.filter((item) => item.id !== id));
             }
-            void messageApi.success('Skill 已删除');
+            void messageApi.success(t('ai_settings.skill.message.deleted'));
         } catch (e: any) {
-            void messageApi.error(e?.message || '删除 Skill 失败');
+            void messageApi.error(e?.message || t('ai_settings.skill.message.delete_failed'));
         } finally {
             setLoading(false);
         }
@@ -624,11 +631,12 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 presetFixedApiFormat: preset.fixedApiFormat,
                 valuesApiFormat: values.apiFormat,
             });
+            const allowEmptySecret = values.presetKey === 'codebuddy';
             const secretDraft = resolveProviderSecretDraft({
                 apiKeyInput: values.apiKey,
             });
-            if (secretDraft.mode === 'clear') {
-                throw new Error('测试连接前请填写 API Key');
+            if (secretDraft.mode === 'clear' && !allowEmptySecret) {
+                throw new Error(t('ai_settings.message.test_requires_new_api_key'));
             }
             const res = await Service?.AITestProvider?.({
                 ...editingProvider,
@@ -643,9 +651,9 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 temperature: Number(values.temperature) ?? 0.7,
                 apiFormat: resolvedTransport.apiFormat,
             });
-            if (res?.success) { setTestStatus('success'); void messageApi.success('连接成功'); }
-            else { setTestStatus('error'); void messageApi.error(`测试失败: ${res?.message || '未知错误'}`); }
-        } catch (e: any) { setTestStatus('error'); void messageApi.error(e?.message || '测试失败'); }
+            if (res?.success) { setTestStatus('success'); void messageApi.success(t('ai_settings.message.test_success')); }
+            else { setTestStatus('error'); void messageApi.error(res?.message || t('ai_settings.message.test_failed')); }
+        } catch (e: any) { setTestStatus('error'); void messageApi.error(e?.message || t('ai_settings.message.test_failed')); }
         finally { setLoading(false); }
     };
 
@@ -681,9 +689,9 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                         <RobotOutlined />
                     </div>
                     <div>
-                        <div style={{ fontSize: 16, fontWeight: 800, color: overlayTheme.titleText }}>AI 设置</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: overlayTheme.titleText }}>{t('ai_settings.title')}</div>
                         <div style={{ marginTop: 3, color: overlayTheme.mutedText, fontSize: 12 }}>
-                            配置 AI 模型、安全级别和上下文选项
+                            {t('ai_settings.subtitle')}
                         </div>
                     </div>
                 </div>

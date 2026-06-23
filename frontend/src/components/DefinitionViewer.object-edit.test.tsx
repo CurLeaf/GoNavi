@@ -178,6 +178,68 @@ describe('DefinitionViewer object edit entry', () => {
     }));
   });
 
+  it('uses SQL Server catalog metadata when loading routine definitions', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [{ routine_definition: 'CREATE PROCEDURE [reporting].[refresh_stats]\nAS\nSELECT 1;' }],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<DefinitionViewer tab={createTab({
+        id: 'routine-def-conn-1-main-reporting.refresh_stats',
+        title: '存储过程: reporting.refresh_stats',
+        type: 'routine-def',
+        routineName: 'reporting.refresh_stats',
+        routineType: 'PROCEDURE',
+        viewName: undefined,
+        viewKind: undefined,
+      })} />);
+      await flushPromises();
+    });
+
+    const sql = String(backendApp.DBQuery.mock.calls[0][2] || '');
+    expect(sql).toContain('FROM [main].sys.all_sql_modules AS m');
+    expect(sql).toContain("WHERE o.name = N'refresh_stats'");
+    expect(sql).toContain("AND s.name = N'reporting'");
+    expect(sql).not.toContain('OBJECT_DEFINITION');
+    expect(String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''))).toContain('CREATE PROCEDURE [reporting].[refresh_stats]');
+  });
+
+  it('joins SQL Server sp_helptext rows when catalog metadata is empty', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    backendApp.DBQuery
+      .mockResolvedValueOnce({ success: true, data: [] })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { Text: 'CREATE PROCEDURE [reporting].[refresh_stats]\n' },
+          { Text: 'AS\n' },
+          { Text: 'BEGIN\n  SELECT 1;\nEND' },
+        ],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(<DefinitionViewer tab={createTab({
+        id: 'routine-def-conn-1-main-reporting.refresh_stats',
+        title: '存储过程: reporting.refresh_stats',
+        type: 'routine-def',
+        routineName: 'reporting.refresh_stats',
+        routineType: 'PROCEDURE',
+        viewName: undefined,
+        viewKind: undefined,
+      })} />);
+      await flushPromises();
+    });
+
+    expect(backendApp.DBQuery.mock.calls[1][2]).toBe("EXEC [main].sys.sp_helptext @objname = N'[reporting].[refresh_stats]'");
+    const editorText = String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''));
+    expect(editorText).toContain('CREATE PROCEDURE [reporting].[refresh_stats]');
+    expect(editorText).toContain('BEGIN\n  SELECT 1;\nEND');
+  });
+
   it('adds CREATE OR REPLACE for routine source snippets returned without ddl prefix', async () => {
     storeState.connections[0].config.type = 'oracle';
     backendApp.DBQuery.mockResolvedValue({

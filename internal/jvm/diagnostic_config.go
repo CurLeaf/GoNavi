@@ -9,6 +9,17 @@ import (
 
 const defaultDiagnosticTimeoutSeconds = 15
 
+const (
+	diagnosticErrorTransportUnsupportedKey      = "jvm.backend.diagnostic.error.transport_unsupported"
+	diagnosticErrorDisabledKey                  = "jvm.backend.diagnostic.error.disabled"
+	diagnosticErrorCommandRequiredKey           = "jvm.backend.diagnostic.error.command_required"
+	diagnosticPolicyMultiCommandUnsupportedKey  = "jvm.backend.diagnostic.policy.multiline_not_supported"
+	diagnosticPolicyObserveCommandNotAllowedKey = "jvm.backend.diagnostic.policy.observe_not_allowed"
+	diagnosticPolicyTraceCommandNotAllowedKey   = "jvm.backend.diagnostic.policy.trace_not_allowed"
+	diagnosticPolicyMutatingNotAllowedKey       = "jvm.backend.diagnostic.policy.mutating_not_allowed"
+	diagnosticPolicyReadOnlyObserveOnlyKey      = "jvm.backend.diagnostic.policy.read_only_observe_only"
+)
+
 var observeDiagnosticCommands = map[string]struct{}{
 	"dashboard":   {},
 	"thread":      {},
@@ -36,7 +47,12 @@ func NormalizeDiagnosticConfig(cfg connection.ConnectionConfig) (connection.JVMD
 	normalized := cfg.JVM.Diagnostic
 	normalized.Transport = normalizeDiagnosticTransport(normalized.Transport)
 	if normalized.Transport == "" {
-		return connection.JVMDiagnosticConfig{}, fmt.Errorf("不支持的 JVM 诊断传输模式：%s", strings.TrimSpace(cfg.JVM.Diagnostic.Transport))
+		return connection.JVMDiagnosticConfig{}, &LocalizedError{
+			Key: diagnosticErrorTransportUnsupportedKey,
+			Params: map[string]any{
+				"transport": cfg.JVM.Diagnostic.Transport,
+			},
+		}
 	}
 
 	normalized.BaseURL = strings.TrimSpace(normalized.BaseURL)
@@ -54,7 +70,7 @@ func NormalizeDiagnosticConfig(cfg connection.ConnectionConfig) (connection.JVMD
 
 func ValidateDiagnosticCommandPolicy(cfg connection.JVMDiagnosticConfig, command string) (string, error) {
 	if !cfg.Enabled {
-		return "", fmt.Errorf("当前连接未启用 JVM 诊断增强模式")
+		return "", &LocalizedError{Key: diagnosticErrorDisabledKey}
 	}
 
 	category, normalizedCommand, err := classifyDiagnosticCommand(command)
@@ -65,15 +81,24 @@ func ValidateDiagnosticCommandPolicy(cfg connection.JVMDiagnosticConfig, command
 	switch category {
 	case DiagnosticCommandCategoryObserve:
 		if !cfg.AllowObserveCommands {
-			return "", fmt.Errorf("当前连接未开放观察类诊断命令：%s", normalizedCommand)
+			return "", &LocalizedError{
+				Key:    diagnosticPolicyObserveCommandNotAllowedKey,
+				Params: map[string]any{"command": normalizedCommand},
+			}
 		}
 	case DiagnosticCommandCategoryTrace:
 		if !cfg.AllowTraceCommands {
-			return "", fmt.Errorf("当前连接未开放跟踪类诊断命令：%s", normalizedCommand)
+			return "", &LocalizedError{
+				Key:    diagnosticPolicyTraceCommandNotAllowedKey,
+				Params: map[string]any{"command": normalizedCommand},
+			}
 		}
 	default:
 		if !cfg.AllowMutatingCommands {
-			return "", fmt.Errorf("当前连接未开放高风险诊断命令：%s", normalizedCommand)
+			return "", &LocalizedError{
+				Key:    diagnosticPolicyMutatingNotAllowedKey,
+				Params: map[string]any{"command": normalizedCommand},
+			}
 		}
 	}
 
@@ -94,7 +119,7 @@ func ValidateDiagnosticExecutionPolicy(cfg connection.ConnectionConfig, command 
 	if cfg.JVM.ReadOnly != nil && *cfg.JVM.ReadOnly {
 		switch category {
 		case DiagnosticCommandCategoryTrace, DiagnosticCommandCategoryMutating:
-			return "", fmt.Errorf("当前连接为只读模式，仅允许观察类诊断命令")
+			return "", &LocalizedError{Key: diagnosticPolicyReadOnlyObserveOnlyKey}
 		}
 	}
 
@@ -104,10 +129,10 @@ func ValidateDiagnosticExecutionPolicy(cfg connection.ConnectionConfig, command 
 func classifyDiagnosticCommand(command string) (string, string, error) {
 	normalizedCommand := strings.TrimSpace(command)
 	if normalizedCommand == "" {
-		return "", "", fmt.Errorf("诊断命令不能为空")
+		return "", "", &LocalizedError{Key: diagnosticErrorCommandRequiredKey}
 	}
 	if strings.ContainsAny(normalizedCommand, "\r\n") {
-		return "", "", fmt.Errorf("诊断命令不支持换行或多命令输入")
+		return "", "", &LocalizedError{Key: diagnosticPolicyMultiCommandUnsupportedKey}
 	}
 
 	fields := strings.Fields(strings.ToLower(normalizedCommand))

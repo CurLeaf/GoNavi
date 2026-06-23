@@ -3,6 +3,7 @@ package jvm
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,6 +22,8 @@ type blockingMonitoringProvider struct {
 	release chan struct{}
 	once    sync.Once
 }
+
+type fakeProviderWithoutMonitoring struct{}
 
 func (f fakeMonitoringProvider) Mode() string { return ModeJMX }
 func (f fakeMonitoringProvider) TestConnection(context.Context, connection.ConnectionConfig) error {
@@ -51,6 +54,26 @@ func (p *blockingMonitoringProvider) GetMonitoringSnapshot(context.Context, conn
 	})
 	<-p.release
 	return p.snapshot, p.snapshotErr
+}
+
+func (f fakeProviderWithoutMonitoring) Mode() string { return ModeJMX }
+func (f fakeProviderWithoutMonitoring) TestConnection(context.Context, connection.ConnectionConfig) error {
+	return nil
+}
+func (f fakeProviderWithoutMonitoring) ProbeCapabilities(context.Context, connection.ConnectionConfig) ([]Capability, error) {
+	return nil, nil
+}
+func (f fakeProviderWithoutMonitoring) ListResources(context.Context, connection.ConnectionConfig, string) ([]ResourceSummary, error) {
+	return nil, nil
+}
+func (f fakeProviderWithoutMonitoring) GetValue(context.Context, connection.ConnectionConfig, string) (ValueSnapshot, error) {
+	return ValueSnapshot{}, nil
+}
+func (f fakeProviderWithoutMonitoring) PreviewChange(context.Context, connection.ConnectionConfig, ChangeRequest) (ChangePreview, error) {
+	return ChangePreview{}, nil
+}
+func (f fakeProviderWithoutMonitoring) ApplyChange(context.Context, connection.ConnectionConfig, ChangeRequest) (ApplyResult, error) {
+	return ApplyResult{}, nil
 }
 
 func swapMonitoringProviderFactory(factory func(mode string) (Provider, error)) func() {
@@ -216,6 +239,60 @@ func TestMonitoringManagerStopMarksSessionStopped(t *testing.T) {
 	}
 }
 
+func TestMonitoringManagerReturnsLocalizedErrorsForFixedMonitoringFailures(t *testing.T) {
+	manager := newMonitoringManagerForTest(5)
+
+	_, err := manager.GetHistory("conn-missing", ModeJMX)
+	assertMonitoringLocalizedError(t, err, "jvm.backend.monitoring.error.session_not_found", map[string]any{
+		"connectionId": "conn-missing",
+		"providerMode": ModeJMX,
+	})
+
+	err = manager.Stop("conn-missing", ModeAgent)
+	assertMonitoringLocalizedError(t, err, "jvm.backend.monitoring.error.session_not_found", map[string]any{
+		"connectionId": "conn-missing",
+		"providerMode": ModeAgent,
+	})
+
+	restore := swapMonitoringProviderFactory(func(mode string) (Provider, error) {
+		return fakeProviderWithoutMonitoring{}, nil
+	})
+	defer restore()
+
+	_, err = manager.Start(context.Background(), connection.ConnectionConfig{
+		ID:   "conn-monitor",
+		Type: "jvm",
+		Host: "orders.internal",
+		JVM: connection.JVMConfig{
+			PreferredMode: ModeJMX,
+			AllowedModes:  []string{ModeJMX},
+		},
+	}, "")
+	assertMonitoringLocalizedError(t, err, "jvm.backend.monitoring.error.snapshot_unsupported", map[string]any{
+		"provider": "JMX",
+	})
+}
+
+func assertMonitoringLocalizedError(t *testing.T, err error, key string, params map[string]any) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatalf("expected localized error %q, got nil", key)
+	}
+	var localized *LocalizedError
+	if !errors.As(err, &localized) {
+		t.Fatalf("expected LocalizedError %q, got %T: %v", key, err, err)
+	}
+	if localized.Key != key {
+		t.Fatalf("expected localized key %q, got %q", key, localized.Key)
+	}
+	for name, expected := range params {
+		if localized.Params[name] != expected {
+			t.Fatalf("expected param %s=%#v, got %#v in %#v", name, expected, localized.Params[name], localized.Params)
+		}
+	}
+}
+
 func TestMonitoringSessionIgnoresStaleStopFromPreviousSampler(t *testing.T) {
 	session := &monitoringSession{}
 
@@ -330,6 +407,15 @@ func TestMonitoringSamplerStopsAfterConsecutiveFailures(t *testing.T) {
 			}
 			if len(snapshot.ProviderWarnings) == 0 {
 				t.Fatalf("expected provider warnings to explain sampling failure")
+			}
+			expectedFinalWarning := "__gonavi_i18n__:jvm.backend.monitoring.warning.sample_auto_stopped:count=3"
+			if snapshot.ProviderWarnings[len(snapshot.ProviderWarnings)-1] != expectedFinalWarning {
+				t.Fatalf("expected final warning to be structured, got %#v", snapshot.ProviderWarnings)
+			}
+			for _, warning := range snapshot.ProviderWarnings {
+				if strings.Contains(warning, "监控采样连续失败") {
+					t.Fatalf("expected no localized Chinese warning in manager snapshot, got %#v", snapshot.ProviderWarnings)
+				}
 			}
 			return
 		case <-deadline:

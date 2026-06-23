@@ -30,6 +30,8 @@ import type {
   TabData,
 } from "../types";
 import { buildRpcConnectionConfig } from "../utils/connectionRpcConfig";
+import { t as translate } from "../i18n";
+import { useOptionalI18n } from "../i18n/provider";
 import {
   buildJVMChangeDraftFromAIPlan,
   buildJVMAIPlanPrompt,
@@ -65,6 +67,26 @@ const DEFAULT_PAYLOAD_TEXT = JVM_DEFAULT_PAYLOAD_TEMPLATE;
 
 type JVMResourceBrowserProps = {
   tab: TabData;
+};
+
+type LocalizedError = Error & {
+  userMessage?: string;
+};
+
+const createLocalizedError = (message: string): LocalizedError => {
+  const error = new Error(message) as LocalizedError;
+  error.userMessage = message;
+  return error;
+};
+
+const resolveLocalizedErrorMessage = (
+  error: unknown,
+  fallback: string,
+): string => {
+  const userMessage = (error as LocalizedError | undefined)?.userMessage;
+  return typeof userMessage === "string" && userMessage.trim()
+    ? userMessage
+    : fallback;
 };
 
 const buildJVMRuntimeConfig = (
@@ -194,6 +216,10 @@ const normalizeApplyResult = (value: any): JVMApplyResult | null => {
 };
 
 const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
+  const i18n = useOptionalI18n();
+  const i18nLanguage = i18n?.language;
+  const tr = (key: string, params?: Parameters<typeof translate>[1]) =>
+    translate(key, params, i18nLanguage);
   const connection = useStore((state) =>
     state.connections.find((item) => item.id === tab.connectionId),
   );
@@ -234,6 +260,8 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
   );
   const [previewContextKey, setPreviewContextKey] = useState("");
   const [applyLoading, setApplyLoading] = useState(false);
+  const snapshotLoadSequenceRef = useRef(0);
+  const i18nLanguageRef = useRef(i18nLanguage);
   const previewSequenceRef = useRef(0);
   const currentPreviewContextKey = buildJVMPreviewContextKey(
     tab.connectionId,
@@ -242,6 +270,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     runtimeFingerprint,
   );
   const previewContextKeyRef = useRef(currentPreviewContextKey);
+  i18nLanguageRef.current = i18nLanguage;
   previewContextKeyRef.current = currentPreviewContextKey;
 
   const clearPreviewState = () => {
@@ -284,23 +313,25 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     [action, supportedActions],
   );
   const selectedActionDisplay = useMemo(
-    () => resolveJVMActionDisplay(selectedActionDefinition || action),
-    [action, selectedActionDefinition],
+    () =>
+      resolveJVMActionDisplay(selectedActionDefinition || action, i18nLanguage),
+    [action, i18nLanguage, selectedActionDefinition],
   );
 
   const loadSnapshot = async () => {
     const loadContextKey = currentPreviewContextKey;
+    const loadLanguage = i18nLanguage;
     if (!connection) {
       setLoading(false);
       setSnapshot(null);
-      setError("连接不存在或已被删除");
+      setError(tr("jvm_resource.error.connection_missing"));
       return;
     }
 
     if (!resourcePath) {
       setLoading(false);
       setSnapshot(null);
-      setError("资源路径为空");
+      setError(tr("jvm_resource.error.resource_path_empty"));
       return;
     }
 
@@ -308,10 +339,11 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     if (typeof backendApp?.JVMGetValue !== "function") {
       setLoading(false);
       setSnapshot(null);
-      setError("JVMGetValue 后端方法不可用");
+      setError(tr("jvm_resource.error.get_value_unavailable"));
       return;
     }
 
+    const loadSequence = ++snapshotLoadSequenceRef.current;
     setLoading(true);
     setError("");
     try {
@@ -319,26 +351,43 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
         buildJVMRuntimeConfig(connection, providerMode),
         resourcePath,
       );
-      if (loadContextKey !== previewContextKeyRef.current) {
+      if (
+        loadSequence !== snapshotLoadSequenceRef.current ||
+        loadContextKey !== previewContextKeyRef.current ||
+        loadLanguage !== i18nLanguageRef.current
+      ) {
         return;
       }
       if (!result?.success) {
         setSnapshot(null);
-        setError(String(result?.message || "读取 JVM 资源失败"));
+        setError(tr("jvm_resource.error.read_failed"));
         return;
       }
       setSnapshot((result.data || null) as JVMValueSnapshot | null);
     } catch (err: any) {
+      if (
+        loadSequence !== snapshotLoadSequenceRef.current ||
+        loadContextKey !== previewContextKeyRef.current ||
+        loadLanguage !== i18nLanguageRef.current
+      ) {
+        return;
+      }
       setSnapshot(null);
-      setError(err?.message || "读取 JVM 资源失败");
+      setError(tr("jvm_resource.error.read_failed"));
     } finally {
-      setLoading(false);
+      if (
+        loadSequence === snapshotLoadSequenceRef.current &&
+        loadContextKey === previewContextKeyRef.current &&
+        loadLanguage === i18nLanguageRef.current
+      ) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     void loadSnapshot();
-  }, [connection, providerMode, resourcePath, runtimeFingerprint, tab.connectionId]);
+  }, [connection, i18nLanguage, providerMode, resourcePath, runtimeFingerprint, tab.connectionId]);
 
   useEffect(() => {
     setSnapshot(null);
@@ -400,18 +449,14 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
           : undefined;
 
       if (!planContext) {
-        setDraftError(
-          "AI 计划缺少来源上下文，请在目标 JVM 资源页重新生成后再应用。",
-        );
+        setDraftError(tr("jvm_resource.error.ai_plan_missing_context"));
         setApplyMessage("");
         clearPreviewState();
         return;
       }
 
       if (!matchesJVMAIPlanTargetTab(tab, planContext)) {
-        setDraftError(
-          "当前 JVM 页签与 AI 计划的来源上下文不一致，已拒绝自动应用。",
-        );
+        setDraftError(tr("jvm_resource.error.ai_plan_context_mismatch"));
         setApplyMessage("");
         clearPreviewState();
         return;
@@ -420,8 +465,8 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       let draftFromPlan: JVMAIChangeDraft;
       try {
         draftFromPlan = buildJVMChangeDraftFromAIPlan(plan);
-      } catch (err: any) {
-        setDraftError(err?.message || "AI 计划暂时无法转换为 JVM 预览草稿");
+      } catch {
+        setDraftError(tr("jvm_resource.error.ai_plan_to_draft_failed"));
         setApplyMessage("");
         clearPreviewState();
         return;
@@ -434,7 +479,9 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       setDraftSource(draftFromPlan.source || "ai-plan");
       setDraftError("");
       setApplyMessage(
-        `已从 AI 计划填充草稿，目标资源为 ${draftFromPlan.resourceId}，请先执行“预览变更”再确认写入。`,
+        tr("jvm_resource.message.ai_plan_draft_filled", {
+          resourceId: draftFromPlan.resourceId,
+        }),
       );
       clearPreviewState();
     };
@@ -448,7 +495,14 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
         "gonavi:jvm-apply-ai-plan",
         handler as EventListener,
       );
-  }, [resourcePath, tab.id]);
+  }, [
+    i18nLanguage,
+    resourcePath,
+    tab.connectionId,
+    tab.id,
+    tab.providerMode,
+    tab.type,
+  ]);
 
   const handleSelectAction = (
     nextAction: string,
@@ -473,7 +527,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     const trimmedAction = String(action || "").trim() || "put";
     const trimmedReason = String(reason || "").trim();
     if (!trimmedReason) {
-      throw new Error("请填写变更原因");
+      throw createLocalizedError(tr("jvm_resource.error.reason_required"));
     }
 
     const rawPayload = String(payloadText || "").trim();
@@ -481,14 +535,16 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     if (rawPayload) {
       const parsed = JSON.parse(rawPayload);
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("Payload 必须是 JSON 对象");
+        throw createLocalizedError(
+          tr("jvm_resource.error.payload_object_required"),
+        );
       }
       payload = parsed as Record<string, any>;
     }
 
     const resourceId = String(draftResourceId || resourcePath).trim();
     if (!resourceId) {
-      throw new Error("资源 ID 为空，无法生成变更草稿");
+      throw createLocalizedError(tr("jvm_resource.error.resource_id_empty"));
     }
 
     return {
@@ -518,7 +574,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
 
   const handleAskAIForPlan = () => {
     if (!connection) {
-      setDraftError("连接不存在或已被删除");
+      setDraftError(tr("jvm_resource.error.connection_missing"));
       return;
     }
 
@@ -549,21 +605,26 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
 
   const handlePreview = async () => {
     if (!connection) {
-      setDraftError("连接不存在或已被删除");
+      setDraftError(tr("jvm_resource.error.connection_missing"));
       return;
     }
 
     const backendApp = (window as any).go?.app?.App;
     if (typeof backendApp?.JVMPreviewChange !== "function") {
-      setDraftError("JVMPreviewChange 后端方法不可用");
+      setDraftError(tr("jvm_resource.error.preview_unavailable"));
       return;
     }
 
     let draftPlan: JVMChangeRequest;
     try {
       draftPlan = buildDraftPlan();
-    } catch (err: any) {
-      setDraftError(err?.message || "变更草稿不合法");
+    } catch (err) {
+      setDraftError(
+        resolveLocalizedErrorMessage(
+          err,
+          tr("jvm_resource.error.draft_invalid"),
+        ),
+      );
       return;
     }
 
@@ -588,14 +649,16 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
 
       if (result?.success === false) {
         clearPreviewState();
-        setDraftError(String(result?.message || "预览 JVM 变更失败"));
+        setDraftError(
+          String(result?.message || tr("jvm_resource.error.preview_failed")),
+        );
         return;
       }
 
       const preview = normalizePreviewResult(result);
       if (!preview) {
         clearPreviewState();
-        setDraftError("预览结果格式不正确");
+        setDraftError(tr("jvm_resource.error.preview_result_invalid"));
         return;
       }
 
@@ -606,7 +669,11 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       setPreviewOpen(true);
     } catch (err: any) {
       clearPreviewState();
-      setDraftError(err?.message || "预览 JVM 变更失败");
+      setDraftError(
+        err?.message ||
+          (typeof err === "string" ? err : "") ||
+          tr("jvm_resource.error.preview_failed"),
+      );
     } finally {
       setPreviewLoading(false);
     }
@@ -616,31 +683,31 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
     await Promise.resolve();
 
     if (!connection) {
-      setDraftError("连接不存在或已被删除");
+      setDraftError(tr("jvm_resource.error.connection_missing"));
       return;
     }
 
     const backendApp = (window as any).go?.app?.App;
     if (typeof backendApp?.JVMApplyChange !== "function") {
-      setDraftError("JVMApplyChange 后端方法不可用");
+      setDraftError(tr("jvm_resource.error.apply_unavailable"));
       return;
     }
 
     if (!previewResult || !previewRequest || !previewRuntimeConfig) {
-      setDraftError("请先预览变更，再确认执行");
+      setDraftError(tr("jvm_resource.error.preview_required"));
       return;
     }
     if (previewContextKey !== previewContextKeyRef.current) {
       clearPreviewState();
-      setDraftError("资源上下文已变化，请重新预览后再执行");
+      setDraftError(tr("jvm_resource.error.context_changed"));
       return;
     }
 
     let applyRequest: JVMChangeRequest;
     try {
       applyRequest = buildJVMPreviewApplyRequest(previewRequest, previewResult);
-    } catch (err: any) {
-      setDraftError(err?.message || "确认令牌缺失，请重新预览后再执行");
+    } catch {
+      setDraftError(tr("jvm_resource.error.confirmation_missing"));
       return;
     }
 
@@ -653,7 +720,9 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
         applyRequest,
       );
       if (result?.success === false) {
-        setDraftError(String(result?.message || "执行 JVM 变更失败"));
+        setDraftError(
+          String(result?.message || tr("jvm_resource.error.apply_failed")),
+        );
         return;
       }
 
@@ -664,11 +733,17 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
 
       clearPreviewState();
       setApplyMessage(
-        applyResult?.message || result?.message || "JVM 变更已执行",
+        applyResult?.message ||
+          result?.message ||
+          tr("jvm_resource.message.apply_success"),
       );
       await loadSnapshot();
     } catch (err: any) {
-      setDraftError(err?.message || "执行 JVM 变更失败");
+      setDraftError(
+        err?.message ||
+          (typeof err === "string" ? err : "") ||
+          tr("jvm_resource.error.apply_failed"),
+      );
     } finally {
       setApplyLoading(false);
     }
@@ -676,7 +751,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
 
   if (!connection) {
     return (
-      <Empty description="连接不存在或已被删除" style={{ marginTop: 64 }} />
+      <Empty description={tr("jvm_resource.error.connection_missing")} style={{ marginTop: 64 }} />
     );
   }
 
@@ -716,7 +791,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
         <JVMWorkspaceHero
           darkMode={darkMode}
           eyebrow="JVM Resource"
-          title="JVM 资源工作台"
+          title={tr("jvm_resource.title")}
           description={
             <>
               <Text strong>{connection.name}</Text>
@@ -727,7 +802,9 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
             <>
               <JVMModeBadge mode={providerMode} />
               <Tag color={readOnly ? "blue" : "red"}>
-                {readOnly ? "只读连接" : "可写连接"}
+                {readOnly
+                  ? tr("jvm_resource.badge.read_only")
+                  : tr("jvm_resource.badge.writable")}
               </Tag>
             </>
           }
@@ -738,21 +815,21 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                 icon={<ReloadOutlined />}
                 onClick={() => void loadSnapshot()}
               >
-                刷新
+                {tr("common.refresh")}
               </Button>
               <Button
                 size="small"
                 icon={<FileSearchOutlined />}
                 onClick={handleOpenAudit}
               >
-                审计记录
+                {tr("jvm_resource.action.audit")}
               </Button>
               <Button
                 size="small"
                 icon={<RobotOutlined />}
                 onClick={handleAskAIForPlan}
               >
-                AI 生成计划
+                {tr("jvm_resource.action.generate_ai_plan")}
               </Button>
             </>
           }
@@ -769,7 +846,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
           }}
         >
           <Card
-            title="资源快照"
+            title={tr("jvm_resource.card.snapshot")}
             variant="borderless"
             style={{
               ...cardStyle,
@@ -788,20 +865,20 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                       size="small"
                       styles={DESCRIPTION_STYLES}
                     >
-                      <Descriptions.Item label="资源 ID">
+                      <Descriptions.Item label={tr("jvm_resource.field.resource_id")}>
                         {snapshot.resourceId || "-"}
                       </Descriptions.Item>
-                      <Descriptions.Item label="资源类型">
+                      <Descriptions.Item label={tr("jvm_resource.field.resource_type")}>
                         {snapshot.kind || tab.resourceKind || "-"}
                       </Descriptions.Item>
-                      <Descriptions.Item label="格式">
+                      <Descriptions.Item label={tr("jvm_resource.field.format")}>
                         {snapshot.format || "-"}
                       </Descriptions.Item>
-                      <Descriptions.Item label="版本">
+                      <Descriptions.Item label={tr("jvm_resource.field.version")}>
                         {snapshot.version || "-"}
                       </Descriptions.Item>
-                      <Descriptions.Item label="可用动作">
-                        {formatJVMActionSummary(supportedActions)}
+                      <Descriptions.Item label={tr("jvm_resource.field.available_actions")}>
+                        {formatJVMActionSummary(supportedActions, i18nLanguage)}
                       </Descriptions.Item>
                     </Descriptions>
                     {snapshot.description ? (
@@ -812,7 +889,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                         strong
                         style={{ display: "block", marginBottom: 8 }}
                       >
-                        资源值
+                        {tr("jvm_resource.section.resource_value")}
                       </Text>
                       <div
                         className="jvm-resource-browser-code-block"
@@ -847,7 +924,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                           strong
                           style={{ display: "block", marginBottom: 8 }}
                         >
-                          元数据
+                          {tr("jvm_resource.section.metadata")}
                         </Text>
                         <div
                           className="jvm-resource-browser-code-block"
@@ -882,14 +959,14 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                     ) : null}
                   </>
                 ) : error ? null : (
-                  <Empty description="暂无资源数据" />
+                  <Empty description={tr("jvm_resource.empty.no_resource_data")} />
                 )}
               </Space>
             )}
           </Card>
 
           {!readOnly ? (
-            <Card title="变更草稿" variant="borderless" style={cardStyle}>
+            <Card title={tr("jvm_resource.card.change_draft")} variant="borderless" style={cardStyle}>
               <Space direction="vertical" size={16} style={{ width: "100%" }}>
                 {draftError ? (
                   <Alert type="error" showIcon message={draftError} />
@@ -902,17 +979,19 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                   size="small"
                   styles={DESCRIPTION_STYLES}
                 >
-                  <Descriptions.Item label="资源路径">
+                  <Descriptions.Item label={tr("jvm_resource.field.resource_path")}>
                     {resourcePath || "-"}
                   </Descriptions.Item>
-                  <Descriptions.Item label="目标资源">
+                  <Descriptions.Item label={tr("jvm_resource.field.target_resource")}>
                     {draftResourceId || resourcePath || "-"}
                   </Descriptions.Item>
-                  <Descriptions.Item label="资源版本">
+                  <Descriptions.Item label={tr("jvm_resource.field.resource_version")}>
                     {snapshot?.version || "-"}
                   </Descriptions.Item>
-                  <Descriptions.Item label="草稿来源">
-                    {draftSource === "ai-plan" ? "AI 辅助草稿" : "手工编辑"}
+                  <Descriptions.Item label={tr("jvm_resource.field.draft_source")}>
+                    {draftSource === "ai-plan"
+                      ? tr("jvm_resource.draft_source.ai_plan")
+                      : tr("jvm_resource.draft_source.manual")}
                   </Descriptions.Item>
                 </Descriptions>
                 {supportedActions.length > 0 ? (
@@ -921,7 +1000,9 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                     size={8}
                     style={{ width: "100%" }}
                   >
-                    <Text strong>资源支持动作</Text>
+                    <Text strong>
+                      {tr("jvm_resource.section.supported_actions")}
+                    </Text>
                     <Space size={8} wrap>
                       {supportedActions.map((item) => (
                         <Button
@@ -931,7 +1012,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                           danger={item.dangerous}
                           onClick={() => handleSelectAction(item.action, item)}
                         >
-                          {resolveJVMActionDisplay(item).label}
+                          {resolveJVMActionDisplay(item, i18nLanguage).label}
                         </Button>
                       ))}
                     </Space>
@@ -942,19 +1023,23 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                     ) : null}
                     {selectedActionDefinition?.payloadFields?.length ? (
                       <Text type="secondary">
-                        Payload 字段：
+                        {tr("jvm_resource.field.payload_fields")}
                         {selectedActionDefinition.payloadFields
                           .map(
                             (field) =>
-                              `${field.name}${field.required ? "(必填)" : ""}`,
+                              `${field.name}${
+                                field.required
+                                  ? tr("jvm_resource.marker.required_suffix")
+                                  : ""
+                              }`,
                           )
-                          .join("、")}
+                          .join(tr("jvm_resource.list_separator"))}
                       </Text>
                     ) : null}
                   </Space>
                 ) : null}
                 <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                  <Text strong>动作</Text>
+                  <Text strong>{tr("jvm_resource.field.action")}</Text>
                   <Input
                     value={action}
                     onChange={(event) =>
@@ -965,34 +1050,37 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                     }
                     placeholder={
                       providerMode === "jmx"
-                        ? "例如 set 或 invoke"
-                        : "例如 put / clear / evict"
+                        ? tr("jvm_resource.placeholder.action_jmx")
+                        : tr("jvm_resource.placeholder.action_default")
                     }
                     maxLength={64}
                   />
                   {action ? (
                     <Text type="secondary">
-                      当前动作：
-                      {formatJVMActionDisplayText(selectedActionDisplay)}
+                      {tr("jvm_resource.message.current_action")}
+                      {formatJVMActionDisplayText(
+                        selectedActionDisplay,
+                        i18nLanguage,
+                      )}
                     </Text>
                   ) : null}
                 </Space>
                 <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                  <Text strong>变更原因</Text>
+                  <Text strong>{tr("jvm_resource.field.reason")}</Text>
                   <Input
                     value={reason}
                     onChange={(event) => setReason(event.target.value)}
-                    placeholder="填写本次 JVM 资源变更原因"
+                    placeholder={tr("jvm_resource.placeholder.reason")}
                     maxLength={200}
                   />
                 </Space>
                 <Space direction="vertical" size={8} style={{ width: "100%" }}>
-                  <Text strong>Payload(JSON)</Text>
+                  <Text strong>{tr("jvm_resource.field.payload")}</Text>
                   <Text type="secondary">
-                    预览会使用当前草稿；确认执行会使用最近一次成功预览的
-                    request，修改草稿后请重新预览。
-                    {selectedActionDefinition?.payloadExample && !snapshot?.sensitive
-                      ? " 已按当前动作填充推荐模板。"
+                    {tr("jvm_resource.message.payload_hint")}
+                    {selectedActionDefinition?.payloadExample &&
+                    !snapshot?.sensitive
+                      ? ` ${tr("jvm_resource.message.payload_template_applied")}`
                       : ""}
                   </Text>
                   <TextArea
@@ -1008,10 +1096,10 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
                     loading={previewLoading}
                     onClick={() => void handlePreview()}
                   >
-                    预览变更
+                    {tr("jvm_resource.action.preview_change")}
                   </Button>
                   <Button icon={<RobotOutlined />} onClick={handleAskAIForPlan}>
-                    让 AI 生成计划
+                    {tr("jvm_resource.action.ask_ai_plan")}
                   </Button>
                 </Space>
               </Space>

@@ -432,6 +432,26 @@ export namespace app {
 	        this.filePassword = source["filePassword"];
 	    }
 	}
+	export class ExportFileOptions {
+	    format: string;
+	    xlsxMaxRowsPerSheet?: number;
+	    jobId?: string;
+	    totalRowsHint?: number;
+	    totalRowsKnown?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ExportFileOptions(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.format = source["format"];
+	        this.xlsxMaxRowsPerSheet = source["xlsxMaxRowsPerSheet"];
+	        this.jobId = source["jobId"];
+	        this.totalRowsHint = source["totalRowsHint"];
+	        this.totalRowsKnown = source["totalRowsKnown"];
+	    }
+	}
 	export class SecurityUpdateOptions {
 	    allowPartial?: boolean;
 	    writeBackup?: boolean;
@@ -883,6 +903,24 @@ export namespace connection {
 	        this.keyPath = source["keyPath"];
 	    }
 	}
+	export class ConnectionProtectionConfig {
+	    restrictDataEdit?: boolean;
+	    restrictStructureEdit?: boolean;
+	    restrictScriptExecution?: boolean;
+	    restrictDataImport?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConnectionProtectionConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.restrictDataEdit = source["restrictDataEdit"];
+	        this.restrictStructureEdit = source["restrictStructureEdit"];
+	        this.restrictScriptExecution = source["restrictScriptExecution"];
+	        this.restrictDataImport = source["restrictDataImport"];
+	    }
+	}
 	export class ConnectionConfig {
 	    id?: string;
 	    type: string;
@@ -892,6 +930,8 @@ export namespace connection {
 	    password: string;
 	    savePassword?: boolean;
 	    database: string;
+	    readOnly?: boolean;
+	    protection?: ConnectionProtectionConfig;
 	    useSSL?: boolean;
 	    sslMode?: string;
 	    sslCAPath?: string;
@@ -907,6 +947,8 @@ export namespace connection {
 	    dsn?: string;
 	    connectionParams?: string;
 	    timeout?: number;
+	    keepAliveEnabled?: boolean;
+	    keepAliveIntervalMinutes?: number;
 	    redisDB?: number;
 	    redisSentinelMaster?: string;
 	    redisSentinelUser?: string;
@@ -941,6 +983,8 @@ export namespace connection {
 	        this.password = source["password"];
 	        this.savePassword = source["savePassword"];
 	        this.database = source["database"];
+	        this.readOnly = source["readOnly"];
+	        this.protection = this.convertValues(source["protection"], ConnectionProtectionConfig);
 	        this.useSSL = source["useSSL"];
 	        this.sslMode = source["sslMode"];
 	        this.sslCAPath = source["sslCAPath"];
@@ -956,6 +1000,8 @@ export namespace connection {
 	        this.dsn = source["dsn"];
 	        this.connectionParams = source["connectionParams"];
 	        this.timeout = source["timeout"];
+	        this.keepAliveEnabled = source["keepAliveEnabled"];
+	        this.keepAliveIntervalMinutes = source["keepAliveIntervalMinutes"];
 	        this.redisDB = source["redisDB"];
 	        this.redisSentinelMaster = source["redisSentinelMaster"];
 	        this.redisSentinelUser = source["redisSentinelUser"];
@@ -995,6 +1041,7 @@ export namespace connection {
 		    return a;
 		}
 	}
+	
 	export class GlobalProxyView {
 	    enabled: boolean;
 	    type: string;
@@ -1199,6 +1246,68 @@ export namespace connection {
 		    return a;
 		}
 	}
+	export class SavedQuery {
+	    id: string;
+	    name: string;
+	    sql: string;
+	    connectionId: string;
+	    dbName: string;
+	    createdAt: number;
+	    connectionFingerprint?: string;
+	    fingerprintVersion?: string;
+	    bindingStatus?: string;
+	    originalConnectionId?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SavedQuery(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.sql = source["sql"];
+	        this.connectionId = source["connectionId"];
+	        this.dbName = source["dbName"];
+	        this.createdAt = source["createdAt"];
+	        this.connectionFingerprint = source["connectionFingerprint"];
+	        this.fingerprintVersion = source["fingerprintVersion"];
+	        this.bindingStatus = source["bindingStatus"];
+	        this.originalConnectionId = source["originalConnectionId"];
+	    }
+	}
+	export class SavedQueryImportPayload {
+	    queries: SavedQuery[];
+	    legacyConnections?: SavedConnectionInput[];
+	
+	    static createFrom(source: any = {}) {
+	        return new SavedQueryImportPayload(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.queries = this.convertValues(source["queries"], SavedQuery);
+	        this.legacyConnections = this.convertValues(source["legacyConnections"], SavedConnectionInput);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 
 }
 
@@ -1315,6 +1424,7 @@ export namespace sync {
 	    targetConfig: connection.ConnectionConfig;
 	    sourceDatabase?: string;
 	    targetDatabase?: string;
+	    targetSchema?: string;
 	    tables: string[];
 	    sourceQuery?: string;
 	    content?: string;
@@ -1336,6 +1446,7 @@ export namespace sync {
 	        this.targetConfig = this.convertValues(source["targetConfig"], connection.ConnectionConfig);
 	        this.sourceDatabase = source["sourceDatabase"];
 	        this.targetDatabase = source["targetDatabase"];
+	        this.targetSchema = source["targetSchema"];
 	        this.tables = source["tables"];
 	        this.sourceQuery = source["sourceQuery"];
 	        this.content = source["content"];

@@ -22,6 +22,8 @@ import {
 } from "@ant-design/icons";
 
 import { EventsOn } from "../../wailsjs/runtime";
+import { t as translate, type I18nParams } from "../i18n";
+import { useOptionalI18n } from "../i18n/provider";
 import { useStore } from "../store";
 import type {
   JVMDiagnosticAuditRecord,
@@ -56,21 +58,27 @@ const DEFAULT_COMMAND =
   JVM_DIAGNOSTIC_COMMAND_PRESETS.find((item) => item.category === "observe")
     ?.command || "thread -n 5";
 
+const translateJVMDiagnostic = (
+  key: string,
+  params?: I18nParams,
+  language?: string,
+): string => translate(key, params, language);
+
 const DIAGNOSTIC_WORKFLOW_STEPS = [
   {
     index: "01",
-    title: "检查能力",
-    description: "只读取诊断通道、流式输出与命令权限，不创建会话。",
+    titleKey: "jvm_diagnostic.workflow.probe.title",
+    descriptionKey: "jvm_diagnostic.workflow.probe.description",
   },
   {
     index: "02",
-    title: "新建会话",
-    description: "创建诊断上下文，后续命令都会绑定到这个会话。",
+    titleKey: "jvm_diagnostic.workflow.session.title",
+    descriptionKey: "jvm_diagnostic.workflow.session.description",
   },
   {
     index: "03",
-    title: "执行命令",
-    description: "会话建立后显示命令编辑器、原因输入与模板。",
+    titleKey: "jvm_diagnostic.workflow.command.title",
+    descriptionKey: "jvm_diagnostic.workflow.command.description",
   },
 ];
 
@@ -156,18 +164,24 @@ export const createJVMDiagnosticLocalPendingChunk = ({
   sessionId,
   commandId,
   command,
+  content,
   timestamp = Date.now(),
 }: {
   sessionId: string;
   commandId: string;
   command: string;
+  content?: string;
   timestamp?: number;
 }): JVMDiagnosticEventChunk => ({
   sessionId,
   commandId,
   event: "diagnostic",
   phase: "running",
-  content: `已提交诊断命令，等待后端输出：${command}`,
+  content:
+    content ||
+    translateJVMDiagnostic("jvm_diagnostic.output.local_pending", {
+      command,
+    }),
   timestamp,
   metadata: {
     source: "local-pending",
@@ -209,6 +223,12 @@ const buildJVMDiagnosticRedactionKey = (
 ): string => `${chunk.sessionId || "unknown-session"}::${chunk.commandId || "unknown-command"}`;
 
 const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
+  const i18n = useOptionalI18n();
+  const t = useCallback(
+    (key: string, params?: I18nParams) =>
+      i18n?.t ? i18n.t(key, params) : translateJVMDiagnostic(key, params, "zh-CN"),
+    [i18n],
+  );
   const connection = useStore((state) =>
     state.connections.find((item) => item.id === tab.connectionId),
   );
@@ -322,15 +342,21 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
     try {
       const result = await backendApp.JVMListDiagnosticAuditRecords(connection.id, 20);
       if (result?.success === false) {
-        throw new Error(String(result?.message || "加载诊断历史失败"));
+        throw new Error(
+          String(result?.message || t("jvm_diagnostic.error.history_load_failed")),
+        );
       }
       setRecords(Array.isArray(result?.data) ? result.data : []);
     } catch (err: any) {
-      setError(redactJVMDiagnosticOutput(err?.message || "加载诊断历史失败"));
+      setError(
+        redactJVMDiagnosticOutput(
+          err?.message || t("jvm_diagnostic.error.history_load_failed"),
+        ),
+      );
     } finally {
       setHistoryLoading(false);
     }
-  }, [connection]);
+  }, [connection, t]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -342,7 +368,10 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
       const planTransport = String(detail.plan.transport || diagnosticTransport);
       if (planTransport !== diagnosticTransport) {
         setError(
-          `AI 计划的诊断 transport 为 ${planTransport}，与当前控制台 ${diagnosticTransport} 不一致，请重新生成计划后再应用。`,
+          t("jvm_diagnostic.ai_plan.error.transport_mismatch", {
+            planTransport,
+            currentTransport: diagnosticTransport,
+          }),
         );
         return;
       }
@@ -353,13 +382,13 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         reason: String(detail.plan.reason || ""),
         source: "ai-plan",
       });
-      message.success("AI 诊断计划已回填到控制台");
+      message.success(t("jvm_diagnostic.ai_plan.message.filled"));
     };
 
     window.addEventListener("gonavi:jvm-apply-diagnostic-plan", handler);
     return () =>
       window.removeEventListener("gonavi:jvm-apply-diagnostic-plan", handler);
-  }, [diagnosticTransport, setDraft, tab.id]);
+  }, [diagnosticTransport, setDraft, t, tab.id]);
 
   useEffect(() => {
     void loadAuditRecords();
@@ -378,7 +407,9 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
       const safeChunk = redactDiagnosticChunk(payload.chunk);
       appendOutput(tab.id, [safeChunk]);
       if (safeChunk.phase === "failed") {
-        setError(safeChunk.content || "诊断命令执行失败");
+        setError(
+          safeChunk.content || t("jvm_diagnostic.error.execute_failed"),
+        );
       }
       if (safeChunk.commandId && isJVMDiagnosticTerminalPhase(safeChunk.phase)) {
         terminalCommandIdsRef.current.add(safeChunk.commandId);
@@ -392,7 +423,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         stopListening();
       }
     };
-  }, [appendOutput, finishActiveCommand, loadAuditRecords, redactDiagnosticChunk, tab.id]);
+  }, [appendOutput, finishActiveCommand, loadAuditRecords, redactDiagnosticChunk, t, tab.id]);
 
   const handleProbe = async () => {
     if (!rpcConnectionConfig) {
@@ -400,7 +431,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
     }
     const backendApp = (window as any).go?.app?.App;
     if (typeof backendApp?.JVMProbeDiagnosticCapabilities !== "function") {
-      setError("JVMProbeDiagnosticCapabilities 后端方法不可用");
+      setError(t("jvm_diagnostic.error.probe_unavailable"));
       return;
     }
 
@@ -411,12 +442,18 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         rpcConnectionConfig,
       );
       if (result?.success === false) {
-        throw new Error(String(result?.message || "检查诊断能力失败"));
+        throw new Error(
+          String(result?.message || t("jvm_diagnostic.error.probe_failed")),
+        );
       }
       setCapabilities(Array.isArray(result?.data) ? result.data : []);
     } catch (err: any) {
       setCapabilities([]);
-      setError(redactJVMDiagnosticOutput(err?.message || "检查诊断能力失败"));
+      setError(
+        redactJVMDiagnosticOutput(
+          err?.message || t("jvm_diagnostic.error.probe_failed"),
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -428,7 +465,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
     }
     const backendApp = (window as any).go?.app?.App;
     if (typeof backendApp?.JVMStartDiagnosticSession !== "function") {
-      setError("JVMStartDiagnosticSession 后端方法不可用");
+      setError(t("jvm_diagnostic.error.start_unavailable"));
       return;
     }
 
@@ -438,12 +475,14 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
       const result = await backendApp.JVMStartDiagnosticSession(
         rpcConnectionConfig,
         {
-          title: "JVM 诊断控制台",
-          reason: draft.reason || "控制台启动会话",
+          title: t("jvm_diagnostic.session.default_title"),
+          reason: draft.reason || t("jvm_diagnostic.session.default_reason"),
         },
       );
       if (result?.success === false) {
-        throw new Error(String(result?.message || "创建诊断会话失败"));
+        throw new Error(
+          String(result?.message || t("jvm_diagnostic.error.start_failed")),
+        );
       }
       const nextSession = (result?.data || null) as JVMDiagnosticSessionHandle | null;
       setSession(nextSession);
@@ -453,7 +492,11 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
       void loadAuditRecords();
     } catch (err: any) {
       setSession(null);
-      setError(redactJVMDiagnosticOutput(err?.message || "创建诊断会话失败"));
+      setError(
+        redactJVMDiagnosticOutput(
+          err?.message || t("jvm_diagnostic.error.start_failed"),
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -465,16 +508,16 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
     }
     const backendApp = (window as any).go?.app?.App;
     if (typeof backendApp?.JVMExecuteDiagnosticCommand !== "function") {
-      setError("JVMExecuteDiagnosticCommand 后端方法不可用");
+      setError(t("jvm_diagnostic.error.execute_unavailable"));
       return;
     }
     if (!effectiveSession?.sessionId) {
-      setError("请先创建诊断会话，再执行命令");
+      setError(t("jvm_diagnostic.error.execute_session_required"));
       return;
     }
     const command = draft.command.trim();
     if (!command) {
-      setError("诊断命令不能为空");
+      setError(t("jvm_diagnostic.error.execute_command_required"));
       return;
     }
 
@@ -492,6 +535,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         sessionId,
         commandId,
         command,
+        content: t("jvm_diagnostic.output.local_pending", { command }),
       }),
     ]);
     setRecords((current) => [
@@ -519,7 +563,9 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         },
       );
       if (result?.success === false) {
-        throw new Error(String(result?.message || "执行诊断命令失败"));
+        throw new Error(
+          String(result?.message || t("jvm_diagnostic.error.execute_failed")),
+        );
       }
       if (result?.message) {
         message.warning(
@@ -535,7 +581,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
               commandId,
               event: "diagnostic",
               phase: "completed",
-              content: "诊断命令调用已返回，但未收到后端终态事件，前端已兜底结束等待状态。",
+              content: t("jvm_diagnostic.output.frontend_completed_fallback"),
               timestamp: Date.now(),
               metadata: {
                 source: "frontend-fallback",
@@ -573,7 +619,9 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         });
       }
     } catch (err: any) {
-      const rawMessageText = String(err?.message || "执行诊断命令失败");
+      const rawMessageText = String(
+        err?.message || t("jvm_diagnostic.error.execute_failed"),
+      );
       let messageText = "";
       if (!terminalCommandIdsRef.current.has(commandId)) {
         const safeChunk = redactDiagnosticChunk({
@@ -610,7 +658,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
     }
     const backendApp = (window as any).go?.app?.App;
     if (typeof backendApp?.JVMCancelDiagnosticCommand !== "function") {
-      setError("JVMCancelDiagnosticCommand 后端方法不可用");
+      setError(t("jvm_diagnostic.error.cancel_unavailable"));
       return;
     }
 
@@ -624,11 +672,17 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
         activeCommandId,
       );
       if (result?.success === false) {
-        throw new Error(String(result?.message || "取消诊断命令失败"));
+        throw new Error(
+          String(result?.message || t("jvm_diagnostic.error.cancel_failed")),
+        );
       }
-      message.info("已发送取消请求");
+      message.info(t("jvm_diagnostic.message.cancel_sent"));
     } catch (err: any) {
-      setError(redactJVMDiagnosticOutput(err?.message || "取消诊断命令失败"));
+      setError(
+        redactJVMDiagnosticOutput(
+          err?.message || t("jvm_diagnostic.error.cancel_failed"),
+        ),
+      );
     } finally {
       setLoading(false);
     }
@@ -647,7 +701,12 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
   };
 
   if (!connection) {
-    return <Empty description="连接不存在或已被删除" style={{ marginTop: 64 }} />;
+    return (
+      <Empty
+        description={t("jvm_diagnostic.connection_missing.message")}
+        style={{ marginTop: 64 }}
+      />
+    );
   }
 
   const pageBackground = darkMode
@@ -721,7 +780,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
   const renderCapabilityContent = () =>
     capabilities.length ? (
       <div style={{ display: "grid", gap: 10 }}>
-        <Text strong>能力检查结果</Text>
+        <Text strong>{t("jvm_diagnostic.capability_result.title")}</Text>
         <div style={{ display: "grid", gap: 8 }}>
           {capabilities.map((item) => (
             <div
@@ -740,16 +799,30 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
                   {formatJVMDiagnosticTransportLabel(item.transport)}
                 </Tag>
                 <Tag color={item.canOpenSession ? "green" : "red"}>
-                  {item.canOpenSession ? "可建会话" : "不可建会话"}
+                  {item.canOpenSession
+                    ? t("jvm_diagnostic.capability_result.session_allowed")
+                    : t("jvm_diagnostic.capability_result.session_denied")}
                 </Tag>
                 <Tag color={item.canStream ? "green" : "red"}>
-                  {item.canStream ? "流式输出" : "不支持流式"}
+                  {item.canStream
+                    ? t("jvm_diagnostic.capability_result.streaming_supported")
+                    : t("jvm_diagnostic.capability_result.streaming_unsupported")}
                 </Tag>
                 <Tag color={item.allowObserveCommands ? "green" : "red"}>
-                  {item.allowObserveCommands ? "观察命令" : "禁止观察"}
+                  {item.allowObserveCommands
+                    ? t("jvm_diagnostic.capability_result.observe_allowed")
+                    : t("jvm_diagnostic.capability_result.observe_denied")}
                 </Tag>
-                {item.allowTraceCommands ? <Tag color="gold">跟踪命令</Tag> : null}
-                {item.allowMutatingCommands ? <Tag color="red">高风险命令</Tag> : null}
+                {item.allowTraceCommands ? (
+                  <Tag color="gold">
+                    {t("jvm_diagnostic.capability_result.trace_allowed")}
+                  </Tag>
+                ) : null}
+                {item.allowMutatingCommands ? (
+                  <Tag color="red">
+                    {t("jvm_diagnostic.capability_result.mutating_allowed")}
+                  </Tag>
+                ) : null}
               </Space>
             </div>
           ))}
@@ -759,8 +832,8 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
       <Alert
         type="info"
         showIcon
-        message="尚未检查能力"
-        description="能力检查只读取通道权限和命令策略，不会创建会话或执行命令。"
+        message={t("jvm_diagnostic.capability.empty.title")}
+        description={t("jvm_diagnostic.capability.empty.description")}
       />
     );
 
@@ -795,9 +868,9 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
           }}
         >
           <div style={{ minWidth: 0 }}>
-            <Text type="secondary">JVM 诊断</Text>
+            <Text type="secondary">{t("jvm_diagnostic.workbench.eyebrow")}</Text>
             <Typography.Title level={3} style={{ margin: "2px 0 6px" }}>
-              JVM 诊断工作台
+              {t("jvm_diagnostic.workbench.title")}
             </Typography.Title>
             <Paragraph type="secondary" style={{ marginBottom: 0 }}>
               <Text strong>{connection.name}</Text>
@@ -810,16 +883,22 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
 
           <Space wrap size={8} style={{ justifyContent: "flex-end" }}>
             <Tag color={hasSession ? "green" : "default"}>
-              {hasSession ? "会话已建立" : "未建会话"}
+              {hasSession
+                ? t("jvm_diagnostic.workbench.status.session_established")
+                : t("jvm_diagnostic.workbench.status.no_session")}
             </Tag>
-            {commandRunning ? <Tag color="processing">命令执行中</Tag> : null}
+            {commandRunning ? (
+              <Tag color="processing">
+                {t("jvm_diagnostic.workbench.status.command_running")}
+              </Tag>
+            ) : null}
             <Button
               icon={<ToolOutlined />}
               style={actionButtonStyle}
               onClick={() => void handleProbe()}
               loading={loading}
             >
-              检查能力
+              {t("jvm_diagnostic.workbench.action.probe")}
             </Button>
             <Button
               icon={<RocketOutlined />}
@@ -828,7 +907,9 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
               onClick={() => void handleStartSession()}
               loading={loading}
             >
-              {hasSession ? "重建会话" : "新建会话"}
+              {hasSession
+                ? t("jvm_diagnostic.workbench.action.restart_session")
+                : t("jvm_diagnostic.workbench.action.start_session")}
             </Button>
             {hasSession ? (
               <Button
@@ -838,7 +919,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
                 onClick={() => void handleExecuteCommand()}
                 loading={commandRunning}
               >
-                执行命令
+                {t("jvm_diagnostic.workbench.action.execute_command")}
               </Button>
             ) : null}
             {hasSession ? (
@@ -850,7 +931,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
                 onClick={() => void handleCancelCommand()}
                 loading={loading && commandRunning}
               >
-                取消命令
+                {t("jvm_diagnostic.workbench.action.cancel_command")}
               </Button>
             ) : null}
           </Space>
@@ -872,8 +953,8 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
             <Card
               title={renderCardTitle(
                 <RocketOutlined />,
-                "开始一次诊断",
-                "先建立会话，再显示命令编辑器和模板",
+                t("jvm_diagnostic.no_session.title"),
+                t("jvm_diagnostic.no_session.description"),
               )}
               variant="borderless"
               style={cardStyle}
@@ -883,8 +964,8 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
                 <Alert
                   type="info"
                   showIcon
-                  message="命令输入将在会话建立后显示"
-                  description="这样可以避免未绑定会话时误以为命令已经可执行，也能保证审计记录、输出流和取消命令都绑定到同一个会话。"
+                  message={t("jvm_diagnostic.no_session.alert.title")}
+                  description={t("jvm_diagnostic.no_session.alert.description")}
                 />
                 <div
                   style={{
@@ -916,10 +997,10 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
                         {step.index}
                       </Text>
                       <div style={{ marginTop: 6 }}>
-                        <Text strong>{step.title}</Text>
+                        <Text strong>{t(step.titleKey)}</Text>
                       </div>
                       <Paragraph type="secondary" style={{ margin: "6px 0 0" }}>
-                        {step.description}
+                        {t(step.descriptionKey)}
                       </Paragraph>
                     </div>
                   ))}
@@ -932,7 +1013,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
                     loading={loading}
                     onClick={() => void handleStartSession()}
                   >
-                    新建诊断会话
+                    {t("jvm_diagnostic.no_session.action.start")}
                   </Button>
                   <Button
                     icon={<ToolOutlined />}
@@ -940,7 +1021,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
                     loading={loading}
                     onClick={() => void handleProbe()}
                   >
-                    先检查能力
+                    {t("jvm_diagnostic.no_session.action.probe")}
                   </Button>
                 </Space>
               </div>
@@ -950,8 +1031,8 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
               <Card
                 title={renderCardTitle(
                   <PlayCircleOutlined />,
-                  "命令输入",
-                  "支持自动补全，按 Ctrl/Cmd + Enter 执行",
+                  t("jvm_diagnostic.command_input.title"),
+                  t("jvm_diagnostic.command_input.description"),
                 )}
                 variant="borderless"
                 style={cardStyle}
@@ -959,9 +1040,11 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
               >
                 <div style={{ display: "grid", gap: 14 }}>
                   <div style={{ display: "grid", gap: 6 }}>
-                    <Text strong>诊断命令</Text>
+                    <Text strong>
+                      {t("jvm_diagnostic.command_input.command_label")}
+                    </Text>
                     <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                      输入 Arthas/诊断命令，例如 thread -n 5、dashboard、jvm；也可以从下方模板一键回填。
+                      {t("jvm_diagnostic.command_input.command_description")}
                     </Paragraph>
                     <div
                       data-jvm-diagnostic-command-editor-shell="true"
@@ -1004,23 +1087,30 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
                     </div>
                   </div>
                   <div style={{ display: "grid", gap: 6 }}>
-                    <Text strong>诊断原因（可选）</Text>
+                    <Text strong>
+                      {t("jvm_diagnostic.command_input.reason_label")}
+                    </Text>
                     <Input
                       value={draft.reason || ""}
-                      placeholder="例如：排查 CPU 飙高、确认线程阻塞、定位慢方法"
+                      placeholder={t(
+                        "jvm_diagnostic.command_input.reason_placeholder",
+                      )}
                       onChange={(event) =>
                         setDraft(tab.id, { reason: event.target.value })
                       }
                     />
                     <Text type="secondary">
-                      用于审计记录和 AI 上下文理解，不会作为 Arthas 命令发送到目标 JVM。
+                      {t("jvm_diagnostic.command_input.reason_help")}
                     </Text>
                   </div>
                 </div>
               </Card>
 
               <Card
-                title={renderCardTitle(<ToolOutlined />, "命令模板")}
+                title={renderCardTitle(
+                  <ToolOutlined />,
+                  t("jvm_diagnostic.command_templates.title"),
+                )}
                 variant="borderless"
                 style={cardStyle}
                 styles={compactCardStyles}
@@ -1042,8 +1132,8 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
             <Card
               title={renderCardTitle(
                 <PlayCircleOutlined />,
-                "实时输出",
-                "按后端事件流追加显示",
+                t("jvm_diagnostic.output.title"),
+                t("jvm_diagnostic.output.description"),
               )}
               variant="borderless"
               style={cardStyle}
@@ -1058,8 +1148,8 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
           <Card
             title={renderCardTitle(
               <ToolOutlined />,
-              "会话与能力",
-              "当前通道、权限与快捷维护",
+              t("jvm_diagnostic.session_capability.title"),
+              t("jvm_diagnostic.session_capability.description"),
             )}
             variant="borderless"
             style={cardStyle}
@@ -1077,11 +1167,15 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
               >
                 <Space size={6} wrap>
                   <Tag color={hasSession ? "green" : "default"}>
-                    {hasSession ? "会话已建立" : "未建会话"}
+                    {hasSession
+                      ? t("jvm_diagnostic.session_capability.status.session_established")
+                      : t("jvm_diagnostic.session_capability.status.no_session")}
                   </Tag>
                   <Tag>{formatJVMDiagnosticTransportLabel(diagnosticTransport)}</Tag>
                   <Tag color={commandRunning ? "processing" : "green"}>
-                    {commandRunning ? "命令执行中" : "空闲"}
+                    {commandRunning
+                      ? t("jvm_diagnostic.session_capability.status.command_running")
+                      : t("jvm_diagnostic.session_capability.status.idle")}
                   </Tag>
                 </Space>
                 {effectiveSession?.sessionId ? (
@@ -1093,11 +1187,13 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
                     {effectiveSession.sessionId}
                   </Text>
                 ) : (
-                  <Text type="secondary">创建会话后会在这里显示会话 ID。</Text>
+                  <Text type="secondary">
+                    {t("jvm_diagnostic.session_capability.session_id_hint")}
+                  </Text>
                 )}
               </div>
               <Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                检查能力不会执行命令；执行命令前必须先建会话。审计历史展示最近命令记录，未建会话时也可能包含过去会话的记录。
+                {t("jvm_diagnostic.session_capability.note")}
               </Paragraph>
               <Space wrap>
                 <Button
@@ -1105,7 +1201,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
                   icon={<ClearOutlined />}
                   onClick={() => clearOutput(tab.id)}
                 >
-                  清空输出
+                  {t("jvm_diagnostic.session_capability.action.clear_output")}
                 </Button>
                 <Button
                   size="small"
@@ -1113,7 +1209,7 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
                   onClick={() => void loadAuditRecords()}
                   loading={historyLoading}
                 >
-                  刷新历史
+                  {t("jvm_diagnostic.session_capability.action.refresh_history")}
                 </Button>
               </Space>
               {renderCapabilityContent()}
@@ -1123,8 +1219,8 @@ const JVMDiagnosticConsole: React.FC<JVMDiagnosticConsoleProps> = ({ tab }) => {
           <Card
             title={renderCardTitle(
               <HistoryOutlined />,
-              "审计历史",
-              "最近命令和执行状态",
+              t("jvm_diagnostic.history.title"),
+              t("jvm_diagnostic.history.description"),
             )}
             variant="borderless"
             style={cardStyle}

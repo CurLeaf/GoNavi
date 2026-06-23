@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  setCurrentLanguage,
+} from '../i18n';
 import {
   DEFAULT_SHORTCUT_OPTIONS,
   findReservedConflict,
@@ -8,15 +11,26 @@ import {
   normalizeShortcutCombo,
   RESERVED_SHORTCUTS,
   comboToMonacoKeyBinding,
+  eventToShortcut,
   getPrimaryShortcutDisplayLabel,
   getShortcutDisplayLabel,
   getShortcutPrimaryModifierDisplayLabel,
+  installGlobalImeCompositionTracking,
+  isGlobalImeCompositionActive,
+  isImeComposingKeyEvent,
+  isShortcutMatch,
   resolveShortcutBinding,
   resolveShortcutDisplay,
+  setGlobalImeCompositionActive,
   sanitizeShortcutOptions,
   SHORTCUT_ACTION_META,
 } from './shortcuts';
 import type { ConflictInfo } from './shortcuts';
+
+beforeEach(() => {
+  setCurrentLanguage('zh-CN');
+  setGlobalImeCompositionActive(false);
+});
 
 // ─── findReservedConflict ────────────────────────────────────────────
 
@@ -112,6 +126,30 @@ describe('describeConflictContext', () => {
   });
 });
 
+describe('shortcut localization', () => {
+  it('localizes action meta and reserved conflict copy for the active language while preserving raw combos', () => {
+    setCurrentLanguage('en-US');
+    try {
+      expect(SHORTCUT_ACTION_META.runQuery.label).toBe('Run SQL');
+      expect(SHORTCUT_ACTION_META.saveQuery.description).toBe('Save the current query tab; unnamed queries open the save dialog');
+      expect(SHORTCUT_ACTION_META.sendAIChatMessage.description).toContain('Shift+Enter');
+      expect(describeConflictContext('global')).toBe('Browser');
+
+      const browserSave = findReservedConflict('Ctrl+S');
+      expect(browserSave).toMatchObject({
+        label: 'Browser Save',
+        context: 'global',
+      });
+
+      setCurrentLanguage('zh-CN');
+      expect(SHORTCUT_ACTION_META.runQuery.label).toBe('执行 SQL');
+      expect(findReservedConflict('Ctrl+S')?.label).toBe('浏览器保存');
+    } finally {
+      setCurrentLanguage('zh-CN');
+    }
+  });
+});
+
 // ─── RESERVED_SHORTCUTS sanity ───────────────────────────────────────
 
 describe('RESERVED_SHORTCUTS', () => {
@@ -130,6 +168,125 @@ describe('RESERVED_SHORTCUTS', () => {
       expect(entry.label).toBeTruthy();
       expect(['global', 'monaco', 'datagrid']).toContain(entry.context);
     }
+  });
+});
+
+describe('IME shortcut guards', () => {
+  it('tracks composition state through global listeners', () => {
+    const windowListeners = new Map<string, EventListener[]>();
+    const documentListeners = new Map<string, EventListener[]>();
+    const target = {
+      addEventListener: vi.fn((type: string, listener: EventListener) => {
+        windowListeners.set(type, [...(windowListeners.get(type) || []), listener]);
+      }),
+      removeEventListener: vi.fn((type: string, listener: EventListener) => {
+        windowListeners.set(type, (windowListeners.get(type) || []).filter(item => item !== listener));
+      }),
+    };
+    const documentTarget = {
+      visibilityState: 'visible' as DocumentVisibilityState,
+      addEventListener: vi.fn((type: string, listener: EventListener) => {
+        documentListeners.set(type, [...(documentListeners.get(type) || []), listener]);
+      }),
+      removeEventListener: vi.fn((type: string, listener: EventListener) => {
+        documentListeners.set(type, (documentListeners.get(type) || []).filter(item => item !== listener));
+      }),
+    };
+
+    const dispose = installGlobalImeCompositionTracking(
+      target as unknown as Window,
+      documentTarget as unknown as Document,
+    );
+
+    windowListeners.get('compositionstart')?.forEach(listener => listener(new Event('compositionstart')));
+    expect(isGlobalImeCompositionActive()).toBe(true);
+
+    windowListeners.get('compositionend')?.forEach(listener => listener(new Event('compositionend')));
+    expect(isGlobalImeCompositionActive()).toBe(false);
+
+    windowListeners.get('compositionstart')?.forEach(listener => listener(new Event('compositionstart')));
+    windowListeners.get('blur')?.forEach(listener => listener(new Event('blur')));
+    expect(isGlobalImeCompositionActive()).toBe(false);
+
+    windowListeners.get('compositionstart')?.forEach(listener => listener(new Event('compositionstart')));
+    documentTarget.visibilityState = 'hidden';
+    documentListeners.get('visibilitychange')?.forEach(listener => listener(new Event('visibilitychange')));
+    expect(isGlobalImeCompositionActive()).toBe(false);
+
+    dispose();
+    expect(target.removeEventListener).toHaveBeenCalledWith('compositionstart', expect.any(Function), true);
+    expect(documentTarget.removeEventListener).toHaveBeenCalledWith('visibilitychange', expect.any(Function), true);
+  });
+
+  it('treats composing key events as non-shortcuts', () => {
+    const event = {
+      key: 'Process',
+      keyCode: 229,
+      which: 229,
+      isComposing: true,
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      nativeEvent: {
+        isComposing: true,
+        keyCode: 229,
+        which: 229,
+      },
+    } as unknown as KeyboardEvent;
+
+    expect(isImeComposingKeyEvent(event)).toBe(true);
+    expect(eventToShortcut(event)).toBe('');
+    expect(isShortcutMatch(event, 'Ctrl+Enter')).toBe(false);
+  });
+
+  it('treats number keys as non-shortcuts while a composition session is active', () => {
+    setGlobalImeCompositionActive(true);
+    const event = {
+      key: '1',
+      keyCode: 49,
+      which: 49,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      isComposing: false,
+      nativeEvent: {
+        isComposing: false,
+      },
+    } as unknown as KeyboardEvent;
+
+    expect(isImeComposingKeyEvent(event)).toBe(true);
+    expect(eventToShortcut(event)).toBe('');
+    expect(isShortcutMatch(event, '1')).toBe(false);
+  });
+
+  it('treats Monaco visible IME textarea events as composing even without native flags', () => {
+    const target = {
+      className: 'inputarea monaco-mouse-cursor-text ime-input',
+      classList: {
+        contains: (name: string) => name === 'ime-input',
+      },
+      closest: vi.fn(),
+    } as unknown as EventTarget;
+    const event = {
+      key: '1',
+      keyCode: 49,
+      which: 49,
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      shiftKey: false,
+      isComposing: false,
+      nativeEvent: {
+        isComposing: false,
+      },
+      target,
+    } as unknown as KeyboardEvent;
+
+    expect(isImeComposingKeyEvent(event)).toBe(true);
+    expect(eventToShortcut(event)).toBe('');
+    expect(isShortcutMatch(event, '1')).toBe(false);
   });
 });
 

@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React from 'react';
-import { Button, Checkbox, DatePicker, Form, Input, Modal, TimePicker } from 'antd';
+import { Button, Checkbox, DatePicker, Form, Input, TimePicker } from 'antd';
 import dayjs from 'dayjs';
 import { CopyOutlined } from '@ant-design/icons';
 import Editor from './MonacoEditor';
@@ -8,6 +9,9 @@ import {
   getTemporalPickerType,
   type TemporalPickerType,
 } from './dataGridTemporal';
+import { t as defaultTranslate, type I18nParams } from '../i18n';
+
+export type DataGridModalsTranslate = (key: string, params?: I18nParams) => string;
 
 type ColumnMeta = {
   type: string;
@@ -28,6 +32,7 @@ export interface DataGridRowEditorField {
 export interface DataGridModalsProps {
   tableName?: string;
   darkMode: boolean;
+  translate?: DataGridModalsTranslate;
   displayColumnNames: string[];
   rowEditorOpen: boolean;
   rowEditorRowKey: string;
@@ -68,6 +73,7 @@ export interface DataGridModalsProps {
 const DataGridModals: React.FC<DataGridModalsProps> = ({
   tableName,
   darkMode,
+  translate = defaultTranslate,
   rowEditorOpen,
   rowEditorRowKey,
   rowEditorForm,
@@ -105,15 +111,15 @@ const DataGridModals: React.FC<DataGridModalsProps> = ({
 }) => (
   <>
     <Modal
-      title="编辑行"
+      title={translate('data_grid.row_editor.title')}
       open={rowEditorOpen}
       onCancel={onCloseRowEditor}
       width={980}
       destroyOnHidden
       maskClosable={false}
       footer={[
-        <Button key="cancel" onClick={onCloseRowEditor}>取消</Button>,
-        <Button key="ok" type="primary" onClick={onApplyRowEditor}>应用</Button>,
+        <Button key="cancel" onClick={onCloseRowEditor}>{translate('common.cancel')}</Button>,
+        <Button key="ok" type="primary" onClick={onApplyRowEditor}>{translate('data_grid.action.apply')}</Button>,
       ]}
     >
       <div style={{ marginBottom: 8, color: '#888', fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
@@ -168,7 +174,7 @@ const DataGridModals: React.FC<DataGridModalsProps> = ({
                 <Button
                   size="small"
                   onClick={() => onOpenRowEditorFieldEditor(field.columnName)}
-                  title="弹窗编辑"
+                  title={translate('data_grid.row_editor.popup_edit')}
                   disabled={!field.isWritable}
                 >
                   ...
@@ -181,16 +187,20 @@ const DataGridModals: React.FC<DataGridModalsProps> = ({
     </Modal>
 
     <Modal
-      title={cellEditorMeta ? `编辑单元格：${cellEditorMeta.title}` : '编辑单元格'}
+      title={
+        cellEditorMeta
+          ? translate('data_grid.cell_editor.title_with_column', { column: cellEditorMeta.title })
+          : translate('data_grid.cell_editor.title')
+      }
       open={cellEditorOpen}
       onCancel={onCloseCellEditor}
       destroyOnHidden
       width={960}
       maskClosable={false}
       footer={[
-        <Button key="format" onClick={onFormatJsonInEditor} disabled={!cellEditorIsJson}>格式化 JSON</Button>,
-        <Button key="cancel" onClick={onCloseCellEditor}>取消</Button>,
-        <Button key="ok" type="primary" onClick={onSaveCellEditor}>保存</Button>,
+        <Button key="format" onClick={onFormatJsonInEditor} disabled={!cellEditorIsJson}>{translate('data_grid.json_editor.format')}</Button>,
+        <Button key="cancel" onClick={onCloseCellEditor}>{translate('common.cancel')}</Button>,
+        <Button key="ok" type="primary" onClick={onSaveCellEditor}>{translate('common.save')}</Button>,
       ]}
     >
       <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
@@ -216,22 +226,25 @@ const DataGridModals: React.FC<DataGridModalsProps> = ({
     </Modal>
 
     <Modal
-      title={`批量填充 (${selectedCellsSize} 个单元格)`}
+      title={translate('data_grid.batch_fill.title', { count: selectedCellsSize })}
       open={batchEditModalOpen}
       onCancel={onCloseBatchEditModal}
-      onOk={onApplyBatchFill}
       width={500}
+      footer={[
+        <Button key="cancel" onClick={onCloseBatchEditModal}>{translate('common.cancel')}</Button>,
+        <Button key="ok" type="primary" onClick={onApplyBatchFill}>{translate('data_grid.action.apply')}</Button>,
+      ]}
     >
       <div style={{ marginBottom: 16 }}>
         <Checkbox checked={batchEditSetNull} onChange={(event) => onBatchEditSetNullChange(event.target.checked)}>
-          设置为 NULL
+          {translate('data_grid.batch_fill.set_null')}
         </Checkbox>
       </div>
       {!batchEditSetNull && (
         <Input.TextArea
           value={batchEditValue}
           onChange={(event) => onBatchEditValueChange(event.target.value)}
-          placeholder="输入要填充的值"
+          placeholder={translate('data_grid.batch_fill.value_placeholder')}
           autoSize={{ minRows: 3, maxRows: 10 }}
           autoFocus
         />
@@ -239,20 +252,20 @@ const DataGridModals: React.FC<DataGridModalsProps> = ({
     </Modal>
 
     <Modal
-      title="编辑 JSON 结果集"
+      title={translate('data_grid.json_editor.title')}
       open={jsonEditorOpen}
       onCancel={onCloseJsonEditor}
       destroyOnHidden
       width={980}
       maskClosable={false}
       footer={[
-        <Button key="format" onClick={onFormatJsonEditor}>格式化 JSON</Button>,
-        <Button key="cancel" onClick={onCloseJsonEditor}>取消</Button>,
-        <Button key="ok" type="primary" onClick={onApplyJsonEditor}>应用修改</Button>,
+        <Button key="format" onClick={onFormatJsonEditor}>{translate('data_grid.json_editor.format')}</Button>,
+        <Button key="cancel" onClick={onCloseJsonEditor}>{translate('common.cancel')}</Button>,
+        <Button key="ok" type="primary" onClick={onApplyJsonEditor}>{translate('data_grid.json_editor.apply_changes')}</Button>,
       ]}
     >
       <div style={{ marginBottom: 8, color: '#888', fontSize: 12 }}>
-        说明：此处按当前结果集顺序编辑，不支持在 JSON 模式增删记录（可在表格模式操作）。
+        {translate('data_grid.json_editor.description')}
       </div>
       {jsonEditorOpen && (
         <Editor
@@ -282,10 +295,10 @@ const DataGridModals: React.FC<DataGridModalsProps> = ({
       width={960}
       footer={[
         <Button key="copy" icon={<CopyOutlined />} onClick={onCopyDdl} disabled={!ddlText.trim()}>
-          复制 DDL
+          {translate('data_grid.ddl.copy')}
         </Button>,
         <Button key="close" type="primary" onClick={onCloseDdlModal}>
-          关闭
+          {translate('common.close')}
         </Button>,
       ]}
     >
@@ -294,7 +307,7 @@ const DataGridModals: React.FC<DataGridModalsProps> = ({
           height="56vh"
           language="sql"
           theme={darkMode ? 'transparent-dark' : 'transparent-light'}
-          value={ddlLoading ? '正在加载 DDL...' : ddlText}
+          value={ddlLoading ? translate('data_grid.ddl.loading') : ddlText}
           options={{
             readOnly: true,
             minimap: { enabled: false },

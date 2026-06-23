@@ -1,20 +1,62 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import AIBuiltinToolsCatalog from './AIBuiltinToolsCatalog';
 import { buildOverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
+import { I18nProvider } from '../../i18n/provider';
+
+const source = readFileSync(new URL('./AIBuiltinToolsCatalog.tsx', import.meta.url), 'utf8');
 
 const renderCatalog = () => (
-  <AIBuiltinToolsCatalog
-    darkMode={false}
-    overlayTheme={buildOverlayWorkbenchTheme(false)}
-    cardBg="#fff"
-    cardBorder="rgba(0,0,0,0.08)"
-  />
+  <I18nProvider preference="zh-CN" systemLanguages={['zh-CN']} onPreferenceChange={() => {}}>
+    <AIBuiltinToolsCatalog
+      darkMode={false}
+      overlayTheme={buildOverlayWorkbenchTheme(false)}
+      cardBg="#fff"
+      cardBorder="rgba(0,0,0,0.08)"
+    />
+  </I18nProvider>
 );
 
 describe('AIBuiltinToolsCatalog', () => {
+  it('localizes search and empty chrome copy', () => {
+    expect(source).toContain("aria-label={t('ai_settings.tools.search.aria_label')}");
+    expect(source).toContain("placeholder={t('ai_settings.tools.search.placeholder')}");
+    expect(source).toContain("{t('ai_settings.tools.search.clear')}");
+    expect(source).toContain("t('ai_settings.tools.summary', {");
+    expect(source).toContain("t('ai_settings.tools.empty.no_matches')");
+    expect(source).not.toContain('aria-label="搜索内置工具"');
+    expect(source).not.toContain('placeholder="搜索工具、流程或参数，例如 mcp / lineLimit / allowMutating / 事务"');
+    expect(source).not.toContain('清除');
+    expect(source).not.toContain('当前显示 {visibleFlows.length}/{BUILTIN_TOOL_FLOWS.length} 条推荐流程');
+    expect(source).not.toContain('没有匹配的内置工具。可以改搜更宽泛的关键词');
+  });
+
+  it('localizes parameter detail labels without translating raw parameter values', () => {
+    expect(source).toContain("t('ai_settings.tools.params_label')");
+    expect(source).toContain("t('ai_settings.tools.parameters.hint_title')");
+    expect(source).toContain("t('ai_settings.tools.parameters.type_label', { type: item.typeLabel })");
+    expect(source).toContain("t('ai_settings.tools.parameters.required')");
+    expect(source).toContain("t('ai_settings.tools.parameters.optional')");
+    expect(source).toContain("t('ai_settings.tools.parameters.enum_values', { values: item.enumValues.join(' / ') })");
+    expect(source).toContain("t('ai_settings.tools.parameters.default_value', { value: item.defaultValue })");
+    expect(source).toContain("t('ai_settings.tools.parameters.example')");
+    expect(source).not.toContain('<span>参数：</span>');
+    expect(source).not.toContain('>参数提示<');
+    expect(source).not.toContain('类型：{item.typeLabel}');
+    expect(source).not.toContain("item.required ? '必填' : '可选'");
+    expect(source).not.toContain('可选值：{item.enumValues.join');
+    expect(source).not.toContain('默认：{item.defaultValue}');
+    expect(source).not.toContain('示例：<code');
+  });
+
+  it('localizes the catalog intro copy', () => {
+    expect(source).toContain("t('ai_settings.tools.description')");
+    expect(source).not.toContain('AI 助手在处理数据库相关问题时，可以自动调用以下内置工具获取真实数据，全程无需人工干预。');
+  });
+
   it('renders the workspace flows, snapshot tools, and local saved-sql discovery tools', () => {
     const markup = renderToStaticMarkup(renderCatalog());
 

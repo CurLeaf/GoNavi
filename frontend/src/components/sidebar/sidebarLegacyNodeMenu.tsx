@@ -1,0 +1,1211 @@
+import { Input, Modal, message, type MenuProps } from 'antd';
+import {
+  CheckSquareOutlined,
+  CloudOutlined,
+  CodeOutlined,
+  ConsoleSqlOutlined,
+  CopyOutlined,
+  DashboardOutlined,
+  DatabaseOutlined,
+  DeleteOutlined,
+  DisconnectOutlined,
+  EditOutlined,
+  ExportOutlined,
+  EyeOutlined,
+  FileAddOutlined,
+  FolderAddOutlined,
+  FolderOpenOutlined,
+  FolderOutlined,
+  KeyOutlined,
+  LinkOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SaveOutlined,
+  SendOutlined,
+  TableOutlined,
+  ThunderboltOutlined,
+  WarningOutlined,
+} from '@ant-design/icons';
+import { t } from '../../i18n';
+import { useStore } from '../../store';
+import type { SavedConnection, SavedQuery } from '../../types';
+import { getDataSourceCapabilities } from '../../utils/dataSourceCapabilities';
+import { buildTableSelectQuery } from '../../utils/objectQueryTemplates';
+import {
+  MAX_REDIS_DB_ALIAS_LENGTH,
+  buildRedisDbNodeLabel,
+  getRedisDbAlias,
+} from '../../utils/redisDbAlias';
+import { supportsTableTruncateAction } from '../tableDataDangerActions';
+
+const updateTreeNodeTitle = (
+  nodes: any[],
+  targetKey: string,
+  title: string,
+): any[] =>
+  nodes.map((node) => {
+    if (node.key === targetKey) {
+      return { ...node, title };
+    }
+    if (Array.isArray(node.children)) {
+      return { ...node, children: updateTreeNodeTitle(node.children, targetKey, title) };
+    }
+    return node;
+  });
+
+const openRedisDbAliasModal = (
+  node: any,
+  context: SidebarLegacyNodeMenuContext,
+): void => {
+  const { id, redisDB, redisKeyCount } = node.dataRef;
+  const { treeDataRef, setTreeData } = context;
+  const currentAlias = getRedisDbAlias(
+    useStore.getState().appearance.redisDbAliases,
+    id,
+    redisDB,
+  );
+  let draft = currentAlias;
+  Modal.confirm({
+    title: t('redis.db_alias.modal.title', { db: `db${redisDB}` }),
+    icon: null,
+    content: (
+      <Input
+        defaultValue={currentAlias}
+        maxLength={MAX_REDIS_DB_ALIAS_LENGTH}
+        placeholder={t('redis.db_alias.modal.placeholder')}
+        onChange={(event) => {
+          draft = event.target.value;
+        }}
+        onPressEnter={(event) => {
+          draft = (event.target as HTMLInputElement).value;
+        }}
+      />
+    ),
+    okText: t('common.confirm'),
+    cancelText: t('common.cancel'),
+    onOk: () => {
+      useStore.getState().setRedisDbAlias(id, redisDB, draft);
+      if (treeDataRef?.current && typeof setTreeData === 'function') {
+        const nextAlias = getRedisDbAlias(
+          useStore.getState().appearance.redisDbAliases,
+          id,
+          redisDB,
+        );
+        const keyCount = Number(redisKeyCount);
+        const suffix = Number.isFinite(keyCount) && keyCount > 0 ? ` (${keyCount})` : '';
+        const nextTitle = buildRedisDbNodeLabel(redisDB, nextAlias, suffix);
+        const nextTree = updateTreeNodeTitle(treeDataRef.current, node.key, nextTitle);
+        treeDataRef.current = nextTree;
+        setTreeData(nextTree);
+      }
+    },
+  });
+};
+
+type TreeNode = {
+  type?: string;
+  title?: string;
+  key?: string;
+  dataRef?: any;
+  children?: TreeNode[];
+  [key: string]: any;
+};
+
+export type SidebarLegacyNodeMenuContext = Record<string, any>;
+
+export const buildSidebarLegacyNodeMenuItems = (
+  node: any,
+  context: SidebarLegacyNodeMenuContext,
+): MenuProps['items'] => {
+  const {
+    addTab,
+    getMetadataDialect,
+    handleV2DatabaseContextMenuAction,
+    isPostgresSchemaDialect,
+    handleExportSchemaSQL,
+    openRenameSchemaModal,
+    loadTables,
+    getDatabaseNodeRef,
+    handleDeleteSchema,
+    tableSortPreference,
+    isStructureOnlyDbType,
+    openNewTableDesign,
+    handleTableGroupSortAction,
+    openCreateView,
+    openCreateStarRocksMaterializedView,
+    openCreateRoutine,
+    createTagForm,
+    setRenameViewTarget,
+    setIsCreateTagModalOpen,
+    removeConnectionTag,
+    setExpandedKeys,
+    setLoadedKeys,
+    loadingNodesRef,
+    loadDatabases,
+    buildConnectionRootRedisCommandTabTitle,
+    buildConnectionRootRedisMonitorTabTitle,
+    onEditConnection,
+    handleDuplicateConnection,
+    disconnectConnectionNode,
+    deleteConnectionNode,
+    connectionTags,
+    moveConnectionToTag,
+    setTargetConnection,
+    setIsCreateDbModalOpen,
+    buildConnectionRootQueryTabTitle,
+    handleRunSQLFile,
+    openCreateStarRocksExternalCatalog,
+    openEditView,
+    renameViewForm,
+    setIsRenameViewModalOpen,
+    handleDropView,
+    onDoubleClick,
+    openViewDefinition,
+    openRoutineDefinition,
+    openEditRoutine,
+    handleDropRoutine,
+    openEventDefinition,
+    resolveMessagePublishTarget,
+    openMessagePublishModal,
+    openDesign,
+    openCreateStarRocksRollup,
+    handleCopyTableName,
+    handleCopyStructure,
+    handleExport,
+    setRenameTableTarget,
+    renameTableForm,
+    setIsRenameTableModalOpen,
+    handleTableDataDangerAction,
+    handleDeleteTable,
+    openExportDialog,
+    isSavedQueryUnmatched,
+    connections,
+    handleRebindSavedQuery,
+    openRenameSavedQueryModal,
+    resolveSavedQueryDisplayName,
+    deleteQuery,
+    treeDataRef,
+    setTreeData,
+    handleAddExternalSQLDirectory,
+    openCreateExternalSQLFileModal,
+    openCreateExternalSQLDirectoryModal,
+    openRenameExternalSQLDirectoryModal,
+    handleRefreshExternalSQLDirectory,
+    handleDeleteExternalSQLDirectory,
+    handleRemoveExternalSQLDirectory,
+    openExternalSQLFile,
+    openRenameExternalSQLFileModal,
+    handleDeleteExternalSQLFile,
+    extractObjectName,
+  } = context;
+    const conn = node.dataRef as SavedConnection;
+    const isRedis = conn?.config?.type === 'redis';
+
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'schema') {
+        const dialect = getMetadataDialect(node.dataRef as SavedConnection);
+        const schemaName = String(node?.dataRef?.schemaName || '').trim();
+        if (!isPostgresSchemaDialect(dialect) || !schemaName) {
+            return [];
+        }
+        return [
+            {
+                key: 'rename-schema',
+                label: '编辑模式',
+                icon: <EditOutlined />,
+                onClick: () => openRenameSchemaModal(node)
+            },
+            {
+                key: 'refresh-schema',
+                label: '刷新',
+                icon: <ReloadOutlined />,
+                onClick: () => void loadTables(getDatabaseNodeRef(node.dataRef, node.dataRef.dbName))
+            },
+            {
+                key: 'export-schema',
+                label: '导出当前模式表结构 (SQL)',
+                icon: <ExportOutlined />,
+                onClick: () => void handleExportSchemaSQL(node, false)
+            },
+            {
+                key: 'backup-schema-sql',
+                label: '备份当前模式全部表 (结构+数据 SQL)',
+                icon: <SaveOutlined />,
+                onClick: () => void handleExportSchemaSQL(node, true)
+            },
+            { type: 'divider' },
+            {
+                key: 'drop-schema',
+                label: '删除模式',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => handleDeleteSchema(node)
+            },
+        ];
+    }
+
+    // 表分组节点的右键菜单
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'tables') {
+        const groupData = node.dataRef; // { ...conn, dbName, groupKey }
+        const sortPreferenceKey = `${groupData.id}-${groupData.dbName}`;
+        const currentSort = tableSortPreference[sortPreferenceKey] || 'name';
+        const canCreateTable = !isStructureOnlyDbType(String(groupData.id || ''));
+
+        return [
+            ...(canCreateTable ? [{
+                key: 'new-table',
+                label: '新建表',
+                icon: <TableOutlined />,
+                onClick: () => openNewTableDesign(node)
+            }] : []),
+            { type: 'divider' },
+            {
+                key: 'sort-by-name',
+                label: '按名称排序',
+                icon: currentSort === 'name' ? <CheckSquareOutlined /> : null,
+                onClick: () => handleTableGroupSortAction(node, 'name')
+            },
+            {
+                key: 'sort-by-frequency',
+                label: '按使用频率排序',
+                icon: currentSort === 'frequency' ? <CheckSquareOutlined /> : null,
+                onClick: () => handleTableGroupSortAction(node, 'frequency')
+            }
+        ];
+    }
+
+    // 视图分组节点的右键菜单
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'views') {
+        return [
+            {
+                key: 'create-view',
+                label: t('sidebar.menu.create_view'),
+                icon: <PlusOutlined />,
+                onClick: () => openCreateView(node)
+            },
+        ];
+    }
+
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'materializedViews') {
+        return [
+            {
+                key: 'create-materialized-view',
+                label: t('sidebar.v2_database_menu.new_materialized_view'),
+                icon: <PlusOutlined />,
+                onClick: () => openCreateStarRocksMaterializedView(node)
+            },
+        ];
+    }
+
+    // 函数分组节点的右键菜单
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'routines') {
+        const dialect = getMetadataDialect(node.dataRef as SavedConnection);
+        const routineMenu: MenuProps['items'] = [
+            {
+                key: 'create-function',
+                label: t('sidebar.tab.create_function'),
+                icon: <PlusOutlined />,
+                onClick: () => openCreateRoutine(node, 'FUNCTION')
+            },
+        ];
+        if (dialect !== 'duckdb') {
+            routineMenu.push({
+                key: 'create-procedure',
+                label: t('sidebar.tab.create_procedure'),
+                icon: <PlusOutlined />,
+                onClick: () => openCreateRoutine(node, 'PROCEDURE')
+            });
+        }
+        return routineMenu;
+    }
+
+    if (node.type === 'object-group' && node.dataRef?.groupKey === 'events') {
+        return [
+            {
+                key: 'create-event-query',
+                label: '新建事件',
+                icon: <PlusOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `query-create-event-${Date.now()}`,
+                        title: '新建事件',
+                        type: 'query',
+                        connectionId: node.dataRef.id,
+                        dbName: node.dataRef.dbName,
+                        query: `CREATE EVENT event_name\nON SCHEDULE EVERY 1 DAY\nDO\nBEGIN\n    -- event body\nEND;`
+                    });
+                }
+            },
+        ];
+    }
+
+    // Connection Tag Menu — must be BEFORE the connection check
+    if (node.type === 'tag') {
+        return [
+            {
+                key: 'edit-tag',
+                label: '编辑标签',
+                icon: <EditOutlined />,
+                onClick: () => {
+                    createTagForm.setFieldsValue({ name: node.title, connectionIds: node.dataRef.connectionIds });
+                    setRenameViewTarget(node);
+                    setIsCreateTagModalOpen(true);
+                }
+            },
+            { type: 'divider' },
+            {
+                key: 'delete-tag',
+                label: '删除标签',
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    Modal.confirm({
+                        title: '确认删除',
+                        content: `确定要删除标签 "${node.title}" 吗？这不会删除里面的连接。`,
+                        onOk: () => {
+                            removeConnectionTag(node.dataRef.id);
+                        }
+                    });
+                }
+            }
+        ];
+    }
+
+    if (node.type === 'connection') {
+        // Redis connection menu
+        if (isRedis) {
+            return [
+                {
+                    key: 'refresh',
+                    label: t('sidebar.menu.refresh'),
+                    icon: <ReloadOutlined />,
+                    onClick: () => {
+                        const connKey = String(node.key);
+                        // 清除子节点的展开/已加载状态，确保刷新后重新展开时能触发 onLoadData
+                        setExpandedKeys((prev: any[]) => prev.filter((k: any) => !k.toString().startsWith(`${connKey}-`)));
+                        setLoadedKeys((prev: any[]) => prev.filter((k: any) => !k.toString().startsWith(`${connKey}-`)));
+                        // 清除 loadingNodesRef 中残留的子节点加载标记
+                        Array.from(loadingNodesRef.current as Set<string>).forEach(lk => {
+                            if (lk.startsWith(`tables-${connKey}-`)) loadingNodesRef.current.delete(lk);
+                        });
+                        loadDatabases(node);
+                    }
+                },
+                { type: 'divider' },
+                {
+                    key: 'new-command',
+                    label: t('sidebar.menu.new_command_window'),
+                    icon: <ConsoleSqlOutlined />,
+                    onClick: () => {
+                        addTab({
+                            id: `redis-cmd-${node.key}-${Date.now()}`,
+                            title: buildConnectionRootRedisCommandTabTitle(),
+                            type: 'redis-command',
+                            connectionId: node.key,
+                            redisDB: 0
+                        });
+                    }
+                },
+                {
+                    key: 'open-monitor',
+                    label: t('redis_monitor.title.instance'),
+                    icon: <DashboardOutlined />,
+                    onClick: () => {
+                        addTab({
+                            id: `redis-monitor-${node.key}-${Date.now()}`,
+                            title: buildConnectionRootRedisMonitorTabTitle(),
+                            type: 'redis-monitor',
+                            connectionId: node.key,
+                            redisDB: 0
+                        });
+                    }
+                },
+                { type: 'divider' },
+                {
+                    key: 'edit',
+                    label: t('sidebar.menu.edit_connection'),
+                    icon: <EditOutlined />,
+                    onClick: () => {
+                        if (onEditConnection) onEditConnection(node.dataRef);
+                    }
+                },
+                {
+                    key: 'copy-connection',
+                    label: t('connection.sidebar.menu.copy'),
+                    icon: <CopyOutlined />,
+                    onClick: () => handleDuplicateConnection(node.dataRef as SavedConnection)
+                },
+                {
+                    key: 'disconnect',
+                    label: t('connection.sidebar.menu.disconnect'),
+                    icon: <DisconnectOutlined />,
+                    onClick: () => void disconnectConnectionNode(node)
+                },
+                {
+                    key: 'delete',
+                    label: t('connection.sidebar.menu.delete'),
+                    icon: <DeleteOutlined />,
+                    danger: true,
+                    onClick: () => deleteConnectionNode(node)
+                }
+            ];
+        }
+
+        // Tag submenu for connection
+        const tagSubMenuItems: NonNullable<MenuProps['items']> = connectionTags.map((tag: any) => ({
+            key: `move-to-tag-${tag.id}`,
+            label: tag.name,
+            icon: <FolderOutlined />,
+            onClick: () => moveConnectionToTag(node.key, tag.id)
+        }));
+        if (connectionTags.length > 0) {
+            tagSubMenuItems.push({ type: 'divider' });
+        }
+        tagSubMenuItems.push({
+            key: 'move-to-ungrouped',
+            label: t('connection.sidebar.menu.moveOutTag'),
+            onClick: () => moveConnectionToTag(node.key, null)
+        });
+
+        // Regular database connection menu
+        const connectionCapabilities = getDataSourceCapabilities((node.dataRef as SavedConnection)?.config);
+        return [
+            ...(connectionCapabilities.supportsCreateDatabase ? [{
+                key: 'new-db',
+                label: t('connection.sidebar.menu.createDatabase'),
+                icon: <DatabaseOutlined />,
+                onClick: () => {
+                    setTargetConnection(node);
+                    setIsCreateDbModalOpen(true);
+                }
+            }] : []),
+            {
+                key: 'refresh',
+                label: t('sidebar.menu.refresh'),
+                icon: <ReloadOutlined />,
+                onClick: () => {
+                    const connKey = String(node.key);
+                    // 清除子节点的展开/已加载状态，确保刷新后重新展开时能触发 onLoadData
+                    setExpandedKeys((prev: any[]) => prev.filter((k: any) => !k.toString().startsWith(`${connKey}-`)));
+                    setLoadedKeys((prev: any[]) => prev.filter((k: any) => !k.toString().startsWith(`${connKey}-`)));
+                    // 清除 loadingNodesRef 中残留的子节点加载标记
+                    Array.from(loadingNodesRef.current as Set<string>).forEach(lk => {
+                        if (lk.startsWith(`tables-${connKey}-`)) loadingNodesRef.current.delete(lk);
+                    });
+                    loadDatabases(node);
+                }
+            },
+            { type: 'divider' },
+             {
+               key: 'new-query',
+               label: t('sidebar.menu.new_query'),
+               icon: <ConsoleSqlOutlined />,
+               onClick: () => {
+                   addTab({
+                       id: `query-${Date.now()}`,
+                       title: buildConnectionRootQueryTabTitle(),
+                       type: 'query',
+                       connectionId: node.key,
+                       dbName: undefined,
+                       query: ''
+                   });
+               }
+             },
+             {
+                 key: 'open-sql-file',
+                 label: t('sidebar.sql_file_exec.title'),
+                 icon: <FileAddOutlined />,
+                 onClick: () => handleRunSQLFile(node)
+             },
+             { type: 'divider' },
+             {
+                 key: 'edit',
+                 label: t('sidebar.menu.edit_connection'),
+                 icon: <EditOutlined />,
+                 onClick: () => {
+                     if (onEditConnection) onEditConnection(node.dataRef);
+                 }
+             },
+             {
+                 key: 'copy-connection',
+                 label: t('connection.sidebar.menu.copy'),
+                 icon: <CopyOutlined />,
+                 onClick: () => handleDuplicateConnection(node.dataRef as SavedConnection)
+             },
+             {
+                 key: 'move-to-tag',
+                 label: t('connection.sidebar.menu.moveToTag'),
+                 icon: <FolderOpenOutlined />,
+                 children: tagSubMenuItems
+             },
+             {
+                 key: 'disconnect',
+                 label: t('connection.sidebar.menu.disconnect'),
+                 icon: <DisconnectOutlined />,
+                 onClick: () => void disconnectConnectionNode(node)
+             },
+             {
+                 key: 'delete',
+                 label: t('connection.sidebar.menu.delete'),
+                 icon: <DeleteOutlined />,
+                 danger: true,
+                 onClick: () => deleteConnectionNode(node)
+             }
+        ];
+    } else if (node.type === 'redis-db') {
+        // Redis database menu
+        const { id, redisDB } = node.dataRef;
+        return [
+            {
+                key: 'open-keys',
+                label: t('redis_viewer.title.key_explorer'),
+                icon: <KeyOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `redis-keys-${id}-db${redisDB}`,
+                        title: `db${redisDB}`,
+                        type: 'redis-keys',
+                        connectionId: id,
+                        redisDB: redisDB
+                    });
+                }
+            },
+            {
+                key: 'new-command',
+                label: t('sidebar.menu.new_command_window'),
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `redis-cmd-${id}-db${redisDB}-${Date.now()}`,
+                        title: buildConnectionRootRedisCommandTabTitle(`db${redisDB}`),
+                        type: 'redis-command',
+                        connectionId: id,
+                        redisDB: redisDB
+                    });
+                }
+            },
+            {
+                key: 'open-monitor',
+                label: t('redis_monitor.title.instance'),
+                icon: <DashboardOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `redis-monitor-${id}-db${redisDB}-${Date.now()}`,
+                        title: buildConnectionRootRedisMonitorTabTitle(`db${redisDB}`),
+                        type: 'redis-monitor',
+                        connectionId: id,
+                        redisDB: redisDB
+                    });
+                }
+            },
+            {
+                key: 'set-db-alias',
+                label: t('redis.db_alias.menu.set'),
+                icon: <EditOutlined />,
+                onClick: () => openRedisDbAliasModal(node, context)
+            }
+        ];
+    } else if (node.type === 'database') {
+       const databaseConn = node.dataRef as SavedConnection;
+       const dialect = getMetadataDialect(databaseConn);
+       const capabilities = getDataSourceCapabilities(databaseConn?.config);
+       const isStarRocks = dialect === 'starrocks';
+       const supportsSchemaActions = isPostgresSchemaDialect(dialect);
+       const canCreateTable = !isStructureOnlyDbType(String(databaseConn?.id || ''));
+       return [
+           ...(canCreateTable ? [{
+                key: 'new-table',
+                label: t('sidebar.menu.create_table'),
+                icon: <TableOutlined />,
+                onClick: () => openNewTableDesign(node)
+            }] : []),
+            ...(supportsSchemaActions ? [
+                {
+                    key: 'new-schema',
+                    label: t('sidebar.v2_database_menu.new_schema'),
+                    icon: <FolderAddOutlined />,
+                    onClick: () => handleV2DatabaseContextMenuAction(node, 'new-schema')
+                },
+            ] : []),
+            ...(isStarRocks ? [
+                {
+                    key: 'new-materialized-view',
+                    label: t('sidebar.v2_database_menu.new_materialized_view'),
+                    icon: <ThunderboltOutlined />,
+                    onClick: () => openCreateStarRocksMaterializedView(node)
+                },
+                {
+                    key: 'new-external-catalog',
+                    label: t('sidebar.v2_database_menu.new_external_catalog'),
+                    icon: <CloudOutlined />,
+                    onClick: () => openCreateStarRocksExternalCatalog(node)
+                },
+            ] : []),
+            ...(capabilities.supportsRenameDatabase ? [{
+                key: 'rename-db',
+                label: t('sidebar.menu.rename_database'),
+                icon: <EditOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'rename-db')
+            }] : []),
+            ...(capabilities.supportsDropDatabase ? [{
+                key: 'danger-zone',
+                label: t('sidebar.menu.danger_operations'),
+                icon: <WarningOutlined />,
+                children: [
+                    {
+                        key: 'drop-db',
+                        label: t('sidebar.v2_table_menu.item_with_suffix', { label: t('sidebar.menu.delete_database'), suffix: 'DROP' }),
+                        icon: <DeleteOutlined />,
+                        danger: true,
+                        onClick: () => handleV2DatabaseContextMenuAction(node, 'drop-db')
+                    }
+                ]
+            }] : []),
+            {
+                key: 'refresh',
+                label: t('sidebar.v2_database_menu.refresh_object_tree'),
+                icon: <ReloadOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'refresh')
+            },
+            {
+                key: 'export-db-schema',
+                label: t('sidebar.v2_database_menu.export_all_table_schema_sql'),
+                icon: <ExportOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'export-db-schema')
+            },
+            {
+                key: 'backup-db-sql',
+                label: t('sidebar.v2_database_menu.backup_all_tables_sql'),
+                icon: <SaveOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'backup-db-sql')
+            },
+            { type: 'divider' },
+            {
+                key: 'disconnect-db',
+                label: t('sidebar.menu.close_database'),
+                icon: <DisconnectOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'disconnect-db')
+            },
+             {
+                 key: 'new-query',
+                 label: t('sidebar.menu.new_query'),
+                 icon: <ConsoleSqlOutlined />,
+                 onClick: () => handleV2DatabaseContextMenuAction(node, 'new-query')
+              },
+             {
+                  key: 'run-sql',
+                  label: t('sidebar.sql_file_exec.title'),
+                  icon: <FileAddOutlined />,
+                  onClick: () => handleV2DatabaseContextMenuAction(node, 'run-sql')
+              }
+       ];
+    } else if (node.type === 'view') {
+        return [
+            {
+                key: 'open-view',
+                label: t('sidebar.menu.browse_view_data'),
+                icon: <EyeOutlined />,
+                onClick: () => onDoubleClick(null, node)
+            },
+            {
+                key: 'view-definition',
+                label: t('sidebar.menu.view_definition'),
+                icon: <CodeOutlined />,
+                onClick: () => openViewDefinition(node)
+            },
+            {
+                key: 'copy-view-name',
+                label: '复制名称',
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyTableName(node)
+            },
+            { type: 'divider' },
+            {
+                key: 'edit-view',
+                label: t('sidebar.menu.edit_view'),
+                icon: <EditOutlined />,
+                onClick: () => openEditView(node)
+            },
+            {
+                key: 'new-query',
+                label: t('sidebar.menu.new_query'),
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `query-${Date.now()}`,
+                        title: t('query.new'),
+                        type: 'query',
+                        connectionId: node.dataRef.id,
+                        dbName: node.dataRef.dbName,
+                        query: ''
+                    });
+                }
+            },
+            { type: 'divider' },
+            {
+                key: 'rename-view',
+                label: t('sidebar.menu.rename_view'),
+                icon: <EditOutlined />,
+                onClick: () => {
+                    setRenameViewTarget(node);
+                    renameViewForm.setFieldsValue({ newName: extractObjectName(node.dataRef?.viewName || node.title) });
+                    setIsRenameViewModalOpen(true);
+                }
+            },
+            {
+                key: 'danger-zone',
+                label: t('sidebar.menu.danger_operations'),
+                icon: <WarningOutlined />,
+                children: [
+                    {
+                        key: 'drop-view',
+                        label: t('sidebar.menu.delete_view'),
+                        icon: <DeleteOutlined />,
+                        danger: true,
+                        onClick: () => handleDropView(node)
+                    }
+                ]
+            },
+        ];
+    } else if (node.type === 'materialized-view') {
+        return [
+            {
+                key: 'open-materialized-view',
+                label: t('sidebar.menu.browse_materialized_view_data'),
+                icon: <EyeOutlined />,
+                onClick: () => onDoubleClick(null, node)
+            },
+            {
+                key: 'materialized-view-definition',
+                label: t('sidebar.menu.materialized_view_definition'),
+                icon: <CodeOutlined />,
+                onClick: () => openViewDefinition(node)
+            },
+            {
+                key: 'copy-materialized-view-name',
+                label: '复制名称',
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyTableName(node)
+            },
+            {
+                key: 'new-query',
+                label: t('sidebar.menu.new_query'),
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: `query-${Date.now()}`,
+                        title: t('query.new'),
+                        type: 'query',
+                        connectionId: node.dataRef.id,
+                        dbName: node.dataRef.dbName,
+                        query: buildTableSelectQuery('starrocks', String(node.dataRef?.tableName || node.dataRef?.viewName || ''))
+                    });
+                }
+            },
+        ];
+    } else if (node.type === 'routine') {
+        const routineType = node.dataRef?.routineType || 'FUNCTION';
+        const typeLabel = t(routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function');
+        return [
+            {
+                key: 'view-routine-def',
+                label: t('sidebar.menu.view_object_definition'),
+                icon: <CodeOutlined />,
+                onClick: () => openRoutineDefinition(node)
+            },
+            {
+                key: 'edit-routine',
+                label: t('sidebar.menu.edit_definition'),
+                icon: <EditOutlined />,
+                onClick: () => openEditRoutine(node)
+            },
+            { type: 'divider' },
+            {
+                key: 'danger-zone',
+                label: t('sidebar.menu.danger_operations'),
+                icon: <WarningOutlined />,
+                children: [
+                    {
+                        key: 'drop-routine',
+                        label: t('sidebar.menu.delete_routine', { type: typeLabel }),
+                        icon: <DeleteOutlined />,
+                        danger: true,
+                        onClick: () => handleDropRoutine(node)
+                    }
+                ]
+            },
+        ];
+    } else if (node.type === 'db-event') {
+        return [
+            {
+                key: 'view-event-def',
+                label: t('sidebar.menu.view_object_definition'),
+                icon: <CodeOutlined />,
+                onClick: () => openEventDefinition(node)
+            },
+            {
+                key: 'edit-event-query',
+                label: t('sidebar.menu.edit_definition'),
+                icon: <EditOutlined />,
+                onClick: () => {
+                    const { eventName, dbName, id } = node.dataRef;
+                    addTab({
+                        id: `query-edit-event-${Date.now()}`,
+                        title: t('sidebar.tab.edit_event', { name: eventName }),
+                        type: 'query',
+                        connectionId: id,
+                        dbName,
+                        query: `SHOW CREATE EVENT \`${String(eventName || '').replace(/`/g, '``')}\`;`
+                    });
+                }
+            },
+        ];
+    } else if (node.type === 'table') {
+        const isStarRocks = getMetadataDialect(node.dataRef as SavedConnection) === 'starrocks';
+        const messagePublishTarget = resolveMessagePublishTarget(node);
+        return [
+            {
+                key: 'new-query',
+                label: t('sidebar.menu.new_query'),
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => {
+                   const tableName = String(node.dataRef?.tableName || '').trim();
+                   const queryTemplate = buildTableSelectQuery(getMetadataDialect(node.dataRef as SavedConnection), tableName);
+                   addTab({
+                       id: `query-${Date.now()}`,
+                       title: t('query.new'),
+                       type: 'query',
+                       connectionId: node.dataRef.id,
+                       dbName: node.dataRef.dbName,
+                       query: queryTemplate
+                   });
+                }
+            },
+            ...(messagePublishTarget ? [{
+                key: 'publish-message',
+                label: '测试发送消息',
+                icon: <SendOutlined />,
+                onClick: () => openMessagePublishModal(node),
+            }] : []),
+            { type: 'divider' },
+            {
+                key: 'design-table',
+                label: isStructureOnlyDbType(String(node.dataRef?.id || '')) ? '表结构' : '设计表',
+                icon: <EditOutlined />,
+                onClick: () => openDesign(node, 'columns', false)
+            },
+            ...(isStarRocks ? [{
+                key: 'new-rollup',
+                label: '新增 Rollup',
+                icon: <ThunderboltOutlined />,
+                onClick: () => openCreateStarRocksRollup(node)
+            }] : []),
+            {
+                key: 'copy-table-name',
+                label: '复制表名',
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyTableName(node)
+            },
+            {
+                key: 'copy-structure',
+                label: '复制表结构',
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyStructure(node)
+            },
+            {
+                key: 'backup-table',
+                label: '备份表 (SQL)',
+                icon: <SaveOutlined />,
+                onClick: () => handleExport(node, { format: 'sql' })
+            },
+            {
+                key: 'rename-table',
+                label: '重命名表',
+                icon: <EditOutlined />,
+                onClick: () => {
+                    setRenameTableTarget(node);
+                    renameTableForm.setFieldsValue({ newName: extractObjectName(node.dataRef?.tableName || node.title) });
+                    setIsRenameTableModalOpen(true);
+                }
+            },
+            {
+                key: 'danger-zone',
+                label: t('sidebar.menu.danger_operations'),
+                icon: <WarningOutlined />,
+                children: [
+                    ...(supportsTableTruncateAction(node.dataRef?.config?.type, node.dataRef?.config?.driver) ? [{
+                        key: 'truncate-table',
+                        label: '截断表',
+                        danger: true,
+                        onClick: () => handleTableDataDangerAction(node, 'truncate')
+                    }] : []),
+                    {
+                        key: 'clear-table',
+                        label: '清空表',
+                        danger: true,
+                        onClick: () => handleTableDataDangerAction(node, 'clear')
+                    },
+                    {
+                        key: 'drop-table',
+                        label: '删除表',
+                        icon: <DeleteOutlined />,
+                        danger: true,
+                        onClick: () => handleDeleteTable(node)
+                    }
+                ]
+            },
+            {
+                type: 'divider'
+            },
+            {
+                key: 'export',
+                label: '导出表数据…',
+                icon: <ExportOutlined />,
+                onClick: () => openExportDialog(node),
+            }
+        ];
+    }
+
+    // 已存查询节点的右键菜单
+    if (node.type === 'saved-query') {
+        const q = node.dataRef as SavedQuery;
+        const rebindMenuItems: MenuProps['items'] = isSavedQueryUnmatched(q)
+            ? [
+                {
+                    key: 'rebind-query',
+                    label: '绑定到连接',
+                    icon: <LinkOutlined />,
+                    disabled: connections.length === 0,
+                    children: connections.length > 0
+                        ? connections.map((conn: SavedConnection) => ({
+                            key: `rebind-query-${conn.id}`,
+                            label: conn.name || conn.id,
+                            onClick: () => void handleRebindSavedQuery(q, conn),
+                        }))
+                        : undefined,
+                },
+            ]
+            : [];
+        return [
+            {
+                key: 'open-query',
+                label: t('sidebar.menu.open_query'),
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => {
+                    addTab({
+                        id: q.id,
+                        title: resolveSavedQueryDisplayName(q.name),
+                        type: 'query',
+                        connectionId: q.connectionId,
+                        dbName: q.dbName,
+                        query: q.sql,
+                        savedQueryId: q.id,
+                    });
+                }
+            },
+            ...rebindMenuItems,
+            { type: 'divider' },
+            {
+                key: 'rename-query',
+                label: t('sidebar.menu.rename_query'),
+                icon: <EditOutlined />,
+                onClick: () => openRenameSavedQueryModal(q),
+            },
+            {
+                key: 'delete-query',
+                label: t('sidebar.menu.delete_query'),
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    Modal.confirm({
+                        title: t('sidebar.modal.confirm_delete.title'),
+                        content: t('sidebar.modal.confirm_delete_saved_query.content', { name: resolveSavedQueryDisplayName(q.name) }),
+                        okButtonProps: { danger: true },
+                        onOk: async () => {
+                            try {
+                                await deleteQuery(q.id);
+                            } catch (e) {
+                                message.error('删除查询失败: ' + (e instanceof Error ? e.message : String(e)));
+                                throw e;
+                            }
+                            // 从树中移除节点
+                            const removeNode = (list: TreeNode[]): TreeNode[] =>
+                                list
+                                    .filter(n => !(n.type === 'saved-query' && n.dataRef?.id === q.id))
+                                    .map(n => n.children ? { ...n, children: removeNode(n.children) } : n);
+                            const nextTreeData = removeNode(treeDataRef.current);
+                            treeDataRef.current = nextTreeData;
+                            setTreeData(nextTreeData);
+                            message.success(t('sidebar.message.saved_query_deleted'));
+                        }
+                    });
+                }
+            }
+        ];
+    }
+
+    if (node.type === 'external-sql-root') {
+        return [
+            {
+                key: 'add-external-sql-directory',
+                label: t('sidebar.menu.add_sql_directory'),
+                icon: <PlusOutlined />,
+                onClick: () => {
+                    void handleAddExternalSQLDirectory(node);
+                }
+            }
+        ];
+    }
+
+    if (node.type === 'external-sql-directory') {
+        return [
+            {
+                key: 'new-external-sql-file',
+                label: t('sidebar.menu.new_sql_file'),
+                icon: <FileAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLFileModal(node);
+                }
+            },
+            {
+                key: 'new-external-sql-directory',
+                label: t('sidebar.menu.new_sql_directory'),
+                icon: <FolderAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLDirectoryModal(node);
+                }
+            },
+            {
+                key: 'rename-external-sql-directory',
+                label: t('sidebar.menu.rename_sql_directory'),
+                icon: <EditOutlined />,
+                onClick: () => {
+                    openRenameExternalSQLDirectoryModal(node);
+                }
+            },
+            { type: 'divider' },
+            {
+                key: 'refresh-external-sql-directory',
+                label: t('sidebar.menu.refresh_directory'),
+                icon: <ReloadOutlined />,
+                onClick: () => {
+                    void handleRefreshExternalSQLDirectory(node);
+                }
+            },
+            { type: 'divider' },
+            {
+                key: 'remove-external-sql-directory',
+                label: t('sidebar.menu.remove_directory'),
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    void handleRemoveExternalSQLDirectory(node);
+                }
+            },
+            {
+                key: 'delete-external-sql-directory',
+                label: t('sidebar.menu.delete_local_directory'),
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    handleDeleteExternalSQLDirectory(node);
+                }
+            }
+        ];
+    }
+
+    if (node.type === 'external-sql-folder') {
+        return [
+            {
+                key: 'new-external-sql-file',
+                label: t('sidebar.menu.new_sql_file'),
+                icon: <FileAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLFileModal(node);
+                }
+            },
+            {
+                key: 'new-external-sql-directory',
+                label: t('sidebar.menu.new_sql_directory'),
+                icon: <FolderAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLDirectoryModal(node);
+                }
+            },
+            {
+                key: 'rename-external-sql-directory',
+                label: t('sidebar.menu.rename_sql_directory'),
+                icon: <EditOutlined />,
+                onClick: () => {
+                    openRenameExternalSQLDirectoryModal(node);
+                }
+            },
+            {
+                key: 'refresh-external-sql-directory',
+                label: t('sidebar.menu.refresh_directory'),
+                icon: <ReloadOutlined />,
+                onClick: () => {
+                    void handleRefreshExternalSQLDirectory(node);
+                }
+            },
+            { type: 'divider' },
+            {
+                key: 'delete-external-sql-directory',
+                label: t('sidebar.menu.delete_sql_directory'),
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    handleDeleteExternalSQLDirectory(node);
+                }
+            }
+        ];
+    }
+
+    if (node.type === 'external-sql-file') {
+        return [
+            {
+                key: 'open-external-sql-file',
+                label: t('sidebar.menu.open_sql_file'),
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => {
+                    void openExternalSQLFile(node);
+                }
+            },
+            {
+                key: 'rename-external-sql-file',
+                label: t('sidebar.menu.rename_sql_file'),
+                icon: <EditOutlined />,
+                onClick: () => {
+                    openRenameExternalSQLFileModal(node);
+                }
+            },
+            {
+                key: 'new-external-sql-file-sibling',
+                label: t('sidebar.menu.new_sql_file_in_directory'),
+                icon: <FileAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLFileModal(node);
+                }
+            },
+            {
+                key: 'new-external-sql-directory-sibling',
+                label: t('sidebar.menu.new_sql_directory_in_directory'),
+                icon: <FolderAddOutlined />,
+                onClick: () => {
+                    openCreateExternalSQLDirectoryModal(node);
+                }
+            },
+            { type: 'divider' },
+            {
+                key: 'delete-external-sql-file',
+                label: t('sidebar.menu.delete_sql_file'),
+                icon: <DeleteOutlined />,
+                danger: true,
+                onClick: () => {
+                    handleDeleteExternalSQLFile(node);
+                }
+            }
+        ];
+    }
+
+    return [];
+  };

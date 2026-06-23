@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Button, Dropdown, message, Modal, Tabs, Tooltip } from 'antd';
+import { Button, Dropdown, message, Tabs, Tooltip } from 'antd';
 import { AppstoreOutlined, CloseOutlined, ConsoleSqlOutlined, DatabaseOutlined, PlusOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
 import type { MenuProps, TabsProps } from 'antd';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
@@ -17,15 +18,17 @@ import RedisMonitor from './RedisMonitor';
 import TriggerViewer from './TriggerViewer';
 import DefinitionViewer from './DefinitionViewer';
 import TableOverview from './TableOverview';
+import TableExportWorkbench from './TableExportWorkbench';
 import JVMOverview from './JVMOverview';
 import JVMResourceBrowser from './JVMResourceBrowser';
 import JVMAuditViewer from './JVMAuditViewer';
 import JVMDiagnosticConsole from './JVMDiagnosticConsole';
 import JVMMonitoringDashboard from './JVMMonitoringDashboard';
+import SqlAnalysisWorkbench from './explain/SqlAnalysisWorkbench';
 import type { TabData } from '../types';
+import { t } from '../i18n';
 import {
   buildTabDisplayModel,
-  getTabDisplayKindLabel,
   resolveConnectionHostSummary,
   type TabDisplayPart,
   type TabDisplayModel,
@@ -34,33 +37,59 @@ import { ReadSQLFile, WriteSQLFile } from '../../wailsjs/go/app/App';
 import {
   getSQLFileTabPath,
   hasSQLFileTabUnsavedChanges,
+  isSQLFileMissingErrorMessage,
+  isSQLFileMissingReadResult,
   isSQLFileQueryTab,
   normalizeSQLFileReadContent,
 } from '../utils/sqlFileTabDirty';
 import { clearSQLFileTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
 
-const getTabKindLabel = getTabDisplayKindLabel;
+const getTabKindLabel = (tab: TabData): string => {
+  if (tab.type === 'query') return t('tab_manager.kind_badge.query');
+  if (tab.type === 'table') return t('tab_manager.kind_badge.table');
+  if (tab.type === 'design') return t('tab_manager.kind_badge.design');
+  if (tab.type === 'table-overview') return t('tab_manager.kind_badge.table_overview');
+  if (tab.type === 'table-export') return t('tab_manager.kind_badge.table_export');
+  if (tab.type === 'sql-analysis') return t('tab_manager.kind_badge.sql_analysis');
+  if (tab.type.startsWith('redis')) return t('tab_manager.kind_badge.redis');
+  if (tab.type.startsWith('jvm')) return t('tab_manager.kind_badge.jvm');
+  if (tab.type === 'trigger') return t('tab_manager.kind_badge.trigger');
+  if (tab.type === 'view-def') {
+    return tab.viewKind === 'materialized'
+      ? t('tab_manager.kind_badge.materialized_view')
+      : t('tab_manager.kind_badge.view');
+  }
+  if (tab.type === 'event-def') return t('tab_manager.kind_badge.event');
+  if (tab.type === 'routine-def') return t('tab_manager.kind_badge.routine');
+  return t('tab_manager.kind_badge.fallback');
+};
 
 export const TAB_WORKBENCH_CLASS_NAME = 'tab-workbench';
 
 const getTabKindTooltipLabel = (tab: TabData): string => {
-  if (tab.type === 'query') return 'SQL 查询';
-  if (tab.type === 'table') return '表数据';
-  if (tab.type === 'design') return '表设计';
-  if (tab.type === 'table-overview') return '表概览';
-  if (tab.type === 'redis-keys') return 'Redis Key';
-  if (tab.type === 'redis-command') return 'Redis 命令';
-  if (tab.type === 'redis-monitor') return 'Redis 监控';
-  if (tab.type === 'jvm-overview') return 'JVM 概览';
-  if (tab.type === 'jvm-resource') return 'JVM 资源';
-  if (tab.type === 'jvm-audit') return 'JVM 审计';
-  if (tab.type === 'jvm-diagnostic') return 'JVM 诊断';
-  if (tab.type === 'jvm-monitoring') return 'JVM 监控';
-  if (tab.type === 'trigger') return '触发器';
-  if (tab.type === 'view-def') return tab.viewKind === 'materialized' ? '物化视图' : '视图';
-  if (tab.type === 'event-def') return '事件';
-  if (tab.type === 'routine-def') return '函数 / 过程';
-  return '标签页';
+  if (tab.type === 'query') return t('tab_manager.hover.kind.query');
+  if (tab.type === 'table') return t('tab_manager.hover.kind.table');
+  if (tab.type === 'design') return t('tab_manager.hover.kind.design');
+  if (tab.type === 'table-overview') return t('tab_manager.hover.kind.table_overview');
+  if (tab.type === 'table-export') return t('tab_manager.hover.kind.table_export');
+  if (tab.type === 'sql-analysis') return t('tab_manager.hover.kind.sql_analysis');
+  if (tab.type === 'redis-keys') return t('tab_manager.hover.kind.redis_keys');
+  if (tab.type === 'redis-command') return t('tab_manager.hover.kind.redis_command');
+  if (tab.type === 'redis-monitor') return t('tab_manager.hover.kind.redis_monitor');
+  if (tab.type === 'jvm-overview') return t('tab_manager.hover.kind.jvm_overview');
+  if (tab.type === 'jvm-resource') return t('tab_manager.hover.kind.jvm_resource');
+  if (tab.type === 'jvm-audit') return t('tab_manager.hover.kind.jvm_audit');
+  if (tab.type === 'jvm-diagnostic') return t('tab_manager.hover.kind.jvm_diagnostic');
+  if (tab.type === 'jvm-monitoring') return t('tab_manager.hover.kind.jvm_monitoring');
+  if (tab.type === 'trigger') return t('tab_manager.hover.kind.trigger');
+  if (tab.type === 'view-def') {
+    return tab.viewKind === 'materialized'
+      ? t('tab_manager.hover.kind.materialized_view')
+      : t('tab_manager.hover.kind.view');
+  }
+  if (tab.type === 'event-def') return t('tab_manager.hover.kind.event');
+  if (tab.type === 'routine-def') return t('tab_manager.hover.kind.routine');
+  return t('tab_manager.hover.kind.fallback');
 };
 
 const getTabObjectLabel = (tab: TabData): string => {
@@ -71,6 +100,7 @@ const getTabObjectLabel = (tab: TabData): string => {
   if (tab.triggerName) return tab.triggerName;
   if (tab.resourcePath) return tab.resourcePath;
   if (tab.filePath) return tab.filePath;
+  if (tab.type === 'sql-analysis') return tab.title;
   if (tab.type.startsWith('redis')) return `db${tab.redisDB ?? 0}`;
   return '';
 };
@@ -160,12 +190,12 @@ export const TabHoverInfo: React.FC<TabHoverInfoProps> = ({
     ? [...displayModel.primaryParts, ...displayModel.secondaryParts].find((part) => part.key === 'schema')
     : undefined;
   const rows = [
-    ['类型', getTabKindTooltipLabel(tab)],
-    ['连接', connectionLabel || '未绑定连接'],
-    ['Host', hostSummary || '未配置'],
-    ['数据库', tab.dbName || '未指定'],
+    [t('tab_manager.hover.label.type'), getTabKindTooltipLabel(tab)],
+    [t('tab_manager.hover.label.connection'), connectionLabel || t('tab_manager.hover.fallback.unbound_connection')],
+    ['Host', hostSummary || t('tab_manager.hover.fallback.host_not_configured')],
+    [t('tab_manager.hover.label.database'), tab.dbName || t('tab_manager.hover.fallback.database_not_specified')],
     ['Schema', schemaPart?.value],
-    ['对象', objectLabel],
+    [t('tab_manager.hover.label.object'), objectLabel],
   ].filter(([, value]) => Boolean(value));
 
   return (
@@ -284,7 +314,7 @@ const SortableTabLabel: React.FC<SortableTabLabelProps> = ({
         <button
           type="button"
           className="gn-v2-tab-close"
-          aria-label={`关闭 ${displayTitle}`}
+          aria-label={t('tab_manager.close_aria', { title: displayTitle })}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -385,6 +415,12 @@ const TabContent: React.FC<{ tab: TabData; isActive: boolean }> = React.memo(({ 
   if (tab.type === 'table-overview') {
     return <TableOverview tab={tab} />;
   }
+  if (tab.type === 'table-export') {
+    return <TableExportWorkbench tab={tab} />;
+  }
+  if (tab.type === 'sql-analysis') {
+    return <SqlAnalysisWorkbench tab={tab} />;
+  }
   if (tab.type === 'jvm-overview') {
     return <JVMOverview tab={tab} />;
   }
@@ -408,6 +444,7 @@ const TabManager: React.FC = React.memo(() => {
   const connections = useStore(state => state.connections);
   const theme = useStore(state => state.theme);
   const appearance = useStore(state => state.appearance);
+  const languagePreference = useStore(state => state.languagePreference);
   const activeTabId = useStore(state => state.activeTabId);
   const setActiveTab = useStore(state => state.setActiveTab);
   const addTab = useStore(state => state.addTab);
@@ -450,12 +487,17 @@ const TabManager: React.FC = React.memo(() => {
     };
 
     const dirtyTabs: Array<{ tab: TabData; draft: string }> = [];
+    const missingFileTabs: Array<{ tab: TabData; filePath: string }> = [];
     for (const tab of candidateTabs) {
       const filePath = getSQLFileTabPath(tab);
       if (!filePath) continue;
       try {
         const res = await ReadSQLFile(filePath);
         if (!res.success) {
+          if (isSQLFileMissingReadResult(res)) {
+            missingFileTabs.push({ tab, filePath });
+            continue;
+          }
           message.error(`读取 SQL 文件失败，已取消关闭：${res.message || filePath}`);
           return;
         }
@@ -464,64 +506,93 @@ const TabManager: React.FC = React.memo(() => {
           dirtyTabs.push({ tab, draft });
         }
       } catch (error) {
-        message.error('读取 SQL 文件失败，已取消关闭：' + (error instanceof Error ? error.message : String(error)));
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (isSQLFileMissingErrorMessage(errorMessage)) {
+          missingFileTabs.push({ tab, filePath });
+          continue;
+        }
+        message.error('读取 SQL 文件失败，已取消关闭：' + errorMessage);
         return;
       }
     }
 
-    if (dirtyTabs.length === 0) {
-      closeConfirmedTabsAndClearDrafts();
+    const confirmDirtyTabsOrClose = () => {
+      if (dirtyTabs.length === 0) {
+        closeConfirmedTabsAndClearDrafts();
+        return;
+      }
+
+      const firstDirtyTab = dirtyTabs[0].tab;
+      const dirtyFilePath = getSQLFileTabPath(firstDirtyTab);
+      const dirtyLabel = dirtyTabs.length === 1
+        ? `“${firstDirtyTab.title || dirtyFilePath}”`
+        : `${dirtyTabs.length} 个 SQL 文件`;
+
+      let destroyConfirm: (() => void) | null = null;
+      const confirmRef = Modal.confirm({
+        title: '保存 SQL 文件修改？',
+        content: `${dirtyLabel} 有未保存修改，是否保存后再关闭？`,
+        okText: '保存并关闭',
+        cancelText: '取消',
+        closable: true,
+        maskClosable: true,
+        okButtonProps: { type: 'primary' },
+        footer: (_, { OkBtn, CancelBtn }) => (
+          <>
+            <Button
+              onClick={() => {
+                destroyConfirm?.();
+                closeConfirmedTabsAndClearDrafts();
+              }}
+            >
+              不保存
+            </Button>
+            <CancelBtn />
+            <OkBtn />
+          </>
+        ),
+        onOk: async () => {
+          try {
+            for (const { tab, draft } of dirtyTabs) {
+              const filePath = getSQLFileTabPath(tab);
+              if (!filePath) continue;
+              const res = await WriteSQLFile(filePath, draft);
+              if (!res.success) {
+                throw new Error(`保存 ${tab.title || filePath} 失败：${res.message || '未知错误'}`);
+              }
+            }
+            message.success('SQL 文件已保存');
+            closeConfirmedTabsAndClearDrafts();
+          } catch (error) {
+            message.error(error instanceof Error ? error.message : String(error));
+            throw error;
+          }
+        },
+      });
+      destroyConfirm = confirmRef.destroy;
+    };
+
+    if (missingFileTabs.length > 0) {
+      const firstMissing = missingFileTabs[0];
+      const missingLabel = missingFileTabs.length === 1
+        ? `“${firstMissing.tab.title || firstMissing.filePath}”`
+        : `${missingFileTabs.length} 个 SQL 文件标签`;
+      Modal.confirm({
+        title: '关闭已丢失的 SQL 文件标签？',
+        content: `${missingLabel} 对应的外部 SQL 文件已不存在或已被移动，关闭后将丢弃标签内的本地草稿。`,
+        okText: dirtyTabs.length > 0 ? '继续关闭' : '关闭标签',
+        cancelText: '取消',
+        closable: true,
+        maskClosable: true,
+        okButtonProps: { danger: true },
+        onOk: () => {
+          confirmDirtyTabsOrClose();
+        },
+      });
       return;
     }
 
-    const firstDirtyTab = dirtyTabs[0].tab;
-    const dirtyFilePath = getSQLFileTabPath(firstDirtyTab);
-    const dirtyLabel = dirtyTabs.length === 1
-      ? `“${firstDirtyTab.title || dirtyFilePath}”`
-      : `${dirtyTabs.length} 个 SQL 文件`;
-
-    let destroyConfirm: (() => void) | null = null;
-    const confirmRef = Modal.confirm({
-      title: '保存 SQL 文件修改？',
-      content: `${dirtyLabel} 有未保存修改，是否保存后再关闭？`,
-      okText: '保存并关闭',
-      cancelText: '取消',
-      closable: true,
-      maskClosable: true,
-      okButtonProps: { type: 'primary' },
-      footer: (_, { OkBtn, CancelBtn }) => (
-        <>
-          <Button
-            onClick={() => {
-              destroyConfirm?.();
-              closeConfirmedTabsAndClearDrafts();
-            }}
-          >
-            不保存
-          </Button>
-          <CancelBtn />
-          <OkBtn />
-        </>
-      ),
-      onOk: async () => {
-        try {
-          for (const { tab, draft } of dirtyTabs) {
-            const filePath = getSQLFileTabPath(tab);
-            if (!filePath) continue;
-            const res = await WriteSQLFile(filePath, draft);
-            if (!res.success) {
-              throw new Error(`保存 ${tab.title || filePath} 失败：${res.message || '未知错误'}`);
-            }
-          }
-          message.success('SQL 文件已保存');
-          closeConfirmedTabsAndClearDrafts();
-        } catch (error) {
-          message.error(error instanceof Error ? error.message : String(error));
-          throw error;
-        }
-      },
-    });
-    destroyConfirm = confirmRef.destroy;
+    confirmDirtyTabsOrClose();
   }, []);
 
   const closeTabsWithSQLFilePrompt = useCallback((targetIds: string[], closeConfirmedTabs: () => void) => {
@@ -578,7 +649,7 @@ const TabManager: React.FC = React.memo(() => {
         addTab({
             id: newTabId,
             type: 'query',
-            title: '新建查询',
+            title: t('query.new'),
             query: sql,
             connectionId: resolvedConnId,
             dbName: resolvedDbName
@@ -604,7 +675,7 @@ const TabManager: React.FC = React.memo(() => {
         addTab({
             id: newTabId,
             type: 'query',
-            title: '新建查询',
+            title: t('query.new'),
             query: sql,
             connectionId: resolvedConnId,
             dbName: resolvedDbName
@@ -648,26 +719,26 @@ const TabManager: React.FC = React.memo(() => {
       { type: 'divider' },
       {
         key: 'close-other',
-        label: '关闭其他页',
+        label: t('tab_manager.menu.close_other'),
         disabled: tabs.length <= 1,
         onClick: () => closeTabsWithSQLFilePrompt(getCloseOtherTabIds(tabs, tab.id), () => closeOtherTabs(tab.id)),
       },
       {
         key: 'close-left',
-        label: '关闭左侧',
+        label: t('tab_manager.menu.close_left'),
         disabled: index === 0,
         onClick: () => closeTabsWithSQLFilePrompt(getCloseTabsToLeftIds(tabs, tab.id), () => closeTabsToLeft(tab.id)),
       },
       {
         key: 'close-right',
-        label: '关闭右侧',
+        label: t('tab_manager.menu.close_right'),
         disabled: index === tabs.length - 1,
         onClick: () => closeTabsWithSQLFilePrompt(getCloseTabsToRightIds(tabs, tab.id), () => closeTabsToRight(tab.id)),
       },
       { type: 'divider' },
       {
         key: 'close-all',
-        label: '关闭所有',
+        label: t('tab_manager.menu.close_all'),
         disabled: tabs.length === 0,
         onClick: () => closeTabsWithSQLFilePrompt(tabs.map((item) => item.id), () => closeAllTabs()),
       },
@@ -690,7 +761,7 @@ const TabManager: React.FC = React.memo(() => {
       closable: !isV2Ui,
       children: <TabContent tab={tab} isActive={tabIsActive} />,
     };
-  }), [tabs, connections, appearance.tabDisplay, activeTabId, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs, closeTab, closeTabsWithSQLFilePrompt, isV2Ui]);
+  }), [tabs, connections, appearance.tabDisplay, activeTabId, closeOtherTabs, closeTabsToLeft, closeTabsToRight, closeAllTabs, closeTab, closeTabsWithSQLFilePrompt, isV2Ui, languagePreference]);
 
   const handleOpenConnectionModal = () => {
     const target = document.querySelector<HTMLButtonElement>('[data-gonavi-create-connection-action="true"]');
@@ -703,49 +774,49 @@ const TabManager: React.FC = React.memo(() => {
 
   const EmptyWorkbench = (
     <div className="gn-v2-empty-workbench">
-      <section className="gn-v2-empty-hero" aria-label="GoNavi 起始工作台">
+      <section className="gn-v2-empty-hero" aria-label={t('tab_manager.empty.aria.start_workbench')}>
         <div className="gn-v2-empty-eyebrow">
-          <span>WORKBENCH</span>
-          <span>{connections.length} connections</span>
+          <span>{t('tab_manager.empty.eyebrow.workbench')}</span>
+          <span>{t('tab_manager.empty.eyebrow.connections', { count: connections.length })}</span>
         </div>
-        <h1>连接、查询和分析从同一个工作台开始。</h1>
-        <p>选择数据源、打开查询编辑器，或把上下文交给 AI 面板继续处理。</p>
+        <h1>{t('tab_manager.empty.hero.title')}</h1>
+        <p>{t('tab_manager.empty.hero.description')}</p>
         <div className="gn-v2-empty-actions">
           <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenConnectionModal}>
-            新建连接
+            {t('connection.new')}
           </Button>
           <Button icon={<ConsoleSqlOutlined />} onClick={() => window.dispatchEvent(new CustomEvent('gonavi:create-query-tab'))}>
-            新建查询
+            {t('query.new')}
           </Button>
           <Button icon={<RobotOutlined />} onClick={handleOpenAI}>
-            打开 AI
+            {t('tab_manager.empty.action.open_ai')}
           </Button>
         </div>
       </section>
-      <section className="gn-v2-empty-panel" aria-label="快捷工作流">
+      <section className="gn-v2-empty-panel" aria-label={t('tab_manager.empty.quick.aria')}>
         <div className="gn-v2-panel-heading">
-          <span>快捷工作流</span>
+          <span>{t('tab_manager.empty.quick.heading')}</span>
           <AppstoreOutlined />
         </div>
         <button type="button" onClick={handleOpenConnectionModal}>
           <DatabaseOutlined />
           <span>
-            <strong>配置数据源</strong>
-            <small>URI、SSH、代理和驱动集中设置</small>
+            <strong>{t('tab_manager.empty.quick.configure_source.title')}</strong>
+            <small>{t('tab_manager.empty.quick.configure_source.description')}</small>
           </span>
         </button>
         <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('gonavi:create-query-tab'))}>
           <ConsoleSqlOutlined />
           <span>
-            <strong>启动 SQL 工作区</strong>
-            <small>按当前上下文打开查询编辑器</small>
+            <strong>{t('tab_manager.empty.quick.sql_workspace.title')}</strong>
+            <small>{t('tab_manager.empty.quick.sql_workspace.description')}</small>
           </span>
         </button>
         <button type="button" onClick={handleOpenAI}>
           <RobotOutlined />
           <span>
-            <strong>进入 AI 辅助</strong>
-            <small>解释 SQL、生成查询、梳理结果</small>
+            <strong>{t('tab_manager.empty.quick.ai_assist.title')}</strong>
+            <small>{t('tab_manager.empty.quick.ai_assist.description')}</small>
           </span>
         </button>
       </section>

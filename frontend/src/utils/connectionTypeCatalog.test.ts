@@ -24,6 +24,7 @@ describe('connectionTypeCatalog', () => {
     expect(keys).toContain('oceanbase');
     expect(keys).toContain('gaussdb');
     expect(keys).toContain('goldendb');
+    expect(keys).toContain('trino');
     expect(keys).toContain('mongodb');
     expect(keys).toContain('redis');
     expect(keys).toContain('elasticsearch');
@@ -46,6 +47,7 @@ describe('connectionTypeCatalog', () => {
     expect(getConnectionTypeDefaultPort('redis')).toBe(6379);
     expect(getConnectionTypeDefaultPort('oracle')).toBe(1521);
     expect(getConnectionTypeDefaultPort('mongodb')).toBe(27017);
+    expect(getConnectionTypeDefaultPort('trino')).toBe(8080);
     expect(getConnectionTypeDefaultPort('elasticsearch')).toBe(9200);
     expect(getConnectionTypeDefaultPort('chroma')).toBe(8000);
     expect(getConnectionTypeDefaultPort('qdrant')).toBe(6333);
@@ -66,6 +68,7 @@ describe('connectionTypeCatalog', () => {
     expect(getConnectionTypeHint('kafka')).toContain('Consumer Group');
     expect(getConnectionTypeHint('oceanbase')).toBe('MySQL / Oracle 租户');
     expect(getConnectionTypeHint('goldendb')).toBe('MySQL 兼容 / 分布式事务');
+    expect(getConnectionTypeHint('trino')).toBe('HTTP / HTTPS / catalog.schema');
     expect(getConnectionTypeHint('duckdb')).toBe('本地文件连接');
     expect(getConnectionTypeHint('mysql')).toBe('标准连接配置');
   });

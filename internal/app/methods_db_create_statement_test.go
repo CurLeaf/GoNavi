@@ -193,6 +193,24 @@ func TestNormalizeSchemaAndTableByType_RabbitMQPreservesDottedQueueName(t *testi
 	}
 }
 
+func TestNormalizeSchemaAndTableByType_TrinoPreservesDottedTableName(t *testing.T) {
+	t.Parallel()
+
+	schema, table := normalizeSchemaAndTableByType("trino", "hive.default", "orders.events.v1")
+	if schema != "hive.default" || table != "orders.events.v1" {
+		t.Fatalf("expected trino table name to stay intact, got %q.%q", schema, table)
+	}
+}
+
+func TestQuoteTableIdentByType_TrinoKeepsCatalogSchemaAndDottedTable(t *testing.T) {
+	t.Parallel()
+
+	got := quoteTableIdentByType("trino", "hive.default", "orders.events.v1")
+	if got != `"hive"."default"."orders.events.v1"` {
+		t.Fatalf("unexpected trino quoted table: %s", got)
+	}
+}
+
 func TestBuildRunConfigForDDL_CustomHighGoUsesDatabase(t *testing.T) {
 	t.Parallel()
 
@@ -329,6 +347,37 @@ func TestResolveCreateStatementWithFallback_ReturnsCreateViewDirectly(t *testing
 	}
 	if dbInst.columnsCalls != 0 {
 		t.Fatalf("CREATE VIEW path should not call GetColumns, calls=%d", dbInst.columnsCalls)
+	}
+}
+
+func TestResolveCreateStatementWithFallback_OceanBaseOracleUsesShowCreateWhenAgentDDLIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	dbInst := &fakeCreateStatementDB{
+		createSQL: "",
+		queryRows: []map[string]interface{}{
+			{"Create Table": `CREATE TABLE "SYS"."test" ("id" NUMBER)`},
+		},
+	}
+
+	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{
+		Type:             "oceanbase",
+		ConnectionParams: "protocol=oracle",
+	}, "SYS", "SYS.test")
+	if err != nil {
+		t.Fatalf("resolveCreateStatementWithFallback() unexpected error: %v", err)
+	}
+	if ddl != `CREATE TABLE "SYS"."test" ("id" NUMBER)` {
+		t.Fatalf("expected SHOW CREATE TABLE fallback DDL, got: %s", ddl)
+	}
+	if dbInst.createSchema != "SYS" || dbInst.createTable != "test" {
+		t.Fatalf("expected metadata target SYS.test, got %q.%q", dbInst.createSchema, dbInst.createTable)
+	}
+	if len(dbInst.queries) != 1 || dbInst.queries[0] != `SHOW CREATE TABLE "SYS"."test"` {
+		t.Fatalf("expected SHOW CREATE TABLE query, got: %v", dbInst.queries)
+	}
+	if dbInst.columnsCalls != 0 {
+		t.Fatalf("OceanBase Oracle SHOW CREATE fallback should not call GetColumns, calls=%d", dbInst.columnsCalls)
 	}
 }
 

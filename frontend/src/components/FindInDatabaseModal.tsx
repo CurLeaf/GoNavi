@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import React, { useState, useRef, useCallback, useMemo } from 'react';
-import { Modal, Input, Button, Table, Progress, Space, Tag, message, Tooltip, Select, Empty } from 'antd';
+import { Input, Button, Table, Progress, Space, Tag, message, Tooltip, Select, Empty } from 'antd';
 import { SearchOutlined, StopOutlined, EyeOutlined, DatabaseOutlined } from '@ant-design/icons';
 import { DBQuery, DBGetTables, DBGetAllColumns } from '../../wailsjs/go/app/App';
 import { quoteIdentPart, escapeLiteral } from '../utils/sql';
@@ -7,6 +8,7 @@ import { useStore } from '../store';
 import { buildOverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { isMacLikePlatform } from '../utils/appearance';
+import { useI18n } from '../i18n/provider';
 
 interface FindInDatabaseModalProps {
     open: boolean;
@@ -23,24 +25,24 @@ interface SearchResultItem {
     columns: string[];
 }
 
-/** 判断数据库列类型是否为文本类型（只搜索文本字段） */
+/** Returns whether a database column type is searchable as text. */
 const isTextColumnType = (colType: string): boolean => {
     const t = (colType || '').toLowerCase().trim();
-    // 显式排除非文本类型
+    // Explicitly skip non-text types before falling back to searchable.
     if (/^(int|bigint|smallint|tinyint|mediumint|float|double|decimal|numeric|real|money|smallmoney|bit|boolean|bool)/.test(t)) return false;
     if (/^(date|time|datetime|timestamp|year|interval)/.test(t)) return false;
     if (/^(blob|binary|varbinary|image|bytea|raw|long raw)/.test(t)) return false;
     if (/^(geometry|geography|point|line|polygon|spatial)/.test(t)) return false;
     if (/^(json|jsonb|xml|uuid|uniqueidentifier)/.test(t)) return false;
     if (/^(serial|bigserial|smallserial|autoincrement|identity)/.test(t)) return false;
-    // 文本类型正匹配
+    // Positive text type matches.
     if (/^(varchar|char|nvarchar|nchar|text|ntext|tinytext|mediumtext|longtext|string|clob|nclob|character)/.test(t)) return true;
     if (t === 'sysname' || t === 'sql_variant') return true;
-    // 未知类型默认尝试搜索
+    // Unknown types are attempted by default.
     return true;
 };
 
-/** 根据 dbType 构建限制返回行数的 SELECT SQL */
+/** Builds a SELECT statement with a dialect-specific row limit. */
 const buildLimitedSelectSQL = (dbType: string, baseSql: string, limit: number): string => {
     const normalizedType = (dbType || '').toLowerCase();
     switch (normalizedType) {
@@ -58,6 +60,7 @@ const buildLimitedSelectSQL = (dbType: string, baseSql: string, limit: number): 
 const MAX_MATCH_ROWS_PER_TABLE = 100;
 
 const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose, connectionId, dbName }) => {
+    const { t } = useI18n();
     const [keyword, setKeyword] = useState('');
     const [matchMode, setMatchMode] = useState<'contains' | 'exact'>('contains');
     const [searching, setSearching] = useState(false);
@@ -93,12 +96,12 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
     const handleSearch = useCallback(async () => {
         const searchKeyword = keyword.trim();
         if (!searchKeyword) {
-            message.warning('请输入搜索关键字');
+            message.warning(t('find_in_database.message.keyword_required'));
             return;
         }
         const config = buildConfig();
         if (!config) {
-            message.error('未找到连接配置');
+            message.error(t('find_in_database.message.connection_config_not_found'));
             return;
         }
 
@@ -108,10 +111,9 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
         cancelledRef.current = false;
 
         try {
-            // 1. 获取所有表
             const tablesRes = await DBGetTables(buildRpcConnectionConfig(config) as any, dbName);
             if (!tablesRes.success) {
-                message.error('获取表列表失败: ' + tablesRes.message);
+                message.error(t('find_in_database.message.get_tables_failed', { detail: tablesRes.message }));
                 setSearching(false);
                 return;
             }
@@ -119,18 +121,16 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
             const tableNames = tableRows.map((row: any) => Object.values(row)[0] as string).filter(Boolean);
 
             if (tableNames.length === 0) {
-                message.info('当前数据库没有表');
+                message.info(t('find_in_database.message.no_tables'));
                 setSearching(false);
                 return;
             }
 
             setProgress({ current: 0, total: tableNames.length, tableName: '' });
 
-            // 2. 获取所有列信息（返回 any[]，含 tableName/name/type 字段）
             const allColsRes = await DBGetAllColumns(buildRpcConnectionConfig(config) as any, dbName);
             const allColumns: any[] = (allColsRes?.success && Array.isArray(allColsRes.data)) ? allColsRes.data : [];
 
-            // 按表名分组
             const columnsByTable: Record<string, Array<{ name: string; type: string }>> = {};
             allColumns.forEach((col: any) => {
                 const tbl = col.tableName || '';
@@ -141,20 +141,17 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
             const searchResults: SearchResultItem[] = [];
             const escapedKeyword = escapeLiteral(searchKeyword);
 
-            // 3. 逐表搜索
             for (let i = 0; i < tableNames.length; i++) {
                 if (cancelledRef.current) break;
 
                 const tableName = tableNames[i];
                 setProgress({ current: i + 1, total: tableNames.length, tableName });
 
-                // 获取该表的文本列
                 const tableCols = columnsByTable[tableName] || [];
                 const textCols = tableCols.filter(c => isTextColumnType(c.type));
 
                 if (textCols.length === 0) continue;
 
-                // 构建 WHERE 子句
                 const castType = (dbType === 'sqlserver' || dbType === 'mssql') ? 'NVARCHAR(MAX)' : 'CHAR';
                 const whereConditions = textCols.map(c => {
                     const quotedCol = quoteIdentPart(dbType, c.name);
@@ -171,7 +168,6 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
                 try {
                     const res = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, sql);
                     if (res.success && Array.isArray(res.data) && res.data.length > 0) {
-                        // 检查哪些列实际匹配了
                         const matchedCols = new Set<string>();
                         const lowerKeyword = searchKeyword.toLowerCase();
                         res.data.forEach((row: any) => {
@@ -199,22 +195,22 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
                         }
                     }
                 } catch {
-                    // 单表查询失败不中断整体搜索
+                    // Per-table query failures should not stop the whole search.
                 }
             }
 
             if (!cancelledRef.current) {
                 setResults([...searchResults]);
                 if (searchResults.length === 0) {
-                    message.info('未找到匹配的数据');
+                    message.info(t('find_in_database.message.no_matches'));
                 }
             }
         } catch (e: any) {
-            message.error('搜索出错: ' + (e?.message || String(e)));
+            message.error(t('find_in_database.message.search_failed', { detail: e?.message || String(e) }));
         } finally {
             setSearching(false);
         }
-    }, [keyword, matchMode, dbName, dbType, buildConfig]);
+    }, [keyword, matchMode, dbName, dbType, buildConfig, t]);
 
     const handleCancel = useCallback(() => {
         cancelledRef.current = true;
@@ -228,10 +224,9 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
         onClose();
     }, [onClose]);
 
-    // 汇总表的列定义
     const summaryColumns = useMemo(() => [
         {
-            title: '表名',
+            title: t('find_in_database.column.table_name'),
             dataIndex: 'tableName',
             key: 'tableName',
             width: 220,
@@ -243,7 +238,7 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
             ),
         },
         {
-            title: '匹配列',
+            title: t('find_in_database.column.matched_columns'),
             dataIndex: 'matchedColumns',
             key: 'matchedColumns',
             render: (cols: string[]) => (
@@ -255,7 +250,7 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
             ),
         },
         {
-            title: '命中行数',
+            title: t('find_in_database.column.match_count'),
             dataIndex: 'matchCount',
             key: 'matchCount',
             width: 100,
@@ -267,12 +262,12 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
             ),
         },
         {
-            title: '操作',
+            title: t('find_in_database.column.action'),
             key: 'action',
             width: 80,
             align: 'center' as const,
             render: (_: any, record: SearchResultItem) => (
-                <Tooltip title={expandedTable === record.tableName ? '收起详情' : '查看详情'}>
+                <Tooltip title={expandedTable === record.tableName ? t('find_in_database.tooltip.collapse_details') : t('find_in_database.tooltip.view_details')}>
                     <Button
                         type="text"
                         size="small"
@@ -283,9 +278,8 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
                 </Tooltip>
             ),
         },
-    ], [wt, expandedTable]);
+    ], [wt, expandedTable, t]);
 
-    // 展开的详情行 - 动态列
     const expandedResult = useMemo(() => {
         if (!expandedTable) return null;
         return results.find(r => r.tableName === expandedTable);
@@ -322,7 +316,7 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
             title={
                 <span style={{ color: wt.titleText, fontWeight: 600 }}>
                     <SearchOutlined style={{ marginRight: 8, color: wt.iconColor }} />
-                    在数据库中搜索 — {dbName}
+                    {t('find_in_database.title', { dbName })}
                 </span>
             }
             open={open}
@@ -344,10 +338,9 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
             destroyOnHidden
         >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {/* 搜索栏 */}
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <Input
-                        placeholder="输入要搜索的字符串..."
+                        placeholder={t('find_in_database.placeholder.keyword')}
                         value={keyword}
                         onChange={e => setKeyword(e.target.value)}
                         onPressEnter={!searching ? handleSearch : undefined}
@@ -361,22 +354,21 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
                         disabled={searching}
                         style={{ width: 110 }}
                         options={[
-                            { label: '包含', value: 'contains' },
-                            { label: '精确匹配', value: 'exact' },
+                            { label: t('find_in_database.match.contains'), value: 'contains' },
+                            { label: t('find_in_database.match.exact'), value: 'exact' },
                         ]}
                     />
                     {searching ? (
                         <Button icon={<StopOutlined />} danger onClick={handleCancel}>
-                            取消
+                            {t('common.cancel')}
                         </Button>
                     ) : (
                         <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch} disabled={!keyword.trim()}>
-                            搜索
+                            {t('common.search')}
                         </Button>
                     )}
                 </div>
 
-                {/* 进度条 */}
                 {searching && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <Progress
@@ -386,17 +378,20 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
                             strokeColor={wt.iconColor}
                         />
                         <span style={{ fontSize: 12, color: wt.mutedText }}>
-                            正在搜索 {progress.tableName}... ({progress.current}/{progress.total})
+                            {t('find_in_database.progress.searching_table', {
+                                table: progress.tableName,
+                                current: progress.current,
+                                total: progress.total,
+                            })}
                         </span>
                     </div>
                 )}
 
-                {/* 结果汇总表 */}
                 {results.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <div style={{ fontSize: 13, color: wt.mutedText, fontWeight: 500 }}>
-                            找到 {results.length} 个表包含匹配数据
-                            {searching && '（搜索进行中...）'}
+                            {t('find_in_database.summary.found_tables', { count: results.length })}
+                            {searching && t('find_in_database.summary.searching')}
                         </div>
                         <Table
                             dataSource={results}
@@ -417,7 +412,6 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
                     </div>
                 )}
 
-                {/* 详情展开 */}
                 {expandedResult && (
                     <div style={{
                         border: wt.sectionBorder,
@@ -437,9 +431,9 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
                         }}>
                             <span>
                                 <DatabaseOutlined style={{ marginRight: 6 }} />
-                                {expandedResult.tableName} — 匹配行详情
+                                {t('find_in_database.detail.title', { table: expandedResult.tableName })}
                             </span>
-                            <Tag color="blue">{expandedResult.rows.length} 行</Tag>
+                            <Tag color="blue">{t('find_in_database.detail.row_count', { count: expandedResult.rows.length })}</Tag>
                         </div>
                         <Table
                             dataSource={expandedResult.rows.map((row, i) => ({ ...row, __rowIdx: i }))}
@@ -453,9 +447,8 @@ const FindInDatabaseModal: React.FC<FindInDatabaseModalProps> = ({ open, onClose
                     </div>
                 )}
 
-                {/* 无结果且搜索完成 */}
                 {!searching && results.length === 0 && progress.total > 0 && (
-                    <Empty description="未找到匹配的数据" style={{ margin: '24px 0' }} />
+                    <Empty description={t('find_in_database.message.no_matches')} style={{ margin: '24px 0' }} />
                 )}
             </div>
         </Modal>

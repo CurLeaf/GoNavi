@@ -36,6 +36,7 @@ interface UseDataGridFiltersParams {
   messageApi?: {
     warning?: (content: string) => void;
   };
+  translate?: (key: string, params?: Record<string, string | number>) => string;
   getColumnFilterType: (columnName: string) => string;
   resolveDefaultGridFilterOperator: (columnType: unknown) => string;
   resolveNextGridFilterOperatorForColumnChange: (params: {
@@ -73,6 +74,7 @@ export interface UseDataGridFiltersResult {
 }
 
 const EXACT_GRID_FILTER_OPERATOR = '=';
+const fallbackTranslate = (key: string) => key;
 
 export const useDataGridFilters = ({
   appliedFilterConditions,
@@ -87,6 +89,7 @@ export const useDataGridFilters = ({
   onApplyQuickWhereCondition,
   onSort,
   messageApi,
+  translate = fallbackTranslate,
   getColumnFilterType,
   resolveDefaultGridFilterOperator,
   resolveNextGridFilterOperatorForColumnChange,
@@ -228,27 +231,27 @@ export const useDataGridFilters = ({
     { value: '<=', label: '<=' },
     { value: '>', label: '>' },
     { value: '>=', label: '>=' },
-    { value: 'CONTAINS', label: '包含' },
-    { value: 'NOT_CONTAINS', label: '不包含' },
-    { value: 'STARTS_WITH', label: '开始以' },
-    { value: 'NOT_STARTS_WITH', label: '不是开始于' },
-    { value: 'ENDS_WITH', label: '结束以' },
-    { value: 'NOT_ENDS_WITH', label: '不是结束于' },
-    { value: 'IS_NULL', label: '是 null' },
-    { value: 'IS_NOT_NULL', label: '不是 null' },
-    { value: 'IS_EMPTY', label: '是空的' },
-    { value: 'IS_NOT_EMPTY', label: '不是空的' },
-    { value: 'BETWEEN', label: '介于' },
-    { value: 'NOT_BETWEEN', label: '不介于' },
-    { value: 'IN', label: '在列表' },
-    { value: 'NOT_IN', label: '不在列表' },
-    { value: 'CUSTOM', label: '[自定义]' },
-  ]), []);
+    { value: 'CONTAINS', label: translate('data_grid.filter.op.contains') },
+    { value: 'NOT_CONTAINS', label: translate('data_grid.filter.op.not_contains') },
+    { value: 'STARTS_WITH', label: translate('data_grid.filter.op.starts_with') },
+    { value: 'NOT_STARTS_WITH', label: translate('data_grid.filter.op.not_starts_with') },
+    { value: 'ENDS_WITH', label: translate('data_grid.filter.op.ends_with') },
+    { value: 'NOT_ENDS_WITH', label: translate('data_grid.filter.op.not_ends_with') },
+    { value: 'IS_NULL', label: translate('data_grid.filter.op.is_null') },
+    { value: 'IS_NOT_NULL', label: translate('data_grid.filter.op.is_not_null') },
+    { value: 'IS_EMPTY', label: translate('data_grid.filter.op.is_empty') },
+    { value: 'IS_NOT_EMPTY', label: translate('data_grid.filter.op.is_not_empty') },
+    { value: 'BETWEEN', label: translate('data_grid.filter.op.between') },
+    { value: 'NOT_BETWEEN', label: translate('data_grid.filter.op.not_between') },
+    { value: 'IN', label: translate('data_grid.filter.op.in_list') },
+    { value: 'NOT_IN', label: translate('data_grid.filter.op.not_in_list') },
+    { value: 'CUSTOM', label: translate('data_grid.filter.op.custom') },
+  ]), [translate]);
 
   const filterLogicOptions = React.useMemo(() => ([
-    { value: 'AND', label: '且 (AND)' },
-    { value: 'OR', label: '或 (OR)' },
-  ]), []);
+    { value: 'AND', label: translate('data_grid.filter.logic.and') },
+    { value: 'OR', label: translate('data_grid.filter.logic.or') },
+  ]), [translate]);
 
   const isNoValueOp = React.useCallback((op: string) => (
     op === 'IS_NULL' || op === 'IS_NOT_NULL' || op === 'IS_EMPTY' || op === 'IS_NOT_EMPTY'

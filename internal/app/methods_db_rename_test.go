@@ -91,3 +91,136 @@ func TestRenameDatabase_DorisUsesNativeRenameSQL(t *testing.T) {
 		t.Fatalf("unexpected Doris rename SQL, want %q got %q", want, fakeDB.execQueries[0])
 	}
 }
+
+func TestResolvePGLikeDatabaseDDLRunConfig_UsesCompatibleMaintenanceDatabase(t *testing.T) {
+	kingbase := resolvePGLikeDatabaseDDLRunConfig(connection.ConnectionConfig{
+		Type:     "kingbase",
+		User:     "system",
+		Database: "test",
+	}, "kingbase", "test")
+	if kingbase.Database != "template1" {
+		t.Fatalf("expected Kingbase target test to use template1 maintenance database, got %q", kingbase.Database)
+	}
+
+	vastbase := resolvePGLikeDatabaseDDLRunConfig(connection.ConnectionConfig{
+		Type:     "vastbase",
+		User:     "vastbase",
+		Database: "tenant_db",
+	}, "vastbase", "tenant_db")
+	if vastbase.Database != "vastbase" {
+		t.Fatalf("expected Vastbase target tenant_db to use vastbase maintenance database, got %q", vastbase.Database)
+	}
+}
+
+func TestDropDatabase_PostgresUsesMaintenanceDatabaseWhenConfigTargetsDroppedDB(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	fakeDB := &fakeRenameDatabaseDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.DropDatabase(connection.ConnectionConfig{
+		Type:     "postgres",
+		Host:     "127.0.0.1",
+		Port:     5432,
+		User:     "postgres",
+		Database: "test",
+	}, "test")
+
+	if !result.Success {
+		t.Fatalf("expected PostgreSQL drop database success, got failure: %s", result.Message)
+	}
+	if fakeDB.connectConfig.Database != "postgres" {
+		t.Fatalf("expected PostgreSQL drop database to connect to maintenance database postgres, got %q", fakeDB.connectConfig.Database)
+	}
+	if len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one drop statement, got %d: %#v", len(fakeDB.execQueries), fakeDB.execQueries)
+	}
+	const want = `DROP DATABASE "test"`
+	if fakeDB.execQueries[0] != want {
+		t.Fatalf("unexpected PostgreSQL drop SQL, want %q got %q", want, fakeDB.execQueries[0])
+	}
+}
+
+func TestDropDatabase_PostgresUsesTemplateWhenDroppingPostgresDatabase(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	fakeDB := &fakeRenameDatabaseDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.DropDatabase(connection.ConnectionConfig{
+		Type:     "postgres",
+		Host:     "127.0.0.1",
+		Port:     5432,
+		User:     "postgres",
+		Database: "postgres",
+	}, "postgres")
+
+	if !result.Success {
+		t.Fatalf("expected PostgreSQL drop database success, got failure: %s", result.Message)
+	}
+	if fakeDB.connectConfig.Database != "template1" {
+		t.Fatalf("expected PostgreSQL drop postgres database to connect to template1, got %q", fakeDB.connectConfig.Database)
+	}
+}
+
+func TestRenameDatabase_PostgresUsesMaintenanceDatabaseWhenConfigTargetsRenamedDB(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	fakeDB := &fakeRenameDatabaseDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.RenameDatabase(connection.ConnectionConfig{
+		Type:     "postgres",
+		Host:     "127.0.0.1",
+		Port:     5432,
+		User:     "postgres",
+		Database: "test",
+	}, "test", "test_new")
+
+	if !result.Success {
+		t.Fatalf("expected PostgreSQL rename database success, got failure: %s", result.Message)
+	}
+	if fakeDB.connectConfig.Database != "postgres" {
+		t.Fatalf("expected PostgreSQL rename database to connect to maintenance database postgres, got %q", fakeDB.connectConfig.Database)
+	}
+	if len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one rename statement, got %d: %#v", len(fakeDB.execQueries), fakeDB.execQueries)
+	}
+	const want = `ALTER DATABASE "test" RENAME TO "test_new"`
+	if fakeDB.execQueries[0] != want {
+		t.Fatalf("unexpected PostgreSQL rename SQL, want %q got %q", want, fakeDB.execQueries[0])
+	}
+}

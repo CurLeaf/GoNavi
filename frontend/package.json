@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "i18n:scan": "go run ../tools/i18n-scan --root .."
   },
   "dependencies": {
     "@ant-design/icons": "^5.2.6",
@@ -16,9 +17,11 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@monaco-editor/react": "^4.6.0",
+    "@types/dagre": "^0.7.54",
     "@types/react-syntax-highlighter": "^15.5.13",
     "antd": "^5.12.0",
     "clsx": "^2.1.0",
+    "dagre": "^0.8.5",
     "fflate": "^0.8.3",
     "mermaid": "^11.13.0",
     "react": "^18.2.0",
@@ -26,6 +29,7 @@
     "react-markdown": "^10.1.0",
     "react-resizable": "^3.1.3",
     "react-syntax-highlighter": "^16.1.1",
+    "reactflow": "^11.11.4",
     "recharts": "^3.8.1",
     "remark-gfm": "^4.0.1",
     "sql-formatter": "^15.7.0",

@@ -22,6 +22,7 @@ type OracleDB struct {
 	conn        *sql.DB
 	pingTimeout time.Duration
 	forwarder   *ssh.LocalForwarder // Store SSH tunnel forwarder
+	scanDialect string
 }
 
 var _ SessionExecerProvider = (*OracleDB)(nil)
@@ -160,6 +161,7 @@ func (o *OracleDB) Connect(config connection.ConnectionConfig) error {
 			failures = append(failures, fmt.Sprintf("第%d次连接打开失败: %v", idx+1, err))
 			continue
 		}
+		configureSQLConnectionPool(db, "oracle")
 		o.conn = db
 		o.pingTimeout = getConnectTimeout(attempt)
 		if err := o.Ping(); err != nil {
@@ -216,7 +218,7 @@ func (o *OracleDB) QueryContext(ctx context.Context, query string) ([]map[string
 	}
 	defer rows.Close()
 
-	return scanRows(rows)
+	return scanRowsForDialect(rows, o.scanDialect)
 }
 
 func (o *OracleDB) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -229,7 +231,7 @@ func (o *OracleDB) Query(query string) ([]map[string]interface{}, []string, erro
 		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsForDialect(rows, o.scanDialect)
 }
 
 func (o *OracleDB) ExecContext(ctx context.Context, query string) (int64, error) {
@@ -262,7 +264,7 @@ func (o *OracleDB) OpenTransactionExecer(ctx context.Context) (TransactionExecer
 	if err != nil {
 		return nil, err
 	}
-	return NewSQLConnTransactionExecer(conn, "COMMIT", "ROLLBACK"), nil
+	return NewSQLConnTransactionExecerWithDialect(conn, "COMMIT", "ROLLBACK", o.scanDialect), nil
 }
 
 func (o *OracleDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
@@ -273,7 +275,7 @@ func (o *OracleDB) OpenSessionExecer(ctx context.Context) (StatementExecer, erro
 	if err != nil {
 		return nil, err
 	}
-	return NewSQLConnStatementExecer(conn), nil
+	return NewSQLConnStatementExecerWithDialect(conn, o.scanDialect), nil
 }
 
 func (o *OracleDB) GetDatabases() ([]string, error) {
@@ -325,87 +327,151 @@ func (o *OracleDB) GetTables(dbName string) ([]string, error) {
 func (o *OracleDB) GetCreateStatement(dbName, tableName string) (string, error) {
 	// Oracle provides DBMS_METADATA.GET_DDL
 	// Note: LONG type might be tricky, but basic string scan should work for smaller DDLs
-	metadataTableName := escapeOracleMetadataLiteral(tableName)
-	metadataSchemaName := escapeOracleMetadataLiteral(dbName)
-	query := fmt.Sprintf("SELECT DBMS_METADATA.GET_DDL('TABLE', '%s', '%s') as ddl FROM DUAL",
-		metadataTableName, metadataSchemaName)
+	var firstErr error
+	for _, candidate := range oracleMetadataNamePairs(dbName, tableName) {
+		metadataTableName := escapeOracleMetadataLiteralExact(candidate.table)
+		metadataSchemaName := escapeOracleMetadataLiteralExact(candidate.schema)
+		query := fmt.Sprintf("SELECT DBMS_METADATA.GET_DDL('TABLE', '%s', '%s') as ddl FROM DUAL",
+			metadataTableName, metadataSchemaName)
 
-	if dbName == "" {
-		query = fmt.Sprintf("SELECT DBMS_METADATA.GET_DDL('TABLE', '%s') as ddl FROM DUAL", metadataTableName)
-	}
-
-	data, _, err := o.Query(query)
-	if err != nil {
-		return "", err
-	}
-
-	if len(data) > 0 {
-		if val, ok := data[0]["DDL"]; ok {
-			return o.appendOracleCommentDDL(fmt.Sprintf("%v", val), dbName, tableName), nil
+		if candidate.schema == "" {
+			query = fmt.Sprintf("SELECT DBMS_METADATA.GET_DDL('TABLE', '%s') as ddl FROM DUAL", metadataTableName)
 		}
+
+		data, _, err := o.Query(query)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+
+		if len(data) > 0 {
+			if val, ok := data[0]["DDL"]; ok {
+				ddl := strings.TrimSpace(fmt.Sprintf("%v", val))
+				if ddl != "" {
+					return o.appendOracleCommentDDL(ddl, candidate.schema, candidate.table), nil
+				}
+			}
+		}
+	}
+	if firstErr != nil {
+		return "", firstErr
 	}
 	return "", fmt.Errorf("未找到建表语句")
 }
 
 func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
-	metadataTableName := escapeOracleMetadataLiteral(tableName)
-	metadataSchemaName := escapeOracleMetadataLiteral(dbName)
-	query := fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.data_length AS "DATA_LENGTH", c.char_length AS "CHAR_LENGTH", c.data_precision AS "DATA_PRECISION", c.data_scale AS "DATA_SCALE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
-		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS "COLUMN_KEY",
-		cc.comments AS "COMMENT"
-		FROM all_tab_columns c
-		LEFT JOIN all_col_comments cc
-		  ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
-		LEFT JOIN (
-			SELECT cols.owner, cols.table_name, cols.column_name
-			FROM all_constraints cons
-			JOIN all_cons_columns cols
-			  ON cons.owner = cols.owner AND cons.constraint_name = cols.constraint_name
-			WHERE cons.constraint_type = 'P'
-		) pk ON c.owner = pk.owner AND c.table_name = pk.table_name AND c.column_name = pk.column_name
-		WHERE c.owner = '%s' AND c.table_name = '%s'
-		ORDER BY c.column_id`, metadataSchemaName, metadataTableName)
+	for _, candidate := range oracleMetadataNamePairs(dbName, tableName) {
+		query := buildOracleColumnsQuery(candidate.schema, candidate.table)
+		data, _, err := o.Query(query)
+		if err != nil {
+			return nil, err
+		}
+		if len(data) == 0 {
+			continue
+		}
 
-	if dbName == "" {
-		query = fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.data_length AS "DATA_LENGTH", c.char_length AS "CHAR_LENGTH", c.data_precision AS "DATA_PRECISION", c.data_scale AS "DATA_SCALE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
-			CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS "COLUMN_KEY",
-			cc.comments AS "COMMENT"
-			FROM user_tab_columns c
-			LEFT JOIN user_col_comments cc
-			  ON cc.table_name = c.table_name AND cc.column_name = c.column_name
-			LEFT JOIN (
-				SELECT cols.table_name, cols.column_name
-				FROM user_constraints cons
-				JOIN user_cons_columns cols USING (constraint_name)
-				WHERE cons.constraint_type = 'P'
-			) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
-			WHERE c.table_name = '%s'
-			ORDER BY c.column_id`, metadataTableName)
+		return parseOracleColumns(data), nil
+	}
+	if columns, err := o.inferOracleColumnsFromSelect(dbName, tableName); err == nil && len(columns) > 0 {
+		return columns, nil
+	}
+	return []connection.ColumnDefinition{}, nil
+}
+
+func (o *OracleDB) inferOracleColumnsFromSelect(dbName string, tableName string) ([]connection.ColumnDefinition, error) {
+	if o.conn == nil {
+		return nil, fmt.Errorf("连接未打开")
 	}
 
-	data, _, err := o.Query(query)
+	var firstErr error
+	for _, candidate := range oracleMetadataNamePairs(dbName, tableName) {
+		query := "SELECT * FROM " + quoteOracleTableRef(candidate.schema, candidate.table) + " WHERE 1 = 0"
+		rows, err := o.conn.Query(query)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		columns, parseErr := oracleColumnsFromSQLRows(rows)
+		closeErr := rows.Close()
+		if parseErr != nil {
+			if firstErr == nil {
+				firstErr = parseErr
+			}
+			continue
+		}
+		if closeErr != nil {
+			if firstErr == nil {
+				firstErr = closeErr
+			}
+			continue
+		}
+		if len(columns) > 0 {
+			return columns, nil
+		}
+	}
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return nil, fmt.Errorf("未获取到字段定义")
+}
+
+func oracleColumnsFromSQLRows(rows *sql.Rows) ([]connection.ColumnDefinition, error) {
+	names, err := rows.Columns()
 	if err != nil {
 		return nil, err
 	}
+	colTypes, err := rows.ColumnTypes()
+	if err != nil || len(colTypes) != len(names) {
+		colTypes = nil
+	}
 
-	var columns []connection.ColumnDefinition
-	for _, row := range data {
+	columns := make([]connection.ColumnDefinition, 0, len(names))
+	for idx, name := range names {
 		col := connection.ColumnDefinition{
-			Name:     oracleRowString(row, "COLUMN_NAME"),
-			Type:     formatOracleColumnType(row),
-			Nullable: oracleRowString(row, "NULLABLE"),
-			Key:      oracleRowString(row, "COLUMN_KEY"),
-			Comment:  oracleRowString(row, "COMMENT"),
+			Name:     strings.TrimSpace(name),
+			Nullable: "",
+			Key:      "",
+			Extra:    "",
+			Comment:  "",
 		}
-
-		if defaultValue := oracleRowValue(row, "DATA_DEFAULT"); defaultValue != nil {
-			d := fmt.Sprintf("%v", defaultValue)
-			col.Default = &d
+		if colTypes != nil && idx < len(colTypes) && colTypes[idx] != nil {
+			col.Type = formatOracleSQLColumnType(colTypes[idx])
+			if nullable, ok := colTypes[idx].Nullable(); ok {
+				if nullable {
+					col.Nullable = "YES"
+				} else {
+					col.Nullable = "NO"
+				}
+			}
 		}
-
 		columns = append(columns, col)
 	}
 	return columns, nil
+}
+
+func formatOracleSQLColumnType(colType *sql.ColumnType) string {
+	if colType == nil {
+		return ""
+	}
+	typeName := strings.TrimSpace(colType.DatabaseTypeName())
+	if typeName == "" {
+		return ""
+	}
+	upperType := strings.ToUpper(typeName)
+	if length, ok := colType.Length(); ok && length > 0 && strings.Contains(upperType, "CHAR") {
+		return fmt.Sprintf("%s(%d)", typeName, length)
+	}
+	if precision, scale, ok := colType.DecimalSize(); ok && precision > 0 && (strings.Contains(upperType, "NUMBER") || strings.Contains(upperType, "DECIMAL") || strings.Contains(upperType, "NUMERIC")) {
+		if scale > 0 {
+			return fmt.Sprintf("%s(%d,%d)", typeName, precision, scale)
+		}
+		return fmt.Sprintf("%s(%d)", typeName, precision)
+	}
+	return typeName
 }
 
 func oracleRowValue(row map[string]interface{}, names ...string) interface{} {
@@ -482,12 +548,12 @@ func formatOracleColumnType(row map[string]interface{}) string {
 }
 
 func (o *OracleDB) appendOracleCommentDDL(baseDDL string, dbName string, tableName string) string {
-	table := strings.ToUpper(strings.TrimSpace(tableName))
+	table := strings.TrimSpace(tableName)
 	if strings.TrimSpace(baseDDL) == "" || table == "" {
 		return baseDDL
 	}
 
-	schema := strings.ToUpper(strings.TrimSpace(dbName))
+	schema := strings.TrimSpace(dbName)
 	tableRef := quoteOracleDDLIdentifier(table)
 	if schema != "" {
 		tableRef = quoteOracleDDLIdentifier(schema) + "." + tableRef
@@ -523,10 +589,10 @@ func (o *OracleDB) appendOracleCommentDDL(baseDDL string, dbName string, tableNa
 }
 
 func (o *OracleDB) fetchOracleTableComment(schema string, table string) string {
-	escapedTable := escapeOracleMetadataLiteral(table)
+	escapedTable := escapeOracleMetadataLiteralExact(table)
 	var query string
 	if strings.TrimSpace(schema) != "" {
-		query = fmt.Sprintf(`SELECT comments AS "COMMENT" FROM all_tab_comments WHERE owner = '%s' AND table_name = '%s' AND comments IS NOT NULL`, escapeOracleMetadataLiteral(schema), escapedTable)
+		query = fmt.Sprintf(`SELECT comments AS "COMMENT" FROM all_tab_comments WHERE owner = '%s' AND table_name = '%s' AND comments IS NOT NULL`, escapeOracleMetadataLiteralExact(schema), escapedTable)
 	} else {
 		query = fmt.Sprintf(`SELECT comments AS "COMMENT" FROM user_tab_comments WHERE table_name = '%s' AND comments IS NOT NULL`, escapedTable)
 	}
@@ -543,7 +609,7 @@ type oracleColumnComment struct {
 }
 
 func (o *OracleDB) fetchOracleColumnComments(schema string, table string) []oracleColumnComment {
-	escapedTable := escapeOracleMetadataLiteral(table)
+	escapedTable := escapeOracleMetadataLiteralExact(table)
 	var query string
 	if strings.TrimSpace(schema) != "" {
 		query = fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", cc.comments AS "COMMENT"
@@ -551,7 +617,7 @@ FROM all_tab_columns c
 JOIN all_col_comments cc
   ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
 WHERE c.owner = '%s' AND c.table_name = '%s' AND cc.comments IS NOT NULL
-ORDER BY c.column_id`, escapeOracleMetadataLiteral(schema), escapedTable)
+ORDER BY c.column_id`, escapeOracleMetadataLiteralExact(schema), escapedTable)
 	} else {
 		query = fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", cc.comments AS "COMMENT"
 FROM user_tab_columns c
@@ -579,6 +645,14 @@ func quoteOracleDDLIdentifier(ident string) string {
 	return `"` + strings.ReplaceAll(strings.TrimSpace(ident), `"`, `""`) + `"`
 }
 
+func quoteOracleTableRef(schema string, table string) string {
+	tableRef := quoteOracleDDLIdentifier(table)
+	if strings.TrimSpace(schema) != "" {
+		return quoteOracleDDLIdentifier(schema) + "." + tableRef
+	}
+	return tableRef
+}
+
 func escapeOracleCommentLiteral(text string) string {
 	return strings.ReplaceAll(text, "'", "''")
 }
@@ -587,14 +661,132 @@ func escapeOracleMetadataLiteral(text string) string {
 	return strings.ReplaceAll(strings.ToUpper(strings.TrimSpace(text)), "'", "''")
 }
 
+func escapeOracleMetadataLiteralExact(text string) string {
+	return strings.ReplaceAll(strings.TrimSpace(text), "'", "''")
+}
+
+type oracleMetadataNamePair struct {
+	schema string
+	table  string
+}
+
+func oracleMetadataNamePairs(dbName string, tableName string) []oracleMetadataNamePair {
+	rawSchema := strings.TrimSpace(dbName)
+	rawTable := strings.TrimSpace(tableName)
+	if rawTable == "" {
+		return nil
+	}
+
+	upperSchema := strings.ToUpper(rawSchema)
+	upperTable := strings.ToUpper(rawTable)
+	pairs := make([]oracleMetadataNamePair, 0, 4)
+	seen := map[string]struct{}{}
+	add := func(schema string, table string) {
+		key := schema + "\x00" + table
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		pairs = append(pairs, oracleMetadataNamePair{schema: schema, table: table})
+	}
+
+	add(rawSchema, rawTable)
+	add(upperSchema, upperTable)
+	add(rawSchema, upperTable)
+	add(upperSchema, rawTable)
+	return pairs
+}
+
+func buildOracleColumnsQuery(schema string, table string) string {
+	metadataTableName := escapeOracleMetadataLiteralExact(table)
+	metadataSchemaName := escapeOracleMetadataLiteralExact(schema)
+	if strings.TrimSpace(schema) == "" {
+		return fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.data_length AS "DATA_LENGTH", c.char_length AS "CHAR_LENGTH", c.data_precision AS "DATA_PRECISION", c.data_scale AS "DATA_SCALE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
+			CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS "COLUMN_KEY",
+			cc.comments AS "COMMENT"
+			FROM user_tab_columns c
+			LEFT JOIN user_col_comments cc
+			  ON cc.table_name = c.table_name AND cc.column_name = c.column_name
+			LEFT JOIN (
+				SELECT cols.table_name, cols.column_name
+				FROM user_constraints cons
+				JOIN user_cons_columns cols USING (constraint_name)
+				WHERE cons.constraint_type = 'P'
+			) pk ON c.table_name = pk.table_name AND c.column_name = pk.column_name
+			WHERE c.table_name = '%s'
+			ORDER BY c.column_id`, metadataTableName)
+	}
+
+	return fmt.Sprintf(`SELECT c.column_name AS "COLUMN_NAME", c.data_type AS "DATA_TYPE", c.data_length AS "DATA_LENGTH", c.char_length AS "CHAR_LENGTH", c.data_precision AS "DATA_PRECISION", c.data_scale AS "DATA_SCALE", c.nullable AS "NULLABLE", c.data_default AS "DATA_DEFAULT",
+		CASE WHEN pk.column_name IS NOT NULL THEN 'PRI' ELSE '' END AS "COLUMN_KEY",
+		cc.comments AS "COMMENT"
+		FROM all_tab_columns c
+		LEFT JOIN all_col_comments cc
+		  ON cc.owner = c.owner AND cc.table_name = c.table_name AND cc.column_name = c.column_name
+		LEFT JOIN (
+			SELECT cols.owner, cols.table_name, cols.column_name
+			FROM all_constraints cons
+			JOIN all_cons_columns cols
+			  ON cons.owner = cols.owner AND cons.constraint_name = cols.constraint_name
+			WHERE cons.constraint_type = 'P'
+		) pk ON c.owner = pk.owner AND c.table_name = pk.table_name AND c.column_name = pk.column_name
+		WHERE c.owner = '%s' AND c.table_name = '%s'
+		ORDER BY c.column_id`, metadataSchemaName, metadataTableName)
+}
+
+func parseOracleColumns(data []map[string]interface{}) []connection.ColumnDefinition {
+	columns := make([]connection.ColumnDefinition, 0, len(data))
+	for _, row := range data {
+		col := connection.ColumnDefinition{
+			Name:     oracleRowString(row, "COLUMN_NAME"),
+			Type:     formatOracleColumnType(row),
+			Nullable: oracleRowString(row, "NULLABLE"),
+			Key:      oracleRowString(row, "COLUMN_KEY"),
+			Comment:  oracleRowString(row, "COMMENT"),
+		}
+
+		if defaultValue := oracleRowValue(row, "DATA_DEFAULT"); defaultValue != nil {
+			d := fmt.Sprintf("%v", defaultValue)
+			col.Default = &d
+		}
+
+		columns = append(columns, col)
+	}
+	return columns
+}
+
 func (o *OracleDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
-	esc := func(s string) string { return strings.ReplaceAll(strings.ToUpper(strings.TrimSpace(s)), "'", "''") }
-	table := esc(tableName)
-	if table == "" {
+	if strings.TrimSpace(tableName) == "" {
 		return nil, fmt.Errorf("表名不能为空")
 	}
 
-	query := fmt.Sprintf(`SELECT c.index_name, c.column_name, i.uniqueness, c.column_position, i.index_type
+	for _, candidate := range oracleMetadataNamePairs(dbName, tableName) {
+		data, _, err := o.Query(buildOracleIndexesQuery(candidate.schema, candidate.table))
+		if err != nil {
+			return nil, err
+		}
+		if len(data) == 0 {
+			continue
+		}
+		return parseOracleIndexes(data), nil
+	}
+	return []connection.IndexDefinition{}, nil
+}
+
+func buildOracleIndexesQuery(schema string, table string) string {
+	metadataTableName := escapeOracleMetadataLiteralExact(table)
+	metadataSchemaName := escapeOracleMetadataLiteralExact(schema)
+	if strings.TrimSpace(schema) == "" {
+		return fmt.Sprintf(`SELECT c.index_name, c.column_name, i.uniqueness, c.column_position, i.index_type
+			FROM user_ind_columns c
+			JOIN user_indexes i ON i.index_name = c.index_name
+			WHERE c.table_name = '%s'
+			  AND c.column_name IS NOT NULL
+			  AND c.column_name NOT LIKE 'SYS_NC%%$'
+			  AND i.index_type NOT LIKE 'FUNCTION-BASED%%'
+			ORDER BY c.index_name, c.column_position`, metadataTableName)
+	}
+	return fmt.Sprintf(`SELECT c.index_name, c.column_name, i.uniqueness, c.column_position, i.index_type
 		FROM all_ind_columns c
 		JOIN all_indexes i ON i.owner = c.index_owner AND i.index_name = c.index_name
 		WHERE c.table_owner = '%s'
@@ -602,24 +794,10 @@ func (o *OracleDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefin
 		  AND c.column_name IS NOT NULL
 		  AND c.column_name NOT LIKE 'SYS_NC%%$'
 		  AND i.index_type NOT LIKE 'FUNCTION-BASED%%'
-		ORDER BY c.index_name, c.column_position`, esc(dbName), table)
+		ORDER BY c.index_name, c.column_position`, metadataSchemaName, metadataTableName)
+}
 
-	if strings.TrimSpace(dbName) == "" {
-		query = fmt.Sprintf(`SELECT c.index_name, c.column_name, i.uniqueness, c.column_position, i.index_type
-			FROM user_ind_columns c
-			JOIN user_indexes i ON i.index_name = c.index_name
-			WHERE c.table_name = '%s'
-			  AND c.column_name IS NOT NULL
-			  AND c.column_name NOT LIKE 'SYS_NC%%$'
-			  AND i.index_type NOT LIKE 'FUNCTION-BASED%%'
-			ORDER BY c.index_name, c.column_position`, table)
-	}
-
-	data, _, err := o.Query(query)
-	if err != nil {
-		return nil, err
-	}
-
+func parseOracleIndexes(data []map[string]interface{}) []connection.IndexDefinition {
 	getValue := func(row map[string]interface{}, names ...string) interface{} {
 		for _, name := range names {
 			if value, ok := row[name]; ok {
@@ -663,24 +841,44 @@ func (o *OracleDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefin
 		}
 		indexes = append(indexes, idx)
 	}
-	return indexes, nil
+	return indexes
 }
 
 func (o *OracleDB) GetForeignKeys(dbName, tableName string) ([]connection.ForeignKeyDefinition, error) {
-	// Simplified query for FKs
-	query := fmt.Sprintf(`SELECT a.constraint_name, a.column_name, c_pk.table_name r_table_name, b.column_name r_column_name
+	for _, candidate := range oracleMetadataNamePairs(dbName, tableName) {
+		data, _, err := o.Query(buildOracleForeignKeysQuery(candidate.schema, candidate.table))
+		if err != nil {
+			return nil, err
+		}
+		if len(data) == 0 {
+			continue
+		}
+		return parseOracleForeignKeys(data), nil
+	}
+	return []connection.ForeignKeyDefinition{}, nil
+}
+
+func buildOracleForeignKeysQuery(schema string, table string) string {
+	metadataTableName := escapeOracleMetadataLiteralExact(table)
+	metadataSchemaName := escapeOracleMetadataLiteralExact(schema)
+	if strings.TrimSpace(schema) == "" {
+		return fmt.Sprintf(`SELECT a.constraint_name, a.column_name, c_pk.table_name r_table_name, b.column_name r_column_name
+		FROM user_cons_columns a
+		JOIN user_constraints c ON a.constraint_name = c.constraint_name
+		JOIN user_constraints c_pk ON c.r_constraint_name = c_pk.constraint_name
+		JOIN user_cons_columns b ON c_pk.constraint_name = b.constraint_name AND a.position = b.position
+		WHERE c.constraint_type = 'R' AND a.table_name = '%s'`, metadataTableName)
+	}
+	return fmt.Sprintf(`SELECT a.constraint_name, a.column_name, c_pk.table_name r_table_name, b.column_name r_column_name
 		FROM all_cons_columns a
 		JOIN all_constraints c ON a.owner = c.owner AND a.constraint_name = c.constraint_name
 		JOIN all_constraints c_pk ON c.r_owner = c_pk.owner AND c.r_constraint_name = c_pk.constraint_name
 		JOIN all_cons_columns b ON c_pk.owner = b.owner AND c_pk.constraint_name = b.constraint_name AND a.position = b.position
 		WHERE c.constraint_type = 'R' AND a.owner = '%s' AND a.table_name = '%s'`,
-		strings.ToUpper(dbName), strings.ToUpper(tableName))
+		metadataSchemaName, metadataTableName)
+}
 
-	data, _, err := o.Query(query)
-	if err != nil {
-		return nil, err
-	}
-
+func parseOracleForeignKeys(data []map[string]interface{}) []connection.ForeignKeyDefinition {
 	var fks []connection.ForeignKeyDefinition
 	for _, row := range data {
 		fk := connection.ForeignKeyDefinition{
@@ -692,20 +890,38 @@ func (o *OracleDB) GetForeignKeys(dbName, tableName string) ([]connection.Foreig
 		}
 		fks = append(fks, fk)
 	}
-	return fks, nil
+	return fks
 }
 
 func (o *OracleDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error) {
-	query := fmt.Sprintf(`SELECT trigger_name, trigger_type, triggering_event 
-		FROM all_triggers 
-		WHERE table_owner = '%s' AND table_name = '%s'`,
-		strings.ToUpper(dbName), strings.ToUpper(tableName))
-
-	data, _, err := o.Query(query)
-	if err != nil {
-		return nil, err
+	for _, candidate := range oracleMetadataNamePairs(dbName, tableName) {
+		data, _, err := o.Query(buildOracleTriggersQuery(candidate.schema, candidate.table))
+		if err != nil {
+			return nil, err
+		}
+		if len(data) == 0 {
+			continue
+		}
+		return parseOracleTriggers(data), nil
 	}
+	return []connection.TriggerDefinition{}, nil
+}
 
+func buildOracleTriggersQuery(schema string, table string) string {
+	metadataTableName := escapeOracleMetadataLiteralExact(table)
+	metadataSchemaName := escapeOracleMetadataLiteralExact(schema)
+	if strings.TrimSpace(schema) == "" {
+		return fmt.Sprintf(`SELECT trigger_name, trigger_type, triggering_event
+		FROM user_triggers
+		WHERE table_name = '%s'`, metadataTableName)
+	}
+	return fmt.Sprintf(`SELECT trigger_name, trigger_type, triggering_event
+		FROM all_triggers
+		WHERE table_owner = '%s' AND table_name = '%s'`,
+		metadataSchemaName, metadataTableName)
+}
+
+func parseOracleTriggers(data []map[string]interface{}) []connection.TriggerDefinition {
 	var triggers []connection.TriggerDefinition
 	for _, row := range data {
 		trig := connection.TriggerDefinition{
@@ -716,7 +932,7 @@ func (o *OracleDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDe
 		}
 		triggers = append(triggers, trig)
 	}
-	return triggers, nil
+	return triggers
 }
 
 func splitOracleQualifiedTableName(raw string) (string, string) {

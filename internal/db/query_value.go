@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -16,9 +17,10 @@ import (
 )
 
 const (
-	jsMaxSafeInteger int64  = 9007199254740991
-	jsMinSafeInteger int64  = -9007199254740991
-	jsMaxSafeUint    uint64 = 9007199254740991
+	jsMaxSafeInteger           int64  = 9007199254740991
+	jsMinSafeInteger           int64  = -9007199254740991
+	jsMaxSafeUint              uint64 = 9007199254740991
+	oceanBaseOracleScanDialect        = "oceanbase-oracle"
 )
 
 var (
@@ -33,22 +35,365 @@ func normalizeQueryValue(v interface{}) interface{} {
 }
 
 func normalizeQueryValueWithDBType(v interface{}, databaseTypeName string) interface{} {
+	return normalizeQueryValueWithDBTypeAndDialect(v, databaseTypeName, "")
+}
+
+func normalizeQueryValueWithDBTypeAndDialect(v interface{}, databaseTypeName, dialect string) interface{} {
 	if tm, ok := v.(time.Time); ok {
-		return normalizeTemporalValueForDisplay(tm, databaseTypeName)
+		return normalizeTemporalValueForDisplay(tm, databaseTypeName, dialect)
+	}
+	if s, ok := v.(string); ok {
+		if tm, normalizedType, ok := decodeOceanBaseOracleTemporalString(s, databaseTypeName, dialect); ok {
+			return normalizeTemporalValueForDisplay(tm, normalizedType, dialect)
+		}
 	}
 	if b, ok := v.([]byte); ok {
+		if tm, normalizedType, ok := decodeOceanBaseOracleTemporalBytes(b, databaseTypeName, dialect); ok {
+			return normalizeTemporalValueForDisplay(tm, normalizedType, dialect)
+		}
 		return bytesToDisplayValue(b, databaseTypeName)
 	}
 	return normalizeCompositeQueryValue(v)
 }
 
-func normalizeTemporalValueForDisplay(value time.Time, databaseTypeName string) interface{} {
+func normalizeTemporalValueForDisplay(value time.Time, databaseTypeName, dialect string) interface{} {
 	if value.IsZero() {
 		if zeroValue, ok := zeroTemporalDisplayValue(databaseTypeName); ok {
 			return zeroValue
 		}
 	}
+	if shouldDisplayTemporalValueAsDateOnly(databaseTypeName, dialect) || shouldDisplayOceanBaseOracleDateAsDateOnly(value, databaseTypeName, dialect) {
+		return value.Format("2006-01-02")
+	}
 	return value.Format(time.RFC3339Nano)
+}
+
+func isDateOnlyDatabaseTypeName(databaseTypeName string) bool {
+	typeName := strings.ToUpper(strings.TrimSpace(databaseTypeName))
+	return typeName == "DATE" || typeName == "NEWDATE"
+}
+
+func shouldDisplayTemporalValueAsDateOnly(databaseTypeName, dialect string) bool {
+	if !isDateOnlyDatabaseTypeName(databaseTypeName) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(dialect)) {
+	case "mysql", "mariadb", "goldendb", "greatdb", "gdb", "diros", "doris", "starrocks", "sphinx":
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldDisplayOceanBaseOracleDateAsDateOnly(value time.Time, databaseTypeName, dialect string) bool {
+	if !isDateOnlyDatabaseTypeName(databaseTypeName) {
+		return false
+	}
+	if strings.ToLower(strings.TrimSpace(dialect)) != oceanBaseOracleScanDialect {
+		return false
+	}
+	return value.Hour() == 0 && value.Minute() == 0 && value.Second() == 0 && value.Nanosecond() == 0
+}
+
+func decodeOceanBaseOracleTemporalString(value string, databaseTypeName, dialect string) (time.Time, string, bool) {
+	return decodeOceanBaseOracleTemporalBytes([]byte(value), databaseTypeName, dialect)
+}
+
+func decodeOceanBaseOracleTemporalBytes(value []byte, databaseTypeName, dialect string) (time.Time, string, bool) {
+	if strings.ToLower(strings.TrimSpace(dialect)) != oceanBaseOracleScanDialect {
+		return time.Time{}, "", false
+	}
+	if !shouldAttemptOceanBaseOracleTemporalDecode(databaseTypeName, value) {
+		return time.Time{}, "", false
+	}
+	return parseOceanBaseOracleTemporal(value, databaseTypeName)
+}
+
+func shouldAttemptOceanBaseOracleTemporalDecode(databaseTypeName string, value []byte) bool {
+	if isOceanBaseOracleTemporalDatabaseTypeName(databaseTypeName) {
+		return true
+	}
+	if !hasOceanBaseOracleTemporalEncodedLength(value) {
+		return false
+	}
+	typeName := strings.ToUpper(strings.TrimSpace(databaseTypeName))
+	if typeName == "" {
+		return true
+	}
+	if isLikelyOceanBaseOracleTemporalCarrierType(typeName) {
+		return true
+	}
+	return false
+}
+
+func hasOceanBaseOracleTemporalEncodedLength(value []byte) bool {
+	switch len(value) {
+	case 5, 7, 8, 11, 12, 13:
+		return true
+	default:
+		return false
+	}
+}
+
+func isLikelyOceanBaseOracleTemporalCarrierType(typeName string) bool {
+	if typeName == "" {
+		return false
+	}
+	switch {
+	case strings.Contains(typeName, "CHAR"),
+		strings.Contains(typeName, "TEXT"),
+		strings.Contains(typeName, "STRING"),
+		strings.Contains(typeName, "BINARY"),
+		strings.Contains(typeName, "VARBINARY"),
+		strings.Contains(typeName, "RAW"),
+		strings.Contains(typeName, "BLOB"),
+		strings.Contains(typeName, "LOB"):
+		return true
+	default:
+		return false
+	}
+}
+
+func isOceanBaseOracleTemporalDatabaseTypeName(databaseTypeName string) bool {
+	typeName := strings.ToUpper(strings.TrimSpace(databaseTypeName))
+	if typeName == "DATE" || typeName == "TYPE_CA" {
+		return true
+	}
+	return strings.HasPrefix(typeName, "TIMESTAMP")
+}
+
+func parseOceanBaseOracleTemporal(value []byte, databaseTypeName string) (time.Time, string, bool) {
+	if tm, normalizedType, ok := parseOracleBinaryTemporal(value, databaseTypeName); ok {
+		return tm, normalizedType, true
+	}
+	if tm, normalizedType, ok := parseOceanBaseOracleTypeCATemporal(value, databaseTypeName); ok {
+		return tm, normalizedType, true
+	}
+	return parseMySQLLengthEncodedTemporal(value, databaseTypeName)
+}
+
+func parseOceanBaseOracleTypeCATemporal(value []byte, databaseTypeName string) (time.Time, string, bool) {
+	if len(value) != 12 {
+		return time.Time{}, "", false
+	}
+
+	yearHigh := int(value[0])
+	yearLow := int(value[1])
+	month := int(value[2])
+	day := int(value[3])
+	hour := int(value[4])
+	minute := int(value[5])
+	second := int(value[6])
+	nsec := int(binary.LittleEndian.Uint32(value[7:11]))
+	scale := int(value[11])
+
+	if yearHigh < 0 || yearHigh > 99 || yearLow < 0 || yearLow > 99 {
+		return time.Time{}, "", false
+	}
+	if month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 {
+		return time.Time{}, "", false
+	}
+	if scale < 0 || scale > 9 || nsec < 0 || nsec >= 1_000_000_000 {
+		return time.Time{}, "", false
+	}
+	if !matchesTemporalScale(nsec, scale) {
+		return time.Time{}, "", false
+	}
+
+	year := yearHigh*100 + yearLow
+	parsed := time.Date(year, time.Month(month), day, hour, minute, second, nsec, time.UTC)
+	if parsed.Year() != year || int(parsed.Month()) != month || parsed.Day() != day ||
+		parsed.Hour() != hour || parsed.Minute() != minute || parsed.Second() != second || parsed.Nanosecond() != nsec {
+		return time.Time{}, "", false
+	}
+	return parsed, normalizeOracleTemporalDatabaseTypeName(databaseTypeName), true
+}
+
+func matchesTemporalScale(nsec, scale int) bool {
+	if scale >= 9 {
+		return true
+	}
+	step := 1
+	for i := 0; i < 9-scale; i++ {
+		step *= 10
+	}
+	return nsec%step == 0
+}
+
+func parseOracleBinaryTemporal(value []byte, databaseTypeName string) (time.Time, string, bool) {
+	switch len(value) {
+	case 7:
+		tm, ok := parseOracleBinaryDateTime(value[:7])
+		return tm, "DATE", ok
+	case 11:
+		tm, ok := parseOracleBinaryTimestamp(value)
+		return tm, normalizeOracleTemporalDatabaseTypeName(databaseTypeName), ok
+	case 13:
+		tm, ok := parseOracleBinaryTimestampWithTimezone(value)
+		return tm, normalizeOracleTemporalDatabaseTypeName(databaseTypeName), ok
+	default:
+		return time.Time{}, "", false
+	}
+}
+
+func parseMySQLLengthEncodedTemporal(value []byte, databaseTypeName string) (time.Time, string, bool) {
+	if len(value) == 0 {
+		return time.Time{}, "", false
+	}
+	payloadLength := int(value[0])
+	if payloadLength != len(value)-1 {
+		return time.Time{}, "", false
+	}
+
+	switch payloadLength {
+	case 4:
+		tm, ok := parseMySQLBinaryDateTimePayload(value[1:], false)
+		return tm, "DATE", ok
+	case 7:
+		tm, ok := parseMySQLBinaryDateTimePayload(value[1:], false)
+		return tm, normalizeOracleTemporalDatabaseTypeName(databaseTypeName), ok
+	case 11:
+		tm, ok := parseMySQLBinaryDateTimePayload(value[1:], true)
+		return tm, normalizeOracleTemporalDatabaseTypeName(databaseTypeName), ok
+	default:
+		return time.Time{}, "", false
+	}
+}
+
+func parseMySQLBinaryDateTimePayload(value []byte, withFraction bool) (time.Time, bool) {
+	expectedLength := 7
+	if !withFraction {
+		switch len(value) {
+		case 4:
+			year := int(binary.LittleEndian.Uint16(value[0:2]))
+			month := int(value[2])
+			day := int(value[3])
+			if year < 0 || month < 1 || month > 12 || day < 1 || day > 31 {
+				return time.Time{}, false
+			}
+			parsed := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+			if parsed.Year() != year || int(parsed.Month()) != month || parsed.Day() != day {
+				return time.Time{}, false
+			}
+			return parsed, true
+		case expectedLength:
+		default:
+			return time.Time{}, false
+		}
+	} else if len(value) != 11 {
+		return time.Time{}, false
+	}
+
+	year := int(binary.LittleEndian.Uint16(value[0:2]))
+	month := int(value[2])
+	day := int(value[3])
+	hour := int(value[4])
+	minute := int(value[5])
+	second := int(value[6])
+	nsec := 0
+	if withFraction {
+		usec := binary.LittleEndian.Uint32(value[7:11])
+		if usec >= 1_000_000 {
+			return time.Time{}, false
+		}
+		nsec = int(usec) * 1000
+	}
+
+	if year < 0 || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 {
+		return time.Time{}, false
+	}
+
+	parsed := time.Date(year, time.Month(month), day, hour, minute, second, nsec, time.UTC)
+	if parsed.Year() != year || int(parsed.Month()) != month || parsed.Day() != day ||
+		parsed.Hour() != hour || parsed.Minute() != minute || parsed.Second() != second || parsed.Nanosecond() != nsec {
+		return time.Time{}, false
+	}
+	return parsed, true
+}
+
+func normalizeOracleTemporalDatabaseTypeName(databaseTypeName string) string {
+	typeName := strings.ToUpper(strings.TrimSpace(databaseTypeName))
+	switch typeName {
+	case "TYPE_CA":
+		return "TIMESTAMP"
+	default:
+		if typeName == "" {
+			return "TIMESTAMP"
+		}
+		return typeName
+	}
+}
+
+func parseOracleBinaryTimestamp(value []byte) (time.Time, bool) {
+	if len(value) != 11 {
+		return time.Time{}, false
+	}
+	baseTime, ok := parseOracleBinaryDateTime(value[:7])
+	if !ok {
+		return time.Time{}, false
+	}
+	nsec := binary.BigEndian.Uint32(value[7:11])
+	if nsec >= 1_000_000_000 {
+		return time.Time{}, false
+	}
+	return time.Date(
+		baseTime.Year(),
+		baseTime.Month(),
+		baseTime.Day(),
+		baseTime.Hour(),
+		baseTime.Minute(),
+		baseTime.Second(),
+		int(nsec),
+		time.UTC,
+	), true
+}
+
+func parseOracleBinaryTimestampWithTimezone(value []byte) (time.Time, bool) {
+	if len(value) != 13 {
+		return time.Time{}, false
+	}
+	baseTime, ok := parseOracleBinaryTimestamp(value[:11])
+	if !ok {
+		return time.Time{}, false
+	}
+	tzHour := int(value[11]) - 20
+	tzMinute := int(value[12]) - 60
+	if tzHour < -12 || tzHour > 14 || tzMinute < 0 || tzMinute >= 60 {
+		return time.Time{}, false
+	}
+	location := time.FixedZone("", tzHour*3600+tzMinute*60)
+	return time.Date(
+		baseTime.Year(),
+		baseTime.Month(),
+		baseTime.Day(),
+		baseTime.Hour(),
+		baseTime.Minute(),
+		baseTime.Second(),
+		baseTime.Nanosecond(),
+		location,
+	), true
+}
+
+func parseOracleBinaryDateTime(value []byte) (time.Time, bool) {
+	if len(value) != 7 {
+		return time.Time{}, false
+	}
+	year := (int(value[0]) - 100) * 100
+	year += int(value[1]) - 100
+	month := int(value[2])
+	day := int(value[3])
+	hour := int(value[4]) - 1
+	minute := int(value[5]) - 1
+	second := int(value[6]) - 1
+	if year < 0 || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59 {
+		return time.Time{}, false
+	}
+	parsed := time.Date(year, time.Month(month), day, hour, minute, second, 0, time.UTC)
+	if parsed.Year() != year || int(parsed.Month()) != month || parsed.Day() != day ||
+		parsed.Hour() != hour || parsed.Minute() != minute || parsed.Second() != second {
+		return time.Time{}, false
+	}
+	return parsed, true
 }
 
 func zeroTemporalDisplayValue(databaseTypeName string) (string, bool) {
@@ -125,7 +470,7 @@ func normalizeCompositeQueryValue(v interface{}) interface{} {
 		// 部分驱动（如 Kingbase）会返回复杂结构体值，直接透传会导致前端渲染和比较开销激增。
 		// 统一降级为可读字符串，避免对象深层序列化触发 UI 卡顿。
 		if tm, ok := v.(time.Time); ok {
-			return normalizeTemporalValueForDisplay(tm, "")
+			return normalizeTemporalValueForDisplay(tm, "", "")
 		}
 		if stringer, ok := v.(fmt.Stringer); ok {
 			return stringer.String()

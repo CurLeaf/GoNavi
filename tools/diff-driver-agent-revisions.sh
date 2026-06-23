@@ -33,6 +33,20 @@ public_driver_name() {
   esac
 }
 
+normalize_driver_name() {
+  local value
+  value="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  case "$value" in
+    doris|diros) echo "diros" ;;
+    mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|opengauss|gaussdb|iris|mongodb|tdengine|iotdb|clickhouse|elasticsearch)
+      echo "$value"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 extract_revision() {
   local file="$1"
   local driver="$2"
@@ -49,6 +63,7 @@ extract_revision() {
 base_ref=""
 head_ref=""
 target_platform=""
+driver_csv=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,6 +77,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --platform)
       target_platform="${2:-}"
+      shift 2
+      ;;
+    --drivers)
+      driver_csv="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -102,6 +121,27 @@ if [[ "$base_commit" == "$head_commit" ]]; then
   exit 0
 fi
 
+declare -a drivers_to_compare=()
+if [[ -n "$driver_csv" ]]; then
+  seen="|"
+  IFS=',' read -r -a raw_drivers <<< "$driver_csv"
+  for raw_driver in "${raw_drivers[@]}"; do
+    driver="$(normalize_driver_name "$raw_driver")" || continue
+    if [[ "$seen" == *"|$driver|"* ]]; then
+      continue
+    fi
+    drivers_to_compare+=("$driver")
+    seen="${seen}${driver}|"
+  done
+else
+  drivers_to_compare=("${DEFAULT_DRIVERS[@]}")
+fi
+
+if [[ ${#drivers_to_compare[@]} -eq 0 ]]; then
+  echo ""
+  exit 0
+fi
+
 base_worktree="$(mktemp -d "${TMPDIR:-/tmp}/gonavi-driver-rev-base.XXXXXX")"
 head_worktree="$(mktemp -d "${TMPDIR:-/tmp}/gonavi-driver-rev-head.XXXXXX")"
 
@@ -119,19 +159,27 @@ generate_revisions() {
   local worktree="$1"
   (
     cd "$worktree"
-    GONAVI_DRIVER_REVISION_JOBS="${GONAVI_DRIVER_REVISION_JOBS:-1}" \
+    if [[ -n "$driver_csv" ]]; then
+      bash ./tools/generate-driver-agent-revisions.sh --platform "$target_platform" --drivers "$driver_csv" >/dev/null
+    else
       bash ./tools/generate-driver-agent-revisions.sh --platform "$target_platform" >/dev/null
+    fi
   )
 }
 
-generate_revisions "$base_worktree"
-generate_revisions "$head_worktree"
+generate_revisions "$base_worktree" &
+base_pid=$!
+generate_revisions "$head_worktree" &
+head_pid=$!
+
+wait "$base_pid"
+wait "$head_pid"
 
 base_file="$base_worktree/internal/db/driver_agent_revisions_gen.go"
 head_file="$head_worktree/internal/db/driver_agent_revisions_gen.go"
 
 declare -a changed_drivers=()
-for driver in "${DEFAULT_DRIVERS[@]}"; do
+for driver in "${drivers_to_compare[@]}"; do
   base_revision="$(extract_revision "$base_file" "$driver")"
   head_revision="$(extract_revision "$head_file" "$driver")"
   if [[ "$base_revision" != "$head_revision" ]]; then

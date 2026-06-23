@@ -39,6 +39,15 @@ describe('extractQueryResultTableRef', () => {
       });
   });
 
+  it('uses the login user as Oracle default schema when the current db is a service name', () => {
+    expect(extractQueryResultTableRef('SELECT * FROM per_cert_info', 'oracle', 'ORCLPDB1', 'dev'))
+      .toEqual({
+        tableName: 'PER_CERT_INFO',
+        metadataDbName: 'DEV',
+        metadataTableName: 'PER_CERT_INFO',
+      });
+  });
+
   it('keeps existing simple table behavior for MySQL-style qualified names', () => {
     expect(extractQueryResultTableRef('SELECT * FROM app.users LIMIT 500', 'mysql', 'app'))
       .toEqual({

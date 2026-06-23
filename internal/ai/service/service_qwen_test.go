@@ -1,6 +1,7 @@
 package aiservice
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 
@@ -153,5 +154,32 @@ func TestAITestProvider_UsesClaudeCLIHealthCheckForDashScopeCodingPlan(t *testin
 	}
 	if received.Model != "qwen3.5-plus" {
 		t.Fatalf("expected Coding Plan test to default probe model to qwen3.5-plus, got %q", received.Model)
+	}
+}
+
+func TestAITestProviderUsesCurrentLanguageForFailureMessage(t *testing.T) {
+	originalClaudeCLIHealthCheckFunc := claudeCLIHealthCheckFunc
+	defer func() {
+		claudeCLIHealthCheckFunc = originalClaudeCLIHealthCheckFunc
+	}()
+
+	claudeCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
+		return errors.New("raw upstream error")
+	}
+
+	service := NewService()
+	service.AISetLanguage("en-US")
+
+	result := service.AITestProvider(ai.ProviderConfig{
+		Type:      "custom",
+		APIFormat: "claude-cli",
+		BaseURL:   "https://example.com",
+		APIKey:    "sk-test",
+	})
+	if result["success"] != false {
+		t.Fatalf("expected AITestProvider to fail, got %#v", result)
+	}
+	if result["message"] != "Connection test failed: raw upstream error" {
+		t.Fatalf("expected localized failure message with raw detail, got %#v", result["message"])
 	}
 }

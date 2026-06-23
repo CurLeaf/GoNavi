@@ -1,4 +1,5 @@
-import { Button, Modal } from 'antd';
+import Modal from './common/ResizableDraggableModal';
+import { Button } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 import type { CSSProperties } from 'react';
 
@@ -9,6 +10,7 @@ import {
   getSecurityUpdateActionButtonStyle,
   getSecurityUpdateShellSurfaceStyle,
 } from '../utils/securityUpdateVisuals';
+import { useI18n } from '../i18n/provider';
 
 interface SecurityUpdateIntroModalProps {
   open: boolean;
@@ -37,6 +39,8 @@ const SecurityUpdateIntroModal = ({
   onPostpone,
   onViewDetails,
 }: SecurityUpdateIntroModalProps) => {
+  const { t } = useI18n();
+
   return (
     <Modal
       rootClassName={SECURITY_UPDATE_MODAL_CLASS}
@@ -59,10 +63,10 @@ const SecurityUpdateIntroModal = ({
           </div>
           <div>
             <div style={{ fontSize: 16, fontWeight: 800, color: overlayTheme.titleText }}>
-              已保存配置安全更新
+              {t('security_update.intro.title')}
             </div>
             <div style={{ marginTop: 3, color: overlayTheme.mutedText, fontSize: 12 }}>
-              使用新的安全存储方式前，需要先完成一次本地配置更新。
+              {t('security_update.intro.subtitle')}
             </div>
           </div>
         </div>
@@ -89,7 +93,7 @@ const SecurityUpdateIntroModal = ({
           onClick={onViewDetails}
           disabled={loading}
         >
-          查看详情
+          {t('security_update.intro.action.details')}
         </Button>,
         <Button
           key="later"
@@ -100,7 +104,7 @@ const SecurityUpdateIntroModal = ({
           onClick={onPostpone}
           disabled={loading}
         >
-          稍后提醒我
+          {t('security_update.intro.action.later')}
         </Button>,
         <Button
           key="start"
@@ -110,7 +114,7 @@ const SecurityUpdateIntroModal = ({
           loading={loading}
           onClick={onStart}
         >
-          立即更新
+          {t('security_update.intro.action.start_now')}
         </Button>,
       ]}
     >
@@ -122,8 +126,7 @@ const SecurityUpdateIntroModal = ({
           fontSize: 14,
         }}
       >
-        为了让已保存的连接、代理和相关服务配置使用新的安全存储方式，本次更新需要进行一次本地配置更新。
-        更新前会自动创建本地备份；如果本次未完成，系统会保留当前可用配置，你也可以稍后继续。
+        {t('security_update.intro.description')}
       </div>
     </Modal>
   );

@@ -1,5 +1,6 @@
+import Modal from './common/ResizableDraggableModal';
 import { useEffect, useRef, useState } from 'react';
-import { Button, Empty, Modal, Tag } from 'antd';
+import { Button, Empty, Tag } from 'antd';
 import { SafetyCertificateOutlined } from '@ant-design/icons';
 
 import type { SecurityUpdateIssue, SecurityUpdateStatus } from '../types';
@@ -26,6 +27,7 @@ import {
   getSecurityUpdateSectionSurfaceStyle,
   getSecurityUpdateShellSurfaceStyle,
 } from '../utils/securityUpdateVisuals';
+import { useI18n } from '../i18n/provider';
 
 interface SecurityUpdateSettingsModalProps {
   open: boolean;
@@ -36,6 +38,8 @@ interface SecurityUpdateSettingsModalProps {
   focusTarget?: SecurityUpdateSettingsFocusTarget | null;
   focusRequest?: number;
   onClose: () => void;
+  onBack?: () => void;
+  embedded?: boolean;
   onStart: () => void;
   onRetry: () => void;
   onRestart: () => void;
@@ -69,12 +73,15 @@ const SecurityUpdateSettingsModal = ({
   focusTarget = null,
   focusRequest = 0,
   onClose,
+  onBack,
+  embedded = false,
   onStart,
   onRetry,
   onRestart,
   onIssueAction,
 }: SecurityUpdateSettingsModalProps) => {
-  const statusMeta = getSecurityUpdateStatusMeta(status);
+  const { t } = useI18n();
+  const statusMeta = getSecurityUpdateStatusMeta(status, t);
   const sortedIssues = sortSecurityUpdateIssues(status.issues);
   const showRecentResult = hasSecurityUpdateRecentResult(status);
   const showStart = status.overallStatus === 'pending' || status.overallStatus === 'postponed';
@@ -124,7 +131,7 @@ const SecurityUpdateSettingsModal = ({
     <Modal
       rootClassName={SECURITY_UPDATE_MODAL_CLASS}
       title={(
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
           <div
             style={{
               width: 38,
@@ -140,27 +147,28 @@ const SecurityUpdateSettingsModal = ({
           >
             <SafetyCertificateOutlined />
           </div>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 800, color: overlayTheme.titleText }}>
-              安全更新
+              {t('security_update.settings.title')}
             </div>
             <div style={{ marginTop: 3, color: overlayTheme.mutedText, fontSize: 12 }}>
-              管理已保存配置的安全更新状态与待处理项。
+              {t('security_update.settings.subtitle')}
             </div>
           </div>
         </div>
       )}
       open={open}
+      embedded={embedded}
       onCancel={onClose}
       footer={[
         showRetry ? (
           <Button key="retry" className={SECURITY_UPDATE_ACTION_BUTTON_CLASS} style={actionButtonStyle} onClick={onRetry}>
-            重新检查
+            {t('security_update.settings.action.retry_check')}
           </Button>
         ) : null,
         showRestart ? (
           <Button key="restart" className={SECURITY_UPDATE_ACTION_BUTTON_CLASS} style={actionButtonStyle} onClick={onRestart}>
-            重新开始更新
+            {t('security_update.settings.action.restart_update')}
           </Button>
         ) : null,
         showStart ? (
@@ -171,12 +179,17 @@ const SecurityUpdateSettingsModal = ({
             type="primary"
             onClick={onStart}
           >
-            开始更新
+            {t('security_update.settings.action.start')}
           </Button>
         ) : null,
         <Button key="close" className={SECURITY_UPDATE_ACTION_BUTTON_CLASS} style={actionButtonStyle} onClick={onClose}>
-          关闭
+          {t('security_update.settings.action.close')}
         </Button>,
+        onBack ? (
+          <Button key="back" className={SECURITY_UPDATE_ACTION_BUTTON_CLASS} style={actionButtonStyle} onClick={onBack}>
+            {t('common.back_to_previous')}
+          </Button>
+        ) : null,
       ]}
       width={760}
       styles={{
@@ -195,7 +208,7 @@ const SecurityUpdateSettingsModal = ({
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 700, color: overlayTheme.titleText }}>
-                当前状态：{statusMeta.label}
+                {t('security_update.settings.current_status', { status: statusMeta.label })}
               </div>
               <div style={{ marginTop: 6, fontSize: 13, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
                 {statusMeta.description}
@@ -219,15 +232,15 @@ const SecurityUpdateSettingsModal = ({
 
         <div style={sectionStyle(overlayTheme, surfaceOpacity)}>
           <div style={{ fontSize: 14, fontWeight: 700, color: overlayTheme.titleText, marginBottom: 12 }}>
-            影响范围
+            {t('security_update.settings.scope_title')}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 10 }}>
             {[
-              { label: '总计', value: status.summary.total },
-              { label: '已更新', value: status.summary.updated },
-              { label: '待处理', value: status.summary.pending },
-              { label: '已跳过', value: status.summary.skipped },
-              { label: '失败', value: status.summary.failed },
+              { label: t('security_update.settings.summary.total'), value: status.summary.total },
+              { label: t('security_update.settings.summary.updated'), value: status.summary.updated },
+              { label: t('security_update.settings.summary.pending'), value: status.summary.pending },
+              { label: t('security_update.settings.summary.skipped'), value: status.summary.skipped },
+              { label: t('security_update.settings.summary.failed'), value: status.summary.failed },
             ].map((item) => (
               <div
                 key={item.label}
@@ -246,19 +259,19 @@ const SecurityUpdateSettingsModal = ({
 
         <div style={sectionStyle(overlayTheme, surfaceOpacity)}>
           <div style={{ fontSize: 14, fontWeight: 700, color: overlayTheme.titleText, marginBottom: 12 }}>
-            待处理清单
+            {t('security_update.settings.pending_list')}
           </div>
           {sortedIssues.length === 0 ? (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="当前没有待处理项"
+              description={t('security_update.settings.empty_pending')}
             />
           ) : (
             <div style={{ display: 'grid', gap: 10 }}>
               {sortedIssues.map((issue) => {
-                const actionMeta = getSecurityUpdateIssueActionMeta(issue);
-                const itemStatusMeta = getSecurityUpdateItemStatusMeta(issue.status);
-                const issueSeverityMeta = getSecurityUpdateIssueSeverityMeta(issue.severity);
+                const actionMeta = getSecurityUpdateIssueActionMeta(issue, t);
+                const itemStatusMeta = getSecurityUpdateItemStatusMeta(issue.status, t);
+                const issueSeverityMeta = getSecurityUpdateIssueSeverityMeta(issue.severity, t);
                 return (
                   <div
                     key={issue.id}
@@ -278,14 +291,14 @@ const SecurityUpdateSettingsModal = ({
                           {issue.title || issue.message || issue.id}
                         </div>
                         <Tag color={itemStatusMeta.color}>
-                          状态：{itemStatusMeta.label}
+                          {t('security_update.settings.item_status', { status: itemStatusMeta.label })}
                         </Tag>
                         <Tag color={issueSeverityMeta.color}>
-                          级别：{issueSeverityMeta.label}
+                          {t('security_update.settings.item_severity', { severity: issueSeverityMeta.label })}
                         </Tag>
                       </div>
                       <div style={{ marginTop: 6, fontSize: 13, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-                        {issue.message || '当前项需要进一步处理后才能完成安全更新。'}
+                        {issue.message || t('security_update.settings.item_default_message')}
                       </div>
                     </div>
                     <Button
@@ -314,16 +327,16 @@ const SecurityUpdateSettingsModal = ({
             style={sectionStyle(overlayTheme, surfaceOpacity, { emphasized: activeFocus.target === 'recent_result' })}
           >
             <div style={{ fontSize: 14, fontWeight: 700, color: overlayTheme.titleText, marginBottom: 8 }}>
-              最近一次结果
+              {t('security_update.settings.recent_result')}
             </div>
             {status.backupPath ? (
               <div style={{ fontSize: 13, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-                备份位置：<span style={{ color: overlayTheme.titleText }}>{status.backupPath}</span>
+                {t('security_update.settings.backup_path')}<span style={{ color: overlayTheme.titleText }}>{status.backupPath}</span>
               </div>
             ) : null}
             {status.lastError ? (
               <div style={{ marginTop: 8, fontSize: 13, color: '#ff7875', lineHeight: 1.7 }}>
-                最近错误：{status.lastError}
+                {t('security_update.settings.last_error')}{status.lastError}
               </div>
             ) : null}
           </div>

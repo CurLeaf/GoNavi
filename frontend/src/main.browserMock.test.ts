@@ -1,11 +1,18 @@
+import React from 'react';
+import TestRenderer, { act } from 'react-test-renderer';
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./App', () => ({
-  default: () => null,
+  default: () => React.createElement('div', { 'data-testid': 'mock-app' }),
 }));
 
+let renderRootImpl: ((node: React.ReactNode) => void) | null = null;
+
 const createRootMock = vi.fn(() => ({
-  render: vi.fn(),
+  render: vi.fn((node: React.ReactNode) => {
+    renderRootImpl?.(node);
+  }),
 }));
 
 vi.mock('react-dom/client', () => ({
@@ -24,6 +31,10 @@ vi.mock('dayjs', () => ({
 }));
 
 vi.mock('dayjs/locale/zh-cn', () => ({}));
+vi.mock('dayjs/locale/zh-tw', () => ({}));
+vi.mock('dayjs/locale/ja', () => ({}));
+vi.mock('dayjs/locale/de', () => ({}));
+vi.mock('dayjs/locale/ru', () => ({}));
 
 const loaderConfigMock = vi.fn();
 
@@ -43,6 +54,16 @@ vi.mock('monaco-editor', () => ({
 
 vi.mock('monaco-editor/esm/nls.messages.zh-cn', () => ({}));
 
+const syncLanguageRuntimeMock = vi.fn(async (_language: string) => undefined);
+
+vi.mock('./i18n/runtime', async () => {
+  const actual = await vi.importActual<typeof import('./i18n/runtime')>('./i18n/runtime');
+  return {
+    ...actual,
+    syncLanguageRuntime: (language: string) => syncLanguageRuntimeMock(language),
+  };
+});
+
 const importMain = async () => {
   await import('./main');
   return (globalThis as typeof globalThis & {
@@ -53,6 +74,8 @@ const importMain = async () => {
             ImportConfigFile: () => Promise<{ success: boolean; message?: string }>;
             ImportConnectionsPayload: (raw: string, password?: string) => Promise<unknown>;
             ExportConnectionsPackage: (options?: { includeSecrets?: boolean; filePassword?: string }) => Promise<{ success: boolean; message?: string }>;
+            ApplyDataRootDirectory: (path: string) => Promise<{ success: boolean; message?: string; data?: { path?: string } }>;
+            SaveQuery: (input: { id?: string; name?: string; sql?: string }) => Promise<{ name: string; sql: string }>;
           };
         };
       };
@@ -63,37 +86,461 @@ const importMain = async () => {
 describe('main browser mock', () => {
   beforeEach(() => {
     vi.resetModules();
+    renderRootImpl = null;
+    syncLanguageRuntimeMock.mockClear();
     vi.stubGlobal('window', {});
     vi.stubGlobal('document', {
       getElementById: vi.fn(() => ({})),
     });
+    vi.stubGlobal('navigator', {
+      languages: ['zh-CN'],
+      language: 'zh-CN',
+    });
   });
 
   afterEach(() => {
+    vi.doUnmock('./store');
     vi.unstubAllGlobals();
     vi.clearAllMocks();
     vi.resetModules();
   });
 
-  it('returns explicit browser-mode messages for import picker and package export', async () => {
+  it('returns localized browser-mode messages for import picker and unsupported browser mock exports', async () => {
     const app = await importMain();
+    const { t } = await import('./i18n');
 
     expect(app).toBeDefined();
     await expect(app!.ImportConfigFile()).resolves.toEqual({
       success: false,
       message: '已取消',
     });
+    await expect(app!.ExportSQLFile('demo.sql', 'select 1')).resolves.toEqual({
+      success: false,
+      message: t('app.browser_mock.export_sql_unsupported'),
+    });
     await expect(app!.ExportConnectionsPackage({ includeSecrets: true, filePassword: '' })).resolves.toEqual({
       success: false,
-      message: '浏览器 mock 不支持恢复包导出',
+      message: t('app.browser_mock.export_connection_package_unsupported'),
     });
-  });
+  }, 10000);
 
-  it('rejects non-array payloads instead of treating them as successful imports', async () => {
+  it('rejects non-array payloads with the localized browser mock import limitation', async () => {
     const app = await importMain();
+    const { t } = await import('./i18n');
 
     await expect(app!.ImportConnectionsPayload('{"version":1}')).rejects.toThrow(
-      '浏览器 mock 不支持恢复包导入，仅支持历史 JSON 连接数组',
+      t('app.browser_mock.import_connection_package_unsupported'),
     );
+  });
+
+  it('localizes generated browser mock saved query names', async () => {
+    vi.stubGlobal('navigator', {
+      languages: ['en-US'],
+      language: 'en-US',
+    });
+
+    const app = await importMain();
+
+    await expect(app!.SaveQuery({
+      id: 'browser-mock-generated-query',
+      sql: 'select 1',
+    })).resolves.toEqual(expect.objectContaining({
+      name: 'Query 1',
+      sql: 'select 1',
+    }));
+  });
+
+  it('does not hardcode Chinese browser mock saved query names', () => {
+    const source = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+    expect(source).not.toContain("'未命名查询'");
+  });
+
+  it('localizes browser mock MCP HTTP server status messages', async () => {
+    vi.stubGlobal('navigator', {
+      languages: ['en-US'],
+      language: 'en-US',
+    });
+
+    await importMain();
+    const { t } = await import('./i18n');
+    const service = (globalThis as any).window.go.aiservice.Service;
+
+    await expect(service.AIGetMCPHTTPServerStatus()).resolves.toEqual(expect.objectContaining({
+      message: t('app.browser_mock.mcp_http.not_running'),
+    }));
+    await expect(service.AIStartMCPHTTPServer({ addr: '127.0.0.1:8765', path: '/mcp' })).resolves.toEqual(expect.objectContaining({
+      message: t('app.browser_mock.mcp_http.started'),
+    }));
+    await expect(service.AIStopMCPHTTPServer()).resolves.toEqual(expect.objectContaining({
+      message: t('app.browser_mock.mcp_http.stopped'),
+    }));
+  });
+
+  it('does not hardcode Chinese browser mock MCP HTTP server status messages', () => {
+    const source = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+    expect(source).not.toContain("'GoNavi MCP HTTP 服务未启动'");
+    expect(source).not.toContain("'GoNavi MCP HTTP 服务已启动'");
+    expect(source).not.toContain("'GoNavi MCP HTTP 服务已停止'");
+  });
+
+  it('localizes browser mock data root update messages', async () => {
+    vi.stubGlobal('navigator', {
+      languages: ['en-US'],
+      language: 'en-US',
+    });
+
+    const app = await importMain();
+    const { t } = await import('./i18n');
+
+    await expect(app!.ApplyDataRootDirectory('C:/mock/custom-root')).resolves.toEqual(expect.objectContaining({
+      success: true,
+      message: t('app.data_root.message.updated'),
+      data: expect.objectContaining({
+        path: 'C:/mock/custom-root',
+      }),
+    }));
+  });
+
+  it('does not hardcode Chinese browser mock data root update messages', () => {
+    const source = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+    expect(source).not.toContain("'数据目录已更新'");
+  });
+
+  it('localizes browser mock MCP server test messages', async () => {
+    vi.stubGlobal('navigator', {
+      languages: ['en-US'],
+      language: 'en-US',
+    });
+
+    await importMain();
+    const { t } = await import('./i18n');
+    const service = (globalThis as any).window.go.aiservice.Service;
+
+    await expect(service.AITestMCPServer({ command: 'node' })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      message: t('app.browser_mock.mcp_server.test_success'),
+    }));
+    await expect(service.AITestMCPServer({ command: '   ' })).resolves.toEqual(expect.objectContaining({
+      success: false,
+      message: t('app.browser_mock.mcp_server.command_required'),
+    }));
+  });
+
+  it('does not hardcode Chinese browser mock MCP server test messages', () => {
+    const source = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+    expect(source).not.toContain("'MCP mock 测试成功'");
+    expect(source).not.toContain("'MCP 命令不能为空'");
+  });
+
+  it('localizes browser mock MCP tool call unavailable content', async () => {
+    vi.stubGlobal('navigator', {
+      languages: ['en-US'],
+      language: 'en-US',
+    });
+
+    await importMain();
+    const { t } = await import('./i18n');
+    const service = (globalThis as any).window.go.aiservice.Service;
+
+    await expect(service.AICallMCPTool('demo.tool', '{"x":1}')).resolves.toEqual(expect.objectContaining({
+      alias: 'demo.tool',
+      originalName: 'demo.tool',
+      content: t('app.browser_mock.mcp_tool.unavailable'),
+      isError: true,
+    }));
+  });
+
+  it('does not hardcode Chinese browser mock MCP tool call unavailable content', () => {
+    const source = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+    expect(source).not.toContain("'浏览器 mock 未接入真实 MCP 服务'");
+  });
+
+  it('localizes browser mock provider test messages', async () => {
+    vi.stubGlobal('navigator', {
+      languages: ['en-US'],
+      language: 'en-US',
+    });
+
+    await importMain();
+    const { t } = await import('./i18n');
+    const service = (globalThis as any).window.go.aiservice.Service;
+
+    await expect(service.AITestProvider({ apiKey: 'sk-demo' })).resolves.toEqual(expect.objectContaining({
+      success: true,
+      message: t('app.browser_mock.provider.test_success'),
+    }));
+    await expect(service.AITestProvider({ apiKey: '   ' })).resolves.toEqual(expect.objectContaining({
+      success: false,
+      message: t('app.browser_mock.provider.test_failed_detail', { detail: 'missing api key' }),
+    }));
+  });
+
+  it('does not hardcode Chinese browser mock provider test messages', () => {
+    const source = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+    expect(source).not.toContain("'端点连通性测试成功！'");
+    expect(source).not.toContain("'连接测试失败: missing api key'");
+  });
+
+  it('localizes browser mock MCP client status and install messages', async () => {
+    vi.stubGlobal('navigator', {
+      languages: ['en-US'],
+      language: 'en-US',
+    });
+
+    await importMain();
+    const { t } = await import('./i18n');
+    const service = (globalThis as any).window.go.aiservice.Service;
+
+    await expect(service.AIGetMCPClientInstallStatuses()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        client: 'claude-code',
+        message: t('app.browser_mock.mcp_client.claude_code.not_detected'),
+      }),
+      expect.objectContaining({
+        client: 'codex',
+        message: t('app.browser_mock.mcp_client.codex.path_mismatch'),
+      }),
+    ]));
+
+    await expect(service.AIInstallClaudeCodeMCP()).resolves.toEqual(expect.objectContaining({
+      client: 'claude-code',
+      message: t('app.browser_mock.mcp_client.claude_code.installed'),
+    }));
+    await expect(service.AIInstallCodexMCP()).resolves.toEqual(expect.objectContaining({
+      client: 'codex',
+      message: t('app.browser_mock.mcp_client.codex.installed'),
+    }));
+    await expect(service.AIGetMCPClientInstallStatuses()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        client: 'claude-code',
+        installed: true,
+        message: t('app.browser_mock.mcp_client.claude_code.installed'),
+      }),
+      expect.objectContaining({
+        client: 'codex',
+        installed: true,
+        message: t('app.browser_mock.mcp_client.codex.installed'),
+      }),
+    ]));
+  });
+
+  it('does not hardcode Chinese browser mock MCP client status and install messages', () => {
+    const source = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8');
+    expect(source).not.toContain("'未检测到 Claude Code 用户级 GoNavi MCP 配置'");
+    expect(source).not.toContain("'已检测到 Codex 中的 GoNavi MCP 记录，但与当前 GoNavi 安装路径不一致，建议更新'");
+    expect(source).not.toContain("'已写入 Claude Code 用户级 MCP 配置，重启 Claude CLI 后可在 /mcp 的 User MCPs 中看到 GoNavi。'");
+    expect(source).not.toContain("'已写入 Codex 用户级 MCP 配置，重启 Codex CLI 或桌面端后可看到 GoNavi。'");
+  });
+
+  it('waits for store hydration before syncing an explicit persisted language over a different system language', async () => {
+    let languagePreference = 'system';
+    let hydrated = false;
+    const storeListeners = new Set<VoidFunction>();
+    const hydrationListeners = new Set<VoidFunction>();
+    const setLanguagePreference = vi.fn((nextPreference: string) => {
+      languagePreference = nextPreference;
+      storeListeners.forEach((listener) => listener());
+    });
+    const finishHydration = (nextPreference: string) => {
+      hydrated = true;
+      languagePreference = nextPreference;
+      storeListeners.forEach((listener) => listener());
+      hydrationListeners.forEach((listener) => listener());
+    };
+
+    vi.doMock('./store', () => ({
+      useStore: Object.assign(
+        <T,>(selector: (state: { languagePreference: string; setLanguagePreference: (nextPreference: string) => void }) => T): T =>
+          React.useSyncExternalStore(
+            (listener) => {
+              storeListeners.add(listener);
+              return () => storeListeners.delete(listener);
+            },
+            () => selector({ languagePreference, setLanguagePreference }),
+            () => selector({ languagePreference, setLanguagePreference }),
+          ),
+        {
+          persist: {
+            hasHydrated: () => hydrated,
+            onFinishHydration: (listener: VoidFunction) => {
+              hydrationListeners.add(listener);
+              return () => hydrationListeners.delete(listener);
+            },
+          },
+        },
+      ),
+    }));
+
+    let renderer: TestRenderer.ReactTestRenderer | null = null;
+    renderRootImpl = (node) => {
+      act(() => {
+        renderer = TestRenderer.create(node as React.ReactElement);
+      });
+    };
+
+    await importMain();
+    const { getCurrentLanguage } = await import('./i18n');
+
+    expect(renderer).not.toBeNull();
+    expect(getCurrentLanguage()).toBe('en-US');
+    expect(syncLanguageRuntimeMock).not.toHaveBeenCalled();
+
+    act(() => {
+      finishHydration('ja-JP');
+    });
+
+    expect(getCurrentLanguage()).toBe('ja-JP');
+    expect(syncLanguageRuntimeMock.mock.calls.map(([language]) => language)).toEqual(['ja-JP']);
+  });
+
+  it('applies the resolved runtime locale on the first visible frame after hydration', async () => {
+    let languagePreference = 'system';
+    let hydrated = false;
+    const storeListeners = new Set<VoidFunction>();
+    const hydrationListeners = new Set<VoidFunction>();
+    const setLanguagePreference = vi.fn((nextPreference: string) => {
+      languagePreference = nextPreference;
+      storeListeners.forEach((listener) => listener());
+    });
+    const finishHydration = (nextPreference: string) => {
+      hydrated = true;
+      languagePreference = nextPreference;
+      storeListeners.forEach((listener) => listener());
+      hydrationListeners.forEach((listener) => listener());
+    };
+
+    vi.doMock('./store', () => ({
+      useStore: Object.assign(
+        <T,>(selector: (state: { languagePreference: string; setLanguagePreference: (nextPreference: string) => void }) => T): T =>
+          React.useSyncExternalStore(
+            (listener) => {
+              storeListeners.add(listener);
+              return () => storeListeners.delete(listener);
+            },
+            () => selector({ languagePreference, setLanguagePreference }),
+            () => selector({ languagePreference, setLanguagePreference }),
+          ),
+        {
+          persist: {
+            hasHydrated: () => hydrated,
+            onFinishHydration: (listener: VoidFunction) => {
+              hydrationListeners.add(listener);
+              return () => hydrationListeners.delete(listener);
+            },
+          },
+        },
+      ),
+    }));
+
+    renderRootImpl = (node) => {
+      act(() => {
+        TestRenderer.create(node as React.ReactElement);
+      });
+    };
+
+    await importMain();
+    const { getCurrentLanguage } = await import('./i18n');
+
+    dayjsLocaleMock.mockClear();
+
+    act(() => {
+      finishHydration('ja-JP');
+    });
+
+    expect(getCurrentLanguage()).toBe('ja-JP');
+    expect(dayjsLocaleMock).toHaveBeenCalledWith('ja');
+    expect(syncLanguageRuntimeMock.mock.calls.map(([language]) => language)).toEqual(['ja-JP']);
+  });
+
+  it('does not stay blank when hydration finishes in the gap before finish-hydration subscription starts listening', async () => {
+    let languagePreference = 'ja-JP';
+    let hydrated = false;
+    const storeListeners = new Set<VoidFunction>();
+    const hydrationListeners = new Set<VoidFunction>();
+    const setLanguagePreference = vi.fn((nextPreference: string) => {
+      languagePreference = nextPreference;
+      storeListeners.forEach((listener) => listener());
+    });
+    let hydrationSubscriptionCount = 0;
+
+    vi.doMock('./store', () => ({
+      useStore: Object.assign(
+        <T,>(selector: (state: { languagePreference: string; setLanguagePreference: (nextPreference: string) => void }) => T): T =>
+          React.useSyncExternalStore(
+            (listener) => {
+              storeListeners.add(listener);
+              return () => storeListeners.delete(listener);
+            },
+            () => selector({ languagePreference, setLanguagePreference }),
+            () => selector({ languagePreference, setLanguagePreference }),
+          ),
+        {
+          persist: {
+            hasHydrated: () => hydrated,
+            onFinishHydration: (listener: VoidFunction) => {
+              hydrationSubscriptionCount += 1;
+              hydrated = true;
+              hydrationListeners.add(listener);
+              return () => hydrationListeners.delete(listener);
+            },
+          },
+        },
+      ),
+    }));
+
+    let renderer: TestRenderer.ReactTestRenderer | null = null;
+    renderRootImpl = (node) => {
+      renderer = TestRenderer.create(node as React.ReactElement);
+    };
+
+    await importMain();
+    const { getCurrentLanguage } = await import('./i18n');
+
+    await act(async () => {});
+
+    expect(hydrationSubscriptionCount).toBeGreaterThan(0);
+    expect(renderer).not.toBeNull();
+    expect(renderer!.toJSON()).not.toBeNull();
+    expect(getCurrentLanguage()).toBe('ja-JP');
+    expect(dayjsLocaleMock).toHaveBeenCalledWith('ja');
+    expect(syncLanguageRuntimeMock.mock.calls.map(([language]) => language)).toEqual(['ja-JP']);
+  });
+
+  it('renders immediately with the resolved locale when hydration is already complete on first load', async () => {
+    const setLanguagePreference = vi.fn();
+
+    vi.doMock('./store', () => ({
+      useStore: Object.assign(
+        <T,>(selector: (state: { languagePreference: string; setLanguagePreference: (nextPreference: string) => void }) => T): T =>
+          React.useSyncExternalStore(
+            () => () => {},
+            () => selector({ languagePreference: 'ja-JP', setLanguagePreference }),
+            () => selector({ languagePreference: 'ja-JP', setLanguagePreference }),
+          ),
+        {
+          persist: {
+            hasHydrated: () => true,
+            onFinishHydration: () => () => {},
+          },
+        },
+      ),
+    }));
+
+    let renderer: TestRenderer.ReactTestRenderer | null = null;
+    renderRootImpl = (node) => {
+      act(() => {
+        renderer = TestRenderer.create(node as React.ReactElement);
+      });
+    };
+
+    await importMain();
+    const { getCurrentLanguage } = await import('./i18n');
+    await act(async () => {});
+
+    expect(renderer).not.toBeNull();
+    expect(renderer!.toJSON()).not.toBeNull();
+    expect(getCurrentLanguage()).toBe('ja-JP');
+    expect(dayjsLocaleMock).toHaveBeenCalledWith('ja');
+    expect(syncLanguageRuntimeMock.mock.calls.map(([language]) => language)).toEqual(['ja-JP']);
   });
 });

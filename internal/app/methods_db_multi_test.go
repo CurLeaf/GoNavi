@@ -34,6 +34,11 @@ type fakeNativeMultiResultDB struct {
 	multiCalls int
 }
 
+type fakeEmptyNativeMultiResultDB struct {
+	*fakeBatchWriteDB
+	multiCalls int
+}
+
 func (f *fakeNativeMultiResultDB) QueryMulti(query string) ([]connection.ResultSetData, error) {
 	results, _, err := f.QueryMultiWithMessages(query)
 	return results, err
@@ -65,6 +70,28 @@ func (f *fakeNativeMultiResultDB) QueryMultiContextWithMessages(ctx context.Cont
 		Columns:  columns,
 		Messages: append([]string(nil), messages...),
 	}}, append([]string(nil), messages...), nil
+}
+
+func (f *fakeEmptyNativeMultiResultDB) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	results, _, err := f.QueryMultiWithMessages(query)
+	return results, err
+}
+
+func (f *fakeEmptyNativeMultiResultDB) QueryMultiWithMessages(query string) ([]connection.ResultSetData, []string, error) {
+	return f.QueryMultiContextWithMessages(context.Background(), query)
+}
+
+func (f *fakeEmptyNativeMultiResultDB) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	results, _, err := f.QueryMultiContextWithMessages(ctx, query)
+	return results, err
+}
+
+func (f *fakeEmptyNativeMultiResultDB) QueryMultiContextWithMessages(ctx context.Context, query string) ([]connection.ResultSetData, []string, error) {
+	f.multiCalls++
+	if err := f.queryErr[query]; err != nil {
+		return nil, nil, err
+	}
+	return []connection.ResultSetData{}, nil, nil
 }
 
 func (f *fakeBatchWriteDB) Connect(config connection.ConnectionConfig) error {
@@ -1329,6 +1356,57 @@ func TestDBQueryMultiRunsSQLServerStatisticsBatchNatively(t *testing.T) {
 	}
 	if len(result.Messages) != 1 || !strings.Contains(result.Messages[0], "logical reads") {
 		t.Fatalf("expected SQL Server statistics message to be returned, got %#v", result.Messages)
+	}
+}
+
+func TestDBQueryMultiFallsBackWhenNativeReadOnlyBatchReturnsEmptyResults(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "SELECT 1 AS value"
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"value": 1},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"value"},
+		},
+		queryErr: map[string]error{},
+	}
+	fakeDB := &fakeEmptyNativeMultiResultDB{fakeBatchWriteDB: baseDB}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "sqlserver", Host: "127.0.0.1", Port: 1433, User: "sa"}
+
+	result := app.DBQueryMulti(config, "master", query, "sqlserver-empty-native-read-fallback-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.multiCalls != 1 {
+		t.Fatalf("expected one native multi-result attempt, got %d", fakeDB.multiCalls)
+	}
+	if baseDB.session == nil {
+		t.Fatal("expected empty native result to fall back to pinned session query")
+	}
+	if baseDB.session.queryCalls != 1 {
+		t.Fatalf("expected fallback to query through pinned session once, got %d", baseDB.session.queryCalls)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 1 {
+		t.Fatalf("expected one fallback result set, got %#v", resultSets)
+	}
+	if got := resultSets[0].Rows[0]["value"]; got != 1 {
+		t.Fatalf("expected fallback SELECT result value=1, got %#v", got)
 	}
 }
 

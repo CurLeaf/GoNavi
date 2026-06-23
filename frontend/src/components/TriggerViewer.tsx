@@ -9,6 +9,7 @@ import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
 import { buildEditableTriggerSql } from '../utils/triggerEditSql';
+import { buildSqlServerObjectDefinitionQueries } from '../utils/sqlServerObjectDefinition';
 
 interface TriggerViewerProps {
     tab: TabData;
@@ -125,7 +126,6 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
     // 透明 Monaco Editor 主题由 MonacoEditor 包装组件按需注册（含 stickyScroll 不透明背景）
 
     const escapeSQLLiteral = (raw: string): string => String(raw || '').replace(/'/g, "''");
-    const quoteSqlServerIdentifier = (raw: string): string => `[${String(raw || '').replace(/]/g, ']]')}]`;
     const parseSchemaAndName = (fullName: string): { schema: string; name: string } => {
         const parsed = splitQualifiedNameLast(fullName);
         return { schema: parsed.parentPath, name: parsed.objectName };
@@ -185,7 +185,7 @@ WHERE t.tgname = '${safeTriggerName}'
   AND NOT t.tgisinternal
 LIMIT 1`];
             case 'sqlserver': {
-                return [`SELECT OBJECT_DEFINITION(OBJECT_ID('${escapeSQLLiteral(triggerName)}')) AS trigger_definition`];
+                return buildSqlServerObjectDefinitionQueries('trigger', triggerName, dbName, 'trigger_definition');
             }
             case 'oracle':
             case 'dm':
@@ -318,7 +318,17 @@ LIMIT 1`];
                 return row.trigger_definition || row.TRIGGER_DEFINITION || Object.values(row)[0] || '';
             }
             case 'sqlserver': {
-                return row.trigger_definition || row.TRIGGER_DEFINITION || Object.values(row)[0] || '';
+                const directDefinition = getCaseInsensitiveRawValue(row, ['trigger_definition', 'definition']);
+                if (directDefinition !== undefined && directDefinition !== null && String(directDefinition).trim() !== '') {
+                    return String(directDefinition);
+                }
+                const helpTextDefinition = data
+                    .map((item) => getCaseInsensitiveRawValue(item, ['Text', 'text']))
+                    .filter((value) => value !== undefined && value !== null)
+                    .map((value) => String(value))
+                    .join('');
+                if (helpTextDefinition.trim()) return helpTextDefinition;
+                return Object.values(row)[0] || '';
             }
             case 'oracle':
             case 'dm': {

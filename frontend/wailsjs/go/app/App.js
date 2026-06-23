@@ -30,6 +30,10 @@ export function CheckForUpdatesSilently() {
   return window['go']['app']['App']['CheckForUpdatesSilently']();
 }
 
+export function ClearSlowQueries(arg1, arg2) {
+  return window['go']['app']['App']['ClearSlowQueries'](arg1, arg2);
+}
+
 export function ClearTables(arg1, arg2, arg3) {
   return window['go']['app']['App']['ClearTables'](arg1, arg2, arg3);
 }
@@ -142,12 +146,20 @@ export function DeleteConnection(arg1) {
   return window['go']['app']['App']['DeleteConnection'](arg1);
 }
 
+export function DeleteQuery(arg1) {
+  return window['go']['app']['App']['DeleteQuery'](arg1);
+}
+
 export function DeleteSQLDirectory(arg1) {
   return window['go']['app']['App']['DeleteSQLDirectory'](arg1);
 }
 
 export function DeleteSQLFile(arg1) {
   return window['go']['app']['App']['DeleteSQLFile'](arg1);
+}
+
+export function DiagnoseQuery(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DiagnoseQuery'](arg1, arg2, arg3);
 }
 
 export function DismissSecurityUpdateReminder() {
@@ -198,12 +210,24 @@ export function ExportData(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportData'](arg1, arg2, arg3, arg4);
 }
 
+export function ExportDataWithOptions(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExportDataWithOptions'](arg1, arg2, arg3, arg4);
+}
+
 export function ExportDatabaseSQL(arg1, arg2, arg3) {
   return window['go']['app']['App']['ExportDatabaseSQL'](arg1, arg2, arg3);
 }
 
+export function ExportDatabasesSQLWithOptions(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExportDatabasesSQLWithOptions'](arg1, arg2, arg3, arg4);
+}
+
 export function ExportQuery(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['app']['App']['ExportQuery'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function ExportQueryWithOptions(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['app']['App']['ExportQueryWithOptions'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function ExportSQLFile(arg1, arg2) {
@@ -218,12 +242,20 @@ export function ExportTable(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportTable'](arg1, arg2, arg3, arg4);
 }
 
+export function ExportTableWithOptions(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['ExportTableWithOptions'](arg1, arg2, arg3, arg4);
+}
+
 export function ExportTablesDataSQL(arg1, arg2, arg3) {
   return window['go']['app']['App']['ExportTablesDataSQL'](arg1, arg2, arg3);
 }
 
 export function ExportTablesSQL(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['ExportTablesSQL'](arg1, arg2, arg3, arg4);
+}
+
+export function ExportTablesSQLWithOptions(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['app']['App']['ExportTablesSQLWithOptions'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function GenerateQueryID() {
@@ -262,8 +294,20 @@ export function GetSavedConnections() {
   return window['go']['app']['App']['GetSavedConnections']();
 }
 
+export function GetSavedQueries() {
+  return window['go']['app']['App']['GetSavedQueries']();
+}
+
 export function GetSecurityUpdateStatus() {
   return window['go']['app']['App']['GetSecurityUpdateStatus']();
+}
+
+export function GetSlowQueries(arg1, arg2, arg3, arg4) {
+  return window['go']['app']['App']['GetSlowQueries'](arg1, arg2, arg3, arg4);
+}
+
+export function GetUnboundSavedQueries() {
+  return window['go']['app']['App']['GetUnboundSavedQueries']();
 }
 
 export function ImportConfigFile() {
@@ -288,6 +332,10 @@ export function ImportLegacyConnections(arg1) {
 
 export function ImportLegacyGlobalProxy(arg1) {
   return window['go']['app']['App']['ImportLegacyGlobalProxy'](arg1);
+}
+
+export function ImportSavedQueries(arg1) {
+  return window['go']['app']['App']['ImportSavedQueries'](arg1);
 }
 
 export function InstallLocalDriverPackage(arg1, arg2, arg3, arg4) {
@@ -420,6 +468,10 @@ export function ReadAppLogTail(arg1, arg2) {
 
 export function ReadSQLFile(arg1) {
   return window['go']['app']['App']['ReadSQLFile'](arg1);
+}
+
+export function RebindSavedQuery(arg1, arg2) {
+  return window['go']['app']['App']['RebindSavedQuery'](arg1, arg2);
 }
 
 export function RedisConnect(arg1) {
@@ -578,6 +630,10 @@ export function SaveGlobalProxy(arg1) {
   return window['go']['app']['App']['SaveGlobalProxy'](arg1);
 }
 
+export function SaveQuery(arg1) {
+  return window['go']['app']['App']['SaveQuery'](arg1);
+}
+
 export function SelectCertificateFile(arg1, arg2) {
   return window['go']['app']['App']['SelectCertificateFile'](arg1, arg2);
 }
@@ -608,6 +664,10 @@ export function SelectSQLDirectory(arg1) {
 
 export function SelectSSHKeyFile(arg1) {
   return window['go']['app']['App']['SelectSSHKeyFile'](arg1);
+}
+
+export function SetLanguage(arg1) {
+  return window['go']['app']['App']['SetLanguage'](arg1);
 }
 
 export function SetMacNativeWindowControls(arg1) {

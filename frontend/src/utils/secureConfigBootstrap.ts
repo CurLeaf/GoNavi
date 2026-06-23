@@ -12,6 +12,7 @@ import {
   readLegacyPersistedSecrets,
   stripLegacyPersistedSecrets,
 } from './legacyConnectionStorage';
+import { stripLegacySavedQueries } from './savedQueryPersistence';
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -39,6 +40,7 @@ type SecureConfigBootstrapArgs = {
   storage?: StorageLike;
   replaceConnections: (connections: SavedConnection[]) => void;
   replaceGlobalProxy: (proxy: GlobalProxyConfig) => void;
+  t?: SecureConfigBootstrapTranslator;
 };
 
 type SecureConfigBootstrapResult = {
@@ -56,7 +58,15 @@ type StartSecurityUpdateResult = {
 
 type MergeSecurityUpdateStatusOptions = {
   previousStatus?: Partial<SecurityUpdateStatus> | null;
+  t?: SecureConfigBootstrapTranslator;
 };
+
+type SecureConfigBootstrapTranslator = (key: string) => string;
+
+const secureConfigBootstrapText = (
+  key: string,
+  t?: SecureConfigBootstrapTranslator,
+): string => (t ? t(key) : key);
 
 const defaultSummary = () => ({
   total: 0,
@@ -74,7 +84,10 @@ const hasMeaningfulSummary = (summary: SecurityUpdateSummary): boolean => (
   || summary.failed > 0
 );
 
-const buildLegacyPendingDetails = (rawPayload: string | null): {
+const buildLegacyPendingDetails = (
+  rawPayload: string | null,
+  t?: SecureConfigBootstrapTranslator,
+): {
   hasLegacyItems: boolean;
   summary: SecurityUpdateSummary;
   issues: SecurityUpdateIssue[];
@@ -89,19 +102,19 @@ const buildLegacyPendingDetails = (rawPayload: string | null): {
     status: 'pending',
     reasonCode: 'migration_required',
     action: 'open_connection',
-    message: '该连接仍保存在当前应用的本地配置中，完成安全更新后会迁入新的安全存储。',
+    message: secureConfigBootstrapText('security_update.bootstrap.legacy.connection.message', t),
   }));
 
   if (legacy.globalProxy) {
     issues.push({
       id: 'legacy-global-proxy-default',
       scope: 'global_proxy',
-      title: '全局代理',
+      title: secureConfigBootstrapText('security_update.bootstrap.legacy.global_proxy.title', t),
       severity: 'medium',
       status: 'pending',
       reasonCode: 'migration_required',
       action: 'open_proxy_settings',
-      message: '全局代理仍保存在当前应用的本地配置中，完成安全更新后会迁入新的安全存储。',
+      message: secureConfigBootstrapText('security_update.bootstrap.legacy.global_proxy.message', t),
     });
   }
 
@@ -196,7 +209,7 @@ export const mergeSecurityUpdateStatusWithLegacySource = (
   const hasActiveMigrationRound = String(base.migrationId || '').trim() !== '';
   const baseNonLegacyIssues = base.issues.filter((issue) => !isLocalLegacyIssue(issue));
 
-  const legacy = buildLegacyPendingDetails(rawPayload);
+  const legacy = buildLegacyPendingDetails(rawPayload, options?.t);
   const legacySummary = deriveLegacySummary(base, legacy.issues.length, options?.previousStatus);
 
   if (!legacySummary.hasContribution) {
@@ -312,8 +325,9 @@ const cleanupLegacySourceIfCompleted = (
   if (!storage || !rawPayload || status.overallStatus !== 'completed') {
     return;
   }
-  const sanitizedPayload = stripLegacyPersistedSecrets(rawPayload);
-  if (sanitizedPayload && sanitizedPayload !== rawPayload) {
+  const currentPayload = storage.getItem(LEGACY_PERSIST_KEY) ?? rawPayload;
+  const sanitizedPayload = stripLegacySavedQueries(stripLegacyPersistedSecrets(currentPayload));
+  if (sanitizedPayload && sanitizedPayload !== currentPayload) {
     storage.setItem(LEGACY_PERSIST_KEY, sanitizedPayload);
   }
 };
@@ -324,7 +338,7 @@ export async function finalizeSecurityUpdateStatus(
 ): Promise<SecurityUpdateStatus> {
   const storage = resolveStorage(args.storage);
   const rawPayload = storage?.getItem(LEGACY_PERSIST_KEY) ?? null;
-  const status = mergeSecurityUpdateStatusWithLegacySource(rawStatus, rawPayload);
+  const status = mergeSecurityUpdateStatusWithLegacySource(rawStatus, rawPayload, { t: args.t });
 
   if (status.overallStatus === 'completed') {
     await refreshVisibleConfigFromBackend(args.backend, args.replaceConnections, args.replaceGlobalProxy, true);
@@ -344,7 +358,7 @@ export async function bootstrapSecureConfig(args: SecureConfigBootstrapArgs): Pr
   const backendStatus = typeof args.backend?.GetSecurityUpdateStatus === 'function'
     ? await args.backend.GetSecurityUpdateStatus()
     : undefined;
-  const status = mergeSecurityUpdateStatusWithLegacySource(backendStatus, rawPayload);
+  const status = mergeSecurityUpdateStatusWithLegacySource(backendStatus, rawPayload, { t: args.t });
 
   if (!hasLegacySensitiveItems) {
     await refreshVisibleConfigFromBackend(args.backend, args.replaceConnections, args.replaceGlobalProxy, true);
@@ -372,7 +386,7 @@ export async function startSecurityUpdateFromBootstrap(args: SecureConfigBootstr
   if (typeof args.backend?.StartSecurityUpdate !== 'function') {
     return {
       status: null,
-      error: new Error('安全更新能力不可用'),
+      error: new Error(secureConfigBootstrapText('security_update.error.capability_unavailable', args.t)),
     };
   }
 
@@ -385,7 +399,7 @@ export async function startSecurityUpdateFromBootstrap(args: SecureConfigBootstr
         writeBackup: true,
       },
     });
-    const status = mergeSecurityUpdateStatusWithLegacySource(rawStatus, rawPayload);
+    const status = mergeSecurityUpdateStatusWithLegacySource(rawStatus, rawPayload, { t: args.t });
 
     if (status.overallStatus === 'completed') {
       await refreshVisibleConfigFromBackend(args.backend, args.replaceConnections, args.replaceGlobalProxy, true);

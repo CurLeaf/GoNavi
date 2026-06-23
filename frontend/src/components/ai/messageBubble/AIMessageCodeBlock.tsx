@@ -5,6 +5,7 @@ import mermaid from 'mermaid';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
+import Modal from '../../common/ResizableDraggableModal';
 import type { OverlayWorkbenchTheme } from '../../../utils/overlayWorkbenchTheme';
 import { buildAIReadonlyPreviewSQL } from '../../../utils/aiSqlLimit';
 
@@ -109,7 +110,6 @@ const CodeRunButton: React.FC<{ text: string; connectionId?: string; dbName?: st
           return;
         }
         if (result.requiresConfirm) {
-          const { Modal } = await import('antd');
           Modal.confirm({
             title: '⚠️ 安全确认',
             content: result.warningMessage || `此 SQL 为 ${result.operationType} 操作，确定要执行吗？`,
@@ -211,6 +211,7 @@ const HighlightedCodeBlock: React.FC<HighlightedCodeBlockProps> = ({
         displayText,
         50,
         activeConnectionConfig?.driver || '',
+        { oceanBaseProtocol: activeConnectionConfig?.oceanBaseProtocol },
       );
       const response = await DBQuery(activeConnectionConfig, activeDbName || '', previewSql);
       if (response.success && Array.isArray(response.data)) {

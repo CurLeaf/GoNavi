@@ -302,6 +302,26 @@ func TestReadSQLFileByPathReturnsLargeFileMetadata(t *testing.T) {
 	}
 }
 
+func TestReadSQLFileByPathMarksMissingFile(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "missing.sql")
+
+	result := readSQLFileByPath(filePath)
+	if result.Success {
+		t.Fatalf("expected missing sql file read to fail, got %#v", result)
+	}
+
+	data, ok := result.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected error metadata map, got %#v", result.Data)
+	}
+	if data["errorCode"] != sqlFileErrorCodeNotFound {
+		t.Fatalf("expected file_not_found error code, got %#v", data["errorCode"])
+	}
+	if data["filePath"] != filePath {
+		t.Fatalf("expected filePath %q, got %#v", filePath, data["filePath"])
+	}
+}
+
 func TestReadSQLFileWithMetadataByPathReturnsSmallFileContentAndPath(t *testing.T) {
 	filePath := filepath.Join(t.TempDir(), "report.sql")
 	if err := os.WriteFile(filePath, []byte("select 1;"), 0o644); err != nil {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,40 @@ import (
 
 	"GoNavi-Wails/internal/db"
 )
+
+func TestDriverStatusItemJSONIncludesStableReasonCode(t *testing.T) {
+	item := driverStatusItem{
+		Type:       "clickhouse",
+		Name:       "ClickHouse",
+		ReasonCode: driverStatusReasonSlimBuildMissingDriver,
+	}
+
+	payload, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("marshal driver status item: %v", err)
+	}
+
+	if !strings.Contains(string(payload), `"reasonCode":"slim_build_missing_driver"`) {
+		t.Fatalf("expected stable reasonCode in payload, got %s", string(payload))
+	}
+}
+
+func TestDriverNetworkProbeItemJSONIncludesStableProbeCode(t *testing.T) {
+	item := driverNetworkProbeItem{
+		ProbeCode: driverNetworkProbeCodeGitHubRelease,
+		Name:      "GitHub driver release",
+		URL:       "https://github.com/example/release",
+	}
+
+	payload, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("marshal driver network probe item: %v", err)
+	}
+
+	if !strings.Contains(string(payload), `"probeCode":"github_release"`) {
+		t.Fatalf("expected stable probeCode in payload, got %s", string(payload))
+	}
+}
 
 func TestResolveVersionedDriverOptionUsesPublishedMongoV1Release(t *testing.T) {
 	definition, ok := resolveDriverDefinition("mongodb")
@@ -469,6 +504,39 @@ func TestElasticsearchDriverDefinitionUsesOptionalAgent(t *testing.T) {
 	}
 }
 
+func TestTrinoDriverDefinitionUsesOptionalAgent(t *testing.T) {
+	definition, ok := resolveDriverDefinition("trino")
+	if !ok {
+		t.Fatal("expected trino driver definition")
+	}
+	if definition.Name != "Trino" {
+		t.Fatalf("unexpected trino driver name: %q", definition.Name)
+	}
+	if definition.BuiltIn {
+		t.Fatal("expected trino to be an optional driver agent")
+	}
+	if driverGoModulePathMap["trino"] != "github.com/trinodb/trino-go-client" {
+		t.Fatalf("unexpected trino go module path: %q", driverGoModulePathMap["trino"])
+	}
+	if definition.PinnedVersion != "0.333.0" {
+		t.Fatalf("unexpected trino definition pinned version: %q", definition.PinnedVersion)
+	}
+	if definition.DefaultDownloadURL != "builtin://activate/trino" {
+		t.Fatalf("unexpected trino default download URL: %q", definition.DefaultDownloadURL)
+	}
+	if latestDriverVersionMap["trino"] != "0.333.0" {
+		t.Fatalf("unexpected trino pinned version: %q", latestDriverVersionMap["trino"])
+	}
+
+	tags, err := optionalDriverBuildTags("trino", "")
+	if err != nil {
+		t.Fatalf("resolve trino build tags failed: %v", err)
+	}
+	if tags != "gonavi_trino_driver" {
+		t.Fatalf("unexpected trino build tag: %q", tags)
+	}
+}
+
 func TestIoTDBDriverDefinitionUsesOptionalAgent(t *testing.T) {
 	definition, ok := resolveDriverDefinition("iotdb")
 	if !ok {
@@ -830,14 +898,70 @@ func TestOptionalDriverDownloadZipURLAcceptsQueryString(t *testing.T) {
 }
 
 func TestDownloadDriverPackageRejectsUnsupportedMongoVersion(t *testing.T) {
-	app := &App{}
+	app := NewApp()
+	app.SetLanguage("en-US")
 
 	result := app.DownloadDriverPackage("mongodb", "1.16.1", "builtin://activate/mongodb?channel=history&version=1.16.1", t.TempDir())
 	if result.Success {
 		t.Fatal("expected unsupported MongoDB 1.16.1 install to be rejected")
 	}
-	if !strings.Contains(result.Message, "仅支持 1.17.x 和 2.x") {
-		t.Fatalf("expected support-range error, got %q", result.Message)
+	if !strings.Contains(result.Message, "only 1.17.x and 2.x are supported") {
+		t.Fatalf("expected English support-range error, got %q", result.Message)
+	}
+	if strings.Contains(result.Message, "仅支持 1.17.x 和 2.x") {
+		t.Fatalf("expected localized wrapper instead of fixed Chinese, got %q", result.Message)
+	}
+}
+
+func TestDownloadDriverPackageUsesCurrentLanguageForBuiltinWrapper(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage("en-US")
+
+	result := app.DownloadDriverPackage("mysql", "", "", t.TempDir())
+	if result.Success {
+		t.Fatal("expected built-in driver download to be rejected")
+	}
+	if !strings.Contains(result.Message, "Built-in drivers do not need extension package downloads") {
+		t.Fatalf("expected English built-in wrapper, got %q", result.Message)
+	}
+	if strings.Contains(result.Message, "内置驱动无需下载扩展包") {
+		t.Fatalf("expected localized wrapper instead of fixed Chinese, got %q", result.Message)
+	}
+}
+
+func TestLocalizedDriverNeedsUpdateTextsUseCurrentLanguage(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage("en-US")
+
+	reason, message := app.localizedDriverNeedsUpdateTexts("rev-old", "rev-new", 3)
+	if !strings.Contains(reason, "Reinstall required to apply driver updates.") {
+		t.Fatalf("expected English update reason, got %q", reason)
+	}
+	if !strings.Contains(reason, "installed revision rev-old.") || !strings.Contains(reason, "expected revision rev-new.") {
+		t.Fatalf("expected English revision detail, got %q", reason)
+	}
+	if !strings.Contains(message, "Affects 3 saved connections") {
+		t.Fatalf("expected affected-connections detail, got %q", message)
+	}
+	if strings.Contains(reason, "需要重装") || strings.Contains(message, "已保存连接") {
+		t.Fatalf("expected localized update texts instead of fixed Chinese, got reason=%q message=%q", reason, message)
+	}
+}
+
+func TestLocalizeDriverSelectionErrorUsesCurrentLanguageForSlimBuild(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage("en-US")
+
+	definition := driverDefinition{Type: "clickhouse", Name: "ClickHouse"}
+	err := app.localizeDriverSelectionError(definition, &driverBuildUnavailableError{Name: "ClickHouse"})
+	if err == nil {
+		t.Fatal("expected localized slim-build error")
+	}
+	if !strings.Contains(err.Error(), "ClickHouse is not included in the current slim build") {
+		t.Fatalf("expected English slim-build wrapper, got %q", err.Error())
+	}
+	if strings.Contains(err.Error(), "当前发行包为精简构建") {
+		t.Fatalf("expected localized wrapper instead of fixed Chinese, got %q", err.Error())
 	}
 }
 

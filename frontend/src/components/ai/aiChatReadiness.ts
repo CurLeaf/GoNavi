@@ -62,6 +62,12 @@ const getProviderHost = (baseUrl: string): string => {
 const hasProviderSecret = (provider: AIProviderConfig): boolean =>
   provider.hasSecret ?? Boolean(provider.secretRef || provider.apiKey);
 
+const isBaseURLOptionalProvider = (provider: AIProviderConfig): boolean =>
+  provider.type === 'custom' && trimText(provider.apiFormat) === 'codebuddy-cli';
+
+const isModelOptionalProvider = (provider: AIProviderConfig): boolean =>
+  provider.type === 'custom' && ['codebuddy-cli', 'cursor-agent'].includes(trimText(provider.apiFormat));
+
 const getSelectedProvider = (params: {
   providers?: AIProviderConfig[];
   activeProvider?: AIProviderConfig | null;
@@ -143,10 +149,10 @@ export const buildAIChatReadinessSnapshot = (params: {
   if (!hasProviderSecret(activeProvider)) {
     issues.push('missing_secret');
   }
-  if (!trimText(activeProvider.baseUrl)) {
+  if (!isBaseURLOptionalProvider(activeProvider) && !trimText(activeProvider.baseUrl)) {
     issues.push('missing_base_url');
   }
-  if (!trimText(activeProvider.model)) {
+  if (!isModelOptionalProvider(activeProvider) && !trimText(activeProvider.model)) {
     issues.push('missing_selected_model');
   }
 
@@ -189,7 +195,7 @@ export const buildAIChatReadinessSnapshot = (params: {
     };
   }
 
-  if (!providerSummary.model) {
+  if (!providerSummary.model && !isModelOptionalProvider(activeProvider)) {
     const title = params.loadingModels
       ? `正在加载 ${providerSummary.name || providerSummary.id || '当前供应商'} 的模型列表`
       : `先为 ${providerSummary.name || providerSummary.id || '当前供应商'} 选择一个模型`;
@@ -218,7 +224,11 @@ export const buildAIChatReadinessSnapshot = (params: {
     };
   }
 
-  const title = `AI 已就绪：${providerSummary.name || providerSummary.id} / ${providerSummary.model}`;
+  const resolvedProviderLabel = providerSummary.name || providerSummary.id;
+  const resolvedModelLabel = providerSummary.model || (isModelOptionalProvider(activeProvider) ? '自动选择' : '');
+  const title = resolvedModelLabel
+    ? `AI 已就绪：${resolvedProviderLabel} / ${resolvedModelLabel}`
+    : `AI 已就绪：${resolvedProviderLabel}`;
   const description = contextAttachedCount > 0
     ? `当前已关联 ${contextAttachedCount} 张表结构上下文，可直接发送。`
     : hasConnectionContext

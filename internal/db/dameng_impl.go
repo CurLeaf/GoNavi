@@ -110,6 +110,7 @@ func (d *DamengDB) Connect(config connection.ConnectionConfig) error {
 			failures = append(failures, fmt.Sprintf("第%d次连接打开失败: %v", idx+1, err))
 			continue
 		}
+		configureSQLConnectionPool(db, "dameng")
 		d.conn = db
 		d.pingTimeout = getConnectTimeout(attempt)
 		if err := d.Ping(); err != nil {
@@ -180,6 +181,24 @@ func (d *DamengDB) Query(query string) ([]map[string]interface{}, []string, erro
 	}
 	defer rows.Close()
 	return scanRows(rows)
+}
+
+func (d *DamengDB) StreamQueryContext(ctx context.Context, query string, consumer QueryStreamConsumer) error {
+	if d.conn == nil {
+		return fmt.Errorf("连接未打开")
+	}
+
+	rows, err := d.conn.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	return streamRows(rows, consumer)
+}
+
+func (d *DamengDB) StreamQuery(query string, consumer QueryStreamConsumer) error {
+	return d.StreamQueryContext(context.Background(), query, consumer)
 }
 
 func (d *DamengDB) ExecContext(ctx context.Context, query string) (int64, error) {

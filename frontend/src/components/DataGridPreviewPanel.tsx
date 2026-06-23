@@ -1,10 +1,13 @@
 import React from 'react';
 import { Button } from 'antd';
 import Editor from './MonacoEditor';
+import { t as defaultTranslate, type I18nParams } from '../i18n';
 
 type ColumnMeta = {
   type?: string;
 };
+
+export type DataGridPreviewPanelTranslate = (key: string, params?: I18nParams) => string;
 
 interface DataGridPreviewPanelProps {
   visible: boolean;
@@ -16,6 +19,7 @@ interface DataGridPreviewPanelProps {
   dataPanelValue: string;
   columnMetaMap: Record<string, ColumnMeta>;
   columnMetaMapByLowerName: Record<string, ColumnMeta>;
+  translate?: DataGridPreviewPanelTranslate;
   onFormatJson: () => void;
   onSave: () => void;
   onValueChange: (value: string) => void;
@@ -33,6 +37,7 @@ const DataGridPreviewPanel: React.FC<DataGridPreviewPanelProps> = ({
   dataPanelValue,
   columnMetaMap,
   columnMetaMapByLowerName,
+  translate = defaultTranslate,
   onFormatJson,
   onSave,
   onValueChange,
@@ -71,15 +76,15 @@ const DataGridPreviewPanel: React.FC<DataGridPreviewPanelProps> = ({
         }}
       >
         <span style={{ color: darkMode ? '#aaa' : '#666', fontWeight: 500 }}>
-          {focusedCellInfo ? focusedCellInfo.dataIndex : '点击单元格查看数据'}
+          {focusedCellInfo ? focusedCellInfo.dataIndex : translate('data_grid.preview_panel.no_cell_title')}
         </span>
         {meta?.type ? <span style={{ color: '#888', fontSize: 11 }}>({meta.type})</span> : null}
         <div style={{ flex: 1 }} />
         {dataPanelIsJson && (
-          <Button size="small" onClick={onFormatJson}>格式化 JSON</Button>
+          <Button size="small" onClick={onFormatJson}>{translate('data_grid.json_editor.format')}</Button>
         )}
         {focusedCellWritable && (
-          <Button size="small" type="primary" onClick={onSave}>保存</Button>
+          <Button size="small" type="primary" onClick={onSave}>{translate('common.save')}</Button>
         )}
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
@@ -120,7 +125,7 @@ const DataGridPreviewPanel: React.FC<DataGridPreviewPanelProps> = ({
               fontSize: 13,
             }}
           >
-            点击表格中的单元格以预览完整数据
+            {translate('data_grid.preview_panel.no_cell_description')}
           </div>
         )}
       </div>

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Card, Row, Col, Statistic, Select, Button, message, Tag, Typography, Tooltip, Spin } from 'antd';
+import React, { useState, useEffect, useRef } from 'react';
+import { Card, Row, Col, Statistic, Button, Tag, Typography, Spin } from 'antd';
 import { AreaChart, Area, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, CartesianGrid, Legend, LineChart, Line } from 'recharts';
 import {
   DesktopOutlined,
@@ -13,6 +13,8 @@ import {
 import { useStore } from '../store';
 import { SavedConnection } from '../types';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
+import { t, type I18nParams } from '../i18n';
+import { useOptionalI18n } from '../i18n/provider';
 import { RedisGetServerInfo } from '../../wailsjs/go/app/App';
 
 const { Title, Text } = Typography;
@@ -41,6 +43,9 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
   const connections = useStore(state => state.connections);
   const theme = useStore(state => state.theme);
   const darkMode = theme === 'dark';
+  const i18n = useOptionalI18n();
+  const i18nLanguage = i18n?.language;
+  const tr = (key: string, params?: I18nParams) => t(key, params, i18nLanguage);
 
   const [isRunning, setIsRunning] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -53,10 +58,10 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
   const mountedRef = useRef(true);
   // Interval ref
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Previous ops counter to calculate QPS if instantaneous_ops_per_sec is not enough
-  const prevMetricsRef = useRef({ prevOps: 0, prevTime: 0 });
-
   const connection = connections.find((c: SavedConnection) => c.id === connectionId);
+  const formatFetchError = (detail?: unknown) => tr('redis_monitor.message.fetch_failed', {
+    detail: String(detail || tr('common.unknown')),
+  });
 
   const fetchMetrics = async () => {
     if (!connection) return;
@@ -68,7 +73,7 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
       if (!mountedRef.current) return;
 
       if (!res.success) {
-        setError(res.message || 'Failed to fetch Redis info');
+        setError(formatFetchError(res.message));
         return;
       }
 
@@ -123,7 +128,7 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
 
     } catch (err: any) {
       if (mountedRef.current) {
-        setError(err.message || 'Unknown error');
+        setError(formatFetchError(err?.message || err));
         if (loading) setLoading(false);
       }
     }
@@ -150,10 +155,10 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isRunning, connectionId, redisDB, connection]);
+  }, [isRunning, connectionId, redisDB, connection, i18nLanguage]);
 
   if (!connection) {
-    return <div style={{ padding: 20 }}>Connection not found.</div>;
+    return <div style={{ padding: 20 }}>{tr('redis_monitor.state.connection_not_found')}</div>;
   }
 
   // Determine styles for charts based on theme
@@ -183,7 +188,7 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
         <div>
           <Title level={3} style={{ margin: 0, fontWeight: 600 }}>
             <DashboardOutlined style={{ marginRight: 8, color: '#1677ff' }} />
-            Redis 实例监控
+            {tr('redis_monitor.title.instance')}
           </Title>
           <Text type="secondary">
             {connection.name} 
@@ -200,10 +205,10 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
             icon={isRunning ? <PauseCircleOutlined /> : <PlayCircleOutlined />} 
             onClick={() => setIsRunning(!isRunning)}
           >
-            {isRunning ? '暂停刷新' : '恢复刷新'}
+            {isRunning ? tr('redis_monitor.action.pause_refresh') : tr('redis_monitor.action.resume_refresh')}
           </Button>
           <Button icon={<ReloadOutlined />} onClick={fetchMetrics}>
-            立即刷新
+            {tr('redis_monitor.action.refresh_now')}
           </Button>
         </div>
       </div>
@@ -212,27 +217,27 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
         <Col span={6}>
           <Card bordered={false} style={{ background: cardBgColor, borderRadius: 8, boxShadow: '0 1px 2px 0 rgba(0,0,0,0.03)' }}>
             <Statistic 
-              title={<span style={{ fontWeight: 500 }}><DesktopOutlined /> 已用内存 (Used)</span>}
+              title={<span style={{ fontWeight: 500 }}><DesktopOutlined /> {tr('redis_monitor.metric.memory_used')}</span>}
               value={getFormatMemoryString(currentInfo.used_memory || '0')}
               valueStyle={{ color: '#eb2f96', fontWeight: 600 }}
-              suffix={<Text type="secondary" style={{ fontSize: 13, marginLeft: 8 }}>Peak: {getFormatMemoryString(currentInfo.used_memory_peak || '0')}</Text>}
+              suffix={<Text type="secondary" style={{ fontSize: 13, marginLeft: 8 }}>{tr('redis_monitor.metric.memory_peak', { value: getFormatMemoryString(currentInfo.used_memory_peak || '0') })}</Text>}
             />
           </Card>
         </Col>
         <Col span={6}>
           <Card bordered={false} style={{ background: cardBgColor, borderRadius: 8, boxShadow: '0 1px 2px 0 rgba(0,0,0,0.03)' }}>
             <Statistic 
-              title={<span style={{ fontWeight: 500 }}><ApiOutlined /> 客户端数量 (Clients)</span>}
+              title={<span style={{ fontWeight: 500 }}><ApiOutlined /> {tr('redis_monitor.metric.clients')}</span>}
               value={currentInfo.connected_clients || '0'}
               valueStyle={{ color: '#1677ff', fontWeight: 600 }}
-              suffix={<Text type="secondary" style={{ fontSize: 13, marginLeft: 8 }}>Blocked: {currentInfo.blocked_clients || '0'}</Text>}
+              suffix={<Text type="secondary" style={{ fontSize: 13, marginLeft: 8 }}>{tr('redis_monitor.metric.blocked_clients', { value: currentInfo.blocked_clients || '0' })}</Text>}
             />
           </Card>
         </Col>
         <Col span={6}>
           <Card bordered={false} style={{ background: cardBgColor, borderRadius: 8, boxShadow: '0 1px 2px 0 rgba(0,0,0,0.03)' }}>
             <Statistic 
-              title={<span style={{ fontWeight: 500 }}><HddOutlined /> 吞吐量 (OPS)</span>}
+              title={<span style={{ fontWeight: 500 }}><HddOutlined /> {tr('redis_monitor.metric.ops')}</span>}
               value={currentInfo.instantaneous_ops_per_sec || '0'}
               valueStyle={{ color: '#52c41a', fontWeight: 600 }}
               suffix={<Text type="secondary" style={{ fontSize: 13, marginLeft: 8 }}>cmds/s</Text>}
@@ -242,10 +247,10 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
         <Col span={6}>
           <Card bordered={false} style={{ background: cardBgColor, borderRadius: 8, boxShadow: '0 1px 2px 0 rgba(0,0,0,0.03)' }}>
             <Statistic 
-              title={<span style={{ fontWeight: 500 }}>启动时长 (Uptime)</span>}
+              title={<span style={{ fontWeight: 500 }}>{tr('redis_monitor.metric.uptime')}</span>}
               value={getUptimeString(currentInfo.uptime_in_seconds || '0')}
               valueStyle={{ color: '#fa8c16', fontWeight: 600 }}
-              suffix={<Text type="secondary" style={{ fontSize: 13, marginLeft: 8 }}>Days: {currentInfo.uptime_in_days || '0'}</Text>}
+              suffix={<Text type="secondary" style={{ fontSize: 13, marginLeft: 8 }}>{tr('redis_monitor.metric.days', { value: currentInfo.uptime_in_days || '0' })}</Text>}
             />
           </Card>
         </Col>
@@ -255,7 +260,7 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
         <Col span={12}>
           <Card 
             bordered={false} 
-            title="请求吞吐量 (QPS)" 
+            title={tr('redis_monitor.chart.qps')}
             style={{ background: cardBgColor, borderRadius: 8, height: 350, boxShadow: '0 1px 2px 0 rgba(0,0,0,0.03)' }}
             styles={{ body: { padding: '16px 16px 0 0', height: 290 } }}
           >
@@ -283,7 +288,7 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
         <Col span={12}>
           <Card 
             bordered={false} 
-            title="内存开销 (Memory)" 
+            title={tr('redis_monitor.chart.memory')}
             style={{ background: cardBgColor, borderRadius: 8, height: 350, boxShadow: '0 1px 2px 0 rgba(0,0,0,0.03)' }}
             styles={{ body: { padding: '16px 16px 0 0', height: 290 } }}
           >
@@ -298,8 +303,8 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
                   formatter={(value: any) => [`${value} MB`]}
                 />
                 <Legend verticalAlign="top" height={36}/>
-                <Line type="monotone" dataKey="memory" name="Used Memory" stroke="#eb2f96" strokeWidth={2} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="memory_rss" name="RSS Memory" stroke="#722ed1" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="memory" name={tr('redis_monitor.series.used_memory')} stroke="#eb2f96" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="memory_rss" name={tr('redis_monitor.series.rss_memory')} stroke="#722ed1" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </Card>
@@ -310,7 +315,7 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
         <Col span={12}>
           <Card 
             bordered={false} 
-            title="CPU 使用率 (CPU Usage)" 
+            title={tr('redis_monitor.chart.cpu_usage')}
             style={{ background: cardBgColor, borderRadius: 8, height: 300, boxShadow: '0 1px 2px 0 rgba(0,0,0,0.03)' }}
             styles={{ body: { padding: '16px 16px 0 0', height: 240 } }}
           >
@@ -325,8 +330,8 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
                   formatter={(value: any) => [`${value} s`]}
                 />
                 <Legend verticalAlign="top" height={36}/>
-                <Line type="monotone" dataKey="cpuSys" name="System" stroke="#cf1322" strokeWidth={2} dot={false} isAnimationActive={false} />
-                <Line type="monotone" dataKey="cpuUser" name="User" stroke="#1677ff" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="cpuSys" name={tr('redis_monitor.series.system')} stroke="#cf1322" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line type="monotone" dataKey="cpuUser" name={tr('redis_monitor.series.user')} stroke="#1677ff" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </Card>
@@ -335,7 +340,7 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
         <Col span={12}>
           <Card 
             bordered={false} 
-            title="连接信息 (Clients & Keys)" 
+            title={tr('redis_monitor.chart.clients_keys')}
             style={{ background: cardBgColor, borderRadius: 8, height: 300, boxShadow: '0 1px 2px 0 rgba(0,0,0,0.03)' }}
             styles={{ body: { padding: '16px 16px 0 0', height: 240 } }}
           >
@@ -350,8 +355,8 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
                   itemStyle={{ fontWeight: 600 }}
                 />
                 <Legend verticalAlign="top" height={36}/>
-                <Line yAxisId="left" type="stepAfter" dataKey="clients" name="Clients" stroke="#1677ff" strokeWidth={2} dot={false} isAnimationActive={false} />
-                <Line yAxisId="right" type="stepAfter" dataKey="keys" name="Total Keys" stroke="#fa8c16" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="left" type="stepAfter" dataKey="clients" name={tr('redis_monitor.series.clients')} stroke="#1677ff" strokeWidth={2} dot={false} isAnimationActive={false} />
+                <Line yAxisId="right" type="stepAfter" dataKey="keys" name={tr('redis_monitor.series.total_keys')} stroke="#fa8c16" strokeWidth={2} dot={false} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </Card>
@@ -359,7 +364,7 @@ const RedisMonitor: React.FC<RedisMonitorProps> = ({ connectionId, redisDB }) =>
       </Row>
 
       <div style={{ marginTop: 24 }}>
-        <Card bordered={false} title="详细服务器参数" style={{ background: cardBgColor, borderRadius: 8 }}>
+        <Card bordered={false} title={tr('redis_monitor.server_details.title')} style={{ background: cardBgColor, borderRadius: 8 }}>
           <div style={{ columnCount: 3, columnGap: 40 }}>
             {['redis_version', 'os', 'arch_bits', 'multiplexing_api', 'gcc_version', 'run_id', 'tcp_port', 'uptime_in_days', 'hz', 'lru_clock', 'role', 'maxmemory_human', 'maxmemory_policy', 'mem_fragmentation_ratio', 'keyspace_hits', 'keyspace_misses', 'total_connections_received'].map(key => (
               currentInfo[key] ? (

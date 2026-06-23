@@ -9,7 +9,7 @@ const SAFETY_LEVEL_LABELS: Record<string, string> = {
 const SAFETY_RULE_TEXTS: Record<string, string> = {
   readonly: '只读模式仅允许查询语句。',
   readwrite: '读写模式允许查询和 DML，DDL 仍会被阻止。',
-  full: '完全开放模式允许查询、DML 和 DDL；未识别操作仍会被阻止。',
+  full: '完全开放模式允许所有 SQL 操作；高风险或未识别语句仍会要求确认。',
 };
 
 const normalizeSafetyLevel = (value: AISafetyLevel | string | undefined): string => {

@@ -1,8 +1,42 @@
+import { readFileSync } from 'node:fs';
+
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TableDesignerSqlPreview, { resolveSqlChangeHighlights } from './TableDesignerSqlPreview';
+
+const tableDesignerColumnI18nKeys = [
+  'table_designer.column.name',
+  'table_designer.column.type',
+  'table_designer.column.primary_key',
+  'table_designer.column.auto_increment',
+  'table_designer.column.not_null',
+  'table_designer.column.default',
+  'table_designer.column.comment',
+  'table_designer.column.actions',
+  'table_designer.tooltip.edit_comment_popup',
+] as const;
+
+const sharedI18nDir = new URL('../../../shared/i18n/', import.meta.url);
+const sharedI18nLocaleFiles = [
+  'de-DE.json',
+  'en-US.json',
+  'ja-JP.json',
+  'ru-RU.json',
+  'zh-CN.json',
+  'zh-TW.json',
+] as const;
+
+const sliceBetween = (source: string, start: string, end: string): string => {
+  const startIndex = source.indexOf(start);
+  const endIndex = source.indexOf(end, startIndex + start.length);
+
+  expect(startIndex).toBeGreaterThanOrEqual(0);
+  expect(endIndex).toBeGreaterThan(startIndex);
+
+  return source.slice(startIndex, endIndex);
+};
 
 const mockMonaco = {
   Range: class {
@@ -74,6 +108,92 @@ describe('TableDesignerSqlPreview', () => {
   beforeEach(() => {
     mockEditor.deltaDecorations.mockClear();
     mockMonaco.editor.defineTheme.mockClear();
+  });
+
+  it('keeps TableDesigner initial column labels in i18n catalogs', () => {
+    const source = readFileSync(new URL('./TableDesigner.tsx', import.meta.url), 'utf8');
+    const initialColumnsDefinition = sliceBetween(
+      source,
+      '// Initial Columns Definition',
+      'setTableColumns(initialCols);',
+    );
+
+    for (const localeFile of sharedI18nLocaleFiles) {
+      const catalog = JSON.parse(readFileSync(new URL(localeFile, sharedI18nDir), 'utf8')) as Record<string, string>;
+      for (const key of tableDesignerColumnI18nKeys) {
+        expect(catalog[key], `${localeFile} ${key}`).toBeTruthy();
+      }
+    }
+
+    for (const key of tableDesignerColumnI18nKeys) {
+      expect(initialColumnsDefinition).toContain(`t('${key}'`);
+    }
+    expect(initialColumnsDefinition).toContain('i18nLanguage');
+
+    for (const literal of [
+      "'名'",
+      "'类型'",
+      "'主键'",
+      "'自增'",
+      "'不是 Null'",
+      "'不是 NULL'",
+      "'默认'",
+      "'注释'",
+      "'操作'",
+      '"弹框编辑注释"',
+      "'弹框编辑注释'",
+    ]) {
+      expect(initialColumnsDefinition).not.toContain(literal);
+    }
+  });
+
+  it('does not ship corrupted table designer i18n catalog strings', () => {
+    const badLocalizedValuePattern = /\?{2,}|\uFFFD|f\?r|verf\?gbar|Schl\?ssel|Zuf\?llige|Schreibgesch\?tzt|OLAP \?|\{\{count\}\} \?/;
+    const badValues: string[] = [];
+
+    for (const localeFile of sharedI18nLocaleFiles) {
+      const catalog = JSON.parse(readFileSync(new URL(localeFile, sharedI18nDir), 'utf8')) as Record<string, unknown>;
+
+      for (const [key, value] of Object.entries(catalog)) {
+        if (
+          key.startsWith('table_designer.')
+          && typeof value === 'string'
+          && badLocalizedValuePattern.test(value)
+        ) {
+          badValues.push(`${localeFile} ${key}=${value}`);
+        }
+      }
+    }
+
+    expect(badValues).toEqual([]);
+  });
+
+  it('keeps generated SQL fallback text independent from UI locale', () => {
+    const source = readFileSync(new URL('./TableDesigner.tsx', import.meta.url), 'utf8');
+
+    for (const forbiddenSnippet of [
+      "t('table_designer.trigger.template.body_comment'",
+      "t('table_designer.trigger.template.enter_create'",
+      "t('table_designer.trigger.definition_unavailable'",
+    ]) {
+      expect(source).not.toContain(forbiddenSnippet);
+    }
+
+    for (const forbiddenSqlFallbackPattern of [
+      /return\s+result\.sql\s*\|\|[^\n]*t\('table_designer\.message\.index_create_sql_placeholder'/,
+      /return\s+result\.sql\s*\|\|[^\n]*t\('table_designer\.message\.index_create_sql_unavailable'/,
+    ]) {
+      expect(source).not.toMatch(forbiddenSqlFallbackPattern);
+    }
+  });
+
+  it('keeps TableDesigner load failures localized without translating raw details', () => {
+    const source = readFileSync(new URL('./TableDesigner.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("t('table_designer.message.connection_not_found'");
+    expect(source).toContain("t('table_designer.message.load_columns_failed', { detail: colsRes.message }");
+    expect(source).not.toContain('message.error("Connection not found")');
+    expect(source).not.toContain('message.error("Failed to load columns: " + colsRes.message)');
   });
 
   it('renders SQL changes in a read-only Monaco SQL editor with explicit syntax highlight theme', () => {

@@ -14,6 +14,8 @@ type SecurityUpdateStatusMeta = {
   tone: SecurityUpdateTone;
 };
 
+type SecurityUpdateTranslator = (key: string) => string;
+
 type SecurityUpdateEntryVisibility = {
   showIntro: boolean;
   showBanner: boolean;
@@ -36,63 +38,67 @@ const severityWeight: Record<SecurityUpdateIssueSeverity, number> = {
   low: 2,
 };
 
+const localize = (t: SecurityUpdateTranslator | undefined, key: string): string => (
+  t ? t(key) : key
+);
+
 const actionMetaMap: Record<SecurityUpdateIssueAction, SecurityUpdateIssueActionMeta> = {
   open_connection: {
-    label: '打开连接',
+    label: 'security_update.action.open_connection',
     emphasis: 'primary',
   },
   open_proxy_settings: {
-    label: '代理设置',
+    label: 'security_update.action.open_proxy_settings',
     emphasis: 'primary',
   },
   open_ai_settings: {
-    label: 'AI 设置',
+    label: 'security_update.action.open_ai_settings',
     emphasis: 'primary',
   },
   retry_update: {
-    label: '重新检查',
+    label: 'security_update.action.retry_update',
     emphasis: 'primary',
   },
   view_details: {
-    label: '查看详情',
+    label: 'security_update.action.view_details',
     emphasis: 'default',
   },
 };
 
 const itemStatusMetaMap: Record<SecurityUpdateItemStatus, SecurityUpdateBadgeMeta> = {
   pending: {
-    label: '待更新',
+    label: 'security_update.item_status.pending',
     color: 'processing',
   },
   updated: {
-    label: '已更新',
+    label: 'security_update.item_status.updated',
     color: 'success',
   },
   needs_attention: {
-    label: '待处理',
+    label: 'security_update.item_status.needs_attention',
     color: 'warning',
   },
   skipped: {
-    label: '已跳过',
+    label: 'security_update.item_status.skipped',
     color: 'default',
   },
   failed: {
-    label: '失败',
+    label: 'security_update.item_status.failed',
     color: 'error',
   },
 };
 
 const issueSeverityMetaMap: Record<SecurityUpdateIssueSeverity, SecurityUpdateBadgeMeta> = {
   high: {
-    label: '高风险',
+    label: 'security_update.severity.high',
     color: 'error',
   },
   medium: {
-    label: '中风险',
+    label: 'security_update.severity.medium',
     color: 'warning',
   },
   low: {
-    label: '低风险',
+    label: 'security_update.severity.low',
     color: 'default',
   },
 };
@@ -108,49 +114,52 @@ export function sortSecurityUpdateIssues(issues: SecurityUpdateIssue[]): Securit
   });
 }
 
-export function getSecurityUpdateStatusMeta(status: SecurityUpdateStatus): SecurityUpdateStatusMeta {
+export function getSecurityUpdateStatusMeta(
+  status: SecurityUpdateStatus,
+  t?: SecurityUpdateTranslator,
+): SecurityUpdateStatusMeta {
   switch (status.overallStatus) {
     case 'pending':
       return {
-        label: '待更新',
-        description: '检测到可进行的安全更新，你可以现在开始或稍后继续。',
+        label: localize(t, 'security_update.status.pending.label'),
+        description: localize(t, 'security_update.status.pending.description'),
         tone: 'warning',
       };
     case 'postponed':
       return {
-        label: '待更新',
-        description: '本次安全更新已延后，当前可用配置会继续保留。',
+        label: localize(t, 'security_update.status.postponed.label'),
+        description: localize(t, 'security_update.status.postponed.description'),
         tone: 'warning',
       };
     case 'in_progress':
       return {
-        label: '更新中',
-        description: '正在检查并更新已保存配置的安全存储。',
+        label: localize(t, 'security_update.status.in_progress.label'),
+        description: localize(t, 'security_update.status.in_progress.description'),
         tone: 'processing',
       };
     case 'needs_attention':
       return {
-        label: '待处理',
-        description: '更新尚未完成，有少量配置需要你处理。',
+        label: localize(t, 'security_update.status.needs_attention.label'),
+        description: localize(t, 'security_update.status.needs_attention.description'),
         tone: 'warning',
       };
     case 'completed':
       return {
-        label: '已完成',
-        description: '已保存配置已完成安全更新。',
+        label: localize(t, 'security_update.status.completed.label'),
+        description: localize(t, 'security_update.status.completed.description'),
         tone: 'success',
       };
     case 'rolled_back':
       return {
-        label: '已回退',
-        description: '本次更新未完成，系统已保留当前可用配置。',
+        label: localize(t, 'security_update.status.rolled_back.label'),
+        description: localize(t, 'security_update.status.rolled_back.description'),
         tone: 'error',
       };
     case 'not_detected':
     default:
       return {
-        label: '未检测到',
-        description: '当前没有需要处理的安全更新。',
+        label: localize(t, 'security_update.status.not_detected.label'),
+        description: localize(t, 'security_update.status.not_detected.description'),
         tone: 'default',
       };
   }
@@ -189,16 +198,41 @@ export function resolveSecurityUpdateEntryVisibility(status: SecurityUpdateStatu
   }
 }
 
-export function getSecurityUpdateIssueActionMeta(issue: Partial<SecurityUpdateIssue>): SecurityUpdateIssueActionMeta {
-  return actionMetaMap[issue.action ?? 'view_details'] ?? actionMetaMap.view_details;
+export function getSecurityUpdateIssueActionMeta(
+  issue: Partial<SecurityUpdateIssue>,
+  t?: SecurityUpdateTranslator,
+): SecurityUpdateIssueActionMeta {
+  const resolvedAction = issue.action && actionMetaMap[issue.action] ? issue.action : 'view_details';
+  const meta = actionMetaMap[resolvedAction];
+  const key = `security_update.action.${resolvedAction}`;
+  return {
+    ...meta,
+    label: localize(t, key),
+  };
 }
 
-export function getSecurityUpdateItemStatusMeta(status?: SecurityUpdateItemStatus): SecurityUpdateBadgeMeta {
-  return itemStatusMetaMap[status ?? 'pending'] ?? itemStatusMetaMap.pending;
+export function getSecurityUpdateItemStatusMeta(
+  status?: SecurityUpdateItemStatus,
+  t?: SecurityUpdateTranslator,
+): SecurityUpdateBadgeMeta {
+  const resolvedStatus = status ?? 'pending';
+  const meta = itemStatusMetaMap[resolvedStatus] ?? itemStatusMetaMap.pending;
+  return {
+    ...meta,
+    label: localize(t, `security_update.item_status.${resolvedStatus}`),
+  };
 }
 
-export function getSecurityUpdateIssueSeverityMeta(severity?: SecurityUpdateIssueSeverity): SecurityUpdateBadgeMeta {
-  return issueSeverityMetaMap[severity ?? 'low'] ?? issueSeverityMetaMap.low;
+export function getSecurityUpdateIssueSeverityMeta(
+  severity?: SecurityUpdateIssueSeverity,
+  t?: SecurityUpdateTranslator,
+): SecurityUpdateBadgeMeta {
+  const resolvedSeverity = severity ?? 'low';
+  const meta = issueSeverityMetaMap[resolvedSeverity] ?? issueSeverityMetaMap.low;
+  return {
+    ...meta,
+    label: localize(t, `security_update.severity.${resolvedSeverity}`),
+  };
 }
 
 export type {
@@ -206,5 +240,6 @@ export type {
   SecurityUpdateEntryVisibility,
   SecurityUpdateIssueActionMeta,
   SecurityUpdateStatusMeta,
+  SecurityUpdateTranslator,
   SecurityUpdateTone,
 };

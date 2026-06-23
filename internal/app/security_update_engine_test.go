@@ -132,6 +132,7 @@ func TestGetSecurityUpdateStatusReturnsPendingWhenOnlyAIProviderNeedsSecurityUpd
 func TestGetSecurityUpdateStatusIncludesPendingAIProviderIssuesBeforeStart(t *testing.T) {
 	app := NewAppWithSecretStore(newFakeAppSecretStore())
 	app.configDir = t.TempDir()
+	app.SetLanguage("en-US")
 
 	writeLegacyAIProviderConfig(t, app.configDir, map[string]any{
 		"providers": []map[string]any{
@@ -164,6 +165,61 @@ func TestGetSecurityUpdateStatusIncludesPendingAIProviderIssuesBeforeStart(t *te
 	}
 	if issue.Status != SecurityUpdateItemStatusPending || issue.Action != SecurityUpdateIssueActionOpenAISettings {
 		t.Fatalf("expected pending AI settings issue, got %#v", issue)
+	}
+	if issue.Message != "AI provider configuration is still saved in the current app configuration. After the security update completes, it will be moved to the new secure storage." {
+		t.Fatalf("expected localized AI provider migration message, got %q", issue.Message)
+	}
+}
+
+func TestSecurityUpdateEngineDoesNotHardcodeAIProviderIssueMessages(t *testing.T) {
+	source, err := os.ReadFile("security_update_engine.go")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	text := string(source)
+	for _, legacy := range []string{
+		"AI 提供商配置需要补充后才能完成安全更新",
+		"AI 提供商配置已不存在或仍需重新保存后才能完成安全更新",
+		"AI 提供商配置仍保存在当前应用配置中，完成安全更新后会迁入新的安全存储。",
+	} {
+		if strings.Contains(text, legacy) {
+			t.Fatalf("security_update_engine.go still hardcodes AI provider issue message %q", legacy)
+		}
+	}
+}
+
+func TestSecurityUpdateEngineDoesNotHardcodeConnectionIssueMessages(t *testing.T) {
+	source, err := os.ReadFile("security_update_engine.go")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	text := string(source)
+	for _, legacy := range []string{
+		"连接配置已不存在或仍需重新保存后才能完成安全更新",
+		"连接配置仍需补充后才能完成安全更新",
+		"连接密码已丢失，请重新保存后再继续",
+	} {
+		if strings.Contains(text, legacy) {
+			t.Fatalf("security_update_engine.go still hardcodes connection issue message %q", legacy)
+		}
+	}
+}
+
+func TestSecurityUpdateEngineDoesNotHardcodeGlobalProxyIssueMessages(t *testing.T) {
+	source, err := os.ReadFile("security_update_engine.go")
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	text := string(source)
+	for _, legacy := range []string{
+		"全局代理",
+		"全局代理配置已不存在或仍需重新保存后才能完成安全更新",
+		"全局代理密码仍需补充后才能完成安全更新",
+		"全局代理密码已丢失，请重新保存后再继续",
+	} {
+		if strings.Contains(text, legacy) {
+			t.Fatalf("security_update_engine.go still hardcodes global proxy issue text %q", legacy)
+		}
 	}
 }
 
@@ -294,6 +350,133 @@ func TestRetrySecurityUpdateCurrentRoundDoesNotReimportBrokenLegacySourceAfterUs
 	}
 	if resolvedConnection.Password != "postgres-fixed" {
 		t.Fatalf("expected retry to keep user-fixed password, got %q", resolvedConnection.Password)
+	}
+}
+
+func TestRetrySecurityUpdateCurrentRoundLocalizesConnectionIssueMessage(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+	app.SetLanguage("en-US")
+
+	writeLegacyAIProviderConfig(t, app.configDir, map[string]any{
+		"providers": []map[string]any{
+			{
+				"id":      "openai-main",
+				"type":    "openai",
+				"name":    "OpenAI",
+				"apiKey":  "sk-ai-test",
+				"baseUrl": "https://api.openai.com/v1",
+			},
+		},
+	})
+
+	completed, err := app.StartSecurityUpdate(StartSecurityUpdateRequest{
+		SourceType: SecurityUpdateSourceTypeCurrentAppSavedConfig,
+		RawPayload: buildLegacySecurityUpdatePayload(),
+	})
+	if err != nil {
+		t.Fatalf("StartSecurityUpdate returned error: %v", err)
+	}
+	if completed.OverallStatus != SecurityUpdateOverallStatusCompleted {
+		t.Fatalf("expected completed status, got %q", completed.OverallStatus)
+	}
+
+	connectionRepo := app.savedConnectionRepository()
+	if err := connectionRepo.deleteSecretBundle("legacy-1"); err != nil {
+		t.Fatalf("deleteSecretBundle returned error: %v", err)
+	}
+
+	repo := newSecurityUpdateStateRepository(app.configDir)
+	retryable := completed
+	retryable.OverallStatus = SecurityUpdateOverallStatusNeedsAttention
+	if err := repo.WriteResult(retryable); err != nil {
+		t.Fatalf("WriteResult returned error: %v", err)
+	}
+
+	retried, err := app.RetrySecurityUpdateCurrentRound(RetrySecurityUpdateRequest{
+		MigrationID: completed.MigrationID,
+	})
+	if err != nil {
+		t.Fatalf("RetrySecurityUpdateCurrentRound returned error: %v", err)
+	}
+	if retried.OverallStatus != SecurityUpdateOverallStatusNeedsAttention {
+		t.Fatalf("expected needs_attention status, got %q", retried.OverallStatus)
+	}
+	if len(retried.Issues) != 1 {
+		t.Fatalf("expected one connection issue, got %#v", retried.Issues)
+	}
+	issue := retried.Issues[0]
+	if issue.Scope != SecurityUpdateIssueScopeConnection || issue.RefID != "legacy-1" {
+		t.Fatalf("expected legacy-1 connection issue, got %#v", issue)
+	}
+	if issue.Title != "Legacy" {
+		t.Fatalf("expected connection name to stay raw, got %q", issue.Title)
+	}
+	if issue.Message != "Connection configuration still needs more information before the security update can be completed." {
+		t.Fatalf("expected localized connection issue message, got %q", issue.Message)
+	}
+}
+
+func TestRetrySecurityUpdateCurrentRoundLocalizesGlobalProxyIssueText(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+	app.SetLanguage("en-US")
+
+	writeLegacyAIProviderConfig(t, app.configDir, map[string]any{
+		"providers": []map[string]any{
+			{
+				"id":      "openai-main",
+				"type":    "openai",
+				"name":    "OpenAI",
+				"apiKey":  "sk-ai-test",
+				"baseUrl": "https://api.openai.com/v1",
+			},
+		},
+	})
+
+	completed, err := app.StartSecurityUpdate(StartSecurityUpdateRequest{
+		SourceType: SecurityUpdateSourceTypeCurrentAppSavedConfig,
+		RawPayload: buildLegacySecurityUpdatePayload(),
+	})
+	if err != nil {
+		t.Fatalf("StartSecurityUpdate returned error: %v", err)
+	}
+	if completed.OverallStatus != SecurityUpdateOverallStatusCompleted {
+		t.Fatalf("expected completed status, got %q", completed.OverallStatus)
+	}
+
+	if err := app.dailySecretStore().DeleteGlobalProxy(); err != nil {
+		t.Fatalf("DeleteGlobalProxy returned error: %v", err)
+	}
+
+	repo := newSecurityUpdateStateRepository(app.configDir)
+	retryable := completed
+	retryable.OverallStatus = SecurityUpdateOverallStatusNeedsAttention
+	if err := repo.WriteResult(retryable); err != nil {
+		t.Fatalf("WriteResult returned error: %v", err)
+	}
+
+	retried, err := app.RetrySecurityUpdateCurrentRound(RetrySecurityUpdateRequest{
+		MigrationID: completed.MigrationID,
+	})
+	if err != nil {
+		t.Fatalf("RetrySecurityUpdateCurrentRound returned error: %v", err)
+	}
+	if retried.OverallStatus != SecurityUpdateOverallStatusNeedsAttention {
+		t.Fatalf("expected needs_attention status, got %q", retried.OverallStatus)
+	}
+	if len(retried.Issues) != 1 {
+		t.Fatalf("expected one global proxy issue, got %#v", retried.Issues)
+	}
+	issue := retried.Issues[0]
+	if issue.Scope != SecurityUpdateIssueScopeGlobalProxy {
+		t.Fatalf("expected global proxy issue, got %#v", issue)
+	}
+	if issue.Title != "Global Proxy" {
+		t.Fatalf("expected localized global proxy title, got %q", issue.Title)
+	}
+	if issue.Message != "Global proxy password is missing. Save it again before continuing." {
+		t.Fatalf("expected localized global proxy issue message, got %q", issue.Message)
 	}
 }
 
@@ -810,6 +993,57 @@ func TestStartSecurityUpdateRollsBackAllChangesWhenPreviewArtifactWriteFails(t *
 	}
 
 	assertSecurityUpdateRollbackRestoredCurrentAppState(t, app, store)
+}
+
+func TestStartSecurityUpdateLocalizesSystemFailureIssue(t *testing.T) {
+	store := newFakeAppSecretStore()
+	app := NewAppWithSecretStore(store)
+	app.configDir = t.TempDir()
+	app.SetLanguage("en-US")
+
+	writeLegacyAIProviderConfig(t, app.configDir, map[string]any{
+		"providers": []map[string]any{
+			{
+				"id":      "openai-main",
+				"type":    "openai",
+				"name":    "OpenAI",
+				"apiKey":  "sk-ai-test",
+				"baseUrl": "https://api.openai.com/v1",
+			},
+		},
+	})
+
+	restoreWriteJSONFile := swapSecurityUpdateWriteJSONFile(func(path string, payload any) error {
+		if strings.HasSuffix(filepath.ToSlash(path), "/"+securityUpdateNormalizedPreviewFileName) {
+			return errors.New("forced preview write failure")
+		}
+		return writeJSONFile(path, payload)
+	})
+	defer restoreWriteJSONFile()
+
+	status, err := app.StartSecurityUpdate(StartSecurityUpdateRequest{
+		SourceType: SecurityUpdateSourceTypeCurrentAppSavedConfig,
+		RawPayload: buildLegacySecurityUpdatePayload(),
+	})
+	if err != nil {
+		t.Fatalf("StartSecurityUpdate returned error: %v", err)
+	}
+	if status.OverallStatus != SecurityUpdateOverallStatusRolledBack {
+		t.Fatalf("expected rolled_back status, got %q", status.OverallStatus)
+	}
+	if len(status.Issues) != 1 {
+		t.Fatalf("expected one system issue, got %#v", status.Issues)
+	}
+	issue := status.Issues[0]
+	if issue.Title != "Security update was not completed" {
+		t.Fatalf("expected localized system issue title, got %q", issue.Title)
+	}
+	if issue.Message != "The current environment could not complete this security update. Try again later." {
+		t.Fatalf("expected localized system issue message, got %q", issue.Message)
+	}
+	if !strings.Contains(status.LastError, "forced preview write failure") {
+		t.Fatalf("expected raw last error to be preserved, got %q", status.LastError)
+	}
 }
 
 func TestStartSecurityUpdateRollsBackAllChangesWhenFinalResultWriteFails(t *testing.T) {

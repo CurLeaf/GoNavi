@@ -1,6 +1,9 @@
 package db
 
 import (
+	"bufio"
+	"bytes"
+	"strings"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -63,5 +66,138 @@ func TestNormalizeKingbaseAgentChangeSetByColumns(t *testing.T) {
 	}
 	if _, ok := out.Updates[0].Values["event name"]; ok {
 		t.Fatalf("unexpected update value key \"event name\" after normalization")
+	}
+}
+
+type optionalAgentTestWriteCloser struct {
+	bytes.Buffer
+}
+
+func (w *optionalAgentTestWriteCloser) Close() error { return nil }
+
+type optionalAgentTestStreamConsumer struct {
+	columns []string
+	rows    [][]interface{}
+}
+
+func (c *optionalAgentTestStreamConsumer) SetColumns(columns []string) error {
+	c.columns = append([]string(nil), columns...)
+	return nil
+}
+
+func (c *optionalAgentTestStreamConsumer) ConsumeRow(row map[string]interface{}) error {
+	values := make([]interface{}, len(c.columns))
+	for idx, column := range c.columns {
+		values[idx] = row[column]
+	}
+	c.rows = append(c.rows, values)
+	return nil
+}
+
+func (c *optionalAgentTestStreamConsumer) ConsumeRowValues(values []interface{}) error {
+	c.rows = append(c.rows, append([]interface{}(nil), values...))
+	return nil
+}
+
+func TestOptionalDriverAgentClientCallStreamQueryConsumesChunks(t *testing.T) {
+	var stdin optionalAgentTestWriteCloser
+	stdout := strings.Join([]string{
+		`{"id":1,"success":true,"chunkType":"columns","fields":["id","name"]}`,
+		`{"id":1,"success":true,"chunkType":"rows","data":[[1,"alice"],[2,"bob"]]}`,
+		`{"id":1,"success":true,"chunkType":"done"}`,
+	}, "\n") + "\n"
+
+	client := &optionalDriverAgentClient{
+		stdin:  &stdin,
+		reader: bufio.NewReader(strings.NewReader(stdout)),
+		driver: "oceanbase",
+	}
+	consumer := &optionalAgentTestStreamConsumer{}
+	if err := client.callStreamQuery(optionalAgentRequest{
+		Method: optionalAgentMethodStreamQuery,
+		Query:  "SELECT 1",
+	}, consumer); err != nil {
+		t.Fatalf("callStreamQuery 返回错误: %v", err)
+	}
+
+	if len(consumer.columns) != 2 || consumer.columns[0] != "id" || consumer.columns[1] != "name" {
+		t.Fatalf("流式列定义异常: %#v", consumer.columns)
+	}
+	if len(consumer.rows) != 2 {
+		t.Fatalf("流式行数异常: %#v", consumer.rows)
+	}
+	if got := consumer.rows[0][1]; got != "alice" {
+		t.Fatalf("第 1 行数据异常，want=%q got=%v", "alice", got)
+	}
+	if got := consumer.rows[1][0]; got != int64(2) {
+		t.Fatalf("第 2 行 ID 异常，want=%d got=%v (%T)", 2, got, got)
+	}
+	if !strings.Contains(stdin.String(), `"method":"streamQuery"`) {
+		t.Fatalf("请求未使用 streamQuery 方法: %s", stdin.String())
+	}
+}
+
+func TestOptionalDriverAgentDBQueryWithMessagesParsesAgentMessages(t *testing.T) {
+	var stdin optionalAgentTestWriteCloser
+	stdout := `{"id":1,"success":true,"data":[{"sql_text":"select 1"}],"fields":["sql_text"],"messages":["PRINT sql line 1","PRINT sql line 2"]}` + "\n"
+
+	dbInst := &OptionalDriverAgentDB{
+		driverType: "sqlserver",
+		client: &optionalDriverAgentClient{
+			stdin:  &stdin,
+			reader: bufio.NewReader(strings.NewReader(stdout)),
+			driver: "sqlserver",
+		},
+	}
+
+	rows, fields, messages, err := dbInst.QueryWithMessages("exec dbo.p_get_select")
+	if err != nil {
+		t.Fatalf("QueryWithMessages 返回错误: %v", err)
+	}
+	if len(rows) != 1 || rows[0]["sql_text"] != "select 1" {
+		t.Fatalf("查询结果异常: %#v", rows)
+	}
+	if len(fields) != 1 || fields[0] != "sql_text" {
+		t.Fatalf("字段异常: %#v", fields)
+	}
+	if len(messages) != 2 || messages[0] != "PRINT sql line 1" {
+		t.Fatalf("消息异常: %#v", messages)
+	}
+	if !strings.Contains(stdin.String(), `"method":"query"`) {
+		t.Fatalf("请求未使用 query 方法: %s", stdin.String())
+	}
+}
+
+func TestOptionalDriverAgentDBQueryMultiWithMessagesParsesResultSets(t *testing.T) {
+	var stdin optionalAgentTestWriteCloser
+	stdout := `{"id":1,"success":true,"data":[{"statementIndex":1,"rows":[{"name":"master"}],"columns":["name"]},{"statementIndex":1,"rows":[],"columns":[],"messages":["PRINT generated sql"]}],"messages":["batch top-level message"]}` + "\n"
+
+	dbInst := &OptionalDriverAgentDB{
+		driverType: "sqlserver",
+		client: &optionalDriverAgentClient{
+			stdin:  &stdin,
+			reader: bufio.NewReader(strings.NewReader(stdout)),
+			driver: "sqlserver",
+		},
+	}
+
+	resultSets, messages, err := dbInst.QueryMultiWithMessages("exec dbo.p_get_select")
+	if err != nil {
+		t.Fatalf("QueryMultiWithMessages 返回错误: %v", err)
+	}
+	if len(resultSets) != 2 {
+		t.Fatalf("结果集数量异常: %#v", resultSets)
+	}
+	if got := resultSets[0].Rows[0]["name"]; got != "master" {
+		t.Fatalf("首个结果集异常，got=%v", got)
+	}
+	if len(resultSets[1].Messages) != 1 || resultSets[1].Messages[0] != "PRINT generated sql" {
+		t.Fatalf("消息结果集异常: %#v", resultSets[1])
+	}
+	if len(messages) != 1 || messages[0] != "batch top-level message" {
+		t.Fatalf("顶层消息异常: %#v", messages)
+	}
+	if !strings.Contains(stdin.String(), `"method":"queryMulti"`) {
+		t.Fatalf("请求未使用 queryMulti 方法: %s", stdin.String())
 	}
 }

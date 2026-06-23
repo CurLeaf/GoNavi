@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -352,6 +353,170 @@ func TestClickHouseHTTPClientProtocolVersionStripperRemovesDriverQueryParam(t *t
 	}
 	if !strings.Contains(seenQuery, "database=default") {
 		t.Fatalf("expected other query parameters to remain, got %q", seenQuery)
+	}
+}
+
+func TestClickHouseHTTPServerInfoFunctionUnsupportedEnablesCompatibilityRetry(t *testing.T) {
+	err := errors.New(`failed to query server hello: failed to query server hello info: sendQuery: [HTTP 404] response body: "Code: 46. DB::Exception: Unknown function displayName: While processing displayName(), version(), revision(), timezone(). (UNKNOWN_FUNCTION)"`)
+	if !isClickHouseHTTPServerInfoFunctionUnsupported(err) {
+		t.Fatalf("expected displayName unknown function to be treated as HTTP server-info compatibility issue")
+	}
+	if !shouldRetryClickHouseHTTPCompatibility(err) {
+		t.Fatalf("expected displayName unknown function to permit HTTP compatibility retry")
+	}
+	if !shouldTryNextClickHouseProtocol(clickhouse.HTTP, err) {
+		t.Fatalf("expected HTTP displayName issue to permit protocol fallback")
+	}
+	if shouldTryNextClickHouseProtocol(clickhouse.Native, err) {
+		t.Fatalf("native protocol should not treat HTTP displayName issue as retryable")
+	}
+
+	message := clickHouseAttemptFailureMessage(clickhouse.HTTP, err)
+	if !strings.Contains(message, "displayName") || !strings.Contains(message, "兼容模式") {
+		t.Fatalf("expected displayName compatibility retry hint, got %q", message)
+	}
+}
+
+func TestIsClickHouseHTTPServerInfoFunctionUnsupportedIgnoresUnrelatedErrors(t *testing.T) {
+	if isClickHouseHTTPServerInfoFunctionUnsupported(nil) {
+		t.Fatal("nil error should not be treated as server-info function issue")
+	}
+	if isClickHouseHTTPServerInfoFunctionUnsupported(errors.New("[HTTP 404] page not found")) {
+		t.Fatal("plain 404 without displayName signal should not be treated as server-info function issue")
+	}
+	if isClickHouseHTTPServerInfoFunctionUnsupported(errors.New("Code: 60. DB::Exception: Unknown function someOtherFn")) {
+		t.Fatal("unknown function error without displayName should not be treated as server-info function issue")
+	}
+}
+
+func TestClickHouseHTTPCompatibilityStripperRewritesServerHelloQuery(t *testing.T) {
+	var seenBody string
+	stripper := clickHouseHTTPClientProtocolVersionStripper{
+		next: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.Body != nil {
+				data, err := io.ReadAll(req.Body)
+				if err != nil {
+					return nil, err
+				}
+				seenBody = string(data)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	req, err := http.NewRequest(
+		http.MethodPost,
+		"http://clickhouse.local:8123/?database=default",
+		strings.NewReader(clickHouseServerHelloQuery),
+	)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	res, err := stripper.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	if res != nil && res.Body != nil {
+		res.Body.Close()
+	}
+	if strings.Contains(seenBody, "displayName()") {
+		t.Fatalf("expected displayName() rewritten out of server hello query, got %q", seenBody)
+	}
+	if seenBody != clickHouseServerHelloCompatQuery {
+		t.Fatalf("expected compatibility server hello query, got %q", seenBody)
+	}
+}
+
+func TestClickHouseHTTPCompatibilityStripperRewritesServerHelloOnlyOnce(t *testing.T) {
+	var seenBodies []string
+	stripper := clickHouseHTTPClientProtocolVersionStripper{
+		serverHelloRewritten: &atomic.Bool{},
+		next: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.Body != nil {
+				data, err := io.ReadAll(req.Body)
+				if err != nil {
+					return nil, err
+				}
+				seenBodies = append(seenBodies, string(data))
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	for i := 0; i < 2; i++ {
+		req, err := http.NewRequest(
+			http.MethodPost,
+			"http://clickhouse.local:8123/?database=default",
+			strings.NewReader(clickHouseServerHelloQuery),
+		)
+		if err != nil {
+			t.Fatalf("new request %d: %v", i, err)
+		}
+		res, err := stripper.RoundTrip(req)
+		if err != nil {
+			t.Fatalf("round trip %d: %v", i, err)
+		}
+		if res != nil && res.Body != nil {
+			res.Body.Close()
+		}
+	}
+
+	if len(seenBodies) != 2 {
+		t.Fatalf("expected two forwarded requests, got %d", len(seenBodies))
+	}
+	if seenBodies[0] != clickHouseServerHelloCompatQuery {
+		t.Fatalf("expected first (handshake) request rewritten, got %q", seenBodies[0])
+	}
+	if seenBodies[1] != clickHouseServerHelloQuery {
+		t.Fatalf("expected second identical query left unchanged after handshake, got %q", seenBodies[1])
+	}
+}
+
+func TestClickHouseHTTPCompatibilityStripperLeavesOtherBodiesUnchanged(t *testing.T) {
+	const userQuery = "SELECT count() FROM system.tables"
+	var seenBody string
+	stripper := clickHouseHTTPClientProtocolVersionStripper{
+		next: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.Body != nil {
+				data, err := io.ReadAll(req.Body)
+				if err != nil {
+					return nil, err
+				}
+				seenBody = string(data)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+	req, err := http.NewRequest(
+		http.MethodPost,
+		"http://clickhouse.local:8123/?database=default",
+		strings.NewReader(userQuery),
+	)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	res, err := stripper.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	if res != nil && res.Body != nil {
+		res.Body.Close()
+	}
+	if seenBody != userQuery {
+		t.Fatalf("expected user query body untouched, got %q", seenBody)
 	}
 }
 

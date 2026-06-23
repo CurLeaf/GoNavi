@@ -121,7 +121,7 @@ const extractSharedStrings = (entries: Record<string, Uint8Array>): string[] => 
   if (!sharedStrings) return [];
   const xml = strFromU8(sharedStrings);
   const blocks = xml.match(/<si\b[\s\S]*?<\/si>/g) || [];
-  return blocks.map((block) => collectXmlTextTags(block).join(''));
+  return blocks.map((block: string) => collectXmlTextTags(block).join(''));
 };
 
 const extractCellValue = (cellXml: string, sharedStrings: string[]): string => {
@@ -145,10 +145,10 @@ const extractXlsxText = (entries: Record<string, Uint8Array>): string => {
   return sheetPaths.map((path) => {
     const xml = strFromU8(entries[path]);
     const rows = xml.match(/<row\b[\s\S]*?<\/row>/g) || [];
-    const lines = rows.map((rowXml) => {
+    const lines = rows.map((rowXml: string) => {
       const cells = rowXml.match(/<c\b[\s\S]*?<\/c>/g) || [];
-      return cells.map((cellXml) => extractCellValue(cellXml, sharedStrings)).join('\t').trimEnd();
-    }).filter((line) => line.trim().length > 0);
+      return cells.map((cellXml: string) => extractCellValue(cellXml, sharedStrings)).join('\t').trimEnd();
+    }).filter((line: string) => line.trim().length > 0);
     if (lines.length === 0) return '';
     const sheetName = path.replace(/^xl\/worksheets\//i, '').replace(/\.xml$/i, '');
     return `[工作表: ${sheetName}]\n${lines.join('\n')}`;

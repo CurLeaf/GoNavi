@@ -10,6 +10,7 @@ import {
   getSecurityUpdateActionButtonStyle,
   getSecurityUpdateBannerSurfaceStyle,
 } from '../utils/securityUpdateVisuals';
+import { useI18n } from '../i18n/provider';
 
 interface SecurityUpdateBannerProps {
   status: SecurityUpdateStatus;
@@ -30,22 +31,22 @@ const resolvePrimaryAction = (
   switch (status.overallStatus) {
     case 'postponed':
       return {
-        label: '立即更新',
+        labelKey: 'security_update.banner.action.start_now',
         onClick: actions.onStart,
       };
     case 'needs_attention':
       return {
-        label: '查看详情',
+        labelKey: 'security_update.banner.action.view_details',
         onClick: actions.onOpenDetails,
       };
     case 'rolled_back':
       return {
-        label: '重新开始更新',
+        labelKey: 'security_update.banner.action.restart_update',
         onClick: actions.onRestart,
       };
     default:
       return {
-        label: '查看详情',
+        labelKey: 'security_update.banner.action.view_details',
         onClick: actions.onOpenDetails,
       };
   }
@@ -58,12 +59,12 @@ const resolveSecondaryAction = (
   switch (status.overallStatus) {
     case 'needs_attention':
       return {
-        label: '重新检查',
+        labelKey: 'security_update.banner.action.retry_check',
         onClick: actions.onRetry,
       };
     case 'rolled_back':
       return {
-        label: '查看详情',
+        labelKey: 'security_update.banner.action.view_details',
         onClick: actions.onOpenDetails,
       };
     default:
@@ -82,7 +83,8 @@ const SecurityUpdateBanner = ({
   onOpenDetails,
   onDismiss,
 }: SecurityUpdateBannerProps) => {
-  const statusMeta = getSecurityUpdateStatusMeta(status);
+  const { t } = useI18n();
+  const statusMeta = getSecurityUpdateStatusMeta(status, t);
   const primaryAction = resolvePrimaryAction(status, { onStart, onRetry, onRestart, onOpenDetails });
   const secondaryAction = resolveSecondaryAction(status, { onRetry, onOpenDetails });
   const actionButtonStyle = getSecurityUpdateActionButtonStyle();
@@ -118,7 +120,7 @@ const SecurityUpdateBanner = ({
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: overlayTheme.titleText }}>
-          已保存配置可进行安全更新
+          {t('security_update.banner.title')}
         </div>
         <div style={{ marginTop: 4, fontSize: 13, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
           {statusMeta.description}
@@ -127,7 +129,7 @@ const SecurityUpdateBanner = ({
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         {secondaryAction ? (
           <Button className={SECURITY_UPDATE_ACTION_BUTTON_CLASS} style={actionButtonStyle} onClick={secondaryAction.onClick}>
-            {secondaryAction.label}
+            {t(secondaryAction.labelKey)}
           </Button>
         ) : null}
         <Button
@@ -136,7 +138,7 @@ const SecurityUpdateBanner = ({
           type="primary"
           onClick={primaryAction.onClick}
         >
-          {primaryAction.label}
+          {t(primaryAction.labelKey)}
         </Button>
         <Button
           className={SECURITY_UPDATE_ACTION_BUTTON_CLASS}

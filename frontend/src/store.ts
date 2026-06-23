@@ -19,6 +19,7 @@ import {
   JVMDiagnosticCommandDraft,
   JVMDiagnosticEventChunk,
   SqlSnippet,
+  TableExportHistoryEntry,
 } from "./types";
 import {
   ShortcutAction,
@@ -48,10 +49,35 @@ import {
 } from "./utils/oceanBaseProtocol";
 import { sanitizeFontFamilyInput } from "./utils/fontFamilies";
 import {
+  DEFAULT_LANGUAGE,
+  LANGUAGE_PREFERENCES,
+  resolveLanguage,
+  t as translate,
+  type LanguagePreference,
+} from "./i18n";
+import {
   DEFAULT_TAB_DISPLAY_SETTINGS,
   sanitizeTabDisplaySettings,
   type TabDisplaySettings,
 } from "./utils/tabDisplay";
+import {
+  DEFAULT_REDIS_DB_ALIASES,
+  sanitizeRedisDbAliases,
+  setRedisDbAlias as applyRedisDbAlias,
+  type RedisDbAliasMap,
+} from "./utils/redisDbAlias";
+import {
+  captureLegacySavedQueriesSnapshot,
+  deleteSavedQueryFromBackend,
+  sanitizeSavedQueries,
+  saveSavedQueryToBackend,
+  type SavedQueryBackend,
+} from "./utils/savedQueryPersistence";
+import {
+  deriveLegacyConnectionReadOnlyFlag,
+  normalizeConnectionProtectionConfig,
+  resolveConnectionProtectionConfig,
+} from "./utils/connectionReadOnly";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
@@ -65,6 +91,7 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
   tabDisplay: TabDisplaySettings;
+  redisDbAliases: RedisDbAliasMap;
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -79,6 +106,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   customUIFontFamily: null,
   customMonoFontFamily: null,
   tabDisplay: DEFAULT_TAB_DISPLAY_SETTINGS,
+  redisDbAliases: DEFAULT_REDIS_DB_ALIASES,
   ...DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
 };
 const DEFAULT_UI_SCALE = 1.0;
@@ -109,19 +137,27 @@ const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 3600;
+const DEFAULT_KEEPALIVE_INTERVAL_MINUTES = 240;
+const MIN_KEEPALIVE_INTERVAL_MINUTES = 1;
+const MAX_KEEPALIVE_INTERVAL_MINUTES = 1440;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 10;
+const PERSIST_VERSION = 13;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const PERSIST_WRITE_DEBOUNCE_MS = 160;
 const MAX_PERSISTED_QUERY_TABS = 20;
 const MAX_PERSISTED_QUERY_LENGTH = 1024 * 1024;
-const MAX_SQL_LOGS = 1000;
+const MAX_RUNTIME_SQL_LOGS = 120;
+const MAX_RUNTIME_SQL_LOG_LENGTH = 12 * 1024;
+const MAX_RUNTIME_SQL_LOG_MESSAGE_LENGTH = 1024;
 const MAX_PERSISTED_SQL_LOGS = 200;
-const MAX_PERSISTED_SQL_LOG_LENGTH = 100 * 1024;
+const MAX_PERSISTED_SQL_LOG_LENGTH = 24 * 1024;
 const MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH = 2 * 1024;
+const MAX_TABLE_EXPORT_HISTORY_PER_TARGET = 20;
+const MAX_TABLE_EXPORT_HISTORY_TARGETS = 200;
 const DEFAULT_CONNECTION_TYPE = "mysql";
 const DEFAULT_JVM_PORT = 9010;
+const DEFAULT_LANGUAGE_PREFERENCE: LanguagePreference = "system";
 const MAX_REDIS_DATABASE_INDEX = Number.MAX_SAFE_INTEGER;
 const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
   enabled: false,
@@ -136,6 +172,13 @@ const DEFAULT_GLOBAL_PROXY: GlobalProxyConfig = {
 const isFrontendTestRuntime = (): boolean => {
   const env = (import.meta as unknown as { env?: Record<string, unknown> }).env || {};
   return env.MODE === "test" || env.VITEST === true || env.VITEST === "true";
+};
+
+const resolveSavedQueryBackend = (): SavedQueryBackend | undefined => {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  return (window as unknown as { go?: { app?: { App?: SavedQueryBackend } } }).go?.app?.App;
 };
 
 const createDebouncedPersistStorage = <S>(
@@ -287,6 +330,7 @@ const SUPPORTED_CONNECTION_TYPES = new Set([
   "starrocks",
   "sphinx",
   "clickhouse",
+  "trino",
   "postgres",
   "redis",
   "tdengine",
@@ -318,6 +362,7 @@ const SSL_SUPPORTED_CONNECTION_TYPES = new Set([
   "sphinx",
   "dameng",
   "clickhouse",
+  "trino",
   "postgres",
   "sqlserver",
   "oracle",
@@ -354,6 +399,8 @@ const getDefaultPortByType = (type: string): number => {
       return 9306;
     case "clickhouse":
       return 9000;
+    case "trino":
+      return 8080;
     case "postgres":
     case "vastbase":
     case "opengauss":
@@ -747,6 +794,9 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     supportsNetworkTunnel &&
     (raw.useHttpTunnel === true || raw.UseHTTPTunnel === true);
   const useProxy = supportsNetworkTunnel && !!raw.useProxy && !useHttpTunnel;
+  const normalizedProtection = normalizeConnectionProtectionConfig(
+    raw.protection,
+  );
 
   const safeConfig: ConnectionConfig & Record<string, unknown> = {
     ...raw,
@@ -758,6 +808,8 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
     password: savePassword ? toTrimmedString(raw.password) : "",
     savePassword,
     database: toTrimmedString(raw.database),
+    readOnly: raw.readOnly === true,
+    protection: normalizedProtection,
     useSSL: sslCapable ? !!raw.useSSL : false,
     sslMode: sslCapable ? sslMode : "disable",
     sslCAPath: sslCapable ? toTrimmedString(raw.sslCAPath) : "",
@@ -802,7 +854,18 @@ const sanitizeConnectionConfig = (value: unknown): ConnectionConfig => {
       1,
       MAX_TIMEOUT_SECONDS,
     ),
+    keepAliveEnabled: Boolean(raw.keepAliveEnabled),
+    keepAliveIntervalMinutes: normalizeIntegerInRange(
+      raw.keepAliveIntervalMinutes,
+      DEFAULT_KEEPALIVE_INTERVAL_MINUTES,
+      MIN_KEEPALIVE_INTERVAL_MINUTES,
+      MAX_KEEPALIVE_INTERVAL_MINUTES,
+    ),
   };
+
+  const resolvedProtection = resolveConnectionProtectionConfig(safeConfig);
+  safeConfig.protection = resolvedProtection;
+  safeConfig.readOnly = deriveLegacyConnectionReadOnlyFlag(resolvedProtection);
 
   if (type === "redis") {
     safeConfig.redisDB = normalizeIntegerInRange(
@@ -1181,6 +1244,7 @@ interface AppState {
   savedQueries: SavedQuery[];
   externalSQLDirectories: ExternalSQLDirectory[];
   theme: "light" | "dark";
+  languagePreference: LanguagePreference;
   appearance: AppearanceSettings;
   uiScale: number;
   fontSize: number;
@@ -1194,6 +1258,7 @@ interface AppState {
   shortcutOptions: ShortcutOptions;
   sqlSnippets: SqlSnippet[];
   sqlLogs: SqlLog[];
+  tableExportHistories: Record<string, TableExportHistoryEntry[]>;
   tableAccessCount: Record<string, number>;
   tableSortPreference: Record<string, "name" | "frequency">;
   tableColumnOrders: Record<string, string[]>;
@@ -1265,7 +1330,12 @@ interface AppState {
     draft: Partial<
       Pick<
         TabData,
-        "query" | "connectionId" | "dbName" | "title" | "resultPanelVisible"
+        | "query"
+        | "connectionId"
+        | "dbName"
+        | "title"
+        | "resultPanelVisible"
+        | "formatRestoreSnapshot"
       >
     >,
   ) => void;
@@ -1282,13 +1352,20 @@ interface AppState {
     context: { connectionId: string; dbName: string } | null,
   ) => void;
 
-  saveQuery: (query: SavedQuery) => void;
-  deleteQuery: (id: string) => void;
+  replaceSavedQueries: (queries: SavedQuery[]) => void;
+  saveQuery: (query: SavedQuery) => Promise<SavedQuery>;
+  deleteQuery: (id: string) => Promise<void>;
   saveExternalSQLDirectory: (directory: ExternalSQLDirectory) => void;
   deleteExternalSQLDirectory: (id: string) => void;
 
   setTheme: (theme: "light" | "dark") => void;
+  setLanguagePreference: (languagePreference: LanguagePreference) => void;
   setAppearance: (appearance: Partial<AppearanceSettings>) => void;
+  setRedisDbAlias: (
+    connectionId: string,
+    dbIndex: number,
+    alias: string,
+  ) => void;
   setUiScale: (scale: number) => void;
   setFontSize: (size: number) => void;
   setStartupFullscreen: (enabled: boolean) => void;
@@ -1318,6 +1395,10 @@ interface AppState {
 
   addSqlLog: (log: SqlLog) => void;
   clearSqlLogs: () => void;
+  upsertTableExportHistory: (
+    historyKey: string,
+    entry: TableExportHistoryEntry,
+  ) => void;
 
   recordTableAccess: (
     connectionId: string,
@@ -1387,33 +1468,6 @@ interface AppState {
   setAIActiveSessionId: (sessionId: string | null) => void;
 }
 
-const sanitizeSavedQueries = (value: unknown): SavedQuery[] => {
-  if (!Array.isArray(value)) return [];
-  const result: SavedQuery[] = [];
-  value.forEach((entry, index) => {
-    if (!entry || typeof entry !== "object") return;
-    const raw = entry as Record<string, unknown>;
-    const id =
-      toTrimmedString(raw.id, `query-${index + 1}`) || `query-${index + 1}`;
-    const sql = toTrimmedString(raw.sql);
-    const connectionId = toTrimmedString(raw.connectionId);
-    const dbName = toTrimmedString(raw.dbName);
-    if (!sql || !connectionId || !dbName) return;
-    result.push({
-      id,
-      name:
-        toTrimmedString(raw.name, `查询-${index + 1}`) || `查询-${index + 1}`,
-      sql,
-      connectionId,
-      dbName,
-      createdAt: Number.isFinite(Number(raw.createdAt))
-        ? Number(raw.createdAt)
-        : Date.now(),
-    });
-  });
-  return result;
-};
-
 const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
   if (!Array.isArray(value)) return DEFAULT_SQL_SNIPPETS;
   const result: SqlSnippet[] = [];
@@ -1446,13 +1500,20 @@ const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
   return result;
 };
 
+const resolveExternalSQLDirectoryName = (name: unknown, path: string): string => {
+  const explicitName = toTrimmedString(name);
+  if (explicitName) return explicitName;
+  const pathSegment = path.split(/[\\/]/).filter(Boolean).pop();
+  return pathSegment || translate("sidebar.sql_directory.default_name");
+};
+
 const sanitizeExternalSQLDirectories = (
   value: unknown,
 ): ExternalSQLDirectory[] => {
   if (!Array.isArray(value)) return [];
   const result: ExternalSQLDirectory[] = [];
   const seenPaths = new Set<string>();
-  value.forEach((entry, index) => {
+  value.forEach((entry) => {
     if (!entry || typeof entry !== "object") return;
     const raw = entry as Record<string, unknown>;
     const path = toTrimmedString(raw.path);
@@ -1462,15 +1523,13 @@ const sanitizeExternalSQLDirectories = (
     seenPaths.add(normalizedPath);
     const connectionId = toTrimmedString(raw.connectionId);
     const dbName = toTrimmedString(raw.dbName);
-    const fallbackName =
-      path.split(/[\\/]/).filter(Boolean).pop() || `SQL目录-${index + 1}`;
     result.push({
       id:
         toTrimmedString(
           raw.id,
           buildExternalSQLDirectoryId(connectionId, dbName, path),
         ) || buildExternalSQLDirectoryId(connectionId, dbName, path),
-      name: toTrimmedString(raw.name, fallbackName) || fallbackName,
+      name: resolveExternalSQLDirectoryName(raw.name, path),
       path,
       ...(connectionId ? { connectionId } : {}),
       ...(dbName ? { dbName } : {}),
@@ -1478,6 +1537,95 @@ const sanitizeExternalSQLDirectories = (
         ? Number(raw.createdAt)
         : Date.now(),
     });
+  });
+  return result;
+};
+
+const sanitizeTableExportHistoryEntry = (
+  value: unknown,
+): TableExportHistoryEntry | null => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const raw = value as Record<string, unknown>;
+  const jobId = toTrimmedString(raw.jobId);
+  if (!jobId) {
+    return null;
+  }
+  const normalizeCount = (input: unknown): number => {
+    const next = Number(input);
+    if (!Number.isFinite(next) || next < 0) {
+      return 0;
+    }
+    return Math.trunc(next);
+  };
+  const normalizeTimestamp = (input: unknown): number => {
+    const next = Number(input);
+    if (!Number.isFinite(next) || next <= 0) {
+      return 0;
+    }
+    return Math.trunc(next);
+  };
+  const statusRaw = toTrimmedString(raw.status).toLowerCase();
+  const status: TableExportHistoryEntry["status"] =
+    statusRaw === "start" ||
+    statusRaw === "running" ||
+    statusRaw === "finalizing" ||
+    statusRaw === "done" ||
+    statusRaw === "error"
+      ? statusRaw
+      : "idle";
+  return {
+    jobId,
+    targetName: toTrimmedString(raw.targetName, "未命名对象") || "未命名对象",
+    startedAt: normalizeTimestamp(raw.startedAt),
+    finishedAt: normalizeTimestamp(raw.finishedAt),
+    format: toTrimmedString(raw.format).slice(0, 32),
+    scope: toTrimmedString(raw.scope).slice(0, 64),
+    scopeLabel: toTrimmedString(raw.scopeLabel).slice(0, 128),
+    strategyLabel: toTrimmedString(raw.strategyLabel).slice(0, 128),
+    status,
+    stage: toTrimmedString(raw.stage).slice(0, 256),
+    current: normalizeCount(raw.current),
+    total: normalizeCount(raw.total),
+    totalRowsKnown: raw.totalRowsKnown === true,
+    filePath: toTrimmedString(raw.filePath).slice(0, MAX_URI_LENGTH),
+    message: toTrimmedString(raw.message).slice(0, MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH),
+  };
+};
+
+const sanitizeTableExportHistories = (
+  value: unknown,
+): Record<string, TableExportHistoryEntry[]> => {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  const raw = value as Record<string, unknown>;
+  const entries = Object.entries(raw)
+    .filter(([key, history]) => toTrimmedString(key) && Array.isArray(history))
+    .slice(0, MAX_TABLE_EXPORT_HISTORY_TARGETS);
+  const result: Record<string, TableExportHistoryEntry[]> = {};
+  entries.forEach(([key, history]) => {
+    const seenJobIds = new Set<string>();
+    const sanitizedHistory = (history as unknown[])
+      .map((entry) => sanitizeTableExportHistoryEntry(entry))
+      .filter((entry): entry is TableExportHistoryEntry => !!entry)
+      .filter((entry) => {
+        if (seenJobIds.has(entry.jobId)) {
+          return false;
+        }
+        seenJobIds.add(entry.jobId);
+        return true;
+      })
+      .sort((a, b) => {
+        const timeA = a.finishedAt || a.startedAt || 0;
+        const timeB = b.finishedAt || b.startedAt || 0;
+        return timeB - timeA;
+      })
+      .slice(0, MAX_TABLE_EXPORT_HISTORY_PER_TARGET);
+    if (sanitizedHistory.length > 0) {
+      result[toTrimmedString(key)] = sanitizedHistory;
+    }
   });
   return result;
 };
@@ -1495,6 +1643,15 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
     const query = typeof raw.query === "string" ? raw.query.slice(0, MAX_PERSISTED_QUERY_LENGTH) : "";
     const filePath = toTrimmedString(raw.filePath);
     const savedQueryId = toTrimmedString(raw.savedQueryId);
+    const rawFormatRestoreSnapshot =
+      raw.formatRestoreSnapshot && typeof raw.formatRestoreSnapshot === "object"
+        ? (raw.formatRestoreSnapshot as Record<string, unknown>)
+        : null;
+    const formatRestoreQuery =
+      typeof rawFormatRestoreSnapshot?.query === "string"
+        ? rawFormatRestoreSnapshot.query.slice(0, MAX_PERSISTED_QUERY_LENGTH)
+        : "";
+    const formatRestoreCreatedAt = Number(rawFormatRestoreSnapshot?.createdAt);
     if (!query.trim() && !filePath && !savedQueryId) return;
 
     let id = toTrimmedString(raw.id, `query-${index + 1}`) || `query-${index + 1}`;
@@ -1517,6 +1674,14 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
       filePath: filePath || undefined,
       savedQueryId: savedQueryId || undefined,
       readOnly: raw.readOnly === true,
+      formatRestoreSnapshot: formatRestoreQuery
+        ? {
+            query: formatRestoreQuery,
+            createdAt: Number.isFinite(formatRestoreCreatedAt)
+              ? formatRestoreCreatedAt
+              : Date.now(),
+          }
+        : undefined,
     });
   });
 
@@ -1559,50 +1724,101 @@ const resolveActiveContextForTabId = (
   return fallbackContext;
 };
 
-const sanitizeSqlLogs = (value: unknown, limit = MAX_PERSISTED_SQL_LOGS): SqlLog[] => {
+type SqlLogSanitizeOptions = {
+  limit: number;
+  sqlLength: number;
+  messageLength: number;
+};
+
+const RUNTIME_SQL_LOG_SANITIZE_OPTIONS: SqlLogSanitizeOptions = {
+  limit: MAX_RUNTIME_SQL_LOGS,
+  sqlLength: MAX_RUNTIME_SQL_LOG_LENGTH,
+  messageLength: MAX_RUNTIME_SQL_LOG_MESSAGE_LENGTH,
+};
+
+const PERSISTED_SQL_LOG_SANITIZE_OPTIONS: SqlLogSanitizeOptions = {
+  limit: MAX_PERSISTED_SQL_LOGS,
+  sqlLength: MAX_PERSISTED_SQL_LOG_LENGTH,
+  messageLength: MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH,
+};
+
+const sanitizeSqlLogEntry = (
+  entry: unknown,
+  index: number,
+  options: SqlLogSanitizeOptions,
+): SqlLog | null => {
+  if (!entry || typeof entry !== "object") return null;
+  const raw = entry as Record<string, unknown>;
+  const sql = typeof raw.sql === "string" ? raw.sql.slice(0, options.sqlLength) : "";
+  if (!sql.trim()) return null;
+
+  const status = raw.status === "error" ? "error" : "success";
+  const timestamp = Number(raw.timestamp);
+  const duration = Number(raw.duration);
+  const affectedRows = Number(raw.affectedRows);
+  const message = typeof raw.message === "string"
+    ? raw.message.slice(0, options.messageLength)
+    : "";
+
+  const log: SqlLog = {
+    id: toTrimmedString(raw.id, `log-${index + 1}`) || `log-${index + 1}`,
+    timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now(),
+    sql,
+    status,
+    duration: Number.isFinite(duration) && duration >= 0 ? duration : 0,
+    dbName: toTrimmedString(raw.dbName) || undefined,
+  };
+
+  if (message) {
+    log.message = message;
+  }
+  if (Number.isFinite(affectedRows)) {
+    log.affectedRows = affectedRows;
+  }
+
+  return log;
+};
+
+const sanitizeSqlLogs = (
+  value: unknown,
+  options: SqlLogSanitizeOptions = PERSISTED_SQL_LOG_SANITIZE_OPTIONS,
+): SqlLog[] => {
   if (!Array.isArray(value)) return [];
   const result: SqlLog[] = [];
   const seenIds = new Set<string>();
 
   value.forEach((entry, index) => {
-    if (!entry || typeof entry !== "object") return;
-    const raw = entry as Record<string, unknown>;
-    const sql = typeof raw.sql === "string" ? raw.sql.slice(0, MAX_PERSISTED_SQL_LOG_LENGTH) : "";
-    if (!sql.trim()) return;
+    const log = sanitizeSqlLogEntry(entry, index, options);
+    if (!log) return;
 
-    let id = toTrimmedString(raw.id, `log-${index + 1}`) || `log-${index + 1}`;
+    let id = log.id;
     if (seenIds.has(id)) {
       id = `${id}-${index + 1}`;
     }
     seenIds.add(id);
 
-    const status = raw.status === "error" ? "error" : "success";
-    const timestamp = Number(raw.timestamp);
-    const duration = Number(raw.duration);
-    const affectedRows = Number(raw.affectedRows);
-    const log: SqlLog = {
-      id,
-      timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now(),
-      sql,
-      status,
-      duration: Number.isFinite(duration) && duration >= 0 ? duration : 0,
-      dbName: toTrimmedString(raw.dbName) || undefined,
-    };
-
-    const message = typeof raw.message === "string"
-      ? raw.message.slice(0, MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH)
-      : "";
-    if (message) {
-      log.message = message;
-    }
-    if (Number.isFinite(affectedRows)) {
-      log.affectedRows = affectedRows;
-    }
-
-    result.push(log);
+    result.push(id === log.id ? log : { ...log, id });
   });
 
-  return result.slice(0, limit);
+  return result.slice(0, options.limit);
+};
+
+const sanitizeRuntimeSqlLogs = (value: unknown) =>
+  sanitizeSqlLogs(value, RUNTIME_SQL_LOG_SANITIZE_OPTIONS);
+
+const sanitizePersistedSqlLogs = (value: unknown) =>
+  sanitizeSqlLogs(value, PERSISTED_SQL_LOG_SANITIZE_OPTIONS);
+
+const appendRuntimeSqlLog = (existing: SqlLog[], entry: SqlLog): SqlLog[] => {
+  const nextEntry = sanitizeSqlLogEntry(entry, 0, RUNTIME_SQL_LOG_SANITIZE_OPTIONS);
+  if (!nextEntry) {
+    return existing;
+  }
+
+  const nextLogs = [nextEntry, ...existing.slice(0, MAX_RUNTIME_SQL_LOGS - 1)];
+  return existing.some((item) => item.id === nextEntry.id)
+    ? sanitizeRuntimeSqlLogs(nextLogs)
+    : nextLogs;
 };
 
 const hasLegacyConnectionSecrets = (
@@ -1642,6 +1858,22 @@ const hasLegacyConnectionSecrets = (
 
 const sanitizeTheme = (value: unknown): "light" | "dark" =>
   value === "dark" ? "dark" : "light";
+
+const sanitizeLanguagePreference = (value: unknown): LanguagePreference => {
+  if (
+    typeof value === "string" &&
+    (LANGUAGE_PREFERENCES as readonly string[]).includes(value)
+  ) {
+    return value as LanguagePreference;
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const resolved = resolveLanguage(value, []);
+    if (resolved !== DEFAULT_LANGUAGE) {
+      return resolved;
+    }
+  }
+  return DEFAULT_LANGUAGE_PREFERENCE;
+};
 
 const sanitizeSqlFormatOptions = (
   value: unknown,
@@ -1824,6 +2056,7 @@ const sanitizeAppearance = (
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),
     tabDisplay: sanitizeTabDisplaySettings(appearance.tabDisplay),
+    redisDbAliases: sanitizeRedisDbAliases(appearance.redisDbAliases),
     showDataTableVerticalBorders:
       dataGridDisplaySettings.showDataTableVerticalBorders,
     dataTableDensity: dataGridDisplaySettings.dataTableDensity,
@@ -2085,6 +2318,7 @@ export const useStore = create<AppState>()(
       savedQueries: [],
       externalSQLDirectories: [],
       theme: "light",
+      languagePreference: DEFAULT_LANGUAGE_PREFERENCE,
       appearance: { ...DEFAULT_APPEARANCE },
       uiScale: DEFAULT_UI_SCALE,
       fontSize: DEFAULT_FONT_SIZE,
@@ -2109,6 +2343,7 @@ export const useStore = create<AppState>()(
       shortcutOptions: cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
       sqlSnippets: DEFAULT_SQL_SNIPPETS,
       sqlLogs: [],
+      tableExportHistories: {},
       tableAccessCount: {},
       tableSortPreference: {},
       tableColumnOrders: {},
@@ -2455,9 +2690,13 @@ export const useStore = create<AppState>()(
               ),
             };
           }
-          // 语义去重：对 table/design 类型按 connectionId+dbName+tableName 匹配已有 Tab
+          // 语义去重：对表相关标签页按 connectionId+dbName+tableName 匹配已有 Tab
           if (
-            (incomingTab.type === "table" || incomingTab.type === "design") &&
+            (
+              incomingTab.type === "table" ||
+              incomingTab.type === "design" ||
+              incomingTab.type === "table-export"
+            ) &&
             incomingTab.tableName &&
             incomingTab.connectionId &&
             incomingTab.dbName
@@ -2569,6 +2808,30 @@ export const useStore = create<AppState>()(
               const nextResultPanelVisible = draft.resultPanelVisible === true;
               if (nextTab.resultPanelVisible !== nextResultPanelVisible) {
                 nextTab.resultPanelVisible = nextResultPanelVisible;
+                changed = true;
+              }
+            }
+            if (Object.prototype.hasOwnProperty.call(draft, "formatRestoreSnapshot")) {
+              const rawSnapshot = draft.formatRestoreSnapshot;
+              const nextSnapshot =
+                rawSnapshot && typeof rawSnapshot.query === "string"
+                  ? {
+                      query: rawSnapshot.query.slice(0, MAX_PERSISTED_QUERY_LENGTH),
+                      createdAt: Number.isFinite(Number(rawSnapshot.createdAt))
+                        ? Number(rawSnapshot.createdAt)
+                        : Date.now(),
+                    }
+                  : undefined;
+              const currentSnapshot = nextTab.formatRestoreSnapshot;
+              if (
+                currentSnapshot?.query !== nextSnapshot?.query ||
+                currentSnapshot?.createdAt !== nextSnapshot?.createdAt
+              ) {
+                if (nextSnapshot?.query) {
+                  nextTab.formatRestoreSnapshot = nextSnapshot;
+                } else {
+                  delete nextTab.formatRestoreSnapshot;
+                }
                 changed = true;
               }
             }
@@ -2745,24 +3008,34 @@ export const useStore = create<AppState>()(
         })),
       setActiveContext: (context) => set({ activeContext: context }),
 
-      saveQuery: (query) =>
+      replaceSavedQueries: (queries) =>
+        set({ savedQueries: sanitizeSavedQueries(queries) }),
+
+      saveQuery: async (query) => {
+        const saved = await saveSavedQueryToBackend(
+          resolveSavedQueryBackend(),
+          query,
+        );
         set((state) => {
-          // If query with same ID exists, update it
-          const existing = state.savedQueries.find((q) => q.id === query.id);
+          const existing = state.savedQueries.find((q) => q.id === saved.id);
           if (existing) {
             return {
               savedQueries: state.savedQueries.map((q) =>
-                q.id === query.id ? query : q,
+                q.id === saved.id ? saved : q,
               ),
             };
           }
-          return { savedQueries: [...state.savedQueries, query] };
-        }),
+          return { savedQueries: [...state.savedQueries, saved] };
+        });
+        return saved;
+      },
 
-      deleteQuery: (id) =>
+      deleteQuery: async (id) => {
+        await deleteSavedQueryFromBackend(resolveSavedQueryBackend(), id);
         set((state) => ({
           savedQueries: state.savedQueries.filter((q) => q.id !== id),
-        })),
+        }));
+      },
 
       saveExternalSQLDirectory: (directory) =>
         set((state) => {
@@ -2778,11 +3051,7 @@ export const useStore = create<AppState>()(
                 directory.id,
                 buildExternalSQLDirectoryId(connectionId, dbName, path),
               ) || buildExternalSQLDirectoryId(connectionId, dbName, path),
-            name:
-              toTrimmedString(
-                directory.name,
-                path.split(/[\\/]/).filter(Boolean).pop() || "SQL目录",
-              ) || "SQL目录",
+            name: resolveExternalSQLDirectoryName(directory.name, path),
             path,
             ...(connectionId ? { connectionId } : {}),
             ...(dbName ? { dbName } : {}),
@@ -2819,10 +3088,29 @@ export const useStore = create<AppState>()(
         })),
 
       setTheme: (theme) => set({ theme }),
+      setLanguagePreference: (languagePreference) =>
+        set({
+          languagePreference: sanitizeLanguagePreference(languagePreference),
+        }),
       setAppearance: (appearance) =>
         set((state) => ({
           appearance: sanitizeAppearance(
             { ...state.appearance, ...appearance },
+            PERSIST_VERSION,
+          ),
+        })),
+      setRedisDbAlias: (connectionId, dbIndex, alias) =>
+        set((state) => ({
+          appearance: sanitizeAppearance(
+            {
+              ...state.appearance,
+              redisDbAliases: applyRedisDbAlias(
+                state.appearance.redisDbAliases,
+                connectionId,
+                dbIndex,
+                alias,
+              ),
+            },
             PERSIST_VERSION,
           ),
         })),
@@ -2934,8 +3222,41 @@ export const useStore = create<AppState>()(
         }),
 
       addSqlLog: (log) =>
-        set((state) => ({ sqlLogs: sanitizeSqlLogs([log, ...state.sqlLogs], MAX_SQL_LOGS) })),
+        set((state) => ({ sqlLogs: appendRuntimeSqlLog(state.sqlLogs, log) })),
       clearSqlLogs: () => set({ sqlLogs: [] }),
+      upsertTableExportHistory: (historyKey, entry) =>
+        set((state) => {
+          const safeHistoryKey = toTrimmedString(historyKey);
+          const safeEntry = sanitizeTableExportHistoryEntry(entry);
+          if (!safeHistoryKey || !safeEntry) {
+            return state;
+          }
+          const existingEntries = state.tableExportHistories[safeHistoryKey] || [];
+          const existingIndex = existingEntries.findIndex(
+            (item) => item.jobId === safeEntry.jobId,
+          );
+          const nextEntries =
+            existingIndex >= 0
+              ? existingEntries.map((item, index) =>
+                  index === existingIndex ? { ...item, ...safeEntry } : item,
+                )
+              : [safeEntry, ...existingEntries];
+          const trimmedEntries = nextEntries.slice(0, MAX_TABLE_EXPORT_HISTORY_PER_TARGET);
+          const unchanged =
+            existingEntries.length === trimmedEntries.length &&
+            existingEntries.every((item, index) =>
+              JSON.stringify(item) === JSON.stringify(trimmedEntries[index]),
+            );
+          if (unchanged) {
+            return state;
+          }
+          return {
+            tableExportHistories: {
+              ...state.tableExportHistories,
+              [safeHistoryKey]: trimmedEntries,
+            },
+          };
+        }),
 
       recordTableAccess: (connectionId, dbName, tableName) =>
         set((state) => {
@@ -3252,6 +3573,7 @@ export const useStore = create<AppState>()(
         const state = unwrapPersistedAppState(
           persistedState,
         ) as Partial<AppState>;
+        captureLegacySavedQueriesSnapshot(state.savedQueries, state.connections);
         const nextState: Partial<AppState> = { ...state };
         nextState.connections = sanitizeConnections(state.connections);
         const safeTabs = sanitizeQueryTabs(state.tabs);
@@ -3271,11 +3593,14 @@ export const useStore = create<AppState>()(
           nextState.connectionTags,
           nextState.connections,
         );
-        nextState.savedQueries = sanitizeSavedQueries(state.savedQueries);
+        delete nextState.savedQueries;
         nextState.externalSQLDirectories = sanitizeExternalSQLDirectories(
           state.externalSQLDirectories,
         );
         nextState.theme = sanitizeTheme(state.theme);
+        nextState.languagePreference = sanitizeLanguagePreference(
+          state.languagePreference,
+        );
         nextState.appearance = sanitizeAppearance(state.appearance, version);
         nextState.uiScale = sanitizeUiScale(state.uiScale);
         nextState.fontSize = sanitizeFontSize(state.fontSize);
@@ -3294,7 +3619,10 @@ export const useStore = create<AppState>()(
         nextState.shortcutOptions = sanitizeShortcutOptions(
           state.shortcutOptions,
         );
-        nextState.sqlLogs = sanitizeSqlLogs(state.sqlLogs);
+        nextState.sqlLogs = sanitizeRuntimeSqlLogs(state.sqlLogs);
+        nextState.tableExportHistories = sanitizeTableExportHistories(
+          state.tableExportHistories,
+        );
         const existingSnippets = sanitizeSqlSnippets(state.sqlSnippets);
         const existingSnippetIds = new Set(existingSnippets.map((s) => s.id));
         const missingSnippets = DEFAULT_SQL_SNIPPETS.filter(
@@ -3340,6 +3668,7 @@ export const useStore = create<AppState>()(
         const state = unwrapPersistedAppState(
           persistedState,
         ) as Partial<AppState>;
+        captureLegacySavedQueriesSnapshot(state.savedQueries, state.connections);
         const safeTabs = sanitizeQueryTabs(state.tabs);
         const persistedConnections =
           state.connections === undefined
@@ -3365,11 +3694,14 @@ export const useStore = create<AppState>()(
           sidebarRootOrder: persistedSidebarRootOrder,
           tabs: safeTabs,
           activeTabId: sanitizeActiveTabId(state.activeTabId, safeTabs),
-          savedQueries: sanitizeSavedQueries(state.savedQueries),
+          savedQueries: currentState.savedQueries,
           externalSQLDirectories: sanitizeExternalSQLDirectories(
             state.externalSQLDirectories,
           ),
           theme: sanitizeTheme(state.theme),
+          languagePreference: sanitizeLanguagePreference(
+            state.languagePreference,
+          ),
           appearance: sanitizeAppearance(state.appearance, PERSIST_VERSION),
           uiScale: sanitizeUiScale(state.uiScale),
           fontSize: sanitizeFontSize(state.fontSize),
@@ -3400,7 +3732,7 @@ export const useStore = create<AppState>()(
             state.sqlEditorTransactionOptions,
           ),
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
-          sqlLogs: sanitizeSqlLogs(state.sqlLogs),
+          sqlLogs: sanitizeRuntimeSqlLogs(state.sqlLogs),
           sqlSnippets: sanitizeSqlSnippets(state.sqlSnippets),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
 
@@ -3416,9 +3748,9 @@ export const useStore = create<AppState>()(
           activeTabId: sanitizeActiveTabId(state.activeTabId, tabs),
           connectionTags: state.connectionTags,
           sidebarRootOrder: state.sidebarRootOrder,
-          savedQueries: state.savedQueries,
           externalSQLDirectories: state.externalSQLDirectories,
           theme: state.theme,
+          languagePreference: state.languagePreference,
           appearance: state.appearance,
           uiScale: state.uiScale,
           fontSize: state.fontSize,
@@ -3432,7 +3764,10 @@ export const useStore = create<AppState>()(
           dataEditTransactionOptions: state.dataEditTransactionOptions,
           sqlEditorTransactionOptions: state.sqlEditorTransactionOptions,
           shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
-          sqlLogs: sanitizeSqlLogs(state.sqlLogs),
+          sqlLogs: sanitizePersistedSqlLogs(state.sqlLogs),
+          tableExportHistories: sanitizeTableExportHistories(
+            state.tableExportHistories,
+          ),
           sqlSnippets: state.sqlSnippets,
           tableAccessCount: state.tableAccessCount,
           tableSortPreference: state.tableSortPreference,

@@ -1,0 +1,1189 @@
+import React from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, create, type ReactTestRenderer } from "react-test-renderer";
+import { readFileSync } from "node:fs";
+
+import { setCurrentLanguage } from "../i18n";
+
+const storeState = {
+  addConnection: vi.fn(),
+  updateConnection: vi.fn(),
+  theme: "light",
+  languagePreference: "zh-CN",
+  setLanguagePreference: vi.fn((languagePreference: "zh-CN" | "en-US") => {
+    storeState.languagePreference = languagePreference;
+    setCurrentLanguage(languagePreference);
+    notifyStoreSubscribers();
+  }),
+  appearance: { uiVersion: "legacy", opacity: 1 },
+};
+
+const storeSubscribers = new Set<() => void>();
+const notifyStoreSubscribers = () => {
+  storeSubscribers.forEach((subscriber) => subscriber());
+};
+
+let mockFormValues: Record<string, any> = {};
+
+const antdMessage = vi.hoisted(() => ({
+  error: vi.fn(),
+  warning: vi.fn(),
+  success: vi.fn(),
+  destroy: vi.fn(),
+}));
+
+const backendApp = {
+  DBGetDatabases: vi.fn(),
+  GetDriverStatusList: vi.fn(),
+  MongoDiscoverMembers: vi.fn(),
+  TestConnection: vi.fn(),
+  RedisConnect: vi.fn(),
+  SelectDatabaseFile: vi.fn(),
+  SelectCertificateFile: vi.fn(),
+  SelectSSHKeyFile: vi.fn(),
+  TestJVMConnection: vi.fn(),
+};
+
+const textContent = (node: any): string => {
+  if (node === null || node === undefined) return "";
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) {
+    return node.map((item) => textContent(item)).join("");
+  }
+  return [node.props?.placeholder, textContent(node.children || [])]
+    .filter(Boolean)
+    .join("");
+};
+
+const findButton = (renderer: ReactTestRenderer, text: string) =>
+  renderer.root.findAll((node) => node.type === "button" && textContent(node).includes(text))[0];
+
+const findButtonByAnyText = (renderer: ReactTestRenderer, texts: string[]) =>
+  renderer.root.findAll(
+    (node) => node.type === "button" && texts.some((text) => textContent(node).includes(text)),
+  )[0];
+
+const findClickableByAnyText = (renderer: ReactTestRenderer, texts: string[]) =>
+  renderer.root.findAll(
+    (node) => typeof node.props?.onClick === "function" && texts.some((text) => textContent(node).includes(text)),
+  )[0];
+
+const findClickableCard = (renderer: ReactTestRenderer, text: string) =>
+  renderer.root.findAll((node) => node.props?.role === "button" && textContent(node).includes(text))[0];
+
+const flushConnectionTestTick = async () => {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await Promise.resolve();
+};
+
+const source = readFileSync(new URL("./ConnectionModal.tsx", import.meta.url), "utf8");
+
+const initialConnection = (type: string, config: Record<string, any> = {}) =>
+  ({
+    id: `${type}-conn`,
+    name: `${type} connection`,
+    type,
+    config: {
+      type,
+      host: "localhost",
+      port: 3306,
+      user: "user",
+      ...config,
+    },
+  }) as any;
+
+vi.mock("../store", () => ({
+  useStore: (selector: (state: typeof storeState) => unknown) =>
+    React.useSyncExternalStore(
+      (subscriber) => {
+        storeSubscribers.add(subscriber);
+        return () => {
+          storeSubscribers.delete(subscriber);
+        };
+      },
+      () => selector(storeState),
+      () => selector(storeState),
+    ),
+}));
+
+vi.mock("../../wailsjs/go/app/App", () => backendApp);
+
+vi.mock("../utils/overlayWorkbenchTheme", () => ({
+  buildOverlayWorkbenchTheme: () => ({
+    shellBg: "#fff",
+    shellBorder: "1px solid #eee",
+    shellShadow: "none",
+    shellBackdropFilter: "none",
+    sectionBorder: "1px solid #eee",
+    sectionBg: "#fff",
+    mutedText: "#666",
+    titleText: "#111",
+    iconBg: "#f5f5f5",
+    iconColor: "#111",
+  }),
+}));
+
+vi.mock("./DatabaseIcons", () => ({
+  getDbIcon: (type: string) => <span>{type}</span>,
+  getDbDefaultColor: () => "#1677ff",
+  getDbIconLabel: (type: string) => type,
+  DB_ICON_TYPES: ["mysql", "postgres"],
+  PRESET_ICON_COLORS: ["#1677ff", "#52c41a"],
+}));
+
+vi.mock("@ant-design/icons", () => {
+  const Icon = () => <span />;
+  return {
+    DatabaseOutlined: Icon,
+    FileTextOutlined: Icon,
+    CloudOutlined: Icon,
+    CheckCircleFilled: Icon,
+    CloseCircleFilled: Icon,
+    LinkOutlined: Icon,
+    EditOutlined: Icon,
+    AppstoreOutlined: Icon,
+    BgColorsOutlined: Icon,
+    ApiOutlined: Icon,
+    ClusterOutlined: Icon,
+    CodeOutlined: Icon,
+    GatewayOutlined: Icon,
+    SafetyCertificateOutlined: Icon,
+    ThunderboltOutlined: Icon,
+  };
+});
+
+vi.mock("antd", () => {
+  const Button: any = ({ children, disabled, loading, onClick, ...rest }: any) => (
+    <button type="button" disabled={disabled || loading} onClick={onClick} {...rest}>
+      {children}
+    </button>
+  );
+  Button.Group = ({ children }: any) => <div>{children}</div>;
+
+  const Input: any = ({ children, value, onChange, placeholder, ...rest }: any) => (
+    <input value={value} onChange={onChange} placeholder={placeholder} {...rest}>
+      {children}
+    </input>
+  );
+  Input.Password = ({ value, onChange, placeholder, ...rest }: any) => (
+    <input value={value} onChange={onChange} placeholder={placeholder} {...rest} />
+  );
+  Input.TextArea = ({ value, onChange, placeholder, ...rest }: any) => (
+    <textarea value={value} onChange={onChange} placeholder={placeholder} {...rest} />
+  );
+
+  const Select: any = ({ children, options = [], placeholder }: any) => (
+    <div>
+      {placeholder ? <span>{placeholder}</span> : null}
+      {options.map((option: any) => (
+        <span key={String(option.value)}>{option.label}</span>
+      ))}
+      {children}
+    </div>
+  );
+  Select.Option = ({ children }: any) => <span>{children}</span>;
+  const Checkbox = ({ children, checked, onChange }: any) => (
+    <label onChange={onChange}>
+      <input type="checkbox" checked={checked} onChange={onChange} />
+      {children}
+    </label>
+  );
+  const Alert = ({ message, description }: any) => (
+    <div>
+      <div>{message}</div>
+      <div>{description}</div>
+    </div>
+  );
+  const Card = ({ children, onClick }: any) => (
+    <div onClick={onClick} role="button">
+      {children}
+    </div>
+  );
+  const Row = ({ children }: any) => <div>{children}</div>;
+  const Col = ({ children }: any) => <div>{children}</div>;
+  const Space: any = ({ children }: any) => <div>{children}</div>;
+  Space.Compact = ({ children, ...rest }: any) => <div {...rest}>{children}</div>;
+  const Table = () => <div />;
+  const Tag = ({ children }: any) => <span>{children}</span>;
+  const Switch = () => <button type="button">switch</button>;
+
+  const formApi = {
+    validateFields: vi.fn(() => Promise.resolve()),
+    getFieldsValue: vi.fn(() => ({
+      type: "mysql",
+      timeout: 30,
+      useSSH: false,
+      useProxy: false,
+      useHttpTunnel: false,
+      password: "",
+      ...mockFormValues,
+    })),
+    setFieldsValue: vi.fn((values: Record<string, any>) => {
+      mockFormValues = { ...mockFormValues, ...values };
+    }),
+    setFieldValue: vi.fn((name: string, value: any) => {
+      mockFormValues = { ...mockFormValues, [name]: value };
+    }),
+    getFieldValue: vi.fn((name: string) => mockFormValues[name]),
+    resetFields: vi.fn(() => {
+      mockFormValues = {};
+    }),
+  };
+
+  const Form: any = ({ children }: any) => <form>{children}</form>;
+  Form.Item = ({ children, label, help }: any) => (
+    <div>
+      {label ? <div>{label}</div> : null}
+      {typeof children === "function" ? children(formApi) : children}
+      {help ? <div>{help}</div> : null}
+    </div>
+  );
+  Form.useForm = () => [formApi];
+  Form.useWatch = (name: string) => {
+    if (mockFormValues[name] !== undefined) {
+      return mockFormValues[name];
+    }
+    switch (name) {
+      case "mysqlTopology":
+      case "mongoTopology":
+      case "redisTopology":
+        return "single";
+      case "mongoSrv":
+        return false;
+      case "jvmDiagnosticEnabled":
+        return mockFormValues.jvmDiagnosticEnabled ?? false;
+      case "sslMode":
+        return "preferred";
+      case "proxyType":
+        return "socks5";
+      case "driver":
+      case "mongoAuthMechanism":
+        return "";
+      case "mongoReadPreference":
+        return "primary";
+      case "jvmEnvironment":
+        return "dev";
+      case "jvmPreferredMode":
+        return "jmx";
+      case "jvmDiagnosticTransport":
+        return mockFormValues.jvmDiagnosticTransport ?? "agent-bridge";
+      default:
+        return undefined;
+    }
+  };
+
+  const Modal: any = ({ title, children, footer, open }: any) =>
+    open ? (
+      <section>
+        <div>{title}</div>
+        <div>{children}</div>
+        <div>{footer}</div>
+      </section>
+    ) : null;
+  Modal.confirm = vi.fn();
+
+  const Typography = {
+    Text: ({ children }: any) => <span>{children}</span>,
+  };
+
+  return {
+    Modal,
+    Form,
+    Input,
+    InputNumber: Input,
+    Button,
+    message: antdMessage,
+    Checkbox,
+    Select,
+    Alert,
+    Card,
+    Row,
+    Col,
+    Typography,
+    Space,
+    Table,
+    Tag,
+    Switch,
+  };
+});
+
+describe("ConnectionModal i18n", () => {
+  beforeEach(() => {
+    vi.stubGlobal("document", {
+      body: {},
+      querySelectorAll: vi.fn(() => []),
+    });
+    vi.stubGlobal(
+      "MutationObserver",
+      class {
+        observe = vi.fn();
+        disconnect = vi.fn();
+      },
+    );
+    vi.stubGlobal("window", {
+      setTimeout,
+      clearTimeout,
+    });
+    storeState.theme = "light";
+    storeState.languagePreference = "zh-CN";
+    storeState.appearance.uiVersion = "legacy";
+    storeState.appearance.opacity = 1;
+    backendApp.GetDriverStatusList.mockResolvedValue({ success: true, data: { drivers: [] } });
+    backendApp.TestConnection.mockResolvedValue({ success: false, message: "saved connection not found: conn-1" });
+    backendApp.DBGetDatabases.mockResolvedValue({ success: true, data: [] });
+    backendApp.MongoDiscoverMembers.mockResolvedValue({ success: true, data: { members: [] } });
+    backendApp.RedisConnect.mockResolvedValue({ success: true, message: "ok" });
+    backendApp.TestJVMConnection.mockResolvedValue({ success: true, message: "ok" });
+    backendApp.SelectDatabaseFile.mockReset();
+    backendApp.SelectCertificateFile.mockReset();
+    backendApp.SelectSSHKeyFile.mockReset();
+    antdMessage.error.mockReset();
+    antdMessage.warning.mockReset();
+    antdMessage.success.mockReset();
+    antdMessage.destroy.mockReset();
+    void import("antd").then(({ Modal }) => {
+      (Modal.confirm as any).mockReset?.();
+    });
+    storeState.addConnection.mockReset();
+    storeState.updateConnection.mockReset();
+    storeState.setLanguagePreference.mockClear();
+    mockFormValues = {};
+    setCurrentLanguage("zh-CN");
+  });
+
+  it("updates visible copy when languagePreference changes while the modal stays open", async () => {
+    const { default: ConnectionModal } = await import("./ConnectionModal");
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<ConnectionModal open onClose={vi.fn()} />);
+    });
+
+    expect(textContent(renderer!.toJSON())).toContain("选择数据源类型");
+
+    await act(async () => {
+      storeState.setLanguagePreference("en-US");
+    });
+
+    expect(storeState.setLanguagePreference).toHaveBeenCalledWith("en-US");
+    expect(textContent(renderer!.toJSON())).toContain("Select connection type");
+    expect(textContent(renderer!.toJSON())).not.toContain("选择数据源类型");
+  });
+
+  it.each(["legacy", "v2"] as const)(
+    "renders localized create flow copy for %s ui",
+    async (uiVersion) => {
+      storeState.appearance.uiVersion = uiVersion;
+      mockFormValues = {
+        type: "mysql",
+        useSSL: true,
+        sslMode: "preferred",
+        timeout: 30,
+      };
+      const { default: ConnectionModal } = await import("./ConnectionModal");
+
+      let renderer: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<ConnectionModal open onClose={vi.fn()} />);
+      });
+
+      expect(textContent(renderer!.toJSON())).toContain("选择数据源类型");
+      expect(textContent(renderer!.toJSON())).toContain("选择数据源");
+      expect(textContent(renderer!.toJSON())).toContain("取消");
+
+      await act(async () => {
+        findClickableCard(renderer!, "MySQL").props.onClick();
+      });
+
+      mockFormValues = {
+        ...mockFormValues,
+        useSSL: true,
+        sslMode: "preferred",
+      };
+      await act(async () => {
+        renderer!.update(<ConnectionModal open onClose={vi.fn()} />);
+      });
+
+      expect(textContent(renderer!.toJSON())).toContain("新建 MySQL 连接");
+      expect(textContent(renderer!.toJSON())).toContain("基础身份");
+      expect(textContent(renderer!.toJSON())).toContain("测试连接");
+      expect(textContent(renderer!.toJSON())).toContain("保存");
+      expect(textContent(renderer!.toJSON())).toContain("上一步");
+
+      await act(async () => {
+        findClickableByAnyText(renderer!, ["Network & Security", "网络与安全"]).props.onClick();
+      });
+
+      const pageText = textContent(renderer!.toJSON());
+      expect(pageText).toContain("首选");
+      expect(pageText).toContain("必需");
+      expect(pageText).toContain("跳过验证");
+    },
+  );
+
+  it.each(["legacy", "v2"] as const)(
+    "renders English titles, footer copy, and raw-preserving failure feedback for %s ui",
+    async (uiVersion) => {
+      storeState.appearance.uiVersion = uiVersion;
+      setCurrentLanguage("en-US");
+      const { default: ConnectionModal } = await import("./ConnectionModal");
+
+      let renderer: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<ConnectionModal open onClose={vi.fn()} />);
+      });
+
+      expect(textContent(renderer!.toJSON())).toContain("Select connection type");
+      expect(textContent(renderer!.toJSON())).toContain("Choose data source");
+      expect(textContent(renderer!.toJSON())).toContain("Cancel");
+
+      await act(async () => {
+        findClickableCard(renderer!, "MySQL").props.onClick();
+      });
+
+      expect(textContent(renderer!.toJSON())).toContain("New MySQL connection");
+      expect(textContent(renderer!.toJSON())).toContain("Connection identity");
+      expect(textContent(renderer!.toJSON())).toContain("Test connection");
+      expect(textContent(renderer!.toJSON())).toContain("Save");
+      expect(textContent(renderer!.toJSON())).toContain("Back");
+
+      await act(async () => {
+        findButton(renderer!, "Test connection").props.onClick();
+        await flushConnectionTestTick();
+      });
+
+      expect(textContent(renderer!.toJSON())).toContain(
+        "The saved secret for this connection was not found. Enter the password again and save before retrying.",
+      );
+      expect(textContent(renderer!.toJSON())).toContain("View details");
+    },
+  );
+
+  it.each([
+    {
+      language: "zh-CN" as const,
+      sourceLabel: "MySQL",
+      expectations: [
+        "生产连接保护",
+        "按需勾选限制项",
+        "限制数据编辑",
+        "限制结构编辑",
+        "限制脚本执行",
+        "限制数据导入",
+        "当前策略",
+      ],
+    },
+    {
+      language: "en-US" as const,
+      sourceLabel: "MySQL",
+      expectations: [
+        "Production guard",
+        "Select only the restrictions you need",
+        "Restrict data edits",
+        "Restrict structure edits",
+        "Restrict script execution",
+        "Restrict data import",
+        "Current policy",
+      ],
+    },
+  ])(
+    "renders a detailed production-guard card in $language",
+    async ({ language, sourceLabel, expectations }) => {
+      setCurrentLanguage(language);
+      storeState.languagePreference = language;
+      mockFormValues = {
+        type: "mysql",
+        restrictDataEdit: true,
+        restrictStructureEdit: true,
+        restrictScriptExecution: false,
+        restrictDataImport: false,
+        useSSL: true,
+        sslMode: "preferred",
+        timeout: 30,
+      };
+
+      const { default: ConnectionModal } = await import("./ConnectionModal");
+
+      let renderer: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<ConnectionModal open onClose={vi.fn()} />);
+      });
+
+      await act(async () => {
+        findClickableCard(renderer!, sourceLabel).props.onClick();
+      });
+
+      const pageText = textContent(renderer!.toJSON());
+      expectations.forEach((expected) => {
+        expect(pageText).toContain(expected);
+      });
+      expect(pageText).not.toContain("connection.modal.section.undefined.title");
+      expect(pageText).not.toContain("connection.modal.section.undefined.description");
+    },
+  );
+
+  it("renders English topology and authentication copy for legacy mysql, mongodb, and redis sections", async () => {
+    storeState.appearance.uiVersion = "legacy";
+    setCurrentLanguage("en-US");
+    const { default: ConnectionModal } = await import("./ConnectionModal");
+
+    mockFormValues = {
+      mysqlTopology: "replica",
+    };
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("mysql", {
+            mysqlTopology: "replica",
+          })}
+        />,
+      );
+      await flushConnectionTestTick();
+    });
+
+    let pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("Primary-replica");
+
+    mockFormValues = {
+      mongoTopology: "replica",
+      mongoSrv: false,
+      mongoReadPreference: "primary",
+      mongoAuthMechanism: "",
+    };
+    await act(async () => {
+      renderer!.update(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("mongodb", {
+            port: 27017,
+            topology: "replica",
+            mongoTopology: "replica",
+          })}
+        />,
+      );
+    });
+
+    pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("Replica set / multi-node");
+    expect(pageText).toContain("Standard address");
+    expect(pageText).toContain("Auth database (authSource)");
+    expect(pageText).toContain("Read preference (readPreference)");
+    expect(pageText).toContain("Read from the primary node only.");
+    expect(pageText).toContain("Authentication method");
+    expect(pageText).toContain("Auto-negotiate");
+    expect(pageText).toContain("Let the driver choose based on server capabilities.");
+
+    mockFormValues = {
+      redisTopology: "cluster",
+    };
+    await act(async () => {
+      renderer!.update(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("redis", {
+            port: 6379,
+            redisTopology: "cluster",
+          })}
+        />,
+      );
+    });
+
+    pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("Cluster mode");
+    expect(pageText).toContain("Redis password");
+    expect(pageText).toContain("Visible databases");
+  });
+
+  it("renders English network, appearance, and raw-preserving copy for v2 ui", async () => {
+    storeState.appearance.uiVersion = "v2";
+    setCurrentLanguage("en-US");
+    mockFormValues = {
+      type: "mysql",
+      name: "prod",
+      host: "localhost",
+      port: 3306,
+      user: "root",
+      password: "",
+      timeout: 30,
+      useSSL: true,
+      sslMode: "preferred",
+      useProxy: true,
+      proxyType: "socks5",
+      proxyHost: "127.0.0.1",
+      proxyPort: 1080,
+      proxyUser: "",
+      proxyPassword: "",
+      useSSH: false,
+      useHttpTunnel: false,
+    };
+    const { default: ConnectionModal } = await import("./ConnectionModal");
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<ConnectionModal open onClose={vi.fn()} />);
+    });
+
+    await act(async () => {
+      findClickableCard(renderer!, "MySQL").props.onClick();
+      await flushConnectionTestTick();
+    });
+    mockFormValues = {
+      ...mockFormValues,
+      useSSL: true,
+      sslMode: "preferred",
+    };
+    await act(async () => {
+      renderer!.update(<ConnectionModal open onClose={vi.fn()} />);
+    });
+
+    await act(async () => {
+      findClickableByAnyText(renderer!, ["Network & Security", "网络与安全"]).props.onClick();
+    });
+    mockFormValues = {
+      ...mockFormValues,
+      useProxy: true,
+      proxyType: "socks5",
+      proxyHost: "127.0.0.1",
+      proxyPort: 1080,
+      proxyUser: "",
+      proxyPassword: "",
+      useSSH: false,
+      useHttpTunnel: false,
+    };
+
+    let pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("Network & Security");
+    expect(pageText).toContain("SSL, SSH, proxy, and advanced connection");
+    expect(pageText).toContain("Keep connection methods listed above and show the selected details below");
+    expect(pageText).toContain("SSL/TLS");
+    expect(pageText).toContain("Preferred");
+    expect(pageText).toContain("Required");
+    expect(pageText).toContain("Skip Verify");
+    expect(pageText).toContain("SSH tunnel");
+    expect(pageText).toContain("Proxy");
+    expect(pageText).toContain("HTTP tunnel");
+    expect(pageText).toContain("Advanced connection");
+    expect(pageText).toContain("Connection timeout (seconds)");
+    expect(pageText).toContain("Configuration sections");
+    expect(pageText).toContain("Appearance");
+    expect(pageText).toContain("Custom icon and color");
+
+    await act(async () => {
+      findClickableCard(renderer!, "Proxy").props.onClick();
+    });
+    await act(async () => {
+      renderer!.update(<ConnectionModal open onClose={vi.fn()} />);
+    });
+
+    pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("Proxy host");
+    expect(pageText).toContain("For example: 127.0.0.1 or proxy.company.com");
+    expect(pageText).toContain("Proxy type");
+    expect(pageText).toContain("Proxy username");
+    expect(pageText).toContain("Leave blank for no authentication");
+
+    await act(async () => {
+      renderer!.update(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={
+            {
+              id: "conn-1",
+              name: "prod",
+              type: "mysql",
+              config: {
+                type: "mysql",
+                host: "localhost",
+                port: 3306,
+                user: "root",
+                useProxy: true,
+                proxy: {
+                  type: "socks5",
+                  host: "127.0.0.1",
+                  port: 1080,
+                  user: "",
+                  password: "",
+                },
+              },
+              hasProxyPassword: true,
+            } as any
+          }
+        />,
+      );
+    });
+
+    await act(async () => {
+      renderer!.root.findAll((node) =>
+        textContent(node).includes("Clear saved proxy password") &&
+        typeof node.props.onChange === "function",
+      )[0].props.onChange({ target: { checked: true } });
+    });
+
+    await act(async () => {
+      findButton(renderer!, "Test connection").props.onClick();
+      await flushConnectionTestTick();
+    });
+
+    const failedText = textContent(renderer!.toJSON());
+    expect(failedText).toContain(
+      "enter a new proxy password before testing, or cancel clearing the saved proxy password.",
+    );
+    expect(failedText).toContain("127.0.0.1");
+  });
+
+  it("renders English driver unavailable alert while preserving product names", async () => {
+    storeState.appearance.uiVersion = "legacy";
+    setCurrentLanguage("en-US");
+    backendApp.GetDriverStatusList.mockResolvedValue({
+      success: true,
+      data: {
+        drivers: [
+          {
+            type: "dameng",
+            name: "Dameng (达梦)",
+            connectable: false,
+            message: "",
+          },
+        ],
+      },
+    });
+    const { default: ConnectionModal } = await import("./ConnectionModal");
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("dameng", {
+            port: 5236,
+          })}
+        />,
+      );
+      await flushConnectionTestTick();
+    });
+
+    const pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("Dameng (达梦) driver unavailable");
+    expect(pageText).toContain("Install in Driver Manager");
+  });
+
+  it("renders English tail copy for SSL hints, driver confirm, Mongo discovery, ClickHouse auto, and examples", async () => {
+    storeState.appearance.uiVersion = "legacy";
+    setCurrentLanguage("en-US");
+    const { default: ConnectionModal } = await import("./ConnectionModal");
+    const { Modal } = await import("antd");
+
+    backendApp.GetDriverStatusList.mockResolvedValueOnce({
+      success: true,
+      data: {
+        drivers: [
+          {
+            type: "dameng",
+            name: "Dameng (达梦)",
+            connectable: false,
+            message: "",
+          },
+        ],
+      },
+    });
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("dameng", { port: 5236 })}
+        />,
+      );
+      await flushConnectionTestTick();
+    });
+    await act(async () => {
+      findButton(renderer!, "Test connection").props.onClick();
+      await flushConnectionTestTick();
+    });
+    expect(Modal.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Dameng (达梦) driver unavailable",
+        content: "Dameng (达梦) driver is not installed or enabled. Install it in Driver Manager first.",
+        okText: "Install in Driver Manager",
+        cancelText: "Cancel",
+      }),
+    );
+
+    mockFormValues = {
+      type: "mysql",
+      useSSL: true,
+      sslMode: "preferred",
+      timeout: 30,
+    };
+    await act(async () => {
+      renderer!.update(<ConnectionModal open onClose={vi.fn()} />);
+    });
+    await act(async () => {
+      findClickableCard(renderer!, "MySQL").props.onClick();
+    });
+    await act(async () => {
+      findClickableByAnyText(renderer!, ["Network & Security", "网络与安全"]).props.onClick();
+    });
+    expect(textContent(renderer!.toJSON())).toContain(
+      "MySQL-compatible data sources support CA certificates, client certificates, and private keys.",
+    );
+    expect(textContent(renderer!.toJSON())).toContain("Editing");
+
+    mockFormValues = {
+      type: "clickhouse",
+      clickHouseProtocol: "auto",
+      timeout: 30,
+    };
+    await act(async () => {
+      renderer!.update(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("clickhouse", { port: 9000 })}
+        />,
+      );
+    });
+    await act(async () => {
+      findClickableByAnyText(renderer!, ["Basic information", "基础信息"]).props.onClick();
+    });
+    expect(textContent(renderer!.toJSON())).toContain("Auto");
+
+    mockFormValues = {
+      type: "postgres",
+      timeout: 30,
+    };
+    await act(async () => {
+      renderer!.update(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("postgres", { port: 5432 })}
+        />,
+      );
+    });
+    expect(textContent(renderer!.toJSON())).toContain(
+      "For example: postgres://user:pass@127.0.0.1:5432/db_name",
+    );
+
+    mockFormValues = {
+      type: "mongodb",
+      mongoTopology: "replica",
+      mongoReadPreference: "primary",
+      mongoAuthMechanism: "",
+      timeout: 30,
+    };
+    backendApp.MongoDiscoverMembers.mockResolvedValueOnce({
+      success: true,
+      data: { members: [{ host: "mongo-1:27017", role: "PRIMARY", healthy: true }] },
+    });
+    await act(async () => {
+      renderer!.unmount();
+      renderer = create(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("mongodb", {
+            port: 27017,
+            mongoTopology: "replica",
+          })}
+        />,
+      );
+    });
+    await act(async () => {
+      findClickableByAnyText(renderer!, ["Replica set / multi-node"]).props.onClick();
+      await flushConnectionTestTick();
+    });
+    await act(async () => {
+      findButton(renderer!, "Discover members").props.onClick();
+      await flushConnectionTestTick();
+    });
+    expect(antdMessage.success).toHaveBeenCalledWith("Discovered 1 member.");
+
+    backendApp.MongoDiscoverMembers.mockResolvedValueOnce({
+      success: false,
+      message: "",
+    });
+    await act(async () => {
+      findButton(renderer!, "Discover members").props.onClick();
+      await flushConnectionTestTick();
+    });
+    expect(antdMessage.error).toHaveBeenCalledWith("Member discovery failed");
+  });
+
+  it("removes the remaining Chinese user-facing tail strings from ConnectionModal source", () => {
+    [
+      'label: "自动"',
+      '"已输入新值，保存时会替换当前已保存内容。"',
+      '<Tag color="blue">当前</Tag>',
+      '"当前"',
+      '"成员发现失败"',
+      '`发现 ${members.length} 个成员`',
+      '"达梦启用 SSL 时必须填写证书路径与私钥路径"',
+      '"TLS 客户端证书与私钥路径需要同时填写"',
+      '"HTTP 隧道主机不能为空"',
+      '"HTTP 隧道端口必须在 1-65535 之间"',
+      '"例如：orders-app_A1B2C3D4E5"',
+      '"例如：orders-prod-01"',
+      'help="例如: /Users/name/.ssh/id_rsa"',
+      'label: "NoSQL"',
+      'name: "Custom (自定义)"',
+    ].forEach((snippet) => {
+      expect(source).not.toContain(snippet);
+    });
+    expect(source).not.toContain('res?.message !== "已取消"');
+    expect(source.match(/isBackendCancelledResult\(res\)/g) ?? []).toHaveLength(3);
+    expect(source).toContain('name: "Dameng (达梦)"');
+  });
+
+  it("renders English URI feedback and file picker error shell while preserving raw detail", async () => {
+    storeState.appearance.uiVersion = "legacy";
+    setCurrentLanguage("en-US");
+    backendApp.SelectDatabaseFile.mockResolvedValue({
+      success: false,
+      message: "backend raw error: /tmp/app.db",
+    });
+    const { default: ConnectionModal } = await import("./ConnectionModal");
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<ConnectionModal open onClose={vi.fn()} />);
+    });
+
+    await act(async () => {
+      findClickableCard(renderer!, "MySQL").props.onClick();
+    });
+
+    await act(async () => {
+      findButton(renderer!, "Generate URI").props.onClick();
+    });
+
+    expect(textContent(renderer!.toJSON())).toContain("URI generated.");
+
+    await act(async () => {
+      findButton(renderer!, "Back").props.onClick();
+    });
+    await act(async () => {
+      findClickableCard(renderer!, "SQLite").props.onClick();
+    });
+    await act(async () => {
+      findButton(renderer!, "Browse...").props.onClick();
+      await flushConnectionTestTick();
+    });
+
+    expect(antdMessage.error).toHaveBeenCalledWith(
+      "Failed to select database file: backend raw error: /tmp/app.db",
+    );
+  });
+
+  it("retranslates test failure feedback while preserving raw detail when language changes in-place", async () => {
+    storeState.appearance.uiVersion = "legacy";
+    setCurrentLanguage("zh-CN");
+    backendApp.TestConnection.mockResolvedValue({
+      success: false,
+      message: "backend raw error: /tmp/app.db",
+    });
+    const { default: ConnectionModal } = await import("./ConnectionModal");
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<ConnectionModal open onClose={vi.fn()} />);
+    });
+
+    await act(async () => {
+      findClickableCard(renderer!, "MySQL").props.onClick();
+    });
+
+    await act(async () => {
+      findButton(renderer!, "测试连接").props.onClick();
+      await flushConnectionTestTick();
+    });
+
+    let pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("连接失败");
+    expect(pageText).toContain("测试失败: backend raw error: /tmp/app.db");
+    expect(pageText).toContain("查看原因");
+
+    await act(async () => {
+      storeState.setLanguagePreference("en-US");
+    });
+
+    pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain(
+      "Connection test failed: backend raw error: /tmp/app.db",
+    );
+    expect(pageText).toContain("View details");
+    expect(pageText).toContain("backend raw error: /tmp/app.db");
+  });
+
+  it("renders English data source groups and hints for the remaining step one copy", async () => {
+    storeState.appearance.uiVersion = "legacy";
+    setCurrentLanguage("en-US");
+    mockFormValues = {
+      jvmDiagnosticEnabled: true,
+      jvmDiagnosticTransport: "agent-bridge",
+    };
+    const { default: ConnectionModal } = await import("./ConnectionModal");
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<ConnectionModal open onClose={vi.fn()} />);
+    });
+
+    let pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("Relational databases");
+    expect(pageText).toContain("Domestic databases");
+    expect(pageText).toContain("NoSQL databases");
+    expect(pageText).toContain("Time-series databases");
+    expect(pageText).toContain("Other");
+    expect(pageText).toContain("Local file connection");
+    expect(pageText).toContain("Standard connection configuration");
+
+    await act(async () => {
+      findClickableByAnyText(renderer!, ["Other"]).props.onClick();
+    });
+    pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("JVM runtime");
+    expect(pageText).not.toContain("JVM Runtime");
+    expect(pageText).toContain("Custom");
+    expect(pageText).not.toContain("Custom (自定义)");
+  });
+
+  it("renders English custom driver DSN copy after the module was loaded in another language", async () => {
+    storeState.appearance.uiVersion = "legacy";
+    setCurrentLanguage("zh-CN");
+    const { default: ConnectionModal } = await import("./ConnectionModal");
+    setCurrentLanguage("en-US");
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("custom", {
+            driver: "mysql",
+            dsn: "user:pass@tcp(localhost:3306)/dbname",
+          })}
+        />,
+      );
+    });
+
+    const pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("Driver Name");
+    expect(pageText).toContain("Connection string (DSN)");
+    expect(pageText).toContain("Enter a Go database/sql driver name already registered by GoNavi");
+    expect(pageText).toContain("Do not enter a system ODBC/JDBC driver name directly or import a JDBC Jar");
+  });
+
+  it("renders English JVM fields and diagnostic transport copy", async () => {
+    storeState.appearance.uiVersion = "legacy";
+    setCurrentLanguage("en-US");
+    const { default: ConnectionModal } = await import("./ConnectionModal");
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("jvm", {
+            port: 9010,
+            jvm: {
+              allowedModes: ["jmx", "endpoint", "agent"],
+              preferredMode: "jmx",
+              diagnostic: {
+                enabled: true,
+                transport: "agent-bridge",
+              },
+            },
+          })}
+        />,
+      );
+    });
+
+    const pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("JMX host override");
+    expect(pageText).toContain("JMX port");
+    expect(pageText).toContain("JMX username");
+    expect(pageText).toContain("Endpoint address");
+    expect(pageText).toContain("Agent address");
+    expect(pageText).toContain("Diagnostic transport");
+    expect(pageText).toContain("Agent Bridge");
+    expect(pageText).toContain("Bridge diagnostic commands through GoNavi Agent.");
+    expect(pageText).toContain("Observe commands");
+    expect(pageText).toContain(
+      "Read-only troubleshooting commands such as thread, dashboard, and jvm.",
+    );
+    expect(pageText).toContain("Trace commands");
+    expect(pageText).toContain(
+      "Commands such as trace and watch that add extra overhead to the target.",
+    );
+    expect(pageText).toContain("High-risk commands");
+    expect(pageText).toContain(
+      "Commands that may change runtime state or cause noticeable performance impact.",
+    );
+  });
+
+  it("renders English protocol and database service fields", async () => {
+    storeState.appearance.uiVersion = "legacy";
+    setCurrentLanguage("en-US");
+    const { default: ConnectionModal } = await import("./ConnectionModal");
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("oceanbase", {
+            oceanBaseProtocol: "mysql",
+          })}
+        />,
+      );
+    });
+
+    let pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("OceanBase protocol");
+    expect(pageText).toContain("Choose MySQL for MySQL tenants and Oracle for Oracle tenants.");
+
+    await act(async () => {
+      renderer!.update(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("postgres", {
+            port: 5432,
+            database: "appdb",
+          })}
+        />,
+      );
+    });
+
+    pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("Default connection database");
+
+    await act(async () => {
+      renderer!.update(
+        <ConnectionModal
+          open
+          onClose={vi.fn()}
+          initialValues={initialConnection("oracle", {
+            port: 1521,
+            database: "ORCLPDB1",
+          })}
+        />,
+      );
+    });
+
+    pageText = textContent(renderer!.toJSON());
+    expect(pageText).toContain("Service Name");
+  });
+});

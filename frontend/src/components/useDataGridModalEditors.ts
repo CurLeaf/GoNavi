@@ -18,7 +18,7 @@ interface OpenRowEditorParams {
 }
 
 interface UseDataGridModalEditorsParams {
-  toEditableText: (value: any) => string;
+  toEditableText: (value: any, columnName?: string) => string;
   looksLikeJsonText: (text: string) => boolean;
 }
 
@@ -100,7 +100,7 @@ export const useDataGridModalEditors = ({
   ) => {
     if (!record || !dataIndex) return;
     const raw = record?.[dataIndex];
-    const text = toEditableText(raw);
+    const text = toEditableText(raw, dataIndex);
     const isJson = looksLikeJsonText(text);
     const titleText = typeof title === 'string'
       ? title

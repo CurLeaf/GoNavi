@@ -32,13 +32,64 @@ const getGlobalShortcutCaseBlock = (action: string) => {
 describe('tool center menu entries', () => {
   it('exposes snippet management next to shortcut management', () => {
     expect(appSource).toContain("key: 'snippet-settings'");
-    expect(appSource).toContain("title: '代码片段管理'");
+    expect(appSource).toContain("title: t('app.tools.entry.snippets.title')");
+    expect(appSource).toContain("description: t('app.tools.entry.snippets.description')");
     expect(appSource).toContain('setIsSnippetModalOpen(true)');
 
     const snippetIndex = appSource.indexOf("key: 'snippet-settings'");
     const shortcutIndex = appSource.indexOf("key: 'shortcut-settings'", snippetIndex);
     expect(snippetIndex).toBeGreaterThan(-1);
     expect(shortcutIndex).toBeGreaterThan(snippetIndex);
+  });
+
+  it('uses scalable side navigation for the tool center instead of horizontal segmented switching', () => {
+    expect(appSource).toContain("type ToolCenterGroupKey = 'config' | 'workflow' | 'workspace';");
+    expect(appSource).toContain("const [activeToolCenterGroupKey, setActiveToolCenterGroupKey] = useState<ToolCenterGroupKey>('config');");
+    expect(appSource).toContain("const [toolCenterBackGroupKey, setToolCenterBackGroupKey] = useState<ToolCenterGroupKey | null>(null);");
+    expect(appSource).toContain("title: t('app.tools.group.config.title')");
+    expect(appSource).toContain("title: t('app.tools.group.workflow.title')");
+    expect(appSource).toContain("title: t('app.tools.group.workspace.title')");
+    expect(appSource).toContain("toolCenterGroups.find((group) => group.key === activeToolCenterGroupKey)");
+    expect(appSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("gridTemplateColumns: '232px minmax(0, 1fr)'");
+    expect(appSource).toContain("const toolCenterNavPanelStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterNavScrollStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterContentPanelStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterDetailPanelStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterDetailBodyStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain('role="tablist" aria-orientation="vertical"');
+    expect(appSource).toContain('role="tab"');
+    expect(appSource).toContain('aria-selected={active}');
+    expect(appSource).toContain('title={`${group.title} - ${group.description}`}');
+    expect(appSource).toContain("borderRight: `1px solid ${overlayTheme.divider}`");
+    expect(appSource).toContain('setActiveToolCenterPane(null);');
+    expect(appSource).toContain('group.items.length');
+    expect(appSource).toContain("const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {");
+    expect(appSource).toContain("const [activeToolCenterPane, setActiveToolCenterPane] = useState<ToolCenterPaneState | null>(null);");
+    expect(appSource).toContain("const handleReturnToToolCenter = useCallback((closeChild?: () => void) => {");
+    expect(appSource).toContain("t('common.back_to_previous')");
+    expect(appSource).toContain("width={1080}");
+    expect(appSource).toContain('centered');
+  });
+
+  it('keeps the tool center modal height fixed across group switches and scrolls the list area internally', () => {
+    expect(appSource).toContain('const toolCenterModalContentStyle = useMemo<React.CSSProperties>(() => ({');
+    expect(appSource).toContain("height: 'min(820px, calc(100vh - 64px))'");
+    expect(appSource).toContain("const toolCenterModalWorkspaceStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("const toolCenterScrollableListStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appSource).toContain("body: { paddingTop: 8, paddingBottom: 8, overflow: 'hidden', flex: 1, minHeight: 0 }");
+    expect(appSource).toContain('style={toolCenterModalWorkspaceStyle}');
+    expect(appSource).toContain('style={toolCenterModalSplitStyle}');
+    expect(appSource).toContain('style={toolCenterNavPanelStyle}');
+    expect(appSource).toContain('style={toolCenterNavScrollStyle}');
+    expect(appSource).toContain('style={toolCenterContentPanelStyle}');
+    expect(appSource).toContain('style={toolCenterDetailPanelStyle}');
+    expect(appSource).toContain('style={toolCenterDetailBodyStyle}');
+    expect(appSource).toContain('style={toolCenterScrollableListStyle}');
+    expect(appSource).toContain("overflowY: 'auto'");
+    expect(appSource).toContain("borderTop: index === 0 ? `1px solid ${overlayTheme.divider}` : 'none'");
+    expect(appSource).toContain("borderBottom: `1px solid ${overlayTheme.divider}`");
   });
 
   it('keeps the v2 AI entry in the sidebar and the legacy AI entry on the content edge', () => {
@@ -74,7 +125,10 @@ describe('tool center menu entries', () => {
   it('lets the v2 Sidebar own the entire left layout instead of stacking legacy controls above it', () => {
     const siderIndex = appSource.indexOf("className={isV2Ui ? 'gn-v2-app-sider' : undefined}");
     const legacyGuardIndex = appSource.indexOf('{!isV2Ui && (', siderIndex);
-    const legacyCreateIndex = appSource.indexOf('新建连接', legacyGuardIndex);
+    const legacyCreateIndex = appSource.indexOf('<Button icon={<PlusOutlined />} onClick={handleCreateConnection}', legacyGuardIndex);
+    const legacyCreateTitleIndex = appSource.indexOf("title={t('connection.new')}", legacyCreateIndex);
+    const legacyQueryIndex = appSource.indexOf('<Button icon={<ConsoleSqlOutlined />} onClick={handleNewQuery}', legacyGuardIndex);
+    const legacyQueryTitleIndex = appSource.indexOf("title={t('query.new')}", legacyQueryIndex);
     const sidebarIndex = appSource.indexOf('<Sidebar', legacyGuardIndex);
     const floatingLogIndex = appSource.indexOf('Floating SQL Log Toggle', sidebarIndex);
     const floatingLogGuardIndex = appSource.indexOf('{!isV2Ui && (', floatingLogIndex);
@@ -83,6 +137,10 @@ describe('tool center menu entries', () => {
     expect(legacyGuardIndex).toBeGreaterThan(siderIndex);
     expect(legacyCreateIndex).toBeGreaterThan(legacyGuardIndex);
     expect(legacyCreateIndex).toBeLessThan(sidebarIndex);
+    expect(legacyCreateTitleIndex).toBeGreaterThan(legacyCreateIndex);
+    expect(legacyQueryIndex).toBeGreaterThan(legacyCreateIndex);
+    expect(legacyQueryIndex).toBeLessThan(sidebarIndex);
+    expect(legacyQueryTitleIndex).toBeGreaterThan(legacyQueryIndex);
     expect(appSource).toContain('paddingBottom: isV2Ui ? 0 : 58');
     expect(floatingLogIndex).toBeGreaterThan(sidebarIndex);
     expect(floatingLogGuardIndex).toBeGreaterThan(floatingLogIndex);
@@ -139,6 +197,10 @@ describe('tool center menu entries', () => {
   it('loads editable connection details before opening the edit modal so stored secrets can be shown', () => {
     expect(appSource).toContain("typeof backendApp?.GetEditableSavedConnection === 'function'");
     expect(appSource).toContain('const editableConnection = await backendApp.GetEditableSavedConnection(conn.id);');
+    expect(appSource).toContain('const errorMessage = error?.message;');
+    expect(appSource).toContain("typeof errorMessage === 'string'");
+    expect(appSource).toContain("t('app.connection.message.editable_load_failed_with_detail', { detail })");
+    expect(appSource).toContain("t('app.connection.message.editable_load_failed')");
     expect(appSource).toContain('setEditingConnection(nextConnection);');
     expect(appSource).toContain('setIsModalOpen(true);');
   });
@@ -259,8 +321,8 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain("setProperty('--gn-control-height-sm'");
     expect(appSource).toContain('fontFamily: resolvedUiFontFamily');
     expect(appSource).toContain('fontFamilyCode: resolvedMonoFontFamily');
-    expect(appSource).toContain('数据表字体大小');
-    expect(appSource).toContain('左侧库表字体大小');
+    expect(appSource).toContain("t('app.theme.data_table.font_size')");
+    expect(appSource).toContain("t('app.theme.data_table.sidebar_tree_font_size')");
     expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'ui\', installedFontFamilies)');
     expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies)');
     expect(appSource).toContain('ListInstalledFontFamilies()');
@@ -268,7 +330,18 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain("import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';");
     expect(appSource).toContain('<LinuxCJKFontBanner');
     expect(linuxCJKFontBannerSource).toContain('data-gonavi-linux-cjk-font-banner="true"');
-    expect(linuxCJKFontBannerSource).toContain('Linux CJK fonts missing / Ubuntu 中文字体缺失');
+    expect(linuxCJKFontBannerSource).toContain('useI18n');
+    expect(linuxCJKFontBannerSource).toContain("t('app.linux_cjk_font_banner.title')");
+    expect(linuxCJKFontBannerSource).toContain("t('app.linux_cjk_font_banner.description')");
+    expect(linuxCJKFontBannerSource).toContain("t('app.linux_cjk_font_banner.action.open_font_settings')");
+    expect(linuxCJKFontBannerSource).toContain("t('common.close')");
+    expect(linuxCJKFontBannerSource).not.toContain('Linux CJK fonts missing / Ubuntu 中文字体缺失');
+    expect(linuxCJKFontBannerSource).not.toContain('Chinese text may render as');
+    expect(linuxCJKFontBannerSource).not.toContain('Font Settings');
+    expect(appSource).toContain("t('app.theme.font_family.linux_cjk_install_prefix')");
+    expect(appSource).toContain("t('app.theme.font_family.linux_cjk_install_suffix')");
+    expect(appSource).not.toContain('Ubuntu/Linux 未检测到中文 CJK 字体');
+    expect(appSource).not.toContain('，然后重启 GoNavi。');
     expect(appSource).toContain('setIsLinuxCJKFontBannerDismissed(true)');
     expect(appSource).toContain('matchFontFamilyOption');
     expect(appSource).toContain('showSearch');

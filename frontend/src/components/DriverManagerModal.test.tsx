@@ -1,8 +1,13 @@
 import React from 'react';
+import { readFileSync } from 'node:fs';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import DriverManagerModal from './DriverManagerModal';
+
+const connectionModalSource = readFileSync(new URL('./ConnectionModal.tsx', import.meta.url), 'utf8');
+const driverManagerModalSource = readFileSync(new URL('./DriverManagerModal.tsx', import.meta.url), 'utf8');
+const sidebarSource = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
 
 const storeState = vi.hoisted(() => ({
   theme: 'light',
@@ -55,6 +60,20 @@ vi.mock('@ant-design/icons', () => {
     InfoCircleFilled: Icon,
     ReloadOutlined: Icon,
   };
+});
+
+describe('driver-agent update prompt placement', () => {
+  it('keeps revision mismatch prompts inside driver manager only', () => {
+    expect(driverManagerModalSource).toContain('需要重装');
+    expect(driverManagerModalSource).toContain('row.needsUpdate');
+
+    expect(connectionModalSource).not.toContain('当前数据源驱动代理建议重装');
+    expect(connectionModalSource).not.toContain('去驱动管理重装');
+
+    expect(sidebarSource).not.toContain('warnIfConnectionDriverAgentNeedsUpdate');
+    expect(sidebarSource).not.toContain('driver-agent-update-');
+    expect(sidebarSource).not.toContain('驱动代理需要重装：');
+  });
 });
 
 vi.mock('antd', () => {

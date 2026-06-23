@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readV2ThemeCss } from './test/readV2ThemeCss';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const v2ThemeCss = readFileSync(path.resolve(__dirname, './v2-theme.css'), 'utf8');
+const v2ThemeCss = readV2ThemeCss();
 
 describe('v2 modal confirm theme', () => {
   it('keeps static confirm title and content readable in dark theme', () => {

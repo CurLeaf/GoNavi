@@ -77,50 +77,62 @@ type JVMConfig struct {
 	Diagnostic    JVMDiagnosticConfig `json:"diagnostic,omitempty"`
 }
 
+// ConnectionProtectionConfig 存储生产连接保护的细粒度限制项。
+type ConnectionProtectionConfig struct {
+	RestrictDataEdit        bool `json:"restrictDataEdit,omitempty"`
+	RestrictStructureEdit   bool `json:"restrictStructureEdit,omitempty"`
+	RestrictScriptExecution bool `json:"restrictScriptExecution,omitempty"`
+	RestrictDataImport      bool `json:"restrictDataImport,omitempty"`
+}
+
 // ConnectionConfig 存储数据库连接的完整配置，包括 SSH、代理、SSL 等网络层设置。
 type ConnectionConfig struct {
-	ID                    string           `json:"id,omitempty"`
-	Type                  string           `json:"type"`
-	Host                  string           `json:"host"`
-	Port                  int              `json:"port"`
-	User                  string           `json:"user"`
-	Password              string           `json:"password"`
-	SavePassword          bool             `json:"savePassword,omitempty"` // Persist password in saved connection
-	Database              string           `json:"database"`
-	UseSSL                bool             `json:"useSSL,omitempty"`      // MySQL-like SSL/TLS switch
-	SSLMode               string           `json:"sslMode,omitempty"`     // preferred | required | skip-verify | disable
-	SSLCAPath             string           `json:"sslCAPath,omitempty"`   // TLS root CA / server certificate path
-	SSLCertPath           string           `json:"sslCertPath,omitempty"` // TLS client certificate path (e.g., Dameng)
-	SSLKeyPath            string           `json:"sslKeyPath,omitempty"`  // TLS client private key path (e.g., Dameng)
-	UseSSH                bool             `json:"useSSH"`
-	SSH                   SSHConfig        `json:"ssh"`
-	UseProxy              bool             `json:"useProxy,omitempty"`
-	Proxy                 ProxyConfig      `json:"proxy,omitempty"`
-	UseHTTPTunnel         bool             `json:"useHttpTunnel,omitempty"`
-	HTTPTunnel            HTTPTunnelConfig `json:"httpTunnel,omitempty"`
-	Driver                string           `json:"driver,omitempty"`                // For custom connection
-	DSN                   string           `json:"dsn,omitempty"`                   // For custom connection
-	ConnectionParams      string           `json:"connectionParams,omitempty"`      // Extra URI query parameters for built-in drivers
-	Timeout               int              `json:"timeout,omitempty"`               // Connection timeout in seconds (default: 30)
-	RedisDB               int              `json:"redisDB,omitempty"`               // Redis database index (0-15)
-	RedisSentinelMaster   string           `json:"redisSentinelMaster,omitempty"`   // Redis Sentinel master name
-	RedisSentinelUser     string           `json:"redisSentinelUser,omitempty"`     // Redis Sentinel auth user
-	RedisSentinelPassword string           `json:"redisSentinelPassword,omitempty"` // Redis Sentinel auth password
-	URI                   string           `json:"uri,omitempty"`                   // Connection URI for copy/paste
-	ClickHouseProtocol    string           `json:"clickHouseProtocol,omitempty"`    // auto | http | native
-	OceanBaseProtocol     string           `json:"oceanBaseProtocol,omitempty"`     // OceanBase tenant compatibility protocol: mysql | oracle
-	Hosts                 []string         `json:"hosts,omitempty"`                 // Multi-host addresses: host:port
-	Topology              string           `json:"topology,omitempty"`              // single | replica | cluster | sentinel
-	MySQLReplicaUser      string           `json:"mysqlReplicaUser,omitempty"`      // MySQL replica auth user
-	MySQLReplicaPassword  string           `json:"mysqlReplicaPassword,omitempty"`  // MySQL replica auth password
-	ReplicaSet            string           `json:"replicaSet,omitempty"`            // MongoDB replica set name
-	AuthSource            string           `json:"authSource,omitempty"`            // MongoDB authSource
-	ReadPreference        string           `json:"readPreference,omitempty"`        // MongoDB readPreference
-	MongoSRV              bool             `json:"mongoSrv,omitempty"`              // MongoDB use mongodb+srv URI scheme
-	MongoAuthMechanism    string           `json:"mongoAuthMechanism,omitempty"`    // MongoDB authMechanism
-	MongoReplicaUser      string           `json:"mongoReplicaUser,omitempty"`      // MongoDB replica auth user
-	MongoReplicaPassword  string           `json:"mongoReplicaPassword,omitempty"`  // MongoDB replica auth password
-	JVM                   JVMConfig        `json:"jvm,omitempty"`                   // JVM connector config
+	ID                       string                     `json:"id,omitempty"`
+	Type                     string                     `json:"type"`
+	Host                     string                     `json:"host"`
+	Port                     int                        `json:"port"`
+	User                     string                     `json:"user"`
+	Password                 string                     `json:"password"`
+	SavePassword             bool                       `json:"savePassword,omitempty"` // Persist password in saved connection
+	Database                 string                     `json:"database"`
+	ReadOnly                 bool                       `json:"readOnly,omitempty"` // Legacy production guard compatibility flag. Prefer Protection for new logic.
+	Protection               ConnectionProtectionConfig `json:"protection,omitempty"`
+	UseSSL                   bool                       `json:"useSSL,omitempty"`      // MySQL-like SSL/TLS switch
+	SSLMode                  string                     `json:"sslMode,omitempty"`     // preferred | required | skip-verify | disable
+	SSLCAPath                string                     `json:"sslCAPath,omitempty"`   // TLS root CA / server certificate path
+	SSLCertPath              string                     `json:"sslCertPath,omitempty"` // TLS client certificate path (e.g., Dameng)
+	SSLKeyPath               string                     `json:"sslKeyPath,omitempty"`  // TLS client private key path (e.g., Dameng)
+	UseSSH                   bool                       `json:"useSSH"`
+	SSH                      SSHConfig                  `json:"ssh"`
+	UseProxy                 bool                       `json:"useProxy,omitempty"`
+	Proxy                    ProxyConfig                `json:"proxy,omitempty"`
+	UseHTTPTunnel            bool                       `json:"useHttpTunnel,omitempty"`
+	HTTPTunnel               HTTPTunnelConfig           `json:"httpTunnel,omitempty"`
+	Driver                   string                     `json:"driver,omitempty"`                   // For custom connection
+	DSN                      string                     `json:"dsn,omitempty"`                      // For custom connection
+	ConnectionParams         string                     `json:"connectionParams,omitempty"`         // Extra URI query parameters for built-in drivers
+	Timeout                  int                        `json:"timeout,omitempty"`                  // Connection timeout in seconds (default: 30)
+	KeepAliveEnabled         bool                       `json:"keepAliveEnabled,omitempty"`         // Enable background keep-alive ping for long-lived cached connections
+	KeepAliveIntervalMinutes int                        `json:"keepAliveIntervalMinutes,omitempty"` // Keep-alive ping interval in minutes (default: 240)
+	RedisDB                  int                        `json:"redisDB,omitempty"`                  // Redis database index (0-15)
+	RedisSentinelMaster      string                     `json:"redisSentinelMaster,omitempty"`      // Redis Sentinel master name
+	RedisSentinelUser        string                     `json:"redisSentinelUser,omitempty"`        // Redis Sentinel auth user
+	RedisSentinelPassword    string                     `json:"redisSentinelPassword,omitempty"`    // Redis Sentinel auth password
+	URI                      string                     `json:"uri,omitempty"`                      // Connection URI for copy/paste
+	ClickHouseProtocol       string                     `json:"clickHouseProtocol,omitempty"`       // auto | http | native
+	OceanBaseProtocol        string                     `json:"oceanBaseProtocol,omitempty"`        // OceanBase tenant compatibility protocol: mysql | oracle
+	Hosts                    []string                   `json:"hosts,omitempty"`                    // Multi-host addresses: host:port
+	Topology                 string                     `json:"topology,omitempty"`                 // single | replica | cluster | sentinel
+	MySQLReplicaUser         string                     `json:"mysqlReplicaUser,omitempty"`         // MySQL replica auth user
+	MySQLReplicaPassword     string                     `json:"mysqlReplicaPassword,omitempty"`     // MySQL replica auth password
+	ReplicaSet               string                     `json:"replicaSet,omitempty"`               // MongoDB replica set name
+	AuthSource               string                     `json:"authSource,omitempty"`               // MongoDB authSource
+	ReadPreference           string                     `json:"readPreference,omitempty"`           // MongoDB readPreference
+	MongoSRV                 bool                       `json:"mongoSrv,omitempty"`                 // MongoDB use mongodb+srv URI scheme
+	MongoAuthMechanism       string                     `json:"mongoAuthMechanism,omitempty"`       // MongoDB authMechanism
+	MongoReplicaUser         string                     `json:"mongoReplicaUser,omitempty"`         // MongoDB replica auth user
+	MongoReplicaPassword     string                     `json:"mongoReplicaPassword,omitempty"`     // MongoDB replica auth password
+	JVM                      JVMConfig                  `json:"jvm,omitempty"`                      // JVM connector config
 }
 
 // ResultSetData 表示一个查询结果集（行 + 列名），用于多结果集场景。

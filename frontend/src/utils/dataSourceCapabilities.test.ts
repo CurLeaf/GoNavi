@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { getDataSourceCapabilities } from './dataSourceCapabilities';
+import { getDataSourceCapabilities, shouldShowOceanBaseRowNumberColumn } from './dataSourceCapabilities';
 
 describe('dataSourceCapabilities', () => {
   it('treats Oracle table preview totals as manual exact count plus approximate metadata count', () => {
@@ -55,6 +55,19 @@ describe('dataSourceCapabilities', () => {
       supportsSqlQueryExport: true,
       supportsCopyInsert: true,
       preferManualTotalCount: false,
+    });
+  });
+
+  it('treats Trino as an editable SQL datasource without database-level DDL shortcuts', () => {
+    expect(getDataSourceCapabilities({ type: 'trino' })).toMatchObject({
+      type: 'trino',
+      supportsQueryEditor: true,
+      supportsSqlQueryExport: true,
+      supportsCopyInsert: true,
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
     });
   });
 
@@ -227,6 +240,61 @@ describe('dataSourceCapabilities', () => {
     });
   });
 
+  it('forces supported SQL connections marked read-only into query-only mode', () => {
+    expect(getDataSourceCapabilities({ type: 'postgres', readOnly: true })).toMatchObject({
+      type: 'postgres',
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      supportsMessagePublish: false,
+      forceReadOnlyQueryResult: true,
+      forceReadOnlyStructureDesigner: true,
+    });
+  });
+
+  it('allows script execution while still disabling result edits when only data-edit protection is enabled', () => {
+    expect(getDataSourceCapabilities({
+      type: 'postgres',
+      protection: {
+        restrictDataEdit: true,
+      },
+    })).toMatchObject({
+      type: 'postgres',
+      supportsCreateDatabase: true,
+      supportsRenameDatabase: true,
+      supportsDropDatabase: true,
+      forceReadOnlyQueryResult: true,
+      forceReadOnlyStructureDesigner: false,
+    });
+  });
+
+  it('keeps query results editable while disabling DDL shortcuts when only structure protection is enabled', () => {
+    expect(getDataSourceCapabilities({
+      type: 'postgres',
+      protection: {
+        restrictStructureEdit: true,
+      },
+    })).toMatchObject({
+      type: 'postgres',
+      supportsCreateDatabase: false,
+      supportsRenameDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
+      forceReadOnlyStructureDesigner: true,
+    });
+  });
+
+  it('ignores readOnly for datasource types that do not support connection-level production guard', () => {
+    expect(getDataSourceCapabilities({ type: 'redis', readOnly: true })).toMatchObject({
+      type: 'redis',
+      supportsQueryEditor: false,
+      supportsCreateDatabase: false,
+      supportsDropDatabase: false,
+      forceReadOnlyQueryResult: false,
+      forceReadOnlyStructureDesigner: true,
+    });
+  });
+
   it('treats RabbitMQ as a queryable messaging datasource with publish support', () => {
     expect(getDataSourceCapabilities({ type: 'rabbitmq' })).toMatchObject({
       type: 'rabbitmq',
@@ -256,6 +324,14 @@ describe('dataSourceCapabilities', () => {
       preferManualTotalCount: true,
       supportsApproximateTableCount: true,
     });
+  });
+
+  it('shows row numbers for OceanBase datasources regardless of protocol normalization', () => {
+    expect(shouldShowOceanBaseRowNumberColumn({ type: 'oceanbase' })).toBe(true);
+    expect(shouldShowOceanBaseRowNumberColumn({ type: 'oceanbase', oceanBaseProtocol: 'oracle' })).toBe(true);
+    expect(shouldShowOceanBaseRowNumberColumn({ type: 'custom', driver: 'oceanbase', oceanBaseProtocol: 'oracle' })).toBe(true);
+    expect(shouldShowOceanBaseRowNumberColumn({ type: 'oracle' })).toBe(false);
+    expect(shouldShowOceanBaseRowNumberColumn({ type: 'mysql' })).toBe(false);
   });
 
   it('treats custom OceanBase Oracle driver as Oracle capabilities', () => {

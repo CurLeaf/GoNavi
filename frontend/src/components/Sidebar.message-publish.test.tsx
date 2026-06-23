@@ -18,6 +18,6 @@ describe('Sidebar Kafka publish entry', () => {
     expect(sidebarSource).toContain('<MessagePublishModal');
     expect(modalSource).toContain('buildMessagePublishCommand');
     expect(modalSource).toContain('DBQuery(');
-    expect(modalSource).toContain('消息体');
+    expect(modalSource).toContain("t('message_publish_modal.field.body.label')");
   });
 });

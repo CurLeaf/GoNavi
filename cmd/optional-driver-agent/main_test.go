@@ -101,6 +101,9 @@ type fakeAgentTimeoutDB struct {
 	execCalled         bool
 	execContextCalled  bool
 	deadlineSet        bool
+	queryMessages      []string
+	multiResults       []connection.ResultSetData
+	multiMessages      []string
 }
 
 func (f *fakeAgentTimeoutDB) Connect(config connection.ConnectionConfig) error { return nil }
@@ -116,6 +119,14 @@ func (f *fakeAgentTimeoutDB) QueryContext(ctx context.Context, query string) ([]
 		f.deadlineSet = true
 	}
 	return []map[string]interface{}{{"ok": 1}}, []string{"ok"}, nil
+}
+func (f *fakeAgentTimeoutDB) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	data, fields, err := f.QueryContext(context.Background(), query)
+	return data, fields, append([]string(nil), f.queryMessages...), err
+}
+func (f *fakeAgentTimeoutDB) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
+	data, fields, err := f.QueryContext(ctx, query)
+	return data, fields, append([]string(nil), f.queryMessages...), err
 }
 func (f *fakeAgentTimeoutDB) Exec(query string) (int64, error) {
 	f.execCalled = true
@@ -150,6 +161,15 @@ func (f *fakeAgentTimeoutDB) GetForeignKeys(dbName, tableName string) ([]connect
 func (f *fakeAgentTimeoutDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefinition, error) {
 	return nil, nil
 }
+func (f *fakeAgentTimeoutDB) QueryMultiWithMessages(query string) ([]connection.ResultSetData, []string, error) {
+	return append([]connection.ResultSetData(nil), f.multiResults...), append([]string(nil), f.multiMessages...), nil
+}
+func (f *fakeAgentTimeoutDB) QueryMultiContextWithMessages(ctx context.Context, query string) ([]connection.ResultSetData, []string, error) {
+	if _, ok := ctx.Deadline(); ok {
+		f.deadlineSet = true
+	}
+	return f.QueryMultiWithMessages(query)
+}
 
 type fakeAgentSessionDB struct {
 	fakeAgentTimeoutDB
@@ -165,6 +185,7 @@ type fakeAgentStatementSession struct {
 	queryCalls int
 	execCalls  int
 	closed     bool
+	messages   []string
 }
 
 func (f *fakeAgentStatementSession) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -174,6 +195,14 @@ func (f *fakeAgentStatementSession) Query(query string) ([]map[string]interface{
 func (f *fakeAgentStatementSession) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	f.queryCalls++
 	return []map[string]interface{}{{"session_ok": 1}}, []string{"session_ok"}, nil
+}
+func (f *fakeAgentStatementSession) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	data, fields, err := f.QueryContext(context.Background(), query)
+	return data, fields, append([]string(nil), f.messages...), err
+}
+func (f *fakeAgentStatementSession) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
+	data, fields, err := f.QueryContext(ctx, query)
+	return data, fields, append([]string(nil), f.messages...), err
 }
 
 func (f *fakeAgentStatementSession) Exec(query string) (int64, error) {
@@ -188,6 +217,64 @@ func (f *fakeAgentStatementSession) ExecContext(ctx context.Context, query strin
 func (f *fakeAgentStatementSession) Close() error {
 	f.closed = true
 	return nil
+}
+
+type fakeAgentStreamSession struct {
+	closed      bool
+	streamCalls int
+	deadlineSet bool
+}
+
+func (f *fakeAgentStreamSession) Exec(query string) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeAgentStreamSession) ExecContext(ctx context.Context, query string) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeAgentStreamSession) Close() error {
+	f.closed = true
+	return nil
+}
+
+func (f *fakeAgentStreamSession) StreamQuery(query string, consumer db.QueryStreamConsumer) error {
+	return f.StreamQueryContext(context.Background(), query, consumer)
+}
+
+func (f *fakeAgentStreamSession) StreamQueryContext(ctx context.Context, query string, consumer db.QueryStreamConsumer) error {
+	f.streamCalls++
+	if _, ok := ctx.Deadline(); ok {
+		f.deadlineSet = true
+	}
+	if err := consumer.SetColumns([]string{"id", "name"}); err != nil {
+		return err
+	}
+	if valueConsumer, ok := consumer.(db.QueryStreamValueConsumer); ok {
+		if err := valueConsumer.ConsumeRowValues([]interface{}{1, "alice"}); err != nil {
+			return err
+		}
+		if err := valueConsumer.ConsumeRowValues([]interface{}{2, "bob"}); err != nil {
+			return err
+		}
+		return nil
+	}
+	if err := consumer.ConsumeRow(map[string]interface{}{"id": 1, "name": "alice"}); err != nil {
+		return err
+	}
+	return consumer.ConsumeRow(map[string]interface{}{"id": 2, "name": "bob"})
+}
+
+type fakeAgentSessionStreamDB struct {
+	fakeAgentTimeoutDB
+	session   *fakeAgentStreamSession
+	openCalls int
+}
+
+func (f *fakeAgentSessionStreamDB) OpenSessionExecer(ctx context.Context) (db.StatementExecer, error) {
+	f.openCalls++
+	f.session = &fakeAgentStreamSession{}
+	return f.session, nil
 }
 
 func TestQueryWithOptionalTimeout_UsesQueryContext(t *testing.T) {
@@ -239,6 +326,77 @@ func TestQueryWithOptionalTimeout_ClickHouseLegacyModeUsesQueryContext(t *testin
 	}
 }
 
+func TestHandleRequest_QueryIncludesServerMessages(t *testing.T) {
+	old := agentDriverType
+	defer func() { agentDriverType = old }()
+	agentDriverType = "sqlserver"
+
+	fake := &fakeAgentTimeoutDB{
+		queryMessages: []string{"PRINT sql line 1", "PRINT sql line 2"},
+	}
+	runtimeState := &agentRuntime{inst: fake, sessions: make(map[string]db.StatementExecer)}
+
+	resp := handleRequest(runtimeState, agentRequest{
+		ID:        11,
+		Method:    agentMethodQuery,
+		Query:     "exec dbo.p_get_select",
+		TimeoutMs: int64((2 * time.Second).Milliseconds()),
+	})
+	if !resp.Success {
+		t.Fatalf("query request failed: %s", resp.Error)
+	}
+	if len(resp.Messages) != 2 || resp.Messages[0] != "PRINT sql line 1" {
+		t.Fatalf("expected query messages to be preserved, got %#v", resp.Messages)
+	}
+}
+
+func TestHandleRequest_QueryMultiIncludesResultSetsAndMessages(t *testing.T) {
+	old := agentDriverType
+	defer func() { agentDriverType = old }()
+	agentDriverType = "sqlserver"
+
+	fake := &fakeAgentTimeoutDB{
+		multiResults: []connection.ResultSetData{
+			{
+				StatementIndex: 1,
+				Rows:           []map[string]interface{}{{"name": "master"}},
+				Columns:        []string{"name"},
+			},
+			{
+				StatementIndex: 1,
+				Rows:           []map[string]interface{}{},
+				Columns:        []string{},
+				Messages:       []string{"PRINT generated sql"},
+			},
+		},
+		multiMessages: []string{"batch top-level message"},
+	}
+	runtimeState := &agentRuntime{inst: fake, sessions: make(map[string]db.StatementExecer)}
+
+	resp := handleRequest(runtimeState, agentRequest{
+		ID:        12,
+		Method:    agentMethodQueryMulti,
+		Query:     "exec dbo.p_get_select",
+		TimeoutMs: int64((2 * time.Second).Milliseconds()),
+	})
+	if !resp.Success {
+		t.Fatalf("queryMulti request failed: %s", resp.Error)
+	}
+	if len(resp.Messages) != 1 || resp.Messages[0] != "batch top-level message" {
+		t.Fatalf("expected top-level messages to be preserved, got %#v", resp.Messages)
+	}
+	resultSets, ok := resp.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", resp.Data)
+	}
+	if len(resultSets) != 2 {
+		t.Fatalf("expected 2 result sets, got %#v", resultSets)
+	}
+	if len(resultSets[1].Messages) != 1 || resultSets[1].Messages[0] != "PRINT generated sql" {
+		t.Fatalf("expected message-only result set to be preserved, got %#v", resultSets[1])
+	}
+}
+
 func TestHandleRequest_UsesPinnedSessionForSessionScopedQueryAndExec(t *testing.T) {
 	old := agentDriverType
 	defer func() { agentDriverType = old }()
@@ -270,6 +428,9 @@ func TestHandleRequest_UsesPinnedSessionForSessionScopedQueryAndExec(t *testing.
 	})
 	if !queryResp.Success {
 		t.Fatalf("session query failed: %s", queryResp.Error)
+	}
+	if len(queryResp.Messages) != 0 {
+		t.Fatalf("expected empty default session messages, got %#v", queryResp.Messages)
 	}
 	if fake.queryCalled || fake.queryContextCalled {
 		t.Fatalf("expected session query to bypass database-level query path, got Query=%v QueryContext=%v", fake.queryCalled, fake.queryContextCalled)
@@ -304,5 +465,137 @@ func TestHandleRequest_UsesPinnedSessionForSessionScopedQueryAndExec(t *testing.
 	}
 	if !fake.session.closed {
 		t.Fatal("expected pinned session to close")
+	}
+}
+
+func TestHandleStreamRequest_UsesSessionStreamerAndWritesChunks(t *testing.T) {
+	old := agentDriverType
+	originalAsync := runAgentMemoryTrimAsync
+	originalTrim := agentMemoryTrimFn
+	originalLastAt := agentMemoryTrimLastAt.Load()
+	defer func() { agentDriverType = old }()
+	defer func() {
+		runAgentMemoryTrimAsync = originalAsync
+		agentMemoryTrimFn = originalTrim
+		agentMemoryTrimRunning.Store(false)
+		agentMemoryTrimLastAt.Store(originalLastAt)
+	}()
+	agentDriverType = "oceanbase"
+	agentMemoryTrimRunning.Store(false)
+	agentMemoryTrimLastAt.Store(0)
+
+	fake := &fakeAgentSessionStreamDB{}
+	runtimeState := &agentRuntime{
+		inst:     fake,
+		sessions: make(map[string]db.StatementExecer),
+	}
+
+	trimmed := 0
+	runAgentMemoryTrimAsync = func(fn func()) {
+		fn()
+	}
+	agentMemoryTrimFn = func() {
+		trimmed++
+	}
+
+	var out bytes.Buffer
+	writer := bufio.NewWriter(&out)
+	if err := handleStreamRequest(runtimeState, agentRequest{
+		ID:        9,
+		Method:    agentMethodStreamQuery,
+		Query:     "SELECT * FROM person_info",
+		TimeoutMs: int64((2 * time.Second).Milliseconds()),
+	}, writer); err != nil {
+		t.Fatalf("handleStreamRequest 返回错误: %v", err)
+	}
+
+	if fake.openCalls != 1 {
+		t.Fatalf("expected OpenSessionExecer called once, got %d", fake.openCalls)
+	}
+	if fake.session == nil || fake.session.streamCalls != 1 {
+		t.Fatalf("expected session streamer used once, session=%#v", fake.session)
+	}
+	if !fake.session.deadlineSet {
+		t.Fatal("expected stream query context deadline to be set")
+	}
+	if !fake.session.closed {
+		t.Fatal("expected session to close after streaming")
+	}
+	if fake.queryCalled || fake.queryContextCalled {
+		t.Fatalf("unexpected fallback query path, Query=%v QueryContext=%v", fake.queryCalled, fake.queryContextCalled)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 stream responses, got %d: %q", len(lines), out.String())
+	}
+
+	var columnsResp struct {
+		Success   bool     `json:"success"`
+		ChunkType string   `json:"chunkType"`
+		Fields    []string `json:"fields"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &columnsResp); err != nil {
+		t.Fatalf("decode columns response failed: %v", err)
+	}
+	if !columnsResp.Success || columnsResp.ChunkType != agentChunkColumns || len(columnsResp.Fields) != 2 {
+		t.Fatalf("unexpected columns response: %#v", columnsResp)
+	}
+
+	var rowsResp struct {
+		Success   bool            `json:"success"`
+		ChunkType string          `json:"chunkType"`
+		Data      [][]interface{} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &rowsResp); err != nil {
+		t.Fatalf("decode rows response failed: %v", err)
+	}
+	if !rowsResp.Success || rowsResp.ChunkType != agentChunkRows || len(rowsResp.Data) != 2 {
+		t.Fatalf("unexpected rows response: %#v", rowsResp)
+	}
+	if got := rowsResp.Data[1][1]; got != "bob" {
+		t.Fatalf("unexpected streamed row payload: %v", rowsResp.Data)
+	}
+
+	var doneResp struct {
+		Success   bool   `json:"success"`
+		ChunkType string `json:"chunkType"`
+	}
+	if err := json.Unmarshal([]byte(lines[2]), &doneResp); err != nil {
+		t.Fatalf("decode done response failed: %v", err)
+	}
+	if !doneResp.Success || doneResp.ChunkType != agentChunkDone {
+		t.Fatalf("unexpected done response: %#v", doneResp)
+	}
+	if trimmed != 0 {
+		t.Fatalf("小流式任务不应触发内存回收，got=%d", trimmed)
+	}
+}
+
+func TestMaybeReleaseAgentMemory_TriggersTrimForLargeJobs(t *testing.T) {
+	originalAsync := runAgentMemoryTrimAsync
+	originalTrim := agentMemoryTrimFn
+	originalLastAt := agentMemoryTrimLastAt.Load()
+	t.Cleanup(func() {
+		runAgentMemoryTrimAsync = originalAsync
+		agentMemoryTrimFn = originalTrim
+		agentMemoryTrimRunning.Store(false)
+		agentMemoryTrimLastAt.Store(originalLastAt)
+	})
+
+	agentMemoryTrimRunning.Store(false)
+	agentMemoryTrimLastAt.Store(0)
+	triggered := 0
+	runAgentMemoryTrimAsync = func(fn func()) {
+		fn()
+	}
+	agentMemoryTrimFn = func() {
+		triggered++
+	}
+
+	maybeReleaseAgentMemory("test-large-query", agentMemoryTrimRowsThreshold)
+
+	if triggered != 1 {
+		t.Fatalf("大查询完成后应触发一次内存回收，got=%d", triggered)
 	}
 }

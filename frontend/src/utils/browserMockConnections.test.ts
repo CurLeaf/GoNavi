@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { t } from '../i18n';
 import { duplicateBrowserMockConnection } from './browserMockConnections';
 
 describe('duplicateBrowserMockConnection', () => {
@@ -20,7 +21,7 @@ describe('duplicateBrowserMockConnection', () => {
 
     expect(duplicated.id).toBe('conn-2');
     expect(duplicated.config.id).toBe('conn-2');
-    expect(duplicated.name).toBe('Primary - 副本');
+    expect(duplicated.name).toBe(`Primary${t('connection.copy_suffix')}`);
     expect(duplicated.includeDatabases).toEqual(['appdb']);
   });
 });

@@ -21,6 +21,7 @@ import (
 	"GoNavi-Wails/internal/logger"
 	proxytunnel "GoNavi-Wails/internal/proxy"
 	"GoNavi-Wails/internal/secretstore"
+	"GoNavi-Wails/shared/i18n"
 	"github.com/google/uuid"
 )
 
@@ -41,9 +42,12 @@ var (
 )
 
 type cachedDatabase struct {
-	inst     db.Database
-	lastPing time.Time
-	config   connection.ConnectionConfig
+	inst              db.Database
+	lastPing          time.Time
+	config            connection.ConnectionConfig
+	keepAliveEnabled  bool
+	keepAliveInterval time.Duration
+	keepAliveInFlight bool
 }
 
 type cachedConnectFailure struct {
@@ -76,6 +80,8 @@ type App struct {
 	mu                 sync.RWMutex // Mutex for cache access
 	updateMu           sync.Mutex
 	updateState        updateState
+	i18nMu             sync.RWMutex
+	localizer          *i18n.Localizer
 	queryMu            sync.RWMutex
 	configDir          string
 	secretStore        secretstore.SecretStore
@@ -85,6 +91,8 @@ type App struct {
 	jvmPreviewTokenMu  sync.Mutex
 	jvmPreviewTokens   map[string]jvmPreviewConfirmationToken
 	jvmPreviewTokenTTL time.Duration
+	keepAliveCancel    context.CancelFunc
+	keepAliveDone      chan struct{}
 }
 
 // NewApp creates a new App application struct
@@ -103,9 +111,57 @@ func NewAppWithSecretStore(store secretstore.SecretStore) *App {
 		sqlTransactions:    make(map[string]*managedSQLTransaction),
 		configDir:          resolveAppConfigDir(),
 		secretStore:        store,
+		localizer:          newAppLocalizer(),
 		jvmPreviewTokens:   make(map[string]jvmPreviewConfirmationToken),
 		jvmPreviewTokenTTL: defaultJVMPreviewConfirmationTokenTTL,
 	}
+}
+
+func newAppLocalizer() *i18n.Localizer {
+	localizer, err := i18n.NewLocalizer(i18n.LanguageEnUS)
+	if err != nil {
+		logger.Warnf("加载应用多语言目录失败：%v", err)
+		return nil
+	}
+	return localizer
+}
+
+func (a *App) SetLanguage(language string) {
+	normalized, ok := i18n.NormalizeLanguage(language)
+	if !ok {
+		return
+	}
+	a.i18nMu.Lock()
+	defer a.i18nMu.Unlock()
+	if a.localizer == nil {
+		a.localizer = newAppLocalizer()
+	}
+	if a.localizer != nil {
+		a.localizer.SetLanguage(normalized)
+	}
+}
+
+func (a *App) appText(key string, params map[string]any) string {
+	if a == nil {
+		return key
+	}
+	a.i18nMu.RLock()
+	if a.localizer != nil {
+		text := a.localizer.T(key, params)
+		a.i18nMu.RUnlock()
+		return text
+	}
+	a.i18nMu.RUnlock()
+
+	a.i18nMu.Lock()
+	defer a.i18nMu.Unlock()
+	if a.localizer == nil {
+		a.localizer = newAppLocalizer()
+	}
+	if a.localizer == nil {
+		return key
+	}
+	return a.localizer.T(key, params)
 }
 
 // InitializeLifecycle attaches runtime context without exposing lifecycle internals to Wails bindings.
@@ -134,6 +190,7 @@ func (a *App) startup(ctx context.Context) {
 		installMacNativeWindowDiagnostics(logger.Path())
 	}
 	applyMacWindowTranslucencyFix()
+	a.startConnectionKeepAliveLoop()
 	logger.Infof("应用启动完成（首次连接保护窗口=%s，最多重试=%d 次）", startupConnectRetryWindow, startupConnectRetryAttempts)
 }
 
@@ -182,6 +239,7 @@ func (a *App) LogWindowDiagnostic(stage string, payload string) {
 // Shutdown is called when the app terminates.
 func (a *App) Shutdown() {
 	logger.Infof("应用开始关闭，准备释放资源")
+	a.stopConnectionKeepAliveLoop()
 	a.rollbackPendingSQLTransactionsOnShutdown()
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -224,6 +282,9 @@ func normalizeCacheKeyConfig(config connection.ConnectionConfig) connection.Conn
 	}
 	// timeout 仅用于 Query/Ping 控制，不应作为物理连接复用键的一部分。
 	normalized.Timeout = 0
+	// keepalive 仅影响后台保活策略，不应参与物理连接复用键。
+	normalized.KeepAliveEnabled = false
+	normalized.KeepAliveIntervalMinutes = 0
 	normalized.SavePassword = false
 
 	if !normalized.UseSSH {
@@ -297,6 +358,7 @@ func normalizeConnectionReleaseMatchConfig(config connection.ConnectionConfig) c
 	normalized := normalizeCacheKeyConfig(config)
 	normalized.Database = ""
 	normalized.RedisDB = 0
+	normalized.ConnectionParams = ""
 	return normalized
 }
 
@@ -305,6 +367,72 @@ func getConnectionReleaseMatchKey(config connection.ConnectionConfig) string {
 	b, _ := json.Marshal(normalized)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
+}
+
+type cachedDatabaseCloseTarget struct {
+	key  string
+	inst db.Database
+}
+
+func (a *App) releaseCachedDatabaseConnectionsForConfig(config connection.ConnectionConfig) int {
+	if a == nil {
+		return 0
+	}
+	return a.releaseCachedDatabaseConnectionsByMatchKey(getConnectionReleaseMatchKey(config))
+}
+
+func (a *App) releaseCachedDatabaseConnectionsByMatchKey(targetKey string) int {
+	if a == nil || strings.TrimSpace(targetKey) == "" {
+		return 0
+	}
+
+	targets := make([]cachedDatabaseCloseTarget, 0)
+	a.mu.Lock()
+	for key, entry := range a.dbCache {
+		entryConfig := entry.config
+		if strings.TrimSpace(entryConfig.Type) == "" {
+			continue
+		}
+		if getConnectionReleaseMatchKey(entryConfig) != targetKey {
+			continue
+		}
+		targets = append(targets, cachedDatabaseCloseTarget{key: key, inst: entry.inst})
+		delete(a.dbCache, key)
+	}
+	a.mu.Unlock()
+
+	for _, target := range targets {
+		if target.inst == nil {
+			continue
+		}
+		if closeErr := target.inst.Close(); closeErr != nil {
+			logger.Error(closeErr, "关闭缓存连接失败：缓存Key=%s", shortCacheKey(target.key))
+		}
+	}
+
+	return len(targets)
+}
+
+func isMySQLMaxUserConnectionsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(normalizeErrorMessage(err))
+	return strings.Contains(message, "max_user_connections") ||
+		(strings.Contains(message, "error 1226") && strings.Contains(message, "has exceeded"))
+}
+
+func withMySQLMaxUserConnectionsHint(err error, released int) error {
+	if err == nil {
+		return nil
+	}
+	if !isMySQLMaxUserConnectionsError(err) {
+		return err
+	}
+	if released > 0 {
+		return fmt.Errorf("%w；数据库账号连接数已达上限(max_user_connections)，GoNavi 已释放同一连接实例的 %d 个缓存连接并重试；若仍失败，请关闭 Navicat/其他客户端连接或提高数据库用户 max_user_connections", err, released)
+	}
+	return fmt.Errorf("%w；数据库账号连接数已达上限(max_user_connections)，GoNavi 未找到可释放的同实例缓存连接；请关闭 Navicat/其他客户端连接或提高数据库用户 max_user_connections", err)
 }
 
 func shortCacheKey(cacheKey string) string {
@@ -587,11 +715,10 @@ func (a *App) getDatabase(config connection.ConnectionConfig) (db.Database, erro
 }
 
 func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Database, error) {
-	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	effectiveConfig, err := a.resolveEffectiveConnectionConfig(config)
 	if err != nil {
-		return nil, wrapConnectError(config, err)
+		return nil, err
 	}
-	effectiveConfig := applyGlobalProxyToConnection(resolvedConfig)
 	if supported, reason := driverRuntimeSupportStatusFunc(effectiveConfig.Type); !supported {
 		if strings.TrimSpace(reason) == "" {
 			reason = fmt.Sprintf("%s 驱动未启用，请先在驱动管理中安装启用", strings.TrimSpace(effectiveConfig.Type))
@@ -617,6 +744,14 @@ func (a *App) openDatabaseIsolated(config connection.ConnectionConfig) (db.Datab
 		return nil, wrapConnectError(effectiveConfig, err)
 	}
 	return dbInst, nil
+}
+
+func (a *App) resolveEffectiveConnectionConfig(config connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+	resolvedConfig, err := a.resolveConnectionSecrets(config)
+	if err != nil {
+		return config, wrapConnectError(config, err)
+	}
+	return applyGlobalProxyToConnection(resolvedConfig), nil
 }
 
 func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing bool) (db.Database, error) {
@@ -654,6 +789,20 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	entry, ok := a.dbCache[key]
 	a.mu.RUnlock()
 	if ok {
+		keepAliveEnabled, keepAliveInterval := resolveConnectionKeepAliveSettings(effectiveConfig)
+		if entry.keepAliveEnabled != keepAliveEnabled || entry.keepAliveInterval != keepAliveInterval {
+			a.mu.Lock()
+			if cur, exists := a.dbCache[key]; exists && cur.inst == entry.inst {
+				cur.keepAliveEnabled = keepAliveEnabled
+				cur.keepAliveInterval = keepAliveInterval
+				if !keepAliveEnabled {
+					cur.keepAliveInFlight = false
+				}
+				a.dbCache[key] = cur
+				entry = cur
+			}
+			a.mu.Unlock()
+		}
 		if isFileDB {
 			logger.Infof("命中文件库连接缓存：类型=%s 缓存Key=%s", strings.TrimSpace(effectiveConfig.Type), shortKey)
 		}
@@ -720,9 +869,14 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	initialKey := key
 	dbInst, connectedConfig, err := a.connectDatabaseWithStartupRetry(resolvedConfig)
 	if err != nil {
-		failedKey := getCacheKey(connectedConfig)
-		a.recordConnectFailureByKey(failedKey, err)
-		return nil, err
+		retryInst, retryConfig, retryErr := a.retryConnectAfterMySQLMaxUserConnections(resolvedConfig, connectedConfig, err)
+		if retryErr != nil {
+			failedKey := getCacheKey(retryConfig)
+			a.recordConnectFailureByKey(failedKey, retryErr)
+			return nil, retryErr
+		}
+		dbInst = retryInst
+		connectedConfig = retryConfig
 	}
 	a.clearConnectFailureByKey(initialKey)
 	effectiveConfig = connectedConfig
@@ -731,6 +885,7 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 	a.clearConnectFailureByKey(key)
 
 	now := time.Now()
+	keepAliveEnabled, keepAliveInterval := resolveConnectionKeepAliveSettings(effectiveConfig)
 
 	a.mu.Lock()
 	if existing, exists := a.dbCache[key]; exists && existing.inst != nil {
@@ -742,11 +897,39 @@ func (a *App) getDatabaseWithPing(config connection.ConnectionConfig, forcePing 
 		}
 		return existing.inst, nil
 	}
-	a.dbCache[key] = cachedDatabase{inst: dbInst, lastPing: now, config: normalizeCacheKeyConfig(effectiveConfig)}
+	a.dbCache[key] = cachedDatabase{
+		inst:              dbInst,
+		lastPing:          now,
+		config:            normalizeCacheKeyConfig(effectiveConfig),
+		keepAliveEnabled:  keepAliveEnabled,
+		keepAliveInterval: keepAliveInterval,
+	}
 	a.mu.Unlock()
 
 	logger.Infof("数据库连接成功并写入缓存：%s 缓存Key=%s", formatConnSummary(effectiveConfig), shortKey)
 	return dbInst, nil
+}
+
+func (a *App) retryConnectAfterMySQLMaxUserConnections(rawConfig connection.ConnectionConfig, failedConfig connection.ConnectionConfig, err error) (db.Database, connection.ConnectionConfig, error) {
+	if !isMySQLMaxUserConnectionsError(err) {
+		return nil, failedConfig, err
+	}
+
+	released := a.releaseCachedDatabaseConnectionsForConfig(failedConfig)
+	logger.Warnf("检测到 MySQL 用户连接数超限，已释放同实例缓存连接：%s 数量=%d", formatConnSummary(failedConfig), released)
+	if released <= 0 {
+		return nil, failedConfig, withMySQLMaxUserConnectionsHint(err, released)
+	}
+
+	dbInst, connectedConfig, retryErr := a.connectDatabaseWithStartupRetry(rawConfig)
+	if retryErr != nil {
+		if isMySQLMaxUserConnectionsError(retryErr) {
+			return nil, connectedConfig, withMySQLMaxUserConnectionsHint(retryErr, released)
+		}
+		return nil, connectedConfig, retryErr
+	}
+	logger.Infof("MySQL 用户连接数超限释放缓存后重连成功：%s 释放数量=%d", formatConnSummary(connectedConfig), released)
+	return dbInst, connectedConfig, nil
 }
 
 func (a *App) getCachedConnectFailureByKey(key string) (cachedConnectFailure, time.Duration, bool) {

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button, InputNumber, Pagination, Select } from 'antd';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
+import { t as defaultTranslate, type I18nParams } from '../i18n';
 
 interface DataGridPaginationState {
   current: number;
@@ -13,6 +14,8 @@ interface DataGridPaginationState {
   totalCountCancelled?: boolean;
 }
 
+export type DataGridPaginationTranslate = (key: string, params?: I18nParams) => string;
+
 export interface DataGridPaginationBarProps {
   isV2Ui: boolean;
   pagination?: DataGridPaginationState;
@@ -20,10 +23,13 @@ export interface DataGridPaginationBarProps {
   paginationSummaryText: string;
   paginationControlTotal: number;
   paginationTotalPages: number;
+  paginationPageText: string;
   paginationPageSizeOptions: string[];
+  showKnownPageCount: boolean;
   onPageChange?: (page: number, size: number) => void;
   onPageSizeChange: (value: string) => void;
   onV2PageStep: (direction: 'previous' | 'next') => void;
+  translate?: DataGridPaginationTranslate;
 }
 
 const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
@@ -33,10 +39,13 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
   paginationSummaryText,
   paginationControlTotal,
   paginationTotalPages,
+  paginationPageText,
   paginationPageSizeOptions,
+  showKnownPageCount,
   onPageChange,
   onPageSizeChange,
   onV2PageStep,
+  translate = defaultTranslate,
 }) => {
   const [jumpPage, setJumpPage] = React.useState<number | null>(pagination?.current ?? null);
 
@@ -58,9 +67,9 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
     if (normalizedJumpPage === pagination.current) return;
     onPageChange(normalizedJumpPage, pagination.pageSize);
   };
-  const jumpPageControl = (
+  const jumpPageControl = showKnownPageCount ? (
     <div className="data-grid-pagination-jump" data-grid-pagination-jump="true">
-      <span className="data-grid-pagination-jump-label">跳页</span>
+      <span className="data-grid-pagination-jump-label">{translate('data_grid.pagination.jump_label')}</span>
       <InputNumber
         size="small"
         min={1}
@@ -71,7 +80,7 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
         onChange={(value) => setJumpPage(typeof value === 'number' && Number.isFinite(value) ? value : null)}
         onPressEnter={submitJumpPage}
         className="data-grid-pagination-jump-input"
-        aria-label="跳转页码"
+        aria-label={translate('data_grid.pagination.jump_aria')}
         disabled={!onPageChange}
       />
       <Button
@@ -80,10 +89,10 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
         disabled={jumpDisabled}
         onClick={submitJumpPage}
       >
-        跳
+        {translate('data_grid.pagination.jump_action')}
       </Button>
     </div>
-  );
+  ) : null;
 
   return (
     <div
@@ -103,9 +112,15 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
             onClick={() => onV2PageStep('previous')}
           />
           <div className="data-grid-pagination-page-chip" data-grid-v2-page-chip="true">
-            <strong>{pagination.current}</strong>
-            <span>/</span>
-            <span>{paginationTotalPages}</span>
+            {showKnownPageCount ? (
+              <>
+                <strong>{pagination.current}</strong>
+                <span>/</span>
+                <span>{paginationTotalPages}</span>
+              </>
+            ) : (
+              <span>{paginationPageText}</span>
+            )}
           </div>
           <Button
             data-grid-v2-pagination-next="true"
@@ -120,15 +135,15 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
             popupMatchSelectWidth={false}
             value={String(pagination.pageSize)}
             onChange={onPageSizeChange}
-            options={paginationPageSizeOptions.map((value) => ({ value, label: `${value}/页` }))}
+            options={paginationPageSizeOptions.map((value) => ({ value, label: translate('data_grid.pagination.page_size_option', { count: value }) }))}
             className="data-grid-pagination-size-select"
-            aria-label="每页条数"
+            aria-label={translate('data_grid.pagination.page_size_aria')}
           />
         </div>
       ) : (
         <div className="data-grid-pagination-shell">
           <div className="data-grid-pagination-summary" aria-live="polite">
-            <span className="data-grid-pagination-kicker">结果集</span>
+            <span className="data-grid-pagination-kicker">{translate('data_grid.pagination.result_set')}</span>
             <span className="data-grid-pagination-summary-value">{paginationSummaryText}</span>
           </div>
           <Pagination
@@ -155,9 +170,9 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
             popupMatchSelectWidth={false}
             value={String(pagination.pageSize)}
             onChange={onPageSizeChange}
-            options={paginationPageSizeOptions.map((value) => ({ value, label: `${value} 条 / 页` }))}
+            options={paginationPageSizeOptions.map((value) => ({ value, label: translate('data_grid.pagination.page_size_option', { count: value }) }))}
             className="data-grid-pagination-size-select"
-            aria-label="每页条数"
+            aria-label={translate('data_grid.pagination.page_size_aria')}
           />
         </div>
       )}

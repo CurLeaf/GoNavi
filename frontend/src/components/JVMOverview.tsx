@@ -21,6 +21,7 @@ import {
   JVMWorkspaceHero,
   JVMWorkspaceShell,
 } from "./jvm/JVMWorkspaceLayout";
+import { useI18n } from "../i18n/provider";
 
 const { Text } = Typography;
 const DESCRIPTION_STYLES = { label: { width: 120 } } as const;
@@ -30,6 +31,7 @@ type JVMOverviewProps = {
 };
 
 const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
+  const { language, t } = useI18n();
   const connection = useStore((state) =>
     state.connections.find((item) => item.id === tab.connectionId),
   );
@@ -51,8 +53,8 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
     if (!endpoint.enabled && !endpoint.baseUrl) {
       return "";
     }
-    return endpoint.baseUrl || "已启用";
-  }, [connection]);
+    return endpoint.baseUrl || t("jvm_overview.value.enabled");
+  }, [connection, t]);
 
   const agentSummary = useMemo(() => {
     if (!connection?.config.jvm?.agent) {
@@ -62,18 +64,20 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
     if (!agent.enabled && !agent.baseUrl) {
       return "";
     }
-    return agent.baseUrl || "已启用";
-  }, [connection]);
+    return agent.baseUrl || t("jvm_overview.value.enabled");
+  }, [connection, t]);
 
   const allowedModeSummary = useMemo(() => {
     const items = allowedModes.length > 0 ? allowedModes : ["jmx"];
-    return items.map((item) => resolveJVMModeMeta(item).label).join("、");
-  }, [allowedModes]);
+    const delimiter =
+      language.startsWith("zh") || language === "ja-JP" ? "、" : ", ";
+    return items.map((item) => resolveJVMModeMeta(item).label).join(delimiter);
+  }, [allowedModes, language]);
 
   useEffect(() => {
     if (!connection) {
       setCapabilities([]);
-      setCapabilityError("连接不存在或已被删除");
+      setCapabilityError(t("jvm_overview.connection_missing.message"));
       setCapabilityLoading(false);
       return;
     }
@@ -92,7 +96,9 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
         if (result?.success === false) {
           setCapabilities([]);
           setCapabilityError(
-            String(result?.message || "读取 JVM 模式能力失败"),
+            String(
+              result?.message || t("jvm_overview.error.capability_load_failed"),
+            ),
           );
           return;
         }
@@ -102,7 +108,9 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
       } catch (error: any) {
         if (!cancelled) {
           setCapabilities([]);
-          setCapabilityError(error?.message || "读取 JVM 模式能力失败");
+          setCapabilityError(
+            error?.message || t("jvm_overview.error.capability_load_failed"),
+          );
         }
       } finally {
         if (!cancelled) {
@@ -115,11 +123,14 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
     return () => {
       cancelled = true;
     };
-  }, [connection]);
+  }, [connection, t]);
 
   if (!connection) {
     return (
-      <Empty description="连接不存在或已被删除" style={{ marginTop: 64 }} />
+      <Empty
+        description={t("jvm_overview.connection_missing.message")}
+        style={{ marginTop: 64 }}
+      />
     );
   }
 
@@ -132,8 +143,8 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
     <JVMWorkspaceShell darkMode={darkMode}>
       <JVMWorkspaceHero
         darkMode={darkMode}
-        eyebrow="JVM Runtime"
-        title="JVM 运行时概览"
+        eyebrow={t("jvm_overview.eyebrow")}
+        title={t("jvm_overview.title")}
         description={
           <>
             <Text strong>{connection.name}</Text>
@@ -147,42 +158,54 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
           <>
             <JVMModeBadge mode={providerMode} />
             <Tag color={readOnly ? "blue" : "red"}>
-              {readOnly ? "只读连接" : "可写连接"}
+              {readOnly
+                ? t("jvm_overview.badge.read_only")
+                : t("jvm_overview.badge.writable")}
             </Tag>
             <Tag>{connection.config.jvm?.environment || "dev"}</Tag>
           </>
         }
       />
 
-      <Card title="连接摘要" variant="borderless" style={cardStyle}>
+      <Card
+        title={t("jvm_overview.card.connection_summary")}
+        variant="borderless"
+        style={cardStyle}
+      >
         <Descriptions column={1} size="small" styles={DESCRIPTION_STYLES}>
-          <Descriptions.Item label="当前模式">
+          <Descriptions.Item label={t("jvm_overview.field.current_mode")}>
             {resolveJVMModeMeta(providerMode).label}
           </Descriptions.Item>
-          <Descriptions.Item label="允许模式">
+          <Descriptions.Item label={t("jvm_overview.field.allowed_modes")}>
             {allowedModeSummary}
           </Descriptions.Item>
-          <Descriptions.Item label="JMX 地址">{`${jmxHost}:${jmxPort}`}</Descriptions.Item>
-          <Descriptions.Item label="Endpoint">
-            {endpointSummary || "未配置"}
+          <Descriptions.Item label={t("jvm_overview.field.jmx_address")}>
+            {`${jmxHost}:${jmxPort}`}
           </Descriptions.Item>
-          <Descriptions.Item label="Agent">
-            {agentSummary || "未配置"}
+          <Descriptions.Item label={t("jvm_overview.field.endpoint")}>
+            {endpointSummary || t("jvm_overview.value.not_configured")}
           </Descriptions.Item>
-          <Descriptions.Item label="资源浏览">
-            {"通过侧边栏展开模式节点后懒加载"}
+          <Descriptions.Item label={t("jvm_overview.field.agent")}>
+            {agentSummary || t("jvm_overview.value.not_configured")}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("jvm_overview.field.resource_browse")}>
+            {t("jvm_overview.value.resource_browse_lazy_load")}
           </Descriptions.Item>
         </Descriptions>
       </Card>
 
-      <Card title="模式能力" variant="borderless" style={cardStyle}>
+      <Card
+        title={t("jvm_overview.card.mode_capability")}
+        variant="borderless"
+        style={cardStyle}
+      >
         {capabilityLoading ? (
           <Skeleton active paragraph={{ rows: 3 }} />
         ) : capabilityError ? (
           <Alert
             type="error"
             showIcon
-            message="读取 JVM 模式能力失败"
+            message={t("jvm_overview.error.capability_load_failed")}
             description={
               <span style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                 {capabilityError}
@@ -190,7 +213,7 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
             }
           />
         ) : capabilities.length === 0 ? (
-          <Empty description="暂无模式能力数据" />
+          <Empty description={t("jvm_overview.empty.capabilities")} />
         ) : (
           <Space direction="vertical" size={12} style={{ width: "100%" }}>
             {capabilities.map((capability) => (
@@ -205,13 +228,19 @@ const JVMOverview: React.FC<JVMOverviewProps> = ({ tab }) => {
                 <Space size={8} wrap>
                   <JVMModeBadge mode={capability.mode} />
                   <Tag color={capability.canBrowse ? "green" : "default"}>
-                    {capability.canBrowse ? "可浏览" : "不可浏览"}
+                    {capability.canBrowse
+                      ? t("jvm_overview.capability.can_browse")
+                      : t("jvm_overview.capability.cannot_browse")}
                   </Tag>
                   <Tag color={capability.canWrite ? "red" : "blue"}>
-                    {capability.canWrite ? "可写" : "只读"}
+                    {capability.canWrite
+                      ? t("jvm_overview.capability.writable")
+                      : t("jvm_overview.capability.read_only")}
                   </Tag>
                   <Tag color={capability.canPreview ? "gold" : "default"}>
-                    {capability.canPreview ? "支持预览" : "不支持预览"}
+                    {capability.canPreview
+                      ? t("jvm_overview.capability.preview_supported")
+                      : t("jvm_overview.capability.preview_unsupported")}
                   </Tag>
                 </Space>
                 {capability.reason ? (

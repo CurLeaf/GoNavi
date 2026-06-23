@@ -7,6 +7,7 @@ import {
   resolveSidebarRootOrderTokens,
 } from '../store';
 import type { ConnectionTag, SavedConnection } from '../types';
+import { t } from '../i18n';
 
 export type SidebarTreeNodeType =
   | 'connection'
@@ -21,6 +22,9 @@ export type SidebarTreeNodeType =
   | 'v2-table-section'
   | 'queries-folder'
   | 'saved-query'
+  | 'all-saved-queries'
+  | 'saved-query-group'
+  | 'unmatched-saved-queries'
   | 'external-sql-root'
   | 'external-sql-directory'
   | 'external-sql-folder'
@@ -145,9 +149,9 @@ export const buildV2SidebarTableSectionedChildren = (
   });
 
   return [
-    buildSectionNode('pinned', '置顶'),
+    buildSectionNode('pinned', t('table_overview.section.pinned')),
     ...pinnedTables,
-    buildSectionNode('all', '全部'),
+    buildSectionNode('all', t('table_overview.section.all')),
     ...regularTables,
   ];
 };
@@ -196,7 +200,7 @@ export const buildV2RailConnectionGroups = (
     if (tagConnections.length === 0) return;
     tagGroups.set(tag.id, {
       id: tag.id,
-      name: tag.name || '未命名分组',
+      name: tag.name || t('connection.sidebar.group.untitled'),
       connections: tagConnections,
       rootToken: buildSidebarRootTagToken(tag.id),
     });
@@ -254,7 +258,7 @@ export const buildV2RailConnectionGroups = (
   return groups;
 };
 
-export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = '组'): string => {
+export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = t('connection.sidebar.group.badge')): string => {
   const trimmed = String(name ?? '').trim();
   if (!trimmed) return fallback;
   const cjkParts = trimmed.match(/[\u4e00-\u9fa5]/g);
@@ -284,12 +288,12 @@ export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = '组
 
 export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines' | 'events';
 
-export const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: string }> = [
-  { key: 'all', label: '全部' },
-  { key: 'tables', label: '表' },
-  { key: 'views', label: '视图' },
-  { key: 'routines', label: '函数' },
-  { key: 'events', label: '事件' },
+export const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; labelKey: string }> = [
+  { key: 'all', labelKey: 'sidebar.command_search.object_kind.all' },
+  { key: 'tables', labelKey: 'sidebar.command_search.object_kind.tables' },
+  { key: 'views', labelKey: 'sidebar.command_search.object_kind.views' },
+  { key: 'routines', labelKey: 'sidebar.command_search.object_kind.routines' },
+  { key: 'events', labelKey: 'sidebar.command_search.object_kind.events' },
 ];
 
 const V2_EXPLORER_FILTER_GROUP_KEYS: Record<Exclude<V2ExplorerFilter, 'all'>, string[]> = {
@@ -411,6 +415,13 @@ export type V2CommandSearchItem =
       dbName?: string;
     };
 
+export interface V2CommandSearchTreeIndexEntry {
+  item: Extract<V2CommandSearchItem, { kind: 'node' }>;
+  normalizedSearchText: string;
+  normalizedObjectText: string;
+  objectNode: boolean;
+}
+
 export type V2CommandSearchMode = 'default' | 'object' | 'ai';
 
 export interface V2CommandSearchQuery {
@@ -463,40 +474,69 @@ const isV2CommandSearchObjectNode = (node: SidebarTreeNode): boolean => {
     || node.type === 'materialized-view';
 };
 
-const V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT = 24;
+export const V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT = 24;
+export const V2_COMMAND_SEARCH_MAX_TREE_RESULTS = 120;
+
+export const buildV2CommandSearchTreeIndex = (
+  items: V2CommandSearchItem[],
+): V2CommandSearchTreeIndexEntry[] => {
+  return items.flatMap((item) => {
+    if (item.kind !== 'node') {
+      return [];
+    }
+    const dataRef = item.node.dataRef || {};
+    const normalizedTitle = String(item.title || '').toLowerCase();
+    const normalizedPrimaryObjectText = String(
+      dataRef.tableName || dataRef.viewName || item.title || '',
+    ).toLowerCase();
+
+    return [{
+      item,
+      normalizedSearchText: [
+        item.title,
+        item.meta,
+        dataRef.tableName,
+        dataRef.viewName,
+        dataRef.dbName,
+        dataRef.name,
+        dataRef.config?.host,
+      ].filter(Boolean).join(' ').toLowerCase(),
+      normalizedObjectText: `${normalizedPrimaryObjectText} ${normalizedTitle}`.trim(),
+      objectNode: isV2CommandSearchObjectNode(item.node),
+    }];
+  });
+};
 
 export const filterV2CommandSearchTreeItems = (
-  items: V2CommandSearchItem[],
+  items: V2CommandSearchItem[] | V2CommandSearchTreeIndexEntry[],
   query: V2CommandSearchQuery,
 ): V2CommandSearchItem[] => {
   if (query.mode === 'ai') return [];
+  const index = items.length > 0 && 'item' in items[0]
+    ? items as V2CommandSearchTreeIndexEntry[]
+    : buildV2CommandSearchTreeIndex(items as V2CommandSearchItem[]);
   const normalizedKeyword = query.normalizedKeyword;
   const objectMode = query.mode === 'object';
-  const matchedItems = items.filter((item) => {
-    if (item.kind !== 'node') return false;
-    const node = item.node;
-    const dataRef = node.dataRef || {};
-    if (objectMode && !isV2CommandSearchObjectNode(node)) {
-      return false;
+  const result: V2CommandSearchItem[] = [];
+  const maxResults = normalizedKeyword
+    ? V2_COMMAND_SEARCH_MAX_TREE_RESULTS
+    : V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT;
+
+  for (const entry of index) {
+    if (objectMode && !entry.objectNode) {
+      continue;
     }
-    if (!normalizedKeyword) return true;
-    const objectName = String(dataRef.tableName || dataRef.viewName || item.title || '').toLowerCase();
-    if (objectMode) {
-      return objectName.includes(normalizedKeyword)
-        || String(item.title || '').toLowerCase().includes(normalizedKeyword);
+    if (!normalizedKeyword) {
+      result.push(entry.item);
+    } else if (objectMode ? entry.normalizedObjectText.includes(normalizedKeyword) : entry.normalizedSearchText.includes(normalizedKeyword)) {
+      result.push(entry.item);
     }
-    const haystack = [
-      item.title,
-      item.meta,
-      dataRef.tableName,
-      dataRef.viewName,
-      dataRef.dbName,
-      dataRef.name,
-      dataRef.config?.host,
-    ].filter(Boolean).join(' ').toLowerCase();
-    return haystack.includes(normalizedKeyword);
-  });
-  return normalizedKeyword ? matchedItems : matchedItems.slice(0, V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT);
+    if (result.length >= maxResults) {
+      break;
+    }
+  }
+
+  return result;
 };
 
 export interface V2CommandSearchEnterState {
@@ -759,6 +799,65 @@ export const resolveV2ActiveConnectionId = ({
     || normalizeDirectId(fallbackConnectionId)
     || normalizeDirectId(activeTabConnectionId)
     || '';
+};
+
+export const resolveSidebarDatabaseTreePruneKeys = ({
+  treeData,
+  expandedKeys,
+  selectedKeys,
+  activeDatabaseKey,
+  touchedAtByDatabaseKey,
+  maxLoadedDatabases,
+}: {
+  treeData: SidebarTreeNode[];
+  expandedKeys: React.Key[];
+  selectedKeys: React.Key[];
+  activeDatabaseKey?: string;
+  touchedAtByDatabaseKey?: Record<string, number>;
+  maxLoadedDatabases: number;
+}): string[] => {
+  if (!Number.isFinite(maxLoadedDatabases) || maxLoadedDatabases <= 0) {
+    return [];
+  }
+
+  const loadedDatabaseKeys: string[] = [];
+  const visit = (nodes: SidebarTreeNode[]) => {
+    nodes.forEach((node) => {
+      if (node.type === 'database' && Array.isArray(node.children) && node.children.length > 0) {
+        loadedDatabaseKeys.push(String(node.key || '').trim());
+        return;
+      }
+      if (node.children?.length) {
+        visit(node.children);
+      }
+    });
+  };
+  visit(treeData);
+
+  if (loadedDatabaseKeys.length <= maxLoadedDatabases) {
+    return [];
+  }
+
+  const expandedKeySet = new Set(expandedKeys.map((key) => String(key || '').trim()).filter(Boolean));
+  const selectedKeySet = new Set(selectedKeys.map((key) => String(key || '').trim()).filter(Boolean));
+  const protectedDatabaseKeys = new Set<string>();
+  if (activeDatabaseKey) {
+    protectedDatabaseKeys.add(String(activeDatabaseKey).trim());
+  }
+
+  const candidates = loadedDatabaseKeys
+    .filter((key) => key && !expandedKeySet.has(key) && !selectedKeySet.has(key) && !protectedDatabaseKeys.has(key))
+    .sort((left, right) => {
+      const leftTouchedAt = Number(touchedAtByDatabaseKey?.[left] || 0);
+      const rightTouchedAt = Number(touchedAtByDatabaseKey?.[right] || 0);
+      if (leftTouchedAt !== rightTouchedAt) {
+        return leftTouchedAt - rightTouchedAt;
+      }
+      return left.localeCompare(right);
+    });
+
+  const pruneCount = loadedDatabaseKeys.length - maxLoadedDatabases;
+  return candidates.slice(0, pruneCount);
 };
 
 export const shouldClearSidebarActiveContextOnEmptySelect = (isV2Ui: boolean): boolean => !isV2Ui;

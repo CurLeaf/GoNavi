@@ -49,10 +49,13 @@ func (m *MariaDB) Connect(config connection.ConnectionConfig) error {
 	if err != nil {
 		return fmt.Errorf("打开数据库连接失败：%w", err)
 	}
+	configureSQLConnectionPool(db, "mariadb")
 	m.conn = db
 	m.pingTimeout = getConnectTimeout(config)
 
 	if err := m.Ping(); err != nil {
+		_ = db.Close()
+		m.conn = nil
 		return fmt.Errorf("连接建立后验证失败：%w", err)
 	}
 	return nil
@@ -87,7 +90,7 @@ func (m *MariaDB) QueryMulti(query string) ([]connection.ResultSetData, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanMultiRowsForDialect(rows, "mariadb")
 }
 
 func (m *MariaDB) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
@@ -99,7 +102,7 @@ func (m *MariaDB) QueryMultiContext(ctx context.Context, query string) ([]connec
 		return nil, err
 	}
 	defer rows.Close()
-	return scanMultiRows(rows)
+	return scanMultiRowsForDialect(rows, "mariadb")
 }
 
 func (m *MariaDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
@@ -113,7 +116,7 @@ func (m *MariaDB) QueryContext(ctx context.Context, query string) ([]map[string]
 	}
 	defer rows.Close()
 
-	return scanRows(rows)
+	return scanRowsForDialect(rows, "mariadb")
 }
 
 func (m *MariaDB) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -126,7 +129,7 @@ func (m *MariaDB) Query(query string) ([]map[string]interface{}, []string, error
 		return nil, nil, err
 	}
 	defer rows.Close()
-	return scanRows(rows)
+	return scanRowsForDialect(rows, "mariadb")
 }
 
 func (m *MariaDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {

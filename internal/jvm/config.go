@@ -8,6 +8,7 @@ import (
 )
 
 const defaultJMXPort = 9010
+const disallowedModeKey = "jvm.backend.error.disallowed_mode"
 
 func NormalizeConnectionConfig(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
 	cfg := raw
@@ -51,7 +52,12 @@ func ResolveProviderMode(raw connection.ConnectionConfig, requestedMode string) 
 		selectedMode = cfg.JVM.PreferredMode
 	}
 	if !containsMode(cfg.JVM.AllowedModes, selectedMode) {
-		return connection.ConnectionConfig{}, "", fmt.Errorf("当前连接不允许使用 %q 模式", selectedMode)
+		return connection.ConnectionConfig{}, "", &LocalizedError{
+			Key: disallowedModeKey,
+			Params: map[string]any{
+				"mode": selectedMode,
+			},
+		}
 	}
 
 	cfg.JVM.PreferredMode = selectedMode

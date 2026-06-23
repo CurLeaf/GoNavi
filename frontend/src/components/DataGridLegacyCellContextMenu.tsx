@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { CopyOutlined, EditOutlined, UndoOutlined, VerticalAlignBottomOutlined } from '@ant-design/icons';
+import { t } from '../i18n';
 
 interface CellContextMenuState {
   visible: boolean;
@@ -21,6 +22,7 @@ interface DataGridLegacyCellContextMenuProps {
   copiedCellPatchAvailable: boolean;
   canUndoCellChange: boolean;
   supportsCopyInsert: boolean;
+  translate?: (key: string, params?: Record<string, unknown>) => string;
   onClose: () => void;
   onCopyFieldName: () => void;
   onCopyRowData: () => void;
@@ -55,6 +57,10 @@ const separatorStyle = (darkMode: boolean): React.CSSProperties => ({
   margin: '4px 0',
 });
 
+const fallbackTranslate = (key: string, params?: Record<string, unknown>) => (
+  t(key, params as Parameters<typeof t>[1])
+);
+
 const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps> = ({
   visible,
   darkMode,
@@ -66,6 +72,7 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
   copiedCellPatchAvailable,
   canUndoCellChange,
   supportsCopyInsert,
+  translate = fallbackTranslate,
   onClose,
   onCopyFieldName,
   onCopyRowData,
@@ -130,7 +137,7 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
     >
       <div style={baseItemStyle} {...makeHoverHandlers()} onClick={onCopyFieldName}>
         <CopyOutlined style={{ marginRight: 8 }} />
-        复制字段名称
+        {translate('data_grid.context_menu.copy_field_name')}
       </div>
       <div style={separatorStyle(darkMode)} />
       {canModifyData && (
@@ -149,18 +156,18 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
             }}
           >
             <UndoOutlined style={{ marginRight: 8 }} />
-            撤销此单元格修改
+            {translate('data_grid.context_menu.undo_cell_change')}
           </div>
           <div style={baseItemStyle} {...makeHoverHandlers()} onClick={onSetNull}>
-            设置为 NULL
+            {translate('data_grid.batch_fill.set_null')}
           </div>
           <div style={baseItemStyle} {...makeHoverHandlers()} onClick={onEditRow}>
             <EditOutlined style={{ marginRight: 8 }} />
-            编辑本行
+            {translate('data_grid.context_menu.edit_row')}
           </div>
           <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyRowForPaste)}>
             <CopyOutlined style={{ marginRight: 8 }} />
-            复制本行为新增行
+            {translate('data_grid.context_menu.copy_row_as_new')}
           </div>
           <div
             style={{
@@ -177,7 +184,9 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
             }}
           >
             <VerticalAlignBottomOutlined style={{ marginRight: 8 }} />
-            {canPasteRows ? `粘贴为新增行 (${copiedRowsForPasteLength})` : '粘贴为新增行'}
+            {canPasteRows
+              ? translate('data_grid.context_menu.paste_row_as_new_count', { count: copiedRowsForPasteLength })
+              : translate('data_grid.context_menu.paste_row_as_new')}
           </div>
           <div
             style={{
@@ -191,7 +200,7 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
             }}
           >
             <VerticalAlignBottomOutlined style={{ marginRight: 8 }} />
-            填充到选中行 ({selectedRowKeysLength})
+            {translate('data_grid.context_menu.fill_to_selected_rows', { count: selectedRowKeysLength })}
           </div>
           <div
             style={{
@@ -205,30 +214,30 @@ const DataGridLegacyCellContextMenu: React.FC<DataGridLegacyCellContextMenuProps
             }}
           >
             <VerticalAlignBottomOutlined style={{ marginRight: 8 }} />
-            粘贴已复制列（同名列）
+            {translate('data_grid.context_menu.paste_copied_columns')}
           </div>
           <div style={separatorStyle(darkMode)} />
         </>
       )}
       <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyRowData)}>
         <CopyOutlined style={{ marginRight: 8 }} />
-        复制行数据
+        {translate('data_grid.context_menu.copy_row_data')}
       </div>
       {supportsCopyInsert && (
         <>
-          <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyInsert)}>复制为 INSERT</div>
-          <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyUpdate)}>复制为 UPDATE</div>
-          <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyDelete)}>复制为 DELETE</div>
+          <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyInsert)}>{translate('data_grid.context_menu.copy_as_insert')}</div>
+          <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyUpdate)}>{translate('data_grid.context_menu.copy_as_update')}</div>
+          <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyDelete)}>{translate('data_grid.context_menu.copy_as_delete')}</div>
         </>
       )}
-      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyJson)}>复制为 JSON</div>
-      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyCsv)}>复制为 CSV</div>
-      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyMarkdown)}>复制为 Markdown</div>
+      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyJson)}>{translate('data_grid.context_menu.copy_as_json')}</div>
+      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyCsv)}>{translate('data_grid.context_menu.copy_as_csv')}</div>
+      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onCopyMarkdown)}>{translate('data_grid.context_menu.copy_as_markdown')}</div>
       <div style={separatorStyle(darkMode)} />
-      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onExportCsv)}>导出为 CSV</div>
-      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onExportXlsx)}>导出为 Excel</div>
-      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onExportJson)}>导出为 JSON</div>
-      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onExportHtml)}>导出为 HTML</div>
+      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onExportCsv)}>{translate('data_grid.context_menu.export_as_csv')}</div>
+      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onExportXlsx)}>{translate('data_grid.context_menu.export_as_excel')}</div>
+      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onExportJson)}>{translate('data_grid.context_menu.export_as_json')}</div>
+      <div style={baseItemStyle} {...makeHoverHandlers()} onClick={closeAfter(onExportHtml)}>{translate('data_grid.context_menu.export_as_html')}</div>
     </div>,
     document.body,
   );
