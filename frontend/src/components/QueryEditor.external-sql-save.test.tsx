@@ -4329,6 +4329,47 @@ describe('QueryEditor external SQL save', () => {
     expect(messageApi.success).toHaveBeenCalledWith('查询已保存！');
   });
 
+  it('allows Ctrl/Cmd+S to save external SQL files from document-level targets', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    const filePath = '/Users/me/Documents/gonavi-queries/report.sql';
+    editorState.hasTextFocus = false;
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ filePath })} />);
+    });
+
+    editorState.value = 'select 6;';
+    const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+    const event = {
+      ctrlKey: !isMacRuntime,
+      metaKey: isMacRuntime,
+      altKey: false,
+      shiftKey: false,
+      key: 's',
+      target: document.body,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(backendApp.WriteSQLFile).toHaveBeenCalledWith(filePath, 'select 6;');
+    expect(messageApi.success).toHaveBeenCalledWith(expect.stringContaining('SQL 文件已保存'));
+  });
+
   it('does not create saved queries when external SQL file writes fail', async () => {
     let renderer!: ReactTestRenderer;
     const filePath = '/Users/me/Documents/gonavi-queries/report.sql';

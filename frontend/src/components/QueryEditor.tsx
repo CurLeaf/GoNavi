@@ -4132,7 +4132,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const targetNode = resolveEventTargetNode(event.target);
           const editorHasFocus = !!editor?.hasTextFocus?.();
           const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
-          if (!editorHasFocus && !inQueryEditor) {
+          if (!editorHasFocus && !inQueryEditor && !isDocumentLevelShortcutTarget(targetNode)) {
               return;
           }
 
