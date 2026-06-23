@@ -8,6 +8,7 @@ import { setCurrentLanguage } from '../i18n';
 import type { SavedQuery, TabData } from '../types';
 import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 import { clearQueryTabDraft, clearSQLFileTabDraft, getQueryTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
+import { normalizeQueryResultMessages } from './queryEditor/QueryEditorHelpers';
 import QueryEditor, {
   collectQueryEditorObjectDecorationCandidates,
   resolveQueryEditorNavigationDecorations,
@@ -780,6 +781,18 @@ describe('QueryEditor external SQL save', () => {
     expect(dataGridState.latestProps?.columnNames).not.toEqual([]);
   });
 
+  it('normalizes sqlserver mssql-prefixed message lines line-by-line', () => {
+    expect(normalizeQueryResultMessages([
+      "mssql:     select c.queryno,'' ,left(dbo.f_vendor_class(''' + b.groupid + ''',' + colname + '),",
+      "mssql:         'char','',''),'自动生成',0,isdefault,defaultoperator,defaultvalue,defaultvalue2,ishaving",
+      "        where funcno = @funcno and tabname = '$vendorclass'",
+    ])).toEqual([
+      "select c.queryno,'' ,left(dbo.f_vendor_class(''' + b.groupid + ''',' + colname + '),",
+      "'char','',''),'自动生成',0,isdefault,defaultoperator,defaultvalue,defaultvalue2,ishaving",
+      "where funcno = @funcno and tabname = '$vendorclass'",
+    ]);
+  });
+
   it('keeps multiple result sets from a single sqlserver statement', async () => {
     storeState.connections[0].config.type = 'sqlserver';
     storeState.connections[0].config.database = 'master';
@@ -923,6 +936,46 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer!.toJSON())).toContain("insert into c_dyscript(projectid,name) values (1,'demo')");
     expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
     expect(dataGridState.latestProps).toBeNull();
+  });
+
+  it('strips mssql prefixes before rendering sqlserver message-only results', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'hydee';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [
+        {
+          statementIndex: 1,
+          columns: [],
+          rows: [],
+          messages: [
+            "mssql:     select c.queryno,'' ,left(dbo.f_vendor_class(''' + b.groupid + ''',' + colname + '),",
+            "mssql:         'char','',''),'自动生成',0,isdefault,defaultoperator,defaultvalue,defaultvalue2,ishaving",
+            "        where funcno = @funcno and tabname = '$vendorclass'",
+          ],
+        },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'hydee', query: "sp_sql p_get_query" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const rendered = textContent(renderer!.toJSON());
+    expect(rendered).toContain('消息 1');
+    expect(rendered).toContain("select c.queryno,'' ,left(dbo.f_vendor_class");
+    expect(rendered).toContain("'char','',''),'自动生成'");
+    expect(rendered).toContain("where funcno = @funcno and tabname = '$vendorclass'");
+    expect(rendered).not.toContain('mssql:');
   });
 
   it('renders top-level sqlserver print messages when result sets contain only status rows', async () => {
@@ -2333,6 +2386,24 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-results .query-result-tabs > .ant-tabs-nav .ant-tabs-tab-btn {');
     expect(css).toContain('user-select: none;');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-results .query-result-tab-text {');
+  });
+
+  it('keeps query message blocks explicitly left, top aligned, copyable, and textarea-based', () => {
+    const source = readFileSync(new URL('./QueryEditorResultsPanel.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("textAlign: 'left'");
+    expect(source).toContain("justifyContent: 'flex-start'");
+    expect(source).toContain("data-query-result-message-textarea");
+    expect(source).toContain("query_editor.results_panel.message.action.copy");
+    expect(source).toContain("typeof navigator?.clipboard?.writeText !== 'function'");
+    expect(source).toContain('await navigator.clipboard.writeText(safeText);');
+    expect(source).toContain('event.currentTarget.select();');
+  });
+
+  it('keeps editor select-all scoped away from non-editor editable targets', () => {
+    const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+
+    expect(source).toContain("if (isEditableElement(event.target) && !inEditorPane) {");
   });
 
   it('embeds the sql execution log as a result tab instead of a standalone workspace panel in v2', () => {

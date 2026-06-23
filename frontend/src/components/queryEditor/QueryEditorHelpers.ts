@@ -25,6 +25,7 @@ export type CompletionTriggerMeta = {dbName: string, triggerName: string, tableN
 export type CompletionRoutineMeta = {dbName: string, routineName: string, routineType: string, schemaName?: string};
 
 export const QUERY_LOCATOR_ALIAS_PREFIX = '__gonavi_locator_';
+const SQLSERVER_MESSAGE_PREFIX_RE = /^\s*mssql:\s*/i;
 
 export const buildQueryReadOnlyLocator = (reason: string): EditRowLocator => ({
     strategy: 'none',
@@ -119,6 +120,36 @@ export const stripQueryIdentifierQuotes = (part: string): string => {
     }
     return text;
 };
+
+export const normalizeQueryResultMessageText = (message: unknown): string => {
+    const text = String(message ?? '').replace(/\r\n?/g, '\n');
+    if (!text.trim()) return '';
+
+    let prefixRemoved = false;
+    const normalizedLines = text
+        .split('\n')
+        .map((line) => {
+            if (!line.trim()) return '';
+            if (SQLSERVER_MESSAGE_PREFIX_RE.test(line)) {
+                prefixRemoved = true;
+                return line.replace(SQLSERVER_MESSAGE_PREFIX_RE, '').trimStart();
+            }
+            return line;
+        });
+
+    const normalized = (prefixRemoved
+        ? normalizedLines.map((line) => line.trim() ? line.trimStart() : '').join('\n')
+        : normalizedLines.join('\n'))
+        .trim();
+
+    return prefixRemoved ? normalized : text.trim();
+};
+
+export const normalizeQueryResultMessages = (messages: unknown): string[] => (
+    Array.isArray(messages)
+        ? messages.map((item) => normalizeQueryResultMessageText(item)).filter(Boolean)
+        : []
+);
 
 export const MYSQL_SYSTEM_METADATA_SCHEMAS = new Set(['information_schema', 'performance_schema', 'mysql', 'sys']);
 export const POSTGRES_SYSTEM_METADATA_SCHEMAS = new Set(['information_schema', 'pg_catalog']);

@@ -95,6 +95,7 @@ import {
     isDocumentLevelShortcutTarget,
     isQueryEditorPrimaryMouseButton,
     normalizeCommentText,
+    normalizeQueryResultMessages,
     normalizeCompletionQualifiedName,
     normalizeEditorPosition,
     normalizeExecutedSqlKey,
@@ -2832,6 +2833,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const cols = (rsData.columns && rsData.columns.length > 0)
               ? rsData.columns
               : (rows.length > 0 ? Object.keys(rows[0]) : []);
+          const refreshedMessages = normalizeQueryResultMessages(rsData?.messages);
           rows.forEach((row: any, i: number) => {
               if (row && typeof row === 'object') row[GONAVI_ROW_KEY] = i;
           });
@@ -2843,8 +2845,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       ...rs,
                       rows,
                       columns: cols,
-                      messages: Array.isArray(rsData.messages) ? rsData.messages : [],
-                      resultType: ((!Array.isArray(rsData.rows) || rsData.rows.length === 0) && (!Array.isArray(rsData.columns) || rsData.columns.length === 0) && Array.isArray(rsData.messages) && rsData.messages.length > 0)
+                      messages: refreshedMessages,
+                      resultType: ((!Array.isArray(rsData.rows) || rsData.rows.length === 0) && (!Array.isArray(rsData.columns) || rsData.columns.length === 0) && refreshedMessages.length > 0)
                           ? 'message'
                           : 'grid',
                       truncated,
@@ -2926,6 +2928,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const cols = (rsData.columns && rsData.columns.length > 0)
               ? rsData.columns
               : (rows.length > 0 ? Object.keys(rows[0]) : target.columns);
+          const pageMessages = normalizeQueryResultMessages(rsData?.messages);
           const totalState = resolveQueryResultPaginationTotal({
               current: safePage,
               pageSize: safePageSize,
@@ -2938,7 +2941,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       ...rs,
                       rows,
                       columns: cols,
-                      messages: Array.isArray(rsData.messages) ? rsData.messages : [],
+                      messages: pageMessages,
                       resultType: 'grid',
                       truncated: false,
                       page: {
@@ -3091,6 +3094,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 setQueryId(queryId);
 
                 const res = await DBQueryWithCancel(buildRpcConnectionConfig(config) as any, currentDb, executedSql, queryId);
+                const legacyResultMessages = normalizeQueryResultMessages(res?.messages);
                 const duration = Date.now() - startTime;
                 addSqlLog({
                     id: `log-${Date.now()}-query-${idx + 1}`,
@@ -3134,12 +3138,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         statementResultIndex: 1,
                         rows,
                         columns: cols,
-                        messages: Array.isArray(res.messages) ? res.messages : [],
+                        messages: legacyResultMessages,
                         pkColumns: [],
                         readOnly: true,
                         truncated
                     });
-                } else if (Array.isArray(res.messages) && res.messages.length > 0) {
+                } else if (legacyResultMessages.length > 0) {
                     nextResultSets.push({
                         key: `result-${idx + 1}`,
                         sql: rawStatement,
@@ -3148,7 +3152,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         statementResultIndex: 1,
                         rows: [],
                         columns: [],
-                        messages: res.messages,
+                        messages: legacyResultMessages,
                         resultType: 'message',
                         pkColumns: [],
                         readOnly: true,
@@ -3166,7 +3170,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                             statementResultIndex: 1,
                             rows: [row],
                             columns: ['affectedRows'],
-                            messages: Array.isArray(res.messages) ? res.messages : [],
+                            messages: legacyResultMessages,
                             pkColumns: [],
                             readOnly: true
                         });
@@ -3382,9 +3386,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
             // res.data 是 ResultSetData[] 数组
             const resultSetDataArray = Array.isArray(res.data) ? (res.data as any[]) : [];
-            const topLevelMessages = Array.isArray(res.messages)
-                ? (res.messages as any[]).map((item) => String(item ?? '').trim()).filter(Boolean)
-                : [];
+            const topLevelMessages = normalizeQueryResultMessages(res.messages);
             const nextResultSets: ResultSet[] = [];
             const maxRows = Number(queryOptions?.maxRows) || 0;
             let anyTruncated = false;
@@ -3398,7 +3400,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 const plan = executablePlans[Math.max(0, sourceStatementIndex - 1)];
                 const originalSql = plan?.originalSql || '';
                 const executedSql = plan?.executedSql || originalSql;
-                const resultMessages = Array.isArray(rsData?.messages) ? rsData.messages : [];
+                const resultMessages = normalizeQueryResultMessages(rsData?.messages);
 
                 // 检查是否为 affectedRows 类结果集
                 const isAffectedResult = Array.isArray(rsData.rows) && rsData.rows.length === 1
@@ -3591,10 +3593,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const editorHasFocus = !!editor.hasTextFocus?.();
           const inEditorPane = !!(targetNode && editorPaneRef.current?.contains(targetNode));
           const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
-          if (!editorHasFocus && !inEditorPane) {
+          if (isEditableElement(event.target) && !inEditorPane) {
               return;
           }
-          if (!editorHasFocus && isEditableElement(event.target) && !inEditorPane) {
+          if (!editorHasFocus && !inEditorPane) {
               return;
           }
           if (!editorHasFocus && !inQueryEditor) {

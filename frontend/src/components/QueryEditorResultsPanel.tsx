@@ -1,6 +1,6 @@
 import React from 'react';
-import { Button, Dropdown, Tabs, Tooltip, type MenuProps } from 'antd';
-import { BugOutlined, CloseOutlined, EyeInvisibleOutlined, RobotOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Tabs, Tooltip, message, type MenuProps } from 'antd';
+import { BugOutlined, CloseOutlined, CopyOutlined, EyeInvisibleOutlined, RobotOutlined } from '@ant-design/icons';
 
 import type { EditRowLocator } from '../utils/rowLocator';
 import type { QueryResultPaginationState } from '../utils/queryResultPagination';
@@ -89,6 +89,111 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
     const hideTooltipTitle = toggleShortcutLabel
         ? t('query_editor.results_panel.tooltip.hide_with_shortcut', { shortcut: toggleShortcutLabel })
         : t('query_editor.results_panel.tooltip.hide');
+    const handleMessageTextareaKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'a') {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.focus();
+        event.currentTarget.select();
+    };
+    const handleCopyMessageText = async (text: string) => {
+        const safeText = String(text || '');
+        if (!safeText.trim()) {
+            return;
+        }
+        try {
+            if (typeof navigator?.clipboard?.writeText !== 'function') {
+                throw new Error(t('query_editor.results_panel.message.copy_unsupported'));
+            }
+            await navigator.clipboard.writeText(safeText);
+            message.success(t('data_grid.message.copied_to_clipboard'));
+        } catch (error: any) {
+            message.error(t('query_editor.results_panel.message.copy_failed', {
+                detail: error?.message || t('common.unknown'),
+            }));
+        }
+    };
+    const renderMessageBlock = ({
+        text,
+        title,
+        fontSize,
+        fillHeight = false,
+        compact = false,
+        maxWidth,
+        color,
+        marginTop,
+    }: {
+        text: string;
+        title?: string;
+        fontSize: string;
+        fillHeight?: boolean;
+        compact?: boolean;
+        maxWidth?: number;
+        color: string;
+        marginTop?: number;
+    }) => (
+        <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: compact ? 8 : 12,
+            padding: compact ? 12 : 16,
+            borderRadius: 8,
+            border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
+            background: darkMode ? 'rgba(255,255,255,0.03)' : '#fff',
+            textAlign: 'left',
+            marginTop,
+            width: maxWidth ? `min(100%, ${maxWidth}px)` : '100%',
+            flex: fillHeight ? 1 : undefined,
+            minHeight: fillHeight ? 0 : undefined,
+            boxSizing: 'border-box',
+        }}>
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: title ? 'space-between' : 'flex-end',
+                gap: 12,
+            }}>
+                {title ? <span style={{ fontSize: 14, fontWeight: 600 }}>{title}</span> : <span />}
+                <Button
+                    size="small"
+                    icon={<CopyOutlined />}
+                    onClick={() => { void handleCopyMessageText(text); }}
+                    disabled={!text.trim()}
+                >
+                    {t('query_editor.results_panel.message.action.copy')}
+                </Button>
+            </div>
+            <textarea
+                readOnly
+                wrap="soft"
+                spellCheck={false}
+                aria-label={title || t('query_editor.results_panel.message.title')}
+                data-query-result-message-textarea={compact ? 'compact' : 'full'}
+                value={text}
+                onKeyDown={handleMessageTextareaKeyDown}
+                style={{
+                    width: '100%',
+                    flex: fillHeight ? 1 : undefined,
+                    minHeight: compact ? 72 : 0,
+                    maxHeight: compact ? 160 : undefined,
+                    padding: 0,
+                    margin: 0,
+                    border: 'none',
+                    resize: 'none',
+                    background: 'transparent',
+                    color,
+                    fontFamily: 'var(--gn-font-mono)',
+                    fontSize,
+                    lineHeight: 1.6,
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    overflow: 'auto',
+                }}
+            />
+        </div>
+    );
     const toolbarHideButton = (
         <Tooltip title={hideTooltipTitle}>
             <Button
@@ -184,30 +289,26 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
         ),
         children: (() => {
             if (rs.resultType === 'message') {
+                const messageText = (rs.messages || []).join('\n');
                 return (
                     <div className={isV2Ui ? 'gn-v2-query-success' : undefined} style={{
-                        flex: 1, minHeight: 0, display: 'flex', justifyContent: 'center',
+                        flex: 1, minHeight: 0, display: 'flex', justifyContent: 'flex-start',
                         flexDirection: 'column', gap: 12, padding: 24, color: '#666', userSelect: 'text',
-                        overflow: 'auto',
+                        overflow: 'hidden',
                     }}>
-                        <span style={{ fontSize: 14, fontWeight: 600 }}>{t('query_editor.results_panel.message.title')}</span>
-                        <div style={{
-                            padding: 16,
-                            borderRadius: 8,
-                            border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
-                            background: darkMode ? 'rgba(255,255,255,0.03)' : '#fff',
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-word',
-                            fontFamily: 'var(--gn-font-mono)',
+                        {renderMessageBlock({
+                            text: messageText,
+                            title: t('query_editor.results_panel.message.title'),
                             fontSize: 'var(--gn-font-size-mono, 13px)',
-                        }}>
-                            {(rs.messages || []).join('\n')}
-                        </div>
+                            fillHeight: true,
+                            color: darkMode ? '#d4d4d4' : '#333',
+                        })}
                     </div>
                 );
             }
             if (isAffectedRowsResult(rs)) {
                 const affected = Number(rs.rows[0]?.affectedRows ?? 0);
+                const messageText = Array.isArray(rs.messages) ? rs.messages.join('\n') : '';
                 return (
                     <div className={isV2Ui ? 'gn-v2-query-success' : undefined} style={{
                         flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -216,44 +317,33 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                         <span style={{ fontSize: 36, color: '#52c41a' }}>✓</span>
                         <span style={{ fontSize: 14, fontWeight: 500 }}>{t('query_editor.result.execution_success')}</span>
                         <span style={{ fontSize: 13, color: '#999' }}>{t('query_editor.result.affected_rows', { count: affected })}</span>
-                        {Array.isArray(rs.messages) && rs.messages.length > 0 && (
-                            <div style={{
-                                marginTop: 8,
-                                maxWidth: 720,
-                                padding: 12,
-                                borderRadius: 8,
-                                border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
-                                background: darkMode ? 'rgba(255,255,255,0.03)' : '#fff',
-                                whiteSpace: 'pre-wrap',
-                                wordBreak: 'break-word',
-                                fontFamily: 'var(--gn-font-mono)',
+                        {messageText
+                            ? renderMessageBlock({
+                                text: messageText,
                                 fontSize: 'var(--gn-font-size-mono, 12px)',
-                            }}>
-                                {rs.messages.join('\n')}
-                            </div>
-                        )}
+                                compact: true,
+                                maxWidth: 720,
+                                color: darkMode ? '#d4d4d4' : '#666',
+                                marginTop: 8,
+                            })
+                            : null}
                     </div>
                 );
             }
             return (
                 <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                    {Array.isArray(rs.messages) && rs.messages.length > 0 && (
-                        <div style={{
-                            flex: '0 0 auto',
-                            margin: '8px 8px 0',
-                            padding: '10px 12px',
-                            borderRadius: 8,
-                            border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
-                            background: darkMode ? 'rgba(255,255,255,0.03)' : '#fff',
-                            whiteSpace: 'pre-wrap',
-                            wordBreak: 'break-word',
-                            fontFamily: 'var(--gn-font-mono)',
-                            fontSize: 'var(--gn-font-size-mono, 12px)',
-                            color: darkMode ? '#d4d4d4' : '#666',
-                        }}>
-                            {rs.messages.join('\n')}
-                        </div>
-                    )}
+                    {Array.isArray(rs.messages) && rs.messages.length > 0
+                        ? (
+                            <div style={{ flex: '0 0 auto', margin: '8px 8px 0' }}>
+                                {renderMessageBlock({
+                                    text: rs.messages.join('\n'),
+                                    fontSize: 'var(--gn-font-size-mono, 12px)',
+                                    compact: true,
+                                    color: darkMode ? '#d4d4d4' : '#666',
+                                })}
+                            </div>
+                        )
+                        : null}
                     <DataGrid
                         data={rs.rows}
                         columnNames={rs.columns}
