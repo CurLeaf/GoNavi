@@ -87,3 +87,138 @@ func TestCopyMongoChangeDocumentV1_LeavesInsertIDStringUntouched(t *testing.T) {
 		t.Fatalf("insert _id string should stay string, got %T %v", doc["_id"], doc["_id"])
 	}
 }
+
+func TestConvertBsonValueV1_EncodesMongoTypedValues(t *testing.T) {
+	const oidHex = "507f1f77bcf86cd799439011"
+	oid, err := primitive.ObjectIDFromHex(oidHex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decimalValue, err := primitive.ParseDecimal128("12.34")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	converted, ok := convertBsonValue(bson.M{
+		"_id":       oid,
+		"createdAt": primitive.DateTime(1719100800000),
+		"count32":   int32(7),
+		"count64":   int64(8),
+		"ratio":     1.5,
+		"price":     decimalValue,
+		"uid": primitive.Binary{
+			Subtype: 0x04,
+			Data:    []byte{0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56, 0x78},
+		},
+		"nested": bson.M{
+			"innerId": oid,
+		},
+		"items": bson.A{int32(1), int64(2)},
+	}).(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected converted document map, got %T", converted)
+	}
+
+	if converted["_id"].(map[string]interface{})["$oid"] != oidHex {
+		t.Fatalf("unexpected ObjectID wrapper: %#v", converted["_id"])
+	}
+	if converted["createdAt"].(map[string]interface{})["$date"].(map[string]interface{})["$numberLong"] != "1719100800000" {
+		t.Fatalf("unexpected date wrapper: %#v", converted["createdAt"])
+	}
+	if converted["count32"].(map[string]interface{})["$numberInt"] != "7" {
+		t.Fatalf("unexpected int32 wrapper: %#v", converted["count32"])
+	}
+	if converted["count64"].(map[string]interface{})["$numberLong"] != "8" {
+		t.Fatalf("unexpected int64 wrapper: %#v", converted["count64"])
+	}
+	if converted["ratio"] != 1.5 {
+		t.Fatalf("plain double should stay float64, got %T %#v", converted["ratio"], converted["ratio"])
+	}
+	if converted["price"].(map[string]interface{})["$numberDecimal"] != "12.34" {
+		t.Fatalf("unexpected decimal wrapper: %#v", converted["price"])
+	}
+	if converted["uid"].(map[string]interface{})["$binary"].(map[string]interface{})["base64"] != "EjRWeBI0VngSNFZ4EjRWeA==" {
+		t.Fatalf("unexpected binary wrapper: %#v", converted["uid"])
+	}
+
+	nestedDoc, ok := converted["nested"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected nested map, got %T", converted["nested"])
+	}
+	if nestedDoc["innerId"].(map[string]interface{})["$oid"] != oidHex {
+		t.Fatalf("unexpected nested ObjectID wrapper: %#v", nestedDoc["innerId"])
+	}
+
+	items, ok := converted["items"].([]interface{})
+	if !ok || len(items) != 2 {
+		t.Fatalf("unexpected items wrapper: %#v", converted["items"])
+	}
+	if items[0].(map[string]interface{})["$numberInt"] != "1" || items[1].(map[string]interface{})["$numberLong"] != "2" {
+		t.Fatalf("unexpected numeric array wrappers: %#v", items)
+	}
+}
+
+func TestCopyMongoChangeDocumentV1_DecodesExtendedJSONWrappers(t *testing.T) {
+	doc := copyMongoChangeDocument(map[string]interface{}{
+		"_id":       map[string]interface{}{"$oid": "507f1f77bcf86cd799439011"},
+		"createdAt": map[string]interface{}{"$date": map[string]interface{}{"$numberLong": "1719100800000"}},
+		"count32":   map[string]interface{}{"$numberInt": "7"},
+		"count64":   map[string]interface{}{"$numberLong": "8"},
+		"ratio":     map[string]interface{}{"$numberDouble": "1.5"},
+		"price":     map[string]interface{}{"$numberDecimal": "12.34"},
+		"uid": map[string]interface{}{
+			"$binary": map[string]interface{}{
+				"base64":  "EjRWeBI0VngSNFZ4EjRWeA==",
+				"subType": "04",
+			},
+		},
+		"nested": map[string]interface{}{
+			"innerId": map[string]interface{}{"$oid": "507f1f77bcf86cd799439012"},
+		},
+		"items": []interface{}{
+			map[string]interface{}{"$numberInt": "1"},
+			map[string]interface{}{"$numberLong": "2"},
+		},
+	})
+
+	if _, ok := doc["_id"].(primitive.ObjectID); !ok {
+		t.Fatalf("expected _id to decode to primitive.ObjectID, got %T", doc["_id"])
+	}
+	if got, ok := doc["createdAt"].(primitive.DateTime); !ok || got != primitive.DateTime(1719100800000) {
+		t.Fatalf("expected createdAt primitive.DateTime, got %T %#v", doc["createdAt"], doc["createdAt"])
+	}
+	if got, ok := doc["count32"].(int32); !ok || got != 7 {
+		t.Fatalf("expected count32 int32, got %T %#v", doc["count32"], doc["count32"])
+	}
+	if got, ok := doc["count64"].(int64); !ok || got != 8 {
+		t.Fatalf("expected count64 int64, got %T %#v", doc["count64"], doc["count64"])
+	}
+	if got, ok := doc["ratio"].(float64); !ok || got != 1.5 {
+		t.Fatalf("expected ratio float64, got %T %#v", doc["ratio"], doc["ratio"])
+	}
+	if _, ok := doc["price"].(primitive.Decimal128); !ok {
+		t.Fatalf("expected price primitive.Decimal128, got %T", doc["price"])
+	}
+	if binaryValue, ok := doc["uid"].(primitive.Binary); !ok || binaryValue.Subtype != 0x04 || len(binaryValue.Data) != 16 {
+		t.Fatalf("expected uid primitive.Binary UUID, got %T %#v", doc["uid"], doc["uid"])
+	}
+
+	nestedDoc, ok := doc["nested"].(primitive.M)
+	if !ok {
+		t.Fatalf("expected nested primitive.M, got %T %#v", doc["nested"], doc["nested"])
+	}
+	if _, ok := nestedDoc["innerId"].(primitive.ObjectID); !ok {
+		t.Fatalf("expected nested innerId ObjectID, got %T", nestedDoc["innerId"])
+	}
+
+	items, ok := doc["items"].(bson.A)
+	if !ok || len(items) != 2 {
+		t.Fatalf("expected items bson.A, got %T %#v", doc["items"], doc["items"])
+	}
+	if got, ok := items[0].(int32); !ok || got != 1 {
+		t.Fatalf("expected items[0] int32, got %T %#v", items[0], items[0])
+	}
+	if got, ok := items[1].(int64); !ok || got != 2 {
+		t.Fatalf("expected items[1] int64, got %T %#v", items[1], items[1])
+	}
+}

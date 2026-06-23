@@ -12,6 +12,7 @@ import DataGrid, {
 import DataGridToolbarFrame from './DataGridToolbarFrame';
 import { V2CellContextMenuView, V2ColumnHeaderContextMenuView, V2TableGroupContextMenuView } from './V2TableContextMenu';
 import { setCurrentLanguage, t } from '../i18n';
+import { parseMongoEditedValue } from '../utils/mongodb';
 import { DUCKDB_ROWID_LOCATOR_COLUMN, ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
 
 const storeState = vi.hoisted(() => ({
@@ -644,6 +645,47 @@ describe('DataGrid commit change set', () => {
         inserts: [{ name: 'insert-name' }],
         updates: [{ keys: { _id: { $oid: '507f1f77bcf86cd799439011' } }, values: { name: 'new-name' } }],
         deletes: [{ _id: '507f1f77bcf86cd799439012' }],
+      },
+    });
+  });
+
+  it('keeps MongoDB explicit typed edit values in the final commit payload', () => {
+    const result = buildDataGridCommitChangeSet({
+      addedRows: [{
+        [GONAVI_ROW_KEY]: 'new-1',
+        _id: '507f1f77bcf86cd799439013',
+        age: '{"$numberLong":"12"}',
+        ratio: '1.5',
+      }],
+      modifiedRows: {},
+      deletedRowKeys: new Set(),
+      data: [],
+      editLocator: {
+        strategy: 'primary-key',
+        columns: ['_id'],
+        valueColumns: ['_id'],
+        readOnly: false,
+      },
+      visibleColumnNames: ['_id', 'age', 'ratio'],
+      rowKeyToString,
+      normalizeCommitCellValue: (columnName, value) => parseMongoEditedValue(
+        columnName,
+        value,
+        columnName === 'ratio' ? { $numberDouble: '0.5' } : undefined,
+      ),
+      shouldCommitColumn: commitColumnGuard,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      changes: {
+        inserts: [{
+          _id: { $oid: '507f1f77bcf86cd799439013' },
+          age: { $numberLong: '12' },
+          ratio: { $numberDouble: '1.5' },
+        }],
+        updates: [],
+        deletes: [],
       },
     });
   });

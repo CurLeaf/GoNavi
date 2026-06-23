@@ -136,3 +136,68 @@ func TestOptionalDriverAgentClientCallStreamQueryConsumesChunks(t *testing.T) {
 		t.Fatalf("请求未使用 streamQuery 方法: %s", stdin.String())
 	}
 }
+
+func TestOptionalDriverAgentDBQueryWithMessagesParsesAgentMessages(t *testing.T) {
+	var stdin optionalAgentTestWriteCloser
+	stdout := `{"id":1,"success":true,"data":[{"sql_text":"select 1"}],"fields":["sql_text"],"messages":["PRINT sql line 1","PRINT sql line 2"]}` + "\n"
+
+	dbInst := &OptionalDriverAgentDB{
+		driverType: "sqlserver",
+		client: &optionalDriverAgentClient{
+			stdin:  &stdin,
+			reader: bufio.NewReader(strings.NewReader(stdout)),
+			driver: "sqlserver",
+		},
+	}
+
+	rows, fields, messages, err := dbInst.QueryWithMessages("exec dbo.p_get_select")
+	if err != nil {
+		t.Fatalf("QueryWithMessages 返回错误: %v", err)
+	}
+	if len(rows) != 1 || rows[0]["sql_text"] != "select 1" {
+		t.Fatalf("查询结果异常: %#v", rows)
+	}
+	if len(fields) != 1 || fields[0] != "sql_text" {
+		t.Fatalf("字段异常: %#v", fields)
+	}
+	if len(messages) != 2 || messages[0] != "PRINT sql line 1" {
+		t.Fatalf("消息异常: %#v", messages)
+	}
+	if !strings.Contains(stdin.String(), `"method":"query"`) {
+		t.Fatalf("请求未使用 query 方法: %s", stdin.String())
+	}
+}
+
+func TestOptionalDriverAgentDBQueryMultiWithMessagesParsesResultSets(t *testing.T) {
+	var stdin optionalAgentTestWriteCloser
+	stdout := `{"id":1,"success":true,"data":[{"statementIndex":1,"rows":[{"name":"master"}],"columns":["name"]},{"statementIndex":1,"rows":[],"columns":[],"messages":["PRINT generated sql"]}],"messages":["batch top-level message"]}` + "\n"
+
+	dbInst := &OptionalDriverAgentDB{
+		driverType: "sqlserver",
+		client: &optionalDriverAgentClient{
+			stdin:  &stdin,
+			reader: bufio.NewReader(strings.NewReader(stdout)),
+			driver: "sqlserver",
+		},
+	}
+
+	resultSets, messages, err := dbInst.QueryMultiWithMessages("exec dbo.p_get_select")
+	if err != nil {
+		t.Fatalf("QueryMultiWithMessages 返回错误: %v", err)
+	}
+	if len(resultSets) != 2 {
+		t.Fatalf("结果集数量异常: %#v", resultSets)
+	}
+	if got := resultSets[0].Rows[0]["name"]; got != "master" {
+		t.Fatalf("首个结果集异常，got=%v", got)
+	}
+	if len(resultSets[1].Messages) != 1 || resultSets[1].Messages[0] != "PRINT generated sql" {
+		t.Fatalf("消息结果集异常: %#v", resultSets[1])
+	}
+	if len(messages) != 1 || messages[0] != "batch top-level message" {
+		t.Fatalf("顶层消息异常: %#v", messages)
+	}
+	if !strings.Contains(stdin.String(), `"method":"queryMulti"`) {
+		t.Fatalf("请求未使用 queryMulti 方法: %s", stdin.String())
+	}
+}

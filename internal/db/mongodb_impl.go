@@ -4,6 +4,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -1058,7 +1059,16 @@ func (m *MongoDB) execCount(ctx context.Context, cmd bson.D) ([]map[string]inter
 // convertBsonValue 将 BSON 特殊类型转换为前端可读的 JSON 友好值
 func convertBsonValue(v interface{}) interface{} {
 	switch val := v.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{}, len(val))
+		for k, v2 := range val {
+			result[k] = convertBsonValue(v2)
+		}
+		return result
 	case bson.ObjectID:
+		if converted, ok := encodeMongoExtendedJSONFieldValue(val); ok {
+			return converted
+		}
 		return val.Hex()
 	case bson.M:
 		result := make(map[string]interface{}, len(val))
@@ -1078,9 +1088,73 @@ func convertBsonValue(v interface{}) interface{} {
 			result[i] = convertBsonValue(v2)
 		}
 		return result
+	case []interface{}:
+		result := make([]interface{}, len(val))
+		for i, v2 := range val {
+			result[i] = convertBsonValue(v2)
+		}
+		return result
 	default:
+		if !shouldEncodeMongoExtendedJSONFieldValue(v) {
+			return v
+		}
+		if converted, ok := encodeMongoExtendedJSONFieldValue(v); ok {
+			return converted
+		}
 		return v
 	}
+}
+
+func shouldEncodeMongoExtendedJSONFieldValue(v interface{}) bool {
+	switch v.(type) {
+	case bson.DateTime,
+		bson.Decimal128,
+		bson.Binary,
+		bson.Regex,
+		bson.Timestamp,
+		bson.MaxKey,
+		bson.MinKey,
+		bson.Undefined,
+		int32,
+		int64,
+		[]byte,
+		time.Time:
+		return true
+	default:
+		return false
+	}
+}
+
+func encodeMongoExtendedJSONFieldValue(v interface{}) (interface{}, bool) {
+	payload, err := bson.MarshalExtJSON(bson.M{"v": v}, true, false)
+	if err != nil {
+		return nil, false
+	}
+
+	var wrapped map[string]interface{}
+	if err := json.Unmarshal(payload, &wrapped); err != nil {
+		return nil, false
+	}
+
+	converted, ok := wrapped["v"]
+	return converted, ok
+}
+
+func decodeMongoExtendedJSONFieldValue(v interface{}) interface{} {
+	payload, err := json.Marshal(map[string]interface{}{"v": v})
+	if err != nil {
+		return v
+	}
+
+	var wrapped bson.M
+	if err := bson.UnmarshalExtJSON(payload, false, &wrapped); err != nil {
+		return v
+	}
+
+	if converted, ok := wrapped["v"]; ok {
+		return converted
+	}
+	return v
 }
 
 func (m *MongoDB) Exec(query string) (int64, error) {
@@ -1220,7 +1294,7 @@ func (m *MongoDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDef
 func copyMongoChangeDocument(row map[string]interface{}) bson.M {
 	doc := bson.M{}
 	for k, v := range row {
-		doc[k] = v
+		doc[k] = decodeMongoExtendedJSONFieldValue(v)
 	}
 	return doc
 }
@@ -1228,44 +1302,9 @@ func copyMongoChangeDocument(row map[string]interface{}) bson.M {
 func buildMongoChangeFilter(row map[string]interface{}) bson.M {
 	filter := bson.M{}
 	for k, v := range row {
-		filter[k] = normalizeMongoChangeFilterValue(k, v)
+		filter[k] = decodeMongoExtendedJSONFieldValue(v)
 	}
 	return filter
-}
-
-func normalizeMongoChangeFilterValue(key string, value interface{}) interface{} {
-	if strings.TrimSpace(key) != "_id" {
-		return value
-	}
-
-	switch val := value.(type) {
-	case map[string]interface{}:
-		if raw, ok := val["$oid"]; ok {
-			if oid, parsed := parseMongoObjectIDHex(fmt.Sprintf("%v", raw)); parsed {
-				return oid
-			}
-		}
-	case bson.M:
-		if raw, ok := val["$oid"]; ok {
-			if oid, parsed := parseMongoObjectIDHex(fmt.Sprintf("%v", raw)); parsed {
-				return oid
-			}
-		}
-	}
-	return value
-}
-
-func parseMongoObjectIDHex(value string) (bson.ObjectID, bool) {
-	text := strings.TrimSpace(value)
-	var zero bson.ObjectID
-	if len(text) != 24 {
-		return zero, false
-	}
-	oid, err := bson.ObjectIDFromHex(text)
-	if err != nil {
-		return zero, false
-	}
-	return oid, true
 }
 
 // ApplyChanges implements batch changes for MongoDB
@@ -1300,10 +1339,7 @@ func (m *MongoDB) ApplyChanges(tableName string, changes connection.ChangeSet) e
 			return fmt.Errorf("更新操作需要主键条件")
 		}
 
-		updateDoc := bson.M{"$set": bson.M{}}
-		for k, v := range update.Values {
-			updateDoc["$set"].(bson.M)[k] = v
-		}
+		updateDoc := bson.M{"$set": copyMongoChangeDocument(update.Values)}
 
 		result, err := collection.UpdateOne(ctx, filter, updateDoc)
 		if err != nil {

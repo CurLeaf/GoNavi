@@ -2878,6 +2878,62 @@ describe('QueryEditor external SQL save', () => {
     expect(messageApi.warning).not.toHaveBeenCalled();
   });
 
+  it('auto aliases Oracle duplicate explicit columns before alias star expansion', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'APP';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{
+        columns: ['EHR_USERID_1', 'USERID', 'EHR_USERID', 'USERNAME'],
+        rows: [{
+          EHR_USERID_1: 'emp-1',
+          USERID: 7,
+          EHR_USERID: 'emp-1',
+          USERNAME: 'alice',
+        }],
+      }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { name: 'USERID', key: 'PRI' },
+        { name: 'EHR_USERID', key: '' },
+        { name: 'USERNAME', key: '' },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({
+        dbName: 'APP',
+        query: 'SELECT EHR_USERID, a.* FROM S_USER_BASE a',
+      })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'primary-key',
+      columns: ['USERID'],
+      valueColumns: ['USERID'],
+      writableColumns: {
+        USERID: 'USERID',
+        EHR_USERID: 'EHR_USERID',
+        USERNAME: 'USERNAME',
+      },
+      readOnly: false,
+    });
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('EHR_USERID AS EHR_USERID_1, a.*');
+    expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
   it.each([
     'mysql',
     'mariadb',

@@ -1337,33 +1337,80 @@ describe('store appearance persistence', () => {
     expect(useStore.getState().activeTabId).toBe('query-1');
   });
 
-  it('persists recent SQL execution logs and trims oversized entries', async () => {
+  it('keeps only the most recent runtime SQL logs and trims oversized entries', async () => {
     const { useStore } = await importStore();
-    const longSql = `select '${'x'.repeat(120 * 1024)}'`;
+    const longSql = `select '${'x'.repeat(20 * 1024)}'`;
 
-    useStore.getState().addSqlLog({
-      id: 'log-1',
-      timestamp: 100,
-      sql: longSql,
-      status: 'success',
-      duration: 12,
+    for (let i = 0; i < 140; i += 1) {
+      useStore.getState().addSqlLog({
+        id: `log-${i}`,
+        timestamp: 100 + i,
+        sql: longSql,
+        status: 'success',
+        duration: 12 + i,
+        dbName: 'main',
+      });
+    }
+
+    expect(useStore.getState().sqlLogs).toHaveLength(120);
+    expect(useStore.getState().sqlLogs[0]).toEqual(expect.objectContaining({
+      id: 'log-139',
       dbName: 'main',
-    });
+    }));
+    expect(useStore.getState().sqlLogs[119]).toEqual(expect.objectContaining({
+      id: 'log-20',
+    }));
+    expect(useStore.getState().sqlLogs[0]?.sql.length).toBe(12 * 1024);
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
-    expect(persisted.state.sqlLogs).toHaveLength(1);
-    expect(persisted.state.sqlLogs[0].sql.length).toBe(100 * 1024);
+    expect(persisted.state.sqlLogs).toHaveLength(120);
+    expect(persisted.state.sqlLogs[0].sql.length).toBe(12 * 1024);
     expect(persisted.state.sqlLogs[0].dbName).toBe('main');
 
     vi.resetModules();
     const reloaded = await importStore();
     expect(reloaded.useStore.getState().sqlLogs[0]).toEqual(expect.objectContaining({
-      id: 'log-1',
+      id: 'log-139',
       status: 'success',
-      duration: 12,
+      duration: 151,
       dbName: 'main',
     }));
-    expect(reloaded.useStore.getState().sqlLogs[0]?.sql.length).toBe(100 * 1024);
+    expect(reloaded.useStore.getState().sqlLogs).toHaveLength(120);
+    expect(reloaded.useStore.getState().sqlLogs[119]).toEqual(expect.objectContaining({
+      id: 'log-20',
+    }));
+    expect(reloaded.useStore.getState().sqlLogs[0]?.sql.length).toBe(12 * 1024);
+  });
+
+  it('shrinks oversized SQL logs from older persisted snapshots during hydration', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        sqlLogs: Array.from({ length: 200 }, (_, index) => ({
+          id: `legacy-log-${index}`,
+          timestamp: 500 + index,
+          sql: `select '${'x'.repeat(18 * 1024)}'`,
+          status: index % 2 === 0 ? 'success' : 'error',
+          duration: index,
+          dbName: 'legacy',
+          message: 'm'.repeat(3 * 1024),
+        })),
+      },
+      version: 12,
+    }));
+
+    const { useStore } = await importStore();
+    const sqlLogs = useStore.getState().sqlLogs;
+
+    expect(sqlLogs).toHaveLength(120);
+    expect(sqlLogs[0]).toEqual(expect.objectContaining({
+      id: 'legacy-log-0',
+      dbName: 'legacy',
+    }));
+    expect(sqlLogs[119]).toEqual(expect.objectContaining({
+      id: 'legacy-log-119',
+    }));
+    expect(sqlLogs[0]?.sql.length).toBe(12 * 1024);
+    expect(sqlLogs[0]?.message?.length).toBe(1024);
   });
 
   it('defaults AI chat send shortcut to Enter in shared shortcut options', async () => {

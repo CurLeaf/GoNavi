@@ -289,7 +289,31 @@ type ViewerScrollSnapshot = {
 };
 
 const viewerFilterSnapshotsByTab = new Map<string, ViewerFilterSnapshot>();
+const MAX_VIEWER_FILTER_SNAPSHOTS = 64;
 const VIEWER_SCROLL_SNAPSHOT_PERSIST_DELAY_MS = 160;
+
+const trimViewerFilterSnapshots = () => {
+  while (viewerFilterSnapshotsByTab.size > MAX_VIEWER_FILTER_SNAPSHOTS) {
+    const oldestKey = viewerFilterSnapshotsByTab.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    viewerFilterSnapshotsByTab.delete(oldestKey);
+  }
+};
+
+const setViewerFilterSnapshot = (
+  tabId: string,
+  snapshot: ViewerFilterSnapshot,
+) => {
+  const normalizedTabId = String(tabId || '').trim();
+  if (!normalizedTabId) return;
+  if (viewerFilterSnapshotsByTab.has(normalizedTabId)) {
+    viewerFilterSnapshotsByTab.delete(normalizedTabId);
+  }
+  viewerFilterSnapshotsByTab.set(normalizedTabId, snapshot);
+  trimViewerFilterSnapshots();
+};
 
 const normalizeViewerFilterConditions = (conditions: FilterCondition[] | undefined): FilterCondition[] => {
   if (!Array.isArray(conditions)) return [];
@@ -389,7 +413,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
   const persistViewerSnapshot = useCallback((tabId: string, overrides?: Partial<ViewerFilterSnapshot>) => {
     const normalizedTabId = String(tabId || '').trim();
     if (!normalizedTabId) return;
-    viewerFilterSnapshotsByTab.set(normalizedTabId, {
+    setViewerFilterSnapshot(normalizedTabId, {
       showFilter,
       conditions: normalizeViewerFilterConditions(filterConditions),
       quickWhereCondition: normalizeQuickWhereCondition(quickWhereCondition),

@@ -73,6 +73,7 @@ import {
 } from './dataGridClipboardExport';
 import { applyNoAutoCapAttributesWithin, noAutoCapInputProps } from '../utils/inputAutoCap';
 import { DEFAULT_SHORTCUT_OPTIONS, getShortcutPlatform, resolveShortcutDisplay } from '../utils/shortcuts';
+import { formatMongoValueForDisplay } from '../utils/mongodb';
 import {
     TEMPORAL_FORMATS,
     formatFromDayjs,
@@ -355,6 +356,10 @@ export const formatCellDisplayText = (val: any, columnType?: string, connectionC
         if (val === null) return 'NULL';
         const bitText = normalizeBitHexDisplayText(val, columnType);
         if (bitText !== null) return bitText;
+        if (String(connectionConfig?.type || '').trim().toLowerCase() === 'mongodb') {
+            const mongoText = formatMongoValueForDisplay(val);
+            return mongoText.length > TABLE_CELL_PREVIEW_MAX_CHARS ? `${mongoText.slice(0, TABLE_CELL_PREVIEW_MAX_CHARS)}…` : mongoText;
+        }
         if (typeof val === 'object') {
             if (!Array.isArray(val) && !isPlainObject(val)) {
                 return String(val);
@@ -398,6 +403,9 @@ const formatClipboardCellText = (val: any, columnType?: string, connectionConfig
         if (val === null || val === undefined) return 'NULL';
         const bitText = normalizeBitHexDisplayText(val, columnType);
         if (bitText !== null) return bitText;
+        if (String(connectionConfig?.type || '').trim().toLowerCase() === 'mongodb') {
+            return formatMongoValueForDisplay(val);
+        }
         if (typeof val === 'string') {
             const oceanBaseDateOnly = normalizeOceanBaseOracleDateDisplayText(val, columnType, connectionConfig);
             if (oceanBaseDateOnly !== null) return oceanBaseDateOnly;

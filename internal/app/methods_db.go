@@ -1062,6 +1062,13 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 
+	// 某些 optional driver-agent 的原生多结果集路径会异常返回“成功但无任何结果集”。
+	// 对只读查询这是不可信信号，回退到逐条执行可以避免普通 SELECT 在结果面板中被吃空。
+	if useNativeMultiResult && allReadOnly && results != nil && len(results) == 0 && len(resultMessages) == 0 {
+		logger.Warnf("DBQueryMulti 原生多结果集返回空结果，将回退逐条执行：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
+		results = nil
+	}
+
 	// 驱动支持多结果集，直接返回
 	if results != nil {
 		return connection.QueryResult{Success: true, Data: results, Messages: resultMessages, QueryID: queryID}

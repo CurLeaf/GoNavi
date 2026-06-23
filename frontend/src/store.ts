@@ -137,14 +137,16 @@ const MIN_KEEPALIVE_INTERVAL_MINUTES = 1;
 const MAX_KEEPALIVE_INTERVAL_MINUTES = 1440;
 const DEFAULT_DIAGNOSTIC_TIMEOUT_SECONDS = 15;
 const MAX_DIAGNOSTIC_TIMEOUT_SECONDS = 300;
-const PERSIST_VERSION = 12;
+const PERSIST_VERSION = 13;
 const PERSIST_STORAGE_KEY = "lite-db-storage";
 const PERSIST_WRITE_DEBOUNCE_MS = 160;
 const MAX_PERSISTED_QUERY_TABS = 20;
 const MAX_PERSISTED_QUERY_LENGTH = 1024 * 1024;
-const MAX_SQL_LOGS = 1000;
+const MAX_RUNTIME_SQL_LOGS = 120;
+const MAX_RUNTIME_SQL_LOG_LENGTH = 12 * 1024;
+const MAX_RUNTIME_SQL_LOG_MESSAGE_LENGTH = 1024;
 const MAX_PERSISTED_SQL_LOGS = 200;
-const MAX_PERSISTED_SQL_LOG_LENGTH = 100 * 1024;
+const MAX_PERSISTED_SQL_LOG_LENGTH = 24 * 1024;
 const MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH = 2 * 1024;
 const MAX_TABLE_EXPORT_HISTORY_PER_TARGET = 20;
 const MAX_TABLE_EXPORT_HISTORY_TARGETS = 200;
@@ -1725,50 +1727,101 @@ const resolveActiveContextForTabId = (
   return fallbackContext;
 };
 
-const sanitizeSqlLogs = (value: unknown, limit = MAX_PERSISTED_SQL_LOGS): SqlLog[] => {
+type SqlLogSanitizeOptions = {
+  limit: number;
+  sqlLength: number;
+  messageLength: number;
+};
+
+const RUNTIME_SQL_LOG_SANITIZE_OPTIONS: SqlLogSanitizeOptions = {
+  limit: MAX_RUNTIME_SQL_LOGS,
+  sqlLength: MAX_RUNTIME_SQL_LOG_LENGTH,
+  messageLength: MAX_RUNTIME_SQL_LOG_MESSAGE_LENGTH,
+};
+
+const PERSISTED_SQL_LOG_SANITIZE_OPTIONS: SqlLogSanitizeOptions = {
+  limit: MAX_PERSISTED_SQL_LOGS,
+  sqlLength: MAX_PERSISTED_SQL_LOG_LENGTH,
+  messageLength: MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH,
+};
+
+const sanitizeSqlLogEntry = (
+  entry: unknown,
+  index: number,
+  options: SqlLogSanitizeOptions,
+): SqlLog | null => {
+  if (!entry || typeof entry !== "object") return null;
+  const raw = entry as Record<string, unknown>;
+  const sql = typeof raw.sql === "string" ? raw.sql.slice(0, options.sqlLength) : "";
+  if (!sql.trim()) return null;
+
+  const status = raw.status === "error" ? "error" : "success";
+  const timestamp = Number(raw.timestamp);
+  const duration = Number(raw.duration);
+  const affectedRows = Number(raw.affectedRows);
+  const message = typeof raw.message === "string"
+    ? raw.message.slice(0, options.messageLength)
+    : "";
+
+  const log: SqlLog = {
+    id: toTrimmedString(raw.id, `log-${index + 1}`) || `log-${index + 1}`,
+    timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now(),
+    sql,
+    status,
+    duration: Number.isFinite(duration) && duration >= 0 ? duration : 0,
+    dbName: toTrimmedString(raw.dbName) || undefined,
+  };
+
+  if (message) {
+    log.message = message;
+  }
+  if (Number.isFinite(affectedRows)) {
+    log.affectedRows = affectedRows;
+  }
+
+  return log;
+};
+
+const sanitizeSqlLogs = (
+  value: unknown,
+  options: SqlLogSanitizeOptions = PERSISTED_SQL_LOG_SANITIZE_OPTIONS,
+): SqlLog[] => {
   if (!Array.isArray(value)) return [];
   const result: SqlLog[] = [];
   const seenIds = new Set<string>();
 
   value.forEach((entry, index) => {
-    if (!entry || typeof entry !== "object") return;
-    const raw = entry as Record<string, unknown>;
-    const sql = typeof raw.sql === "string" ? raw.sql.slice(0, MAX_PERSISTED_SQL_LOG_LENGTH) : "";
-    if (!sql.trim()) return;
+    const log = sanitizeSqlLogEntry(entry, index, options);
+    if (!log) return;
 
-    let id = toTrimmedString(raw.id, `log-${index + 1}`) || `log-${index + 1}`;
+    let id = log.id;
     if (seenIds.has(id)) {
       id = `${id}-${index + 1}`;
     }
     seenIds.add(id);
 
-    const status = raw.status === "error" ? "error" : "success";
-    const timestamp = Number(raw.timestamp);
-    const duration = Number(raw.duration);
-    const affectedRows = Number(raw.affectedRows);
-    const log: SqlLog = {
-      id,
-      timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now(),
-      sql,
-      status,
-      duration: Number.isFinite(duration) && duration >= 0 ? duration : 0,
-      dbName: toTrimmedString(raw.dbName) || undefined,
-    };
-
-    const message = typeof raw.message === "string"
-      ? raw.message.slice(0, MAX_PERSISTED_SQL_LOG_MESSAGE_LENGTH)
-      : "";
-    if (message) {
-      log.message = message;
-    }
-    if (Number.isFinite(affectedRows)) {
-      log.affectedRows = affectedRows;
-    }
-
-    result.push(log);
+    result.push(id === log.id ? log : { ...log, id });
   });
 
-  return result.slice(0, limit);
+  return result.slice(0, options.limit);
+};
+
+const sanitizeRuntimeSqlLogs = (value: unknown) =>
+  sanitizeSqlLogs(value, RUNTIME_SQL_LOG_SANITIZE_OPTIONS);
+
+const sanitizePersistedSqlLogs = (value: unknown) =>
+  sanitizeSqlLogs(value, PERSISTED_SQL_LOG_SANITIZE_OPTIONS);
+
+const appendRuntimeSqlLog = (existing: SqlLog[], entry: SqlLog): SqlLog[] => {
+  const nextEntry = sanitizeSqlLogEntry(entry, 0, RUNTIME_SQL_LOG_SANITIZE_OPTIONS);
+  if (!nextEntry) {
+    return existing;
+  }
+
+  const nextLogs = [nextEntry, ...existing.slice(0, MAX_RUNTIME_SQL_LOGS - 1)];
+  return existing.some((item) => item.id === nextEntry.id)
+    ? sanitizeRuntimeSqlLogs(nextLogs)
+    : nextLogs;
 };
 
 const hasLegacyConnectionSecrets = (
@@ -3173,7 +3226,7 @@ export const useStore = create<AppState>()(
         }),
 
       addSqlLog: (log) =>
-        set((state) => ({ sqlLogs: sanitizeSqlLogs([log, ...state.sqlLogs], MAX_SQL_LOGS) })),
+        set((state) => ({ sqlLogs: appendRuntimeSqlLog(state.sqlLogs, log) })),
       clearSqlLogs: () => set({ sqlLogs: [] }),
       upsertTableExportHistory: (historyKey, entry) =>
         set((state) => {
@@ -3573,7 +3626,7 @@ export const useStore = create<AppState>()(
         nextState.shortcutOptions = sanitizeShortcutOptions(
           state.shortcutOptions,
         );
-        nextState.sqlLogs = sanitizeSqlLogs(state.sqlLogs);
+        nextState.sqlLogs = sanitizeRuntimeSqlLogs(state.sqlLogs);
         nextState.tableExportHistories = sanitizeTableExportHistories(
           state.tableExportHistories,
         );
@@ -3686,7 +3739,7 @@ export const useStore = create<AppState>()(
             state.sqlEditorTransactionOptions,
           ),
           shortcutOptions: sanitizeShortcutOptions(state.shortcutOptions),
-          sqlLogs: sanitizeSqlLogs(state.sqlLogs),
+          sqlLogs: sanitizeRuntimeSqlLogs(state.sqlLogs),
           sqlSnippets: sanitizeSqlSnippets(state.sqlSnippets),
           tableAccessCount: sanitizeTableAccessCount(state.tableAccessCount),
 
@@ -3718,7 +3771,7 @@ export const useStore = create<AppState>()(
           dataEditTransactionOptions: state.dataEditTransactionOptions,
           sqlEditorTransactionOptions: state.sqlEditorTransactionOptions,
           shortcutOptions: resolveShortcutOptionsForPersistence(state.shortcutOptions),
-          sqlLogs: sanitizeSqlLogs(state.sqlLogs),
+          sqlLogs: sanitizePersistedSqlLogs(state.sqlLogs),
           tableExportHistories: sanitizeTableExportHistories(
             state.tableExportHistories,
           ),

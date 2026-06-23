@@ -29,6 +29,7 @@ const (
 	optionalAgentMethodOpenSession      = "openSession"
 	optionalAgentMethodCloseSession     = "closeSession"
 	optionalAgentMethodQuery            = "query"
+	optionalAgentMethodQueryMulti       = "queryMulti"
 	optionalAgentMethodStreamQuery      = "streamQuery"
 	optionalAgentMethodExec             = "exec"
 	optionalAgentMethodGetDatabases     = "getDatabases"
@@ -75,6 +76,7 @@ type optionalAgentResponse struct {
 	Error        string          `json:"error,omitempty"`
 	Data         json.RawMessage `json:"data,omitempty"`
 	Fields       []string        `json:"fields,omitempty"`
+	Messages     []string        `json:"messages,omitempty"`
 	ChunkType    string          `json:"chunkType,omitempty"`
 	RowsAffected int64           `json:"rowsAffected,omitempty"`
 }
@@ -106,7 +108,7 @@ func ProbeOptionalDriverAgentMetadata(driverType string, executablePath string) 
 	}()
 
 	var metadata OptionalDriverAgentMetadata
-	if err := client.callWithTimeout(optionalAgentRequest{Method: optionalAgentMethodMetadata}, &metadata, nil, nil, optionalAgentMetadataProbeTimeout); err != nil {
+	if err := client.callWithTimeout(optionalAgentRequest{Method: optionalAgentMethodMetadata}, &metadata, nil, nil, nil, optionalAgentMetadataProbeTimeout); err != nil {
 		return OptionalDriverAgentMetadata{}, err
 	}
 	metadata.DriverType = normalizeRuntimeDriverType(metadata.DriverType)
@@ -208,7 +210,7 @@ func (c *optionalDriverAgentClient) stderrText() string {
 	return strings.TrimSpace(c.stderr.String())
 }
 
-func (c *optionalDriverAgentClient) call(req optionalAgentRequest, out interface{}, fields *[]string, rowsAffected *int64) error {
+func (c *optionalDriverAgentClient) call(req optionalAgentRequest, out interface{}, fields *[]string, messages *[]string, rowsAffected *int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -252,6 +254,9 @@ func (c *optionalDriverAgentClient) call(req optionalAgentRequest, out interface
 	if fields != nil {
 		*fields = resp.Fields
 	}
+	if messages != nil {
+		*messages = append((*messages)[:0], resp.Messages...)
+	}
 	if rowsAffected != nil {
 		*rowsAffected = resp.RowsAffected
 	}
@@ -263,14 +268,14 @@ func (c *optionalDriverAgentClient) call(req optionalAgentRequest, out interface
 	return nil
 }
 
-func (c *optionalDriverAgentClient) callWithTimeout(req optionalAgentRequest, out interface{}, fields *[]string, rowsAffected *int64, timeout time.Duration) error {
+func (c *optionalDriverAgentClient) callWithTimeout(req optionalAgentRequest, out interface{}, fields *[]string, messages *[]string, rowsAffected *int64, timeout time.Duration) error {
 	if timeout <= 0 {
-		return c.call(req, out, fields, rowsAffected)
+		return c.call(req, out, fields, messages, rowsAffected)
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- c.call(req, out, fields, rowsAffected)
+		errCh <- c.call(req, out, fields, messages, rowsAffected)
 	}()
 
 	timer := time.NewTimer(timeout)
@@ -469,7 +474,7 @@ func (d *OptionalDriverAgentDB) Connect(config connection.ConnectionConfig) erro
 	if err := client.call(optionalAgentRequest{
 		Method: optionalAgentMethodConnect,
 		Config: &config,
-	}, nil, nil, nil); err != nil {
+	}, nil, nil, nil, nil); err != nil {
 		_ = client.close()
 		return err
 	}
@@ -482,7 +487,7 @@ func (d *OptionalDriverAgentDB) Close() error {
 	if d.client == nil {
 		return nil
 	}
-	_ = d.client.call(optionalAgentRequest{Method: optionalAgentMethodClose}, nil, nil, nil)
+	_ = d.client.call(optionalAgentRequest{Method: optionalAgentMethodClose}, nil, nil, nil, nil)
 	err := d.client.close()
 	d.client = nil
 	return err
@@ -493,10 +498,87 @@ func (d *OptionalDriverAgentDB) Ping() error {
 	if err != nil {
 		return err
 	}
-	return client.call(optionalAgentRequest{Method: optionalAgentMethodPing}, nil, nil, nil)
+	return client.call(optionalAgentRequest{Method: optionalAgentMethodPing}, nil, nil, nil, nil)
 }
 
 func (d *OptionalDriverAgentDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	data, fields, _, err := d.QueryContextWithMessages(ctx, query)
+	return data, fields, err
+}
+
+func (d *OptionalDriverAgentDB) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, nil, err
+	}
+	client, err := d.requireClient()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var data []map[string]interface{}
+	var fields []string
+	var messages []string
+	if err := client.call(optionalAgentRequest{
+		Method:    optionalAgentMethodQuery,
+		Query:     query,
+		TimeoutMs: timeoutMsFromContext(ctx),
+	}, &data, &fields, &messages, nil); err != nil {
+		return nil, nil, nil, err
+	}
+	return data, fields, messages, nil
+}
+
+func (d *OptionalDriverAgentDB) Query(query string) ([]map[string]interface{}, []string, error) {
+	data, fields, _, err := d.QueryWithMessages(query)
+	return data, fields, err
+}
+
+func (d *OptionalDriverAgentDB) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	client, err := d.requireClient()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var data []map[string]interface{}
+	var fields []string
+	var messages []string
+	if err := client.call(optionalAgentRequest{
+		Method: optionalAgentMethodQuery,
+		Query:  query,
+	}, &data, &fields, &messages, nil); err != nil {
+		return nil, nil, nil, err
+	}
+	return data, fields, messages, nil
+}
+
+func (d *OptionalDriverAgentDB) QueryMulti(query string) ([]connection.ResultSetData, error) {
+	results, _, err := d.QueryMultiWithMessages(query)
+	return results, err
+}
+
+func (d *OptionalDriverAgentDB) QueryMultiWithMessages(query string) ([]connection.ResultSetData, []string, error) {
+	client, err := d.requireClient()
+	if err != nil {
+		return nil, nil, err
+	}
+	var results []connection.ResultSetData
+	var messages []string
+	if err := client.call(optionalAgentRequest{
+		Method: optionalAgentMethodQueryMulti,
+		Query:  query,
+	}, &results, nil, &messages, nil); err != nil {
+		if isOptionalAgentMultiResultUnsupportedError(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	return results, messages, nil
+}
+
+func (d *OptionalDriverAgentDB) QueryMultiContext(ctx context.Context, query string) ([]connection.ResultSetData, error) {
+	results, _, err := d.QueryMultiContextWithMessages(ctx, query)
+	return results, err
+}
+
+func (d *OptionalDriverAgentDB) QueryMultiContextWithMessages(ctx context.Context, query string) ([]connection.ResultSetData, []string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
@@ -504,32 +586,19 @@ func (d *OptionalDriverAgentDB) QueryContext(ctx context.Context, query string) 
 	if err != nil {
 		return nil, nil, err
 	}
-	var data []map[string]interface{}
-	var fields []string
+	var results []connection.ResultSetData
+	var messages []string
 	if err := client.call(optionalAgentRequest{
-		Method:    optionalAgentMethodQuery,
+		Method:    optionalAgentMethodQueryMulti,
 		Query:     query,
 		TimeoutMs: timeoutMsFromContext(ctx),
-	}, &data, &fields, nil); err != nil {
+	}, &results, nil, &messages, nil); err != nil {
+		if isOptionalAgentMultiResultUnsupportedError(err) {
+			return nil, nil, nil
+		}
 		return nil, nil, err
 	}
-	return data, fields, nil
-}
-
-func (d *OptionalDriverAgentDB) Query(query string) ([]map[string]interface{}, []string, error) {
-	client, err := d.requireClient()
-	if err != nil {
-		return nil, nil, err
-	}
-	var data []map[string]interface{}
-	var fields []string
-	if err := client.call(optionalAgentRequest{
-		Method: optionalAgentMethodQuery,
-		Query:  query,
-	}, &data, &fields, nil); err != nil {
-		return nil, nil, err
-	}
-	return data, fields, nil
+	return results, messages, nil
 }
 
 func (d *OptionalDriverAgentDB) StreamQuery(query string, consumer QueryStreamConsumer) error {
@@ -581,7 +650,7 @@ func (d *OptionalDriverAgentDB) ExecContext(ctx context.Context, query string) (
 		Method:    optionalAgentMethodExec,
 		Query:     query,
 		TimeoutMs: timeoutMsFromContext(ctx),
-	}, nil, nil, &affected); err != nil {
+	}, nil, nil, nil, &affected); err != nil {
 		return 0, err
 	}
 	return affected, nil
@@ -596,7 +665,7 @@ func (d *OptionalDriverAgentDB) Exec(query string) (int64, error) {
 	if err := client.call(optionalAgentRequest{
 		Method: optionalAgentMethodExec,
 		Query:  query,
-	}, nil, nil, &affected); err != nil {
+	}, nil, nil, nil, &affected); err != nil {
 		return 0, err
 	}
 	return affected, nil
@@ -611,7 +680,7 @@ func (d *OptionalDriverAgentDB) OpenSessionExecer(ctx context.Context) (Statemen
 	if err := client.call(optionalAgentRequest{
 		Method:    optionalAgentMethodOpenSession,
 		TimeoutMs: timeoutMsFromContext(ctx),
-	}, &sessionID, nil, nil); err != nil {
+	}, &sessionID, nil, nil, nil); err != nil {
 		return nil, err
 	}
 	sessionID = strings.TrimSpace(sessionID)
@@ -627,6 +696,10 @@ func (d *OptionalDriverAgentDB) OpenSessionExecer(ctx context.Context) (Statemen
 
 func (s *optionalDriverAgentSession) Query(query string) ([]map[string]interface{}, []string, error) {
 	return s.QueryContext(context.Background(), query)
+}
+
+func (s *optionalDriverAgentSession) QueryWithMessages(query string) ([]map[string]interface{}, []string, []string, error) {
+	return s.QueryContextWithMessages(context.Background(), query)
 }
 
 func (s *optionalDriverAgentSession) StreamQuery(query string, consumer QueryStreamConsumer) error {
@@ -663,20 +736,26 @@ func (s *optionalDriverAgentSession) StreamQueryContext(ctx context.Context, que
 }
 
 func (s *optionalDriverAgentSession) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
+	data, fields, _, err := s.QueryContextWithMessages(ctx, query)
+	return data, fields, err
+}
+
+func (s *optionalDriverAgentSession) QueryContextWithMessages(ctx context.Context, query string) ([]map[string]interface{}, []string, []string, error) {
 	if err := s.ensureOpen(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var data []map[string]interface{}
 	var fields []string
+	var messages []string
 	if err := s.client.call(optionalAgentRequest{
 		Method:    optionalAgentMethodQuery,
 		SessionID: s.sessionID,
 		Query:     query,
 		TimeoutMs: timeoutMsFromContext(ctx),
-	}, &data, &fields, nil); err != nil {
-		return nil, nil, err
+	}, &data, &fields, &messages, nil); err != nil {
+		return nil, nil, nil, err
 	}
-	return data, fields, nil
+	return data, fields, messages, nil
 }
 
 func (s *optionalDriverAgentSession) Exec(query string) (int64, error) {
@@ -693,7 +772,7 @@ func (s *optionalDriverAgentSession) ExecContext(ctx context.Context, query stri
 		SessionID: s.sessionID,
 		Query:     query,
 		TimeoutMs: timeoutMsFromContext(ctx),
-	}, nil, nil, &affected); err != nil {
+	}, nil, nil, nil, &affected); err != nil {
 		return 0, err
 	}
 	return affected, nil
@@ -714,7 +793,7 @@ func (s *optionalDriverAgentSession) Close() error {
 	return s.client.call(optionalAgentRequest{
 		Method:    optionalAgentMethodCloseSession,
 		SessionID: sessionID,
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 }
 
 func (s *optionalDriverAgentSession) ensureOpen() error {
@@ -740,6 +819,19 @@ func isOptionalAgentStreamUnsupportedError(err error) bool {
 	return strings.Contains(text, "不支持的方法") || strings.Contains(text, "不支持流式查询")
 }
 
+func isOptionalAgentMultiResultUnsupportedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.TrimSpace(err.Error())
+	if text == "" {
+		return false
+	}
+	return strings.Contains(text, "不支持的方法") ||
+		strings.Contains(text, "不支持原生多结果集查询") ||
+		strings.Contains(text, "不支持多结果集查询")
+}
+
 func (d *OptionalDriverAgentDB) GetDatabases() ([]string, error) {
 	client, err := d.requireClient()
 	if err != nil {
@@ -748,7 +840,7 @@ func (d *OptionalDriverAgentDB) GetDatabases() ([]string, error) {
 	var dbs []string
 	if err := client.call(optionalAgentRequest{
 		Method: optionalAgentMethodGetDatabases,
-	}, &dbs, nil, nil); err != nil {
+	}, &dbs, nil, nil, nil); err != nil {
 		return nil, err
 	}
 	return dbs, nil
@@ -763,7 +855,7 @@ func (d *OptionalDriverAgentDB) GetTables(dbName string) ([]string, error) {
 	if err := client.call(optionalAgentRequest{
 		Method: optionalAgentMethodGetTables,
 		DBName: dbName,
-	}, &tables, nil, nil); err != nil {
+	}, &tables, nil, nil, nil); err != nil {
 		return nil, err
 	}
 	return tables, nil
@@ -779,7 +871,7 @@ func (d *OptionalDriverAgentDB) GetCreateStatement(dbName, tableName string) (st
 		Method:    optionalAgentMethodGetCreateStmt,
 		DBName:    dbName,
 		TableName: tableName,
-	}, &sqlText, nil, nil); err != nil {
+	}, &sqlText, nil, nil, nil); err != nil {
 		return "", err
 	}
 	return sqlText, nil
@@ -795,7 +887,7 @@ func (d *OptionalDriverAgentDB) GetColumns(dbName, tableName string) ([]connecti
 		Method:    optionalAgentMethodGetColumns,
 		DBName:    dbName,
 		TableName: tableName,
-	}, &columns, nil, nil); err != nil {
+	}, &columns, nil, nil, nil); err != nil {
 		return nil, err
 	}
 	return columns, nil
@@ -810,7 +902,7 @@ func (d *OptionalDriverAgentDB) GetAllColumns(dbName string) ([]connection.Colum
 	if err := client.call(optionalAgentRequest{
 		Method: optionalAgentMethodGetAllColumns,
 		DBName: dbName,
-	}, &columns, nil, nil); err != nil {
+	}, &columns, nil, nil, nil); err != nil {
 		return nil, err
 	}
 	return columns, nil
@@ -826,7 +918,7 @@ func (d *OptionalDriverAgentDB) GetIndexes(dbName, tableName string) ([]connecti
 		Method:    optionalAgentMethodGetIndexes,
 		DBName:    dbName,
 		TableName: tableName,
-	}, &indexes, nil, nil); err != nil {
+	}, &indexes, nil, nil, nil); err != nil {
 		return nil, err
 	}
 	return indexes, nil
@@ -842,7 +934,7 @@ func (d *OptionalDriverAgentDB) GetForeignKeys(dbName, tableName string) ([]conn
 		Method:    optionalAgentMethodGetForeignKeys,
 		DBName:    dbName,
 		TableName: tableName,
-	}, &keys, nil, nil); err != nil {
+	}, &keys, nil, nil, nil); err != nil {
 		return nil, err
 	}
 	return keys, nil
@@ -858,7 +950,7 @@ func (d *OptionalDriverAgentDB) GetTriggers(dbName, tableName string) ([]connect
 		Method:    optionalAgentMethodGetTriggers,
 		DBName:    dbName,
 		TableName: tableName,
-	}, &triggers, nil, nil); err != nil {
+	}, &triggers, nil, nil, nil); err != nil {
 		return nil, err
 	}
 	return triggers, nil
@@ -883,7 +975,7 @@ func (d *OptionalDriverAgentDB) ApplyChanges(tableName string, changes connectio
 		Method:    optionalAgentMethodApplyChanges,
 		TableName: tableName,
 		Changes:   &changes,
-	}, nil, nil, nil)
+	}, nil, nil, nil, nil)
 }
 
 func (d *OptionalDriverAgentDB) requireClient() (*optionalDriverAgentClient, error) {

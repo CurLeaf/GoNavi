@@ -2414,9 +2414,6 @@ describe('Sidebar locate toolbar', () => {
     const loadTablesStart = source.indexOf('const loadTables = async (node: any) => {');
     const loadTablesEnd = source.indexOf('const config = {', loadTablesStart);
     const loadTablesSource = source.slice(loadTablesStart, loadTablesEnd);
-    const externalSqlReadStart = source.indexOf('const externalSQLDirectoryResults = await Promise.all(', loadTablesStart);
-    const externalSqlReadEnd = source.indexOf('const externalSQLTrees = externalSQLDirectoryResults.reduce', externalSqlReadStart);
-    const externalSqlReadSource = source.slice(externalSqlReadStart, externalSqlReadEnd);
     const externalSqlFlowStart = source.indexOf('const handleAddExternalSQLDirectory = async (node: any) => {');
     const externalSqlFlowEnd = source.indexOf('const cancelSQLFileExecution = () => {', externalSqlFlowStart);
     const externalSqlFlowSource = source.slice(externalSqlFlowStart, externalSqlFlowEnd);
@@ -2439,8 +2436,6 @@ describe('Sidebar locate toolbar', () => {
     [
       loadTablesStart,
       loadTablesEnd,
-      externalSqlReadStart,
-      externalSqlReadEnd,
       externalSqlFlowStart,
       externalSqlFlowEnd,
       treeTitleStart,
@@ -2457,9 +2452,7 @@ describe('Sidebar locate toolbar', () => {
 
     expect(loadTablesSource).toContain("title: t('sidebar.tree.saved_queries')");
     expect(loadTablesSource).not.toContain("title: '已存查询'");
-
-    expect(externalSqlReadSource).toContain("t('sidebar.message.external_sql_directory_read_failed'");
-    expect(externalSqlReadSource).not.toContain('SQL 目录读取失败');
+    expect(source).not.toContain('const externalSQLDirectoryResults = await Promise.all(');
     expect(loadTablesSource).not.toContain('SQL 目录读取失败');
     expect(loadTablesSource).not.toContain("'SQL目录'");
 
