@@ -1091,6 +1091,64 @@ describe('DataGrid DDL interactions', () => {
     renderer!.unmount();
   });
 
+  it('keeps pending local changes visible after refreshing the grid', async () => {
+    const reloadSpy = vi.fn();
+
+    const Harness = () => {
+      const [rows, setRows] = React.useState([
+        { __gonavi_row_key__: 'row-1', id: 1, name: 'old' },
+      ]);
+
+      return (
+        <DataGrid
+          data={rows}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          pkColumns={['id']}
+          editLocator={{
+            strategy: 'primary-key',
+            columns: ['id'],
+            valueColumns: ['id'],
+            readOnly: false,
+          }}
+          onReload={() => {
+            reloadSpy();
+            setRows([{ __gonavi_row_key__: 'row-1', id: 1, name: 'old' }]);
+          }}
+        />
+      );
+    };
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<Harness />);
+    });
+    await waitForEffects();
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onAddRow();
+    });
+    await waitForEffects();
+
+    expect(testRenderState.latestTableProps.dataSource).toHaveLength(2);
+    expect(renderer!.root.findByType(DataGridToolbarFrame).props.pendingChangeCount).toBe(1);
+
+    await act(async () => {
+      renderer!.root.findByType(DataGridToolbarFrame).props.onRefresh();
+    });
+    await waitForEffects();
+    await waitForEffects();
+
+    expect(reloadSpy).toHaveBeenCalledTimes(1);
+    expect(testRenderState.latestTableProps.dataSource).toHaveLength(2);
+    expect(testRenderState.latestTableProps.dataSource[1][GONAVI_ROW_KEY]).toContain('new-');
+    expect(renderer!.root.findByType(DataGridToolbarFrame).props.pendingChangeCount).toBe(1);
+    renderer!.unmount();
+  });
+
   it('localizes v2 column header fallback labels', () => {
     setCurrentLanguage('en-US');
 

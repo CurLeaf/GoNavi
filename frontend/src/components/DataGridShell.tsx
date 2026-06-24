@@ -479,12 +479,6 @@ const renderDataTableView = () => (
   ), [columnMetaMap, columnMetaMapByLowerName, currentConnConfig, dbType, displayColumnNames, effectiveEditLocator, rowEditorOpen, rowEditorRowKey]);
 
   const handleRefreshGrid = useCallback(() => {
-      clearAutoCommitTimer();
-      autoCommitFailedTokenRef.current = -1;
-      setAddedRows([]);
-      setModifiedRows({});
-      setDeletedRowKeys(new Set());
-      setModifiedColumns({});
       setSelectedRowKeys([]);
       const normalizedTableName = String(tableName || '').trim();
       const normalizedDbName = String(dbName || '').trim();
@@ -496,7 +490,7 @@ const renderDataTableView = () => (
           setMetadataReloadVersion((value: number) => value + 1);
       }
       if (onReload) onReload();
-  }, [clearAutoCommitTimer, connectionId, dbName, onReload, tableName]);
+  }, [connectionId, dbName, onReload, tableName]);
 
   const handleResetPendingChanges = useCallback(() => {
       clearAutoCommitTimer();

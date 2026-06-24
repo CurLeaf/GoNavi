@@ -2037,10 +2037,13 @@ describe('DataGrid layout', () => {
     }
   });
 
-  it('clears modified cell markers when refreshing the grid', () => {
+  it('keeps pending cell markers when refreshing the grid', () => {
     const source = readDataGridSource();
 
-    expect(source).toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setModifiedColumns\(\{\}\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}, \[[\s\S]*clearAutoCommitTimer[\s\S]*onReload[\s\S]*\]\);/);
+    expect(source).toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setSelectedRowKeys\(\[\]\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}, \[[\s\S]*onReload[\s\S]*\]\);/);
+    expect(source).not.toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setAddedRows\(\[\]\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}\,/);
+    expect(source).not.toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setModifiedRows\(\{\}\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}\,/);
+    expect(source).not.toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setDeletedRowKeys\(new Set\(\)\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}\,/);
   });
 
   it('routes temporal inline editors through the current connection config', () => {
