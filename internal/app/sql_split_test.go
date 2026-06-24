@@ -211,6 +211,55 @@ END;`,
 	}
 }
 
+func TestSplitSQLStatements_OracleCreateProcedureSkipsSqlPlusSlashDelimiter(t *testing.T) {
+	input := `CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_new(
+    p_sourceid IN VARCHAR2
+) IS
+    v_memcardno VARCHAR2(40);
+    v_ecnt NUMBER;
+    CURSOR cur_ware IS
+        SELECT d.goodsid, d.goodsqty
+        FROM t_order_d d
+        WHERE d.sourceid = p_sourceid;
+BEGIN
+    FOR row_ware IN cur_ware LOOP
+        v_ecnt := row_ware.goodsqty;
+    END LOOP;
+END;
+/
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_new(
+    p_sourceid IN VARCHAR2
+) IS
+    v_memcardno VARCHAR2(40);
+    v_ecnt NUMBER;
+    CURSOR cur_ware IS
+        SELECT d.goodsid, d.goodsqty
+        FROM t_order_d d
+        WHERE d.sourceid = p_sourceid;
+BEGIN
+    FOR row_ware IN cur_ware LOOP
+        v_ecnt := row_ware.goodsqty;
+    END LOOP;
+END;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
+func TestSplitSQLStatements_DoesNotTreatSlashOperatorLineAsDelimiter(t *testing.T) {
+	input := "SELECT 10\n/\n2 FROM dual;"
+	got := splitSQLStatements(input)
+	want := []string{"SELECT 10\n/\n2 FROM dual"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
 func TestSplitSQLStatements_TransactionBeginStillSplits(t *testing.T) {
 	input := "BEGIN; UPDATE accounts SET balance = balance - 1 WHERE id = 1; COMMIT;"
 	got := splitSQLStatements(input)

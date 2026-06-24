@@ -435,3 +435,43 @@ func TestStreamSQLFileKeepsOracleCreateProcedureTogether(t *testing.T) {
 		t.Fatalf("unexpected second statement: %q", statements[1])
 	}
 }
+
+func TestStreamSQLFileSkipsOracleSqlPlusSlashDelimiter(t *testing.T) {
+	input := strings.Join([]string{
+		"CREATE OR REPLACE PROCEDURE proc_tally2accept(",
+		"  p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE",
+		") IS",
+		"  v_count PLS_INTEGER;",
+		"BEGIN",
+		"  SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;",
+		"END;",
+		"/",
+		"SELECT 1 FROM dual;",
+	}, "\n")
+	var statements []string
+
+	count, err := streamSQLFile(&chunkedReader{data: []byte(input), step: 2}, func(index int, stmt string) error {
+		statements = append(statements, stmt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamSQLFile returned error: %v", err)
+	}
+	if count != 2 || len(statements) != 2 {
+		t.Fatalf("expected 2 statements, got count=%d statements=%#v", count, statements)
+	}
+	if statements[0] != strings.Join([]string{
+		"CREATE OR REPLACE PROCEDURE proc_tally2accept(",
+		"  p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE",
+		") IS",
+		"  v_count PLS_INTEGER;",
+		"BEGIN",
+		"  SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;",
+		"END;",
+	}, "\n") {
+		t.Fatalf("unexpected create procedure statement: %q", statements[0])
+	}
+	if statements[1] != "SELECT 1 FROM dual" {
+		t.Fatalf("unexpected second statement: %q", statements[1])
+	}
+}

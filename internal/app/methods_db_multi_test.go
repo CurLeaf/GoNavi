@@ -435,6 +435,52 @@ END;`
 	}
 }
 
+func TestDBQueryMultiSkipsOracleSqlPlusSlashDelimiter(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeBatchWriteDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type: "oracle",
+		Host: "127.0.0.1",
+		Port: 1521,
+		User: "app",
+	}
+	query := `CREATE OR REPLACE PROCEDURE proc_tally2accept(
+    p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE
+) IS
+    v_count PLS_INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;
+END;
+/`
+	wantExecuted := `CREATE OR REPLACE PROCEDURE proc_tally2accept(
+    p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE
+) IS
+    v_count PLS_INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;
+END;`
+
+	result := app.DBQueryMulti(config, "ORCLPDB1", query, "oracle-sqlplus-slash-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.execCalls != 1 || len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one sequential exec call, got execCalls=%d queries=%#v", fakeDB.execCalls, fakeDB.execQueries)
+	}
+	if fakeDB.execQueries[0] != wantExecuted {
+		t.Fatalf("expected slash delimiter to be skipped, got %q", fakeDB.execQueries[0])
+	}
+}
+
 var _ db.BatchWriteExecer = (*fakeBatchWriteDB)(nil)
 var _ db.SessionExecerProvider = (*fakeBatchWriteDB)(nil)
 var _ db.QueryMessageExecer = (*fakeBatchWriteDB)(nil)

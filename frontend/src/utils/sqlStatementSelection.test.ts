@@ -128,6 +128,61 @@ describe('sqlStatementSelection', () => {
     });
   });
 
+  it('skips standalone SQL*Plus slash delimiters after Oracle CREATE PROCEDURE definitions', () => {
+    const sql = [
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_new(',
+      '  p_sourceid IN VARCHAR2',
+      ') IS',
+      '  v_memcardno VARCHAR2(40);',
+      '  v_ecnt NUMBER;',
+      '  CURSOR cur_ware IS',
+      '    SELECT d.goodsid, d.goodsqty',
+      '    FROM t_order_d d',
+      '    WHERE d.sourceid = p_sourceid;',
+      'BEGIN',
+      '  FOR row_ware IN cur_ware LOOP',
+      '    v_ecnt := row_ware.goodsqty;',
+      '  END LOOP;',
+      'END;',
+      '/',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_new(',
+        '  p_sourceid IN VARCHAR2',
+        ') IS',
+        '  v_memcardno VARCHAR2(40);',
+        '  v_ecnt NUMBER;',
+        '  CURSOR cur_ware IS',
+        '    SELECT d.goodsid, d.goodsqty',
+        '    FROM t_order_d d',
+        '    WHERE d.sourceid = p_sourceid;',
+        'BEGIN',
+        '  FOR row_ware IN cur_ware LOOP',
+        '    v_ecnt := row_ware.goodsqty;',
+        '  END LOOP;',
+        'END;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('v_memcardno'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+  });
+
+  it('does not treat a slash operator line as a SQL*Plus delimiter', () => {
+    const sql = 'SELECT 10\n/\n2 FROM dual;';
+
+    expect(findSqlStatementRanges(sql).map((range) => range.text)).toEqual([
+      'SELECT 10\n/\n2 FROM dual',
+    ]);
+  });
+
   it('keeps PostgreSQL dollar-quoted CREATE FUNCTION definitions as one executable statement', () => {
     const sql = [
       'CREATE OR REPLACE FUNCTION refresh_stats() RETURNS void AS $$',

@@ -15,6 +15,10 @@ const isWhitespace = (ch: string): boolean => (
   ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f'
 );
 
+const isHorizontalWhitespace = (ch: string): boolean => (
+  ch === ' ' || ch === '\t' || ch === '\r' || ch === '\f'
+);
+
 const isSqlIdentifierStart = (ch: string): boolean => /^[A-Za-z_]$/.test(ch);
 
 const isSqlIdentifierPart = (ch: string): boolean => /^[A-Za-z0-9_$#]$/.test(ch);
@@ -57,6 +61,26 @@ const nextSqlSignificantToken = (text: string, position: number): string => {
 const nextSqlSignificantChar = (text: string, position: number): string => {
   const index = skipSqlWhitespaceAndComments(text, position);
   return index >= text.length ? '' : text[index];
+};
+
+const resolveStandaloneSqlSlashLineEnd = (text: string, index: number): number | null => {
+  if (text[index] !== '/') return null;
+
+  const lineStart = text.lastIndexOf('\n', Math.max(0, index - 1)) + 1;
+  for (let pos = lineStart; pos < index; pos++) {
+    if (!isHorizontalWhitespace(text[pos])) {
+      return null;
+    }
+  }
+
+  let lineEnd = index + 1;
+  while (lineEnd < text.length && text[lineEnd] !== '\n') {
+    if (!isHorizontalWhitespace(text[lineEnd])) {
+      return null;
+    }
+    lineEnd += 1;
+  }
+  return lineEnd;
 };
 
 const shouldEnterPlsqlBeginBlock = (text: string, tokenEnd: number): boolean => {
@@ -193,6 +217,18 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
         index++;
         inBlockComment = true;
         continue;
+      }
+      if ((justClosedPLSQLBlock || !text.slice(statementStart, index).trim()) && ch === '/') {
+        const slashLineEnd = resolveStandaloneSqlSlashLineEnd(text, index);
+        if (slashLineEnd !== null) {
+          push(index);
+          statementStart = slashLineEnd < text.length && text[slashLineEnd] === '\n'
+            ? slashLineEnd + 1
+            : slashLineEnd;
+          index = slashLineEnd;
+          justClosedPLSQLBlock = false;
+          continue;
+        }
       }
       if (ch === '#') {
         inLineComment = true;

@@ -157,6 +157,15 @@ func splitSQLStatements(sql string) []string {
 			continue
 		}
 
+		if ch == '/' && (justClosedPLSQLBlock || strings.TrimSpace(cur.String()) == "") {
+			if lineEnd, ok := standaloneSQLSlashLineEnd(text, i); ok {
+				push()
+				justClosedPLSQLBlock = false
+				i = lineEnd
+				continue
+			}
+		}
+
 		// 块注释开始
 		if ch == '/' && next == '*' {
 			inBlockComment = true
@@ -222,6 +231,42 @@ func isSQLIdentifierStart(ch byte) bool {
 
 func isSQLIdentifierPart(ch byte) bool {
 	return isSQLIdentifierStart(ch) || (ch >= '0' && ch <= '9') || ch == '$' || ch == '#'
+}
+
+func isSQLHorizontalWhitespace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\f'
+}
+
+func standaloneSQLSlashLineEnd(text string, pos int) (int, bool) {
+	if pos < 0 || pos >= len(text) || text[pos] != '/' {
+		return 0, false
+	}
+	lineStart := strings.LastIndexByte(text[:pos], '\n') + 1
+	for i := lineStart; i < pos; i++ {
+		if !isSQLHorizontalWhitespace(text[i]) {
+			return 0, false
+		}
+	}
+	lineEnd, standalone, _ := scanSQLStandaloneSlashLineSuffix(text, pos)
+	if !standalone {
+		return 0, false
+	}
+	return lineEnd, true
+}
+
+func scanSQLStandaloneSlashLineSuffix(text string, pos int) (lineEnd int, standalone bool, complete bool) {
+	if pos < 0 || pos >= len(text) || text[pos] != '/' {
+		return 0, false, true
+	}
+	for i := pos + 1; i < len(text); i++ {
+		if text[i] == '\n' {
+			return i, true, true
+		}
+		if !isSQLHorizontalWhitespace(text[i]) {
+			return 0, false, true
+		}
+	}
+	return len(text), true, false
 }
 
 func skipSQLWhitespaceAndComments(text string, pos int) int {

@@ -178,6 +178,24 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 			continue
 		}
 
+		if ch == '/' && (s.closedPLSQL || strings.TrimSpace(s.cur.String()) == "") && sqlStreamCurrentLineWhitespaceOnly(&s.cur) {
+			lineEnd, standalone, complete := scanSQLStandaloneSlashLineSuffix(text, i)
+			if standalone {
+				if !complete {
+					s.pending = text[i:]
+					break
+				}
+				stmt := strings.TrimSpace(s.cur.String())
+				if stmt != "" {
+					statements = append(statements, stmt)
+				}
+				s.cur.Reset()
+				s.closedPLSQL = false
+				i = lineEnd
+				continue
+			}
+		}
+
 		// 块注释开始
 		if ch == '/' && i+1 >= len(text) {
 			s.pending = text[i:]
@@ -267,12 +285,37 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 // Flush 返回缓冲区中剩余的不完整语句（文件结束时调用）。
 func (s *sqlStreamSplitter) Flush() string {
 	if s.pending != "" {
+		if (s.closedPLSQL || strings.TrimSpace(s.cur.String()) == "") && sqlStreamCurrentLineWhitespaceOnly(&s.cur) {
+			if _, standalone, _ := scanSQLStandaloneSlashLineSuffix(s.pending, 0); standalone {
+				s.pending = ""
+				stmt := strings.TrimSpace(s.cur.String())
+				s.cur.Reset()
+				s.closedPLSQL = false
+				return stmt
+			}
+		}
 		s.cur.WriteString(s.pending)
 		s.pending = ""
 	}
 	stmt := strings.TrimSpace(s.cur.String())
 	s.cur.Reset()
+	if stmt == "/" {
+		return ""
+	}
 	return stmt
+}
+
+func sqlStreamCurrentLineWhitespaceOnly(builder *strings.Builder) bool {
+	text := builder.String()
+	for i := len(text) - 1; i >= 0; i-- {
+		if text[i] == '\n' {
+			return true
+		}
+		if !isSQLHorizontalWhitespace(text[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func isIncompleteSQLDollarTag(s string) bool {
