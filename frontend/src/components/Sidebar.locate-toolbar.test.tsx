@@ -1064,6 +1064,8 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-tree-status::before \{[^}]*width: 7px;[^}]*height: 7px;[^}]*border-radius: 50%;/s);
     expect(css).toMatch(/\.gn-v2-tree-status\.is-success::before \{[^}]*background: #22c55e;[^}]*box-shadow: 0 0 0 4px rgba\(34, 197, 94, 0\.18\);/s);
     expect(css).toMatch(/\.gn-v2-tree-label \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s);
+    expect(css).toMatch(/\.gn-v2-tree-title\.is-mono \{[^}]*width: max-content;[^}]*min-width: 100%;[^}]*flex: 0 0 auto;/s);
+    expect(css).toMatch(/\.gn-v2-tree-title\.is-mono \.gn-v2-tree-label \{[^}]*flex: 0 0 auto;[^}]*overflow: visible;[^}]*text-overflow: clip;/s);
     expect(css).toMatch(/\.gn-v2-tree-folder-icon \{[^}]*width: 22px;[^}]*height: 22px;[^}]*flex: 0 0 22px;/s);
     expect(css).not.toContain('.gn-v2-tree-connection-meta');
   });
@@ -1088,9 +1090,18 @@ describe('Sidebar locate toolbar', () => {
         type: 'table',
       },
     ] as any, 900);
+    const veryLongWidth = estimateV2TreeHorizontalScrollWidth([
+      {
+        title: `example.main.${'order_detail_with_long_business_suffix_'.repeat(6)}`,
+        key: 'table-very-long',
+        type: 'table',
+      },
+    ] as any, 320);
 
     expect(narrowWidth).toBeGreaterThan(260);
-    expect(narrowWidth).toBeLessThanOrEqual(960);
+    expect(narrowWidth).toBeLessThanOrEqual(2600);
+    expect(veryLongWidth).toBeGreaterThan(960);
+    expect(veryLongWidth).toBeLessThanOrEqual(2600);
     expect(wideWidth).toBeUndefined();
   });
 

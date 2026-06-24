@@ -2726,7 +2726,16 @@ body[data-ui-version="v2"] .gn-v2-tree-title {
   line-height: 1.25;
 }
 
+body[data-ui-version="v2"] .gn-v2-tree-title.is-mono {
+  width: max-content;
+  min-width: 100%;
+  flex: 0 0 auto;
+}
+
 body[data-ui-version="v2"] .gn-v2-tree-title.is-mono .gn-v2-tree-label {
+  flex: 0 0 auto;
+  overflow: visible;
+  text-overflow: clip;
   font-family: inherit;
   font-size: inherit;
   font-weight: 400 !important;
