@@ -77,6 +77,7 @@ export default function SnippetSettingsModal({
   const mutedColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)';
   const selectedBg = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)';
   const newSnippetAction = t('snippet_settings.action.new');
+  const snippetModalBodyMaxHeight = 'calc(100vh - 128px)';
 
   const sortedSnippets = useMemo(
     () => [...sqlSnippets].sort((a, b) => a.prefix.localeCompare(b.prefix)),
@@ -248,16 +249,34 @@ export default function SnippetSettingsModal({
       styles={{
         content: shellStyle,
         header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
-        body: { paddingTop: 8, paddingBottom: 24 },
+        body: {
+          paddingTop: 8,
+          paddingBottom: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          maxHeight: snippetModalBodyMaxHeight,
+          minHeight: 0,
+          overflow: 'hidden',
+        },
       }}
       footer={null}
     >
-      <div style={{ display: 'flex', gap: 16, minHeight: 420 }}>
+      <div
+        data-sql-snippet-content-region="true"
+        style={{
+          display: 'flex',
+          gap: 16,
+          flex: '1 1 420px',
+          minHeight: 0,
+          overflow: 'hidden',
+        }}
+      >
         {/* Left: snippet list */}
         <div
           style={{
             width: 220,
             flexShrink: 0,
+            minHeight: 0,
             borderRadius: 14,
             border: overlayTheme.sectionBorder,
             background: overlayTheme.sectionBg,
@@ -332,7 +351,7 @@ export default function SnippetSettingsModal({
         </div>
 
         {/* Right: editor */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
           {showEditor ? (
             <div
               style={{
@@ -341,6 +360,8 @@ export default function SnippetSettingsModal({
                 flexDirection: 'column',
                 gap: 12,
                 height: '100%',
+                minHeight: 0,
+                overflow: 'hidden',
               }}
             >
               <div style={{ display: 'flex', gap: 12 }}>
@@ -379,7 +400,17 @@ export default function SnippetSettingsModal({
                 />
               </div>
 
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div
+                data-sql-snippet-editor-scroll-region="true"
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  paddingRight: 4,
+                }}
+              >
                 <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>{t('snippet_settings.field.body.label')}</div>
                 <Input.TextArea
                   value={draft.body}
@@ -422,11 +453,12 @@ export default function SnippetSettingsModal({
         data-sql-snippet-action-row="true"
         style={{
           display: 'flex',
+          flex: '0 0 auto',
           gap: 12,
           justifyContent: 'flex-end',
           alignItems: 'center',
-          paddingTop: 18,
-          marginTop: 18,
+          paddingTop: 12,
+          marginTop: 12,
           borderTop: overlayTheme.sectionBorder,
         }}
       >

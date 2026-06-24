@@ -1967,6 +1967,7 @@ function App() {
       setToolCenterBackGroupKey(group);
       setActiveToolCenterGroupKey(group);
       setActiveToolCenterPane({ key, group });
+      setIsToolsModalOpen(true);
   }, []);
   const handleReturnToToolCenter = useCallback((closeChild?: () => void) => {
       const returnGroup = toolCenterBackGroupKey ?? 'config';
@@ -2472,13 +2473,14 @@ function App() {
 
   useEffect(() => {
       const handleOpenSnippetSettingsEvent = () => {
-          setIsSnippetModalOpen(true);
+          setIsSnippetModalOpen(false);
+          handleOpenToolCenterPane('workspace', 'snippet-settings');
       };
       window.addEventListener('gonavi:open-snippet-settings', handleOpenSnippetSettingsEvent as EventListener);
       return () => {
           window.removeEventListener('gonavi:open-snippet-settings', handleOpenSnippetSettingsEvent as EventListener);
       };
-  }, []);
+  }, [handleOpenToolCenterPane]);
 
   useEffect(() => {
       const handleOpenTabDisplaySettingsEvent = () => {

@@ -320,6 +320,15 @@ describe('SnippetSettingsModal i18n', () => {
     expect(source).not.toContain('示例：SELECT');
   });
 
+  it('keeps snippet editor content scrollable without clipping the action row', () => {
+    expect(source).toContain("const snippetModalBodyMaxHeight = 'calc(100vh - 128px)';");
+    expect(source).toContain("maxHeight: snippetModalBodyMaxHeight");
+    expect(source).toContain('data-sql-snippet-content-region="true"');
+    expect(source).toContain('data-sql-snippet-editor-scroll-region="true"');
+    expect(source).toContain("overflowY: 'auto'");
+    expect(source).toContain("flex: '0 0 auto'");
+  });
+
   it('keeps the shell and feedback keys available in every locale', () => {
     locales.forEach((locale) => {
       const catalog = JSON.parse(readFileSync(new URL(`../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8')) as Record<string, string>;
@@ -363,5 +372,34 @@ describe('SnippetSettingsModal i18n', () => {
     });
 
     expect(messageApi.warning).toHaveBeenCalledWith('Prefix is required');
+  });
+
+  it('renders a bounded content region and fixed action row for long syntax help', async () => {
+    const renderer = await renderModal();
+
+    const newButton = renderer.root.findAll((node: any) => node.type === 'button' && getText(node).includes('New Snippet'))[0];
+
+    await act(async () => {
+      newButton.props.onClick();
+    });
+
+    const contentRegion = renderer.root.findByProps({ 'data-sql-snippet-content-region': 'true' });
+    const editorScrollRegion = renderer.root.findByProps({ 'data-sql-snippet-editor-scroll-region': 'true' });
+    const actionRow = renderer.root.findByProps({ 'data-sql-snippet-action-row': 'true' });
+
+    expect(contentRegion.props.style).toMatchObject({
+      flex: '1 1 420px',
+      minHeight: 0,
+      overflow: 'hidden',
+    });
+    expect(editorScrollRegion.props.style).toMatchObject({
+      flex: 1,
+      minHeight: 0,
+      overflowY: 'auto',
+    });
+    expect(actionRow.props.style).toMatchObject({
+      flex: '0 0 auto',
+      justifyContent: 'flex-end',
+    });
   });
 });

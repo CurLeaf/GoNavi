@@ -7293,7 +7293,10 @@ describe('QueryEditor external SQL save', () => {
     expect(modalSource).toContain("defaultActiveKey={['snippet-help']}");
     expect(modalSource).toContain('footer={null}');
     expect(modalSource).toContain('data-sql-snippet-action-row="true"');
-    expect(modalSource).toContain('body: { paddingTop: 8, paddingBottom: 24 }');
+    expect(modalSource).toContain('data-sql-snippet-content-region="true"');
+    expect(modalSource).toContain('data-sql-snippet-editor-scroll-region="true"');
+    expect(modalSource).toContain("maxHeight: snippetModalBodyMaxHeight");
+    expect(modalSource).toContain("flex: '0 0 auto'");
     expect(modalSource).toContain("size=\"large\"");
     expect(modalSource).toContain('minWidth: 96');
     expect(modalSource).toContain('syntaxHelp');

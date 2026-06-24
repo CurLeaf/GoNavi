@@ -42,7 +42,10 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain("key: 'snippet-settings'");
     expect(appSource).toContain("title: t('app.tools.entry.snippets.title')");
     expect(appSource).toContain("description: t('app.tools.entry.snippets.description')");
-    expect(appSource).toContain('setIsSnippetModalOpen(true)');
+    expect(appSource).toContain("handleOpenToolCenterPane('workspace', 'snippet-settings')");
+    expect(appSource).toContain('gonavi:open-snippet-settings');
+    expect(appSource).toContain("setIsSnippetModalOpen(false);");
+    expect(appSource).not.toContain('setIsSnippetModalOpen(true)');
 
     const snippetIndex = appSource.indexOf("key: 'snippet-settings'");
     const shortcutIndex = appSource.indexOf("key: 'shortcut-settings'", snippetIndex);
