@@ -7,6 +7,7 @@ import {
   bootstrapSecureConfig,
   finalizeSecurityUpdateStatus,
   mergeSecurityUpdateStatusWithLegacySource,
+  prepareSecureConfigForExternalMCP,
   startSecurityUpdateFromBootstrap,
 } from './secureConfigBootstrap';
 import { stripLegacyPersistedConnectionById } from './legacyConnectionStorage';
@@ -161,6 +162,53 @@ describe('secureConfigBootstrap', () => {
     expect(result.shouldShowIntro).toBe(true);
     expect(result.shouldShowBanner).toBe(false);
     expect(args.replaceConnections).toHaveBeenCalledWith(
+      expect.arrayContaining([expect.objectContaining({ id: 'legacy-1' })]),
+    );
+  });
+
+  it('auto-starts legacy security update on bootstrap when requested so MCP sees backend connections', async () => {
+    const args = createBaseArgs();
+    const StartSecurityUpdate = vi.fn().mockResolvedValue({
+      overallStatus: 'completed',
+      summary: { total: 2, updated: 2, pending: 0, skipped: 0, failed: 0 },
+      issues: [],
+    });
+
+    const result = await bootstrapSecureConfig({
+      ...args,
+      autoStartLegacySecurityUpdate: true,
+      backend: {
+        GetSecurityUpdateStatus: vi.fn().mockResolvedValue({
+          overallStatus: 'pending',
+          summary: { total: 0, updated: 0, pending: 0, skipped: 0, failed: 0 },
+          issues: [],
+        }),
+        StartSecurityUpdate,
+        GetSavedConnections: vi.fn().mockResolvedValue([
+          {
+            id: 'legacy-1',
+            name: 'Legacy',
+            config: {
+              id: 'legacy-1',
+              type: 'postgres',
+              host: 'db.local',
+              port: 5432,
+              user: 'postgres',
+            },
+            hasPrimaryPassword: true,
+          },
+        ]),
+      },
+    });
+
+    expect(StartSecurityUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      sourceType: 'current_app_saved_config',
+      rawPayload: legacyPayload,
+    }));
+    expect(result.status.overallStatus).toBe('completed');
+    expect(result.hasLegacySensitiveItems).toBe(false);
+    expect(args.storage.getItem(LEGACY_PERSIST_KEY)).not.toContain('"password":"secret"');
+    expect(args.replaceConnections).toHaveBeenLastCalledWith(
       expect.arrayContaining([expect.objectContaining({ id: 'legacy-1' })]),
     );
   });
@@ -483,6 +531,62 @@ describe('secureConfigBootstrap', () => {
       expect.arrayContaining([expect.objectContaining({ id: 'legacy-1' })]),
     );
     expect(args.storage.getItem(LEGACY_PERSIST_KEY)).toContain('"password":"secret"');
+  });
+
+  it('prepares secure backend connections before external MCP use', async () => {
+    const args = createBaseArgs();
+    const StartSecurityUpdate = vi.fn().mockResolvedValue({
+      overallStatus: 'completed',
+      summary: { total: 2, updated: 2, pending: 0, skipped: 0, failed: 0 },
+      issues: [],
+    });
+
+    const result = await prepareSecureConfigForExternalMCP({
+      ...args,
+      backend: {
+        StartSecurityUpdate,
+        GetSavedConnections: vi.fn().mockResolvedValue([
+          {
+            id: 'legacy-1',
+            name: 'Legacy',
+            config: {
+              id: 'legacy-1',
+              type: 'postgres',
+              host: 'db.local',
+              port: 5432,
+              user: 'postgres',
+            },
+            hasPrimaryPassword: true,
+          },
+        ]),
+      },
+    });
+
+    expect(result.attempted).toBe(true);
+    expect(result.error).toBeNull();
+    expect(result.status?.overallStatus).toBe('completed');
+    expect(StartSecurityUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      rawPayload: legacyPayload,
+    }));
+    expect(args.storage.getItem(LEGACY_PERSIST_KEY)).not.toContain('"password":"secret"');
+  });
+
+  it('skips external MCP preparation when no legacy connection source exists', async () => {
+    const storage = createMemoryStorage();
+    const StartSecurityUpdate = vi.fn();
+    const result = await prepareSecureConfigForExternalMCP({
+      storage,
+      replaceConnections: vi.fn(),
+      replaceGlobalProxy: vi.fn(),
+      backend: {
+        StartSecurityUpdate,
+      },
+    });
+
+    expect(result.attempted).toBe(false);
+    expect(result.status).toBeNull();
+    expect(result.error).toBeNull();
+    expect(StartSecurityUpdate).not.toHaveBeenCalled();
   });
 
   it('starts security update even when rawPayload is empty but backend supports AI-only update', async () => {

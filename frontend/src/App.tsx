@@ -56,6 +56,7 @@ import {
   bootstrapSecureConfig,
   finalizeSecurityUpdateStatus,
   mergeSecurityUpdateStatusWithLegacySource,
+  prepareSecureConfigForExternalMCP,
   startSecurityUpdateFromBootstrap,
 } from './utils/secureConfigBootstrap';
 import { bootstrapSavedQueries } from './utils/savedQueryPersistence';
@@ -562,6 +563,7 @@ function App() {
           try {
               const result = await bootstrapSecureConfig({
                   backend: (window as any).go?.app?.App,
+                  autoStartLegacySecurityUpdate: true,
                   replaceConnections,
                   replaceGlobalProxy,
                   t,
@@ -1298,6 +1300,51 @@ function App() {
   const handleStartSecurityUpdate = useCallback(() => {
       void runSecurityUpdateRound('start');
   }, [runSecurityUpdateRound]);
+  const handlePrepareExternalMCPUse = useCallback(async () => {
+      const backendApp = (window as any).go?.app?.App;
+      const result = await prepareSecureConfigForExternalMCP({
+          backend: backendApp,
+          replaceConnections,
+          replaceGlobalProxy,
+          t,
+      });
+      if (result.error) {
+          throw result.error;
+      }
+      if (!result.status) {
+          return;
+      }
+
+      const nextStatus = normalizeSecurityUpdateStatus(result.status);
+      const shouldOpenSettings = nextStatus.overallStatus === 'needs_attention' || nextStatus.overallStatus === 'rolled_back';
+      applySecurityUpdateStatus(nextStatus, {
+          openSettings: shouldOpenSettings,
+          refreshFocus: shouldOpenSettings,
+      });
+
+      if (nextStatus.overallStatus === 'completed') {
+          setSecurityUpdateHasLegacySensitiveItems(false);
+          setSecurityUpdateRawPayload(null);
+          setIsSecurityUpdateSettingsOpen(false);
+          return;
+      }
+
+      const hasConnectionIssue = nextStatus.issues.some((issue) =>
+          issue.scope === 'connection' && issue.status !== 'updated',
+      );
+      if (nextStatus.overallStatus === 'rolled_back' || hasConnectionIssue) {
+          throw new Error(t('app.security_update.message.needs_attention'));
+      }
+      if (nextStatus.overallStatus === 'needs_attention') {
+          void message.warning(t('app.security_update.message.needs_attention'));
+      }
+  }, [
+      applySecurityUpdateStatus,
+      normalizeSecurityUpdateStatus,
+      replaceConnections,
+      replaceGlobalProxy,
+      t,
+  ]);
   const handleRetrySecurityUpdate = useCallback(() => {
       void runSecurityUpdateRound('retry');
   }, [runSecurityUpdateRound]);
@@ -4051,6 +4098,7 @@ function App() {
             darkMode={darkMode}
             overlayTheme={overlayTheme}
             focusProviderId={focusedAIProviderId}
+            onBeforeExternalMCPUse={handlePrepareExternalMCPUse}
           />
           )}
           <ConnectionPackagePasswordModal

@@ -40,7 +40,7 @@ interface UseAIMCPClientInstallerOptions {
   copyTextToClipboard: (text: string, successMessage: string) => Promise<void>;
   messageApi: MCPClientMessageApi;
   onAfterInstall?: () => void;
-  onBeforeInstall?: () => void;
+  onBeforeInstall?: () => void | Promise<void>;
   onConfigChanged?: () => void;
   resolveAIService: () => Promise<AIMCPClientInstallerService | null>;
   translate?: MCPClientInstallTranslator;
@@ -124,7 +124,7 @@ export const useAIMCPClientInstaller = ({
     const targetLabel = selectedMCPClientStatus?.displayName || (targetClient === 'codex' ? 'Codex' : 'Claude Code');
     if (remoteClient) {
       try {
-        onBeforeInstall?.();
+        await onBeforeInstall?.();
         setMCPClientSelectionTouched(true);
         await copyTextToClipboard(
           buildRemoteMCPClientGuide(selectedMCPClientStatus),
@@ -138,11 +138,18 @@ export const useAIMCPClientInstaller = ({
       return;
     }
     if (selectedMCPClientStatus?.matchesCurrent) {
-      void messageApi.success(copy('ai_chat.mcp_client.install.message.already_connected', '{{label}} is already connected to current GoNavi MCP. No repeated write is needed.', { label: targetLabel }));
+      try {
+        await onBeforeInstall?.();
+        void messageApi.success(copy('ai_chat.mcp_client.install.message.already_connected', '{{label}} is already connected to current GoNavi MCP. No repeated write is needed.', { label: targetLabel }));
+      } catch (error: any) {
+        void messageApi.error(error?.message || copy('ai_chat.mcp_client.install.message.install_failed', 'Failed to install {{label}} MCP', { label: targetLabel }));
+      } finally {
+        onAfterInstall?.();
+      }
       return;
     }
     try {
-      onBeforeInstall?.();
+      await onBeforeInstall?.();
       setMCPClientSelectionTouched(true);
       const service = await resolveAIService();
       if (targetClient === 'codex') {

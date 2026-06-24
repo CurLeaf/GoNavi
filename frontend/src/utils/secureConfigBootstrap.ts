@@ -38,6 +38,7 @@ type SecurityUpdateBackend = {
 type SecureConfigBootstrapArgs = {
   backend?: SecurityUpdateBackend;
   storage?: StorageLike;
+  autoStartLegacySecurityUpdate?: boolean;
   replaceConnections: (connections: SavedConnection[]) => void;
   replaceGlobalProxy: (proxy: GlobalProxyConfig) => void;
   t?: SecureConfigBootstrapTranslator;
@@ -54,6 +55,10 @@ type SecureConfigBootstrapResult = {
 type StartSecurityUpdateResult = {
   status: SecurityUpdateStatus | null;
   error: Error | null;
+};
+
+type PrepareExternalMCPResult = StartSecurityUpdateResult & {
+  attempted: boolean;
 };
 
 type MergeSecurityUpdateStatusOptions = {
@@ -332,6 +337,13 @@ const cleanupLegacySourceIfCompleted = (
   }
 };
 
+const shouldAutoStartLegacySecurityUpdate = (status: SecurityUpdateStatus): boolean => {
+  if (String(status.migrationId || '').trim() !== '') {
+    return false;
+  }
+  return status.overallStatus === 'not_detected' || status.overallStatus === 'pending';
+};
+
 export async function finalizeSecurityUpdateStatus(
   args: SecureConfigBootstrapArgs,
   rawStatus: Partial<SecurityUpdateStatus> | undefined,
@@ -350,15 +362,29 @@ export async function finalizeSecurityUpdateStatus(
 
 export async function bootstrapSecureConfig(args: SecureConfigBootstrapArgs): Promise<SecureConfigBootstrapResult> {
   const storage = resolveStorage(args.storage);
-  const rawPayload = storage?.getItem(LEGACY_PERSIST_KEY) ?? null;
-  const hasLegacySensitiveItems = hasLegacyMigratableSensitiveItems(rawPayload);
+  let rawPayload = storage?.getItem(LEGACY_PERSIST_KEY) ?? null;
+  let hasLegacySensitiveItems = hasLegacyMigratableSensitiveItems(rawPayload);
 
   applyLegacyVisibleConfig(rawPayload, args.replaceConnections, args.replaceGlobalProxy);
 
   const backendStatus = typeof args.backend?.GetSecurityUpdateStatus === 'function'
     ? await args.backend.GetSecurityUpdateStatus()
     : undefined;
-  const status = mergeSecurityUpdateStatusWithLegacySource(backendStatus, rawPayload, { t: args.t });
+  let status = mergeSecurityUpdateStatusWithLegacySource(backendStatus, rawPayload, { t: args.t });
+
+  if (
+    hasLegacySensitiveItems
+    && args.autoStartLegacySecurityUpdate === true
+    && typeof args.backend?.StartSecurityUpdate === 'function'
+    && shouldAutoStartLegacySecurityUpdate(status)
+  ) {
+    const startResult = await startSecurityUpdateFromBootstrap(args);
+    if (!startResult.error && startResult.status) {
+      status = startResult.status;
+      rawPayload = storage?.getItem(LEGACY_PERSIST_KEY) ?? rawPayload;
+      hasLegacySensitiveItems = hasLegacyMigratableSensitiveItems(rawPayload);
+    }
+  }
 
   if (!hasLegacySensitiveItems) {
     await refreshVisibleConfigFromBackend(args.backend, args.replaceConnections, args.replaceGlobalProxy, true);
@@ -373,6 +399,25 @@ export async function bootstrapSecureConfig(args: SecureConfigBootstrapArgs): Pr
     hasLegacySensitiveItems,
     shouldShowIntro: status.overallStatus === 'pending',
     shouldShowBanner: ['postponed', 'rolled_back', 'needs_attention'].includes(status.overallStatus),
+  };
+}
+
+export async function prepareSecureConfigForExternalMCP(args: SecureConfigBootstrapArgs): Promise<PrepareExternalMCPResult> {
+  const storage = resolveStorage(args.storage);
+  const rawPayload = storage?.getItem(LEGACY_PERSIST_KEY) ?? null;
+  if (!hasLegacyMigratableSensitiveItems(rawPayload)) {
+    return {
+      attempted: false,
+      status: null,
+      error: null,
+    };
+  }
+
+  const result = await startSecurityUpdateFromBootstrap(args);
+  return {
+    attempted: true,
+    status: result.status,
+    error: result.error,
   };
 }
 
@@ -419,6 +464,7 @@ export async function startSecurityUpdateFromBootstrap(args: SecureConfigBootstr
 export type {
   BackendGlobalProxyResult,
   MergeSecurityUpdateStatusOptions,
+  PrepareExternalMCPResult,
   SecurityUpdateBackend,
   SecureConfigBootstrapArgs,
   SecureConfigBootstrapResult,

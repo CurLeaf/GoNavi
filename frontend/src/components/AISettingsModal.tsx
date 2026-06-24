@@ -41,6 +41,7 @@ interface AISettingsModalProps {
     darkMode: boolean;
     overlayTheme: OverlayWorkbenchTheme;
     focusProviderId?: string;
+    onBeforeExternalMCPUse?: () => Promise<void>;
 }
 
 const DEFAULT_MCP_HTTP_SERVER_STATUS: AIMCPHTTPServerStatus = {
@@ -79,7 +80,7 @@ const normalizeMCPHTTPAuthorizationToken = (value: string): string => {
     return withoutHeaderName.replace(/^Bearer\s+/i, '').trim();
 };
 
-const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId }) => {
+const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId, onBeforeExternalMCPUse }) => {
     const { t } = useI18n();
     const defaultMCPHTTPServerStatus = useMemo<AIMCPHTTPServerStatus>(() => ({
         ...DEFAULT_MCP_HTTP_SERVER_STATUS,
@@ -181,7 +182,10 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         resolveAIService,
         messageApi,
         copyTextToClipboard,
-        onBeforeInstall: () => setLoading(true),
+        onBeforeInstall: async () => {
+            setLoading(true);
+            await onBeforeExternalMCPUse?.();
+        },
         onAfterInstall: () => setLoading(false),
         onConfigChanged: () => window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed')),
         translate: t,
@@ -531,6 +535,9 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             }
             if (!checked && typeof Service.AIStopMCPHTTPServer !== 'function') {
                 throw new Error(t('ai_settings.mcp_http.error.stop_unsupported_version'));
+            }
+            if (checked) {
+                await onBeforeExternalMCPUse?.();
             }
             const nextStatus = checked
                 ? await Service.AIStartMCPHTTPServer({
