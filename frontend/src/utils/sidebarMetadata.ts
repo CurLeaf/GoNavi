@@ -78,9 +78,14 @@ export const normalizeSidebarViewMetadataEntry = (
 
   const parsedViewName = splitQualifiedNameLast(viewName);
   const parsedNormalizedViewName = splitQualifiedNameLast(normalizedViewName);
+  const normalizedDialect = String(dialect || '').trim().toLowerCase();
+  const normalizedDbName = String(dbName || '').trim();
+  const resolvedSchemaName = String(
+    schemaName || parsedNormalizedViewName.parentPath || parsedViewName.parentPath || '',
+  ).trim();
   return {
     viewName: normalizedViewName,
-    schemaName: String(schemaName || parsedNormalizedViewName.parentPath || parsedViewName.parentPath || '').trim(),
+    schemaName: resolvedSchemaName || (normalizedDialect === 'mysql' ? normalizedDbName : ''),
   };
 };
 
