@@ -1902,6 +1902,45 @@ describe('DataGrid layout', () => {
     expect(markup).not.toContain('data-grid-pagination-jump="true"');
   });
 
+  it('keeps legacy unknown-total pagination in sequential mode instead of numbered pages', () => {
+    const previousUiVersion = mockStoreState.uiVersion;
+    mockStoreState.uiVersion = 'legacy';
+
+    try {
+      const markup = renderDataGridWithI18n(
+        <DataGrid
+          data={[
+            {
+              __gonavi_row_key__: 'row-1',
+              id: 1,
+              name: 'alpha',
+            },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          readOnly
+          pagination={{
+            current: 3,
+            pageSize: 100,
+            total: 400,
+            totalKnown: false,
+          }}
+          onPageChange={() => {}}
+        />,
+      );
+
+      expect(markup).toContain('第 3 页');
+      expect(markup).toContain('data-grid-pagination-sequential="true"');
+      expect(markup).not.toContain('class="ant-pagination');
+      expect(markup).not.toContain('data-grid-pagination-jump="true"');
+    } finally {
+      mockStoreState.uiVersion = previousUiVersion;
+    }
+  });
+
   it('renders the v2 DataGrid toolbar using the redesigned topbar hooks', () => {
     const markup = renderDataGridWithI18n(
       <DataGrid

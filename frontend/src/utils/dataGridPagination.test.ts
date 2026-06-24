@@ -48,6 +48,13 @@ describe('dataGridPagination', () => {
     })).toBe('data_grid.pagination.summary.counting {"current":1}');
 
     expect(resolvePaginationSummaryText({
+      pagination: { ...pagination, totalKnown: false },
+      prefersManualTotalCount: false,
+      supportsApproximateTableCount: false,
+      translate: keyEchoTranslate,
+    })).toBe('data_grid.pagination.summary.not_counted {"current":1}');
+
+    expect(resolvePaginationSummaryText({
       pagination: {
         ...pagination,
         totalKnown: false,

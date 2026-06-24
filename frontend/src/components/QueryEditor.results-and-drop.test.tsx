@@ -1306,6 +1306,49 @@ describe('QueryEditor external SQL save', () => {
     );
   });
 
+  it('falls back to read-only results when query locator metadata stalls', async () => {
+    vi.useFakeTimers();
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['NAME'], rows: [{ NAME: 'alpha' }] }],
+    });
+    backendApp.DBGetColumns.mockReturnValueOnce(new Promise(() => {}));
+    backendApp.DBGetIndexes.mockReturnValueOnce(new Promise(() => {}));
+
+    try {
+      let renderer!: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<QueryEditor tab={createTab({ dbName: 'main', query: 'SELECT NAME FROM users' })} />);
+      });
+
+      await act(async () => {
+        findButton(renderer!, '运行').props.onClick();
+        await Promise.resolve();
+      });
+
+      expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(
+        expect.anything(),
+        'main',
+        'SELECT NAME FROM users LIMIT 5000',
+        'query-1',
+      );
+      expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ NAME: 'alpha' });
+      expect(dataGridState.latestProps?.tableName).toBe('users');
+      expect(dataGridState.latestProps?.readOnly).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps MySQL information_schema routine results read-only without a locator warning', async () => {
     const sql = [
       'SELECT ROUTINE_SCHEMA, ROUTINE_NAME, DEFINER, SECURITY_TYPE',

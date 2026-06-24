@@ -5716,7 +5716,7 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(textContent(renderer!.toJSON())).toContain('消息 2');
+    expect(textContent(renderer!.toJSON())).toContain('消息 1');
     expect(queryResultMessageText(renderer!)).toContain("insert into c_dyscript(projectid,name) values (1,'demo')");
     expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
     expect(dataGridState.latestProps).toBeNull();
@@ -5748,7 +5748,7 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(textContent(renderer!.toJSON())).toContain('消息 2');
+    expect(textContent(renderer!.toJSON())).toContain('消息 1');
     expect(queryResultMessageText(renderer!)).toContain("insert into c_dyscript(projectid,name) values (1,'demo')");
     expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
     expect(dataGridState.latestProps).toBeNull();
