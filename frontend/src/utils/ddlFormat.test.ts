@@ -19,4 +19,18 @@ describe('formatDdlForDisplay', () => {
 
     expect(formatDdlForDisplay(raw, 'duckdb')).toBe(raw);
   });
+
+  it('keeps Oracle comment statements separated from create table DDL', () => {
+    const raw = `CREATE TABLE "H2"."S_BUSI" (
+  "ID" NUMBER
+) TABLESPACE "H2DB";
+
+COMMENT ON TABLE "H2"."S_BUSI" IS '业务机构信息';
+COMMENT ON COLUMN "H2"."S_BUSI"."ID" IS '主键';`;
+
+    const formatted = formatDdlForDisplay(raw, 'oracle');
+
+    expect(formatted).toContain('TABLESPACE "H2DB";\n\nCOMMENT ON TABLE "H2"."S_BUSI"');
+    expect(formatted).toContain(`COMMENT ON COLUMN "H2"."S_BUSI"."ID" IS '主键';`);
+  });
 });

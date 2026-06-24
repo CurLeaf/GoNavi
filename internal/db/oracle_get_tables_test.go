@@ -317,4 +317,7 @@ ORDER BY c.column_id`] = oracleRecordingQueryResult{
 			t.Fatalf("expected DDL to contain %q, got: %s", want, ddl)
 		}
 	}
+	if !strings.Contains(ddl, ");\n\nCOMMENT ON TABLE") {
+		t.Fatalf("expected Oracle DDL comments to be separated by a statement terminator and blank line, got: %s", ddl)
+	}
 }
