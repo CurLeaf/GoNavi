@@ -850,11 +850,10 @@ describe('QueryEditor external SQL save', () => {
       success: true,
       data: [
         {
-          statementIndex: 1,
           columns: ['dddwno', 'dddwlist'],
           rows: [{ dddwno: '001', dddwlist: 'demo' }],
         },
-        { statementIndex: 1, columns: ['affectedRows'], rows: [{ affectedRows: 846 }] },
+        { columns: ['affectedRows'], rows: [{ affectedRows: 846 }] },
       ],
     });
 

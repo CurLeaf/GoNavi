@@ -1603,6 +1603,51 @@ func TestDBQueryMultiKeepsAllResultSetsFromSingleSQLServerStatement(t *testing.T
 	}
 }
 
+func TestDBQueryMultiNormalizesSingleSQLServerSelectAffectedRowsStatementIndex(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "select * from c_dddw"
+	fakeDB := &fakeBatchWriteDB{
+		multiResult: map[string][]connection.ResultSetData{
+			query: {
+				{
+					Rows:    []map[string]interface{}{{"dddwno": "001", "dddwlist": "demo"}},
+					Columns: []string{"dddwno", "dddwlist"},
+				},
+				{
+					Rows:    []map[string]interface{}{{"affectedRows": int64(846)}},
+					Columns: []string{"affectedRows"},
+				},
+			},
+		},
+		queryErr: map[string]error{},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "sqlserver", Host: "127.0.0.1", Port: 1433, User: "sa"}
+
+	result := app.DBQueryMulti(config, "hydee", query, "sqlserver-select-affectedrows-index-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 2 {
+		t.Fatalf("expected two result sets, got %#v", resultSets)
+	}
+	if resultSets[0].StatementIndex != 1 || resultSets[1].StatementIndex != 1 {
+		t.Fatalf("expected select result and trailing affectedRows result to share statementIndex=1, got %#v", resultSets)
+	}
+}
+
 func TestDBQueryMultiTreatsBareSQLServerProcedureCallAsQueryFirst(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {
