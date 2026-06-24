@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { t as catalogTranslate } from '../i18n/catalog';
 import type { SavedConnection, TabData } from '../types';
 import {
   applyTabDisplaySettingsPatch,
@@ -14,6 +15,7 @@ import {
 
 const keyEchoTranslate = (key: string, params?: Record<string, unknown>): string => {
   if (key === 'sidebar.tab.new_query') return 'T(New query)';
+  if (key === 'sidebar.tab.new_query_database') return `T(New query (${params?.database}))`;
   if (key === 'sidebar.tab.redis_command') return `T(Command ${params?.database})`;
   if (key === 'sidebar.tab.redis_monitor') return `T(Monitor ${params?.database})`;
   return key;
@@ -282,6 +284,36 @@ describe('tabDisplay', () => {
     expect(model.primaryText).toBe('SQL T(New query)');
     expect(model.fullTitle).not.toContain('fs_org_auth_application');
     expect(model.fullTitle).not.toContain('select *');
+  });
+
+  it('relocalizes untitled query tab labels when the stored title came from another locale', () => {
+    const queryTab: TabData = {
+      id: 'query-1',
+      title: catalogTranslate('zh-CN', 'query.new'),
+      type: 'query',
+      connectionId: 'mysql-1',
+      dbName: 'front_end_sys',
+      query: 'select 1;',
+    };
+
+    const model = buildTabDisplayModel(queryTab, undefined, undefined, keyEchoTranslate);
+
+    expect(model.primaryText).toBe('SQL T(New query)');
+  });
+
+  it('relocalizes database-scoped untitled query labels with the current database name', () => {
+    const queryTab: TabData = {
+      id: 'query-1',
+      title: catalogTranslate('zh-CN', 'sidebar.tab.new_query_database', { database: 'main' }),
+      type: 'query',
+      connectionId: 'mysql-1',
+      dbName: 'main',
+      query: 'select 1;',
+    };
+
+    const model = buildTabDisplayModel(queryTab, undefined, undefined, keyEchoTranslate);
+
+    expect(model.primaryText).toBe('SQL T(New query (main))');
   });
 
   it('uses SQL file names as compact query tab object labels', () => {

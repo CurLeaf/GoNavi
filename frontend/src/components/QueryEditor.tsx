@@ -32,8 +32,9 @@ import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
 import { buildMySQLCompatibleViewMetadataSqls, isSidebarViewTableType, normalizeSidebarViewName } from '../utils/sidebarMetadata';
 import { SIDEBAR_SQL_EDITOR_DRAG_MIME, decodeSidebarSqlEditorDragPayload, hasSidebarSqlEditorDragPayload } from '../utils/sidebarSqlDrag';
 import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
-import { SUPPORTED_LANGUAGES, t as translate } from '../i18n';
+import { t as translate } from '../i18n';
 import { buildSqlAnalysisWorkbenchTab } from '../utils/sqlAnalysisTab';
+import { isLocalizedUntitledQueryTitle } from '../utils/queryTabTitle';
 import {
     DUCKDB_ROWID_LOCATOR_COLUMN,
     ORACLE_ROWID_LOCATOR_COLUMN,
@@ -123,28 +124,6 @@ export {
     resolveQueryEditorNavigationDecorations,
     resolveQueryEditorNavigationTarget,
 } from './queryEditor/QueryEditorHelpers';
-
-const UNTITLED_QUERY_DATABASE_PLACEHOLDER = '__GONAVI_QUERY_DATABASE__';
-
-const UNTITLED_QUERY_TITLE_PREFIXES = Array.from(
-    new Set(
-        SUPPORTED_LANGUAGES
-            .flatMap((language) => {
-                const titles = [translate('query.new', undefined, language).trim()];
-                const databaseQueryTitle = translate(
-                    'sidebar.tab.new_query_database',
-                    { database: UNTITLED_QUERY_DATABASE_PLACEHOLDER },
-                    language,
-                ).trim();
-                const databasePrefixIndex = databaseQueryTitle.indexOf(UNTITLED_QUERY_DATABASE_PLACEHOLDER);
-                if (databasePrefixIndex > 0) {
-                    titles.push(databaseQueryTitle.slice(0, databasePrefixIndex).trim());
-                }
-                return titles;
-            })
-            .filter(Boolean)
-    )
-);
 
 const buildQueryEditorMonacoActionLabel = (key: string): string =>
     `GoNavi: ${translate(key)}`;
@@ -4048,7 +4027,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const resolveDefaultQueryName = () => {
       const rawTitle = String(tab.title || '').trim();
-      if (!rawTitle || UNTITLED_QUERY_TITLE_PREFIXES.some((title) => rawTitle.startsWith(title))) {
+      if (isLocalizedUntitledQueryTitle(rawTitle)) {
           return translate('query_editor.save_modal.unnamed');
       }
       return rawTitle;

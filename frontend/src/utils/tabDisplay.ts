@@ -1,6 +1,7 @@
 import type { ConnectionConfig, SavedConnection, TabData } from '../types';
 import { t as catalogTranslate } from '../i18n/catalog';
 import type { I18nParams } from '../i18n/types';
+import { resolveLocalizedUntitledQueryTitle } from './queryTabTitle';
 
 export const TAB_DISPLAY_ELEMENT_KEYS = ['connection', 'kind', 'object', 'database', 'schema', 'host'] as const;
 
@@ -425,7 +426,9 @@ const compactQueryTabTitle = (tab: TabData, translate: TabDisplayTranslate = def
   }
 
   const rawTitle = String(tab.title || '').trim();
-  const title = rawTitle && !isLikelyRawSqlTitle(rawTitle) ? rawTitle : translate('sidebar.tab.new_query');
+  const resolvedUntitledTitle = resolveLocalizedUntitledQueryTitle(rawTitle, tab.dbName, translate);
+  const displayTitle = resolvedUntitledTitle || rawTitle;
+  const title = displayTitle && !isLikelyRawSqlTitle(displayTitle) ? displayTitle : translate('sidebar.tab.new_query');
   if (title.length <= QUERY_TAB_TITLE_MAX_LENGTH) {
     return title;
   }
