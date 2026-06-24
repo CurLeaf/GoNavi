@@ -38,22 +38,25 @@ describe("buildSchemasMetadataQuerySpecs", () => {
       if (sql.includes("information_schema.views")) {
         return {
           success: true,
+          message: "",
           data: [{ view_name: "CHARACTER_SETS", schema_name: "information_schema" }],
         };
       }
       if (sql.includes("information_schema.tables")) {
         return {
           success: true,
+          message: "",
           data: [{ view_name: "CHARACTER_SETS", schema_name: "information_schema", table_type: "SYSTEM VIEW" }],
         };
       }
       if (sql.includes("SHOW FULL TABLES FROM `information_schema` WHERE Table_type = 'VIEW'")) {
         return {
           success: true,
+          message: "",
           data: [{ Tables_in_information_schema: "CHARACTER_SETS", Table_type: "VIEW" }],
         };
       }
-      return { success: false, data: [] };
+      return { success: false, message: "", data: [] };
     });
 
     const result = await loadViews({ config: { type: "mysql" } }, "information_schema");
