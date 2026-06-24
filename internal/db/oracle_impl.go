@@ -585,7 +585,18 @@ func (o *OracleDB) appendOracleCommentDDL(baseDDL string, dbName string, tableNa
 	if len(commentLines) == 0 {
 		return baseDDL
 	}
-	return strings.TrimRight(baseDDL, " \t\r\n") + "\n" + strings.Join(commentLines, "\n")
+	return ensureOracleDDLStatementTerminator(baseDDL) + "\n\n" + strings.Join(commentLines, "\n")
+}
+
+func ensureOracleDDLStatementTerminator(ddl string) string {
+	trimmed := strings.TrimRight(ddl, " \t\r\n")
+	if trimmed == "" {
+		return trimmed
+	}
+	if strings.HasSuffix(trimmed, ";") || strings.HasSuffix(trimmed, "/") {
+		return trimmed
+	}
+	return trimmed + ";"
 }
 
 func (o *OracleDB) fetchOracleTableComment(schema string, table string) string {
