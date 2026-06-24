@@ -62,4 +62,21 @@ describe('QueryEditorToolbar layout', () => {
     expect(commitHoverCss).toContain('box-shadow:');
     expect(commitKbdHoverCss).toContain('background:');
   });
+
+  it('keeps transaction selects wide enough for localized auto-commit labels', () => {
+    const css = readV2ThemeCss();
+    const transactionModeCss = css.slice(
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-mode-select {'),
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-delay-select {'),
+    );
+    const transactionDelayCss = css.slice(
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-delay-select {'),
+      css.indexOf('body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-select-selector {'),
+    );
+
+    expect(transactionModeCss).toContain('width: 78px !important;');
+    expect(transactionModeCss).toContain('flex: 0 0 78px !important;');
+    expect(transactionDelayCss).toContain('width: 104px !important;');
+    expect(transactionDelayCss).toContain('flex: 0 0 104px !important;');
+  });
 });

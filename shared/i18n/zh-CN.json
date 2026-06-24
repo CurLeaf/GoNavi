@@ -6249,6 +6249,8 @@
   "query_editor.transaction.action.commit_with_count": "提交 ({{count}})",
   "query_editor.transaction.action.rollback": "回滚",
   "query_editor.transaction.delay.immediate": "立即",
+  "query_editor.transaction.delay.immediate_commit": "立即提交",
+  "query_editor.transaction.delay.seconds_commit": "{{seconds}}s后提交",
   "query_editor.transaction.message.pending_managed_transaction": "当前 SQL 编辑器已有未提交事务，请先提交或回滚后再执行新的增删改语句。",
   "query_editor.transaction.mode.auto": "自动",
   "query_editor.transaction.mode.manual": "手动",

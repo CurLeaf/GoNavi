@@ -154,13 +154,13 @@ body[data-ui-version="v2"] .gn-v2-query-toolbar-max-rows-select {
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-mode-select {
-  width: 74px !important;
-  flex: 0 0 74px !important;
+  width: 78px !important;
+  flex: 0 0 78px !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar-transaction-delay-select {
-  width: 62px !important;
-  flex: 0 0 62px !important;
+  width: 104px !important;
+  flex: 0 0 104px !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-query-toolbar .ant-select-selector {

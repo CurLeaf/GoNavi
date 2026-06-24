@@ -2553,8 +2553,9 @@ describe('QueryEditor external SQL save', () => {
     expect(transactionSettingsSource).toContain('query_editor.transaction.mode.auto');
     expect(transactionSettingsSource).not.toContain("label: '手动提交'");
     expect(transactionSettingsSource).not.toContain("label: '自动提交'");
-    expect(transactionSettingsSource).toContain('query_editor.transaction.delay.immediate');
-    expect(transactionSettingsSource).toContain("label: '3s'");
+    expect(transactionSettingsSource).toContain('query_editor.transaction.delay.immediate_commit');
+    expect(transactionSettingsSource).toContain('query_editor.transaction.delay.seconds_commit');
+    expect(transactionSettingsSource).not.toContain("label: '3s'");
     expect(source).toContain('QueryEditorTransactionToolbar');
     expect(transactionToolbarSource).toContain("className={isV2Ui ? 'gn-v2-query-transaction-toolbar' : undefined}");
     expect(transactionToolbarSource).toContain(": null;");
@@ -2581,8 +2582,8 @@ describe('QueryEditor external SQL save', () => {
 
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-selects');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-actions');
-    expect(css).toContain('width: 74px !important;');
-    expect(css).toContain('width: 62px !important;');
+    expect(css).toContain('width: 78px !important;');
+    expect(css).toContain('width: 104px !important;');
     expect(css).toContain('flex: 0 0 auto !important;');
     expect(css).toContain('justify-content: flex-start;');
     expect(css).toContain('height: 32px !important;');

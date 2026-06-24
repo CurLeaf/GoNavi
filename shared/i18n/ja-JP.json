@@ -6249,6 +6249,8 @@
   "query_editor.transaction.action.commit_with_count": "コミット ({{count}})",
   "query_editor.transaction.action.rollback": "ロールバック",
   "query_editor.transaction.delay.immediate": "即時",
+  "query_editor.transaction.delay.immediate_commit": "即時コミット",
+  "query_editor.transaction.delay.seconds_commit": "{{seconds}}s 後にコミット",
   "query_editor.transaction.message.pending_managed_transaction": "SQL エディターには未コミットのトランザクションがあります。新しい DML 文を実行する前にコミットまたはロールバックしてください。",
   "query_editor.transaction.mode.auto": "自動",
   "query_editor.transaction.mode.manual": "手動",

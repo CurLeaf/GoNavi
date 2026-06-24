@@ -6249,6 +6249,8 @@
   "query_editor.transaction.action.commit_with_count": "Commit ({{count}})",
   "query_editor.transaction.action.rollback": "Rollback",
   "query_editor.transaction.delay.immediate": "Сразу",
+  "query_editor.transaction.delay.immediate_commit": "Commit сразу",
+  "query_editor.transaction.delay.seconds_commit": "Commit через {{seconds}}s",
   "query_editor.transaction.message.pending_managed_transaction": "В SQL-редакторе уже есть незавершённая транзакция. Перед выполнением нового DML-оператора выполните commit или rollback.",
   "query_editor.transaction.mode.auto": "Авто",
   "query_editor.transaction.mode.manual": "Вручную",

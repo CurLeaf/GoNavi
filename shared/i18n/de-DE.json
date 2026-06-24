@@ -6249,6 +6249,8 @@
   "query_editor.transaction.action.commit_with_count": "Commit ({{count}})",
   "query_editor.transaction.action.rollback": "Rollback",
   "query_editor.transaction.delay.immediate": "Sofort",
+  "query_editor.transaction.delay.immediate_commit": "Sofort committen",
+  "query_editor.transaction.delay.seconds_commit": "Commit in {{seconds}}s",
   "query_editor.transaction.message.pending_managed_transaction": "Im SQL-Editor ist bereits eine nicht festgeschriebene Transaktion offen. Führen Sie zuerst Commit oder Rollback aus, bevor Sie eine weitere DML-Anweisung starten.",
   "query_editor.transaction.mode.auto": "Automatisch",
   "query_editor.transaction.mode.manual": "Manuell",

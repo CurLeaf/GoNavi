@@ -6249,6 +6249,8 @@
   "query_editor.transaction.action.commit_with_count": "Commit ({{count}})",
   "query_editor.transaction.action.rollback": "Rollback",
   "query_editor.transaction.delay.immediate": "Immediately",
+  "query_editor.transaction.delay.immediate_commit": "Commit now",
+  "query_editor.transaction.delay.seconds_commit": "Commit in {{seconds}}s",
   "query_editor.transaction.message.pending_managed_transaction": "The SQL editor already has a pending transaction. Commit or roll it back before running another DML statement.",
   "query_editor.transaction.mode.auto": "Auto",
   "query_editor.transaction.mode.manual": "Manual",

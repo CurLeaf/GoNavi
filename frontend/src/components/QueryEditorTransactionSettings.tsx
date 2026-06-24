@@ -8,18 +8,14 @@ export type SqlEditorCommitMode = 'manual' | 'auto';
 
 type SqlEditorAutoCommitDelayOption = {
   value: number;
-  label: string;
-} | {
-  value: number;
-  labelKey: string;
 };
 
 export const SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS: SqlEditorAutoCommitDelayOption[] = [
-  { value: 0, labelKey: 'query_editor.transaction.delay.immediate' },
-  { value: 3000, label: '3s' },
-  { value: 5000, label: '5s' },
-  { value: 10000, label: '10s' },
-  { value: 30000, label: '30s' },
+  { value: 0 },
+  { value: 3000 },
+  { value: 5000 },
+  { value: 10000 },
+  { value: 30000 },
 ];
 
 type QueryEditorTransactionSettingsProps = {
@@ -39,18 +35,36 @@ const QueryEditorTransactionSettings: React.FC<QueryEditorTransactionSettingsPro
 }) => {
   const i18n = useOptionalI18n();
   const t = i18n?.t ?? defaultTranslate;
+  const [isModeSelectOpen, setIsModeSelectOpen] = React.useState(false);
+  const [isModeTooltipOpen, setIsModeTooltipOpen] = React.useState(false);
   const autoCommitDelayOptions = SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS.map((option) => ({
     value: option.value,
-    label: 'labelKey' in option ? t(option.labelKey) : option.label,
+    label: option.value === 0
+      ? t('query_editor.transaction.delay.immediate_commit')
+      : t('query_editor.transaction.delay.seconds_commit', { seconds: Math.round(option.value / 1000) }),
   }));
+  const handleModeSelectOpenChange = (open: boolean) => {
+    setIsModeSelectOpen(open);
+    if (open) {
+      setIsModeTooltipOpen(false);
+    }
+  };
+  const handleModeTooltipOpenChange = (open: boolean) => {
+    setIsModeTooltipOpen(open);
+  };
 
   return (
     <>
-      <Tooltip title={t('query_editor.transaction.mode.tooltip')}>
+      <Tooltip
+        title={t('query_editor.transaction.mode.tooltip')}
+        open={isModeTooltipOpen && !isModeSelectOpen}
+        onOpenChange={handleModeTooltipOpenChange}
+      >
       <Select
         className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-transaction-mode-select' : undefined}
         style={isV2Ui ? undefined : { width: 78 }}
         value={commitMode}
+        onOpenChange={handleModeSelectOpenChange}
         onChange={(mode) => onCommitModeChange(mode === 'auto' ? 'auto' : 'manual')}
         options={[
           { label: t('query_editor.transaction.mode.manual'), value: 'manual' },
