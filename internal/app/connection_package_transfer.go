@@ -216,26 +216,33 @@ func (a *App) importConnectionPackagePayload(payload connectionPackagePayload) (
 }
 
 func (a *App) ImportConnectionsPayload(raw string, password string) ([]connection.SavedConnectionView, error) {
+	localizeError := func(err error) error {
+		return localizeConnectionPackageError(a.appText, err)
+	}
+	mysqlWorkbenchError := func(key string, params map[string]any) error {
+		return errors.New(a.appText(key, params))
+	}
+
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return nil, errConnectionPackageUnsupported
+		return nil, localizeError(errConnectionPackageUnsupported)
 	}
 	if len(trimmed) > connectionImportMaxFileBytes {
-		return nil, errConnectionImportFileTooLarge
+		return nil, localizeError(errConnectionImportFileTooLarge)
 	}
 
 	if isConnectionPackageV2AppManaged(trimmed) {
 		var file connectionPackageFileV2
 		if err := json.Unmarshal([]byte(trimmed), &file); err != nil {
-			return nil, errConnectionPackageUnsupported
+			return nil, localizeError(errConnectionPackageUnsupported)
 		}
 		payload, err := decryptConnectionPackageV2AppManaged(file)
 		if err != nil {
-			return nil, err
+			return nil, localizeError(err)
 		}
 		views, err := a.importConnectionPackagePayload(payload)
 		if err != nil {
-			return nil, err
+			return nil, localizeError(err)
 		}
 		return sanitizeSavedConnectionViews(views), nil
 	}
@@ -243,15 +250,15 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 	if isConnectionPackageV2Protected(trimmed) {
 		var file connectionPackageFileV2Protected
 		if err := json.Unmarshal([]byte(trimmed), &file); err != nil {
-			return nil, errConnectionPackageUnsupported
+			return nil, localizeError(errConnectionPackageUnsupported)
 		}
 		payload, err := decryptConnectionPackageV2Protected(file, password)
 		if err != nil {
-			return nil, err
+			return nil, localizeError(err)
 		}
 		views, err := a.importConnectionPackagePayload(payload)
 		if err != nil {
-			return nil, err
+			return nil, localizeError(err)
 		}
 		return sanitizeSavedConnectionViews(views), nil
 	}
@@ -259,15 +266,15 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 	if isConnectionPackageEnvelope(trimmed) {
 		var file connectionPackageFile
 		if err := json.Unmarshal([]byte(trimmed), &file); err != nil {
-			return nil, errConnectionPackageUnsupported
+			return nil, localizeError(errConnectionPackageUnsupported)
 		}
 		payload, err := decryptConnectionPackage(file, password)
 		if err != nil {
-			return nil, err
+			return nil, localizeError(err)
 		}
 		views, err := a.importConnectionPackagePayload(payload)
 		if err != nil {
-			return nil, err
+			return nil, localizeError(err)
 		}
 		return sanitizeSavedConnectionViews(views), nil
 	}
@@ -275,10 +282,10 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 	if isMySQLWorkbenchXML(trimmed) {
 		inputs, err := parseMySQLWorkbenchXML(trimmed)
 		if err != nil {
-			return nil, fmt.Errorf("解析 MySQL Workbench XML 失败: %w", err)
+			return nil, mysqlWorkbenchError("file.backend.error.mysql_workbench_parse_failed", map[string]any{"detail": err.Error()})
 		}
 		if len(inputs) == 0 {
-			return nil, fmt.Errorf("未在 XML 中找到有效的连接配置")
+			return nil, mysqlWorkbenchError("file.backend.error.mysql_workbench_no_connections", nil)
 		}
 		views, err := a.importSavedConnectionsAtomically(inputs)
 		if err != nil {
@@ -288,12 +295,12 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 	}
 
 	if isNavicatNCX(trimmed) {
-		inputs, err := parseNavicatNCX(trimmed)
+		inputs, err := parseNavicatNCXWithText(trimmed, a.appText)
 		if err != nil {
-			return nil, fmt.Errorf("解析 Navicat NCX 失败: %w", err)
+			return nil, navicatWrapError(a.appText, "file.backend.error.navicat_ncx_parse_failed", nil, err)
 		}
 		if len(inputs) == 0 {
-			return nil, fmt.Errorf("未在 Navicat NCX 中找到 GoNavi 支持的有效连接配置")
+			return nil, navicatError(a.appText, "file.backend.error.navicat_ncx_no_connections", nil)
 		}
 		views, err := a.importSavedConnectionsAtomically(inputs)
 		if err != nil {
@@ -304,7 +311,7 @@ func (a *App) ImportConnectionsPayload(raw string, password string) ([]connectio
 
 	var legacy []connection.LegacySavedConnection
 	if err := json.Unmarshal([]byte(trimmed), &legacy); err != nil {
-		return nil, errConnectionPackageUnsupported
+		return nil, localizeError(errConnectionPackageUnsupported)
 	}
 	return a.ImportLegacyConnections(legacy)
 }

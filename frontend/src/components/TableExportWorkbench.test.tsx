@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TableExportWorkbench, { buildTableExportHistoryEntry } from './TableExportWorkbench';
+import { setCurrentLanguage } from '../i18n';
 import type { ExportProgressState } from './useExportProgressRunner';
 
 const mockUpsertTableExportHistory = vi.fn();
@@ -75,6 +76,7 @@ vi.mock('./useExportProgressRunner', () => ({
 
 describe('TableExportWorkbench', () => {
   beforeEach(() => {
+    setCurrentLanguage('zh-CN');
     mockUpsertTableExportHistory.mockReset();
     mockStoreState = createMockStoreState();
     mockProgressRunnerState = createMockProgressRunnerState();
@@ -277,8 +279,8 @@ describe('TableExportWorkbench', () => {
 
     expect(progressMatches).toHaveLength(1);
     expect(source).not.toContain('<Tabs');
-    expect(source).toContain('当前任务不在这里重复展示');
-    expect(source).toContain('导出耗时');
+    expect(source).toContain("t('data_export.workbench.description.history')");
+    expect(source).toContain("t('data_export.label.elapsed')");
   });
 
   it('prefers backend startedAt over a placeholder history timestamp for the same job', () => {

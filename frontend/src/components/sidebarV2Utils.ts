@@ -8,6 +8,12 @@ import {
 } from '../store';
 import type { ConnectionTag, SavedConnection } from '../types';
 import { t } from '../i18n';
+import { t as catalogTranslate } from '../i18n/catalog';
+
+type SidebarV2Translate = (key: string) => string;
+
+const translateSidebarV2Current: SidebarV2Translate = (key) => t(key);
+const translateSidebarV2ZhCN: SidebarV2Translate = (key) => catalogTranslate('zh-CN', key);
 
 export type SidebarTreeNodeType =
   | 'connection'
@@ -132,6 +138,7 @@ export const sortSidebarTableEntries = <T extends SidebarTableEntryForSort>(
 export const buildV2SidebarTableSectionedChildren = (
   parentKey: string,
   tableNodes: SidebarTreeNode[],
+  translate: SidebarV2Translate = translateSidebarV2Current,
 ): SidebarTreeNode[] => {
   const pinnedTables = tableNodes.filter((node) => node?.dataRef?.pinnedSidebarTable);
   if (pinnedTables.length === 0) return tableNodes;
@@ -149,9 +156,9 @@ export const buildV2SidebarTableSectionedChildren = (
   });
 
   return [
-    buildSectionNode('pinned', t('table_overview.section.pinned')),
+    buildSectionNode('pinned', translate('table_overview.section.pinned')),
     ...pinnedTables,
-    buildSectionNode('all', t('table_overview.section.all')),
+    buildSectionNode('all', translate('table_overview.section.all')),
     ...regularTables,
   ];
 };
@@ -160,9 +167,10 @@ export const buildSidebarTableChildrenForUi = (
   parentKey: string,
   tableNodes: SidebarTreeNode[],
   isV2Ui: boolean,
+  translate: SidebarV2Translate = translateSidebarV2Current,
 ): SidebarTreeNode[] => {
   if (!isV2Ui) return tableNodes;
-  return buildV2SidebarTableSectionedChildren(parentKey, tableNodes);
+  return buildV2SidebarTableSectionedChildren(parentKey, tableNodes, translate);
 };
 
 export const formatSidebarRowCount = (count: number): string => {
@@ -288,13 +296,17 @@ export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = t('c
 
 export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines' | 'events';
 
-export const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; labelKey: string }> = [
-  { key: 'all', labelKey: 'sidebar.command_search.object_kind.all' },
-  { key: 'tables', labelKey: 'sidebar.command_search.object_kind.tables' },
-  { key: 'views', labelKey: 'sidebar.command_search.object_kind.views' },
-  { key: 'routines', labelKey: 'sidebar.command_search.object_kind.routines' },
-  { key: 'events', labelKey: 'sidebar.command_search.object_kind.events' },
+export const buildV2ExplorerFilterOptions = (
+  translate: SidebarV2Translate = translateSidebarV2Current,
+): Array<{ key: V2ExplorerFilter; label: string }> => [
+  { key: 'all', label: translate('sidebar.command_search.object_kind.all') },
+  { key: 'tables', label: translate('sidebar.command_search.object_kind.tables') },
+  { key: 'views', label: translate('sidebar.command_search.object_kind.views') },
+  { key: 'routines', label: translate('sidebar.command_search.object_kind.routines') },
+  { key: 'events', label: translate('sidebar.command_search.object_kind.events') },
 ];
+
+export const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: string }> = buildV2ExplorerFilterOptions(translateSidebarV2ZhCN);
 
 const V2_EXPLORER_FILTER_GROUP_KEYS: Record<Exclude<V2ExplorerFilter, 'all'>, string[]> = {
   tables: ['tables'],

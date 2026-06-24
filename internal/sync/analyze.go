@@ -61,35 +61,40 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 		syncData = true
 	}
 
+	analysisStartedStage := localizedSyncBackendText("data_sync.progress.stage.analysis_started", nil)
+	analysisCompletedStage := localizedSyncBackendText("data_sync.progress.stage.analysis_completed", nil)
 	totalTables := len(config.Tables)
-	s.progress(config.JobID, 0, totalTables, "", "差异分析开始")
+	s.progress(config.JobID, 0, totalTables, "", analysisStartedStage)
 
 	sourceDB, err := newSyncDatabase(config.SourceConfig.Type)
 	if err != nil {
 		logger.Error(err, "初始化源数据库驱动失败：类型=%s", config.SourceConfig.Type)
-		return SyncAnalyzeResult{Success: false, Message: "初始化源数据库驱动失败: " + err.Error()}
+		return SyncAnalyzeResult{Success: false, Message: localizedSyncBackendDetailText("data_sync.backend.error.init_source_driver_failed", err)}
 	}
 	targetDB, err := newSyncDatabase(config.TargetConfig.Type)
 	if err != nil {
 		logger.Error(err, "初始化目标数据库驱动失败：类型=%s", config.TargetConfig.Type)
-		return SyncAnalyzeResult{Success: false, Message: "初始化目标数据库驱动失败: " + err.Error()}
+		return SyncAnalyzeResult{Success: false, Message: localizedSyncBackendDetailText("data_sync.backend.error.init_target_driver_failed", err)}
 	}
 
 	if err := sourceDB.Connect(config.SourceConfig); err != nil {
 		logger.Error(err, "源数据库连接失败：%s", formatConnSummaryForSync(config.SourceConfig))
-		return SyncAnalyzeResult{Success: false, Message: "源数据库连接失败: " + err.Error()}
+		return SyncAnalyzeResult{Success: false, Message: localizedSyncBackendDetailText("data_sync.backend.error.connect_source_failed", err)}
 	}
 	defer sourceDB.Close()
 
 	if err := targetDB.Connect(config.TargetConfig); err != nil {
 		logger.Error(err, "目标数据库连接失败：%s", formatConnSummaryForSync(config.TargetConfig))
-		return SyncAnalyzeResult{Success: false, Message: "目标数据库连接失败: " + err.Error()}
+		return SyncAnalyzeResult{Success: false, Message: localizedSyncBackendDetailText("data_sync.backend.error.connect_target_failed", err)}
 	}
 	defer targetDB.Close()
 
 	for i, tableName := range config.Tables {
 		func() {
-			s.progress(config.JobID, i, totalTables, tableName, fmt.Sprintf("分析表(%d/%d)", i+1, totalTables))
+			s.progress(config.JobID, i, totalTables, tableName, localizedSyncBackendText("data_sync.progress.stage.analyzing_table", map[string]any{
+				"current": i + 1,
+				"total":   totalTables,
+			}))
 
 			summary := TableDiffSummary{
 				Table:     tableName,
@@ -117,7 +122,7 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 			summary.SchemaDiffCount = len(plan.PreDataSQL) + len(plan.PostDataSQL)
 
 			if !plan.TargetTableExists && !plan.AutoCreate {
-				summary.Message = firstNonEmpty(plan.PlannedAction, "目标表不存在，无法执行同步")
+				summary.Message = firstNonEmpty(plan.PlannedAction, localizedSyncBackendText("data_sync.plan.target_missing_cannot_sync", nil))
 				result.Tables = append(result.Tables, summary)
 				return
 			}
@@ -125,9 +130,11 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 			if !syncData {
 				summary.CanSync = true
 				if summary.SchemaDiffCount > 0 {
-					summary.Message = firstNonEmpty(plan.PlannedAction, fmt.Sprintf("检测到 %d 条结构变更", summary.SchemaDiffCount))
+					summary.Message = firstNonEmpty(plan.PlannedAction, localizedSyncBackendText("data_sync.plan.schema_changes_detected", map[string]any{
+						"count": summary.SchemaDiffCount,
+					}))
 				} else {
-					summary.Message = firstNonEmpty(plan.PlannedAction, "仅同步结构，未执行数据差异分析")
+					summary.Message = firstNonEmpty(plan.PlannedAction, localizedSyncBackendText("data_sync.plan.schema_only_no_data_diff", nil))
 				}
 				result.Tables = append(result.Tables, summary)
 				return
@@ -145,14 +152,14 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 			targetType := resolveMigrationDBType(config.TargetConfig)
 			sourceCount, counted, err := countTableRowsForSync(sourceDB, sourceType, plan.SourceQueryTable)
 			if err != nil {
-				summary.Message = "读取源表失败: " + err.Error()
+				summary.Message = localizedSyncBackendDetailText("data_sync.backend.error.read_source_table_failed", err)
 				result.Tables = append(result.Tables, summary)
 				return
 			}
 			if !counted {
 				sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(sourceType, plan.SourceQueryTable)))
 				if err != nil {
-					summary.Message = "读取源表失败: " + err.Error()
+					summary.Message = localizedSyncBackendDetailText("data_sync.backend.error.read_source_table_failed", err)
 					result.Tables = append(result.Tables, summary)
 					return
 				}
@@ -162,7 +169,7 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 			if !plan.TargetTableExists && plan.AutoCreate {
 				summary.CanSync = true
 				summary.Inserts = sourceCount
-				summary.Message = firstNonEmpty(plan.PlannedAction, "目标表不存在，执行时将自动建表并导入全部源数据")
+				summary.Message = firstNonEmpty(plan.PlannedAction, localizedSyncBackendText("data_sync.plan.target_missing_auto_create_all", nil))
 				result.Tables = append(result.Tables, summary)
 				return
 			}
@@ -170,18 +177,20 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 			if tableMode != "insert_update" {
 				summary.CanSync = true
 				summary.Inserts = sourceCount
-				summary.Message = firstNonEmpty(plan.PlannedAction, "当前模式无需差异对比，将按源表数据执行导入")
+				summary.Message = firstNonEmpty(plan.PlannedAction, localizedSyncBackendText("data_sync.plan.data_import_without_diff", nil))
 				result.Tables = append(result.Tables, summary)
 				return
 			}
 
 			if len(pkCols) == 0 {
-				summary.Message = "无主键，不支持差异对比同步；如需直接导入请使用仅插入或全量覆盖模式"
+				summary.Message = localizedSyncBackendText("data_sync.backend.error.diff_pk_required", nil)
 				result.Tables = append(result.Tables, summary)
 				return
 			}
 			if len(pkCols) > 1 {
-				summary.Message = fmt.Sprintf("复合主键（%s），暂不支持差异对比同步", strings.Join(pkCols, ","))
+				summary.Message = localizedSyncBackendText("data_sync.backend.error.diff_composite_pk_unsupported", map[string]any{
+					"columns": strings.Join(pkCols, ","),
+				})
 				result.Tables = append(result.Tables, summary)
 				return
 			}
@@ -201,7 +210,7 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 				summary.Deletes = counts.Deletes
 				summary.Same = counts.Same
 				if strings.TrimSpace(summary.Message) == "" {
-					summary.Message = firstNonEmpty(plan.PlannedAction, "差异分析完成")
+					summary.Message = firstNonEmpty(plan.PlannedAction, localizedSyncBackendText("data_sync.backend.summary.diff_completed", nil))
 				}
 				result.Tables = append(result.Tables, summary)
 				return
@@ -209,13 +218,13 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 
 			sourceRows, _, err := sourceDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(sourceType, plan.SourceQueryTable)))
 			if err != nil {
-				summary.Message = "读取源表失败: " + err.Error()
+				summary.Message = localizedSyncBackendDetailText("data_sync.backend.error.read_source_table_failed", err)
 				result.Tables = append(result.Tables, summary)
 				return
 			}
 			targetRows, _, err := targetDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(config.TargetConfig.Type, plan.TargetQueryTable)))
 			if err != nil {
-				summary.Message = "读取目标表失败: " + err.Error()
+				summary.Message = localizedSyncBackendDetailText("data_sync.backend.error.read_target_table_failed", err)
 				result.Tables = append(result.Tables, summary)
 				return
 			}
@@ -270,14 +279,16 @@ func (s *SyncEngine) Analyze(config SyncConfig) SyncAnalyzeResult {
 
 			summary.CanSync = true
 			if strings.TrimSpace(summary.Message) == "" {
-				summary.Message = firstNonEmpty(plan.PlannedAction, "差异分析完成")
+				summary.Message = firstNonEmpty(plan.PlannedAction, localizedSyncBackendText("data_sync.backend.summary.diff_completed", nil))
 			}
 			result.Tables = append(result.Tables, summary)
 		}()
 	}
 
-	s.progress(config.JobID, totalTables, totalTables, "", "差异分析完成")
-	result.Message = fmt.Sprintf("已完成 %d 张表的差异分析", len(result.Tables))
+	s.progress(config.JobID, totalTables, totalTables, "", analysisCompletedStage)
+	result.Message = localizedSyncBackendText("data_sync.backend.result.analyzed_tables", map[string]any{
+		"count": len(result.Tables),
+	})
 	return result
 }
 

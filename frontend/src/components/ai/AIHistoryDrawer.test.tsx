@@ -77,9 +77,14 @@ describe('AIHistoryDrawer', () => {
     expect(markup.indexOf('较新会话')).toBeLessThan(markup.indexOf('较早会话'));
   });
 
-  it('renders the dedicated empty state when there is no history session', () => {
+  it('falls back to English drawer chrome and empty state when no i18n provider is mounted', () => {
     const markup = renderHistoryDrawer();
 
-    expect(markup).toContain('还没有历史对话');
+    expect(markup).toContain('Chat history');
+    expect(markup).toContain('Start new chat');
+    expect(markup).toContain('Search history...');
+    expect(markup).toContain('No history yet');
+    expect(markup).not.toContain('ai_chat.history.title');
+    expect(markup).not.toContain('还没有历史对话');
   });
 });

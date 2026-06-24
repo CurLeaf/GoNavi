@@ -1,7 +1,20 @@
 import type { SavedConnection, TabData } from '../../types';
+import { t as translateCatalog, type I18nParams } from '../../i18n';
 
 const ACTIVE_TAB_CONTENT_LIMIT = 12000;
 const WORKSPACE_TAB_CONTENT_LIMIT = 4000;
+
+type AIInspectionTranslator = (key: string, params?: I18nParams) => string;
+
+const translateInspectionCopy = (
+  translate: AIInspectionTranslator | undefined,
+  key: string,
+  fallback: string,
+): string => {
+  const t = translate || ((catalogKey, params) => translateCatalog(catalogKey, params, 'en-US'));
+  const translated = t(key);
+  return translated && translated !== key ? translated : fallback;
+};
 
 const normalizeWorkspaceTabLimit = (input: unknown): number => {
   const value = Math.floor(Number(input) || 12);
@@ -75,18 +88,24 @@ export const buildActiveTabSnapshot = (params: {
   activeTabId?: string | null;
   connections: SavedConnection[];
   includeContent?: boolean;
+  translate?: AIInspectionTranslator;
 }) => {
   const {
     tabs = [],
     activeTabId = null,
     connections,
     includeContent = true,
+    translate,
   } = params;
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   if (!activeTab) {
     return {
       hasActiveTab: false,
-      message: '当前没有活动页签',
+      message: translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.workspace.no_active_tab',
+        'No active tab is currently selected',
+      ),
     };
   }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { t as translateCatalog } from '../../i18n/catalog';
 import type { AIMCPToolDescriptor, AIToolCall, SavedConnection } from '../../types';
 import { buildToolResultMessage, executeLocalAIToolCall } from './aiLocalToolExecutor';
 
@@ -79,6 +80,27 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"connectionName":"主库"');
     expect(result.content).toContain('"contentKind":"sql"');
     expect(result.content).toContain('SELECT id, status FROM orders');
+  });
+
+  it('localizes empty active-tab snapshots through the local tool executor', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_active_tab', {
+        includeContent: true,
+      }),
+      connections: [buildConnection()],
+      tabs: [],
+      activeTabId: null,
+      mcpTools: [],
+      toolContextMap: new Map(),
+      translate: (key, params) => translateCatalog('en-US', key, params),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"message":"No active tab is currently selected"');
   });
 
   it('returns a workspace tab overview so the model can inspect which editors are currently open', async () => {
@@ -169,6 +191,43 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('CREATE TABLE orders');
   });
 
+  it('localizes AI context snapshot messages while preserving raw table metadata and DDL', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_ai_context', {
+        includeDDL: true,
+        ddlLimit: 120,
+      }),
+      connections: [buildConnection()],
+      activeContext: {
+        connectionId: 'conn-1',
+        dbName: 'crm',
+      },
+      aiContexts: {
+        'conn-1:crm': [
+          {
+            dbName: 'crm',
+            tableName: 'orders',
+            ddl: 'CREATE TABLE orders (id bigint primary key, status varchar(32));',
+          },
+        ],
+      },
+      mcpTools: [],
+      toolContextMap: new Map(),
+      translate: (key, params) => translateCatalog('en-US', key, params),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('"message":"Currently linked table schema contexts: 1"');
+    expect(result.content).toContain('"dbName":"crm"');
+    expect(result.content).toContain('"tableName":"orders"');
+    expect(result.content).toContain('CREATE TABLE orders');
+    expect(result.content).not.toContain('当前已关联');
+  });
+
   it('blocks execute_sql when the AI safety check rejects the statement', async () => {
     const query = vi.fn();
     const result = await executeLocalAIToolCall({
@@ -197,7 +256,8 @@ describe('aiLocalToolExecutor', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.content).toContain('安全策略拦截');
+    expect(result.content).toContain('Security policy blocked this request');
+    expect(result.content).not.toContain('安全策略拦截');
     expect(query).not.toHaveBeenCalled();
   });
 
@@ -355,6 +415,65 @@ describe('aiLocalToolExecutor', () => {
     expect(indexResult.success).toBe(true);
     expect(indexResult.content).toContain('idx_users_email');
     expect(message.tool_name).toBe('自定义探针');
+  });
+
+  it('localizes local executor tool error wrappers while preserving raw names and details', async () => {
+    const translate = vi.fn((key: string, params?: Record<string, unknown>) => {
+      if (params?.functionName) return `T:${key} functionName=${params.functionName}`;
+      if (params?.detail) return `T:${key} detail=${params.detail}`;
+      return `T:${key}`;
+    });
+    const mcpTools: AIMCPToolDescriptor[] = [{
+      alias: 'external_probe',
+      originalName: 'raw_external_probe',
+      serverId: 'server-1',
+      serverName: 'Demo MCP',
+      title: 'Demo Probe',
+      description: '',
+    }];
+
+    const unknownFunction = await executeLocalAIToolCall({
+      toolCall: buildToolCall('missing_tool', {}),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      translate,
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+    const emptyMcpError = await executeLocalAIToolCall({
+      toolCall: buildToolCall('external_probe', {}),
+      connections: [buildConnection()],
+      mcpTools,
+      toolContextMap: new Map(),
+      translate,
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        callMCPTool: vi.fn().mockResolvedValue({ isError: true, content: '' }),
+      },
+    });
+    const thrownMcpError = await executeLocalAIToolCall({
+      toolCall: buildToolCall('external_probe', {}),
+      connections: [buildConnection()],
+      mcpTools,
+      toolContextMap: new Map(),
+      translate,
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        callMCPTool: vi.fn().mockRejectedValue(new Error('raw upstream 503')),
+      },
+    });
+
+    expect(unknownFunction.success).toBe(false);
+    expect(unknownFunction.content).toBe('T:ai_chat.panel.tool_error.unknown_function functionName=missing_tool');
+    expect(emptyMcpError.success).toBe(false);
+    expect(emptyMcpError.content).toBe('T:ai_chat.panel.tool_error.mcp_failed');
+    expect(thrownMcpError.success).toBe(false);
+    expect(thrownMcpError.content).toBe('T:ai_chat.panel.tool_error.mcp_failed_with_detail detail=raw upstream 503');
   });
 
   it('previews sample rows for a table without forcing the model to handwrite select limit sql', async () => {
@@ -561,13 +680,13 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).not.toContain('SELECT * FROM users LIMIT 10');
   });
 
-  it('returns sql editor transaction settings, active dml semantics, and pending transactions', async () => {
+  it('localizes sql editor transaction settings, active dml semantics, and pending transactions', async () => {
     const result = await executeLocalAIToolCall({
       toolCall: buildToolCall('inspect_sql_editor_transaction', {}),
       connections: [buildConnection()],
       tabs: [{
         id: 'tab-query-1',
-        title: '订单更新',
+        title: 'Order update',
         type: 'query',
         connectionId: 'conn-1',
         dbName: 'crm',
@@ -577,6 +696,7 @@ describe('aiLocalToolExecutor', () => {
       activeTabId: 'tab-query-1',
       mcpTools: [],
       toolContextMap: new Map(),
+      translate: (key, params) => translateCatalog('en-US', key, params),
       sqlLogs: [{
         id: 'log-1',
         timestamp: 10,
@@ -612,7 +732,10 @@ describe('aiLocalToolExecutor', () => {
     expect(result.content).toContain('"usesManagedTransaction":true');
     expect(result.content).toContain('"pendingTransactionCount":1');
     expect(result.content).toContain('"activePendingTransaction"');
-    expect(result.content).toContain('自动提交，但 DML 仍会先进入托管事务');
+    expect(result.content).toContain('Auto commit is enabled, but DML still enters a managed transaction');
+    expect(result.content).toContain('Ask the user to click \\"Commit\\" or \\"Rollback\\" in the result transaction bar');
+    expect(result.content).toContain('DML opens a managed transaction first and auto-commits about 3 seconds after successful execution');
+    expect(result.content).toContain('SQL editor runs INSERT/UPDATE/DELETE/MERGE/REPLACE DML inside a managed transaction');
     expect(result.content).toContain('UPDATE orders SET status');
   });
 

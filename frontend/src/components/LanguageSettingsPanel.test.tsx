@@ -35,9 +35,21 @@ describe("LanguageSettingsPanel", () => {
     expect(text).toContain("Deutsch");
     expect(text).toContain("Русский");
 
-    const segmented = renderer!.root.findByProps({ "aria-label": "Language" });
+    const group = renderer!.root.findByProps({ role: "radiogroup", "aria-label": "Language" });
+    expect(group.props.style.gridTemplateColumns).toBe("repeat(2, minmax(0, 1fr))");
+
+    const radios = renderer!.root.findAll((node) => node.type === "button" && node.props.role === "radio");
+    expect(radios).toHaveLength(7);
+    expect(radios[0]?.props["aria-checked"]).toBe(true);
+
+    const simplifiedChinese = radios.find((node) => {
+      const children = Array.isArray(node.props.children) ? node.props.children.join("") : String(node.props.children ?? "");
+      return children.includes("Simplified Chinese");
+    });
+    expect(simplifiedChinese).toBeDefined();
+
     await act(async () => {
-      segmented.props.onChange("zh-CN");
+      simplifiedChinese!.props.onClick();
     });
 
     expect(onPreferenceChange).toHaveBeenCalledWith("zh-CN");

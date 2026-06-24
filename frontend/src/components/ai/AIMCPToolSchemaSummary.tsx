@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { AIMCPToolDescriptor } from '../../types';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import { buildMCPHintStyle } from './AIMCPHelpBlock';
@@ -108,13 +110,21 @@ const AIMCPToolSchemaSummary: React.FC<AIMCPToolSchemaSummaryProps> = ({
   darkMode,
   overlayTheme,
 }) => {
+  const i18n = useOptionalI18n();
+  const copy = (
+    key: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => (i18n?.t ?? ((catalogKey, catalogParams) => catalogTranslate('en-US', catalogKey, catalogParams)))(key, params);
+
   if (tools.length === 0) {
     return null;
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>已发现工具和参数提示</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>
+        {copy('ai_settings.mcp_server.tool_schema_summary.title')}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 8 }}>
         {tools.map((tool) => {
           const summary = summarizeToolParameters(tool);
@@ -140,12 +150,15 @@ const AIMCPToolSchemaSummary: React.FC<AIMCPToolSchemaSummaryProps> = ({
               ) : null}
               <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
                 {summary.hasInputSchema
-                  ? `参数 ${summary.parameters.length} 个，必填 ${summary.requiredCount} 个；星号表示必填。`
-                  : '未声明 inputSchema，调用参数需参考服务文档或用 /mcptool 继续查看。'}
+                  ? copy('ai_settings.mcp_server.tool_schema_summary.parameter_counts', {
+                    count: summary.parameters.length,
+                    requiredCount: summary.requiredCount,
+                  })
+                  : copy('ai_settings.mcp_server.tool_schema_summary.no_input_schema')}
               </div>
               {summary.hasInputSchema ? (
                 <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-                  最小 arguments 示例：
+                  {copy('ai_settings.mcp_server.tool_schema_summary.minimal_arguments_example')}
                   {' '}
                   <code style={{ fontFamily: 'var(--gn-font-mono)', overflowWrap: 'anywhere' }}>
                     {summary.minimalArgumentsExample}
@@ -175,7 +188,9 @@ const AIMCPToolSchemaSummary: React.FC<AIMCPToolSchemaSummaryProps> = ({
                   ))}
                   {summary.truncated ? (
                     <span style={{ ...buildMCPHintStyle(overlayTheme.mutedText), padding: '3px 0' }}>
-                      还有 {summary.parameters.length - MAX_PARAMETER_PREVIEW} 个参数，使用 /mcptool 查看完整 schema
+                      {copy('ai_settings.mcp_server.tool_schema_summary.more_parameters', {
+                        count: summary.parameters.length - MAX_PARAMETER_PREVIEW,
+                      })}
                     </span>
                   ) : null}
                 </div>

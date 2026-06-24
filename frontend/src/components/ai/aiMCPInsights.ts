@@ -1,5 +1,7 @@
 import type { AIMCPClientInstallStatus, AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import { validateMCPServerDraft } from '../../utils/mcpServerValidation';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
 
 const SERVER_TOOL_PREVIEW_LIMIT = 20;
 
@@ -24,11 +26,13 @@ export const buildMCPSetupSnapshot = (params: {
   mcpServers?: AIMCPServerConfig[];
   mcpClientStatuses?: AIMCPClientInstallStatus[];
   mcpTools?: AIMCPToolDescriptor[];
+  translate?: AIInspectionTranslator;
 }) => {
   const {
     mcpServers = [],
     mcpClientStatuses = [],
     mcpTools = [],
+    translate,
   } = params;
 
   const normalizedServers = sortByName(
@@ -93,11 +97,29 @@ export const buildMCPSetupSnapshot = (params: {
   const nextActions: string[] = [];
 
   if (serversWithConfigurationErrors > 0) {
-    warnings.push(`有 ${serversWithConfigurationErrors} 个 MCP 服务存在启动配置错误，测试和工具发现可能失败`);
-    nextActions.push('先修复 MCP 服务配置检查里的错误项，再重新测试服务');
+    warnings.push(translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.mcp.warning.config_errors',
+      `${serversWithConfigurationErrors} MCP server has launch configuration errors; testing and tool discovery may fail`,
+      { count: serversWithConfigurationErrors },
+    ));
+    nextActions.push(translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.mcp.next_action.fix_config_errors',
+      'Fix the MCP server configuration errors first, then test the server again',
+    ));
   } else if (serversWithConfigurationWarnings > 0) {
-    warnings.push(`有 ${serversWithConfigurationWarnings} 个 MCP 服务存在启动配置告警，建议在排查工具发现失败前先确认`);
-    nextActions.push('打开对应 MCP 服务，按配置检查提示拆分启动命令、参数和超时时间');
+    warnings.push(translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.mcp.warning.config_warnings',
+      `${serversWithConfigurationWarnings} MCP server has launch configuration warnings; confirm them before diagnosing tool discovery failures`,
+      { count: serversWithConfigurationWarnings },
+    ));
+    nextActions.push(translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.mcp.next_action.fix_config_warnings',
+      'Open the affected MCP server and split launch command, arguments, and timeout according to the configuration check hints',
+    ));
   }
 
   return {
@@ -119,8 +141,22 @@ export const buildMCPSetupSnapshot = (params: {
     nextActions,
     message: normalizedServers.length > 0
       ? serverConfigurationIssueCount > 0
-        ? `当前共配置 ${normalizedServers.length} 个 MCP 服务，其中 ${enabledServerCount} 个已启用，${serverConfigurationIssueCount} 个配置检查项需要确认`
-        : `当前共配置 ${normalizedServers.length} 个 MCP 服务，其中 ${enabledServerCount} 个已启用`
-      : '当前还没有配置任何 MCP 服务',
+        ? translateInspectionCopy(
+          translate,
+          'ai_chat.inspection.mcp.message.with_issues',
+          `${normalizedServers.length} MCP server is configured; ${enabledServerCount} enabled; ${serverConfigurationIssueCount} configuration checks need attention`,
+          { serverCount: normalizedServers.length, enabledCount: enabledServerCount, issueCount: serverConfigurationIssueCount },
+        )
+        : translateInspectionCopy(
+          translate,
+          'ai_chat.inspection.mcp.message.configured',
+          `${normalizedServers.length} MCP server is configured; ${enabledServerCount} enabled`,
+          { serverCount: normalizedServers.length, enabledCount: enabledServerCount },
+        )
+      : translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.mcp.message.empty',
+        'No MCP servers are configured yet',
+      ),
   };
 };

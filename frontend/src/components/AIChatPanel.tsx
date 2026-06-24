@@ -25,6 +25,7 @@ import { getShortcutPlatform, resolveShortcutBinding } from '../utils/shortcuts'
 import { isMacLikePlatform } from '../utils/appearance';
 import { buildAvailableAIChatTools } from '../utils/aiToolRegistry';
 import {
+    buildAIChatInsights,
     buildAIChatInlineHistorySessions,
     calculateAIContextUsageChars,
     collectAIChatContextTableNames,
@@ -233,8 +234,9 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             userPromptSettings,
             overrideJVMPlanContext,
             overrideJVMDiagnosticPlanContext,
+            translate: t,
         });
-    }, [availableTools, skills, userPromptSettings]);
+    }, [availableTools, skills, t, userPromptSettings]);
 
     const {
         executeLocalTools,
@@ -252,6 +254,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         pendingJVMDiagnosticPlanContextRef,
         setSending,
         skills,
+        translate: t,
         updateAIChatMessage,
         userPromptSettings,
     });
@@ -296,7 +299,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             addAIChatMessage(sid, connectingMsg);
 
             const truncatedHistory = historyLocal.slice(0, lastUserMsgIndex + 1);
-            const messagesPayload = truncatedHistory.map(toAIRequestMessage);
+            const messagesPayload = truncatedHistory.map((message) => toAIRequestMessage(message, t));
 
             try {
                 const sysMessages = await buildSystemContextMessages(
@@ -315,6 +318,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
                     pendingAssistantMessageId: connectingMsg.id,
                     jvmPlanContext: retryJVMPlanContext,
                     jvmDiagnosticPlanContext: retryJVMDiagnosticPlanContext,
+                    translate: t,
                 });
             } catch {
                 setSending(false);
@@ -329,6 +333,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         getCurrentJVMPlanContext,
         getCurrentJVMDiagnosticPlanContext,
         resetToolCallState,
+        t,
         updateAIChatMessage,
     ]);
 
@@ -346,6 +351,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         nudgeCountRef,
         pendingJVMPlanContextRef,
         pendingJVMDiagnosticPlanContextRef,
+        translate: t,
     });
 
     const handleSend = useCallback(async () => {
@@ -422,11 +428,11 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
 
         updateAIChatMessage(sid, connectingMsg.id, { content: t('ai_chat.panel.status.model_connecting') });
 
-        const chatMessages = [...messages, userMsg].map(toAIRequestMessage);
+        const chatMessages = [...messages, userMsg].map((message) => toAIRequestMessage(message, t));
 
         let finalMessagesPayload = chatMessages;
         const dynamicMaxLimit = getDynamicMaxContextChars(activeProvider?.model);
-        const summary = await compressContextIfNeeded(sid, chatMessages, dynamicMaxLimit);
+        const summary = await compressContextIfNeeded(sid, chatMessages, dynamicMaxLimit, t);
         if (summary) {
             const compressedMsg: AIChatMessage = {
                 id: genId(),
@@ -437,7 +443,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             useStore.getState().replaceAIChatHistory(sid, [compressedMsg, userMsg, connectingMsg]);
             finalMessagesPayload = [
                 { role: 'assistant', content: compressedMsg.content },
-                toAIRequestMessage(userMsg),
+                toAIRequestMessage(userMsg, t),
             ];
         }
 
@@ -458,6 +464,7 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
             jvmPlanContext: currentJVMPlanContext,
             jvmDiagnosticPlanContext: currentJVMDiagnosticPlanContext,
             unavailableContent: t('ai_chat.panel.message.service_not_ready'),
+            translate: t,
             onNonStreamSuccess: messages.length === 0
                 ? () => generateTitleForSession(sid)
                 : undefined,
@@ -549,54 +556,11 @@ export const AIChatPanel: React.FC<AIChatPanelProps> = ({
         [activeContext?.connectionId, activeContext?.dbName, aiContexts],
     );
     const aiInsights = useMemo(() => {
-        const recentLogs = sqlLogs.slice(0, 24);
-        const slowest = recentLogs
-            .filter((log) => log.status === 'success')
-            .sort((left, right) => right.duration - left.duration)[0];
-        const errors = recentLogs.filter((log) => log.status === 'error');
-        const writeCount = recentLogs.filter((log) => /\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE)\b/i.test(log.sql)).length;
-        const contextCount = contextTableNames.length;
-        const tableSeparator = t('ai_chat.panel.insight.context.table_separator');
-        const tablePreview = `${contextTableNames.slice(0, 3).join(tableSeparator)}${contextCount > 3 ? t('ai_chat.panel.insight.context.more_tables_suffix') : ''}`;
-
-        return [
-            {
-                tone: 'info' as const,
-                title: contextCount > 0
-                    ? t('ai_chat.panel.insight.context.linked_title', { count: contextCount })
-                    : t('ai_chat.panel.insight.context.empty_title'),
-                body: contextCount > 0
-                    ? t('ai_chat.panel.insight.context.linked_body', { tables: tablePreview })
-                    : t('ai_chat.panel.insight.context.empty_body'),
-            },
-            {
-                tone: slowest && slowest.duration > 1000 ? 'warn' as const : 'accent' as const,
-                title: slowest
-                    ? t('ai_chat.panel.insight.query.slowest_title', { duration: Math.round(slowest.duration).toLocaleString() })
-                    : t('ai_chat.panel.insight.query.empty_title'),
-                body: slowest ? slowest.sql.slice(0, 140) : t('ai_chat.panel.insight.query.empty_body'),
-            },
-            {
-                tone: errors.length > 0 ? 'warn' as const : 'info' as const,
-                title: errors.length > 0
-                    ? t('ai_chat.panel.insight.status.failed_title', { count: errors.length })
-                    : t('ai_chat.panel.insight.status.ok_title'),
-                body: errors[0]?.message || (
-                    recentLogs.length > 0
-                        ? t('ai_chat.panel.insight.status.recent_body', { count: recentLogs.length })
-                        : t('ai_chat.panel.insight.status.empty_body')
-                ),
-            },
-            {
-                tone: writeCount > 0 ? 'warn' as const : 'accent' as const,
-                title: writeCount > 0
-                    ? t('ai_chat.panel.insight.write.detected_title', { count: writeCount })
-                    : t('ai_chat.panel.insight.write.readonly_title'),
-                body: writeCount > 0
-                    ? t('ai_chat.panel.insight.write.detected_body')
-                    : t('ai_chat.panel.insight.write.readonly_body'),
-            },
-        ];
+        return buildAIChatInsights({
+            contextTableNames,
+            sqlLogs,
+            translate: t,
+        });
     }, [contextTableNames, sqlLogs, t]);
     const panelHistorySessions = useMemo(
         () => buildAIChatInlineHistorySessions(

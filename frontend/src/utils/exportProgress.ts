@@ -1,3 +1,5 @@
+import { getCurrentLanguage, t } from '../i18n';
+
 export type ExportProgressStatus = 'idle' | 'start' | 'running' | 'finalizing' | 'done' | 'error';
 
 const hasUsableExportTotal = (total: number, totalRowsKnown: boolean): boolean => {
@@ -54,13 +56,16 @@ export const formatExportProgressRows = (
   total: number,
   totalRowsKnown: boolean,
 ): string => {
-  const formatter = new Intl.NumberFormat('zh-CN');
+  const formatter = new Intl.NumberFormat(getCurrentLanguage());
   const safeCurrent = formatter.format(Math.max(0, Math.trunc(Number(current) || 0)));
   if (!hasUsableExportTotal(total, totalRowsKnown)) {
-    return `已写入 ${safeCurrent} 行`;
+    return t('data_export.progress.rows_written', { current: safeCurrent });
   }
   const safeTotal = formatter.format(Math.max(0, Math.trunc(Number(total) || 0)));
-  return `已写入 ${safeCurrent} / ${safeTotal} 行`;
+  return t('data_export.progress.rows_written_with_total', {
+    current: safeCurrent,
+    total: safeTotal,
+  });
 };
 
 export const resolveExportElapsedMs = (

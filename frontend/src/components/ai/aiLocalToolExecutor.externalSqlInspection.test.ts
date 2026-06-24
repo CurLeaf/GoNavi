@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { I18nParams } from '../../i18n';
+import { t as translateCatalog } from '../../i18n/catalog';
 import type { AIToolCall, ExternalSQLDirectory, SavedConnection } from '../../types';
+import { executeConnectionWorkspaceSnapshotToolCall } from './aiSnapshotInspectionConnectionToolExecutor';
 import { executeLocalAIToolCall } from './aiLocalToolExecutor';
 
 const buildConnection = (): SavedConnection => ({
@@ -155,7 +158,83 @@ describe('aiLocalToolExecutor external SQL inspection tools', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(result.content).toContain('目标文件不在已配置的外部 SQL 目录中');
+    expect(result.content).toContain('The target file is outside configured external SQL directories');
     expect(readSQLFile).not.toHaveBeenCalled();
+  });
+
+  it('localizes external sql file read failures and keeps runtime details raw', async () => {
+    const externalSQLDirectories: ExternalSQLDirectory[] = [
+      {
+        id: 'dir-1',
+        name: 'Report scripts',
+        path: 'D:/sql/reports',
+        connectionId: 'conn-1',
+        dbName: 'crm',
+        createdAt: 1,
+      },
+    ];
+    const translate = (key: string, params?: I18nParams) =>
+      translateCatalog('en-US', key, params);
+
+    const missingFilePath = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_external_sql_file', {
+        filePath: '',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      externalSQLDirectories,
+      translate,
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+    const outsideDirectory = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_external_sql_file', {
+        filePath: 'D:/private/secret.sql',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      externalSQLDirectories,
+      translate,
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+      },
+    });
+    const unsupportedRuntime = await executeConnectionWorkspaceSnapshotToolCall({
+      toolName: 'inspect_external_sql_file',
+      args: {
+        filePath: 'D:/sql/reports/daily.sql',
+      },
+      connections: [buildConnection()],
+      externalSQLDirectories,
+      translate,
+      runtime: {
+        readSQLFile: undefined,
+      },
+    });
+    const rawRuntimeDetail = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_external_sql_file', {
+        filePath: 'D:/sql/reports/daily.sql',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      externalSQLDirectories,
+      translate,
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        readSQLFile: vi.fn().mockRejectedValue(new Error('EACCES: D:/sql/reports/daily.sql')),
+      },
+    });
+
+    expect(missingFilePath.content).toBe('Failed to read external SQL file: filePath is required');
+    expect(outsideDirectory.content).toBe('Failed to read external SQL file: The target file is outside configured external SQL directories');
+    expect(unsupportedRuntime?.content).toBe('Failed to read external SQL file: The current runtime does not support reading local SQL files yet');
+    expect(rawRuntimeDetail.content).toBe('Failed to read external SQL file: EACCES: D:/sql/reports/daily.sql');
   });
 });

@@ -1,4 +1,5 @@
 import type { SqlLog } from '../../store';
+import type { I18nParams } from '../../i18n';
 import type {
   AIChatMessage,
   AIContextItem,
@@ -41,6 +42,7 @@ export interface ExecuteLocalAIToolCallOptions {
   skills?: AISkillConfig[];
   userPromptSettings?: AIUserPromptSettings;
   dynamicModels?: string[];
+  translate?: (key: string, params?: I18nParams) => string;
   runtime?: Partial<AILocalToolRuntime>;
 }
 
@@ -53,6 +55,13 @@ export interface ExecuteLocalAIToolCallResult {
 
 const buildToolName = (toolCall: AIToolCall, descriptor?: AIMCPToolDescriptor) =>
   descriptor?.title || descriptor?.originalName || toolCall.function.name;
+
+const translateToolError = (
+  translate: ExecuteLocalAIToolCallOptions['translate'] | undefined,
+  key: string,
+  fallback: string,
+  params?: I18nParams,
+) => translate?.(key, params) || fallback;
 
 export async function executeLocalAIToolCall({
   toolCall,
@@ -73,6 +82,7 @@ export async function executeLocalAIToolCall({
   skills = [],
   userPromptSettings,
   dynamicModels = [],
+  translate,
   runtime,
 }: ExecuteLocalAIToolCallOptions): Promise<ExecuteLocalAIToolCallResult> {
   const mergedRuntime: AILocalToolRuntime = { ...buildDefaultLocalToolRuntime(), ...(runtime || {}) };
@@ -100,6 +110,7 @@ export async function executeLocalAIToolCall({
       skills,
       userPromptSettings,
       dynamicModels,
+      translate,
       runtime: mergedRuntime,
     });
     if (snapshotInspectionResult) {
@@ -117,6 +128,7 @@ export async function executeLocalAIToolCall({
       connections,
       toolContextMap,
       runtime: mergedRuntime,
+      translate,
     });
     if (databaseToolResult) {
       return {
@@ -129,7 +141,12 @@ export async function executeLocalAIToolCall({
 
     if (!descriptor) {
       return {
-        content: `Unknown function: ${toolCall.function.name}`,
+        content: translateToolError(
+          translate,
+          'ai_chat.panel.tool_error.unknown_function',
+          `Unknown function: ${toolCall.function.name}`,
+          { functionName: toolCall.function.name },
+        ),
         success: false,
         toolName: buildToolName(toolCall),
       };
@@ -137,14 +154,29 @@ export async function executeLocalAIToolCall({
 
     try {
       const result = await mergedRuntime.callMCPTool?.(toolCall.function.name, toolCall.function.arguments || '{}');
+      const content = result?.content
+        ? String(result.content)
+        : result?.isError
+          ? translateToolError(
+              translate,
+              'ai_chat.panel.tool_error.mcp_failed',
+              'MCP tool call failed',
+            )
+          : '';
       return {
-        content: String(result?.content || (result?.isError ? 'MCP 工具调用失败' : '')),
+        content,
         success: !!result && !result.isError,
         toolName: buildToolName(toolCall, descriptor),
       };
     } catch (error: any) {
+      const detail = error?.message || String(error);
       return {
-        content: `MCP 工具调用失败: ${error?.message || error}`,
+        content: translateToolError(
+          translate,
+          'ai_chat.panel.tool_error.mcp_failed_with_detail',
+          `MCP tool call failed: ${detail}`,
+          { detail },
+        ),
         success: false,
         toolName: buildToolName(toolCall, descriptor),
       };

@@ -156,8 +156,8 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
     allowInEditable: true,
   },
   toggleQueryResultsPanel: {
-    label: '切换结果区',
-    description: '在查询编辑器中显示或隐藏下方结果区域',
+    labelKey: 'app.shortcuts.action.toggleQueryResultsPanel.label',
+    descriptionKey: 'app.shortcuts.action.toggleQueryResultsPanel.description',
     scope: 'queryEditor',
     allowInEditable: true,
   },

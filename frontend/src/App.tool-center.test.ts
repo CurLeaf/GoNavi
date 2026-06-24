@@ -14,6 +14,14 @@ const linuxCJKFontBannerSource = readFileSync(
   fileURLToPath(new globalThis.URL('./components/LinuxCJKFontBanner.tsx', import.meta.url)),
   'utf8',
 );
+const appUtilityStylesSource = readFileSync(
+  fileURLToPath(new globalThis.URL('./hooks/useAppUtilityStyles.tsx', import.meta.url)),
+  'utf8',
+);
+const appSidebarResizeSource = readFileSync(
+  fileURLToPath(new globalThis.URL('./hooks/useAppSidebarResize.ts', import.meta.url)),
+  'utf8',
+);
 
 const getGlobalShortcutCaseBlock = (action: string) => {
   const caseToken = `case '${action}':`;
@@ -50,18 +58,18 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain("title: t('app.tools.group.workflow.title')");
     expect(appSource).toContain("title: t('app.tools.group.workspace.title')");
     expect(appSource).toContain("toolCenterGroups.find((group) => group.key === activeToolCenterGroupKey)");
-    expect(appSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
-    expect(appSource).toContain("gridTemplateColumns: '232px minmax(0, 1fr)'");
-    expect(appSource).toContain("const toolCenterNavPanelStyle = useMemo<React.CSSProperties>(() => ({");
-    expect(appSource).toContain("const toolCenterNavScrollStyle = useMemo<React.CSSProperties>(() => ({");
-    expect(appSource).toContain("const toolCenterContentPanelStyle = useMemo<React.CSSProperties>(() => ({");
-    expect(appSource).toContain("const toolCenterDetailPanelStyle = useMemo<React.CSSProperties>(() => ({");
-    expect(appSource).toContain("const toolCenterDetailBodyStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appUtilityStylesSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appUtilityStylesSource).toContain("gridTemplateColumns: '232px minmax(0, 1fr)'");
+    expect(appUtilityStylesSource).toContain("const toolCenterNavPanelStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appUtilityStylesSource).toContain("const toolCenterNavScrollStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appUtilityStylesSource).toContain("const toolCenterContentPanelStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appUtilityStylesSource).toContain("const toolCenterDetailPanelStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appUtilityStylesSource).toContain("const toolCenterDetailBodyStyle = useMemo<React.CSSProperties>(() => ({");
     expect(appSource).toContain('role="tablist" aria-orientation="vertical"');
     expect(appSource).toContain('role="tab"');
     expect(appSource).toContain('aria-selected={active}');
     expect(appSource).toContain('title={`${group.title} - ${group.description}`}');
-    expect(appSource).toContain("borderRight: `1px solid ${overlayTheme.divider}`");
+    expect(appUtilityStylesSource).toContain("borderRight: `1px solid ${overlayTheme.divider}`");
     expect(appSource).toContain('setActiveToolCenterPane(null);');
     expect(appSource).toContain('group.items.length');
     expect(appSource).toContain("const handleOpenToolCenterPane = useCallback((group: ToolCenterGroupKey, key: ToolCenterPaneKey) => {");
@@ -73,11 +81,11 @@ describe('tool center menu entries', () => {
   });
 
   it('keeps the tool center modal height fixed across group switches and scrolls the list area internally', () => {
-    expect(appSource).toContain('const toolCenterModalContentStyle = useMemo<React.CSSProperties>(() => ({');
-    expect(appSource).toContain("height: 'min(820px, calc(100vh - 64px))'");
-    expect(appSource).toContain("const toolCenterModalWorkspaceStyle = useMemo<React.CSSProperties>(() => ({");
-    expect(appSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
-    expect(appSource).toContain("const toolCenterScrollableListStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appUtilityStylesSource).toContain('const toolCenterModalContentStyle = useMemo<React.CSSProperties>(() => ({');
+    expect(appUtilityStylesSource).toContain("height: 'min(820px, calc(100vh - 64px))'");
+    expect(appUtilityStylesSource).toContain("const toolCenterModalWorkspaceStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appUtilityStylesSource).toContain("const toolCenterModalSplitStyle = useMemo<React.CSSProperties>(() => ({");
+    expect(appUtilityStylesSource).toContain("const toolCenterScrollableListStyle = useMemo<React.CSSProperties>(() => ({");
     expect(appSource).toContain("body: { paddingTop: 8, paddingBottom: 8, overflow: 'hidden', flex: 1, minHeight: 0 }");
     expect(appSource).toContain('style={toolCenterModalWorkspaceStyle}');
     expect(appSource).toContain('style={toolCenterModalSplitStyle}');
@@ -87,7 +95,7 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('style={toolCenterDetailPanelStyle}');
     expect(appSource).toContain('style={toolCenterDetailBodyStyle}');
     expect(appSource).toContain('style={toolCenterScrollableListStyle}');
-    expect(appSource).toContain("overflowY: 'auto'");
+    expect(appUtilityStylesSource).toContain("overflowY: 'auto'");
     expect(appSource).toContain("borderTop: index === 0 ? `1px solid ${overlayTheme.divider}` : 'none'");
     expect(appSource).toContain("borderBottom: `1px solid ${overlayTheme.divider}`");
   });
@@ -153,14 +161,14 @@ describe('tool center menu entries', () => {
   });
 
   it('does not start sidebar resize from right-clicking the resize handle', () => {
-    expect(appSource).toContain('if (e.button !== 0)');
+    expect(appSidebarResizeSource).toContain('if (e.button !== 0)');
     expect(appSource).toContain('onContextMenu={(event) => {');
     expect(appSource).toContain('event.preventDefault();');
     expect(appSource).toContain('event.stopPropagation();');
 
-    const guardIndex = appSource.indexOf('if (e.button !== 0)');
-    const ghostDisplayIndex = appSource.indexOf("ghostRef.current.style.display = 'block'", guardIndex);
-    const dragStartIndex = appSource.indexOf('sidebarDragRef.current = {', guardIndex);
+    const guardIndex = appSidebarResizeSource.indexOf('if (e.button !== 0)');
+    const ghostDisplayIndex = appSidebarResizeSource.indexOf("ghostRef.current.style.display = 'block'", guardIndex);
+    const dragStartIndex = appSidebarResizeSource.indexOf('sidebarDragRef.current = {', guardIndex);
 
     expect(guardIndex).toBeGreaterThan(-1);
     expect(ghostDisplayIndex).toBeGreaterThan(guardIndex);
@@ -168,14 +176,14 @@ describe('tool center menu entries', () => {
   });
 
   it('positions sidebar resize guide from the rendered sider edge', () => {
-    expect(appSource).toContain('const siderRef = React.useRef<HTMLDivElement | null>(null);');
+    expect(appSidebarResizeSource).toContain('const siderRef = useRef<HTMLDivElement | null>(null);');
     expect(appSource).toContain('ref={siderRef}');
-    expect(appSource).toContain('const siderRect = siderRef.current?.getBoundingClientRect();');
-    expect(appSource).toContain('const startGuideLeft = siderRect?.right ?? sidebarWidth;');
-    expect(appSource).toContain('const startWidth = siderRect?.width ?? sidebarWidth;');
-    expect(appSource).toContain('resolveSidebarResizeBounds(siderRef.current)');
-    expect(appSource).toContain('ghostRef.current.style.left = `${startGuideLeft}px`;');
-    expect(appSource).toContain('ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;');
+    expect(appSidebarResizeSource).toContain('const siderRect = siderRef.current?.getBoundingClientRect();');
+    expect(appSidebarResizeSource).toContain('const startGuideLeft = siderRect?.right ?? sidebarWidth;');
+    expect(appSidebarResizeSource).toContain('const startWidth = siderRect?.width ?? sidebarWidth;');
+    expect(appSidebarResizeSource).toContain('resolveSidebarResizeBounds(siderRef.current)');
+    expect(appSidebarResizeSource).toContain('ghostRef.current.style.left = `${startGuideLeft}px`;');
+    expect(appSidebarResizeSource).toContain('ghostRef.current.style.left = `${startGuideLeft + (newWidth - startWidth)}px`;');
   });
 
   it('keeps legacy sidebar resize bounds aligned with the v2 sider CSS limits', () => {
@@ -323,8 +331,8 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain('fontFamilyCode: resolvedMonoFontFamily');
     expect(appSource).toContain("t('app.theme.data_table.font_size')");
     expect(appSource).toContain("t('app.theme.data_table.sidebar_tree_font_size')");
-    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'ui\', installedFontFamilies)');
-    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies)');
+    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'ui\', installedFontFamilies, t)');
+    expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies, t)');
     expect(appSource).toContain('ListInstalledFontFamilies()');
     expect(appSource).toContain('const [installedFontFamilies, setInstalledFontFamilies] = useState<InstalledFontFamily[]>(EMPTY_INSTALLED_FONT_FAMILIES);');
     expect(appSource).toContain("import LinuxCJKFontBanner from './components/LinuxCJKFontBanner';");

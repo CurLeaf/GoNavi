@@ -251,7 +251,9 @@ export const useSidebarBatchExport = ({
       addTab(buildBatchTableExportWorkbenchTab({
           connectionId: connId,
           dbName: dbName || undefined,
-          title: dbName ? `批量导出 ${dbName} 对象` : '批量导出对象',
+          title: dbName
+            ? t('sidebar.tab.batch_export_objects_database', { database: dbName })
+            : t('sidebar.tab.batch_export_objects'),
       }));
   };
 
@@ -592,7 +594,7 @@ export const useSidebarBatchExport = ({
 
       addTab(buildBatchDatabaseExportWorkbenchTab({
           connectionId: connId,
-          title: '批量导出库',
+          title: t('sidebar.tab.batch_export_databases'),
       }));
   };
 

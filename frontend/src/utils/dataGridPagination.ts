@@ -46,15 +46,16 @@ export const resolvePaginationSummaryText = (params: {
   const approximateTotal = resolveApproximateTotal(pagination);
 
   if (pagination.totalKnown === false) {
-    if (prefersManualTotalCount) {
-      if (pagination.totalCountLoading) return translate('data_grid.pagination.summary.counting_exact', { current: currentCount });
-      if (supportsApproximateTableCount && approximateTotal !== null) {
-        return translate('data_grid.pagination.summary.approximate', { current: currentCount, total: approximateTotal });
-      }
-      if (pagination.totalCountCancelled) return translate('data_grid.pagination.summary.cancelled', { current: currentCount });
-      return translate('data_grid.pagination.summary.not_counted', { current: currentCount });
+    if (pagination.totalCountLoading) {
+      return prefersManualTotalCount
+        ? translate('data_grid.pagination.summary.counting_exact', { current: currentCount })
+        : translate('data_grid.pagination.summary.counting', { current: currentCount });
     }
-    return translate('data_grid.pagination.summary.counting', { current: currentCount });
+    if (supportsApproximateTableCount && approximateTotal !== null) {
+      return translate('data_grid.pagination.summary.approximate', { current: currentCount, total: approximateTotal });
+    }
+    if (pagination.totalCountCancelled) return translate('data_grid.pagination.summary.cancelled', { current: currentCount });
+    return translate('data_grid.pagination.summary.not_counted', { current: currentCount });
   }
 
   if (!Number.isFinite(total) || total <= 0) {

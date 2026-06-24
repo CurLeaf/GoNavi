@@ -1,5 +1,7 @@
 import React from 'react';
 import { message } from 'antd';
+import { t as catalogTranslate } from '../../i18n/catalog';
+import type { I18nParams } from '../../i18n/types';
 
 import type { AIContextItem } from '../../types';
 import { useStore } from '../../store';
@@ -18,7 +20,21 @@ interface UseAIChatContextBindingParams {
   connectionKey: string;
   addAIContext: (connectionKey: string, item: AIContextItem) => void;
   removeAIContext: (connectionKey: string, dbName: string, tableName: string) => void;
+  translate?: AIChatContextBindingTranslate;
 }
+
+type AIChatContextBindingTranslate = (key: string, params?: I18nParams) => string;
+
+const defaultTranslate: AIChatContextBindingTranslate = (key, params) =>
+  catalogTranslate('en-US', key, params);
+
+const getErrorDetail = (value: unknown): string => {
+  if (value instanceof Error) {
+    return value.message || 'unknown error';
+  }
+  const detail = String(value || '').trim();
+  return detail || 'unknown error';
+};
 
 export const useAIChatContextBinding = ({
   activeContext,
@@ -26,6 +42,7 @@ export const useAIChatContextBinding = ({
   connectionKey,
   addAIContext,
   removeAIContext,
+  translate = defaultTranslate,
 }: UseAIChatContextBindingParams) => {
   const [contextOpen, setContextOpen] = React.useState(false);
   const [contextLoading, setContextLoading] = React.useState(false);
@@ -41,6 +58,14 @@ export const useAIChatContextBinding = ({
     () => contextTables.filter((table) => table.name.toLowerCase().includes(searchText.toLowerCase())),
     [contextTables, searchText],
   );
+  const translateMessage = React.useCallback((
+    key: string,
+    fallback: string,
+    params?: I18nParams,
+  ) => {
+    const translated = translate(key, params);
+    return translated && translated !== key ? translated : fallback;
+  }, [translate]);
 
   const fetchTablesForDb = React.useCallback(async (dbName: string, connConfig: any) => {
     setContextLoading(true);
@@ -50,20 +75,33 @@ export const useAIChatContextBinding = ({
       if (res.success && Array.isArray(res.data)) {
         setContextTables(res.data.map((row) => ({ name: Object.values(row)[0] as string })));
       } else {
-        message.error(`获取表格失败: ${res.message}`);
+        const detail = getErrorDetail(res.message);
+        message.error(translateMessage(
+          'ai_chat.input.message.fetch_tables_failed',
+          `Failed to load tables: ${detail}`,
+          { detail },
+        ));
         setContextTables([]);
       }
     } catch (error: any) {
-      message.error(error?.message || '获取表格失败');
+      const detail = getErrorDetail(error);
+      message.error(translateMessage(
+        'ai_chat.input.message.fetch_tables_failed',
+        `Failed to load tables: ${detail}`,
+        { detail },
+      ));
       setContextTables([]);
     } finally {
       setContextLoading(false);
     }
-  }, []);
+  }, [translateMessage]);
 
   const handleOpenContext = React.useCallback(async () => {
     if (!activeContext?.connectionId) {
-      message.warning('请先在左侧选择一个数据库作为所聊上下文');
+      message.warning(translateMessage(
+        'ai_chat.input.message.select_database_context_first',
+        'Select a database on the left before attaching chat context',
+      ));
       return;
     }
 
@@ -89,14 +127,25 @@ export const useAIChatContextBinding = ({
       if (tablesRes.success && Array.isArray(tablesRes.data)) {
         setContextTables(tablesRes.data.map((row: any) => ({ name: Object.values(row)[0] as string })));
       } else {
+        const detail = getErrorDetail(tablesRes.message);
+        message.error(translateMessage(
+          'ai_chat.input.message.fetch_tables_failed',
+          `Failed to load tables: ${detail}`,
+          { detail },
+        ));
         setContextTables([]);
       }
     } catch (error: any) {
-      message.error(error?.message || '读取上下文表失败');
+      const detail = getErrorDetail(error);
+      message.error(translateMessage(
+        'ai_chat.input.message.context_load_failed',
+        `Failed to load table context: ${detail}`,
+        { detail },
+      ));
     } finally {
       setContextLoading(false);
     }
-  }, [activeContext, activeContextItems]);
+  }, [activeContext, activeContextItems, translateMessage]);
 
   const handleAppendContext = React.useCallback(async () => {
     if (!activeContext?.connectionId) {
@@ -139,7 +188,13 @@ export const useAIChatContextBinding = ({
         });
 
         if (!schemaResult.success) {
-          message.error(`获取表 ${dbName}.${tableName} 结构失败: ${schemaResult.content}`);
+          const table = `${dbName}.${tableName}`;
+          const detail = getErrorDetail(schemaResult.content);
+          message.error(translateMessage(
+            'ai_chat.input.message.fetch_table_schema_failed',
+            `Failed to load structure for ${table}: ${detail}`,
+            { table, detail },
+          ));
           continue;
         }
 
@@ -155,25 +210,45 @@ export const useAIChatContextBinding = ({
 
       if (addedCount > 0 || removedCount > 0) {
         if (addedCount > 0 && removedCount === 0) {
-          message.success(`已添加 ${addedCount} 张表的结构到上下文`);
+          message.success(translateMessage(
+            'ai_chat.input.message.context_added',
+            `Added ${addedCount} table structures to the context`,
+            { count: addedCount },
+          ));
         } else if (removedCount > 0 && addedCount === 0) {
-          message.success(`已从上下文移除 ${removedCount} 张表的结构`);
+          message.success(translateMessage(
+            'ai_chat.input.message.context_removed',
+            `Removed ${removedCount} table structures from the context`,
+            { count: removedCount },
+          ));
         } else {
-          message.success(`上下文已同步更新：新增 ${addedCount}，移除 ${removedCount}`);
+          message.success(translateMessage(
+            'ai_chat.input.message.context_synced',
+            `Context synced: added ${addedCount}, removed ${removedCount}`,
+            { added: addedCount, removed: removedCount },
+          ));
         }
         if (addedCount > 0) {
           setContextExpanded(true);
         }
       } else {
-        message.info('选中的表未发生变化');
+        message.info(translateMessage(
+          'ai_chat.input.message.selection_unchanged',
+          'Selected tables did not change',
+        ));
       }
       setContextOpen(false);
     } catch (error: any) {
-      message.error(error?.message || '同步 AI 上下文失败');
+      const detail = getErrorDetail(error);
+      message.error(translateMessage(
+        'ai_chat.input.message.context_sync_failed',
+        `Failed to sync AI context: ${detail}`,
+        { detail },
+      ));
     } finally {
       setAppendingContext(false);
     }
-  }, [activeContext, activeContextItems, addAIContext, connectionKey, removeAIContext, selectedTableKeys]);
+  }, [activeContext, activeContextItems, addAIContext, connectionKey, removeAIContext, selectedTableKeys, translateMessage]);
 
   const handleDbChange = React.useCallback((value: string) => {
     const connection = useStore.getState().connections.find((item) => item.id === activeContext?.connectionId);

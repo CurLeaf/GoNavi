@@ -1,12 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildShortcutSnapshot } from './aiShortcutInsights';
+import { setCurrentLanguage } from '../../i18n';
 import {
   cloneShortcutOptions,
   DEFAULT_SHORTCUT_OPTIONS,
 } from '../../utils/shortcuts';
 
 describe('aiShortcutInsights', () => {
+  afterEach(() => {
+    setCurrentLanguage('zh-CN');
+  });
+
   it('returns current-platform and cross-platform shortcut bindings with customization markers', () => {
     const shortcutOptions = cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS);
     shortcutOptions.toggleQueryResultsPanel.windows = {
@@ -31,6 +36,8 @@ describe('aiShortcutInsights', () => {
   });
 
   it('supports filtering by action key or shortcut-related keywords', () => {
+    setCurrentLanguage('en-US');
+
     const byAction = buildShortcutSnapshot({
       currentPlatform: 'windows',
       action: 'toggleQueryResultsPanel',

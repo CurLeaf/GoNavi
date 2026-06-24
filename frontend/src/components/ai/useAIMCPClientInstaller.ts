@@ -11,11 +11,14 @@ import {
   pickPreferredMCPClient,
   type MCPClientKey,
 } from '../../utils/mcpClientInstallStatus';
+import {
+  translateMCPClientInstallCopy,
+  type MCPClientInstallTranslator,
+} from './mcpClientInstallPanelState';
 
 interface MCPClientInstallResult {
   success?: boolean;
   client?: string;
-  message?: string;
   configPath?: string;
   command?: string;
   args?: string[];
@@ -40,6 +43,7 @@ interface UseAIMCPClientInstallerOptions {
   onBeforeInstall?: () => void;
   onConfigChanged?: () => void;
   resolveAIService: () => Promise<AIMCPClientInstallerService | null>;
+  translate?: MCPClientInstallTranslator;
 }
 
 export const useAIMCPClientInstaller = ({
@@ -49,6 +53,7 @@ export const useAIMCPClientInstaller = ({
   onBeforeInstall,
   onConfigChanged,
   resolveAIService,
+  translate,
 }: UseAIMCPClientInstallerOptions) => {
   const [mcpClientStatuses, setMCPClientStatuses] = useState<AIMCPClientInstallStatus[]>(EMPTY_MCP_CLIENT_STATUSES);
   const [selectedMCPClient, setSelectedMCPClient] = useState<MCPClientKey>('claude-code');
@@ -65,6 +70,11 @@ export const useAIMCPClientInstaller = ({
       : formatMCPLaunchCommand(selectedMCPClientStatus),
     [selectedMCPClientStatus],
   );
+  const copy = useCallback((
+    key: string,
+    fallback: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => translateMCPClientInstallCopy(translate, key, fallback, params), [translate]);
 
   const syncMCPClientStatuses = useCallback((items?: AIMCPClientInstallStatus[]) => {
     const normalizedStatuses = normalizeMCPClientStatuses(items);
@@ -99,14 +109,14 @@ export const useAIMCPClientInstaller = ({
       if (silent) {
         console.warn('[AI] refresh mcp client statuses failed', error);
       } else {
-        void messageApi.error(error?.message || '刷新客户端安装状态失败');
+        void messageApi.error(error?.message || copy('ai_chat.mcp_client.install.message.refresh_failed', 'Failed to refresh client installation status'));
       }
     } finally {
       if (!silent) {
         setMCPClientStatusLoading(false);
       }
     }
-  }, [messageApi, resolveAIService, syncMCPClientStatuses]);
+  }, [copy, messageApi, resolveAIService, syncMCPClientStatuses]);
 
   const handleInstallSelectedMCPClient = useCallback(async () => {
     const remoteClient = isRemoteMCPClientStatus(selectedMCPClientStatus);
@@ -118,69 +128,68 @@ export const useAIMCPClientInstaller = ({
         setMCPClientSelectionTouched(true);
         await copyTextToClipboard(
           buildRemoteMCPClientGuide(selectedMCPClientStatus),
-          `${targetLabel} 远程接入说明已复制`,
+          copy('ai_chat.mcp_client.install.message.remote_guide_copied', '{{label}} remote connection guide copied', { label: targetLabel }),
         );
       } catch (error: any) {
-        void messageApi.error(error?.message || `复制 ${targetLabel} 远程接入说明失败`);
+        void messageApi.error(error?.message || copy('ai_chat.mcp_client.install.message.remote_guide_copy_failed', 'Failed to copy {{label}} remote connection guide', { label: targetLabel }));
       } finally {
         onAfterInstall?.();
       }
       return;
     }
     if (selectedMCPClientStatus?.matchesCurrent) {
-      void messageApi.success(`${targetLabel} 已接入当前 GoNavi MCP，无需重复写入`);
+      void messageApi.success(copy('ai_chat.mcp_client.install.message.already_connected', '{{label}} is already connected to current GoNavi MCP. No repeated write is needed.', { label: targetLabel }));
       return;
     }
     try {
       onBeforeInstall?.();
       setMCPClientSelectionTouched(true);
       const service = await resolveAIService();
-      let result: MCPClientInstallResult;
       if (targetClient === 'codex') {
         if (typeof service?.AIInstallCodexMCP !== 'function') {
-          throw new Error('当前版本暂不支持自动安装 Codex MCP');
+          throw new Error(copy('ai_chat.mcp_client.install.message.codex_not_supported', 'This version does not support automatic Codex MCP installation yet'));
         }
-        result = await service.AIInstallCodexMCP();
+        await service.AIInstallCodexMCP();
       } else {
         if (typeof service?.AIInstallClaudeCodeMCP !== 'function') {
-          throw new Error('当前版本暂不支持自动安装 Claude Code MCP');
+          throw new Error(copy('ai_chat.mcp_client.install.message.claude_not_supported', 'This version does not support automatic Claude Code MCP installation yet'));
         }
-        result = await service.AIInstallClaudeCodeMCP();
+        await service.AIInstallClaudeCodeMCP();
       }
       await loadMCPClientStatuses({ silent: true });
       onConfigChanged?.();
-      void messageApi.success(result?.message || `已写入 ${targetLabel} 用户级 MCP 配置`);
+      void messageApi.success(copy('ai_chat.mcp_client.install.message.install_success', 'Wrote {{label}} user-level MCP config', { label: targetLabel }));
     } catch (error: any) {
-      void messageApi.error(error?.message || `安装 ${targetLabel} MCP 失败`);
+      void messageApi.error(error?.message || copy('ai_chat.mcp_client.install.message.install_failed', 'Failed to install {{label}} MCP', { label: targetLabel }));
     } finally {
       onAfterInstall?.();
     }
-  }, [copyTextToClipboard, loadMCPClientStatuses, messageApi, onAfterInstall, onBeforeInstall, onConfigChanged, resolveAIService, selectedMCPClientStatus]);
+  }, [copy, copyTextToClipboard, loadMCPClientStatuses, messageApi, onAfterInstall, onBeforeInstall, onConfigChanged, resolveAIService, selectedMCPClientStatus]);
 
   const handleCopySelectedMCPConfigPath = useCallback(async () => {
     const configPath = String(selectedMCPClientStatus?.configPath || '').trim();
     if (!configPath) {
-      void messageApi.warning('当前没有可复制的配置文件路径');
+      void messageApi.warning(copy('ai_chat.mcp_client.install.message.config_path_missing', 'No config file path is available to copy'));
       return;
     }
     try {
-      await copyTextToClipboard(configPath, '配置文件路径已复制');
+      await copyTextToClipboard(configPath, copy('ai_chat.mcp_client.install.message.config_path_copied', 'Config file path copied'));
     } catch (error: any) {
-      void messageApi.error(error?.message || '复制配置文件路径失败');
+      void messageApi.error(error?.message || copy('ai_chat.mcp_client.install.message.config_path_copy_failed', 'Failed to copy config file path'));
     }
-  }, [copyTextToClipboard, messageApi, selectedMCPClientStatus]);
+  }, [copy, copyTextToClipboard, messageApi, selectedMCPClientStatus]);
 
   const handleCopySelectedMCPLaunchCommand = useCallback(async () => {
     if (!selectedMCPClientCommandText) {
-      void messageApi.warning('当前没有可复制的启动命令');
+      void messageApi.warning(copy('ai_chat.mcp_client.install.message.launch_command_missing', 'No launch command is available to copy'));
       return;
     }
     try {
-      await copyTextToClipboard(selectedMCPClientCommandText, '启动命令已复制');
+      await copyTextToClipboard(selectedMCPClientCommandText, copy('ai_chat.mcp_client.install.message.launch_command_copied', 'Launch command copied'));
     } catch (error: any) {
-      void messageApi.error(error?.message || '复制启动命令失败');
+      void messageApi.error(error?.message || copy('ai_chat.mcp_client.install.message.launch_command_copy_failed', 'Failed to copy launch command'));
     }
-  }, [copyTextToClipboard, messageApi, selectedMCPClientCommandText]);
+  }, [copy, copyTextToClipboard, messageApi, selectedMCPClientCommandText]);
 
   return {
     handleCopySelectedMCPConfigPath,

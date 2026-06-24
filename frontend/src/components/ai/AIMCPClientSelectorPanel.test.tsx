@@ -39,15 +39,15 @@ describe('AIMCPClientSelectorPanel', () => {
       />,
     );
 
-    expect(markup).toContain('接入外部客户端');
-    expect(markup).toContain('选择目标客户端');
-    expect(markup).toContain('写入或复制配置');
-    expect(markup).toContain('重启或配置目标端');
+    expect(markup).toContain('Connect external client');
+    expect(markup).toContain('Choose target client');
+    expect(markup).toContain('Write or copy config');
+    expect(markup).toContain('Restart or configure target');
     expect(markup).toContain('Codex');
-    expect(markup).toContain('已接入');
+    expect(markup).toContain('Connected');
     expect(markup).toContain('OpenClaw');
-    expect(markup).toContain('远程桥接');
-    expect(markup).toContain('当前已选中，将复制远程接入说明');
-    expect(markup).toContain('云端 Agent');
+    expect(markup).toContain('Remote bridge');
+    expect(markup).toContain('Selected. The remote connection guide will be copied');
+    expect(markup).toContain('cloud Agents');
   });
 });

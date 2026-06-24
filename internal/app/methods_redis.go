@@ -257,7 +257,7 @@ func (a *App) RedisConnect(config connection.ConnectionConfig) connection.QueryR
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	logger.Infof("RedisConnect 连接成功：%s", formatRedisConnSummary(config))
-	return connection.QueryResult{Success: true, Message: "连接成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.connect_success", nil)}
 }
 
 // RedisTestConnection tests a Redis connection (alias for RedisConnect)
@@ -271,11 +271,11 @@ func (a *App) RedisTestConnection(config connection.ConnectionConfig) connection
 	if client != nil {
 		if closeErr := client.Close(); closeErr != nil {
 			logger.Error(closeErr, "RedisTestConnection 释放临时连接失败：%s", formatRedisConnSummary(config))
-			return connection.QueryResult{Success: false, Message: fmt.Sprintf("连接成功但释放测试连接失败：%v", closeErr)}
+			return connection.QueryResult{Success: false, Message: a.appText("redis.backend.error.test_connection_close_failed", map[string]any{"detail": closeErr.Error()})}
 		}
 	}
 	logger.Infof("RedisTestConnection 连接成功：%s", formatRedisConnSummary(config))
-	return connection.QueryResult{Success: true, Message: "连接成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.connect_success", nil)}
 }
 
 // RedisScanKeys scans keys matching a pattern
@@ -317,27 +317,27 @@ func parseRedisScanCursor(cursor any) (uint64, error) {
 		return uint64(v), nil
 	case int64:
 		if v < 0 {
-			return 0, fmt.Errorf("游标不能为负数: %d", v)
+			return 0, fmt.Errorf("cursor must not be negative: %d", v)
 		}
 		return uint64(v), nil
 	case int32:
 		if v < 0 {
-			return 0, fmt.Errorf("游标不能为负数: %d", v)
+			return 0, fmt.Errorf("cursor must not be negative: %d", v)
 		}
 		return uint64(v), nil
 	case int16:
 		if v < 0 {
-			return 0, fmt.Errorf("游标不能为负数: %d", v)
+			return 0, fmt.Errorf("cursor must not be negative: %d", v)
 		}
 		return uint64(v), nil
 	case int8:
 		if v < 0 {
-			return 0, fmt.Errorf("游标不能为负数: %d", v)
+			return 0, fmt.Errorf("cursor must not be negative: %d", v)
 		}
 		return uint64(v), nil
 	case int:
 		if v < 0 {
-			return 0, fmt.Errorf("游标不能为负数: %d", v)
+			return 0, fmt.Errorf("cursor must not be negative: %d", v)
 		}
 		return uint64(v), nil
 	case float64:
@@ -353,26 +353,26 @@ func parseRedisScanCursor(cursor any) (uint64, error) {
 		}
 		parsed, err := strconv.ParseUint(trimmed, 10, 64)
 		if err != nil {
-			return 0, fmt.Errorf("无效游标: %q", v)
+			return 0, fmt.Errorf("invalid cursor: %q", v)
 		}
 		return parsed, nil
 	default:
-		return 0, fmt.Errorf("不支持的游标类型: %T", cursor)
+		return 0, fmt.Errorf("unsupported cursor type: %T", cursor)
 	}
 }
 
 func parseRedisScanCursorFromFloat(value float64) (uint64, error) {
 	if math.IsNaN(value) || math.IsInf(value, 0) {
-		return 0, fmt.Errorf("无效浮点游标: %v", value)
+		return 0, fmt.Errorf("invalid float cursor: %v", value)
 	}
 	if value < 0 {
-		return 0, fmt.Errorf("游标不能为负数: %v", value)
+		return 0, fmt.Errorf("cursor must not be negative: %v", value)
 	}
 	if math.Trunc(value) != value {
-		return 0, fmt.Errorf("游标必须为整数: %v", value)
+		return 0, fmt.Errorf("cursor must be an integer: %v", value)
 	}
 	if value > float64(math.MaxUint64) {
-		return 0, fmt.Errorf("游标超出范围: %v", value)
+		return 0, fmt.Errorf("cursor is out of range: %v", value)
 	}
 	return uint64(value), nil
 }
@@ -407,7 +407,7 @@ func (a *App) RedisSetString(config connection.ConnectionConfig, key, value stri
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "设置成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.set_success", nil)}
 }
 
 // RedisSetHashField sets a field in a hash
@@ -423,7 +423,7 @@ func (a *App) RedisSetHashField(config connection.ConnectionConfig, key, field, 
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "设置成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.set_success", nil)}
 }
 
 // RedisDeleteKeys deletes one or more keys
@@ -456,7 +456,7 @@ func (a *App) RedisSetTTL(config connection.ConnectionConfig, key string, ttl in
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "设置成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.set_success", nil)}
 }
 
 // RedisExecuteCommand executes a raw Redis command
@@ -470,7 +470,7 @@ func (a *App) RedisExecuteCommand(config connection.ConnectionConfig, command st
 	// Parse command string into args
 	args := parseRedisCommand(command)
 	if len(args) == 0 {
-		return connection.QueryResult{Success: false, Message: "命令不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("redis.backend.error.command_required", nil)}
 	}
 
 	result, err := client.ExecuteCommand(args)
@@ -573,7 +573,7 @@ func (a *App) RedisSelectDB(config connection.ConnectionConfig, dbIndex int) con
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "切换成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.select_db_success", nil)}
 }
 
 // RedisRenameKey renames a key
@@ -589,7 +589,7 @@ func (a *App) RedisRenameKey(config connection.ConnectionConfig, oldKey, newKey 
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "重命名成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.rename_success", nil)}
 }
 
 // RedisKeyExists checks whether a key already exists
@@ -609,44 +609,51 @@ func (a *App) RedisKeyExists(config connection.ConnectionConfig, key string) con
 	return connection.QueryResult{Success: true, Data: map[string]bool{"exists": exists}}
 }
 
-func normalizeRedisStringArgs(raw any, argName string) ([]string, error) {
+func localizedRedisArgumentError(text func(string, map[string]any) string, key string, argName string) error {
+	if text == nil {
+		return fmt.Errorf("%s", key)
+	}
+	return fmt.Errorf("%s", text(key, map[string]any{"name": argName}))
+}
+
+func normalizeRedisStringArgs(raw any, argName string, text func(string, map[string]any) string) ([]string, error) {
 	switch v := raw.(type) {
 	case nil:
-		return nil, fmt.Errorf("%s 不能为空", argName)
+		return nil, localizedRedisArgumentError(text, "redis.backend.error.argument_required", argName)
 	case string:
-		text := strings.TrimSpace(v)
-		if text == "" {
-			return nil, fmt.Errorf("%s 不能为空", argName)
+		itemText := strings.TrimSpace(v)
+		if itemText == "" {
+			return nil, localizedRedisArgumentError(text, "redis.backend.error.argument_required", argName)
 		}
-		return []string{text}, nil
+		return []string{itemText}, nil
 	case []string:
 		items := make([]string, 0, len(v))
 		for _, item := range v {
-			text := strings.TrimSpace(item)
-			if text == "" {
+			itemText := strings.TrimSpace(item)
+			if itemText == "" {
 				continue
 			}
-			items = append(items, text)
+			items = append(items, itemText)
 		}
 		if len(items) == 0 {
-			return nil, fmt.Errorf("%s 不能为空", argName)
+			return nil, localizedRedisArgumentError(text, "redis.backend.error.argument_required", argName)
 		}
 		return items, nil
 	case []interface{}:
 		items := make([]string, 0, len(v))
 		for _, item := range v {
-			text := strings.TrimSpace(fmt.Sprintf("%v", item))
-			if text == "" || text == "<nil>" {
+			itemText := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if itemText == "" || itemText == "<nil>" {
 				continue
 			}
-			items = append(items, text)
+			items = append(items, itemText)
 		}
 		if len(items) == 0 {
-			return nil, fmt.Errorf("%s 不能为空", argName)
+			return nil, localizedRedisArgumentError(text, "redis.backend.error.argument_required", argName)
 		}
 		return items, nil
 	default:
-		return nil, fmt.Errorf("%s 类型无效", argName)
+		return nil, localizedRedisArgumentError(text, "redis.backend.error.argument_invalid_type", argName)
 	}
 }
 
@@ -658,7 +665,7 @@ func (a *App) RedisDeleteHashField(config connection.ConnectionConfig, key strin
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	normalizedFields, err := normalizeRedisStringArgs(fields, "fields")
+	normalizedFields, err := normalizeRedisStringArgs(fields, "fields", a.appText)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -668,7 +675,7 @@ func (a *App) RedisDeleteHashField(config connection.ConnectionConfig, key strin
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "删除成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.delete_success", nil)}
 }
 
 // RedisListPush pushes values to a list
@@ -684,7 +691,7 @@ func (a *App) RedisListPush(config connection.ConnectionConfig, key string, valu
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "添加成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.add_success", nil)}
 }
 
 // RedisListSet sets a value at an index in a list
@@ -700,7 +707,7 @@ func (a *App) RedisListSet(config connection.ConnectionConfig, key string, index
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "设置成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.set_success", nil)}
 }
 
 // RedisSetAdd adds members to a set
@@ -716,7 +723,7 @@ func (a *App) RedisSetAdd(config connection.ConnectionConfig, key string, member
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "添加成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.add_success", nil)}
 }
 
 // RedisSetRemove removes members from a set
@@ -732,7 +739,7 @@ func (a *App) RedisSetRemove(config connection.ConnectionConfig, key string, mem
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "删除成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.delete_success", nil)}
 }
 
 // RedisZSetAdd adds members to a sorted set
@@ -748,7 +755,7 @@ func (a *App) RedisZSetAdd(config connection.ConnectionConfig, key string, membe
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "添加成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.add_success", nil)}
 }
 
 // RedisZSetRemove removes members from a sorted set
@@ -764,7 +771,7 @@ func (a *App) RedisZSetRemove(config connection.ConnectionConfig, key string, me
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "删除成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.delete_success", nil)}
 }
 
 // RedisStreamAdd adds an entry to a stream
@@ -781,7 +788,7 @@ func (a *App) RedisStreamAdd(config connection.ConnectionConfig, key string, fie
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "添加成功", Data: map[string]string{"id": newID}}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.add_success", nil), Data: map[string]string{"id": newID}}
 }
 
 // RedisStreamDelete deletes stream entries by IDs
@@ -798,7 +805,7 @@ func (a *App) RedisStreamDelete(config connection.ConnectionConfig, key string, 
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "删除成功", Data: map[string]int64{"deleted": deleted}}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.delete_success", nil), Data: map[string]int64{"deleted": deleted}}
 }
 
 // RedisFlushDB flushes the current database
@@ -814,7 +821,7 @@ func (a *App) RedisFlushDB(config connection.ConnectionConfig) connection.QueryR
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "清空成功"}
+	return connection.QueryResult{Success: true, Message: a.appText("redis.backend.message.flush_success", nil)}
 }
 
 // CloseAllRedisClients closes all cached Redis clients (called on shutdown)

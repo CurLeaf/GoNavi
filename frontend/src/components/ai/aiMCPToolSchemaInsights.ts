@@ -1,10 +1,19 @@
 import type { AIMCPToolDescriptor } from '../../types';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
 
 const DEFAULT_TOOL_LIMIT = 8;
 const MAX_TOOL_LIMIT = 30;
 const MAX_PARAMETER_HINTS = 40;
 const MAX_ENUM_VALUES = 12;
 const MAX_SCHEMA_DEPTH = 2;
+
+const translateMCPToolSchemaCopy = (
+  translate: AIInspectionTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: Parameters<AIInspectionTranslator>[1],
+): string => translateInspectionCopy(translate, key, fallback, params);
 
 interface JSONSchemaRecord {
   [key: string]: any;
@@ -158,8 +167,9 @@ const buildUsageHints = (params: {
   tool: AIMCPToolDescriptor;
   hasInputSchema: boolean;
   parameterHints: MCPToolSchemaParameterHint[];
+  translate?: AIInspectionTranslator;
 }) => {
-  const { tool, hasInputSchema, parameterHints } = params;
+  const { tool, hasInputSchema, parameterHints, translate } = params;
   const hints: string[] = [];
   const requiredTopLevel = parameterHints
     .filter((item) => item.required && !item.path.includes('.'))
@@ -168,19 +178,41 @@ const buildUsageHints = (params: {
   const nestedHint = parameterHints.find((item) => item.nestedPropertyCount > 0 || item.path.includes('.'));
 
   if (!hasInputSchema) {
-    hints.push('这个 MCP 工具没有声明 inputSchema；调用前优先查看服务 README 或先用空对象试探。');
+    hints.push(translateMCPToolSchemaCopy(
+      translate,
+      'ai_chat.inspection.mcp_tool_schema.usage.no_input_schema',
+      'This MCP tool does not declare inputSchema; check the service README first or probe with an empty object.',
+    ));
   }
   if (requiredTopLevel.length > 0) {
-    hints.push(`调用 ${tool.alias} 前必须提供：${requiredTopLevel.join(', ')}`);
+    hints.push(translateMCPToolSchemaCopy(
+      translate,
+      'ai_chat.inspection.mcp_tool_schema.usage.required_params',
+      'Before calling {{alias}}, provide: {{parameters}}',
+      { alias: tool.alias, parameters: requiredTopLevel.join(', ') },
+    ));
   }
   if (enumHint) {
-    hints.push(`${enumHint.path} 只能从枚举值中选择：${enumHint.enumValues.join(' / ')}`);
+    hints.push(translateMCPToolSchemaCopy(
+      translate,
+      'ai_chat.inspection.mcp_tool_schema.usage.enum_values',
+      '{{path}} must be one of: {{values}}',
+      { path: enumHint.path, values: enumHint.enumValues.join(' / ') },
+    ));
   }
   if (nestedHint) {
-    hints.push('嵌套对象和数组参数必须按 JSON 结构传入，不要把对象整体写成字符串。');
+    hints.push(translateMCPToolSchemaCopy(
+      translate,
+      'ai_chat.inspection.mcp_tool_schema.usage.nested_json',
+      'Nested object and array parameters must follow the JSON structure; do not pass the whole object as a string.',
+    ));
   }
   if (parameterHints.length > 0) {
-    hints.push('调用前只传 schema 中声明的字段；不确定字段含义时先向用户确认，而不是猜测。');
+    hints.push(translateMCPToolSchemaCopy(
+      translate,
+      'ai_chat.inspection.mcp_tool_schema.usage.schema_fields_only',
+      'Only pass fields declared in the schema; if a field meaning is unclear, ask the user instead of guessing.',
+    ));
   }
   return hints;
 };
@@ -192,6 +224,7 @@ export const buildMCPToolSchemaSnapshot = (params: {
   keyword?: string;
   includeSchema?: boolean;
   limit?: number;
+  translate?: AIInspectionTranslator;
 }) => {
   const {
     mcpTools = [],
@@ -199,6 +232,7 @@ export const buildMCPToolSchemaSnapshot = (params: {
     serverId = '',
     keyword = '',
     includeSchema = false,
+    translate,
   } = params;
   const normalizedAlias = normalizeSearchText(alias);
   const normalizedServerId = normalizeSearchText(serverId);
@@ -254,7 +288,7 @@ export const buildMCPToolSchemaSnapshot = (params: {
       requiredParameterCount: requiredParameters.length,
       requiredParameters,
       parameters: parameterHints,
-      usageHints: buildUsageHints({ tool, hasInputSchema, parameterHints }),
+      usageHints: buildUsageHints({ tool, hasInputSchema, parameterHints, translate }),
       inputSchema: includeSchema ? inputSchema : undefined,
     };
   });
@@ -262,14 +296,38 @@ export const buildMCPToolSchemaSnapshot = (params: {
   const warnings: string[] = [];
   const nextActions: string[] = [];
   if (allTools.length === 0) {
-    warnings.push('当前没有发现任何 MCP 工具，可能还没有配置 MCP 服务，或服务测试/发现失败。');
-    nextActions.push('先调用 inspect_mcp_setup 查看 MCP 服务是否启用并已发现工具。');
+    warnings.push(translateMCPToolSchemaCopy(
+      translate,
+      'ai_chat.inspection.mcp_tool_schema.warning.no_tools',
+      'No MCP tools were discovered; MCP services may not be configured, or service testing/discovery may have failed.',
+    ));
+    nextActions.push(translateMCPToolSchemaCopy(
+      translate,
+      'ai_chat.inspection.mcp_tool_schema.next_action.inspect_setup',
+      'Call inspect_mcp_setup first to check whether MCP services are enabled and tools have been discovered.',
+    ));
   } else if (matchedTools.length === 0) {
-    warnings.push('没有找到匹配的 MCP 工具。');
-    nextActions.push('先调用 inspect_mcp_setup 查看当前实际发现到的 MCP 工具 alias，再用 alias 精确查询。');
+    warnings.push(translateMCPToolSchemaCopy(
+      translate,
+      'ai_chat.inspection.mcp_tool_schema.warning.no_matches',
+      'No matching MCP tool was found.',
+    ));
+    nextActions.push(translateMCPToolSchemaCopy(
+      translate,
+      'ai_chat.inspection.mcp_tool_schema.next_action.lookup_alias',
+      'Call inspect_mcp_setup first to check the MCP tool aliases actually discovered, then query by exact alias.',
+    ));
   } else if (tools.some((tool) => !tool.hasInputSchema)) {
-    warnings.push('部分 MCP 工具没有声明 inputSchema，参数说明可能不完整。');
-    nextActions.push('没有 schema 的工具需要回到 MCP 服务 README 或工具返回错误继续确认参数。');
+    warnings.push(translateMCPToolSchemaCopy(
+      translate,
+      'ai_chat.inspection.mcp_tool_schema.warning.missing_schema',
+      'Some MCP tools do not declare inputSchema, so parameter documentation may be incomplete.',
+    ));
+    nextActions.push(translateMCPToolSchemaCopy(
+      translate,
+      'ai_chat.inspection.mcp_tool_schema.next_action.read_readme',
+      'For tools without schema, go back to the MCP service README or use tool errors to confirm parameters.',
+    ));
   }
 
   return {
@@ -288,9 +346,22 @@ export const buildMCPToolSchemaSnapshot = (params: {
     warnings,
     nextActions,
     message: matchedTools.length > 0
-      ? `已找到 ${matchedTools.length} 个 MCP 工具，返回 ${tools.length} 个参数 schema 摘要`
+      ? translateMCPToolSchemaCopy(
+          translate,
+          'ai_chat.inspection.mcp_tool_schema.message.with_matches',
+          'Found {{matched}} MCP tools and returned {{returned}} parameter schema summaries',
+          { matched: matchedTools.length, returned: tools.length },
+        )
       : allTools.length > 0
-        ? '没有找到匹配的 MCP 工具'
-        : '当前还没有可用 MCP 工具 schema',
+        ? translateMCPToolSchemaCopy(
+            translate,
+            'ai_chat.inspection.mcp_tool_schema.message.no_matches',
+            'No matching MCP tool was found',
+          )
+        : translateMCPToolSchemaCopy(
+            translate,
+            'ai_chat.inspection.mcp_tool_schema.message.empty',
+            'No MCP tool schema is available yet',
+          ),
   };
 };

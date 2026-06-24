@@ -1,12 +1,14 @@
 import type { AIMCPToolDescriptor } from "../types";
 import {
   BUILTIN_AI_TOOL_INFO,
+  localizeBuiltinAIToolInfo,
   type AIChatToolDefinition,
   type AIBuiltinToolInfo,
 } from "./aiBuiltinToolInfo";
 
 export {
   BUILTIN_AI_TOOL_INFO,
+  localizeBuiltinAIToolInfo,
   type AIChatToolDefinition,
   type AIBuiltinToolInfo,
 } from "./aiBuiltinToolInfo";
@@ -48,4 +50,7 @@ export const buildMCPAIChatTools = (
 export const buildAvailableAIChatTools = (
   tools: AIMCPToolDescriptor[],
   t?: AIChatToolTranslator,
-): AIChatToolDefinition[] => [...BUILTIN_AI_TOOLS, ...buildMCPAIChatTools(tools, t)];
+): AIChatToolDefinition[] => [
+  ...localizeBuiltinAIToolInfo(t).map((item) => item.tool),
+  ...buildMCPAIChatTools(tools, t),
+];

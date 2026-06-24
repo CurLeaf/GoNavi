@@ -1,13 +1,20 @@
 import React from 'react';
 import { CheckOutlined } from '@ant-design/icons';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { AIContextLevel } from '../../types';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 
-const CONTEXT_OPTIONS: { label: string; value: AIContextLevel; desc: string; icon: string }[] = [
-  { label: '仅 Schema', value: 'schema_only', desc: '只传递表/列结构信息给 AI', icon: '📋' },
-  { label: '含采样数据', value: 'with_samples', desc: '包含少量采样数据帮助 AI 理解数据特征', icon: '📊' },
-  { label: '含查询结果', value: 'with_results', desc: '传递最近的查询结果作为上下文', icon: '📑' },
+const CONTEXT_OPTIONS: {
+  labelKey: string;
+  value: AIContextLevel;
+  descKey: string;
+  icon: string;
+}[] = [
+  { labelKey: 'ai_settings.context.schema_only.label', value: 'schema_only', descKey: 'ai_settings.context.schema_only.desc', icon: '📋' },
+  { labelKey: 'ai_settings.context.with_samples.label', value: 'with_samples', descKey: 'ai_settings.context.with_samples.desc', icon: '📊' },
+  { labelKey: 'ai_settings.context.with_results.label', value: 'with_results', descKey: 'ai_settings.context.with_results.desc', icon: '📑' },
 ];
 
 interface AISettingsContextSectionProps {
@@ -26,56 +33,61 @@ const AISettingsContextSection: React.FC<AISettingsContextSectionProps> = ({
   cardBg,
   cardBorder,
   onChange,
-}) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-    <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 8 }}>
-      控制发送给 AI 的数据库上下文信息量
-    </div>
-    {CONTEXT_OPTIONS.map((opt) => {
-      const active = contextLevel === opt.value;
-      return (
-        <div
-          key={opt.value}
-          onClick={() => onChange(opt.value)}
-          style={{
-            padding: '14px 16px',
-            borderRadius: 14,
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-            border: `1.5px solid ${active ? overlayTheme.selectedText : cardBorder}`,
-            background: active ? overlayTheme.selectedBg : cardBg,
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 14,
-          }}
-        >
+}) => {
+  const i18n = useOptionalI18n();
+  const copy = (key: string) => (i18n?.t ?? ((catalogKey) => catalogTranslate('en-US', catalogKey)))(key);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginBottom: 8 }}>
+        {copy('ai_settings.context.description')}
+      </div>
+      {CONTEXT_OPTIONS.map((opt) => {
+        const active = contextLevel === opt.value;
+        return (
           <div
+            key={opt.value}
+            onClick={() => onChange(opt.value)}
             style={{
-              width: 36,
-              height: 36,
-              borderRadius: 10,
-              display: 'grid',
-              placeItems: 'center',
-              fontSize: 18,
-              flexShrink: 0,
-              background: active ? overlayTheme.iconBg : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'),
-              color: active ? overlayTheme.iconColor : overlayTheme.mutedText,
+              padding: '14px 16px',
+              borderRadius: 14,
+              cursor: 'pointer',
               transition: 'all 0.2s ease',
+              border: `1.5px solid ${active ? overlayTheme.selectedText : cardBorder}`,
+              background: active ? overlayTheme.selectedBg : cardBg,
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 14,
             }}
           >
-            {opt.icon}
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, display: 'flex', alignItems: 'center', gap: 8 }}>
-              {opt.label}
-              {active && <CheckOutlined style={{ color: overlayTheme.iconColor, fontSize: 14 }} />}
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                display: 'grid',
+                placeItems: 'center',
+                fontSize: 18,
+                flexShrink: 0,
+                background: active ? overlayTheme.iconBg : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)'),
+                color: active ? overlayTheme.iconColor : overlayTheme.mutedText,
+                transition: 'all 0.2s ease',
+              }}
+            >
+              {opt.icon}
             </div>
-            <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginTop: 4, lineHeight: '1.5' }}>{opt.desc}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText, display: 'flex', alignItems: 'center', gap: 8 }}>
+                {copy(opt.labelKey)}
+                {active && <CheckOutlined style={{ color: overlayTheme.iconColor, fontSize: 14 }} />}
+              </div>
+              <div style={{ fontSize: 13, color: overlayTheme.mutedText, marginTop: 4, lineHeight: '1.5' }}>{copy(opt.descKey)}</div>
+            </div>
           </div>
-        </div>
-      );
-    })}
-  </div>
-);
+        );
+      })}
+    </div>
+  );
+};
 
 export default AISettingsContextSection;

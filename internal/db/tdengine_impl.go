@@ -314,7 +314,7 @@ func (t *TDengineDB) GetCreateStatement(dbName, tableName string) (string, error
 	if lastErr != nil {
 		return "", lastErr
 	}
-	return "", fmt.Errorf("未找到建表语句")
+	return "", errors.New(localizedDriverRuntimeText("db.backend.error.create_table_statement_not_found", nil))
 }
 
 func (t *TDengineDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
@@ -381,7 +381,7 @@ func (t *TDengineDB) GetColumns(dbName, tableName string) ([]connection.ColumnDe
 
 func (t *TDengineDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	if strings.TrimSpace(dbName) == "" {
-		return nil, fmt.Errorf("获取全部列信息需要指定数据库名称")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.database_name_required", nil)
 	}
 
 	tables, err := t.GetTables(dbName)
@@ -422,13 +422,13 @@ func (t *TDengineDB) GetTriggers(dbName, tableName string) ([]connection.Trigger
 
 func (t *TDengineDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if t.conn == nil {
-		return fmt.Errorf("连接未打开")
+		return localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 	if strings.TrimSpace(tableName) == "" {
-		return fmt.Errorf("表名不能为空")
+		return localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 	if len(changes.Updates) > 0 || len(changes.Deletes) > 0 {
-		return fmt.Errorf("TDengine 目标端当前仅支持 INSERT 写入，暂不支持 UPDATE/DELETE 差异同步，请改用仅插入或全量覆盖模式")
+		return localizedDatabaseRuntimeError("db.backend.error.tdengine_apply_changes_insert_only", nil)
 	}
 
 	qualifiedTable := quoteTDengineTable("", tableName)

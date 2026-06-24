@@ -1,5 +1,5 @@
 export namespace ai {
-	
+
 	export class MCPClientInstallResult {
 	    success: boolean;
 	    client?: string;
@@ -7,11 +7,11 @@ export namespace ai {
 	    configPath?: string;
 	    command?: string;
 	    args?: string[];
-	
+
 	    static createFrom(source: any = {}) {
 	        return new MCPClientInstallResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.success = source["success"];
@@ -908,11 +908,11 @@ export namespace connection {
 	    restrictStructureEdit?: boolean;
 	    restrictScriptExecution?: boolean;
 	    restrictDataImport?: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ConnectionProtectionConfig(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.restrictDataEdit = source["restrictDataEdit"];
@@ -1039,9 +1039,9 @@ export namespace connection {
 		        return new classs(a);
 		    }
 		    return a;
-		}
+	    }
 	}
-	
+
 	export class GlobalProxyView {
 	    enabled: boolean;
 	    type: string;

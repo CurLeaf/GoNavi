@@ -7,6 +7,7 @@ import {
   buildRemoteMCPClientQuickStart,
   isRemoteMCPClientStatus,
 } from '../../utils/mcpClientInstallStatus';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import AIMCPRemoteQuickStartPanel from './AIMCPRemoteQuickStartPanel';
 import {
@@ -14,6 +15,7 @@ import {
   getMCPClientStatusTone,
   getSelectedMCPClientStateLine,
   resolveMCPClientCommandName,
+  translateMCPClientInstallCopy,
 } from './mcpClientInstallPanelState';
 
 interface AIMCPClientStatusPanelProps {
@@ -39,9 +41,16 @@ const AIMCPClientStatusPanel: React.FC<AIMCPClientStatusPanelProps> = ({
   onCopyConfigPath,
   onCopyLaunchCommand,
 }) => {
+  const i18n = useOptionalI18n();
+  const t = i18n?.t;
+  const copy = (
+    key: string,
+    fallback: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => translateMCPClientInstallCopy(t, key, fallback, params);
   const selectedIsRemoteClient = isRemoteMCPClientStatus(selectedStatus);
   const remoteQuickStart = selectedIsRemoteClient
-    ? buildRemoteMCPClientQuickStart(selectedStatus)
+    ? buildRemoteMCPClientQuickStart(selectedStatus, t)
     : null;
 
   return (
@@ -58,33 +67,46 @@ const AIMCPClientStatusPanel: React.FC<AIMCPClientStatusPanelProps> = ({
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
-          已选客户端状态
+          {copy('ai_chat.mcp_client.install.status.title', 'Selected client status')}
         </div>
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-          当前目标客户端：{selectedStatus?.displayName || '未选择客户端'}
+          {copy(
+            selectedStatus?.displayName
+              ? 'ai_chat.mcp_client.install.status.current_target'
+              : 'ai_chat.mcp_client.install.status.no_client',
+            selectedStatus?.displayName ? 'Current target client: {{label}}' : 'No client selected',
+            { label: selectedStatus?.displayName || '' },
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
-            {getMCPClientStatusSummary(selectedStatus)}
+            {getMCPClientStatusSummary(selectedStatus, t)}
           </div>
           {selectedStatus && (
+            (() => {
+              const tone = getMCPClientStatusTone(selectedStatus, darkMode, t);
+              return (
             <div
               style={{
                 padding: '3px 9px',
                 borderRadius: 999,
                 fontSize: 11,
                 fontWeight: 700,
-                color: getMCPClientStatusTone(selectedStatus, darkMode).color,
-                background: getMCPClientStatusTone(selectedStatus, darkMode).bg,
+                color: tone.color,
+                background: tone.bg,
               }}
             >
-              {getMCPClientStatusTone(selectedStatus, darkMode).label}
+              {tone.label}
             </div>
+              );
+            })()
           )}
         </div>
       </div>
       <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-        当前状态：{getSelectedMCPClientStateLine(selectedStatus)}
+        {copy('ai_chat.mcp_client.install.status.current_state', 'Current status: {{status}}', {
+          status: getSelectedMCPClientStateLine(selectedStatus, t),
+        })}
       </div>
       {selectedIsRemoteClient && (
         <div
@@ -98,7 +120,10 @@ const AIMCPClientStatusPanel: React.FC<AIMCPClientStatusPanelProps> = ({
             lineHeight: 1.7,
           }}
         >
-          远程接入边界：数据库连接信息和密码仍保存在 Windows GoNavi；云端 Agent 默认通过 schema-only MCP 工具读取连接摘要、库表和 DDL，不注册 execute_sql。跨机器接入请使用 GoNavi Streamable HTTP 模式，并配合 token、隧道或反向代理。
+          {copy(
+            'ai_chat.mcp_client.install.status.remote_boundary',
+            'Remote connection boundary: database connection info and passwords stay in Windows GoNavi. Cloud Agents read connection summaries, tables, and DDL through schema-only MCP tools by default, and execute_sql is not registered. For cross-machine access, use GoNavi Streamable HTTP mode with a token, tunnel, or reverse proxy.',
+          )}
         </div>
       )}
       {remoteQuickStart && (
@@ -110,28 +135,32 @@ const AIMCPClientStatusPanel: React.FC<AIMCPClientStatusPanelProps> = ({
         />
       )}
       <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-        CLI 检测：{selectedIsRemoteClient
-          ? `远程 Agent 不需要检测本机 ${resolveMCPClientCommandName(selectedStatus)} 命令`
+        {copy('ai_chat.mcp_client.install.status.cli_prefix', 'CLI detection: {{status}}', {
+          status: selectedIsRemoteClient
+            ? copy('ai_chat.mcp_client.install.status.cli.remote', 'Remote Agent does not need local {{command}} command detection', { command: resolveMCPClientCommandName(selectedStatus) })
           : selectedStatus?.clientDetected
-            ? `已检测到 ${resolveMCPClientCommandName(selectedStatus)}`
-            : `未检测到 ${resolveMCPClientCommandName(selectedStatus)}，仍可先写配置`}
+            ? copy('ai_chat.mcp_client.install.status.cli.detected', 'Detected {{command}}', { command: resolveMCPClientCommandName(selectedStatus) })
+            : copy('ai_chat.mcp_client.install.status.cli.not_detected', '{{command}} was not detected; config can still be written first', { command: resolveMCPClientCommandName(selectedStatus) }),
+        })}
       </div>
       {selectedStatus?.clientPath && (
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, fontFamily: 'var(--gn-font-mono)' }}>
-          命令路径：{selectedStatus.clientPath}
+          {copy('ai_chat.mcp_client.install.status.command_path', 'Command path: {{path}}', { path: selectedStatus.clientPath })}
         </div>
       )}
       <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-        检测结果：{selectedStatus?.message || '未检测到接入状态'}
+        {copy('ai_chat.mcp_client.install.status.detection_result', 'Detection result: {{message}}', {
+          message: selectedStatus?.message || copy('ai_chat.mcp_client.install.status.detection_missing', 'No connection status detected'),
+        })}
       </div>
       {selectedStatus?.configPath && (
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, fontFamily: 'var(--gn-font-mono)' }}>
-          配置文件：{selectedStatus.configPath}
+          {copy('ai_chat.mcp_client.install.status.config_file', 'Config file: {{path}}', { path: selectedStatus.configPath })}
         </div>
       )}
       {selectedCommandText && (
         <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6, fontFamily: 'var(--gn-font-mono)' }}>
-          启动命令：{selectedCommandText}
+          {copy('ai_chat.mcp_client.install.status.launch_command', 'Launch command: {{command}}', { command: selectedCommandText })}
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -142,7 +171,7 @@ const AIMCPClientStatusPanel: React.FC<AIMCPClientStatusPanelProps> = ({
           onClick={onRefreshStatus}
           style={{ borderRadius: 8 }}
         >
-          刷新状态
+          {copy('ai_chat.mcp_client.install.status.refresh', 'Refresh status')}
         </Button>
         <Button
           size="small"
@@ -151,7 +180,7 @@ const AIMCPClientStatusPanel: React.FC<AIMCPClientStatusPanelProps> = ({
           onClick={onCopyConfigPath}
           style={{ borderRadius: 8 }}
         >
-          复制配置路径
+          {copy('ai_chat.mcp_client.install.status.copy_config', 'Copy config path')}
         </Button>
         <Button
           size="small"
@@ -160,7 +189,7 @@ const AIMCPClientStatusPanel: React.FC<AIMCPClientStatusPanelProps> = ({
           onClick={onCopyLaunchCommand}
           style={{ borderRadius: 8 }}
         >
-          复制启动命令
+          {copy('ai_chat.mcp_client.install.status.copy_command', 'Copy launch command')}
         </Button>
       </div>
     </div>

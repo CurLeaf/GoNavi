@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { setCurrentLanguage, t } from '../i18n';
 import {
   formatExportElapsed,
   formatExportProgressRows,
@@ -9,6 +10,10 @@ import {
 } from './exportProgress';
 
 describe('exportProgress', () => {
+  afterEach(() => {
+    setCurrentLanguage('zh-CN');
+  });
+
   it('uses actual percent when total row count is known', () => {
     expect(resolveExportProgressPercent('running', 25, 100, true)).toBe(25);
   });
@@ -21,15 +26,26 @@ describe('exportProgress', () => {
   });
 
   it('falls back to indeterminate progress when total row hint is zero', () => {
+    setCurrentLanguage('en-US');
     expect(resolveExportProgressPercent('running', 754000, 0, true)).toBe(0);
     expect(shouldUseExactExportProgress('running', 0, true)).toBe(false);
     expect(shouldUseIndeterminateExportProgress('running', 0, true)).toBe(true);
-    expect(formatExportProgressRows(754000, 0, true)).toBe('已写入 754,000 行');
+    expect(formatExportProgressRows(754000, 0, true)).toBe(
+      t('data_export.progress.rows_written', { current: '754,000' }),
+    );
   });
 
-  it('formats row summary for known and unknown totals', () => {
-    expect(formatExportProgressRows(12345, 0, false)).toBe('已写入 12,345 行');
-    expect(formatExportProgressRows(12345, 880000, true)).toBe('已写入 12,345 / 880,000 行');
+  it('formats row summary with localized text and number separators', () => {
+    setCurrentLanguage('de-DE');
+    expect(formatExportProgressRows(12345, 0, false)).toBe(
+      t('data_export.progress.rows_written', { current: '12.345' }),
+    );
+    expect(formatExportProgressRows(12345, 880000, true)).toBe(
+      t('data_export.progress.rows_written_with_total', {
+        current: '12.345',
+        total: '880.000',
+      }),
+    );
   });
 
   it('resolves and formats elapsed export duration', () => {
@@ -37,5 +53,13 @@ describe('exportProgress', () => {
     expect(resolveExportElapsedMs(1000, 0, 31_500)).toBe(30_500);
     expect(formatExportElapsed(30_500)).toBe('00:30');
     expect(formatExportElapsed(3_723_000)).toBe('01:02:03');
+  });
+
+  it('keeps export progress source free of hard-coded Chinese row summaries', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('./exportProgress.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('已写入 ');
+    expect(source).not.toContain("Intl.NumberFormat('zh-CN')");
   });
 });

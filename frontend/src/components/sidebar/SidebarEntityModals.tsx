@@ -185,13 +185,17 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
     </Modal>
 
     <Modal
-      title="新建数据库"
+      title={t('sidebar.modal.create_database.title')}
       open={isCreateDbModalOpen}
       onOk={handleCreateDatabase}
       onCancel={() => setIsCreateDbModalOpen(false)}
     >
       <Form form={createDbForm} layout="vertical">
-        <Form.Item name="name" label="数据库名称" rules={[{ required: true, message: '请输入名称' }]}>
+        <Form.Item
+          name="name"
+          label={t('sidebar.field.database_name')}
+          rules={[{ required: true, message: t('sidebar.validation.name_required') }]}
+        >
           <Input {...noAutoCapInputProps} />
         </Form.Item>
       </Form>
@@ -215,7 +219,9 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
     </Modal>
 
     <Modal
-      title={`编辑模式${renameSchemaTarget?.dataRef?.dbName && renameSchemaTarget?.dataRef?.schemaName ? ` (${renameSchemaTarget.dataRef.dbName}.${renameSchemaTarget.dataRef.schemaName})` : ''}`}
+      title={renameSchemaTarget?.dataRef?.dbName && renameSchemaTarget?.dataRef?.schemaName
+        ? t('sidebar.modal.rename_schema.title', { name: `${renameSchemaTarget.dataRef.dbName}.${renameSchemaTarget.dataRef.schemaName}` })
+        : t('sidebar.menu.edit_schema')}
       open={isRenameSchemaModalOpen}
       onOk={handleRenameSchema}
       onCancel={() => {
@@ -225,7 +231,11 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
       }}
     >
       <Form form={renameSchemaForm} layout="vertical">
-        <Form.Item name="newName" label="模式名称" rules={[{ required: true, message: '请输入模式名称' }]}>
+        <Form.Item
+          name="newName"
+          label={t('sidebar.field.schema_name')}
+          rules={[{ required: true, message: t('sidebar.validation.schema_name_required') }]}
+        >
           <Input {...noAutoCapInputProps} />
         </Form.Item>
       </Form>
@@ -249,7 +259,9 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
     </Modal>
 
     <Modal
-      title={`重命名表${renameTableTarget?.dataRef?.tableName ? ` (${renameTableTarget.dataRef.tableName})` : ''}`}
+      title={renameTableTarget?.dataRef?.tableName
+        ? t('sidebar.modal.rename_table.title', { name: renameTableTarget.dataRef.tableName })
+        : t('sidebar.menu.rename_table')}
       open={isRenameTableModalOpen}
       onOk={handleRenameTable}
       onCancel={() => {
@@ -259,14 +271,20 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
       }}
     >
       <Form form={renameTableForm} layout="vertical">
-        <Form.Item name="newName" label="新表名" rules={[{ required: true, message: '请输入新表名' }]}>
+        <Form.Item
+          name="newName"
+          label={t('sidebar.field.new_table_name')}
+          rules={[{ required: true, message: t('sidebar.validation.new_table_name_required') }]}
+        >
           <Input {...noAutoCapInputProps} />
         </Form.Item>
       </Form>
     </Modal>
 
     <Modal
-      title={`重命名视图${renameViewTarget?.dataRef?.viewName ? ` (${renameViewTarget.dataRef.viewName})` : ''}`}
+      title={renameViewTarget?.dataRef?.viewName
+        ? t('sidebar.modal.rename_view.title', { name: renameViewTarget.dataRef.viewName })
+        : t('sidebar.menu.rename_view')}
       open={isRenameViewModalOpen}
       onOk={handleRenameView}
       onCancel={() => {
@@ -276,7 +294,11 @@ export const SidebarEntityModals: React.FC<SidebarEntityModalsProps> = ({
       }}
     >
       <Form form={renameViewForm} layout="vertical">
-        <Form.Item name="newName" label="新视图名" rules={[{ required: true, message: '请输入新视图名' }]}>
+        <Form.Item
+          name="newName"
+          label={t('sidebar.field.new_view_name')}
+          rules={[{ required: true, message: t('sidebar.validation.new_view_name_required') }]}
+        >
           <Input {...noAutoCapInputProps} />
         </Form.Item>
       </Form>

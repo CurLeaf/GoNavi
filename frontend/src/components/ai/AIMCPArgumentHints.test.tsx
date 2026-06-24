@@ -1,9 +1,98 @@
 import React from 'react';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
+import { I18nProvider } from '../../i18n/provider';
 import { buildOverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import AIMCPArgumentHints from './AIMCPArgumentHints';
+
+vi.mock('../../i18n/runtime', () => ({
+  syncLanguageRuntime: vi.fn(async () => undefined),
+}));
+
+const source = readFileSync(new URL('./AIMCPArgumentHints.tsx', import.meta.url), 'utf8');
+const mcpArgumentHintsSource = readFileSync(new URL('../../utils/mcpArgumentHints.ts', import.meta.url), 'utf8');
+const mcpArgumentDetailHintsSource = readFileSync(new URL('../../utils/mcpArgumentDetailHints.ts', import.meta.url), 'utf8');
+const zhCnCatalog = JSON.parse(readFileSync(new URL('../../../../shared/i18n/zh-CN.json', import.meta.url), 'utf8'));
+const zhTwCatalog = JSON.parse(readFileSync(new URL('../../../../shared/i18n/zh-TW.json', import.meta.url), 'utf8'));
+const enUsCatalog = JSON.parse(readFileSync(new URL('../../../../shared/i18n/en-US.json', import.meta.url), 'utf8'));
+const jaJpCatalog = JSON.parse(readFileSync(new URL('../../../../shared/i18n/ja-JP.json', import.meta.url), 'utf8'));
+const deDeCatalog = JSON.parse(readFileSync(new URL('../../../../shared/i18n/de-DE.json', import.meta.url), 'utf8'));
+const ruRuCatalog = JSON.parse(readFileSync(new URL('../../../../shared/i18n/ru-RU.json', import.meta.url), 'utf8'));
+
+const REQUIRED_KEYS = [
+  'ai_settings.mcp_server.argument_hints.category.secret',
+  'ai_settings.mcp_server.argument_hints.category.path',
+  'ai_settings.mcp_server.argument_hints.category.endpoint',
+  'ai_settings.mcp_server.argument_hints.category.network',
+  'ai_settings.mcp_server.argument_hints.category.mode',
+  'ai_settings.mcp_server.argument_hints.category.runtime',
+  'ai_settings.mcp_server.argument_hints.category.generic',
+  'ai_settings.mcp_server.argument_hints.current_command',
+  'ai_settings.mcp_server.argument_hints.argument_details',
+  'ai_settings.mcp_server.argument_hints.masked_value',
+  'ai_settings.mcp_server.argument_hints.value_hint_prefix',
+  'ai_settings.mcp_server.argument_hints.business_arguments',
+  'ai_settings.mcp_server.argument_hints.dont_screenshot',
+  'ai_settings.mcp_server.argument_hints.next_actions',
+  'ai_settings.mcp_server.argument_hints.action_separator',
+  'ai_settings.mcp_server.argument_hints.required_complete',
+  'ai_settings.mcp_server.argument_hints.fill_missing_required',
+  'ai_settings.mcp_server.argument_hints.split_inline_args',
+];
+
+const GENERATED_REQUIRED_KEYS = [
+  'ai_settings.mcp_server.argument_hints.command_field_warning',
+  'ai_settings.mcp_server.argument_hints.hidden_value',
+  'ai_settings.mcp_server.argument_hints.possible_secret_hidden',
+  'ai_settings.mcp_server.argument_hints.next_action.add_step',
+  'ai_settings.mcp_server.argument_hints.generic.label',
+  'ai_settings.mcp_server.argument_hints.generic.detail',
+  'ai_settings.mcp_server.argument_hints.generic.value_hint',
+  'ai_settings.mcp_server.argument_hints.detail.value_label',
+  'ai_settings.mcp_server.argument_hints.detail.sensitive_value_detail',
+  'ai_settings.mcp_server.argument_hints.detail.value_detail',
+  'ai_settings.mcp_server.argument_hints.detail.positional.label',
+  'ai_settings.mcp_server.argument_hints.detail.positional.detail',
+  'ai_settings.mcp_server.argument_hints.detail.positional.value_hint',
+  'ai_settings.mcp_server.argument_hints.profile.docker.title',
+  'ai_settings.mcp_server.argument_hints.profile.docker.summary',
+  'ai_settings.mcp_server.argument_hints.profile.docker.order',
+  'ai_settings.mcp_server.argument_hints.step.interactive.label',
+  'ai_settings.mcp_server.argument_hints.step.interactive.detail',
+  'ai_settings.mcp_server.argument_hints.step.image.label',
+  'ai_settings.mcp_server.argument_hints.step.image.detail',
+  'ai_settings.mcp_server.argument_hints.business.directory.label',
+  'ai_settings.mcp_server.argument_hints.business.directory.detail',
+  'ai_settings.mcp_server.argument_hints.business.directory.value_hint',
+  'ai_settings.mcp_server.argument_hints.business.transport.label',
+  'ai_settings.mcp_server.argument_hints.business.transport.detail',
+  'ai_settings.mcp_server.argument_hints.business.transport.value_hint',
+  'ai_settings.mcp_server.argument_hints.business.port.label',
+  'ai_settings.mcp_server.argument_hints.business.port.detail',
+  'ai_settings.mcp_server.argument_hints.business.port.value_hint',
+];
+
+const SHELL_CHINESE_LITERALS = [
+  '当前命令',
+  '参数逐项说明',
+  '值已脱敏',
+  '应填：',
+  '已识别业务参数',
+  '不要截图真实值',
+  '下一步：',
+  '必填参数看起来已经齐了',
+  '一键补齐缺失必填参数',
+  '一键拆分启动命令字段',
+  '敏感',
+  '路径',
+  '地址',
+  '网络',
+  '模式',
+  '运行时',
+  '业务',
+];
 
 const flattenRendererText = (node: any): string => {
   if (node == null || typeof node === 'boolean') {
@@ -18,26 +107,71 @@ const flattenRendererText = (node: any): string => {
   return flattenRendererText(node.children ?? node.props?.children);
 };
 
+const renderHints = (
+  element: React.ReactElement,
+  preference?: 'zh-CN' | 'en-US',
+) => {
+  if (!preference) {
+    return element;
+  }
+  return (
+    <I18nProvider
+      preference={preference}
+      systemLanguages={[preference]}
+      onPreferenceChange={() => undefined}
+    >
+      {element}
+    </I18nProvider>
+  );
+};
+
 describe('AIMCPArgumentHints', () => {
+  it('keeps argument hint shell copy in catalogs instead of source literals', () => {
+    expect(source).toContain('useOptionalI18n()');
+    expect(source).toContain("catalogTranslate('en-US'");
+    for (const key of REQUIRED_KEYS) {
+      expect(source).toContain(key);
+    }
+    expect(mcpArgumentHintsSource).toContain('ai_settings.mcp_server.argument_hints.profile.docker.title');
+    expect(mcpArgumentDetailHintsSource).toContain('ai_settings.mcp_server.argument_hints.detail.value_label');
+    for (const literal of SHELL_CHINESE_LITERALS) {
+      expect(source).not.toContain(literal);
+    }
+  });
+
+  it('keeps argument hint keys present in all six catalogs with matching placeholders', () => {
+    const catalogs = [zhCnCatalog, zhTwCatalog, enUsCatalog, jaJpCatalog, deDeCatalog, ruRuCatalog];
+    const placeholders = (value: string) => [...value.matchAll(/\{\{([^}]+)\}\}/g)].map((match) => match[1]).sort();
+    for (const key of [...REQUIRED_KEYS, ...GENERATED_REQUIRED_KEYS]) {
+      const base = placeholders(enUsCatalog[key]);
+      for (const catalog of catalogs) {
+        expect(catalog[key]).toBeTruthy();
+        expect(placeholders(catalog[key])).toEqual(base);
+      }
+    }
+  });
+
   it('can append missing required args from command-specific hints', async () => {
     const onArgsChange = vi.fn();
     let renderer!: ReactTestRenderer;
 
     await act(async () => {
       renderer = create(
-        <AIMCPArgumentHints
-          command="docker"
-          args={['run', '--rm']}
-          onArgsChange={onArgsChange}
-          cardBorder="rgba(0,0,0,0.08)"
-          darkMode={false}
-          overlayTheme={buildOverlayWorkbenchTheme(false)}
-        />,
+        renderHints(
+          <AIMCPArgumentHints
+            command="docker"
+            args={['run', '--rm']}
+            onArgsChange={onArgsChange}
+            cardBorder="rgba(0,0,0,0.08)"
+            darkMode={false}
+            overlayTheme={buildOverlayWorkbenchTheme(false)}
+          />,
+        ),
       );
     });
 
     const buttons = renderer.root.findAll(
-      (node) => node.type === 'button' && flattenRendererText(node).includes('一键补齐缺失必填参数'),
+      (node) => node.type === 'button' && flattenRendererText(node).includes('Fill missing required arguments'),
     );
 
     expect(buttons.length).toBe(1);
@@ -57,24 +191,26 @@ describe('AIMCPArgumentHints', () => {
 
     await act(async () => {
       renderer = create(
-        <AIMCPArgumentHints
-          command="docker run --rm mcp/server-fetch:latest"
-          args={['--env', 'API_KEY=secret']}
-          onArgsChange={onArgsChange}
-          onCommandArgsChange={onCommandArgsChange}
-          cardBorder="rgba(0,0,0,0.08)"
-          darkMode={false}
-          overlayTheme={buildOverlayWorkbenchTheme(false)}
-        />,
+        renderHints(
+          <AIMCPArgumentHints
+            command="docker run --rm mcp/server-fetch:latest"
+            args={['--env', 'API_KEY=secret']}
+            onArgsChange={onArgsChange}
+            onCommandArgsChange={onCommandArgsChange}
+            cardBorder="rgba(0,0,0,0.08)"
+            darkMode={false}
+            overlayTheme={buildOverlayWorkbenchTheme(false)}
+          />,
+        ),
       );
     });
 
     const text = flattenRendererText(renderer.toJSON());
-    expect(text).toContain('启动命令字段里还包含 3 个参数');
-    expect(text).not.toContain('一键补齐缺失必填参数');
+    expect(text).toContain('The startup command field still contains 3 arguments');
+    expect(text).not.toContain('Fill missing required arguments');
 
     const buttons = renderer.root.findAll(
-      (node) => node.type === 'button' && flattenRendererText(node).includes('一键拆分启动命令字段'),
+      (node) => node.type === 'button' && flattenRendererText(node).includes('Split startup command field'),
     );
 
     expect(buttons.length).toBe(1);
@@ -98,32 +234,93 @@ describe('AIMCPArgumentHints', () => {
 
     await act(async () => {
       renderer = create(
-        <AIMCPArgumentHints
-          command="uvx"
-          args={[
-            'mcp-server-demo',
-            '--stdio',
-            '--api-key=sk-real-secret',
-            '--directory',
-            'D:\\Work',
-          ]}
-          cardBorder="rgba(0,0,0,0.08)"
-          darkMode={false}
-          overlayTheme={buildOverlayWorkbenchTheme(false)}
-        />,
+        renderHints(
+          <AIMCPArgumentHints
+            command="uvx"
+            args={[
+              'mcp-server-demo',
+              '--stdio',
+              '--api-key=sk-real-secret',
+              '--directory',
+              'D:\\Work',
+            ]}
+            cardBorder="rgba(0,0,0,0.08)"
+            darkMode={false}
+            overlayTheme={buildOverlayWorkbenchTheme(false)}
+          />,
+        ),
+      );
+    });
+
+    const text = flattenRendererText(renderer.toJSON());
+    expect(text).toContain('Argument details');
+    expect(text).toContain('Detected business arguments');
+    expect(text).toContain('--api-key');
+    expect(text).toContain('API Key');
+    expect(text).toContain('Do not screenshot the real value');
+    expect(text).toContain('--directory');
+    expect(text).toContain('Allowed directory');
+    expect(text).toContain('Value is masked');
+    expect(text).not.toContain('sk-real-secret');
+  });
+
+  it('renders zh-CN shell copy from provider while preserving raw argument values', async () => {
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(
+        renderHints(
+          <AIMCPArgumentHints
+            command="uvx"
+            args={['mcp-server-demo', '--tenant', 'prod']}
+            cardBorder="rgba(0,0,0,0.08)"
+            darkMode={false}
+            overlayTheme={buildOverlayWorkbenchTheme(false)}
+          />,
+          'zh-CN',
+        ),
       );
     });
 
     const text = flattenRendererText(renderer.toJSON());
     expect(text).toContain('参数逐项说明');
-    expect(text).toContain('已识别业务参数');
-    expect(text).toContain('--api-key');
-    expect(text).toContain('API Key');
-    expect(text).toContain('不要截图真实值');
-    expect(text).toContain('--directory');
-    expect(text).toContain('授权目录');
-    expect(text).toContain('值已脱敏');
-    expect(text).not.toContain('sk-real-secret');
+    expect(text).toContain('应填：');
+    expect(text).toContain('--tenant');
+    expect(text).toContain('prod');
+  });
+
+  it('renders command-specific argument guidance in en-US while preserving raw values', async () => {
+    let renderer!: ReactTestRenderer;
+
+    await act(async () => {
+      renderer = create(
+        renderHints(
+          <AIMCPArgumentHints
+            command="docker"
+            args={['run', '--rm', 'mcp/server-fetch:latest']}
+            cardBorder="rgba(0,0,0,0.08)"
+            darkMode={false}
+            overlayTheme={buildOverlayWorkbenchTheme(false)}
+          />,
+          'en-US',
+        ),
+      );
+    });
+
+    const text = flattenRendererText(renderer.toJSON());
+    expect(text).toContain('Docker MCP argument order');
+    expect(text).toContain('Keep standard input');
+    expect(text).toContain('Image name');
+    expect(text).toContain('mcp/server-fetch:latest');
+    [
+      'Docker MCP 参数顺序建议',
+      '保持标准输入',
+      '镜像名',
+      '补充 保持标准输入',
+      '推荐顺序',
+    ].forEach((rawSnippet) => {
+      expect(text).not.toContain(rawSnippet);
+    });
   });
 
   it('renders fallback explanations for unknown MCP args', async () => {
@@ -131,24 +328,26 @@ describe('AIMCPArgumentHints', () => {
 
     await act(async () => {
       renderer = create(
-        <AIMCPArgumentHints
-          command="acme-mcp-server"
-          args={['--tenant', 'prod', 'target-a']}
-          cardBorder="rgba(0,0,0,0.08)"
-          darkMode={false}
-          overlayTheme={buildOverlayWorkbenchTheme(false)}
-        />,
+        renderHints(
+          <AIMCPArgumentHints
+            command="acme-mcp-server"
+            args={['--tenant', 'prod', 'target-a']}
+            cardBorder="rgba(0,0,0,0.08)"
+            darkMode={false}
+            overlayTheme={buildOverlayWorkbenchTheme(false)}
+          />,
+        ),
       );
     });
 
     const text = flattenRendererText(renderer.toJSON());
-    expect(text).toContain('参数逐项说明');
+    expect(text).toContain('Argument details');
     expect(text).toContain('--tenant');
-    expect(text).toContain('未识别参数');
-    expect(text).toContain('GoNavi 不能从参数名 --tenant 准确判断业务含义');
+    expect(text).toContain('Unrecognized argument');
+    expect(text).toContain('GoNavi cannot infer the business meaning of --tenant');
     expect(text).toContain('prod');
-    expect(text).toContain('未识别参数的值');
+    expect(text).toContain('Unrecognized argument value');
     expect(text).toContain('target-a');
-    expect(text).toContain('位置参数');
+    expect(text).toContain('Positional argument');
   });
 });

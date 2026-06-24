@@ -1,3 +1,5 @@
+import { t as translateCatalog } from '../i18n/catalog';
+
 export type DataTableDensity = 'comfortable' | 'standard' | 'compact';
 
 export interface DataGridDisplaySettings {
@@ -21,6 +23,8 @@ export const MIN_DATA_TABLE_FONT_SIZE = 10;
 export const MAX_DATA_TABLE_FONT_SIZE = 18;
 export const MIN_SIDEBAR_TREE_FONT_SIZE = 10;
 export const MAX_SIDEBAR_TREE_FONT_SIZE = 18;
+
+type DensityOptionTranslator = (key: string) => string;
 
 interface DensityParams {
   defaultColumnWidth: number;
@@ -58,11 +62,20 @@ const DENSITY_PARAMS: Record<DataTableDensity, DensityParams> = {
   },
 };
 
-export const DENSITY_OPTIONS = [
-  { label: '舒适', value: 'comfortable' as const },
-  { label: '标准', value: 'standard' as const },
-  { label: '紧凑', value: 'compact' as const },
-];
+const DENSITY_OPTION_VALUES = [
+  'comfortable',
+  'standard',
+  'compact',
+] as const;
+
+export const createDensityOptions = (
+  translate: DensityOptionTranslator = (key) => translateCatalog('en-US', key),
+) => DENSITY_OPTION_VALUES.map((value) => ({
+  label: translate(`app.theme.data_table.density.${value}`),
+  value,
+}));
+
+export const DENSITY_OPTIONS = createDensityOptions();
 
 export const sanitizeDataTableDensity = (value: unknown): DataTableDensity => {
   if (value === 'standard' || value === 'compact') return value;

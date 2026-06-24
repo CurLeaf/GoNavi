@@ -1,4 +1,9 @@
+import { t as catalogTranslate } from '../../i18n/catalog';
+import type { I18nParams } from '../../i18n/types';
+
 export type AISlashCommandCategory = 'generate' | 'review' | 'diagnose';
+
+export type AISlashCommandTranslate = (key: string, params?: I18nParams) => string;
 
 export interface AISlashCommandDefinition {
   cmd: string;
@@ -20,50 +25,103 @@ export interface AISlashCommandGroup extends AISlashCommandCategoryMeta {
   commands: AISlashCommandDefinition[];
 }
 
-export const AI_SLASH_COMMAND_CATEGORIES: AISlashCommandCategoryMeta[] = [
+interface AISlashCommandCategoryTemplate {
+  key: AISlashCommandCategory;
+  titleKey: string;
+  descriptionKey: string;
+}
+
+interface AISlashCommandTemplate {
+  cmd: string;
+  labelKey: string;
+  descKey: string;
+  promptKey: string;
+  category: AISlashCommandCategory;
+  keywordKey: string;
+  featured?: boolean;
+}
+
+const defaultTranslate: AISlashCommandTranslate = (key, params) =>
+  catalogTranslate('en-US', key, params);
+
+const AI_SLASH_COMMAND_CATEGORIES: AISlashCommandCategoryTemplate[] = [
   {
     key: 'generate',
-    title: 'SQL 生成',
-    description: '直接产出 SQL、测试数据或迁移草稿。',
+    titleKey: 'ai_chat.input.slash.category.generate.title',
+    descriptionKey: 'ai_chat.input.slash.category.generate.description',
   },
   {
     key: 'review',
-    title: '结构评审',
-    description: '解释 SQL、评审表设计和索引策略。',
+    titleKey: 'ai_chat.input.slash.category.review.title',
+    descriptionKey: 'ai_chat.input.slash.category.review.description',
   },
   {
     key: 'diagnose',
-    title: '诊断探针',
-    description: '优先调用内置探针看 AI、MCP 和最近 SQL 活动的真实状态。',
+    titleKey: 'ai_chat.input.slash.category.diagnose.title',
+    descriptionKey: 'ai_chat.input.slash.category.diagnose.description',
   },
 ];
 
-export const DEFAULT_AI_SLASH_COMMANDS: AISlashCommandDefinition[] = [
-  { cmd: '/query', label: '🔍 自然语言查询', desc: '用中文描述你想查什么', prompt: '帮我写一条 SQL 查询：', category: 'generate', featured: true, keywords: ['查询', '自然语言', '查数据'] },
-  { cmd: '/sql', label: '📝 生成 SQL', desc: '描述需求自动生成语句', prompt: '请根据以下需求生成 SQL：', category: 'generate', featured: true, keywords: ['sql', '生成', '查询语句'] },
-  { cmd: '/mock', label: '🎲 造测试数据', desc: '生成 INSERT 测试数据', prompt: '请为当前关联的表生成 10 条符合业务语义的测试数据 INSERT 语句：', category: 'generate', keywords: ['mock', '测试数据', 'insert'] },
-  { cmd: '/diff', label: '🔄 表对比', desc: '对比两表差异生成变更', prompt: '请对比以下两张表的结构差异，并生成从旧版本迁移到新版本的 ALTER 语句：', category: 'generate', keywords: ['diff', '迁移', 'alter'] },
-  { cmd: '/explain', label: '💡 解释 SQL', desc: '解释选中 SQL 的逻辑', prompt: '请解释以下 SQL 的执行逻辑和每一步的作用：\n```sql\n\n```', category: 'review', featured: true, keywords: ['解释', 'sql', '逻辑'] },
-  { cmd: '/optimize', label: '⚡ 优化分析', desc: '分析 SQL 性能瓶颈', prompt: '请分析以下 SQL 的性能问题，并给出优化后的版本：\n```sql\n\n```', category: 'review', keywords: ['优化', '索引', '性能'] },
-  { cmd: '/schema', label: '🏗️ 表设计评审', desc: '评审表结构设计质量', prompt: '请全面评审当前关联表的设计，包括字段类型、范式、索引策略等方面的改进建议：', category: 'review', keywords: ['schema', '表结构', '设计'] },
-  { cmd: '/index', label: '📊 索引建议', desc: '推荐最优索引方案', prompt: '请基于当前表结构和常见查询场景，推荐最优的索引方案并给出建表语句：', category: 'review', keywords: ['index', '索引', '慢查询'] },
-  { cmd: '/health', label: '🩺 AI 配置体检', desc: '调用体检探针总览当前 AI 配置', prompt: '请先调用 inspect_ai_setup_health，对当前 GoNavi AI 配置做一次完整体检，然后总结 blockers、warnings 和 nextActions。', category: 'diagnose', featured: true, keywords: ['health', '体检', 'ai配置', '探针'] },
-  { cmd: '/tools', label: '🧰 工具目录', desc: '按关键词选择该用哪个内置探针', prompt: '请先调用 inspect_ai_tool_catalog，按我的问题关键词筛选推荐流程、内置工具参数提示和当前 MCP 工具摘要，再告诉我下一步应该调用哪个工具。关键词：', category: 'diagnose', keywords: ['工具目录', '内置工具', 'toolcatalog', '参数提示', 'arguments', '探针路线'] },
-  { cmd: '/budget', label: '🧠 上下文体量', desc: '诊断消息、DDL、MCP schema 和 Skills 体量', prompt: '请先调用 inspect_ai_context_budget，检查当前会话消息、工具结果、DDL、MCP schema、提示词和 Skills 的体量风险，并给出应该收窄哪些上下文。', category: 'diagnose', keywords: ['上下文', 'context', '体量', '预算', '变慢', '乱答', 'schema太大', '工具结果'] },
-  { cmd: '/hotspots', label: '🧱 代码热点', desc: '查看大文件拆分候选和测试范围', prompt: '请先调用 inspect_codebase_hotspots，读取当前 GoNavi 前端大文件热点、建议拆分切片和测试目标，再告诉我下一步最适合拆哪个文件、拆到什么边界，以及需要跑哪些验证。关键词：', category: 'diagnose', keywords: ['大文件', '臃肿', '拆分', '重构', 'hotspots', '代码热点', '几千行'] },
-  { cmd: '/mcp', label: '🪛 排查 MCP 接入', desc: '检查 MCP 服务和外部客户端状态', prompt: '请先调用 inspect_mcp_setup，帮我盘点当前 MCP 服务、工具发现结果，以及 Claude Code / Codex 本机客户端和 OpenClaw / Hermans 远程 Agent 的接入状态。', category: 'diagnose', featured: true, keywords: ['mcp', 'codex', 'claude', 'openclaw', 'hermans', '外部客户端'] },
-  { cmd: '/mcpfail', label: '🧯 MCP 运行失败', desc: '读取 MCP 启动、发现和调用失败日志', prompt: '请先调用 inspect_mcp_runtime_failures，读取最近 MCP 启动、工具发现、工具调用、stdio、Docker 或 HTTP MCP 失败日志，结合当前 MCP 服务配置判断原因和 nextActions。关键词或服务名：', category: 'diagnose', keywords: ['mcpfail', 'mcp失败', '运行期失败', '工具发现0个', 'stdio', 'docker mcp', 'http mcp', '启动失败', '调用失败'] },
-  { cmd: '/mcpadd', label: '🧭 新增 MCP 指引', desc: '查看 command、args、env 和模板怎么填', prompt: '请先调用 inspect_mcp_authoring_guide；如果我贴了完整启动命令或草稿，再调用 inspect_mcp_draft 试算字段和校验问题；最后结合 inspect_mcp_setup，告诉我新增 GoNavi MCP 服务时 command、args、env、timeout 应该怎么填，以及最接近的模板应该选哪个。', category: 'diagnose', featured: true, keywords: ['mcp新增', 'command', 'args', 'env', '模板'] },
-  { cmd: '/mcpdraft', label: '🧪 MCP 草稿校验', desc: '校验一条 MCP 启动命令怎么拆', prompt: '请先调用 inspect_mcp_draft 校验我提供的 MCP fullCommand 或 command/args/env/timeout 草稿，返回自动拆分结果、启动预览、suggestedServerSeed、错误/告警和 nextActions；如果还缺字段说明，再补充调用 inspect_mcp_authoring_guide。', category: 'diagnose', keywords: ['mcp草稿', 'mcp校验', 'fullcommand', '启动命令', '参数拆分', 'command', 'args', 'env'] },
-  { cmd: '/mcptool', label: '🧩 MCP 工具参数', desc: '查看 MCP 工具 schema 和 arguments 写法', prompt: '请先调用 inspect_mcp_setup 找到当前已发现的 MCP 工具 alias；如果我已经给了工具名或关键词，再调用 inspect_mcp_tool_schema 读取对应 inputSchema，告诉我必填参数、字段类型、枚举值、嵌套路径，以及 arguments JSON 应该怎么写。', category: 'diagnose', keywords: ['mcp工具', 'mcp工具参数', 'schema', 'arguments', '参数', '工具调用', 'inputschema'] },
-  { cmd: '/connfail', label: '🧯 连接失败探针', desc: '总结最近连接失败、冷却和验证异常', prompt: '请先调用 inspect_recent_connection_failures，帮我总结最近数据库连接失败、连接冷却、验证失败和 SSH 隧道异常的真实日志结论；如果已经有明确地址或类型，再结合 inspect_current_connection 或 inspect_saved_connections 继续缩小范围。', category: 'diagnose', featured: true, keywords: ['连接失败', '冷却', '验证失败', 'ssh', 'mysql'] },
-  { cmd: '/shortcuts', label: '⌨️ 快捷键探针', desc: '读取当前 Win/Mac 快捷键配置', prompt: '请先调用 inspect_shortcuts，告诉我当前 GoNavi 的快捷键配置，尤其是执行 SQL、切换结果区、打开 AI 面板和 AI 发送消息这些动作在当前平台和另一平台分别怎么按，是否改过默认值。', category: 'diagnose', keywords: ['快捷键', 'shortcuts', '结果区', 'mac', 'windows'] },
-  { cmd: '/applog', label: '🪵 应用日志', desc: '回看最近 GoNavi 应用日志', prompt: '请先调用 inspect_app_logs，帮我看最近 GoNavi 应用日志里的错误和警告；如果我提到连接失败、MCP 拉起失败、启动异常或 gonavi.log，就优先结合关键词继续筛。', category: 'diagnose', keywords: ['日志', 'gonavi.log', 'mcp报错', '连接失败', '启动异常'] },
-  { cmd: '/airender', label: '🧯 AI 渲染异常', desc: '读取最近一次 AI 消息渲染失败记录', prompt: '请先调用 inspect_ai_last_render_error，告诉我最近一次 AI 消息渲染失败记录里是哪条消息、报错摘要是什么，以及下一步该怎么排查。', category: 'diagnose', keywords: ['渲染失败', '气泡空白', 'ai消息', 'render', '白块'] },
-  { cmd: '/safety', label: '🛡️ 查看写入安全', desc: '确认只读/写入边界和 allowMutating', prompt: '请先调用 inspect_ai_safety，告诉我当前 AI 和 GoNavi MCP 的写入边界、是否只读，以及 execute_sql 是否需要 allowMutating。', category: 'diagnose', keywords: ['安全', '只读', 'allowmutating', 'ddl', 'dml'] },
-  { cmd: '/activity', label: '🕘 最近 SQL 活动', desc: '总结最近执行、报错和热点', prompt: '请先调用 inspect_recent_sql_activity，帮我总结最近 SQL 活动、错误热点和主要读写类型。', category: 'diagnose', keywords: ['activity', 'sql日志', '最近执行', '报错'] },
-  { cmd: '/tx', label: '🔁 SQL 事务状态', desc: '查看 SQL 编辑器提交模式和待提交事务', prompt: '请先调用 inspect_sql_editor_transaction，告诉我 SQL 编辑器当前 DML 托管事务语义、手动/自动提交设置、活动 SQL 页签是否会进入事务、是否有待提交事务，以及下一步应该提交、回滚还是继续执行。', category: 'diagnose', featured: true, keywords: ['事务', 'transaction', '提交', '自动提交', '手动提交', '未提交', 'dml'] },
+const AI_SLASH_COMMAND_TEMPLATES: AISlashCommandTemplate[] = [
+  { cmd: '/query', labelKey: 'ai_chat.input.slash.query.label', descKey: 'ai_chat.input.slash.query.desc', promptKey: 'ai_chat.input.slash.query.prompt', keywordKey: 'ai_chat.input.slash.query.keywords', category: 'generate', featured: true },
+  { cmd: '/sql', labelKey: 'ai_chat.input.slash.sql.label', descKey: 'ai_chat.input.slash.sql.desc', promptKey: 'ai_chat.input.slash.sql.prompt', keywordKey: 'ai_chat.input.slash.sql.keywords', category: 'generate', featured: true },
+  { cmd: '/mock', labelKey: 'ai_chat.input.slash.mock.label', descKey: 'ai_chat.input.slash.mock.desc', promptKey: 'ai_chat.input.slash.mock.prompt', keywordKey: 'ai_chat.input.slash.mock.keywords', category: 'generate' },
+  { cmd: '/diff', labelKey: 'ai_chat.input.slash.diff.label', descKey: 'ai_chat.input.slash.diff.desc', promptKey: 'ai_chat.input.slash.diff.prompt', keywordKey: 'ai_chat.input.slash.diff.keywords', category: 'generate' },
+  { cmd: '/explain', labelKey: 'ai_chat.input.slash.explain.label', descKey: 'ai_chat.input.slash.explain.desc', promptKey: 'ai_chat.input.slash.explain.prompt', keywordKey: 'ai_chat.input.slash.explain.keywords', category: 'review', featured: true },
+  { cmd: '/optimize', labelKey: 'ai_chat.input.slash.optimize.label', descKey: 'ai_chat.input.slash.optimize.desc', promptKey: 'ai_chat.input.slash.optimize.prompt', keywordKey: 'ai_chat.input.slash.optimize.keywords', category: 'review' },
+  { cmd: '/schema', labelKey: 'ai_chat.input.slash.schema.label', descKey: 'ai_chat.input.slash.schema.desc', promptKey: 'ai_chat.input.slash.schema.prompt', keywordKey: 'ai_chat.input.slash.schema.keywords', category: 'review' },
+  { cmd: '/index', labelKey: 'ai_chat.input.slash.index.label', descKey: 'ai_chat.input.slash.index.desc', promptKey: 'ai_chat.input.slash.index.prompt', keywordKey: 'ai_chat.input.slash.index.keywords', category: 'review' },
+  { cmd: '/health', labelKey: 'ai_chat.input.slash.health.label', descKey: 'ai_chat.input.slash.health.desc', promptKey: 'ai_chat.input.slash.health.prompt', keywordKey: 'ai_chat.input.slash.health.keywords', category: 'diagnose', featured: true },
+  { cmd: '/tools', labelKey: 'ai_chat.input.slash.tools.label', descKey: 'ai_chat.input.slash.tools.desc', promptKey: 'ai_chat.input.slash.tools.prompt', keywordKey: 'ai_chat.input.slash.tools.keywords', category: 'diagnose' },
+  { cmd: '/budget', labelKey: 'ai_chat.input.slash.budget.label', descKey: 'ai_chat.input.slash.budget.desc', promptKey: 'ai_chat.input.slash.budget.prompt', keywordKey: 'ai_chat.input.slash.budget.keywords', category: 'diagnose' },
+  { cmd: '/hotspots', labelKey: 'ai_chat.input.slash.hotspots.label', descKey: 'ai_chat.input.slash.hotspots.desc', promptKey: 'ai_chat.input.slash.hotspots.prompt', keywordKey: 'ai_chat.input.slash.hotspots.keywords', category: 'diagnose' },
+  { cmd: '/mcp', labelKey: 'ai_chat.input.slash.mcp.label', descKey: 'ai_chat.input.slash.mcp.desc', promptKey: 'ai_chat.input.slash.mcp.prompt', keywordKey: 'ai_chat.input.slash.mcp.keywords', category: 'diagnose', featured: true },
+  { cmd: '/mcpfail', labelKey: 'ai_chat.input.slash.mcpfail.label', descKey: 'ai_chat.input.slash.mcpfail.desc', promptKey: 'ai_chat.input.slash.mcpfail.prompt', keywordKey: 'ai_chat.input.slash.mcpfail.keywords', category: 'diagnose' },
+  { cmd: '/mcpadd', labelKey: 'ai_chat.input.slash.mcpadd.label', descKey: 'ai_chat.input.slash.mcpadd.desc', promptKey: 'ai_chat.input.slash.mcpadd.prompt', keywordKey: 'ai_chat.input.slash.mcpadd.keywords', category: 'diagnose', featured: true },
+  { cmd: '/mcpdraft', labelKey: 'ai_chat.input.slash.mcpdraft.label', descKey: 'ai_chat.input.slash.mcpdraft.desc', promptKey: 'ai_chat.input.slash.mcpdraft.prompt', keywordKey: 'ai_chat.input.slash.mcpdraft.keywords', category: 'diagnose' },
+  { cmd: '/mcptool', labelKey: 'ai_chat.input.slash.mcptool.label', descKey: 'ai_chat.input.slash.mcptool.desc', promptKey: 'ai_chat.input.slash.mcptool.prompt', keywordKey: 'ai_chat.input.slash.mcptool.keywords', category: 'diagnose' },
+  { cmd: '/connfail', labelKey: 'ai_chat.input.slash.connfail.label', descKey: 'ai_chat.input.slash.connfail.desc', promptKey: 'ai_chat.input.slash.connfail.prompt', keywordKey: 'ai_chat.input.slash.connfail.keywords', category: 'diagnose', featured: true },
+  { cmd: '/shortcuts', labelKey: 'ai_chat.input.slash.shortcuts.label', descKey: 'ai_chat.input.slash.shortcuts.desc', promptKey: 'ai_chat.input.slash.shortcuts.prompt', keywordKey: 'ai_chat.input.slash.shortcuts.keywords', category: 'diagnose' },
+  { cmd: '/applog', labelKey: 'ai_chat.input.slash.applog.label', descKey: 'ai_chat.input.slash.applog.desc', promptKey: 'ai_chat.input.slash.applog.prompt', keywordKey: 'ai_chat.input.slash.applog.keywords', category: 'diagnose' },
+  { cmd: '/airender', labelKey: 'ai_chat.input.slash.airender.label', descKey: 'ai_chat.input.slash.airender.desc', promptKey: 'ai_chat.input.slash.airender.prompt', keywordKey: 'ai_chat.input.slash.airender.keywords', category: 'diagnose' },
+  { cmd: '/safety', labelKey: 'ai_chat.input.slash.safety.label', descKey: 'ai_chat.input.slash.safety.desc', promptKey: 'ai_chat.input.slash.safety.prompt', keywordKey: 'ai_chat.input.slash.safety.keywords', category: 'diagnose' },
+  { cmd: '/activity', labelKey: 'ai_chat.input.slash.activity.label', descKey: 'ai_chat.input.slash.activity.desc', promptKey: 'ai_chat.input.slash.activity.prompt', keywordKey: 'ai_chat.input.slash.activity.keywords', category: 'diagnose' },
+  { cmd: '/tx', labelKey: 'ai_chat.input.slash.tx.label', descKey: 'ai_chat.input.slash.tx.desc', promptKey: 'ai_chat.input.slash.tx.prompt', keywordKey: 'ai_chat.input.slash.tx.keywords', category: 'diagnose', featured: true },
 ];
+
+const splitAISlashCommandKeywords = (keywords: string): string[] =>
+  String(keywords || '')
+    .split('|')
+    .map((keyword) => keyword.trim())
+    .filter(Boolean);
+
+const localizeAISlashCommand = (
+  command: AISlashCommandTemplate,
+  translate: AISlashCommandTranslate,
+): AISlashCommandDefinition => ({
+  cmd: command.cmd,
+  label: translate(command.labelKey),
+  desc: translate(command.descKey),
+  prompt: translate(command.promptKey),
+  category: command.category,
+  keywords: splitAISlashCommandKeywords(translate(command.keywordKey)),
+  featured: command.featured,
+});
+
+const localizeAISlashCommandCategories = (
+  translate: AISlashCommandTranslate,
+): AISlashCommandCategoryMeta[] => AI_SLASH_COMMAND_CATEGORIES.map((meta) => ({
+  key: meta.key,
+  title: translate(meta.titleKey),
+  description: translate(meta.descriptionKey),
+}));
+
+const buildAISlashCommands = (
+  translate: AISlashCommandTranslate = defaultTranslate,
+): AISlashCommandDefinition[] => AI_SLASH_COMMAND_TEMPLATES.map((command) =>
+  localizeAISlashCommand(command, translate));
+
+export const DEFAULT_AI_SLASH_COMMANDS: AISlashCommandDefinition[] = buildAISlashCommands();
 
 const buildCommandSearchText = (command: AISlashCommandDefinition): string => [
   command.cmd,
@@ -72,28 +130,37 @@ const buildCommandSearchText = (command: AISlashCommandDefinition): string => [
   ...(command.keywords || []),
 ].join(' ').toLowerCase();
 
-export const filterAISlashCommands = (filter: string): AISlashCommandDefinition[] => {
+export const filterAISlashCommands = (
+  filter: string,
+  translate: AISlashCommandTranslate = defaultTranslate,
+): AISlashCommandDefinition[] => {
+  const commands = buildAISlashCommands(translate);
   const normalized = String(filter || '').trim().toLowerCase();
   if (!normalized || normalized === '/') {
-    return DEFAULT_AI_SLASH_COMMANDS;
+    return commands;
   }
 
   const slashSearch = normalized.startsWith('/') ? normalized : `/${normalized}`;
   const keywordSearch = normalized.startsWith('/') ? normalized.slice(1) : normalized;
 
-  return DEFAULT_AI_SLASH_COMMANDS.filter((command) => {
+  return commands.filter((command) => {
     const searchText = buildCommandSearchText(command);
     return command.cmd.startsWith(slashSearch) || searchText.includes(keywordSearch);
   });
 };
 
-export const groupAISlashCommands = (commands: AISlashCommandDefinition[]): AISlashCommandGroup[] =>
-  AI_SLASH_COMMAND_CATEGORIES
+export const groupAISlashCommands = (
+  commands: AISlashCommandDefinition[],
+  translate: AISlashCommandTranslate = defaultTranslate,
+): AISlashCommandGroup[] =>
+  localizeAISlashCommandCategories(translate)
     .map((meta) => ({
       ...meta,
       commands: commands.filter((command) => command.category === meta.key),
     }))
     .filter((group) => group.commands.length > 0);
 
-export const getFeaturedAISlashCommands = (): AISlashCommandDefinition[] =>
-  DEFAULT_AI_SLASH_COMMANDS.filter((command) => command.featured);
+export const getFeaturedAISlashCommands = (
+  translate: AISlashCommandTranslate = defaultTranslate,
+): AISlashCommandDefinition[] =>
+  buildAISlashCommands(translate).filter((command) => command.featured);

@@ -1,3 +1,4 @@
+import { SUPPORTED_LANGUAGES, t } from "../../i18n";
 import { isMacLikePlatform } from "../../utils/appearance";
 import {
   DEFAULT_SHORTCUT_OPTIONS,
@@ -64,6 +65,25 @@ const matchesKeywordFilter = (
   filter: string,
 ): boolean => !filter || searchText.includes(filter);
 
+const buildLocalizedShortcutSearchTerms = (
+  action: ShortcutAction,
+): string[] => {
+  const terms = new Set<string>();
+  for (const language of SUPPORTED_LANGUAGES) {
+    const labelKey = `app.shortcuts.action.${action}.label`;
+    const descriptionKey = `app.shortcuts.action.${action}.description`;
+    const label = t(labelKey, undefined, language);
+    const description = t(descriptionKey, undefined, language);
+    if (label && label !== labelKey) {
+      terms.add(label);
+    }
+    if (description && description !== descriptionKey) {
+      terms.add(description);
+    }
+  }
+  return [...terms];
+};
+
 export const buildShortcutSnapshot = ({
   shortcutOptions,
   currentPlatform = getShortcutPlatform(isMacLikePlatform()),
@@ -102,6 +122,7 @@ export const buildShortcutSnapshot = ({
         shortcutAction,
         meta.label,
         meta.description,
+        ...buildLocalizedShortcutSearchTerms(shortcutAction),
         meta.scope || "global",
         currentBinding.combo,
         currentBinding.defaultCombo,

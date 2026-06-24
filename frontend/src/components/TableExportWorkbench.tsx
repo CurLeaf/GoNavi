@@ -26,6 +26,7 @@ import {
   resolveExportElapsedMs,
   type ExportProgressStatus,
 } from '../utils/exportProgress';
+import { t } from '../i18n';
 import {
   DATA_EXPORT_FORMAT_OPTIONS,
   DEFAULT_DATA_EXPORT_FORMAT,
@@ -45,8 +46,12 @@ type BatchTableExportMode = 'schema' | 'dataOnly' | 'backup';
 type BatchDatabaseExportMode = 'schema' | 'backup';
 type SelectOption = { value: string; label: React.ReactNode; title: string };
 
-const DEFAULT_SCOPE_OPTIONS: TableExportScopeOption[] = [
-  { value: 'all', label: '全表数据', description: '后台重新查询整张表并导出全部数据。' },
+const createDefaultScopeOptions = (): TableExportScopeOption[] => [
+  {
+    value: 'all',
+    label: t('data_export.workbench.scope.all.label'),
+    description: t('data_export.workbench.scope.all.description'),
+  },
 ];
 
 const SELECT_ELLIPSIS_LABEL_STYLE: React.CSSProperties = {
@@ -58,20 +63,40 @@ const SELECT_ELLIPSIS_LABEL_STYLE: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const BATCH_TABLE_EXPORT_MODE_OPTIONS: Array<{ value: BatchTableExportMode; label: string; description: string }> = [
-  { value: 'schema', label: '结构', description: '导出当前数据库下所选对象的建表或定义 SQL。' },
-  { value: 'dataOnly', label: '仅数据', description: '导出所选对象的数据 INSERT 语句。' },
-  { value: 'backup', label: '备份', description: '导出所选对象的结构和数据 SQL。' },
+const createBatchTableExportModeOptions = (): Array<{ value: BatchTableExportMode; label: string; description: string }> => [
+  {
+    value: 'schema',
+    label: t('data_export.workbench.batch_tables.mode.schema.label'),
+    description: t('data_export.workbench.batch_tables.mode.schema.description'),
+  },
+  {
+    value: 'dataOnly',
+    label: t('data_export.workbench.batch_tables.mode.data_only.label'),
+    description: t('data_export.workbench.batch_tables.mode.data_only.description'),
+  },
+  {
+    value: 'backup',
+    label: t('data_export.workbench.batch_tables.mode.backup.label'),
+    description: t('data_export.workbench.batch_tables.mode.backup.description'),
+  },
 ];
 
-const BATCH_DATABASE_EXPORT_MODE_OPTIONS: Array<{ value: BatchDatabaseExportMode; label: string; description: string }> = [
-  { value: 'schema', label: '导出库结构', description: '按数据库分别生成结构 SQL 文件。' },
-  { value: 'backup', label: '备份库', description: '按数据库分别生成结构加数据 SQL 文件。' },
+const createBatchDatabaseExportModeOptions = (): Array<{ value: BatchDatabaseExportMode; label: string; description: string }> => [
+  {
+    value: 'schema',
+    label: t('data_export.workbench.batch_databases.mode.schema.label'),
+    description: t('data_export.workbench.batch_databases.mode.schema.description'),
+  },
+  {
+    value: 'backup',
+    label: t('data_export.workbench.batch_databases.mode.backup.label'),
+    description: t('data_export.workbench.batch_databases.mode.backup.description'),
+  },
 ];
 
 const normalizeScopeOptions = (input: TabData['tableExportScopeOptions']): TableExportScopeOption[] => {
   if (!Array.isArray(input) || input.length === 0) {
-    return DEFAULT_SCOPE_OPTIONS;
+    return createDefaultScopeOptions();
   }
   return input;
 };
@@ -103,22 +128,25 @@ const formatDateTime = (timestamp: number): string => {
 const resolveWorkbenchMode = (tab: TabData): ExportWorkbenchMode => tab.exportWorkbenchMode || 'single';
 
 const resolveObjectTypeLabel = (objectType?: TabData['objectType']): string => {
-  if (objectType === 'view') return '视图';
-  if (objectType === 'materialized-view') return '物化视图';
-  return '表';
+  if (objectType === 'view') return t('data_export.workbench.object_type.view');
+  if (objectType === 'materialized-view') return t('data_export.workbench.object_type.materialized_view');
+  return t('data_export.workbench.object_type.table');
 };
 
-const STATUS_META: Record<ExportProgressStatus, { label: string; border: string; bg: string; text: string }> = {
-  idle: { label: '待开始', border: 'rgba(148, 163, 184, 0.35)', bg: 'rgba(148, 163, 184, 0.12)', text: '#475467' },
-  start: { label: '准备中', border: 'rgba(59, 130, 246, 0.3)', bg: 'rgba(59, 130, 246, 0.12)', text: '#1d4ed8' },
-  running: { label: '执行中', border: 'rgba(16, 185, 129, 0.3)', bg: 'rgba(16, 185, 129, 0.14)', text: '#047857' },
-  finalizing: { label: '收尾中', border: 'rgba(249, 115, 22, 0.3)', bg: 'rgba(249, 115, 22, 0.12)', text: '#c2410c' },
-  done: { label: '已完成', border: 'rgba(34, 197, 94, 0.3)', bg: 'rgba(34, 197, 94, 0.14)', text: '#15803d' },
-  error: { label: '失败', border: 'rgba(239, 68, 68, 0.32)', bg: 'rgba(239, 68, 68, 0.12)', text: '#dc2626' },
+const resolveStatusMeta = (status: ExportProgressStatus): { label: string; border: string; bg: string; text: string } => {
+  const meta: Record<ExportProgressStatus, { label: string; border: string; bg: string; text: string }> = {
+    idle: { label: t('data_export.progress.status.idle'), border: 'rgba(148, 163, 184, 0.35)', bg: 'rgba(148, 163, 184, 0.12)', text: '#475467' },
+    start: { label: t('data_export.progress.status.start'), border: 'rgba(59, 130, 246, 0.3)', bg: 'rgba(59, 130, 246, 0.12)', text: '#1d4ed8' },
+    running: { label: t('data_export.progress.status.running'), border: 'rgba(16, 185, 129, 0.3)', bg: 'rgba(16, 185, 129, 0.14)', text: '#047857' },
+    finalizing: { label: t('data_export.progress.status.finalizing'), border: 'rgba(249, 115, 22, 0.3)', bg: 'rgba(249, 115, 22, 0.12)', text: '#c2410c' },
+    done: { label: t('data_export.progress.status.done'), border: 'rgba(34, 197, 94, 0.3)', bg: 'rgba(34, 197, 94, 0.14)', text: '#15803d' },
+    error: { label: t('data_export.progress.status.error'), border: 'rgba(239, 68, 68, 0.32)', bg: 'rgba(239, 68, 68, 0.12)', text: '#dc2626' },
+  };
+  return meta[status] || meta.idle;
 };
 
 const renderStatusPill = (status: ExportProgressStatus) => {
-  const meta = STATUS_META[status] || STATUS_META.idle;
+  const meta = resolveStatusMeta(status);
   return (
     <span
       style={{
@@ -160,17 +188,19 @@ const filterOptionByLabel = (input: string, option?: { title?: string; value?: s
   String(option?.title || option?.value || '').toLowerCase().includes(String(input || '').trim().toLowerCase());
 
 const resolveBatchTableModeMeta = (mode: BatchTableExportMode) =>
-  BATCH_TABLE_EXPORT_MODE_OPTIONS.find((item) => item.value === mode) || BATCH_TABLE_EXPORT_MODE_OPTIONS[0];
+  createBatchTableExportModeOptions().find((item) => item.value === mode) || createBatchTableExportModeOptions()[0];
 
 const resolveBatchDatabaseModeMeta = (mode: BatchDatabaseExportMode) =>
-  BATCH_DATABASE_EXPORT_MODE_OPTIONS.find((item) => item.value === mode) || BATCH_DATABASE_EXPORT_MODE_OPTIONS[0];
+  createBatchDatabaseExportModeOptions().find((item) => item.value === mode) || createBatchDatabaseExportModeOptions()[0];
 
 const resolveBatchTablesTargetName = (dbName: string, objectCount: number): string => {
-  const safeDbName = String(dbName || '').trim() || '当前数据库';
-  return `${safeDbName} · ${objectCount} 个对象`;
+  const safeDbName = String(dbName || '').trim() || t('data_export.workbench.target.current_database');
+  return t('data_export.workbench.target.batch_tables', { database: safeDbName, count: objectCount });
 };
 
-const resolveBatchDatabasesTargetName = (databaseCount: number): string => `${databaseCount} 个数据库`;
+const resolveBatchDatabasesTargetName = (databaseCount: number): string => (
+  t('data_export.workbench.target.batch_databases', { count: databaseCount })
+);
 
 const formatWorkbenchProgressSummary = (
   mode: ExportWorkbenchMode,
@@ -179,12 +209,18 @@ const formatWorkbenchProgressSummary = (
   totalRowsKnown: boolean,
 ): string => {
   if (mode === 'batch-tables') {
-    if (!totalRowsKnown) return '批量对象导出正在执行';
-    return `已完成 ${Math.min(current, total).toLocaleString()} / ${total.toLocaleString()} 个对象`;
+    if (!totalRowsKnown) return t('data_export.workbench.summary.batch_tables_running');
+    return t('data_export.workbench.summary.batch_tables_done', {
+      current: Math.min(current, total).toLocaleString(),
+      total: total.toLocaleString(),
+    });
   }
   if (mode === 'batch-databases') {
-    if (!totalRowsKnown) return '批量库导出正在执行';
-    return `已完成 ${Math.min(current, total).toLocaleString()} / ${total.toLocaleString()} 个库`;
+    if (!totalRowsKnown) return t('data_export.workbench.summary.batch_databases_running');
+    return t('data_export.workbench.summary.batch_databases_done', {
+      current: Math.min(current, total).toLocaleString(),
+      total: total.toLocaleString(),
+    });
   }
   return formatExportProgressRows(current, total, totalRowsKnown);
 };
@@ -194,12 +230,14 @@ const resolveProgressHint = (mode: ExportWorkbenchMode, status: ExportProgressSt
     return null;
   }
   if (mode === 'single') {
-    return '当前未预先统计总行数，暂不显示百分比，写入行数为实时值。';
+    return t('data_export.hint.rows_unknown');
   }
-  return '当前阶段为后端执行中的过程提示，整体进度会在对象或数据库完成后推进。';
+  return t('data_export.hint.batch_stage');
 };
 
-const resolveOutputLabel = (mode: ExportWorkbenchMode): string => (mode === 'batch-databases' ? '输出目录' : '输出文件');
+const resolveOutputLabel = (mode: ExportWorkbenchMode): string => (
+  mode === 'batch-databases' ? t('data_export.label.directory') : t('data_export.label.file')
+);
 
 export const buildTableExportHistoryEntry = ({
   progressState,
@@ -219,7 +257,7 @@ export const buildTableExportHistoryEntry = ({
   strategyLabel: string;
 }): TableExportHistoryEntry => ({
   jobId: progressState.jobId,
-  targetName: progressState.targetName || fallbackTargetName || '未命名对象',
+  targetName: progressState.targetName || fallbackTargetName || t('data_export.progress.value.target_fallback'),
   startedAt: progressState.startedAt || existingEntry?.startedAt || 0,
   finishedAt: progressState.finishedAt || existingEntry?.finishedAt || 0,
   format: progressState.format || existingEntry?.format || fallbackFormat,
@@ -353,7 +391,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
         if (!res.success) {
           setAvailableDatabases([]);
           setSelectedDatabaseNames([]);
-          setDatabaseLoadError(res.message || '获取数据库列表失败');
+          setDatabaseLoadError(res.message || t('data_export.message.load_databases_failed'));
           return;
         }
         const dbRows: any[] = Array.isArray(res.data) ? res.data : [];
@@ -381,7 +419,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
         if (!alive) return;
         setAvailableDatabases([]);
         setSelectedDatabaseNames([]);
-        setDatabaseLoadError(error?.message || '获取数据库列表失败');
+        setDatabaseLoadError(error?.message || t('data_export.message.load_databases_failed'));
       })
       .finally(() => {
         if (alive) {
@@ -411,7 +449,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
         if (!res.success) {
           setAvailableObjects([]);
           setSelectedObjectNames([]);
-          setObjectLoadError(res.message || '获取对象列表失败');
+          setObjectLoadError(res.message || t('data_export.message.load_objects_failed'));
           return;
         }
         const tableRows: any[] = Array.isArray(res.data) ? res.data : [];
@@ -428,7 +466,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
         if (!alive) return;
         setAvailableObjects([]);
         setSelectedObjectNames([]);
-        setObjectLoadError(error?.message || '获取对象列表失败');
+        setObjectLoadError(error?.message || t('data_export.message.load_objects_failed'));
       })
       .finally(() => {
         if (alive) {
@@ -463,15 +501,19 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
   const activeScopeLabel = isSingleWorkbench
     ? singleScopeLabel
     : isBatchTablesWorkbench
-      ? `已选对象（${selectedObjectNames.length}）`
-      : `已选数据库（${selectedDatabaseNames.length}）`;
+      ? t('data_export.workbench.scope.selected_objects', { count: selectedObjectNames.length })
+      : t('data_export.workbench.scope.selected_databases', { count: selectedDatabaseNames.length });
   const activeScopeCount = isSingleWorkbench
     ? singleScopeRowCount
     : (isBatchTablesWorkbench ? selectedObjectNames.length : selectedDatabaseNames.length);
   const totalRowsKnown = isSingleWorkbench ? singleTotalRowsKnown : true;
   const exportStrategyLabel = isSingleWorkbench
-    ? (scope === 'all' && !activeScopeQuery ? '整表导出链路' : 'SQL 重放导出')
-    : (isBatchTablesWorkbench ? `批量对象 SQL 导出 · ${batchTableModeMeta.label}` : `批量库 SQL 导出 · ${batchDatabaseModeMeta.label}`);
+    ? (scope === 'all' && !activeScopeQuery
+      ? t('data_export.workbench.strategy.full_table')
+      : t('data_export.workbench.strategy.query_replay'))
+    : (isBatchTablesWorkbench
+      ? t('data_export.workbench.strategy.batch_tables', { mode: batchTableModeMeta.label })
+      : t('data_export.workbench.strategy.batch_databases', { mode: batchDatabaseModeMeta.label }));
   const currentElapsedMs = useMemo(
     () => resolveExportElapsedMs(progressState.startedAt, progressState.finishedAt, nowTick),
     [nowTick, progressState.finishedAt, progressState.startedAt],
@@ -480,7 +522,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
   const currentProgressHint = resolveProgressHint(workbenchMode, progressState.status, progressState.totalRowsKnown);
   const progressOutputLabel = resolveOutputLabel(workbenchMode);
   const fallbackTargetName = isSingleWorkbench
-    ? (tab.tableName || '未命名对象')
+    ? (tab.tableName || t('data_export.progress.value.target_fallback'))
     : (isBatchTablesWorkbench ? resolveBatchTablesTargetName(selectedDbName, selectedObjectNames.length) : resolveBatchDatabasesTargetName(selectedDatabaseNames.length));
   const fallbackFormat = isSingleWorkbench ? String(format || '').toUpperCase() : 'SQL';
 
@@ -575,7 +617,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
       return;
     }
     await runExportWithProgress({
-      title: tab.title || `导出 ${objectName}`,
+      title: tab.title || t('data_export.workbench.task.export_target', { name: objectName }),
       targetName: objectName,
       format,
       totalRows: singleScopeRowCount,
@@ -684,25 +726,25 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
     if (isSingleWorkbench) {
       return [
         `${resolveObjectTypeLabel(tab.objectType)} · ${tab.tableName || '-'}`,
-        `数据库 · ${tab.dbName || '-'}`,
-        `连接 · ${connection?.name || '-'}`,
-        `Host · ${hostSummary || '-'}`,
+        `${t('data_export.label.database')} · ${tab.dbName || '-'}`,
+        `${t('data_export.label.connection')} · ${connection?.name || '-'}`,
+        `${t('data_export.label.host')} · ${hostSummary || '-'}`,
       ];
     }
     if (isBatchTablesWorkbench) {
       return [
-        '模式 · 批量对象',
-        `数据库 · ${selectedDbName || '-'}`,
-        `连接 · ${connection?.name || '-'}`,
-        `对象数 · ${selectedObjectNames.length}`,
-        `Host · ${hostSummary || '-'}`,
+        `${t('data_export.label.mode')} · ${t('data_export.workbench.mode.batch_tables')}`,
+        `${t('data_export.label.database')} · ${selectedDbName || '-'}`,
+        `${t('data_export.label.connection')} · ${connection?.name || '-'}`,
+        `${t('data_export.label.object_count')} · ${selectedObjectNames.length}`,
+        `${t('data_export.label.host')} · ${hostSummary || '-'}`,
       ];
     }
     return [
-      '模式 · 批量库',
-      `连接 · ${connection?.name || '-'}`,
-      `已选库 · ${selectedDatabaseNames.length}`,
-      `Host · ${hostSummary || '-'}`,
+      `${t('data_export.label.mode')} · ${t('data_export.workbench.mode.batch_databases')}`,
+      `${t('data_export.label.connection')} · ${connection?.name || '-'}`,
+      `${t('data_export.label.selected_databases')} · ${selectedDatabaseNames.length}`,
+      `${t('data_export.label.host')} · ${hostSummary || '-'}`,
     ];
   }, [
     connection?.name,
@@ -735,9 +777,9 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <Title level={4} style={{ margin: 0, color: headingColor }}>导出工作台</Title>
+          <Title level={4} style={{ margin: 0, color: headingColor }}>{t('data_export.workbench.title')}</Title>
           <div style={{ marginTop: 6, color: secondaryTextColor, fontSize: 13 }}>
-            在同一页内配置导出、观察主进度，并回看最近任务摘要。
+            {t('data_export.workbench.subtitle')}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -789,53 +831,53 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
           }}
         >
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: headingColor, marginBottom: 10 }}>导出配置</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: headingColor, marginBottom: 10 }}>{t('data_export.workbench.section.config')}</div>
             {isSingleWorkbench ? (
               <div style={{ display: 'grid', gridTemplateColumns: '84px minmax(0, 1fr)', rowGap: 10, columnGap: 12 }}>
-                <Text type="secondary">对象</Text>
+                <Text type="secondary">{t('data_export.label.object')}</Text>
                 <Text>{tab.tableName || '-'}</Text>
 
-                <Text type="secondary">类型</Text>
+                <Text type="secondary">{t('data_export.label.type')}</Text>
                 <Text>{resolveObjectTypeLabel(tab.objectType)}</Text>
 
-                <Text type="secondary">连接</Text>
+                <Text type="secondary">{t('data_export.label.connection')}</Text>
                 <Text>{connection?.name || '-'}</Text>
 
-                <Text type="secondary">数据库</Text>
+                <Text type="secondary">{t('data_export.label.database')}</Text>
                 <Text>{tab.dbName || '-'}</Text>
 
-                <Text type="secondary">Host</Text>
+                <Text type="secondary">{t('data_export.label.host')}</Text>
                 <Text>{hostSummary || '-'}</Text>
               </div>
             ) : isBatchTablesWorkbench ? (
               <div style={{ display: 'grid', gridTemplateColumns: '84px minmax(0, 1fr)', rowGap: 10, columnGap: 12 }}>
-                <Text type="secondary">模式</Text>
-                <Text>批量对象</Text>
+                <Text type="secondary">{t('data_export.label.mode')}</Text>
+                <Text>{t('data_export.workbench.mode.batch_tables')}</Text>
 
-                <Text type="secondary">连接</Text>
+                <Text type="secondary">{t('data_export.label.connection')}</Text>
                 <Text>{connection?.name || '-'}</Text>
 
-                <Text type="secondary">数据库</Text>
+                <Text type="secondary">{t('data_export.label.database')}</Text>
                 <Text>{selectedDbName || '-'}</Text>
 
-                <Text type="secondary">对象数</Text>
+                <Text type="secondary">{t('data_export.label.object_count')}</Text>
                 <Text>{selectedObjectNames.length}</Text>
 
-                <Text type="secondary">Host</Text>
+                <Text type="secondary">{t('data_export.label.host')}</Text>
                 <Text>{hostSummary || '-'}</Text>
               </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: '84px minmax(0, 1fr)', rowGap: 10, columnGap: 12 }}>
-                <Text type="secondary">模式</Text>
-                <Text>批量库</Text>
+                <Text type="secondary">{t('data_export.label.mode')}</Text>
+                <Text>{t('data_export.workbench.mode.batch_databases')}</Text>
 
-                <Text type="secondary">连接</Text>
+                <Text type="secondary">{t('data_export.label.connection')}</Text>
                 <Text>{connection?.name || '-'}</Text>
 
-                <Text type="secondary">已选库</Text>
+                <Text type="secondary">{t('data_export.label.selected_databases')}</Text>
                 <Text>{selectedDatabaseNames.length}</Text>
 
-                <Text type="secondary">Host</Text>
+                <Text type="secondary">{t('data_export.label.host')}</Text>
                 <Text>{hostSummary || '-'}</Text>
               </div>
             )}
@@ -845,8 +887,8 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             <Alert
               type="warning"
               showIcon
-              message="当前连接已不存在"
-              description="请先恢复连接配置，再执行该导出任务。"
+              message={t('data_export.workbench.alert.connection_missing_title')}
+              description={t('data_export.workbench.alert.connection_missing_description')}
             />
           ) : null}
 
@@ -854,7 +896,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             <Alert
               type="error"
               showIcon
-              message="数据库列表加载失败"
+              message={t('data_export.workbench.alert.database_load_failed')}
               description={databaseLoadError}
             />
           ) : null}
@@ -863,7 +905,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             <Alert
               type="error"
               showIcon
-              message="对象列表加载失败"
+              message={t('data_export.workbench.alert.object_load_failed')}
               description={objectLoadError}
             />
           ) : null}
@@ -872,7 +914,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             {isSingleWorkbench ? (
               <>
                 <div>
-                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>导出范围</div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.export_scope')}</div>
                   <Select
                     style={{ width: '100%' }}
                     value={scope}
@@ -891,7 +933,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                 </div>
 
                 <div>
-                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>导出格式</div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.format')}</div>
                   <Select
                     style={{ width: '100%' }}
                     value={format}
@@ -902,7 +944,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                 {format === 'xlsx' ? (
                   <div>
-                    <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>每个工作表最大行数</div>
+                    <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.xlsx_max_rows')}</div>
                     <InputNumber
                       min={1}
                       max={MAX_XLSX_ROWS_PER_SHEET}
@@ -919,7 +961,9 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                       }}
                     />
                     <div style={{ marginTop: 6, fontSize: 12, color: secondaryTextColor }}>
-                      仅 XLSX 生效，最大 {MAX_XLSX_ROWS_PER_SHEET.toLocaleString()} 行（不含表头）
+                      {t('data_export.dialog.field.xlsx_max_rows_help', {
+                        maxRows: MAX_XLSX_ROWS_PER_SHEET.toLocaleString(),
+                      })}
                     </div>
                   </div>
                 ) : null}
@@ -927,13 +971,13 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             ) : isBatchTablesWorkbench ? (
               <>
                 <div>
-                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>连接</div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.connection')}</div>
                   <Tooltip title={connection?.name || undefined}>
                     <div>
                       <Select
                         style={{ width: '100%' }}
                         value={selectedConnectionId || undefined}
-                        placeholder="选择连接"
+                        placeholder={t('data_export.workbench.placeholder.select_connection')}
                         options={connectionOptions}
                         showSearch
                         optionFilterProp="title"
@@ -951,13 +995,15 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                 </div>
 
                 <div>
-                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>数据库</div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.database')}</div>
                   <Tooltip title={selectedDbName || undefined}>
                     <div>
                       <Select
                         style={{ width: '100%' }}
                         value={selectedDbName || undefined}
-                        placeholder={loadingDatabases ? '正在加载数据库...' : '选择数据库'}
+                        placeholder={loadingDatabases
+                          ? t('data_export.workbench.placeholder.loading_databases')
+                          : t('data_export.workbench.placeholder.select_database')}
                         loading={loadingDatabases}
                         options={availableDatabases}
                         showSearch
@@ -975,7 +1021,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
-                    <div style={{ fontSize: 12, color: secondaryTextColor }}>对象</div>
+                    <div style={{ fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.object')}</div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <Button
                         size="small"
@@ -983,7 +1029,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                         disabled={availableObjects.length === 0}
                         onClick={() => setSelectedObjectNames(availableObjects.map((item) => item.value))}
                       >
-                        全选
+                        {t('data_export.action.select_all')}
                       </Button>
                       <Button
                         size="small"
@@ -991,7 +1037,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                         disabled={selectedObjectNames.length === 0}
                         onClick={() => setSelectedObjectNames([])}
                       >
-                        清空
+                        {t('data_export.action.clear')}
                       </Button>
                     </div>
                   </div>
@@ -999,7 +1045,11 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                     style={{ width: '100%' }}
                     mode="multiple"
                     value={selectedObjectNames}
-                    placeholder={selectedDbName ? (loadingObjects ? '正在加载对象...' : '选择对象') : '请先选择数据库'}
+                    placeholder={selectedDbName
+                      ? (loadingObjects
+                        ? t('data_export.workbench.placeholder.loading_objects')
+                        : t('data_export.workbench.placeholder.select_object'))
+                      : t('data_export.workbench.placeholder.select_database_first')}
                     loading={loadingObjects}
                     options={availableObjects}
                     disabled={!selectedDbName}
@@ -1010,16 +1060,19 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                     onChange={(next) => setSelectedObjectNames((next as string[]).map((item) => String(item).trim()).filter(Boolean))}
                   />
                   <div style={{ marginTop: 6, fontSize: 12, color: secondaryTextColor }}>
-                    当前库可选 {availableObjects.length} 个对象，已选 {selectedObjectNames.length} 个。
+                    {t('data_export.workbench.helper.available_objects', {
+                      available: availableObjects.length,
+                      selected: selectedObjectNames.length,
+                    })}
                   </div>
                 </div>
 
                 <div>
-                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>导出内容</div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.export_content')}</div>
                   <Select
                     style={{ width: '100%' }}
                     value={batchTableMode}
-                    options={BATCH_TABLE_EXPORT_MODE_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}
+                    options={createBatchTableExportModeOptions().map((item) => ({ value: item.value, label: item.label }))}
                     onChange={(next) => setBatchTableMode(next as BatchTableExportMode)}
                   />
                   <div style={{ marginTop: 6, fontSize: 12, color: secondaryTextColor }}>
@@ -1028,25 +1081,25 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                 </div>
 
                 <div>
-                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>导出格式</div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.format')}</div>
                   <Select
                     style={{ width: '100%' }}
                     value="sql"
                     disabled
-                    options={[{ value: 'sql', label: 'SQL 文件' }]}
+                    options={[{ value: 'sql', label: t('data_export.label.sql_file') }]}
                   />
                 </div>
               </>
             ) : (
               <>
                 <div>
-                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>连接</div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.connection')}</div>
                   <Tooltip title={connection?.name || undefined}>
                     <div>
                       <Select
                         style={{ width: '100%' }}
                         value={selectedConnectionId || undefined}
-                        placeholder="选择连接"
+                        placeholder={t('data_export.workbench.placeholder.select_connection')}
                         options={connectionOptions}
                         showSearch
                         optionFilterProp="title"
@@ -1063,7 +1116,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 6 }}>
-                    <div style={{ fontSize: 12, color: secondaryTextColor }}>数据库</div>
+                    <div style={{ fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.database')}</div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <Button
                         size="small"
@@ -1071,7 +1124,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                         disabled={availableDatabases.length === 0}
                         onClick={() => setSelectedDatabaseNames(availableDatabases.map((item) => item.value))}
                       >
-                        全选
+                        {t('data_export.action.select_all')}
                       </Button>
                       <Button
                         size="small"
@@ -1079,7 +1132,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                         disabled={selectedDatabaseNames.length === 0}
                         onClick={() => setSelectedDatabaseNames([])}
                       >
-                        清空
+                        {t('data_export.action.clear')}
                       </Button>
                     </div>
                   </div>
@@ -1087,7 +1140,9 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                     style={{ width: '100%' }}
                     mode="multiple"
                     value={selectedDatabaseNames}
-                    placeholder={loadingDatabases ? '正在加载数据库...' : '选择数据库'}
+                    placeholder={loadingDatabases
+                      ? t('data_export.workbench.placeholder.loading_databases')
+                      : t('data_export.workbench.placeholder.select_database')}
                     loading={loadingDatabases}
                     options={availableDatabases}
                     showSearch
@@ -1097,16 +1152,16 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                     onChange={(next) => setSelectedDatabaseNames((next as string[]).map((item) => String(item).trim()).filter(Boolean))}
                   />
                   <div style={{ marginTop: 6, fontSize: 12, color: secondaryTextColor }}>
-                    将在开始导出时先选择输出目录，再为每个数据库分别生成独立的 SQL 文件。
+                    {t('data_export.workbench.helper.batch_database_output')}
                   </div>
                 </div>
 
                 <div>
-                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>导出内容</div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.export_content')}</div>
                   <Select
                     style={{ width: '100%' }}
                     value={batchDatabaseMode}
-                    options={BATCH_DATABASE_EXPORT_MODE_OPTIONS.map((item) => ({ value: item.value, label: item.label }))}
+                    options={createBatchDatabaseExportModeOptions().map((item) => ({ value: item.value, label: item.label }))}
                     onChange={(next) => setBatchDatabaseMode(next as BatchDatabaseExportMode)}
                   />
                   <div style={{ marginTop: 6, fontSize: 12, color: secondaryTextColor }}>
@@ -1115,12 +1170,12 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                 </div>
 
                 <div>
-                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>导出格式</div>
+                  <div style={{ marginBottom: 6, fontSize: 12, color: secondaryTextColor }}>{t('data_export.label.format')}</div>
                   <Select
                     style={{ width: '100%' }}
                     value="sql"
                     disabled
-                    options={[{ value: 'sql', label: 'SQL 文件' }]}
+                    options={[{ value: 'sql', label: t('data_export.label.sql_file') }]}
                   />
                 </div>
               </>
@@ -1131,8 +1186,8 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             <Alert
               type="info"
               showIcon
-              message="当前范围暂无法在导出工作台复现"
-              description="该范围缺少稳定的后端查询上下文，请回到数据页直接导出，或改用全表 / 筛选结果导出。"
+              message={t('data_export.workbench.alert.scope_unavailable_title')}
+              description={t('data_export.workbench.alert.scope_unavailable_description')}
             />
           ) : null}
 
@@ -1149,22 +1204,24 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             }}
           >
             <div style={{ display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr)', rowGap: 6, columnGap: 8 }}>
-              <Text type="secondary">{isSingleWorkbench ? '预计行数' : (isBatchDatabasesWorkbench ? '已选数据库' : '已选对象')}</Text>
+              <Text type="secondary">{isSingleWorkbench
+                ? t('data_export.label.estimated_rows')
+                : (isBatchDatabasesWorkbench ? t('data_export.label.selected_databases') : t('data_export.label.object'))}</Text>
               <Text>
                 {typeof activeScopeCount === 'number'
                   ? activeScopeCount.toLocaleString()
-                  : '当前未预先统计'}
+                  : t('data_export.value.unestimated')}
               </Text>
 
-              <Text type="secondary">执行链路</Text>
+              <Text type="secondary">{t('data_export.label.strategy')}</Text>
               <Text>{exportStrategyLabel}</Text>
             </div>
             <div style={{ fontSize: 12, color: secondaryTextColor }}>
               {isSingleWorkbench
-                ? '导出开始后会先选择目标文件，再在右侧主面板展示唯一进度条、导出耗时和输出路径。'
+                ? t('data_export.workbench.helper.single_export_start')
                 : isBatchTablesWorkbench
-                  ? '批量对象导出会统一生成一个 SQL 文件，并在右侧展示整体对象进度与最近任务摘要。'
-                  : '批量库导出会先选择输出目录，再按库生成独立 SQL 文件，并在右侧展示整体库进度。'}
+                  ? t('data_export.workbench.helper.batch_tables_start')
+                  : t('data_export.workbench.helper.batch_databases_start')}
             </div>
             <Button
               type="primary"
@@ -1176,7 +1233,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                 void handleStartExport();
               }}
             >
-              开始导出
+              {t('data_export.action.start')}
             </Button>
           </div>
         </section>
@@ -1197,16 +1254,16 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: headingColor }}>当前任务</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: headingColor }}>{t('data_export.workbench.section.current_task')}</div>
                   {renderStatusPill(progressState.status)}
                 </div>
                 <Title level={5} style={{ margin: '10px 0 0', color: headingColor }}>
-                  {progressState.title || tab.title || '导出任务'}
+                  {progressState.title || tab.title || t('data_export.progress.value.task_fallback')}
                 </Title>
                 <div style={{ marginTop: 6, color: secondaryTextColor, fontSize: 13 }}>
                   {progressState.jobId
                     ? `${progressState.targetName || fallbackTargetName} · ${currentScopeLabel} · ${progressState.format || fallbackFormat}`
-                    : '开始导出后，这里会展示当前任务的唯一主进度。'}
+                    : t('data_export.workbench.description.current_task_empty')}
                 </div>
               </div>
 
@@ -1219,22 +1276,22 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                 }}
               >
                 <div>
-                  <div style={{ fontSize: 12, color: secondaryTextColor, marginBottom: 4 }}>导出耗时</div>
+                  <div style={{ fontSize: 12, color: secondaryTextColor, marginBottom: 4 }}>{t('data_export.label.elapsed')}</div>
                   <div style={{ color: headingColor, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     <ClockCircleOutlined />
                     {progressState.startedAt ? formatExportElapsed(currentElapsedMs) : '--:--'}
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, color: secondaryTextColor, marginBottom: 4 }}>开始时间</div>
+                  <div style={{ fontSize: 12, color: secondaryTextColor, marginBottom: 4 }}>{t('data_export.label.started_at')}</div>
                   <div style={{ color: headingColor, fontWeight: 600 }}>{formatDateTime(progressState.startedAt)}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, color: secondaryTextColor, marginBottom: 4 }}>导出范围</div>
+                  <div style={{ fontSize: 12, color: secondaryTextColor, marginBottom: 4 }}>{t('data_export.label.export_scope')}</div>
                   <div style={{ color: headingColor, fontWeight: 600 }}>{progressState.jobId ? currentScopeLabel : '-'}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 12, color: secondaryTextColor, marginBottom: 4 }}>执行链路</div>
+                  <div style={{ fontSize: 12, color: secondaryTextColor, marginBottom: 4 }}>{t('data_export.label.strategy')}</div>
                   <div style={{ color: headingColor, fontWeight: 600 }}>{progressState.jobId ? currentStrategyLabel : '-'}</div>
                 </div>
               </div>
@@ -1253,11 +1310,11 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(260px, 0.9fr)', gap: 18 }}>
                   <div>
-                    <div style={{ fontSize: 12, color: secondaryTextColor, marginBottom: 6 }}>当前阶段</div>
+                    <div style={{ fontSize: 12, color: secondaryTextColor, marginBottom: 6 }}>{t('data_export.label.current_stage')}</div>
                     <Text data-export-workbench-stage="true">
-                      {progressState.stage || STATUS_META[progressState.status]?.label || '等待开始'}
+                      {progressState.stage || resolveStatusMeta(progressState.status).label || t('data_export.value.waiting_to_start')}
                     </Text>
-                    <div style={{ fontSize: 12, color: secondaryTextColor, margin: '12px 0 6px' }}>进度说明</div>
+                    <div style={{ fontSize: 12, color: secondaryTextColor, margin: '12px 0 6px' }}>{t('data_export.label.progress_summary')}</div>
                     <Text>{currentProgressSummary}</Text>
                     {currentProgressHint ? (
                       <div style={{ marginTop: 6, fontSize: 12, color: secondaryTextColor }}>
@@ -1270,7 +1327,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                     {progressState.filePath ? (
                       <Paragraph style={{ marginBottom: 0, wordBreak: 'break-all' }}>{progressState.filePath}</Paragraph>
                     ) : (
-                      <Text type="secondary">等待选择目标路径</Text>
+                      <Text type="secondary">{t('data_export.value.waiting_target_path')}</Text>
                     )}
                   </div>
                 </div>
@@ -1285,7 +1342,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                 {(progressState.status === 'done' || progressState.status === 'error') ? (
                   <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button icon={<ReloadOutlined />} onClick={reset}>清空当前进度</Button>
+                    <Button icon={<ReloadOutlined />} onClick={reset}>{t('data_export.action.clear_progress')}</Button>
                   </div>
                 ) : null}
               </>
@@ -1293,7 +1350,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
               <div data-export-workbench-current-empty="true">
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description="尚未开始导出"
+                  description={t('data_export.workbench.empty.not_started')}
                 />
               </div>
             )}
@@ -1313,13 +1370,13 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: headingColor }}>最近任务</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: headingColor }}>{t('data_export.workbench.section.history')}</div>
                 <div style={{ marginTop: 4, fontSize: 12, color: secondaryTextColor }}>
-                  当前任务不在这里重复展示，历史区只保留已结束或已切换开的摘要记录。
+                  {t('data_export.workbench.description.history')}
                 </div>
               </div>
               <div style={{ color: secondaryTextColor, fontSize: 12 }}>
-                {historyEntries.length} 条记录
+                {t('data_export.workbench.history.count', { count: historyEntries.length })}
               </div>
             </div>
 
@@ -1345,7 +1402,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
                         </span>
                       </div>
                       <div style={{ marginTop: 6, fontSize: 13, color: headingColor }}>
-                        {entry.stage || STATUS_META[entry.status].label}
+                        {entry.stage || resolveStatusMeta(entry.status).label}
                       </div>
                       <div style={{ marginTop: 4, fontSize: 12, color: secondaryTextColor }}>
                         {formatWorkbenchProgressSummary(workbenchMode, entry.current, entry.total, entry.totalRowsKnown)}
@@ -1357,13 +1414,13 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
 
                     <div style={{ minWidth: 0 }}>
                       <div style={{ display: 'grid', gridTemplateColumns: '80px minmax(0, 1fr)', rowGap: 6, columnGap: 10 }}>
-                        <Text type="secondary">开始时间</Text>
+                        <Text type="secondary">{t('data_export.label.started_at')}</Text>
                         <Text>{formatDateTime(entry.startedAt)}</Text>
 
-                        <Text type="secondary">导出耗时</Text>
+                        <Text type="secondary">{t('data_export.label.elapsed')}</Text>
                         <Text>{formatExportElapsed(resolveExportElapsedMs(entry.startedAt, entry.finishedAt, nowTick))}</Text>
 
-                        <Text type="secondary">{isBatchDatabasesWorkbench ? '目录' : '文件'}</Text>
+                        <Text type="secondary">{isBatchDatabasesWorkbench ? t('data_export.label.directory') : t('data_export.label.file')}</Text>
                         <Paragraph style={{ marginBottom: 0, wordBreak: 'break-all' }}>
                           {entry.filePath || '-'}
                         </Paragraph>
@@ -1374,7 +1431,7 @@ const TableExportWorkbench: React.FC<{ tab: TabData }> = ({ tab }) => {
               </div>
             ) : (
               <div style={{ padding: '6px 0 2px', color: secondaryTextColor, fontSize: 13 }}>
-                暂无历史任务。完成一次导出后，这里会保留最近任务的摘要。
+                {t('data_export.workbench.empty.history')}
               </div>
             )}
           </section>

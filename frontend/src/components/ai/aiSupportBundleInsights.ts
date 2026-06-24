@@ -12,9 +12,11 @@ import type {
   TabData,
 } from '../../types';
 import type { AIBuiltinToolInfo } from '../../utils/aiBuiltinToolInfo.types';
+import type { I18nParams } from '../../i18n';
 import { buildAIAppHealthSnapshot } from './aiAppHealthInsights';
 import { buildAIMessageFlowSnapshot } from './aiChatSessionInsights';
 import { buildAIContextBudgetSnapshot } from './aiContextBudgetInsights';
+import { translateInspectionCopy } from './aiInspectionI18n';
 import { buildMCPRemoteAccessSnapshot } from './aiMCPRemoteAccessInsights';
 import { buildAIToolCatalogSnapshot } from './aiToolCatalogInsights';
 
@@ -62,6 +64,7 @@ export const buildAISupportBundleSnapshot = (params: {
   path?: string;
   exposeStrategy?: string;
   tokenConfigured?: boolean;
+  translate?: (key: string, params?: I18nParams) => string;
 }) => {
   const aiChatHistory = params.aiChatHistory || {};
   const aiChatSessions = params.aiChatSessions || [];
@@ -90,6 +93,7 @@ export const buildAISupportBundleSnapshot = (params: {
     connectionKeyword: params.connectionKeyword,
     lineLimit: params.lineLimit,
     includeLogLines: params.includeLogLines === true,
+    translate: params.translate,
   });
   const messageFlow = buildAIMessageFlowSnapshot({
     aiChatSessions,
@@ -99,6 +103,7 @@ export const buildAISupportBundleSnapshot = (params: {
     limit: 32,
     includeContent: params.includeMessageContent === true,
     previewLimit: 240,
+    translate: params.translate,
   });
   const contextBudget = buildAIContextBudgetSnapshot({
     aiContexts: params.aiContexts,
@@ -111,6 +116,7 @@ export const buildAISupportBundleSnapshot = (params: {
     mcpTools: params.mcpTools,
     skills: params.skills,
     userPromptSettings: params.userPromptSettings,
+    translate: params.translate,
   });
   const remoteAccess = buildMCPRemoteAccessSnapshot({
     mcpClientStatuses: params.mcpClientStatuses,
@@ -119,14 +125,26 @@ export const buildAISupportBundleSnapshot = (params: {
     path: params.path,
     exposeStrategy: params.exposeStrategy,
     tokenConfigured: params.tokenConfigured,
+    translate: params.translate,
   });
   const toolCatalog = buildAIToolCatalogSnapshot({
     builtinTools: params.builtinTools || [],
     mcpTools: params.mcpTools,
-    keyword: String(params.keyword || 'ai mcp 日志 连接 上下文').trim(),
+    keyword: String(params.keyword || 'ai mcp logs connections context').trim(),
     includeMCPTools: true,
     limit: 10,
+    translate: params.translate,
   });
+  const supportBundleMessage = translateInspectionCopy(
+    params.translate,
+    'ai_chat.inspection.support_bundle.message.ready',
+    'Generated a GoNavi AI support bundle snapshot for diagnosing AI, MCP, logs, connections, and context size issues',
+  );
+  const privacyNote = translateInspectionCopy(
+    params.translate,
+    'ai_chat.inspection.support_bundle.privacy.note',
+    'By default, only summaries and structured counts are returned; log lines or message previews are included only when includeLogLines/includeMessageContent is explicitly enabled.',
+  );
 
   const warnings: string[] = [];
   const nextActions: string[] = [];
@@ -141,14 +159,14 @@ export const buildAISupportBundleSnapshot = (params: {
 
   return {
     kind: 'ai_support_bundle',
-    message: '已生成 GoNavi AI 支持包快照，可用于排查 AI、MCP、日志、连接和上下文体量问题',
+    message: supportBundleMessage,
     privacy: {
       databasePasswordsIncluded: false,
       providerSecretsIncluded: false,
       mcpEnvValuesIncluded: false,
       logLinesIncluded: params.includeLogLines === true,
       messageContentIncluded: params.includeMessageContent === true,
-      note: '默认只返回摘要和结构化计数；只有显式开启 includeLogLines/includeMessageContent 时才附带日志或消息内容预览。',
+      note: privacyNote,
     },
     summary: {
       appHealthStatus: appHealth.status,

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useSqlEditorTransactionController } from './useSqlEditorTransactionController';
 import type { PendingSqlEditorTransaction } from './QueryEditorTransactionToolbar';
+import { t as catalogTranslate } from '../i18n/catalog';
 
 const storeState = vi.hoisted(() => ({
   setSqlEditorPendingTransaction: vi.fn(),
@@ -42,9 +43,12 @@ describe('useSqlEditorTransactionController', () => {
   let controller: ReturnType<typeof useSqlEditorTransactionController> | null = null;
   let renderer: ReactTestRenderer | null = null;
 
-  const renderController = () => {
+  const translate = (key: string, params?: Record<string, string | number | boolean | null | undefined>) =>
+    catalogTranslate('en-US', key, params);
+
+  const renderController = (overrides: Record<string, unknown> = {}) => {
     const Harness = () => {
-      controller = useSqlEditorTransactionController({ tabId: 'tab-1' });
+      controller = (useSqlEditorTransactionController as any)({ tabId: 'tab-1', ...overrides });
       return null;
     };
 
@@ -87,7 +91,7 @@ describe('useSqlEditorTransactionController', () => {
     expect(backendApp.DBCommitTransaction).toHaveBeenCalledTimes(1);
     expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-1');
     expect(backendApp.DBRollbackTransaction).not.toHaveBeenCalled();
-    expect(messageApi.success).toHaveBeenCalledWith('SQL 事务已提交');
+    expect(messageApi.success).toHaveBeenCalledWith('事务已提交');
   });
 
   it('does not rollback a transaction while its auto commit is in flight', async () => {
@@ -118,6 +122,52 @@ describe('useSqlEditorTransactionController', () => {
       await finishPromise;
     });
 
-    expect(messageApi.success).toHaveBeenCalledWith('SQL 事务已自动提交');
+    expect(messageApi.success).toHaveBeenCalledWith('自动提交成功');
+  });
+
+  it('uses the active language for transaction success messages', async () => {
+    renderController({ translate });
+
+    await act(async () => {
+      controller?.activatePendingSqlTransaction(createPendingTransaction());
+      await controller?.finishPendingSqlTransaction('commit', 'manual');
+    });
+    expect(messageApi.success).toHaveBeenLastCalledWith('Transaction committed');
+
+    await act(async () => {
+      controller?.activatePendingSqlTransaction(createPendingTransaction({ id: 'tx-2' }));
+      await controller?.finishPendingSqlTransaction('rollback', 'manual');
+    });
+    expect(messageApi.success).toHaveBeenLastCalledWith('Transaction rolled back');
+
+    await act(async () => {
+      controller?.activatePendingSqlTransaction(createPendingTransaction({ id: 'tx-3' }));
+      await controller?.finishPendingSqlTransaction('commit', 'auto');
+    });
+    expect(messageApi.success).toHaveBeenLastCalledWith('Auto commit succeeded');
+  });
+
+  it('uses the active language for transaction failure wrappers and keeps raw error details', async () => {
+    backendApp.DBCommitTransaction.mockResolvedValueOnce({
+      success: false,
+      message: 'ORA-00060: deadlock detected while waiting for resource',
+    });
+    renderController({ translate });
+
+    await act(async () => {
+      controller?.activatePendingSqlTransaction(createPendingTransaction());
+      await controller?.finishPendingSqlTransaction('commit', 'manual');
+    });
+
+    expect(messageApi.error).toHaveBeenLastCalledWith('Commit failed: ORA-00060: deadlock detected while waiting for resource');
+
+    backendApp.DBRollbackTransaction.mockRejectedValueOnce(new Error('SQLSTATE 40001 serialization failure'));
+
+    await act(async () => {
+      controller?.activatePendingSqlTransaction(createPendingTransaction({ id: 'tx-2' }));
+      await controller?.finishPendingSqlTransaction('rollback', 'manual');
+    });
+
+    expect(messageApi.error).toHaveBeenLastCalledWith('Rollback failed: SQLSTATE 40001 serialization failure');
   });
 });

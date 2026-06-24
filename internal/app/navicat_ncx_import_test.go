@@ -110,6 +110,108 @@ func TestImportConnectionsPayloadNavicatNCXRejectsUndecryptableSavedPassword(t *
 	}
 }
 
+func TestImportConnectionsPayloadNavicatNCXUsesCurrentLanguageForUndecryptableSavedPassword(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+	app.SetLanguage("en-US")
+
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<Connections>
+  <Connection ConnType="MYSQL" ConnectionName="Broken" Host="127.0.0.1" Port="3306" UserName="root" Password="FFFF" SavePassword="true" />
+</Connections>`
+
+	_, err := app.ImportConnectionsPayload(raw, "")
+	if err == nil {
+		t.Fatal("expected invalid Navicat password import to fail")
+	}
+
+	got := err.Error()
+	want := "Failed to parse Navicat NCX: Failed to parse password for connection Broken: Failed to decrypt Navicat password"
+	if got != want {
+		t.Fatalf("expected English saved-password error %q, got %q", want, got)
+	}
+	if strings.Contains(got, "解析 Navicat NCX 失败") || strings.Contains(got, "密码解析失败") || strings.Contains(got, "解密 Navicat 密码失败") {
+		t.Fatalf("expected no Chinese Navicat password wrapper in en-US mode, got %q", got)
+	}
+}
+
+func TestImportConnectionsPayloadNavicatNCXUsesCurrentLanguageForUndecryptableSSHPassword(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+	app.SetLanguage("en-US")
+
+	primaryPassword := mustEncryptNavicatV1(t, "primary-secret")
+	raw := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<Connections>
+  <Connection ConnType="POSTGRESQL" ConnectionName="SSH Broken" Host="pg.local" Port="5432" Database="demo" UserName="postgres" Password="%s" SavePassword="true" SSH="true" SSH_Host="jump.local" SSH_Port="22" SSH_UserName="ops" SSH_Password="FFFF" SSH_SavePassword="true" />
+</Connections>`, primaryPassword)
+
+	_, err := app.ImportConnectionsPayload(raw, "")
+	if err == nil {
+		t.Fatal("expected invalid Navicat SSH password import to fail")
+	}
+
+	got := err.Error()
+	want := "Failed to parse Navicat NCX: Failed to parse SSH password for connection SSH Broken: Failed to decrypt Navicat password"
+	if got != want {
+		t.Fatalf("expected English SSH-password error %q, got %q", want, got)
+	}
+	if strings.Contains(got, "解析 Navicat NCX 失败") || strings.Contains(got, "SSH 密码解析失败") || strings.Contains(got, "解密 Navicat 密码失败") {
+		t.Fatalf("expected no Chinese Navicat SSH password wrapper in en-US mode, got %q", got)
+	}
+}
+
+func TestImportConnectionsPayloadNavicatNCXUsesCurrentLanguageForUndecryptableProxyPassword(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+	app.SetLanguage("en-US")
+
+	primaryPassword := mustEncryptNavicatV1(t, "primary-secret")
+	raw := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<Connections>
+  <Connection ConnType="POSTGRESQL" ConnectionName="Proxy Broken" Host="pg.local" Port="5432" Database="demo" UserName="postgres" Password="%s" SavePassword="true" HTTP_Proxy="true" HTTP_Proxy_Host="proxy.local" HTTP_Proxy_Port="8080" HTTP_Proxy_UserName="proxy-user" HTTP_Proxy_Password="FFFF" HTTP_Proxy_SavePassword="true" />
+</Connections>`, primaryPassword)
+
+	_, err := app.ImportConnectionsPayload(raw, "")
+	if err == nil {
+		t.Fatal("expected invalid Navicat proxy password import to fail")
+	}
+
+	got := err.Error()
+	want := "Failed to parse Navicat NCX: Failed to parse proxy password for connection Proxy Broken: Failed to decrypt Navicat password"
+	if got != want {
+		t.Fatalf("expected English proxy-password error %q, got %q", want, got)
+	}
+	if strings.Contains(got, "解析 Navicat NCX 失败") || strings.Contains(got, "代理密码解析失败") || strings.Contains(got, "解密 Navicat 密码失败") {
+		t.Fatalf("expected no Chinese Navicat proxy password wrapper in en-US mode, got %q", got)
+	}
+}
+
+func TestImportConnectionsPayloadNavicatNCXUsesCurrentLanguageForNoSupportedConnections(t *testing.T) {
+	app := NewAppWithSecretStore(newFakeAppSecretStore())
+	app.configDir = t.TempDir()
+	app.SetLanguage("en-US")
+
+	raw := `<?xml version="1.0" encoding="UTF-8"?>
+<Connections>
+  <Connection ConnType="UNSUPPORTED" ConnectionName="Unknown" Host="127.0.0.1" Port="3306" UserName="root" />
+</Connections>`
+
+	_, err := app.ImportConnectionsPayload(raw, "")
+	if err == nil {
+		t.Fatal("expected unsupported Navicat connections import to fail")
+	}
+
+	got := err.Error()
+	want := "No valid GoNavi-supported connection configuration was found in Navicat NCX"
+	if got != want {
+		t.Fatalf("expected English no-connections error %q, got %q", want, got)
+	}
+	if strings.Contains(got, "未在 Navicat NCX 中找到 GoNavi 支持的有效连接配置") {
+		t.Fatalf("expected no Chinese Navicat no-connections wrapper in en-US mode, got %q", got)
+	}
+}
+
 func TestImportConnectionsPayloadNavicatNCXMapsOracleSIDAndRedisDB(t *testing.T) {
 	app := NewAppWithSecretStore(newFakeAppSecretStore())
 	app.configDir = t.TempDir()

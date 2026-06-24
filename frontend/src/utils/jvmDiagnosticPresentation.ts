@@ -8,8 +8,19 @@ export interface JVMDiagnosticCommandPreset {
   category: JVMDiagnosticPresetCategory;
   command: string;
   description: string;
+  descriptionKey: string;
   riskLevel: "low" | "medium" | "high";
 }
+
+export type JVMDiagnosticPresentationTranslate = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) => string;
+
+type LocalizedLabel = {
+  key: string;
+  fallback: string;
+};
 
 export const JVM_DIAGNOSTIC_COMMAND_PRESETS: JVMDiagnosticCommandPreset[] = [
   {
@@ -17,7 +28,8 @@ export const JVM_DIAGNOSTIC_COMMAND_PRESETS: JVMDiagnosticCommandPreset[] = [
     label: "thread",
     category: "observe",
     command: "thread -n 5",
-    description: "查看最繁忙线程，快速定位阻塞或高 CPU 线程。",
+    description: "Inspect the busiest threads to find blocking or high-CPU threads quickly.",
+    descriptionKey: "jvm_diagnostic.completion.preset.thread-top.documentation",
     riskLevel: "low",
   },
   {
@@ -25,7 +37,8 @@ export const JVM_DIAGNOSTIC_COMMAND_PRESETS: JVMDiagnosticCommandPreset[] = [
     label: "dashboard",
     category: "observe",
     command: "dashboard",
-    description: "查看 JVM 运行总览。",
+    description: "Inspect the JVM runtime overview.",
+    descriptionKey: "jvm_diagnostic.completion.preset.dashboard.documentation",
     riskLevel: "low",
   },
   {
@@ -33,7 +46,8 @@ export const JVM_DIAGNOSTIC_COMMAND_PRESETS: JVMDiagnosticCommandPreset[] = [
     label: "trace",
     category: "trace",
     command: "trace com.foo.OrderService submitOrder '#cost > 100'",
-    description: "跟踪慢方法调用路径。",
+    description: "Trace slow method call paths.",
+    descriptionKey: "jvm_diagnostic.completion.preset.trace-slow-method.documentation",
     riskLevel: "medium",
   },
   {
@@ -41,7 +55,8 @@ export const JVM_DIAGNOSTIC_COMMAND_PRESETS: JVMDiagnosticCommandPreset[] = [
     label: "watch",
     category: "trace",
     command: "watch com.foo.OrderService submitOrder '{params,returnObj}' -x 2",
-    description: "观察入参与返回值。",
+    description: "Observe parameters and return values.",
+    descriptionKey: "jvm_diagnostic.completion.preset.watch-return.documentation",
     riskLevel: "medium",
   },
   {
@@ -49,15 +64,25 @@ export const JVM_DIAGNOSTIC_COMMAND_PRESETS: JVMDiagnosticCommandPreset[] = [
     label: "ognl",
     category: "mutating",
     command: "ognl '@java.lang.System@getProperty(\"user.dir\")'",
-    description: "高风险表达式命令，默认只作示意。",
+    description: "High-risk expression command, shown as an example only.",
+    descriptionKey: "jvm_diagnostic.completion.preset.ognl-sample.documentation",
     riskLevel: "high",
   },
 ];
 
-const CATEGORY_LABELS: Record<JVMDiagnosticPresetCategory, string> = {
-  observe: "观察类命令",
-  trace: "跟踪类命令",
-  mutating: "高风险命令",
+const CATEGORY_LABELS: Record<JVMDiagnosticPresetCategory, LocalizedLabel> = {
+  observe: {
+    key: "jvm_diagnostic.presentation.category.observe",
+    fallback: "Observation commands",
+  },
+  trace: {
+    key: "jvm_diagnostic.presentation.category.trace",
+    fallback: "Trace commands",
+  },
+  mutating: {
+    key: "jvm_diagnostic.presentation.category.mutating",
+    fallback: "High-risk commands",
+  },
 };
 
 const RISK_COLORS: Record<"low" | "medium" | "high", string> = {
@@ -66,41 +91,98 @@ const RISK_COLORS: Record<"low" | "medium" | "high", string> = {
   high: "red",
 };
 
-const PHASE_LABELS: Record<string, string> = {
-  running: "执行中",
-  completed: "已完成",
-  failed: "失败",
-  canceled: "已取消",
-  canceling: "取消中",
-  diagnostic: "诊断事件",
+const PHASE_LABELS: Record<string, LocalizedLabel> = {
+  running: {
+    key: "jvm_diagnostic.presentation.phase.running",
+    fallback: "Running",
+  },
+  completed: {
+    key: "jvm_diagnostic.presentation.phase.completed",
+    fallback: "Completed",
+  },
+  failed: {
+    key: "jvm_diagnostic.presentation.phase.failed",
+    fallback: "Failed",
+  },
+  canceled: {
+    key: "jvm_diagnostic.presentation.phase.canceled",
+    fallback: "Canceled",
+  },
+  canceling: {
+    key: "jvm_diagnostic.presentation.phase.canceling",
+    fallback: "Canceling",
+  },
+  diagnostic: {
+    key: "jvm_diagnostic.presentation.phase.diagnostic",
+    fallback: "Diagnostic event",
+  },
 };
 
-const EVENT_LABELS: Record<string, string> = {
-  diagnostic: "诊断输出",
-  chunk: "输出片段",
-  done: "执行结束",
+const EVENT_LABELS: Record<string, LocalizedLabel> = {
+  diagnostic: {
+    key: "jvm_diagnostic.presentation.event.diagnostic",
+    fallback: "Diagnostic output",
+  },
+  chunk: {
+    key: "jvm_diagnostic.presentation.event.chunk",
+    fallback: "Output chunk",
+  },
+  done: {
+    key: "jvm_diagnostic.presentation.event.done",
+    fallback: "Execution finished",
+  },
 };
 
-const TRANSPORT_LABELS: Record<string, string> = {
-  "agent-bridge": "Agent Bridge",
-  "arthas-tunnel": "Arthas Tunnel",
+const TRANSPORT_LABELS: Record<string, LocalizedLabel> = {
+  "agent-bridge": {
+    key: "jvm_diagnostic.presentation.transport.agent_bridge",
+    fallback: "Agent Bridge",
+  },
+  "arthas-tunnel": {
+    key: "jvm_diagnostic.presentation.transport.arthas_tunnel",
+    fallback: "Arthas Tunnel",
+  },
 };
 
-const RISK_LABELS: Record<string, string> = {
-  low: "低风险",
-  medium: "中风险",
-  high: "高风险",
+const RISK_LABELS: Record<string, LocalizedLabel> = {
+  low: {
+    key: "jvm_diagnostic.presentation.risk.low",
+    fallback: "Low risk",
+  },
+  medium: {
+    key: "jvm_diagnostic.presentation.risk.medium",
+    fallback: "Medium risk",
+  },
+  high: {
+    key: "jvm_diagnostic.presentation.risk.high",
+    fallback: "High risk",
+  },
 };
 
-const COMMAND_TYPE_LABELS: Record<string, string> = {
-  observe: "观察类",
-  trace: "跟踪类",
-  mutating: "高风险类",
+const COMMAND_TYPE_LABELS: Record<string, LocalizedLabel> = {
+  observe: {
+    key: "jvm_diagnostic.presentation.command_type.observe",
+    fallback: "Observe",
+  },
+  trace: {
+    key: "jvm_diagnostic.presentation.command_type.trace",
+    fallback: "Trace",
+  },
+  mutating: {
+    key: "jvm_diagnostic.presentation.command_type.mutating",
+    fallback: "High risk",
+  },
 };
 
-const SOURCE_LABELS: Record<string, string> = {
-  manual: "手动输入",
-  "ai-plan": "AI 计划",
+const SOURCE_LABELS: Record<string, LocalizedLabel> = {
+  manual: {
+    key: "jvm_diagnostic.presentation.source.manual",
+    fallback: "Manual input",
+  },
+  "ai-plan": {
+    key: "jvm_diagnostic.presentation.source.ai_plan",
+    fallback: "AI plan",
+  },
 };
 
 const JVM_DIAGNOSTIC_REDACTION_MASK = "********";
@@ -259,7 +341,8 @@ export const redactJVMDiagnosticOutput = (value?: string | null): string =>
 
 export const formatJVMDiagnosticPresetCategory = (
   category: JVMDiagnosticPresetCategory,
-): string => CATEGORY_LABELS[category];
+  translate?: JVMDiagnosticPresentationTranslate,
+): string => translateLabel(CATEGORY_LABELS[category], translate);
 
 export const resolveJVMDiagnosticRiskColor = (
   riskLevel: "low" | "medium" | "high",
@@ -268,40 +351,74 @@ export const resolveJVMDiagnosticRiskColor = (
 const normalizeLabelKey = (value?: string | null): string =>
   String(value || "").trim().toLowerCase();
 
+const translateWithFallback = (
+  translate: JVMDiagnosticPresentationTranslate | undefined,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+): string => {
+  if (!translate) {
+    return fallback;
+  }
+  const translated = translate(key, params);
+  return translated && translated !== key ? translated : fallback;
+};
+
+const translateLabel = (
+  label: LocalizedLabel,
+  translate?: JVMDiagnosticPresentationTranslate,
+): string => translateWithFallback(translate, label.key, label.fallback);
+
 const formatWithFallback = (
   value: string | undefined | null,
-  labels: Record<string, string>,
-  fallback = "未知",
+  labels: Record<string, LocalizedLabel>,
+  translate?: JVMDiagnosticPresentationTranslate,
 ): string => {
   const normalized = normalizeLabelKey(value);
   if (!normalized) {
-    return fallback;
+    return translateWithFallback(
+      translate,
+      "jvm_diagnostic.presentation.fallback.unknown",
+      "Unknown",
+    );
   }
-  return labels[normalized] || String(value || "").trim();
+  const label = labels[normalized];
+  return label ? translateLabel(label, translate) : String(value || "").trim();
 };
 
-export const formatJVMDiagnosticPhaseLabel = (phase?: string | null): string =>
-  formatWithFallback(phase, PHASE_LABELS);
+export const formatJVMDiagnosticPhaseLabel = (
+  phase?: string | null,
+  translate?: JVMDiagnosticPresentationTranslate,
+): string => formatWithFallback(phase, PHASE_LABELS, translate);
 
-export const formatJVMDiagnosticEventLabel = (event?: string | null): string =>
-  formatWithFallback(event, EVENT_LABELS);
+export const formatJVMDiagnosticEventLabel = (
+  event?: string | null,
+  translate?: JVMDiagnosticPresentationTranslate,
+): string => formatWithFallback(event, EVENT_LABELS, translate);
 
 export const formatJVMDiagnosticTransportLabel = (
   transport?: string | null,
-): string => formatWithFallback(transport, TRANSPORT_LABELS);
+  translate?: JVMDiagnosticPresentationTranslate,
+): string => formatWithFallback(transport, TRANSPORT_LABELS, translate);
 
-export const formatJVMDiagnosticRiskLabel = (risk?: string | null): string =>
-  formatWithFallback(risk, RISK_LABELS);
+export const formatJVMDiagnosticRiskLabel = (
+  risk?: string | null,
+  translate?: JVMDiagnosticPresentationTranslate,
+): string => formatWithFallback(risk, RISK_LABELS, translate);
 
 export const formatJVMDiagnosticCommandTypeLabel = (
   type?: string | null,
-): string => formatWithFallback(type, COMMAND_TYPE_LABELS);
+  translate?: JVMDiagnosticPresentationTranslate,
+): string => formatWithFallback(type, COMMAND_TYPE_LABELS, translate);
 
-export const formatJVMDiagnosticSourceLabel = (source?: string | null): string =>
-  formatWithFallback(source, SOURCE_LABELS);
+export const formatJVMDiagnosticSourceLabel = (
+  source?: string | null,
+  translate?: JVMDiagnosticPresentationTranslate,
+): string => formatWithFallback(source, SOURCE_LABELS, translate);
 
 export const groupJVMDiagnosticPresets = (
   presets: JVMDiagnosticCommandPreset[] = JVM_DIAGNOSTIC_COMMAND_PRESETS,
+  translate?: JVMDiagnosticPresentationTranslate,
 ): Array<{
   category: JVMDiagnosticPresetCategory;
   label: string;
@@ -309,20 +426,34 @@ export const groupJVMDiagnosticPresets = (
 }> =>
   (["observe", "trace", "mutating"] as const).map((category) => ({
     category,
-    label: formatJVMDiagnosticPresetCategory(category),
-    items: presets.filter((item) => item.category === category),
+    label: formatJVMDiagnosticPresetCategory(category, translate),
+    items: presets
+      .filter((item) => item.category === category)
+      .map((item) => ({
+        ...item,
+        description: translateWithFallback(
+          translate,
+          item.descriptionKey,
+          item.description,
+        ),
+      })),
   }));
 
 const formatJVMDiagnosticChunkTextWithContent = (
   chunk: JVMDiagnosticEventChunk,
   content: string,
+  translate?: JVMDiagnosticPresentationTranslate,
 ): string => {
   const rawPhase = String(chunk.phase || chunk.event || "").trim();
   const phase = chunk.phase
-    ? formatJVMDiagnosticPhaseLabel(chunk.phase)
-    : formatJVMDiagnosticEventLabel(chunk.event);
+    ? formatJVMDiagnosticPhaseLabel(chunk.phase, translate)
+    : formatJVMDiagnosticEventLabel(chunk.event, translate);
   if (!rawPhase && !content) {
-    return "空事件";
+    return translateWithFallback(
+      translate,
+      "jvm_diagnostic.presentation.chunk.empty_event",
+      "Empty event",
+    );
   }
   if (!rawPhase) {
     return content;
@@ -330,25 +461,29 @@ const formatJVMDiagnosticChunkTextWithContent = (
   if (!content) {
     return phase;
   }
-  return `${phase}：${content}`;
+  return `${phase}: ${content}`;
 };
 
 export const formatJVMDiagnosticChunkText = (
   chunk: JVMDiagnosticEventChunk,
+  translate?: JVMDiagnosticPresentationTranslate,
 ): string =>
   formatJVMDiagnosticChunkTextWithContent(
     chunk,
     redactJVMDiagnosticOutput(chunk.content).trim(),
+    translate,
   );
 
 export const formatJVMDiagnosticChunksForDisplay = (
   chunks: JVMDiagnosticEventChunk[],
+  translate?: JVMDiagnosticPresentationTranslate,
 ): string[] => {
   const state = createJVMDiagnosticRedactionState();
   return chunks.map((chunk) =>
     formatJVMDiagnosticChunkTextWithContent(
       chunk,
       redactJVMDiagnosticChunkContent(chunk.content, state).trim(),
+      translate,
     ),
   );
 };

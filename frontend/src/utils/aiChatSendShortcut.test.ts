@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -14,6 +15,7 @@ import {
 } from './aiChatSendShortcut';
 
 const binding = (combo: string, enabled = true): ShortcutPlatformBinding => ({ combo, enabled });
+const source = readFileSync(new URL('./aiChatSendShortcut.ts', import.meta.url), 'utf8');
 
 describe('aiChatSendShortcut', () => {
   it('registers AI chat send in the shared shortcut center with Enter default', () => {
@@ -23,7 +25,7 @@ describe('aiChatSendShortcut', () => {
       windows: { combo: 'Enter', enabled: true },
     });
     expect(SHORTCUT_ACTION_META.sendAIChatMessage).toMatchObject({
-      label: 'AI 聊天发送',
+      label: 'Send AI Chat',
       allowInEditable: true,
       allowWithoutModifier: true,
       scope: 'aiComposer',
@@ -73,9 +75,25 @@ describe('aiChatSendShortcut', () => {
 
   it('does not allow Shift to become an AI send shortcut even if a stale binding exists', () => {
     expect(shouldSendAIChatOnKeyDown(binding('Shift+Enter'), { key: 'Enter', shiftKey: true })).toBe(false);
-    expect(getAIChatSendShortcutLabel(binding('Meta+Enter'))).toBe('Meta+Enter 发送');
-    expect(getAIChatSendShortcutLabel(binding('Meta+Enter'), 'mac')).toBe('⌘↵ 发送');
-    expect(getAIChatSendShortcutLabel(binding('Enter', false))).toBe('快捷键发送已关闭');
+    expect(getAIChatSendShortcutLabel(binding('Meta+Enter'))).toBe('Meta+Enter to send');
+    expect(getAIChatSendShortcutLabel(binding('Meta+Enter'), 'mac')).toBe('⌘↵ to send');
+    expect(getAIChatSendShortcutLabel(binding('Enter', false))).toBe('Shortcut sending disabled');
+  });
+
+  it('uses the provided translator for the shortcut hint chrome while keeping the shortcut raw', () => {
+    const translate = (key: string, params?: Record<string, string>) => `t:${key}:${params?.shortcut || ''}`;
+
+    expect(getAIChatSendShortcutLabel(binding('Meta+Enter'), 'windows', translate)).toBe(
+      't:ai_chat.input.shortcut.send_with_combo:Meta+Enter',
+    );
+    expect(getAIChatSendShortcutLabel(binding('Enter', false), 'windows', translate)).toBe(
+      't:ai_chat.input.shortcut.disabled:',
+    );
+  });
+
+  it('does not keep legacy Chinese shortcut hint chrome in production source', () => {
+    expect(source).not.toContain('快捷键发送已关闭');
+    expect(source).not.toMatch(/return\s+`[^`]*发送`/);
   });
 
   it('stops propagation after consuming the configured AI send shortcut', () => {

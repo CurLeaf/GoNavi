@@ -4,8 +4,25 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	"GoNavi-Wails/shared/i18n"
 )
+
+func driverSupportFunctionSource(t *testing.T, source string, signature string) string {
+	t.Helper()
+	start := strings.Index(source, signature)
+	if start < 0 {
+		t.Fatalf("driver_support.go missing function signature %q", signature)
+	}
+	rest := source[start+len(signature):]
+	end := strings.Index(rest, "\nfunc ")
+	if end < 0 {
+		return source[start:]
+	}
+	return source[start : start+len(signature)+end]
+}
 
 func TestPostgresRuntimeSupportRequiresInstallMarker(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -164,5 +181,119 @@ func TestGoldenDBBuiltinDatabaseFactoryUsesMySQLImplementation(t *testing.T) {
 	}
 	if _, ok := dbInst.(*MySQLDB); !ok {
 		t.Fatalf("expected goldendb to reuse MySQLDB implementation, got %T", dbInst)
+	}
+}
+
+func TestDriverRuntimeSupportStatusUsesCurrentLanguageForUnrecognizedDriverType(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	supported, reason := DriverRuntimeSupportStatus(" ")
+	if supported {
+		t.Fatal("expected blank driver type to be unsupported")
+	}
+	if reason != "Unrecognized data source type" {
+		t.Fatalf("expected English unrecognized-driver reason, got %q", reason)
+	}
+}
+
+func TestDriverRuntimeSupportStatusUsesCurrentLanguageForOptionalDriverDisabledState(t *testing.T) {
+	tmpDir := t.TempDir()
+	SetExternalDriverDownloadDirectory(tmpDir)
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	supported, reason := DriverRuntimeSupportStatus("mariadb")
+	if supported {
+		t.Fatal("expected mariadb to stay unavailable without installation marker")
+	}
+	if !IsOptionalGoDriverBuildIncluded("mariadb") {
+		want := "MariaDB is not included in the current slim build. Install the Full edition to use this driver."
+		if reason != want {
+			t.Fatalf("expected English slim-build reason %q, got %q", want, reason)
+		}
+		return
+	}
+	want := "MariaDB Go driver is not enabled; install and enable it in Driver Manager."
+	if reason != want {
+		t.Fatalf("expected English disabled-driver reason %q, got %q", want, reason)
+	}
+}
+
+func TestDriverRuntimeSupportStatusUsesCurrentLanguageForMissingOptionalDriverAgent(t *testing.T) {
+	if !IsOptionalGoDriverBuildIncluded("mariadb") {
+		t.Skip("mariadb is not included in the current slim build")
+	}
+
+	tmpDir := t.TempDir()
+	SetExternalDriverDownloadDirectory(tmpDir)
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	markerPath, err := ResolveOptionalGoDriverMarkerPath(tmpDir, "mariadb")
+	if err != nil {
+		t.Fatalf("resolve marker path failed: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+		t.Fatalf("create marker directory failed: %v", err)
+	}
+	if err := os.WriteFile(markerPath, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write marker failed: %v", err)
+	}
+
+	supported, reason := DriverRuntimeSupportStatus("mariadb")
+	if supported {
+		t.Fatal("expected mariadb to stay unavailable when the driver agent executable is missing")
+	}
+	want := "MariaDB driver agent is missing; reinstall and enable it in Driver Manager."
+	if reason != want {
+		t.Fatalf("expected English missing-agent reason %q, got %q", want, reason)
+	}
+}
+
+func TestResolveExternalDriverRootSourceUsesI18nKey(t *testing.T) {
+	sourceBytes, err := os.ReadFile("driver_support.go")
+	if err != nil {
+		t.Fatalf("read driver_support.go: %v", err)
+	}
+	source := string(sourceBytes)
+	functionSource := driverSupportFunctionSource(t, source, "func resolveExternalDriverRoot(downloadDir string) (string, error)")
+	rawCreateDirectoryWrapper := "fmt.Errorf(\"\\u521b\\u5efa\\u9a71\\u52a8\\u76ee\\u5f55\\u5931\\u8d25\\uff1a%w\", err)"
+
+	if strings.Contains(functionSource, rawCreateDirectoryWrapper) {
+		t.Fatal("resolveExternalDriverRoot still contains raw Chinese create-directory wrapper")
+	}
+	if !strings.Contains(functionSource, "driver_manager.backend.error.create_directory_failed") {
+		t.Fatal("resolveExternalDriverRoot does not reference driver_manager.backend.error.create_directory_failed")
+	}
+}
+
+func TestResolveExternalDriverRootUsesCurrentLanguageForCreateDirectoryFailure(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	tmpDir := t.TempDir()
+	blocker := filepath.Join(tmpDir, "driver-root-blocker")
+	if err := os.WriteFile(blocker, []byte("blocker"), 0o644); err != nil {
+		t.Fatalf("write blocker file: %v", err)
+	}
+
+	_, err := ResolveExternalDriverRoot(filepath.Join(blocker, "nested"))
+	if err == nil {
+		t.Fatal("expected create-directory failure")
+	}
+	if !strings.Contains(err.Error(), "Failed to create driver directory:") {
+		t.Fatalf("expected English create-directory wrapper, got %q", err.Error())
+	}
+	if strings.Contains(err.Error(), "\u521b\u5efa\u9a71\u52a8\u76ee\u5f55\u5931\u8d25") {
+		t.Fatalf("expected no Chinese create-directory wrapper in en-US mode, got %q", err.Error())
 	}
 }

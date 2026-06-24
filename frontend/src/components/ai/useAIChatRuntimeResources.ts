@@ -211,7 +211,7 @@ export const useAIChatRuntimeResources = ({
     } catch (error: any) {
       console.warn('Failed to fetch models', error);
       setDynamicModels([]);
-      setComposerNotice(buildModelFetchFailedNotice(`获取模型列表失败：${error?.message || '未知错误'}`));
+      setComposerNotice(buildModelFetchFailedNotice(error?.message));
     } finally {
       setLoadingModels(false);
     }

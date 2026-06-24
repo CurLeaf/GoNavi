@@ -252,7 +252,7 @@ func (v *VastbaseDB) GetCreateStatement(dbName, tableName string) (string, error
 func (v *VastbaseDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	schema, table := normalizePGLikeMetadataTable(dbName, tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	data, _, err := v.Query(buildPGLikeColumnsMetadataQuery(schema, table))
@@ -266,7 +266,7 @@ func (v *VastbaseDB) GetColumns(dbName, tableName string) ([]connection.ColumnDe
 func (v *VastbaseDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	schema, table := normalizePGLikeMetadataTable(dbName, tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	data, _, err := v.Query(buildPGLikeIndexesMetadataQuery(schema, table))
@@ -284,7 +284,7 @@ func (v *VastbaseDB) GetForeignKeys(dbName, tableName string) ([]connection.Fore
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -344,7 +344,7 @@ func (v *VastbaseDB) GetTriggers(dbName, tableName string) ([]connection.Trigger
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }

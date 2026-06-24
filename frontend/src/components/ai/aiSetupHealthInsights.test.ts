@@ -1,8 +1,67 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { buildAISetupHealthSnapshot } from './aiSetupHealthInsights';
 
 describe('buildAISetupHealthSnapshot', () => {
+  it('localizes setup health wrappers while keeping provider and skill names raw', () => {
+    const snapshot = buildAISetupHealthSnapshot({
+      providers: [{
+        id: 'provider-1',
+        type: 'openai',
+        name: 'OpenAI 主账号',
+        apiKey: '',
+        hasSecret: false,
+        baseUrl: '',
+        model: '',
+        models: [],
+        maxTokens: 32000,
+        temperature: 0.2,
+      }],
+      activeProviderId: 'provider-1',
+      builtinToolNames: [],
+      mcpServers: [],
+      mcpClientStatuses: [],
+      mcpTools: [],
+      skills: [],
+      dynamicModels: [],
+      userPromptSettings: {
+        global: '',
+        database: '',
+        jvm: '',
+        jvmDiagnostic: '',
+      },
+      activeContext: {
+        connectionId: 'conn-1',
+        dbName: 'crm',
+      },
+      activeContextItems: [],
+      translate: (key, params) => {
+        const suffix = params
+          ? ` ${Object.entries(params).map(([paramKey, value]) => `${paramKey}=${value}`).join(',')}`
+          : '';
+        return `T:${key}${suffix}`;
+      },
+    });
+
+    expect(snapshot.blockers).toContain('T:ai_chat.inspection.setup.blocker.missing_secret');
+    expect(snapshot.blockers).toContain('T:ai_chat.inspection.setup.blocker.missing_base_url');
+    expect(snapshot.nextActions).toContain('T:ai_chat.inspection.setup.next_action.fill_secret');
+    expect(snapshot.warnings).toContain('T:ai_chat.inspection.setup.warning.no_mcp_servers');
+    expect(snapshot.message).toBe('T:ai_chat.inspection.setup.message.blocked count=3');
+    expect(snapshot.summary.activeProviderName).toBe('OpenAI 主账号');
+  });
+
+  it('keeps setup health production source free of legacy Chinese wrappers', () => {
+    const source = readFileSync('src/components/ai/aiSetupHealthInsights.ts', 'utf8');
+
+    expect(source).not.toContain('当前没有活动 AI 供应商');
+    expect(source).not.toContain('当前活动供应商缺少 API Key / Secret');
+    expect(source).not.toContain('当前还没有配置任何 MCP 服务');
+    expect(source).not.toContain('当前 AI 配置体检通过');
+  });
+
   it('marks the setup as blocked when the active provider is missing critical pieces', () => {
     const snapshot = buildAISetupHealthSnapshot({
       providers: [{
@@ -38,11 +97,11 @@ describe('buildAISetupHealthSnapshot', () => {
     });
 
     expect(snapshot.status).toBe('blocked');
-    expect(snapshot.blockers).toContain('当前活动供应商缺少 API Key / Secret');
-    expect(snapshot.blockers).toContain('当前活动供应商缺少接口地址');
-    expect(snapshot.blockers).toContain('当前活动供应商还没有选中模型');
-    expect(snapshot.nextActions).toContain('补齐当前活动供应商的密钥');
-    expect(snapshot.nextActions).toContain('为当前活动供应商选择一个可用模型');
+    expect(snapshot.blockers).toContain('The active provider is missing an API Key / Secret');
+    expect(snapshot.blockers).toContain('The active provider is missing a base URL');
+    expect(snapshot.blockers).toContain('The active provider has no selected model');
+    expect(snapshot.nextActions).toContain('Fill in the active provider secret');
+    expect(snapshot.nextActions).toContain('Select an available model for the active provider');
     expect(snapshot.summary.chatReady).toBe(false);
   });
 
@@ -128,7 +187,7 @@ describe('buildAISetupHealthSnapshot', () => {
     expect(snapshot.summary.activeProviderName).toBe('OpenAI 主账号');
     expect(snapshot.summary.currentExternalClientCount).toBe(1);
     expect(snapshot.summary.enabledSkillCount).toBe(1);
-    expect(snapshot.mcp.message).toContain('当前共配置 1 个 MCP 服务');
+    expect(snapshot.mcp.message).toContain('1 MCP server is configured');
     expect(snapshot.guidance.enabledSkillPreview).toContain('结构审查');
   });
 
@@ -203,8 +262,8 @@ describe('buildAISetupHealthSnapshot', () => {
     expect(snapshot.status).toBe('needs_attention');
     expect(snapshot.summary.mcpServerConfigurationIssueCount).toBe(2);
     expect(snapshot.summary.mcpServersWithConfigurationErrors).toBe(1);
-    expect(snapshot.warnings).toContain('有 1 个 MCP 服务存在启动配置错误，测试和工具发现可能失败');
-    expect(snapshot.nextActions).toContain('先修复 MCP 服务配置检查里的错误项，再重新测试服务');
+    expect(snapshot.warnings).toContain('1 MCP server has launch configuration errors; testing and tool discovery may fail');
+    expect(snapshot.nextActions).toContain('Fix the MCP server configuration errors first, then test the server again');
     expect(snapshot.mcp.servers[0].configurationIssues.map((issue) => issue.key)).toContain('command-missing');
   });
 });

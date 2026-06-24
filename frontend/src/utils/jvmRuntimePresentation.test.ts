@@ -9,14 +9,27 @@ describe('jvmRuntimePresentation', () => {
   });
 
   it('builds overview tab titles with connection name and mode label', () => {
-    expect(buildJVMTabTitle('Orders JVM', 'overview', 'jmx')).toBe('[Orders JVM] JVM 概览 · JMX');
+    const translate = (key: string) => `T(${key})`;
+
+    expect(buildJVMTabTitle('Orders JVM', 'overview', 'jmx', translate)).toBe('[Orders JVM] T(sidebar.jvm.tab.overview) · JMX');
   });
 
   it('builds resource tab titles with the planned label', () => {
-    expect(buildJVMTabTitle('Orders JVM', 'resource', 'endpoint')).toBe('[Orders JVM] JVM 资源 · Endpoint');
+    const translate = (key: string) => `T(${key})`;
+
+    expect(buildJVMTabTitle('Orders JVM', 'resource', 'endpoint', translate)).toBe('[Orders JVM] T(sidebar.jvm.tab.resource) · Endpoint');
   });
 
   it('builds audit tab titles with the planned label', () => {
-    expect(buildJVMTabTitle('Orders JVM', 'audit', 'jmx')).toBe('[Orders JVM] JVM 审计 · JMX');
+    const translate = (key: string) => `T(${key})`;
+
+    expect(buildJVMTabTitle('Orders JVM', 'audit', 'jmx', translate)).toBe('[Orders JVM] T(sidebar.jvm.tab.audit) · JMX');
+  });
+
+  it('builds diagnostic and monitoring tab titles from i18n keys', () => {
+    const translate = (key: string) => `T(${key})`;
+
+    expect(buildJVMTabTitle('Orders JVM', 'diagnostic', 'agent', translate)).toBe('[Orders JVM] T(sidebar.jvm.tab.diagnostic) · Agent');
+    expect(buildJVMTabTitle('Orders JVM', 'monitoring', 'jmx', translate)).toBe('[Orders JVM] T(sidebar.jvm.tab.monitoring) · JMX');
   });
 });

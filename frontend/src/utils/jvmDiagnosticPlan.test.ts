@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import fs from "node:fs";
 
 import {
   parseJVMDiagnosticPlan,
@@ -41,6 +42,28 @@ describe("jvmDiagnosticPlan", () => {
 
   it("returns null for malformed diagnostic payload", () => {
     expect(parseJVMDiagnosticPlan('{"command":1}')).toBeNull();
+  });
+
+  it("localizes the fallback reason when the AI plan omits reason", () => {
+    const plan = parseJVMDiagnosticPlan(
+      '{"intent":"generic_diagnostic","command":"thread -n 5"}',
+      (key, params) => {
+        expect(key).toBe("jvm_diagnostic.ai_plan.default_reason");
+        return `AI diagnostic plan: ${params?.intent}`;
+      },
+    );
+
+    expect(plan?.reason).toBe("AI diagnostic plan: generic_diagnostic");
+  });
+
+  it("keeps AIMessageBubble diagnostic plan parsing wired to the active translator", () => {
+    const source = fs.readFileSync(
+      new URL("../components/ai/AIMessageBubble.tsx", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).toContain("parseJVMDiagnosticPlan(displayContent, copy)");
+    expect(source).not.toContain("parseJVMDiagnosticPlan(displayContent);");
   });
 });
 

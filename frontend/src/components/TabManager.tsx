@@ -498,7 +498,7 @@ const TabManager: React.FC = React.memo(() => {
             missingFileTabs.push({ tab, filePath });
             continue;
           }
-          message.error(`读取 SQL 文件失败，已取消关闭：${res.message || filePath}`);
+          message.error(t('tab_manager.sql_file_close.read_failed_cancel_close', { detail: res.message || filePath }));
           return;
         }
         const draft = getSQLFileTabDraft(tab.id, String(tab.query ?? ''));
@@ -511,7 +511,7 @@ const TabManager: React.FC = React.memo(() => {
           missingFileTabs.push({ tab, filePath });
           continue;
         }
-        message.error('读取 SQL 文件失败，已取消关闭：' + errorMessage);
+        message.error(t('tab_manager.sql_file_close.read_failed_cancel_close', { detail: errorMessage }));
         return;
       }
     }
@@ -525,15 +525,15 @@ const TabManager: React.FC = React.memo(() => {
       const firstDirtyTab = dirtyTabs[0].tab;
       const dirtyFilePath = getSQLFileTabPath(firstDirtyTab);
       const dirtyLabel = dirtyTabs.length === 1
-        ? `“${firstDirtyTab.title || dirtyFilePath}”`
-        : `${dirtyTabs.length} 个 SQL 文件`;
+        ? t('tab_manager.sql_file_close.dirty_single_label', { title: firstDirtyTab.title || dirtyFilePath })
+        : t('tab_manager.sql_file_close.dirty_multiple_label', { count: dirtyTabs.length });
 
       let destroyConfirm: (() => void) | null = null;
       const confirmRef = Modal.confirm({
-        title: '保存 SQL 文件修改？',
-        content: `${dirtyLabel} 有未保存修改，是否保存后再关闭？`,
-        okText: '保存并关闭',
-        cancelText: '取消',
+        title: t('tab_manager.sql_file_close.save_confirm_title'),
+        content: t('tab_manager.sql_file_close.save_confirm_content', { label: dirtyLabel }),
+        okText: t('tab_manager.sql_file_close.save_and_close'),
+        cancelText: t('common.cancel'),
         closable: true,
         maskClosable: true,
         okButtonProps: { type: 'primary' },
@@ -545,7 +545,7 @@ const TabManager: React.FC = React.memo(() => {
                 closeConfirmedTabsAndClearDrafts();
               }}
             >
-              不保存
+              {t('tab_manager.sql_file_close.discard')}
             </Button>
             <CancelBtn />
             <OkBtn />
@@ -558,10 +558,13 @@ const TabManager: React.FC = React.memo(() => {
               if (!filePath) continue;
               const res = await WriteSQLFile(filePath, draft);
               if (!res.success) {
-                throw new Error(`保存 ${tab.title || filePath} 失败：${res.message || '未知错误'}`);
+                throw new Error(t('tab_manager.sql_file_close.save_failed', {
+                  title: tab.title || filePath,
+                  detail: res.message || t('tab_manager.sql_file_close.unknown_error'),
+                }));
               }
             }
-            message.success('SQL 文件已保存');
+            message.success(t('tab_manager.sql_file_close.saved'));
             closeConfirmedTabsAndClearDrafts();
           } catch (error) {
             message.error(error instanceof Error ? error.message : String(error));
@@ -575,13 +578,13 @@ const TabManager: React.FC = React.memo(() => {
     if (missingFileTabs.length > 0) {
       const firstMissing = missingFileTabs[0];
       const missingLabel = missingFileTabs.length === 1
-        ? `“${firstMissing.tab.title || firstMissing.filePath}”`
-        : `${missingFileTabs.length} 个 SQL 文件标签`;
+        ? t('tab_manager.sql_file_close.missing_single_label', { title: firstMissing.tab.title || firstMissing.filePath })
+        : t('tab_manager.sql_file_close.missing_multiple_label', { count: missingFileTabs.length });
       Modal.confirm({
-        title: '关闭已丢失的 SQL 文件标签？',
-        content: `${missingLabel} 对应的外部 SQL 文件已不存在或已被移动，关闭后将丢弃标签内的本地草稿。`,
-        okText: dirtyTabs.length > 0 ? '继续关闭' : '关闭标签',
-        cancelText: '取消',
+        title: t('tab_manager.sql_file_close.missing_confirm_title'),
+        content: t('tab_manager.sql_file_close.missing_confirm_content', { label: missingLabel }),
+        okText: dirtyTabs.length > 0 ? t('tab_manager.sql_file_close.continue_close') : t('tab_manager.sql_file_close.close_tabs'),
+        cancelText: t('common.cancel'),
         closable: true,
         maskClosable: true,
         okButtonProps: { danger: true },
@@ -691,7 +694,7 @@ const TabManager: React.FC = React.memo(() => {
   const hasDoubleLineTabLabel = useMemo(() => (
     tabs.some((tab) => {
       const connection = connections.find((conn) => conn.id === tab.connectionId);
-      const displayModel = buildTabDisplayModel(tab, connection, appearance.tabDisplay);
+      const displayModel = buildTabDisplayModel(tab, connection, appearance.tabDisplay, t);
       return displayModel.layout === 'double' && Boolean(displayModel.secondaryText);
     })
   ), [appearance.tabDisplay, connections, tabs]);
@@ -704,7 +707,7 @@ const TabManager: React.FC = React.memo(() => {
 
   const items = useMemo(() => tabs.map((tab, index) => {
     const connection = connections.find((conn) => conn.id === tab.connectionId);
-    const displayModel = buildTabDisplayModel(tab, connection, appearance.tabDisplay);
+    const displayModel = buildTabDisplayModel(tab, connection, appearance.tabDisplay, t);
     const displayTitle = displayModel.fullTitle;
     const hostSummary = resolveConnectionHostSummary(connection?.config);
     const tabIsActive = tab.id === activeTabId;
@@ -713,7 +716,7 @@ const TabManager: React.FC = React.memo(() => {
       {
         key: 'tab-display-settings',
         icon: <SettingOutlined />,
-        label: '标签设置',
+        label: t('tab_manager.menu.tab_display_settings'),
         onClick: openTabDisplaySettings,
       },
       { type: 'divider' },

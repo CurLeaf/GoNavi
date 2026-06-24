@@ -47,23 +47,27 @@ func TestClassifySQL(t *testing.T) {
 
 func TestIsHighRiskSQL(t *testing.T) {
 	tests := []struct {
-		sql      string
-		highRisk bool
+		sql         string
+		highRisk    bool
+		warningKey  string
 	}{
-		{"DROP TABLE users", true},
-		{"DROP DATABASE test", true},
-		{"TRUNCATE TABLE users", true},
-		{"DELETE FROM users", true},                   // 无 WHERE
-		{"DELETE FROM users WHERE id=1", false},       // 有 WHERE
-		{"UPDATE users SET name='x'", true},           // 无 WHERE
-		{"UPDATE users SET name='x' WHERE id=1", false}, // 有 WHERE
-		{"SELECT * FROM users", false},
-		{"INSERT INTO users VALUES (1)", false},
+		{"DROP TABLE users", true, "ai_service.backend.warning.sql_drop"},
+		{"DROP DATABASE test", true, "ai_service.backend.warning.sql_drop"},
+		{"TRUNCATE TABLE users", true, "ai_service.backend.warning.sql_truncate"},
+		{"DELETE FROM users", true, "ai_service.backend.warning.sql_delete_without_where"},             // 无 WHERE
+		{"DELETE FROM users WHERE id=1", false, ""},                                                    // 有 WHERE
+		{"UPDATE users SET name='x'", true, "ai_service.backend.warning.sql_update_without_where"},    // 无 WHERE
+		{"UPDATE users SET name='x' WHERE id=1", false, ""},                                            // 有 WHERE
+		{"SELECT * FROM users", false, ""},
+		{"INSERT INTO users VALUES (1)", false, ""},
 	}
 	for _, tt := range tests {
-		highRisk, _ := IsHighRiskSQL(tt.sql)
+		highRisk, warningKey := IsHighRiskSQL(tt.sql)
 		if highRisk != tt.highRisk {
 			t.Errorf("IsHighRiskSQL(%q) = %v, want %v", tt.sql, highRisk, tt.highRisk)
+		}
+		if warningKey != tt.warningKey {
+			t.Errorf("IsHighRiskSQL(%q) warning = %q, want %q", tt.sql, warningKey, tt.warningKey)
 		}
 	}
 }

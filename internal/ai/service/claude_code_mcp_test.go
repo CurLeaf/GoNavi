@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
+
+	"GoNavi-Wails/shared/i18n"
 )
 
 func TestResolveLocalMCPCommandUsesMainBinaryWithArgument(t *testing.T) {
@@ -149,7 +152,7 @@ func TestUpsertClaudeCodeMCPServerConfigRejectsInvalidMCPServersShape(t *testing
 	if err == nil {
 		t.Fatal("expected invalid mcpServers shape to return error")
 	}
-	if !strings.Contains(err.Error(), "mcpServers 不是对象") {
+	if !strings.Contains(err.Error(), "mcpServers should be an object") {
 		t.Fatalf("expected invalid shape error, got %v", err)
 	}
 }
@@ -183,6 +186,75 @@ func TestParseCodexMCPServerConfigDetectsExistingInstall(t *testing.T) {
 	}
 	if cfg.StartupTimeoutSec != 60 {
 		t.Fatalf("unexpected startup timeout: %d", cfg.StartupTimeoutSec)
+	}
+}
+
+func TestCodexMCPConfigParserInternalErrorsUseEnglishText(t *testing.T) {
+	hanText := regexp.MustCompile(`\p{Han}`)
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "short string",
+			err:  func() error { _, err := parseTOMLString("x"); return err }(),
+			want: "invalid string format",
+		},
+		{
+			name: "unclosed single quoted string",
+			err:  func() error { _, err := parseTOMLString("'x"); return err }(),
+			want: "single-quoted string is not closed",
+		},
+		{
+			name: "non string",
+			err:  func() error { _, err := parseTOMLString("[bad]"); return err }(),
+			want: "not a string",
+		},
+		{
+			name: "non array",
+			err:  func() error { _, err := parseTOMLStringArray("'x'"); return err }(),
+			want: "not an array",
+		},
+		{
+			name: "invalid array separator",
+			err:  func() error { _, err := parseTOMLStringArray("['a' 'b']"); return err }(),
+			want: "invalid array separator",
+		},
+		{
+			name: "empty array item",
+			err:  func() error { _, _, err := consumeTOMLQuotedString(""); return err }(),
+			want: "string is empty",
+		},
+		{
+			name: "unclosed double quoted string",
+			err:  func() error { _, _, err := consumeTOMLQuotedString(`"x`); return err }(),
+			want: "double-quoted string is not closed",
+		},
+		{
+			name: "non string array element",
+			err:  func() error { _, err := decodeJSONLikeStringSlice([]any{"ok", 1}); return err }(),
+			want: "array element is not a string",
+		},
+		{
+			name: "non string array",
+			err:  func() error { _, err := decodeJSONLikeStringSlice("x"); return err }(),
+			want: "not a string array",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.err == nil {
+				t.Fatal("expected parser helper to return an error")
+			}
+			if hanText.MatchString(tc.err.Error()) {
+				t.Fatalf("expected English internal parser error, got %q", tc.err.Error())
+			}
+			if tc.err.Error() != tc.want {
+				t.Fatalf("expected parser helper error %q, got %q", tc.want, tc.err.Error())
+			}
+		})
 	}
 }
 
@@ -339,7 +411,453 @@ func TestInspectCodexMCPInstallStatusKeepsMissingCLISignalSeparateFromConfigStat
 	if status.ClientPath != "" {
 		t.Fatalf("expected missing codex command path to be empty, got %q", status.ClientPath)
 	}
-	if status.Message != "未检测到 Codex 用户级 GoNavi MCP 配置" {
+	if status.Message != "No Codex user-level GoNavi MCP configuration was detected" {
 		t.Fatalf("unexpected config message: %q", status.Message)
+	}
+}
+
+func TestMCPClientInstallResultMessagesUseServiceLanguage(t *testing.T) {
+	originalClaudeConfigPathFunc := claudeCodeConfigPathFunc
+	originalCodexConfigPathFunc := codexConfigPathFunc
+	originalExecutablePathFunc := localMCPExecutablePathFunc
+	t.Cleanup(func() {
+		claudeCodeConfigPathFunc = originalClaudeConfigPathFunc
+		codexConfigPathFunc = originalCodexConfigPathFunc
+		localMCPExecutablePathFunc = originalExecutablePathFunc
+	})
+
+	tempDir := t.TempDir()
+	claudeCodeConfigPathFunc = func() (string, error) {
+		return filepath.Join(tempDir, ".claude.json"), nil
+	}
+	codexConfigPathFunc = func() (string, error) {
+		return filepath.Join(tempDir, ".codex", "config.toml"), nil
+	}
+	localMCPExecutablePathFunc = func() (string, error) {
+		return `C:\Program Files\GoNavi\GoNavi.exe`, nil
+	}
+
+	service := NewService()
+	service.AISetLanguage(string(i18n.LanguageEnUS))
+	hanText := regexp.MustCompile(`\p{Han}`)
+
+	claudeResult, err := service.AIInstallClaudeCodeMCP()
+	if err != nil {
+		t.Fatalf("AIInstallClaudeCodeMCP returned error: %v", err)
+	}
+	if hanText.MatchString(claudeResult.Message) {
+		t.Fatalf("Claude Code install message should be localized to English, got %q", claudeResult.Message)
+	}
+	if !strings.Contains(claudeResult.Message, "Claude Code user-level MCP configuration") {
+		t.Fatalf("unexpected Claude Code install message: %q", claudeResult.Message)
+	}
+
+	codexResult, err := service.AIInstallCodexMCP()
+	if err != nil {
+		t.Fatalf("AIInstallCodexMCP returned error: %v", err)
+	}
+	if hanText.MatchString(codexResult.Message) {
+		t.Fatalf("Codex install message should be localized to English, got %q", codexResult.Message)
+	}
+	if !strings.Contains(codexResult.Message, "Codex user-level MCP configuration") {
+		t.Fatalf("unexpected Codex install message: %q", codexResult.Message)
+	}
+}
+
+func TestMCPClientInstallStatusMessagesUseServiceLanguage(t *testing.T) {
+	originalClaudeConfigPathFunc := claudeCodeConfigPathFunc
+	originalCodexConfigPathFunc := codexConfigPathFunc
+	originalExecutablePathFunc := localMCPExecutablePathFunc
+	originalCLIPathFunc := localCLICommandPathFunc
+	t.Cleanup(func() {
+		claudeCodeConfigPathFunc = originalClaudeConfigPathFunc
+		codexConfigPathFunc = originalCodexConfigPathFunc
+		localMCPExecutablePathFunc = originalExecutablePathFunc
+		localCLICommandPathFunc = originalCLIPathFunc
+	})
+
+	tempDir := t.TempDir()
+	claudeCodeConfigPathFunc = func() (string, error) {
+		return filepath.Join(tempDir, ".claude.json"), nil
+	}
+	codexConfigPathFunc = func() (string, error) {
+		return filepath.Join(tempDir, ".codex", "config.toml"), nil
+	}
+	localMCPExecutablePathFunc = func() (string, error) {
+		return `C:\Program Files\GoNavi\GoNavi.exe`, nil
+	}
+	localCLICommandPathFunc = func(string) (string, error) {
+		return "", errors.New("not found")
+	}
+
+	service := NewService()
+	service.AISetLanguage(string(i18n.LanguageEnUS))
+	statuses := service.AIGetMCPClientInstallStatuses()
+	hanText := regexp.MustCompile(`\p{Han}`)
+
+	for _, status := range statuses {
+		if hanText.MatchString(status.Message) {
+			t.Fatalf("%s status message should be localized to English, got %q", status.Client, status.Message)
+		}
+	}
+
+	if len(statuses) != 4 {
+		t.Fatalf("expected 4 MCP client statuses, got %d", len(statuses))
+	}
+	if !strings.Contains(statuses[0].Message, "No Claude Code user-level GoNavi MCP configuration") {
+		t.Fatalf("unexpected Claude Code status message: %q", statuses[0].Message)
+	}
+	if !strings.Contains(statuses[1].Message, "No Codex user-level GoNavi MCP configuration") {
+		t.Fatalf("unexpected Codex status message: %q", statuses[1].Message)
+	}
+	if !strings.Contains(statuses[2].Message, "usually runs in the cloud or a remote environment") {
+		t.Fatalf("unexpected remote client status message: %q", statuses[2].Message)
+	}
+}
+
+func TestMCPClientInstallConfigPathFailuresUseServiceLanguage(t *testing.T) {
+	originalClaudeConfigPathFunc := claudeCodeConfigPathFunc
+	originalCodexConfigPathFunc := codexConfigPathFunc
+	originalExecutablePathFunc := localMCPExecutablePathFunc
+	originalCLIPathFunc := localCLICommandPathFunc
+	t.Cleanup(func() {
+		claudeCodeConfigPathFunc = originalClaudeConfigPathFunc
+		codexConfigPathFunc = originalCodexConfigPathFunc
+		localMCPExecutablePathFunc = originalExecutablePathFunc
+		localCLICommandPathFunc = originalCLIPathFunc
+	})
+
+	claudeCodeConfigPathFunc = func() (string, error) {
+		return "", errors.New("claude config denied")
+	}
+	codexConfigPathFunc = func() (string, error) {
+		return "", errors.New("codex config denied")
+	}
+	localMCPExecutablePathFunc = func() (string, error) {
+		return `C:\Program Files\GoNavi\GoNavi.exe`, nil
+	}
+	localCLICommandPathFunc = func(string) (string, error) {
+		return "", errors.New("not found")
+	}
+
+	service := NewService()
+	service.AISetLanguage(string(i18n.LanguageEnUS))
+	hanText := regexp.MustCompile(`\p{Han}`)
+
+	if _, err := service.AIInstallClaudeCodeMCP(); err == nil {
+		t.Fatal("expected Claude Code install config path error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Failed to locate Claude Code configuration") || !strings.Contains(err.Error(), "claude config denied") {
+		t.Fatalf("Claude Code install error should use English wrapper and keep raw detail, got %q", err.Error())
+	}
+
+	if _, err := service.AIInstallCodexMCP(); err == nil {
+		t.Fatal("expected Codex install config path error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Failed to locate Codex configuration") || !strings.Contains(err.Error(), "codex config denied") {
+		t.Fatalf("Codex install error should use English wrapper and keep raw detail, got %q", err.Error())
+	}
+
+	statuses := service.AIGetMCPClientInstallStatuses()
+	if len(statuses) < 2 {
+		t.Fatalf("expected at least Claude Code and Codex statuses, got %d", len(statuses))
+	}
+	if hanText.MatchString(statuses[0].Message) || !strings.Contains(statuses[0].Message, "Failed to locate Claude Code configuration") || !strings.Contains(statuses[0].Message, "claude config denied") {
+		t.Fatalf("Claude Code status should use English wrapper and keep raw detail, got %q", statuses[0].Message)
+	}
+	if hanText.MatchString(statuses[1].Message) || !strings.Contains(statuses[1].Message, "Failed to locate Codex configuration") || !strings.Contains(statuses[1].Message, "codex config denied") {
+		t.Fatalf("Codex status should use English wrapper and keep raw detail, got %q", statuses[1].Message)
+	}
+}
+
+func TestMCPClientInstallHomeDirDetailUsesServiceLanguage(t *testing.T) {
+	originalClaudeConfigPathFunc := claudeCodeConfigPathFunc
+	originalCodexConfigPathFunc := codexConfigPathFunc
+	originalExecutablePathFunc := localMCPExecutablePathFunc
+	originalCLIPathFunc := localCLICommandPathFunc
+	t.Cleanup(func() {
+		claudeCodeConfigPathFunc = originalClaudeConfigPathFunc
+		codexConfigPathFunc = originalCodexConfigPathFunc
+		localMCPExecutablePathFunc = originalExecutablePathFunc
+		localCLICommandPathFunc = originalCLIPathFunc
+	})
+
+	claudeCodeConfigPathFunc = func() (string, error) {
+		return "", errMCPClientUserHomeDirUnavailable
+	}
+	codexConfigPathFunc = func() (string, error) {
+		return "", errMCPClientUserHomeDirUnavailable
+	}
+	localMCPExecutablePathFunc = func() (string, error) {
+		return `C:\Program Files\GoNavi\GoNavi.exe`, nil
+	}
+	localCLICommandPathFunc = func(string) (string, error) {
+		return "", errors.New("not found")
+	}
+
+	service := NewService()
+	service.AISetLanguage(string(i18n.LanguageEnUS))
+	hanText := regexp.MustCompile(`\p{Han}`)
+
+	if _, err := service.AIInstallClaudeCodeMCP(); err == nil {
+		t.Fatal("expected Claude Code install home-dir error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Unable to determine the current user home directory") {
+		t.Fatalf("Claude Code install home-dir detail should be localized, got %q", err.Error())
+	}
+
+	if _, err := service.AIInstallCodexMCP(); err == nil {
+		t.Fatal("expected Codex install home-dir error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Unable to determine the current user home directory") {
+		t.Fatalf("Codex install home-dir detail should be localized, got %q", err.Error())
+	}
+
+	statuses := service.AIGetMCPClientInstallStatuses()
+	if len(statuses) < 2 {
+		t.Fatalf("expected at least Claude Code and Codex statuses, got %d", len(statuses))
+	}
+	if hanText.MatchString(statuses[0].Message) || !strings.Contains(statuses[0].Message, "Unable to determine the current user home directory") {
+		t.Fatalf("Claude Code status home-dir detail should be localized, got %q", statuses[0].Message)
+	}
+	if hanText.MatchString(statuses[1].Message) || !strings.Contains(statuses[1].Message, "Unable to determine the current user home directory") {
+		t.Fatalf("Codex status home-dir detail should be localized, got %q", statuses[1].Message)
+	}
+}
+
+func TestMCPClientInstallExecutablePathFailuresUseServiceLanguage(t *testing.T) {
+	originalClaudeConfigPathFunc := claudeCodeConfigPathFunc
+	originalCodexConfigPathFunc := codexConfigPathFunc
+	originalExecutablePathFunc := localMCPExecutablePathFunc
+	originalCLIPathFunc := localCLICommandPathFunc
+	t.Cleanup(func() {
+		claudeCodeConfigPathFunc = originalClaudeConfigPathFunc
+		codexConfigPathFunc = originalCodexConfigPathFunc
+		localMCPExecutablePathFunc = originalExecutablePathFunc
+		localCLICommandPathFunc = originalCLIPathFunc
+	})
+
+	tempDir := t.TempDir()
+	claudeConfigPath := filepath.Join(tempDir, ".claude.json")
+	codexConfigPath := filepath.Join(tempDir, ".codex", "config.toml")
+	claudeCodeConfigPathFunc = func() (string, error) {
+		return claudeConfigPath, nil
+	}
+	codexConfigPathFunc = func() (string, error) {
+		return codexConfigPath, nil
+	}
+	localCLICommandPathFunc = func(string) (string, error) {
+		return "", errors.New("not found")
+	}
+	if err := os.WriteFile(claudeConfigPath, []byte(`{"mcpServers":{"gonavi":{"type":"stdio","command":"old-gonavi","args":["mcp-server"]}}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile Claude config returned error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(codexConfigPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll Codex config dir returned error: %v", err)
+	}
+	if err := os.WriteFile(codexConfigPath, []byte("[mcp_servers.gonavi]\ncommand = 'old-gonavi'\nargs = ['mcp-server']\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile Codex config returned error: %v", err)
+	}
+
+	service := NewService()
+	service.AISetLanguage(string(i18n.LanguageEnUS))
+	hanText := regexp.MustCompile(`\p{Han}`)
+
+	localMCPExecutablePathFunc = func() (string, error) {
+		return "", errors.New("executable lookup denied")
+	}
+	if _, err := service.AIInstallClaudeCodeMCP(); err == nil {
+		t.Fatal("expected Claude Code install executable path error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Failed to locate the current GoNavi executable") || !strings.Contains(err.Error(), "executable lookup denied") {
+		t.Fatalf("Claude Code executable path error should use English wrapper and keep raw detail, got %q", err.Error())
+	}
+	statuses := service.AIGetMCPClientInstallStatuses()
+	if len(statuses) < 2 {
+		t.Fatalf("expected at least Claude Code and Codex statuses, got %d", len(statuses))
+	}
+	for _, status := range statuses[:2] {
+		if hanText.MatchString(status.Message) || !strings.Contains(status.Message, "Failed to locate the current GoNavi executable") || !strings.Contains(status.Message, "executable lookup denied") {
+			t.Fatalf("%s status executable path error should use English wrapper and keep raw detail, got %q", status.Client, status.Message)
+		}
+	}
+
+	localMCPExecutablePathFunc = func() (string, error) {
+		return "   ", nil
+	}
+	if _, err := service.AIInstallCodexMCP(); err == nil {
+		t.Fatal("expected Codex install empty executable path error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Current GoNavi executable path is empty") {
+		t.Fatalf("Codex empty executable path error should use English wrapper, got %q", err.Error())
+	}
+	statuses = service.AIGetMCPClientInstallStatuses()
+	for _, status := range statuses[:2] {
+		if hanText.MatchString(status.Message) || !strings.Contains(status.Message, "Current GoNavi executable path is empty") {
+			t.Fatalf("%s status empty executable path error should use English wrapper, got %q", status.Client, status.Message)
+		}
+	}
+}
+
+func TestMCPClientInstallConfigFormatFailuresUseServiceLanguage(t *testing.T) {
+	originalClaudeConfigPathFunc := claudeCodeConfigPathFunc
+	originalCodexConfigPathFunc := codexConfigPathFunc
+	originalExecutablePathFunc := localMCPExecutablePathFunc
+	originalCLIPathFunc := localCLICommandPathFunc
+	t.Cleanup(func() {
+		claudeCodeConfigPathFunc = originalClaudeConfigPathFunc
+		codexConfigPathFunc = originalCodexConfigPathFunc
+		localMCPExecutablePathFunc = originalExecutablePathFunc
+		localCLICommandPathFunc = originalCLIPathFunc
+	})
+
+	tempDir := t.TempDir()
+	claudeConfigPath := filepath.Join(tempDir, ".claude.json")
+	codexConfigPath := filepath.Join(tempDir, ".codex", "config.toml")
+	claudeCodeConfigPathFunc = func() (string, error) {
+		return claudeConfigPath, nil
+	}
+	codexConfigPathFunc = func() (string, error) {
+		return codexConfigPath, nil
+	}
+	localMCPExecutablePathFunc = func() (string, error) {
+		return `C:\Program Files\GoNavi\GoNavi.exe`, nil
+	}
+	localCLICommandPathFunc = func(string) (string, error) {
+		return "", errors.New("not found")
+	}
+
+	service := NewService()
+	service.AISetLanguage(string(i18n.LanguageEnUS))
+	hanText := regexp.MustCompile(`\p{Han}`)
+
+	if err := os.WriteFile(claudeConfigPath, []byte(`{"mcpServers":[]}`), 0o644); err != nil {
+		t.Fatalf("WriteFile Claude config returned error: %v", err)
+	}
+	if _, err := service.AIInstallClaudeCodeMCP(); err == nil {
+		t.Fatal("expected Claude Code invalid config shape error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Claude Code configuration format is invalid") || !strings.Contains(err.Error(), "mcpServers") {
+		t.Fatalf("Claude Code config format error should use English wrapper and keep raw path segment, got %q", err.Error())
+	}
+
+	if err := os.WriteFile(claudeConfigPath, []byte(`{"mcpServers":{"gonavi":[]}}`), 0o644); err != nil {
+		t.Fatalf("WriteFile Claude config returned error: %v", err)
+	}
+	statuses := service.AIGetMCPClientInstallStatuses()
+	if len(statuses) < 2 {
+		t.Fatalf("expected at least Claude Code and Codex statuses, got %d", len(statuses))
+	}
+	if hanText.MatchString(statuses[0].Message) || !strings.Contains(statuses[0].Message, "Claude Code configuration format is invalid") || !strings.Contains(statuses[0].Message, "mcpServers.gonavi") {
+		t.Fatalf("Claude Code status format error should use English wrapper and keep raw path segment, got %q", statuses[0].Message)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(codexConfigPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll Codex config dir returned error: %v", err)
+	}
+	if err := os.WriteFile(codexConfigPath, []byte("[mcp_servers.gonavi]\ncommand = [bad]\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile Codex config returned error: %v", err)
+	}
+	statuses = service.AIGetMCPClientInstallStatuses()
+	if hanText.MatchString(statuses[1].Message) || !strings.Contains(statuses[1].Message, "Codex configuration format is invalid") || !strings.Contains(statuses[1].Message, "mcp_servers.gonavi.command") {
+		t.Fatalf("Codex status format error should use English wrapper and keep raw path segment, got %q", statuses[1].Message)
+	}
+}
+
+func TestMCPClientInstallConfigIOFailuresUseServiceLanguage(t *testing.T) {
+	tempDir := t.TempDir()
+	service := NewService()
+	service.AISetLanguage(string(i18n.LanguageEnUS))
+	hanText := regexp.MustCompile(`\p{Han}`)
+
+	claudeConfigDir := filepath.Join(tempDir, "claude-dir")
+	if err := os.MkdirAll(claudeConfigDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll Claude config dir returned error: %v", err)
+	}
+	if _, err := readClaudeCodeConfig(claudeConfigDir, service.serviceText); err == nil {
+		t.Fatal("expected Claude Code read config error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Failed to read Claude Code configuration") {
+		t.Fatalf("Claude Code read error should use English wrapper, got %q", err.Error())
+	}
+
+	invalidClaudeConfigPath := filepath.Join(tempDir, ".claude-invalid.json")
+	if err := os.WriteFile(invalidClaudeConfigPath, []byte(`{"mcpServers":`), 0o644); err != nil {
+		t.Fatalf("WriteFile invalid Claude config returned error: %v", err)
+	}
+	if _, err := readClaudeCodeConfig(invalidClaudeConfigPath, service.serviceText); err == nil {
+		t.Fatal("expected Claude Code parse config error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Failed to parse Claude Code configuration") {
+		t.Fatalf("Claude Code parse error should use English wrapper, got %q", err.Error())
+	}
+
+	blockingFile := filepath.Join(tempDir, "blocking-file")
+	if err := os.WriteFile(blockingFile, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("WriteFile blocking file returned error: %v", err)
+	}
+	blockedClaudeConfigPath := filepath.Join(blockingFile, ".claude.json")
+	if err := upsertClaudeCodeMCPServerConfig(blockedClaudeConfigPath, gonaviMCPServerID, claudeCodeMCPServerConfig{
+		Type:    "stdio",
+		Command: "GoNavi.exe",
+	}, service.serviceText); err == nil {
+		t.Fatal("expected Claude Code directory creation error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Failed to create Claude Code configuration directory") {
+		t.Fatalf("Claude Code directory creation error should use English wrapper, got %q", err.Error())
+	}
+
+	codexConfigDir := filepath.Join(tempDir, "codex-dir")
+	if err := os.MkdirAll(codexConfigDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll Codex config dir returned error: %v", err)
+	}
+	if _, _, err := readCodexMCPServerConfig(codexConfigDir, gonaviMCPServerID, service.serviceText); err == nil {
+		t.Fatal("expected Codex read config error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Failed to read Codex configuration") {
+		t.Fatalf("Codex read error should use English wrapper, got %q", err.Error())
+	}
+
+	blockedCodexConfigPath := filepath.Join(blockingFile, "config.toml")
+	if err := upsertCodexMCPServerConfig(blockedCodexConfigPath, gonaviMCPServerID, codexMCPServerConfig{
+		Command: "GoNavi.exe",
+		Args:    []string{"mcp-server"},
+	}, service.serviceText); err == nil {
+		t.Fatal("expected Codex directory creation error")
+	} else if hanText.MatchString(err.Error()) || !strings.Contains(err.Error(), "Failed to create Codex configuration directory") {
+		t.Fatalf("Codex directory creation error should use English wrapper, got %q", err.Error())
+	}
+}
+
+func TestMCPClientInstallMessageCatalogKeysExist(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	keys := []string{
+		"ai.service.mcp_client.claude_code.install_success",
+		"ai.service.mcp_client.codex.install_success",
+		"ai.service.mcp_client.user_home_dir_unavailable",
+		"ai.service.mcp_client.claude_code.config_path_failed",
+		"ai.service.mcp_client.codex.config_path_failed",
+		"ai.service.mcp_client.executable_path_failed",
+		"ai.service.mcp_client.executable_path_empty",
+		"ai.service.mcp_client.claude_code.config_format_invalid",
+		"ai.service.mcp_client.codex.config_format_invalid",
+		"ai.service.mcp_client.claude_code.config_read_failed",
+		"ai.service.mcp_client.claude_code.config_parse_failed",
+		"ai.service.mcp_client.claude_code.config_serialize_failed",
+		"ai.service.mcp_client.claude_code.config_dir_create_failed",
+		"ai.service.mcp_client.claude_code.config_write_failed",
+		"ai.service.mcp_client.codex.config_read_failed",
+		"ai.service.mcp_client.codex.config_dir_create_failed",
+		"ai.service.mcp_client.codex.config_write_failed",
+		"ai.service.mcp_client.claude_code.status.missing",
+		"ai.service.mcp_client.codex.status.missing",
+		"ai.service.mcp_client.claude_code.status.path_check_failed",
+		"ai.service.mcp_client.codex.status.path_check_failed",
+		"ai.service.mcp_client.claude_code.status.connected",
+		"ai.service.mcp_client.codex.status.connected",
+		"ai.service.mcp_client.claude_code.status.path_mismatch",
+		"ai.service.mcp_client.codex.status.path_mismatch",
+		"ai.service.mcp_client.remote.status.message",
+	}
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		for _, key := range keys {
+			if strings.TrimSpace(catalog[key]) == "" {
+				t.Fatalf("%s catalog missing MCP client install message key %q", language, key)
+			}
+		}
 	}
 }

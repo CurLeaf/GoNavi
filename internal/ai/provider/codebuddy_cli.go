@@ -95,14 +95,14 @@ func (p *CodeBuddyCLIProvider) ChatWithState(ctx context.Context, state json.Raw
 	output, err := cmd.Output()
 	if err != nil {
 		if isClaudeCLITimeout(ctx, err) {
-			requestErr = fmt.Errorf("CodeBuddy CLI 执行超时（%s），当前登录态、Base URL 或 API Key 可能没有返回有效响应", codebuddyCLIRequestTimeout)
+			requestErr = fmt.Errorf("CodeBuddy CLI timed out (%s); the current login session, Base URL, or API Key may not be returning a valid response", codebuddyCLIRequestTimeout)
 			return nil, nil, requestErr
 		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			requestErr = fmt.Errorf("CodeBuddy CLI 执行失败: %s", string(exitErr.Stderr))
+			requestErr = fmt.Errorf("CodeBuddy CLI execution failed: %s", string(exitErr.Stderr))
 			return nil, nil, requestErr
 		}
-		requestErr = fmt.Errorf("CodeBuddy CLI 执行失败: %w", err)
+		requestErr = fmt.Errorf("CodeBuddy CLI execution failed: %w", err)
 		return nil, nil, requestErr
 	}
 
@@ -184,7 +184,7 @@ func (p *CodeBuddyCLIProvider) chatStreamWithSession(ctx context.Context, resume
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		requestErr = fmt.Errorf("创建 stdout 管道失败: %w", err)
+		requestErr = fmt.Errorf("create stdout pipe failed: %w", err)
 		return "", requestErr
 	}
 
@@ -192,7 +192,7 @@ func (p *CodeBuddyCLIProvider) chatStreamWithSession(ctx context.Context, resume
 	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
-		requestErr = fmt.Errorf("启动 CodeBuddy CLI 失败: %w", err)
+		requestErr = fmt.Errorf("start CodeBuddy CLI failed: %w", err)
 		return "", requestErr
 	}
 
@@ -224,7 +224,7 @@ func (p *CodeBuddyCLIProvider) chatStreamWithSession(ctx context.Context, resume
 			if isCodeBuddyCLISystemRetryEvent(event) {
 				if errMsg, hasError := extractCodeBuddyCLISystemRetryError(event); hasError {
 					callback(ai.StreamChunk{Error: errMsg, Done: true})
-					requestErr = fmt.Errorf("CodeBuddy CLI 鉴权失败: %s", errMsg)
+					requestErr = fmt.Errorf("CodeBuddy CLI authentication failed: %s", errMsg)
 					if cmd.Process != nil {
 						_ = cmd.Process.Kill()
 					}
@@ -235,7 +235,7 @@ func (p *CodeBuddyCLIProvider) chatStreamWithSession(ctx context.Context, resume
 		case "assistant":
 			if errMsg, hasError := extractCodeBuddyCLIEventError(event); hasError {
 				callback(ai.StreamChunk{Error: errMsg, Done: true})
-				requestErr = fmt.Errorf("CodeBuddy CLI 返回错误: %s", errMsg)
+				requestErr = fmt.Errorf("CodeBuddy CLI returned an error: %s", errMsg)
 				_ = cmd.Wait()
 				return "", nil
 			}
@@ -257,7 +257,7 @@ func (p *CodeBuddyCLIProvider) chatStreamWithSession(ctx context.Context, resume
 		case "result":
 			if errMsg, hasError := extractCodeBuddyCLIEventError(event); hasError {
 				callback(ai.StreamChunk{Error: errMsg, Done: true})
-				requestErr = fmt.Errorf("CodeBuddy CLI 返回错误: %s", errMsg)
+				requestErr = fmt.Errorf("CodeBuddy CLI returned an error: %s", errMsg)
 				_ = cmd.Wait()
 				return "", nil
 			}
@@ -267,7 +267,7 @@ func (p *CodeBuddyCLIProvider) chatStreamWithSession(ctx context.Context, resume
 		case "error":
 			errMsg, _ := extractCodeBuddyCLIEventError(event)
 			callback(ai.StreamChunk{Error: errMsg, Done: true})
-			requestErr = fmt.Errorf("CodeBuddy CLI 返回错误: %s", errMsg)
+			requestErr = fmt.Errorf("CodeBuddy CLI returned an error: %s", errMsg)
 			_ = cmd.Wait()
 			return "", nil
 		}
@@ -277,7 +277,7 @@ func (p *CodeBuddyCLIProvider) chatStreamWithSession(ctx context.Context, resume
 	stderrStr := strings.TrimSpace(stderrBuf.String())
 
 	if isClaudeCLITimeout(ctx, waitErr) {
-		requestErr = fmt.Errorf("CodeBuddy CLI 执行超时（%s），当前登录态、Base URL 或 API Key 可能没有返回有效响应", codebuddyCLIRequestTimeout)
+		requestErr = fmt.Errorf("CodeBuddy CLI timed out (%s); the current login session, Base URL, or API Key may not be returning a valid response", codebuddyCLIRequestTimeout)
 		callback(ai.StreamChunk{
 			Error: requestErr.Error(),
 			Done:  true,
@@ -286,9 +286,9 @@ func (p *CodeBuddyCLIProvider) chatStreamWithSession(ctx context.Context, resume
 	}
 
 	if waitErr != nil {
-		errMsg := fmt.Sprintf("CodeBuddy CLI 异常退出: %v", waitErr)
+		errMsg := fmt.Sprintf("CodeBuddy CLI exited unexpectedly: %v", waitErr)
 		if stderrStr != "" {
-			errMsg = fmt.Sprintf("CodeBuddy CLI 异常退出: %s", stderrStr)
+			errMsg = fmt.Sprintf("CodeBuddy CLI exited unexpectedly: %s", stderrStr)
 		}
 		requestErr = fmt.Errorf("%s", errMsg)
 		callback(ai.StreamChunk{Error: errMsg, Done: true})
@@ -307,7 +307,7 @@ func parseCodeBuddySessionState(state json.RawMessage) (codebuddySessionState, e
 
 	var sessionState codebuddySessionState
 	if err := json.Unmarshal(trimmed, &sessionState); err != nil {
-		return codebuddySessionState{}, fmt.Errorf("解析 CodeBuddy 会话状态失败: %w", err)
+		return codebuddySessionState{}, fmt.Errorf("parse CodeBuddy session state failed: %w", err)
 	}
 	sessionState.SessionID = strings.TrimSpace(sessionState.SessionID)
 	return sessionState, nil
@@ -321,7 +321,7 @@ func marshalCodeBuddySessionState(sessionID string) (json.RawMessage, error) {
 
 	payload, err := json.Marshal(codebuddySessionState{SessionID: sessionID})
 	if err != nil {
-		return nil, fmt.Errorf("序列化 CodeBuddy 会话状态失败: %w", err)
+		return nil, fmt.Errorf("serialize CodeBuddy session state failed: %w", err)
 	}
 	return json.RawMessage(payload), nil
 }
@@ -332,7 +332,7 @@ func resolveCodeBuddyCLICommand(lookPath func(string) (string, error)) (string, 
 			return command, nil
 		}
 	}
-	return "", fmt.Errorf("未找到 codebuddy 命令，请先安装 CodeBuddy CLI: npm install -g @tencent/codebuddy")
+	return "", fmt.Errorf("CodeBuddy CLI command not found. Install it first: npm install -g @tencent/codebuddy")
 }
 
 func codebuddyCLIEndpointForLog(config ai.ProviderConfig) string {
@@ -384,7 +384,7 @@ func buildCodeBuddyCLIResponseFromEvents(events []cliStreamEvent) (*ai.ChatRespo
 
 	for _, event := range events {
 		if errMsg, hasError := extractCodeBuddyCLIEventError(event); hasError {
-			return nil, "", fmt.Errorf("CodeBuddy CLI 返回错误: %s", errMsg)
+			return nil, "", fmt.Errorf("CodeBuddy CLI returned an error: %s", errMsg)
 		}
 		if strings.TrimSpace(event.Result) != "" {
 			resultText = strings.TrimSpace(event.Result)
@@ -451,7 +451,7 @@ func resolveCodeBuddyGitBashPath(env []string, goos string, lookPath func(string
 		if exists(configured) {
 			return configured, nil
 		}
-		return "", fmt.Errorf("CodeBuddy CLI 在 Windows 下配置的 CODEBUDDY_CODE_GIT_BASH_PATH 不存在: %s", configured)
+		return "", fmt.Errorf("Configured CODEBUDDY_CODE_GIT_BASH_PATH does not exist on Windows: %s", configured)
 	}
 
 	for _, command := range []string{"bash.exe", "bash"} {
@@ -500,7 +500,7 @@ func extractCodeBuddyCLIEventError(event cliStreamEvent) (string, bool) {
 		return msg, true
 	}
 
-	return "CodeBuddy CLI 返回未知错误", true
+	return "CodeBuddy CLI returned an unknown error", true
 }
 
 func isCodeBuddyCLISystemRetryEvent(event cliStreamEvent) bool {
@@ -522,7 +522,7 @@ func extractCodeBuddyCLISystemRetryError(event cliStreamEvent) (string, bool) {
 	}
 
 	if event.ErrorStatus > 0 {
-		return fmt.Sprintf("CodeBuddy CLI 鉴权失败 (HTTP %d): %s", event.ErrorStatus, errText), true
+		return fmt.Sprintf("CodeBuddy CLI authentication failed (HTTP %d): %s", event.ErrorStatus, errText), true
 	}
-	return fmt.Sprintf("CodeBuddy CLI 鉴权失败: %s", errText), true
+	return fmt.Sprintf("CodeBuddy CLI authentication failed: %s", errText), true
 }

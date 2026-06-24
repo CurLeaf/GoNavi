@@ -486,20 +486,32 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
       };
   }, [connections, connectionId]);
 
+  const resolveExportTitle = useCallback((defaultName: string) => {
+      const normalizedDefaultName = String(defaultName || '').trim();
+      if (normalizedDefaultName === 'query_result') {
+          return translateDataGrid('file.backend.dialog.export_query_result');
+      }
+      if (normalizedDefaultName && normalizedDefaultName !== 'export') {
+          return translateDataGrid('file.backend.dialog.export_table', { table: normalizedDefaultName });
+      }
+      return translateDataGrid('file.backend.dialog.export_data');
+  }, [translateDataGrid]);
+
   const exportByQuery = useCallback(async (sql: string, defaultName: string, options: DataExportFileOptions, totalRows?: number) => {
       const config = buildConnConfig();
       if (!config) return;
+      const normalizedDefaultName = String(defaultName || '').trim();
       const totalRowsKnown = Number.isFinite(totalRows) && Number(totalRows) >= 0;
       await runExportWithProgress({
-          title: `导出 ${defaultName || '查询结果'}`,
-          targetName: defaultName || 'export',
+          title: resolveExportTitle(normalizedDefaultName),
+          targetName: normalizedDefaultName || 'export',
           format: options.format,
           totalRows: totalRowsKnown ? Number(totalRows) : undefined,
           run: (jobId: string) => ExportQueryWithOptions(
               buildRpcConnectionConfig(config) as any,
               dbName || '',
               sql,
-              defaultName || 'export',
+              normalizedDefaultName || 'export',
               {
                   ...options,
                   jobId,
@@ -508,7 +520,7 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
               } as any,
           ),
       });
-  }, [buildConnConfig, dbName, runExportWithProgress]);
+  }, [buildConnConfig, dbName, resolveExportTitle, runExportWithProgress]);
 
   const buildPkWhereSql = useCallback((rows: any[], dbType: string) => {
       if (!tableName || pkColumns.length === 0) return '';
@@ -788,8 +800,8 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
   const handleOpenExportDialog = useCallback(async () => {
       const selectedCount = selectedRowKeys.length;
       const allRowsLabel = (resultExportAllSql || resultSql)
-          ? '全部结果（重新查询）'
-          : `全部结果（当前缓存 ${mergedDisplayData.length} 条）`;
+          ? translateDataGrid('data_grid.export.scope.all_results_requery')
+          : translateDataGrid('data_grid.export.scope.all_results_cached', { count: mergedDisplayData.length });
       const commonInitialValues: Partial<DataExportDialogValues> = {
           format: DEFAULT_DATA_EXPORT_FORMAT,
           xlsxMaxRowsPerSheet: DEFAULT_XLSX_ROWS_PER_SHEET,
@@ -799,25 +811,29 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
           const scopeOptions: DataExportScopeOption[] = [
               {
                   value: 'selected',
-                  label: selectedCount > 0 ? `选中行 (${selectedCount} 条)` : '选中行',
-                  description: '仅导出当前结果集中已勾选的行。',
+                  label: selectedCount > 0
+                      ? translateDataGrid('data_grid.export.scope.selected_rows_count', { count: selectedCount })
+                      : translateDataGrid('data_grid.export.scope.selected_rows'),
+                  description: translateDataGrid('data_grid.export.scope.selected_rows_description'),
                   disabled: selectedCount <= 0,
               },
               {
                   value: 'page',
-                  label: `当前页 (${queryResultCurrentPageRows.length} 条)`,
-                  description: '直接按当前结果页缓存导出。',
+                  label: translateDataGrid('data_grid.export.scope.current_page', {
+                      count: queryResultCurrentPageRows.length,
+                  }),
+                  description: translateDataGrid('data_grid.export.scope.current_page_description'),
               },
               {
                   value: 'all',
                   label: allRowsLabel,
                   description: (resultExportAllSql || resultSql)
-                      ? '后台会重新执行 SQL，避免只导出当前页或当前缓存。'
-                      : '当前查询缺少可重放 SQL 时，将导出当前缓存的全部结果。',
+                      ? translateDataGrid('data_grid.export.scope.all_results_requery_description')
+                      : translateDataGrid('data_grid.export.scope.all_results_cached_description'),
               },
           ];
           const values = await showDataExportDialog(modal, {
-              title: '导出查询结果',
+              title: translateDataGrid('file.backend.dialog.export_query_result'),
               scopeOptions,
               initialValues: {
                   ...commonInitialValues,
@@ -842,29 +858,31 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
           connectionId,
           dbName,
           tableName: tableName || 'export',
-          title: `导出 ${tableName || '数据'}`,
+          title: resolveExportTitle(tableName || 'export'),
           objectType,
           scopeOptions: [
               {
                   value: 'page',
-                  label: `当前页 (${displayData.length} 条)`,
+                  label: translateDataGrid('data_grid.export.scope.current_page', {
+                      count: displayData.length,
+                  }),
                   description: currentPageSql
-                      ? '后台按当前分页条件重新查询后导出当前页。'
-                      : '当前页依赖前端临时状态，建议直接使用快捷导出。',
+                      ? translateDataGrid('data_grid.export.scope.current_page_requery_description')
+                      : translateDataGrid('data_grid.export.scope.current_page_unavailable_description'),
                   disabled: !currentPageSql,
               },
               ...(hasFilteredExportSql ? [{
                   value: 'filteredAll' as const,
-                  label: '筛选结果（全部）',
+                  label: translateDataGrid('data_grid.export.scope.filtered_results_all'),
                   description: filteredAllSql
-                      ? '按当前筛选条件重新查询数据库并导出全部筛选结果。'
-                      : '当前数据源或当前状态暂不支持在工作台重放筛选导出。',
+                      ? translateDataGrid('data_grid.export.scope.filtered_results_all_requery_description')
+                      : translateDataGrid('data_grid.export.scope.filtered_results_all_unavailable_description'),
                   disabled: !filteredAllSql,
               }] : []),
               {
                   value: 'all',
-                  label: '全表数据',
-                  description: '后台重新查询整张表并导出全部数据。',
+                  label: translateDataGrid('data_export.workbench.scope.all.label'),
+                  description: translateDataGrid('data_export.workbench.scope.all.description'),
               },
           ],
           initialScope: hasFilteredExportSql && filteredAllSql ? 'filteredAll' : 'all',
@@ -902,6 +920,7 @@ const handleV2ColumnHeaderContextMenuAction = useCallback((action: V2ColumnHeade
       supportsSqlQueryExport,
       tableName,
       hasChanges,
+      translateDataGrid,
   ]);
 
   return {

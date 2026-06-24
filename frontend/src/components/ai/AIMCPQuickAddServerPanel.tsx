@@ -2,6 +2,9 @@ import React from 'react';
 import { Button, Input } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import type { I18nParams } from '../../i18n';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { AIMCPServerConfig } from '../../types';
 import {
   parseMCPCommandDraft,
@@ -12,7 +15,7 @@ import {
   MCP_COMMAND_PARSE_EXAMPLE,
 } from '../../utils/mcpServerGuidance';
 import { buildMCPQuickAddServerSeed } from '../../utils/mcpServerDraftSeed';
-import { MCP_SERVER_DRAFT_TEMPLATES } from '../../utils/mcpServerTemplates';
+import { MCP_SERVER_DRAFT_TEMPLATES, type MCPServerDraftTemplate } from '../../utils/mcpServerTemplates';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import AIMCPCommandDraftPreview from './AIMCPCommandDraftPreview';
 import { buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
@@ -30,20 +33,39 @@ const renderParseSummary = (
   rawCommandDraft: string,
   parsedCommandDraft: ParseMCPCommandDraftResult,
   overlayTheme: OverlayWorkbenchTheme,
+  copy: (key: string, params?: I18nParams, fallback?: string) => string,
 ) => {
   if (!rawCommandDraft.trim()) {
-    return '支持带引号路径、带空格参数，以及 KEY=VALUE / $env:KEY=VALUE; / set KEY=VALUE && 环境变量前缀。';
+    return copy('ai_settings.mcp_server.guide.full_command.support_hint');
   }
   if (!parsedCommandDraft.ok || !parsedCommandDraft.draft) {
-    return parsedCommandDraft.error || '完整命令解析失败，请检查命令格式。';
+    return parsedCommandDraft.errorKey
+      ? copy(parsedCommandDraft.errorKey, undefined, parsedCommandDraft.error)
+      : (parsedCommandDraft.error || copy(
+        'ai_settings.mcp_server.command_parse.error.failed',
+        undefined,
+        'Failed to parse the full command. Check the command format.',
+      ));
   }
   const envCount = Object.keys(parsedCommandDraft.draft.env || {}).length;
   return (
     <span style={{ color: overlayTheme.mutedText }}>
-      将解析为：命令 {parsedCommandDraft.draft.command}，参数 {parsedCommandDraft.draft.args.length} 个，环境变量 {envCount} 个。
+      {copy('ai_settings.mcp_server.guide.full_command.parsed_summary', {
+        command: parsedCommandDraft.draft.command,
+        argsCount: parsedCommandDraft.draft.args.length,
+        envCount,
+      })}
     </span>
   );
 };
+
+const localizeTemplateSeed = (
+  template: MCPServerDraftTemplate,
+  copy: (key: string, params?: I18nParams, fallback?: string) => string,
+): Partial<AIMCPServerConfig> => ({
+  ...template.seed,
+  name: copy(template.seedNameKey, undefined, String(template.seed.name || template.title)),
+});
 
 const AIMCPQuickAddServerPanel: React.FC<AIMCPQuickAddServerPanelProps> = ({
   cardBg,
@@ -53,6 +75,17 @@ const AIMCPQuickAddServerPanel: React.FC<AIMCPQuickAddServerPanelProps> = ({
   overlayTheme,
   onAddServer,
 }) => {
+  const i18n = useOptionalI18n();
+  const copy = (
+    key: string,
+    params?: I18nParams,
+    fallback?: string,
+  ) => {
+    const translate = i18n?.t ?? ((catalogKey: string, catalogParams?: I18nParams) =>
+      catalogTranslate('en-US', catalogKey, catalogParams));
+    const translated = translate(key, params);
+    return translated === key ? (fallback ?? key) : translated;
+  };
   const [rawCommandDraft, setRawCommandDraft] = React.useState('');
   const parsedCommandDraft = parseMCPCommandDraft(rawCommandDraft);
 
@@ -60,7 +93,7 @@ const AIMCPQuickAddServerPanel: React.FC<AIMCPQuickAddServerPanelProps> = ({
     if (!parsedCommandDraft.ok || !parsedCommandDraft.draft) {
       return;
     }
-    onAddServer(buildMCPQuickAddServerSeed(parsedCommandDraft.draft));
+    onAddServer(buildMCPQuickAddServerSeed(parsedCommandDraft.draft, copy));
     setRawCommandDraft('');
   };
 
@@ -77,22 +110,34 @@ const AIMCPQuickAddServerPanel: React.FC<AIMCPQuickAddServerPanelProps> = ({
       }}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText, fontSize: 14 }}>一行命令快速新增</div>
+        <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText, fontSize: 14 }}>
+          {copy('ai_settings.mcp_server.quick_add.title', undefined, 'Quick add from one command')}
+        </div>
         <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-          先选最接近的模板，或直接粘贴 README 里的一整行启动命令。GoNavi 会先拆成 command、args 和 env，再生成一个可继续编辑的 MCP 草稿。
+          {copy(
+            'ai_settings.mcp_server.quick_add.description',
+            undefined,
+            'Choose the closest template, or paste a full startup command from the README. GoNavi will split it into command, args, and env, then create an editable MCP draft.',
+          )}
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>常见启动方式模板</div>
+        <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>
+          {copy('ai_settings.mcp_server.quick_add.templates_title', undefined, 'Common startup templates')}
+        </div>
         <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-          不确定 command 和 args 怎么拆时，直接点一个模板新增草稿；每张卡片下面展示的就是 GoNavi 实际会启动的命令预览。
+          {copy(
+            'ai_settings.mcp_server.quick_add.templates_description',
+            undefined,
+            'If you are not sure how to split command and args, click a template to create a draft. Each card shows the command GoNavi will actually launch.',
+          )}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
           {MCP_SERVER_DRAFT_TEMPLATES.map((template) => (
             <button
               key={template.key}
               type="button"
-              onClick={() => onAddServer(template.seed)}
+              onClick={() => onAddServer(localizeTemplateSeed(template, copy))}
               style={{
                 textAlign: 'left',
                 padding: '12px 13px',
@@ -103,12 +148,18 @@ const AIMCPQuickAddServerPanel: React.FC<AIMCPQuickAddServerPanelProps> = ({
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: 13, fontWeight: 700 }}>{template.title}</div>
-              <div style={{ marginTop: 4, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>{template.description}</div>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>
+                {copy(template.titleKey, undefined, template.title)}
+              </div>
+              <div style={{ marginTop: 4, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                {copy(template.descriptionKey, undefined, template.description)}
+              </div>
               <code style={{ display: 'block', marginTop: 8, fontFamily: 'var(--gn-font-mono)', fontSize: 12, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: overlayTheme.titleText }}>
                 {buildMCPLaunchPreview(String(template.seed.command || ''), template.seed.args)}
               </code>
-              <div style={{ marginTop: 6, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>{template.detail}</div>
+              <div style={{ marginTop: 6, fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+                {copy(template.detailKey, undefined, template.detail)}
+              </div>
             </button>
           ))}
         </div>
@@ -117,12 +168,12 @@ const AIMCPQuickAddServerPanel: React.FC<AIMCPQuickAddServerPanelProps> = ({
         rows={2}
         value={rawCommandDraft}
         onChange={(event) => setRawCommandDraft(event.target.value)}
-        placeholder={`粘贴完整命令，例如：\n${MCP_COMMAND_PARSE_EXAMPLE}`}
+        placeholder={copy('ai_settings.mcp_server.guide.full_command.placeholder', { example: MCP_COMMAND_PARSE_EXAMPLE })}
         style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}`, fontFamily: 'var(--gn-font-mono)' }}
       />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ ...buildMCPHintStyle(parsedCommandDraft.ok || !rawCommandDraft.trim() ? overlayTheme.mutedText : '#dc2626') }}>
-          {renderParseSummary(rawCommandDraft, parsedCommandDraft, overlayTheme)}
+          {renderParseSummary(rawCommandDraft, parsedCommandDraft, overlayTheme, copy)}
         </div>
         <Button
           icon={<PlusOutlined />}
@@ -130,7 +181,7 @@ const AIMCPQuickAddServerPanel: React.FC<AIMCPQuickAddServerPanelProps> = ({
           disabled={!parsedCommandDraft.ok}
           style={{ borderRadius: 10, fontWeight: 600 }}
         >
-          解析并新增草稿
+          {copy('ai_settings.mcp_server.quick_add.action.parse_and_add', undefined, 'Parse and add draft')}
         </Button>
       </div>
       {parsedCommandDraft.ok && parsedCommandDraft.draft && rawCommandDraft.trim() && (

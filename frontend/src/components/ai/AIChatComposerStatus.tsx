@@ -7,6 +7,8 @@ import {
   LoadingOutlined,
 } from '@ant-design/icons';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIComposerNoticeAction } from '../../utils/aiComposerNotice';
 import type { AIChatReadinessSnapshot } from './aiChatReadiness';
@@ -100,6 +102,9 @@ const AIChatComposerStatus: React.FC<AIChatComposerStatusProps> = ({
   onAction,
   onDismiss,
 }) => {
+  const i18n = useOptionalI18n();
+  const t = i18n?.t ?? ((key: string, params?: Record<string, string | number | boolean | null | undefined>) =>
+    catalogTranslate('en-US', key, params));
   const palette = resolvePalette(snapshot.severity, darkMode);
   const handleAction = () => {
     if (snapshot.action && typeof onAction === 'function') {
@@ -171,8 +176,8 @@ const AIChatComposerStatus: React.FC<AIChatComposerStatusProps> = ({
           )}
           {canDismiss && (
             <Button
-              aria-label="关闭 AI 状态提示"
-              title="关闭"
+              aria-label={t('ai_chat.input.status.dismiss_aria_label')}
+              title={t('common.close')}
               size="small"
               type="text"
               icon={<CloseOutlined />}

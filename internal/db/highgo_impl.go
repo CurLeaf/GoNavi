@@ -304,7 +304,7 @@ func (h *HighGoDB) GetCreateStatement(dbName, tableName string) (string, error) 
 func (h *HighGoDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	schema, table := normalizePGLikeMetadataTable(dbName, tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	data, _, err := h.Query(buildPGLikeColumnsMetadataQuery(schema, table))
@@ -318,7 +318,7 @@ func (h *HighGoDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefi
 func (h *HighGoDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	schema, table := normalizePGLikeMetadataTable(dbName, tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	data, _, err := h.Query(buildPGLikeIndexesMetadataQuery(schema, table))
@@ -336,7 +336,7 @@ func (h *HighGoDB) GetForeignKeys(dbName, tableName string) ([]connection.Foreig
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -396,7 +396,7 @@ func (h *HighGoDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDe
 	}
 	table := strings.TrimSpace(tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }

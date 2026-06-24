@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { message } from 'antd';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
+import { t } from '../i18n';
 import type { ExportProgressStatus } from '../utils/exportProgress';
 
 export type ExportProgressEvent = {
@@ -83,6 +84,7 @@ const hasUsableTotalRows = (known: boolean, total: unknown): boolean => {
 };
 
 const buildExportJobId = (): string => `export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const EXPORT_CANCELED_MESSAGE = '\u5df2\u53d6\u6d88';
 
 const isActiveExportStatus = (status: ExportProgressStatus): boolean =>
   status === 'start' || status === 'running' || status === 'finalizing' || status === 'done' || status === 'error';
@@ -145,7 +147,7 @@ export function useExportProgressRunner(options?: UseExportProgressRunnerOptions
   ): Promise<T | null> => {
     if (state.open && (state.status === 'start' || state.status === 'running' || state.status === 'finalizing')) {
       if (showToast) {
-        void message.warning('当前已有导出任务正在执行，请等待完成后再发起新的导出');
+        void message.warning(t('data_export.message.already_running'));
       }
       return null;
     }
@@ -166,7 +168,7 @@ export function useExportProgressRunner(options?: UseExportProgressRunnerOptions
       startedAt: 0,
       finishedAt: 0,
       status: 'start',
-      stage: '等待选择导出文件',
+      stage: t('data_export.progress.stage.waiting_file_selection'),
       current: 0,
       total: totalRowsKnown ? requestedTotal : 0,
       totalRowsKnown,
@@ -186,15 +188,15 @@ export function useExportProgressRunner(options?: UseExportProgressRunnerOptions
             open: true,
             status: 'done',
             finishedAt: prev.finishedAt || Date.now(),
-            stage: prev.stage || '导出完成',
+            stage: prev.stage || t('data_export.progress.title.done'),
             current: prev.totalRowsKnown ? Math.max(prev.current, prev.total) : prev.current,
             message: '',
           };
         });
         if (showToast) {
-          void message.success('导出成功');
+          void message.success(t('data_export.message.export_success'));
         }
-      } else if (result.message !== '已取消') {
+      } else if (result.message !== EXPORT_CANCELED_MESSAGE) {
         setState((prev) => {
           if (prev.jobId !== jobId) {
             return prev;
@@ -204,12 +206,12 @@ export function useExportProgressRunner(options?: UseExportProgressRunnerOptions
             open: true,
             status: 'error',
             finishedAt: prev.finishedAt || Date.now(),
-            stage: prev.stage || '导出失败',
+            stage: prev.stage || t('data_export.progress.title.error'),
             message: result.message,
           };
         });
         if (showToast) {
-          void message.error(`导出失败: ${result.message}`);
+          void message.error(t('data_export.message.export_failed', { error: result.message }));
         }
       } else {
         reset();
@@ -226,12 +228,12 @@ export function useExportProgressRunner(options?: UseExportProgressRunnerOptions
           open: true,
           status: 'error',
           finishedAt: prev.finishedAt || Date.now(),
-          stage: prev.stage || '导出失败',
+          stage: prev.stage || t('data_export.progress.title.error'),
           message: errorMessage,
         };
       });
       if (showToast) {
-        void message.error(`导出失败: ${errorMessage}`);
+        void message.error(t('data_export.message.export_failed', { error: errorMessage }));
       }
       throw error;
     }

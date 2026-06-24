@@ -1,3 +1,5 @@
+import { t as translateCatalog } from '../i18n';
+
 export type JVMRuntimeMode = 'jmx' | 'endpoint' | 'agent';
 export type JVMTabKind = 'overview' | 'resource' | 'audit' | 'diagnostic' | 'monitoring';
 
@@ -9,6 +11,8 @@ export type JVMModeMeta = {
 };
 
 export const JVM_RUNTIME_MODES: JVMRuntimeMode[] = ['jmx', 'endpoint', 'agent'];
+
+type JVMRuntimeTranslator = (key: string) => string;
 
 const JVM_MODE_META_MAP: Record<JVMRuntimeMode, JVMModeMeta> = {
   jmx: {
@@ -31,12 +35,12 @@ const JVM_MODE_META_MAP: Record<JVMRuntimeMode, JVMModeMeta> = {
   },
 };
 
-const JVM_TAB_KIND_LABELS: Record<JVMTabKind, string> = {
-  overview: 'JVM 概览',
-  resource: 'JVM 资源',
-  audit: 'JVM 审计',
-  diagnostic: 'JVM 诊断',
-  monitoring: 'JVM 监控',
+const JVM_TAB_KIND_LABEL_KEYS: Record<JVMTabKind, string> = {
+  overview: 'sidebar.jvm.tab.overview',
+  resource: 'sidebar.jvm.tab.resource',
+  audit: 'sidebar.jvm.tab.audit',
+  diagnostic: 'sidebar.jvm.tab.diagnostic',
+  monitoring: 'sidebar.jvm.tab.monitoring',
 };
 
 const normalizeMode = (mode: string): string => String(mode || '').trim().toLowerCase();
@@ -66,9 +70,11 @@ export const buildJVMTabTitle = (
   connectionName: string,
   tabKind: JVMTabKind,
   mode: string,
+  translate: JVMRuntimeTranslator = translateCatalog,
 ): string => {
   const trimmedConnectionName = String(connectionName || '').trim();
-  const tabLabel = JVM_TAB_KIND_LABELS[tabKind] || 'JVM';
+  const tabLabelKey = JVM_TAB_KIND_LABEL_KEYS[tabKind];
+  const tabLabel = tabLabelKey ? translate(tabLabelKey) : 'JVM';
   const modeLabel = resolveJVMModeMeta(mode).label;
   const prefix = trimmedConnectionName ? `[${trimmedConnectionName}] ` : '';
 

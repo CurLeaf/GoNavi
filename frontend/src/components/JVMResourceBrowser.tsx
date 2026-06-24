@@ -464,7 +464,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
 
       let draftFromPlan: JVMAIChangeDraft;
       try {
-        draftFromPlan = buildJVMChangeDraftFromAIPlan(plan);
+        draftFromPlan = buildJVMChangeDraftFromAIPlan(plan, tr);
       } catch {
         setDraftError(tr("jvm_resource.error.ai_plan_to_draft_failed"));
         setApplyMessage("");
@@ -586,7 +586,7 @@ const JVMResourceBrowser: React.FC<JVMResourceBrowserProps> = ({ tab }) => {
       readOnly,
       environment: connection.config.jvm?.environment,
       snapshot,
-    });
+    }, tr);
 
     const store = useStore.getState();
     const wasClosed = !store.aiPanelVisible;

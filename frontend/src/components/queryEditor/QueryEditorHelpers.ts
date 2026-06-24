@@ -25,7 +25,29 @@ export type CompletionTriggerMeta = {dbName: string, triggerName: string, tableN
 export type CompletionRoutineMeta = {dbName: string, routineName: string, routineType: string, schemaName?: string};
 
 export const QUERY_LOCATOR_ALIAS_PREFIX = '__gonavi_locator_';
+const QUERY_LOCATOR_METADATA_TIMEOUT_MS = 1500;
 const SQLSERVER_MESSAGE_PREFIX_RE = /^\s*mssql:/i;
+
+const withSoftTimeout = <T,>(promise: Promise<T>, fallback: () => T, timeoutMs = QUERY_LOCATOR_METADATA_TIMEOUT_MS): Promise<T> => {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || typeof globalThis.setTimeout !== 'function') {
+        return promise.catch(() => fallback());
+    }
+    return new Promise<T>((resolve) => {
+        let settled = false;
+        const finish = (value: T) => {
+            if (settled) return;
+            settled = true;
+            globalThis.clearTimeout(timerId);
+            resolve(value);
+        };
+        const timerId = globalThis.setTimeout(() => {
+            finish(fallback());
+        }, timeoutMs);
+        promise
+            .then((value) => finish(value))
+            .catch(() => finish(fallback()));
+    });
+};
 
 const trimBoundaryBlankEntries = (entries: string[]): string[] => {
     let start = 0;
@@ -2059,9 +2081,15 @@ export const resolveQueryLocatorPlan = async ({
 
     try {
         const [resCols, resIndexes] = await Promise.all([
-            DBGetColumns(buildRpcConnectionConfig(config) as any, tableRef.metadataDbName, tableRef.metadataTableName),
-            DBGetIndexes(buildRpcConnectionConfig(config) as any, tableRef.metadataDbName, tableRef.metadataTableName)
-                .catch((error: any) => ({ success: false, message: String(error?.message || error || 'Failed to load indexes'), data: [] })),
+            withSoftTimeout(
+                DBGetColumns(buildRpcConnectionConfig(config) as any, tableRef.metadataDbName, tableRef.metadataTableName),
+                () => ({ success: false, message: 'Timed out while loading columns', data: [] }),
+            ),
+            withSoftTimeout(
+                DBGetIndexes(buildRpcConnectionConfig(config) as any, tableRef.metadataDbName, tableRef.metadataTableName)
+                    .catch((error: any) => ({ success: false, message: String(error?.message || error || 'Failed to load indexes'), data: [] })),
+                () => ({ success: false, message: 'Timed out while loading indexes', data: [] }),
+            ),
         ]);
         if (!resCols?.success || !Array.isArray(resCols.data)) {
             const reason = translate('query_editor.message.read_only_table_locator_metadata_unavailable', {

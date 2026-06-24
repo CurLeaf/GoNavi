@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+import { t as catalogTranslate } from '../i18n/catalog';
 import {
   buildAIComposerNotice,
   buildIncompleteProviderNotice,
@@ -8,80 +10,95 @@ import {
   buildMissingProviderNotice,
 } from './aiComposerNotice';
 
-const t = (key: string, params?: Record<string, unknown>) => {
-  const suffix = params?.detail ? `:${String(params.detail)}` : '';
-  return `${key}${suffix}`;
-};
+const source = readFileSync(new URL('./aiComposerNotice.ts', import.meta.url), 'utf8');
+const en = (key: string, params?: Record<string, unknown>) =>
+  catalogTranslate('en-US', key, params as Record<string, string | number | boolean | null | undefined> | undefined);
 
 describe('ai composer notice helpers', () => {
-  it('builds a translated compact notice for missing provider with an action', () => {
-    expect(buildMissingProviderNotice(t)).toEqual({
+  it('keeps English fallback copy in source instead of legacy Chinese notice defaults', () => {
+    expect(source).toContain("catalogTranslate('en-US'");
+    expect(source).not.toContain('还没有可用供应商');
+    expect(source).not.toContain('先在 AI 设置里添加并启用一个模型供应商。');
+    expect(source).not.toContain('先选择一个模型');
+    expect(source).not.toContain('打开下方模型下拉并选择模型；如果列表为空，请检查供应商入口和 API Key。');
+    expect(source).not.toContain('当前供应商配置还不完整');
+    expect(source).not.toContain('先补全供应商配置再发送，避免请求刚发起就失败。');
+    expect(source).not.toContain('模型列表加载失败');
+    expect(source).not.toContain('请检查供应商入口、API Key 或账号权限，然后重新打开模型下拉。');
+    expect(source).not.toContain('打开 AI 设置');
+    expect(source).not.toContain('修复供应商配置');
+    expect(source).not.toContain('重新加载模型');
+    expect(source).not.toContain('当前供应商还缺少 ${missingLabels.join');
+  });
+
+  it('builds a localized missing-provider notice and falls back to English action copy when needed', () => {
+    expect(buildMissingProviderNotice(en)).toEqual({
       tone: 'warning',
-      title: 'ai_chat.composer_notice.missing_provider.title',
-      description: 'ai_chat.composer_notice.missing_provider.description',
+      title: 'No provider available',
+      description: 'Add and enable a model provider in AI settings first.',
       action: {
         key: 'open-settings',
-        label: '打开 AI 设置',
+        label: 'Open AI settings',
       },
     });
   });
 
-  it('builds a translated compact notice for missing model selection with an action', () => {
-    expect(buildMissingModelNotice(t)).toEqual({
+  it('builds a localized missing-model notice and falls back to English action copy when needed', () => {
+    expect(buildMissingModelNotice(en)).toEqual({
       tone: 'warning',
-      title: 'ai_chat.composer_notice.missing_model.title',
-      description: 'ai_chat.composer_notice.missing_model.description',
+      title: 'Select a model first',
+      description: 'Open the model dropdown below and select a model. If the list is empty, check the provider endpoint and API Key.',
       action: {
         key: 'reload-models',
-        label: '重新加载模型',
+        label: 'Reload models',
       },
     });
   });
 
-  it('builds a translated incomplete provider notice from readiness issues', () => {
-    expect(buildIncompleteProviderNotice(['missing_secret', 'missing_base_url'], t)).toEqual({
+  it('builds an incomplete-provider notice with English fallback wrapper copy instead of mixed Chinese', () => {
+    expect(buildIncompleteProviderNotice(['missing_secret', 'missing_base_url'], en)).toEqual({
       tone: 'error',
-      title: '当前供应商还缺少 密钥、接口地址',
-      description: '先补全供应商配置再发送，避免请求刚发起就失败。',
+      title: 'Current provider is missing API key, endpoint URL',
+      description: 'Complete the provider configuration before sending to avoid immediate request failures.',
       action: {
         key: 'open-settings',
-        label: '修复供应商配置',
+        label: 'Fix provider configuration',
       },
     });
   });
 
-  it('builds a translated inline notice for model fetch failures with raw detail', () => {
-    expect(buildModelFetchFailedNotice(t, '当前接口未返回可用模型')).toEqual({
+  it('builds a localized inline notice for model fetch failures while preserving raw detail', () => {
+    expect(buildModelFetchFailedNotice(en, 'HTTP 401 raw error')).toEqual({
       tone: 'error',
-      title: 'ai_chat.composer_notice.model_fetch_failed.title',
-      description: 'ai_chat.composer_notice.model_fetch_failed.detail_description:当前接口未返回可用模型',
+      title: 'Model list failed to load',
+      description: 'Provider detail: HTTP 401 raw error',
       action: {
         key: 'reload-models',
-        label: '重新加载模型',
+        label: 'Reload models',
       },
     });
   });
 
-  it('uses the translated default description when model fetch failure detail is empty', () => {
-    expect(buildModelFetchFailedNotice(t, '   ')).toEqual({
+  it('uses the English default description when model fetch failure detail is empty', () => {
+    expect(buildModelFetchFailedNotice(en, '   ')).toEqual({
       tone: 'error',
-      title: 'ai_chat.composer_notice.model_fetch_failed.title',
-      description: 'ai_chat.composer_notice.model_fetch_failed.default_description',
+      title: 'Model list failed to load',
+      description: 'Check the provider endpoint, API Key, or account permissions, then reopen the model dropdown.',
       action: {
         key: 'reload-models',
-        label: '重新加载模型',
+        label: 'Reload models',
       },
     });
   });
 
-  it('keeps a non-translated compatibility path for direct notices', () => {
-    expect(buildModelFetchFailedNotice('当前接口未返回可用模型')).toEqual({
+  it('keeps the direct compatibility path raw-detail only while falling back to English chrome', () => {
+    expect(buildModelFetchFailedNotice('HTTP 401 raw error')).toEqual({
       tone: 'error',
-      title: '模型列表加载失败',
-      description: '当前接口未返回可用模型',
+      title: 'Model list failed to load',
+      description: 'HTTP 401 raw error',
       action: {
         key: 'reload-models',
-        label: '重新加载模型',
+        label: 'Reload models',
       },
     });
   });
@@ -103,7 +120,7 @@ describe('ai composer notice helpers', () => {
       description: 'zh:ai_chat.composer_notice.model_fetch_failed.detail_description:HTTP 401 原始错误',
       action: {
         key: 'reload-models',
-        label: 'zh:ai_chat.composer_notice.action.reload_models',
+        label: 'zh:ai_chat.input.status.action.reload_models',
       },
     });
     expect(relocalized).toEqual({
@@ -112,12 +129,12 @@ describe('ai composer notice helpers', () => {
       description: 'en:ai_chat.composer_notice.model_fetch_failed.detail_description:HTTP 401 原始错误',
       action: {
         key: 'reload-models',
-        label: 'en:ai_chat.composer_notice.action.reload_models',
+        label: 'en:ai_chat.input.status.action.reload_models',
       },
     });
   });
 
   it('returns null when there is no composer notice descriptor', () => {
-    expect(buildAIComposerNotice(t, null)).toBeNull();
+    expect(buildAIComposerNotice(en, null)).toBeNull();
   });
 });

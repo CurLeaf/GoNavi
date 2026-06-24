@@ -1,4 +1,5 @@
 import { quoteIdentPart, type FilterCondition } from './sql';
+import { t } from '../i18n';
 
 export type WhereConditionSuggestionKind = 'column' | 'operator' | 'keyword';
 
@@ -146,7 +147,7 @@ export const validateQuickWhereCondition = (
   if (/[;]/.test(text) || /--|\/\*/.test(text)) {
     return {
       ok: false,
-      message: 'WHERE 条件不能包含分号或 SQL 注释',
+      message: t('data_grid.filter.invalid_quick_where'),
     };
   }
   return { ok: true };
@@ -257,7 +258,7 @@ export const resolveWhereConditionSuggestions = ({
         label: operator,
         insertText,
         value: applyWhereConditionSuggestion(text, insertText),
-        detail: '操作符',
+        detail: t('data_grid.filter.suggestion.operator'),
         kind: 'operator',
       });
     });
@@ -280,7 +281,7 @@ export const resolveWhereConditionSuggestions = ({
           label: keyword,
           insertText,
           value: applyWhereConditionSuggestion(text, insertText),
-          detail: '关键字',
+          detail: t('data_grid.filter.suggestion.keyword'),
           kind: 'keyword',
         });
       });
@@ -298,7 +299,7 @@ export const resolveWhereConditionSuggestions = ({
         label: column,
         insertText,
         value: applyWhereConditionSuggestion(text, insertText),
-        detail: '字段',
+        detail: t('data_grid.filter.suggestion.column'),
         kind: 'column',
       });
     });
@@ -311,7 +312,7 @@ export const resolveWhereConditionSuggestions = ({
         label: keyword,
         insertText,
         value: applyWhereConditionSuggestion(text, insertText),
-        detail: '关键字',
+        detail: t('data_grid.filter.suggestion.keyword'),
         kind: 'keyword',
       });
     });

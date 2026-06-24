@@ -231,7 +231,7 @@ export const saveSavedQueryToBackend = async (
 ): Promise<SavedQuery> => {
   const sanitized = sanitizeSavedQuery(query, 0);
   if (!sanitized) {
-    throw new Error('保存查询缺少 SQL、连接或数据库上下文');
+    throw new Error(translate('saved_query.error.missing_context'));
   }
   if (typeof backend?.SaveQuery !== 'function') {
     return sanitized;

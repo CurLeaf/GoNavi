@@ -13,6 +13,7 @@ type capturingRedisClient struct {
 	deletedHashKey    string
 	deletedHashFields []string
 	closed            int
+	closeErr          error
 }
 
 func (c *capturingRedisClient) Connect(config connection.ConnectionConfig) error {
@@ -22,7 +23,7 @@ func (c *capturingRedisClient) Connect(config connection.ConnectionConfig) error
 
 func (c *capturingRedisClient) Close() error {
 	c.closed++
-	return nil
+	return c.closeErr
 }
 
 func (c *capturingRedisClient) Ping() error { return nil }
@@ -163,6 +164,49 @@ func TestRedisTestConnectionUsesIsolatedClientAndClosesIt(t *testing.T) {
 	}
 	if len(redisCache) != 0 {
 		t.Fatalf("redis test connection must not write global redis cache, got %d entries", len(redisCache))
+	}
+}
+
+func TestRedisTestConnectionReturnsLocalizedCloseFailure(t *testing.T) {
+	originalNewRedisClientFunc := newRedisClientFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	proxySnapshot := currentGlobalProxyConfig()
+	defer func() {
+		newRedisClientFunc = originalNewRedisClientFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		if _, err := setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy); err != nil {
+			t.Fatalf("restore global proxy failed: %v", err)
+		}
+		CloseAllRedisClients()
+	}()
+	CloseAllRedisClients()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
+	}
+
+	client := &capturingRedisClient{closeErr: errors.New("close failed")}
+	newRedisClientFunc = func() redislib.RedisClient {
+		return client
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewApp()
+	result := app.RedisTestConnection(connection.ConnectionConfig{
+		Type: "redis",
+		Host: "127.0.0.1",
+		Port: 6379,
+	})
+
+	if result.Success {
+		t.Fatalf("expected localized close failure, got success with %q", result.Message)
+	}
+	if want := app.appText("redis.backend.error.test_connection_close_failed", map[string]any{"detail": "close failed"}); result.Message != want {
+		t.Fatalf("expected localized close failure message %q, got %q", want, result.Message)
+	}
+	if client.closed != 1 {
+		t.Fatalf("expected isolated redis test client to be closed once, got %d", client.closed)
 	}
 }
 

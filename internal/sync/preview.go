@@ -1,7 +1,6 @@
 package sync
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -53,20 +52,20 @@ func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (Ta
 
 	sourceDB, err := newSyncDatabase(config.SourceConfig.Type)
 	if err != nil {
-		return TableDiffPreview{}, fmt.Errorf("初始化源数据库驱动失败: %w", err)
+		return TableDiffPreview{}, syncWrapDetailError("data_sync.backend.error.init_source_driver_failed", err)
 	}
 	targetDB, err := newSyncDatabase(config.TargetConfig.Type)
 	if err != nil {
-		return TableDiffPreview{}, fmt.Errorf("初始化目标数据库驱动失败: %w", err)
+		return TableDiffPreview{}, syncWrapDetailError("data_sync.backend.error.init_target_driver_failed", err)
 	}
 
 	if err := sourceDB.Connect(config.SourceConfig); err != nil {
-		return TableDiffPreview{}, fmt.Errorf("源数据库连接失败: %w", err)
+		return TableDiffPreview{}, syncWrapDetailError("data_sync.backend.error.connect_source_failed", err)
 	}
 	defer sourceDB.Close()
 
 	if err := targetDB.Connect(config.TargetConfig); err != nil {
-		return TableDiffPreview{}, fmt.Errorf("目标数据库连接失败: %w", err)
+		return TableDiffPreview{}, syncWrapDetailError("data_sync.backend.error.connect_target_failed", err)
 	}
 	defer targetDB.Close()
 
@@ -75,7 +74,7 @@ func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (Ta
 		return TableDiffPreview{}, err
 	}
 	if !plan.TargetTableExists && !plan.AutoCreate {
-		return TableDiffPreview{}, errors.New(firstNonEmpty(plan.PlannedAction, "目标表不存在，无法预览差异"))
+		return TableDiffPreview{}, syncTextError("data_sync.plan.target_missing_preview_unavailable", nil)
 	}
 	schemaStatements := make([]string, 0, len(plan.PreDataSQL)+len(plan.PostDataSQL))
 	schemaStatements = append(schemaStatements, plan.PreDataSQL...)
@@ -98,10 +97,12 @@ func (s *SyncEngine) Preview(config SyncConfig, tableName string, limit int) (Ta
 		}
 	}
 	if len(pkCols) == 0 {
-		return TableDiffPreview{}, fmt.Errorf("无主键，不支持数据预览")
+		return TableDiffPreview{}, syncTextError("data_sync.backend.error.preview_pk_required", nil)
 	}
 	if len(pkCols) > 1 {
-		return TableDiffPreview{}, fmt.Errorf("复合主键（%s），暂不支持数据预览", strings.Join(pkCols, ","))
+		return TableDiffPreview{}, syncTextError("data_sync.backend.error.preview_composite_pk_unsupported", map[string]any{
+			"columns": strings.Join(pkCols, ","),
+		})
 	}
 	pkCol := pkCols[0]
 

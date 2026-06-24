@@ -7,11 +7,13 @@ import {
   isRemoteMCPClientStatus,
   type MCPClientKey,
 } from '../../utils/mcpClientInstallStatus';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import {
   getMCPClientInstallStateLabel,
   getMCPClientOptionSummary,
   getMCPClientStatusTone,
+  translateMCPClientInstallCopy,
 } from './mcpClientInstallPanelState';
 
 interface AIMCPClientSelectorPanelProps {
@@ -25,9 +27,27 @@ interface AIMCPClientSelectorPanelProps {
 }
 
 const MCP_CLIENT_INSTALL_STEPS = [
-  { step: '1', title: '选择目标客户端', detail: '本机 Claude/Codex 可自动安装，OpenClaw/Hermans 走远程接入说明。' },
-  { step: '2', title: '写入或复制配置', detail: '自动安装只改用户级 MCP 配置；远程 Agent 复制桥接说明。' },
-  { step: '3', title: '重启或配置目标端', detail: '本机 CLI 重启后验证；云端 Agent 配置远程 MCP 地址后验证。' },
+  {
+    step: '1',
+    titleKey: 'ai_chat.mcp_client.install.selector.step.target.title',
+    titleFallback: 'Choose target client',
+    detailKey: 'ai_chat.mcp_client.install.selector.step.target.detail',
+    detailFallback: 'Local Claude/Codex can be installed automatically. OpenClaw/Hermans use remote connection guidance.',
+  },
+  {
+    step: '2',
+    titleKey: 'ai_chat.mcp_client.install.selector.step.write.title',
+    titleFallback: 'Write or copy config',
+    detailKey: 'ai_chat.mcp_client.install.selector.step.write.detail',
+    detailFallback: 'Automatic install only changes user-level MCP config. Remote Agents copy bridge guidance.',
+  },
+  {
+    step: '3',
+    titleKey: 'ai_chat.mcp_client.install.selector.step.restart.title',
+    titleFallback: 'Restart or configure target',
+    detailKey: 'ai_chat.mcp_client.install.selector.step.restart.detail',
+    detailFallback: 'Restart the local CLI to verify. Cloud Agents verify after configuring the remote MCP URL.',
+  },
 ];
 
 const AIMCPClientSelectorPanel: React.FC<AIMCPClientSelectorPanelProps> = ({
@@ -38,12 +58,26 @@ const AIMCPClientSelectorPanel: React.FC<AIMCPClientSelectorPanelProps> = ({
   cardBorder,
   statusLoading,
   onSelectClient,
-}) => (
-  <>
+}) => {
+  const i18n = useOptionalI18n();
+  const t = i18n?.t;
+  const copy = (
+    key: string,
+    fallback: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => translateMCPClientInstallCopy(t, key, fallback, params);
+
+  return (
+    <>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>接入外部客户端</div>
+      <div style={{ fontWeight: 700, fontSize: 14, color: overlayTheme.titleText }}>
+        {copy('ai_chat.mcp_client.install.selector.title', 'Connect external client')}
+      </div>
       <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-        先选择 1 个目标客户端。本机 CLI 可自动写入或更新配置；远程 Agent 需要通过 MCP 桥接/隧道访问当前 GoNavi，不应保存数据库连接密码。
+        {copy(
+          'ai_chat.mcp_client.install.selector.description',
+          'Choose one target client first. Local CLIs can write or update config automatically; remote Agents must access current GoNavi through an MCP bridge or tunnel and should not store database passwords.',
+        )}
       </div>
     </div>
     <div
@@ -84,25 +118,31 @@ const AIMCPClientSelectorPanel: React.FC<AIMCPClientSelectorPanelProps> = ({
             >
               {item.step}
             </div>
-            <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>{item.title}</div>
+            <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
+              {copy(item.titleKey, item.titleFallback)}
+            </div>
           </div>
-          <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>{item.detail}</div>
+          <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
+            {copy(item.detailKey, item.detailFallback)}
+          </div>
         </div>
       ))}
     </div>
 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>选择外部客户端</div>
+      <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
+        {copy('ai_chat.mcp_client.install.selector.choice_title', 'Select external client')}
+      </div>
       <div
         role="radiogroup"
-        aria-label="选择要安装 GoNavi MCP 的外部客户端"
+        aria-label={copy('ai_chat.mcp_client.install.selector.aria_label', 'Select the external client for GoNavi MCP')}
         style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}
       >
         {statuses.map((status) => {
           const client = isMCPClientKey(status.client) ? status.client : 'claude-code';
           const remoteClient = isRemoteMCPClientStatus(status);
           const active = selectedClient === client;
-          const tone = getMCPClientStatusTone(status, darkMode);
+          const tone = getMCPClientStatusTone(status, darkMode, t);
           return (
             <button
               key={status.client}
@@ -165,15 +205,19 @@ const AIMCPClientSelectorPanel: React.FC<AIMCPClientSelectorPanelProps> = ({
                 </div>
               </div>
               <div style={{ fontSize: 12, color: overlayTheme.titleText, lineHeight: 1.7 }}>
-                {getMCPClientOptionSummary(status)}
+                {getMCPClientOptionSummary(status, t)}
               </div>
               <div style={{ fontSize: 12, color: active ? overlayTheme.selectedText : overlayTheme.mutedText, lineHeight: 1.6, fontWeight: 700 }}>
-                {getMCPClientInstallStateLabel(status)}
+                {getMCPClientInstallStateLabel(status, t)}
               </div>
               <div style={{ fontSize: 11, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
                 {active
-                  ? (remoteClient ? '当前已选中，将复制远程接入说明。' : '当前已选中，将只对这个客户端执行写入或更新。')
-                  : (remoteClient ? '点击后查看远程接入方式。' : '点击后切换到这个客户端。')}
+                  ? (remoteClient
+                    ? copy('ai_chat.mcp_client.install.selector.hint.active_remote', 'Selected. The remote connection guide will be copied.')
+                    : copy('ai_chat.mcp_client.install.selector.hint.active_local', 'Selected. Only this client will be written or updated.'))
+                  : (remoteClient
+                    ? copy('ai_chat.mcp_client.install.selector.hint.inactive_remote', 'Click to view the remote connection method.')
+                    : copy('ai_chat.mcp_client.install.selector.hint.inactive_local', 'Click to switch to this client.'))}
               </div>
             </button>
           );
@@ -181,6 +225,7 @@ const AIMCPClientSelectorPanel: React.FC<AIMCPClientSelectorPanelProps> = ({
       </div>
     </div>
   </>
-);
+  );
+};
 
 export default AIMCPClientSelectorPanel;

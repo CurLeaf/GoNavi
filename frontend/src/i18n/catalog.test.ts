@@ -56,6 +56,9 @@ const readDataGridV2DdlWorkspaceSource = (): string =>
 const readQueryEditorSource = (): string =>
   readFileSync(new URL("../components/QueryEditor.tsx", import.meta.url), "utf8");
 
+const readQueryEditorHelpersSource = (): string =>
+  readFileSync(new URL("../components/queryEditor/QueryEditorHelpers.ts", import.meta.url), "utf8");
+
 const readQueryEditorResultsPanelSource = (): string =>
   readFileSync(new URL("../components/QueryEditorResultsPanel.tsx", import.meta.url), "utf8");
 
@@ -595,11 +598,13 @@ describe("i18n catalog", () => {
       "data_grid.message.change_set_build_failed_detail",
       "data_grid.message.preview_sql_failed_detail",
       "data_grid.message.commit_failed",
+      "data_grid.message.rollback_failed",
     ];
     const noPlaceholderKeys = [
       "data_grid.message.change_set_build_failed",
       "data_grid.message.preview_sql_failed",
       "data_grid.message.transaction_committed",
+      "data_grid.message.transaction_rolled_back",
       "data_grid.message.no_changes_to_commit",
       "data_grid.message.copied_to_clipboard",
       "data_grid.message.no_field_name",
@@ -640,6 +645,7 @@ describe("i18n catalog", () => {
     }
 
     expect(t("en-US", "data_grid.message.commit_failed", { detail: "<raw-detail>" })).toContain("<raw-detail>");
+    expect(t("en-US", "data_grid.message.rollback_failed", { detail: "<raw-rollback-detail>" })).toContain("<raw-rollback-detail>");
     expect(t("zh-CN", "data_grid.message.preview_sql_failed_detail", { detail: "<raw-preview-error>" })).toContain("<raw-preview-error>");
     expect(t("de-DE", "data_grid.copy_sql.error.missing_table_name", { mode: "UPDATE" })).toContain("UPDATE");
   });
@@ -734,12 +740,12 @@ describe("i18n catalog", () => {
     const dataRootFlowSource = sliceBetween(
       source,
       "const loadDataRootInfo = useCallback(async () => {",
-      "// Log Panel",
+      "const handleCreateConnection = useCallback(() => {",
     );
     const windowZoomSource = sliceBetween(
       source,
       "const handleManualResetWindowZoom = React.useCallback(async () => {",
-      "// Sidebar Resizing",
+      "} = useAppSidebarResize({",
     );
     const aiPanelSource = sliceBetween(
       source,
@@ -1186,7 +1192,7 @@ describe("i18n catalog", () => {
       "query_editor.hover.open_procedure_with_shortcut",
       "query_editor.hover.open_function_with_shortcut",
     ] as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorHelpersSource();
     const hoverMessageSource = sliceBetween(
       source,
       "const hoverMessage = (() => {",
@@ -1226,7 +1232,7 @@ describe("i18n catalog", () => {
       "query_editor.object_info.label.schema",
     ] as const;
     const tableAndColumnHoverSeparatorKey = "query_editor.object_info.label.separator" as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorHelpersSource();
     const hoverMarkdownSource = sliceBetween(
       source,
       "const buildQueryEditorHoverMarkdown = (target: QueryEditorHoverTarget): string => {",
@@ -1279,7 +1285,7 @@ describe("i18n catalog", () => {
       "query_editor.object_info.label.schema",
     ] as const;
     const viewHoverSeparatorKey = "query_editor.object_info.label.separator" as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorHelpersSource();
     const hoverMarkdownSource = sliceBetween(
       source,
       "const buildQueryEditorHoverMarkdown = (target: QueryEditorHoverTarget): string => {",
@@ -1329,7 +1335,7 @@ describe("i18n catalog", () => {
       "query_editor.object_info.label.schema",
     ] as const;
     const triggerHoverSeparatorKey = "query_editor.object_info.label.separator" as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorHelpersSource();
     const hoverMarkdownSource = sliceBetween(
       source,
       "const buildQueryEditorHoverMarkdown = (target: QueryEditorHoverTarget): string => {",
@@ -1371,7 +1377,7 @@ describe("i18n catalog", () => {
       "query_editor.object_info.label.schema",
     ] as const;
     const routineHoverSeparatorKey = "query_editor.object_info.label.separator" as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorHelpersSource();
     const hoverMarkdownSource = sliceBetween(
       source,
       "const buildQueryEditorHoverMarkdown = (target: QueryEditorHoverTarget): string => {",
@@ -1409,7 +1415,7 @@ describe("i18n catalog", () => {
     const databaseHoverKeys = [
       "query_editor.object_info.database",
     ] as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorHelpersSource();
     const hoverMarkdownSource = sliceBetween(
       source,
       "const buildQueryEditorHoverMarkdown = (target: QueryEditorHoverTarget): string => {",
@@ -1441,7 +1447,7 @@ describe("i18n catalog", () => {
 
   it("keeps QueryEditor completion comment documentation prefix in catalogs instead of source literals", () => {
     const completionCommentKey = "query_editor.completion.documentation.comment" as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorHelpersSource();
     const completionDocumentationSource = sliceBetween(
       source,
       "const buildCompletionDocumentation = (comment?: string): string | undefined => {",
@@ -1800,7 +1806,7 @@ describe("i18n catalog", () => {
   it("keeps QueryEditor no-safe-locator read-only warning copy in catalogs instead of source literals", () => {
     const noSafeLocatorReasonKey = "query_editor.message.read_only_no_safe_locator" as const;
     const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorHelpersSource();
     const noSafeLocatorSource = sliceBetween(
       source,
       "                if (!resIndexes?.success) {",
@@ -1834,7 +1840,7 @@ describe("i18n catalog", () => {
   it("keeps QueryEditor index-metadata-unavailable read-only warning copy in catalogs instead of source literals", () => {
     const indexMetadataUnavailableReasonKey = "query_editor.message.read_only_index_metadata_unavailable" as const;
     const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorHelpersSource();
     const indexMetadataUnavailableSource = sliceBetween(
       source,
       "                if (!resIndexes?.success) {",
@@ -1868,11 +1874,11 @@ describe("i18n catalog", () => {
   it("keeps QueryEditor table-locator-metadata-unavailable read-only warning copy in catalogs instead of source literals", () => {
     const tableLocatorMetadataUnavailableReasonKey = "query_editor.message.read_only_table_locator_metadata_unavailable" as const;
     const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorHelpersSource();
     const resolveQueryLocatorPlanSource = sliceBetween(
       source,
-      "const resolveQueryLocatorPlan = async ({",
-      "const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isActive = true }) => {",
+      "export const resolveQueryLocatorPlan = async ({",
+      "\n};",
     );
     const resColsFailureSource = sliceBetween(
       resolveQueryLocatorPlanSource,
@@ -1919,7 +1925,7 @@ describe("i18n catalog", () => {
   it("keeps QueryEditor Oracle ROWID fallback read-only warning copy in catalogs instead of source literals", () => {
     const oracleRowIdFallbackReasonKey = "query_editor.message.read_only_oracle_rowid_injection_unavailable" as const;
     const readOnlyWarningWrapperKey = "query_editor.message.read_only_warning_with_detail" as const;
-    const source = readQueryEditorSource();
+    const source = readQueryEditorHelpersSource();
     const oracleRowIdFallbackSource = sliceBetween(
       source,
       "        if (executableAppendExpressions.length > 0 && isOracleLikeDialect(dbType) && selectInfo.selectsBareAll) {",
@@ -1991,7 +1997,7 @@ describe("i18n catalog", () => {
     const aiContextSource = sliceBetween(
       source,
       "const buildQueryEditorAiContextPrompt = (connection: any, database: string): string => {",
-      "const _g = globalThis as any;",
+      "// HMR 重载时释放旧注册避免补全和 hover 内容重复",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {
@@ -2127,7 +2133,7 @@ describe("i18n catalog", () => {
     );
     const diagnosePromptSource = sliceBetween(
       source,
-      "const prompt = translate('query_editor.ai_prompt.diagnose', {",
+      "  const handleDiagnoseExecutionError = () => {",
       "  const sqlEditorTransactionToolbar = (",
     );
     const toolbarAndDiagnoseSource = `${toolbarPromptSource}\n${diagnosePromptSource}`;
@@ -2160,7 +2166,34 @@ describe("i18n catalog", () => {
       "app.shortcuts.action.saveQuery.label",
       "query_editor.action.show_object_info",
     ] as const;
-    const actionLabelSource = readQueryEditorSource();
+    const source = readQueryEditorSource();
+    const actionLabelSource = [
+      sliceBetween(
+        source,
+        "      objectHoverActionRef.current = editor.addAction({",
+        "      editor.onDidChangeCursorPosition?.((event: any) => {",
+      ),
+      sliceBetween(
+        source,
+        "      // Register runQuery shortcut inside Monaco so it overrides Monaco's default keybinding",
+        "      // HMR 重载或测试重置时，以全局状态为准，避免本地闭包状态和 provider 列表不同步。",
+      ),
+      sliceBetween(
+        source,
+        "      const binding = runQueryShortcutBinding;",
+        "  }, [languagePreference, runQueryShortcutBinding]);",
+      ),
+      sliceBetween(
+        source,
+        "      const binding = selectCurrentStatementShortcutBinding;",
+        "  }, [languagePreference, selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);",
+      ),
+      sliceBetween(
+        source,
+        "      const binding = saveQueryShortcutBinding;",
+        "  }, [languagePreference, saveQueryShortcutBinding]);",
+      ),
+    ].join("\n");
 
     for (const language of SUPPORTED_LANGUAGES) {
       for (const key of actionLabelKeys) {
@@ -2234,7 +2267,12 @@ describe("i18n catalog", () => {
       "query_editor.empty_state.title",
       "query_editor.empty_state.description",
     ] as const;
-    const emptyStateSource = readQueryEditorResultsPanelSource();
+    const source = readQueryEditorResultsPanelSource();
+    const emptyStateSource = sliceBetween(
+      source,
+      "<div className={isV2Ui ? 'gn-v2-query-empty' : undefined}",
+      "                    </>",
+    );
 
     for (const language of SUPPORTED_LANGUAGES) {
       for (const key of emptyStateKeys) {

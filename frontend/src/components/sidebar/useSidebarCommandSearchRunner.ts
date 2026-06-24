@@ -1,5 +1,6 @@
 import { useCallback, type MutableRefObject, type Dispatch, type SetStateAction } from 'react';
 
+import { t } from '../../i18n';
 import type { SavedConnection } from '../../types';
 import { resolveSidebarNodeConnectionId, shouldRunV2CommandSearchEnter, type SidebarTreeNode as TreeNode, type V2CommandSearchItem } from '../sidebarV2Utils';
 
@@ -69,7 +70,7 @@ export const useSidebarCommandSearchRunner = ({
     if (item.kind === 'recent') {
       addTab({
         id: `query-${Date.now()}`,
-        title: '最近查询',
+        title: t('sidebar.tab.recent_query'),
         type: 'query',
         connectionId: item.connectionId || activeContext?.connectionId || activeTab?.connectionId || '',
         dbName: item.dbName || activeContext?.dbName || activeTab?.dbName || '',

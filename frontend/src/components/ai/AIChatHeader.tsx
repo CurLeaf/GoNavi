@@ -3,7 +3,8 @@ import { Button, Tooltip } from 'antd';
 import { HistoryOutlined, RobotOutlined, ClearOutlined, SettingOutlined, CloseOutlined, ExportOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIChatMessage } from '../../types';
-import { useI18n } from '../../i18n/provider';
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 
 interface AIChatHeaderProps {
     darkMode: boolean;
@@ -56,7 +57,9 @@ export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
     activeMode = 'chat',
     onModeChange,
 }) => {
-    const { t } = useI18n();
+    const i18n = useOptionalI18n();
+    const t = i18n?.t ?? ((key: string, params?: Record<string, string | number | boolean | null | undefined>) =>
+        catalogTranslate('en-US', key, params));
     const resolvedSessionTitle = sessionTitle === undefined || sessionTitle === ''
         ? t('ai_chat.panel.session.default_title')
         : sessionTitle;
@@ -108,7 +111,7 @@ export const AIChatHeader: React.FC<AIChatHeaderProps> = ({
                         <span className="ai-title" style={{ color: textColor, fontSize: 13, fontWeight: 600 }}>GoNavi AI</span>
                         <small>{t('ai_chat.header.session.connected', { title: resolvedSessionTitle })}</small>
                     </div>
-                    <span className="gn-v2-ai-provider-badge">BETA</span>
+                    <span className="gn-v2-ai-provider-badge">{t('app.theme.ui_version.v2.badge')}</span>
                 </div>
                 <div className="ai-chat-header-right gn-v2-ai-header-actions">
                     <Tooltip title={t('ai_chat.header.tooltip.new_chat')}>

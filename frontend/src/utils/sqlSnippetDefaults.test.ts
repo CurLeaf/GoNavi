@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_SQL_SNIPPETS, BUILTIN_SNIPPET_MAP } from './sqlSnippetDefaults';
+import { readFileSync } from 'node:fs';
+import { DEFAULT_SQL_SNIPPETS, BUILTIN_SNIPPET_MAP, createDefaultSqlSnippets } from './sqlSnippetDefaults';
 import type { SqlSnippet } from '../types';
 
 describe('sqlSnippetDefaults', () => {
@@ -69,5 +70,28 @@ describe('sqlSnippetDefaults', () => {
       const mapped = BUILTIN_SNIPPET_MAP[s.id];
       expect(mapped).not.toBe(s);
     }
+  });
+
+  it('localizes built-in snippet metadata while keeping SQL bodies raw', () => {
+    const snippets = createDefaultSqlSnippets((key) => `T(${key})`);
+    const first = snippets.find((s) => s.id === 'builtin-sel');
+
+    expect(first?.name).toBe('T(sql_snippets.builtin.sel.name)');
+    expect(first?.description).toBe('T(sql_snippets.builtin.sel.description)');
+    expect(first?.body).toBe('SELECT ${1:column_list} FROM ${2:table_name}$0;');
+  });
+
+  it('keeps built-in snippet Chinese metadata out of source defaults', () => {
+    const source = readFileSync(new URL('./sqlSnippetDefaults.ts', import.meta.url), 'utf8');
+
+    [
+      'SELECT 基本查询',
+      '基本 SELECT 查询模板',
+      '子查询',
+      '按日期条件过滤的 SELECT 查询',
+      'INSERT 模板，自动填入当前时间戳',
+    ].forEach((literal) => {
+      expect(source).not.toContain(literal);
+    });
   });
 });

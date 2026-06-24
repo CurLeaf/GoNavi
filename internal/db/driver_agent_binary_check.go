@@ -20,6 +20,18 @@ const (
 	peCOFFHeaderSize   = 20
 )
 
+type driverAgentArchMismatchError struct {
+	fileLabel    string
+	processLabel string
+}
+
+func (e *driverAgentArchMismatchError) Error() string {
+	if e == nil {
+		return "driver agent architecture is incompatible"
+	}
+	return fmt.Sprintf("driver agent architecture is incompatible (file=%s, current process=%s)", e.fileLabel, e.processLabel)
+}
+
 func windowsMachineLabel(machine uint16) string {
 	switch machine {
 	case peMachineI386:
@@ -61,7 +73,10 @@ func validateWindowsExecutableMachineForArch(pathText string, goarch string) err
 		return nil
 	}
 	if machine != expectedMachine {
-		return fmt.Errorf("可执行文件架构不兼容（文件=%s，当前进程=%s）", windowsMachineLabel(machine), expectedLabel)
+		return &driverAgentArchMismatchError{
+			fileLabel:    windowsMachineLabel(machine),
+			processLabel: expectedLabel,
+		}
 	}
 	return nil
 }

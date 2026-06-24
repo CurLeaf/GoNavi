@@ -8,9 +8,16 @@ import (
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/shared/i18n"
 )
 
 func TestWrapConnectError_MongoNoSSL_RemovesMisleadingSSLLabel(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage(string(i18n.LanguageZhCN))
+	t.Cleanup(func() {
+		app.SetLanguage(string(i18n.LanguageEnUS))
+	})
+
 	config := connection.ConnectionConfig{
 		Type:   "mongodb",
 		UseSSL: false,
@@ -24,6 +31,32 @@ func TestWrapConnectError_MongoNoSSL_RemovesMisleadingSSLLabel(t *testing.T) {
 	}
 	if !strings.Contains(text, "主库凭据验证失败") {
 		t.Fatalf("expected auth label to remain, got: %s", text)
+	}
+}
+
+func TestWrapConnectError_MongoNoSSL_UsesCurrentLanguageCredentialLabel(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage(string(i18n.LanguageEnUS))
+	t.Cleanup(func() {
+		app.SetLanguage(string(i18n.LanguageEnUS))
+	})
+
+	config := connection.ConnectionConfig{
+		Type:   "mongodb",
+		UseSSL: false,
+	}
+	sourceErr := errors.New("MongoDB connect failed: SSL 主库凭据: mock error")
+
+	wrapped := wrapConnectError(config, sourceErr)
+	text := wrapped.Error()
+	if strings.Contains(text, "SSL 主库凭据") {
+		t.Fatalf("expected legacy ssl label to be removed when TLS disabled, got: %s", text)
+	}
+	if strings.Contains(text, "主库凭据") {
+		t.Fatalf("expected credential label to follow current language, got: %s", text)
+	}
+	if !strings.Contains(text, "primary credentials") {
+		t.Fatalf("expected english credential label, got: %s", text)
 	}
 }
 
@@ -71,6 +104,12 @@ func TestWithLogHintError_OmitEmptyLogPath(t *testing.T) {
 }
 
 func TestWithLogHintError_IncludeNonEmptyLogPath(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage(string(i18n.LanguageZhCN))
+	t.Cleanup(func() {
+		app.SetLanguage(string(i18n.LanguageEnUS))
+	})
+
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "gonavi.log")
 	if err := os.WriteFile(logPath, []byte("log entry\n"), 0o644); err != nil {
@@ -80,5 +119,28 @@ func TestWithLogHintError_IncludeNonEmptyLogPath(t *testing.T) {
 	text := err.Error()
 	if !strings.Contains(text, "详细日志："+logPath) {
 		t.Fatalf("expected log hint with path, got: %s", text)
+	}
+}
+
+func TestWithLogHintError_UsesCurrentLanguageForLogHint(t *testing.T) {
+	app := NewApp()
+	app.SetLanguage(string(i18n.LanguageEnUS))
+	t.Cleanup(func() {
+		app.SetLanguage(string(i18n.LanguageEnUS))
+	})
+
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "gonavi.log")
+	if err := os.WriteFile(logPath, []byte("log entry\n"), 0o644); err != nil {
+		t.Fatalf("write log failed: %v", err)
+	}
+
+	err := withLogHint{err: errors.New("connect failed"), logPath: logPath}
+	text := err.Error()
+	if !strings.Contains(text, "detail log: "+logPath) {
+		t.Fatalf("expected English log hint with path, got: %s", text)
+	}
+	if strings.Contains(text, "详细日志") {
+		t.Fatalf("expected no Chinese log hint in en-US message, got: %s", text)
 	}
 }

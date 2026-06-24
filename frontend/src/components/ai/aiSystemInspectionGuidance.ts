@@ -1,251 +1,177 @@
 import type { AISystemContextMessage } from './aiSystemContextMessages';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
+
+const INSPECTION_GUIDANCE_KEY_PREFIX = 'ai_chat.system.inspection_guidance';
+
+const INSPECTION_GUIDANCE_FALLBACKS = {
+  inspect_ai_runtime:
+    'If the user asks which model is active, what the current safety level is, which tools are available, or which Skills / MCP tools are enabled, call inspect_ai_runtime first to read the current AI runtime state instead of answering from memory or assumptions.',
+  inspect_ai_safety:
+    'If the user asks why writing is blocked, whether the current mode is read-only, whether DDL can run, or whether allowMutating should be passed, call inspect_ai_safety first to read the real safety boundary instead of guessing from UI state or memory.',
+  inspect_ai_context:
+    'If the user asks about the current AI context, associated tables, or table schemas attached to the session, call inspect_ai_context first to read the mounted table-schema context instead of repeating from memory.',
+  inspect_app_health:
+    'If the user reports unstable AI behavior, asks for an overall check, asks about obvious GoNavi AI issues, wants connection, MCP, and log diagnostics together, or mentions abnormal AI reply bubbles, call inspect_app_health first to get the global health overview, then decide whether to drill into inspect_ai_setup_health, inspect_app_logs, inspect_recent_connection_failures, or inspect_ai_last_render_error.',
+  inspect_ai_support_bundle:
+    'If the user says the AI is immature or unstable, asks to export troubleshooting material, wants MCP, connection, logs, and context inspected together, or is preparing to hand the issue to development, call inspect_ai_support_bundle first to create a support bundle without secrets or database passwords, then drill down based on warnings and nextActions.',
+  inspect_ai_tool_catalog:
+    'If the user question spans multiple features, you are unsure which built-in tool to call first, or the user asks what tools exist, how to fill tool parameters, or which probe fits a problem type, call inspect_ai_tool_catalog first to read the real tool catalog, recommended workflow, and parameter hints before choosing a concrete probe.',
+  inspect_ai_setup_health:
+    'If the user asks why AI is hard to use, asks for a health check of the current AI configuration, or asks about obvious current AI issues, call inspect_ai_setup_health first to get the overall state, then drill into inspect_ai_providers, inspect_ai_chat_readiness, inspect_mcp_setup, or inspect_ai_guidance as needed.',
+  inspect_ai_chat_readiness:
+    'If the user asks why sending is unavailable, what configuration the current AI chat is missing, or whether the input area is ready, call inspect_ai_chat_readiness first to read the real pre-send state instead of judging only from UI state or memory.',
+  inspect_ai_upstream_logs:
+    'If the user mentions upstream AI requests, request parameters, request body, requestId, model payloads, tools not triggering, or the exact upstream error payload, call inspect_ai_upstream_logs first to read the redacted request log and payload-structure summary, then continue with inspect_ai_providers or inspect_ai_message_flow as needed.',
+  inspect_ai_providers:
+    'If the user asks which providers are configured, why the model list is empty, whether an API Key is configured, or why sending is unavailable / no model is selected, call inspect_ai_providers first to read the real provider configuration instead of guessing from memory.',
+  inspect_mcp_setup:
+    'If the user asks which MCP servers are configured, whether Claude / Codex is connected to the GoNavi MCP, why an external client cannot use it, or which MCP services are enabled, call inspect_mcp_setup first to read the real MCP configuration and external-client access state instead of guessing from memory.',
+  inspect_mcp_runtime_failures:
+    'If the user mentions a failed new MCP test, zero discovered tools, MCP tool-call failures, stdio disconnects, Docker MCP exits, or HTTP MCP startup failures, call inspect_mcp_runtime_failures first to read real MCP runtime failure logs and current service discovery state, then decide whether to drill into inspect_mcp_draft, inspect_mcp_docker_setup, or inspect_mcp_setup.',
+  inspect_mcp_authoring_guide:
+    'If the user does not know how to fill command / args / env / timeout for a new MCP server, asks for a node / uvx / python template, or asks why a startup command cannot be entered as one full line, call inspect_mcp_authoring_guide first to read the real authoring guide and templates. If the user has already pasted a command or draft, call inspect_mcp_draft to evaluate it with the real validator instead of explaining from memory.',
+  inspect_mcp_draft:
+    'If the user pastes an MCP README startup command, a command / args / env / timeout draft, or asks how to fill that MCP command in GoNavi, call inspect_mcp_draft first to return automatic splitting, launch preview, suggestedServerSeed, configuration errors / warnings, and nextActions, then give the user concrete values.',
+  inspect_mcp_tool_schema:
+    'If the user asks how to fill parameters for an MCP tool, reports an MCP tool argument error, or asks how to write the arguments JSON for an MCP tool, call inspect_mcp_tool_schema first to read the real inputSchema. If the alias is unknown, call inspect_mcp_setup first to find the currently discovered tool alias.',
+  inspect_ai_guidance:
+    'If the user asks which prompts are currently attached, which Skills are active, why you answered in a certain way, or what the current database / JVM prompt is, call inspect_ai_guidance first to read the real prompt and Skill configuration instead of summarizing from memory.',
+  inspect_shortcuts:
+    'If the user asks what a shortcut is, how it differs between Win and Mac, what the result-area / AI panel / SQL execution shortcut is, or whether they changed the default shortcut, call inspect_shortcuts first to read the real shortcut configuration and platform differences instead of answering default values from memory.',
+  inspect_recent_connection_failures:
+    'If the user asks why a connection cannot be established, mentions recent connection failure cooldown, validation failure, SSH tunnel issues, or multiStatements / parameter compatibility exceptions, call inspect_recent_connection_failures first to read the real connection failure summary, then decide whether to drill into inspect_current_connection, inspect_saved_connections, or inspect_app_logs.',
+  inspect_app_logs:
+    'If the user mentions gonavi.log, recent logs, startup errors, MCP startup failures, or database connection failures, call inspect_app_logs first to read the real application log tail. Continue filtering by keyword if needed instead of guessing only from a dialog or toast.',
+  inspect_ai_last_render_error:
+    'If the user says an AI message is blank, a bubble failed to render, or a message block error was isolated without breaking the whole panel, call inspect_ai_last_render_error first to read the most recent isolated frontend render exception instead of guessing from a screenshot.',
+  inspect_ai_message_flow:
+    'If the user says an AI reply was split into multiple bubbles, the model did not continue after tool calls, message stream state is wrong, or one turn was not appended to the same bubble, call inspect_ai_message_flow first to read the real current-session message structure, consecutive assistant messages, and unresolved tool calls instead of guessing from UI state.',
+  inspect_ai_context_budget:
+    'If the user says AI is slow, context is too large, too many table schemas are mounted, tool results are too long, the model starts answering unreliably, or a complex task needs context sizing before execution, call inspect_ai_context_budget first to read the size risks for messages, DDL, MCP schema, prompts, and Skills, then decide whether to narrow context or split the task.',
+  inspect_codebase_hotspots:
+    'If the user mentions bloated multi-thousand-line files, continuing to split large components, which file should be split next, or whether AI / MCP / UI changes are risky, call inspect_codebase_hotspots first to read large-file hotspots, suggested split slices, and test targets before defining the change scope.',
+  inspect_current_connection:
+    'If the user asks about the current connection, current data source, which database or address is connected, or whether the connection uses SSH / proxy, call inspect_current_connection first to read the active connection summary instead of guessing from UI state or memory.',
+  inspect_connection_capabilities:
+    'If the user asks why database creation / deletion / renaming is unavailable, why result editing is unavailable, or which frontend actions this data source supports, call inspect_connection_capabilities first to read the real connection capability matrix instead of relying on database common knowledge or memory.',
+  inspect_saved_connections:
+    'If the user asks which connections are stored locally, asks to find a MySQL / PostgreSQL / Redis connection, or asks which connection uses SSH / proxy, call inspect_saved_connections first to read the real local connection list, then decide which connection to inspect next.',
+  inspect_redis_topology:
+    'If the user mentions Redis Sentinel / cluster, Sentinel master, Redis Cluster multi-database behavior, Redis DB switching failures, or how to fill multiple Redis nodes, call inspect_redis_topology first to read the real Redis topology, nodes, authentication state, and risk hints instead of guessing from default ports or experience.',
+  inspect_external_sql_directories:
+    'If the user mentions external SQL directories, scripts inside a directory, where a specific SQL file is stored, or where the currently opened SQL file came from, call inspect_external_sql_directories first to read the real external SQL directory assets, then decide whether to read the active tab or locate a concrete script.',
+  inspect_external_sql_file:
+    'If the user provides an external SQL file path or explicitly asks to inspect report.sql / job.sql in a directory, call inspect_external_sql_file first to read the real file content. If the file is already open in the editor, combine it with inspect_active_tab to check the current draft.',
+  inspect_recent_sql_activity:
+    'If the user asks what was run recently, whether data was just deleted, whether recent work was mostly reads or writes, or which database recently had the most errors, call inspect_recent_sql_activity first to read the recent SQL activity summary, then decide whether to drill into inspect_recent_sql_logs for concrete statements.',
+  inspect_sql_editor_transaction:
+    'If the user asks about manual commit / autocommit in the SQL editor, whether there is an uncommitted transaction, whether update / insert / delete will auto-commit, or whether transaction semantics were misunderstood, call inspect_sql_editor_transaction first to read the real commit settings, pending transactions, and whether the current SQL tab will enter a managed transaction instead of explaining from memory.',
+  inspect_sql_risk:
+    'If the user asks you to execute, delete, update, run DDL, run bulk SQL, or asks whether a SQL statement can run / is dangerous, call inspect_sql_risk first to check the current editor or supplied SQL for statement count, write / DDL risk, WHERE conditions, and safety policy result. When high / critical risk is found, explain the risk and ask for confirmation before proceeding.',
+  inspect_saved_queries:
+    'If the user mentions saved queries, SQL history, a previously written statement, or asks to find an earlier script, call inspect_saved_queries first to read locally saved queries, then decide whether to verify fields or reuse SQL.',
+  inspect_ai_sessions:
+    'If the user mentions a previous AI conversation, a prior discussion, or asks which recent session talked about this problem, call inspect_ai_sessions first to read the local AI session list and previews, then decide whether to inspect the current tab or reuse historical SQL.',
+  inspect_sql_snippets:
+    'If the user mentions SQL snippets, snippet templates, template prefixes, or common templates, call inspect_sql_snippets first to read the local SQL snippet library instead of inventing existing templates from memory.',
+} as const;
+
+type InspectionGuidanceToolName = keyof typeof INSPECTION_GUIDANCE_FALLBACKS;
+
+const guidanceKey = (toolName: InspectionGuidanceToolName): string =>
+  `${INSPECTION_GUIDANCE_KEY_PREFIX}.${toolName}`;
+
+const buildGuidanceContent = (
+  toolName: InspectionGuidanceToolName,
+  translate?: AIInspectionTranslator,
+): string => translateInspectionCopy(
+  translate,
+  guidanceKey(toolName),
+  INSPECTION_GUIDANCE_FALLBACKS[toolName],
+);
 
 const appendGuidanceIfToolAvailable = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
-  toolName: string,
-  content: string,
+  toolName: InspectionGuidanceToolName,
+  translate?: AIInspectionTranslator,
 ) => {
   if (!availableToolNames.includes(toolName)) {
     return;
   }
-  messages.push({ role: 'system', content });
+  messages.push({ role: 'system', content: buildGuidanceContent(toolName, translate) });
 };
 
 const appendAIRuntimeInspectionGuidance = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
+  translate?: AIInspectionTranslator,
 ) => {
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
-    'inspect_ai_runtime',
-    '如果用户提到“你现在用的哪个模型”“当前安全级别”“你现在能调用什么工具”“当前启用了哪些 skills / MCP 工具”，优先调用 inspect_ai_runtime 读取当前 AI 运行状态，不要凭记忆或假设回答。',
-  );
+  appendGuidanceIfToolAvailable(messages, availableToolNames, 'inspect_ai_runtime', translate);
 };
 
 const appendAISafetyInspectionGuidance = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
+  translate?: AIInspectionTranslator,
 ) => {
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
-    'inspect_ai_safety',
-    '如果用户提到“为什么现在不能写”“当前是不是只读”“DDL 能不能执行”“allowMutating 要不要传”，优先调用 inspect_ai_safety 读取真实安全边界，不要只凭界面现象或记忆猜测。',
-  );
+  appendGuidanceIfToolAvailable(messages, availableToolNames, 'inspect_ai_safety', translate);
 };
 
 export const appendJVMInspectionGuidanceMessages = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
+  translate?: AIInspectionTranslator,
 ) => {
-  appendAIRuntimeInspectionGuidance(messages, availableToolNames);
-  appendAISafetyInspectionGuidance(messages, availableToolNames);
+  appendAIRuntimeInspectionGuidance(messages, availableToolNames, translate);
+  appendAISafetyInspectionGuidance(messages, availableToolNames, translate);
 };
 
 export const appendDatabaseInspectionGuidanceMessages = (
   messages: AISystemContextMessage[],
   availableToolNames: string[],
+  translate?: AIInspectionTranslator,
 ) => {
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
+  const databaseGuidanceTools: InspectionGuidanceToolName[] = [
     'inspect_ai_context',
-    '如果用户提到“当前 AI 上下文”“当前关联了哪些表”“现在带了哪些表结构”，优先调用 inspect_ai_context 读取当前挂载的表结构上下文，不要凭记忆复述。',
-  );
-  appendAIRuntimeInspectionGuidance(messages, availableToolNames);
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
+    'inspect_ai_runtime',
     'inspect_app_health',
-    '如果用户提到“AI 不稳定”“整体帮我看看”“GoNavi AI 现在还有哪些明显问题”“连接、MCP、日志一起排查”或“AI 回复气泡显示异常”，优先调用 inspect_app_health 获取 AI 配置、应用日志、连接失败、回复气泡渲染异常和工作区页签的全局健康总览，再决定下钻 inspect_ai_setup_health、inspect_app_logs、inspect_recent_connection_failures 或 inspect_ai_last_render_error。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_ai_support_bundle',
-    '如果用户提到“AI 不成熟/不稳定”“帮我导出排障材料”“MCP、连接、日志、上下文一起看”或准备把问题交给开发定位，优先调用 inspect_ai_support_bundle 生成不含密钥和数据库密码的支持包，再根据 warnings 和 nextActions 下钻。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_ai_tool_catalog',
-    '如果用户问题横跨多个功能、你不确定该先调用哪个内置工具，或用户问“你有哪些工具/这个工具参数怎么填/某类问题该用哪个探针”，优先调用 inspect_ai_tool_catalog 按关键词读取真实工具目录、推荐流程和参数提示，再选择具体探针。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_ai_setup_health',
-    '如果用户提到“AI 为什么不好用”“帮我体检一下当前 AI 配置”“当前 AI 整体还有哪些明显问题”，优先调用 inspect_ai_setup_health 先拿到整体现状，再按需下钻 inspect_ai_providers、inspect_ai_chat_readiness、inspect_mcp_setup 或 inspect_ai_guidance。',
-  );
-  appendAISafetyInspectionGuidance(messages, availableToolNames);
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
+    'inspect_ai_safety',
     'inspect_ai_chat_readiness',
-    '如果用户提到“为什么现在不能发送”“当前 AI 聊天到底缺什么配置”“输入区准备好了没有”，优先调用 inspect_ai_chat_readiness 读取真实发送前置状态，不要只凭界面现象或记忆判断。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_ai_upstream_logs',
-    '如果用户提到“AI 上游请求”“请求入参/请求体”“requestId”“发给模型的 payload”“工具调用没触发”“上游接口报错具体传了什么”，优先调用 inspect_ai_upstream_logs 读取脱敏后的真实请求日志和 payload 结构摘要，再结合 inspect_ai_providers 或 inspect_ai_message_flow 继续定位。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_ai_providers',
-    '如果用户提到“当前配了哪些供应商”“为什么模型列表为空”“API Key 有没有配”“为什么现在不能发送/没选中模型”，优先调用 inspect_ai_providers 读取真实供应商配置，不要凭记忆猜测。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_mcp_setup',
-    '如果用户提到“我现在配了哪些 MCP”“Claude/Codex 有没有接入 GoNavi MCP”“为什么外部客户端用不了”“当前 MCP 服务启用了哪些”，优先调用 inspect_mcp_setup 读取真实 MCP 配置和外部客户端接入状态，不要凭记忆猜测。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_mcp_runtime_failures',
-    '如果用户提到“新增 MCP 测试失败”“工具发现 0 个”“MCP 工具调用失败”“stdio 断开”“Docker MCP 退出”或“HTTP MCP 启动失败”，优先调用 inspect_mcp_runtime_failures 读取真实 MCP 运行期失败日志和当前服务发现状态，再决定是否下钻 inspect_mcp_draft、inspect_mcp_docker_setup 或 inspect_mcp_setup。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_mcp_authoring_guide',
-    '如果用户提到“新增 MCP 不知道 command/args/env/timeout 怎么填”“给我一个 node / uvx / python 模板”“为什么启动命令不能直接填整行”，优先调用 inspect_mcp_authoring_guide 读取真实新增指引和模板；如果用户已经贴出命令或草稿，再调用 inspect_mcp_draft 用真实校验器试算，不要凭记忆口述。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_mcp_draft',
-    '如果用户贴出 MCP README 启动命令、command/args/env/timeout 草稿，或问“这条 MCP 命令在 GoNavi 里怎么填”，优先调用 inspect_mcp_draft 返回自动拆分、启动预览、suggestedServerSeed、配置错误/告警和 nextActions，再给用户具体填写结果。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_mcp_tool_schema',
-    '如果用户提到“某个 MCP 工具参数怎么填”“MCP 工具调用报参数错误”“这个 MCP tool 的 arguments JSON 怎么写”，优先调用 inspect_mcp_tool_schema 读取真实 inputSchema；如果不知道 alias，先调用 inspect_mcp_setup 找到当前发现的工具 alias。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_ai_guidance',
-    '如果用户提到“你现在带了哪些提示词”“当前生效的是哪些 Skills”“为什么你会这样回答”“当前数据库/JVM prompt 是什么”，优先调用 inspect_ai_guidance 读取真实提示与技能配置，不要凭记忆概括。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_shortcuts',
-    '如果用户提到“快捷键是什么”“Win 和 Mac 分别怎么按”“结果区/AI 面板/执行 SQL 的组合键”“我是不是改过默认快捷键”，优先调用 inspect_shortcuts 读取真实快捷键配置和平台差异，不要凭记忆回答默认值。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_recent_connection_failures',
-    '如果用户提到“为什么连接不上”“连接最近失败，正在冷却中”“验证失败”“SSH 隧道是不是有问题”“multiStatements / 参数兼容异常”，优先调用 inspect_recent_connection_failures 读取真实连接失败总结，再决定是否继续下钻 inspect_current_connection、inspect_saved_connections 或 inspect_app_logs。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_app_logs',
-    '如果用户提到“gonavi.log”“最近日志”“启动报错”“MCP 拉不起来”“数据库连接为什么失败”，优先调用 inspect_app_logs 读取真实应用日志尾部；必要时再结合关键词继续筛选，不要只凭弹窗或提示文案猜测。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_ai_last_render_error',
-    '如果用户提到“AI 某条消息空白了”“某个气泡渲染失败”“消息块局部报错但面板没全挂”，优先调用 inspect_ai_last_render_error 读取最近一次被隔离的前端渲染异常记录，不要只凭截图现象猜测。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_ai_message_flow',
-    '如果用户提到“AI 回复被拆成多个气泡”“工具调用后没继续回答”“消息流状态不对”“同一轮回答没有追加到同一个气泡”，优先调用 inspect_ai_message_flow 读取当前会话的真实消息结构、连续 assistant 消息和未闭环工具调用，不要只凭界面现象猜测。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_ai_context_budget',
-    '如果用户提到“AI 变慢”“上下文太大”“表结构挂太多”“工具结果太长”“模型开始乱答”或复杂任务前需要判断是否该拆小上下文，优先调用 inspect_ai_context_budget 读取消息、DDL、MCP schema、提示词和 Skills 的体量风险，再决定收窄上下文或拆任务。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_codebase_hotspots',
-    '如果用户提到“几千行文件太臃肿”“继续拆分大组件”“下一步该拆哪个文件”“AI/MCP/UI 改动风险大不大”，优先调用 inspect_codebase_hotspots 读取大文件热点、建议拆分切片和测试目标，再制定改动范围。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_current_connection',
-    '如果用户提到“当前连接”“当前数据源”“我现在连的是哪个库/地址”“这个连接走没走 SSH/代理”，优先调用 inspect_current_connection 读取当前活动连接摘要，不要凭界面或记忆猜测。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_connection_capabilities',
-    '如果用户提到“为什么这里不能建库/删库/改库名”“为什么结果不能编辑”“这个数据源支持哪些前端动作”，优先调用 inspect_connection_capabilities 读取真实连接能力矩阵，不要凭数据库常识或记忆猜测。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_saved_connections',
-    '如果用户提到“本地存了哪些连接”“帮我找 mysql / postgres / redis 连接”“哪条连接配了 SSH/代理”，优先调用 inspect_saved_connections 读取真实本地连接清单，再决定继续查看哪条连接。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_redis_topology',
-    '如果用户提到“Redis 哨兵/集群”“Sentinel master”“Redis Cluster 多库”“切换 Redis DB 失败”“Redis 多节点怎么填”，优先调用 inspect_redis_topology 读取真实 Redis 拓扑、节点、认证状态和风险提示，不要凭默认端口或经验猜测。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_external_sql_directories',
-    '如果用户提到“外部 SQL 目录”“目录里的脚本”“某个 SQL 文件放在哪个目录”“当前打开的 SQL 文件来自哪里”，优先调用 inspect_external_sql_directories 读取真实外部 SQL 目录资产，再决定继续读取活动页签还是定位具体脚本。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_external_sql_file',
-    '如果用户已经给出了某个外部 SQL 文件路径，或明确提到“帮我看看这个目录里的 report.sql / job.sql 在写什么”，优先调用 inspect_external_sql_file 读取真实文件内容；如果这个文件已经在编辑器中打开，再结合 inspect_active_tab 看当前草稿。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_recent_sql_activity',
-    '如果用户提到“最近都执行了什么”“是不是刚删过数据”“最近主要在查还是在改”“哪个库最近报错最多”，优先调用 inspect_recent_sql_activity 先读最近 SQL 活动总结，再决定是否继续下钻 inspect_recent_sql_logs 看具体语句。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_sql_editor_transaction',
-    '如果用户提到“SQL 编辑器手动提交/自动提交”“当前有没有未提交事务”“执行 update/insert/delete 会不会自动提交”“事务语义是不是理解错了”，优先调用 inspect_sql_editor_transaction 读取真实提交设置、待提交事务和当前 SQL 页签是否会进入托管事务，不要凭记忆解释。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_sql_risk',
-    '如果用户要求你执行、删除、更新、DDL、批量 SQL，或问“这条 SQL 能不能跑/危险不危险”，优先调用 inspect_sql_risk 检查当前编辑区或传入 SQL 的语句数量、写入/DDL 风险、WHERE 条件和安全策略结果；发现 high/critical 风险时先解释风险并让用户确认，不要直接推进执行。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_saved_queries',
-    '如果用户提到“保存过的查询”“历史 SQL”“之前写过的语句”“帮我找以前那条脚本”，优先调用 inspect_saved_queries 读取本地已保存查询，再决定是否继续核对字段或复用 SQL。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_ai_sessions',
-    '如果用户提到“之前那条 AI 对话”“上次聊过的记录”“最近哪个会话说过这个问题”，优先调用 inspect_ai_sessions 读取本地 AI 会话清单和预览，再决定继续查看当前页签还是复用历史 SQL。',
-  );
-  appendGuidanceIfToolAvailable(
-    messages,
-    availableToolNames,
     'inspect_sql_snippets',
-    '如果用户提到“SQL 片段”“snippet”“模板前缀”“常用模板”，优先调用 inspect_sql_snippets 读取本地 SQL 片段库，不要凭记忆编造现有模板。',
-  );
+  ];
+
+  databaseGuidanceTools.forEach((toolName) => {
+    appendGuidanceIfToolAvailable(messages, availableToolNames, toolName, translate);
+  });
 };

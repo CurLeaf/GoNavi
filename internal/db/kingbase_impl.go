@@ -498,7 +498,7 @@ func (k *KingbaseDB) GetCreateStatement(dbName, tableName string) (string, error
 func (k *KingbaseDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	schema, table := normalizePGLikeMetadataTable(dbName, tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	data, _, err := k.Query(buildPGLikeColumnsMetadataQuery(schema, table))
@@ -512,7 +512,7 @@ func (k *KingbaseDB) GetColumns(dbName, tableName string) ([]connection.ColumnDe
 func (k *KingbaseDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	schema, table := normalizePGLikeMetadataTable(dbName, tableName)
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	data, _, err := k.Query(buildPGLikeIndexesMetadataQuery(schema, table))
@@ -539,7 +539,7 @@ func (k *KingbaseDB) GetForeignKeys(dbName, tableName string) ([]connection.Fore
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	// 转义函数:处理单引号,移除双引号
@@ -621,7 +621,7 @@ func (k *KingbaseDB) GetTriggers(dbName, tableName string) ([]connection.Trigger
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	// 转义函数:处理单引号,移除双引号
@@ -675,7 +675,7 @@ func (k *KingbaseDB) ApplyChanges(tableName string, changes connection.ChangeSet
 
 	schema, table := splitKingbaseQualifiedTable(tableName)
 	if table == "" {
-		return fmt.Errorf("表名不能为空")
+		return localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	qualifiedTable := ""

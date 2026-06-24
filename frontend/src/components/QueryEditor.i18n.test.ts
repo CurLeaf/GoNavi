@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 const queryEditorSource = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+const queryEditorHelpersSource = readFileSync(new URL('./queryEditor/QueryEditorHelpers.ts', import.meta.url), 'utf8');
 
 describe('QueryEditor i18n source guards', () => {
   it('does not keep legacy builtin SQL function completion details in component source', () => {
@@ -47,12 +48,12 @@ describe('QueryEditor i18n source guards', () => {
   });
 
   it('uses a localized read-only reason for system metadata query results', () => {
-    expect(queryEditorSource).toContain('query_editor.message.read_only_system_metadata');
-    expect(queryEditorSource).not.toContain('系统元数据查询结果保持只读。');
+    expect(queryEditorHelpersSource).toContain('query_editor.message.read_only_system_metadata');
+    expect(queryEditorHelpersSource).not.toContain('系统元数据查询结果保持只读。');
   });
 
   it('does not keep the index metadata internal fallback in Chinese', () => {
-    expect(queryEditorSource).toContain('Failed to load indexes');
-    expect(queryEditorSource).not.toContain('加载索引失败');
+    expect(queryEditorHelpersSource).toContain('Failed to load indexes');
+    expect(queryEditorHelpersSource).not.toContain('加载索引失败');
   });
 });

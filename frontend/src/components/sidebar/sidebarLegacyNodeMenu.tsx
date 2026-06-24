@@ -210,32 +210,32 @@ export const buildSidebarLegacyNodeMenuItems = (
         return [
             {
                 key: 'rename-schema',
-                label: '编辑模式',
+                label: t('sidebar.menu.edit_schema'),
                 icon: <EditOutlined />,
                 onClick: () => openRenameSchemaModal(node)
             },
             {
                 key: 'refresh-schema',
-                label: '刷新',
+                label: t('sidebar.menu.refresh'),
                 icon: <ReloadOutlined />,
                 onClick: () => void loadTables(getDatabaseNodeRef(node.dataRef, node.dataRef.dbName))
             },
             {
                 key: 'export-schema',
-                label: '导出当前模式表结构 (SQL)',
+                label: t('sidebar.menu.export_current_schema_sql'),
                 icon: <ExportOutlined />,
                 onClick: () => void handleExportSchemaSQL(node, false)
             },
             {
                 key: 'backup-schema-sql',
-                label: '备份当前模式全部表 (结构+数据 SQL)',
+                label: t('sidebar.menu.backup_current_schema_sql'),
                 icon: <SaveOutlined />,
                 onClick: () => void handleExportSchemaSQL(node, true)
             },
             { type: 'divider' },
             {
                 key: 'drop-schema',
-                label: '删除模式',
+                label: t('sidebar.menu.delete_schema'),
                 icon: <DeleteOutlined />,
                 danger: true,
                 onClick: () => handleDeleteSchema(node)
@@ -253,20 +253,20 @@ export const buildSidebarLegacyNodeMenuItems = (
         return [
             ...(canCreateTable ? [{
                 key: 'new-table',
-                label: '新建表',
+                label: t('sidebar.menu.new_table'),
                 icon: <TableOutlined />,
                 onClick: () => openNewTableDesign(node)
             }] : []),
             { type: 'divider' },
             {
                 key: 'sort-by-name',
-                label: '按名称排序',
+                label: t('sidebar.menu.sort_by_name'),
                 icon: currentSort === 'name' ? <CheckSquareOutlined /> : null,
                 onClick: () => handleTableGroupSortAction(node, 'name')
             },
             {
                 key: 'sort-by-frequency',
-                label: '按使用频率排序',
+                label: t('sidebar.menu.sort_by_frequency'),
                 icon: currentSort === 'frequency' ? <CheckSquareOutlined /> : null,
                 onClick: () => handleTableGroupSortAction(node, 'frequency')
             }
@@ -322,12 +322,12 @@ export const buildSidebarLegacyNodeMenuItems = (
         return [
             {
                 key: 'create-event-query',
-                label: '新建事件',
+                label: t('sidebar.menu.create_event'),
                 icon: <PlusOutlined />,
                 onClick: () => {
                     addTab({
                         id: `query-create-event-${Date.now()}`,
-                        title: '新建事件',
+                        title: t('sidebar.tab.new_event'),
                         type: 'query',
                         connectionId: node.dataRef.id,
                         dbName: node.dataRef.dbName,
@@ -343,7 +343,7 @@ export const buildSidebarLegacyNodeMenuItems = (
         return [
             {
                 key: 'edit-tag',
-                label: '编辑标签',
+                label: t('sidebar.menu.edit_tag'),
                 icon: <EditOutlined />,
                 onClick: () => {
                     createTagForm.setFieldsValue({ name: node.title, connectionIds: node.dataRef.connectionIds });
@@ -354,13 +354,13 @@ export const buildSidebarLegacyNodeMenuItems = (
             { type: 'divider' },
             {
                 key: 'delete-tag',
-                label: '删除标签',
+                label: t('sidebar.menu.delete_tag'),
                 icon: <DeleteOutlined />,
                 danger: true,
                 onClick: () => {
                     Modal.confirm({
-                        title: '确认删除',
-                        content: `确定要删除标签 "${node.title}" 吗？这不会删除里面的连接。`,
+                        title: t('sidebar.modal.confirm_delete.title'),
+                        content: t('sidebar.modal.confirm_delete_tag.content', { name: node.title }),
                         onOk: () => {
                             removeConnectionTag(node.dataRef.id);
                         }
@@ -714,7 +714,7 @@ export const buildSidebarLegacyNodeMenuItems = (
             },
             {
                 key: 'copy-view-name',
-                label: '复制名称',
+                label: t('sidebar.menu.copy_object_name'),
                 icon: <CopyOutlined />,
                 onClick: () => handleCopyTableName(node)
             },
@@ -782,7 +782,7 @@ export const buildSidebarLegacyNodeMenuItems = (
             },
             {
                 key: 'copy-materialized-view-name',
-                label: '复制名称',
+                label: t('sidebar.menu.copy_object_name'),
                 icon: <CopyOutlined />,
                 onClick: () => handleCopyTableName(node)
             },
@@ -882,44 +882,46 @@ export const buildSidebarLegacyNodeMenuItems = (
             },
             ...(messagePublishTarget ? [{
                 key: 'publish-message',
-                label: '测试发送消息',
+                label: t('message_publish_modal.title'),
                 icon: <SendOutlined />,
                 onClick: () => openMessagePublishModal(node),
             }] : []),
             { type: 'divider' },
             {
                 key: 'design-table',
-                label: isStructureOnlyDbType(String(node.dataRef?.id || '')) ? '表结构' : '设计表',
+                label: isStructureOnlyDbType(String(node.dataRef?.id || ''))
+                  ? t('sidebar.menu.table_structure')
+                  : t('sidebar.menu.design_table'),
                 icon: <EditOutlined />,
                 onClick: () => openDesign(node, 'columns', false)
             },
             ...(isStarRocks ? [{
                 key: 'new-rollup',
-                label: '新增 Rollup',
+                label: t('sidebar.v2_table_menu.new_rollup', { keyword: 'Rollup' }),
                 icon: <ThunderboltOutlined />,
                 onClick: () => openCreateStarRocksRollup(node)
             }] : []),
             {
                 key: 'copy-table-name',
-                label: '复制表名',
+                label: t('sidebar.menu.copy_table_name'),
                 icon: <CopyOutlined />,
                 onClick: () => handleCopyTableName(node)
             },
             {
                 key: 'copy-structure',
-                label: '复制表结构',
+                label: t('sidebar.menu.copy_table_structure'),
                 icon: <CopyOutlined />,
                 onClick: () => handleCopyStructure(node)
             },
             {
                 key: 'backup-table',
-                label: '备份表 (SQL)',
+                label: t('sidebar.menu.backup_table_sql'),
                 icon: <SaveOutlined />,
                 onClick: () => handleExport(node, { format: 'sql' })
             },
             {
                 key: 'rename-table',
-                label: '重命名表',
+                label: t('sidebar.menu.rename_table'),
                 icon: <EditOutlined />,
                 onClick: () => {
                     setRenameTableTarget(node);
@@ -934,19 +936,19 @@ export const buildSidebarLegacyNodeMenuItems = (
                 children: [
                     ...(supportsTableTruncateAction(node.dataRef?.config?.type, node.dataRef?.config?.driver) ? [{
                         key: 'truncate-table',
-                        label: '截断表',
+                        label: t('sidebar.menu.truncate_table'),
                         danger: true,
                         onClick: () => handleTableDataDangerAction(node, 'truncate')
                     }] : []),
                     {
                         key: 'clear-table',
-                        label: '清空表',
+                        label: t('sidebar.menu.clear_table'),
                         danger: true,
                         onClick: () => handleTableDataDangerAction(node, 'clear')
                     },
                     {
                         key: 'drop-table',
-                        label: '删除表',
+                        label: t('sidebar.menu.delete_table'),
                         icon: <DeleteOutlined />,
                         danger: true,
                         onClick: () => handleDeleteTable(node)
@@ -958,7 +960,7 @@ export const buildSidebarLegacyNodeMenuItems = (
             },
             {
                 key: 'export',
-                label: '导出表数据…',
+                label: t('sidebar.menu.export_table_data'),
                 icon: <ExportOutlined />,
                 onClick: () => openExportDialog(node),
             }
@@ -972,7 +974,7 @@ export const buildSidebarLegacyNodeMenuItems = (
             ? [
                 {
                     key: 'rebind-query',
-                    label: '绑定到连接',
+                    label: t('sidebar.menu.bind_to_connection'),
                     icon: <LinkOutlined />,
                     disabled: connections.length === 0,
                     children: connections.length > 0
@@ -1024,7 +1026,9 @@ export const buildSidebarLegacyNodeMenuItems = (
                             try {
                                 await deleteQuery(q.id);
                             } catch (e) {
-                                message.error('删除查询失败: ' + (e instanceof Error ? e.message : String(e)));
+                                message.error(t('sidebar.message.saved_query_delete_failed', {
+                                  error: e instanceof Error ? e.message : String(e),
+                                }));
                                 throw e;
                             }
                             // 从树中移除节点

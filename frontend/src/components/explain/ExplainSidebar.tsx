@@ -9,6 +9,7 @@ import {
   formatPercent,
   formatMs,
 } from '../../utils/explainTypes'
+import { useI18n } from '../../i18n/provider'
 
 // 诊断侧栏：节点详情 + 统计条 + 索引建议列表的合集组件。
 // 拆分为一个文件减少模块碎片化（plan 原拆 3 个文件）。
@@ -50,12 +51,13 @@ function ExplainStatsBar({
   stats: ExplainStats
   warnings?: string[]
 }) {
+  const { t } = useI18n()
   const statsList = [
-    { label: '总成本', value: stats.totalCost ? stats.totalCost.toFixed(1) : '-' },
-    { label: '总耗时', value: formatMs(stats.totalDurationMs) },
-    { label: '扫描行数', value: formatNumber(stats.rowsRead) },
-    { label: '缓冲命中', value: formatPercent(stats.bufferHitRate) },
-    { label: '最大单节点行数', value: formatNumber(stats.maxEstRows) },
+    { label: t('sql_analysis.sidebar.stats.total_cost'), value: stats.totalCost ? stats.totalCost.toFixed(1) : '-' },
+    { label: t('sql_analysis.sidebar.stats.total_duration'), value: formatMs(stats.totalDurationMs) },
+    { label: t('sql_analysis.sidebar.stats.rows_read'), value: formatNumber(stats.rowsRead) },
+    { label: t('sql_analysis.sidebar.stats.buffer_hit'), value: formatPercent(stats.bufferHitRate) },
+    { label: t('sql_analysis.sidebar.stats.max_est_rows'), value: formatNumber(stats.maxEstRows) },
   ]
   return (
     <div
@@ -66,7 +68,7 @@ function ExplainStatsBar({
         padding: 10,
       }}
     >
-      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>执行统计</div>
+      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>{t('sql_analysis.sidebar.stats.title')}</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 12px', fontSize: 12 }}>
         {statsList.map((s) => (
           <div key={s.label} style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -75,9 +77,9 @@ function ExplainStatsBar({
           </div>
         ))}
       </div>
-      {stats.hasFullScan && <WarningRow color="#fa5252" text="存在全表扫描" />}
-      {stats.hasFilesort && <WarningRow color="#f08c00" text="存在额外排序" />}
-      {stats.hasTempTable && <WarningRow color="#7048e8" text="使用临时表" />}
+      {stats.hasFullScan && <WarningRow color="#fa5252" text={t('sql_analysis.sidebar.warning.full_scan')} />}
+      {stats.hasFilesort && <WarningRow color="#f08c00" text={t('sql_analysis.sidebar.warning.filesort')} />}
+      {stats.hasTempTable && <WarningRow color="#7048e8" text={t('sql_analysis.sidebar.warning.temp_table')} />}
       {warnings && warnings.length > 0 && (
         <div style={{ marginTop: 8, fontSize: 11, color: 'var(--gn-text-muted, #6c757d)' }}>
           {warnings.map((w, i) => (
@@ -99,19 +101,20 @@ function WarningRow({ color, text }: { color: string; text: string }) {
 }
 
 function ExplainNodeDetail({ node }: { node: ExplainNode }) {
+  const { t } = useI18n()
   const rows: Array<[string, string]> = []
-  rows.push(['操作类型', node.opType])
-  if (node.opDetail) rows.push(['操作详情', node.opDetail])
-  if (node.table) rows.push(['表', node.table])
-  if (node.index) rows.push(['索引', node.index])
-  if (node.estRows) rows.push(['估算行数', formatNumber(node.estRows)])
-  if (node.actualRows) rows.push(['实际行数', formatNumber(node.actualRows)])
-  if (node.loops) rows.push(['循环次数', formatNumber(node.loops)])
-  if (node.cost) rows.push(['成本', node.cost.toFixed(2)])
-  if (node.durationMs) rows.push(['耗时', formatMs(node.durationMs)])
+  rows.push([t('sql_analysis.sidebar.node.op_type'), node.opType])
+  if (node.opDetail) rows.push([t('sql_analysis.sidebar.node.op_detail'), node.opDetail])
+  if (node.table) rows.push([t('sql_analysis.sidebar.node.table'), node.table])
+  if (node.index) rows.push([t('sql_analysis.sidebar.node.index'), node.index])
+  if (node.estRows) rows.push([t('sql_analysis.sidebar.node.est_rows'), formatNumber(node.estRows)])
+  if (node.actualRows) rows.push([t('sql_analysis.sidebar.node.actual_rows'), formatNumber(node.actualRows)])
+  if (node.loops) rows.push([t('sql_analysis.sidebar.node.loops'), formatNumber(node.loops)])
+  if (node.cost) rows.push([t('sql_analysis.sidebar.node.cost'), node.cost.toFixed(2)])
+  if (node.durationMs) rows.push([t('sql_analysis.sidebar.node.duration'), formatMs(node.durationMs)])
   if (node.bufferHit !== undefined && node.bufferHit > 0)
-    rows.push(['缓冲命中', formatPercent(node.bufferHit)])
-  if (node.flags && node.flags.length > 0) rows.push(['标志', node.flags.join(', ')])
+    rows.push([t('sql_analysis.sidebar.node.buffer_hit'), formatPercent(node.bufferHit)])
+  if (node.flags && node.flags.length > 0) rows.push([t('sql_analysis.sidebar.node.flags'), node.flags.join(', ')])
 
   return (
     <div
@@ -122,7 +125,7 @@ function ExplainNodeDetail({ node }: { node: ExplainNode }) {
         padding: 10,
       }}
     >
-      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>节点详情</div>
+      <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>{t('sql_analysis.sidebar.node.title')}</div>
       <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
         {rows.map(([label, value]) => (
           <div key={label} style={{ display: 'flex', gap: 8 }}>
@@ -134,7 +137,7 @@ function ExplainNodeDetail({ node }: { node: ExplainNode }) {
       {node.extra && Object.keys(node.extra).length > 0 && (
         <details style={{ marginTop: 8, fontSize: 11 }}>
           <summary style={{ cursor: 'pointer', color: 'var(--gn-text-muted, #6c757d)' }}>
-            Extra 字段（{Object.keys(node.extra).length}）
+            {t('sql_analysis.sidebar.node.extra', { count: Object.keys(node.extra).length })}
           </summary>
           <pre style={{ marginTop: 4, fontSize: 11, maxHeight: 120, overflow: 'auto' }}>
             {JSON.stringify(node.extra, null, 2)}
@@ -152,6 +155,7 @@ function IndexSuggestionList({
   suggestions: IndexSuggestion[]
   onSelect?: (s: IndexSuggestion) => void
 }) {
+  const { t } = useI18n()
   return (
     <div
       style={{
@@ -164,11 +168,11 @@ function IndexSuggestionList({
       }}
     >
       <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 13 }}>
-        索引建议（{suggestions.length}）
+        {t('sql_analysis.sidebar.suggestions.title', { count: suggestions.length })}
       </div>
       {suggestions.length === 0 ? (
         <div style={{ fontSize: 12, color: 'var(--gn-text-muted, #6c757d)', padding: '20px 0', textAlign: 'center' }}>
-          未发现明显性能问题
+          {t('sql_analysis.sidebar.suggestions.empty')}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -188,6 +192,7 @@ function SuggestionCard({
   suggestion: IndexSuggestion
   onSelect?: (s: IndexSuggestion) => void
 }) {
+  const { t } = useI18n()
   const color = severityColor(suggestion.severity)
   return (
     <div
@@ -206,7 +211,7 @@ function SuggestionCard({
         </span>
         {suggestion.estRows !== undefined && suggestion.estRows > 0 && (
           <span style={{ color: 'var(--gn-text-muted, #6c757d)', fontSize: 11 }}>
-            {formatNumber(suggestion.estRows)} 行
+            {t('sql_analysis.sidebar.suggestions.rows', { count: formatNumber(suggestion.estRows) })}
           </span>
         )}
       </div>
@@ -226,7 +231,8 @@ function SuggestionCard({
       )}
       {suggestion.affectedTable && (
         <div style={{ marginTop: 4, fontSize: 11, color: 'var(--gn-text-muted, #6c757d)' }}>
-          表：<code>{suggestion.affectedTable}</code>
+          {t('sql_analysis.sidebar.suggestions.table', { table: suggestion.affectedTable }).replace(suggestion.affectedTable, '')}
+          <code>{suggestion.affectedTable}</code>
         </div>
       )}
     </div>

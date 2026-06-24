@@ -1,22 +1,24 @@
 import React from 'react';
 
-import { filterAISlashCommands, type AISlashCommandDefinition } from './aiSlashCommands';
+import { filterAISlashCommands, type AISlashCommandDefinition, type AISlashCommandTranslate } from './aiSlashCommands';
 
 interface UseAISlashCommandMenuParams {
   setInput: (val: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement>;
+  translate?: AISlashCommandTranslate;
 }
 
 export const useAISlashCommandMenu = ({
   setInput,
   textareaRef,
+  translate,
 }: UseAISlashCommandMenuParams) => {
   const [showSlashMenu, setShowSlashMenu] = React.useState(false);
   const [slashFilter, setSlashFilter] = React.useState('');
 
   const filteredSlashCmds = React.useMemo(
-    () => filterAISlashCommands(slashFilter),
-    [slashFilter],
+    () => filterAISlashCommands(slashFilter, translate),
+    [slashFilter, translate],
   );
 
   const handleComposerInputChange = React.useCallback((value: string) => {

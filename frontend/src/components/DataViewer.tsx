@@ -243,6 +243,14 @@ const escapeSQLLiteral = (value: string): string => String(value || '').replace(
 
 const isDuckDBUnsupportedTypeError = (msg: string): boolean => /unsupported\s*type:\s*duckdb\./i.test(String(msg || ''));
 
+const DATA_VIEWER_TIMEOUT_KEYWORDS = [
+  '\u8d85\u65f6',
+  '\u903e\u6642',
+  'タイムアウト',
+  'zeitüberschreitung',
+  'тайм-аут',
+];
+
 const isDuckDBComplexColumnType = (columnType?: string): boolean => {
   const raw = String(columnType || '').trim().toLowerCase();
   if (!raw) return false;
@@ -252,7 +260,8 @@ const isDuckDBComplexColumnType = (columnType?: string): boolean => {
 const formatDataViewerQueryError = (dbType: string, messageText: unknown, tr: DataViewerTranslator): string => {
   const rawMessage = String(messageText || tr('data_viewer.message.query_failed')).trim() || tr('data_viewer.message.query_failed');
   const lower = rawMessage.toLowerCase();
-  const isTimeout = lower.includes('context deadline exceeded') || lower.includes('deadline exceeded') || lower.includes('timeout') || lower.includes('timed out') || lower.includes('\u8d85\u65f6');
+  const hasLocalizedTimeoutKeyword = DATA_VIEWER_TIMEOUT_KEYWORDS.some((keyword) => lower.includes(keyword.toLowerCase()));
+  const isTimeout = lower.includes('context deadline exceeded') || lower.includes('deadline exceeded') || lower.includes('timeout') || lower.includes('timed out') || hasLocalizedTimeoutKeyword;
   const isDuckDBInterrupted = String(dbType || '').trim().toLowerCase() === 'duckdb' && (lower.includes('interrupt error') || lower.includes('interrupted'));
   if (isTimeout || isDuckDBInterrupted) {
     if (String(dbType || '').trim().toLowerCase() === 'duckdb') {
@@ -360,6 +369,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
   const duckdbApproxKeyRef = useRef<string>('');
   const oracleApproxSeqRef = useRef(0);
   const oracleApproxKeyRef = useRef<string>('');
+  const autoCountKeyRef = useRef<string>('');
   const manualCountSeqRef = useRef(0);
   const manualCountKeyRef = useRef<string>('');
   const pkSeqRef = useRef(0);
@@ -454,6 +464,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
     countKeyRef.current = '';
     duckdbApproxKeyRef.current = '';
     oracleApproxKeyRef.current = '';
+    autoCountKeyRef.current = '';
     manualCountKeyRef.current = '';
     duckdbSafeSelectCacheRef.current = {};
     latestConfigRef.current = null;
@@ -664,6 +675,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                         indexes,
                         allowOracleRowID: true,
                         allowDuckDBRowID: String(dbType || '').trim().toLowerCase() === 'duckdb',
+                        translate: tr,
                     }), tr);
 
                     if (nextLocator.readOnly && primaryKeys.length === 0 && !resIndexes?.success && !isOracleLikeDialect(dbType)) {
@@ -913,7 +925,9 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                         return { ...prev, current: currentPage, pageSize: size };
                     }
                 }
-                const keepManualCounting = prev.totalCountLoading && manualCountKeyRef.current === countKey;
+                const keepTotalCounting = prev.totalCountLoading && (
+                  manualCountKeyRef.current === countKey || autoCountKeyRef.current === countKey
+                );
                 const hasApproximateTotalForCurrentKey =
                   prev.totalApprox &&
                   (duckdbApproxKeyRef.current === countKey || oracleApproxKeyRef.current === countKey) &&
@@ -928,7 +942,7 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                         totalKnown: false,
                         totalApprox: true,
                         approximateTotal: prev.approximateTotal,
-                        totalCountLoading: keepManualCounting,
+                        totalCountLoading: keepTotalCounting,
                         totalCountCancelled: false,
                     };
                 }
@@ -940,8 +954,8 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                     totalKnown: false,
                     totalApprox: false,
                     approximateTotal: undefined,
-                    totalCountLoading: keepManualCounting,
-                    totalCountCancelled: keepManualCounting ? false : prev.totalCountCancelled,
+                    totalCountLoading: keepTotalCounting,
+                    totalCountCancelled: keepTotalCounting ? false : prev.totalCountCancelled,
                 };
             });
 
@@ -949,11 +963,13 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
             if (shouldRunAsyncCount) {
                 if (countKeyRef.current !== countKey) {
                     countKeyRef.current = countKey;
+                    autoCountKeyRef.current = countKey;
                     const countSeq = ++countSeqRef.current;
                     const countStart = Date.now();
                     // Large-table COUNT(*) can be slow and may delay later operations in some runtimes.
                     // DuckDB large-file scenarios disable background COUNT because it can slow pagination significantly.
                     const countConfig = buildRpcConnectionConfig(config, { timeout: 5 });
+                    setPagination(prev => ({ ...prev, totalCountLoading: true, totalCountCancelled: false }));
 
                     DBQuery(countConfig, dbName, countSql)
                         .then((resCount: any) => {
@@ -972,11 +988,21 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                             if (countSeqRef.current !== countSeq) return;
                             if (latestCountKeyRef.current !== countKey) return;
 
-                            if (!resCount.success) return;
-                            if (!Array.isArray(resCount.data) || resCount.data.length === 0) return;
+                            autoCountKeyRef.current = '';
+                            if (!resCount.success) {
+                                setPagination(prev => ({ ...prev, totalCountLoading: false }));
+                                return;
+                            }
+                            if (!Array.isArray(resCount.data) || resCount.data.length === 0) {
+                                setPagination(prev => ({ ...prev, totalCountLoading: false }));
+                                return;
+                            }
 
                             const total = parseTotalFromCountRow(resCount.data[0]);
-                            if (total === null) return;
+                            if (total === null) {
+                                setPagination(prev => ({ ...prev, totalCountLoading: false }));
+                                return;
+                            }
 
                             setPagination(prev => ({
                                 ...prev,
@@ -991,6 +1017,8 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
                         .catch(() => {
                             if (countSeqRef.current !== countSeq) return;
                             if (countKeyRef.current !== countKey) return;
+                            autoCountKeyRef.current = '';
+                            setPagination(prev => ({ ...prev, totalCountLoading: false }));
                             // Count failures do not block the main flow; details stay in the SQL log.
                         });
                 }

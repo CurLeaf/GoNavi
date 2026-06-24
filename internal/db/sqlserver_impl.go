@@ -174,7 +174,7 @@ func (s *SqlServerDB) Connect(config connection.ConnectionConfig) error {
 
 	db, err := sql.Open("sqlserver", dsn)
 	if err != nil {
-		return fmt.Errorf("打开数据库连接失败：%w", err)
+		return wrapDatabaseConnectionOpenError(err)
 	}
 	configureSQLConnectionPool(db, "sqlserver")
 	s.conn = db
@@ -183,7 +183,7 @@ func (s *SqlServerDB) Connect(config connection.ConnectionConfig) error {
 	if err := s.Ping(); err != nil {
 		_ = db.Close()
 		s.conn = nil
-		return fmt.Errorf("连接建立后验证失败：%w", err)
+		return wrapDatabaseConnectionVerifyError(err)
 	}
 	return nil
 }
@@ -520,7 +520,7 @@ func (s *SqlServerDB) GetColumns(dbName, tableName string) ([]connection.ColumnD
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -632,7 +632,7 @@ func (s *SqlServerDB) GetIndexes(dbName, tableName string) ([]connection.IndexDe
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -713,7 +713,7 @@ func (s *SqlServerDB) GetForeignKeys(dbName, tableName string) ([]connection.For
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }
@@ -771,7 +771,7 @@ func (s *SqlServerDB) GetTriggers(dbName, tableName string) ([]connection.Trigge
 	}
 
 	if table == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	esc := func(s string) string { return strings.ReplaceAll(s, "'", "''") }

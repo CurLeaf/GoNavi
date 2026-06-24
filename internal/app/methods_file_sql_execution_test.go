@@ -212,8 +212,37 @@ func TestExecuteSQLFileStreamFallsBackToSequentialWhenBatchFails(t *testing.T) {
 	if fakeDB.execQueries[0] != "START TRANSACTION" || fakeDB.execQueries[1] != "ROLLBACK" {
 		t.Fatalf("expected failed batch to roll back before sequential fallback, got %#v", fakeDB.execQueries)
 	}
-	if len(result.Errors) != 1 || !strings.Contains(result.Errors[0], "第 2 条语句执行失败") {
+	if len(result.Errors) != 1 || result.Errors[0] != "file.backend.message.statement_failed" {
 		t.Fatalf("expected per-statement error for second statement, got %#v", result.Errors)
+	}
+}
+
+func TestExecuteSQLFileStreamUsesLocalizedStatementFailure(t *testing.T) {
+	fakeDB := &fakeSQLFileBatchDB{failBatch: true, failExecSQL: "VALUES (2)"}
+	input := strings.Join([]string{
+		"INSERT INTO demo(id) VALUES (1);",
+		"INSERT INTO demo(id) VALUES (2);",
+	}, "\n")
+
+	result, err := executeSQLFileStream(context.Background(), fakeDB, strings.NewReader(input), sqlFileExecutionOptions{
+		DBType:             "mysql",
+		BatchMaxStatements: 100,
+		BatchMaxBytes:      1024,
+		Text: func(key string, params map[string]any) string {
+			if key != "file.backend.message.statement_failed" {
+				t.Fatalf("unexpected i18n key %q", key)
+			}
+			return fmt.Sprintf("localized statement %v failed: %v SQL=%v", params["index"], params["detail"], params["sql"])
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("executeSQLFileStream returned error: %v", err)
+	}
+	if len(result.Errors) != 1 {
+		t.Fatalf("expected one localized statement error, got %#v", result.Errors)
+	}
+	if !strings.Contains(result.Errors[0], "localized statement 2 failed") || !strings.Contains(result.Errors[0], "VALUES (2)") {
+		t.Fatalf("expected localized per-statement error with raw SQL snippet, got %#v", result.Errors)
 	}
 }
 

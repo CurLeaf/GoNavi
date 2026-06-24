@@ -363,7 +363,7 @@ export const useSidebarV2ActionHandlers = ({
     if (!conn?.config) return;
     const res = await DBReleaseConnection(buildRpcConnectionConfig(conn.config, { id: conn.id }) as any);
     if (res && res.success === false) {
-      throw new Error(res.message || '释放连接失败');
+      throw new Error(String(res.message || '').trim());
     }
   };
 
@@ -392,7 +392,7 @@ export const useSidebarV2ActionHandlers = ({
     try {
       await releaseConnectionResources(conn);
     } catch (error: any) {
-      message.warning(error?.message || '连接已从侧边栏断开，但后端连接释放失败');
+      message.warning(String(error?.message || '').trim() || t('sidebar.message.connection_release_failed_from_sidebar'));
     }
     message.success(t('connection.sidebar.disconnect.success'));
   };

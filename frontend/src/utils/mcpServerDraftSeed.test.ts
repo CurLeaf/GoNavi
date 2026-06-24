@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { parseMCPCommandDraft } from './mcpCommandDraft';
 import { buildMCPQuickAddServerSeed, buildMCPServerDraftSeed } from './mcpServerDraftSeed';
+
+const source = readFileSync(new URL('./mcpServerDraftSeed.ts', import.meta.url), 'utf8');
 
 describe('mcpServerDraftSeed', () => {
   it('builds an editable draft seed from a parsed uvx command with env vars', () => {
@@ -50,5 +53,16 @@ describe('mcpServerDraftSeed', () => {
       timeoutSeconds: 60,
       env: { GITHUB_TOKEN: '***' },
     });
+  });
+
+  it('localizes the fallback service name when no raw name candidate is available', () => {
+    const seed = buildMCPServerDraftSeed(
+      { command: '', args: [] },
+      (key) => key === 'ai_settings.mcp_server.draft.default_name' ? 'T:MCP default service' : key,
+    );
+
+    expect(seed.name).toBe('T:MCP default service');
+    expect(source).not.toContain("'MCP 服务'");
+    expect(source).not.toContain('"MCP 服务"');
   });
 });

@@ -1,4 +1,5 @@
 import type { SqlLog } from '../../store';
+import type { I18nParams } from '../../i18n';
 import type { SavedConnection, TabData } from '../../types';
 import { findSqlStatementRanges } from '../../utils/sqlStatementSelection';
 import { shouldUseSqlEditorManagedTransaction } from '../../utils/sqlEditorTransaction';
@@ -8,9 +9,21 @@ import type {
 } from './aiSnapshotInspectionToolTypes';
 
 type SqlEditorCommitMode = 'manual' | 'auto';
+type Translate = (key: string, params?: I18nParams) => string;
 
 const DEFAULT_AUTO_COMMIT_DELAY_MS = 5000;
 const SQL_PREVIEW_LIMIT = 1200;
+const LOG_TRANSACTION_KEYWORD_PATTERN = new RegExp('\\u4e8b\\u52a1|\\u63d0\\u4ea4|\\u56de\\u6eda|transaction|commit|rollback', 'i');
+
+const translateOrFallback = (
+  translate: Translate | undefined,
+  key: string,
+  params: I18nParams | undefined,
+  fallback: string,
+) => {
+  const translated = translate?.(key, params);
+  return translated && translated !== key ? translated : fallback;
+};
 
 const normalizeCommitMode = (value: unknown): SqlEditorCommitMode =>
   String(value || '').trim().toLowerCase() === 'auto' ? 'auto' : 'manual';
@@ -54,21 +67,22 @@ const buildActiveSqlTabSnapshot = (params: {
   activeTabId?: string | null;
   connections: SavedConnection[];
   includeSqlPreview?: boolean;
+  translate?: Translate;
 }) => {
-  const { tabs = [], activeTabId = null, connections, includeSqlPreview = true } = params;
+  const { tabs = [], activeTabId = null, connections, includeSqlPreview = true, translate } = params;
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   if (!activeTab) {
     return {
       hasActiveTab: false,
       hasSql: false,
-      message: '当前没有活动页签',
+      message: translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.no_active_tab', undefined, 'No active tab is currently selected'),
     };
   }
   if (activeTab.type !== 'query') {
     return {
       hasActiveTab: true,
       hasSql: false,
-      message: '当前活动页签不是 SQL 编辑器页签',
+      message: translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.not_sql_tab', undefined, 'The current active tab is not a SQL editor tab'),
       tab: buildTabSummary(activeTab, connections),
     };
   }
@@ -89,10 +103,10 @@ const buildActiveSqlTabSnapshot = (params: {
     hasExplicitTransactionControl,
     usesManagedTransaction,
     transactionSemantics: usesManagedTransaction
-      ? '执行 INSERT/UPDATE/DELETE/MERGE/REPLACE 等 DML 时会先进入 SQL 编辑器托管事务；提交设置只决定事务执行成功后何时 COMMIT。'
+      ? translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.semantics.managed_dml', undefined, 'When the SQL editor runs INSERT/UPDATE/DELETE/MERGE/REPLACE DML, it first enters a managed transaction. The commit setting only decides when COMMIT happens after successful execution.')
       : hasExplicitTransactionControl
-        ? '检测到用户显式事务控制语句，GoNavi 不会再包一层 SQL 编辑器托管事务。'
-        : '当前 SQL 不会触发 SQL 编辑器托管事务；只读查询仍走普通查询路径。',
+        ? translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.semantics.explicit_transaction', undefined, 'Explicit transaction control statements were detected, so GoNavi will not wrap another SQL editor managed transaction around them.')
+        : translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.semantics.no_managed_transaction', undefined, 'The current SQL does not trigger a SQL editor managed transaction. Read-only queries still use the normal query path.'),
   };
 };
 
@@ -128,7 +142,7 @@ const isRelevantSqlEditorTransactionLog = (log: SqlLog): boolean => {
   if (shouldUseSqlEditorManagedTransaction(statements)) return true;
   if (statements.some(hasTransactionControlStatement)) return true;
   return /\b(transaction|commit|rollback)\b/i.test(sql)
-    || /事务|提交|回滚|transaction|commit|rollback/i.test(String(log.message || ''));
+    || LOG_TRANSACTION_KEYWORD_PATTERN.test(String(log.message || ''));
 };
 
 const buildRecentLogPreview = (log: SqlLog) => ({
@@ -150,6 +164,7 @@ export const buildSqlEditorTransactionSnapshot = (params: {
   sqlLogs?: SqlLog[];
   includeSqlPreview?: boolean;
   now?: number;
+  translate?: Translate;
 }) => {
   const {
     transactionState,
@@ -159,6 +174,7 @@ export const buildSqlEditorTransactionSnapshot = (params: {
     sqlLogs = [],
     includeSqlPreview = true,
     now = Date.now(),
+    translate,
   } = params;
   const commitMode = normalizeCommitMode(transactionState?.commitMode);
   const autoCommitDelayMs = normalizeDelayMs(transactionState?.autoCommitDelayMs);
@@ -171,6 +187,7 @@ export const buildSqlEditorTransactionSnapshot = (params: {
     activeTabId,
     connections,
     includeSqlPreview,
+    translate,
   });
   const activeUsesManagedTransaction = activeSqlTab.hasActiveTab
     && activeSqlTab.hasSql
@@ -187,34 +204,44 @@ export const buildSqlEditorTransactionSnapshot = (params: {
 
   const warnings: string[] = [];
   if (pendingTransactions.length > 0) {
-    warnings.push(`当前有 ${pendingTransactions.length} 个 SQL 编辑器托管事务待提交或回滚`);
+    warnings.push(translateOrFallback(
+      translate,
+      'ai_chat.inspection.sql_editor_transaction.warning.pending_transactions',
+      { count: pendingTransactions.length },
+      `There are ${pendingTransactions.length} SQL editor managed transactions pending commit or rollback`,
+    ));
   }
   if (activePendingTransaction) {
-    warnings.push('当前活动 SQL 页签已有待处理事务，继续执行新的 DML 前应先提交或回滚');
+    warnings.push(translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.warning.active_pending_transaction', undefined, 'The active SQL tab already has a pending transaction. Commit or roll it back before running another DML statement.'));
   }
   if (activeUsesManagedTransaction && commitMode === 'auto') {
-    warnings.push('当前设置为自动提交，但 DML 仍会先进入托管事务，只是在延迟到期后自动 COMMIT');
+    warnings.push(translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.warning.auto_commit_managed_dml', undefined, 'Auto commit is enabled, but DML still enters a managed transaction and only runs COMMIT after the delay expires.'));
   }
   if (activeHasExplicitTransactionControl) {
-    warnings.push('当前 SQL 已包含显式事务控制，SQL 编辑器不会再接管提交/回滚');
+    warnings.push(translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.warning.explicit_transaction_control', undefined, 'The current SQL already contains explicit transaction control, so the SQL editor will not take over commit or rollback.'));
   }
 
   const nextActions: string[] = [];
   if (activePendingTransaction) {
-    nextActions.push('先让用户在结果区事务条点击“提交”或“回滚”，或等待自动提交倒计时结束');
+    nextActions.push(translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.next_action.resolve_active_pending', undefined, 'Ask the user to click "Commit" or "Rollback" in the result transaction bar, or wait for the auto-commit countdown to finish.'));
   } else if (pendingTransactions.length > 0) {
-    nextActions.push('如要继续执行 DML，先切回对应 SQL 页签处理待提交事务');
+    nextActions.push(translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.next_action.switch_to_pending_tab', undefined, 'Before continuing with DML, switch back to the matching SQL tab and resolve the pending transaction.'));
   }
   if (activeUsesManagedTransaction) {
     nextActions.push(commitMode === 'auto'
-      ? `说明当前 DML 会先开启托管事务，执行成功后约 ${Math.round(autoCommitDelayMs / 1000)} 秒自动提交`
-      : '说明当前 DML 会先开启托管事务，执行成功后需要手动点击提交或回滚');
+      ? translateOrFallback(
+        translate,
+        'ai_chat.inspection.sql_editor_transaction.next_action.explain_auto_commit',
+        { seconds: Math.round(autoCommitDelayMs / 1000) },
+        `Explain that the current DML opens a managed transaction first and auto-commits about ${Math.round(autoCommitDelayMs / 1000)} seconds after successful execution.`,
+      )
+      : translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.next_action.explain_manual_commit', undefined, 'Explain that the current DML opens a managed transaction first and requires a manual Commit or Rollback after successful execution.'));
   }
   if (!activeSqlTab.hasActiveTab || !activeSqlTab.hasSql) {
-    nextActions.push('先切换到包含 SQL 草稿的查询页签，或让用户贴出要执行的 SQL');
+    nextActions.push(translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.next_action.switch_to_sql_tab', undefined, 'Switch to a query tab with a SQL draft first, or ask the user to paste the SQL they want to run.'));
   }
   if (recentRelevantLogs.length > 0) {
-    nextActions.push('结合 recentRelevantLogs 回看最近写入/事务执行结果，必要时再调用 inspect_recent_sql_activity 下钻');
+    nextActions.push(translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.next_action.inspect_recent_activity', undefined, 'Review recent write or transaction execution results in recentRelevantLogs, and call inspect_recent_sql_activity for deeper inspection if needed.'));
   }
 
   return {
@@ -222,7 +249,7 @@ export const buildSqlEditorTransactionSnapshot = (params: {
       commitMode,
       autoCommitDelayMs,
       transactionAlwaysOnForDML: true,
-      semantics: 'SQL 编辑器执行 INSERT/UPDATE/DELETE/MERGE/REPLACE 等 DML 时始终先进入托管事务；“手动/自动”只控制执行成功后的 COMMIT 时机，不控制是否开启事务。',
+      semantics: translateOrFallback(translate, 'ai_chat.inspection.sql_editor_transaction.commit_policy.semantics', undefined, 'SQL editor runs INSERT/UPDATE/DELETE/MERGE/REPLACE DML inside a managed transaction. Manual or auto mode only controls when COMMIT happens after successful execution, not whether a transaction is opened.'),
     },
     activeSqlTab,
     pendingTransactionCount: pendingTransactions.length,

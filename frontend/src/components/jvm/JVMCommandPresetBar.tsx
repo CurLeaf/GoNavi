@@ -7,6 +7,7 @@ import {
   resolveJVMDiagnosticRiskColor,
   type JVMDiagnosticCommandPreset,
 } from "../../utils/jvmDiagnosticPresentation";
+import { useI18n } from "../../i18n/provider";
 
 const { Text } = Typography;
 
@@ -16,52 +17,56 @@ type JVMCommandPresetBarProps = {
 
 const JVMCommandPresetBar: React.FC<JVMCommandPresetBarProps> = ({
   onSelectPreset,
-}) => (
-  <div style={{ display: "grid", gap: 12 }}>
-    {groupJVMDiagnosticPresets().map((group) => (
-      <Card
-        key={group.category}
-        size="small"
-        title={group.label}
-        style={{ borderRadius: 14 }}
-        styles={{
-          header: { minHeight: 38, paddingInline: 12 },
-          body: { display: "grid", gap: 8, padding: 12 },
-        }}
-      >
-        {group.items.map((preset) => (
-          <div
-            key={preset.key}
-            style={{
-              display: "grid",
-              gap: 6,
-              padding: 10,
-              borderRadius: 12,
-              background: "rgba(127,127,127,0.06)",
-            }}
-          >
-            <Space size={8} wrap>
-              <Button
-                size="small"
-                type="text"
-                onClick={() => onSelectPreset(preset)}
-                style={{ paddingInline: 8, fontWeight: 700 }}
-              >
-                {preset.label}
-              </Button>
-              <Tag color={resolveJVMDiagnosticRiskColor(preset.riskLevel)}>
-                {formatJVMDiagnosticRiskLabel(preset.riskLevel)}
-              </Tag>
-            </Space>
-            <Text type="secondary">{preset.description}</Text>
-            <Text code style={{ width: "fit-content" }}>
-              {preset.command}
-            </Text>
-          </div>
-        ))}
-      </Card>
-    ))}
-  </div>
-);
+}) => {
+  const { t } = useI18n();
+
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      {groupJVMDiagnosticPresets(undefined, t).map((group) => (
+        <Card
+          key={group.category}
+          size="small"
+          title={group.label}
+          style={{ borderRadius: 14 }}
+          styles={{
+            header: { minHeight: 38, paddingInline: 12 },
+            body: { display: "grid", gap: 8, padding: 12 },
+          }}
+        >
+          {group.items.map((preset) => (
+            <div
+              key={preset.key}
+              style={{
+                display: "grid",
+                gap: 6,
+                padding: 10,
+                borderRadius: 12,
+                background: "rgba(127,127,127,0.06)",
+              }}
+            >
+              <Space size={8} wrap>
+                <Button
+                  size="small"
+                  type="text"
+                  onClick={() => onSelectPreset(preset)}
+                  style={{ paddingInline: 8, fontWeight: 700 }}
+                >
+                  {preset.label}
+                </Button>
+                <Tag color={resolveJVMDiagnosticRiskColor(preset.riskLevel)}>
+                  {formatJVMDiagnosticRiskLabel(preset.riskLevel, t)}
+                </Tag>
+              </Space>
+              <Text type="secondary">{preset.description}</Text>
+              <Text code style={{ width: "fit-content" }}>
+                {preset.command}
+              </Text>
+            </div>
+          ))}
+        </Card>
+      ))}
+    </div>
+  );
+};
 
 export default JVMCommandPresetBar;

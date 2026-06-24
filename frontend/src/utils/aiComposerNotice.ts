@@ -1,3 +1,4 @@
+import { t as catalogTranslate } from '../i18n/catalog';
 import type { AIChatReadinessIssue } from '../components/ai/aiChatReadiness';
 import { formatAIChatProviderIssueLabels } from '../components/ai/aiChatReadiness';
 
@@ -25,19 +26,10 @@ export type AIComposerNoticeTranslator = (
   params?: Record<string, string | number | boolean | null | undefined>
 ) => string;
 
-const defaultCopy = {
-  missingProviderTitle: '还没有可用供应商',
-  missingProviderDescription: '先在 AI 设置里添加并启用一个模型供应商。',
-  missingModelTitle: '先选择一个模型',
-  missingModelDescription: '打开下方模型下拉并选择模型；如果列表为空，请检查供应商入口和 API Key。',
-  incompleteProviderTitle: '当前供应商配置还不完整',
-  incompleteProviderDescription: '先补全供应商配置再发送，避免请求刚发起就失败。',
-  modelFetchFailedTitle: '模型列表加载失败',
-  modelFetchFailedDescription: '请检查供应商入口、API Key 或账号权限，然后重新打开模型下拉。',
-  openSettingsAction: '打开 AI 设置',
-  fixProviderAction: '修复供应商配置',
-  reloadModelsAction: '重新加载模型',
-} as const;
+const catalogTranslateEn = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) => catalogTranslate('en-US', key, params);
 
 const translateWithFallback = (
   t: AIComposerNoticeTranslator | undefined,
@@ -52,6 +44,23 @@ const translateWithFallback = (
   return translated && translated !== key ? translated : fallback;
 };
 
+const getProviderFallbackLabel = (t?: AIComposerNoticeTranslator): string =>
+  translateWithFallback(
+    t,
+    'ai_chat.input.status.provider_fallback_name',
+    catalogTranslateEn('ai_chat.input.status.provider_fallback_name'),
+  );
+
+const getIssueSeparator = (t?: AIComposerNoticeTranslator): string =>
+  translateWithFallback(
+    t,
+    'ai_chat.input.status.issue.separator',
+    catalogTranslateEn('ai_chat.input.status.issue.separator'),
+  );
+
+const joinIssueLabels = (labels: string[], t?: AIComposerNoticeTranslator): string =>
+  labels.join(getIssueSeparator(t));
+
 const buildNoticeAction = (
   key: AIComposerNoticeAction,
   labelKey: string,
@@ -64,32 +73,40 @@ const buildNoticeAction = (
 
 export const buildMissingProviderNotice = (t?: AIComposerNoticeTranslator): AIComposerNotice => ({
   tone: 'warning',
-  title: t
-    ? t('ai_chat.composer_notice.missing_provider.title')
-    : defaultCopy.missingProviderTitle,
-  description: t
-    ? t('ai_chat.composer_notice.missing_provider.description')
-    : defaultCopy.missingProviderDescription,
+  title: translateWithFallback(
+    t,
+    'ai_chat.composer_notice.missing_provider.title',
+    catalogTranslateEn('ai_chat.composer_notice.missing_provider.title'),
+  ),
+  description: translateWithFallback(
+    t,
+    'ai_chat.composer_notice.missing_provider.description',
+    catalogTranslateEn('ai_chat.composer_notice.missing_provider.description'),
+  ),
   action: buildNoticeAction(
     'open-settings',
-    'ai_chat.composer_notice.action.open_settings',
-    defaultCopy.openSettingsAction,
+    'ai_chat.input.status.action.open_settings',
+    catalogTranslateEn('ai_chat.input.status.action.open_settings'),
     t,
   ),
 });
 
 export const buildMissingModelNotice = (t?: AIComposerNoticeTranslator): AIComposerNotice => ({
   tone: 'warning',
-  title: t
-    ? t('ai_chat.composer_notice.missing_model.title')
-    : defaultCopy.missingModelTitle,
-  description: t
-    ? t('ai_chat.composer_notice.missing_model.description')
-    : defaultCopy.missingModelDescription,
+  title: translateWithFallback(
+    t,
+    'ai_chat.composer_notice.missing_model.title',
+    catalogTranslateEn('ai_chat.composer_notice.missing_model.title'),
+  ),
+  description: translateWithFallback(
+    t,
+    'ai_chat.composer_notice.missing_model.description',
+    catalogTranslateEn('ai_chat.composer_notice.missing_model.description'),
+  ),
   action: buildNoticeAction(
     'reload-models',
-    'ai_chat.composer_notice.action.reload_models',
-    defaultCopy.reloadModelsAction,
+    'ai_chat.input.status.action.reload_models',
+    catalogTranslateEn('ai_chat.input.status.action.reload_models'),
     t,
   ),
 });
@@ -98,28 +115,40 @@ export const buildIncompleteProviderNotice = (
   issues: AIChatReadinessIssue[] = [],
   t?: AIComposerNoticeTranslator,
 ): AIComposerNotice => {
-  const missingLabels = formatAIChatProviderIssueLabels(issues.filter((issue) => issue !== 'missing_selected_model'));
+  const filteredIssues = issues.filter((issue) => issue !== 'missing_selected_model');
+  const missingLabels = formatAIChatProviderIssueLabels(filteredIssues, t);
+  const providerFallbackLabel = getProviderFallbackLabel(t);
+  const issuesText = joinIssueLabels(missingLabels, t);
   const fallbackTitle = missingLabels.length > 0
-    ? `当前供应商还缺少 ${missingLabels.join('、')}`
-    : defaultCopy.incompleteProviderTitle;
+    ? catalogTranslateEn('ai_chat.input.status.provider_incomplete.title', {
+      provider: catalogTranslateEn('ai_chat.input.status.provider_fallback_name'),
+      issues: joinIssueLabels(
+        formatAIChatProviderIssueLabels(filteredIssues),
+        undefined,
+      ),
+    })
+    : catalogTranslateEn('ai_chat.input.status.provider_fallback_name');
 
   return {
     tone: 'error',
     title: translateWithFallback(
       t,
-      'ai_chat.composer_notice.provider_incomplete.title',
+      'ai_chat.input.status.provider_incomplete.title',
       fallbackTitle,
-      { labels: missingLabels.join('、') },
+      {
+        provider: providerFallbackLabel,
+        issues: issuesText,
+      },
     ),
     description: translateWithFallback(
       t,
-      'ai_chat.composer_notice.provider_incomplete.description',
-      defaultCopy.incompleteProviderDescription,
+      'ai_chat.input.status.provider_incomplete.description',
+      catalogTranslateEn('ai_chat.input.status.provider_incomplete.description'),
     ),
     action: buildNoticeAction(
       'open-settings',
-      'ai_chat.composer_notice.action.fix_provider',
-      defaultCopy.fixProviderAction,
+      'ai_chat.input.status.action.fix_provider',
+      catalogTranslateEn('ai_chat.input.status.action.fix_provider'),
       t,
     ),
   };
@@ -143,18 +172,29 @@ export function buildModelFetchFailedNotice(
 
   return {
     tone: 'error',
-    title: t
-      ? t('ai_chat.composer_notice.model_fetch_failed.title')
-      : defaultCopy.modelFetchFailedTitle,
+    title: translateWithFallback(
+      t,
+      'ai_chat.composer_notice.model_fetch_failed.title',
+      catalogTranslateEn('ai_chat.composer_notice.model_fetch_failed.title'),
+    ),
     description: t
       ? detail
-        ? t('ai_chat.composer_notice.model_fetch_failed.detail_description', { detail })
-        : t('ai_chat.composer_notice.model_fetch_failed.default_description')
-      : detail || defaultCopy.modelFetchFailedDescription,
+        ? translateWithFallback(
+          t,
+          'ai_chat.composer_notice.model_fetch_failed.detail_description',
+          catalogTranslateEn('ai_chat.composer_notice.model_fetch_failed.detail_description', { detail }),
+          { detail },
+        )
+        : translateWithFallback(
+          t,
+          'ai_chat.composer_notice.model_fetch_failed.default_description',
+          catalogTranslateEn('ai_chat.composer_notice.model_fetch_failed.default_description'),
+        )
+      : detail || catalogTranslateEn('ai_chat.composer_notice.model_fetch_failed.default_description'),
     action: buildNoticeAction(
       'reload-models',
-      'ai_chat.composer_notice.action.reload_models',
-      defaultCopy.reloadModelsAction,
+      'ai_chat.input.status.action.reload_models',
+      catalogTranslateEn('ai_chat.input.status.action.reload_models'),
       t,
     ),
   };

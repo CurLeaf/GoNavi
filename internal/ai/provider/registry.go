@@ -20,6 +20,6 @@ func NewProvider(config ai.ProviderConfig) (Provider, error) {
 	case "custom":
 		return NewCustomProvider(config)
 	default:
-		return nil, fmt.Errorf("不支持的 AI Provider 类型: %s", config.Type)
+		return nil, fmt.Errorf("unsupported AI provider type: %s", config.Type)
 	}
 }

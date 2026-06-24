@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { t as translateCatalog } from '../../i18n/catalog';
 import type { SavedConnection, TabData } from '../../types';
 import { buildConnectionCapabilitiesSnapshot } from './aiConnectionCapabilitiesInsights';
 
@@ -96,6 +97,7 @@ describe('aiConnectionCapabilitiesInsights', () => {
     const snapshot = buildConnectionCapabilitiesSnapshot({
       connectionId: 'conn-kafka',
       connections,
+      translate: (key, params) => translateCatalog('zh-CN', key, params),
     });
 
     if (!snapshot.hasConnection || !snapshot.capabilities) {

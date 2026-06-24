@@ -19,6 +19,21 @@ const message = (overrides: Partial<AIChatMessage>): AIChatMessage => ({
   ...overrides,
 });
 
+const translateAttachmentPrompt = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+): string => ({
+  'ai_chat.input.attachment.kind.markdown': 'Markdown',
+  'ai_chat.input.attachment.prompt.heading': `### Attachment ${params?.index}: ${params?.name}`,
+  'ai_chat.input.attachment.prompt.kind': `- Type: ${params?.kind}`,
+  'ai_chat.input.attachment.prompt.mime': `- MIME: ${params?.mimeType}`,
+  'ai_chat.input.attachment.prompt.size': `- Size: ${params?.size}`,
+  'ai_chat.input.attachment.prompt.no_text': 'No readable attachment body was extracted.',
+  'ai_chat.input.attachment.prompt.default_user_content': 'Continue based on the following attachment content.',
+  'ai_chat.input.attachment.prompt.wrapper_start': '<User Uploaded Attachments>',
+  'ai_chat.input.attachment.prompt.wrapper_end': '</User Uploaded Attachments>',
+}[key] || key);
+
 describe('toAIRequestMessage', () => {
   it('keeps reasoning_content on assistant tool-call messages', () => {
     const payload = toAIRequestMessage(message({
@@ -88,11 +103,13 @@ describe('toAIRequestMessage', () => {
         kind: 'markdown',
         text: '# 周报\n收入下降',
       }],
-    }));
+    }), translateAttachmentPrompt as any);
 
     expect(payload.content).toContain('帮我看附件');
-    expect(payload.content).toContain('<用户上传附件>');
+    expect(payload.content).toContain('<User Uploaded Attachments>');
+    expect(payload.content).toContain('### Attachment 1: report.md');
     expect(payload.content).toContain('report.md');
     expect(payload.content).toContain('收入下降');
+    expect(payload.content).not.toContain('<用户上传附件>');
   });
 });

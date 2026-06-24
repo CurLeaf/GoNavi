@@ -38,6 +38,16 @@ import Sidebar, {
   sortSidebarTableEntries,
 } from './Sidebar';
 import {
+  buildSearchScopeOptions as buildCoreSearchScopeOptions,
+  SEARCH_SCOPE_OPTIONS as CORE_SEARCH_SCOPE_OPTIONS,
+} from './sidebarCoreUtils';
+import {
+  buildSidebarTableChildrenForUi as buildV2UtilsSidebarTableChildrenForUi,
+  buildV2ExplorerFilterOptions,
+  buildV2SidebarTableSectionedChildren as buildV2UtilsSidebarTableSectionedChildren,
+  V2_EXPLORER_FILTER_OPTIONS as V2_UTILS_EXPLORER_FILTER_OPTIONS,
+} from './sidebarV2Utils';
+import {
   buildSidebarRootConnectionToken,
   buildSidebarRootTagToken,
   buildSidebarTablePinKey,
@@ -236,9 +246,15 @@ vi.mock('../utils/appearance', async () => {
   };
 });
 
-const renderSidebarMarkup = (props: React.ComponentProps<typeof Sidebar> = {}) => renderToStaticMarkup(
+type SidebarTestLanguage = (typeof SUPPORTED_LANGUAGES)[number];
+
+const renderSidebarMarkup = (
+  props: React.ComponentProps<typeof Sidebar> = {},
+  language: SidebarTestLanguage = getCurrentLanguage(),
+) => renderToStaticMarkup(
   <I18nProvider
-    preference={getCurrentLanguage()}
+    preference={language}
+    systemLanguages={[language]}
     onPreferenceChange={() => undefined}
   >
     <Sidebar {...props} />
@@ -765,7 +781,7 @@ describe('Sidebar locate toolbar', () => {
     const markup = renderSidebarMarkup({ uiVersion: 'v2' });
 
     expect(markup).toContain('data-v2-sidebar-search-mode="filter"');
-    expect(markup).toContain('placeholder="搜索..."');
+    expect(markup).toContain(`placeholder="${t('sidebar.search.placeholder')}"`);
     expect(markup).toContain('value="fs_org"');
     expect(markup).toContain('重置侧栏筛选');
   });
@@ -887,6 +903,52 @@ describe('Sidebar locate toolbar', () => {
     });
   });
 
+  it('localizes extracted sidebar util search and v2 filter labels through injected translators', () => {
+    const translate = (key: string) => ({
+      'sidebar.search.scope.smart': 'Smart',
+      'sidebar.search.scope.object': 'Object',
+      'sidebar.search.scope.database': 'Database',
+      'sidebar.search.scope.host': 'Host',
+      'sidebar.search.scope.tag': 'Tag',
+      'sidebar.command_search.object_kind.all': 'All',
+      'sidebar.command_search.object_kind.tables': 'Tables',
+      'sidebar.command_search.object_kind.views': 'Views',
+      'sidebar.command_search.object_kind.routines': 'Routines',
+      'sidebar.command_search.object_kind.events': 'Events',
+      'table_overview.section.pinned': 'Pinned',
+      'table_overview.section.all': 'All',
+    } as Record<string, string>)[key] || key;
+
+    expect(buildCoreSearchScopeOptions(translate).map((option) => option.label)).toEqual(['Smart', 'Object', 'Database', 'Host', 'Tag']);
+    expect(CORE_SEARCH_SCOPE_OPTIONS.map((option) => option.label)).toEqual([
+      t('sidebar.search.scope.smart', undefined, 'zh-CN'),
+      t('sidebar.search.scope.object', undefined, 'zh-CN'),
+      t('sidebar.search.scope.database', undefined, 'zh-CN'),
+      t('sidebar.search.scope.host', undefined, 'zh-CN'),
+      t('sidebar.search.scope.tag', undefined, 'zh-CN'),
+    ]);
+    expect(buildV2ExplorerFilterOptions(translate).map((option) => option.label)).toEqual(['All', 'Tables', 'Views', 'Routines', 'Events']);
+    expect(V2_UTILS_EXPLORER_FILTER_OPTIONS.map((option) => option.label)).toEqual(['全部', '表', '视图', '函数', '事件']);
+
+    const tableNodes = [
+      { title: 'orders', key: 'orders', type: 'table' as const, dataRef: { pinnedSidebarTable: true } },
+      { title: 'users', key: 'users', type: 'table' as const, dataRef: { pinnedSidebarTable: false } },
+    ];
+
+    expect(buildV2UtilsSidebarTableSectionedChildren('conn-main-tables', tableNodes, translate).map((node) => node.title)).toEqual([
+      'Pinned',
+      'orders',
+      'All',
+      'users',
+    ]);
+    expect(buildV2UtilsSidebarTableChildrenForUi('conn-main-tables', tableNodes, true, translate).map((node) => node.title)).toEqual([
+      'Pinned',
+      'orders',
+      'All',
+      'users',
+    ]);
+  });
+
   it('keeps the v2 command search footer hints tied to real prefix actions', () => {
     const source = readSidebarSource();
 
@@ -894,8 +956,8 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("const v2CommandSearchAiMode = v2CommandSearchQuery.mode === 'ai';");
     expect(source).toContain("key: 'action-ask-ai'");
     expect(source).toContain("window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt'");
-    expect(source).toContain('<TableOutlined /> <kbd>@</kbd>只搜表对象');
-    expect(source).toContain('<RobotOutlined /> <kbd>?</kbd>发送给 AI');
+    expect(source).toContain("<TableOutlined /> <kbd>@</kbd>{t('sidebar.command_search.footer.object_only')}");
+    expect(source).toContain("<RobotOutlined /> <kbd>?</kbd>{t('sidebar.command_search.footer.ask_ai')}");
     expect(source).not.toContain('提示 · 以「@」开头按表名搜索，以「?」开头让 AI 回答');
   });
 
@@ -1714,8 +1776,8 @@ describe('Sidebar locate toolbar', () => {
     const sectionBuilderSourceEnd = source.indexOf('export const buildSidebarTableChildrenForUi = (');
     const sectionBuilderSource = source.slice(sectionBuilderSourceStart, sectionBuilderSourceEnd);
 
-    expect(sectionBuilderSource).toContain("buildSectionNode('pinned', t('table_overview.section.pinned'))");
-    expect(sectionBuilderSource).toContain("buildSectionNode('all', t('table_overview.section.all'))");
+    expect(sectionBuilderSource).toContain("buildSectionNode('pinned', translate('table_overview.section.pinned'))");
+    expect(sectionBuilderSource).toContain("buildSectionNode('all', translate('table_overview.section.all'))");
     expect(sectionBuilderSource).not.toContain("'置顶'");
     expect(sectionBuilderSource).not.toContain("'全部'");
 
@@ -2101,7 +2163,9 @@ describe('Sidebar locate toolbar', () => {
     expect(starRocksSource).toContain("title: t('sidebar.v2_database_menu.new_external_catalog')");
   });
 
-  it('renders the v2 schema context menu with rename and schema-level export actions', () => {
+  it('localizes the v2 schema context menu while keeping raw schema and SQL tokens', () => {
+    setCurrentLanguage('en-US');
+
     const markup = renderToStaticMarkup(
       <V2SchemaContextMenuView
         dbName="app_db"
@@ -2112,11 +2176,17 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('data-v2-schema-context-menu="true"');
     expect(markup).toContain('sales');
     expect(markup).toContain('SCHEMA');
-    expect(markup).toContain('编辑模式');
-    expect(markup).toContain('刷新对象树');
-    expect(markup).toContain('导出当前模式表结构 · SQL');
-    expect(markup).toContain('备份当前模式全部表 · 结构 + 数据');
-    expect(markup).toContain('删除模式 · DROP CASCADE');
+    expect(markup).toContain('app_db · Schema actions');
+    expect(markup).toContain('Maintenance');
+    expect(markup).toContain('Edit schema');
+    expect(markup).toContain('Refresh object tree');
+    expect(markup).toContain('Export and backup');
+    expect(markup).toContain('Export current schema table structures · SQL');
+    expect(markup).toContain('Back up all current schema tables · schema + data');
+    expect(markup).toContain('Delete schema · DROP CASCADE');
+    ['当前数据库', '模式操作', '维护', '编辑模式', '刷新对象树', '导出与备份', '导出当前模式表结构', '备份当前模式全部表', '删除模式'].forEach((rawSnippet) => {
+      expect(markup).not.toContain(rawSnippet);
+    });
   });
 
   it('renders the v2 connection context menu for host rail actions', () => {

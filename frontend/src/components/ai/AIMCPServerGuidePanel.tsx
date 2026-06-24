@@ -1,6 +1,8 @@
 import React from 'react';
 import { Button, Input } from 'antd';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { ParseMCPCommandDraftResult } from '../../utils/mcpCommandDraft';
 import {
@@ -34,21 +36,28 @@ const AIMCPServerGuidePanel: React.FC<AIMCPServerGuidePanelProps> = ({
   parsedCommandDraft,
   onApplyCommandDraft,
   onRawCommandDraftChange,
-}) => (
-  <>
+}) => {
+  const i18n = useOptionalI18n();
+  const copy = (
+    key: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => (i18n?.t ?? ((catalogKey, catalogParams) => catalogTranslate('en-US', catalogKey, catalogParams)))(key, params);
+
+  return (
+    <>
     <div style={{ padding: '10px 12px', borderRadius: 10, border: `1px dashed ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.7)' }}>
-      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>填写示例</div>
+      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>{copy('ai_settings.mcp_server.guide.examples.title')}</div>
       <div style={{ ...buildMCPHintStyle(overlayTheme.mutedText), marginTop: 4 }}>
-        启动命令只填可执行程序本身，不要把参数混在一起。常见形式：
+        {copy('ai_settings.mcp_server.guide.examples.description')}
         {' '}
         <code style={{ fontFamily: 'var(--gn-font-mono)' }}>{MCP_COMMAND_EXAMPLES.join(' / ')}</code>
       </div>
     </div>
 
     <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>推荐填写顺序</div>
+      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>{copy('ai_settings.mcp_server.guide.order.title')}</div>
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-        小白用户可以按这个顺序填：先选上面的模板或粘整行命令，再确认下面的必填项，最后只在需要时补参数、环境变量和超时。
+        {copy('ai_settings.mcp_server.guide.order.description')}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         {MCP_SERVER_FILL_STEPS.map((item) => (
@@ -62,16 +71,16 @@ const AIMCPServerGuidePanel: React.FC<AIMCPServerGuidePanelProps> = ({
               background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)',
             }}
           >
-            {item.step}. {item.title}
+            {item.step}. {copy(item.titleKey)}
           </span>
         ))}
       </div>
     </div>
 
     <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>字段速查</div>
+      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>{copy('ai_settings.mcp_server.guide.field_lookup.title')}</div>
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-        如果看到某个参数名不知道该填什么，先看这一块；下面每个字段也都有更具体的示例和注意事项。
+        {copy('ai_settings.mcp_server.guide.field_lookup.description')}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10 }}>
         {MCP_FIELD_GUIDES.map((item) => (
@@ -87,9 +96,9 @@ const AIMCPServerGuidePanel: React.FC<AIMCPServerGuidePanelProps> = ({
     </div>
 
     <div style={{ padding: '12px 14px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>常见填错现象</div>
+      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>{copy('ai_settings.mcp_server.guide.troubleshooting.title')}</div>
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-        如果测试失败，先按这里反查要改哪个字段；大多数问题都不是 MCP 坏了，而是命令、参数或环境变量拆错了。
+        {copy('ai_settings.mcp_server.guide.troubleshooting.description')}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
         {MCP_TROUBLESHOOTING_GUIDES.map((item) => (
@@ -105,14 +114,14 @@ const AIMCPServerGuidePanel: React.FC<AIMCPServerGuidePanelProps> = ({
               gap: 6,
             }}
           >
-            <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{item.symptom}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{copy(item.symptomKey)}</div>
             <div style={{ fontSize: 12, lineHeight: 1.6, color: overlayTheme.titleText }}>
-              常见原因：{item.likelyCause}
+              {copy('ai_settings.mcp_server.guide.troubleshooting.cause_label')}{copy(item.likelyCauseKey)}
             </div>
-            <div style={buildMCPHintStyle(overlayTheme.mutedText)}>处理方式：{item.fix}</div>
+            <div style={buildMCPHintStyle(overlayTheme.mutedText)}>{copy('ai_settings.mcp_server.guide.troubleshooting.fix_label')}{copy(item.fixKey)}</div>
             {item.example ? (
               <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-                示例：
+                {copy('ai_settings.mcp_server.guide.troubleshooting.example_label')}
                 {' '}
                 <code style={{ fontFamily: 'var(--gn-font-mono)' }}>{item.example}</code>
               </div>
@@ -123,27 +132,31 @@ const AIMCPServerGuidePanel: React.FC<AIMCPServerGuidePanelProps> = ({
     </div>
 
     <div style={{ padding: '12px', borderRadius: 12, border: `1px solid ${cardBorder}`, background: darkMode ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.76)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>只有一条完整命令？</div>
+      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>{copy('ai_settings.mcp_server.guide.full_command.title')}</div>
       <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-        直接粘贴完整命令，GoNavi 会自动拆成“启动命令 / 命令参数 / 环境变量”三块；支持 Unix 的 KEY=VALUE，也支持 Windows PowerShell 的 $env:KEY=VALUE; 和 cmd 的 set KEY=VALUE && 写法。
+        {copy('ai_settings.mcp_server.guide.full_command.description')}
       </div>
       <Input.TextArea
         rows={2}
         value={rawCommandDraft}
         onChange={(event) => onRawCommandDraftChange(event.target.value)}
-        placeholder={`直接粘贴完整命令，例如：\n${MCP_COMMAND_PARSE_EXAMPLE}`}
+        placeholder={copy('ai_settings.mcp_server.guide.full_command.placeholder', { example: MCP_COMMAND_PARSE_EXAMPLE })}
         style={{ borderRadius: 10, background: inputBg, border: `1px solid ${cardBorder}`, fontFamily: 'var(--gn-font-mono)' }}
       />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ ...buildMCPHintStyle(parsedCommandDraft.ok ? overlayTheme.mutedText : '#dc2626') }}>
           {rawCommandDraft.trim()
             ? parsedCommandDraft.ok && parsedCommandDraft.draft
-              ? `将解析为：命令 ${parsedCommandDraft.draft.command}，参数 ${parsedCommandDraft.draft.args.length} 个，环境变量 ${Object.keys(parsedCommandDraft.draft.env).length} 个。`
+              ? copy('ai_settings.mcp_server.guide.full_command.parsed_summary', {
+                command: parsedCommandDraft.draft.command,
+                argsCount: parsedCommandDraft.draft.args.length,
+                envCount: Object.keys(parsedCommandDraft.draft.env).length,
+              })
               : parsedCommandDraft.error
-            : '支持带引号路径、带空格参数，以及 KEY=VALUE / $env:KEY=VALUE; / set KEY=VALUE && 环境变量前缀。'}
+            : copy('ai_settings.mcp_server.guide.full_command.support_hint')}
         </div>
         <Button onClick={onApplyCommandDraft} disabled={!parsedCommandDraft.ok} style={{ borderRadius: 10 }}>
-          自动拆分到下方字段
+          {copy('ai_settings.mcp_server.guide.full_command.apply')}
         </Button>
       </div>
       {parsedCommandDraft.ok && parsedCommandDraft.draft && rawCommandDraft.trim() && (
@@ -155,7 +168,8 @@ const AIMCPServerGuidePanel: React.FC<AIMCPServerGuidePanelProps> = ({
         />
       )}
     </div>
-  </>
-);
+    </>
+  );
+};
 
 export default AIMCPServerGuidePanel;

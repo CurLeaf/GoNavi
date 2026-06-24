@@ -1,68 +1,97 @@
 import type { AIMCPClientInstallStatus } from '../../types';
 import { isRemoteMCPClientStatus } from '../../utils/mcpClientInstallStatus';
 
+export type MCPClientInstallCopyParams = Record<string, string | number | boolean | null | undefined>;
+export type MCPClientInstallTranslator = (key: string, params?: MCPClientInstallCopyParams) => string;
+
 export interface MCPClientInstallStatusTone {
   label: string;
   color: string;
   bg: string;
 }
 
-export const hasMCPClientStatusIssue = (status: AIMCPClientInstallStatus | undefined): boolean =>
-  /失败|异常|错误/u.test(String(status?.message || ''));
+const interpolateFallback = (text: string, params?: MCPClientInstallCopyParams): string =>
+  text.replace(/\{\{(\w+)\}\}/g, (_match, name) => String(params?.[name] ?? ''));
+
+export const translateMCPClientInstallCopy = (
+  translate: MCPClientInstallTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: MCPClientInstallCopyParams,
+): string => {
+  const translated = translate?.(key, params);
+  if (translated && translated !== key) {
+    return translated;
+  }
+  return interpolateFallback(fallback, params);
+};
+
+export const hasMCPClientStatusIssue = (status: AIMCPClientInstallStatus | undefined): boolean => {
+  const message = String(status?.message || '').toLowerCase();
+  return /fail|failed|error|exception/u.test(message) ||
+    message.includes('\u5931\u8d25') ||
+    message.includes('\u5f02\u5e38') ||
+    message.includes('\u9519\u8bef');
+};
 
 export const getMCPClientStatusTone = (
   status: AIMCPClientInstallStatus | undefined,
   darkMode: boolean,
+  translate?: MCPClientInstallTranslator,
 ): MCPClientInstallStatusTone => {
+  const copy = (key: string, fallback: string) => translateMCPClientInstallCopy(translate, key, fallback);
   if (status?.matchesCurrent) {
     return {
-      label: '已接入',
+      label: copy('ai_chat.mcp_client.install.status_tone.connected', 'Connected'),
       color: '#16a34a',
       bg: darkMode ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.12)',
     };
   }
   if (status?.installed) {
     return {
-      label: '需更新',
+      label: copy('ai_chat.mcp_client.install.status_tone.update_required', 'Update needed'),
       color: '#d97706',
       bg: darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)',
     };
   }
   if (isRemoteMCPClientStatus(status)) {
     return {
-      label: '远程桥接',
+      label: copy('ai_chat.mcp_client.install.status_tone.remote_bridge', 'Remote bridge'),
       color: '#0284c7',
       bg: darkMode ? 'rgba(56,189,248,0.16)' : 'rgba(14,165,233,0.10)',
     };
   }
   if (hasMCPClientStatusIssue(status)) {
     return {
-      label: '状态异常',
+      label: copy('ai_chat.mcp_client.install.status_tone.status_error', 'Status error'),
       color: '#dc2626',
       bg: darkMode ? 'rgba(239,68,68,0.18)' : 'rgba(239,68,68,0.1)',
     };
   }
   return {
-    label: '未接入',
+    label: copy('ai_chat.mcp_client.install.status_tone.not_connected', 'Not connected'),
     color: darkMode ? 'rgba(255,255,255,0.72)' : '#64748b',
     bg: darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(100,116,139,0.08)',
   };
 };
 
-export const getMCPClientInstallStateLabel = (status: AIMCPClientInstallStatus | undefined): string => {
+export const getMCPClientInstallStateLabel = (
+  status: AIMCPClientInstallStatus | undefined,
+  translate?: MCPClientInstallTranslator,
+): string => {
   if (status?.matchesCurrent) {
-    return '外部工具接入状态：已接入当前 GoNavi';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.state.connected', 'External tool connection status: connected to this GoNavi');
   }
   if (status?.installed) {
-    return '外部工具接入状态：已存在旧配置，需更新';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.state.stale', 'External tool connection status: old config found, update needed');
   }
   if (hasMCPClientStatusIssue(status)) {
-    return '外部工具接入状态：读取失败';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.state.error', 'External tool connection status: failed to read');
   }
   if (isRemoteMCPClientStatus(status)) {
-    return '外部工具接入状态：需配置远程 MCP 桥接';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.state.remote', 'External tool connection status: remote MCP bridge required');
   }
-  return '外部工具接入状态：未接入';
+  return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.state.missing', 'External tool connection status: not connected');
 };
 
 export const resolveMCPClientCommandName = (status: AIMCPClientInstallStatus | undefined): string => {
@@ -73,77 +102,92 @@ export const resolveMCPClientCommandName = (status: AIMCPClientInstallStatus | u
   return status?.client === 'codex' ? 'codex' : 'claude';
 };
 
-export const getMCPClientStatusSummary = (status: AIMCPClientInstallStatus | undefined): string => {
-  const label = status?.displayName || '这个客户端';
+export const getMCPClientStatusSummary = (
+  status: AIMCPClientInstallStatus | undefined,
+  translate?: MCPClientInstallTranslator,
+): string => {
+  const label = status?.displayName || 'this client';
   if (status?.matchesCurrent) {
-    return `${label} 已接入当前这份 GoNavi MCP，可直接在这个客户端里调用。`;
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.summary.connected', '{{label}} is connected to this GoNavi MCP and can call it directly.', { label });
   }
   if (status?.installed) {
-    return `${label} 里已经有旧的 GoNavi 接入记录，更新后会切到当前这份 GoNavi。`;
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.summary.stale', '{{label}} already has an old GoNavi entry. Updating will point it to this GoNavi.', { label });
   }
   if (hasMCPClientStatusIssue(status)) {
-    return `${label} 的接入状态读取失败，建议先刷新检测。`;
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.summary.error', 'Failed to read the connection status for {{label}}. Refresh detection first.', { label });
   }
   if (isRemoteMCPClientStatus(status)) {
-    return `${label} 通常运行在云端或远端机器，需要通过远程 MCP 桥接调用当前 GoNavi。`;
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.summary.remote', '{{label}} usually runs in the cloud or on another machine and needs a remote MCP bridge to call this GoNavi.', { label });
   }
-  return `当前还没有把这份 GoNavi MCP 接入 ${label}。`;
+  return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.summary.missing', 'This GoNavi MCP is not connected to {{label}} yet.', { label });
 };
 
-export const getMCPClientOptionSummary = (status: AIMCPClientInstallStatus | undefined): string => {
+export const getMCPClientOptionSummary = (
+  status: AIMCPClientInstallStatus | undefined,
+  translate?: MCPClientInstallTranslator,
+): string => {
   if (status?.matchesCurrent) {
-    return '当前这份 GoNavi MCP 已接入到这个客户端。';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.option.connected', 'This GoNavi MCP is already connected to this client.');
   }
   if (status?.installed) {
-    return '检测到旧的 GoNavi 接入记录，建议更新为当前安装路径。';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.option.stale', 'An old GoNavi entry was detected. Update it to the current install path.');
   }
   if (hasMCPClientStatusIssue(status)) {
-    return '接入状态读取异常，建议先刷新再处理。';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.option.error', 'Connection status looks abnormal. Refresh before changing it.');
   }
   if (isRemoteMCPClientStatus(status)) {
-    return '适合云端 Agent：默认 schema-only 读取 GoNavi 表结构，不复制数据库密码，不暴露 SQL 执行。';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.option.remote', 'For cloud Agents: schema-only reads GoNavi structure by default, without copying database passwords or exposing execute_sql.');
   }
-  return '尚未把当前 GoNavi MCP 接入到这里。';
+  return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.option.missing', 'Current GoNavi MCP is not connected here yet.');
 };
 
-export const getMCPClientDetectionSummary = (status: AIMCPClientInstallStatus | undefined): string => {
-  const label = status?.displayName || '这个客户端';
-  const commandName = resolveMCPClientCommandName(status);
+export const getMCPClientDetectionSummary = (
+  status: AIMCPClientInstallStatus | undefined,
+  translate?: MCPClientInstallTranslator,
+): string => {
+  const label = status?.displayName || 'this client';
+  const command = resolveMCPClientCommandName(status);
   if (isRemoteMCPClientStatus(status)) {
-    return `${label} 通常不在这台 Windows 上运行，本机无需检测 ${commandName} 命令；请在云端配置远程 MCP 桥接地址。`;
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.detection.remote', '{{label}} usually does not run on this Windows machine. No local {{command}} command detection is needed; configure a remote MCP bridge URL in the cloud.', { label, command });
   }
   if (status?.clientDetected) {
-    return `已检测到本机 ${commandName} 命令，接入或更新后重启 ${label} 即可验证。`;
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.detection.detected', 'Detected local {{command}} command. After connecting or updating, restart {{label}} to verify.', { label, command });
   }
-  return `未检测到本机 ${commandName} 命令；如果 CLI 还没加入 PATH，也可以先写入 ${label} 的接入配置，稍后再重启验证。`;
+  return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.detection.not_detected', 'Local {{command}} command was not detected. If the CLI is not in PATH yet, you can still write {{label}} config first and restart later.', { label, command });
 };
 
-export const getSelectedMCPClientStateLine = (status: AIMCPClientInstallStatus | undefined): string => {
+export const getSelectedMCPClientStateLine = (
+  status: AIMCPClientInstallStatus | undefined,
+  translate?: MCPClientInstallTranslator,
+): string => {
   if (status?.matchesCurrent) {
-    return '已接入当前 GoNavi，无需重复操作';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.selected.connected', 'Connected to current GoNavi; no repeated action needed');
   }
   if (status?.installed) {
-    return '已存在旧接入记录，建议更新到当前 GoNavi 路径';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.selected.stale', 'Old connection record exists; update it to the current GoNavi path');
   }
   if (hasMCPClientStatusIssue(status)) {
-    return '状态读取异常，建议先刷新检测';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.selected.error', 'Status read is abnormal; refresh detection first');
   }
   if (isRemoteMCPClientStatus(status)) {
-    return '需要配置远程 MCP 桥接，数据库密码仍留在 GoNavi 本机';
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.selected.remote', 'Configure a remote MCP bridge; database passwords stay on the GoNavi machine');
   }
-  return '当前还没有接入 GoNavi MCP';
+  return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.selected.missing', 'GoNavi MCP is not connected yet');
 };
 
-export const resolveMCPClientInstallActionLabel = (status: AIMCPClientInstallStatus | undefined): string => {
-  const label = status?.displayName || '目标客户端';
+export const resolveMCPClientInstallActionLabel = (
+  status: AIMCPClientInstallStatus | undefined,
+  translate?: MCPClientInstallTranslator,
+): string => {
+  const label = status?.displayName || 'target client';
   if (status?.matchesCurrent) {
-    return `${label} 已接入，无需重复安装`;
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.action.connected', '{{label}} is connected; no reinstall needed', { label });
   }
   if (status?.installed) {
-    return `更新 ${label} 接入配置`;
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.action.update', 'Update {{label}} connection config', { label });
   }
   if (isRemoteMCPClientStatus(status)) {
-    return `复制 ${label} 远程接入说明`;
+    return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.action.copy_remote', 'Copy {{label}} remote connection guide', { label });
   }
-  return `安装到 ${label}（外部工具）`;
+  return translateMCPClientInstallCopy(translate, 'ai_chat.mcp_client.install.action.install', 'Install to {{label}} (external tool)', { label });
 };

@@ -4,8 +4,14 @@ package db
 
 import (
 	"errors"
+	"os"
+	"strings"
 	"testing"
+
+	"GoNavi-Wails/shared/i18n"
 )
+
+var rawSQLServerTableNameRequiredText = string([]rune{0x8868, 0x540d, 0x4e0d, 0x80fd, 0x4e3a, 0x7a7a})
 
 type fakeSQLServerExecResult struct {
 	affected int64
@@ -63,5 +69,78 @@ func TestSQLServerRowsAffectedDoesNotHideDMLRowsAffectedErrors(t *testing.T) {
 	)
 	if !errors.Is(err, rowErr) {
 		t.Fatalf("expected rows affected error to propagate for DML, got %v", err)
+	}
+}
+
+func TestSQLServerMetadataErrorsUseCurrentLanguage(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	sqlServer := &SqlServerDB{}
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "columns table name required",
+			call: func() error {
+				_, err := sqlServer.GetColumns("", " ")
+				return err
+			},
+		},
+		{
+			name: "indexes table name required",
+			call: func() error {
+				_, err := sqlServer.GetIndexes("", " ")
+				return err
+			},
+		},
+		{
+			name: "foreign keys table name required",
+			call: func() error {
+				_, err := sqlServer.GetForeignKeys("", " ")
+				return err
+			},
+		},
+		{
+			name: "triggers table name required",
+			call: func() error {
+				_, err := sqlServer.GetTriggers("", " ")
+				return err
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.call()
+			if err == nil {
+				t.Fatal("expected SQL Server metadata call to fail")
+			}
+			if err.Error() != "Table name is required" {
+				t.Fatalf("expected English table-name-required error, got %q", err.Error())
+			}
+			if strings.Contains(err.Error(), rawSQLServerTableNameRequiredText) {
+				t.Fatalf("expected no raw Chinese SQL Server metadata text, got %q", err.Error())
+			}
+		})
+	}
+}
+
+func TestSQLServerMetadataErrorSourcesUseI18nKeys(t *testing.T) {
+	sourceBytes, err := os.ReadFile("sqlserver_impl.go")
+	if err != nil {
+		t.Fatalf("read sqlserver_impl.go: %v", err)
+	}
+	source := string(sourceBytes)
+	rawMessage := `fmt.Errorf("` + rawSQLServerTableNameRequiredText + `")`
+
+	if strings.Contains(source, rawMessage) {
+		t.Fatalf("sqlserver_impl.go still contains raw SQL Server metadata text %q", rawMessage)
+	}
+	if !strings.Contains(source, "db.backend.error.table_name_required") {
+		t.Fatal("sqlserver_impl.go does not reference db.backend.error.table_name_required")
 	}
 }

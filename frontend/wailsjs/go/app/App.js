@@ -110,6 +110,10 @@ export function DBQueryMulti(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DBQueryMulti'](arg1, arg2, arg3, arg4);
 }
 
+export function DBQueryMultiInTransaction(arg1, arg2, arg3) {
+  return window['go']['app']['App']['DBQueryMultiInTransaction'](arg1, arg2, arg3);
+}
+
 export function DBQueryMultiTransactional(arg1, arg2, arg3, arg4) {
   return window['go']['app']['App']['DBQueryMultiTransactional'](arg1, arg2, arg3, arg4);
 }

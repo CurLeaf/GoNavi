@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,11 +17,26 @@ import (
 	"time"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/shared/i18n"
 
 	clickhouse "github.com/ClickHouse/clickhouse-go/v2"
 )
 
 const fakeClickHouseDriverName = "gonavi-fake-clickhouse"
+
+var clickHouseProtocolFailureI18nKeys = []string{
+	"db.backend.error.clickhouse_http_client_protocol_version_unsupported",
+	"db.backend.error.clickhouse_native_protocol_mismatch",
+	"db.backend.error.clickhouse_http_protocol_mismatch",
+	"db.backend.error.clickhouse_unknown_error",
+	"db.backend.error.clickhouse_driver_detail_missing",
+	"db.backend.error.clickhouse_attempt_tls_config_failed",
+	"db.backend.error.clickhouse_attempt_validation_failed",
+	"db.backend.error.clickhouse_validation_failed_manual",
+	"db.backend.error.clickhouse_validation_failed_auto",
+}
+
+const rawClickHouseCreateStatementNotFoundText = "未找到建表语句"
 
 var (
 	registerFakeClickHouseDriverOnce sync.Once
@@ -28,13 +44,18 @@ var (
 	fakeClickHouseState              = struct {
 		pingErr      error
 		queryErr     error
+		execErr      error
 		queryResults map[string]fakeClickHouseQueryResult
 		lastQuery    string
 		queries      []string
+		lastExec     string
+		execQueries  []string
 	}{
 		lastQuery:    "",
 		queryResults: map[string]fakeClickHouseQueryResult{},
 		queries:      nil,
+		lastExec:     "",
+		execQueries:  nil,
 	}
 )
 
@@ -132,6 +153,229 @@ func TestClickHouseGetDatabasesFallsBackToCurrentDatabase(t *testing.T) {
 	}
 	if queries[0] != listSQL || queries[1] != fallbackSQL {
 		t.Fatalf("unexpected query order: %v", queries)
+	}
+}
+
+func TestClickHouseCreateStatementNotFoundUsesCurrentLanguage(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	tests := []struct {
+		name   string
+		result fakeClickHouseQueryResult
+	}{
+		{
+			name: "empty rows",
+			result: fakeClickHouseQueryResult{
+				columns: []string{"statement"},
+				rows:    nil,
+			},
+		},
+		{
+			name: "row without CREATE statement",
+			result: fakeClickHouseQueryResult{
+				columns: []string{"note"},
+				rows: [][]driver.Value{
+					{"SELECT 1"},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registerFakeClickHouseDriverOnce.Do(func() {
+				sql.Register(fakeClickHouseDriverName, fakeClickHouseDriver{})
+			})
+
+			conn, err := sql.Open(fakeClickHouseDriverName, "")
+			if err != nil {
+				t.Fatalf("open fake clickhouse db failed: %v", err)
+			}
+			t.Cleanup(func() {
+				_ = conn.Close()
+			})
+
+			const showCreateSQL = "SHOW CREATE TABLE `app`.`orders`"
+			fakeClickHouseStateMu.Lock()
+			fakeClickHouseState.pingErr = nil
+			fakeClickHouseState.queryErr = nil
+			fakeClickHouseState.queryResults = map[string]fakeClickHouseQueryResult{
+				showCreateSQL: tt.result,
+			}
+			fakeClickHouseState.lastQuery = ""
+			fakeClickHouseState.queries = nil
+			fakeClickHouseStateMu.Unlock()
+
+			clickhouseDB := &ClickHouseDB{conn: conn}
+			_, err = clickhouseDB.GetCreateStatement("app", "orders")
+			if err == nil {
+				t.Fatal("expected ClickHouse GetCreateStatement to fail")
+			}
+			if err.Error() != "The CREATE TABLE statement was not found" {
+				t.Fatalf("expected English create-statement error, got %q", err.Error())
+			}
+			if strings.Contains(err.Error(), rawClickHouseCreateStatementNotFoundText) {
+				t.Fatalf("expected no raw Chinese create-statement text, got %q", err.Error())
+			}
+		})
+	}
+}
+
+func TestClickHouseCreateStatementSourceUsesI18nKey(t *testing.T) {
+	sourceBytes, err := os.ReadFile("clickhouse_impl.go")
+	if err != nil {
+		t.Fatalf("read clickhouse_impl.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	rawMessage := `fmt.Errorf("` + rawClickHouseCreateStatementNotFoundText + `")`
+	if strings.Contains(source, rawMessage) {
+		t.Fatalf("clickhouse_impl.go still contains raw create-statement text %q", rawMessage)
+	}
+	if !strings.Contains(source, "db.backend.error.create_table_statement_not_found") {
+		t.Fatal("clickhouse_impl.go does not reference db.backend.error.create_table_statement_not_found")
+	}
+}
+
+func TestClickHouseApplyChangesErrorsUseCurrentLanguage(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	registerFakeClickHouseDriverOnce.Do(func() {
+		sql.Register(fakeClickHouseDriverName, fakeClickHouseDriver{})
+	})
+
+	tests := []struct {
+		name         string
+		changes      connection.ChangeSet
+		wantText     string
+		forbiddenRaw []string
+	}{
+		{
+			name: "delete failure",
+			changes: connection.ChangeSet{
+				Deletes: []map[string]interface{}{
+					{"id": int64(42)},
+				},
+			},
+			wantText:     "Failed to delete ClickHouse rows",
+			forbiddenRaw: []string{"delete error", "删除失败"},
+		},
+		{
+			name: "update failure",
+			changes: connection.ChangeSet{
+				Updates: []connection.UpdateRow{
+					{
+						Keys:   map[string]interface{}{"id": int64(42)},
+						Values: map[string]interface{}{"name": "Alice"},
+					},
+				},
+			},
+			wantText:     "Failed to update ClickHouse rows",
+			forbiddenRaw: []string{"update error", "更新失败"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn, err := sql.Open(fakeClickHouseDriverName, "")
+			if err != nil {
+				t.Fatalf("open fake clickhouse db failed: %v", err)
+			}
+			t.Cleanup(func() {
+				_ = conn.Close()
+			})
+
+			fakeClickHouseStateMu.Lock()
+			fakeClickHouseState.execErr = errors.New("driver raw failure")
+			fakeClickHouseState.lastExec = ""
+			fakeClickHouseState.execQueries = nil
+			fakeClickHouseStateMu.Unlock()
+
+			clickhouseDB := &ClickHouseDB{conn: conn, database: "analytics"}
+			err = clickhouseDB.ApplyChanges("orders", tt.changes)
+			if err == nil {
+				t.Fatal("expected ApplyChanges to fail")
+			}
+			got := err.Error()
+			if !strings.Contains(got, tt.wantText) {
+				t.Fatalf("expected localized wrapper %q, got %q", tt.wantText, got)
+			}
+			if !strings.Contains(got, "driver raw failure") {
+				t.Fatalf("expected raw driver detail to remain, got %q", got)
+			}
+			if !strings.Contains(got, "ALTER TABLE `analytics`.`orders`") {
+				t.Fatalf("expected raw SQL to remain, got %q", got)
+			}
+			for _, raw := range tt.forbiddenRaw {
+				if strings.Contains(got, raw) {
+					t.Fatalf("expected no raw wrapper %q, got %q", raw, got)
+				}
+			}
+		})
+	}
+}
+
+func TestClickHouseTableNameRequiredUsesCurrentLanguage(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	clickhouseDB := &ClickHouseDB{}
+	_, _, err := clickhouseDB.resolveDatabaseAndTable("", " ")
+	if err == nil {
+		t.Fatal("expected table-name-required error")
+	}
+	if err.Error() != "Table name is required" {
+		t.Fatalf("expected English table-name-required error, got %q", err.Error())
+	}
+	if strings.Contains(err.Error(), rawClickHouseTableNameRequiredText()) {
+		t.Fatalf("expected no raw Chinese table-name-required text, got %q", err.Error())
+	}
+}
+
+func TestClickHouseApplyChangesErrorSourcesUseI18nKeys(t *testing.T) {
+	sourceBytes, err := os.ReadFile("clickhouse_impl.go")
+	if err != nil {
+		t.Fatalf("read clickhouse_impl.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	for _, rawMessage := range []string{
+		`fmt.Errorf("` + rawClickHouseTableNameRequiredText() + `")`,
+		`fmt.Errorf("delete error: %v; sql=%s", err, query)`,
+		`fmt.Errorf("update error: %v; sql=%s", err, query)`,
+	} {
+		if strings.Contains(source, rawMessage) {
+			t.Fatalf("clickhouse_impl.go still contains raw ApplyChanges text %q", rawMessage)
+		}
+	}
+	for _, key := range clickHouseApplyChangesI18nKeys() {
+		if !strings.Contains(source, key) {
+			t.Fatalf("clickhouse_impl.go does not reference i18n key %q", key)
+		}
+	}
+}
+
+func TestClickHouseApplyChangesCatalogKeysExist(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		for _, key := range clickHouseApplyChangesI18nKeys() {
+			if strings.TrimSpace(catalog[key]) == "" {
+				t.Fatalf("%s catalog missing ClickHouse ApplyChanges key %q", language, key)
+			}
+		}
 	}
 }
 
@@ -321,6 +565,131 @@ func TestClickHouseHTTPClientProtocolVersionUnsupportedEnablesCompatibilityRetry
 	message := clickHouseAttemptFailureMessage(clickhouse.HTTP, err)
 	if !strings.Contains(message, "client_protocol_version") || !strings.Contains(message, "兼容模式") {
 		t.Fatalf("expected compatibility retry hint, got %q", message)
+	}
+}
+
+func TestClickHouseProtocolFailureMessagesUseCurrentLanguage(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	clientProtocolErr := errors.New(`Code: 115. DB::Exception: Unknown setting client_protocol_version. (UNKNOWN_SETTING)`)
+	compatMessage := clickHouseAttemptFailureMessage(clickhouse.HTTP, clientProtocolErr)
+	if !strings.Contains(compatMessage, "client_protocol_version") || !strings.Contains(compatMessage, "HTTP compatibility mode") {
+		t.Fatalf("expected English compatibility hint, got %q", compatMessage)
+	}
+	if strings.Contains(compatMessage, "兼容模式") || strings.Contains(compatMessage, "当前") {
+		t.Fatalf("expected no Chinese compatibility hint, got %q", compatMessage)
+	}
+
+	nativeMismatch := clickHouseAttemptFailureMessage(clickhouse.Native, errors.New("code: 27, message: Cannot parse input: expected '(' before: '\x02\x00\x01\x00'"))
+	if !strings.Contains(nativeMismatch, "does not look like a Native handshake") {
+		t.Fatalf("expected English native mismatch hint, got %q", nativeMismatch)
+	}
+	if strings.Contains(nativeMismatch, "不像 Native") {
+		t.Fatalf("expected no Chinese native mismatch hint, got %q", nativeMismatch)
+	}
+
+	httpMismatch := clickHouseAttemptFailureMessage(clickhouse.HTTP, errors.New("malformed HTTP response"))
+	if !strings.Contains(httpMismatch, "does not look like an HTTP response") {
+		t.Fatalf("expected English HTTP mismatch hint, got %q", httpMismatch)
+	}
+	if strings.Contains(httpMismatch, "不像 HTTP") {
+		t.Fatalf("expected no Chinese HTTP mismatch hint, got %q", httpMismatch)
+	}
+
+	unknownMessage := clickHouseAttemptFailureMessage(clickhouse.HTTP, nil)
+	if unknownMessage != "Unknown error" {
+		t.Fatalf("expected localized unknown error, got %q", unknownMessage)
+	}
+}
+
+func TestClickHouseConnectFailureSummaryUsesCurrentLanguage(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	manual := clickHouseConnectFailureSummary(connection.ConnectionConfig{
+		Host:               "clickhouse.local",
+		Port:               9000,
+		ClickHouseProtocol: clickHouseProtocolNative,
+	}, []string{"driver raw detail"})
+	if !strings.Contains(manual, "ClickHouse connection validation failed") ||
+		!strings.Contains(manual, "used user-selected NATIVE protocol") ||
+		!strings.Contains(manual, "driver raw detail") {
+		t.Fatalf("expected English manual protocol failure summary with raw detail, got %q", manual)
+	}
+	if strings.Contains(manual, "连接验证失败") || strings.Contains(manual, "用户选择") || strings.Contains(manual, "第1次") {
+		t.Fatalf("expected no Chinese manual summary, got %q", manual)
+	}
+
+	manualWithMultipleDetails := clickHouseConnectFailureSummary(connection.ConnectionConfig{
+		Host:               "clickhouse.local",
+		Port:               9000,
+		ClickHouseProtocol: clickHouseProtocolNative,
+	}, []string{"first raw detail", "second raw detail"})
+	if !strings.Contains(manualWithMultipleDetails, "first raw detail; second raw detail") {
+		t.Fatalf("expected ASCII separator between raw details, got %q", manualWithMultipleDetails)
+	}
+	if strings.Contains(manualWithMultipleDetails, "；") {
+		t.Fatalf("expected no Chinese separator between raw details, got %q", manualWithMultipleDetails)
+	}
+
+	auto := clickHouseConnectFailureSummary(connection.ConnectionConfig{
+		Host: "clickhouse.local",
+		Port: 8123,
+	}, nil)
+	if !strings.Contains(auto, "Automatic protocol detection failed") ||
+		!strings.Contains(auto, "No driver error details were returned") {
+		t.Fatalf("expected English auto protocol failure summary, got %q", auto)
+	}
+	if strings.Contains(auto, "自动协议探测") || strings.Contains(auto, "未获取到") {
+		t.Fatalf("expected no Chinese auto summary, got %q", auto)
+	}
+}
+
+func TestClickHouseProtocolFailureSourceUsesI18nKeys(t *testing.T) {
+	sourceBytes, err := os.ReadFile("clickhouse_impl.go")
+	if err != nil {
+		t.Fatalf("read clickhouse_impl.go: %v", err)
+	}
+	source := string(sourceBytes)
+	for _, rawMessage := range []string{
+		"当前 ClickHouse HTTP 端口不支持 client_protocol_version",
+		"服务端响应不像 Native 握手",
+		"服务端响应不像 HTTP 响应",
+		"未知错误",
+		"未获取到驱动返回的错误详情",
+		"ClickHouse 连接验证失败",
+		"第%d次 TLS 配置失败",
+		"第%d次连接验证失败",
+	} {
+		if strings.Contains(source, rawMessage) {
+			t.Fatalf("clickhouse_impl.go still contains raw user-facing ClickHouse protocol text %q", rawMessage)
+		}
+	}
+	for _, key := range clickHouseProtocolFailureI18nKeys {
+		if !strings.Contains(source, key) {
+			t.Fatalf("clickhouse_impl.go does not reference i18n key %q", key)
+		}
+	}
+}
+
+func TestClickHouseProtocolFailureCatalogKeysExist(t *testing.T) {
+	catalogs, err := i18n.LoadCatalogs()
+	if err != nil {
+		t.Fatalf("LoadCatalogs() error = %v", err)
+	}
+
+	for _, language := range i18n.SupportedLanguages() {
+		catalog := catalogs[language]
+		for _, key := range clickHouseProtocolFailureI18nKeys {
+			if strings.TrimSpace(catalog[key]) == "" {
+				t.Fatalf("%s catalog missing ClickHouse protocol failure key %q", language, key)
+			}
+		}
 	}
 }
 
@@ -611,6 +980,18 @@ func protocolNames(protocols []clickhouse.Protocol) []string {
 	return names
 }
 
+func rawClickHouseTableNameRequiredText() string {
+	return string([]rune{0x8868, 0x540d, 0x4e0d, 0x80fd, 0x4e3a, 0x7a7a})
+}
+
+func clickHouseApplyChangesI18nKeys() []string {
+	return []string{
+		"db.backend.error.table_name_required",
+		"db.backend.error.clickhouse_delete_failed_with_sql",
+		"db.backend.error.clickhouse_update_failed_with_sql",
+	}
+}
+
 type fakeClickHouseDriver struct{}
 
 func (fakeClickHouseDriver) Open(name string) (driver.Conn, error) {
@@ -652,6 +1033,17 @@ func (fakeClickHouseConn) QueryContext(ctx context.Context, query string, args [
 		return nil, fakeClickHouseState.queryErr
 	}
 	return &fakeClickHouseRows{}, nil
+}
+
+func (fakeClickHouseConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	fakeClickHouseStateMu.Lock()
+	defer fakeClickHouseStateMu.Unlock()
+	fakeClickHouseState.lastExec = query
+	fakeClickHouseState.execQueries = append(fakeClickHouseState.execQueries, query)
+	if fakeClickHouseState.execErr != nil {
+		return nil, fakeClickHouseState.execErr
+	}
+	return driver.RowsAffected(1), nil
 }
 
 type fakeClickHouseRows struct {

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import React, { useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, create, type ReactTestRenderer } from 'react-test-renderer';
@@ -6,6 +7,7 @@ import { useStore } from '../../store';
 import type { AIToolCall } from '../../types';
 import { useAIChatLocalTools } from './useAIChatLocalTools';
 
+const compressContextIfNeededMock = vi.hoisted(() => vi.fn<() => Promise<string | null>>(async () => null));
 const dispatchAIChatPayloadMock = vi.hoisted(() => vi.fn(async (_options: any) => 'stream'));
 const executeLocalAIToolCallMock = vi.hoisted(() => vi.fn(async ({ toolCall }: { toolCall: AIToolCall }) => ({
   content: `result:${toolCall.function.name}`,
@@ -17,6 +19,14 @@ const executeLocalAIToolCallMock = vi.hoisted(() => vi.fn(async ({ toolCall }: {
 vi.mock('./aiChatPayloadDispatch', () => ({
   dispatchAIChatPayload: dispatchAIChatPayloadMock,
 }));
+
+vi.mock('../../utils/aiChatRuntime', async () => {
+  const actual = await vi.importActual<typeof import('../../utils/aiChatRuntime')>('../../utils/aiChatRuntime');
+  return {
+    ...actual,
+    compressContextIfNeeded: compressContextIfNeededMock,
+  };
+});
 
 vi.mock('./aiLocalToolExecutor', () => ({
   executeLocalAIToolCall: executeLocalAIToolCallMock,
@@ -32,6 +42,24 @@ vi.mock('./aiLocalToolExecutor', () => ({
 }));
 
 const SESSION_ID = 'session-local-tools';
+const source = readFileSync(new URL('./useAIChatLocalTools.ts', import.meta.url), 'utf8');
+const panelSource = readFileSync(new URL('../AIChatPanel.tsx', import.meta.url), 'utf8');
+const translatedCopy: Record<string, string> = {
+  'ai_chat.panel.probe.max_rounds': 'T:max-rounds {{count}}',
+  'ai_chat.panel.probe.consecutive_failed': 'T:probe-failed',
+  'ai_chat.panel.status.summarizing_probe': 'T:summarizing-probe',
+  'ai_chat.panel.status.returning_runtime_data': 'T:returning-runtime-data',
+  'ai_chat.panel.status.deep_reasoning': 'T:deep-reasoning',
+  'ai_chat.panel.status.waiting_instruction': 'T:waiting-instruction',
+  'ai_chat.panel.status.analyzing_chain': 'T:analyzing-chain',
+  'ai_chat.panel.status.memory_probe_summary': 'T:memory-summary {{summary}}',
+  'ai_chat.panel.model_control.continue_after_summary': 'T:continue-after-summary',
+};
+
+const translate = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) => (translatedCopy[key] || key).replace(/\{\{(\w+)\}\}/g, (_match, name) => String(params?.[name] ?? ''));
 
 const buildToolCall = (name: string): AIToolCall => ({
   id: `call-${name}`,
@@ -74,6 +102,7 @@ const LocalToolsHarness = () => {
     pendingJVMDiagnosticPlanContextRef,
     setSending,
     skills: [],
+    translate,
     updateAIChatMessage: updateMessage,
     userPromptSettings: {
       global: '',
@@ -87,8 +116,36 @@ const LocalToolsHarness = () => {
 };
 
 describe('useAIChatLocalTools', () => {
+  it('threads the panel translator through the local-tool resend chain', () => {
+    expect(panelSource).toContain('translate: t,');
+    expect(source).toContain('.map((message) => toAIRequestMessage(message, translate));');
+  });
+
+  it('keeps local-tool status and guard copy behind panel i18n keys', () => {
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.probe\.max_rounds'/);
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.probe\.consecutive_failed'/);
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.status\.summarizing_probe'/);
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.status\.returning_runtime_data'/);
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.status\.deep_reasoning'/);
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.status\.waiting_instruction'/);
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.status\.analyzing_chain'/);
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.status\.memory_probe_summary'/);
+    expect(source).toMatch(/translatePanelCopy\(\s*translate,\s*'ai_chat\.panel\.model_control\.continue_after_summary'/);
+    expect(source).not.toContain('content: `⚠️ 工具调用已达');
+    expect(source).not.toContain("content: '⚠️ 探针连续 3 轮执行失败");
+    expect(source).not.toContain("content: '汇总探针执行结果中'");
+    expect(source).not.toContain("safeUpdateTransition('向模型回传运行时数据')");
+    expect(source).not.toContain("safeUpdateTransition('模型大脑深度推理中')");
+    expect(source).not.toContain("safeUpdateTransition('等待下发操作指令')");
+    expect(source).not.toContain("safeUpdateTransition('正在深度思考链路与逻辑')");
+    expect(source).not.toContain('【自动记忆重塑】');
+    expect(source).not.toContain('继续完成你先前未竟的分析或执行下一步');
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
+    compressContextIfNeededMock.mockReset();
+    compressContextIfNeededMock.mockResolvedValue(null);
     dispatchAIChatPayloadMock.mockClear();
     executeLocalAIToolCallMock.mockClear();
     latestHook = undefined;
@@ -179,14 +236,55 @@ describe('useAIChatLocalTools', () => {
       success: true,
       tool_name: 'inspect_active_tab',
     });
-    expect(connecting).toMatchObject({ content: '汇总探针执行结果中', loading: true });
+    expect(connecting).toMatchObject({ content: 'T:summarizing-probe', loading: true });
 
     expect(dispatchAIChatPayloadMock).toHaveBeenCalledTimes(1);
     const dispatchArgs = dispatchAIChatPayloadMock.mock.calls[0][0] as any;
     expect(dispatchArgs.messages[0]).toEqual({ role: 'system', content: 'system-context' });
     expect(JSON.stringify(dispatchArgs.messages)).toContain('result:inspect_active_tab');
-    expect(JSON.stringify(dispatchArgs.messages)).not.toContain('汇总探针执行结果中');
+    expect(JSON.stringify(dispatchArgs.messages)).not.toContain('T:summarizing-probe');
     expect(dispatchArgs.tools).toHaveLength(1);
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('shows translated progress updates while waiting for the chained request to continue', async () => {
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(<LocalToolsHarness />);
+    });
+
+    expect(latestHook).toBeDefined();
+    const run = latestHook!.executeLocalTools([buildToolCall('inspect_active_tab')], 'assistant-1');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150);
+      await run;
+    });
+
+    const findConnecting = () =>
+      (useStore.getState().aiChatHistory[SESSION_ID] || []).find((message) => message.phase === 'connecting');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(findConnecting()).toMatchObject({ content: 'T:returning-runtime-data' });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(findConnecting()).toMatchObject({ content: 'T:deep-reasoning' });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
+    });
+    expect(findConnecting()).toMatchObject({ content: 'T:waiting-instruction' });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1800);
+    });
+    expect(findConnecting()).toMatchObject({ content: 'T:analyzing-chain' });
 
     await act(async () => {
       renderer?.unmount();
@@ -218,6 +316,113 @@ describe('useAIChatLocalTools', () => {
     const messages = useStore.getState().aiChatHistory[SESSION_ID] || [];
     expect(messages.some((message) => message.content.includes('探针连续 3 轮执行失败'))).toBe(false);
     expect(dispatchAIChatPayloadMock).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('shows the localized max-round warning after the tool-call cap is exceeded', async () => {
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(<LocalToolsHarness />);
+    });
+
+    expect(latestHook).toBeDefined();
+    for (let i = 0; i <= 15; i += 1) {
+      if (i > 0) {
+        updateMessage(SESSION_ID, 'assistant-1', {
+          loading: true,
+          phase: 'tool_calling',
+        });
+      }
+      const run = latestHook!.executeLocalTools([buildToolCall('inspect_active_tab')], 'assistant-1');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(150);
+        await run;
+      });
+    }
+
+    const messages = useStore.getState().aiChatHistory[SESSION_ID] || [];
+    const assistant = messages.find((message) => message.id === 'assistant-1');
+    const limitWarning = messages.find((message) => message.content === 'T:max-rounds 15');
+
+    expect(assistant).toMatchObject({ loading: false, phase: 'idle' });
+    expect(limitWarning).toMatchObject({ role: 'assistant' });
+    expect(dispatchAIChatPayloadMock).toHaveBeenCalledTimes(15);
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('replaces long probe history with localized summary prompts before resending', async () => {
+    compressContextIfNeededMock.mockResolvedValue('summary-body');
+
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(<LocalToolsHarness />);
+    });
+
+    expect(latestHook).toBeDefined();
+    const run = latestHook!.executeLocalTools([buildToolCall('inspect_active_tab')], 'assistant-1');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(150);
+      await run;
+    });
+
+    const messages = useStore.getState().aiChatHistory[SESSION_ID] || [];
+    expect(messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'assistant', content: 'T:memory-summary summary-body' }),
+      expect.objectContaining({ role: 'user', content: 'T:continue-after-summary' }),
+    ]));
+
+    const dispatchArgs = dispatchAIChatPayloadMock.mock.calls[0][0] as any;
+    expect(dispatchArgs.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'assistant', content: 'T:memory-summary summary-body' }),
+      expect.objectContaining({ role: 'user', content: 'T:continue-after-summary' }),
+    ]));
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('closes the current assistant message when three consecutive probe failures trigger the localized stop warning', async () => {
+    executeLocalAIToolCallMock.mockResolvedValue({
+      content: 'dial tcp 127.0.0.1:3306: connect: connection refused',
+      success: false,
+      toolName: 'inspect_active_tab',
+      countsAsProbeFailure: true,
+    });
+
+    let renderer: ReactTestRenderer | undefined;
+    await act(async () => {
+      renderer = create(<LocalToolsHarness />);
+    });
+
+    expect(latestHook).toBeDefined();
+    for (let i = 0; i < 3; i += 1) {
+      if (i > 0) {
+        updateMessage(SESSION_ID, 'assistant-1', {
+          loading: true,
+          phase: 'tool_calling',
+        });
+      }
+      const run = latestHook!.executeLocalTools([buildToolCall('inspect_active_tab')], 'assistant-1');
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(150);
+        await run;
+      });
+    }
+
+    const messages = useStore.getState().aiChatHistory[SESSION_ID] || [];
+    const assistant = messages.find((message) => message.id === 'assistant-1');
+    const stopWarning = messages.find((message) => message.content === 'T:probe-failed');
+
+    expect(assistant).toMatchObject({ loading: false, phase: 'idle' });
+    expect(stopWarning).toMatchObject({ role: 'assistant' });
+    expect(dispatchAIChatPayloadMock).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       renderer?.unmount();

@@ -2,6 +2,8 @@ import React from 'react';
 import { Button, Tooltip } from 'antd';
 import { CodeOutlined, PictureOutlined, SendOutlined, StopOutlined, TableOutlined } from '@ant-design/icons';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import { AI_CHAT_ATTACHMENT_ACCEPT } from './aiChatAttachments';
 
@@ -40,6 +42,9 @@ const AIChatComposerActions: React.FC<AIChatComposerActionsProps> = ({
   onSend,
   onStop,
 }) => {
+  const i18n = useOptionalI18n();
+  const t = i18n?.t ?? ((key: string, params?: Record<string, string | number | boolean | null | undefined>) =>
+    catalogTranslate('en-US', key, params));
   const canSend = input.trim().length > 0 || draftAttachmentCount > 0;
   const isV2 = variant === 'v2';
   const legacyIconButtonStyle: React.CSSProperties = {
@@ -68,7 +73,7 @@ const AIChatComposerActions: React.FC<AIChatComposerActionsProps> = ({
         style={{ display: 'none' }}
         onChange={onAttachmentUpload}
       />
-      <Tooltip title="上传附件（图片、Markdown、Word、Excel、PDF、文本）">
+      <Tooltip title={t('ai_chat.input.tooltip.upload_attachment')}>
         <Button
           type="text"
           icon={<PictureOutlined style={isV2 ? undefined : buttonIconStyle} />}
@@ -78,7 +83,7 @@ const AIChatComposerActions: React.FC<AIChatComposerActionsProps> = ({
           onMouseLeave={isV2 ? undefined : (event) => { event.currentTarget.style.color = overlayTheme.mutedText; }}
         />
       </Tooltip>
-      <Tooltip title="关联附带数据库表上下文">
+      <Tooltip title={t('ai_chat.input.tooltip.attach_table_context')}>
         <Button
           type="text"
           icon={<TableOutlined style={isV2 ? undefined : buttonIconStyle} />}
@@ -89,7 +94,7 @@ const AIChatComposerActions: React.FC<AIChatComposerActionsProps> = ({
         />
       </Tooltip>
       {isV2 && (
-        <Tooltip title="快捷命令">
+        <Tooltip title={t('ai_chat.input.tooltip.slash_command')}>
           <Button
             type="text"
             icon={<CodeOutlined />}
@@ -103,7 +108,7 @@ const AIChatComposerActions: React.FC<AIChatComposerActionsProps> = ({
           type={isV2 ? 'button' : undefined}
           className={isV2 ? 'ai-chat-send-btn ai-chat-stop-btn gn-v2-ai-send' : 'ai-chat-send-btn ai-chat-stop-btn'}
           onClick={onStop}
-          title="停止生成"
+          title={t('ai_chat.input.action.stop')}
           style={isV2 ? undefined : {
             background: 'rgba(255,77,79,0.1)',
             color: '#ff4d4f',
@@ -127,7 +132,7 @@ const AIChatComposerActions: React.FC<AIChatComposerActionsProps> = ({
           className={isV2 ? 'ai-chat-send-btn gn-v2-ai-send' : 'ai-chat-send-btn'}
           onClick={() => onSend()}
           disabled={!canSend}
-          title="发送"
+          title={t('ai_chat.input.action.send')}
           style={isV2 ? undefined : {
             background: canSend ? overlayTheme.iconBg : (darkMode ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)'),
             color: canSend ? overlayTheme.iconColor : mutedColor,

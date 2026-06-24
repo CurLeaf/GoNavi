@@ -2,13 +2,58 @@ package appdata
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 const bootstrapFileName = "storage_root.json"
+
+var (
+	ErrSetActiveRootCreateDataDirectory      = errors.New("create data directory failed")
+	ErrSetActiveRootCreateBootstrapDirectory = errors.New("create bootstrap directory failed")
+)
+
+type setActiveRootError struct {
+	kind   error
+	detail error
+}
+
+func (e *setActiveRootError) Error() string {
+	if e == nil || e.kind == nil {
+		return ""
+	}
+	if e.detail == nil {
+		return e.kind.Error()
+	}
+	return e.kind.Error() + ": " + e.detail.Error()
+}
+
+func (e *setActiveRootError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.kind
+}
+
+func newSetActiveRootError(kind error, detail error) error {
+	if kind == nil {
+		return detail
+	}
+	if detail == nil {
+		return kind
+	}
+	return &setActiveRootError{kind: kind, detail: detail}
+}
+
+func SetActiveRootErrorDetail(err error) error {
+	var target *setActiveRootError
+	if errors.As(err, &target) {
+		return target.detail
+	}
+	return nil
+}
 
 type bootstrapConfig struct {
 	DataRoot string `json:"dataRoot"`
@@ -90,7 +135,7 @@ func SetActiveRoot(root string) (string, error) {
 		return "", err
 	}
 	if err := os.MkdirAll(targetRoot, 0o755); err != nil {
-		return "", fmt.Errorf("创建数据目录失败：%w", err)
+		return "", newSetActiveRootError(ErrSetActiveRootCreateDataDirectory, err)
 	}
 	if targetRoot == defaultRoot {
 		if err := os.Remove(BootstrapPath()); err != nil && !os.IsNotExist(err) {
@@ -99,7 +144,7 @@ func SetActiveRoot(root string) (string, error) {
 		return defaultRoot, nil
 	}
 	if err := os.MkdirAll(defaultRoot, 0o755); err != nil {
-		return "", fmt.Errorf("创建默认引导目录失败：%w", err)
+		return "", newSetActiveRootError(ErrSetActiveRootCreateBootstrapDirectory, err)
 	}
 	payload, err := json.MarshalIndent(bootstrapConfig{DataRoot: targetRoot}, "", "  ")
 	if err != nil {

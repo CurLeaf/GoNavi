@@ -358,12 +358,12 @@ function App() {
   const [fontFamiliesLoadError, setFontFamiliesLoadError] = useState<string | null>(null);
   const hasLoadedInstalledFontsRef = useRef(false);
   const uiFontOptions = useMemo(
-      () => buildFontFamilyOptions(runtimePlatform, 'ui', installedFontFamilies),
-      [installedFontFamilies, runtimePlatform],
+      () => buildFontFamilyOptions(runtimePlatform, 'ui', installedFontFamilies, t),
+      [installedFontFamilies, runtimePlatform, t],
   );
   const monoFontOptions = useMemo(
-      () => buildFontFamilyOptions(runtimePlatform, 'mono', installedFontFamilies),
-      [installedFontFamilies, runtimePlatform],
+      () => buildFontFamilyOptions(runtimePlatform, 'mono', installedFontFamilies, t),
+      [installedFontFamilies, runtimePlatform, t],
   );
   const linuxCJKFontInstallHint = getLinuxCJKFontInstallHint(runtimePlatform, installedFontFamilies);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());

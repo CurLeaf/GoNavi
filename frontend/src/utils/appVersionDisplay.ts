@@ -3,6 +3,7 @@ const DEV_ABOUT_VERSION = '0.0.1-dev';
 export const resolveAboutDisplayVersion = (
   buildType: string,
   version: string | undefined,
+  unknownLabel = 'Unknown',
 ): string => {
   const normalizedBuildType = String(buildType || '').trim().toLowerCase();
   if (normalizedBuildType === 'development' || normalizedBuildType === 'dev') {
@@ -10,5 +11,5 @@ export const resolveAboutDisplayVersion = (
   }
 
   const normalizedVersion = String(version || '').trim();
-  return normalizedVersion || '未知';
+  return normalizedVersion || unknownLabel;
 };

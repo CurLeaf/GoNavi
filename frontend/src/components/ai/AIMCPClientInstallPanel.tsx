@@ -6,12 +6,14 @@ import {
   isRemoteMCPClientStatus,
   type MCPClientKey,
 } from '../../utils/mcpClientInstallStatus';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import AIMCPClientSelectorPanel from './AIMCPClientSelectorPanel';
 import AIMCPClientStatusPanel from './AIMCPClientStatusPanel';
 import {
   getMCPClientDetectionSummary,
   resolveMCPClientInstallActionLabel,
+  translateMCPClientInstallCopy,
 } from './mcpClientInstallPanelState';
 
 interface AIMCPClientInstallPanelProps {
@@ -49,6 +51,13 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
   onCopyLaunchCommand,
   onInstall,
 }) => {
+  const i18n = useOptionalI18n();
+  const t = i18n?.t;
+  const copy = (
+    key: string,
+    fallback: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => translateMCPClientInstallCopy(t, key, fallback, params);
   const selectedIsRemoteClient = isRemoteMCPClientStatus(selectedStatus);
 
   return (
@@ -76,10 +85,16 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
           }}
         >
           <div style={{ fontWeight: 700, fontSize: 13, color: overlayTheme.titleText }}>
-            这里是在把 GoNavi MCP 接入 Claude Code / Codex / OpenClaw / Hermans，给外部工具调用，不是给 GoNavi 自己安装插件。
+            {copy(
+              'ai_chat.mcp_client.install.intro.title',
+              'This connects GoNavi MCP to Claude Code / Codex / OpenClaw / Hermans for external tool calls. It is not installing a plugin into GoNavi itself.',
+            )}
           </div>
           <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.7 }}>
-            Claude Code 和 Codex 会写入本机用户级 MCP 配置；OpenClaw、Hermans 这类云端 Agent 会提供远程接入说明，避免把数据库密码复制到云端。
+            {copy(
+              'ai_chat.mcp_client.install.intro.description',
+              'Claude Code and Codex write local user-level MCP config. Cloud Agents such as OpenClaw and Hermans use remote connection guidance so database passwords are not copied to the cloud.',
+            )}
           </div>
         </div>
 
@@ -107,11 +122,14 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 12, color: overlayTheme.mutedText, lineHeight: 1.6 }}>
-            {getMCPClientDetectionSummary(selectedStatus)}
+            {getMCPClientDetectionSummary(selectedStatus, t)}
             {!selectedIsRemoteClient && (
               <>
                 {' '}
-                已经接入当前这份 GoNavi 时，下面的主按钮会自动禁用，避免重复写入。
+                {copy(
+                  'ai_chat.mcp_client.install.repeat_avoidance',
+                  'When already connected to this GoNavi, the main button is disabled to avoid repeated writes.',
+                )}
               </>
             )}
           </div>
@@ -122,7 +140,7 @@ const AIMCPClientInstallPanel: React.FC<AIMCPClientInstallPanelProps> = ({
             disabled={Boolean(selectedStatus?.matchesCurrent)}
             style={{ borderRadius: 10, fontWeight: 600, width: 208, maxWidth: '100%', height: 40 }}
           >
-            {resolveMCPClientInstallActionLabel(selectedStatus)}
+            {resolveMCPClientInstallActionLabel(selectedStatus, t)}
           </Button>
         </div>
       </div>

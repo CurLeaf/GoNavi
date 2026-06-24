@@ -1,4 +1,10 @@
+import { t as catalogTranslate } from '../i18n/catalog';
+
 export type OceanBaseProtocol = 'mysql' | 'oracle';
+type OceanBaseProtocolTranslator = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) => string;
 
 export const OCEANBASE_PROTOCOL_PARAM_KEYS = [
   'protocol',
@@ -16,6 +22,20 @@ type OceanBaseProtocolResolution = {
 };
 
 const normalizeToken = (value: unknown): string => String(value ?? '').trim().toLowerCase();
+const UNSUPPORTED_PROTOCOL_KEY = 'connection.oceanbase.error.unsupported_protocol';
+
+const translateWithFallback = (
+  translate: OceanBaseProtocolTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+): string => {
+  if (!translate) {
+    return fallback;
+  }
+  const translated = translate(key, params);
+  return translated && translated !== key ? translated : fallback;
+};
 
 export const normalizeOceanBaseProtocol = (value: unknown): OceanBaseProtocol | undefined => {
   const normalized = normalizeToken(value);
@@ -36,10 +56,17 @@ export const isUnsupportedOceanBaseProtocolValue = (value: unknown): boolean => 
   return normalized !== '' && !normalizeOceanBaseProtocol(normalized);
 };
 
-export const describeUnsupportedOceanBaseProtocol = (value: unknown): string => {
+export const describeUnsupportedOceanBaseProtocol = (
+  value: unknown,
+  translate?: OceanBaseProtocolTranslator,
+): string => {
   const raw = String(value ?? '').trim();
-  const label = raw ? ` "${raw}"` : '';
-  return `OceanBase 当前仅支持 MySQL/Oracle 租户协议，不支持${label}；请改为 MySQL 或 Oracle。`;
+  return translateWithFallback(
+    translate,
+    UNSUPPORTED_PROTOCOL_KEY,
+    catalogTranslate('en-US', UNSUPPORTED_PROTOCOL_KEY, { value: raw }),
+    { value: raw },
+  );
 };
 
 export const resolveOceanBaseProtocolFromQueryText = (raw: unknown): OceanBaseProtocolResolution => {

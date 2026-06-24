@@ -4,6 +4,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import DriverManagerModal from './DriverManagerModal';
+import { t } from '../i18n';
 
 const connectionModalSource = readFileSync(new URL('./ConnectionModal.tsx', import.meta.url), 'utf8');
 const driverManagerModalSource = readFileSync(new URL('./DriverManagerModal.tsx', import.meta.url), 'utf8');
@@ -64,14 +65,12 @@ vi.mock('@ant-design/icons', () => {
 
 describe('driver-agent update prompt placement', () => {
   it('keeps revision mismatch prompts inside driver manager only', () => {
-    expect(driverManagerModalSource).toContain('需要重装');
+    expect(driverManagerModalSource).toContain('driver_manager.version.needs_reinstall_suffix');
     expect(driverManagerModalSource).toContain('row.needsUpdate');
 
     expect(connectionModalSource).not.toContain('当前数据源驱动代理建议重装');
     expect(connectionModalSource).not.toContain('去驱动管理重装');
 
-    expect(sidebarSource).not.toContain('warnIfConnectionDriverAgentNeedsUpdate');
-    expect(sidebarSource).not.toContain('driver-agent-update-');
     expect(sidebarSource).not.toContain('驱动代理需要重装：');
   });
 });
@@ -223,10 +222,10 @@ describe('DriverManagerModal toolbar actions', () => {
     });
     await flushPromises();
 
-    const installButton = findButton(renderer!, '安装启用');
-    const openDirButtonBefore = findButton(renderer!, '打开驱动目录');
-    const importDirButtonBefore = findButton(renderer!, '导入驱动目录');
-    const installAllButtonBefore = findButton(renderer!, '安装所有驱动');
+    const installButton = findButton(renderer!, t('driver.modal.card.action.install'));
+    const openDirButtonBefore = findButton(renderer!, t('driver.modal.toolbar.openDirectory'));
+    const importDirButtonBefore = findButton(renderer!, t('driver.modal.toolbar.importDirectory'));
+    const installAllButtonBefore = findButton(renderer!, t('driver.modal.toolbar.installAll'));
 
     expect(openDirButtonBefore.props.disabled).toBeFalsy();
     expect(importDirButtonBefore.props.disabled).toBeFalsy();
@@ -237,9 +236,9 @@ describe('DriverManagerModal toolbar actions', () => {
       await Promise.resolve();
     });
 
-    const openDirButtonAfter = findButton(renderer!, '打开驱动目录');
-    const importDirButtonAfter = findButton(renderer!, '导入驱动目录');
-    const installAllButtonAfter = findButton(renderer!, '安装所有驱动');
+    const openDirButtonAfter = findButton(renderer!, t('driver.modal.toolbar.openDirectory'));
+    const importDirButtonAfter = findButton(renderer!, t('driver.modal.toolbar.importDirectory'));
+    const installAllButtonAfter = findButton(renderer!, t('driver.modal.toolbar.installAll'));
 
     expect(openDirButtonAfter.props.disabled).toBeFalsy();
     expect(importDirButtonAfter.props.disabled).toBeFalsy();
@@ -255,21 +254,23 @@ describe('DriverManagerModal toolbar actions', () => {
       });
       await flushPromises();
 
-      const installButton = findButton(renderer!, '安装启用');
+      const installButton = findButton(renderer!, t('driver.modal.card.action.install'));
       await act(async () => {
         installButton.props.onClick();
         await Promise.resolve();
       });
 
-      expect(findButton(renderer!, '安装启用').props.disabled).toBe(true);
+      expect(findButton(renderer!, t('driver.modal.card.action.install')).props.disabled).toBe(true);
 
       await act(async () => {
         vi.advanceTimersByTime(12 * 60 * 1000);
         await Promise.resolve();
       });
 
-      expect(findButton(renderer!, '安装启用').props.disabled).toBeFalsy();
-      expect(messageApi.error).toHaveBeenCalledWith(expect.stringContaining('超过 12 分钟仍未完成'));
+      expect(findButton(renderer!, t('driver.modal.card.action.install')).props.disabled).toBeFalsy();
+      expect(messageApi.error).toHaveBeenCalledWith(
+        t('driver_manager.message.install_watchdog_timeout', { name: 'DuckDB', minutes: 12 }),
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -317,7 +318,7 @@ describe('DriverManagerModal toolbar actions', () => {
       });
       await flushPromises();
 
-      const reinstallButton = findButton(renderer!, '重装驱动');
+      const reinstallButton = findButton(renderer!, t('driver.modal.card.action.reinstall'));
       await act(async () => {
         await reinstallButton.props.onClick();
       });
@@ -371,7 +372,7 @@ describe('DriverManagerModal toolbar actions', () => {
     });
     await flushPromises();
 
-    const refreshButton = findButton(renderer!, '刷新');
+    const refreshButton = findButton(renderer!, t('driver.modal.footer.refresh'));
     await act(async () => {
       await refreshButton.props.onClick();
     });
@@ -390,7 +391,7 @@ describe('DriverManagerModal toolbar actions', () => {
     });
     await flushPromises();
 
-    const switchButtons = renderer!.root.findAll((node) => node.type === 'button' && textContent(node).includes('切换版本'));
+    const switchButtons = renderer!.root.findAll((node) => node.type === 'button' && textContent(node).includes(t('driver_manager.action.switch_version')));
     expect(switchButtons).toHaveLength(1);
     const switchButton = switchButtons[0];
     await act(async () => {

@@ -68,10 +68,10 @@ const SidebarSearchPanel = <TItem extends V2CommandSearchItemLike>({
   if (!isOpen) return null;
 
   const emptyCopy = aiMode
-    ? '输入「?」后加问题，按 Enter 发送到 AI 面板。'
+    ? t('sidebar.command_search.empty.ai')
     : objectMode
-      ? '未找到匹配的表、视图或物化视图。'
-      : '未找到匹配项。可输入 @表名 只搜表对象，或输入 ?问题 让 AI 回答。';
+      ? t('sidebar.command_search.empty.object')
+      : t('sidebar.command_search.empty.default');
 
   const renderRow = (item: TItem, active: boolean) => (
     <button
@@ -145,19 +145,19 @@ const SidebarSearchPanel = <TItem extends V2CommandSearchItemLike>({
           <kbd>esc</kbd>
         </div>
         <div className="gn-v2-command-list">
-          {renderSection('跳转 · GO TO', sections.goTo)}
-          {renderSection('AI · ASK', sections.ai)}
-          {renderSection('动作 · ACTIONS', sections.actions)}
-          {renderSection('近期查询 · RECENT', sections.recent)}
+          {renderSection(t('sidebar.command_search.section.goto'), sections.goTo)}
+          {renderSection(t('sidebar.command_search.section.ai'), sections.ai)}
+          {renderSection(t('sidebar.command_search.section.actions'), sections.actions)}
+          {renderSection(t('sidebar.command_search.section.recent'), sections.recent)}
           {flatItems.length === 0 ? (
             <div className="gn-v2-command-empty">{emptyCopy}</div>
           ) : null}
         </div>
         <div className="gn-v2-command-footer">
-          <span><kbd>↑</kbd><kbd>↓</kbd>导航</span>
-          <span><kbd>↵</kbd>选择</span>
-          <span><TableOutlined /> <kbd>@</kbd>只搜表对象</span>
-          <span><RobotOutlined /> <kbd>?</kbd>发送给 AI</span>
+          <span><kbd>↑</kbd><kbd>↓</kbd>{t('sidebar.command_search.footer.navigate')}</span>
+          <span><kbd>↵</kbd>{t('sidebar.command_search.footer.select')}</span>
+          <span><TableOutlined /> <kbd>@</kbd>{t('sidebar.command_search.footer.object_only')}</span>
+          <span><RobotOutlined /> <kbd>?</kbd>{t('sidebar.command_search.footer.ask_ai')}</span>
         </div>
       </div>
     </div>

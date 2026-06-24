@@ -39,7 +39,7 @@ func (p *ClaudeCLIProvider) Name() string {
 func (p *ClaudeCLIProvider) Validate() error {
 	_, err := claudeLookPath("claude")
 	if err != nil {
-		return fmt.Errorf("未找到 claude 命令，请先安装 Claude Code CLI: npm install -g @anthropic-ai/claude-code")
+		return fmt.Errorf("claude command was not found; install Claude Code CLI first: npm install -g @anthropic-ai/claude-code")
 	}
 	if _, err := resolveClaudeCodeGitBashPath(os.Environ(), runtime.GOOS, claudeLookPath, fileExists); err != nil {
 		return err
@@ -81,14 +81,14 @@ func (p *ClaudeCLIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 	output, err := cmd.Output()
 	if err != nil {
 		if isClaudeCLITimeout(ctx, err) {
-			requestErr = fmt.Errorf("claude CLI 执行超时（%s），当前 Base URL 或 API Key 可能没有返回有效响应", claudeCLIRequestTimeout)
+			requestErr = fmt.Errorf("claude CLI timed out after %s; the current Base URL or API key may not be returning a valid response", claudeCLIRequestTimeout)
 			return nil, requestErr
 		}
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			requestErr = fmt.Errorf("claude CLI 执行失败: %s", string(exitErr.Stderr))
+			requestErr = fmt.Errorf("claude CLI execution failed: %s", string(exitErr.Stderr))
 			return nil, requestErr
 		}
-		requestErr = fmt.Errorf("claude CLI 执行失败: %w", err)
+		requestErr = fmt.Errorf("claude CLI execution failed: %w", err)
 		return nil, requestErr
 	}
 
@@ -99,7 +99,7 @@ func (p *ClaudeCLIProvider) Chat(ctx context.Context, req ai.ChatRequest) (*ai.C
 		return &ai.ChatResponse{Content: strings.TrimSpace(string(output))}, nil
 	}
 	if errMsg, hasError := extractClaudeCLIEventError(result); hasError {
-		requestErr = fmt.Errorf("claude CLI 返回错误: %s", errMsg)
+		requestErr = fmt.Errorf("claude CLI returned an error: %s", errMsg)
 		return nil, requestErr
 	}
 
@@ -142,7 +142,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		requestErr = fmt.Errorf("创建 stdout 管道失败: %w", err)
+		requestErr = fmt.Errorf("failed to create stdout pipe: %w", err)
 		return requestErr
 	}
 
@@ -151,7 +151,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
-		requestErr = fmt.Errorf("启动 claude CLI 失败: %w", err)
+		requestErr = fmt.Errorf("failed to start claude CLI: %w", err)
 		return requestErr
 	}
 
@@ -182,7 +182,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 			if isClaudeCLISystemRetryEvent(event) {
 				if errMsg, hasError := extractClaudeCLISystemRetryError(event); hasError {
 					callback(ai.StreamChunk{Error: errMsg, Done: true})
-					requestErr = fmt.Errorf("claude CLI 鉴权失败: %s", errMsg)
+					requestErr = fmt.Errorf("claude CLI authentication failed: %s", errMsg)
 					if cmd.Process != nil {
 						_ = cmd.Process.Kill()
 					}
@@ -193,7 +193,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		case "assistant":
 			if errMsg, hasError := extractClaudeCLIEventError(event); hasError {
 				callback(ai.StreamChunk{Error: errMsg, Done: true})
-				requestErr = fmt.Errorf("claude CLI 返回错误: %s", errMsg)
+				requestErr = fmt.Errorf("claude CLI returned an error: %s", errMsg)
 				_ = cmd.Wait()
 				return nil
 			}
@@ -217,7 +217,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		case "result":
 			if errMsg, hasError := extractClaudeCLIEventError(event); hasError {
 				callback(ai.StreamChunk{Error: errMsg, Done: true})
-				requestErr = fmt.Errorf("claude CLI 返回错误: %s", errMsg)
+				requestErr = fmt.Errorf("claude CLI returned an error: %s", errMsg)
 				_ = cmd.Wait()
 				return nil
 			}
@@ -228,7 +228,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 		case "error":
 			errMsg, _ := extractClaudeCLIEventError(event)
 			callback(ai.StreamChunk{Error: errMsg, Done: true})
-			requestErr = fmt.Errorf("claude CLI 返回错误: %s", errMsg)
+			requestErr = fmt.Errorf("claude CLI returned an error: %s", errMsg)
 			_ = cmd.Wait()
 			return nil
 		}
@@ -238,7 +238,7 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 	stderrStr := strings.TrimSpace(stderrBuf.String())
 
 	if isClaudeCLITimeout(ctx, waitErr) {
-		requestErr = fmt.Errorf("claude CLI 执行超时（%s），当前 Base URL 或 API Key 可能没有返回有效响应", claudeCLIRequestTimeout)
+		requestErr = fmt.Errorf("claude CLI timed out after %s; the current Base URL or API key may not be returning a valid response", claudeCLIRequestTimeout)
 		callback(ai.StreamChunk{
 			Error: requestErr.Error(),
 			Done:  true,
@@ -247,9 +247,9 @@ func (p *ClaudeCLIProvider) ChatStream(ctx context.Context, req ai.ChatRequest, 
 	}
 
 	if waitErr != nil {
-		errMsg := fmt.Sprintf("claude CLI 异常退出: %v", waitErr)
+		errMsg := fmt.Sprintf("claude CLI exited unexpectedly: %v", waitErr)
 		if stderrStr != "" {
-			errMsg = fmt.Sprintf("claude CLI 异常退出: %s", stderrStr)
+			errMsg = fmt.Sprintf("claude CLI exited unexpectedly: %s", stderrStr)
 		}
 		requestErr = fmt.Errorf("%s", errMsg)
 		callback(ai.StreamChunk{Error: errMsg, Done: true})
@@ -358,7 +358,7 @@ func resolveClaudeCodeGitBashPath(env []string, goos string, lookPath func(strin
 		if exists(configured) {
 			return configured, nil
 		}
-		return "", fmt.Errorf("Claude Code CLI 在 Windows 下需要 git-bash，但 CLAUDE_CODE_GIT_BASH_PATH 指向的 bash.exe 不存在: %s", configured)
+		return "", fmt.Errorf("Claude Code CLI requires git-bash on Windows, but CLAUDE_CODE_GIT_BASH_PATH points to a missing bash.exe: %s", configured)
 	}
 
 	for _, command := range []string{"bash.exe", "bash"} {
@@ -385,7 +385,7 @@ func resolveClaudeCodeGitBashPath(env []string, goos string, lookPath func(strin
 		}
 	}
 
-	return "", fmt.Errorf("Claude Code CLI 在 Windows 下需要 git-bash。请安装 Git for Windows（https://git-scm.com/downloads/win）；如果已安装但未加入 PATH，请设置环境变量 CLAUDE_CODE_GIT_BASH_PATH 指向 bash.exe，例如 C:\\Program Files\\Git\\bin\\bash.exe")
+	return "", fmt.Errorf("Claude Code CLI requires git-bash on Windows. Install Git for Windows (https://git-scm.com/downloads/win); if Git is already installed but not on PATH, set CLAUDE_CODE_GIT_BASH_PATH to bash.exe, for example C:\\Program Files\\Git\\bin\\bash.exe")
 }
 
 func windowsGitBashCandidates(env []string) []string {
@@ -560,7 +560,7 @@ func extractClaudeCLIEventError(event cliStreamEvent) (string, bool) {
 		return msg, true
 	}
 
-	return "claude CLI 返回未知错误", true
+	return "claude CLI returned an unknown error", true
 }
 
 func isClaudeCLISystemRetryEvent(event cliStreamEvent) bool {
@@ -582,7 +582,7 @@ func extractClaudeCLISystemRetryError(event cliStreamEvent) (string, bool) {
 	}
 
 	if event.ErrorStatus > 0 {
-		return fmt.Sprintf("claude CLI 鉴权失败 (HTTP %d): %s", event.ErrorStatus, errText), true
+		return fmt.Sprintf("claude CLI authentication failed (HTTP %d): %s", event.ErrorStatus, errText), true
 	}
-	return fmt.Sprintf("claude CLI 鉴权失败: %s", errText), true
+	return fmt.Sprintf("claude CLI authentication failed: %s", errText), true
 }

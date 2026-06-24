@@ -1716,7 +1716,7 @@ const Sidebar: React.FC<{
   };
 
   const buildJVMDiagnosticTreeNodes = (conn: SavedConnection): TreeNode[] => {
-      const descriptor = buildJVMDiagnosticActionDescriptor(conn.id, conn.config.jvm?.diagnostic);
+      const descriptor = buildJVMDiagnosticActionDescriptor(conn.id, conn.config.jvm?.diagnostic, t);
       if (!descriptor) {
           return [];
       }
@@ -2719,12 +2719,12 @@ const Sidebar: React.FC<{
         {!isV2Ui && (
         <div data-sidebar-legacy-toolbar="true" style={legacyToolbarStyle}>
             <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
-                <Tooltip title="新建组">
+                <Tooltip title={t('sidebar.action.new_group')}>
                     <Button
                         size="small"
                         type="text"
                         icon={<FolderOpenOutlined />}
-                        aria-label="新建组"
+                        aria-label={t('sidebar.action.new_group')}
                         data-sidebar-create-group-action="true"
                         onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
                         style={{ color: legacyToolbarButtonColor }}
@@ -2732,12 +2732,12 @@ const Sidebar: React.FC<{
                 </Tooltip>
             </div>
             <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
-                <Tooltip title="批量操作表">
+                <Tooltip title={t('sidebar.action.batch_tables')}>
                     <Button
                         size="small"
                         type="text"
                         icon={<TableOutlined />}
-                        aria-label="批量操作表"
+                        aria-label={t('sidebar.action.batch_tables')}
                         data-sidebar-batch-table-action="true"
                         onClick={() => openBatchTableExportWorkbench()}
                         style={{ color: legacyToolbarButtonColor }}
@@ -2745,12 +2745,12 @@ const Sidebar: React.FC<{
                 </Tooltip>
             </div>
             <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
-                <Tooltip title="批量操作库">
+                <Tooltip title={t('sidebar.action.batch_databases')}>
                     <Button
                         size="small"
                         type="text"
                         icon={<DatabaseOutlined />}
-                        aria-label="批量操作库"
+                        aria-label={t('sidebar.action.batch_databases')}
                         data-sidebar-batch-database-action="true"
                         onClick={() => openBatchDatabaseExportWorkbench()}
                         style={{ color: legacyToolbarButtonColor }}
@@ -2771,13 +2771,13 @@ const Sidebar: React.FC<{
                 </Tooltip>
             </div>
             <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
-                <Tooltip title={canLocateActiveTab ? '定位当前标签页' : '当前标签页没有可定位的内容'}>
+                <Tooltip title={canLocateActiveTab ? t('sidebar.action.locate_current_tab') : t('sidebar.message.locate_current_tab_unavailable')}>
                     <span style={legacyToolbarDisabledWrapStyle}>
                         <Button
                             size="small"
                             type="text"
                             icon={<AimOutlined />}
-                            aria-label="定位当前标签页"
+                            aria-label={t('sidebar.action.locate_current_tab')}
                             data-sidebar-locate-current-tab-action="true"
                             disabled={!canLocateActiveTab}
                             onClick={handleLocateActiveTabInSidebar}
@@ -2843,7 +2843,7 @@ const Sidebar: React.FC<{
             <div className="gn-v2-sidebar-log-footer">
                 <button type="button" className="gn-v2-sidebar-log-button" onClick={onToggleLogPanel}>
                     <BarsOutlined />
-                    <span>SQL 执行日志</span>
+                    <span>{t('app.sidebar.sql_execution_log')}</span>
                     <small>{sqlLogCount.toLocaleString()}</small>
                 </button>
                 <SlowQueryRailButton
@@ -2954,8 +2954,16 @@ const Sidebar: React.FC<{
             modalScrollSectionStyle={modalScrollSectionStyle}
             modalHintTextStyle={modalHintTextStyle}
             darkMode={darkMode}
-            tableModalTitle={renderSidebarModalTitle(<TableOutlined />, "批量操作表", "按对象批量导出结构、数据或完整备份。")}
-            databaseModalTitle={renderSidebarModalTitle(<DatabaseOutlined />, "批量操作库", "按数据库批量导出结构，或生成结构加数据的备份。")}
+            tableModalTitle={renderSidebarModalTitle(
+              <TableOutlined />,
+              t('sidebar.modal.batch_tables.title'),
+              t('sidebar.modal.batch_tables.description'),
+            )}
+            databaseModalTitle={renderSidebarModalTitle(
+              <DatabaseOutlined />,
+              t('sidebar.modal.batch_databases.title'),
+              t('sidebar.modal.batch_databases.description'),
+            )}
             isBatchModalOpen={isBatchModalOpen}
             setIsBatchModalOpen={setIsBatchModalOpen}
             selectedConnection={selectedConnection}

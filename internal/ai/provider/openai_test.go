@@ -187,7 +187,7 @@ func TestOpenAIProviderChatRetriesWithoutImagesOnHTTP400(t *testing.T) {
 			http.Error(w, `{"error":{"message":"Model do not support image input"}}`, http.StatusBadRequest)
 			return
 		}
-		if !strings.Contains(string(body), omittedImageNotice) {
+		if !strings.Contains(string(body), providerImageOmittedNotice("")) {
 			t.Fatalf("expected retry body to explain omitted image, got %s", body)
 		}
 
@@ -241,7 +241,7 @@ func TestOpenAIProviderChatOmitsImagesUpfrontForMiniMaxTextModel(t *testing.T) {
 		if strings.Contains(bodyText, `"image_url"`) {
 			t.Fatalf("expected MiniMax text request to omit image_url, got %s", body)
 		}
-		if !strings.Contains(bodyText, omittedImageNotice) {
+		if !strings.Contains(bodyText, providerImageOmittedNotice("")) {
 			t.Fatalf("expected request body to explain omitted image, got %s", body)
 		}
 
@@ -312,7 +312,7 @@ func TestOpenAIProviderChatStreamRetriesWithoutToolsThenImagesOnHTTP400(t *testi
 			http.Error(w, `{"error":{"message":"A parameter specified in the request is not valid"}}`, http.StatusBadRequest)
 			return
 		}
-		if !strings.Contains(bodyText, omittedImageNotice) {
+		if !strings.Contains(bodyText, providerImageOmittedNotice("")) {
 			t.Fatalf("expected retry body to explain omitted image, got %s", body)
 		}
 

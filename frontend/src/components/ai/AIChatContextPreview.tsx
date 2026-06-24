@@ -2,6 +2,8 @@ import React from 'react';
 import { Tag } from 'antd';
 import { DatabaseOutlined, DownOutlined, PlusOutlined, TableOutlined } from '@ant-design/icons';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { AIContextItem } from '../../types';
 
 interface AIChatContextPreviewProps {
@@ -46,6 +48,12 @@ export const AIChatContextPreview: React.FC<AIChatContextPreviewProps> = ({
   onOpenContext,
   onRemoveContext,
 }) => {
+  const i18n = useOptionalI18n();
+  const t = i18n?.t ?? ((key: string, params?: Record<string, string | number | boolean | null | undefined>) =>
+    catalogTranslate('en-US', key, params));
+  const contextLabel = t('ai_chat.input.context.label');
+  const currentContextCount = t('ai_chat.input.context.current_count', { count: activeContextItems.length });
+
   if (variant === 'v2') {
     return (
       <>
@@ -57,7 +65,7 @@ export const AIChatContextPreview: React.FC<AIChatContextPreviewProps> = ({
             aria-expanded={contextExpanded}
           >
             <TableOutlined />
-            <span>关联上下文</span>
+            <span>{contextLabel}</span>
             <strong>{activeContextItems.length}</strong>
             <DownOutlined />
           </button>
@@ -67,13 +75,13 @@ export const AIChatContextPreview: React.FC<AIChatContextPreviewProps> = ({
             onClick={onOpenContext}
           >
             <PlusOutlined />
-            <span>添加</span>
+            <span>{t('ai_chat.input.context.add')}</span>
           </button>
         </div>
 
         {contextExpanded && activeContextItems.length > 0 && (
           <div className="gn-v2-ai-context-detail" data-ai-context-detail="true">
-            <div className="gn-v2-ai-context-detail-title">当前上下文 · {activeContextItems.length}</div>
+            <div className="gn-v2-ai-context-detail-title">{currentContextCount}</div>
             {renderContextTableChips(activeContextItems, onRemoveContext, 'gn-v2-ai-context-table-chip', { margin: 0 })}
           </div>
         )}
@@ -92,7 +100,7 @@ export const AIChatContextPreview: React.FC<AIChatContextPreviewProps> = ({
         style={{ background: darkMode ? 'rgba(24, 144, 255, 0.15)' : 'rgba(24, 144, 255, 0.08)', border: 'none', color: '#1890ff', borderRadius: 12, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4, margin: 0, cursor: 'pointer', transition: 'all 0.3s' }}
       >
         <span style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <DatabaseOutlined /> 关联上下文 ({activeContextItems.length}) {contextExpanded ? '▴' : '▾'}
+          <DatabaseOutlined /> {contextLabel} ({activeContextItems.length}) {contextExpanded ? '▴' : '▾'}
         </span>
       </Tag>
       {contextExpanded && renderContextTableChips(

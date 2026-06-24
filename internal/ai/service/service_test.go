@@ -62,7 +62,7 @@ func TestNewModelsRequest_StripsChatCompletionsSuffixForOpenAICompatibleProvider
 		Type:    "openai",
 		BaseURL: "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
 		APIKey:  "sk-test",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

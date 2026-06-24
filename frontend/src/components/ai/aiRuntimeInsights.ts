@@ -5,17 +5,19 @@ import type {
   AISafetyLevel,
   AISkillConfig,
 } from '../../types';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
 
-const SAFETY_LEVEL_LABELS: Record<string, string> = {
-  readonly: '只读',
-  readwrite: '读写',
-  full: '完全开放',
+const SAFETY_LEVEL_FALLBACKS: Record<string, string> = {
+  readonly: 'Read-only',
+  readwrite: 'Read/write',
+  full: 'Full access',
 };
 
-const CONTEXT_LEVEL_LABELS: Record<string, string> = {
-  schema_only: '仅结构',
-  with_samples: '结构+样例',
-  with_results: '结构+结果',
+const CONTEXT_LEVEL_FALLBACKS: Record<string, string> = {
+  schema_only: 'Schema only',
+  with_samples: 'Schema + samples',
+  with_results: 'Schema + results',
 };
 
 const BUILTIN_TOOL_PREVIEW_LIMIT = 30;
@@ -46,6 +48,7 @@ export const buildAIRuntimeSnapshot = (params: {
   mcpTools?: AIMCPToolDescriptor[];
   dynamicModels?: string[];
   builtinToolNames?: string[];
+  translate?: AIInspectionTranslator;
 }) => {
   const {
     providers = [],
@@ -56,6 +59,7 @@ export const buildAIRuntimeSnapshot = (params: {
     mcpTools = [],
     dynamicModels = [],
     builtinToolNames = [],
+    translate,
   } = params;
 
   const activeProvider = providers.find((provider) => provider.id === activeProviderId) || null;
@@ -105,9 +109,17 @@ export const buildAIRuntimeSnapshot = (params: {
       model: provider.model || '',
     })),
     safetyLevel: normalizedSafetyLevel,
-    safetyLabel: SAFETY_LEVEL_LABELS[normalizedSafetyLevel] || normalizedSafetyLevel,
+    safetyLabel: translateInspectionCopy(
+      translate,
+      `ai_chat.inspection.runtime.safety.${normalizedSafetyLevel}`,
+      SAFETY_LEVEL_FALLBACKS[normalizedSafetyLevel] || normalizedSafetyLevel,
+    ),
     contextLevel: normalizedContextLevel,
-    contextLabel: CONTEXT_LEVEL_LABELS[normalizedContextLevel] || normalizedContextLevel,
+    contextLabel: translateInspectionCopy(
+      translate,
+      `ai_chat.inspection.runtime.context.${normalizedContextLevel}`,
+      CONTEXT_LEVEL_FALLBACKS[normalizedContextLevel] || normalizedContextLevel,
+    ),
     dynamicModelCount: dynamicModelPreview.total,
     dynamicModels: dynamicModelPreview.items,
     dynamicModelsTruncated: dynamicModelPreview.truncated,
@@ -134,7 +146,16 @@ export const buildAIRuntimeSnapshot = (params: {
       hasDynamicModelsLoaded: dynamicModelPreview.total > 0,
     },
     message: activeProvider
-      ? `当前 AI 正在使用 ${activeProvider.name || activeProvider.id}，共暴露 ${builtinPreview.total + mcpPreview.total} 个工具`
-      : '当前未启用 AI 供应商',
+      ? translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.runtime.message.active',
+        `AI is using ${activeProvider.name || activeProvider.id} with ${builtinPreview.total + mcpPreview.total} tools available`,
+        { provider: activeProvider.name || activeProvider.id, toolCount: builtinPreview.total + mcpPreview.total },
+      )
+      : translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.runtime.message.no_provider',
+        'No AI provider is currently active',
+      ),
   };
 };

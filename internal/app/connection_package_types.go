@@ -34,13 +34,86 @@ const (
 )
 
 var (
-	errConnectionPackagePasswordRequired = errors.New("恢复包密码不能为空")
-	errConnectionPackageDecryptFailed    = errors.New("文件密码错误或文件已损坏")
-	errConnectionPackageUnsupported      = errors.New("不支持的连接恢复包格式")
-	errConnectionImportFileTooLarge      = errors.New("连接导入文件过大")
-	errConnectionPackagePayloadTooLarge  = errors.New("连接恢复包过大")
+	errConnectionPackagePasswordRequired = errors.New("connection package password cannot be empty")
+	errConnectionPackageDecryptFailed    = errors.New("file password is incorrect or the file is corrupted")
+	errConnectionPackageUnsupported      = errors.New("unsupported connection package format")
+	errConnectionImportFileTooLarge      = errors.New("connection import file is too large")
+	errConnectionPackagePayloadTooLarge  = errors.New("connection package payload is too large")
 	errConnectionPackageNotImplemented   = errors.New("connection package not implemented")
 )
+
+type connectionPackageTextFunc func(key string, params map[string]any) string
+
+type localizedConnectionPackageError struct {
+	message string
+	cause   error
+}
+
+func (e localizedConnectionPackageError) Error() string {
+	return e.message
+}
+
+func (e localizedConnectionPackageError) Unwrap() error {
+	return e.cause
+}
+
+func localizedConnectionPackageText(text connectionPackageTextFunc, key string, params map[string]any) string {
+	if text != nil {
+		return text(key, params)
+	}
+	return defaultAppText(key, params)
+}
+
+func localizedConnectionPackageMessageKey(err error) (string, bool) {
+	switch {
+	case errors.Is(err, errConnectionPackagePasswordRequired):
+		return "file.backend.error.connection_package_password_required", true
+	case errors.Is(err, errConnectionPackageDecryptFailed):
+		return "file.backend.error.connection_package_decrypt_failed", true
+	case errors.Is(err, errConnectionPackageUnsupported):
+		return "file.backend.error.connection_package_unsupported", true
+	case errors.Is(err, errConnectionImportFileTooLarge):
+		return "file.backend.error.connection_import_file_too_large", true
+	case errors.Is(err, errConnectionPackagePayloadTooLarge):
+		return "file.backend.error.connection_package_payload_too_large", true
+	default:
+		return "", false
+	}
+}
+
+func localizedConnectionPackageMessage(text connectionPackageTextFunc, err error) string {
+	if err == nil {
+		return ""
+	}
+	key, ok := localizedConnectionPackageMessageKey(err)
+	if !ok {
+		return err.Error()
+	}
+	return localizedConnectionPackageText(text, key, nil)
+}
+
+func localizedConnectionPackageExportMessage(text connectionPackageTextFunc, err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, errConnectionImportFileTooLarge) {
+		return localizedConnectionPackageText(text, "file.backend.error.connection_export_file_too_large", nil)
+	}
+	return localizedConnectionPackageMessage(text, err)
+}
+
+func localizeConnectionPackageError(text connectionPackageTextFunc, err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := localizedConnectionPackageMessageKey(err); !ok {
+		return err
+	}
+	return localizedConnectionPackageError{
+		message: localizedConnectionPackageMessage(text, err),
+		cause:   err,
+	}
+}
 
 type connectionPackageFile struct {
 	SchemaVersion int                      `json:"schemaVersion"`

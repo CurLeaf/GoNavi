@@ -1,8 +1,10 @@
 import React from 'react';
+import { readFileSync } from 'node:fs';
 import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TabData } from '../types';
+import { I18nProvider } from '../i18n/provider';
 import TriggerViewer from './TriggerViewer';
 
 const storeState = vi.hoisted(() => ({
@@ -34,6 +36,9 @@ vi.mock('../store', () => ({
 }));
 
 vi.mock('../../wailsjs/go/app/App', () => backendApp);
+vi.mock('../i18n/runtime', () => ({
+  syncLanguageRuntime: vi.fn(async () => undefined),
+}));
 
 vi.mock('@ant-design/icons', () => ({
   EditOutlined: () => <span data-icon="edit" />,
@@ -64,6 +69,16 @@ const flushPromises = async (count = 6) => {
   }
 };
 
+const renderWithI18n = (tab: TabData) => (
+  <I18nProvider
+    preference="en-US"
+    systemLanguages={['en-US']}
+    onPreferenceChange={() => undefined}
+  >
+    <TriggerViewer tab={tab} />
+  </I18nProvider>
+);
+
 const findButtonText = (node: any): string => (
   (node.children || [])
     .map((item: any) => (typeof item === 'string' ? item : findButtonText(item)))
@@ -93,14 +108,37 @@ describe('TriggerViewer object edit entry', () => {
     });
   });
 
+  it('keeps TriggerViewer shell and fallback copy localized', () => {
+    const source = readFileSync(new URL('./TriggerViewer.tsx', import.meta.url), 'utf8');
+
+    expect(source).not.toMatch(/DuckDB 不支持触发器|TDengine 不支持触发器|MongoDB 不支持触发器|暂不支持该数据库类型的触发器定义查看/);
+    expect(source).not.toMatch(/未找到触发器定义|未找到数据库连接|触发器名称为空|查询触发器定义失败/);
+    expect(source).not.toMatch(/当前 Sphinx 实例|已执行多套兼容查询|返回失败信息: |unknown error/);
+    expect(source).not.toMatch(/加载触发器定义|加载失败|修改触发器|触发器: |数据库: |对象修改|刷新最新定义失败/);
+
+    expect(source).toContain('trigger_viewer.loading.definition');
+    expect(source).toContain('trigger_viewer.error.load_failed');
+    expect(source).toContain('trigger_viewer.error.connection_not_found');
+    expect(source).toContain('trigger_viewer.error.trigger_name_empty');
+    expect(source).toContain('trigger_viewer.error.query_failed');
+    expect(source).toContain('trigger_viewer.error.query_failed_detail');
+    expect(source).toContain('trigger_viewer.field.trigger');
+    expect(source).toContain('trigger_viewer.field.database');
+    expect(source).toContain('trigger_viewer.action.edit_object');
+    expect(source).toContain('trigger_viewer.warning.refresh_latest_failed');
+    expect(source).toContain('trigger_viewer.tab.edit_trigger_title');
+    expect(source).toContain('trigger_viewer.editor.unsupported.duckdb');
+    expect(source).toContain('trigger_viewer.editor.sphinx.failed_message_unknown');
+  });
+
   it('opens an editable query tab for trigger definitions', async () => {
     let renderer: any;
     await act(async () => {
-      renderer = create(<TriggerViewer tab={tab} />);
+      renderer = create(renderWithI18n(tab));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
@@ -108,7 +146,7 @@ describe('TriggerViewer object edit entry', () => {
 
     expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'main' });
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
-      title: '修改触发器: audit.users_bi',
+      title: 'Edit trigger: audit.users_bi',
       type: 'query',
       connectionId: 'conn-1',
       dbName: 'main',
@@ -126,7 +164,7 @@ describe('TriggerViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<TriggerViewer tab={tab} />);
+      renderer = create(renderWithI18n(tab));
       await flushPromises();
     });
 
@@ -150,11 +188,11 @@ describe('TriggerViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<TriggerViewer tab={tab} />);
+      renderer = create(renderWithI18n(tab));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
@@ -178,11 +216,11 @@ describe('TriggerViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<TriggerViewer tab={tab} />);
+      renderer = create(renderWithI18n(tab));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
@@ -213,11 +251,11 @@ describe('TriggerViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<TriggerViewer tab={tab} />);
+      renderer = create(renderWithI18n(tab));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
@@ -265,16 +303,16 @@ describe('TriggerViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<TriggerViewer tab={{
+      renderer = create(renderWithI18n({
         ...tab,
         id: 'trigger-conn-1-main-audit.users_bu',
-        title: '触发器: audit.users_bu',
+        title: 'Trigger: audit.users_bu',
         triggerName: 'audit.users_bu',
-      }} />);
+      }));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
@@ -301,11 +339,11 @@ describe('TriggerViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<TriggerViewer tab={tab} />);
+      renderer = create(renderWithI18n(tab));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       await button.props.onClick();
@@ -335,11 +373,11 @@ describe('TriggerViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<TriggerViewer tab={tab} />);
+      renderer = create(renderWithI18n(tab));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       await button.props.onClick();
@@ -348,7 +386,7 @@ describe('TriggerViewer object edit entry', () => {
 
     expect(storeState.addTab).not.toHaveBeenCalled();
     expect(String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''))).toContain('CREATE TRIGGER users_bi BEFORE INSERT ON audit.users');
-    expect(findButtonText(renderer.root)).toContain('刷新最新定义失败');
+    expect(findButtonText(renderer.root)).toContain('Failed to refresh the latest definition');
     expect(findButtonText(renderer.root)).toContain('refresh failed');
   });
 
@@ -366,21 +404,21 @@ describe('TriggerViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<TriggerViewer tab={tab} />);
+      renderer = create(renderWithI18n(tab));
       await flushPromises();
     });
 
     await act(async () => {
-      renderer.update(<TriggerViewer tab={{
+      renderer.update(renderWithI18n({
         ...tab,
         id: 'trigger-conn-1-main-audit.users_bu',
-        title: '触发器: audit.users_bu',
+        title: 'Trigger: audit.users_bu',
         triggerName: 'audit.users_bu',
-      }} />);
+      }));
       await flushPromises();
     });
 
-    expect(findButtonText(renderer.root)).toContain('加载失败');
+    expect(findButtonText(renderer.root)).toContain('Load failed');
     expect(findButtonText(renderer.root)).toContain('load failed');
     expect(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')).toHaveLength(0);
     expect(findButtonText(renderer.root)).not.toContain('CREATE TRIGGER users_bi BEFORE INSERT');

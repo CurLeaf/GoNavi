@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ApiOutlined, CaretDownOutlined, CaretRightOutlined, CheckOutlined } from '@ant-design/icons';
 
+import { t as catalogTranslate } from '../../../i18n/catalog';
+import type { I18nParams } from '../../../i18n/types';
+import { useOptionalI18n } from '../../../i18n/provider';
 import type { AIChatMessage, AIToolCall } from '../../../types';
 import type { OverlayWorkbenchTheme } from '../../../utils/overlayWorkbenchTheme';
 
@@ -22,58 +25,66 @@ interface AIToolCallingBlockProps {
   hasContent: boolean;
 }
 
-const TOOL_ACTION_LABELS: Record<string, string> = {
-  inspect_ai_runtime: '读取当前 AI 运行状态',
-  inspect_ai_safety: '读取当前 AI 安全边界',
-  inspect_ai_providers: '读取当前 AI 供应商与模型配置',
-  inspect_ai_chat_readiness: '读取当前 AI 聊天发送前置状态',
-  inspect_ai_tool_catalog: '读取 AI 工具目录和参数提示',
-  inspect_ai_support_bundle: '生成 AI 排障支持包',
-  inspect_mcp_setup: '读取当前 MCP 配置状态',
-  inspect_mcp_runtime_failures: '诊断 MCP 运行期失败',
-  inspect_mcp_authoring_guide: '读取 MCP 新增填写指引',
-  inspect_mcp_draft: '校验 MCP 新增草稿',
-  inspect_mcp_tool_schema: '读取 MCP 工具参数 schema',
-  inspect_ai_guidance: '读取当前 AI 提示与技能配置',
-  get_connections: '获取可用连接信息',
-  get_databases: '扫描数据库列表',
-  get_tables: '分析表结构信息',
-  get_all_columns: '汇总跨表字段摘要',
-  get_columns: '核对真实字段定义',
-  get_indexes: '检查索引定义',
-  get_foreign_keys: '梳理外键关系',
-  get_triggers: '检查触发器逻辑',
-  get_table_ddl: '提取建表语句',
-  inspect_table_bundle: '抓取完整表结构快照',
-  inspect_database_bundle: '抓取数据库结构总览',
-  inspect_current_connection: '读取当前连接摘要',
-  inspect_connection_capabilities: '读取当前连接能力矩阵',
-  inspect_saved_connections: '盘点本地已保存连接',
-  inspect_redis_topology: '诊断 Redis 拓扑配置',
-  inspect_external_sql_directories: '盘点外部 SQL 目录',
-  inspect_external_sql_file: '读取外部 SQL 文件',
-  inspect_ai_sessions: '盘点本地 AI 历史会话',
-  inspect_active_tab: '读取当前活动页签',
-  inspect_workspace_tabs: '盘点当前工作区页签',
-  inspect_recent_sql_logs: '回看最近 SQL 执行日志',
-  inspect_recent_sql_activity: '总结最近 SQL 活动',
-  inspect_sql_editor_transaction: '读取 SQL 编辑器事务状态',
-  inspect_app_logs: '回看 GoNavi 应用日志',
-  inspect_recent_connection_failures: '总结最近连接失败记录',
-  inspect_ai_last_render_error: '读取最近一次 AI 渲染异常',
-  inspect_ai_message_flow: '诊断当前 AI 消息流',
-  inspect_ai_context_budget: '诊断 AI 上下文体量风险',
-  inspect_codebase_hotspots: '读取代码大文件热点',
-  inspect_saved_queries: '检索本地已保存查询',
-  inspect_sql_snippets: '读取 SQL 片段模板',
-  inspect_shortcuts: '读取当前快捷键配置',
-  preview_table_rows: '预览真实样例数据',
-  execute_sql: '执行只读 SQL 验证',
+const useMessageCopy = () => {
+  const i18n = useOptionalI18n();
+  return (key: string, params?: I18nParams) => (
+    i18n?.t ?? ((catalogKey, catalogParams) => catalogTranslate('en-US', catalogKey, catalogParams))
+  )(key, params);
+};
+
+const TOOL_ACTION_LABEL_KEYS: Record<string, string> = {
+  inspect_ai_runtime: 'ai_chat.message.tool_call.inspect_ai_runtime',
+  inspect_ai_safety: 'ai_chat.message.tool_call.inspect_ai_safety',
+  inspect_ai_providers: 'ai_chat.message.tool_call.inspect_ai_providers',
+  inspect_ai_chat_readiness: 'ai_chat.message.tool_call.inspect_ai_chat_readiness',
+  inspect_ai_tool_catalog: 'ai_chat.message.tool_call.inspect_ai_tool_catalog',
+  inspect_ai_support_bundle: 'ai_chat.message.tool_call.inspect_ai_support_bundle',
+  inspect_mcp_setup: 'ai_chat.message.tool_call.inspect_mcp_setup',
+  inspect_mcp_runtime_failures: 'ai_chat.message.tool_call.inspect_mcp_runtime_failures',
+  inspect_mcp_authoring_guide: 'ai_chat.message.tool_call.inspect_mcp_authoring_guide',
+  inspect_mcp_draft: 'ai_chat.message.tool_call.inspect_mcp_draft',
+  inspect_mcp_tool_schema: 'ai_chat.message.tool_call.inspect_mcp_tool_schema',
+  inspect_ai_guidance: 'ai_chat.message.tool_call.inspect_ai_guidance',
+  get_connections: 'ai_chat.message.tool_call.get_connections',
+  get_databases: 'ai_chat.message.tool_call.get_databases',
+  get_tables: 'ai_chat.message.tool_call.get_tables',
+  get_all_columns: 'ai_chat.message.tool_call.get_all_columns',
+  get_columns: 'ai_chat.message.tool_call.get_columns',
+  get_indexes: 'ai_chat.message.tool_call.get_indexes',
+  get_foreign_keys: 'ai_chat.message.tool_call.get_foreign_keys',
+  get_triggers: 'ai_chat.message.tool_call.get_triggers',
+  get_table_ddl: 'ai_chat.message.tool_call.get_table_ddl',
+  inspect_table_bundle: 'ai_chat.message.tool_call.inspect_table_bundle',
+  inspect_database_bundle: 'ai_chat.message.tool_call.inspect_database_bundle',
+  inspect_current_connection: 'ai_chat.message.tool_call.inspect_current_connection',
+  inspect_connection_capabilities: 'ai_chat.message.tool_call.inspect_connection_capabilities',
+  inspect_saved_connections: 'ai_chat.message.tool_call.inspect_saved_connections',
+  inspect_redis_topology: 'ai_chat.message.tool_call.inspect_redis_topology',
+  inspect_external_sql_directories: 'ai_chat.message.tool_call.inspect_external_sql_directories',
+  inspect_external_sql_file: 'ai_chat.message.tool_call.inspect_external_sql_file',
+  inspect_ai_sessions: 'ai_chat.message.tool_call.inspect_ai_sessions',
+  inspect_active_tab: 'ai_chat.message.tool_call.inspect_active_tab',
+  inspect_workspace_tabs: 'ai_chat.message.tool_call.inspect_workspace_tabs',
+  inspect_recent_sql_logs: 'ai_chat.message.tool_call.inspect_recent_sql_logs',
+  inspect_recent_sql_activity: 'ai_chat.message.tool_call.inspect_recent_sql_activity',
+  inspect_sql_editor_transaction: 'ai_chat.message.tool_call.inspect_sql_editor_transaction',
+  inspect_app_logs: 'ai_chat.message.tool_call.inspect_app_logs',
+  inspect_recent_connection_failures: 'ai_chat.message.tool_call.inspect_recent_connection_failures',
+  inspect_ai_last_render_error: 'ai_chat.message.tool_call.inspect_ai_last_render_error',
+  inspect_ai_message_flow: 'ai_chat.message.tool_call.inspect_ai_message_flow',
+  inspect_ai_context_budget: 'ai_chat.message.tool_call.inspect_ai_context_budget',
+  inspect_codebase_hotspots: 'ai_chat.message.tool_call.inspect_codebase_hotspots',
+  inspect_saved_queries: 'ai_chat.message.tool_call.inspect_saved_queries',
+  inspect_sql_snippets: 'ai_chat.message.tool_call.inspect_sql_snippets',
+  inspect_shortcuts: 'ai_chat.message.tool_call.inspect_shortcuts',
+  preview_table_rows: 'ai_chat.message.tool_call.preview_table_rows',
+  execute_sql: 'ai_chat.message.tool_call.execute_sql',
 };
 
 const AIToolResultItem: React.FC<{ resultMsg: AIChatMessage; darkMode: boolean; overlayTheme: OverlayWorkbenchTheme }> = ({ resultMsg, darkMode, overlayTheme }) => {
   const [toolExpanded, setToolExpanded] = useState(false);
   const charCount = resultMsg.content ? resultMsg.content.length : 0;
+  const copy = useMessageCopy();
 
   return (
     <div style={{
@@ -90,8 +101,10 @@ const AIToolResultItem: React.FC<{ resultMsg: AIChatMessage; darkMode: boolean; 
       >
         {toolExpanded ? <CaretDownOutlined /> : <CaretRightOutlined />}
         <ApiOutlined style={{ color: '#1677ff' }} />
-        <span>探针执行结果 (<span style={{ fontFamily: 'var(--gn-font-mono)', color: overlayTheme.iconColor }}>{resultMsg.tool_name || 'unknown'}</span>)</span>
-        <span style={{ fontSize: 11, marginLeft: 8, opacity: 0.6 }}>{charCount > 0 ? `${charCount} 个字符` : '无数据'}</span>
+        <span>{copy('ai_chat.message.tool_result.title', { name: resultMsg.tool_name || 'unknown' })}</span>
+        <span style={{ fontSize: 11, marginLeft: 8, opacity: 0.6 }}>
+          {charCount > 0 ? copy('ai_chat.message.tool_result.char_count', { count: charCount }) : copy('ai_chat.message.tool_result.no_data')}
+        </span>
       </div>
       {toolExpanded && (
         <div style={{ marginTop: 8, fontSize: 12, color: overlayTheme.mutedText, fontFamily: 'var(--gn-font-mono)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: 300, overflowY: 'auto', background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.03)', padding: 8, borderRadius: 6 }}>
@@ -113,6 +126,7 @@ export const AIThinkingBlock: React.FC<AIThinkingBlockProps> = ({
   const isActivelyThinking = isGlobalLoading && !hasContent;
   const [expanded, setExpanded] = useState(isActivelyThinking);
   const contentRef = React.useRef<HTMLDivElement>(null);
+  const copy = useMessageCopy();
 
   useEffect(() => {
     if (isActivelyThinking) {
@@ -154,9 +168,9 @@ export const AIThinkingBlock: React.FC<AIThinkingBlockProps> = ({
         }}
       >
         <span style={{ transition: 'transform 0.2s', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', fontSize: 10 }}>▶</span>
-        <span>💭 思考过程</span>
-        {isActivelyThinking && <span style={{ fontSize: 10, color: '#8b5cf6', animation: 'pulse 1.5s ease-in-out infinite' }}>思考中...</span>}
-        {!isActivelyThinking && <span style={{ fontSize: 10, opacity: 0.5 }}>({displayThinking.length} 字)</span>}
+        <span>💭 {copy('ai_chat.message.thinking.title')}</span>
+        {isActivelyThinking && <span style={{ fontSize: 10, color: '#8b5cf6', animation: 'pulse 1.5s ease-in-out infinite' }}>{copy('ai_chat.message.thinking.active')}</span>}
+        {!isActivelyThinking && <span style={{ fontSize: 10, opacity: 0.5 }}>{copy('ai_chat.message.thinking.count', { count: displayThinking.length })}</span>}
       </div>
       <div className={`ai-expand-transition ${expanded ? 'expanded' : 'collapsed'}`}>
         <div ref={contentRef} style={{
@@ -188,6 +202,7 @@ export const AIToolCallingBlock: React.FC<AIToolCallingBlockProps> = ({
   overlayTheme,
   hasContent,
 }) => {
+  const copy = useMessageCopy();
   const toolResultsById = useMemo(() => {
     return new Map(
       allMessages
@@ -233,7 +248,7 @@ export const AIToolCallingBlock: React.FC<AIToolCallingBlockProps> = ({
           ) : (
             <CheckOutlined style={{ color: '#10b981' }} />
           )}
-          <span>{!allDone && loading ? '正在执行数据探针...' : `数据探针执行完毕 (${toolCalls.length} 项)`}</span>
+          <span>{!allDone && loading ? copy('ai_chat.message.tool_call.running') : copy('ai_chat.message.tool_call.done', { count: toolCalls.length })}</span>
         </div>
         <span style={{ transition: 'transform 0.2s', transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', fontSize: 10, color: overlayTheme.mutedText }}>▶</span>
       </div>
@@ -242,7 +257,9 @@ export const AIToolCallingBlock: React.FC<AIToolCallingBlockProps> = ({
           {toolCalls.map((toolCall) => {
             const resultMsg = toolResultsById.get(toolCall.id);
             const isDone = Boolean(resultMsg);
-            const actionName = TOOL_ACTION_LABELS[toolCall.function.name] || toolCall.function.name;
+            const actionKey = TOOL_ACTION_LABEL_KEYS[toolCall.function.name];
+            const translatedActionName = actionKey ? copy(actionKey) : '';
+            const actionName = translatedActionName && translatedActionName !== actionKey ? translatedActionName : toolCall.function.name;
             return (
               <div key={toolCall.id} style={{
                 display: 'flex',

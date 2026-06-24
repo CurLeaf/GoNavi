@@ -1,4 +1,5 @@
 import type { JVMActionDefinition, JVMChangeRequest, JVMAIPlanContext, JVMValueSnapshot, TabData } from '../types';
+import { t as translateCatalog, type I18nParams } from '../i18n';
 import { JVM_SENSITIVE_VALUE_MASK } from './jvmResourcePresentation';
 
 export type JVMAIChangePlan = {
@@ -28,6 +29,8 @@ type JVMAIPlanPromptContext = {
   snapshot?: JVMValueSnapshot | null;
 };
 
+type JVMAIPlanTranslator = (key: string, params?: I18nParams) => string;
+
 const planFencePattern = /```json\s*([\s\S]*?)```/gi;
 const allowedTargetTypes = new Set<JVMAIChangePlan['targetType']>(['cacheEntry', 'managedBean', 'attribute', 'operation']);
 const allowedPayloadFormats = new Set<NonNullable<JVMAIChangePlan['payload']>['format']>(['json', 'text']);
@@ -36,6 +39,15 @@ const asTrimmedString = (value: unknown): string => String(value ?? '').trim();
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
+
+const translatePlanCopy = (
+  translate: JVMAIPlanTranslator | undefined,
+  key: string,
+  params?: I18nParams,
+): string => {
+  const resolved = (translate || translateCatalog)(key, params);
+  return resolved && resolved !== key ? resolved : key;
+};
 
 const normalizeSelector = (value: unknown): JVMAIChangePlan['selector'] | null => {
   if (!isRecord(value)) {
@@ -103,9 +115,12 @@ const normalizePlan = (value: unknown): JVMAIChangePlan | null => {
   };
 };
 
-const formatSnapshotValue = (snapshot?: JVMValueSnapshot | null): string => {
+const formatSnapshotValue = (
+  snapshot?: JVMValueSnapshot | null,
+  translate?: JVMAIPlanTranslator,
+): string => {
   if (!snapshot) {
-    return '当前资源快照尚未加载成功。';
+    return translatePlanCopy(translate, 'jvm_ai_plan.snapshot.unavailable');
   }
   if (snapshot.sensitive) {
     return JVM_SENSITIVE_VALUE_MASK;
@@ -181,26 +196,29 @@ export const resolveJVMAIPlanTargetTabId = (tabs: TabData[], context?: JVMAIPlan
   return fallbackMatch?.id || '';
 };
 
-export const buildJVMChangeDraftFromAIPlan = (plan: JVMAIChangePlan): JVMAIChangeDraft => {
+export const buildJVMChangeDraftFromAIPlan = (
+  plan: JVMAIChangePlan,
+  translate?: JVMAIPlanTranslator,
+): JVMAIChangeDraft => {
   const resourceId = resolveJVMAIPlanResourceId(plan);
   if (!resourceId) {
-    throw new Error('AI 计划缺少可用的资源定位信息');
+    throw new Error(translatePlanCopy(translate, 'jvm_ai_plan.error.resource_locator_missing'));
   }
 
   const reason = asTrimmedString(plan.reason);
   if (!reason) {
-    throw new Error('AI 计划缺少变更原因');
+    throw new Error(translatePlanCopy(translate, 'jvm_ai_plan.error.reason_missing'));
   }
 
   const action = asTrimmedString(plan.action);
   if (!action) {
-    throw new Error('AI 计划缺少可执行 action');
+    throw new Error(translatePlanCopy(translate, 'jvm_ai_plan.error.action_missing'));
   }
 
   if (plan.action === 'updateValue') {
     const value = plan.payload?.value;
     if (plan.payload?.format !== 'json' || !isRecord(value)) {
-      throw new Error('当前 JVM 预览要求 payload 仍然是 JSON 对象');
+      throw new Error(translatePlanCopy(translate, 'jvm_ai_plan.error.payload_json_object_required'));
     }
     return {
       resourceId,
@@ -214,7 +232,7 @@ export const buildJVMChangeDraftFromAIPlan = (plan: JVMAIChangePlan): JVMAIChang
   const payloadValue = plan.payload?.value;
   if (plan.payload && plan.payload.format === 'json') {
     if (!isRecord(payloadValue)) {
-      throw new Error('当前 JVM 预览要求 payload 仍然是 JSON 对象');
+      throw new Error(translatePlanCopy(translate, 'jvm_ai_plan.error.payload_json_object_required'));
     }
     return {
       resourceId,
@@ -246,16 +264,23 @@ export const buildJVMChangeDraftFromAIPlan = (plan: JVMAIChangePlan): JVMAIChang
   };
 };
 
-const formatSupportedActions = (actions?: JVMActionDefinition[]): string => {
+const formatSupportedActions = (
+  actions?: JVMActionDefinition[],
+  translate?: JVMAIPlanTranslator,
+): string => {
   if (!actions || actions.length === 0) {
-    return '当前资源未声明支持动作。若要生成计划，请仅在你能从快照内容中明确推断时给出 action，并保持 payload 为 JSON 对象。';
+    return translatePlanCopy(translate, 'jvm_ai_plan.actions.none');
   }
   return actions
     .map((item) => {
       const payloadFields = Array.isArray(item.payloadFields) && item.payloadFields.length > 0
-        ? `；payload 字段：${item.payloadFields.map((field) => `${field.name}${field.required ? '(required)' : ''}`).join('、')}`
+        ? translatePlanCopy(translate, 'jvm_ai_plan.actions.payload_fields', {
+          fields: item.payloadFields
+            .map((field) => `${field.name}${field.required ? translatePlanCopy(translate, 'jvm_ai_plan.actions.required_suffix') : ''}`)
+            .join(translatePlanCopy(translate, 'jvm_ai_plan.actions.field_separator')),
+        })
         : '';
-      return `- ${item.action}${item.label ? ` (${item.label})` : ''}${item.description ? `：${item.description}` : ''}${payloadFields}`;
+      return `- ${item.action}${item.label ? translatePlanCopy(translate, 'jvm_ai_plan.actions.label', { label: item.label }) : ''}${item.description ? translatePlanCopy(translate, 'jvm_ai_plan.actions.description', { description: item.description }) : ''}${payloadFields}`;
     })
     .join('\n');
 };
@@ -268,39 +293,43 @@ export const buildJVMAIPlanPrompt = ({
   readOnly,
   environment,
   snapshot,
-}: JVMAIPlanPromptContext): string => {
-  const normalizedPath = asTrimmedString(resourcePath) || '(未提供资源路径)';
+}: JVMAIPlanPromptContext, translate?: JVMAIPlanTranslator): string => {
+  const normalizedPath = asTrimmedString(resourcePath) || translatePlanCopy(translate, 'jvm_ai_plan.prompt.resource_path_missing');
   const snapshotFormat = asTrimmedString(snapshot?.format) || 'json';
-  const environmentLabel = asTrimmedString(environment) || 'unknown';
-  const supportedActionsText = formatSupportedActions(snapshot?.supportedActions);
+  const environmentLabel = asTrimmedString(environment) || translatePlanCopy(translate, 'jvm_ai_plan.prompt.environment_unknown');
+  const connectionPolicy = translatePlanCopy(
+    translate,
+    readOnly ? 'jvm_ai_plan.prompt.connection_policy.read_only' : 'jvm_ai_plan.prompt.connection_policy.writable',
+  );
+  const supportedActionsText = formatSupportedActions(snapshot?.supportedActions, translate);
 
   return [
-    '请分析下面这个 JVM 资源，并生成一个可用于 GoNavi “预览变更” 的结构化修改计划。',
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.intro'),
     '',
-    `连接名称：${connectionName}`,
-    `目标主机：${asTrimmedString(host) || '-'}`,
-    `Provider 模式：${providerMode}`,
-    `运行环境：${environmentLabel}`,
-    `连接策略：${readOnly ? '只读连接，当前只能生成计划和风险分析，不能假设已执行' : '可写连接，但仍必须先预览再人工确认'}`,
-    `当前资源路径：${normalizedPath}`,
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.connection_name', { connectionName }),
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.target_host', { host: asTrimmedString(host) || '-' }),
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.provider_mode', { providerMode }),
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.environment', { environmentLabel }),
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.connection_policy', { policy: connectionPolicy }),
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.resource_path', { resourcePath: normalizedPath }),
     '',
-    '当前资源快照：',
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.snapshot_title'),
     `\`\`\`${snapshotFormat}`,
-    formatSnapshotValue(snapshot),
+    formatSnapshotValue(snapshot, translate),
     '```',
     '',
-    '当前资源支持动作：',
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.supported_actions_title'),
     supportedActionsText,
     '',
-    '输出要求：',
-    '1. 可以先给一小段分析，但必须包含且只包含一个 ```json 代码块。',
-    '2. 代码块里的 JSON 字段必须严格是：targetType、selector、action、payload、reason。',
-    `3. selector.resourcePath 优先使用当前资源路径 ${normalizedPath}，不要凭空编造其他路径。`,
-    '4. action 优先从“当前资源支持动作”里选择；如果当前资源未声明支持动作，才允许基于快照内容推断。',
-    '5. payload 只能使用 JSON 对象包装，不要输出脚本、命令或原始二进制。若需要纯文本值，也请包装成 {"format":"text","value":"..."}。',
-    '6. 不要声称已经执行修改，也不要输出脚本或命令。',
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.output_requirements_title'),
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.requirement.single_json_block'),
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.requirement.fields'),
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.requirement.resource_path', { resourcePath: normalizedPath }),
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.requirement.action'),
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.requirement.payload'),
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.requirement.no_execute'),
     '',
-    'JSON 示例：',
+    translatePlanCopy(translate, 'jvm_ai_plan.prompt.example_title'),
     '```json',
     JSON.stringify(
       {
@@ -315,7 +344,7 @@ export const buildJVMAIPlanPrompt = ({
             status: 'ACTIVE',
           },
         },
-        reason: '修复缓存脏值',
+        reason: translatePlanCopy(translate, 'jvm_ai_plan.prompt.example_reason'),
       },
       null,
       2,

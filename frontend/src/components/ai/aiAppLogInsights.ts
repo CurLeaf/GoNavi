@@ -1,3 +1,6 @@
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
+
 const DEFAULT_APP_LOG_LIMIT = 80;
 const MAX_APP_LOG_LIMIT = 200;
 
@@ -38,6 +41,7 @@ export const buildAppLogSnapshot = (params: {
   readResult?: any;
   keyword?: unknown;
   lineLimit?: unknown;
+  translate?: AIInspectionTranslator;
 }) => {
   const data = params.readResult?.data && typeof params.readResult.data === 'object'
     ? params.readResult.data as Record<string, unknown>
@@ -61,7 +65,16 @@ export const buildAppLogSnapshot = (params: {
     message: lines.length > 0
       ? ''
       : keyword
-        ? `最近日志里没有匹配关键词“${keyword}”的记录`
-        : '最近日志里暂无可读记录',
+        ? translateInspectionCopy(
+          params.translate,
+          'ai_chat.inspection.app_log.message.no_keyword_match',
+          `No recent log entries matched keyword "${keyword}".`,
+          { keyword },
+        )
+        : translateInspectionCopy(
+          params.translate,
+          'ai_chat.inspection.app_log.message.no_readable_entries',
+          'No readable recent log entries are available.',
+        ),
   };
 };
