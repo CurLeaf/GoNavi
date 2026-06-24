@@ -274,3 +274,26 @@ export const shouldUseSqlEditorManagedTransactionForType = (
 
 export const shouldUseSqlEditorManagedTransaction = (statements: string[]): boolean =>
     shouldUseSqlEditorManagedTransactionForType('', statements);
+
+export const canReusePendingSqlEditorTransactionForType = (
+    type: string,
+    statements: string[],
+): boolean => {
+    if (String(type || '').trim().toLowerCase() === 'trino') {
+        return false;
+    }
+    let hasReadStatement = false;
+    for (const statement of statements) {
+        const trimmed = String(statement || '').trim();
+        if (!trimmed) continue;
+        if (isSqlEditorTransactionControlStatement(trimmed)) return false;
+        if (sqlEditorStatementHasManagedWrite(trimmed)) return false;
+        const keyword = resolveSqlEditorOperationKeyword(trimmed);
+        if (!SQL_EDITOR_READ_KEYWORDS.has(keyword)) return false;
+        hasReadStatement = true;
+    }
+    return hasReadStatement;
+};
+
+export const canReusePendingSqlEditorTransaction = (statements: string[]): boolean =>
+    canReusePendingSqlEditorTransactionForType('', statements);

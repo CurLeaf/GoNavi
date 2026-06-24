@@ -100,6 +100,7 @@ const backendApp = vi.hoisted(() => ({
   DBQuery: vi.fn(),
   DBQueryWithCancel: vi.fn(),
   DBQueryMulti: vi.fn(),
+  DBQueryMultiInTransaction: vi.fn(),
   DBQueryMultiTransactional: vi.fn(),
   DBCommitTransaction: vi.fn(),
   DBRollbackTransaction: vi.fn(),
@@ -673,6 +674,7 @@ describe('QueryEditor external SQL save', () => {
     backendApp.ExportSQLFile.mockResolvedValue({ success: true });
     backendApp.DBQueryWithCancel.mockResolvedValue({ success: true, data: [] });
     backendApp.DBQueryMulti.mockResolvedValue({ success: true, data: [] });
+    backendApp.DBQueryMultiInTransaction.mockResolvedValue({ success: true, data: [] });
     backendApp.DBQueryMultiTransactional.mockResolvedValue({ success: true, data: [] });
     backendApp.DBCommitTransaction.mockResolvedValue({ success: true, message: '事务已提交' });
     backendApp.DBRollbackTransaction.mockResolvedValue({ success: true, message: '事务已回滚' });
@@ -4758,6 +4760,62 @@ describe('QueryEditor external SQL save', () => {
 
     expect(backendApp.DBCommitTransaction).toHaveBeenCalledWith('tx-1');
     expect(textContent(renderer!.root)).not.toContain('未提交');
+  });
+
+  it('reuses the pending managed transaction for follow-up read-only SQL in the same tab', async () => {
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+      success: true,
+      transactionId: 'tx-1',
+      transactionPending: true,
+      data: [
+        { columns: ['affectedRows'], rows: [{ affectedRows: 1 }], statementIndex: 1 },
+      ],
+    });
+    backendApp.DBQueryMultiInTransaction.mockResolvedValueOnce({
+      success: true,
+      transactionId: 'tx-1',
+      transactionPending: true,
+      data: [
+        { columns: ['name'], rows: [{ name: 'new' }], statementIndex: 1 },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: "UPDATE users SET name = 'new' WHERE id = 1" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      renderer.update(<QueryEditor tab={createTab({ query: 'SELECT name FROM users WHERE id = 1' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalledTimes(1);
+    expect(backendApp.DBQueryMultiInTransaction).toHaveBeenCalledWith(
+      'tx-1',
+      expect.stringContaining('SELECT name FROM users'),
+      'query-1',
+    );
+    expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+    expect(dataGridState.latestProps?.columnNames).toEqual(['name']);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ name: 'new' });
+    expect(textContent(renderer!.root)).toContain('提交');
+    expect(textContent(renderer!.root)).toContain('回滚');
   });
 
   it('runs SQL editor WITH DML through a pending managed transaction', async () => {

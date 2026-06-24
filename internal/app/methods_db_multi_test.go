@@ -687,6 +687,84 @@ func TestDBQueryMultiTransactionalKeepsDMLTransactionOpenUntilCommit(t *testing.
 	}
 }
 
+func TestDBQueryMultiInTransactionReusesPendingManagedSessionForReadQueries(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	updateStmt := "UPDATE users SET name = 'new' WHERE id = 1"
+	readStmt := "SELECT name FROM users WHERE id = 1"
+	fakeDB := &fakeTransactionalDB{
+		fakeBatchWriteDB: fakeBatchWriteDB{
+			execAffected: map[string]int64{
+				updateStmt: 1,
+			},
+			queryMap: map[string][]map[string]interface{}{
+				readStmt: {
+					{"name": "new"},
+				},
+			},
+			fieldMap: map[string][]string{
+				readStmt: {"name"},
+			},
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, User: "root"}
+
+	startResult := app.DBQueryMultiTransactional(config, "main", updateStmt, "tx-query")
+	if !startResult.Success {
+		t.Fatalf("expected transactional update success, got failure: %s", startResult.Message)
+	}
+	if startResult.TransactionID == "" || !startResult.TransactionPending {
+		t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", startResult.TransactionID, startResult.TransactionPending)
+	}
+	if fakeDB.txSession == nil {
+		t.Fatal("expected transaction provider session to be opened")
+	}
+	if fakeDB.txSession.closed {
+		t.Fatal("expected transaction session to stay open before follow-up read")
+	}
+
+	readResult := app.DBQueryMultiInTransaction(startResult.TransactionID, readStmt, "tx-query-read")
+	if !readResult.Success {
+		t.Fatalf("expected in-transaction read success, got failure: %s", readResult.Message)
+	}
+	if readResult.TransactionID != startResult.TransactionID || !readResult.TransactionPending {
+		t.Fatalf("expected follow-up read to preserve pending transaction metadata, got id=%q pending=%v", readResult.TransactionID, readResult.TransactionPending)
+	}
+	if fakeDB.txSession.queryCalls == 0 {
+		t.Fatal("expected follow-up read to execute on the pinned transaction session")
+	}
+	if fakeDB.txSession.closed {
+		t.Fatal("expected transaction session to remain open after follow-up read")
+	}
+
+	resultSets, ok := readResult.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData from in-transaction read, got %T", readResult.Data)
+	}
+	if len(resultSets) != 1 {
+		t.Fatalf("expected one read result set, got %#v", resultSets)
+	}
+	if got := resultSets[0].Rows[0]["name"]; got != "new" {
+		t.Fatalf("expected in-transaction read to return updated value, got %#v", got)
+	}
+
+	rollbackResult := app.DBRollbackTransaction(startResult.TransactionID)
+	if !rollbackResult.Success {
+		t.Fatalf("expected rollback success after follow-up read, got failure: %s", rollbackResult.Message)
+	}
+	if !fakeDB.txSession.closed {
+		t.Fatal("expected transaction session to close after rollback")
+	}
+}
+
 func TestDBQueryMultiTransactionalUsesImplicitSessionTransactionForOracle(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {

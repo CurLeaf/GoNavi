@@ -6,7 +6,7 @@ import { format } from 'sql-formatter';
 import { v4 as uuidv4 } from 'uuid';
 import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
-import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBQueryMultiTransactional, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID, WriteSQLFile, ExportSQLFile } from '../../wailsjs/go/app/App';
+import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBQueryMultiInTransaction, DBQueryMultiTransactional, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID, WriteSQLFile, ExportSQLFile } from '../../wailsjs/go/app/App';
 import { GONAVI_ROW_KEY } from './DataGrid';
 import { findConnectionMutatingStatements } from '../utils/connectionReadOnly';
 import { getDataSourceCapabilities, shouldShowOceanBaseRowNumberColumn } from '../utils/dataSourceCapabilities';
@@ -25,7 +25,7 @@ import {
 import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/queryResultTable';
 import { quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
 import { formatSqlExecutionError, hasLocalizedSqlTimeoutKeyword } from '../utils/sqlErrorSemantics';
-import { shouldUseSqlEditorManagedTransactionForType } from '../utils/sqlEditorTransaction';
+import { canReusePendingSqlEditorTransactionForType, shouldUseSqlEditorManagedTransactionForType } from '../utils/sqlEditorTransaction';
 import { findSqlStatementRanges, resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/sqlStatementSelection';
 import { isMacLikePlatform } from '../utils/appearance';
 import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
@@ -2874,6 +2874,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
   };
 
+  const executeSqlEditorMultiQuery = useCallback((
+      config: Record<string, any>,
+      dbName: string,
+      sql: string,
+      queryId: string,
+      sourceStatements: string[],
+  ) => {
+      const pendingTransaction = pendingSqlTransactionRef.current;
+      if (pendingTransaction && canReusePendingSqlEditorTransactionForType(String(config.type || ''), sourceStatements)) {
+          return DBQueryMultiInTransaction(pendingTransaction.id, sql, queryId);
+      }
+      return DBQueryMulti(buildRpcConnectionConfig(config) as any, dbName, sql, queryId);
+  }, []);
+
   // 精准重查询单个结果集（提交事务 / 刷新按钮使用），不会重跑整个编辑器 SQL
   const handleReloadResult = async (resultKey: string, sql: string) => {
       if (!sql?.trim() || !currentDb) return;
@@ -2893,14 +2907,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       try {
           setLoading(true);
-          // 使用 DBQueryMulti 保持和首次查询一致的后端路径
+          // 保持与首次执行一致的后端路径，必要时复用挂起事务
           let queryId: string;
           try {
               queryId = await GenerateQueryID();
           } catch {
               queryId = 'reload-' + Date.now();
           }
-          const res = await DBQueryMulti(buildRpcConnectionConfig(config) as any, currentDb, sql, queryId);
+          const res = await executeSqlEditorMultiQuery(
+              config,
+              currentDb,
+              sql,
+              queryId,
+              splitSQLStatements(sql),
+          );
           if (!res?.success) {
               message.error(translate('query_editor.message.refresh_failed', {
                   error: formatSqlExecutionError(res?.message || translate('common.unknown'), { translate }),
@@ -2997,7 +3017,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           } catch {
               queryId = 'query-page-' + Date.now();
           }
-          const res = await DBQueryMulti(buildRpcConnectionConfig(config) as any, currentDb, pageSql, queryId);
+          const res = await executeSqlEditorMultiQuery(
+              config,
+              currentDb,
+              pageSql,
+              queryId,
+              splitSQLStatements(pageSql),
+          );
           if (!res?.success) {
               message.error(translate('query_editor.message.page_query_failed', {
                   error: formatSqlExecutionError(res?.message || translate('common.unknown'), { translate }),
@@ -3417,7 +3443,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 if (result.applied) anyLimitApplied = true;
                 return { ...plan, executedSql: result.sql };
             });
-            const fullSQL = executablePlans.map((plan) => plan.executedSql).join(';\n');
+            const executableStatements = executablePlans.map((plan) => plan.executedSql);
+            const fullSQL = executableStatements.join(';\n');
 
             const startTime = Date.now();
             let queryId: string;
@@ -3429,8 +3456,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             }
             setQueryId(queryId);
 
-            const queryExecutor = useManagedTransaction ? DBQueryMultiTransactional : DBQueryMulti;
-            const res = await queryExecutor(buildRpcConnectionConfig(config) as any, currentDb, fullSQL, queryId);
+            const res = useManagedTransaction
+                ? await DBQueryMultiTransactional(buildRpcConnectionConfig(config) as any, currentDb, fullSQL, queryId)
+                : await executeSqlEditorMultiQuery(
+                    config,
+                    currentDb,
+                    fullSQL,
+                    queryId,
+                    executableStatements,
+                );
             const duration = Date.now() - startTime;
 
             addSqlLog({

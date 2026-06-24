@@ -203,6 +203,64 @@ func (a *App) DBQueryMultiTransactional(config connection.ConnectionConfig, dbNa
 	}
 }
 
+// DBQueryMultiInTransaction executes follow-up SQL in an existing SQL editor managed transaction.
+// The transaction remains open until DBCommitTransaction or DBRollbackTransaction is called.
+func (a *App) DBQueryMultiInTransaction(transactionID string, query string, queryID string) connection.QueryResult {
+	transactionID = strings.TrimSpace(transactionID)
+	if transactionID == "" {
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.transaction_id_required", nil), QueryID: queryID}
+	}
+	if queryID == "" {
+		queryID = generateQueryID()
+	}
+
+	a.sqlTransactionMu.Lock()
+	tx, ok := a.sqlTransactions[transactionID]
+	a.sqlTransactionMu.Unlock()
+	if !ok || tx == nil || tx.execer == nil {
+		return connection.QueryResult{Success: false, Message: a.appText("db.backend.error.transaction_not_found", nil), QueryID: queryID}
+	}
+
+	runConfig := connection.ConnectionConfig{Type: tx.dbType}
+	query = sanitizeSQLForPgLike(tx.dbType, query)
+	statements := splitSQLStatements(query)
+
+	ctx, cancel := newQueryExecutionContext(runConfig)
+	defer cancel()
+
+	a.queryMu.Lock()
+	a.runningQueries[queryID] = queryContext{
+		cancel:  cancel,
+		started: time.Now(),
+	}
+	a.queryMu.Unlock()
+	defer func() {
+		a.queryMu.Lock()
+		delete(a.runningQueries, queryID)
+		a.queryMu.Unlock()
+	}()
+
+	resultSets, err := executeManagedSQLTransactionStatements(ctx, tx.execer, runConfig, statements, a.appText)
+	if err != nil {
+		logger.Error(err, "DBQueryMultiInTransaction 执行失败：id=%s dbType=%s SQL片段=%q", transactionID, tx.dbType, sqlSnippet(query))
+		return connection.QueryResult{
+			Success:            false,
+			Message:            err.Error(),
+			QueryID:            queryID,
+			TransactionID:      transactionID,
+			TransactionPending: true,
+		}
+	}
+
+	return connection.QueryResult{
+		Success:            true,
+		Data:               resultSets,
+		QueryID:            queryID,
+		TransactionID:      transactionID,
+		TransactionPending: true,
+	}
+}
+
 func executeManagedSQLTransactionStatements(ctx context.Context, session db.StatementExecer, runConfig connection.ConnectionConfig, statements []string, text func(string, map[string]any) string) ([]connection.ResultSetData, error) {
 	if text == nil {
 		text = defaultDBBackendText
