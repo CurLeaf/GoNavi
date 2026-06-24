@@ -1038,6 +1038,9 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		logger.Warnf("DBQueryMulti 原生多结果集返回空结果，将回退逐条执行：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 		results = nil
 	}
+	if useNativeMultiResult && results != nil {
+		normalizeNativeResultStatementIndexes(runConfig.Type, statements, results)
+	}
 
 	// 驱动支持多结果集，直接返回
 	if results != nil {
@@ -1274,6 +1277,33 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		fallbackMsg = fmt.Sprintf("当前数据源（%s）不支持原生多语句执行，已自动拆分为 %d 条语句逐条执行。", runConfig.Type, len(statements))
 	}
 	return connection.QueryResult{Success: true, Data: resultSets, QueryID: queryID, Message: fallbackMsg}
+}
+
+func normalizeNativeResultStatementIndexes(dbType string, statements []string, results []connection.ResultSetData) {
+	if !isSQLServerDBType(dbType) || len(results) == 0 {
+		return
+	}
+	hasExplicitStatementIndex := false
+	for _, result := range results {
+		if result.StatementIndex > 0 {
+			hasExplicitStatementIndex = true
+			break
+		}
+	}
+	if hasExplicitStatementIndex {
+		return
+	}
+
+	switch {
+	case len(statements) <= 1:
+		for idx := range results {
+			results[idx].StatementIndex = 1
+		}
+	case len(results) == len(statements):
+		for idx := range results {
+			results[idx].StatementIndex = idx + 1
+		}
+	}
 }
 
 func shouldUseNativeMultiResultBatch(dbType string, statements []string, allReadOnly bool) bool {

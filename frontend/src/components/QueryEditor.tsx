@@ -3479,10 +3479,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             const maxRows = Number(queryOptions?.maxRows) || 0;
             let anyTruncated = false;
             const statementResultCounts = new Map<number, number>();
+            const resolveSourceStatementIndex = (rsData: any, idx: number): number => {
+                const explicitStatementIndex = Number(rsData?.statementIndex || 0);
+                if (explicitStatementIndex > 0) {
+                    return explicitStatementIndex;
+                }
+                if (normalizedDbType === 'sqlserver' && sourceStatements.length === 1) {
+                    return 1;
+                }
+                return idx + 1;
+            };
             const sqlServerStatementsWithConcreteResults = new Set<number>();
             if (normalizedDbType === 'sqlserver') {
                 resultSetDataArray.forEach((rsData, idx) => {
-                    const sourceStatementIndex = Number(rsData?.statementIndex || idx + 1);
+                    const sourceStatementIndex = resolveSourceStatementIndex(rsData, idx);
                     const resultMessages = normalizeQueryResultMessages(rsData?.messages);
                     if (hasConcreteQueryResultSetData(rsData, resultMessages)) {
                         sqlServerStatementsWithConcreteResults.add(sourceStatementIndex);
@@ -3495,7 +3505,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
             for (let idx = 0; idx < resultSetDataArray.length; idx++) {
                 const rsData = resultSetDataArray[idx];
-                const sourceStatementIndex = Number(rsData?.statementIndex || idx + 1);
+                const sourceStatementIndex = resolveSourceStatementIndex(rsData, idx);
                 const plan = executablePlans[Math.max(0, sourceStatementIndex - 1)];
                 const originalSql = plan?.originalSql || '';
                 const executedSql = plan?.executedSql || originalSql;
