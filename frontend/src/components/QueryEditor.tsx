@@ -2777,6 +2777,24 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           result.columns[0] === 'affectedRows',
       );
 
+  const isAffectedRowsResultSetData = (result?: any): boolean =>
+      Boolean(
+          result &&
+          Array.isArray(result.rows) &&
+          result.rows.length === 1 &&
+          Array.isArray(result.columns) &&
+          result.columns.length === 1 &&
+          result.columns[0] === 'affectedRows',
+      );
+
+  const hasConcreteQueryResultSetData = (result: any, messages: string[]): boolean => {
+      if (!result || isAffectedRowsResultSetData(result)) return false;
+      if (messages.length > 0) return true;
+      if (Array.isArray(result.columns) && result.columns.length > 0) return true;
+      if (Array.isArray(result.rows) && result.rows.length > 0) return true;
+      return false;
+  };
+
   const isMessageLikeResultSet = (result?: ResultSet | null): boolean =>
       Boolean(
           result &&
@@ -3492,28 +3510,49 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             const maxRows = Number(queryOptions?.maxRows) || 0;
             let anyTruncated = false;
             const statementResultCounts = new Map<number, number>();
+            const sqlServerStatementsWithConcreteResults = new Set<number>();
+            if (normalizedDbType === 'sqlserver') {
+                resultSetDataArray.forEach((rsData, idx) => {
+                    const sourceStatementIndex = Number(rsData?.statementIndex || idx + 1);
+                    const resultMessages = normalizeQueryResultMessages(rsData?.messages);
+                    if (hasConcreteQueryResultSetData(rsData, resultMessages)) {
+                        sqlServerStatementsWithConcreteResults.add(sourceStatementIndex);
+                    }
+                });
+            }
+            const shouldUseTopLevelSqlServerMessages = normalizedDbType === 'sqlserver'
+                && topLevelMessages.length > 0
+                && sqlServerStatementsWithConcreteResults.size === 0;
 
             for (let idx = 0; idx < resultSetDataArray.length; idx++) {
                 const rsData = resultSetDataArray[idx];
                 const sourceStatementIndex = Number(rsData?.statementIndex || idx + 1);
-                const statementResultIndex = (statementResultCounts.get(sourceStatementIndex) || 0) + 1;
-                statementResultCounts.set(sourceStatementIndex, statementResultIndex);
                 const plan = executablePlans[Math.max(0, sourceStatementIndex - 1)];
                 const originalSql = plan?.originalSql || '';
                 const executedSql = plan?.executedSql || originalSql;
                 const resultMessages = normalizeQueryResultMessages(rsData?.messages);
 
                 // 检查是否为 affectedRows 类结果集
-                const isAffectedResult = Array.isArray(rsData.rows) && rsData.rows.length === 1
-                    && rsData.columns && rsData.columns.length === 1
-                    && rsData.columns[0] === 'affectedRows';
+                const isAffectedResult = isAffectedRowsResultSetData(rsData);
+                const shouldHideSqlServerAffectedResult = normalizedDbType === 'sqlserver'
+                    && isAffectedResult
+                    && (
+                        sqlServerStatementsWithConcreteResults.has(sourceStatementIndex)
+                        || shouldUseTopLevelSqlServerMessages
+                    );
+                if (shouldHideSqlServerAffectedResult) {
+                    continue;
+                }
+
+                const statementResultIndex = (statementResultCounts.get(sourceStatementIndex) || 0) + 1;
+                statementResultCounts.set(sourceStatementIndex, statementResultIndex);
 
                 if (isAffectedResult) {
                     const affected = Number(rsData.rows[0]?.affectedRows);
                     const row = { affectedRows: Number.isFinite(affected) ? affected : 0 };
                     (row as any)[GONAVI_ROW_KEY] = 0;
                     nextResultSets.push({
-                        key: `result-${idx + 1}`,
+                        key: `result-${nextResultSets.length + 1}`,
                         sql: executedSql,
                         exportSql: originalSql,
                         sourceStatementIndex,
@@ -3526,7 +3565,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                     });
                 } else if ((!Array.isArray(rsData.rows) || rsData.rows.length === 0) && (!Array.isArray(rsData.columns) || rsData.columns.length === 0) && resultMessages.length > 0) {
                     nextResultSets.push({
-                        key: `result-${idx + 1}`,
+                        key: `result-${nextResultSets.length + 1}`,
                         sql: executedSql,
                         exportSql: originalSql,
                         sourceStatementIndex,
@@ -3566,7 +3605,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         fallbackPageSize: maxRows,
                     });
                     nextResultSets.push({
-                        key: `result-${idx + 1}`,
+                        key: `result-${nextResultSets.length + 1}`,
                         sql: executedSql,
                         exportSql: originalSql,
                         sourceStatementIndex,
