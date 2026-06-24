@@ -105,12 +105,14 @@ export const useSidebarCommandSearchRunner = ({
       onDoubleClick(null, node);
       return;
     }
-    if (node.type === 'db-trigger' || node.type === 'db-event' || node.type === 'routine') {
+    if (node.type === 'db-trigger' || node.type === 'db-event' || node.type === 'routine' || node.type === 'sequence' || node.type === 'package') {
       setActiveContext({ connectionId: dataRef.id, dbName: dataRef.dbName });
       setSelectedKeys([node.key]);
       selectedNodesRef.current = [node];
       scrollSidebarTreeToKey(node.key);
-      onDoubleClick(null, node);
+      if (node.type !== 'sequence' && node.type !== 'package') {
+        onDoubleClick(null, node);
+      }
     }
   }, [
     activeContext,

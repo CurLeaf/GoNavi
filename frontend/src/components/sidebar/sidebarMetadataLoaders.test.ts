@@ -5,7 +5,14 @@ vi.mock("../../../wailsjs/go/app/App", () => ({
 }));
 
 import { DBQuery } from "../../../wailsjs/go/app/App";
-import { buildSchemasMetadataQuerySpecs, loadViews } from "./sidebarMetadataLoaders";
+import {
+  buildPackagesMetadataQuerySpecs,
+  buildSchemasMetadataQuerySpecs,
+  buildSequencesMetadataQuerySpecs,
+  loadPackages,
+  loadSequences,
+  loadViews,
+} from "./sidebarMetadataLoaders";
 
 const mockedDBQuery = vi.mocked(DBQuery);
 
@@ -65,5 +72,63 @@ describe("buildSchemasMetadataQuerySpecs", () => {
     expect(result.views).toEqual([
       { viewName: "CHARACTER_SETS", schemaName: "information_schema" },
     ]);
+  });
+});
+
+describe("Oracle object metadata loaders", () => {
+  it("builds owner-scoped sequence and package queries for Oracle", () => {
+    expect(buildSequencesMetadataQuerySpecs("oracle", "MYCIMLED").map((spec) => spec.sql)).toEqual([
+      "SELECT SEQUENCE_OWNER AS schema_name, SEQUENCE_NAME AS sequence_name FROM ALL_SEQUENCES WHERE SEQUENCE_OWNER = 'MYCIMLED' ORDER BY SEQUENCE_NAME",
+    ]);
+    expect(buildPackagesMetadataQuerySpecs("oracle", "MYCIMLED").map((spec) => spec.sql)).toEqual([
+      "SELECT OWNER AS schema_name, OBJECT_NAME AS package_name FROM ALL_OBJECTS WHERE OWNER = 'MYCIMLED' AND OBJECT_TYPE = 'PACKAGE' ORDER BY OBJECT_NAME",
+    ]);
+  });
+
+  it("loads and deduplicates Oracle sequences and packages", async () => {
+    mockedDBQuery.mockImplementation(async (_config: unknown, _dbName: string, sql: string) => {
+      if (sql.includes("ALL_SEQUENCES")) {
+        return {
+          success: true,
+          message: "",
+          data: [
+            { schema_name: "MYCIMLED", sequence_name: "SEQ_PERSON_ID" },
+            { SEQUENCE_OWNER: "MYCIMLED", SEQUENCE_NAME: "SEQ_PERSON_ID" },
+          ],
+        };
+      }
+      if (sql.includes("ALL_OBJECTS") && sql.includes("PACKAGE")) {
+        return {
+          success: true,
+          message: "",
+          data: [
+            { schema_name: "MYCIMLED", package_name: "PKG_PERSON" },
+            { OWNER: "MYCIMLED", OBJECT_NAME: "PKG_PERSON" },
+          ],
+        };
+      }
+      return { success: false, message: "", data: [] };
+    });
+
+    await expect(loadSequences({ config: { type: "oracle" } }, "MYCIMLED")).resolves.toEqual({
+      supported: true,
+      sequences: [
+        {
+          displayName: "MYCIMLED.SEQ_PERSON_ID",
+          schemaName: "MYCIMLED",
+          sequenceName: "MYCIMLED.SEQ_PERSON_ID",
+        },
+      ],
+    });
+    await expect(loadPackages({ config: { type: "oracle" } }, "MYCIMLED")).resolves.toEqual({
+      supported: true,
+      packages: [
+        {
+          displayName: "MYCIMLED.PKG_PERSON",
+          packageName: "MYCIMLED.PKG_PERSON",
+          schemaName: "MYCIMLED",
+        },
+      ],
+    });
   });
 });

@@ -642,7 +642,7 @@ describe('Sidebar locate toolbar', () => {
     const source = readSidebarSource();
     const commandSearchRunSource = source.slice(
       source.indexOf("if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view')"),
-      source.indexOf("if (node.type === 'db-trigger' || node.type === 'db-event' || node.type === 'routine')"),
+      source.indexOf("if (node.type === 'db-trigger' || node.type === 'db-event' || node.type === 'routine' || node.type === 'sequence' || node.type === 'package')"),
     );
 
     expect(commandSearchRunSource).toContain("tabId: String(node.key || '')");
@@ -824,12 +824,16 @@ describe('Sidebar locate toolbar', () => {
     expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.all'");
     expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.tables'");
     expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.views'");
+    expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.sequences'");
     expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.routines'");
+    expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.packages'");
     expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.events'");
     expect(objectKindSource).not.toContain("label: '全部'");
     expect(objectKindSource).not.toContain("label: '表'");
     expect(objectKindSource).not.toContain("label: '视图'");
+    expect(objectKindSource).not.toContain("label: '序列'");
     expect(objectKindSource).not.toContain("label: '函数'");
+    expect(objectKindSource).not.toContain("label: '存储包'");
     expect(objectKindSource).not.toContain("label: '事件'");
 
     expect(searchScopeSource).toContain("labelKey: 'sidebar.command_search.scope.smart'");
@@ -875,7 +879,9 @@ describe('Sidebar locate toolbar', () => {
       'sidebar.command_search.object_kind.all',
       'sidebar.command_search.object_kind.tables',
       'sidebar.command_search.object_kind.views',
+      'sidebar.command_search.object_kind.sequences',
       'sidebar.command_search.object_kind.routines',
+      'sidebar.command_search.object_kind.packages',
       'sidebar.command_search.object_kind.events',
       'sidebar.command_search.scope.smart',
       'sidebar.command_search.scope.object',
@@ -913,7 +919,9 @@ describe('Sidebar locate toolbar', () => {
       'sidebar.command_search.object_kind.all': 'All',
       'sidebar.command_search.object_kind.tables': 'Tables',
       'sidebar.command_search.object_kind.views': 'Views',
+      'sidebar.command_search.object_kind.sequences': 'Sequences',
       'sidebar.command_search.object_kind.routines': 'Routines',
+      'sidebar.command_search.object_kind.packages': 'Packages',
       'sidebar.command_search.object_kind.events': 'Events',
       'table_overview.section.pinned': 'Pinned',
       'table_overview.section.all': 'All',
@@ -927,8 +935,8 @@ describe('Sidebar locate toolbar', () => {
       t('sidebar.search.scope.host', undefined, 'zh-CN'),
       t('sidebar.search.scope.tag', undefined, 'zh-CN'),
     ]);
-    expect(buildV2ExplorerFilterOptions(translate).map((option) => option.label)).toEqual(['All', 'Tables', 'Views', 'Routines', 'Events']);
-    expect(V2_UTILS_EXPLORER_FILTER_OPTIONS.map((option) => option.label)).toEqual(['全部', '表', '视图', '函数', '事件']);
+    expect(buildV2ExplorerFilterOptions(translate).map((option) => option.label)).toEqual(['All', 'Tables', 'Views', 'Sequences', 'Routines', 'Packages', 'Events']);
+    expect(V2_UTILS_EXPLORER_FILTER_OPTIONS.map((option) => option.label)).toEqual(['全部', '表', '视图', '序列', '函数', '存储包', '事件']);
 
     const tableNodes = [
       { title: 'orders', key: 'orders', type: 'table' as const, dataRef: { pinnedSidebarTable: true } },
@@ -992,6 +1000,13 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-rail-tool \{[^}]*width: calc\(24px \* var\(--gn-ui-scale, 1\)\);/s);
     expect(css).toMatch(/\.gn-v2-active-connection-trigger \{[^}]*height: 34px;[^}]*border: 0;[^}]*background: transparent;/s);
     expect(css).not.toContain('.gn-v2-active-connection-trigger:hover');
+  });
+
+  it('keeps v2 explorer filter tabs on a single line when Oracle object filters are present', () => {
+    const css = readV2ThemeCss();
+
+    expect(css).toMatch(/\.gn-v2-explorer-filter-tabs \{[^}]*flex-wrap: nowrap;[^}]*overflow-x: auto;[^}]*overflow-y: hidden;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-filter-tabs button \{[^}]*flex: 0 0 auto;[^}]*white-space: nowrap;/s);
   });
 
   it('keeps v2 tree status dots circular while using virtual horizontal scroll for long labels', () => {
@@ -1371,11 +1386,25 @@ describe('Sidebar locate toolbar', () => {
           children: [{ title: 'v_users', key: 'v_users', type: 'view' as const }],
         },
         {
+          title: '序列',
+          key: 'conn-main-sequences',
+          type: 'object-group' as const,
+          dataRef: { groupKey: 'sequences' },
+          children: [{ title: 'seq_person_id', key: 'seq_person_id', type: 'sequence' as const }],
+        },
+        {
           title: '函数',
           key: 'conn-main-routines',
           type: 'object-group' as const,
           dataRef: { groupKey: 'routines' },
           children: [{ title: 'calc_total', key: 'calc_total', type: 'routine' as const }],
+        },
+        {
+          title: '存储包',
+          key: 'conn-main-packages',
+          type: 'object-group' as const,
+          dataRef: { groupKey: 'packages' },
+          children: [{ title: 'pkg_person', key: 'pkg_person', type: 'package' as const }],
         },
         {
           title: '事件',
@@ -1391,12 +1420,16 @@ describe('Sidebar locate toolbar', () => {
       'conn-main-queries',
       'conn-main-tables',
       'conn-main-views',
+      'conn-main-sequences',
       'conn-main-routines',
+      'conn-main-packages',
       'conn-main-events',
     ]);
     expect(filterV2ExplorerTreeByKind(tree, 'tables')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-tables']);
     expect(filterV2ExplorerTreeByKind(tree, 'views')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-views']);
+    expect(filterV2ExplorerTreeByKind(tree, 'sequences')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-sequences']);
     expect(filterV2ExplorerTreeByKind(tree, 'routines')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-routines']);
+    expect(filterV2ExplorerTreeByKind(tree, 'packages')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-packages']);
     expect(filterV2ExplorerTreeByKind(tree, 'events')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-events']);
   });
 
@@ -2609,7 +2642,9 @@ describe('Sidebar locate toolbar', () => {
     const objectGroupTitleCases = [
       ['tables', 'sidebar.v2_table_group_menu.title', '表'],
       ['views', 'sidebar.object_group.views', '视图'],
+      ['sequences', 'sidebar.object_group.sequences', '序列'],
       ['routines', 'sidebar.object_group.routines', '函数'],
+      ['packages', 'sidebar.object_group.packages', '存储包'],
       ['triggers', 'sidebar.object_group.triggers', '触发器'],
       ['events', 'sidebar.object_group.events', '事件'],
       ['materializedViews', 'sidebar.object_group.materialized_views', '物化视图'],
@@ -2684,7 +2719,9 @@ describe('Sidebar locate toolbar', () => {
     [
       "if (groupKey === 'tables') return t('sidebar.v2_table_group_menu.title');",
       "if (groupKey === 'views') return t('sidebar.object_group.views');",
+      "if (groupKey === 'sequences') return t('sidebar.object_group.sequences');",
       "if (groupKey === 'routines') return t('sidebar.object_group.routines');",
+      "if (groupKey === 'packages') return t('sidebar.object_group.packages');",
       "if (groupKey === 'triggers') return t('sidebar.object_group.triggers');",
       "if (groupKey === 'events') return t('sidebar.object_group.events');",
       "if (groupKey === 'materializedViews') return t('sidebar.object_group.materialized_views');",

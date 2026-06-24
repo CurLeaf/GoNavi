@@ -24,6 +24,8 @@ export type SidebarTreeNodeType =
   | 'db-trigger'
   | 'db-event'
   | 'routine'
+  | 'sequence'
+  | 'package'
   | 'object-group'
   | 'v2-table-section'
   | 'queries-folder'
@@ -76,7 +78,7 @@ export const shouldLoadSidebarNodeOnExpand = (
 export const resolveSidebarTableNameForCopy = (
   node: Pick<SidebarTreeNode, 'title' | 'dataRef'> | null | undefined,
 ): string => {
-  return String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || node?.title || '').trim();
+  return String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.sequenceName || node?.dataRef?.packageName || node?.dataRef?.eventName || node?.title || '').trim();
 };
 
 type SidebarTableSortPreference = 'name' | 'frequency';
@@ -294,7 +296,7 @@ export const getV2RailConnectionGroupBadgeText = (name: unknown, fallback = t('c
   return trimmed.slice(0, 2);
 };
 
-export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines' | 'events';
+export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'sequences' | 'routines' | 'packages' | 'events';
 
 export const buildV2ExplorerFilterOptions = (
   translate: SidebarV2Translate = translateSidebarV2Current,
@@ -302,7 +304,9 @@ export const buildV2ExplorerFilterOptions = (
   { key: 'all', label: translate('sidebar.command_search.object_kind.all') },
   { key: 'tables', label: translate('sidebar.command_search.object_kind.tables') },
   { key: 'views', label: translate('sidebar.command_search.object_kind.views') },
+  { key: 'sequences', label: translate('sidebar.command_search.object_kind.sequences') },
   { key: 'routines', label: translate('sidebar.command_search.object_kind.routines') },
+  { key: 'packages', label: translate('sidebar.command_search.object_kind.packages') },
   { key: 'events', label: translate('sidebar.command_search.object_kind.events') },
 ];
 
@@ -311,7 +315,9 @@ export const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; label: s
 const V2_EXPLORER_FILTER_GROUP_KEYS: Record<Exclude<V2ExplorerFilter, 'all'>, string[]> = {
   tables: ['tables'],
   views: ['views', 'materializedViews'],
+  sequences: ['sequences'],
   routines: ['routines'],
+  packages: ['packages'],
   events: ['events'],
 };
 
@@ -365,7 +371,9 @@ export const filterV2ExplorerTreeByKind = (
   const objectTypeMatches = (node: SidebarTreeNode): boolean => {
     if (filter === 'tables') return node.type === 'table';
     if (filter === 'views') return node.type === 'view' || node.type === 'materialized-view';
+    if (filter === 'sequences') return node.type === 'sequence';
     if (filter === 'routines') return node.type === 'routine';
+    if (filter === 'packages') return node.type === 'package';
     if (filter === 'events') return node.type === 'db-event';
     return false;
   };
@@ -483,7 +491,9 @@ export const parseV2CommandSearchQuery = (value: unknown): V2CommandSearchQuery 
 const isV2CommandSearchObjectNode = (node: SidebarTreeNode): boolean => {
   return node.type === 'table'
     || node.type === 'view'
-    || node.type === 'materialized-view';
+    || node.type === 'materialized-view'
+    || node.type === 'sequence'
+    || node.type === 'package';
 };
 
 export const V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT = 24;
@@ -499,7 +509,7 @@ export const buildV2CommandSearchTreeIndex = (
     const dataRef = item.node.dataRef || {};
     const normalizedTitle = String(item.title || '').toLowerCase();
     const normalizedPrimaryObjectText = String(
-      dataRef.tableName || dataRef.viewName || item.title || '',
+      dataRef.tableName || dataRef.viewName || dataRef.sequenceName || dataRef.packageName || item.title || '',
     ).toLowerCase();
 
     return [{
@@ -509,6 +519,8 @@ export const buildV2CommandSearchTreeIndex = (
         item.meta,
         dataRef.tableName,
         dataRef.viewName,
+        dataRef.sequenceName,
+        dataRef.packageName,
         dataRef.dbName,
         dataRef.name,
         dataRef.config?.host,

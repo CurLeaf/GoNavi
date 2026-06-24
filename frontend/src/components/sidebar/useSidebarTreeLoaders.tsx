@@ -10,6 +10,7 @@ import {
   FolderOpenOutlined,
   FunctionOutlined,
   HddOutlined,
+  KeyOutlined,
   TableOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
@@ -32,7 +33,9 @@ import {
   loadDatabaseEvents,
   loadDatabaseTriggers,
   loadFunctions,
+  loadPackages,
   loadSchemas,
+  loadSequences,
   loadStarRocksMaterializedViews,
   loadViews,
   parseMetadataRowCount,
@@ -505,18 +508,22 @@ export const useSidebarTreeLoaders = ({
 	                };
 	            });
 
-	            const [schemasResult, viewsResult, materializedViewsResult, triggersResult, routinesResult, eventsResult] = await Promise.all([
+	            const [schemasResult, viewsResult, materializedViewsResult, triggersResult, routinesResult, sequencesResult, packagesResult, eventsResult] = await Promise.all([
 	                loadSchemas(conn, conn.dbName),
 	                loadViews(conn, conn.dbName),
 	                loadStarRocksMaterializedViews(conn, conn.dbName),
 	                loadDatabaseTriggers(conn, conn.dbName),
 	                loadFunctions(conn, conn.dbName),
+	                loadSequences(conn, conn.dbName),
+	                loadPackages(conn, conn.dbName),
 	                loadDatabaseEvents(conn, conn.dbName),
 	            ]);
             const viewRows: SidebarViewMetadataEntry[] = Array.isArray(viewsResult.views) ? viewsResult.views : [];
             const materializedViewRows: SidebarViewMetadataEntry[] = Array.isArray(materializedViewsResult.views) ? materializedViewsResult.views : [];
             const triggerRows: any[] = Array.isArray(triggersResult.triggers) ? triggersResult.triggers : [];
             const routineRows: any[] = Array.isArray(routinesResult.routines) ? routinesResult.routines : [];
+            const sequenceRows: any[] = Array.isArray(sequencesResult.sequences) ? sequencesResult.sequences : [];
+            const packageRows: any[] = Array.isArray(packagesResult.packages) ? packagesResult.packages : [];
             const eventRows: any[] = Array.isArray(eventsResult.events) ? eventsResult.events : [];
             const schemaRows: string[] = Array.isArray(schemasResult.schemas) ? schemasResult.schemas : [];
 
@@ -578,6 +585,24 @@ export const useSidebarTreeLoaders = ({
                 };
             });
 
+            const sequenceEntries = sequenceRows.map((sequence: any) => {
+                const parsed = splitQualifiedName(sequence.sequenceName);
+                return {
+                    ...sequence,
+                    schemaName: sequence.schemaName || parsed.schemaName,
+                    displayName: parsed.objectName || sequence.sequenceName,
+                };
+            });
+
+            const packageEntries = packageRows.map((packageEntry: any) => {
+                const parsed = splitQualifiedName(packageEntry.packageName);
+                return {
+                    ...packageEntry,
+                    schemaName: packageEntry.schemaName || parsed.schemaName,
+                    displayName: parsed.objectName || packageEntry.packageName,
+                };
+            });
+
             const eventEntries = eventRows.map((event: any) => ({
                 ...event,
                 schemaName: String(event.schemaName || conn.dbName || '').trim(),
@@ -626,6 +651,10 @@ export const useSidebarTreeLoaders = ({
 
 	            // Sort routines by display name (case-insensitive)
 	            routineEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
+
+	            sequenceEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
+
+	            packageEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
 
 	            eventEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
 
@@ -695,6 +724,30 @@ export const useSidebarTreeLoaders = ({
 	                isLeaf: true,
 	            });
 
+	            const buildSequenceNode = (entry: { sequenceName: string; schemaName: string; displayName: string }): TreeNode => {
+	                const keyName = buildSidebarObjectKeyName(conn.dbName, entry.schemaName, entry.sequenceName);
+	                return {
+	                    title: entry.displayName,
+	                    key: `${conn.id}-${conn.dbName}-sequence-${keyName}`,
+	                    icon: <KeyOutlined />,
+	                    type: 'sequence',
+	                    dataRef: { ...conn, sequenceName: entry.sequenceName, schemaName: entry.schemaName },
+	                    isLeaf: true,
+	                };
+	            };
+
+	            const buildPackageNode = (entry: { packageName: string; schemaName: string; displayName: string }): TreeNode => {
+	                const keyName = buildSidebarObjectKeyName(conn.dbName, entry.schemaName, entry.packageName);
+	                return {
+	                    title: entry.displayName,
+	                    key: `${conn.id}-${conn.dbName}-package-${keyName}`,
+	                    icon: <CodeOutlined />,
+	                    type: 'package',
+	                    dataRef: { ...conn, packageName: entry.packageName, schemaName: entry.schemaName },
+	                    isLeaf: true,
+	                };
+	            };
+
 	            const buildEventNode = (entry: { eventName: string; schemaName: string; displayName: string; eventType?: string; status?: string }): TreeNode => ({
 	                title: entry.displayName,
 	                key: `${conn.id}-${conn.dbName}-event-${entry.schemaName}-${entry.eventName}`,
@@ -735,6 +788,8 @@ export const useSidebarTreeLoaders = ({
 	                    views: TreeNode[];
 	                    materializedViews: TreeNode[];
 	                    routines: TreeNode[];
+	                    sequences: TreeNode[];
+	                    packages: TreeNode[];
 	                    triggers: TreeNode[];
 	                    events: TreeNode[];
 	                };
@@ -751,6 +806,8 @@ export const useSidebarTreeLoaders = ({
 	                            views: [],
 	                            materializedViews: [],
 	                            routines: [],
+	                            sequences: [],
+	                            packages: [],
 	                            triggers: [],
 	                            events: [],
 	                        };
@@ -764,12 +821,15 @@ export const useSidebarTreeLoaders = ({
 	                viewEntries.forEach((entry) => getSchemaBucket(entry.schemaName).views.push(buildViewNode(entry)));
 	                materializedViewEntries.forEach((entry) => getSchemaBucket(entry.schemaName).materializedViews.push(buildMaterializedViewNode(entry)));
 	                routineEntries.forEach((entry) => getSchemaBucket(entry.schemaName).routines.push(buildRoutineNode(entry)));
+	                sequenceEntries.forEach((entry) => getSchemaBucket(entry.schemaName).sequences.push(buildSequenceNode(entry)));
+	                packageEntries.forEach((entry) => getSchemaBucket(entry.schemaName).packages.push(buildPackageNode(entry)));
 	                triggerEntries.forEach((entry) => getSchemaBucket(entry.schemaName).triggers.push(buildTriggerNode(entry)));
 	                eventEntries.forEach((entry) => getSchemaBucket(entry.schemaName).events.push(buildEventNode(entry)));
 
 	                const dialect = getMetadataDialect(conn as SavedConnection);
 	                const isOracleLike = (dialect === 'oracle' || dialect === 'dm');
 	                const includeMaterializedViews = dialect === 'starrocks';
+	                const includeOracleObjects = isOracleLike;
 	                const includeEvents = supportsDatabaseEvents(conn as SavedConnection);
 
 	                const schemaNodes: TreeNode[] = Array.from(schemaMap.values())
@@ -787,7 +847,9 @@ export const useSidebarTreeLoaders = ({
 	                            buildObjectGroup(schemaNodeKey, 'tables', t('sidebar.object_group.tables'), <TableOutlined />, bucket.tables, { schemaName: bucket.schemaName }),
 	                            buildObjectGroup(schemaNodeKey, 'views', t('sidebar.object_group.views'), <EyeOutlined />, bucket.views, { schemaName: bucket.schemaName }),
 	                            ...(includeMaterializedViews ? [buildObjectGroup(schemaNodeKey, 'materializedViews', t('sidebar.object_group.materialized_views'), <ThunderboltOutlined />, bucket.materializedViews, { schemaName: bucket.schemaName })] : []),
+	                            ...(includeOracleObjects ? [buildObjectGroup(schemaNodeKey, 'sequences', t('sidebar.object_group.sequences'), <KeyOutlined />, bucket.sequences, { schemaName: bucket.schemaName })] : []),
 	                            buildObjectGroup(schemaNodeKey, 'routines', t('sidebar.object_group.routines'), <CodeOutlined />, bucket.routines, { schemaName: bucket.schemaName }),
+	                            ...(includeOracleObjects ? [buildObjectGroup(schemaNodeKey, 'packages', t('sidebar.object_group.packages'), <CodeOutlined />, bucket.packages, { schemaName: bucket.schemaName })] : []),
 	                            buildObjectGroup(schemaNodeKey, 'triggers', t('sidebar.object_group.triggers'), <FunctionOutlined />, bucket.triggers, { schemaName: bucket.schemaName }),
 	                            ...(includeEvents ? [buildObjectGroup(schemaNodeKey, 'events', t('sidebar.object_group.events'), <ClockCircleOutlined />, bucket.events, { schemaName: bucket.schemaName })] : []),
 	                        ];
@@ -805,13 +867,17 @@ export const useSidebarTreeLoaders = ({
 
 	                replaceTreeNodeChildren(key, [queriesNode, ...schemaNodes]);
 	            } else {
-	                const includeMaterializedViews = getMetadataDialect(conn as SavedConnection) === 'starrocks';
+	                const dialect = getMetadataDialect(conn as SavedConnection);
+	                const includeMaterializedViews = dialect === 'starrocks';
+	                const includeOracleObjects = dialect === 'oracle' || dialect === 'dm';
 	                const includeEvents = supportsDatabaseEvents(conn as SavedConnection);
 	                const groupedNodes: TreeNode[] = [
 	                    buildObjectGroup(key as string, 'tables', t('sidebar.object_group.tables'), <TableOutlined />, sortedTableEntries.map(buildTableNode)),
 	                    buildObjectGroup(key as string, 'views', t('sidebar.object_group.views'), <EyeOutlined />, viewEntries.map(buildViewNode)),
 	                    ...(includeMaterializedViews ? [buildObjectGroup(key as string, 'materializedViews', t('sidebar.object_group.materialized_views'), <ThunderboltOutlined />, materializedViewEntries.map(buildMaterializedViewNode))] : []),
+	                    ...(includeOracleObjects ? [buildObjectGroup(key as string, 'sequences', t('sidebar.object_group.sequences'), <KeyOutlined />, sequenceEntries.map(buildSequenceNode))] : []),
 	                    buildObjectGroup(key as string, 'routines', t('sidebar.object_group.routines'), <CodeOutlined />, routineEntries.map(buildRoutineNode)),
+	                    ...(includeOracleObjects ? [buildObjectGroup(key as string, 'packages', t('sidebar.object_group.packages'), <CodeOutlined />, packageEntries.map(buildPackageNode))] : []),
 	                    buildObjectGroup(key as string, 'triggers', t('sidebar.object_group.triggers'), <FunctionOutlined />, triggerEntries.map(buildTriggerNode)),
 	                    ...(includeEvents ? [buildObjectGroup(key as string, 'events', t('sidebar.object_group.events'), <ClockCircleOutlined />, eventEntries.map(buildEventNode))] : []),
 	                ];

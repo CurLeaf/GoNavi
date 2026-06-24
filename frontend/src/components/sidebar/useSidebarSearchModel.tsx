@@ -9,6 +9,7 @@ import {
   DatabaseOutlined,
   EyeOutlined,
   FilterOutlined,
+  KeyOutlined,
   PlusOutlined,
   RobotOutlined,
   TableOutlined,
@@ -398,12 +399,14 @@ export const useSidebarSearchModel = ({
           node.type === 'table'
           || node.type === 'view'
           || node.type === 'materialized-view'
+          || node.type === 'sequence'
           || node.type === 'db-trigger'
           || node.type === 'db-event'
           || node.type === 'routine'
+          || node.type === 'package'
         ) {
           const conn = connectionById.get(String(dataRef.id || ''));
-          const objectName = String(dataRef.tableName || dataRef.viewName || dataRef.triggerName || dataRef.eventName || dataRef.routineName || node.title || '').trim();
+          const objectName = String(dataRef.tableName || dataRef.viewName || dataRef.sequenceName || dataRef.triggerName || dataRef.eventName || dataRef.routineName || dataRef.packageName || node.title || '').trim();
           const displayName = String(node.title || extractObjectName(objectName) || objectName).trim();
           result.push({
             key: `node-${node.key}`,
@@ -412,7 +415,9 @@ export const useSidebarSearchModel = ({
             meta: [conn?.name || dataRef.id, dataRef.dbName].filter(Boolean).join(' · '),
             icon: node.type === 'table'
               ? <TableOutlined />
-              : (node.type === 'db-event' ? <ClockCircleOutlined /> : (node.type === 'routine' ? <CodeOutlined /> : <EyeOutlined />)),
+              : (node.type === 'sequence'
+                ? <KeyOutlined />
+                : (node.type === 'db-event' ? <ClockCircleOutlined /> : ((node.type === 'routine' || node.type === 'package') ? <CodeOutlined /> : <EyeOutlined />))),
             node,
           });
         }

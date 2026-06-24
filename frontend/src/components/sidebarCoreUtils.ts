@@ -58,9 +58,11 @@ export const isV2SidebarObjectNode = (node: Pick<SidebarObjectNodeLike, 'type'> 
   return node?.type === 'table'
     || node?.type === 'view'
     || node?.type === 'materialized-view'
+    || node?.type === 'sequence'
     || node?.type === 'db-trigger'
     || node?.type === 'db-event'
-    || node?.type === 'routine';
+    || node?.type === 'routine'
+    || node?.type === 'package';
 };
 
 export const resolveSidebarObjectDragText = (
@@ -69,8 +71,10 @@ export const resolveSidebarObjectDragText = (
   const dataRef = node?.dataRef || {};
   if (node?.type === 'table') return String(dataRef.tableName || node?.title || '').trim();
   if (node?.type === 'view' || node?.type === 'materialized-view') return String(dataRef.viewName || dataRef.tableName || node?.title || '').trim();
+  if (node?.type === 'sequence') return String(dataRef.sequenceName || node?.title || '').trim();
   if (node?.type === 'db-trigger') return String(dataRef.triggerName || node?.title || '').trim();
   if (node?.type === 'routine') return String(dataRef.routineName || node?.title || '').trim();
+  if (node?.type === 'package') return String(dataRef.packageName || node?.title || '').trim();
   if (node?.type === 'db-event') return String(dataRef.eventName || node?.title || '').trim();
   return '';
 };

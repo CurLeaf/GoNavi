@@ -51,8 +51,8 @@ export const useSidebarTitleRender = ({
   const displayTitle = String(node.title ?? '');
   const dragText = resolveSidebarObjectDragText(node);
   let hoverTitle = displayTitle;
-  if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view' || node.type === 'db-event') {
-    const rawTableName = String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || '').trim();
+  if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view' || node.type === 'sequence' || node.type === 'package' || node.type === 'db-event') {
+    const rawTableName = String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.sequenceName || node?.dataRef?.packageName || node?.dataRef?.eventName || '').trim();
     const conn = node?.dataRef as SavedConnection | undefined;
     if (rawTableName && shouldHideSchemaPrefix(conn)) {
       if (splitQualifiedName(rawTableName).schemaName) {

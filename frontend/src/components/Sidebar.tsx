@@ -228,7 +228,9 @@ const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; labelKey: strin
   { key: 'all', labelKey: 'sidebar.command_search.object_kind.all' },
   { key: 'tables', labelKey: 'sidebar.command_search.object_kind.tables' },
   { key: 'views', labelKey: 'sidebar.command_search.object_kind.views' },
+  { key: 'sequences', labelKey: 'sidebar.command_search.object_kind.sequences' },
   { key: 'routines', labelKey: 'sidebar.command_search.object_kind.routines' },
+  { key: 'packages', labelKey: 'sidebar.command_search.object_kind.packages' },
   { key: 'events', labelKey: 'sidebar.command_search.object_kind.events' },
 ];
 
@@ -1483,7 +1485,7 @@ const Sidebar: React.FC<{
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'jvm-mode' || type === 'jvm-resource' || type === 'jvm-diagnostic' || type === 'jvm-monitoring') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: '' });
-      } else if (type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
+      } else if (type === 'view' || type === 'materialized-view' || type === 'sequence' || type === 'package' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') {
           setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
@@ -1545,7 +1547,7 @@ const Sidebar: React.FC<{
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'jvm-mode' || type === 'jvm-resource' || type === 'jvm-diagnostic' || type === 'jvm-monitoring') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: '' });
-      } else if (type === 'table' || type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
+      } else if (type === 'table' || type === 'view' || type === 'materialized-view' || type === 'sequence' || type === 'package' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       else if (type === 'redis-db') setActiveContext({ connectionId: dataRef.id, dbName: `db${dataRef.redisDB}` });
@@ -1632,6 +1634,8 @@ const Sidebar: React.FC<{
               routineName,
               routineType
           });
+          return;
+      } else if (node.type === 'sequence' || node.type === 'package') {
           return;
       } else if (node.type === 'jvm-mode') {
           const { providerMode, id } = node.dataRef;

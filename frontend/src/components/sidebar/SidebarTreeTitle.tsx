@@ -55,9 +55,11 @@ export const renderSidebarV2TreeTitle = ({
   const isMono = node.type === 'table'
     || node.type === 'view'
     || node.type === 'materialized-view'
+    || node.type === 'sequence'
     || node.type === 'db-trigger'
     || node.type === 'db-event'
     || node.type === 'routine'
+    || node.type === 'package'
     || node.type === 'saved-query'
     || node.type === 'external-sql-file';
   const titleClassName = [
