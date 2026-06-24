@@ -173,7 +173,7 @@ func resolveEsIndexName(dbName, tableName, defaultDB string) string {
 //   - "a"."b"."c"  → a.b.c（引号包裹的多段标识符）
 //   - "a.b.c"      → a.b.c（单引号包裹的完整名称）
 //   - my_index      → my_index（无引号）
-var reESSQLFrom = regexp.MustCompile(`(?i)\bFROM\s+(?:"([^"]+)"(?:\."([^"]+)")*|([a-zA-Z0-9_*][a-zA-Z0-9_.\-*]*))\s`)
+var reESSQLFrom = regexp.MustCompile(`(?i)\bFROM\s+(?:"([^"]+)"(?:\."([^"]+)")*|([a-zA-Z0-9_*][a-zA-Z0-9_.\-*]*))\s*(?:;|\s|$)`)
 
 // extractESSQLFromTable 从 SQL 语句中提取 FROM 后的索引名。
 // 支持多段引号格式（如 "schema"."table"."partition"）和单段格式。
@@ -203,6 +203,8 @@ func extractESSQLFromTable(sql string) string {
 	var parts []string
 	for _, seg := range strings.Split(rest, ".") {
 		s := strings.TrimSpace(seg)
+		s = strings.TrimSuffix(s, ";")
+		s = strings.TrimSpace(s)
 		s = strings.Trim(s, `"`)
 		if s != "" {
 			parts = append(parts, s)
