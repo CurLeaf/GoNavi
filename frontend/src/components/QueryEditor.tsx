@@ -109,6 +109,7 @@ import {
     resolveNextResultSetIndex,
     resolveOracleExactCaseTableReference,
     resolveOracleLikeDefaultSchemaName,
+    resolveOracleLikeExecutionSchemaName,
     resolveQueryEditorFormatterLanguage,
     resolveQueryEditorHoverTarget,
     resolveQueryEditorNavigationDecorations,
@@ -3353,6 +3354,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             const defaultOracleSchema = isOracleLikeDialect(normalizedDbType)
                 ? resolveOracleLikeDefaultSchemaName(config)
                 : '';
+            const oracleExecutionSchema = isOracleLikeDialect(normalizedDbType)
+                ? resolveOracleLikeExecutionSchemaName(config, currentDb)
+                : '';
+            const shouldQualifyOracleUnqualifiedTables = Boolean(
+                oracleExecutionSchema
+                && oracleExecutionSchema.toLowerCase() !== String(defaultOracleSchema || '').trim().toLowerCase(),
+            );
             const oracleTableCache = new Map<string, CompletionTableMeta[]>();
             const getOracleTablesForDb = async (dbName: string): Promise<CompletionTableMeta[]> => {
                 const normalizedDbName = String(dbName || '').trim();
@@ -3409,12 +3417,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                         const leadingSegments = splitQueryIdentifierPathSegments(leadingTable.tableText);
                         const oracleLookupDbName = String(
                             (leadingSegments.length >= 2 ? leadingSegments[0]?.value : '')
-                            || defaultOracleSchema
+                            || oracleExecutionSchema
                             || currentDb
                             || '',
                         ).trim();
                         const oracleTables = oracleLookupDbName ? await getOracleTablesForDb(oracleLookupDbName) : [];
-                        const exactQualifiedTable = resolveOracleExactCaseTableReference(statement, oracleLookupDbName, oracleTables);
+                        const exactQualifiedTable = resolveOracleExactCaseTableReference(statement, oracleLookupDbName, oracleTables, {
+                            qualifyUnqualified: shouldQualifyOracleUnqualifiedTables,
+                        });
                         if (exactQualifiedTable) {
                             executableStatement = rewriteLeadingSelectTableReference(statement, exactQualifiedTable) || statement;
                         }

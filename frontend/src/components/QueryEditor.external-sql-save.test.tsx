@@ -5541,6 +5541,47 @@ describe('QueryEditor external SQL save', () => {
     renderer?.unmount();
   });
 
+  it('qualifies OceanBase Oracle read-only queries with the selected schema instead of the login user', async () => {
+    storeState.connections[0].config.type = 'oceanbase';
+    (storeState.connections[0].config as any).oceanBaseProtocol = 'oracle';
+    storeState.connections[0].config.user = 'SBDEVREAD';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    (storeState.connections[0].config as any).readOnly = true;
+    backendApp.DBGetTables.mockResolvedValueOnce({
+      success: true,
+      data: [{ Table: 'SBDEV.PERSON_INFO' }],
+    });
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['ZJJHM'], rows: [{ ZJJHM: '' }] }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'SBDEV', query: "select * from person_info where zjjhm=''" })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
+    expect(backendApp.DBGetTables).toHaveBeenCalledWith(expect.anything(), 'SBDEV');
+    expect(backendApp.DBGetColumns).not.toHaveBeenCalled();
+    expect(executedSql).toMatch(/from\s+"SBDEV"\."PERSON_INFO"\s+where\s+zjjhm=''/i);
+    expect(executedSql).not.toContain('SBDEVREAD.PERSON_INFO');
+    expect(dataGridState.latestProps?.readOnly).toBe(true);
+    expect(storeState.addSqlLog).toHaveBeenCalledWith(expect.objectContaining({
+      sql: "select * from person_info where zjjhm=''",
+      status: 'success',
+    }));
+    renderer?.unmount();
+  });
+
   it('keeps Oracle anonymous PL/SQL blocks intact when running from the editor', async () => {
     storeState.connections[0].config.type = 'oracle';
     storeState.connections[0].config.database = 'ORCLPDB1';

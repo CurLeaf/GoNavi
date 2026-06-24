@@ -1147,6 +1147,7 @@ export const resolveOracleExactCaseTableReference = (
     statement: string,
     currentDb: string,
     tables: CompletionTableMeta[],
+    options?: { qualifyUnqualified?: boolean },
 ): string | undefined => {
     const leadingTable = matchLeadingSelectTableReference(statement);
     if (!leadingTable) return undefined;
@@ -1155,7 +1156,8 @@ export const resolveOracleExactCaseTableReference = (
     if (segments.length === 0 || segments.length > 2 || segments.some((segment) => segment.quoted)) {
         return undefined;
     }
-    if (!segments.some((segment) => /[a-z]/.test(segment.value))) {
+    const shouldQualifyUnqualified = Boolean(options?.qualifyUnqualified && segments.length === 1);
+    if (!segments.some((segment) => /[a-z]/.test(segment.value)) && !shouldQualifyUnqualified) {
         return undefined;
     }
 
@@ -1170,7 +1172,7 @@ export const resolveOracleExactCaseTableReference = (
         const parsed = splitSidebarQualifiedName(String(table.tableName || ''));
         const objectName = String(parsed.objectName || table.tableName || '').trim();
         const schemaName = String(parsed.schemaName || table.dbName || '').trim();
-        if (objectName !== rawObjectName) return false;
+        if (objectName !== rawObjectName && objectName.toLowerCase() !== rawObjectName.toLowerCase()) return false;
         if (!rawSchemaName) return true;
         return schemaName.toLowerCase() === rawSchemaName.toLowerCase();
     });
@@ -1181,6 +1183,8 @@ export const resolveOracleExactCaseTableReference = (
     const exactSchemaName = String(matchedParsed.schemaName || matched.dbName || rawSchemaName).trim();
     const quotedParts = rawSchemaName
         ? [exactSchemaName, exactObjectName]
+        : shouldQualifyUnqualified
+            ? [exactSchemaName || targetDbName, exactObjectName]
         : [exactObjectName];
     if (quotedParts.some((part) => !String(part || '').trim())) {
         return undefined;
@@ -1193,6 +1197,15 @@ export const resolveOracleLikeDefaultSchemaName = (config: any): string => {
     if (!rawUser) return '';
     const userPart = rawUser.split('@')[0] || rawUser;
     return String(userPart || '').trim();
+};
+
+export const resolveOracleLikeExecutionSchemaName = (config: any, currentDb: string): string => {
+    const selectedDb = String(currentDb || '').trim();
+    const configuredDb = String(config?.database || '').trim();
+    if (selectedDb && (!configuredDb || selectedDb.toLowerCase() !== configuredDb.toLowerCase())) {
+        return selectedDb;
+    }
+    return resolveOracleLikeDefaultSchemaName(config) || selectedDb;
 };
 
 export const getQueryEditorModelTextIfWithinLimit = (model: any, maxTextLength: number): string | null => {
@@ -2053,7 +2066,9 @@ export const resolveQueryLocatorPlan = async ({
     };
     if (forceReadOnly) return plan;
 
-    const defaultSchema = isOracleLikeDialect(dbType) ? resolveOracleLikeDefaultSchemaName(config) : '';
+    const defaultSchema = isOracleLikeDialect(dbType)
+        ? resolveOracleLikeExecutionSchemaName(config, currentDb)
+        : '';
     let tableRef = extractQueryResultTableRef(statement, dbType, currentDb, defaultSchema);
     if (!tableRef) return plan;
     plan.tableRef = tableRef;
