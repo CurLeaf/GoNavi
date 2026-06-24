@@ -47,6 +47,7 @@ import {
   buildSidebarTableChildrenForUi,
   isSidebarTablePinned,
   sortSidebarTableEntries,
+  type SidebarConnectionState,
   type SidebarTreeNode as TreeNode,
 } from '../sidebarV2Utils';
 import { DBGetDatabases, DBGetTables, DBQuery, GetDriverStatusList, JVMProbeCapabilities } from '../../../wailsjs/go/app/App';
@@ -126,7 +127,7 @@ type UseSidebarTreeLoadersOptions = {
   pinnedSidebarTables: any[];
   isV2Ui: boolean;
   loadingNodesRef: React.MutableRefObject<Set<string>>;
-  setConnectionStates: React.Dispatch<React.SetStateAction<Record<string, 'success' | 'error'>>>;
+  setConnectionStates: React.Dispatch<React.SetStateAction<Record<string, SidebarConnectionState>>>;
   setLoadedKeys: React.Dispatch<React.SetStateAction<React.Key[]>>;
   replaceTreeNodeChildren: (key: React.Key, children: TreeNode[] | undefined) => TreeNode[];
   buildRuntimeConfig: (conn: any, overrideDatabase?: string, clearDatabase?: boolean) => any;
@@ -219,6 +220,7 @@ export const useSidebarTreeLoaders = ({
 		      const loadKey = `dbs-${conn.id}`;
 	      if (loadingNodesRef.current.has(loadKey)) return;
 	      loadingNodesRef.current.add(loadKey);
+          setConnectionStates(prev => ({ ...prev, [conn.id]: 'loading' }));
 	      const config = {
 	          ...conn.config,
           port: Number(conn.config.port),

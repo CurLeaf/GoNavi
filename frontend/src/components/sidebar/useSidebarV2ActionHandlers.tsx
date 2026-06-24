@@ -20,6 +20,7 @@ import {
 } from '../V2TableContextMenu';
 import {
   isSidebarTablePinned,
+  type SidebarConnectionState,
   type SidebarTreeNode as TreeNode,
   type V2RailConnectionGroup,
 } from '../sidebarV2Utils';
@@ -32,7 +33,7 @@ type UseSidebarV2ActionHandlersArgs = {
   treeDataRef: MutableRefObject<TreeNode[]>;
   findTreeNodeByKeyRef: MutableRefObject<(nodes: TreeNode[], targetKey: React.Key) => TreeNode | null>;
   refreshV2TableContextMenuStatsRef: MutableRefObject<(node: any) => void>;
-  setConnectionStates: Dispatch<SetStateAction<Record<string, 'success' | 'error'>>>;
+  setConnectionStates: Dispatch<SetStateAction<Record<string, SidebarConnectionState>>>;
   setExpandedKeys: Dispatch<SetStateAction<React.Key[]>>;
   setLoadedKeys: Dispatch<SetStateAction<React.Key[]>>;
   setTargetConnection: Dispatch<SetStateAction<any>>;

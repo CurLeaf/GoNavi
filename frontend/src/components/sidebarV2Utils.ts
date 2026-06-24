@@ -15,6 +15,8 @@ type SidebarV2Translate = (key: string) => string;
 const translateSidebarV2Current: SidebarV2Translate = (key) => t(key);
 const translateSidebarV2ZhCN: SidebarV2Translate = (key) => catalogTranslate('zh-CN', key);
 
+export type SidebarConnectionState = 'loading' | 'success' | 'error';
+
 export type SidebarTreeNodeType =
   | 'connection'
   | 'database'

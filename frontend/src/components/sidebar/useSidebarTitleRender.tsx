@@ -9,6 +9,7 @@ import { SIDEBAR_SQL_EDITOR_DRAG_MIME, encodeSidebarSqlEditorDragPayload } from 
 import {
   resolveSidebarObjectDragText,
 } from '../sidebarCoreUtils';
+import type { SidebarConnectionState } from '../sidebarV2Utils';
 import {
   shouldHideSchemaPrefix,
   splitQualifiedName,
@@ -16,7 +17,7 @@ import {
 import { resolveV2ObjectGroupTitle } from './sidebarHelpers';
 
 type UseSidebarTitleRenderArgs = {
-  connectionStates: Record<string, 'success' | 'error'>;
+  connectionStates: Record<string, SidebarConnectionState>;
   isV2Ui: boolean;
   renderV2TreeTitle: (node: any, hoverTitle: string, statusBadge: React.ReactNode) => React.ReactNode;
   handleAddExternalSQLDirectory: (node: any) => Promise<void>;
@@ -36,16 +37,18 @@ export const useSidebarTitleRender = ({
   treeDragSelectSuppressUntilRef,
   setIsTreeDragging,
 }: UseSidebarTitleRenderArgs) => useCallback((node: any) => {
-  let status: 'success' | 'error' | 'default' = 'default';
+  let status: 'loading' | 'success' | 'error' | 'default' = 'default';
   if (node.type === 'connection' || node.type === 'database') {
-    if (connectionStates[node.key] === 'success') status = 'success';
+    if (connectionStates[node.key] === 'loading') status = 'loading';
+    else if (connectionStates[node.key] === 'success') status = 'success';
     else if (connectionStates[node.key] === 'error') status = 'error';
   }
+  const legacyBadgeStatus = status === 'loading' ? 'processing' : status;
 
   const statusBadge = node.type === 'connection' || node.type === 'database' ? (
     isV2Ui
       ? <span className={`gn-v2-tree-status is-${status}`} aria-hidden="true" />
-      : <Badge status={status} style={{ marginLeft: 4, marginRight: 8 }} />
+      : <Badge status={legacyBadgeStatus} style={{ marginLeft: 4, marginRight: 8 }} />
   ) : null;
 
   const displayTitle = String(node.title ?? '');

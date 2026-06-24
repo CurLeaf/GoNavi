@@ -175,6 +175,7 @@ import {
   shouldCloseV2CommandSearchOnGlobalKey,
   shouldRunV2CommandSearchEnter,
   sortSidebarTableEntries,
+  type SidebarConnectionState,
   type SidebarTreeNode as TreeNode,
   type V2CommandSearchItem,
 } from './sidebarV2Utils';
@@ -704,8 +705,8 @@ const Sidebar: React.FC<{
       return () => window.removeEventListener('keydown', handleV2CommandSearchGlobalKeyDown, true);
   }, [closeV2CommandSearch, isV2CommandSearchOpen]);
   
-  // Connection Status State: key -> 'success' | 'error'
-  const [connectionStates, setConnectionStates] = useState<Record<string, 'success' | 'error'>>({});
+  // Connection Status State: key -> 'loading' | 'success' | 'error'
+  const [connectionStates, setConnectionStates] = useState<Record<string, SidebarConnectionState>>({});
   const [isTreeDragging, setIsTreeDragging] = useState(false);
 
   // Create Database Modal

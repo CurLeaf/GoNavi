@@ -22,7 +22,7 @@ import { getDataSourceCapabilities } from '../../utils/dataSourceCapabilities';
 import { resolveConnectionHostSummary } from '../../utils/tabDisplay';
 import { resolveConnectionIconType } from '../../utils/connectionVisual';
 import { formatSidebarRowCount } from './sidebarHelpers';
-import { isSidebarTablePinned, type SidebarTreeNode as TreeNode, type V2RailConnectionGroup } from '../sidebarV2Utils';
+import { isSidebarTablePinned, type SidebarConnectionState, type SidebarTreeNode as TreeNode, type V2RailConnectionGroup } from '../sidebarV2Utils';
 import { getTableDataDangerActionMeta, supportsTableTruncateAction } from '../tableDataDangerActions';
 import {
   SIDEBAR_CONTEXT_MENU_FALLBACK_HEIGHT,
@@ -45,7 +45,7 @@ export type SidebarContextMenuState = {
 
 type SidebarV2ContextMenuOptions = {
   connections: SavedConnection[];
-  connectionStates: Record<string, 'success' | 'error'>;
+  connectionStates: Record<string, SidebarConnectionState>;
   connectionTags: Array<{ id: string; name: string; connectionIds: string[] }>;
   activeShortcutPlatform: any;
   flattenConnectionNodes: (nodes: TreeNode[]) => TreeNode[];
@@ -104,7 +104,7 @@ export const useSidebarV2ContextMenu = ({
   const [v2TableContextMenuStats, setV2TableContextMenuStats] = useState<Record<string, V2TableContextMenuStats>>({});
 
   const connectionStatusMap = useMemo(() => {
-      const statusMap = new Map<string, 'live' | 'error' | 'idle'>();
+      const statusMap = new Map<string, 'loading' | 'live' | 'error' | 'idle'>();
       const sortedConnectionIds = connections
           .map((conn) => conn.id)
           .sort((a, b) => b.length - a.length);
@@ -114,7 +114,7 @@ export const useSidebarV2ContextMenu = ({
       Object.entries(connectionStates).forEach(([key, value]) => {
           const ownState = statusMap.get(key);
           if (ownState !== undefined) {
-              statusMap.set(key, value === 'success' ? 'live' : 'error');
+              statusMap.set(key, value === 'loading' ? 'loading' : value === 'success' ? 'live' : 'error');
               return;
           }
           if (value !== 'success') return;
@@ -126,7 +126,7 @@ export const useSidebarV2ContextMenu = ({
       return statusMap;
   }, [connectionStates, connections]);
 
-  const buildRailConnectionStatus = useCallback((connectionId: string): 'live' | 'error' | 'idle' => {
+  const buildRailConnectionStatus = useCallback((connectionId: string): 'loading' | 'live' | 'error' | 'idle' => {
       return connectionStatusMap.get(connectionId) || 'idle';
   }, [connectionStatusMap]);
 
