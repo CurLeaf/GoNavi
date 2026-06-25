@@ -225,7 +225,7 @@ const overlayTheme: OverlayWorkbenchTheme = {
   divider: '#eee',
 };
 
-const renderModal = async () => {
+const renderModal = async (props: Partial<React.ComponentProps<typeof SnippetSettingsModal>> = {}) => {
   let renderer: ReturnType<typeof create>;
 
   await act(async () => {
@@ -240,6 +240,7 @@ const renderModal = async () => {
           onClose={() => undefined}
           darkMode={false}
           overlayTheme={overlayTheme}
+          {...props}
         />
       </I18nProvider>,
     );
@@ -322,11 +323,30 @@ describe('SnippetSettingsModal i18n', () => {
 
   it('keeps snippet editor content scrollable without clipping the action row', () => {
     expect(source).toContain("const snippetModalBodyMaxHeight = 'calc(100vh - 128px)';");
-    expect(source).toContain("maxHeight: snippetModalBodyMaxHeight");
+    expect(source).toContain("const snippetModalEmbeddedBodyMaxHeight = '100%';");
+    expect(source).toContain("const snippetSyntaxReferenceMaxHeight = 'min(220px, 32vh)';");
+    expect(source).toContain('maxHeight: embedded ? snippetModalEmbeddedBodyMaxHeight : snippetModalBodyMaxHeight');
+    expect(source).toContain('data-sql-snippet-syntax-reference-scroll-region="true"');
+    expect(source).toContain('data-sql-snippet-editor-panel-scroll-region="true"');
     expect(source).toContain('data-sql-snippet-content-region="true"');
     expect(source).toContain('data-sql-snippet-editor-scroll-region="true"');
     expect(source).toContain("overflowY: 'auto'");
     expect(source).toContain("flex: '0 0 auto'");
+    expect(source).toContain('height: 220');
+    expect(source).toContain('maxHeight: 260');
+  });
+
+  it('lets the tool center provide the title when embedded', async () => {
+    const renderer = await renderModal({ embedded: true });
+    const root = renderer.root;
+
+    expect(() => root.findByProps({ className: 'gn-embedded-modal-header' })).toThrow();
+    expect(getJsonText(renderer.toJSON())).toContain('Select a snippet on the left to edit, or click "New Snippet"');
+
+    const standaloneRenderer = await renderModal();
+    const standaloneText = getJsonText(standaloneRenderer.toJSON());
+    expect(standaloneText).toContain('Snippet Management');
+    expect(standaloneText).toContain('Manage SQL snippets and prefix completion.');
   });
 
   it('keeps the shell and feedback keys available in every locale', () => {
@@ -384,7 +404,9 @@ describe('SnippetSettingsModal i18n', () => {
     });
 
     const contentRegion = renderer.root.findByProps({ 'data-sql-snippet-content-region': 'true' });
+    const editorPanelScrollRegion = renderer.root.findByProps({ 'data-sql-snippet-editor-panel-scroll-region': 'true' });
     const editorScrollRegion = renderer.root.findByProps({ 'data-sql-snippet-editor-scroll-region': 'true' });
+    const syntaxReferenceScrollRegion = renderer.root.findByProps({ 'data-sql-snippet-syntax-reference-scroll-region': 'true' });
     const actionRow = renderer.root.findByProps({ 'data-sql-snippet-action-row': 'true' });
 
     expect(contentRegion.props.style).toMatchObject({
@@ -392,14 +414,83 @@ describe('SnippetSettingsModal i18n', () => {
       minHeight: 0,
       overflow: 'hidden',
     });
-    expect(editorScrollRegion.props.style).toMatchObject({
-      flex: 1,
+    expect(editorPanelScrollRegion.props.style).toMatchObject({
+      height: '100%',
       minHeight: 0,
       overflowY: 'auto',
+      overflowX: 'hidden',
+      overscrollBehavior: 'contain',
+    });
+    expect(editorScrollRegion.props.style).toMatchObject({
+      flex: '0 0 auto',
+      minHeight: 0,
+      marginTop: 10,
+    });
+    expect(syntaxReferenceScrollRegion.props.style).toMatchObject({
+      maxHeight: 'min(220px, 32vh)',
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      overscrollBehavior: 'contain',
     });
     expect(actionRow.props.style).toMatchObject({
       flex: '0 0 auto',
+      gap: 10,
       justifyContent: 'flex-end',
+      paddingTop: 8,
+      marginTop: 8,
     });
+  });
+
+  it('uses the full embedded body height and keeps the action row outside the scrollable content', async () => {
+    const renderer = await renderModal({ embedded: true });
+
+    const newButton = renderer.root.findAll((node: any) => node.type === 'button' && getText(node).includes('New Snippet'))[0];
+
+    await act(async () => {
+      newButton.props.onClick();
+    });
+
+    const embeddedBody = renderer.root.findByProps({ className: 'gn-embedded-modal-body' });
+    const contentRegion = renderer.root.findByProps({ 'data-sql-snippet-content-region': 'true' });
+    const actionRow = renderer.root.findByProps({ 'data-sql-snippet-action-row': 'true' });
+
+    expect(embeddedBody.props.style).toMatchObject({
+      height: '100%',
+      maxHeight: '100%',
+      minHeight: 0,
+      overflow: 'hidden',
+    });
+    expect(contentRegion.props.style).toMatchObject({
+      flex: '1 1 0',
+      minHeight: 0,
+      overflow: 'hidden',
+    });
+    expect(actionRow.props.style).toMatchObject({
+      flex: '0 0 auto',
+      gap: 10,
+      paddingTop: 8,
+      marginTop: 8,
+    });
+  });
+
+  it('uses compact action buttons so the footer does not consume editor height', async () => {
+    const renderer = await renderModal({ embedded: true, onBack: () => undefined });
+
+    const newButton = renderer.root.findAll((node: any) => node.type === 'button' && getText(node).includes('New Snippet'))[0];
+
+    await act(async () => {
+      newButton.props.onClick();
+    });
+
+    const saveButton = renderer.root.findAll((node: any) => node.type === 'button' && getText(node).includes('Save'))[0];
+    const closeButton = renderer.root.findAll((node: any) => node.type === 'button' && getText(node).includes('Close'))[0];
+    const backButton = renderer.root.findAll((node: any) => node.type === 'button' && getText(node).includes('Back'))[0];
+
+    expect(saveButton.props.size).toBe('middle');
+    expect(saveButton.props.style).toMatchObject({ minWidth: 84 });
+    expect(closeButton.props.size).toBe('middle');
+    expect(closeButton.props.style).toMatchObject({ minWidth: 84 });
+    expect(backButton.props.size).toBe('middle');
+    expect(backButton.props.style).toMatchObject({ minWidth: 104 });
   });
 });

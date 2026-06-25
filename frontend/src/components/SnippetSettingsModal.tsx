@@ -78,6 +78,8 @@ export default function SnippetSettingsModal({
   const selectedBg = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)';
   const newSnippetAction = t('snippet_settings.action.new');
   const snippetModalBodyMaxHeight = 'calc(100vh - 128px)';
+  const snippetModalEmbeddedBodyMaxHeight = '100%';
+  const snippetSyntaxReferenceMaxHeight = 'min(220px, 32vh)';
 
   const sortedSnippets = useMemo(
     () => [...sqlSnippets].sort((a, b) => a.prefix.localeCompare(b.prefix)),
@@ -193,7 +195,20 @@ export default function SnippetSettingsModal({
         key: 'syntax',
         label: t('snippet_settings.syntax_reference.label'),
         children: (
-          <div style={{ fontSize: 12, lineHeight: 1.8, color: mutedColor, fontFamily: 'var(--gn-font-mono)' }}>
+          <div
+            data-sql-snippet-syntax-reference-scroll-region="true"
+            style={{
+              maxHeight: snippetSyntaxReferenceMaxHeight,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              overscrollBehavior: 'contain',
+              paddingRight: 6,
+              fontSize: 12,
+              lineHeight: 1.8,
+              color: mutedColor,
+              fontFamily: 'var(--gn-font-mono)',
+            }}
+          >
             <div>{t('snippet_settings.syntax_reference.first_tabstop')}</div>
             <div>{t('snippet_settings.syntax_reference.second_tabstop')}</div>
             <div>{t('snippet_settings.syntax_reference.final_cursor')}</div>
@@ -211,14 +226,14 @@ export default function SnippetSettingsModal({
         ),
       },
     ],
-    [draft.syntaxHelp, mutedColor, t, textColor],
+    [draft.syntaxHelp, mutedColor, snippetSyntaxReferenceMaxHeight, t, textColor],
   );
 
   const showEditor = isCreating || selectedSnippet;
 
   return (
     <Modal
-      title={
+      title={embedded ? null : (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
           <div
             style={{
@@ -241,9 +256,10 @@ export default function SnippetSettingsModal({
             </div>
           </div>
         </div>
-      }
+      )}
       open={open}
       embedded={embedded}
+      closable={embedded ? false : undefined}
       onCancel={onClose}
       width={820}
       styles={{
@@ -254,7 +270,8 @@ export default function SnippetSettingsModal({
           paddingBottom: 0,
           display: 'flex',
           flexDirection: 'column',
-          maxHeight: snippetModalBodyMaxHeight,
+          height: embedded ? '100%' : undefined,
+          maxHeight: embedded ? snippetModalEmbeddedBodyMaxHeight : snippetModalBodyMaxHeight,
           minHeight: 0,
           overflow: 'hidden',
         },
@@ -266,7 +283,7 @@ export default function SnippetSettingsModal({
         style={{
           display: 'flex',
           gap: 16,
-          flex: '1 1 420px',
+          flex: embedded ? '1 1 0' : '1 1 420px',
           minHeight: 0,
           overflow: 'hidden',
         }}
@@ -351,20 +368,23 @@ export default function SnippetSettingsModal({
         </div>
 
         {/* Right: editor */}
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
           {showEditor ? (
             <div
               style={{
                 ...panelStyle,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 12,
                 height: '100%',
                 minHeight: 0,
-                overflow: 'hidden',
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                overscrollBehavior: 'contain',
+                paddingRight: 12,
               }}
+              data-sql-snippet-editor-panel-scroll-region="true"
             >
-              <div style={{ display: 'flex', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 12, flex: '0 0 auto' }}>
                 <div style={{ flex: 0.4 }}>
                   <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>{t('snippet_settings.field.prefix.label')}</div>
                   <Input
@@ -389,7 +409,7 @@ export default function SnippetSettingsModal({
                 </div>
               </div>
 
-              <div>
+              <div style={{ flex: '0 0 auto', marginTop: 10 }}>
                 <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>{t('snippet_settings.field.description.label')}</div>
                 <Input
                   value={draft.description || ''}
@@ -403,12 +423,11 @@ export default function SnippetSettingsModal({
               <div
                 data-sql-snippet-editor-scroll-region="true"
                 style={{
-                  flex: 1,
+                  flex: '0 0 auto',
                   display: 'flex',
                   flexDirection: 'column',
                   minHeight: 0,
-                  overflowY: 'auto',
-                  paddingRight: 4,
+                  marginTop: 10,
                 }}
               >
                 <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>{t('snippet_settings.field.body.label')}</div>
@@ -417,8 +436,9 @@ export default function SnippetSettingsModal({
                   onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
                   placeholder={'SELECT ${1:columns} FROM ${2:table_name}$0;'}
                   style={{
-                    flex: 1,
-                    minHeight: 120,
+                    height: 220,
+                    minHeight: 160,
+                    maxHeight: 260,
                     fontFamily: 'var(--gn-font-mono)',
                     fontSize: 13,
                     resize: 'none',
@@ -428,7 +448,7 @@ export default function SnippetSettingsModal({
                   size="small"
                   defaultActiveKey={['snippet-help']}
                   items={syntaxHelpItems}
-                  style={{ marginTop: 8, background: 'transparent' }}
+                  style={{ marginTop: 8, background: 'transparent', flex: '0 0 auto' }}
                 />
               </div>
 
@@ -454,11 +474,11 @@ export default function SnippetSettingsModal({
         style={{
           display: 'flex',
           flex: '0 0 auto',
-          gap: 12,
+          gap: 10,
           justifyContent: 'flex-end',
           alignItems: 'center',
-          paddingTop: 12,
-          marginTop: 12,
+          paddingTop: 8,
+          marginTop: 8,
           borderTop: overlayTheme.sectionBorder,
         }}
       >
@@ -468,7 +488,7 @@ export default function SnippetSettingsModal({
             description={t('snippet_settings.confirm.reset.description')}
             onConfirm={() => handleReset(draft.id)}
           >
-            <Button icon={<UndoOutlined />} size="large" style={{ minWidth: 118 }}>
+            <Button icon={<UndoOutlined />} size="middle" style={{ minWidth: 104 }}>
               {t('snippet_settings.action.reset')}
             </Button>
           </Popconfirm>
@@ -479,21 +499,21 @@ export default function SnippetSettingsModal({
             description={t('snippet_settings.confirm.delete.description')}
             onConfirm={() => handleDelete(draft.id)}
           >
-            <Button danger icon={<DeleteOutlined />} size="large" style={{ minWidth: 96 }}>
+            <Button danger icon={<DeleteOutlined />} size="middle" style={{ minWidth: 84 }}>
               {t('snippet_settings.action.delete')}
             </Button>
           </Popconfirm>
         )}
         {showEditor && (
-          <Button type="primary" icon={<SaveOutlined />} size="large" style={{ minWidth: 96 }} onClick={handleSave}>
+          <Button type="primary" icon={<SaveOutlined />} size="middle" style={{ minWidth: 84 }} onClick={handleSave}>
             {t('snippet_settings.action.save')}
           </Button>
         )}
-        <Button size="large" style={{ minWidth: 96 }} onClick={onClose}>
+        <Button size="middle" style={{ minWidth: 84 }} onClick={onClose}>
           {t('snippet_settings.action.close')}
         </Button>
         {onBack ? (
-          <Button size="large" style={{ minWidth: 124 }} onClick={onBack}>
+          <Button size="middle" style={{ minWidth: 104 }} onClick={onBack}>
             {t('common.back_to_previous')}
           </Button>
         ) : null}

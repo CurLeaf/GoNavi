@@ -79,4 +79,29 @@ describe('QueryEditorToolbar layout', () => {
     expect(transactionDelayCss).toContain('width: 104px !important;');
     expect(transactionDelayCss).toContain('flex: 0 0 104px !important;');
   });
+
+  it('shows delayed full-name tooltips for truncated connection and database selectors', () => {
+    const toolbarSource = readFileSync(new URL('./QueryEditorToolbar.tsx', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
+    const connectionSelectSource = toolbarSource.slice(
+      toolbarSource.indexOf('gn-v2-query-toolbar-connection-select'),
+      toolbarSource.indexOf('gn-v2-query-toolbar-database-select'),
+    );
+    const databaseSelectSource = toolbarSource.slice(
+      toolbarSource.indexOf('gn-v2-query-toolbar-database-select'),
+      toolbarSource.indexOf('gn-v2-query-toolbar-max-rows-select'),
+    );
+
+    expect(toolbarSource).toContain('FULL_NAME_TOOLTIP_DELAY_SECONDS = 1');
+    expect(toolbarSource).toContain('mouseEnterDelay={FULL_NAME_TOOLTIP_DELAY_SECONDS}');
+    expect(toolbarSource).toContain('renderFullNameSelectTooltip');
+    expect(toolbarSource).toContain('gn-query-toolbar-select-full-name');
+    expect(connectionSelectSource).toContain('optionRender={(option) => renderFullNameSelectTooltip(option.data.fullName)}');
+    expect(connectionSelectSource).toContain('labelRender={(option) => renderFullNameSelectTooltip(option.label ?? option.value)}');
+    expect(databaseSelectSource).toContain('optionRender={(option) => renderFullNameSelectTooltip(option.data.fullName)}');
+    expect(databaseSelectSource).toContain('labelRender={(option) => renderFullNameSelectTooltip(option.label ?? option.value)}');
+    expect(css).toContain('.gn-query-toolbar-select-full-name {');
+    expect(css).toContain('text-overflow: ellipsis;');
+    expect(css).toContain('white-space: nowrap;');
+  });
 });

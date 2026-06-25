@@ -55,6 +55,33 @@ type QueryEditorToolbarProps = {
   onAIAction: (action: "generate" | "explain" | "optimize" | "schema") => void;
 };
 
+const FULL_NAME_TOOLTIP_DELAY_SECONDS = 1;
+
+type FullNameSelectOption = {
+  label: string;
+  value: string;
+  fullName: string;
+};
+
+const renderFullNameSelectTooltip = (fullName: React.ReactNode) => {
+  const fullNameText = String(fullName ?? "");
+
+  return (
+    <Tooltip
+      title={fullNameText}
+      mouseEnterDelay={FULL_NAME_TOOLTIP_DELAY_SECONDS}
+      placement="topLeft"
+    >
+      <span
+        className="gn-query-toolbar-select-full-name"
+        aria-label={fullNameText}
+      >
+        {fullNameText}
+      </span>
+    </Tooltip>
+  );
+};
+
 const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   isV2Ui,
   currentConnectionId,
@@ -89,6 +116,17 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   const i18n = useOptionalI18n();
   const t = i18n?.t ?? defaultTranslate;
   const baseMoreMenuItems = saveMoreMenuItems ?? [];
+  const connectionSelectOptions: FullNameSelectOption[] =
+    queryCapableConnections.map((connection) => ({
+      label: connection.name,
+      value: connection.id,
+      fullName: connection.name,
+    }));
+  const databaseSelectOptions: FullNameSelectOption[] = dbList.map((db) => ({
+    label: db,
+    value: db,
+    fullName: db,
+  }));
   const toggleResultPanelShortcutLabel =
     toggleQueryResultsPanelShortcutBinding.enabled &&
     toggleQueryResultsPanelShortcutBinding.combo
@@ -172,10 +210,10 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
         placeholder={t("query_editor.placeholder.connection")}
         value={currentConnectionId}
         onChange={onConnectionChange}
-        options={queryCapableConnections.map((c) => ({
-          label: c.name,
-          value: c.id,
-        }))}
+        options={connectionSelectOptions}
+        optionFilterProp="label"
+        optionRender={(option) => renderFullNameSelectTooltip(option.data.fullName)}
+        labelRender={(option) => renderFullNameSelectTooltip(option.label ?? option.value)}
         showSearch
       />
       <Select
@@ -188,7 +226,10 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
         placeholder={t("query_editor.placeholder.database")}
         value={currentDb}
         onChange={onDatabaseChange}
-        options={dbList.map((db) => ({ label: db, value: db }))}
+        options={databaseSelectOptions}
+        optionFilterProp="label"
+        optionRender={(option) => renderFullNameSelectTooltip(option.data.fullName)}
+        labelRender={(option) => renderFullNameSelectTooltip(option.label ?? option.value)}
         showSearch
       />
       <Tooltip title={t("query_editor.max_rows.tooltip")}>

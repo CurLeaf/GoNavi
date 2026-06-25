@@ -2712,6 +2712,10 @@ describe('QueryEditor external SQL save', () => {
     expect(toolbarSource).toContain('gn-v2-query-toolbar-actions');
     expect(toolbarSource).toContain('gn-v2-query-toolbar-connection-select');
     expect(toolbarSource).toContain('gn-v2-query-toolbar-database-select');
+    expect(toolbarSource).toContain('FULL_NAME_TOOLTIP_DELAY_SECONDS = 1');
+    expect(toolbarSource).toContain('mouseEnterDelay={FULL_NAME_TOOLTIP_DELAY_SECONDS}');
+    expect(toolbarSource).toContain('optionRender={(option) => renderFullNameSelectTooltip(option.data.fullName)}');
+    expect(toolbarSource).toContain('labelRender={(option) => renderFullNameSelectTooltip(option.label ?? option.value)}');
     expect(toolbarSource).toContain('gn-v2-query-toolbar-max-rows-select');
     expect(toolbarSource).toContain('QueryEditorTransactionSettings');
     expect(transactionSettingsSource).toContain('gn-v2-query-toolbar-transaction-mode-select');
@@ -2789,10 +2793,12 @@ describe('QueryEditor external SQL save', () => {
     expect(modalSource).toContain('data-sql-snippet-action-row="true"');
     expect(modalSource).toContain('data-sql-snippet-content-region="true"');
     expect(modalSource).toContain('data-sql-snippet-editor-scroll-region="true"');
-    expect(modalSource).toContain("maxHeight: snippetModalBodyMaxHeight");
+    expect(modalSource).toContain('maxHeight: embedded ? snippetModalEmbeddedBodyMaxHeight : snippetModalBodyMaxHeight');
+    expect(modalSource).toContain('data-sql-snippet-syntax-reference-scroll-region="true"');
+    expect(modalSource).toContain('data-sql-snippet-editor-panel-scroll-region="true"');
     expect(modalSource).toContain("flex: '0 0 auto'");
-    expect(modalSource).toContain("size=\"large\"");
-    expect(modalSource).toContain('minWidth: 96');
+    expect(modalSource).toContain("size=\"middle\"");
+    expect(modalSource).toContain('minWidth: 84');
     expect(modalSource).toContain('syntaxHelp');
     expect(modalSource).toContain("t('snippet_settings.syntax_reference.label')");
     expect(source).toContain('s.syntaxHelp || s.description || s.body');
