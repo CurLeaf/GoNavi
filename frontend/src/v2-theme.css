@@ -819,24 +819,35 @@ body[data-ui-version="v2"] .gn-v2-data-grid-ddl-view.is-side {
 }
 
 body[data-ui-version="v2"] .gn-v2-data-grid-ddl-view.is-side .gn-v2-data-grid-alt-toolbar {
-  min-height: 52px;
-  align-items: flex-start;
-  padding: 8px 10px;
+  min-height: 46px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
 }
 
-body[data-ui-version="v2"] .gn-v2-data-grid-ddl-view.is-side .gn-v2-data-grid-alt-toolbar > div:first-child {
-  flex: 1 1 auto;
+body[data-ui-version="v2"] .gn-v2-data-grid-ddl-view.is-side .gn-v2-data-grid-ddl-title {
+  flex: 1 1 72px;
+  overflow: hidden;
 }
 
-body[data-ui-version="v2"] .gn-v2-data-grid-ddl-view.is-side .gn-v2-data-grid-alt-toolbar > div:last-child {
+body[data-ui-version="v2"] .gn-v2-data-grid-ddl-view.is-side .gn-v2-data-grid-ddl-actions {
   justify-content: flex-end;
-  flex: 0 1 auto;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-ddl-view.is-side .gn-v2-data-grid-ddl-actions .ant-btn-sm {
+  padding-inline: 7px;
+}
+
+body[data-ui-version="v2"] .gn-v2-data-grid-ddl-view.is-side .gn-v2-data-grid-ddl-actions .ant-segmented-small .ant-segmented-item-label {
+  padding-inline: 8px;
 }
 
 body[data-ui-version="v2"] .gn-v2-data-grid-ddl-view.is-side .gn-v2-data-grid-alt-toolbar strong {
-  max-width: 210px;
+  max-width: 150px;
 }
 
 body[data-ui-version="v2"] .gn-v2-data-grid-ddl-code {

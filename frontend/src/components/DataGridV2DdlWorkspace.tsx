@@ -1,7 +1,7 @@
 import React from 'react';
 import { Button, Segmented } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
-import Editor from './MonacoEditor';
+import Editor, { type OnMount } from './MonacoEditor';
 import { t as defaultTranslate, type I18nParams } from '../i18n';
 
 type DdlViewLayoutMode = 'bottom' | 'side';
@@ -16,9 +16,81 @@ export interface DataGridV2DdlViewProps {
   ddlText: string;
   darkMode: boolean;
   onDdlViewLayoutChange: (layout: DdlViewLayoutMode) => void;
+  onClose?: () => void;
   onReload: () => void;
   onCopy: () => void;
 }
+
+const handleReadOnlyDdlEditorMount: OnMount = (editor, monaco) => {
+  const contentMouseTargetTypes = new Set([
+    monaco.editor.MouseTargetType.CONTENT_TEXT,
+    monaco.editor.MouseTargetType.CONTENT_EMPTY,
+  ]);
+  let pendingContentInteraction:
+    | { x: number; y: number; scrollLeft: number }
+    | null = null;
+
+  const getMousePoint = (event: any) => ({
+    x: Number.isFinite(Number(event?.posx)) ? Number(event.posx) : Number(event?.browserEvent?.clientX ?? 0),
+    y: Number.isFinite(Number(event?.posy)) ? Number(event.posy) : Number(event?.browserEvent?.clientY ?? 0),
+  });
+
+  const restoreScrollLeft = (scrollLeft: number) => {
+    const apply = () => {
+      if (typeof editor.getScrollLeft === 'function' && editor.getScrollLeft() === scrollLeft) return;
+      editor.setScrollLeft?.(scrollLeft);
+    };
+    apply();
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        apply();
+        requestAnimationFrame(apply);
+      });
+    }
+  };
+
+  editor.onDidScrollChange?.((event: any) => {
+    if (!pendingContentInteraction) return;
+    if (event?.scrollLeftChanged === false) return;
+    restoreScrollLeft(pendingContentInteraction.scrollLeft);
+  });
+
+  editor.onMouseDown((event: any) => {
+    pendingContentInteraction = null;
+    if (!contentMouseTargetTypes.has(event.target?.type)) return;
+    const mouseEvent = event.event;
+    if (mouseEvent?.browserEvent && mouseEvent.browserEvent.button !== 0) return;
+    if (mouseEvent?.leftButton === false) return;
+    const point = getMousePoint(mouseEvent);
+    pendingContentInteraction = {
+      ...point,
+      scrollLeft: typeof editor.getScrollLeft === 'function' ? editor.getScrollLeft() : 0,
+    };
+  });
+
+  editor.onMouseUp((event: any) => {
+    const interaction = pendingContentInteraction;
+    if (!interaction) return;
+    const point = getMousePoint(event.event);
+    const moved = Math.abs(point.x - interaction.x) > 3 || Math.abs(point.y - interaction.y) > 3;
+    restoreScrollLeft(interaction.scrollLeft);
+    if (!moved) {
+      pendingContentInteraction = null;
+      return;
+    }
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (pendingContentInteraction === interaction) {
+            pendingContentInteraction = null;
+          }
+        });
+      });
+      return;
+    }
+    pendingContentInteraction = null;
+  });
+};
 
 export const DataGridV2DdlView: React.FC<DataGridV2DdlViewProps> = ({
   layout,
@@ -29,16 +101,17 @@ export const DataGridV2DdlView: React.FC<DataGridV2DdlViewProps> = ({
   ddlText,
   darkMode,
   onDdlViewLayoutChange,
+  onClose,
   onReload,
   onCopy,
 }) => (
   <div data-grid-ddl-view={layout} className={`gn-v2-data-grid-ddl-view${layout === 'side' ? ' is-side' : ''}`}>
     <div className="gn-v2-data-grid-alt-toolbar">
-      <div>
+      <div className="gn-v2-data-grid-ddl-title">
         <span>DDL</span>
         <strong>{tableName ? `DDL - ${tableName}` : 'DDL'}</strong>
       </div>
-      <div>
+      <div className="gn-v2-data-grid-ddl-actions">
         <Segmented
           size="small"
           value={ddlViewLayout}
@@ -55,7 +128,7 @@ export const DataGridV2DdlView: React.FC<DataGridV2DdlViewProps> = ({
           {translate('data_grid.ddl.copy')}
         </Button>
         {layout === 'side' && (
-          <Button size="small" onClick={() => onDdlViewLayoutChange('bottom')}>
+          <Button size="small" onClick={onClose}>
             {translate('common.close')}
           </Button>
         )}
@@ -68,13 +141,21 @@ export const DataGridV2DdlView: React.FC<DataGridV2DdlViewProps> = ({
         language="sql"
         theme={darkMode ? 'transparent-dark' : 'transparent-light'}
         value={ddlLoading ? translate('data_grid.ddl.loading') : ddlText}
+        onMount={handleReadOnlyDdlEditorMount}
         options={{
           readOnly: true,
+          domReadOnly: true,
           minimap: { enabled: false },
           scrollBeyondLastLine: false,
           wordWrap: 'off',
           tabSize: 2,
           automaticLayout: true,
+          mouseStyle: 'default',
+          renderLineHighlight: 'none',
+          glyphMargin: false,
+          folding: false,
+          lineDecorationsWidth: 8,
+          lineNumbersMinChars: 2,
         }}
       />
     </div>

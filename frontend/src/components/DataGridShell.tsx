@@ -83,6 +83,7 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     closeBatchEditModal,
     closeCellEditMode,
     closeCellEditor,
+    closeDdlView,
     closeJsonEditor,
     closeRowEditor,
     closestCenter,
@@ -755,6 +756,7 @@ const renderDataTableView = () => (
                 ddlText={ddlText}
                 darkMode={darkMode}
                 onDdlViewLayoutChange={setDdlViewLayout}
+                onClose={closeDdlView}
                 onReload={() => {
                     void handleOpenTableDdl({ asView: true });
                 }}
@@ -773,6 +775,7 @@ const renderDataTableView = () => (
                 ddlText={ddlText}
                 darkMode={darkMode}
                 onDdlViewLayoutChange={setDdlViewLayout}
+                onClose={closeDdlView}
                 onReload={() => {
                     void handleOpenTableDdl({ asView: true });
                 }}

@@ -1322,6 +1322,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       handleViewModeChange,
       handleDdlSidebarResizeStart,
       resetDdlViewState,
+      closeDdlView,
   } = useDataGridDdlView({
       canViewDdl,
       currentConnConfig,
@@ -1329,6 +1330,7 @@ const DataGrid: React.FC<DataGridProps> = ({
       dbType,
       tableName,
       isV2Ui,
+      isActive,
       cellEditMode,
       selectedRowKeys,
       mergedDisplayDataRef,
@@ -1833,8 +1835,19 @@ const DataGrid: React.FC<DataGridProps> = ({
   }, [displayData, modifiedRows, deletedRowKeys]);
   mergedDisplayDataRef.current = mergedDisplayData;
 
+  const dataSourceContextKey = useMemo(
+      () => `${connectionId || ''}\u0001${dbName || ''}\u0001${tableName || ''}`,
+      [connectionId, dbName, tableName],
+  );
+  const previousDataSourceContextKeyRef = useRef<string | null>(null);
+
   // Reset local state when data source likely changes (e.g. tableName change)
   useEffect(() => {
+      const previousContextKey = previousDataSourceContextKeyRef.current;
+      const contextChanged = previousContextKey !== dataSourceContextKey;
+      previousDataSourceContextKeyRef.current = dataSourceContextKey;
+      if (!contextChanged) return;
+
       setAddedRows([]);
       setModifiedRows({});
       setDeletedRowKeys(new Set());
@@ -1843,11 +1856,30 @@ const DataGrid: React.FC<DataGridProps> = ({
       setCopiedCellPatch(null);
       setCopiedRowsForPaste([]);
       closeRowEditor();
-      resetDdlViewState();
+      const shouldKeepOpenV2DdlView = previousContextKey !== null
+          && isV2Ui
+          && viewMode === 'ddl'
+          && canViewDdl
+          && !!currentConnConfig
+          && !!tableName;
+      if (!shouldKeepOpenV2DdlView && previousContextKey !== null) {
+          resetDdlViewState();
+      }
       closeVirtualInlineEditor();
       closeCellEditor();
       formRef.current.resetFields();
-  }, [tableName, dbName, connectionId, closeRowEditor, resetDdlViewState, closeVirtualInlineEditor, closeCellEditor]); // Reset on context change
+  }, [
+      canViewDdl,
+      closeCellEditor,
+      closeRowEditor,
+      closeVirtualInlineEditor,
+      currentConnConfig,
+      dataSourceContextKey,
+      isV2Ui,
+      resetDdlViewState,
+      tableName,
+      viewMode,
+  ]); // Reset on context change
 
   useEffect(() => {
       const next = new Map<string, Item>();
@@ -4260,6 +4292,7 @@ const DataGrid: React.FC<DataGridProps> = ({
         handleCopyUpdate,
         handleDataPanelFormatJson,
         handleDataPanelSave,
+        closeDdlView,
         handleDdlSidebarResizeStart,
         handleDeleteSelected,
         handleDragEnd,
