@@ -4,7 +4,7 @@ import { t as catalogTranslate } from '../i18n/catalog';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { formatDdlForDisplay } from '../utils/ddlFormat';
 
-type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er';
+type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er' | 'sqlLog';
 type DdlViewLayoutMode = 'bottom' | 'side';
 type TranslateParams = Record<string, string | number | boolean | null | undefined>;
 
@@ -118,13 +118,17 @@ export const useDataGridDdlView = ({
   }, [canViewDdl, currentConnConfig, dbName, dbType, isV2Ui, messageApi, tableName, translateMessage]);
 
   React.useEffect(() => {
-    if (isV2Ui || (viewMode !== 'fields' && viewMode !== 'ddl' && viewMode !== 'er')) return;
+    if (isV2Ui || (viewMode !== 'fields' && viewMode !== 'ddl' && viewMode !== 'er' && viewMode !== 'sqlLog')) return;
     setViewMode('table');
   }, [isV2Ui, viewMode]);
 
   const handleViewModeChange = React.useCallback((nextMode: GridViewMode) => {
-    if ((nextMode === 'fields' || nextMode === 'ddl' || nextMode === 'er') && !isV2Ui) {
+    if ((nextMode === 'fields' || nextMode === 'ddl' || nextMode === 'er' || nextMode === 'sqlLog') && !isV2Ui) {
       setViewMode('table');
+      return;
+    }
+    if (nextMode === 'sqlLog') {
+      setViewMode('sqlLog');
       return;
     }
     if (nextMode === 'ddl') {

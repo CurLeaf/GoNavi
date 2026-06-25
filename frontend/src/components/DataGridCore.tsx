@@ -1334,6 +1334,8 @@ interface DataGridProps {
     scrollSnapshot?: { top: number; left: number };
     onScrollSnapshotChange?: (snapshot: { top: number; left: number }) => void;
     toolbarExtraActions?: React.ReactNode;
+    isActive?: boolean;
+    enableSqlLogEvent?: boolean;
 }
 
 type GridFilterCondition = FilterCondition & {
@@ -1344,7 +1346,7 @@ type GridFilterCondition = FilterCondition & {
     value2?: string;
 };
 
-type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er';
+type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er' | 'sqlLog';
 type DdlViewLayoutMode = 'bottom' | 'side';
 type DataGridExportScope = 'selected' | 'page' | 'all' | 'filteredAll';
 type VirtualEditingCellState = {

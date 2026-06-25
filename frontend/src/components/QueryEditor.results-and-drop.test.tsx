@@ -15,6 +15,7 @@ import QueryEditor, {
   resolveQueryEditorNavigationDecorations,
   resolveQueryEditorNavigationTarget,
 } from './QueryEditor';
+import QueryEditorResultsPanel from './QueryEditorResultsPanel';
 
 const storeState = vi.hoisted(() => ({
   connections: [
@@ -2645,18 +2646,57 @@ describe('QueryEditor external SQL save', () => {
     expect(source).toContain("if (isEditableElement(event.target) && !inEditorPane) {");
   });
 
-  it('embeds the sql execution log as a result tab instead of a standalone workspace panel in v2', () => {
+  it('keeps the embedded sql execution log limited to v2 query editor result tabs', () => {
     const panelSource = readFileSync(new URL('./QueryEditorResultsPanel.tsx', import.meta.url), 'utf8');
     const editorSource = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
 
     expect(panelSource).toContain('QUERY_EDITOR_SQL_LOG_TAB_KEY');
+    expect(panelSource).toContain('const shouldShowSqlLogTab = isV2Ui && (sqlLogCount > 0 || activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY);');
     expect(panelSource).toContain('<LogPanel');
     expect(panelSource).toContain('variant="embedded"');
     expect(panelSource).toContain('executionError={executionError}');
     expect(panelSource).toContain("t('log_panel.short_title')");
     expect(panelSource).toContain('[logTabItem, ...resultTabItems]');
     expect(editorSource).toContain("window.addEventListener('gonavi:show-sql-execution-log'");
+    expect(editorSource).toContain("event instanceof CustomEvent && event.detail?.mode === 'open'");
     expect(editorSource).toContain('setActiveResultKey(QUERY_EDITOR_SQL_LOG_TAB_KEY)');
+  });
+
+  it('does not render the embedded sql execution log tab in legacy UI', () => {
+    const renderResultsPanel = (isV2Ui: boolean) => create(
+      <QueryEditorResultsPanel
+        resultSets={[]}
+        activeResultKey=""
+        loading={false}
+        executionError=""
+        sqlLogCount={1}
+        darkMode={false}
+        isV2Ui={isV2Ui}
+        currentDb="main"
+        currentConnectionId="conn-1"
+        toggleShortcutLabel=""
+        onActiveResultKeyChange={vi.fn()}
+        onHide={vi.fn()}
+        onCloseResult={vi.fn()}
+        onCloseOtherResultTabs={vi.fn()}
+        onCloseResultTabsToLeft={vi.fn()}
+        onCloseResultTabsToRight={vi.fn()}
+        onCloseAllResultTabs={vi.fn()}
+        onReloadResult={vi.fn()}
+        onResultPageChange={vi.fn()}
+        onDiagnoseExecutionError={vi.fn()}
+      />,
+    );
+
+    const legacyRenderer = renderResultsPanel(false);
+    expect(legacyRenderer.root.findAll((node) => node.props?.['data-log-panel'] === 'true')).toHaveLength(0);
+    expect(legacyRenderer.root.findAll((node) => node.props?.['data-tab-key'] === '__gonavi_sql_execution_log__')).toHaveLength(0);
+    legacyRenderer.unmount();
+
+    const v2Renderer = renderResultsPanel(true);
+    expect(v2Renderer.root.findAll((node) => node.props?.['data-log-panel'] === 'true')).toHaveLength(1);
+    expect(v2Renderer.root.findAll((node) => node.props?.['data-tab-key'] === '__gonavi_sql_execution_log__')).toHaveLength(1);
+    v2Renderer.unmount();
   });
 
   it('keeps the v2 query editor toolbar grouped and compact', () => {

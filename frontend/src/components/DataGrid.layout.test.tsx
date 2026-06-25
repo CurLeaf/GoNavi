@@ -34,6 +34,12 @@ const readDataGridSource = () => [
   './DataGridCore.tsx',
   './DataGridShell.tsx',
 ].map((file) => readFileSync(new URL(file, import.meta.url), 'utf8')).join('\n');
+const readDataViewerSource = (): string =>
+  readFileSync(new URL('./DataViewer.tsx', import.meta.url), 'utf8');
+const readDataGridSecondaryActionsSource = (): string =>
+  readFileSync(new URL('./DataGridSecondaryActions.tsx', import.meta.url), 'utf8');
+const readDataGridShellSource = (): string =>
+  readFileSync(new URL('./DataGridShell.tsx', import.meta.url), 'utf8');
 
 const mockStoreState = vi.hoisted(() => ({
   languagePreference: 'system' as LanguagePreference,
@@ -172,6 +178,7 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-column-quick-find-action="true"');
     expect(markup).toContain('字段显示');
     expect(markup).toContain('跳列');
+    expect(markup).toContain('日志');
     expect(markup).toContain(zhObjectDesignLabel);
     expect(markup).toContain('data-grid-page-find="true"');
     expect(markup).toContain('data-grid-page-find-prev="true"');
@@ -188,6 +195,27 @@ describe('DataGrid layout', () => {
     expect(markup).not.toContain('class="ant-pagination');
     expect(markup).not.toContain('class="data-grid-pagination-kicker"');
     expect(markup).toContain('当前页查找...');
+  });
+
+  it('opens the embedded SQL log view from the shared V2 SQL log event in table data tabs', () => {
+    const source = readDataGridSource();
+    const dataViewerSource = readDataViewerSource();
+    const secondaryActionsSource = readDataGridSecondaryActionsSource();
+    const shellSource = readDataGridShellSource();
+
+    expect(dataViewerSource).toContain('isActive={isActive}');
+    expect(dataViewerSource).toContain('enableSqlLogEvent');
+    expect(source).toContain("isActive = true");
+    expect(source).toContain("enableSqlLogEvent = false");
+    expect(source).toContain("'gonavi:show-sql-execution-log'");
+    expect(source).toContain("if (!enableSqlLogEvent || !isV2Ui || !isActive) return;");
+    expect(source).toContain("handleViewModeChange('sqlLog');");
+    expect(source).toContain("'sqlLog'");
+    expect(shellSource).toContain('import LogPanel from');
+    expect(shellSource).toContain("viewMode === 'sqlLog'");
+    expect(shellSource).toContain('<LogPanel variant="embedded" />');
+    expect(secondaryActionsSource).toContain("key: 'sqlLog'");
+    expect(secondaryActionsSource).toContain("translate('log_panel.short_title')");
   });
 
   it('localizes DataGrid error boundary, column drag affordances, and legacy row context menu labels through i18n keys', () => {

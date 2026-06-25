@@ -2,6 +2,7 @@ import React from 'react';
 import { Button, Popover } from 'antd';
 import {
   AimOutlined,
+  BugOutlined,
   ConsoleSqlOutlined,
   EditOutlined,
   FileTextOutlined,
@@ -10,7 +11,7 @@ import {
 } from '@ant-design/icons';
 import { t as defaultTranslate, type I18nParams } from '../i18n';
 
-type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er';
+type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er' | 'sqlLog';
 
 export type DataGridSecondaryActionsTranslate = (key: string, params?: I18nParams) => string;
 
@@ -69,6 +70,7 @@ const DataGridSecondaryActions: React.FC<DataGridSecondaryActionsProps> = ({
       { key: 'fields', label: fieldsActionLabel, icon: fieldsActionIcon },
       { key: 'ddl', label: translate('data_grid.secondary.view_ddl'), icon: <ConsoleSqlOutlined />, disabled: !canViewDdl },
       { key: 'er', label: translate('data_grid.secondary.er_diagram'), icon: <LinkOutlined /> },
+      { key: 'sqlLog', label: translate('log_panel.short_title'), icon: <BugOutlined /> },
     ];
 
     return (

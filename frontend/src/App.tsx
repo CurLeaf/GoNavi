@@ -391,7 +391,6 @@ function App() {
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
-  const sqlLogCount = useStore(state => state.sqlLogs.length);
   const globalProxyInvalidHintShownRef = React.useRef(false);
   const windowDiagSequenceRef = React.useRef(0);
   const windowDiagLastSignatureRef = React.useRef('');
@@ -2139,23 +2138,23 @@ function App() {
 
 
   const {
-      handleCloseLogPanel: handleCloseLegacyLogPanel,
+      handleCloseLogPanel: handleCloseAppLogPanel,
       handleLogResizeStart,
-      handleToggleLogPanel: toggleLegacyLogPanel,
+      handleToggleLogPanel: toggleAppLogPanel,
       isLogPanelOpen,
       logGhostRef,
       logPanelHeight,
   } = useAppLogPanelResize();
   const handleToggleLogPanel = useCallback(() => {
       if (isV2Ui) {
-          window.dispatchEvent(new CustomEvent('gonavi:show-sql-execution-log'));
+          window.dispatchEvent(new CustomEvent('gonavi:show-sql-execution-log', { detail: { mode: 'open' } }));
           return;
       }
-      toggleLegacyLogPanel();
-  }, [isV2Ui, toggleLegacyLogPanel]);
+      toggleAppLogPanel();
+  }, [isV2Ui, toggleAppLogPanel]);
   const handleCloseLogPanel = useCallback(() => {
-      handleCloseLegacyLogPanel();
-  }, [handleCloseLegacyLogPanel]);
+      handleCloseAppLogPanel();
+  }, [handleCloseAppLogPanel]);
   
   const handleCreateConnection = useCallback(() => {
       setSecurityUpdateRepairSource(null);
@@ -2944,7 +2943,6 @@ function App() {
                             onOpenSettings={handleOpenSettingsModal}
                             onToggleAI={toggleAIPanel}
                             onToggleLogPanel={handleToggleLogPanel}
-                            sqlLogCount={sqlLogCount}
                             uiVersion={appearance.uiVersion}
                             onFocusCommandSearch={handleFocusSidebarSearch}
                         />

@@ -9,6 +9,7 @@ import DataGridModals from './DataGridModals';
 import DataGridPreviewPanel from './DataGridPreviewPanel';
 import DataGridSecondaryActions from './DataGridSecondaryActions';
 import DataGridToolbarFrame from './DataGridToolbarFrame';
+import LogPanel from './LogPanel';
 import { DataGridJsonView, DataGridTextView } from './DataGridRecordViews';
 import { DataGridV2DdlSideWorkspace, DataGridV2DdlView } from './DataGridV2DdlWorkspace';
 import { DataGridV2ErView, DataGridV2FieldsView } from './DataGridV2MetadataViews';
@@ -789,6 +790,8 @@ const renderDataTableView = () => (
                 onOpenTable={onOpenErTable}
                 translate={translateDataGrid}
             />
+        ) : isV2Ui && viewMode === 'sqlLog' ? (
+            <LogPanel variant="embedded" />
         ) : viewMode === 'json' ? (
             <DataGridJsonView
                 darkMode={darkMode}

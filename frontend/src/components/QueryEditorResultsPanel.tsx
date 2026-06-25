@@ -81,7 +81,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
 }) => {
     const i18n = useOptionalI18n();
     const t = i18n?.t ?? defaultTranslate;
-    const shouldShowSqlLogTab = sqlLogCount > 0 || activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY;
+    const shouldShowSqlLogTab = isV2Ui && (sqlLogCount > 0 || activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY);
     const logTabCountLabel = sqlLogCount > 999 ? '999+' : String(sqlLogCount);
     const resolvedResultSetKey = activeResultKey && resultSets.some((rs) => rs.key === activeResultKey)
         ? activeResultKey

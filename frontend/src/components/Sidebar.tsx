@@ -99,8 +99,7 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Popover, Toolt
   AimOutlined,
   MoreOutlined,
   ToolOutlined,
-  SettingOutlined,
-  BarsOutlined
+  SettingOutlined
 	} from '@ant-design/icons';
 import {
     buildSidebarRootConnectionToken,
@@ -369,7 +368,6 @@ const Sidebar: React.FC<{
   onOpenSettings?: () => void;
   onToggleAI?: () => void;
   onToggleLogPanel?: () => void;
-  sqlLogCount?: number;
   uiVersion?: 'legacy' | 'v2';
   onFocusCommandSearch?: () => void;
 }> = React.memo(({
@@ -379,7 +377,6 @@ const Sidebar: React.FC<{
   onOpenSettings,
   onToggleAI,
   onToggleLogPanel,
-  sqlLogCount = 0,
   uiVersion,
   onFocusCommandSearch,
 }) => {
@@ -2854,11 +2851,6 @@ const Sidebar: React.FC<{
 
         {isV2Ui && (
             <div className="gn-v2-sidebar-log-footer">
-                <button type="button" className="gn-v2-sidebar-log-button" onClick={onToggleLogPanel}>
-                    <BarsOutlined />
-                    <span>{t('app.sidebar.sql_execution_log')}</span>
-                    <small>{sqlLogCount.toLocaleString()}</small>
-                </button>
                 <SlowQueryRailButton
                     className="gn-v2-sidebar-slow-query-button"
                     tooltipPlacement="top"

@@ -117,20 +117,35 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('const handleOpenToolsModal = useCallback(');
     expect(appSource).toContain('const handleOpenSettingsModal = useCallback(');
     expect(appSource).toContain('const handleToggleLogPanel = useCallback(');
+    expect(appSource).toContain('new CustomEvent');
+    expect(appSource).toContain("'gonavi:show-sql-execution-log'");
+    expect(appSource).toContain("detail: { mode: 'open' }");
+    expect(appSource).toContain('toggleAppLogPanel();');
     expect(appSource).toContain('const handleFocusSidebarSearch = useCallback(');
     expect(appSource).toContain('const antdTheme = useMemo(() => ({');
     expect(appSource).toContain('theme={antdTheme}');
-    expect(appSource).toContain('const sqlLogCount = useStore(state => state.sqlLogs.length);');
     expect(appSource).toContain('onOpenTools={handleOpenToolsModal}');
     expect(appSource).toContain('onOpenSettings={handleOpenSettingsModal}');
     expect(appSource).toContain('onToggleLogPanel={handleToggleLogPanel}');
     expect(appSource).toContain('onFocusCommandSearch={handleFocusSidebarSearch}');
-    expect(appSource).toContain('sqlLogCount={sqlLogCount}');
     expect(appSource).not.toContain('onOpenTools={() => setIsToolsModalOpen(true)}');
     expect(appSource).not.toContain('onOpenSettings={() => setIsSettingsModalOpen(true)}');
     expect(appSource).not.toContain('onToggleLogPanel={() => setIsLogPanelOpen((prev) => !prev)}');
+    expect(appSource).not.toContain('sqlLogCount={sqlLogCount}');
     expect(appSource).not.toContain('theme={{');
     expect(appSource).not.toContain('const sqlLogs = useStore(state => state.sqlLogs);');
+  });
+
+  it('renders the shared SQL log panel only for legacy layouts', () => {
+    const logPanelIndex = appSource.indexOf('<LogPanel', appSource.indexOf('<Content'));
+    const logPanelGuardIndex = appSource.lastIndexOf('{isLogPanelOpen && (', logPanelIndex);
+    const legacyOnlyGuardIndex = appSource.lastIndexOf('{!isV2Ui && isLogPanelOpen && (', logPanelIndex);
+
+    expect(logPanelIndex).toBeGreaterThan(-1);
+    expect(logPanelGuardIndex).toBe(-1);
+    expect(legacyOnlyGuardIndex).toBeGreaterThan(-1);
+    expect(appSource).toContain('onClose={handleCloseLogPanel}');
+    expect(appSource).toContain('onResizeStart={handleLogResizeStart}');
   });
 
   it('lets the v2 Sidebar own the entire left layout instead of stacking legacy controls above it', () => {

@@ -989,7 +989,7 @@ describe('QueryEditor external SQL save', () => {
     renderer.unmount();
   });
 
-  it('opens the embedded sql execution log tab from the shared log toggle event in v2', async () => {
+  it('opens the embedded sql execution log tab from the shared log event in v2', async () => {
     storeState.appearance.uiVersion = 'v2';
     storeState.sqlLogs = [{
       id: 'log-1',
@@ -1038,6 +1038,54 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer.toJSON())).not.toContain('SQL 执行日志');
     expect(storeState.updateQueryTabDraft).toHaveBeenLastCalledWith('tab-1', {
       resultPanelVisible: false,
+    });
+
+    renderer.unmount();
+  });
+
+  it('keeps the embedded sql execution log tab open for explicit open events in v2', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.sqlLogs = [{
+      id: 'log-1',
+      timestamp: Date.now(),
+      sql: 'select 1',
+      status: 'success',
+      duration: 12,
+    }];
+
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab()} />);
+    });
+
+    const openEvent = new CustomEvent('gonavi:show-sql-execution-log', { detail: { mode: 'open' } });
+    await act(async () => {
+      windowListeners['gonavi:show-sql-execution-log']?.forEach((listener) => listener(openEvent));
+    });
+    expect(textContent(renderer.toJSON())).toContain('SQL 执行日志');
+
+    await act(async () => {
+      windowListeners['gonavi:show-sql-execution-log']?.forEach((listener) => listener(openEvent));
+    });
+    expect(textContent(renderer.toJSON())).toContain('SQL 执行日志');
+    expect(storeState.updateQueryTabDraft).toHaveBeenLastCalledWith('tab-1', {
+      resultPanelVisible: true,
     });
 
     renderer.unmount();

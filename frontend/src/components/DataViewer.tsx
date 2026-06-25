@@ -1229,6 +1229,8 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
           exportSqlWithFilter={exportSqlWithFilter || undefined}
           scrollSnapshot={scrollSnapshotRef.current}
           onScrollSnapshotChange={handleTableScrollSnapshotChange}
+          isActive={isActive}
+          enableSqlLogEvent
       />
     </div>
   );

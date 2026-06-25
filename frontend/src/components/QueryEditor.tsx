@@ -385,11 +385,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           return nextVisible;
       });
   }, [tab.id, updateQueryTabDraft]);
-  const handleShowSqlExecutionLog = useCallback(() => {
+  const handleShowSqlExecutionLog = useCallback((mode: 'open' | 'toggle' = 'toggle') => {
       if (!isActive) {
           return;
       }
-      if (isResultPanelVisible && activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY) {
+      if (mode !== 'open' && isResultPanelVisible && activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY) {
           updateResultPanelVisibility(false);
           return;
       }
@@ -4467,8 +4467,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [isActive, handleQuickSave]);
 
   useEffect(() => {
-      const handleOpenSqlExecutionLog = () => {
-          handleShowSqlExecutionLog();
+      const handleOpenSqlExecutionLog = (event: Event) => {
+          const mode = event instanceof CustomEvent && event.detail?.mode === 'open' ? 'open' : 'toggle';
+          handleShowSqlExecutionLog(mode);
       };
 
       window.addEventListener('gonavi:show-sql-execution-log', handleOpenSqlExecutionLog as EventListener);

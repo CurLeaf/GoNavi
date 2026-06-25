@@ -286,7 +286,7 @@ const DataGrid: React.FC<DataGridProps> = ({
     resultExportAllSql,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
     onApplyQuickWhereCondition,
-    scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions, showRowNumberColumn = false
+    scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions, showRowNumberColumn = false, isActive = true, enableSqlLogEvent = false
 }) => {
   const connections = useStore(state => state.connections);
   const addTab = useStore(state => state.addTab);
@@ -1351,13 +1351,23 @@ const DataGrid: React.FC<DataGridProps> = ({
           if (String(detail.tableName || '') !== String(tableName || '')) return;
           const nextMode = String(detail.viewMode || '').trim();
           if (!nextMode) return;
-          if (!['table', 'json', 'text', 'fields', 'ddl', 'er'].includes(nextMode)) return;
+          if (!['table', 'json', 'text', 'fields', 'ddl', 'er', 'sqlLog'].includes(nextMode)) return;
           handleViewModeChange(nextMode as GridViewMode);
       };
 
       window.addEventListener('gonavi:data-grid:set-view-mode', handleExternalViewModeChange as EventListener);
       return () => window.removeEventListener('gonavi:data-grid:set-view-mode', handleExternalViewModeChange as EventListener);
-  }, [canOpenObjectDesigner, connectionId, dbName, handleViewModeChange, tableName]);
+  }, [connectionId, dbName, handleViewModeChange, tableName]);
+
+  useEffect(() => {
+      if (!enableSqlLogEvent || !isV2Ui || !isActive) return;
+      const handleOpenSqlExecutionLog = () => {
+          handleViewModeChange('sqlLog');
+      };
+
+      window.addEventListener('gonavi:show-sql-execution-log', handleOpenSqlExecutionLog as EventListener);
+      return () => window.removeEventListener('gonavi:show-sql-execution-log', handleOpenSqlExecutionLog as EventListener);
+  }, [enableSqlLogEvent, handleViewModeChange, isActive, isV2Ui]);
 
   useEffect(() => {
       if (!isTableSurfaceActive || !isV2Ui || !cellContextMenu.visible) return;

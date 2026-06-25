@@ -2,7 +2,7 @@ import React from 'react';
 import { Segmented } from 'antd';
 import { t as defaultTranslate, type I18nParams } from '../i18n';
 
-type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er';
+type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er' | 'sqlLog';
 
 export type DataGridResultViewTranslate = (key: string, params?: I18nParams) => string;
 

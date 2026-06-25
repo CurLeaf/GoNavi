@@ -697,8 +697,8 @@ describe('Sidebar locate toolbar', () => {
     expect(source).not.toContain("justifyContent: 'space-between', borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.015)' }}>");
   });
 
-  it('renders the v2 sidebar rail, command search hint, filter tabs and log footer', () => {
-    const markup = renderSidebarMarkup({ uiVersion: 'v2', sqlLogCount: 2341, onCreateConnection: mocks.noop });
+  it('renders the v2 sidebar rail, command search hint, filter tabs and slow-query footer', () => {
+    const markup = renderSidebarMarkup({ uiVersion: 'v2', onCreateConnection: mocks.noop });
     const source = readSidebarSource();
 
     expect(markup).toContain('gn-v2-sidebar-redesign');
@@ -734,8 +734,10 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('onClick={() => setV2ExplorerFilter(item.key)}');
     expect(source).toContain('treeData={isV2Ui ? v2VisibleTreeData : displayTreeData}');
     expect(markup).toContain('gn-v2-sidebar-log-footer');
-    expect(markup).toContain('SQL 执行日志');
-    expect(markup).toContain('2,341');
+    expect(markup).toContain('gn-v2-sidebar-slow-query-button');
+    expect(markup).not.toContain('gn-v2-sidebar-log-button');
+    expect(markup).not.toContain('SQL 执行日志');
+    expect(markup).not.toContain('2,341');
     expect(markup).not.toContain('gn-v2-rail-action-group');
     expect(source).toContain('className="gn-v2-rail-primary-actions"');
     expect(markup).toContain('data-sidebar-create-group-action="true"');
