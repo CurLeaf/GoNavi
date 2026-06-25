@@ -1386,8 +1386,13 @@ describe('DataGrid layout', () => {
     expect(bottomDdlMarkup).toContain(rawTableName);
     expect(bottomDdlMarkup).toContain(rawDdl);
     expect(sideDdlMarkup).toContain('aria-label="[data_grid.ddl.sidebar_aria]"');
+    expect(sideDdlMarkup).toContain('gn-v2-data-grid-ddl-title');
+    expect(sideDdlMarkup).toContain('gn-v2-data-grid-ddl-actions');
     expect(sideDdlMarkup).toContain('[common.close]');
     expect(sideDdlMarkup).toContain('[data_grid.ddl.loading]');
+    const v2ThemeCss = readV2ThemeCss();
+    expect(v2ThemeCss).toMatch(/\.gn-v2-data-grid-ddl-view\.is-side\s+\.gn-v2-data-grid-ddl-actions\s*\{[^}]*flex-wrap:\s*nowrap;/s);
+    expect(v2ThemeCss).toMatch(/\.gn-v2-data-grid-ddl-view\.is-side\s+\.gn-v2-data-grid-ddl-title\s*\{[^}]*overflow:\s*hidden;/s);
     expect(ddlWorkspaceTranslateCalls.map((call) => call.key)).toEqual([
       'data_grid.ddl.layout_bottom',
       'data_grid.ddl.layout_side',
