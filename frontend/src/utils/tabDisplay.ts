@@ -463,6 +463,12 @@ const buildCompactObjectTabTitle = (tab: TabData, translate: TabDisplayTranslate
   if (tab.type === 'routine-def') {
     return replaceTitleObjectLabel(tab.title, tab.routineName);
   }
+  if (tab.type === 'sequence-def') {
+    return replaceTitleObjectLabel(tab.title, tab.sequenceName);
+  }
+  if (tab.type === 'package-def') {
+    return replaceTitleObjectLabel(tab.title, tab.packageName);
+  }
   return tab.title;
 };
 
@@ -479,6 +485,8 @@ export const getTabDisplayKindLabel = (tab: TabData): string => {
   if (tab.type === 'view-def') return tab.viewKind === 'materialized' ? 'MV' : 'VIEW';
   if (tab.type === 'event-def') return 'EVT';
   if (tab.type === 'routine-def') return 'FUNC';
+  if (tab.type === 'sequence-def') return 'SEQ';
+  if (tab.type === 'package-def') return 'PKG';
   return 'TAB';
 };
 
@@ -488,6 +496,8 @@ const getTabRawObjectLabel = (tab: TabData, translate: TabDisplayTranslate = def
   if (tab.viewName) return tab.viewName;
   if (tab.eventName) return tab.eventName;
   if (tab.routineName) return tab.routineName;
+  if (tab.sequenceName) return tab.sequenceName;
+  if (tab.packageName) return tab.packageName;
   if (tab.triggerName) return tab.triggerName;
   if (tab.resourcePath) return tab.resourcePath;
   if (tab.filePath) return getFileNameFromPath(tab.filePath);

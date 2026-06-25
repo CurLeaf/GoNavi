@@ -475,3 +475,52 @@ func TestStreamSQLFileSkipsOracleSqlPlusSlashDelimiter(t *testing.T) {
 		t.Fatalf("unexpected second statement: %q", statements[1])
 	}
 }
+
+func TestStreamSQLFileKeepsOraclePackageSpecAndBodyTogether(t *testing.T) {
+	input := strings.Join([]string{
+		"CREATE OR REPLACE PACKAGE pkg_order AS",
+		"  PROCEDURE sync_order(p_id IN NUMBER);",
+		"END pkg_order;",
+		"/",
+		"CREATE OR REPLACE PACKAGE BODY pkg_order AS",
+		"  PROCEDURE sync_order(p_id IN NUMBER) IS",
+		"  BEGIN",
+		"    NULL;",
+		"  END sync_order;",
+		"END pkg_order;",
+		"/ -- SQLPlus delimiter from PL/SQL tools",
+		"SELECT 1 FROM dual;",
+	}, "\n")
+	var statements []string
+
+	count, err := streamSQLFile(&chunkedReader{data: []byte(input), step: 3}, func(index int, stmt string) error {
+		statements = append(statements, stmt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamSQLFile returned error: %v", err)
+	}
+	if count != 3 || len(statements) != 3 {
+		t.Fatalf("expected 3 statements, got count=%d statements=%#v", count, statements)
+	}
+	if statements[0] != strings.Join([]string{
+		"CREATE OR REPLACE PACKAGE pkg_order AS",
+		"  PROCEDURE sync_order(p_id IN NUMBER);",
+		"END pkg_order;",
+	}, "\n") {
+		t.Fatalf("unexpected package spec statement: %q", statements[0])
+	}
+	if statements[1] != strings.Join([]string{
+		"CREATE OR REPLACE PACKAGE BODY pkg_order AS",
+		"  PROCEDURE sync_order(p_id IN NUMBER) IS",
+		"  BEGIN",
+		"    NULL;",
+		"  END sync_order;",
+		"END pkg_order;",
+	}, "\n") {
+		t.Fatalf("unexpected package body statement: %q", statements[1])
+	}
+	if statements[2] != "SELECT 1 FROM dual" {
+		t.Fatalf("unexpected third statement: %q", statements[2])
+	}
+}

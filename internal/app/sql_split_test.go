@@ -251,6 +251,83 @@ END;`,
 	}
 }
 
+func TestSplitSQLStatements_OracleCreateProcedureSkipsCommentedSqlPlusSlashDelimiter(t *testing.T) {
+	input := `-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1
+-- 请确认语法兼容当前数据库后执行
+CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_sourceid     IN VARCHAR2,
+    p_saleno_out   OUT VARCHAR2,
+    p_msg_out      OUT NVARCHAR2
+) AS
+    v_saleno VARCHAR2(40);
+    v_ecnt NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_ecnt FROM dual;
+    p_saleno_out := v_saleno;
+    p_msg_out := 'OK';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := SQLERRM;
+END cproc_tzhssr_order2sale_A1;
+/ -- SQLPlus delimiter from PL/SQL tools
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1
+-- 请确认语法兼容当前数据库后执行
+CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_sourceid     IN VARCHAR2,
+    p_saleno_out   OUT VARCHAR2,
+    p_msg_out      OUT NVARCHAR2
+) AS
+    v_saleno VARCHAR2(40);
+    v_ecnt NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_ecnt FROM dual;
+    p_saleno_out := v_saleno;
+    p_msg_out := 'OK';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := SQLERRM;
+END cproc_tzhssr_order2sale_A1;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
+func TestSplitSQLStatements_OraclePackageSpecAndBodyStayWhole(t *testing.T) {
+	input := `CREATE OR REPLACE PACKAGE pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER);
+END pkg_order;
+/
+CREATE OR REPLACE PACKAGE BODY pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER) IS
+    BEGIN
+        NULL;
+    END sync_order;
+END pkg_order;
+/ -- SQLPlus delimiter from PL/SQL tools
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`CREATE OR REPLACE PACKAGE pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER);
+END pkg_order;`,
+		`CREATE OR REPLACE PACKAGE BODY pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER) IS
+    BEGIN
+        NULL;
+    END sync_order;
+END pkg_order;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
 func TestSplitSQLStatements_DoesNotTreatSlashOperatorLineAsDelimiter(t *testing.T) {
 	input := "SELECT 10\n/\n2 FROM dual;"
 	got := splitSQLStatements(input)

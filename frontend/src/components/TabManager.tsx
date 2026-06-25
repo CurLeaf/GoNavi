@@ -61,6 +61,8 @@ const getTabKindLabel = (tab: TabData): string => {
   }
   if (tab.type === 'event-def') return t('tab_manager.kind_badge.event');
   if (tab.type === 'routine-def') return t('tab_manager.kind_badge.routine');
+  if (tab.type === 'sequence-def') return t('tab_manager.kind_badge.sequence');
+  if (tab.type === 'package-def') return t('tab_manager.kind_badge.package');
   return t('tab_manager.kind_badge.fallback');
 };
 
@@ -89,6 +91,8 @@ const getTabKindTooltipLabel = (tab: TabData): string => {
   }
   if (tab.type === 'event-def') return t('tab_manager.hover.kind.event');
   if (tab.type === 'routine-def') return t('tab_manager.hover.kind.routine');
+  if (tab.type === 'sequence-def') return t('tab_manager.hover.kind.sequence');
+  if (tab.type === 'package-def') return t('tab_manager.hover.kind.package');
   return t('tab_manager.hover.kind.fallback');
 };
 
@@ -97,6 +101,8 @@ const getTabObjectLabel = (tab: TabData): string => {
   if (tab.viewName) return tab.viewName;
   if (tab.eventName) return tab.eventName;
   if (tab.routineName) return tab.routineName;
+  if (tab.sequenceName) return tab.sequenceName;
+  if (tab.packageName) return tab.packageName;
   if (tab.triggerName) return tab.triggerName;
   if (tab.resourcePath) return tab.resourcePath;
   if (tab.filePath) return tab.filePath;
@@ -409,7 +415,7 @@ const TabContent: React.FC<{ tab: TabData; isActive: boolean }> = React.memo(({ 
   if (tab.type === 'trigger') {
     return <TriggerViewer tab={tab} />;
   }
-  if (tab.type === 'view-def' || tab.type === 'event-def' || tab.type === 'routine-def') {
+  if (tab.type === 'view-def' || tab.type === 'event-def' || tab.type === 'routine-def' || tab.type === 'sequence-def' || tab.type === 'package-def') {
     return <DefinitionViewer tab={tab} />;
   }
   if (tab.type === 'table-overview') {

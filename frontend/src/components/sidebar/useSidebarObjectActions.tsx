@@ -986,6 +986,30 @@ export const useSidebarObjectActions = ({
     });
   };
 
+  const openSequenceDefinition = (node: any) => {
+    const { sequenceName, dbName, id } = node.dataRef;
+    addTab({
+      id: `sequence-def-${id}-${dbName}-${sequenceName}`,
+      title: t('sidebar.tab.sequence_definition', { name: sequenceName }),
+      type: 'sequence-def',
+      connectionId: id,
+      dbName,
+      sequenceName,
+    });
+  };
+
+  const openPackageDefinition = (node: any) => {
+    const { packageName, dbName, id } = node.dataRef;
+    addTab({
+      id: `package-def-${id}-${dbName}-${packageName}`,
+      title: t('sidebar.tab.package_definition', { name: packageName }),
+      type: 'package-def',
+      connectionId: id,
+      dbName,
+      packageName,
+    });
+  };
+
   const openEditRoutine = async (node: any) => {
     const conn = node.dataRef;
     const { routineName, routineType, dbName, id } = conn;
@@ -1222,6 +1246,8 @@ export const useSidebarObjectActions = ({
     handleRebindSavedQuery,
     openRoutineDefinition,
     openEventDefinition,
+    openSequenceDefinition,
+    openPackageDefinition,
     openEditRoutine,
     openCreateRoutine,
     handleDropRoutine,

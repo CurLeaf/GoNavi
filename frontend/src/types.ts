@@ -453,6 +453,8 @@ export interface TabData {
     | "view-def"
     | "event-def"
     | "routine-def"
+    | "sequence-def"
+    | "package-def"
     | "table-overview"
     | "table-export"
     | "jvm-overview"
@@ -480,6 +482,8 @@ export interface TabData {
   eventName?: string; // Event name for MySQL event definition tabs
   routineName?: string; // Routine name for function/procedure definition tabs
   routineType?: string; // 'FUNCTION' or 'PROCEDURE'
+  sequenceName?: string; // Sequence name for sequence definition tabs
+  packageName?: string; // Package name for package definition tabs
   schemaName?: string; // Schema / owner name for schema-grouped objects
   sidebarLocateKey?: string; // Precise sidebar tree key for locating an object node
   savedQueryId?: string; // Saved query identity for quick-save behavior

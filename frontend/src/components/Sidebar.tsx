@@ -1636,7 +1636,11 @@ const Sidebar: React.FC<{
               routineType
           });
           return;
-      } else if (node.type === 'sequence' || node.type === 'package') {
+      } else if (node.type === 'sequence') {
+          openSequenceDefinition(node);
+          return;
+      } else if (node.type === 'package') {
+          openPackageDefinition(node);
           return;
       } else if (node.type === 'jvm-mode') {
           const { providerMode, id } = node.dataRef;
@@ -1844,6 +1848,8 @@ const Sidebar: React.FC<{
       handleRebindSavedQuery,
       openRoutineDefinition,
       openEventDefinition,
+      openSequenceDefinition,
+      openPackageDefinition,
       openEditRoutine,
       openCreateRoutine,
       handleDropRoutine,
@@ -2188,6 +2194,8 @@ const Sidebar: React.FC<{
     openEditRoutine,
     handleDropRoutine,
     openEventDefinition,
+    openSequenceDefinition,
+    openPackageDefinition,
     resolveMessagePublishTarget,
     openMessagePublishModal,
     openDesign,

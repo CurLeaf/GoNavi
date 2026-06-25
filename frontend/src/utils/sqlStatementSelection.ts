@@ -75,6 +75,12 @@ const resolveStandaloneSqlSlashLineEnd = (text: string, index: number): number |
 
   let lineEnd = index + 1;
   while (lineEnd < text.length && text[lineEnd] !== '\n') {
+    if (text[lineEnd] === '-' && text[lineEnd + 1] === '-') {
+      while (lineEnd < text.length && text[lineEnd] !== '\n') {
+        lineEnd += 1;
+      }
+      return lineEnd;
+    }
     if (!isHorizontalWhitespace(text[lineEnd])) {
       return null;
     }
@@ -116,7 +122,32 @@ const isCreateRoutineHeaderPrefix = (text: string): boolean => {
     current = nextSqlSignificantTokenSpan(text, current.end);
   }
 
-  return current.token === 'procedure' || current.token === 'function';
+  if (current.token === 'procedure' || current.token === 'function') {
+    return true;
+  }
+  if (current.token !== 'package') {
+    return false;
+  }
+  current = nextSqlSignificantTokenSpan(text, current.end);
+  return current.token === '' || current.token === 'body' || isSqlIdentifierStart(current.token[0] || '');
+};
+
+const isCreatePackageHeaderPrefix = (text: string): boolean => {
+  let current = nextSqlSignificantTokenSpan(text, 0);
+  if (current.token !== 'create') return false;
+
+  current = nextSqlSignificantTokenSpan(text, current.end);
+  if (current.token === 'or') {
+    current = nextSqlSignificantTokenSpan(text, current.end);
+    if (current.token !== 'replace') return false;
+    current = nextSqlSignificantTokenSpan(text, current.end);
+  }
+
+  while (['editionable', 'noneditionable'].includes(current.token)) {
+    current = nextSqlSignificantTokenSpan(text, current.end);
+  }
+
+  return current.token === 'package';
 };
 
 const shouldEnterPlsqlCreateRoutineBlock = (
@@ -290,7 +321,9 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
         justClosedPLSQLBlock = false;
       } else if (plsqlDepth === 0 && shouldEnterPlsqlCreateRoutineBlock(text, statementStart, token, tokenEnd)) {
         plsqlDepth++;
-        plsqlDeclareBeginSkips++;
+        if (!isCreatePackageHeaderPrefix(text.slice(statementStart, tokenEnd - token.length))) {
+          plsqlDeclareBeginSkips++;
+        }
         justClosedPLSQLBlock = false;
       } else if (token === 'end' && plsqlDepth > 0 && !isPlsqlControlEnd(text, tokenEnd)) {
         plsqlDepth--;

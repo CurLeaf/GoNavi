@@ -295,6 +295,130 @@ describe('DefinitionViewer object edit entry', () => {
     expect(query).toContain('SELECT COUNT(*) INTO v_count FROM dual;');
   });
 
+  it('opens an editable query tab for Oracle sequence definitions', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [{
+        SEQUENCE_OWNER: 'H2',
+        SEQUENCE_NAME: 'HWMS_PACK_SEQNO',
+        MIN_VALUE: 1,
+        MAX_VALUE: 999999999999,
+        INCREMENT_BY: 1,
+        CYCLE_FLAG: 'N',
+        ORDER_FLAG: 'N',
+        CACHE_SIZE: 20,
+      }],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(createTab({
+        id: 'sequence-def-conn-1-H2-H2.HWMS_PACK_SEQNO',
+        title: 'Sequence: H2.HWMS_PACK_SEQNO',
+        type: 'sequence-def',
+        sequenceName: 'H2.HWMS_PACK_SEQNO',
+        viewName: undefined,
+        viewKind: undefined,
+      })));
+      await flushPromises();
+    });
+
+    expect(String(backendApp.DBQuery.mock.calls[0][2] || '')).toContain('FROM ALL_SEQUENCES');
+    const editorText = String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''));
+    expect(editorText).toContain('CREATE SEQUENCE H2.HWMS_PACK_SEQNO');
+    expect(editorText).toContain('CACHE 20');
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'query',
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE SEQUENCE H2.HWMS_PACK_SEQNO'),
+    }));
+  });
+
+  it('loads Oracle package specification and body definitions without dropping lines', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'PACKAGE pkg_order AS\n' },
+          { TEXT: '  PROCEDURE sync_order(p_id IN NUMBER);\n' },
+          { TEXT: 'END pkg_order;\n' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'PACKAGE BODY pkg_order AS\n' },
+          { TEXT: '  PROCEDURE sync_order(p_id IN NUMBER) IS\n' },
+          { TEXT: '  BEGIN\n' },
+          { TEXT: '    NULL;\n' },
+          { TEXT: '  END;\n' },
+          { TEXT: 'END pkg_order;\n' },
+        ],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(createTab({
+        id: 'package-def-conn-1-H2-H2.PKG_ORDER',
+        title: 'Package: H2.PKG_ORDER',
+        type: 'package-def',
+        packageName: 'H2.PKG_ORDER',
+        viewName: undefined,
+        viewKind: undefined,
+      })));
+      await flushPromises();
+    });
+
+    expect(String(backendApp.DBQuery.mock.calls[0][2] || '')).toContain("TYPE = 'PACKAGE'");
+    expect(String(backendApp.DBQuery.mock.calls[1][2] || '')).toContain("TYPE = 'PACKAGE BODY'");
+    const editorText = String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''));
+    expect(editorText).toContain('PACKAGE pkg_order AS');
+    expect(editorText).toContain('PROCEDURE sync_order(p_id IN NUMBER);');
+    expect(editorText).toContain('PACKAGE BODY pkg_order AS');
+    expect(editorText).toContain('NULL;');
+
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'PACKAGE pkg_order AS\n' },
+          { TEXT: '  PROCEDURE sync_order(p_id IN NUMBER);\n' },
+          { TEXT: 'END pkg_order;\n' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'PACKAGE BODY pkg_order AS\n' },
+          { TEXT: '  PROCEDURE sync_order(p_id IN NUMBER) IS\n' },
+          { TEXT: '  BEGIN\n' },
+          { TEXT: '    NULL;\n' },
+          { TEXT: '  END sync_order;\n' },
+          { TEXT: 'END pkg_order;\n' },
+        ],
+      });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    const editQuery = String(storeState.addTab.mock.calls[0][0].query || '');
+    expect(editQuery).toContain('CREATE OR REPLACE PACKAGE pkg_order AS');
+    expect(editQuery).toContain('/\nCREATE OR REPLACE PACKAGE BODY pkg_order AS');
+    expect(editQuery).toContain('END sync_order;');
+  });
+
   it('reloads the latest object definition before opening object edit', async () => {
     backendApp.DBQuery
       .mockResolvedValueOnce({

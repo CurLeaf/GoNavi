@@ -131,7 +131,9 @@ func splitSQLStatements(sql string) []string {
 				justClosedPLSQLBlock = false
 			} else if plsqlDepth == 0 && shouldEnterPLSQLCreateRoutineBlock(text, cur.String(), token, tokenEnd) {
 				plsqlDepth++
-				plsqlDeclareBeginSkips++
+				if !isCreatePackageHeaderPrefix(cur.String()) {
+					plsqlDeclareBeginSkips++
+				}
 				justClosedPLSQLBlock = false
 			} else if token == "end" && plsqlDepth > 0 && !isPLSQLControlEnd(text, tokenEnd) {
 				plsqlDepth--
@@ -262,11 +264,32 @@ func scanSQLStandaloneSlashLineSuffix(text string, pos int) (lineEnd int, standa
 		if text[i] == '\n' {
 			return i, true, true
 		}
+		if text[i] == '-' {
+			if i+1 >= len(text) {
+				return len(text), true, false
+			}
+			if text[i+1] == '-' {
+				lineEnd := scanSQLLineCommentEnd(text, i+2)
+				if lineEnd >= len(text) {
+					return lineEnd, true, false
+				}
+				return lineEnd, true, true
+			}
+		}
 		if !isSQLHorizontalWhitespace(text[i]) {
 			return 0, false, true
 		}
 	}
 	return len(text), true, false
+}
+
+func scanSQLLineCommentEnd(text string, pos int) int {
+	for i := pos; i < len(text); i++ {
+		if text[i] == '\n' {
+			return i
+		}
+	}
+	return len(text)
 }
 
 func skipSQLWhitespaceAndComments(text string, pos int) int {
@@ -384,7 +407,36 @@ func isCreateRoutineHeaderPrefix(text string) bool {
 		currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
 	}
 
-	return currentToken == "procedure" || currentToken == "function"
+	if currentToken == "procedure" || currentToken == "function" {
+		return true
+	}
+	if currentToken != "package" {
+		return false
+	}
+	currentToken, _ = nextSQLSignificantTokenSpan(text, currentEnd)
+	return currentToken == "" || currentToken == "body" || isSQLIdentifierStart(currentToken[0])
+}
+
+func isCreatePackageHeaderPrefix(text string) bool {
+	currentToken, currentEnd := nextSQLSignificantTokenSpan(text, 0)
+	if currentToken != "create" {
+		return false
+	}
+
+	currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+	if currentToken == "or" {
+		currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+		if currentToken != "replace" {
+			return false
+		}
+		currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+	}
+
+	for currentToken == "editionable" || currentToken == "noneditionable" {
+		currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+	}
+
+	return currentToken == "package"
 }
 
 func nextSQLSignificantTokenSpan(text string, pos int) (string, int) {

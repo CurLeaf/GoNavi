@@ -175,6 +175,103 @@ describe('sqlStatementSelection', () => {
     });
   });
 
+  it('skips SQL*Plus slash delimiter comments after named Oracle procedure endings', () => {
+    const sql = [
+      '-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1',
+      '-- 请确认语法兼容当前数据库后执行',
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+      '  p_sourceid IN VARCHAR2,',
+      '  p_msg_out OUT NVARCHAR2',
+      ') AS',
+      '  v_saleno VARCHAR2(40);',
+      '  v_ecnt NUMBER;',
+      'BEGIN',
+      '  SELECT COUNT(*) INTO v_ecnt FROM dual;',
+      "  p_msg_out := 'OK';",
+      'EXCEPTION',
+      '  WHEN OTHERS THEN',
+      '    p_msg_out := SQLERRM;',
+      'END cproc_tzhssr_order2sale_A1;',
+      '/ -- SQLPlus delimiter from PL/SQL tools',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        '-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1',
+        '-- 请确认语法兼容当前数据库后执行',
+        'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+        '  p_sourceid IN VARCHAR2,',
+        '  p_msg_out OUT NVARCHAR2',
+        ') AS',
+        '  v_saleno VARCHAR2(40);',
+        '  v_ecnt NUMBER;',
+        'BEGIN',
+        '  SELECT COUNT(*) INTO v_ecnt FROM dual;',
+        "  p_msg_out := 'OK';",
+        'EXCEPTION',
+        '  WHEN OTHERS THEN',
+        '    p_msg_out := SQLERRM;',
+        'END cproc_tzhssr_order2sale_A1;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('CREATE OR REPLACE'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+    expect(resolveExecutableSql(sql, sql.indexOf('p_msg_out := SQLERRM'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+  });
+
+  it('keeps Oracle PACKAGE specification and body definitions as complete executable statements', () => {
+    const sql = [
+      'CREATE OR REPLACE PACKAGE pkg_order AS',
+      '  PROCEDURE sync_order(p_id IN NUMBER);',
+      'END pkg_order;',
+      '/',
+      'CREATE OR REPLACE PACKAGE BODY pkg_order AS',
+      '  PROCEDURE sync_order(p_id IN NUMBER) IS',
+      '  BEGIN',
+      '    NULL;',
+      '  END sync_order;',
+      'END pkg_order;',
+      '/ -- SQLPlus delimiter from PL/SQL tools',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'CREATE OR REPLACE PACKAGE pkg_order AS',
+        '  PROCEDURE sync_order(p_id IN NUMBER);',
+        'END pkg_order;',
+      ].join('\n'),
+      [
+        'CREATE OR REPLACE PACKAGE BODY pkg_order AS',
+        '  PROCEDURE sync_order(p_id IN NUMBER) IS',
+        '  BEGIN',
+        '    NULL;',
+        '  END sync_order;',
+        'END pkg_order;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('PROCEDURE sync_order'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+    expect(resolveExecutableSql(sql, sql.indexOf('NULL'))).toEqual({
+      sql: ranges[1],
+      source: 'statement',
+    });
+  });
+
   it('does not treat a slash operator line as a SQL*Plus delimiter', () => {
     const sql = 'SELECT 10\n/\n2 FROM dual;';
 

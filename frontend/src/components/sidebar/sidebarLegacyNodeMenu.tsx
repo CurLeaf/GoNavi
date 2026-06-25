@@ -165,6 +165,8 @@ export const buildSidebarLegacyNodeMenuItems = (
     openEditRoutine,
     handleDropRoutine,
     openEventDefinition,
+    openSequenceDefinition,
+    openPackageDefinition,
     resolveMessagePublishTarget,
     openMessagePublishModal,
     openDesign,
@@ -832,6 +834,36 @@ export const buildSidebarLegacyNodeMenuItems = (
                         onClick: () => handleDropRoutine(node)
                     }
                 ]
+            },
+        ];
+    } else if (node.type === 'sequence') {
+        return [
+            {
+                key: 'view-sequence-def',
+                label: t('sidebar.menu.view_object_definition'),
+                icon: <CodeOutlined />,
+                onClick: () => openSequenceDefinition(node)
+            },
+            {
+                key: 'copy-sequence-name',
+                label: t('sidebar.menu.copy_object_name'),
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyTableName(node)
+            },
+        ];
+    } else if (node.type === 'package') {
+        return [
+            {
+                key: 'view-package-def',
+                label: t('sidebar.menu.view_object_definition'),
+                icon: <CodeOutlined />,
+                onClick: () => openPackageDefinition(node)
+            },
+            {
+                key: 'copy-package-name',
+                label: t('sidebar.menu.copy_object_name'),
+                icon: <CopyOutlined />,
+                onClick: () => handleCopyTableName(node)
             },
         ];
     } else if (node.type === 'db-event') {

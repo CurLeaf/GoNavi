@@ -48,6 +48,17 @@ const isCommentOnlyDefinition = (definition: string): boolean => {
     return lines.length > 0 && lines.every((line) => line.startsWith('--'));
 };
 
+const withCreateOrReplacePackageHeaders = (definition: string): string => {
+    const normalized = String(definition || '').replace(/\r\n/g, '\n').trim();
+    if (!normalized) return '';
+    return normalized
+        .split(/(?=^\s*PACKAGE(?:\s+BODY)?\b)/gim)
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => (/^\s*CREATE\b/i.test(part) ? part : `CREATE OR REPLACE ${part}`))
+        .join('\n/\n');
+};
+
 const buildEditableDefinitionSql = (
     tab: TabData,
     definition: string,
@@ -73,6 +84,18 @@ const buildEditableDefinitionSql = (
             return `${header}${ensureSqlStatementTerminator(normalizedDefinition.replace(/^\s*view\b/i, 'CREATE OR REPLACE VIEW'))}`;
         }
         return `${header}CREATE OR REPLACE VIEW ${objectName} AS\n${ensureSqlStatementTerminator(normalizedDefinition)}`;
+    }
+
+    if (tab.type === 'sequence-def' && !/^\s*create\b/i.test(normalizedDefinition)) {
+        return `${header}${ensureSqlStatementTerminator(`CREATE SEQUENCE ${objectName}\n${normalizedDefinition}`)}`;
+    }
+
+    if (
+        tab.type === 'package-def'
+        && !/^\s*create\b/i.test(normalizedDefinition)
+        && /^\s*package\b/i.test(normalizedDefinition)
+    ) {
+        return `${header}${withCreateOrReplacePackageHeaders(normalizedDefinition)}`;
     }
 
     if (
@@ -109,6 +132,8 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         tab.eventName,
         tab.routineName,
         tab.routineType,
+        tab.sequenceName,
+        tab.packageName,
     ].map((item) => String(item || '')).join('||');
 
     const escapeSQLLiteral = (raw: string): string => String(raw || '').replace(/'/g, "''");
@@ -320,6 +345,58 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         }
     };
 
+    const buildShowSequenceQueries = (dialect: string, sequenceName: string, dbName: string): string[] => {
+        const { schema, name } = parseSchemaAndName(sequenceName);
+        const safeName = escapeSQLLiteral(name);
+        const safeDbName = escapeSQLLiteral(dbName);
+        const owner = schema ? escapeSQLLiteral(schema).toUpperCase() : (safeDbName ? safeDbName.toUpperCase() : '');
+
+        switch (dialect) {
+            case 'oracle':
+            case 'dm':
+                if (owner) {
+                    return [`SELECT SEQUENCE_OWNER, SEQUENCE_NAME, MIN_VALUE, MAX_VALUE, INCREMENT_BY, CYCLE_FLAG, ORDER_FLAG, CACHE_SIZE, LAST_NUMBER FROM ALL_SEQUENCES WHERE SEQUENCE_OWNER = '${owner}' AND SEQUENCE_NAME = '${safeName.toUpperCase()}'`];
+                }
+                return [`SELECT SEQUENCE_NAME, MIN_VALUE, MAX_VALUE, INCREMENT_BY, CYCLE_FLAG, ORDER_FLAG, CACHE_SIZE, LAST_NUMBER FROM USER_SEQUENCES WHERE SEQUENCE_NAME = '${safeName.toUpperCase()}'`];
+            case 'postgres':
+            case 'kingbase':
+            case 'highgo':
+            case 'vastbase':
+            case 'opengauss':
+            case 'gaussdb': {
+                const schemaRef = schema || 'public';
+                return [`SELECT sequence_schema, sequence_name, data_type, start_value, minimum_value, maximum_value, increment FROM information_schema.sequences WHERE sequence_schema = '${escapeSQLLiteral(schemaRef)}' AND sequence_name = '${safeName}' LIMIT 1`];
+            }
+            default:
+                return [`-- ${t('definition_viewer.editor.unsupported_sequence_definition')}`];
+        }
+    };
+
+    const buildShowPackageQueries = (dialect: string, packageName: string, dbName: string): string[] => {
+        const { schema, name } = parseSchemaAndName(packageName);
+        const safeName = escapeSQLLiteral(name);
+        const safeDbName = escapeSQLLiteral(dbName);
+
+        switch (dialect) {
+            case 'oracle':
+            case 'dm': {
+                const owner = schema ? escapeSQLLiteral(schema).toUpperCase() : (safeDbName ? safeDbName.toUpperCase() : '');
+                if (owner) {
+                    return [
+                        `SELECT TEXT FROM ALL_SOURCE WHERE OWNER = '${owner}' AND NAME = '${safeName.toUpperCase()}' AND TYPE = 'PACKAGE' ORDER BY LINE`,
+                        `SELECT TEXT FROM ALL_SOURCE WHERE OWNER = '${owner}' AND NAME = '${safeName.toUpperCase()}' AND TYPE = 'PACKAGE BODY' ORDER BY LINE`,
+                    ];
+                }
+                return [
+                    `SELECT TEXT FROM USER_SOURCE WHERE NAME = '${safeName.toUpperCase()}' AND TYPE = 'PACKAGE' ORDER BY LINE`,
+                    `SELECT TEXT FROM USER_SOURCE WHERE NAME = '${safeName.toUpperCase()}' AND TYPE = 'PACKAGE BODY' ORDER BY LINE`,
+                ];
+            }
+            default:
+                return [`-- ${t('definition_viewer.editor.unsupported_package_definition')}`];
+        }
+    };
+
     const runQueryCandidates = async (
         config: Record<string, any>,
         dbName: string,
@@ -346,6 +423,35 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         }
         if (hasSuccessfulQuery) {
             return { success: true, data: [] };
+        }
+        return { success: false, data: [], message: lastMessage };
+    };
+
+    const runQueryCandidatesCollectAll = async (
+        config: Record<string, any>,
+        dbName: string,
+        queries: string[]
+    ): Promise<{ success: boolean; data: any[]; message?: string }> => {
+        let lastMessage = '';
+        let hasSuccessfulQuery = false;
+        const data: any[] = [];
+        for (const query of queries) {
+            const sql = String(query || '').trim();
+            if (!sql) continue;
+            try {
+                const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, sql);
+                if (!result.success || !Array.isArray(result.data)) {
+                    lastMessage = result.message || lastMessage;
+                    continue;
+                }
+                hasSuccessfulQuery = true;
+                data.push(...result.data);
+            } catch (error: any) {
+                lastMessage = error?.message || String(error);
+            }
+        }
+        if (hasSuccessfulQuery) {
+            return { success: true, data };
         }
         return { success: false, data: [], message: lastMessage };
     };
@@ -511,6 +617,66 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         }
     };
 
+    const buildSequenceDefinitionFromRow = (row: Record<string, any>): string => {
+        const sequenceName = String(getCaseInsensitiveRawValue(row, ['sequence_name']) || '').trim();
+        const owner = String(getCaseInsensitiveRawValue(row, ['sequence_owner', 'owner', 'sequence_schema']) || '').trim();
+        const name = owner && sequenceName ? `${owner}.${sequenceName}` : sequenceName;
+        if (!name) return JSON.stringify(row, null, 2);
+
+        const clauses: string[] = [];
+        const increment = getCaseInsensitiveRawValue(row, ['increment_by', 'increment']);
+        const minValue = getCaseInsensitiveRawValue(row, ['min_value', 'minimum_value']);
+        const maxValue = getCaseInsensitiveRawValue(row, ['max_value', 'maximum_value']);
+        const cacheSize = Number(getCaseInsensitiveRawValue(row, ['cache_size']));
+        const cycleFlag = String(getCaseInsensitiveRawValue(row, ['cycle_flag']) || '').trim().toUpperCase();
+        const orderFlag = String(getCaseInsensitiveRawValue(row, ['order_flag']) || '').trim().toUpperCase();
+
+        if (increment !== undefined && increment !== null && String(increment).trim() !== '') {
+            clauses.push(`INCREMENT BY ${increment}`);
+        }
+        if (minValue !== undefined && minValue !== null && String(minValue).trim() !== '') {
+            clauses.push(`MINVALUE ${minValue}`);
+        }
+        if (maxValue !== undefined && maxValue !== null && String(maxValue).trim() !== '') {
+            clauses.push(`MAXVALUE ${maxValue}`);
+        }
+        if (Number.isFinite(cacheSize)) {
+            clauses.push(cacheSize > 0 ? `CACHE ${cacheSize}` : 'NOCACHE');
+        }
+        if (cycleFlag) clauses.push(cycleFlag === 'Y' ? 'CYCLE' : 'NOCYCLE');
+        if (orderFlag) clauses.push(orderFlag === 'Y' ? 'ORDER' : 'NOORDER');
+
+        return [`CREATE SEQUENCE ${name}`, ...clauses.map((clause) => `  ${clause}`)].join('\n') + ';';
+    };
+
+    const extractSequenceDefinition = (dialect: string, data: any[]): string => {
+        if (!data || data.length === 0) return `-- ${t('definition_viewer.editor.sequence_definition_not_found')}`;
+        switch (dialect) {
+            case 'oracle':
+            case 'dm':
+            case 'postgres':
+            case 'kingbase':
+            case 'highgo':
+            case 'vastbase':
+            case 'opengauss':
+            case 'gaussdb':
+                return buildSequenceDefinitionFromRow(data[0] as Record<string, any>);
+            default:
+                return JSON.stringify(data[0], null, 2);
+        }
+    };
+
+    const extractPackageDefinition = (dialect: string, data: any[]): string => {
+        if (!data || data.length === 0) return `-- ${t('definition_viewer.editor.package_definition_not_found')}`;
+        switch (dialect) {
+            case 'oracle':
+            case 'dm':
+                return data.map(row => row.text || row.TEXT || Object.values(row)[0] || '').join('');
+            default:
+                return JSON.stringify(data[0], null, 2);
+        }
+    };
+
     const loadDefinition = async (): Promise<{ success: boolean; definition?: string; error?: string }> => {
         const conn = connections.find(c => c.id === tab.connectionId);
         if (!conn) {
@@ -543,6 +709,22 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             queries = buildShowEventQueries(dialect, eventName, dbName);
             extractFn = extractEventDefinition;
             resolvedObjectLabel = t('definition_viewer.object.event');
+        } else if (tab.type === 'sequence-def') {
+            const sequenceName = tab.sequenceName || '';
+            if (!sequenceName) {
+                return { success: false, error: t('definition_viewer.error.sequence_name_empty') };
+            }
+            queries = buildShowSequenceQueries(dialect, sequenceName, dbName);
+            extractFn = extractSequenceDefinition;
+            resolvedObjectLabel = t('definition_viewer.object.sequence');
+        } else if (tab.type === 'package-def') {
+            const packageName = tab.packageName || '';
+            if (!packageName) {
+                return { success: false, error: t('definition_viewer.error.package_name_empty') };
+            }
+            queries = buildShowPackageQueries(dialect, packageName, dbName);
+            extractFn = extractPackageDefinition;
+            resolvedObjectLabel = t('definition_viewer.object.package');
         } else {
             const routineName = tab.routineName || '';
             const routineType = tab.routineType || 'FUNCTION';
@@ -573,7 +755,9 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                 ssh: conn.config.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' }
             };
 
-            const result = await runQueryCandidates(config, dbName, queries);
+            const result = tab.type === 'package-def'
+                ? await runQueryCandidatesCollectAll(config, dbName, queries)
+                : await runQueryCandidates(config, dbName, queries);
 
             if (result.success && Array.isArray(result.data) && result.data.length > 0) {
                 return { success: true, definition: extractFn(dialect, result.data) };
@@ -655,7 +839,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
         return () => {
             cancelled = true;
         };
-    }, [tab.connectionId, tab.dbName, tab.viewName, tab.viewKind, tab.eventName, tab.routineName, tab.routineType, tab.type, connections, objectIdentityKey, t]);
+    }, [tab.connectionId, tab.dbName, tab.viewName, tab.viewKind, tab.eventName, tab.routineName, tab.routineType, tab.sequenceName, tab.packageName, tab.type, connections, objectIdentityKey, t]);
 
     useEffect(() => () => {
         isMountedRef.current = false;
@@ -663,13 +847,29 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
 
     const objectLabel = tab.type === 'view-def'
         ? (tab.viewKind === 'materialized' ? t('definition_viewer.object.materialized_view') : t('definition_viewer.object.view'))
-        : (tab.type === 'event-def' ? t('definition_viewer.object.event') : t('definition_viewer.object.routine'));
+        : (tab.type === 'event-def'
+            ? t('definition_viewer.object.event')
+            : (tab.type === 'sequence-def'
+                ? t('definition_viewer.object.sequence')
+                : (tab.type === 'package-def'
+                    ? t('definition_viewer.object.package')
+                    : t('definition_viewer.object.routine'))));
     const objectName = tab.type === 'view-def'
         ? tab.viewName
-        : (tab.type === 'event-def' ? tab.eventName : tab.routineName);
+        : (tab.type === 'event-def'
+            ? tab.eventName
+            : (tab.type === 'sequence-def'
+                ? tab.sequenceName
+                : (tab.type === 'package-def' ? tab.packageName : tab.routineName)));
     const loadingTip = tab.type === 'view-def'
         ? t('definition_viewer.loading.view_definition')
-        : (tab.type === 'event-def' ? t('definition_viewer.loading.event_definition') : t('definition_viewer.loading.routine_definition'));
+        : (tab.type === 'event-def'
+            ? t('definition_viewer.loading.event_definition')
+            : (tab.type === 'sequence-def'
+                ? t('definition_viewer.loading.sequence_definition')
+                : (tab.type === 'package-def'
+                    ? t('definition_viewer.loading.package_definition')
+                    : t('definition_viewer.loading.routine_definition'))));
     const normalizedObjectName = String(objectName || '').trim();
     const displayedDefinition = loadedDefinitionKeyRef.current === objectIdentityKey ? definition : '';
     const hasDefinition = String(displayedDefinition || '').trim() !== '';

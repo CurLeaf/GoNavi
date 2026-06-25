@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -478,6 +479,59 @@ END;`
 	}
 	if fakeDB.execQueries[0] != wantExecuted {
 		t.Fatalf("expected slash delimiter to be skipped, got %q", fakeDB.execQueries[0])
+	}
+}
+
+func TestDBQueryMultiKeepsOraclePackageSpecAndBodyTogether(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeBatchWriteDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type: "oracle",
+		Host: "127.0.0.1",
+		Port: 1521,
+		User: "app",
+	}
+	query := `CREATE OR REPLACE PACKAGE pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER);
+END pkg_order;
+/
+CREATE OR REPLACE PACKAGE BODY pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER) IS
+    BEGIN
+        NULL;
+    END sync_order;
+END pkg_order;
+/ -- SQLPlus delimiter from PL/SQL tools`
+	wantExecuted := []string{
+		`CREATE OR REPLACE PACKAGE pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER);
+END pkg_order;`,
+		`CREATE OR REPLACE PACKAGE BODY pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER) IS
+    BEGIN
+        NULL;
+    END sync_order;
+END pkg_order;`,
+	}
+
+	result := app.DBQueryMulti(config, "ORCLPDB1", query, "oracle-package-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.execCalls != 2 || len(fakeDB.execQueries) != 2 {
+		t.Fatalf("expected two sequential exec calls, got execCalls=%d queries=%#v", fakeDB.execCalls, fakeDB.execQueries)
+	}
+	if !reflect.DeepEqual(fakeDB.execQueries, wantExecuted) {
+		t.Fatalf("expected package spec/body to stay intact, got %#v", fakeDB.execQueries)
 	}
 }
 
