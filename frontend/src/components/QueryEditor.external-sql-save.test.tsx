@@ -1481,54 +1481,72 @@ describe('QueryEditor external SQL save', () => {
     const routines = [
       { dbName: 'main', routineName: 'reporting.refresh_stats', routineType: 'PROCEDURE', schemaName: 'reporting' },
     ];
+    const sequences = [
+      { dbName: 'main', sequenceName: 'billing.order_seq', schemaName: 'billing' },
+    ];
+    const packages = [
+      { dbName: 'main', packageName: 'billing.pkg_order', schemaName: 'billing' },
+    ];
 
-    expect(resolveQueryEditorNavigationTarget('select * from analytics.events', 31, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+    expect(resolveQueryEditorNavigationTarget('select * from analytics.events', 31, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
       type: 'table',
       dbName: 'analytics',
       tableName: 'events',
       schemaName: undefined,
     });
-    expect(resolveQueryEditorNavigationTarget('select * from dbo.orders', 21, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+    expect(resolveQueryEditorNavigationTarget('select * from dbo.orders', 21, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
       type: 'table',
       dbName: 'main',
       tableName: 'dbo.orders',
       schemaName: 'dbo',
     });
-    expect(resolveQueryEditorNavigationTarget('use analytics', 6, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+    expect(resolveQueryEditorNavigationTarget('use analytics', 6, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
       type: 'database',
       dbName: 'analytics',
     });
-    expect(resolveQueryEditorNavigationTarget('select * from users', 18, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+    expect(resolveQueryEditorNavigationTarget('select * from users', 18, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
       type: 'table',
       dbName: 'main',
       tableName: 'users',
       schemaName: undefined,
     });
-    expect(resolveQueryEditorNavigationTarget('select * from reporting.active_users', 31, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+    expect(resolveQueryEditorNavigationTarget('select * from reporting.active_users', 31, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
       type: 'view',
       dbName: 'main',
       viewName: 'reporting.active_users',
       schemaName: 'reporting',
     });
-    expect(resolveQueryEditorNavigationTarget('select * from analytics.mv_daily_stats', 37, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+    expect(resolveQueryEditorNavigationTarget('select * from analytics.mv_daily_stats', 37, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
       type: 'materialized-view',
       dbName: 'analytics',
       viewName: 'mv_daily_stats',
       schemaName: undefined,
     });
-    expect(resolveQueryEditorNavigationTarget('call audit.users_bi()', 18, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+    expect(resolveQueryEditorNavigationTarget('call audit.users_bi()', 18, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
       type: 'trigger',
       dbName: 'main',
       triggerName: 'audit.users_bi',
       tableName: 'audit.users',
       schemaName: 'audit',
     });
-    expect(resolveQueryEditorNavigationTarget('call reporting.refresh_stats()', 21, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines)).toEqual({
+    expect(resolveQueryEditorNavigationTarget('call reporting.refresh_stats()', 21, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
       type: 'routine',
       dbName: 'main',
       routineName: 'reporting.refresh_stats',
       routineType: 'PROCEDURE',
       schemaName: 'reporting',
+    });
+    expect(resolveQueryEditorNavigationTarget('select billing.order_seq.nextval from dual', 18, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
+      type: 'sequence',
+      dbName: 'main',
+      sequenceName: 'billing.order_seq',
+      schemaName: 'billing',
+    });
+    expect(resolveQueryEditorNavigationTarget('begin billing.pkg_order.sync_order(1); end;', 16, 'main', ['main', 'analytics'], tables, views, materializedViews, triggers, routines, sequences, packages)).toEqual({
+      type: 'package',
+      dbName: 'main',
+      packageName: 'billing.pkg_order',
+      schemaName: 'billing',
     });
   });
 
@@ -1772,6 +1790,12 @@ describe('QueryEditor external SQL save', () => {
       { dbName: 'main', routineName: 'reporting.refresh_stats', routineType: 'PROCEDURE', schemaName: 'reporting' },
       { dbName: 'main', routineName: 'reporting.score_user', routineType: 'FUNCTION', schemaName: 'reporting' },
     ];
+    const sequences = [
+      { dbName: 'main', sequenceName: 'billing.order_seq', schemaName: 'billing' },
+    ];
+    const packages = [
+      { dbName: 'main', packageName: 'billing.pkg_order', schemaName: 'billing' },
+    ];
 
     const cases = [
       { lineContent: 'use analytics', column: 6, expected: 'Ctrl + click to switch to this database' },
@@ -1781,6 +1805,8 @@ describe('QueryEditor external SQL save', () => {
       { lineContent: 'call audit.users_bi()', column: 18, expected: 'Ctrl + click to open this trigger' },
       { lineContent: 'call reporting.refresh_stats()', column: 21, expected: 'Ctrl + click to open this stored procedure' },
       { lineContent: 'select reporting.score_user()', column: 21, expected: 'Ctrl + click to open this function' },
+      { lineContent: 'select billing.order_seq.nextval from dual', column: 18, expected: 'Ctrl + click to open this sequence' },
+      { lineContent: 'begin billing.pkg_order.sync_order(1); end;', column: 16, expected: 'Ctrl + click to open this package' },
     ];
 
     for (const testCase of cases) {
@@ -1794,6 +1820,8 @@ describe('QueryEditor external SQL save', () => {
         materializedViews,
         triggers,
         routines,
+        sequences,
+        packages,
         'Ctrl',
       );
 
@@ -2098,7 +2126,9 @@ describe('QueryEditor external SQL save', () => {
 
   it('localizes Monaco action labels for the active language', async () => {
     setCurrentLanguage('en-US');
+    storeState.shortcutOptions.runQuery.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Q' };
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
 
     await act(async () => {
@@ -2120,7 +2150,9 @@ describe('QueryEditor external SQL save', () => {
   });
 
   it('refreshes Monaco action labels when languagePreference changes after mount', async () => {
+    storeState.shortcutOptions.runQuery.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Q' };
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
 
     await act(async () => {
@@ -2289,6 +2321,7 @@ describe('QueryEditor external SQL save', () => {
   it('shows "No selectable SQL statement." in English when selecting the current statement without selectable SQL', async () => {
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
     messageApi.info.mockReset();
 
@@ -2308,6 +2341,7 @@ describe('QueryEditor external SQL save', () => {
   });
 
   it('selects only the current SQL statement when the editor content uses CRLF line endings', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
     const sql = [
       'SELECT * FROM first_table;',
@@ -3720,6 +3754,99 @@ describe('QueryEditor external SQL save', () => {
         routineName: 'reporting.refresh_stats',
         schemaName: 'reporting',
         objectGroup: 'routines',
+      }),
+    }));
+  });
+
+  it('opens sequence and package tabs on ctrl left click inside the editor', async () => {
+    editorState.value = 'select billing.order_seq.nextval from dual; begin billing.pkg_order.sync_order(1); end;';
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      if (sql.includes('ALL_SEQUENCES') || sql.includes('USER_SEQUENCES')) {
+        return { success: true, data: [{ sequence_name: 'order_seq', schema_name: 'billing' }] };
+      }
+      if (sql.includes('ALL_OBJECTS') && sql.includes("OBJECT_TYPE = 'PACKAGE'")) {
+        return { success: true, data: [{ package_name: 'pkg_order', schema_name: 'billing' }] };
+      }
+      return { success: true, data: [] };
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      for (let i = 0; i < 12; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 18 } },
+        event: {
+          leftButton: true,
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        },
+      });
+    });
+
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 59 } },
+        event: {
+          leftButton: true,
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        },
+      });
+    });
+
+    expect(storeState.addTab).toHaveBeenCalledWith({
+      id: 'sequence-def-conn-1-main-billing.order_seq',
+      title: '序列：billing.order_seq',
+      type: 'sequence-def',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      sequenceName: 'billing.order_seq',
+      schemaName: 'billing',
+      sidebarLocateKey: 'sequence-def-conn-1-main-billing.order_seq',
+    });
+    expect(storeState.addTab).toHaveBeenCalledWith({
+      id: 'package-def-conn-1-main-billing.pkg_order',
+      title: '存储包：billing.pkg_order',
+      type: 'package-def',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      packageName: 'billing.pkg_order',
+      schemaName: 'billing',
+      sidebarLocateKey: 'package-def-conn-1-main-billing.pkg_order',
+    });
+    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'gonavi:locate-sidebar-object',
+      detail: expect.objectContaining({
+        tabId: 'sequence-def-conn-1-main-billing.order_seq',
+        sequenceName: 'billing.order_seq',
+        schemaName: 'billing',
+        objectGroup: 'sequences',
+      }),
+    }));
+    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'gonavi:locate-sidebar-object',
+      detail: expect.objectContaining({
+        tabId: 'package-def-conn-1-main-billing.pkg_order',
+        packageName: 'billing.pkg_order',
+        schemaName: 'billing',
+        objectGroup: 'packages',
       }),
     }));
   });
@@ -5615,6 +5742,50 @@ describe('QueryEditor external SQL save', () => {
       sql: plsql,
       status: 'success',
     }));
+    renderer?.unmount();
+  });
+
+  it('preserves Oracle SQLPlus slash delimiters for selected object-edit PL/SQL definitions', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['affectedRows'], rows: [{ affectedRows: 1 }] }],
+    });
+    const expectedPlsql = [
+      '-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1',
+      '-- 请确认语法兼容当前数据库后执行',
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1 AS',
+      'BEGIN',
+      '  NULL;',
+      'END cproc_tzhssr_order2sale_A1;',
+      '/',
+    ].join('\n');
+    const legacyEditorPlsql = expectedPlsql.replace(/\n\/$/, '\n/;');
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ORCLPDB1', query: legacyEditorPlsql, queryMode: 'object-edit' })} />);
+    });
+    editorState.selection = {
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: 7,
+      endColumn: 3,
+      positionLineNumber: 7,
+      positionColumn: 3,
+    };
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(expect.anything(), 'ORCLPDB1', expectedPlsql, 'query-1');
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('/;');
     renderer?.unmount();
   });
 

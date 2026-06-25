@@ -32,9 +32,18 @@ const normalizeMySQLViewDDL = (rawDefinition: unknown): string => {
     return `${normalized};`;
 };
 
+const normalizeSqlPlusSlashTerminator = (sql: string): string => (
+    String(sql || '').trim().replace(/(^|\n)([ \t]*\/[ \t]*);+([ \t]*(?:--[^\n]*)?)\s*$/i, '$1$2$3')
+);
+
+const hasStandaloneSqlPlusSlashTerminator = (sql: string): boolean => (
+    /(?:^|\n)[ \t]*\/[ \t]*(?:--[^\n]*)?\s*$/i.test(String(sql || '').trim())
+);
+
 const ensureSqlStatementTerminator = (sql: string): string => {
-    const normalized = String(sql || '').trim();
+    const normalized = normalizeSqlPlusSlashTerminator(sql);
     if (!normalized) return '';
+    if (hasStandaloneSqlPlusSlashTerminator(normalized)) return normalized;
     return /;\s*$/.test(normalized) ? normalized : `${normalized};`;
 };
 

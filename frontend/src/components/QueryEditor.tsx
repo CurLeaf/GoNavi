@@ -57,7 +57,9 @@ import QueryEditorToolbar from './QueryEditorToolbar';
 import { useSqlEditorTransactionController } from './useSqlEditorTransactionController';
 import {
     type CompletionColumnMeta,
+    type CompletionPackageMeta,
     type CompletionRoutineMeta,
+    type CompletionSequenceMeta,
     type CompletionTableMeta,
     type CompletionTriggerMeta,
     type CompletionViewMeta,
@@ -74,6 +76,8 @@ import {
     buildCompletionDocumentation,
     buildCompletionFunctionsMetadataQuerySpecs,
     buildCompletionMaterializedViewsMetadataQuerySpecs,
+    buildCompletionPackagesMetadataQuerySpecs,
+    buildCompletionSequencesMetadataQuerySpecs,
     buildCompletionTableCommentSQL,
     buildCompletionTriggersMetadataQuerySpecs,
     buildCompletionViewsMetadataQuerySpecs,
@@ -170,6 +174,8 @@ let sharedViewsData: CompletionViewMeta[] = [];
 let sharedMaterializedViewsData: CompletionViewMeta[] = [];
 let sharedTriggersData: CompletionTriggerMeta[] = [];
 let sharedRoutinesData: CompletionRoutineMeta[] = [];
+let sharedSequencesData: CompletionSequenceMeta[] = [];
+let sharedPackagesData: CompletionPackageMeta[] = [];
 let sharedColumnsCacheData: Record<string, any[]> = {};
 const QUERY_EDITOR_LAZY_VISIBLE_DB_COMPLETION_LIMIT = 10;
 const sharedLazyTablesCache: Record<string, CompletionTableMeta[] | undefined> = {};
@@ -190,6 +196,8 @@ const resetSharedQueryEditorMetadata = () => {
     sharedMaterializedViewsData = [];
     sharedTriggersData = [];
     sharedRoutinesData = [];
+    sharedSequencesData = [];
+    sharedPackagesData = [];
     sharedColumnsCacheData = {};
     clearRecord(sharedLazyTablesCache);
     clearRecord(sharedLazyTablesInFlight);
@@ -258,6 +266,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const materializedViewsRef = useRef<CompletionViewMeta[]>([]);
   const triggersRef = useRef<CompletionTriggerMeta[]>([]);
   const routinesRef = useRef<CompletionRoutineMeta[]>([]);
+  const sequencesRef = useRef<CompletionSequenceMeta[]>([]);
+  const packagesRef = useRef<CompletionPackageMeta[]>([]);
   const visibleDbsRef = useRef<string[]>([]); // Store visible databases for cross-db intellisense
   const metadataFetchKeyRef = useRef<string>('');
   const metadataContextKeyRef = useRef<string>('');
@@ -530,6 +540,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       sharedMaterializedViewsData = materializedViewsRef.current;
       sharedTriggersData = triggersRef.current;
       sharedRoutinesData = routinesRef.current;
+      sharedSequencesData = sequencesRef.current;
+      sharedPackagesData = packagesRef.current;
       sharedColumnsCacheData = columnsCacheRef.current;
   }, [isActive, currentDb, currentConnectionId, connections]);
 
@@ -573,6 +585,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               materializedViewsRef.current,
               triggersRef.current,
               routinesRef.current,
+              sequencesRef.current,
+              packagesRef.current,
           );
           if (!hoverTarget) continue;
 
@@ -620,6 +634,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           materializedViewsRef.current,
           triggersRef.current,
           routinesRef.current,
+          sequencesRef.current,
+          packagesRef.current,
       );
       if (!hoverTarget) {
           return false;
@@ -1018,6 +1034,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           const allMaterializedViews: CompletionViewMeta[] = [];
           const allTriggers: CompletionTriggerMeta[] = [];
           const allRoutines: CompletionRoutineMeta[] = [];
+          const allSequences: CompletionSequenceMeta[] = [];
+          const allPackages: CompletionPackageMeta[] = [];
           const metadataDialect = normalizeMetadataDialect(conn);
           const syncMetadataSnapshot = () => {
               if (cancelled) {
@@ -1029,6 +1047,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               materializedViewsRef.current = [...allMaterializedViews];
               triggersRef.current = [...allTriggers];
               routinesRef.current = [...allRoutines];
+              sequencesRef.current = [...allSequences];
+              packagesRef.current = [...allPackages];
               if (isActive) {
                   sharedTablesData = tablesRef.current;
                   sharedAllColumnsData = allColumnsRef.current;
@@ -1036,6 +1056,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   sharedMaterializedViewsData = materializedViewsRef.current;
                   sharedTriggersData = triggersRef.current;
                   sharedRoutinesData = routinesRef.current;
+                  sharedSequencesData = sequencesRef.current;
+                  sharedPackagesData = packagesRef.current;
               }
               return true;
           };
@@ -1211,6 +1233,64 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   });
               });
               if (!syncMetadataSnapshot()) return;
+
+              const sequenceResults = await queryCompletionMetadataRowsBySpecs(
+                  config,
+                  dbName,
+                  buildCompletionSequencesMetadataQuerySpecs(metadataDialect, dbName),
+              );
+              if (cancelled) return;
+              const seenSequences = new Set<string>();
+              sequenceResults.forEach((queryResult) => {
+                  queryResult.rows.forEach((row) => {
+                      const rawSequenceName = String(getCaseInsensitiveValue(row, ['sequence_name', 'name']) || '').trim() || getFirstRowValue(row);
+                      if (!rawSequenceName) return;
+                      const schemaName = String(getCaseInsensitiveValue(row, ['schema_name', 'sequence_owner', 'owner', 'db', 'database']) || '').trim();
+                      const sequenceParts = splitSidebarQualifiedName(rawSequenceName);
+                      const resolvedSchemaName = String(schemaName || sequenceParts.schemaName || '').trim();
+                      const resolvedSequenceName = String(sequenceParts.objectName || rawSequenceName).trim();
+                      const qualifiedSequenceName = buildQualifiedCompletionName(resolvedSchemaName, resolvedSequenceName);
+                      if (!qualifiedSequenceName) return;
+                      const uniqueKey = `${dbName.toLowerCase()}@@${qualifiedSequenceName.toLowerCase()}`;
+                      if (seenSequences.has(uniqueKey)) return;
+                      seenSequences.add(uniqueKey);
+                      allSequences.push({
+                          dbName,
+                          sequenceName: qualifiedSequenceName,
+                          schemaName: resolvedSchemaName || splitSidebarQualifiedName(qualifiedSequenceName).schemaName || undefined,
+                      });
+                  });
+              });
+              if (!syncMetadataSnapshot()) return;
+
+              const packageResults = await queryCompletionMetadataRowsBySpecs(
+                  config,
+                  dbName,
+                  buildCompletionPackagesMetadataQuerySpecs(metadataDialect, dbName),
+              );
+              if (cancelled) return;
+              const seenPackages = new Set<string>();
+              packageResults.forEach((queryResult) => {
+                  queryResult.rows.forEach((row) => {
+                      const rawPackageName = String(getCaseInsensitiveValue(row, ['package_name', 'object_name', 'name']) || '').trim() || getFirstRowValue(row);
+                      if (!rawPackageName) return;
+                      const schemaName = String(getCaseInsensitiveValue(row, ['schema_name', 'owner', 'db', 'database']) || '').trim();
+                      const packageParts = splitSidebarQualifiedName(rawPackageName);
+                      const resolvedSchemaName = String(schemaName || packageParts.schemaName || '').trim();
+                      const resolvedPackageName = String(packageParts.objectName || rawPackageName).trim();
+                      const qualifiedPackageName = buildQualifiedCompletionName(resolvedSchemaName, resolvedPackageName);
+                      if (!qualifiedPackageName) return;
+                      const uniqueKey = `${dbName.toLowerCase()}@@${qualifiedPackageName.toLowerCase()}`;
+                      if (seenPackages.has(uniqueKey)) return;
+                      seenPackages.add(uniqueKey);
+                      allPackages.push({
+                          dbName,
+                          packageName: qualifiedPackageName,
+                          schemaName: resolvedSchemaName || splitSidebarQualifiedName(qualifiedPackageName).schemaName || undefined,
+                      });
+                  });
+              });
+              if (!syncMetadataSnapshot()) return;
           }
 
           if (!syncMetadataSnapshot()) return;
@@ -1350,6 +1430,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               materializedViewsRef.current,
               triggersRef.current,
               routinesRef.current,
+              sequencesRef.current,
+              packagesRef.current,
               primaryShortcutModifierLabel,
           );
           if (decorations.length === 0) {
@@ -1603,6 +1685,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               materializedViewsRef.current,
               triggersRef.current,
               routinesRef.current,
+              sequencesRef.current,
+              packagesRef.current,
           );
           if (!navigationTarget) {
               return;
@@ -1715,6 +1799,60 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   tableName: targetTriggerName,
                   schemaName: targetSchemaName,
                   objectGroup: 'triggers',
+              });
+              return;
+          }
+
+          if (navigationTarget.type === 'sequence') {
+              const targetSequenceName = String(navigationTarget.sequenceName || '').trim();
+              if (!targetSequenceName) return;
+              const targetSchemaName = String(navigationTarget.schemaName || '').trim();
+              const sidebarLocateKey = `sequence-def-${connectionId}-${targetDbName}-${targetSequenceName}`;
+              addTab({
+                  id: `sequence-def-${connectionId}-${targetDbName}-${targetSequenceName}`,
+                  title: translate('sidebar.tab.sequence_definition', { name: targetSequenceName }),
+                  type: 'sequence-def',
+                  connectionId,
+                  dbName: targetDbName,
+                  sequenceName: targetSequenceName,
+                  schemaName: targetSchemaName || undefined,
+                  sidebarLocateKey,
+              });
+              dispatchQueryEditorSidebarLocate({
+                  tabId: sidebarLocateKey,
+                  connectionId,
+                  dbName: targetDbName,
+                  sequenceName: targetSequenceName,
+                  tableName: targetSequenceName,
+                  schemaName: targetSchemaName,
+                  objectGroup: 'sequences',
+              });
+              return;
+          }
+
+          if (navigationTarget.type === 'package') {
+              const targetPackageName = String(navigationTarget.packageName || '').trim();
+              if (!targetPackageName) return;
+              const targetSchemaName = String(navigationTarget.schemaName || '').trim();
+              const sidebarLocateKey = `package-def-${connectionId}-${targetDbName}-${targetPackageName}`;
+              addTab({
+                  id: `package-def-${connectionId}-${targetDbName}-${targetPackageName}`,
+                  title: translate('sidebar.tab.package_definition', { name: targetPackageName }),
+                  type: 'package-def',
+                  connectionId,
+                  dbName: targetDbName,
+                  packageName: targetPackageName,
+                  schemaName: targetSchemaName || undefined,
+                  sidebarLocateKey,
+              });
+              dispatchQueryEditorSidebarLocate({
+                  tabId: sidebarLocateKey,
+                  connectionId,
+                  dbName: targetDbName,
+                  packageName: targetPackageName,
+                  tableName: targetPackageName,
+                  schemaName: targetSchemaName,
+                  objectGroup: 'packages',
               });
               return;
           }
@@ -1874,6 +2012,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   sharedMaterializedViewsData,
                   sharedTriggersData,
                   sharedRoutinesData,
+                  sharedSequencesData,
+                  sharedPackagesData,
               );
               if (!hoverTarget) {
                   return null;
@@ -2695,6 +2835,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
     return findSqlStatementRanges(sql).map((range) => range.text);
   };
 
+  const containsOraclePlsqlDefinition = (statements: string[]): boolean => (
+      statements.some((statement) => /^\s*(?:(?:--[^\n]*|\/\*[\s\S]*?\*\/)\s*)*CREATE\s+(?:OR\s+REPLACE\s+)?(?:EDITIONABLE\s+|NONEDITIONABLE\s+)?(?:PROCEDURE|FUNCTION|PACKAGE|TRIGGER)\b/i.test(statement))
+  );
+
+  const normalizeOracleSqlPlusSlashTerminators = (sql: string): string => (
+      String(sql || '').replace(/(^|\n)([ \t]*\/[ \t]*);+([ \t]*(?:--[^\n]*)?)(?=\n|$)/g, '$1$2$3')
+  );
+
   const getSelectedSQL = (): string => {
       const editor = editorRef.current;
       if (!editor) return '';
@@ -3454,7 +3602,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 return { ...plan, executedSql: result.sql };
             });
             const executableStatements = executablePlans.map((plan) => plan.executedSql);
-            const fullSQL = executableStatements.join(';\n');
+            const shouldPreserveOraclePlsqlBatch = isOracleLikeDialect(normalizedDbType) && containsOraclePlsqlDefinition(sourceStatements);
+            const fullSQL = shouldPreserveOraclePlsqlBatch
+                ? normalizeOracleSqlPlusSlashTerminators(normalizedRawSQL)
+                : executableStatements.join(';\n');
 
             const startTime = Date.now();
             let queryId: string;

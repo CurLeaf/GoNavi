@@ -23,6 +23,8 @@ export type CompletionColumnMeta = {dbName: string, tableName: string, name: str
 export type CompletionViewMeta = {dbName: string, viewName: string, schemaName?: string};
 export type CompletionTriggerMeta = {dbName: string, triggerName: string, tableName: string, schemaName?: string};
 export type CompletionRoutineMeta = {dbName: string, routineName: string, routineType: string, schemaName?: string};
+export type CompletionSequenceMeta = {dbName: string, sequenceName: string, schemaName?: string};
+export type CompletionPackageMeta = {dbName: string, packageName: string, schemaName?: string};
 
 export const QUERY_LOCATOR_ALIAS_PREFIX = '__gonavi_locator_';
 const QUERY_LOCATOR_METADATA_TIMEOUT_MS = 1500;
@@ -946,6 +948,42 @@ export const buildCompletionFunctionsMetadataQuerySpecs = (dialect: string, dbNa
     }
 };
 
+export const buildCompletionSequencesMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
+    const safeDbName = escapeMetadataSqlLiteral(dbName);
+    switch (dialect) {
+        case 'oracle':
+        case 'dm':
+        case 'dameng':
+            return normalizeMetadataQuerySpecs([
+                {
+                    sql: safeDbName
+                        ? `SELECT SEQUENCE_OWNER AS schema_name, SEQUENCE_NAME AS sequence_name FROM ALL_SEQUENCES WHERE SEQUENCE_OWNER = '${safeDbName.toUpperCase()}' ORDER BY SEQUENCE_NAME`
+                        : `SELECT SEQUENCE_NAME AS sequence_name FROM USER_SEQUENCES ORDER BY SEQUENCE_NAME`,
+                },
+            ]);
+        default:
+            return [];
+    }
+};
+
+export const buildCompletionPackagesMetadataQuerySpecs = (dialect: string, dbName: string): MetadataQuerySpec[] => {
+    const safeDbName = escapeMetadataSqlLiteral(dbName);
+    switch (dialect) {
+        case 'oracle':
+        case 'dm':
+        case 'dameng':
+            return normalizeMetadataQuerySpecs([
+                {
+                    sql: safeDbName
+                        ? `SELECT OWNER AS schema_name, OBJECT_NAME AS package_name FROM ALL_OBJECTS WHERE OWNER = '${safeDbName.toUpperCase()}' AND OBJECT_TYPE = 'PACKAGE' ORDER BY OBJECT_NAME`
+                        : `SELECT OBJECT_NAME AS package_name FROM USER_OBJECTS WHERE OBJECT_TYPE = 'PACKAGE' ORDER BY OBJECT_NAME`,
+                },
+            ]);
+        default:
+            return [];
+    }
+};
+
 export const queryCompletionMetadataRowsBySpecs = async (
     config: Record<string, any>,
     dbName: string,
@@ -979,7 +1017,9 @@ export type QueryEditorNavigationTarget =
     | { type: 'view'; dbName: string; viewName: string; schemaName?: string }
     | { type: 'materialized-view'; dbName: string; viewName: string; schemaName?: string }
     | { type: 'trigger'; dbName: string; triggerName: string; tableName: string; schemaName?: string }
-    | { type: 'routine'; dbName: string; routineName: string; routineType: string; schemaName?: string };
+    | { type: 'routine'; dbName: string; routineName: string; routineType: string; schemaName?: string }
+    | { type: 'sequence'; dbName: string; sequenceName: string; schemaName?: string }
+    | { type: 'package'; dbName: string; packageName: string; schemaName?: string };
 
 export type QueryEditorHoverTarget =
     | { kind: 'database'; dbName: string; range: { startColumn: number; endColumn: number } }
@@ -988,6 +1028,8 @@ export type QueryEditorHoverTarget =
     | { kind: 'materialized-view'; dbName: string; viewName: string; schemaName?: string; range: { startColumn: number; endColumn: number } }
     | { kind: 'trigger'; dbName: string; triggerName: string; tableName: string; schemaName?: string; range: { startColumn: number; endColumn: number } }
     | { kind: 'routine'; dbName: string; routineName: string; routineType: string; schemaName?: string; range: { startColumn: number; endColumn: number } }
+    | { kind: 'sequence'; dbName: string; sequenceName: string; schemaName?: string; range: { startColumn: number; endColumn: number } }
+    | { kind: 'package'; dbName: string; packageName: string; schemaName?: string; range: { startColumn: number; endColumn: number } }
     | { kind: 'column'; dbName: string; tableName: string; columnName: string; type?: string; comment?: string; schemaName?: string; range: { startColumn: number; endColumn: number } };
 
 export const QUERY_EDITOR_IDENTIFIER_CHAR_REGEX = /[A-Za-z0-9_$`"\[\].]/;
@@ -1438,6 +1480,10 @@ export const buildQueryEditorHoverMarkdown = (target: QueryEditorHoverTarget): s
             return `${buildObjectInfoTitle('trigger_viewer.field.trigger', target.triggerName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.database', target.dbName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.table', target.tableName)}${target.schemaName ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.schema', target.schemaName)}` : ''}`;
         case 'routine':
             return `${buildObjectInfoTitle(target.routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function', target.routineName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.database', target.dbName)}${target.schemaName ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.schema', target.schemaName)}` : ''}`;
+        case 'sequence':
+            return `${buildObjectInfoTitle('definition_viewer.object.sequence', target.sequenceName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.database', target.dbName)}${target.schemaName ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.schema', target.schemaName)}` : ''}`;
+        case 'package':
+            return `${buildObjectInfoTitle('definition_viewer.object.package', target.packageName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.database', target.dbName)}${target.schemaName ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.schema', target.schemaName)}` : ''}`;
         case 'column':
             return `${buildObjectInfoTitle('query_editor.object_info.column', target.columnName)}${target.type ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.type', target.type)}` : ''}\n\n${buildObjectInfoLabel('query_editor.object_info.label.table', target.tableName)}\n\n${buildObjectInfoLabel('query_editor.object_info.label.database', target.dbName)}${target.schemaName ? `\n\n${buildObjectInfoLabel('query_editor.object_info.label.schema', target.schemaName)}` : ''}${appendComment(target.comment)}`;
         default:
@@ -1540,6 +1586,8 @@ export const resolveQueryEditorNavigationTarget = (
     materializedViews: CompletionViewMeta[] = [],
     triggers: CompletionTriggerMeta[] = [],
     routines: CompletionRoutineMeta[] = [],
+    sequences: CompletionSequenceMeta[] = [],
+    packages: CompletionPackageMeta[] = [],
 ): QueryEditorNavigationTarget | null => {
     const text = String(lineContent || '');
     if (!text) return null;
@@ -1601,6 +1649,8 @@ export const resolveQueryEditorNavigationTarget = (
         ...buildObjectNameMeta(routine.dbName, routine.routineName, routine.schemaName),
         routineType: String(routine.routineType || 'FUNCTION').trim().toUpperCase() || 'FUNCTION',
     }));
+    const sequenceMetas = sequences.map((sequence) => buildObjectNameMeta(sequence.dbName, sequence.sequenceName, sequence.schemaName));
+    const packageMetas = packages.map((pkg) => buildObjectNameMeta(pkg.dbName, pkg.packageName, pkg.schemaName));
 
     const findTable = (candidateDbName: string, candidateTableName: string, schemaName = ''): QueryEditorNavigationTarget | null => {
         const normalizedDbName = String(candidateDbName || '').trim().toLowerCase();
@@ -1728,12 +1778,36 @@ export const resolveQueryEditorNavigationTarget = (
         };
     };
 
+    const findSequence = (candidateDbName: string, candidateSequenceName: string, schemaName = ''): QueryEditorNavigationTarget | null => {
+        const matched = findNamedObject(sequenceMetas, candidateDbName, candidateSequenceName, schemaName);
+        if (!matched) return null;
+        return {
+            type: 'sequence',
+            dbName: matched.dbName,
+            sequenceName: matched.rawObjectName,
+            schemaName: matched.schemaName || undefined,
+        };
+    };
+
+    const findPackage = (candidateDbName: string, candidatePackageName: string, schemaName = ''): QueryEditorNavigationTarget | null => {
+        const matched = findNamedObject(packageMetas, candidateDbName, candidatePackageName, schemaName);
+        if (!matched) return null;
+        return {
+            type: 'package',
+            dbName: matched.dbName,
+            packageName: matched.rawObjectName,
+            schemaName: matched.schemaName || undefined,
+        };
+    };
+
     const findObjectInPriorityOrder = (candidateDbName: string, candidateObjectName: string, schemaName = ''): QueryEditorNavigationTarget | null => (
         findTable(candidateDbName, candidateObjectName, schemaName)
         || findView(candidateDbName, candidateObjectName, schemaName)
         || findMaterializedView(candidateDbName, candidateObjectName, schemaName)
         || findTrigger(candidateDbName, candidateObjectName, schemaName)
         || findRoutine(candidateDbName, candidateObjectName, schemaName)
+        || findSequence(candidateDbName, candidateObjectName, schemaName)
+        || findPackage(candidateDbName, candidateObjectName, schemaName)
     );
 
     if (parts.length === 1) {
@@ -1755,6 +1829,14 @@ export const resolveQueryEditorNavigationTarget = (
 
     const [dbName, schemaName, tableName] = parts;
     if (!visibleDbSet.has(dbName.toLowerCase())) {
+        const schemaQualifiedSequence = findSequence(currentDbName, schemaName, dbName);
+        if (schemaQualifiedSequence && ['nextval', 'currval'].includes(tableName.toLowerCase())) {
+            return schemaQualifiedSequence;
+        }
+        const schemaQualifiedPackage = findPackage(currentDbName, schemaName, dbName);
+        if (schemaQualifiedPackage) {
+            return schemaQualifiedPackage;
+        }
         return null;
     }
     return findObjectInPriorityOrder(dbName, tableName, schemaName);
@@ -1772,6 +1854,8 @@ export const resolveQueryEditorHoverTarget = (
     materializedViews: CompletionViewMeta[] = [],
     triggers: CompletionTriggerMeta[] = [],
     routines: CompletionRoutineMeta[] = [],
+    sequences: CompletionSequenceMeta[] = [],
+    packages: CompletionPackageMeta[] = [],
 ): QueryEditorHoverTarget | null => {
     const text = String(lineContent || '');
     if (!text) return null;
@@ -1820,6 +1904,8 @@ export const resolveQueryEditorHoverTarget = (
         materializedViews,
         triggers,
         routines,
+        sequences,
+        packages,
     );
     if (navigationTarget) {
         if (navigationTarget.type === 'database') {
@@ -1845,7 +1931,13 @@ export const resolveQueryEditorHoverTarget = (
         if (navigationTarget.type === 'trigger') {
             return { kind: 'trigger', dbName: navigationTarget.dbName, triggerName: navigationTarget.triggerName, tableName: navigationTarget.tableName, schemaName: navigationTarget.schemaName, range };
         }
-        return { kind: 'routine', dbName: navigationTarget.dbName, routineName: navigationTarget.routineName, routineType: navigationTarget.routineType, schemaName: navigationTarget.schemaName, range };
+        if (navigationTarget.type === 'routine') {
+            return { kind: 'routine', dbName: navigationTarget.dbName, routineName: navigationTarget.routineName, routineType: navigationTarget.routineType, schemaName: navigationTarget.schemaName, range };
+        }
+        if (navigationTarget.type === 'sequence') {
+            return { kind: 'sequence', dbName: navigationTarget.dbName, sequenceName: navigationTarget.sequenceName, schemaName: navigationTarget.schemaName, range };
+        }
+        return { kind: 'package', dbName: navigationTarget.dbName, packageName: navigationTarget.packageName, schemaName: navigationTarget.schemaName, range };
     }
 
     const findColumnTarget = (dbName: string, tableName: string, columnName: string): QueryEditorHoverTarget | null => {
@@ -1930,6 +2022,8 @@ export const resolveQueryEditorNavigationDecorations = (
     materializedViews: CompletionViewMeta[] = [],
     triggers: CompletionTriggerMeta[] = [],
     routines: CompletionRoutineMeta[] = [],
+    sequences: CompletionSequenceMeta[] = [],
+    packages: CompletionPackageMeta[] = [],
     shortcutModifierLabel = 'Ctrl/Cmd',
 ): Array<{ startColumn: number; endColumn: number; hoverMessage: string }> => {
     const text = String(lineContent || '');
@@ -1948,6 +2042,8 @@ export const resolveQueryEditorNavigationDecorations = (
         materializedViews,
         triggers,
         routines,
+        sequences,
+        packages,
     );
     if (!navigationTarget) return [];
 
@@ -1974,6 +2070,16 @@ export const resolveQueryEditorNavigationDecorations = (
         }
         if (navigationTarget.type === 'trigger') {
             return translate('query_editor.hover.open_trigger_with_shortcut', {
+                shortcut: shortcutModifierLabel,
+            });
+        }
+        if (navigationTarget.type === 'sequence') {
+            return translate('query_editor.hover.open_sequence_with_shortcut', {
+                shortcut: shortcutModifierLabel,
+            });
+        }
+        if (navigationTarget.type === 'package') {
+            return translate('query_editor.hover.open_package_with_shortcut', {
                 shortcut: shortcutModifierLabel,
             });
         }

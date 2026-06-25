@@ -1191,6 +1191,8 @@ describe("i18n catalog", () => {
       "query_editor.hover.open_trigger_with_shortcut",
       "query_editor.hover.open_procedure_with_shortcut",
       "query_editor.hover.open_function_with_shortcut",
+      "query_editor.hover.open_sequence_with_shortcut",
+      "query_editor.hover.open_package_with_shortcut",
     ] as const;
     const source = readQueryEditorHelpersSource();
     const hoverMessageSource = sliceBetween(
@@ -1929,7 +1931,7 @@ describe("i18n catalog", () => {
     const oracleRowIdFallbackSource = sliceBetween(
       source,
       "        if (executableAppendExpressions.length > 0 && isOracleLikeDialect(dbType) && selectInfo.selectsBareAll) {",
-      "        plan.executedSql = appendQuerySelectExpressions(statement, executableAppendExpressions);",
+      "        plan.executedSql = appendQuerySelectExpressions(executableStatement, executableAppendExpressions);",
     );
 
     for (const language of SUPPORTED_LANGUAGES) {

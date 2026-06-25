@@ -419,6 +419,55 @@ describe('DefinitionViewer object edit entry', () => {
     expect(editQuery).toContain('END sync_order;');
   });
 
+  it('keeps Oracle routine SQLPlus slash delimiters executable when opening object edit', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1 AS\n' },
+          { TEXT: 'BEGIN\n' },
+          { TEXT: '  NULL;\n' },
+          { TEXT: 'END cproc_tzhssr_order2sale_A1;\n' },
+          { TEXT: '/\n' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1 AS\n' },
+          { TEXT: 'BEGIN\n' },
+          { TEXT: '  NULL;\n' },
+          { TEXT: 'END cproc_tzhssr_order2sale_A1;\n' },
+          { TEXT: '/\n' },
+        ],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(createTab({
+        id: 'routine-def-conn-1-H2-H2.CPROC_TZHSSR_ORDER2SALE_A1',
+        title: 'Procedure: H2.CPROC_TZHSSR_ORDER2SALE_A1',
+        type: 'routine-def',
+        routineName: 'H2.CPROC_TZHSSR_ORDER2SALE_A1',
+        routineType: 'PROCEDURE',
+        viewName: undefined,
+        viewKind: undefined,
+      })));
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    const editQuery = String(storeState.addTab.mock.calls[0][0].query || '');
+    expect(editQuery).toContain('END cproc_tzhssr_order2sale_A1;\n/');
+    expect(editQuery).not.toContain('/;');
+  });
+
   it('reloads the latest object definition before opening object edit', async () => {
     backendApp.DBQuery
       .mockResolvedValueOnce({
