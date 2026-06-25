@@ -205,6 +205,8 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
   let dollarTag: string | null = null;
   let plsqlDepth = 0;
   let plsqlDeclareBeginSkips = 0;
+  let plsqlCaseDepth = 0;
+  let skipNextPlsqlCaseEndToken = false;
   let justClosedPLSQLBlock = false;
 
   const push = (end: number) => {
@@ -309,6 +311,16 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
         tokenEnd++;
       }
       const token = text.slice(index, tokenEnd).toLowerCase();
+      if (token === 'case' && plsqlDepth > 0) {
+        if (skipNextPlsqlCaseEndToken) {
+          skipNextPlsqlCaseEndToken = false;
+        } else {
+          plsqlCaseDepth++;
+          justClosedPLSQLBlock = false;
+        }
+      } else if (token !== 'case') {
+        skipNextPlsqlCaseEndToken = false;
+      }
       if (token === 'begin' && plsqlDeclareBeginSkips > 0) {
         plsqlDeclareBeginSkips--;
         justClosedPLSQLBlock = false;
@@ -325,10 +337,19 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
           plsqlDeclareBeginSkips++;
         }
         justClosedPLSQLBlock = false;
+      } else if (token === 'end' && plsqlDepth > 0 && plsqlCaseDepth > 0) {
+        plsqlCaseDepth--;
+        if (nextSqlSignificantToken(text, tokenEnd) === 'case') {
+          skipNextPlsqlCaseEndToken = true;
+        }
+        justClosedPLSQLBlock = false;
       } else if (token === 'end' && plsqlDepth > 0 && !isPlsqlControlEnd(text, tokenEnd)) {
         plsqlDepth--;
         if (plsqlDeclareBeginSkips > plsqlDepth) {
           plsqlDeclareBeginSkips = plsqlDepth;
+        }
+        if (plsqlCaseDepth > plsqlDepth) {
+          plsqlCaseDepth = plsqlDepth;
         }
         justClosedPLSQLBlock = plsqlDepth === 0;
       }

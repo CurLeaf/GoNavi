@@ -21,6 +21,8 @@ func splitSQLStatements(sql string) []string {
 	var dollarTag string // postgres/kingbase: $$...$$ or $tag$...$tag$
 	plsqlDepth := 0
 	plsqlDeclareBeginSkips := 0
+	plsqlCaseDepth := 0
+	skipNextPLSQLCaseEndToken := false
 	justClosedPLSQLBlock := false
 
 	push := func() {
@@ -119,6 +121,16 @@ func splitSQLStatements(sql string) []string {
 				tokenEnd++
 			}
 			token := strings.ToLower(text[tokenStart:tokenEnd])
+			if token == "case" && plsqlDepth > 0 {
+				if skipNextPLSQLCaseEndToken {
+					skipNextPLSQLCaseEndToken = false
+				} else {
+					plsqlCaseDepth++
+					justClosedPLSQLBlock = false
+				}
+			} else if token != "case" {
+				skipNextPLSQLCaseEndToken = false
+			}
 			if token == "begin" && plsqlDeclareBeginSkips > 0 {
 				plsqlDeclareBeginSkips--
 				justClosedPLSQLBlock = false
@@ -135,10 +147,19 @@ func splitSQLStatements(sql string) []string {
 					plsqlDeclareBeginSkips++
 				}
 				justClosedPLSQLBlock = false
+			} else if token == "end" && plsqlDepth > 0 && plsqlCaseDepth > 0 {
+				plsqlCaseDepth--
+				if nextSQLSignificantToken(text, tokenEnd) == "case" {
+					skipNextPLSQLCaseEndToken = true
+				}
+				justClosedPLSQLBlock = false
 			} else if token == "end" && plsqlDepth > 0 && !isPLSQLControlEnd(text, tokenEnd) {
 				plsqlDepth--
 				if plsqlDeclareBeginSkips > plsqlDepth {
 					plsqlDeclareBeginSkips = plsqlDepth
+				}
+				if plsqlCaseDepth > plsqlDepth {
+					plsqlCaseDepth = plsqlDepth
 				}
 				justClosedPLSQLBlock = plsqlDepth == 0
 			}

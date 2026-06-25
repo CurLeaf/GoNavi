@@ -436,6 +436,57 @@ END;`
 	}
 }
 
+func TestDBQueryMultiKeepsOracleCreateProcedureCursorCaseExpressionAsSingleStatement(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeBatchWriteDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type: "oracle",
+		Host: "127.0.0.1",
+		Port: 1521,
+		User: "app",
+	}
+	query := `CREATE OR REPLACE PROCEDURE proc_accept_to_add(
+    p_acceptno IN t_accept_h.acceptno%TYPE
+) IS
+    CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS
+        SELECT si.compid, si.batid, si.wareid
+        FROM   t_store_i si
+        ORDER  BY CASE
+                      WHEN p_ind = '1' THEN
+                       to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))
+                      WHEN p_ind = '2' THEN
+                       lpad(to_char(floor(si.wareqty)), 10, '0')
+                      ELSE
+                       to_char(si.batid)
+                  END,si.batid;
+BEGIN
+    NULL;
+END;`
+
+	result := app.DBQueryMulti(config, "ORCLPDB1", query, "oracle-create-procedure-cursor-case-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.batchCalls != 0 {
+		t.Fatalf("expected CREATE PROCEDURE to skip batch path, got batchCalls=%d", fakeDB.batchCalls)
+	}
+	if fakeDB.execCalls != 1 || len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one sequential exec call, got execCalls=%d queries=%#v", fakeDB.execCalls, fakeDB.execQueries)
+	}
+	if fakeDB.execQueries[0] != query {
+		t.Fatalf("expected CREATE PROCEDURE to stay intact, got %q", fakeDB.execQueries[0])
+	}
+}
+
 func TestDBQueryMultiSkipsOracleSqlPlusSlashDelimiter(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {

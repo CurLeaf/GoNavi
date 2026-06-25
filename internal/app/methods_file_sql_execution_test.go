@@ -436,6 +436,66 @@ func TestStreamSQLFileKeepsOracleCreateProcedureTogether(t *testing.T) {
 	}
 }
 
+func TestStreamSQLFileKeepsOracleCreateProcedureCursorCaseExpressionTogether(t *testing.T) {
+	input := strings.Join([]string{
+		"CREATE OR REPLACE PROCEDURE proc_accept_to_add(",
+		"  p_acceptno IN t_accept_h.acceptno%TYPE",
+		") IS",
+		"  CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS",
+		"    SELECT si.compid, si.batid, si.wareid",
+		"    FROM t_store_i si",
+		"    ORDER BY CASE",
+		"      WHEN p_ind = '1' THEN",
+		"        to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))",
+		"      WHEN p_ind = '2' THEN",
+		"        lpad(to_char(floor(si.wareqty)), 10, '0')",
+		"      ELSE",
+		"        to_char(si.batid)",
+		"    END,si.batid;",
+		"BEGIN",
+		"  NULL;",
+		"END;",
+		"/",
+		"SELECT 1 FROM dual;",
+	}, "\n")
+	var statements []string
+
+	count, err := streamSQLFile(&chunkedReader{data: []byte(input), step: 4}, func(index int, stmt string) error {
+		statements = append(statements, stmt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamSQLFile returned error: %v", err)
+	}
+	if count != 2 || len(statements) != 2 {
+		t.Fatalf("expected 2 statements, got count=%d statements=%#v", count, statements)
+	}
+	if statements[0] != strings.Join([]string{
+		"CREATE OR REPLACE PROCEDURE proc_accept_to_add(",
+		"  p_acceptno IN t_accept_h.acceptno%TYPE",
+		") IS",
+		"  CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS",
+		"    SELECT si.compid, si.batid, si.wareid",
+		"    FROM t_store_i si",
+		"    ORDER BY CASE",
+		"      WHEN p_ind = '1' THEN",
+		"        to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))",
+		"      WHEN p_ind = '2' THEN",
+		"        lpad(to_char(floor(si.wareqty)), 10, '0')",
+		"      ELSE",
+		"        to_char(si.batid)",
+		"    END,si.batid;",
+		"BEGIN",
+		"  NULL;",
+		"END;",
+	}, "\n") {
+		t.Fatalf("unexpected create procedure statement: %q", statements[0])
+	}
+	if statements[1] != "SELECT 1 FROM dual" {
+		t.Fatalf("unexpected second statement: %q", statements[1])
+	}
+}
+
 func TestStreamSQLFileSkipsOracleSqlPlusSlashDelimiter(t *testing.T) {
 	input := strings.Join([]string{
 		"CREATE OR REPLACE PROCEDURE proc_tally2accept(",

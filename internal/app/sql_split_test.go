@@ -251,6 +251,52 @@ END;`,
 	}
 }
 
+func TestSplitSQLStatements_OracleCreateProcedureKeepsCursorCaseExpression(t *testing.T) {
+	input := `CREATE OR REPLACE PROCEDURE proc_accept_to_add(
+    p_acceptno IN t_accept_h.acceptno%TYPE
+) IS
+    CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS
+        SELECT si.compid, si.batid, si.wareid
+        FROM   t_store_i si
+        ORDER  BY CASE
+                      WHEN p_ind = '1' THEN
+                       to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))
+                      WHEN p_ind = '2' THEN
+                       lpad(to_char(floor(si.wareqty)), 10, '0')
+                      ELSE
+                       to_char(si.batid)
+                  END,si.batid;
+BEGIN
+    NULL;
+END;
+/
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`CREATE OR REPLACE PROCEDURE proc_accept_to_add(
+    p_acceptno IN t_accept_h.acceptno%TYPE
+) IS
+    CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS
+        SELECT si.compid, si.batid, si.wareid
+        FROM   t_store_i si
+        ORDER  BY CASE
+                      WHEN p_ind = '1' THEN
+                       to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))
+                      WHEN p_ind = '2' THEN
+                       lpad(to_char(floor(si.wareqty)), 10, '0')
+                      ELSE
+                       to_char(si.batid)
+                  END,si.batid;
+BEGIN
+    NULL;
+END;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
 func TestSplitSQLStatements_OracleCreateProcedureSkipsCommentedSqlPlusSlashDelimiter(t *testing.T) {
 	input := `-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1
 -- 请确认语法兼容当前数据库后执行

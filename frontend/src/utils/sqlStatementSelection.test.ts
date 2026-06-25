@@ -175,6 +175,63 @@ describe('sqlStatementSelection', () => {
     });
   });
 
+  it('keeps Oracle CREATE PROCEDURE cursor CASE expressions as one executable statement', () => {
+    const sql = [
+      'CREATE OR REPLACE PROCEDURE proc_accept_to_add(',
+      '  p_acceptno IN t_accept_h.acceptno%TYPE',
+      ') IS',
+      '  CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS',
+      '    SELECT si.compid, si.batid, si.wareid',
+      '    FROM t_store_i si',
+      '    ORDER BY CASE',
+      "      WHEN p_ind = '1' THEN",
+      "        to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))",
+      "      WHEN p_ind = '2' THEN",
+      "        lpad(to_char(floor(si.wareqty)), 10, '0')",
+      '      ELSE',
+      '        to_char(si.batid)',
+      '    END,si.batid;',
+      'BEGIN',
+      '  NULL;',
+      'END;',
+      '/',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'CREATE OR REPLACE PROCEDURE proc_accept_to_add(',
+        '  p_acceptno IN t_accept_h.acceptno%TYPE',
+        ') IS',
+        '  CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS',
+        '    SELECT si.compid, si.batid, si.wareid',
+        '    FROM t_store_i si',
+        '    ORDER BY CASE',
+        "      WHEN p_ind = '1' THEN",
+        "        to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))",
+        "      WHEN p_ind = '2' THEN",
+        "        lpad(to_char(floor(si.wareqty)), 10, '0')",
+        '      ELSE',
+        '        to_char(si.batid)',
+        '    END,si.batid;',
+        'BEGIN',
+        '  NULL;',
+        'END;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('ORDER BY CASE'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+    expect(resolveExecutableSql(sql, sql.indexOf('NULL'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+  });
+
   it('skips SQL*Plus slash delimiter comments after named Oracle procedure endings', () => {
     const sql = [
       '-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1',

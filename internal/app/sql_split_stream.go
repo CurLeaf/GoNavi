@@ -20,6 +20,8 @@ type sqlStreamSplitter struct {
 	dollarTag      string
 	plsqlDepth     int
 	declareSkips   int
+	plsqlCaseDepth int
+	skipCaseEnd    bool
 	closedPLSQL    bool
 }
 
@@ -136,6 +138,16 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 				s.pending = text[tokenStart:]
 				break
 			}
+			if token == "case" && s.plsqlDepth > 0 {
+				if s.skipCaseEnd {
+					s.skipCaseEnd = false
+				} else {
+					s.plsqlCaseDepth++
+					s.closedPLSQL = false
+				}
+			} else if token != "case" {
+				s.skipCaseEnd = false
+			}
 			if token == "begin" && s.declareSkips > 0 {
 				s.declareSkips--
 				s.closedPLSQL = false
@@ -152,10 +164,19 @@ func (s *sqlStreamSplitter) Feed(chunk []byte) []string {
 					s.declareSkips++
 				}
 				s.closedPLSQL = false
+			} else if token == "end" && s.plsqlDepth > 0 && s.plsqlCaseDepth > 0 {
+				s.plsqlCaseDepth--
+				if nextSQLSignificantToken(text, tokenEnd) == "case" {
+					s.skipCaseEnd = true
+				}
+				s.closedPLSQL = false
 			} else if token == "end" && s.plsqlDepth > 0 && !isPLSQLControlEnd(text, tokenEnd) {
 				s.plsqlDepth--
 				if s.declareSkips > s.plsqlDepth {
 					s.declareSkips = s.plsqlDepth
+				}
+				if s.plsqlCaseDepth > s.plsqlDepth {
+					s.plsqlCaseDepth = s.plsqlDepth
 				}
 				s.closedPLSQL = s.plsqlDepth == 0
 			}
