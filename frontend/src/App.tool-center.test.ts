@@ -103,6 +103,60 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain("borderBottom: `1px solid ${overlayTheme.divider}`");
   });
 
+  it('lets the tool center detail header own embedded tool titles', () => {
+    const renderPaneStart = appSource.indexOf('const renderToolCenterPane = () => {');
+    const renderPaneSource = appSource.slice(
+      renderPaneStart,
+      appSource.indexOf('};\n\n            return (', renderPaneStart),
+    );
+    const connectionPackageSource = renderPaneSource.slice(
+      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'connection-package')"),
+      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'data-root')"),
+    );
+    const dataRootSource = renderPaneSource.slice(
+      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'data-root')"),
+      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'security-update')"),
+    );
+    const securityUpdateSource = renderPaneSource.slice(
+      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'security-update')"),
+      renderPaneSource.indexOf("activeToolCenterPane.key === 'schema-compare'"),
+    );
+    const dataSyncSource = renderPaneSource.slice(
+      renderPaneSource.indexOf("activeToolCenterPane.key === 'schema-compare'"),
+      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'drivers')"),
+    );
+    const driverSource = renderPaneSource.slice(
+      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'drivers')"),
+      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'snippet-settings')"),
+    );
+    const snippetSource = renderPaneSource.slice(
+      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'snippet-settings')"),
+      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'shortcut-settings')"),
+    );
+    const shortcutSource = renderPaneSource.slice(
+      renderPaneSource.indexOf("if (activeToolCenterPane.key === 'shortcut-settings')"),
+      renderPaneSource.indexOf('return null;', renderPaneSource.indexOf("if (activeToolCenterPane.key === 'shortcut-settings')")),
+    );
+
+    expect(appSource).toContain('activeToolCenterPaneItem?.title ?? activeToolCenterGroup.title');
+    expect(connectionPackageSource).toContain('<ConnectionPackagePasswordModal');
+    expect(connectionPackageSource).not.toContain('renderUtilityModalTitle');
+    expect(dataRootSource).toContain('title={null}');
+    expect(dataRootSource).toContain('closable={false}');
+    expect(dataRootSource).not.toContain('renderUtilityModalTitle');
+    expect(securityUpdateSource).toContain('<SecurityUpdateSettingsModal');
+    expect(securityUpdateSource).not.toContain('renderUtilityModalTitle');
+    expect(dataSyncSource).toContain('<DataSyncModal');
+    expect(dataSyncSource).not.toContain('renderUtilityModalTitle');
+    expect(driverSource).toContain('<DriverManagerModal');
+    expect(driverSource).not.toContain('renderUtilityModalTitle');
+    expect(snippetSource).toContain('<SnippetSettingsModal');
+    expect(snippetSource).not.toContain('renderUtilityModalTitle');
+    expect(shortcutSource).toContain('title={null}');
+    expect(shortcutSource).toContain('closable={false}');
+    expect(shortcutSource).not.toContain('renderUtilityModalTitle');
+  });
+
   it('keeps the v2 AI entry in the sidebar and the legacy AI entry on the content edge', () => {
     expect(appSource).toContain('onToggleAI={toggleAIPanel}');
     expect(appSource).toContain('renderLegacyAIEdgeHandle');

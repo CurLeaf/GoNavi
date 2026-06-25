@@ -134,6 +134,11 @@ describe('SecurityUpdateSettingsModal i18n source guards', () => {
     expect(source).not.toContain('当前项需要进一步处理后才能完成安全更新。');
   });
 
+  it('lets the tool center provide the title when embedded', () => {
+    expect(source).toContain('title={embedded ? null : (');
+    expect(source).toContain('closable={embedded ? false : undefined}');
+  });
+
   it('localizes settings chrome while preserving raw issue details, backup path and error text', async () => {
     const modalText = await renderSettingsModalText();
     expect(modalText).toContain('Security Update');

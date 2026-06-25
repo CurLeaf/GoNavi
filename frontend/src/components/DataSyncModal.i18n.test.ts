@@ -109,4 +109,10 @@ describe("DataSyncModal i18n", () => {
       /tr\(\s*(['"])data_sync\.compare_entry\.preview\.sql\.data_help\1/,
     );
   });
+
+  it('hides the modal hero when embedded in the tool center', () => {
+    expect(source).toContain('{!embedded && (');
+    expect(source).toContain('<div style={heroPanelStyle}>');
+    expect(source).toMatch(/embedded\s*\?\s*\(\s*dataSyncContent\s*\)/);
+  });
 });

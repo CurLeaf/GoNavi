@@ -931,6 +931,8 @@ describe("i18n catalog", () => {
     expect(passwordModalSource).not.toContain("密码已加密保护。如需通过公网传输，建议设置文件保护密码。");
     expect(passwordModalSource).not.toContain("导出连接密码");
     expect(passwordModalSource).not.toContain("设置文件保护密码");
+    expect(passwordModalSource).toContain("title={embedded ? null : (");
+    expect(passwordModalSource).toContain("closable={embedded ? false : undefined}");
   });
 
   it("keeps QueryEditor format settings menu labels in catalogs instead of source literals", () => {

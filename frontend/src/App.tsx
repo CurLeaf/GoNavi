@@ -3401,11 +3401,8 @@ function App() {
                   <Modal
                     embedded
                     open
-                    title={renderUtilityModalTitle(
-                      <HddOutlined />,
-                      t('app.data_root.title'),
-                      t('app.data_root.description'),
-                    )}
+                    title={null}
+                    closable={false}
                     onCancel={closeToolCenterPane}
                     footer={[
                       <Button key="close" onClick={closeToolCenterPane}>
@@ -3551,11 +3548,8 @@ function App() {
                   <Modal
                     embedded
                     open
-                    title={renderUtilityModalTitle(
-                      <LinkOutlined />,
-                      t('app.shortcuts.title'),
-                      t('app.shortcuts.description'),
-                    )}
+                    title={null}
+                    closable={false}
                     onCancel={() => {
                       setCapturingShortcutAction(null);
                       closeToolCenterPane();

@@ -64,9 +64,10 @@ export default function ConnectionPackagePasswordModal({
     <Modal
       open={open}
       embedded={embedded}
-      title={(
+      title={embedded ? null : (
         <span style={{ minWidth: 0 }}>{title}</span>
       )}
+      closable={embedded ? false : undefined}
       onCancel={onCancel}
       destroyOnHidden={false}
       maskClosable={false}
