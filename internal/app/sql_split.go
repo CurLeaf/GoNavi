@@ -281,9 +281,14 @@ func scanSQLStandaloneSlashLineSuffix(text string, pos int) (lineEnd int, standa
 	if pos < 0 || pos >= len(text) || text[pos] != '/' {
 		return 0, false, true
 	}
+	seenOptionalSemicolon := false
 	for i := pos + 1; i < len(text); i++ {
 		if text[i] == '\n' {
 			return i, true, true
+		}
+		if text[i] == ';' && !seenOptionalSemicolon {
+			seenOptionalSemicolon = true
+			continue
 		}
 		if text[i] == '-' {
 			if i+1 >= len(text) {

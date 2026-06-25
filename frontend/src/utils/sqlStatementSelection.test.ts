@@ -285,6 +285,103 @@ describe('sqlStatementSelection', () => {
     });
   });
 
+  it('keeps large Oracle procedures intact when the cursor is in the exception tail', () => {
+    const sql = [
+      '-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1',
+      '-- 请确认语法兼容当前数据库后执行',
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+      '  p_sourceid IN VARCHAR2,',
+      '  p_msg_out OUT NVARCHAR2',
+      ') AS',
+      '  v_ecnt NUMBER;',
+      '  CURSOR cur_ware IS',
+      '    SELECT d.goodsid, d.goodsqty',
+      '    FROM t_order_d d',
+      '    ORDER BY CASE',
+      "      WHEN d.goodsqty > 0 THEN '1'",
+      "      ELSE '2'",
+      '    END, d.goodsid;',
+      'BEGIN',
+      '  FOR row_ware IN cur_ware LOOP',
+      '    IF row_ware.goodsqty > 0 THEN',
+      '      BEGIN',
+      '        SELECT COUNT(*) INTO v_ecnt FROM dual;',
+      '      EXCEPTION',
+      '        WHEN no_data_found THEN',
+      '          v_ecnt := 0;',
+      '      END;',
+      '    ELSE',
+      '      BEGIN',
+      '        v_ecnt := 0;',
+      '      END;',
+      '    END IF;',
+      '  END LOOP;',
+      "  p_msg_out := '';",
+      'EXCEPTION',
+      '  WHEN OTHERS THEN',
+      "    p_msg_out := substr('订单核销失败，错误信息：' || SQLERRM || '，错误位置：' ||",
+      '                        dbms_utility.format_error_backtrace, 1, 1000);',
+      'END cproc_tzhssr_order2sale_A1;',
+      '/ -- SQLPlus delimiter from PL/SQL tools',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toHaveLength(2);
+    expect(ranges[0]).toContain('CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1');
+    expect(ranges[0]).toContain('p_msg_out OUT NVARCHAR2');
+    expect(ranges[0]).toContain('EXCEPTION');
+    expect(ranges[0]).toContain('END cproc_tzhssr_order2sale_A1;');
+    expect(ranges[1]).toBe('SELECT 1 FROM dual');
+    expect(resolveExecutableSql(sql, sql.indexOf('p_msg_out := substr'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+    expect(resolveExecutableSql(sql, sql.indexOf('/ -- SQLPlus delimiter'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+    expect(resolveCurrentSqlStatementRange(sql, sql.indexOf('/ -- SQLPlus delimiter'))?.text).toBe(ranges[0]);
+  });
+
+  it('skips optional semicolons after SQL*Plus slash delimiters', () => {
+    const sql = [
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+      '  p_msg_out OUT NVARCHAR2',
+      ') AS',
+      'BEGIN',
+      "  p_msg_out := '';",
+      'EXCEPTION',
+      '  WHEN OTHERS THEN',
+      '    p_msg_out := SQLERRM;',
+      'END cproc_tzhssr_order2sale_A1;',
+      '/;',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+        '  p_msg_out OUT NVARCHAR2',
+        ') AS',
+        'BEGIN',
+        "  p_msg_out := '';",
+        'EXCEPTION',
+        '  WHEN OTHERS THEN',
+        '    p_msg_out := SQLERRM;',
+        'END cproc_tzhssr_order2sale_A1;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('/;'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+  });
+
   it('keeps Oracle PACKAGE specification and body definitions as complete executable statements', () => {
     const sql = [
       'CREATE OR REPLACE PACKAGE pkg_order AS',

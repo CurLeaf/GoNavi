@@ -742,6 +742,134 @@ describe('QueryEditor external SQL save', () => {
     renderer?.unmount();
   });
 
+  it('runs the whole Oracle procedure when the cursor is in the exception tail', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['affectedRows'], rows: [{ affectedRows: 1 }] }],
+    });
+    const plsql = [
+      '-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1',
+      '-- 请确认语法兼容当前数据库后执行',
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+      '  p_sourceid IN VARCHAR2,',
+      '  p_msg_out OUT NVARCHAR2',
+      ') AS',
+      '  v_ecnt NUMBER;',
+      '  CURSOR cur_ware IS',
+      '    SELECT d.goodsid',
+      '    FROM t_order_d d',
+      '    ORDER BY CASE',
+      "      WHEN d.goodsqty > 0 THEN '1'",
+      "      ELSE '2'",
+      '    END, d.goodsid;',
+      'BEGIN',
+      '  FOR row_ware IN cur_ware LOOP',
+      '    IF row_ware.goodsid IS NOT NULL THEN',
+      '      BEGIN',
+      '        SELECT COUNT(*) INTO v_ecnt FROM dual;',
+      '      EXCEPTION',
+      '        WHEN no_data_found THEN',
+      '          v_ecnt := 0;',
+      '      END;',
+      '    END IF;',
+      '  END LOOP;',
+      "  p_msg_out := '';",
+      'EXCEPTION',
+      '  WHEN OTHERS THEN',
+      "    p_msg_out := substr('订单核销失败，错误信息：' || SQLERRM || '，错误位置：' ||",
+      '                        dbms_utility.format_error_backtrace, 1, 1000);',
+      'END cproc_tzhssr_order2sale_A1;',
+      '/;',
+    ].join('\n');
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ORCLPDB1', query: plsql, queryMode: 'object-edit' })} />);
+    });
+
+    const tailLine = plsql.split('\n').findIndex((line) => line.includes('p_msg_out := substr')) + 1;
+    editorState.position = { lineNumber: tailLine, column: 5 };
+    editorState.selection = {
+      startLineNumber: tailLine,
+      startColumn: 5,
+      endLineNumber: tailLine,
+      endColumn: 5,
+      positionLineNumber: tailLine,
+      positionColumn: 5,
+    };
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
+    expect(executedSql).toContain('CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1');
+    expect(executedSql).toContain('p_msg_out OUT NVARCHAR2');
+    expect(executedSql).toContain('p_msg_out := substr');
+    expect(executedSql).not.toBe(plsql.split('\n').slice(tailLine - 1).join('\n'));
+    expect(executedSql).not.toContain('/;');
+    renderer?.unmount();
+  });
+
+  it('runs the preceding Oracle procedure when the cursor is on the SQLPlus slash delimiter', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['affectedRows'], rows: [{ affectedRows: 1 }] }],
+    });
+    const plsql = [
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+      '  p_sourceid IN VARCHAR2,',
+      '  p_msg_out OUT NVARCHAR2',
+      ') AS',
+      'BEGIN',
+      "  p_msg_out := '';",
+      'EXCEPTION',
+      '  WHEN OTHERS THEN',
+      '    p_msg_out := SQLERRM;',
+      'END cproc_tzhssr_order2sale_A1;',
+      '/;',
+    ].join('\n');
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ORCLPDB1', query: plsql, queryMode: 'object-edit' })} />);
+    });
+
+    const slashLine = plsql.split('\n').findIndex((line) => line.startsWith('/')) + 1;
+    editorState.position = { lineNumber: slashLine, column: 1 };
+    editorState.selection = {
+      startLineNumber: slashLine,
+      startColumn: 1,
+      endLineNumber: slashLine,
+      endColumn: 1,
+      positionLineNumber: slashLine,
+      positionColumn: 1,
+    };
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
+    expect(executedSql).toContain('CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1');
+    expect(executedSql).toContain('p_msg_out OUT NVARCHAR2');
+    expect(executedSql).toContain('END cproc_tzhssr_order2sale_A1;');
+    expect(executedSql).not.toContain('/;');
+    renderer?.unmount();
+  });
+
   it('renders result grid for sqlserver exec statements that return rows', async () => {
     storeState.connections[0].config.type = 'sqlserver';
     storeState.connections[0].config.database = 'master';

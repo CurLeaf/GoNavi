@@ -74,7 +74,13 @@ const resolveStandaloneSqlSlashLineEnd = (text: string, index: number): number |
   }
 
   let lineEnd = index + 1;
+  let seenOptionalSemicolon = false;
   while (lineEnd < text.length && text[lineEnd] !== '\n') {
+    if (text[lineEnd] === ';' && !seenOptionalSemicolon) {
+      seenOptionalSemicolon = true;
+      lineEnd += 1;
+      continue;
+    }
     if (text[lineEnd] === '-' && text[lineEnd + 1] === '-') {
       while (lineEnd < text.length && text[lineEnd] !== '\n') {
         lineEnd += 1;
@@ -88,6 +94,37 @@ const resolveStandaloneSqlSlashLineEnd = (text: string, index: number): number |
   }
   return lineEnd;
 };
+
+const resolveStandaloneSqlSlashLineAtOffset = (
+  text: string,
+  offset: number,
+): { lineStart: number; lineEnd: number; slashIndex: number } | null => {
+  const lineStart = text.lastIndexOf('\n', Math.max(0, offset - 1)) + 1;
+  const nextLineBreak = text.indexOf('\n', lineStart);
+  const lineEnd = nextLineBreak === -1 ? text.length : nextLineBreak;
+
+  let slashIndex = lineStart;
+  while (slashIndex < lineEnd && isHorizontalWhitespace(text[slashIndex])) {
+    slashIndex += 1;
+  }
+  if (slashIndex >= lineEnd || text[slashIndex] !== '/') {
+    return null;
+  }
+
+  const resolvedLineEnd = resolveStandaloneSqlSlashLineEnd(text, slashIndex);
+  if (resolvedLineEnd === null || resolvedLineEnd !== lineEnd) {
+    return null;
+  }
+
+  return { lineStart, lineEnd, slashIndex };
+};
+
+const findPreviousSqlStatementRange = (
+  ranges: SqlStatementRange[],
+  offset: number,
+): SqlStatementRange | null => (
+  [...ranges].reverse().find((range) => range.end <= offset) || null
+);
 
 const shouldEnterPlsqlBeginBlock = (text: string, tokenEnd: number): boolean => {
   const nextChar = nextSqlSignificantChar(text, tokenEnd);
@@ -385,6 +422,11 @@ export const resolveCurrentSqlStatementRange = (sql: string, cursorOffset: numbe
     return containingRange;
   }
 
+  const slashLine = resolveStandaloneSqlSlashLineAtOffset(text, offset);
+  if (slashLine) {
+    return findPreviousSqlStatementRange(ranges, slashLine.lineStart);
+  }
+
   const nextRange = ranges.find((range) => offset < range.start);
   if (nextRange) {
     return nextRange;
@@ -409,6 +451,14 @@ export const resolveExecutableSql = (
   const statement = ranges.find((range) => offset >= range.start && offset <= range.end);
   if (statement?.text.trim()) {
     return { sql: statement.text, source: 'statement' };
+  }
+
+  const slashLine = resolveStandaloneSqlSlashLineAtOffset(text, offset);
+  if (slashLine) {
+    const previousStatement = findPreviousSqlStatementRange(ranges, slashLine.lineStart);
+    return previousStatement?.text.trim()
+      ? { sql: previousStatement.text, source: 'statement' }
+      : null;
   }
 
   const lineStart = text.lastIndexOf('\n', Math.max(0, offset - 1)) + 1;

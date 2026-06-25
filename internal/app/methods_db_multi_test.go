@@ -533,6 +533,56 @@ END;`
 	}
 }
 
+func TestDBQueryMultiSkipsOracleSqlPlusSlashDelimiterWithSemicolon(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeBatchWriteDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type: "oracle",
+		Host: "127.0.0.1",
+		Port: 1521,
+		User: "app",
+	}
+	query := `CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_msg_out OUT NVARCHAR2
+) AS
+BEGIN
+    p_msg_out := '';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := SQLERRM;
+END cproc_tzhssr_order2sale_A1;
+/;`
+	wantExecuted := `CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_msg_out OUT NVARCHAR2
+) AS
+BEGIN
+    p_msg_out := '';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := SQLERRM;
+END cproc_tzhssr_order2sale_A1;`
+
+	result := app.DBQueryMulti(config, "ORCLPDB1", query, "oracle-sqlplus-slash-semicolon-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.execCalls != 1 || len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one sequential exec call, got execCalls=%d queries=%#v", fakeDB.execCalls, fakeDB.execQueries)
+	}
+	if fakeDB.execQueries[0] != wantExecuted {
+		t.Fatalf("expected slash delimiter with semicolon to be skipped, got %q", fakeDB.execQueries[0])
+	}
+}
+
 func TestDBQueryMultiKeepsOraclePackageSpecAndBodyTogether(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {

@@ -343,6 +343,48 @@ END cproc_tzhssr_order2sale_A1;`,
 	}
 }
 
+func TestSplitSQLStatements_OracleCreateProcedureSkipsSemicolonAfterSqlPlusSlashDelimiter(t *testing.T) {
+	input := `-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1
+-- 请确认语法兼容当前数据库后执行
+CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_sourceid     IN VARCHAR2,
+    p_msg_out      OUT NVARCHAR2
+) AS
+    v_ecnt NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_ecnt FROM dual;
+    p_msg_out := '';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := substr('订单核销失败，错误信息：' || SQLERRM || '，错误位置：' ||
+                            dbms_utility.format_error_backtrace, 1, 1000);
+END cproc_tzhssr_order2sale_A1;
+/;
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1
+-- 请确认语法兼容当前数据库后执行
+CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_sourceid     IN VARCHAR2,
+    p_msg_out      OUT NVARCHAR2
+) AS
+    v_ecnt NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_ecnt FROM dual;
+    p_msg_out := '';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := substr('订单核销失败，错误信息：' || SQLERRM || '，错误位置：' ||
+                            dbms_utility.format_error_backtrace, 1, 1000);
+END cproc_tzhssr_order2sale_A1;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
 func TestSplitSQLStatements_OraclePackageSpecAndBodyStayWhole(t *testing.T) {
 	input := `CREATE OR REPLACE PACKAGE pkg_order AS
     PROCEDURE sync_order(p_id IN NUMBER);
