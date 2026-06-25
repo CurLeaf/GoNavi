@@ -2145,8 +2145,22 @@ body[data-ui-version="v2"] .gn-v2-active-connection-copy span {
 body[data-ui-version="v2"] .gn-v2-active-connection-actions {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   flex: 0 0 auto;
+}
+
+body[data-ui-version="v2"] .gn-v2-active-connection-query-action {
+  padding: 0 8px;
+  max-width: 96px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+body[data-ui-version="v2"] .gn-v2-active-connection-query-action > span:not(.anticon) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 body[data-ui-version="v2"] .gn-v2-explorer-search {

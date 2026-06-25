@@ -2554,6 +2554,24 @@ const Sidebar: React.FC<{
                     </div>
                 </div>
                 <div className="gn-v2-active-connection-actions">
+                    <Tooltip title={t('sidebar.menu.new_query')}>
+                        <Button
+                            size="small"
+                            type="text"
+                            className="gn-v2-active-connection-query-action"
+                            icon={<FileTextOutlined />}
+                            aria-label={t('sidebar.menu.new_query')}
+                            data-gonavi-new-query-action="true"
+                            disabled={!activeConnection}
+                            onClick={() => {
+                                if (activeConnection) {
+                                    handleV2ConnectionContextMenuAction(getConnectionNodeForAction(activeConnection), 'new-query');
+                                }
+                            }}
+                        >
+                            {t('sidebar.menu.new_query')}
+                        </Button>
+                    </Tooltip>
                     {onCreateConnection && (
                         <Tooltip title={t('connection.new')}>
                             <Button

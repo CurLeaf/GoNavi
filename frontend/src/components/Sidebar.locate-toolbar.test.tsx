@@ -745,6 +745,7 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('data-sidebar-batch-database-action="true"');
     expect(markup).toContain('data-sidebar-open-external-sql-file-action="true"');
     expect(markup).toContain('data-sidebar-locate-current-tab-action="true"');
+    expect(markup).toContain('data-gonavi-new-query-action="true"');
     expect(markup).toContain('data-gonavi-create-connection-action="true"');
     expect(markup).toContain('aria-label="AI 助手"');
     expect(markup).toContain('data-gonavi-ai-entry-action="true"');
@@ -1001,7 +1002,48 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-rail-tool \{[^}]*height: calc\(32px \* var\(--gn-ui-scale, 1\)\);/s);
     expect(css).toMatch(/\.gn-v2-rail-tool \{[^}]*width: calc\(24px \* var\(--gn-ui-scale, 1\)\);/s);
     expect(css).toMatch(/\.gn-v2-active-connection-trigger \{[^}]*height: 34px;[^}]*border: 0;[^}]*background: transparent;/s);
+    expect(css).toMatch(/\.gn-v2-active-connection-query-action \{[^}]*max-width: 96px;[^}]*font-size: 12px;/s);
     expect(css).not.toContain('.gn-v2-active-connection-trigger:hover');
+  });
+
+  it('shows a prominent v2 new query action before connection creation without reusing the plus icon', () => {
+    mocks.state.connections = [{
+      id: 'conn-local',
+      name: '开发240',
+      config: {
+        type: 'mysql',
+        host: 'front_end_sys_dev',
+        port: 3306,
+      },
+    }];
+    mocks.state.activeContext = { connectionId: 'conn-local', dbName: 'front_end_sys_dev' };
+    mocks.state.appearance = {
+      enabled: true,
+      opacity: 1,
+      blur: 0,
+      uiVersion: 'v2',
+    };
+
+    const markup = renderSidebarMarkup({ uiVersion: 'v2', onCreateConnection: mocks.noop });
+    const sidebarSource = readSourceFile('./Sidebar.tsx');
+    const headerSource = sidebarSource.slice(
+      sidebarSource.indexOf('<div className="gn-v2-active-connection-actions">'),
+      sidebarSource.indexOf('<Tooltip title={v2ConnectionActionsLabel}>', sidebarSource.indexOf('<div className="gn-v2-active-connection-actions">')),
+    );
+    const newQueryActionSource = headerSource.slice(
+      headerSource.indexOf('<Tooltip title={t(\'sidebar.menu.new_query\')}>'),
+      headerSource.indexOf('{onCreateConnection && ('),
+    );
+
+    expect(markup).toContain('data-gonavi-new-query-action="true"');
+    expect(markup).toContain('aria-label="新建查询"');
+    expect(markup).toContain('新建查询');
+    expect(markup.indexOf('data-gonavi-new-query-action="true"')).toBeLessThan(markup.indexOf('data-gonavi-create-connection-action="true"'));
+    expect(newQueryActionSource).toContain('icon={<FileTextOutlined />}');
+    expect(newQueryActionSource).not.toContain('icon={<PlusOutlined />}');
+    expect(newQueryActionSource).toContain("handleV2ConnectionContextMenuAction(getConnectionNodeForAction(activeConnection), 'new-query')");
+    expect(newQueryActionSource).not.toContain("handleV2ConnectionContextMenuAction(activeConnection, 'new-query')");
+    expect(newQueryActionSource).toContain('disabled={!activeConnection}');
   });
 
   it('keeps v2 explorer filter tabs on a single line when Oracle object filters are present', () => {
