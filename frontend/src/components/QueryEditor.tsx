@@ -35,6 +35,7 @@ import { resolveUniqueKeyGroupsFromIndexes } from './dataGridCopyInsert';
 import { t as translate } from '../i18n';
 import { buildSqlAnalysisWorkbenchTab } from '../utils/sqlAnalysisTab';
 import { isLocalizedUntitledQueryTitle } from '../utils/queryTabTitle';
+import { buildSqlServerObjectDefinitionQueries } from '../utils/sqlServerObjectDefinition';
 import {
     DUCKDB_ROWID_LOCATOR_COLUMN,
     ORACLE_ROWID_LOCATOR_COLUMN,
@@ -63,6 +64,7 @@ import {
     type CompletionTableMeta,
     type CompletionTriggerMeta,
     type CompletionViewMeta,
+    type QueryEditorNavigationTarget,
     type QueryStatementPlan,
     QUERY_EDITOR_HOVER_DELAY_MS,
     QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH,
@@ -88,7 +90,6 @@ import {
     clearQueryEditorObjectDecorations,
     collectQueryEditorObjectDecorationCandidates,
     collectQueryEditorReferencedDatabaseNames,
-    dispatchQueryEditorSidebarLocate,
     getCaseInsensitiveValue,
     getFirstRowValue,
     getNormalizedPositionAtOffset,
@@ -134,6 +135,52 @@ const buildQueryEditorMonacoActionLabel = (key: string): string =>
     `GoNavi: ${translate(key)}`;
 
 const QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER = '{SQL}';
+
+const escapeQueryEditorObjectEditSqlLiteral = (value: unknown): string => (
+    String(value || '').replace(/'/g, "''")
+);
+
+const getQueryEditorObjectEditRawValue = (row: Record<string, any>, candidateKeys: string[]): any => {
+    const keyMap = new Map<string, any>();
+    Object.keys(row || {}).forEach((key) => keyMap.set(key.toLowerCase(), row[key]));
+    for (const key of candidateKeys) {
+        if (keyMap.has(key.toLowerCase())) {
+            const value = keyMap.get(key.toLowerCase());
+            if (value !== undefined && value !== null) return value;
+        }
+    }
+    return undefined;
+};
+
+const normalizeQueryEditorRoutineDefinitionForEdit = (
+    definition: string,
+    routineName: string,
+    routineType: string,
+): string => {
+    const text = String(definition || '').trim();
+    if (!text) return '';
+    if (/^\s*create\b/i.test(text)) return text;
+    if (/^\s*(function|procedure)\b/i.test(text)) {
+        return `CREATE OR REPLACE ${text}`;
+    }
+    const normalizedType = String(routineType || 'FUNCTION').trim().toUpperCase().includes('PROC')
+        ? 'PROCEDURE'
+        : 'FUNCTION';
+    return `CREATE OR REPLACE ${normalizedType} ${routineName}\n${text}`;
+};
+
+const buildQueryEditorRoutineEditFallbackSql = (
+    routineName: string,
+    routineType: string,
+): string => {
+    const normalizedType = String(routineType || 'FUNCTION').trim().toUpperCase().includes('PROC')
+        ? 'PROCEDURE'
+        : 'FUNCTION';
+    if (normalizedType === 'PROCEDURE') {
+        return `CREATE OR REPLACE PROCEDURE ${routineName}()\nBEGIN\n    -- TODO: edit procedure body\nEND;`;
+    }
+    return `CREATE OR REPLACE FUNCTION ${routineName}()\nRETURNS INTEGER\nBEGIN\n    -- TODO: edit function body\n    RETURN 0;\nEND;`;
+};
 
 const buildQueryEditorAiContextPrompt = (connection: any, database: string): string => {
     if (!connection) {
@@ -1390,6 +1437,154 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       };
   }, [cancelEditorResizeFrame, handleMouseMove, handleMouseUp]);
 
+  const openRoutineObjectEditTab = useCallback(async (
+      navigationTarget: Extract<QueryEditorNavigationTarget, { type: 'routine' }>,
+      connectionId: string,
+      targetDbName: string,
+  ) => {
+      const targetRoutineName = String(navigationTarget.routineName || '').trim();
+      if (!targetRoutineName) return;
+
+      const normalizedRoutineType = String(navigationTarget.routineType || 'FUNCTION').trim().toUpperCase().includes('PROC')
+          ? 'PROCEDURE'
+          : 'FUNCTION';
+      const routineTypeLabel = normalizedRoutineType === 'PROCEDURE'
+          ? translate('sidebar.object.procedure')
+          : translate('sidebar.object.function');
+      const sqlTemplateHeader = `-- ${translate('sidebar.sql_template.edit_routine', {
+          type: routineTypeLabel,
+          name: targetRoutineName,
+      })}`;
+      let editSql = `${sqlTemplateHeader}\n-- ${translate('sidebar.sql_template.modify_then_execute')}\n${buildQueryEditorRoutineEditFallbackSql(targetRoutineName, normalizedRoutineType)}`;
+
+      const conn = connectionsRef.current.find((item) => item.id === connectionId);
+      if (conn) {
+          const dialect = normalizeMetadataDialect(conn);
+          const parsedRoutine = splitSidebarQualifiedName(targetRoutineName);
+          const routineObjectName = parsedRoutine.objectName || targetRoutineName;
+          const routineSchemaName = String(navigationTarget.schemaName || parsedRoutine.schemaName || '').trim();
+          const safeName = escapeQueryEditorObjectEditSqlLiteral(routineObjectName);
+          const safeSchema = escapeQueryEditorObjectEditSqlLiteral(routineSchemaName);
+          const safeDbName = escapeQueryEditorObjectEditSqlLiteral(targetDbName);
+          const config = {
+              ...conn.config,
+              port: Number(conn.config?.port),
+              password: conn.config?.password || '',
+              database: conn.config?.database || '',
+              useSSH: conn.config?.useSSH || false,
+              ssh: conn.config?.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
+          };
+          const queries = (() => {
+              switch (dialect) {
+                  case 'mysql':
+                  case 'starrocks':
+                      return [
+                          `SHOW CREATE ${normalizedRoutineType} \`${routineObjectName.replace(/`/g, '``')}\``,
+                          safeDbName
+                              ? `SELECT ROUTINE_DEFINITION AS routine_definition FROM information_schema.routines WHERE routine_schema = '${safeDbName}' AND routine_name = '${safeName}' AND UPPER(routine_type) = '${normalizedRoutineType}' LIMIT 1`
+                              : '',
+                      ].filter(Boolean);
+                  case 'postgres':
+                  case 'kingbase':
+                  case 'highgo':
+                  case 'vastbase':
+                  case 'opengauss':
+                  case 'gaussdb': {
+                      const schemaRef = safeSchema || 'public';
+                      return [`SELECT pg_get_functiondef(p.oid) AS routine_definition FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = '${schemaRef}' AND p.proname = '${safeName}' LIMIT 1`];
+                  }
+                  case 'sqlserver':
+                      return buildSqlServerObjectDefinitionQueries('routine', targetRoutineName, targetDbName, 'routine_definition');
+                  case 'oracle':
+                  case 'dm':
+                  case 'dameng': {
+                      const owner = safeSchema || safeDbName;
+                      return [
+                          owner
+                              ? `SELECT TEXT FROM ALL_SOURCE WHERE OWNER = '${owner.toUpperCase()}' AND NAME = '${safeName.toUpperCase()}' AND TYPE = '${normalizedRoutineType}' ORDER BY LINE`
+                              : `SELECT TEXT FROM USER_SOURCE WHERE NAME = '${safeName.toUpperCase()}' AND TYPE = '${normalizedRoutineType}' ORDER BY LINE`,
+                      ];
+                  }
+                  case 'duckdb': {
+                      const schemaRef = safeSchema || 'main';
+                      return [
+                          `SELECT schema_name, function_name, parameters, macro_definition FROM duckdb_functions() WHERE internal = false AND lower(function_type) = 'macro' AND schema_name = '${schemaRef}' AND function_name = '${safeName}' LIMIT 1`,
+                      ];
+                  }
+                  default:
+                      return [];
+              }
+          })();
+
+          for (const queryText of queries) {
+              try {
+                  const result = await DBQuery(buildRpcConnectionConfig(config) as any, targetDbName, queryText);
+                  if (!result.success || !Array.isArray(result.data) || result.data.length === 0) {
+                      continue;
+                  }
+                  let definition = '';
+                  if (dialect === 'oracle' || dialect === 'dm' || dialect === 'dameng') {
+                      definition = result.data.map((row: any) => row.text || row.TEXT || Object.values(row)[0] || '').join('');
+                  } else if (dialect === 'duckdb') {
+                      const row = result.data[0] as Record<string, any>;
+                      const schemaName = String(getQueryEditorObjectEditRawValue(row, ['schema_name']) || routineSchemaName || '').trim();
+                      const functionName = String(getQueryEditorObjectEditRawValue(row, ['function_name', 'routine_name', 'name']) || routineObjectName || '').trim();
+                      const parametersRaw = getQueryEditorObjectEditRawValue(row, ['parameters']);
+                      const macroDefinition = String(getQueryEditorObjectEditRawValue(row, ['macro_definition']) || '').trim();
+                      const parameters = Array.isArray(parametersRaw)
+                          ? parametersRaw.map((item) => String(item ?? '').trim()).filter(Boolean).join(', ')
+                          : String(parametersRaw ?? '').replace(/^\[|\]$/g, '').trim();
+                      const qualifiedName = schemaName ? `${schemaName}.${functionName}` : functionName;
+                      if (qualifiedName && macroDefinition) {
+                          definition = macroDefinition.startsWith('(')
+                              ? `CREATE OR REPLACE MACRO ${qualifiedName}(${parameters}) AS ${macroDefinition};`
+                              : `CREATE OR REPLACE MACRO ${qualifiedName}(${parameters}) AS TABLE ${macroDefinition};`;
+                      }
+                  } else if (dialect === 'sqlserver') {
+                      definition = result.data
+                          .map((row: any) => getQueryEditorObjectEditRawValue(row, ['routine_definition', 'definition', 'text', 'Text']) ?? '')
+                          .map((value) => String(value))
+                          .join('');
+                  } else {
+                      const row = result.data[0] as Record<string, any>;
+                      const direct = getQueryEditorObjectEditRawValue(row, ['routine_definition', 'definition']);
+                      if (direct !== undefined && direct !== null && String(direct).trim()) {
+                          definition = String(direct);
+                      } else {
+                          const createKey = Object.keys(row).find((key) => /create\s+(function|procedure)/i.test(key));
+                          definition = createKey ? String(row[createKey] || '') : '';
+                      }
+                  }
+
+                  const normalizedDefinition = normalizeQueryEditorRoutineDefinitionForEdit(
+                      definition,
+                      targetRoutineName,
+                      normalizedRoutineType,
+                  );
+                  if (normalizedDefinition) {
+                      editSql = `${sqlTemplateHeader}\n${normalizedDefinition}`;
+                      break;
+                  }
+              } catch {
+                  // 查询最新定义失败时保留可编辑模板。
+              }
+          }
+      }
+
+      addTab({
+          id: `query-edit-routine-${connectionId}-${targetDbName}-${targetRoutineName}-${Date.now()}`,
+          title: translate('sidebar.tab.edit_routine', {
+              type: routineTypeLabel,
+              name: targetRoutineName,
+          }),
+          type: 'query',
+          connectionId,
+          dbName: targetDbName,
+          query: editSql,
+          queryMode: 'object-edit',
+      });
+  }, [addTab]);
+
   // Setup Autocomplete and Editor
   const handleEditorDidMount: OnMount = (editor, monaco) => {
       editorRef.current = editor;
@@ -1716,9 +1911,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               return;
           }
 
-          setCurrentDb(targetDbName);
-          currentDbRef.current = targetDbName;
-          setActiveContext({ connectionId, dbName: targetDbName });
           if (navigationTarget.type === 'table') {
               const targetTableName = String(navigationTarget.tableName || '').trim();
               if (!targetTableName) return;
@@ -1730,13 +1922,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   dbName: targetDbName,
                   tableName: targetTableName,
                   objectType: 'table',
-              });
-              dispatchQueryEditorSidebarLocate({
-                  connectionId,
-                  dbName: targetDbName,
-                  tableName: targetTableName,
-                  schemaName: navigationTarget.schemaName,
-                  objectGroup: 'tables',
               });
               return;
           }
@@ -1762,15 +1947,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   schemaName: targetSchemaName || undefined,
                   sidebarLocateKey,
               });
-              dispatchQueryEditorSidebarLocate({
-                  tabId: sidebarLocateKey,
-                  connectionId,
-                  dbName: targetDbName,
-                  viewName: targetViewName,
-                  tableName: targetViewName,
-                  schemaName: targetSchemaName,
-                  objectGroup: navigationTarget.type === 'materialized-view' ? 'materializedViews' : 'views',
-              });
               return;
           }
 
@@ -1791,15 +1967,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   schemaName: targetSchemaName || undefined,
                   sidebarLocateKey,
               });
-              dispatchQueryEditorSidebarLocate({
-                  tabId: sidebarLocateKey,
-                  connectionId,
-                  dbName: targetDbName,
-                  triggerName: targetTriggerName,
-                  tableName: targetTriggerName,
-                  schemaName: targetSchemaName,
-                  objectGroup: 'triggers',
-              });
               return;
           }
 
@@ -1817,15 +1984,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   sequenceName: targetSequenceName,
                   schemaName: targetSchemaName || undefined,
                   sidebarLocateKey,
-              });
-              dispatchQueryEditorSidebarLocate({
-                  tabId: sidebarLocateKey,
-                  connectionId,
-                  dbName: targetDbName,
-                  sequenceName: targetSequenceName,
-                  tableName: targetSequenceName,
-                  schemaName: targetSchemaName,
-                  objectGroup: 'sequences',
               });
               return;
           }
@@ -1845,48 +2003,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   schemaName: targetSchemaName || undefined,
                   sidebarLocateKey,
               });
-              dispatchQueryEditorSidebarLocate({
-                  tabId: sidebarLocateKey,
-                  connectionId,
-                  dbName: targetDbName,
-                  packageName: targetPackageName,
-                  tableName: targetPackageName,
-                  schemaName: targetSchemaName,
-                  objectGroup: 'packages',
-              });
               return;
           }
 
-          const targetRoutineName = String(navigationTarget.routineName || '').trim();
-          if (!targetRoutineName) return;
-          const routineTypeLabel = navigationTarget.routineType === 'PROCEDURE'
-              ? translate('sidebar.object.procedure')
-              : translate('sidebar.object.function');
-          const targetSchemaName = String(navigationTarget.schemaName || '').trim();
-          const sidebarLocateKey = `${connectionId}-${targetDbName}-routine-${targetRoutineName}`;
-          addTab({
-              id: `routine-def-${connectionId}-${targetDbName}-${targetRoutineName}`,
-              title: translate('sidebar.tab.routine_definition', {
-                  type: routineTypeLabel,
-                  name: targetRoutineName,
-              }),
-              type: 'routine-def',
-              connectionId,
-              dbName: targetDbName,
-              routineName: targetRoutineName,
-              routineType: navigationTarget.routineType,
-              schemaName: targetSchemaName || undefined,
-              sidebarLocateKey,
-          });
-          dispatchQueryEditorSidebarLocate({
-              tabId: sidebarLocateKey,
-              connectionId,
-              dbName: targetDbName,
-              routineName: targetRoutineName,
-              tableName: targetRoutineName,
-              schemaName: targetSchemaName,
-              objectGroup: 'routines',
-          });
+          void openRoutineObjectEditTab(navigationTarget, connectionId, targetDbName);
       });
 
       editor.onDidDispose?.(() => {

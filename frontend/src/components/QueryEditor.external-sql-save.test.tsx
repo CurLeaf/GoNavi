@@ -1656,7 +1656,7 @@ describe('QueryEditor external SQL save', () => {
       });
     });
 
-    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'analytics' });
+    expect(storeState.setActiveContext).not.toHaveBeenCalled();
     expect(storeState.addTab).toHaveBeenCalledWith({
       id: 'conn-1-analytics-table-events',
       title: 'events',
@@ -1666,7 +1666,7 @@ describe('QueryEditor external SQL save', () => {
       tableName: 'events',
       objectType: 'table',
     });
-    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+    expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'gonavi:locate-sidebar-object',
     }));
     expect(preventDefault).toHaveBeenCalled();
@@ -1703,13 +1703,86 @@ describe('QueryEditor external SQL save', () => {
       });
     });
 
-    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'mkefu_location_dev_local' });
+    expect(storeState.setActiveContext).not.toHaveBeenCalled();
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
       type: 'table',
       connectionId: 'conn-1',
       dbName: 'mkefu_location_dev_local',
       tableName: 'fs_mkefu_regist_record',
       objectType: 'table',
+    }));
+    expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'gonavi:locate-sidebar-object',
+    }));
+    expect(preventDefault).toHaveBeenCalled();
+    expect(stopPropagation).toHaveBeenCalled();
+  });
+
+  it('opens a routine object-edit tab on ctrl click without locating the sidebar tree', async () => {
+    storeState.connections[0].config.type = 'postgres';
+    editorState.value = 'call reporting.refresh_stats();';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      const text = String(sql || '');
+      if (text.includes('pg_get_functiondef')) {
+        return {
+          success: true,
+          data: [{
+            routine_definition: 'CREATE OR REPLACE PROCEDURE reporting.refresh_stats() LANGUAGE plpgsql AS $$ BEGIN NULL; END; $$;',
+          }],
+        };
+      }
+      if (text.includes('FROM pg_proc') || text.includes('information_schema.routines')) {
+        return {
+          success: true,
+          data: [{ schema_name: 'reporting', routine_name: 'refresh_stats', routine_type: 'PROCEDURE' }],
+        };
+      }
+      return { success: true, data: [] };
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      for (let i = 0; i < 12; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 21 } },
+        event: {
+          browserEvent: { button: 0, buttons: 1 },
+          leftButton: true,
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault,
+          stopPropagation,
+        },
+      });
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(storeState.setActiveContext).not.toHaveBeenCalled();
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      title: expect.stringContaining('refresh_stats'),
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE OR REPLACE PROCEDURE reporting.refresh_stats()'),
+    }));
+    expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'gonavi:locate-sidebar-object',
     }));
     expect(preventDefault).toHaveBeenCalled();
     expect(stopPropagation).toHaveBeenCalled();
@@ -3691,7 +3764,7 @@ describe('QueryEditor external SQL save', () => {
       });
     });
 
-    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'main' });
+    expect(storeState.setActiveContext).not.toHaveBeenCalled();
     expect(storeState.addTab).toHaveBeenCalledWith({
       id: 'view-def-conn-1-main-active_users',
       title: '视图：active_users',
@@ -3703,13 +3776,8 @@ describe('QueryEditor external SQL save', () => {
       schemaName: 'reporting',
       sidebarLocateKey: 'conn-1-main-view-active_users',
     });
-    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+    expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'gonavi:locate-sidebar-object',
-      detail: expect.objectContaining({
-        tabId: 'conn-1-main-view-active_users',
-        schemaName: 'reporting',
-        objectGroup: 'views',
-      }),
     }));
   });
 
@@ -3775,34 +3843,17 @@ describe('QueryEditor external SQL save', () => {
       schemaName: 'audit',
       sidebarLocateKey: 'conn-1-main-trigger-audit.users_bi-audit.users',
     });
-    expect(storeState.addTab).toHaveBeenCalledWith({
-      id: 'routine-def-conn-1-main-reporting.refresh_stats',
-      title: '存储过程：reporting.refresh_stats',
-      type: 'routine-def',
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.stringMatching(/^query-edit-routine-conn-1-main-reporting\.refresh_stats-\d+$/),
+      title: '编辑 存储过程：reporting.refresh_stats',
+      type: 'query',
       connectionId: 'conn-1',
       dbName: 'main',
-      routineName: 'reporting.refresh_stats',
-      routineType: 'PROCEDURE',
-      schemaName: 'reporting',
-      sidebarLocateKey: 'conn-1-main-routine-reporting.refresh_stats',
-    });
-    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'gonavi:locate-sidebar-object',
-      detail: expect.objectContaining({
-        tabId: 'conn-1-main-trigger-audit.users_bi-audit.users',
-        triggerName: 'audit.users_bi',
-        schemaName: 'audit',
-        objectGroup: 'triggers',
-      }),
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE OR REPLACE PROCEDURE reporting.refresh_stats()'),
     }));
-    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+    expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'gonavi:locate-sidebar-object',
-      detail: expect.objectContaining({
-        tabId: 'conn-1-main-routine-reporting.refresh_stats',
-        routineName: 'reporting.refresh_stats',
-        schemaName: 'reporting',
-        objectGroup: 'routines',
-      }),
     }));
   });
 
@@ -3879,23 +3930,8 @@ describe('QueryEditor external SQL save', () => {
       schemaName: 'billing',
       sidebarLocateKey: 'package-def-conn-1-main-billing.pkg_order',
     });
-    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
+    expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'gonavi:locate-sidebar-object',
-      detail: expect.objectContaining({
-        tabId: 'sequence-def-conn-1-main-billing.order_seq',
-        sequenceName: 'billing.order_seq',
-        schemaName: 'billing',
-        objectGroup: 'sequences',
-      }),
-    }));
-    expect((window as any).dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'gonavi:locate-sidebar-object',
-      detail: expect.objectContaining({
-        tabId: 'package-def-conn-1-main-billing.pkg_order',
-        packageName: 'billing.pkg_order',
-        schemaName: 'billing',
-        objectGroup: 'packages',
-      }),
     }));
   });
 
@@ -4003,9 +4039,10 @@ describe('QueryEditor external SQL save', () => {
         type: 'trigger',
       }));
       expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
-        id: 'routine-def-conn-1-main-reporting.refresh_stats',
-        title: 'Procedure: reporting.refresh_stats',
-        type: 'routine-def',
+        id: expect.stringMatching(/^query-edit-routine-conn-1-main-reporting\.refresh_stats-\d+$/),
+        title: 'Edit Procedure: reporting.refresh_stats',
+        type: 'query',
+        queryMode: 'object-edit',
       }));
     });
 
@@ -7743,7 +7780,7 @@ describe('QueryEditor external SQL save', () => {
       });
     });
 
-    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'front_end_sys' });
+    expect(storeState.setActiveContext).not.toHaveBeenCalled();
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
       type: 'table',
       connectionId: 'conn-1',
@@ -7825,7 +7862,7 @@ describe('QueryEditor external SQL save', () => {
       });
     });
 
-    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'front_end_sys' });
+    expect(storeState.setActiveContext).not.toHaveBeenCalled();
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
       type: 'table',
       connectionId: 'conn-1',
