@@ -804,14 +804,18 @@ const renderDataTableView = () => (
                 translate={translateDataGrid}
                 onOpenJsonEditor={handleOpenJsonEditor}
             />
-	        ) : (
-	            <DataGridTextView
+        ) : (
+            <DataGridTextView
                 darkMode={darkMode}
                 rowCount={textViewRows.length}
                 textRecordIndex={textRecordIndex}
                 canModifyData={canModifyData}
                 currentTextRow={currentTextRow}
                 displayOutputColumnNames={displayOutputColumnNames}
+                columnMetaMap={columnMetaMap}
+                columnMetaMapByLowerName={columnMetaMapByLowerName}
+                showColumnType={showColumnType}
+                showColumnComment={showColumnComment}
                 translate={translateDataGrid}
                 onPrev={() => setTextRecordIndex((i: number) => Math.max(0, i - 1))}
                 onNext={() => setTextRecordIndex((i: number) => Math.min(textViewRows.length - 1, i + 1))}

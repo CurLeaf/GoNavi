@@ -1709,6 +1709,8 @@ describe('DataGrid layout', () => {
         'data_grid.record_view.next': 'Next label',
         'data_grid.record_view.record_position': `Record label ${params?.current} of ${params?.total}`,
         'data_grid.record_view.edit_current': 'Edit current label',
+        'data_grid.column.type_tooltip': `TYPE ${params?.type}`,
+        'data_grid.column.comment_tooltip': `COMMENT ${params?.comment}`,
         'data_grid.preview_panel.no_cell_title': 'Select cell title',
         'data_grid.preview_panel.no_cell_description': 'Select cell description',
         'data_grid.json_editor.format': 'Format JSON label',
@@ -1840,6 +1842,10 @@ describe('DataGrid layout', () => {
         canModifyData
         currentTextRow={{ raw_sql: 'GitHub release HTTP 500 checksum abc123' }}
         displayOutputColumnNames={['raw_sql']}
+        columnMetaMap={{ raw_sql: { type: 'varchar(128)', comment: 'SQL text payload' } }}
+        columnMetaMapByLowerName={{}}
+        showColumnType
+        showColumnComment
         translate={translate}
         onPrev={() => {}}
         onNext={() => {}}
@@ -1852,8 +1858,32 @@ describe('DataGrid layout', () => {
     expect(textRecordMarkup).toContain('Record label 1 of 2');
     expect(textRecordMarkup).toContain('Edit current label');
     expect(textRecordMarkup).toContain('raw_sql');
+    expect(textRecordMarkup).toContain('TYPE varchar(128)');
+    expect(textRecordMarkup).toContain('COMMENT SQL text payload');
     expect(textRecordMarkup).toContain('GitHub release HTTP 500 checksum abc123');
     expect(textRecordMarkup).not.toContain('data_grid.record_view');
+
+    const hiddenTextRecordMarkup = renderToStaticMarkup(
+      <DataGridTextView
+        darkMode={false}
+        rowCount={1}
+        textRecordIndex={0}
+        canModifyData={false}
+        currentTextRow={{ raw_sql: 'select 1' }}
+        displayOutputColumnNames={['raw_sql']}
+        columnMetaMap={{ raw_sql: { type: 'varchar(128)', comment: 'SQL text payload' } }}
+        columnMetaMapByLowerName={{}}
+        showColumnType={false}
+        showColumnComment={false}
+        translate={translate}
+        onPrev={() => {}}
+        onNext={() => {}}
+        onEditCurrent={() => {}}
+        formatTextViewValue={(value) => String(value)}
+      />,
+    );
+    expect(hiddenTextRecordMarkup).not.toContain('TYPE varchar(128)');
+    expect(hiddenTextRecordMarkup).not.toContain('COMMENT SQL text payload');
 
     const previewWithCellMarkup = renderToStaticMarkup(
       <DataGridPreviewPanel
