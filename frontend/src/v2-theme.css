@@ -2661,7 +2661,8 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-indent-unit {
 }
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-node-content-wrapper {
-  min-width: 0;
+  min-width: 100%;
+  width: max-content !important;
   min-height: 26px !important;
   padding: 0 6px !important;
   display: flex !important;
@@ -2720,27 +2721,30 @@ body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .gn-v2-tree-folder-icon .a
 }
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title {
-  min-width: 0;
-  flex: 1 1 auto;
+  min-width: max-content;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   overflow: visible;
 }
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title > span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: max-content;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
 body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title > .gn-v2-tree-title {
+  width: max-content;
+  min-width: 100%;
   overflow: visible;
 }
 
 body[data-ui-version="v2"] .gn-v2-tree-title {
-  width: 100%;
-  min-width: 0;
+  width: max-content;
+  min-width: 100%;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -2824,18 +2828,18 @@ body[data-ui-version="v2"] .gn-v2-tree-status.is-error::before {
 }
 
 body[data-ui-version="v2"] .gn-v2-tree-label {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: max-content;
+  flex: 0 0 auto;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
   letter-spacing: 0;
   font-weight: 400 !important;
 }
 
 body[data-ui-version="v2"] .gn-v2-tree-connection-copy {
-  min-width: 0;
-  flex: 1 1 auto;
+  min-width: max-content;
+  flex: 0 0 auto;
   color: var(--gn-fg-1);
   font-weight: 400 !important;
 }

@@ -70,6 +70,12 @@ import {
 } from './V2TableContextMenu';
 
 const readSourceFile = (relativePath: string) => readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const readCssRuleBlock = (css: string, selector: string) => {
+  const match = css.match(new RegExp(`${escapeRegExp(selector)}\\s*\\{(?<body>[^}]*)\\}`, 's'));
+  expect(match, `Missing CSS rule for ${selector}`).not.toBeNull();
+  return match?.groups?.body ?? '';
+};
 const readSidebarSource = () => [
   readSourceFile('./Sidebar.tsx'),
   readSourceFile('./sidebar/sidebarHelpers.ts'),
@@ -1100,14 +1106,30 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*height: 12px !important;[^}]*bottom: calc\(\(var\(--gn-v2-tree-horizontal-scroll-reserve\) - 12px\) \* -1\) !important;/s);
     expect(css).not.toContain('.gn-v2-tree-horizontal-scroll-spacer');
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \.ant-tree-list-scrollbar-thumb \{[^}]*height: 8px !important;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-node-content-wrapper \{[^}]*display: flex !important;/s);
+    const treeContentWrapperCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-node-content-wrapper');
+    expect(treeContentWrapperCss).toContain('min-width: 100%;');
+    expect(treeContentWrapperCss).toContain('width: max-content !important;');
+    expect(treeContentWrapperCss).toContain('display: flex !important;');
     expect(css).toMatch(/\.gn-v2-tree-title\.is-connection \{[^}]*align-items:\s*center;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-title \{[^}]*flex: 1 1 auto;[^}]*overflow: visible;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-title > \.gn-v2-tree-title \{[^}]*overflow: visible;/s);
+    const antTreeTitleCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title');
+    expect(antTreeTitleCss).toContain('min-width: max-content;');
+    expect(antTreeTitleCss).toContain('flex: 0 0 auto;');
+    expect(antTreeTitleCss).toContain('overflow: visible;');
+    const antTreeTitleSpanCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title > span');
+    expect(antTreeTitleSpanCss).toContain('min-width: max-content;');
+    expect(antTreeTitleSpanCss).toContain('overflow: visible;');
+    expect(antTreeTitleSpanCss).toContain('text-overflow: clip;');
+    const v2TreeTitleCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title > .gn-v2-tree-title');
+    expect(v2TreeTitleCss).toContain('width: max-content;');
+    expect(v2TreeTitleCss).toContain('min-width: 100%;');
+    expect(v2TreeTitleCss).toContain('overflow: visible;');
     expect(css).toMatch(/\.gn-v2-tree-status \{[^}]*width: 14px;[^}]*height: 14px;[^}]*flex: 0 0 14px;[^}]*overflow: visible;/s);
     expect(css).toMatch(/\.gn-v2-tree-status::before \{[^}]*width: 7px;[^}]*height: 7px;[^}]*border-radius: 50%;/s);
     expect(css).toMatch(/\.gn-v2-tree-status\.is-success::before \{[^}]*background: #22c55e;[^}]*box-shadow: 0 0 0 4px rgba\(34, 197, 94, 0\.18\);/s);
-    expect(css).toMatch(/\.gn-v2-tree-label \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s);
+    const treeLabelCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-tree-label');
+    expect(treeLabelCss).toContain('flex: 0 0 auto;');
+    expect(treeLabelCss).toContain('overflow: visible;');
+    expect(treeLabelCss).toContain('text-overflow: clip;');
     expect(css).toMatch(/\.gn-v2-tree-title\.is-mono \{[^}]*width: max-content;[^}]*min-width: 100%;[^}]*flex: 0 0 auto;/s);
     expect(css).toMatch(/\.gn-v2-tree-title\.is-mono \.gn-v2-tree-label \{[^}]*flex: 0 0 auto;[^}]*overflow: visible;[^}]*text-overflow: clip;/s);
     expect(css).toMatch(/\.gn-v2-tree-folder-icon \{[^}]*width: 22px;[^}]*height: 22px;[^}]*flex: 0 0 22px;/s);
