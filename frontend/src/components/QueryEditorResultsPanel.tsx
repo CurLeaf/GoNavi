@@ -134,7 +134,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
         color: string;
         marginTop?: number;
     }) => (
-        <div style={{
+        <div className={`query-result-message-block${compact ? ' is-compact' : ' is-full'}`} style={{
             display: 'flex',
             flexDirection: 'column',
             gap: compact ? 8 : 12,
@@ -149,11 +149,13 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
             minHeight: fillHeight ? 0 : undefined,
             boxSizing: 'border-box',
         }}>
-            <div style={{
+            <div className="query-result-message-header" style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: title ? 'space-between' : 'flex-end',
                 gap: 12,
+                flex: '0 0 auto',
+                minHeight: compact ? 28 : 32,
             }}>
                 {title ? <span style={{ fontSize: 14, fontWeight: 600 }}>{title}</span> : <span />}
                 <Button
@@ -165,33 +167,47 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                     {t('query_editor.results_panel.message.action.copy')}
                 </Button>
             </div>
-            <textarea
-                readOnly
-                wrap="soft"
-                spellCheck={false}
-                aria-label={title || t('query_editor.results_panel.message.title')}
-                data-query-result-message-textarea={compact ? 'compact' : 'full'}
-                value={text}
-                onKeyDown={handleMessageTextareaKeyDown}
+            <div
+                className="query-result-message-scroll-body"
                 style={{
-                    width: '100%',
-                    flex: fillHeight ? 1 : undefined,
+                    flex: fillHeight ? 1 : '0 1 auto',
                     minHeight: compact ? 72 : 0,
                     maxHeight: compact ? 160 : undefined,
-                    padding: 0,
-                    margin: 0,
-                    border: 'none',
-                    resize: 'none',
-                    background: 'transparent',
-                    color,
-                    fontFamily: 'var(--gn-font-mono)',
-                    fontSize,
-                    lineHeight: 1.6,
-                    outline: 'none',
-                    boxSizing: 'border-box',
                     overflow: 'auto',
+                    minWidth: 0,
+                    borderRadius: 6,
                 }}
-            />
+            >
+                <textarea
+                    readOnly
+                    wrap="off"
+                    spellCheck={false}
+                    aria-label={title || t('query_editor.results_panel.message.title')}
+                    data-query-result-message-textarea={compact ? 'compact' : 'full'}
+                    value={text}
+                    onKeyDown={handleMessageTextareaKeyDown}
+                    style={{
+                        display: 'block',
+                        width: '100%',
+                        minWidth: 'max-content',
+                        height: '100%',
+                        minHeight: compact ? 72 : 0,
+                        padding: 0,
+                        margin: 0,
+                        border: 'none',
+                        resize: 'none',
+                        background: 'transparent',
+                        color,
+                        fontFamily: 'var(--gn-font-mono)',
+                        fontSize,
+                        lineHeight: 1.6,
+                        whiteSpace: 'pre',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                        overflow: 'auto',
+                    }}
+                />
+            </div>
         </div>
     );
     const toolbarHideButton = (

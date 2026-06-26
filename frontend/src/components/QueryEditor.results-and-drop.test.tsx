@@ -1169,6 +1169,12 @@ describe('QueryEditor external SQL save', () => {
       '',
       "        where funcno = @funcno and tabname = '$vendorclass'",
     ].join('\n'));
+    expect(messageTextarea.props.wrap).toBe('off');
+    expect(messageTextarea.props.style).toMatchObject({
+      display: 'block',
+      whiteSpace: 'pre',
+      overflow: 'auto',
+    });
     expect(messageTextarea.props.value).not.toContain('mssql:');
   });
 
@@ -2633,6 +2639,12 @@ describe('QueryEditor external SQL save', () => {
 
     expect(source).toContain("textAlign: 'left'");
     expect(source).toContain("justifyContent: 'flex-start'");
+    expect(source).toContain('query-result-message-block');
+    expect(source).toContain('query-result-message-header');
+    expect(source).toContain('query-result-message-scroll-body');
+    expect(source).toContain("flex: fillHeight ? 1 : '0 1 auto'");
+    expect(source).toContain('wrap="off"');
+    expect(source).toContain("whiteSpace: 'pre'");
     expect(source).toContain("data-query-result-message-textarea");
     expect(source).toContain("query_editor.results_panel.message.action.copy");
     expect(source).toContain("typeof navigator?.clipboard?.writeText !== 'function'");
