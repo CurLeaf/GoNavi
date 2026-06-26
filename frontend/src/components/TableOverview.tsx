@@ -259,6 +259,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const setSidebarTablePinned = useStore(state => state.setSidebarTablePinned);
     const darkMode = theme === 'dark';
     const isV2Ui = appearance.uiVersion === 'v2';
+    const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';
     const activeShortcutPlatform = getShortcutPlatform(isMacLikePlatform());
 
     const [tables, setTables] = useState<TableStatRow[]>([]);
@@ -463,6 +464,30 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
             readOnly: structureOnly,
         });
     }, [connection, tab.dbName, addTab, setActiveContext, supportsDesignWrite, t]);
+
+    const openTableObjectDesigner = useCallback((tableName: string) => {
+        if (!connection) return;
+        setActiveContext({ connectionId: connection.id, dbName: tab.dbName || '' });
+        addTab({
+            id: `${connection.id}-${tab.dbName}-${tableName}`,
+            title: tableName,
+            type: 'table',
+            connectionId: connection.id,
+            dbName: tab.dbName,
+            tableName,
+            initialViewMode: 'fields',
+            initialViewModeRequestId: String(Date.now()),
+            objectType: 'table',
+        });
+    }, [connection, tab.dbName, addTab, setActiveContext]);
+
+    const openTableByDefaultAction = useCallback((tableName: string) => {
+        if (tableDoubleClickAction === 'open-design') {
+            openTableObjectDesigner(tableName);
+            return;
+        }
+        openTable(tableName);
+    }, [openTable, openTableObjectDesigner, tableDoubleClickAction]);
 
     const openTableDdl = useCallback((tableName: string) => {
         if (!connection) return;
@@ -990,7 +1015,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
     const renderCardTableContent = (table: TableStatRow) => (
         <div
             className={isV2Ui ? 'gn-v2-table-card' : undefined}
-            onDoubleClick={() => openTable(table.name)}
+            onDoubleClick={() => openTableByDefaultAction(table.name)}
             onContextMenu={isV2Ui ? (event) => openV2OverviewContextMenu(event, table) : undefined}
             style={{
                 background: cardBg,
@@ -1059,7 +1084,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         const content = (
                 <div
                     className={isV2Ui ? 'gn-v2-table-row' : undefined}
-                    onDoubleClick={() => openTable(table.name)}
+                    onDoubleClick={() => openTableByDefaultAction(table.name)}
                     onContextMenu={isV2Ui ? (event) => openV2OverviewContextMenu(event, table) : undefined}
                     style={{
                         position: 'relative',

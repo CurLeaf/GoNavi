@@ -32,7 +32,6 @@ import {
 import type { SearchScope } from '../sidebarCoreUtils';
 import {
   buildV2CommandSearchTreeIndex,
-  V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE,
   estimateV2TreeHorizontalScrollWidth,
   filterV2CommandSearchTreeItems,
   filterV2ExplorerTreeByKind,
@@ -612,9 +611,7 @@ export const useSidebarSearchModel = ({
     () => estimateV2TreeHorizontalScrollWidth(v2VisibleTreeData, treeViewportWidth),
     [treeViewportWidth, v2VisibleTreeData],
   );
-  const effectiveTreeHeight = isV2Ui && v2TreeHorizontalScrollWidth
-    ? Math.max(1, treeHeight - V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE)
-    : treeHeight;
+  const effectiveTreeHeight = treeHeight;
   const v2TreeMetrics = useMemo(() => {
     const databaseTableCounts = new Map<React.Key, number>();
     const objectGroupCounts = new Map<React.Key, number>();

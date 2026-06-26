@@ -493,6 +493,7 @@ const Sidebar: React.FC<{
   const v2UseLegacySidebarFilter = isV2Ui && v2SidebarSearchMode === 'filter';
   const v2CommandSearchPersistentFilterEnabled = appearance.v2CommandSearchPersistentFilterEnabled === true;
   const v2PersistedSidebarFilter = appearance.v2SidebarPersistedFilter ?? '';
+  const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';
   const [searchValue, setSearchValue] = useState(v2PersistedSidebarFilter);
   const deferredSearchValue = useDeferredValue(searchValue);
   const [searchScopes, setSearchScopes] = useState<SearchScope[]>(['smart']);
@@ -1561,6 +1562,8 @@ const Sidebar: React.FC<{
               connectionId: id,
               dbName,
               tableName,
+              initialViewMode: tableDoubleClickAction === 'open-design' ? 'fields' : undefined,
+              initialViewModeRequestId: tableDoubleClickAction === 'open-design' ? String(Date.now()) : undefined,
               objectType: 'table',
           });
           return;

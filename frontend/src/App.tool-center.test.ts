@@ -403,6 +403,12 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain('fontFamilyCode: resolvedMonoFontFamily');
     expect(appSource).toContain("t('app.theme.data_table.font_size')");
     expect(appSource).toContain("t('app.theme.data_table.sidebar_tree_font_size')");
+    expect(appSource).toContain("const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';");
+    expect(appSource).toContain("t('app.theme.data_table.table_double_click_action')");
+    expect(appSource).toContain("t('app.theme.data_table.table_double_click_action.open_data')");
+    expect(appSource).toContain("t('app.theme.data_table.table_double_click_action.open_design')");
+    expect(appSource).toContain("t('app.theme.data_table.table_double_click_action_hint')");
+    expect(appSource).toContain("setAppearance({ tableDoubleClickAction: value as 'open-data' | 'open-design' })");
     expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'ui\', installedFontFamilies, t)');
     expect(appSource).toContain('buildFontFamilyOptions(runtimePlatform, \'mono\', installedFontFamilies, t)');
     expect(appSource).toContain('ListInstalledFontFamilies()');

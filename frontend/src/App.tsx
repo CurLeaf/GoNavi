@@ -249,6 +249,7 @@ function App() {
   const effectiveSidebarTreeFontSize = sidebarTreeFontSizeFollowsGlobal
       ? effectiveFontSize
       : (sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize) ?? effectiveFontSize);
+  const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';
   const tabDisplaySettings = useMemo(
       () => sanitizeTabDisplaySettings(appearance.tabDisplay),
       [appearance.tabDisplay],
@@ -4788,6 +4789,21 @@ function App() {
                                               checked={appearance.showDataTableVerticalBorders === true}
                                               onChange={(checked) => setAppearance({ showDataTableVerticalBorders: checked })}
                                           />
+                                      </div>
+                                      <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.data_table.table_double_click_action')}</div>
+                                          <Segmented
+                                              block
+                                              options={[
+                                                  { label: t('app.theme.data_table.table_double_click_action.open_data'), value: 'open-data' },
+                                                  { label: t('app.theme.data_table.table_double_click_action.open_design'), value: 'open-design' },
+                                              ]}
+                                              value={tableDoubleClickAction}
+                                              onChange={(value) => setAppearance({ tableDoubleClickAction: value as 'open-data' | 'open-design' })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
+                                              {t('app.theme.data_table.table_double_click_action_hint')}
+                                          </div>
                                       </div>
                                       <div>
                                           <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.data_table.density')}</div>

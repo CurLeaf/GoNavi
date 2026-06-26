@@ -6,7 +6,13 @@ import TableOverview from './TableOverview';
 
 const storeState = vi.hoisted(() => ({
   theme: 'light',
-  appearance: { uiVersion: 'legacy' as const },
+  appearance: {
+    uiVersion: 'legacy',
+    tableDoubleClickAction: 'open-data',
+  } as {
+    uiVersion: 'legacy' | 'v2';
+    tableDoubleClickAction: 'open-data' | 'open-design';
+  },
   connections: [
     {
       id: 'conn-1',
@@ -56,6 +62,12 @@ vi.mock('../utils/autoFetchVisibility', () => ({
 vi.mock('../utils/connectionRpcConfig', () => ({
   buildRpcConnectionConfig: (config: unknown) => config,
 }));
+vi.mock('./ExportProgressModal', () => ({
+  useExportProgressDialog: () => ({
+    exportProgressModal: null,
+    runExportWithProgress: vi.fn(),
+  }),
+}));
 vi.mock('./V2TableContextMenu', () => ({
   V2TableContextMenuView: () => null,
 }));
@@ -90,6 +102,8 @@ vi.mock('antd', () => {
   const Tooltip = ({ children }: any) => <div>{children}</div>;
   const Modal: any = ({ children }: any) => <div>{children}</div>;
   Modal.confirm = vi.fn();
+  const Text = ({ children }: any) => <span>{children}</span>;
+  const Paragraph = ({ children }: any) => <p>{children}</p>;
   return {
     Button,
     Dropdown,
@@ -98,6 +112,7 @@ vi.mock('antd', () => {
     Modal,
     Spin,
     Tooltip,
+    Typography: { Text, Paragraph },
     message: messageApi,
   };
 });
@@ -126,6 +141,7 @@ const collectText = (node: any): string => {
 describe('TableOverview tdengine compatibility', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    storeState.appearance = { uiVersion: 'legacy', tableDoubleClickAction: 'open-data' };
     backendApp.DBGetTables.mockResolvedValue({
       success: true,
       data: [
@@ -158,5 +174,79 @@ describe('TableOverview tdengine compatibility', () => {
     const renderedText = collectText(renderer!.toJSON());
     expect(renderedText).toContain('meters');
     expect(renderedText).toContain('d001');
+  });
+
+  it('uses the table default open behavior for v2 card double-clicks', async () => {
+    storeState.appearance = { uiVersion: 'v2', tableDoubleClickAction: 'open-design' };
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<TableOverview tab={{
+        id: 'tab-1',
+        title: '表概览 - metrics',
+        type: 'table-overview',
+        connectionId: 'conn-1',
+        dbName: 'metrics',
+      } as any} />);
+    });
+    await flushPromises();
+
+    const card = renderer!.root.findAll((node) => node.props.className === 'gn-v2-table-card')[0];
+    expect(card).toBeTruthy();
+
+    await act(async () => {
+      card.props.onDoubleClick();
+    });
+
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'table',
+      tableName: 'd001',
+      initialViewMode: 'fields',
+      initialViewModeRequestId: expect.any(String),
+    }));
+    expect(storeState.addTab).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'design',
+      tableName: 'd001',
+    }));
+  });
+
+  it('uses the table default open behavior for list double-clicks', async () => {
+    storeState.appearance = { uiVersion: 'v2', tableDoubleClickAction: 'open-design' };
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<TableOverview tab={{
+        id: 'tab-1',
+        title: '表概览 - metrics',
+        type: 'table-overview',
+        connectionId: 'conn-1',
+        dbName: 'metrics',
+      } as any} />);
+    });
+    await flushPromises();
+
+    const viewModeActions = renderer!.root.findAll((node) => (
+      typeof node.props.onClick === 'function' && node.props.style?.padding === '3px 7px'
+    ));
+    expect(viewModeActions.length).toBeGreaterThanOrEqual(2);
+    await act(async () => {
+      viewModeActions[1].props.onClick();
+    });
+
+    const listRow = renderer!.root.findAll((node) => node.props.className === 'gn-v2-table-row')[0];
+    expect(listRow).toBeTruthy();
+
+    await act(async () => {
+      listRow.props.onDoubleClick();
+    });
+
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'table',
+      tableName: 'd001',
+      initialViewMode: 'fields',
+      initialViewModeRequestId: expect.any(String),
+    }));
+    expect(storeState.addTab).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'design',
+      tableName: 'd001',
+    }));
   });
 });

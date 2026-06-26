@@ -79,12 +79,15 @@ import {
   resolveConnectionProtectionConfig,
 } from "./utils/connectionReadOnly";
 
+export type TableDoubleClickAction = "open-data" | "open-design";
+
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
   enabled: boolean;
   opacity: number;
   blur: number;
   useNativeMacWindowControls: boolean;
+  tableDoubleClickAction: TableDoubleClickAction;
   v2SidebarSearchMode: "command" | "filter";
   v2CommandSearchPersistentFilterEnabled: boolean;
   v2SidebarPersistedFilter: string;
@@ -100,6 +103,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   opacity: 1.0,
   blur: 0,
   useNativeMacWindowControls: false,
+  tableDoubleClickAction: "open-data",
   v2SidebarSearchMode: "command",
   v2CommandSearchPersistentFilterEnabled: false,
   v2SidebarPersistedFilter: "",
@@ -124,6 +128,12 @@ const sanitizeV2SidebarSearchMode = (
   value: unknown,
 ): AppearanceSettings["v2SidebarSearchMode"] => {
   return value === "filter" ? "filter" : DEFAULT_APPEARANCE.v2SidebarSearchMode;
+};
+
+const sanitizeTableDoubleClickAction = (
+  value: unknown,
+): TableDoubleClickAction => {
+  return value === "open-design" ? "open-design" : DEFAULT_APPEARANCE.tableDoubleClickAction;
 };
 
 const sanitizeV2SidebarPersistedFilter = (value: unknown): string => {
@@ -2062,6 +2072,9 @@ const sanitizeAppearance = (
       typeof appearance.useNativeMacWindowControls === "boolean"
         ? appearance.useNativeMacWindowControls
         : DEFAULT_APPEARANCE.useNativeMacWindowControls,
+    tableDoubleClickAction: sanitizeTableDoubleClickAction(
+      appearance.tableDoubleClickAction,
+    ),
     v2SidebarSearchMode: sanitizeV2SidebarSearchMode(
       appearance.v2SidebarSearchMode,
     ),

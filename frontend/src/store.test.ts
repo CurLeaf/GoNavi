@@ -69,6 +69,7 @@ describe('store appearance persistence', () => {
     expect(appearance.opacity).toBe(0.75);
     expect(appearance.blur).toBe(6);
     expect(appearance.useNativeMacWindowControls).toBe(true);
+    expect(appearance.tableDoubleClickAction).toBe('open-data');
     expect(appearance.v2SidebarSearchMode).toBe('command');
     expect(appearance.v2CommandSearchPersistentFilterEnabled).toBe(false);
     expect(appearance.v2SidebarPersistedFilter).toBe('');
@@ -93,11 +94,13 @@ describe('store appearance persistence', () => {
     useStore.getState().setAppearance({
       showDataTableVerticalBorders: true,
       dataTableDensity: 'compact',
+      tableDoubleClickAction: 'open-design',
     });
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.appearance.showDataTableVerticalBorders).toBe(true);
     expect(persisted.state.appearance.dataTableDensity).toBe('compact');
+    expect(persisted.state.appearance.tableDoubleClickAction).toBe('open-design');
 
     vi.resetModules();
     const reloaded = await importStore();
@@ -105,6 +108,21 @@ describe('store appearance persistence', () => {
 
     expect(appearance.showDataTableVerticalBorders).toBe(true);
     expect(appearance.dataTableDensity).toBe('compact');
+    expect(appearance.tableDoubleClickAction).toBe('open-design');
+  });
+
+  it('sanitizes invalid table double-click appearance settings', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        appearance: {
+          tableDoubleClickAction: 'open-random',
+        },
+      },
+      version: 10,
+    }));
+
+    const { useStore } = await importStore();
+    expect(useStore.getState().appearance.tableDoubleClickAction).toBe('open-data');
   });
 
   it('persists language preference and sanitizes unsupported persisted values', async () => {

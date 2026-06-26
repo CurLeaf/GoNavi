@@ -323,6 +323,17 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('if (shouldLoadSidebarNodeOnExpand(node))');
   });
 
+  it('uses the appearance preference to switch table double-click to the embedded object designer', () => {
+    const source = readSidebarSource();
+
+    expect(source).toContain("const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';");
+    expect(source).toContain("type: 'table',");
+    expect(source).toContain("initialViewMode: tableDoubleClickAction === 'open-design' ? 'fields' : undefined");
+    expect(source).toContain("initialViewModeRequestId: tableDoubleClickAction === 'open-design' ? String(Date.now()) : undefined");
+    expect(source).not.toContain("if (tableDoubleClickAction === 'open-design') {\n              openDesign(node, 'columns', false);");
+    expect(source).toContain('recordTableAccess(id, dbName, tableName);');
+  });
+
   it('parses v2 command search prefixes into real search modes', () => {
     expect(parseV2CommandSearchQuery('@ payment_order')).toMatchObject({
       mode: 'object',
@@ -1087,8 +1098,8 @@ describe('Sidebar locate toolbar', () => {
     expect(source).not.toContain("overflowX: isV2Ui ? 'auto' : 'hidden'");
     expect(source).toContain('scrollWidth={isV2Ui ? v2TreeHorizontalScrollWidth : undefined}');
     expect(utilsSource).toContain('export const V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE = 32;');
-    expect(source).toContain('const effectiveTreeHeight = isV2Ui && v2TreeHorizontalScrollWidth');
-    expect(source).toContain('treeHeight - V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE');
+    expect(source).toContain('const effectiveTreeHeight = treeHeight;');
+    expect(source).not.toContain('treeHeight - V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE');
     expect(source).toContain('height={effectiveTreeHeight}');
     expect(source).toContain('treeData={isV2Ui ? v2VisibleTreeData : displayTreeData}');
     expect(source).not.toContain('__v2-tree-horizontal-scroll-spacer__');
@@ -1096,14 +1107,15 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \{[^}]*--gn-v2-tree-horizontal-scroll-reserve: 32px;[^}]*overflow: hidden !important;/s);
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.sidebar-tree-scroll-content \{[^}]*display: flex;[^}]*height: 100%;[^}]*padding: 4px 0 0;/s);
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree \{[^}]*flex: 1 1 auto;[^}]*width: 100%;[^}]*min-width: 0;[^}]*height: 100%;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list \{[^}]*height: calc\(100% - var\(--gn-v2-tree-horizontal-scroll-reserve\)\);[^}]*min-height: 0;[^}]*box-sizing: border-box;/s);
-    expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list \{[^}]*height: 100%;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list \{[^}]*position: relative;[^}]*height: 100%;[^}]*min-height: 0;[^}]*box-sizing: border-box;[^}]*padding-bottom: var\(--gn-v2-tree-horizontal-scroll-reserve\);/s);
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder-inner \{[^}]*width: 100%;[^}]*min-width: 100%;/s);
     expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder-inner \{[^}]*width: max-content;/s);
     expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list \{[^}]*position: static !important;/s);
     expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder \{[^}]*calc\(100% - var\(--gn-v2-tree-horizontal-scroll-reserve\)\)/s);
     expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder \{[^}]*overflow-x: auto !important;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*height: 12px !important;[^}]*bottom: calc\(\(var\(--gn-v2-tree-horizontal-scroll-reserve\) - 12px\) \* -1\) !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder \{[^}]*padding-bottom: var\(--gn-v2-tree-horizontal-scroll-reserve\);/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*height: 12px !important;[^}]*bottom: calc\(\(var\(--gn-v2-tree-horizontal-scroll-reserve\) - 12px\) \/ 2\) !important;/s);
+    expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*bottom: calc\(\(var\(--gn-v2-tree-horizontal-scroll-reserve\) - 12px\) \* -1\) !important;/s);
     expect(css).not.toContain('.gn-v2-tree-horizontal-scroll-spacer');
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \.ant-tree-list-scrollbar-thumb \{[^}]*height: 8px !important;/s);
     const treeContentWrapperCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-node-content-wrapper');
