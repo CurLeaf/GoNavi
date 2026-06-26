@@ -286,7 +286,9 @@ const DataGrid: React.FC<DataGridProps> = ({
     resultExportAllSql,
     onReload, onSort, onPageChange, pagination, onRequestTotalCount, onCancelTotalCount, sortInfoExternal, showFilter, onToggleFilter, exportSqlWithFilter, onApplyFilter, appliedFilterConditions, quickWhereCondition,
     onApplyQuickWhereCondition,
-    scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions, showRowNumberColumn = false, isActive = true, enableSqlLogEvent = false
+    scrollSnapshot, onScrollSnapshotChange, toolbarExtraActions, showRowNumberColumn = false, isActive = true, enableSqlLogEvent = false,
+    initialViewMode,
+    initialViewModeRequestId
 }) => {
   const connections = useStore(state => state.connections);
   const addTab = useStore(state => state.addTab);
@@ -1343,6 +1345,8 @@ const DataGrid: React.FC<DataGridProps> = ({
           },
       },
       translate: translateDataGrid,
+      initialViewMode,
+      initialViewModeRequestId,
   });
 
   useEffect(() => {

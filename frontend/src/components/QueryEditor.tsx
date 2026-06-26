@@ -42,6 +42,7 @@ import {
     type EditRowLocator,
 } from '../utils/rowLocator';
 import { getQueryTabDraft, hasQueryTabDraft, setQueryTabDraft, setSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
+import { buildEditableTriggerSql } from '../utils/triggerEditSql';
 import {
     getColumnDefinitionComment,
     getColumnDefinitionKey,
@@ -93,6 +94,7 @@ import {
     getCaseInsensitiveValue,
     getFirstRowValue,
     getNormalizedPositionAtOffset,
+    hasQueryEditorCtrlMetaModifier,
     getInitialEditorQuery,
     getMySQLShowTablesName,
     getNormalizedOffsetAtPosition,
@@ -182,6 +184,440 @@ const buildQueryEditorRoutineEditFallbackSql = (
     return `CREATE OR REPLACE FUNCTION ${routineName}()\nRETURNS INTEGER\nBEGIN\n    -- TODO: edit function body\n    RETURN 0;\nEND;`;
 };
 
+const normalizeQueryEditorMySQLViewDDL = (rawDefinition: unknown): string => {
+    const text = String(rawDefinition || '').trim();
+    if (!text) return '';
+
+    const normalized = text.replace(/\r\n/g, '\n').trim().replace(/;+\s*$/, '');
+    const createViewPrefixPattern = /^\s*create\s+(?:algorithm\s*=\s*\w+\s+)?(?:definer\s*=\s*(?:`[^`]+`|\S+)\s*@\s*(?:`[^`]+`|\S+)\s+)?(?:sql\s+security\s+(?:definer|invoker)\s+)?view\s+/i;
+    if (createViewPrefixPattern.test(normalized)) {
+        return `${normalized.replace(createViewPrefixPattern, 'CREATE OR REPLACE VIEW ')};`;
+    }
+
+    if (/^\s*(select|with)\b/i.test(normalized)) {
+        return normalized;
+    }
+
+    return `${normalized};`;
+};
+
+const normalizeQueryEditorSqlPlusSlashTerminator = (sql: string): string => (
+    String(sql || '').trim().replace(/(^|\n)([ \t]*\/[ \t]*);+([ \t]*(?:--[^\n]*)?)\s*$/i, '$1$2$3')
+);
+
+const hasQueryEditorSqlPlusSlashTerminator = (sql: string): boolean => (
+    /(?:^|\n)[ \t]*\/[ \t]*(?:--[^\n]*)?\s*$/i.test(String(sql || '').trim())
+);
+
+const ensureQueryEditorObjectEditSqlTerminator = (sql: string): string => {
+    const normalized = normalizeQueryEditorSqlPlusSlashTerminator(sql);
+    if (!normalized) return '';
+    if (hasQueryEditorSqlPlusSlashTerminator(normalized)) return normalized;
+    return /;\s*$/.test(normalized) ? normalized : `${normalized};`;
+};
+
+const isQueryEditorCommentOnlyDefinition = (definition: string): boolean => {
+    const normalized = String(definition || '').replace(/\r\n/g, '\n').trim();
+    if (!normalized) return false;
+    const lines = normalized
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+    return lines.length > 0 && lines.every((line) => line.startsWith('--'));
+};
+
+const withQueryEditorCreateOrReplacePackageHeaders = (definition: string): string => {
+    const normalized = String(definition || '').replace(/\r\n/g, '\n').trim();
+    if (!normalized) return '';
+    return normalized
+        .split(/(?=^\s*PACKAGE(?:\s+BODY)?\b)/gim)
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => (/^\s*CREATE\b/i.test(part) ? part : `CREATE OR REPLACE ${part}`))
+        .join('\n/\n');
+};
+
+const buildQueryEditorQualifiedObjectName = (objectName: string, schemaName?: string): string => {
+    const normalizedObjectName = String(objectName || '').trim();
+    const normalizedSchemaName = String(schemaName || '').trim();
+    if (!normalizedObjectName || !normalizedSchemaName || normalizedObjectName.includes('.')) {
+        return normalizedObjectName;
+    }
+    return `${normalizedSchemaName}.${normalizedObjectName}`;
+};
+
+const buildQueryEditorEditableDefinitionSql = (
+    objectType: 'view-def' | 'sequence-def' | 'package-def',
+    definition: string,
+    objectName: string,
+    objectLabel: string,
+): string => {
+    const normalizedDefinition = String(definition || '').trim();
+    const header = [
+        `-- ${translate('definition_viewer.edit.comment_title', { object: objectLabel, name: objectName })}`,
+        `-- ${translate('definition_viewer.edit.comment_compatibility')}`,
+    ].join('\n') + '\n';
+    if (!normalizedDefinition) {
+        return `${header}-- ${translate('definition_viewer.edit.comment_empty_definition', { name: objectName })}\n`;
+    }
+
+    if (isQueryEditorCommentOnlyDefinition(normalizedDefinition)) {
+        return `${header}${ensureQueryEditorObjectEditSqlTerminator(normalizedDefinition)}`;
+    }
+
+    if (objectType === 'view-def' && !/^\s*create\b/i.test(normalizedDefinition)) {
+        if (/^\s*view\b/i.test(normalizedDefinition)) {
+            return `${header}${ensureQueryEditorObjectEditSqlTerminator(normalizedDefinition.replace(/^\s*view\b/i, 'CREATE OR REPLACE VIEW'))}`;
+        }
+        return `${header}CREATE OR REPLACE VIEW ${objectName} AS\n${ensureQueryEditorObjectEditSqlTerminator(normalizedDefinition)}`;
+    }
+
+    if (objectType === 'sequence-def' && !/^\s*create\b/i.test(normalizedDefinition)) {
+        return `${header}${ensureQueryEditorObjectEditSqlTerminator(`CREATE SEQUENCE ${objectName}\n${normalizedDefinition}`)}`;
+    }
+
+    if (
+        objectType === 'package-def'
+        && !/^\s*create\b/i.test(normalizedDefinition)
+        && /^\s*package\b/i.test(normalizedDefinition)
+    ) {
+        return `${header}${withQueryEditorCreateOrReplacePackageHeaders(normalizedDefinition)}`;
+    }
+
+    return `${header}${ensureQueryEditorObjectEditSqlTerminator(normalizedDefinition)}`;
+};
+
+const buildQueryEditorObjectDefinitionConnectionConfig = (conn: any): Record<string, any> => ({
+    ...conn.config,
+    port: Number(conn.config?.port),
+    password: conn.config?.password || '',
+    database: conn.config?.database || '',
+    useSSH: conn.config?.useSSH || false,
+    ssh: conn.config?.ssh || { host: '', port: 22, user: '', password: '', keyPath: '' },
+});
+
+const runQueryEditorObjectDefinitionCandidates = async (
+    config: Record<string, any>,
+    dbName: string,
+    queries: string[],
+    collectAll = false,
+): Promise<any[]> => {
+    const collectedRows: any[] = [];
+    for (const query of queries) {
+        const sql = String(query || '').trim();
+        if (!sql || sql.startsWith('--')) continue;
+        try {
+            const result = await DBQuery(buildRpcConnectionConfig(config) as any, dbName, sql);
+            if (!result.success || !Array.isArray(result.data) || result.data.length === 0) {
+                continue;
+            }
+            if (!collectAll) {
+                return result.data;
+            }
+            collectedRows.push(...result.data);
+        } catch {
+            // 元数据定义读取失败时保留编辑模板。
+        }
+    }
+    return collectedRows;
+};
+
+const buildQueryEditorViewDefinitionQueries = (
+    dialect: string,
+    viewName: string,
+    dbName: string,
+    schemaName?: string,
+    viewKind?: 'view' | 'materialized',
+): string[] => {
+    const parsed = splitSidebarQualifiedName(viewName);
+    const objectName = parsed.objectName || viewName;
+    const schema = String(schemaName || parsed.schemaName || '').trim();
+    const safeName = escapeQueryEditorObjectEditSqlLiteral(objectName);
+    const safeDbName = escapeQueryEditorObjectEditSqlLiteral(dbName);
+
+    switch (dialect) {
+        case 'mysql':
+        case 'starrocks': {
+            const viewRef = schema
+                ? `\`${schema.replace(/`/g, '``')}\`.\`${objectName.replace(/`/g, '``')}\``
+                : `\`${objectName.replace(/`/g, '``')}\``;
+            if (dialect === 'starrocks' && viewKind === 'materialized') {
+                return [
+                    `SHOW CREATE MATERIALIZED VIEW ${viewRef}`,
+                    `SHOW CREATE TABLE ${viewRef}`,
+                ];
+            }
+            return [
+                `SHOW CREATE VIEW ${viewRef}`,
+                safeDbName
+                    ? `SELECT VIEW_DEFINITION AS view_definition FROM information_schema.views WHERE table_schema = '${safeDbName}' AND table_name = '${safeName}' LIMIT 1`
+                    : '',
+                `SHOW CREATE TABLE ${viewRef}`,
+            ].filter(Boolean);
+        }
+        case 'postgres':
+        case 'kingbase':
+        case 'highgo':
+        case 'vastbase':
+        case 'opengauss':
+        case 'gaussdb': {
+            const schemaRef = schema || 'public';
+            return [`SELECT pg_get_viewdef('${escapeQueryEditorObjectEditSqlLiteral(schemaRef)}.${safeName}'::regclass, true) AS view_definition`];
+        }
+        case 'sqlserver':
+            return buildSqlServerObjectDefinitionQueries('view', viewName, dbName, 'view_definition');
+        case 'oracle': {
+            const owner = schema ? escapeQueryEditorObjectEditSqlLiteral(schema).toUpperCase() : (safeDbName ? safeDbName.toUpperCase() : '');
+            if (owner) {
+                return [`SELECT TEXT AS view_definition FROM ALL_VIEWS WHERE OWNER = '${owner}' AND VIEW_NAME = '${safeName.toUpperCase()}'`];
+            }
+            return [`SELECT TEXT AS view_definition FROM USER_VIEWS WHERE VIEW_NAME = '${safeName.toUpperCase()}'`];
+        }
+        case 'sqlite':
+            return [`SELECT sql AS view_definition FROM sqlite_master WHERE type='view' AND name='${safeName}'`];
+        case 'duckdb': {
+            const schemaRef = schema || 'main';
+            return [`SELECT view_definition FROM information_schema.views WHERE table_schema = '${escapeQueryEditorObjectEditSqlLiteral(schemaRef)}' AND table_name = '${safeName}' LIMIT 1`];
+        }
+        default:
+            return [];
+    }
+};
+
+const extractQueryEditorViewDefinition = (dialect: string, data: any[]): string => {
+    if (!Array.isArray(data) || data.length === 0) return '';
+    const row = data[0] as Record<string, any>;
+    if (dialect === 'mysql' || dialect === 'starrocks') {
+        const direct = getQueryEditorObjectEditRawValue(row, ['view_definition', 'VIEW_DEFINITION']);
+        if (direct !== undefined && direct !== null && String(direct).trim()) {
+            return normalizeQueryEditorMySQLViewDDL(direct);
+        }
+        const sqlKey = Object.keys(row).find((key) => {
+            const lowerKey = key.toLowerCase();
+            return lowerKey.includes('create view') || lowerKey === 'create view' || lowerKey.includes('create table');
+        });
+        if (sqlKey) {
+            return normalizeQueryEditorMySQLViewDDL(row[sqlKey]);
+        }
+        const createValue = Object.values(row).find((value) => {
+            const text = String(value || '').toUpperCase();
+            return text.includes('CREATE') && (text.includes('VIEW') || text.includes('TABLE'));
+        });
+        return createValue ? normalizeQueryEditorMySQLViewDDL(createValue) : '';
+    }
+    if (dialect === 'sqlserver') {
+        const direct = getQueryEditorObjectEditRawValue(row, ['view_definition', 'definition']);
+        if (direct !== undefined && direct !== null && String(direct).trim()) {
+            return String(direct);
+        }
+        return data
+            .map((item) => getQueryEditorObjectEditRawValue(item, ['Text', 'text']))
+            .filter((value) => value !== undefined && value !== null)
+            .map((value) => String(value))
+            .join('');
+    }
+    const direct = getQueryEditorObjectEditRawValue(row, ['view_definition', 'definition', 'sql', 'text', 'TEXT', 'SQL']);
+    return direct !== undefined && direct !== null ? String(direct) : String(Object.values(row)[0] || '');
+};
+
+const buildQueryEditorSequenceDefinitionQueries = (
+    dialect: string,
+    sequenceName: string,
+    dbName: string,
+    schemaName?: string,
+): string[] => {
+    const parsed = splitSidebarQualifiedName(sequenceName);
+    const objectName = parsed.objectName || sequenceName;
+    const schema = String(schemaName || parsed.schemaName || '').trim();
+    const safeName = escapeQueryEditorObjectEditSqlLiteral(objectName);
+    const safeDbName = escapeQueryEditorObjectEditSqlLiteral(dbName);
+    const owner = schema ? escapeQueryEditorObjectEditSqlLiteral(schema).toUpperCase() : (safeDbName ? safeDbName.toUpperCase() : '');
+
+    switch (dialect) {
+        case 'oracle':
+            if (owner) {
+                return [`SELECT SEQUENCE_OWNER, SEQUENCE_NAME, MIN_VALUE, MAX_VALUE, INCREMENT_BY, CYCLE_FLAG, ORDER_FLAG, CACHE_SIZE, LAST_NUMBER FROM ALL_SEQUENCES WHERE SEQUENCE_OWNER = '${owner}' AND SEQUENCE_NAME = '${safeName.toUpperCase()}'`];
+            }
+            return [`SELECT SEQUENCE_NAME, MIN_VALUE, MAX_VALUE, INCREMENT_BY, CYCLE_FLAG, ORDER_FLAG, CACHE_SIZE, LAST_NUMBER FROM USER_SEQUENCES WHERE SEQUENCE_NAME = '${safeName.toUpperCase()}'`];
+        case 'postgres':
+        case 'kingbase':
+        case 'highgo':
+        case 'vastbase':
+        case 'opengauss':
+        case 'gaussdb': {
+            const schemaRef = schema || 'public';
+            return [`SELECT sequence_schema, sequence_name, data_type, start_value, minimum_value, maximum_value, increment FROM information_schema.sequences WHERE sequence_schema = '${escapeQueryEditorObjectEditSqlLiteral(schemaRef)}' AND sequence_name = '${safeName}' LIMIT 1`];
+        }
+        default:
+            return [];
+    }
+};
+
+const buildQueryEditorSequenceDefinitionFromRow = (
+    row: Record<string, any>,
+    fallbackSequenceName: string,
+    fallbackSchemaName?: string,
+): string => {
+    const sequenceName = String(getQueryEditorObjectEditRawValue(row, ['sequence_name']) || splitSidebarQualifiedName(fallbackSequenceName).objectName || fallbackSequenceName).trim();
+    const owner = String(getQueryEditorObjectEditRawValue(row, ['sequence_owner', 'owner', 'sequence_schema']) || fallbackSchemaName || splitSidebarQualifiedName(fallbackSequenceName).schemaName || '').trim();
+    const name = buildQueryEditorQualifiedObjectName(sequenceName, owner);
+    if (!name) return '';
+
+    const clauses: string[] = [];
+    const increment = getQueryEditorObjectEditRawValue(row, ['increment_by', 'increment']);
+    const minValue = getQueryEditorObjectEditRawValue(row, ['min_value', 'minimum_value']);
+    const maxValue = getQueryEditorObjectEditRawValue(row, ['max_value', 'maximum_value']);
+    const cacheSize = Number(getQueryEditorObjectEditRawValue(row, ['cache_size']));
+    const cycleFlag = String(getQueryEditorObjectEditRawValue(row, ['cycle_flag']) || '').trim().toUpperCase();
+    const orderFlag = String(getQueryEditorObjectEditRawValue(row, ['order_flag']) || '').trim().toUpperCase();
+
+    if (increment !== undefined && increment !== null && String(increment).trim() !== '') {
+        clauses.push(`INCREMENT BY ${increment}`);
+    }
+    if (minValue !== undefined && minValue !== null && String(minValue).trim() !== '') {
+        clauses.push(`MINVALUE ${minValue}`);
+    }
+    if (maxValue !== undefined && maxValue !== null && String(maxValue).trim() !== '') {
+        clauses.push(`MAXVALUE ${maxValue}`);
+    }
+    if (Number.isFinite(cacheSize)) {
+        clauses.push(cacheSize > 0 ? `CACHE ${cacheSize}` : 'NOCACHE');
+    }
+    if (cycleFlag) clauses.push(cycleFlag === 'Y' ? 'CYCLE' : 'NOCYCLE');
+    if (orderFlag) clauses.push(orderFlag === 'Y' ? 'ORDER' : 'NOORDER');
+
+    return [`CREATE SEQUENCE ${name}`, ...clauses.map((clause) => `  ${clause}`)].join('\n');
+};
+
+const extractQueryEditorSequenceDefinition = (
+    data: any[],
+    sequenceName: string,
+    schemaName?: string,
+): string => {
+    if (!Array.isArray(data) || data.length === 0) return '';
+    return buildQueryEditorSequenceDefinitionFromRow(data[0] as Record<string, any>, sequenceName, schemaName);
+};
+
+const buildQueryEditorPackageDefinitionQueries = (
+    dialect: string,
+    packageName: string,
+    dbName: string,
+    schemaName?: string,
+): string[] => {
+    const parsed = splitSidebarQualifiedName(packageName);
+    const objectName = parsed.objectName || packageName;
+    const schema = String(schemaName || parsed.schemaName || '').trim();
+    const safeName = escapeQueryEditorObjectEditSqlLiteral(objectName);
+    const safeDbName = escapeQueryEditorObjectEditSqlLiteral(dbName);
+
+    if (dialect !== 'oracle') {
+        return [];
+    }
+
+    const owner = schema ? escapeQueryEditorObjectEditSqlLiteral(schema).toUpperCase() : (safeDbName ? safeDbName.toUpperCase() : '');
+    if (owner) {
+        return [
+            `SELECT TEXT FROM ALL_SOURCE WHERE OWNER = '${owner}' AND NAME = '${safeName.toUpperCase()}' AND TYPE = 'PACKAGE' ORDER BY LINE`,
+            `SELECT TEXT FROM ALL_SOURCE WHERE OWNER = '${owner}' AND NAME = '${safeName.toUpperCase()}' AND TYPE = 'PACKAGE BODY' ORDER BY LINE`,
+        ];
+    }
+    return [
+        `SELECT TEXT FROM USER_SOURCE WHERE NAME = '${safeName.toUpperCase()}' AND TYPE = 'PACKAGE' ORDER BY LINE`,
+        `SELECT TEXT FROM USER_SOURCE WHERE NAME = '${safeName.toUpperCase()}' AND TYPE = 'PACKAGE BODY' ORDER BY LINE`,
+    ];
+};
+
+const extractQueryEditorPackageDefinition = (data: any[]): string => {
+    if (!Array.isArray(data) || data.length === 0) return '';
+    return data
+        .map((row: any) => getQueryEditorObjectEditRawValue(row, ['text', 'TEXT']) ?? Object.values(row || {})[0] ?? '')
+        .map((value) => String(value))
+        .join('');
+};
+
+const buildQueryEditorTriggerDefinitionQueries = (
+    dialect: string,
+    triggerName: string,
+    dbName: string,
+    schemaName?: string,
+): string[] => {
+    const parsed = splitSidebarQualifiedName(triggerName);
+    const objectName = parsed.objectName || triggerName;
+    const schema = String(schemaName || parsed.schemaName || '').trim();
+    const safeName = escapeQueryEditorObjectEditSqlLiteral(objectName);
+    const safeDbName = escapeQueryEditorObjectEditSqlLiteral(dbName);
+
+    switch (dialect) {
+        case 'mysql':
+        case 'starrocks': {
+            const triggerRef = schema
+                ? `\`${schema.replace(/`/g, '``')}\`.\`${objectName.replace(/`/g, '``')}\``
+                : `\`${objectName.replace(/`/g, '``')}\``;
+            return [
+                `SHOW CREATE TRIGGER ${triggerRef}`,
+                safeDbName
+                    ? `SELECT TRIGGER_NAME, TRIGGER_SCHEMA, EVENT_OBJECT_SCHEMA, EVENT_OBJECT_TABLE, ACTION_TIMING, EVENT_MANIPULATION, ACTION_ORIENTATION, ACTION_STATEMENT FROM information_schema.triggers WHERE trigger_schema = '${safeDbName}' AND trigger_name = '${safeName}' LIMIT 1`
+                    : '',
+            ].filter(Boolean);
+        }
+        case 'postgres':
+        case 'kingbase':
+        case 'highgo':
+        case 'vastbase':
+        case 'opengauss':
+        case 'gaussdb':
+            return [`SELECT pg_get_triggerdef(t.oid, true) AS trigger_definition
+FROM pg_trigger t
+JOIN pg_class c ON t.tgrelid = c.oid
+WHERE t.tgname = '${safeName}'
+  AND NOT t.tgisinternal
+LIMIT 1`];
+        case 'sqlserver':
+            return buildSqlServerObjectDefinitionQueries('trigger', triggerName, dbName, 'trigger_definition');
+        case 'oracle': {
+            if (schema) {
+                return [
+                    `SELECT DBMS_METADATA.GET_DDL('TRIGGER', '${safeName.toUpperCase()}', '${escapeQueryEditorObjectEditSqlLiteral(schema).toUpperCase()}') AS trigger_definition FROM DUAL`,
+                    `SELECT TRIGGER_BODY FROM ALL_TRIGGERS WHERE OWNER = '${escapeQueryEditorObjectEditSqlLiteral(schema).toUpperCase()}' AND TRIGGER_NAME = '${safeName.toUpperCase()}'`,
+                ];
+            }
+            if (safeDbName) {
+                return [
+                    `SELECT DBMS_METADATA.GET_DDL('TRIGGER', '${safeName.toUpperCase()}', '${safeDbName.toUpperCase()}') AS trigger_definition FROM DUAL`,
+                    `SELECT TRIGGER_BODY FROM ALL_TRIGGERS WHERE OWNER = '${safeDbName.toUpperCase()}' AND TRIGGER_NAME = '${safeName.toUpperCase()}'`,
+                ];
+            }
+            return [
+                `SELECT DBMS_METADATA.GET_DDL('TRIGGER', '${safeName.toUpperCase()}') AS trigger_definition FROM DUAL`,
+                `SELECT TRIGGER_BODY FROM USER_TRIGGERS WHERE TRIGGER_NAME = '${safeName.toUpperCase()}'`,
+            ];
+        }
+        case 'sqlite':
+            return [`SELECT sql AS trigger_definition FROM sqlite_master WHERE type = 'trigger' AND name = '${safeName}'`];
+        default:
+            return [];
+    }
+};
+
+const extractQueryEditorTriggerDefinition = (dialect: string, data: any[]): string => {
+    if (!Array.isArray(data) || data.length === 0) return '';
+    const row = data[0] as Record<string, any>;
+    const direct = getQueryEditorObjectEditRawValue(row, ['trigger_definition', 'definition', 'sql', 'SQL']);
+    if (direct !== undefined && direct !== null && String(direct).trim()) {
+        return String(direct);
+    }
+    if (dialect === 'mysql' || dialect === 'starrocks') {
+        const statementKey = Object.keys(row).find((key) => {
+            const lowerKey = key.toLowerCase();
+            return lowerKey.includes('statement') || lowerKey.includes('create trigger');
+        });
+        if (statementKey) return String(row[statementKey] || '');
+        const createValue = Object.values(row).find((value) => String(value || '').toUpperCase().includes('CREATE TRIGGER'));
+        return createValue ? String(createValue) : String(getQueryEditorObjectEditRawValue(row, ['ACTION_STATEMENT', 'action_statement']) || '');
+    }
+    return String(getQueryEditorObjectEditRawValue(row, ['TRIGGER_BODY', 'trigger_body', 'TEXT', 'text']) || Object.values(row)[0] || '');
+};
+
 const buildQueryEditorAiContextPrompt = (connection: any, database: string): string => {
     if (!connection) {
         return '';
@@ -236,6 +672,7 @@ const clearRecord = (record: Record<string, unknown>) => {
     });
 };
 const resetSharedQueryEditorMetadata = () => {
+    sharedCurrentDb = '';
     sharedTablesData = [];
     sharedAllColumnsData = [];
     sharedVisibleDbs = [];
@@ -1063,6 +1500,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
           const metadataDbName = String(currentDbRef.current || currentDb || '').trim();
           if (!metadataDbName) return;
+          if (isActive) {
+              sharedCurrentDb = metadataDbName;
+          }
           const metadataDbNames = collectQueryEditorReferencedDatabaseNames(
               getCurrentQuery(),
               metadataDbName,
@@ -1097,6 +1537,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               sequencesRef.current = [...allSequences];
               packagesRef.current = [...allPackages];
               if (isActive) {
+                  sharedCurrentDb = metadataDbName;
                   sharedTablesData = tablesRef.current;
                   sharedAllColumnsData = allColumnsRef.current;
                   sharedViewsData = viewsRef.current;
@@ -1585,6 +2026,131 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       });
   }, [addTab]);
 
+  const openDefinitionObjectEditTab = useCallback(async (
+      navigationTarget: Extract<QueryEditorNavigationTarget, { type: 'view' | 'materialized-view' | 'sequence' | 'package' }>,
+      connectionId: string,
+      targetDbName: string,
+  ) => {
+      const targetSchemaName = String(navigationTarget.schemaName || '').trim();
+      const conn = connectionsRef.current.find((item) => item.id === connectionId);
+      const dialect = conn ? normalizeMetadataDialect(conn) : '';
+      let targetObjectName = '';
+      let objectEditName = '';
+      let objectLabel = '';
+      let definitionTabType: 'view-def' | 'sequence-def' | 'package-def' = 'view-def';
+      let definitionQueries: string[] = [];
+      let collectAllDefinitionRows = false;
+      let latestDefinition = '';
+
+      if (navigationTarget.type === 'view' || navigationTarget.type === 'materialized-view') {
+          targetObjectName = String(navigationTarget.viewName || '').trim();
+          if (!targetObjectName) return;
+          definitionTabType = 'view-def';
+          objectEditName = buildQueryEditorQualifiedObjectName(targetObjectName, targetSchemaName);
+          objectLabel = navigationTarget.type === 'materialized-view'
+              ? translate('definition_viewer.object.materialized_view')
+              : translate('definition_viewer.object.view');
+          definitionQueries = conn
+              ? buildQueryEditorViewDefinitionQueries(
+                  dialect,
+                  targetObjectName,
+                  targetDbName,
+                  targetSchemaName,
+                  navigationTarget.type === 'materialized-view' ? 'materialized' : 'view',
+              )
+              : [];
+      } else if (navigationTarget.type === 'sequence') {
+          targetObjectName = String(navigationTarget.sequenceName || '').trim();
+          if (!targetObjectName) return;
+          definitionTabType = 'sequence-def';
+          objectEditName = buildQueryEditorQualifiedObjectName(targetObjectName, targetSchemaName);
+          objectLabel = translate('definition_viewer.object.sequence');
+          definitionQueries = conn
+              ? buildQueryEditorSequenceDefinitionQueries(dialect, targetObjectName, targetDbName, targetSchemaName)
+              : [];
+      } else {
+          targetObjectName = String(navigationTarget.packageName || '').trim();
+          if (!targetObjectName) return;
+          definitionTabType = 'package-def';
+          objectEditName = buildQueryEditorQualifiedObjectName(targetObjectName, targetSchemaName);
+          objectLabel = translate('definition_viewer.object.package');
+          collectAllDefinitionRows = true;
+          definitionQueries = conn
+              ? buildQueryEditorPackageDefinitionQueries(dialect, targetObjectName, targetDbName, targetSchemaName)
+              : [];
+      }
+
+      if (conn && definitionQueries.length > 0) {
+          const rows = await runQueryEditorObjectDefinitionCandidates(
+              buildQueryEditorObjectDefinitionConnectionConfig(conn),
+              targetDbName,
+              definitionQueries,
+              collectAllDefinitionRows,
+          );
+          if (definitionTabType === 'view-def') {
+              latestDefinition = extractQueryEditorViewDefinition(dialect, rows);
+          } else if (definitionTabType === 'sequence-def') {
+              latestDefinition = extractQueryEditorSequenceDefinition(rows, targetObjectName, targetSchemaName);
+          } else {
+              latestDefinition = extractQueryEditorPackageDefinition(rows);
+          }
+      }
+
+      addTab({
+          id: `query-edit-object-${connectionId}-${targetDbName}-${objectEditName}-${Date.now()}`,
+          title: translate('definition_viewer.edit.tab_title', {
+              object: objectLabel,
+              name: objectEditName,
+          }),
+          type: 'query',
+          connectionId,
+          dbName: targetDbName,
+          query: buildQueryEditorEditableDefinitionSql(
+              definitionTabType,
+              latestDefinition,
+              objectEditName,
+              objectLabel,
+          ),
+          queryMode: 'object-edit',
+      });
+  }, [addTab]);
+
+  const openTriggerObjectEditTab = useCallback(async (
+      navigationTarget: Extract<QueryEditorNavigationTarget, { type: 'trigger' }>,
+      connectionId: string,
+      targetDbName: string,
+  ) => {
+      const targetTriggerName = String(navigationTarget.triggerName || '').trim();
+      if (!targetTriggerName) return;
+
+      const conn = connectionsRef.current.find((item) => item.id === connectionId);
+      let latestDefinition = '';
+      if (conn) {
+          const dialect = normalizeMetadataDialect(conn);
+          const rows = await runQueryEditorObjectDefinitionCandidates(
+              buildQueryEditorObjectDefinitionConnectionConfig(conn),
+              targetDbName,
+              buildQueryEditorTriggerDefinitionQueries(
+                  dialect,
+                  targetTriggerName,
+                  targetDbName,
+                  navigationTarget.schemaName,
+              ),
+          );
+          latestDefinition = extractQueryEditorTriggerDefinition(dialect, rows);
+      }
+
+      addTab({
+          id: `query-edit-trigger-${connectionId}-${targetDbName}-${targetTriggerName}-${Date.now()}`,
+          title: translate('trigger_viewer.tab.edit_trigger_title', { name: targetTriggerName }),
+          type: 'query',
+          connectionId,
+          dbName: targetDbName,
+          query: buildEditableTriggerSql(targetTriggerName, latestDefinition, { translate }),
+          queryMode: 'object-edit',
+      });
+  }, [addTab]);
+
   // Setup Autocomplete and Editor
   const handleEditorDidMount: OnMount = (editor, monaco) => {
       editorRef.current = editor;
@@ -1666,7 +2232,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (isKeyboardLikeEvent && isImeComposingKeyEvent(keyboardEvent as KeyboardEvent)) {
               return;
           }
-          const nextPressed = !!(keyboardEvent?.ctrlKey || keyboardEvent?.metaKey);
+          const keyboardEventType = isKeyboardLikeEvent ? String((keyboardEvent as KeyboardEvent).type || '').toLowerCase() : '';
+          const keyboardKey = isKeyboardLikeEvent ? String((keyboardEvent as KeyboardEvent).key || '').trim().toLowerCase() : '';
+          const keyboardCode = isKeyboardLikeEvent ? String((keyboardEvent as KeyboardEvent).code || '').trim().toLowerCase() : '';
+          const isModifierKeyDown = isKeyboardLikeEvent
+              && keyboardEventType !== 'keyup'
+              && (
+                  keyboardKey === 'control'
+                  || keyboardKey === 'ctrl'
+                  || keyboardKey === 'meta'
+                  || keyboardKey === 'os'
+                  || keyboardKey === 'command'
+                  || keyboardCode.startsWith('control')
+                  || keyboardCode.startsWith('meta')
+                  || keyboardCode.startsWith('os')
+              );
+          const eventHasModifierFlag = hasQueryEditorCtrlMetaModifier(keyboardEvent);
+          const nextPressed = isKeyboardLikeEvent
+              ? !!(eventHasModifierFlag || isModifierKeyDown)
+              : !!(eventHasModifierFlag || wasPressed);
           ctrlMetaPressedRef.current = nextPressed;
           if (!nextPressed && !wasPressed) {
               return;
@@ -1678,7 +2262,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               return;
           }
           if (!wasPressed || isKeyboardLikeEvent) {
-              applyNavigationHoverStateAtPosition(lastHoverTargetPositionRef.current);
+              const keyboardFallbackPosition = isKeyboardLikeEvent
+                  ? normalizeEditorPosition(editor.getPosition?.()) || lastEditorCursorPositionRef.current
+                  : null;
+              applyNavigationHoverStateAtPosition(lastHoverTargetPositionRef.current || keyboardFallbackPosition);
           }
       };
       const handleWindowBlur = () => {
@@ -1864,7 +2451,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (!isQueryEditorPrimaryMouseButton(browserEvent)) {
               return;
           }
-          if (!browserEvent.ctrlKey && !browserEvent.metaKey) {
+          if (!hasQueryEditorCtrlMetaModifier(browserEvent) && !ctrlMetaPressedRef.current) {
               return;
           }
 
@@ -1921,88 +2508,30 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   connectionId,
                   dbName: targetDbName,
                   tableName: targetTableName,
+                  initialViewMode: 'fields',
+                  initialViewModeRequestId: String(Date.now()),
                   objectType: 'table',
               });
               return;
           }
 
           if (navigationTarget.type === 'view' || navigationTarget.type === 'materialized-view') {
-              const targetViewName = String(navigationTarget.viewName || '').trim();
-              if (!targetViewName) return;
-              const viewTitle = navigationTarget.type === 'materialized-view'
-                  ? translate('sidebar.tab.materialized_view_definition', { name: targetViewName })
-                  : translate('sidebar.tab.view_definition', { name: targetViewName });
-              const targetSchemaName = String(navigationTarget.schemaName || '').trim();
-              const sidebarLocateKey = navigationTarget.type === 'materialized-view'
-                  ? `${connectionId}-${targetDbName}-materialized-view-${targetViewName}`
-                  : `${connectionId}-${targetDbName}-view-${targetViewName}`;
-              addTab({
-                  id: `view-def-${connectionId}-${targetDbName}-${targetViewName}`,
-                  title: viewTitle,
-                  type: 'view-def',
-                  connectionId,
-                  dbName: targetDbName,
-                  viewName: targetViewName,
-                  viewKind: navigationTarget.type === 'materialized-view' ? 'materialized' : 'view',
-                  schemaName: targetSchemaName || undefined,
-                  sidebarLocateKey,
-              });
+              void openDefinitionObjectEditTab(navigationTarget, connectionId, targetDbName);
               return;
           }
 
           if (navigationTarget.type === 'trigger') {
-              const targetTriggerName = String(navigationTarget.triggerName || '').trim();
-              if (!targetTriggerName) return;
-              const targetTriggerTableName = String(navigationTarget.tableName || '').trim();
-              const targetSchemaName = String(navigationTarget.schemaName || '').trim();
-              const sidebarLocateKey = `${connectionId}-${targetDbName}-trigger-${targetTriggerName}-${targetTriggerTableName}`;
-              addTab({
-                  id: `trigger-${connectionId}-${targetDbName}-${targetTriggerName}`,
-                  title: translate('sidebar.tab.trigger', { name: targetTriggerName }),
-                  type: 'trigger',
-                  connectionId,
-                  dbName: targetDbName,
-                  triggerName: targetTriggerName,
-                  triggerTableName: targetTriggerTableName || undefined,
-                  schemaName: targetSchemaName || undefined,
-                  sidebarLocateKey,
-              });
+              void openTriggerObjectEditTab(navigationTarget, connectionId, targetDbName);
               return;
           }
 
           if (navigationTarget.type === 'sequence') {
-              const targetSequenceName = String(navigationTarget.sequenceName || '').trim();
-              if (!targetSequenceName) return;
-              const targetSchemaName = String(navigationTarget.schemaName || '').trim();
-              const sidebarLocateKey = `sequence-def-${connectionId}-${targetDbName}-${targetSequenceName}`;
-              addTab({
-                  id: `sequence-def-${connectionId}-${targetDbName}-${targetSequenceName}`,
-                  title: translate('sidebar.tab.sequence_definition', { name: targetSequenceName }),
-                  type: 'sequence-def',
-                  connectionId,
-                  dbName: targetDbName,
-                  sequenceName: targetSequenceName,
-                  schemaName: targetSchemaName || undefined,
-                  sidebarLocateKey,
-              });
+              void openDefinitionObjectEditTab(navigationTarget, connectionId, targetDbName);
               return;
           }
 
           if (navigationTarget.type === 'package') {
-              const targetPackageName = String(navigationTarget.packageName || '').trim();
-              if (!targetPackageName) return;
-              const targetSchemaName = String(navigationTarget.schemaName || '').trim();
-              const sidebarLocateKey = `package-def-${connectionId}-${targetDbName}-${targetPackageName}`;
-              addTab({
-                  id: `package-def-${connectionId}-${targetDbName}-${targetPackageName}`,
-                  title: translate('sidebar.tab.package_definition', { name: targetPackageName }),
-                  type: 'package-def',
-                  connectionId,
-                  dbName: targetDbName,
-                  packageName: targetPackageName,
-                  schemaName: targetSchemaName || undefined,
-                  sidebarLocateKey,
-              });
+              void openDefinitionObjectEditTab(navigationTarget, connectionId, targetDbName);
               return;
           }
 
@@ -2179,6 +2708,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   if (!raw) return raw;
                   return shouldQuoteCompletionIdentifiers ? quoteQualifiedIdent(activeDialect, raw) : raw;
               };
+              const getActiveCompletionDbName = () => String(sharedCurrentDb || currentDbRef.current || currentDb || tab.dbName || '').trim();
               const dialectKeywords = resolveSqlKeywords(activeDialect);
               const dialectFunctions = resolveSqlFunctions(activeDialect);
 
@@ -2203,6 +2733,42 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       displayName: displayName || rawTableName,
                       insertText,
                       dbQualifiedLabel,
+                  };
+              };
+              const normalizeRoutineType = (routineType: string) => (
+                  String(routineType || '').trim().toUpperCase().includes('PROC') ? 'PROCEDURE' : 'FUNCTION'
+              );
+              const getRoutineTypeLabel = (routineType: string) => (
+                  normalizeRoutineType(routineType) === 'PROCEDURE'
+                      ? translate('sidebar.object.procedure')
+                      : translate('sidebar.object.function')
+              );
+              const buildRoutineSuggestionMeta = (routine: CompletionRoutineMeta) => {
+                  const rawDbName = String(routine.dbName || '').trim();
+                  const rawRoutineName = String(routine.routineName || '').trim();
+                  const parsed = splitSchemaAndTable(rawRoutineName);
+                  const schemaName = String(routine.schemaName || parsed.schema || '').trim();
+                  const objectName = String(parsed.table || rawRoutineName).trim();
+                  const schemaMatchesDb = !!schemaName
+                      && !!rawDbName
+                      && schemaName.toLowerCase() === rawDbName.toLowerCase();
+                  const isCurrentDb = rawDbName.toLowerCase() === getActiveCompletionDbName().toLowerCase();
+                  const displayName = isCurrentDb && schemaMatchesDb
+                      ? objectName
+                      : (parsed.schema ? rawRoutineName : objectName);
+                  const dbQualifiedLabel = rawDbName && !isCurrentDb
+                      ? `${rawDbName}.${displayName}`
+                      : displayName;
+                  const insertName = rawDbName && !isCurrentDb
+                      ? dbQualifiedLabel
+                      : displayName;
+                  return {
+                      displayName,
+                      dbQualifiedLabel,
+                      insertText: `${quoteCompletionPath(insertName)}($0)`,
+                      objectName,
+                      schemaName,
+                      routineType: normalizeRoutineType(routine.routineType),
                   };
               };
 
@@ -2413,7 +2979,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           sortText: '0' + suggestionMeta.displayName
                       };
                       });
-                      return { suggestions };
+                      const routineSuggestions = sharedRoutinesData
+                          .filter((routine) => String(routine.dbName || '').toLowerCase() === qualifierLower)
+                          .map((routine) => ({ routine, meta: buildRoutineSuggestionMeta(routine) }))
+                          .filter(({ routine, meta }) => (
+                              !prefix
+                              || meta.displayName.toLowerCase().startsWith(prefix)
+                              || meta.objectName.toLowerCase().startsWith(prefix)
+                              || String(routine.routineName || '').toLowerCase().startsWith(prefix)
+                          ))
+                          .map(({ routine, meta }) => ({
+                              label: meta.displayName,
+                              kind: monaco.languages.CompletionItemKind.Function,
+                              insertText: meta.insertText,
+                              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                              detail: `${getRoutineTypeLabel(routine.routineType)} (${routine.dbName})`,
+                              range,
+                              sortText: '1' + meta.displayName,
+                          }));
+                      return { suggestions: [...suggestions, ...routineSuggestions] };
                   }
 
                   // qualifier 是 schema（如 dbo/public）时，仅补全表名，避免输入 dbo. 后再补成 dbo.dbo.table
@@ -2443,7 +3027,23 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                           range,
                           sortText: '0' + t.table
                       }));
-                      return { suggestions };
+                      const routineSuggestions = sharedRoutinesData
+                          .filter((routine) => {
+                              const meta = buildRoutineSuggestionMeta(routine);
+                              return meta.schemaName.toLowerCase() === qualifierLower;
+                          })
+                          .map((routine) => ({ routine, meta: buildRoutineSuggestionMeta(routine) }))
+                          .filter(({ meta }) => !prefix || meta.objectName.toLowerCase().startsWith(prefix))
+                          .map(({ routine, meta }) => ({
+                              label: meta.objectName,
+                              kind: monaco.languages.CompletionItemKind.Function,
+                              insertText: `${quoteCompletionPart(meta.objectName)}($0)`,
+                              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                              detail: `${getRoutineTypeLabel(routine.routineType)} (${routine.dbName}${meta.schemaName ? '.' + meta.schemaName : ''})`,
+                              range,
+                              sortText: '1' + meta.objectName,
+                          }));
+                      return { suggestions: [...suggestions, ...routineSuggestions] };
                   }
 
                   // 否则检查是否是表别名或表名，提示列
@@ -2488,7 +3088,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   foundTables.add(t.toLowerCase());
               }
 
-              const currentDatabase = sharedCurrentDb || '';
+              const currentDatabase = getActiveCompletionDbName();
               const wordPrefix = (word.word || '').toLowerCase();
               const startsWithPrefix = (candidate: string) => !wordPrefix || candidate.toLowerCase().startsWith(wordPrefix);
               const includesWordPrefix = (candidate: string) => !wordPrefix || String(candidate || '').toLowerCase().includes(wordPrefix);
@@ -2502,14 +3102,18 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   return '9';
               };
               const expectsTableName = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TABLE|DESCRIBE|DESC|EXPLAIN)\s+[`"]?[\w.]*$/i.test(linePrefix);
+              const expectsRoutineName = /\bCALL\s+[`"]?[\w.]*$/i.test(linePrefix);
               const shouldBoostKeywords = !expectsTableName
+                  && !expectsRoutineName
                   && wordPrefix.length > 0
                   && dialectKeywords.some((keyword) => keyword.toLowerCase().startsWith(wordPrefix));
               const sortGroups = shouldBoostKeywords
-                  ? { keyword: '00', func: '05', columnCurrent: '10', columnOther: '11', tableCurrent: '20', tableOther: '21', db: '30' }
+                  ? { keyword: '00', func: '05', routineCurrent: '06', routineOther: '07', columnCurrent: '10', columnOther: '11', tableCurrent: '20', tableOther: '21', db: '30' }
+                  : expectsRoutineName
+                      ? { keyword: '30', func: '40', routineCurrent: '00', routineOther: '01', columnCurrent: '20', columnOther: '21', tableCurrent: '10', tableOther: '11', db: '35' }
                   : expectsTableName
-                      ? { keyword: '20', func: '25', columnCurrent: '10', columnOther: '11', tableCurrent: '00', tableOther: '01', db: '30' }
-                      : { keyword: '30', func: '25', columnCurrent: '00', columnOther: '01', tableCurrent: '10', tableOther: '11', db: '20' };
+                      ? { keyword: '20', func: '25', routineCurrent: '26', routineOther: '27', columnCurrent: '10', columnOther: '11', tableCurrent: '00', tableOther: '01', db: '30' }
+                      : { keyword: '30', func: '25', routineCurrent: '26', routineOther: '27', columnCurrent: '00', columnOther: '01', tableCurrent: '10', tableOther: '11', db: '20' };
               let completionTables = sharedTablesData;
               if (
                   expectsTableName
@@ -2674,6 +3278,33 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   };
               });
 
+              const routineSuggestions = sharedRoutinesData
+                  .map((routine) => ({ routine, meta: buildRoutineSuggestionMeta(routine) }))
+                  .filter(({ routine, meta }) => {
+                      if (expectsRoutineName && meta.routineType !== 'PROCEDURE') return false;
+                      return includesWordPrefix(meta.dbQualifiedLabel)
+                          || includesWordPrefix(meta.displayName)
+                          || includesWordPrefix(meta.objectName)
+                          || includesWordPrefix(routine.routineName || '');
+                  })
+                  .map(({ routine, meta }) => {
+                      const isCurrentDb = (routine.dbName || '').toLowerCase() === currentDatabase.toLowerCase();
+                      const schemaInfo = meta.schemaName && meta.schemaName.toLowerCase() !== String(routine.dbName || '').toLowerCase()
+                          ? `.${meta.schemaName}`
+                          : '';
+                      return {
+                          label: meta.dbQualifiedLabel,
+                          kind: monaco.languages.CompletionItemKind.Function,
+                          insertText: meta.insertText,
+                          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                          detail: `${getRoutineTypeLabel(routine.routineType)} (${routine.dbName}${schemaInfo})`,
+                          range,
+                          sortText: (isCurrentDb ? sortGroups.routineCurrent : sortGroups.routineOther)
+                              + getPrefixMatchRank(meta.dbQualifiedLabel, meta.displayName, meta.objectName, routine.routineName || '')
+                              + meta.dbQualifiedLabel,
+                      };
+                  });
+
               // 数据库提示
               const dbSuggestions = sharedVisibleDbs
                   .filter((db) => startsWithPrefix(db))
@@ -2714,6 +3345,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ...relevantColumns,   // FROM 表的列最优先
                   ...tableSuggestions,  // 表次之
                   ...dbSuggestions,     // 数据库
+                  ...routineSuggestions, // 存储过程/函数
                   ...funcSuggestions,   // 内置函数
                   ...keywordSuggestions // 关键字最后
               ];

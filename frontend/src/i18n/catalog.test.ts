@@ -189,6 +189,10 @@ describe("i18n catalog", () => {
       "app.theme.mode.light.description",
       "app.theme.mode.light.label",
       "app.theme.mode_title",
+      "app.theme.data_table.table_double_click_action",
+      "app.theme.data_table.table_double_click_action.open_data",
+      "app.theme.data_table.table_double_click_action.open_design",
+      "app.theme.data_table.table_double_click_action_hint",
       "app.theme.nav.appearance.description",
       "app.theme.nav.appearance.title",
       "app.theme.nav.theme.description",
@@ -2216,19 +2220,29 @@ describe("i18n catalog", () => {
 
   it("keeps QueryEditor object navigation tab titles in catalogs instead of source literals", () => {
     const objectTabTitleKeys = [
-      "sidebar.tab.view_definition",
-      "sidebar.tab.materialized_view_definition",
-      "sidebar.tab.trigger",
-      "sidebar.tab.routine_definition",
+      "definition_viewer.edit.tab_title",
+      "definition_viewer.object.view",
+      "definition_viewer.object.materialized_view",
+      "definition_viewer.object.sequence",
+      "definition_viewer.object.package",
+      "trigger_viewer.tab.edit_trigger_title",
+      "sidebar.tab.edit_routine",
       "sidebar.object.procedure",
       "sidebar.object.function",
     ] as const;
     const source = readQueryEditorSource();
-    const objectNavigationSource = sliceBetween(
-      source,
-      "          if (navigationTarget.type === 'view' || navigationTarget.type === 'materialized-view') {",
-      "      editor.onDidDispose?.(() => {",
-    );
+    const objectNavigationSource = [
+      sliceBetween(
+        source,
+        "const buildQueryEditorEditableDefinitionSql = (",
+        "const buildQueryEditorAiContextPrompt = (",
+      ),
+      sliceBetween(
+        source,
+        "  const openRoutineObjectEditTab = useCallback(async (",
+        "  // Setup Autocomplete and Editor",
+      ),
+    ].join("\n");
 
     for (const language of SUPPORTED_LANGUAGES) {
       for (const key of objectTabTitleKeys) {
@@ -2236,10 +2250,13 @@ describe("i18n catalog", () => {
         expect(catalogs[language][key]).toBeTruthy();
       }
 
-      expect(getPlaceholders(catalogs[language]["sidebar.tab.view_definition"])).toEqual(["name"]);
-      expect(getPlaceholders(catalogs[language]["sidebar.tab.materialized_view_definition"])).toEqual(["name"]);
-      expect(getPlaceholders(catalogs[language]["sidebar.tab.trigger"])).toEqual(["name"]);
-      expect(getPlaceholders(catalogs[language]["sidebar.tab.routine_definition"])).toEqual(["name", "type"]);
+      expect([...getPlaceholders(catalogs[language]["definition_viewer.edit.tab_title"])].sort()).toEqual(["name", "object"]);
+      expect(getPlaceholders(catalogs[language]["definition_viewer.object.view"])).toEqual([]);
+      expect(getPlaceholders(catalogs[language]["definition_viewer.object.materialized_view"])).toEqual([]);
+      expect(getPlaceholders(catalogs[language]["definition_viewer.object.sequence"])).toEqual([]);
+      expect(getPlaceholders(catalogs[language]["definition_viewer.object.package"])).toEqual([]);
+      expect(getPlaceholders(catalogs[language]["trigger_viewer.tab.edit_trigger_title"])).toEqual(["name"]);
+      expect([...getPlaceholders(catalogs[language]["sidebar.tab.edit_routine"])].sort()).toEqual(["name", "type"]);
       expect(getPlaceholders(catalogs[language]["sidebar.object.procedure"])).toEqual([]);
       expect(getPlaceholders(catalogs[language]["sidebar.object.function"])).toEqual([]);
     }
@@ -2248,7 +2265,11 @@ describe("i18n catalog", () => {
       expect(objectNavigationSource).toContain(key);
     }
 
-    assertSourceDoesNotInlineCatalogValues(objectNavigationSource, objectTabTitleKeys);
+    assertSourceDoesNotInlineCatalogValues(objectNavigationSource, [
+      "definition_viewer.edit.tab_title",
+      "trigger_viewer.tab.edit_trigger_title",
+      "sidebar.tab.edit_routine",
+    ]);
   });
 
   it("guards QueryEditor V2 empty state against inlining any catalog literal into source", () => {

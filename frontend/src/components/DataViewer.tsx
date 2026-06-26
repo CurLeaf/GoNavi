@@ -1231,6 +1231,8 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
           onScrollSnapshotChange={handleTableScrollSnapshotChange}
           isActive={isActive}
           enableSqlLogEvent
+          initialViewMode={tab.initialViewMode}
+          initialViewModeRequestId={tab.initialViewModeRequestId}
       />
     </div>
   );

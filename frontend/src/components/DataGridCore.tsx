@@ -1336,6 +1336,8 @@ interface DataGridProps {
     toolbarExtraActions?: React.ReactNode;
     isActive?: boolean;
     enableSqlLogEvent?: boolean;
+    initialViewMode?: GridViewMode;
+    initialViewModeRequestId?: string;
 }
 
 type GridFilterCondition = FilterCondition & {

@@ -1890,6 +1890,40 @@ describe('DataGrid DDL interactions', () => {
     expect(content).toContain('name');
   });
 
+  it('opens the embedded object designer from an initial v2 table view request', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { name: 'id', type: 'bigint', key: 'PRI', nullable: 'NO', default: '', comment: '' },
+        { name: 'name', type: 'varchar(255)', key: '', nullable: 'YES', default: '', comment: '' },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <DataGrid
+          data={[{ __gonavi_row_key__: 'row-1', id: 1, name: 'alpha' }]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          initialViewMode="fields"
+          initialViewModeRequestId="query-editor-jump-1"
+        />,
+      );
+    });
+    await waitForEffects();
+
+    const content = textContent(renderer!.root);
+    expect(content).toContain('SCHEMA DESIGNER');
+    expect(content).toContain('字段');
+    expect(content).toContain('id');
+    expect(content).toContain('name');
+  });
+
   it('returns to the legacy table view when v2-only footer views are active during UI switch', async () => {
     storeState.appearance.uiVersion = 'v2';
 

@@ -130,6 +130,16 @@ export const isQueryEditorPrimaryMouseButton = (event: any): boolean => {
     return false;
 };
 
+export const hasQueryEditorCtrlMetaModifier = (event: any): boolean => {
+    const candidates = [
+        event,
+        event?.browserEvent,
+        event?.nativeEvent,
+        event?.originalEvent,
+    ];
+    return candidates.some((candidate) => !!(candidate?.ctrlKey || candidate?.metaKey));
+};
+
 export const readSidebarSqlDropText = (
     event: DragEvent,
     currentConnectionId = '',

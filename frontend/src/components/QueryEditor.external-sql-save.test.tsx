@@ -1302,6 +1302,83 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
+  it('suggests MySQL CALL keyword and stored routine names in SQL completion', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      const text = String(sql || '');
+      if (text.includes('information_schema.routines')) {
+        return {
+          success: true,
+          data: [
+            { routine_name: 'codex_tmp_proc_link_test', routine_type: 'PROCEDURE', schema_name: 'main' },
+            { routine_name: 'codex_tmp_score_user', routine_type: 'FUNCTION', schema_name: 'main' },
+          ],
+        };
+      }
+      return { success: true, data: [] };
+    });
+
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '', dbName: 'main' })} />);
+    });
+    await act(async () => {
+      for (let i = 0; i < 12; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.value = 'CA';
+    editorState.latestOnChange?.(editorState.value);
+    const keywordItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: editorState.value.length + 1 },
+    );
+    expect(keywordItems.suggestions.some((item: any) => item.label === 'CALL')).toBe(true);
+
+    editorState.value = 'CALL codex_tmp';
+    editorState.latestOnChange?.(editorState.value);
+    const routineItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: editorState.value.length + 1 },
+    );
+    const procedureSuggestion = routineItems.suggestions.find((item: any) => item.label === 'codex_tmp_proc_link_test');
+    const functionSuggestion = routineItems.suggestions.find((item: any) => item.label === 'codex_tmp_score_user');
+
+    expect(procedureSuggestion).toMatchObject({
+      kind: 2,
+      insertText: 'codex_tmp_proc_link_test($0)',
+      detail: '存储过程 (main)',
+    });
+    expect(String(procedureSuggestion?.sortText || '')).toMatch(/^00/);
+    expect(functionSuggestion).toBeUndefined();
+
+    editorState.value = 'SELECT codex_tmp';
+    editorState.latestOnChange?.(editorState.value);
+    const expressionRoutineItems = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 1, column: editorState.value.length + 1 },
+    );
+    const expressionFunctionSuggestion = expressionRoutineItems.suggestions.find((item: any) => item.label === 'codex_tmp_score_user');
+    expect(expressionFunctionSuggestion).toMatchObject({
+      kind: 2,
+      insertText: 'codex_tmp_score_user($0)',
+      detail: '函数 (main)',
+    });
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('quotes uppercase postgres table names in FROM completion insert text', async () => {
     let renderer!: ReactTestRenderer;
     autoFetchState.visible = true;
@@ -1622,7 +1699,7 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
-  it('opens a table tab on ctrl left click inside the editor', async () => {
+  it('opens a table data tab with the embedded object designer on ctrl left click inside the editor', async () => {
     editorState.value = 'select * from analytics.events where id = 1';
     autoFetchState.visible = true;
     backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }, { Database: 'analytics' }] });
@@ -1664,6 +1741,8 @@ describe('QueryEditor external SQL save', () => {
       connectionId: 'conn-1',
       dbName: 'analytics',
       tableName: 'events',
+      initialViewMode: 'fields',
+      initialViewModeRequestId: expect.any(String),
       objectType: 'table',
     });
     expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -1673,7 +1752,7 @@ describe('QueryEditor external SQL save', () => {
     expect(stopPropagation).toHaveBeenCalled();
   });
 
-  it('opens a table tab on macOS cmd click when Monaco omits leftButton', async () => {
+  it('opens a table data tab with the embedded object designer on macOS cmd click when Monaco omits leftButton', async () => {
     editorState.value = 'select * from fs_mkefu_regist_record;';
     autoFetchState.visible = true;
     backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'mkefu_location_dev_local' }] });
@@ -1709,6 +1788,8 @@ describe('QueryEditor external SQL save', () => {
       connectionId: 'conn-1',
       dbName: 'mkefu_location_dev_local',
       tableName: 'fs_mkefu_regist_record',
+      initialViewMode: 'fields',
+      initialViewModeRequestId: expect.any(String),
       objectType: 'table',
     }));
     expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -1788,6 +1869,74 @@ describe('QueryEditor external SQL save', () => {
     expect(stopPropagation).toHaveBeenCalled();
   });
 
+  it('opens a MySQL procedure object-edit tab from a CALL routine link', async () => {
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'main';
+    editorState.value = 'CALL codex_tmp_proc_link_test();';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+    backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      const text = String(sql || '');
+      if (text.includes('information_schema.routines') || text.includes('SHOW FUNCTION STATUS') || text.includes('SHOW PROCEDURE STATUS')) {
+        return {
+          success: true,
+          data: [{ routine_name: 'codex_tmp_proc_link_test', routine_type: 'PROCEDURE', schema_name: 'main' }],
+        };
+      }
+      if (text.includes('SHOW CREATE PROCEDURE')) {
+        return {
+          success: true,
+          data: [{
+            'Create Procedure': 'CREATE PROCEDURE codex_tmp_proc_link_test() BEGIN SELECT 1 AS codex_tmp_result; END',
+          }],
+        };
+      }
+      return { success: true, data: [] };
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      for (let i = 0; i < 12; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 12 } },
+        event: {
+          browserEvent: { button: 0, buttons: 1 },
+          leftButton: true,
+          ctrlKey: true,
+          metaKey: false,
+          preventDefault,
+          stopPropagation,
+        },
+      });
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(backendApp.DBQuery).toHaveBeenCalledWith(expect.any(Object), 'main', 'SHOW CREATE PROCEDURE `codex_tmp_proc_link_test`');
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      title: expect.stringContaining('codex_tmp_proc_link_test'),
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE PROCEDURE codex_tmp_proc_link_test()'),
+    }));
+    expect(preventDefault).toHaveBeenCalled();
+    expect(stopPropagation).toHaveBeenCalled();
+  });
+
   it('does not read the full editor model when ctrl/cmd clicking objects in large SQL', async () => {
     editorState.value = [
       ...Array.from({ length: 4000 }, (_, index) => `-- filler ${index + 1}`),
@@ -1836,6 +1985,7 @@ describe('QueryEditor external SQL save', () => {
       connectionId: 'conn-1',
       dbName: 'analytics',
       tableName: 'events',
+      initialViewMode: 'fields',
     }));
     expect(preventDefault).toHaveBeenCalled();
     expect(stopPropagation).toHaveBeenCalled();
@@ -1891,6 +2041,261 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.editor.updateOptions).toHaveBeenLastCalledWith({ mouseStyle: 'text' });
   });
 
+  it('keeps link-style feedback when modifier state is tracked but mousemove omits ctrl/meta flags', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    editorState.value = 'SELECT * FROM uk_user';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'mkefu_location_dev_local' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_mkefu_location_dev_local: 'uk_user' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'mkefu_location_dev_local' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    editorState.editor.deltaDecorations.mockClear();
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener({
+        type: 'keydown',
+        ctrlKey: true,
+        metaKey: false,
+        key: 'Control',
+        code: 'ControlLeft',
+        repeat: false,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        target: null,
+      }));
+      editorState.mouseMoveListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 18 } },
+        event: {
+          ctrlKey: false,
+          metaKey: false,
+        },
+      });
+    });
+
+    expect(editorState.domNode.style.cursor).toBe('pointer');
+    const lastDecorationCall = editorState.editor.deltaDecorations.mock.calls.at(-1);
+    expect(lastDecorationCall?.[1]?.[0]?.options?.inlineClassName).toBe('gonavi-query-editor-link-hint');
+  });
+
+  it('opens an object tab when modifier state is tracked but mousedown omits ctrl/meta flags', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    editorState.value = 'SELECT * FROM uk_user';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'mkefu_location_dev_local' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_mkefu_location_dev_local: 'uk_user' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'mkefu_location_dev_local' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener({
+        type: 'keydown',
+        ctrlKey: true,
+        metaKey: false,
+        key: 'Control',
+        code: 'ControlLeft',
+        repeat: false,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        target: null,
+      }));
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 18 } },
+        event: {
+          browserEvent: { button: 0, buttons: 1 },
+          ctrlKey: false,
+          metaKey: false,
+          preventDefault,
+          stopPropagation,
+        },
+      });
+    });
+
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'mkefu_location_dev_local',
+      tableName: 'uk_user',
+      initialViewMode: 'fields',
+    }));
+    expect(preventDefault).toHaveBeenCalled();
+    expect(stopPropagation).toHaveBeenCalled();
+  });
+
+  it('opens an object tab when mousedown stores ctrl/meta flags on the native browser event', async () => {
+    editorState.value = 'SELECT * FROM uk_user';
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'mkefu_location_dev_local' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_mkefu_location_dev_local: 'uk_user' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'mkefu_location_dev_local' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const preventDefault = vi.fn();
+    const stopPropagation = vi.fn();
+    await act(async () => {
+      editorState.mouseDownListeners[0]?.({
+        target: { position: { lineNumber: 1, column: 18 } },
+        event: {
+          leftButton: true,
+          ctrlKey: false,
+          metaKey: false,
+          browserEvent: {
+            button: 0,
+            buttons: 1,
+            ctrlKey: false,
+            metaKey: true,
+            preventDefault,
+            stopPropagation,
+          },
+          preventDefault,
+          stopPropagation,
+        },
+      });
+    });
+
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'table',
+      connectionId: 'conn-1',
+      dbName: 'mkefu_location_dev_local',
+      tableName: 'uk_user',
+      initialViewMode: 'fields',
+    }));
+    expect(preventDefault).toHaveBeenCalled();
+    expect(stopPropagation).toHaveBeenCalled();
+  });
+
+  it('shows link-style feedback from the current cursor when ctrl/cmd is pressed without moving the mouse', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    editorState.value = 'SELECT * FROM uk_user';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM uk_user'.length + 1 };
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'mkefu_location_dev_local' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_mkefu_location_dev_local: 'uk_user' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'mkefu_location_dev_local' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    editorState.editor.deltaDecorations.mockClear();
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener({
+        ctrlKey: true,
+        metaKey: false,
+        key: 'Control',
+        code: 'ControlLeft',
+        repeat: false,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        target: null,
+      }));
+    });
+
+    expect(editorState.editor.deltaDecorations).toHaveBeenCalled();
+    expect(editorState.domNode.style.cursor).toBe('pointer');
+    const lastDecorationCall = editorState.editor.deltaDecorations.mock.calls.at(-1);
+    expect(lastDecorationCall?.[1]?.[0]?.options?.inlineClassName).toBe('gonavi-query-editor-link-hint');
+  });
+
+  it('treats modifier keydown itself as pressed when desktop WebView omits ctrl/meta flags', async () => {
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+
+    editorState.value = 'SELECT * FROM uk_user';
+    editorState.position = { lineNumber: 1, column: 'SELECT * FROM uk_user'.length + 1 };
+    autoFetchState.visible = true;
+    backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'mkefu_location_dev_local' }] });
+    backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_mkefu_location_dev_local: 'uk_user' }] });
+    backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'mkefu_location_dev_local' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    editorState.editor.deltaDecorations.mockClear();
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener({
+        type: 'keydown',
+        ctrlKey: false,
+        metaKey: false,
+        key: 'Meta',
+        code: 'MetaLeft',
+        repeat: false,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        target: null,
+      }));
+    });
+
+    expect(editorState.domNode.style.cursor).toBe('pointer');
+    const lastDecorationCall = editorState.editor.deltaDecorations.mock.calls.at(-1);
+    expect(lastDecorationCall?.[1]?.[0]?.options?.inlineClassName).toBe('gonavi-query-editor-link-hint');
+  });
+
   it('shows hover shortcut hints in English for every navigable object kind', () => {
     setCurrentLanguage('en-US');
 
@@ -1920,7 +2325,7 @@ describe('QueryEditor external SQL save', () => {
 
     const cases = [
       { lineContent: 'use analytics', column: 6, expected: 'Ctrl + click to switch to this database' },
-      { lineContent: 'select * from analytics.events', column: 27, expected: 'Ctrl + click to open this table' },
+      { lineContent: 'select * from analytics.events', column: 27, expected: 'Ctrl + click to open this table object design' },
       { lineContent: 'select * from reporting.active_users', column: 31, expected: 'Ctrl + click to open this view' },
       { lineContent: 'select * from analytics.mv_daily_stats', column: 37, expected: 'Ctrl + click to open this materialized view' },
       { lineContent: 'call audit.users_bi()', column: 18, expected: 'Ctrl + click to open this trigger' },
@@ -3729,7 +4134,7 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toMatch(/body\[data-theme='dark'\]\s+\.gonavi-query-editor-link-hint\s*\{[^}]*color:\s*#69b1ff\s*!important;/s);
   });
 
-  it('opens a view tab on ctrl left click inside the editor', async () => {
+  it('opens a view object-edit tab on ctrl left click inside the editor', async () => {
     editorState.value = 'select * from reporting.active_users';
     autoFetchState.visible = true;
     backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
@@ -3737,7 +4142,7 @@ describe('QueryEditor external SQL save', () => {
     backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
     backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
       if (sql.includes('information_schema.views') || sql.includes('pg_catalog.pg_views') || sql.includes('USER_VIEWS') || sql.includes('ALL_VIEWS')) {
-        return { success: true, data: [{ view_name: 'active_users', schema_name: 'reporting' }] };
+        return { success: true, data: [{ view_name: 'active_users', schema_name: 'reporting', view_definition: 'select id from users' }] };
       }
       return { success: true, data: [] };
     });
@@ -3762,32 +4167,36 @@ describe('QueryEditor external SQL save', () => {
           stopPropagation: vi.fn(),
         },
       });
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
     });
 
     expect(storeState.setActiveContext).not.toHaveBeenCalled();
-    expect(storeState.addTab).toHaveBeenCalledWith({
-      id: 'view-def-conn-1-main-active_users',
-      title: '视图：active_users',
-      type: 'view-def',
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.stringMatching(/^query-edit-object-conn-1-main-reporting\.active_users-\d+$/),
+      title: '修改视图: reporting.active_users',
+      type: 'query',
       connectionId: 'conn-1',
       dbName: 'main',
-      viewName: 'active_users',
-      viewKind: 'view',
-      schemaName: 'reporting',
-      sidebarLocateKey: 'conn-1-main-view-active_users',
-    });
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE OR REPLACE VIEW reporting.active_users AS'),
+    }));
     expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'gonavi:locate-sidebar-object',
     }));
   });
 
-  it('opens trigger and routine tabs on ctrl left click inside the editor', async () => {
+  it('opens trigger and routine object-edit tabs on ctrl left click inside the editor', async () => {
     editorState.value = 'call audit.users_bi(); call reporting.refresh_stats();';
     autoFetchState.visible = true;
     backendApp.DBGetDatabases.mockResolvedValueOnce({ success: true, data: [{ Database: 'main' }] });
     backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] });
     backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
     backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+      if (sql.includes('SHOW CREATE TRIGGER')) {
+        return { success: true, data: [{ 'SQL Original Statement': 'CREATE TRIGGER audit.users_bi BEFORE INSERT ON audit.users FOR EACH ROW SET @a = 1' }] };
+      }
       if (sql.includes('information_schema.triggers') || sql.includes('SHOW TRIGGERS') || sql.includes('USER_TRIGGERS') || sql.includes('ALL_TRIGGERS')) {
         return { success: true, data: [{ trigger_name: 'users_bi', table_name: 'users', schema_name: 'audit' }] };
       }
@@ -3817,6 +4226,9 @@ describe('QueryEditor external SQL save', () => {
           stopPropagation: vi.fn(),
         },
       });
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
     });
 
     await act(async () => {
@@ -3830,19 +4242,20 @@ describe('QueryEditor external SQL save', () => {
           stopPropagation: vi.fn(),
         },
       });
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
     });
 
-    expect(storeState.addTab).toHaveBeenCalledWith({
-      id: 'trigger-conn-1-main-audit.users_bi',
-      title: '触发器：audit.users_bi',
-      type: 'trigger',
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.stringMatching(/^query-edit-trigger-conn-1-main-audit\.users_bi-\d+$/),
+      title: '修改触发器: audit.users_bi',
+      type: 'query',
       connectionId: 'conn-1',
       dbName: 'main',
-      triggerName: 'audit.users_bi',
-      triggerTableName: 'audit.users',
-      schemaName: 'audit',
-      sidebarLocateKey: 'conn-1-main-trigger-audit.users_bi-audit.users',
-    });
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE TRIGGER audit.users_bi'),
+    }));
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
       id: expect.stringMatching(/^query-edit-routine-conn-1-main-reporting\.refresh_stats-\d+$/),
       title: '编辑 存储过程：reporting.refresh_stats',
@@ -3857,7 +4270,7 @@ describe('QueryEditor external SQL save', () => {
     }));
   });
 
-  it('opens sequence and package tabs on ctrl left click inside the editor', async () => {
+  it('opens sequence and package object-edit tabs on ctrl left click inside the editor', async () => {
     editorState.value = 'select billing.order_seq.nextval from dual; begin billing.pkg_order.sync_order(1); end;';
     autoFetchState.visible = true;
     storeState.connections[0].config.type = 'oracle';
@@ -3867,7 +4280,25 @@ describe('QueryEditor external SQL save', () => {
     backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
     backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
       if (sql.includes('ALL_SEQUENCES') || sql.includes('USER_SEQUENCES')) {
-        return { success: true, data: [{ sequence_name: 'order_seq', schema_name: 'billing' }] };
+        return {
+          success: true,
+          data: [{
+            sequence_owner: 'BILLING',
+            sequence_name: 'ORDER_SEQ',
+            min_value: 1,
+            max_value: 999999,
+            increment_by: 1,
+            cache_size: 20,
+            cycle_flag: 'N',
+            order_flag: 'N',
+          }],
+        };
+      }
+      if (sql.includes('ALL_SOURCE') || sql.includes('USER_SOURCE')) {
+        if (sql.includes("TYPE = 'PACKAGE BODY'")) {
+          return { success: true, data: [{ TEXT: 'PACKAGE BODY pkg_order AS\nPROCEDURE sync_order(p_id NUMBER) IS BEGIN NULL; END;\nEND pkg_order;\n' }] };
+        }
+        return { success: true, data: [{ TEXT: 'PACKAGE pkg_order AS\nPROCEDURE sync_order(p_id NUMBER);\nEND pkg_order;\n' }] };
       }
       if (sql.includes('ALL_OBJECTS') && sql.includes("OBJECT_TYPE = 'PACKAGE'")) {
         return { success: true, data: [{ package_name: 'pkg_order', schema_name: 'billing' }] };
@@ -3895,6 +4326,9 @@ describe('QueryEditor external SQL save', () => {
           stopPropagation: vi.fn(),
         },
       });
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
     });
 
     await act(async () => {
@@ -3908,35 +4342,36 @@ describe('QueryEditor external SQL save', () => {
           stopPropagation: vi.fn(),
         },
       });
+      for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+      }
     });
 
-    expect(storeState.addTab).toHaveBeenCalledWith({
-      id: 'sequence-def-conn-1-main-billing.order_seq',
-      title: '序列：billing.order_seq',
-      type: 'sequence-def',
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.stringMatching(/^query-edit-object-conn-1-main-BILLING\.ORDER_SEQ-\d+$/),
+      title: '修改序列: BILLING.ORDER_SEQ',
+      type: 'query',
       connectionId: 'conn-1',
       dbName: 'main',
-      sequenceName: 'billing.order_seq',
-      schemaName: 'billing',
-      sidebarLocateKey: 'sequence-def-conn-1-main-billing.order_seq',
-    });
-    expect(storeState.addTab).toHaveBeenCalledWith({
-      id: 'package-def-conn-1-main-billing.pkg_order',
-      title: '存储包：billing.pkg_order',
-      type: 'package-def',
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE SEQUENCE BILLING.ORDER_SEQ'),
+    }));
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.stringMatching(/^query-edit-object-conn-1-main-billing\.pkg_order-\d+$/),
+      title: '修改存储包: billing.pkg_order',
+      type: 'query',
       connectionId: 'conn-1',
       dbName: 'main',
-      packageName: 'billing.pkg_order',
-      schemaName: 'billing',
-      sidebarLocateKey: 'package-def-conn-1-main-billing.pkg_order',
-    });
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE OR REPLACE PACKAGE pkg_order'),
+    }));
     expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'gonavi:locate-sidebar-object',
     }));
   });
 
   describe('object navigation tab title localization', () => {
-    it('uses the English catalog title for view definition tabs', async () => {
+    it('uses the English catalog title for view object-edit tabs', async () => {
       storeState.languagePreference = 'en-US';
       setCurrentLanguage('en-US');
       editorState.value = 'select * from reporting.active_users';
@@ -3946,7 +4381,7 @@ describe('QueryEditor external SQL save', () => {
       backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
       backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
         if (sql.includes('information_schema.views') || sql.includes('pg_catalog.pg_views') || sql.includes('USER_VIEWS') || sql.includes('ALL_VIEWS')) {
-          return { success: true, data: [{ view_name: 'active_users', schema_name: 'reporting' }] };
+          return { success: true, data: [{ view_name: 'active_users', schema_name: 'reporting', view_definition: 'select id from users' }] };
         }
         return { success: true, data: [] };
       });
@@ -3971,16 +4406,20 @@ describe('QueryEditor external SQL save', () => {
             stopPropagation: vi.fn(),
           },
         });
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
       });
 
       expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
-        id: 'view-def-conn-1-main-active_users',
-        title: 'View: active_users',
-        type: 'view-def',
+        id: expect.stringMatching(/^query-edit-object-conn-1-main-reporting\.active_users-\d+$/),
+        title: 'Edit View: reporting.active_users',
+        type: 'query',
+        queryMode: 'object-edit',
       }));
     });
 
-    it('uses the English catalog titles for trigger and procedure tabs', async () => {
+    it('uses the English catalog titles for trigger and procedure object-edit tabs', async () => {
       storeState.languagePreference = 'en-US';
       setCurrentLanguage('en-US');
       editorState.value = 'call audit.users_bi(); call reporting.refresh_stats();';
@@ -3989,6 +4428,9 @@ describe('QueryEditor external SQL save', () => {
       backendApp.DBGetTables.mockResolvedValueOnce({ success: true, data: [{ Tables_in_main: 'users' }] });
       backendApp.DBGetAllColumns.mockResolvedValueOnce({ success: true, data: [] });
       backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
+        if (sql.includes('SHOW CREATE TRIGGER')) {
+          return { success: true, data: [{ 'SQL Original Statement': 'CREATE TRIGGER audit.users_bi BEFORE INSERT ON audit.users FOR EACH ROW SET @a = 1' }] };
+        }
         if (sql.includes('information_schema.triggers') || sql.includes('SHOW TRIGGERS') || sql.includes('USER_TRIGGERS') || sql.includes('ALL_TRIGGERS')) {
           return { success: true, data: [{ trigger_name: 'users_bi', table_name: 'users', schema_name: 'audit' }] };
         }
@@ -4018,6 +4460,9 @@ describe('QueryEditor external SQL save', () => {
             stopPropagation: vi.fn(),
           },
         });
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
       });
 
       await act(async () => {
@@ -4031,12 +4476,16 @@ describe('QueryEditor external SQL save', () => {
             stopPropagation: vi.fn(),
           },
         });
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
       });
 
       expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
-        id: 'trigger-conn-1-main-audit.users_bi',
-        title: 'Trigger: audit.users_bi',
-        type: 'trigger',
+        id: expect.stringMatching(/^query-edit-trigger-conn-1-main-audit\.users_bi-\d+$/),
+        title: 'Edit trigger: audit.users_bi',
+        type: 'query',
+        queryMode: 'object-edit',
       }));
       expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
         id: expect.stringMatching(/^query-edit-routine-conn-1-main-reporting\.refresh_stats-\d+$/),
@@ -4046,7 +4495,7 @@ describe('QueryEditor external SQL save', () => {
       }));
     });
 
-    it('uses the English catalog title for materialized view definition tabs', async () => {
+    it('uses the English catalog title for materialized view object-edit tabs', async () => {
       storeState.languagePreference = 'en-US';
       setCurrentLanguage('en-US');
       storeState.connections[0].config.type = 'starrocks';
@@ -4058,6 +4507,9 @@ describe('QueryEditor external SQL save', () => {
       backendApp.DBQuery.mockImplementation(async (_config: any, _dbName: string, sql: string) => {
         if (sql.includes("UPPER(TABLE_TYPE) LIKE '%MATERIALIZED%'") || sql.includes('SHOW MATERIALIZED VIEWS')) {
           return { success: true, data: [{ object_name: 'mv_daily_stats', schema_name: 'analytics' }] };
+        }
+        if (sql.includes('SHOW CREATE MATERIALIZED VIEW') || sql.includes('SHOW CREATE TABLE')) {
+          return { success: true, data: [{ 'Create Table': 'CREATE MATERIALIZED VIEW analytics.mv_daily_stats AS SELECT 1 AS id' }] };
         }
         return { success: true, data: [] };
       });
@@ -4082,13 +4534,16 @@ describe('QueryEditor external SQL save', () => {
             stopPropagation: vi.fn(),
           },
         });
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
       });
 
       expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
-        id: 'view-def-conn-1-analytics-analytics.mv_daily_stats',
-        title: 'Materialized view: analytics.mv_daily_stats',
-        type: 'view-def',
-        viewKind: 'materialized',
+        id: expect.stringMatching(/^query-edit-object-conn-1-analytics-analytics\.mv_daily_stats-\d+$/),
+        title: 'Edit Materialized view: analytics.mv_daily_stats',
+        type: 'query',
+        queryMode: 'object-edit',
       }));
     });
   });
@@ -7786,6 +8241,8 @@ describe('QueryEditor external SQL save', () => {
       connectionId: 'conn-1',
       dbName: 'front_end_sys',
       tableName: 'fs_mkefu_regist_record',
+      initialViewMode: 'fields',
+      initialViewModeRequestId: expect.any(String),
       objectType: 'table',
     }));
   });
@@ -7868,6 +8325,8 @@ describe('QueryEditor external SQL save', () => {
       connectionId: 'conn-1',
       dbName: 'front_end_sys',
       tableName: 'fs_mkefu_regist_record',
+      initialViewMode: 'fields',
+      initialViewModeRequestId: expect.any(String),
       objectType: 'table',
     }));
   });

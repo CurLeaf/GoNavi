@@ -470,6 +470,8 @@ export interface TabData {
   queryMode?: "standard" | "object-edit";
   filePath?: string;
   initialTab?: string;
+  initialViewMode?: "table" | "json" | "text" | "fields" | "ddl" | "er" | "sqlLog";
+  initialViewModeRequestId?: string;
   readOnly?: boolean;
   providerMode?: "jmx" | "endpoint" | "agent";
   resourcePath?: string;

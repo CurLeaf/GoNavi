@@ -118,7 +118,7 @@ describe('sqlDialect', () => {
   });
 
   it('resolves mysql-family completion keywords and functions with mysql syntax', () => {
-    expect(resolveSqlKeywords('mariadb')).toEqual(expect.arrayContaining(['LIMIT', 'CHANGE', 'AUTO_INCREMENT']));
+    expect(resolveSqlKeywords('mariadb')).toEqual(expect.arrayContaining(['LIMIT', 'CHANGE', 'AUTO_INCREMENT', 'CALL']));
     expect(names(resolveSqlFunctions('diros'))).toEqual(expect.arrayContaining(['DATE_FORMAT', 'GROUP_CONCAT']));
     expect(resolveSqlKeywords('starrocks')).toEqual(expect.arrayContaining(['OLAP', 'DISTRIBUTED BY', 'BUCKETS', 'ADD ROLLUP', 'EXTERNAL CATALOG']));
     expect(names(resolveSqlFunctions('starrocks'))).toEqual(expect.arrayContaining(['TO_BITMAP', 'HLL_UNION_AGG']));

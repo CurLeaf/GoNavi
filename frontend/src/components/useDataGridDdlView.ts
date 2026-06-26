@@ -7,6 +7,8 @@ import { formatDdlForDisplay } from '../utils/ddlFormat';
 type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er' | 'sqlLog';
 type DdlViewLayoutMode = 'bottom' | 'side';
 type TranslateParams = Record<string, string | number | boolean | null | undefined>;
+const GRID_VIEW_MODES: GridViewMode[] = ['table', 'json', 'text', 'fields', 'ddl', 'er', 'sqlLog'];
+const V2_ONLY_GRID_VIEW_MODES = new Set<GridViewMode>(['fields', 'ddl', 'er', 'sqlLog']);
 const DDL_VIEW_LAYOUT_STORAGE_KEY = 'gonavi.dataGrid.ddlViewLayout';
 let sharedDdlViewOpen = false;
 let sharedDdlViewLayout: DdlViewLayoutMode | null = null;
@@ -72,6 +74,17 @@ const buildDdlContextKey = (currentConnConfig: unknown, dbName?: string, tableNa
   ].join('\u0001');
 };
 
+const resolveInitialGridViewMode = (
+  initialViewMode: GridViewMode | undefined,
+  isV2Ui: boolean,
+  canViewDdl: boolean,
+): GridViewMode | null => {
+  if (!initialViewMode || !GRID_VIEW_MODES.includes(initialViewMode)) return null;
+  if (!isV2Ui && V2_ONLY_GRID_VIEW_MODES.has(initialViewMode)) return null;
+  if (initialViewMode === 'ddl' && !canViewDdl) return null;
+  return initialViewMode;
+};
+
 interface UseDataGridDdlViewParams {
   canViewDdl: boolean;
   currentConnConfig: unknown;
@@ -90,6 +103,8 @@ interface UseDataGridDdlViewParams {
   };
   dbType?: string;
   translate?: (key: string, params?: TranslateParams) => string;
+  initialViewMode?: GridViewMode;
+  initialViewModeRequestId?: string;
 }
 
 export interface UseDataGridDdlViewResult {
@@ -128,10 +143,15 @@ export const useDataGridDdlView = ({
   messageApi,
   dbType,
   translate,
+  initialViewMode,
+  initialViewModeRequestId,
 }: UseDataGridDdlViewParams): UseDataGridDdlViewResult => {
   const canRestoreSharedDdlView = isV2Ui && canViewDdl && !!currentConnConfig && !!tableName && shouldRestoreSharedDdlView();
   const shouldStartWithSharedDdlView = isActive && canRestoreSharedDdlView;
-  const [viewMode, setViewMode] = React.useState<GridViewMode>(() => (shouldStartWithSharedDdlView ? 'ddl' : 'table'));
+  const initialResolvedViewMode = resolveInitialGridViewMode(initialViewMode, isV2Ui, canViewDdl);
+  const [viewMode, setViewMode] = React.useState<GridViewMode>(() => (
+    shouldStartWithSharedDdlView ? 'ddl' : (initialResolvedViewMode || 'table')
+  ));
   const [ddlModalOpen, setDdlModalOpen] = React.useState(false);
   const [ddlLoading, setDdlLoading] = React.useState(shouldStartWithSharedDdlView);
   const [ddlText, setDdlText] = React.useState('');
@@ -288,6 +308,17 @@ export const useDataGridDdlView = ({
 
     setViewMode(nextMode);
   }, [cellEditMode, closeCellEditModeRef, closeDdlView, handleOpenTableDdl, isV2Ui, mergedDisplayDataRef, resolvedViewMode, rowKeyStr, selectedRowKeys, setTextRecordIndex]);
+
+  const appliedInitialViewModeKeyRef = React.useRef('');
+  React.useEffect(() => {
+    if (!isActive) return;
+    const nextInitialViewMode = resolveInitialGridViewMode(initialViewMode, isV2Ui, canViewDdl);
+    if (!nextInitialViewMode) return;
+    const applyKey = `${ddlContextKey}\u0001${nextInitialViewMode}\u0001${initialViewModeRequestId || ''}`;
+    if (appliedInitialViewModeKeyRef.current === applyKey) return;
+    appliedInitialViewModeKeyRef.current = applyKey;
+    handleViewModeChange(nextInitialViewMode);
+  }, [canViewDdl, ddlContextKey, handleViewModeChange, initialViewMode, initialViewModeRequestId, isActive, isV2Ui]);
 
   const handleDdlSidebarResizeStart = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
