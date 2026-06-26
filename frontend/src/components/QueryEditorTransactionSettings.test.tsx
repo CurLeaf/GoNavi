@@ -26,7 +26,6 @@ vi.mock('../i18n/provider', () => ({
   }),
 }));
 
-const latestSelectProps = () => antdState.selectProps[antdState.selectProps.length - 1];
 const latestTooltipProps = () => antdState.tooltipProps[antdState.tooltipProps.length - 1];
 
 describe('QueryEditorTransactionSettings', () => {
@@ -42,7 +41,7 @@ describe('QueryEditorTransactionSettings', () => {
     renderer = null;
   });
 
-  it('hides the DBeaver reference tooltip while the transaction mode select is open', () => {
+  it('keeps the DBeaver reference tooltip above the transaction mode select', () => {
     act(() => {
       renderer = create(
         <QueryEditorTransactionSettings
@@ -55,20 +54,9 @@ describe('QueryEditorTransactionSettings', () => {
       );
     });
 
-    act(() => {
-      latestTooltipProps().onOpenChange(true);
-    });
-    expect(latestTooltipProps().open).toBe(true);
-
-    act(() => {
-      latestSelectProps().onOpenChange(true);
-    });
-    expect(latestTooltipProps().open).toBe(false);
-
-    act(() => {
-      latestSelectProps().onOpenChange(false);
-      latestTooltipProps().onOpenChange(true);
-    });
-    expect(latestTooltipProps().open).toBe(true);
+    expect(latestTooltipProps().placement).toBe('topLeft');
+    expect(latestTooltipProps()).not.toHaveProperty('autoAdjustOverflow', false);
+    expect(latestTooltipProps()).not.toHaveProperty('open');
+    expect(antdState.selectProps[0]).not.toHaveProperty('onOpenChange');
   });
 });

@@ -35,42 +35,29 @@ const QueryEditorTransactionSettings: React.FC<QueryEditorTransactionSettingsPro
 }) => {
   const i18n = useOptionalI18n();
   const t = i18n?.t ?? defaultTranslate;
-  const [isModeSelectOpen, setIsModeSelectOpen] = React.useState(false);
-  const [isModeTooltipOpen, setIsModeTooltipOpen] = React.useState(false);
   const autoCommitDelayOptions = SQL_EDITOR_AUTO_COMMIT_DELAY_OPTIONS.map((option) => ({
     value: option.value,
     label: option.value === 0
       ? t('query_editor.transaction.delay.immediate_commit')
       : t('query_editor.transaction.delay.seconds_commit', { seconds: Math.round(option.value / 1000) }),
   }));
-  const handleModeSelectOpenChange = (open: boolean) => {
-    setIsModeSelectOpen(open);
-    if (open) {
-      setIsModeTooltipOpen(false);
-    }
-  };
-  const handleModeTooltipOpenChange = (open: boolean) => {
-    setIsModeTooltipOpen(open);
-  };
 
   return (
     <>
       <Tooltip
         title={t('query_editor.transaction.mode.tooltip')}
-        open={isModeTooltipOpen && !isModeSelectOpen}
-        onOpenChange={handleModeTooltipOpenChange}
+        placement="topLeft"
       >
-      <Select
-        className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-transaction-mode-select' : undefined}
-        style={isV2Ui ? undefined : { width: 78 }}
-        value={commitMode}
-        onOpenChange={handleModeSelectOpenChange}
-        onChange={(mode) => onCommitModeChange(mode === 'auto' ? 'auto' : 'manual')}
-        options={[
-          { label: t('query_editor.transaction.mode.manual'), value: 'manual' },
-          { label: t('query_editor.transaction.mode.auto'), value: 'auto' },
-        ]}
-      />
+        <Select
+          className={isV2Ui ? 'gn-v2-query-toolbar-select gn-v2-query-toolbar-transaction-mode-select' : undefined}
+          style={isV2Ui ? undefined : { width: 78 }}
+          value={commitMode}
+          onChange={(mode) => onCommitModeChange(mode === 'auto' ? 'auto' : 'manual')}
+          options={[
+            { label: t('query_editor.transaction.mode.manual'), value: 'manual' },
+            { label: t('query_editor.transaction.mode.auto'), value: 'auto' },
+          ]}
+        />
       </Tooltip>
       {commitMode === 'auto' && (
         <Select

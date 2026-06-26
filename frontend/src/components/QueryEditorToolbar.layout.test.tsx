@@ -96,6 +96,7 @@ describe('QueryEditorToolbar layout', () => {
     expect(toolbarSource).toContain('mouseEnterDelay={FULL_NAME_TOOLTIP_DELAY_SECONDS}');
     expect(toolbarSource).toContain('renderFullNameSelectTooltip');
     expect(toolbarSource).toContain('gn-query-toolbar-select-full-name');
+    expect(toolbarSource).toContain('title: ""');
     expect(connectionSelectSource).toContain('optionRender={(option) => renderFullNameSelectTooltip(option.data.fullName)}');
     expect(connectionSelectSource).toContain('labelRender={(option) => renderFullNameSelectTooltip(option.label ?? option.value)}');
     expect(databaseSelectSource).toContain('optionRender={(option) => renderFullNameSelectTooltip(option.data.fullName)}');

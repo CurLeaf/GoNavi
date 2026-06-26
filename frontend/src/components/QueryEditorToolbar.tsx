@@ -60,6 +60,7 @@ const FULL_NAME_TOOLTIP_DELAY_SECONDS = 1;
 type FullNameSelectOption = {
   label: string;
   value: string;
+  title: string;
   fullName: string;
 };
 
@@ -120,11 +121,13 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
     queryCapableConnections.map((connection) => ({
       label: connection.name,
       value: connection.id,
+      title: "",
       fullName: connection.name,
     }));
   const databaseSelectOptions: FullNameSelectOption[] = dbList.map((db) => ({
     label: db,
     value: db,
+    title: "",
     fullName: db,
   }));
   const toggleResultPanelShortcutLabel =
