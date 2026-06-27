@@ -2,6 +2,7 @@ import React from 'react';
 import { StarFilled, StarOutlined } from '@ant-design/icons';
 import { t } from '../../i18n';
 import { SIDEBAR_SQL_EDITOR_DRAG_MIME, encodeSidebarSqlEditorDragPayload } from '../../utils/sidebarSqlDrag';
+import { sanitizeRedisDbAlias } from '../../utils/redisDbAlias';
 import { resolveSidebarObjectDragText } from '../sidebarCoreUtils';
 import { resolveV2ObjectGroupTitle } from './sidebarHelpers';
 
@@ -52,6 +53,11 @@ export const renderSidebarV2TreeTitle = ({
     return rawTitle;
   })();
   const metaText = getV2TreeMetaText(node);
+  const redisDbAlias = node.type === 'redis-db'
+    ? sanitizeRedisDbAlias(node?.dataRef?.redisDbAlias)
+    : '';
+  const redisDbIndex = Number(node?.dataRef?.redisDB);
+  const redisDbBaseTitle = Number.isFinite(redisDbIndex) ? `db${redisDbIndex}` : displayTitle;
   const isMono = node.type === 'table'
     || node.type === 'view'
     || node.type === 'materialized-view'
@@ -66,6 +72,7 @@ export const renderSidebarV2TreeTitle = ({
     'gn-v2-tree-title',
     isMono ? 'is-mono' : '',
     node.type === 'object-group' ? 'is-group' : '',
+    node.type === 'redis-db' ? 'is-redis-db' : '',
     node.type === 'table' && node?.dataRef?.pinnedSidebarTable ? 'is-pinned-table' : '',
   ].filter(Boolean).join(' ');
   const tablePinAction = node.type === 'table' ? (
@@ -145,7 +152,14 @@ export const renderSidebarV2TreeTitle = ({
         } : undefined}
       >
         {statusBadge}
-        <span className="gn-v2-tree-label">{displayTitle}</span>
+        <span className="gn-v2-tree-label">
+          {redisDbAlias ? (
+            <>
+              <span className="gn-v2-redis-db-name">{redisDbBaseTitle}</span>
+              <span className="gn-v2-redis-db-alias">{redisDbAlias}</span>
+            </>
+          ) : displayTitle}
+        </span>
         {metaText && <span className="gn-v2-tree-count">{metaText}</span>}
       </span>
       {tablePinAction}

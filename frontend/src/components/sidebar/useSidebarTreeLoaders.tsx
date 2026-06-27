@@ -314,16 +314,16 @@ export const useSidebarTreeLoaders = ({
                       const redisDbAliases = useStore.getState().appearance.redisDbAliases;
                       let dbs = redisRows.map((db: any) => {
                           const keyCount = Number(db.keys) > 0 ? Number(db.keys) : 0;
+                          const alias = getRedisDbAlias(redisDbAliases, conn.id, db.index);
                           return {
                               title: buildRedisDbNodeLabel(
                                   db.index,
-                                  getRedisDbAlias(redisDbAliases, conn.id, db.index),
-                                  keyCount > 0 ? ` (${keyCount})` : '',
+                                  alias,
                               ),
                               key: `${conn.id}-db${db.index}`,
                               icon: <DatabaseOutlined style={{ color: '#DC382D' }} />,
                               type: 'redis-db' as const,
-                              dataRef: { ...conn, redisDB: db.index, redisKeyCount: keyCount },
+                              dataRef: { ...conn, redisDB: db.index, redisKeyCount: keyCount, redisDbAlias: alias },
                               isLeaf: true,
                               dbIndex: db.index,
                           };

@@ -38,17 +38,25 @@ import {
 } from '../../utils/redisDbAlias';
 import { supportsTableTruncateAction } from '../tableDataDangerActions';
 
-const updateTreeNodeTitle = (
+const updateRedisDbNodeAlias = (
   nodes: any[],
   targetKey: string,
   title: string,
+  alias: string,
 ): any[] =>
   nodes.map((node) => {
     if (node.key === targetKey) {
-      return { ...node, title };
+      return {
+        ...node,
+        title,
+        dataRef: {
+          ...(node.dataRef || {}),
+          redisDbAlias: alias,
+        },
+      };
     }
     if (Array.isArray(node.children)) {
-      return { ...node, children: updateTreeNodeTitle(node.children, targetKey, title) };
+      return { ...node, children: updateRedisDbNodeAlias(node.children, targetKey, title, alias) };
     }
     return node;
   });
@@ -57,7 +65,7 @@ const openRedisDbAliasModal = (
   node: any,
   context: SidebarLegacyNodeMenuContext,
 ): void => {
-  const { id, redisDB, redisKeyCount } = node.dataRef;
+  const { id, redisDB } = node.dataRef;
   const { treeDataRef, setTreeData } = context;
   const currentAlias = getRedisDbAlias(
     useStore.getState().appearance.redisDbAliases,
@@ -91,10 +99,8 @@ const openRedisDbAliasModal = (
           id,
           redisDB,
         );
-        const keyCount = Number(redisKeyCount);
-        const suffix = Number.isFinite(keyCount) && keyCount > 0 ? ` (${keyCount})` : '';
-        const nextTitle = buildRedisDbNodeLabel(redisDB, nextAlias, suffix);
-        const nextTree = updateTreeNodeTitle(treeDataRef.current, node.key, nextTitle);
+        const nextTitle = buildRedisDbNodeLabel(redisDB, nextAlias);
+        const nextTree = updateRedisDbNodeAlias(treeDataRef.current, node.key, nextTitle, nextAlias);
         treeDataRef.current = nextTree;
         setTreeData(nextTree);
       }

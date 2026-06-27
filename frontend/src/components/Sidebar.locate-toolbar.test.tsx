@@ -1034,6 +1034,8 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-tree-title \{[^}]*font-size: var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\);/s);
     expect(css).toMatch(/\.gn-v2-tree-title\.is-mono \.gn-v2-tree-label \{[^}]*font-size: inherit;[^}]*font-weight: 400 !important;/s);
     expect(css).toMatch(/\.gn-v2-tree-count \{[^}]*font-size: clamp\(10px, calc\(var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\) - 1px\), 16px\);/s);
+    expect(css).toMatch(/\.gn-v2-tree-title\.is-redis-db \.gn-v2-tree-label \{[^}]*display: inline-flex;[^}]*gap: 6px;/s);
+    expect(css).toMatch(/\.gn-v2-redis-db-alias \{[^}]*color: var\(--gn-fg-5\);[^}]*opacity: 0\.78;/s);
     expect(css).toMatch(/\.gn-v2-connection-rail \{[^}]*width: calc\(38px \* var\(--gn-ui-scale, 1\)\);[^}]*flex: 0 0 calc\(38px \* var\(--gn-ui-scale, 1\)\);/s);
     expect(css).toMatch(/\.gn-v2-rail-item,\s*body\[data-ui-version="v2"\] \.gn-v2-rail-tool \{[^}]*width: calc\(36px \* var\(--gn-ui-scale, 1\)\);[^}]*height: calc\(38px \* var\(--gn-ui-scale, 1\)\);[^}]*font-size: var\(--gn-font-size-sm, 12px\);/s);
     expect(css).toMatch(/\.gn-v2-rail-tool \{[^}]*height: calc\(32px \* var\(--gn-ui-scale, 1\)\);/s);
@@ -2541,6 +2543,25 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("title: t('sidebar.tab.new_query_database', { database: node.title })");
     expect(source).toContain("title: buildConnectionRootRedisCommandTabTitle(`db${redisDB}`)");
     expect(source).toContain("title: buildConnectionRootRedisMonitorTabTitle(`db${redisDB}`)");
+  });
+
+  it('keeps redis db key counts in v2 meta and renders aliases separately from the db title', () => {
+    const loaderSource = readSourceFile('./sidebar/useSidebarTreeLoaders.tsx');
+    const redisLoadStart = loaderSource.indexOf("if (conn.config.type === 'redis') {");
+    const redisLoadEnd = loaderSource.indexOf('const res = await DBGetDatabases', redisLoadStart);
+    expect(redisLoadStart).toBeGreaterThanOrEqual(0);
+    expect(redisLoadEnd).toBeGreaterThan(redisLoadStart);
+    const redisLoadSource = loaderSource.slice(redisLoadStart, redisLoadEnd);
+
+    expect(redisLoadSource).toContain('const alias = getRedisDbAlias(redisDbAliases, conn.id, db.index);');
+    expect(redisLoadSource).toContain('title: buildRedisDbNodeLabel(');
+    expect(redisLoadSource).toContain('dataRef: { ...conn, redisDB: db.index, redisKeyCount: keyCount, redisDbAlias: alias }');
+    expect(redisLoadSource).not.toContain("keyCount > 0 ? ` (${keyCount})` : ''");
+
+    const titleSource = readSourceFile('./sidebar/SidebarTreeTitle.tsx');
+    expect(titleSource).toContain("node.type === 'redis-db' ? 'is-redis-db' : ''");
+    expect(titleSource).toContain("const redisDbAlias = node.type === 'redis-db'");
+    expect(titleSource).toContain('className="gn-v2-redis-db-alias"');
   });
 
   it('localizes sidebar JVM probe and resource failure prompts', () => {

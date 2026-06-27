@@ -2841,6 +2841,20 @@ body[data-ui-version="v2"] .gn-v2-tree-label {
   font-weight: 400 !important;
 }
 
+body[data-ui-version="v2"] .gn-v2-tree-title.is-redis-db .gn-v2-tree-label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+body[data-ui-version="v2"] .gn-v2-redis-db-alias {
+  color: var(--gn-fg-5);
+  font-family: var(--gn-font-sans);
+  font-size: clamp(10px, calc(var(--gn-sidebar-tree-font-size, var(--gn-font-size-sm, 12px)) - 1px), 16px);
+  font-weight: 400 !important;
+  opacity: 0.78;
+}
+
 body[data-ui-version="v2"] .gn-v2-tree-connection-copy {
   min-width: max-content;
   flex: 0 0 auto;
