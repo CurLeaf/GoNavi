@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
@@ -3619,7 +3620,20 @@ func looksLikeSelectOrWith(sql string) bool {
 		return false
 	}
 	lower := strings.ToLower(trimmed)
-	return strings.HasPrefix(lower, "select ") || strings.HasPrefix(lower, "with ") || lower == "select" || lower == "with"
+	return hasLeadingReadonlySQLKeyword(lower, "select") || hasLeadingReadonlySQLKeyword(lower, "with")
+}
+
+func hasLeadingReadonlySQLKeyword(sql string, keyword string) bool {
+	if sql == keyword {
+		return true
+	}
+	if !strings.HasPrefix(sql, keyword) {
+		return false
+	}
+	if len(sql) <= len(keyword) {
+		return true
+	}
+	return unicode.IsSpace(rune(sql[len(keyword)]))
 }
 
 func escapeSQLLiteral(value string) string {
