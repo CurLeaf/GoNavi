@@ -5,6 +5,7 @@ import type { FormInstance } from 'antd/es/form';
 import Modal from '../common/ResizableDraggableModal';
 import { t } from '../../i18n';
 import type { SavedConnection } from '../../types';
+import type { QueryOptions } from '../../store';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { resolveConnectionAccentColor, resolveConnectionIconType } from '../../utils/connectionVisual';
 import { buildTableSelectQuery } from '../../utils/objectQueryTemplates';
@@ -55,6 +56,8 @@ type UseSidebarV2ActionHandlersArgs = {
   moveConnectionToTag: (connectionId: string, tagId: string | null) => void;
   setSidebarTablePinned: (connectionId: string, dbName: string, tableName: string, schemaName: string, pinned: boolean) => void;
   setTableSortPreference: (connectionId: string, dbName: string, sortBy: 'name' | 'frequency') => void;
+  setQueryOptions: (options: Partial<QueryOptions>) => void;
+  showSidebarTableComment: boolean;
   replaceTreeNodeChildren: (key: React.Key, children: TreeNode[] | undefined) => void;
   loadDatabases: (node: any) => Promise<void>;
   loadTables: (node: any) => Promise<void>;
@@ -118,6 +121,8 @@ export const useSidebarV2ActionHandlers = ({
   moveConnectionToTag,
   setSidebarTablePinned,
   setTableSortPreference,
+  setQueryOptions,
+  showSidebarTableComment,
   replaceTreeNodeChildren,
   loadDatabases,
   loadTables,
@@ -261,6 +266,9 @@ export const useSidebarV2ActionHandlers = ({
     switch (action) {
       case 'new-table':
         openNewTableDesign(node);
+        return;
+      case 'toggle-table-comments':
+        setQueryOptions({ showSidebarTableComment: !showSidebarTableComment });
         return;
       case 'sort-by-name':
         handleTableGroupSortAction(node, 'name');

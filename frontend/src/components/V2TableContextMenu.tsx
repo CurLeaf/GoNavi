@@ -264,6 +264,7 @@ export const V2TableContextMenuView: React.FC<{
 
 export type V2TableGroupContextMenuActionKey =
   | 'new-table'
+  | 'toggle-table-comments'
   | 'sort-by-name'
   | 'sort-by-frequency';
 
@@ -273,6 +274,7 @@ export const V2TableGroupContextMenuView: React.FC<{
   dbName?: string;
   count?: number;
   currentSort?: 'name' | 'frequency';
+  showTableComments?: boolean;
   onAction?: (action: V2TableGroupContextMenuActionKey) => void;
 }> = ({
   title,
@@ -280,6 +282,7 @@ export const V2TableGroupContextMenuView: React.FC<{
   dbName,
   count,
   currentSort = 'name',
+  showTableComments = false,
   onAction,
 }) => {
   const sortLabel = currentSort === 'frequency'
@@ -308,6 +311,17 @@ export const V2TableGroupContextMenuView: React.FC<{
       <div className="gn-v2-context-menu-body">
         {renderItems([
           { action: 'new-table', icon: <TableOutlined />, title: t('sidebar.menu.create_table'), kbd: primaryShortcut('N', shortcutPlatform), featured: true },
+        ])}
+
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_table_group_menu.display_section')}</div>
+        {renderItems([
+          {
+            action: 'toggle-table-comments',
+            icon: showTableComments ? <CheckSquareOutlined /> : <FileTextOutlined />,
+            title: t('sidebar.v2_table_group_menu.show_table_comments'),
+            kbd: showTableComments ? t('data_grid.context_menu.current_marker') : undefined,
+            selected: showTableComments,
+          },
         ])}
 
         <div className="gn-v2-context-menu-section-title">{t('data_grid.context_menu.sort_section')}</div>

@@ -418,6 +418,8 @@ const Sidebar: React.FC<{
   const recordTableAccess = useStore(state => state.recordTableAccess);
   const setTableSortPreference = useStore(state => state.setTableSortPreference);
   const setSidebarTablePinned = useStore(state => state.setSidebarTablePinned);
+  const queryOptions = useStore(state => state.queryOptions);
+  const setQueryOptions = useStore(state => state.setQueryOptions);
   const addSqlLog = useStore(state => state.addSqlLog);
   const sqlLogs = useStore(state => state.sqlLogs) || [];
   const shortcutOptions = useStore(state => state.shortcutOptions);
@@ -429,6 +431,7 @@ const Sidebar: React.FC<{
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const showSidebarTableComment = queryOptions?.showSidebarTableComment === true;
   const { exportProgressModal, runExportWithProgress } = useExportProgressDialog();
   const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
@@ -2035,6 +2038,8 @@ const Sidebar: React.FC<{
       moveConnectionToTag,
       setSidebarTablePinned,
       setTableSortPreference,
+      setQueryOptions,
+      showSidebarTableComment,
       replaceTreeNodeChildren,
       loadDatabases,
       loadTables,
@@ -2162,6 +2167,7 @@ const Sidebar: React.FC<{
       v2TreeMetrics,
       tableSortPreference,
       pinnedSidebarTables,
+      showSidebarTableComment,
       getConnectionNodeForAction,
       buildRuntimeConfig,
       extractObjectName,
@@ -2186,6 +2192,7 @@ const Sidebar: React.FC<{
       hoverTitle,
       statusBadge,
       getV2TreeMetaText,
+      showSidebarTableComment,
       toggleSidebarTablePinned,
       snapshotTreeSelectionBeforeDrag,
       restoreTreeSelectionAfterDrag,

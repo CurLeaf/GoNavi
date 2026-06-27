@@ -1231,6 +1231,7 @@ export interface SqlLog {
 export interface QueryOptions {
   maxRows: number;
   showColumnComment: boolean;
+  showSidebarTableComment?: boolean;
   showColumnType: boolean;
   showQueryResultsPanel: boolean;
 }
@@ -1922,16 +1923,21 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
   const maxRows = Number(raw.maxRows);
   const showColumnComment =
     typeof raw.showColumnComment === "boolean" ? raw.showColumnComment : true;
+  const showSidebarTableComment =
+    typeof raw.showSidebarTableComment === "boolean"
+      ? raw.showSidebarTableComment
+      : false;
   const showColumnType =
     typeof raw.showColumnType === "boolean" ? raw.showColumnType : true;
   const showQueryResultsPanel =
     typeof raw.showQueryResultsPanel === "boolean" ? raw.showQueryResultsPanel : false;
   if (!Number.isFinite(maxRows) || maxRows <= 0) {
-    return { maxRows: 5000, showColumnComment, showColumnType, showQueryResultsPanel };
+    return { maxRows: 5000, showColumnComment, showSidebarTableComment, showColumnType, showQueryResultsPanel };
   }
   return {
     maxRows: Math.min(50000, Math.trunc(maxRows)),
     showColumnComment,
+    showSidebarTableComment,
     showColumnType,
     showQueryResultsPanel,
   };
@@ -2361,6 +2367,7 @@ export const useStore = create<AppState>()(
       queryOptions: {
         maxRows: 5000,
         showColumnComment: true,
+        showSidebarTableComment: false,
         showColumnType: true,
         showQueryResultsPanel: false,
       },

@@ -52,6 +52,8 @@ import {
   buildSidebarRootTagToken,
   buildSidebarTablePinKey,
 } from '../store';
+import { renderSidebarV2TreeTitle } from './sidebar/SidebarTreeTitle';
+import { buildSidebarTableStatusSQL } from './sidebar/sidebarMetadataLoaders';
 import {
   DEFAULT_SHORTCUT_OPTIONS,
   cloneShortcutOptions,
@@ -200,6 +202,8 @@ vi.mock('../store', () => ({
     recordTableAccess: mocks.noop,
     setTableSortPreference: mocks.noop,
     setSidebarTablePinned: mocks.noop,
+    queryOptions: { showSidebarTableComment: false },
+    setQueryOptions: mocks.noop,
     addSqlLog: mocks.noop,
     sqlLogs: [],
     shortcutOptions: mocks.state.shortcutOptions ?? cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
@@ -2820,6 +2824,7 @@ describe('Sidebar locate toolbar', () => {
         dbName="mkefu_ai_dev"
         count={15}
         currentSort="frequency"
+        showTableComments
       />,
     );
 
@@ -2831,6 +2836,8 @@ describe('Sidebar locate toolbar', () => {
       sort: t('sidebar.v2_table_group_menu.sort_frequency'),
     }));
     expect(markup).toContain(t('sidebar.menu.create_table'));
+    expect(markup).toContain(t('sidebar.v2_table_group_menu.display_section'));
+    expect(markup).toContain(t('sidebar.v2_table_group_menu.show_table_comments'));
     expect(markup).toContain(t('data_grid.context_menu.sort_section'));
     expect(markup).toContain(t('sidebar.menu.sort_by_name'));
     expect(markup).toContain(t('sidebar.menu.sort_by_frequency'));
@@ -2846,6 +2853,7 @@ describe('Sidebar locate toolbar', () => {
     expect(end).toBeGreaterThan(start);
     const tableGroupCallSource = sidebarSource.slice(start, end);
     expect(tableGroupCallSource).toContain('<V2TableGroupContextMenuView');
+    expect(tableGroupCallSource).toContain('showTableComments={showSidebarTableComment}');
     expect(tableGroupCallSource).not.toContain('title=');
     ['? ? tables', '表 · tables'].forEach((rawSnippet) => {
       expect(tableGroupCallSource).not.toContain(rawSnippet);
@@ -2898,6 +2906,81 @@ describe('Sidebar locate toolbar', () => {
     ].forEach((rawSnippet) => {
       expect(treeTitleSource).not.toContain(rawSnippet);
     });
+  });
+
+  it('renders sidebar table comments as an opt-in suffix while using the tab-style table hover card', () => {
+    const baseNode = {
+      type: 'table',
+      title: 'users',
+      key: 'conn-main-users',
+      dataRef: {
+        id: 'conn',
+        dbName: 'main',
+        tableName: 'users',
+        tableComment: '用户表',
+      },
+    };
+    const baseOptions = {
+      node: baseNode,
+      hoverTitle: 'users',
+      statusBadge: null,
+      getV2TreeMetaText: () => '',
+      toggleSidebarTablePinned: vi.fn(),
+      snapshotTreeSelectionBeforeDrag: vi.fn(),
+      restoreTreeSelectionAfterDrag: vi.fn(),
+      treeDragSelectSuppressUntilRef: { current: 0 },
+      setIsTreeDragging: vi.fn(),
+    };
+
+    const hiddenSuffixMarkup = renderToStaticMarkup(renderSidebarV2TreeTitle({
+      ...baseOptions,
+      showSidebarTableComment: false,
+    }));
+    expect(hiddenSuffixMarkup).not.toContain('gn-v2-tree-table-comment');
+
+    const visibleSuffixMarkup = renderToStaticMarkup(renderSidebarV2TreeTitle({
+      ...baseOptions,
+      showSidebarTableComment: true,
+    }));
+    expect(visibleSuffixMarkup).toContain('gn-v2-tree-table-comment');
+    expect(visibleSuffixMarkup).toContain('用户表');
+
+    const treeTitleSource = readSourceFile('./sidebar/SidebarTreeTitle.tsx');
+    expect(treeTitleSource).toContain('data-sidebar-table-hover-info="true"');
+    expect(treeTitleSource).toContain('rootClassName="gn-v2-tab-hover-tooltip gn-v2-sidebar-table-hover-tooltip"');
+    expect(treeTitleSource).toContain('title={tableHoverInfo ? undefined : effectiveHoverTitle}');
+    expect(treeTitleSource).toContain("const SIDEBAR_TREE_NODE_CONTENT_SELECTOR = '.ant-tree-node-content-wrapper';");
+    expect(treeTitleSource).toContain("removeAttribute('title')");
+    expect(treeTitleSource).toContain('ref={tableHoverInfo ? clearSidebarTableNativeHoverTitleRef : undefined}');
+    expect(treeTitleSource).toContain('onPointerOverCapture={tableHoverInfo ? clearSidebarTableNativeHoverTitle : undefined}');
+    expect(treeTitleSource).toContain("resolveConnectionHostSummary(dataRef.config)");
+    expect(treeTitleSource).toContain("t('tab_manager.kind_badge.table')");
+    expect(treeTitleSource).toContain("t('tab_manager.hover.kind.table')");
+    expect(treeTitleSource).toContain("t('table_designer.action.table_comment')");
+    expect(treeTitleSource).toContain('mouseEnterDelay={1.2}');
+
+    const css = readV2ThemeCss();
+    expect(css).toMatch(/\.gn-v2-tree-table-comment \{[^}]*max-width: 24em;[^}]*text-overflow: ellipsis;/s);
+    expect(css).toMatch(/\.gn-v2-tab-hover-tooltip \.ant-tooltip-inner \{[^}]*min-width: 260px;[^}]*padding: 0;/s);
+    expect(css).toMatch(/\.gn-v2-tab-hover-card \{[^}]*cursor: text;[^}]*user-select: text;/s);
+    expect(css).toContain('--gn-v2-tab-hover-grid-columns: 56px minmax(0, 1fr);');
+    expect(css).toMatch(/\.gn-v2-tab-hover-row \{[^}]*grid-template-columns: var\(--gn-v2-tab-hover-grid-columns\);/s);
+  });
+
+  it('loads table comments through the sidebar table status metadata query', () => {
+    const mysqlSql = buildSidebarTableStatusSQL({ config: { type: 'mysql' } } as any, 'app');
+    const pgSql = buildSidebarTableStatusSQL({ config: { type: 'postgres' } } as any, 'app');
+    const sqlServerSql = buildSidebarTableStatusSQL({ config: { type: 'sqlserver' } } as any, 'app');
+    const oracleSql = buildSidebarTableStatusSQL({ config: { type: 'oracle' } } as any, 'APP');
+
+    expect(mysqlSql).toContain('TABLE_COMMENT AS table_comment');
+    expect(pgSql).toContain("obj_description(c.oid, 'pg_class') AS table_comment");
+    expect(sqlServerSql).toContain('ep.value AS table_comment');
+    expect(oracleSql).toContain('comments AS table_comment');
+
+    const loaderSource = readSourceFile('./sidebar/useSidebarTreeLoaders.tsx');
+    expect(loaderSource).toContain('tableCommentMap');
+    expect(loaderSource).toContain('tableComment: entry.tableComment');
   });
 
   it('listens for table overview pin changes to refresh the matching sidebar database node', () => {

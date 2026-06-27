@@ -62,6 +62,10 @@ export const useSidebarTitleRender = ({
         hoverTitle = rawTableName;
       }
     }
+    const tableComment = node.type === 'table' ? String(node?.dataRef?.tableComment || '').trim() : '';
+    if (tableComment) {
+      hoverTitle = `${hoverTitle}\n${t('sidebar.v2_table_group_menu.table_comment_tooltip', { comment: tableComment })}`;
+    }
   } else if (node.type === 'object-group') {
     const objectGroupTitle = resolveV2ObjectGroupTitle(node);
     if (objectGroupTitle) {

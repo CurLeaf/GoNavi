@@ -486,6 +486,16 @@ export const useSidebarTreeLoaders = ({
                     ? await DBQuery(buildRpcConnectionConfig(config) as any, conn.dbName, tableStatusSql).catch(() => ({ success: false, data: [] as any[] }))
                     : { success: false, data: [] as any[] };
                 const tableRowCountMap = new Map<string, number>();
+                const tableCommentMap = new Map<string, string>();
+                const putTableComment = (rawTableName: string, rawComment: string) => {
+                    const tableName = String(rawTableName || '').trim();
+                    const comment = String(rawComment || '').trim();
+                    if (!tableName || !comment) return;
+                    const keys = new Set<string>([tableName.toLowerCase()]);
+                    const parsed = splitQualifiedName(tableName);
+                    if (parsed.objectName) keys.add(parsed.objectName.toLowerCase());
+                    keys.forEach((metadataKey) => tableCommentMap.set(metadataKey, comment));
+                };
                 if (tableStatsResult?.success && Array.isArray(tableStatsResult.data)) {
                     tableStatsResult.data.forEach((row: Record<string, any>) => {
                         const rawTableName = String(
@@ -494,6 +504,15 @@ export const useSidebarTreeLoaders = ({
                             || ''
                         ).trim();
                         if (!rawTableName) return;
+                        putTableComment(rawTableName, getCaseInsensitiveValue(row, [
+                            'table_comment',
+                            'TABLE_COMMENT',
+                            'comment',
+                            'Comment',
+                            'comments',
+                            'COMMENTS',
+                            'MS_Description',
+                        ]));
                         const rowCount = parseMetadataRowCount(row);
                         if (rowCount === undefined) return;
                         tableRowCountMap.set(rawTableName.toLowerCase(), rowCount);
@@ -502,11 +521,23 @@ export const useSidebarTreeLoaders = ({
 	            const tableEntries = tableRows.map((row: any) => {
 	                const tableName = Object.values(row)[0] as string;
 	                const parsed = splitQualifiedName(tableName);
+                    const rowComment = getCaseInsensitiveValue(row, [
+                        'table_comment',
+                        'TABLE_COMMENT',
+                        'comment',
+                        'Comment',
+                        'comments',
+                        'COMMENTS',
+                    ]);
 	                return {
 	                    tableName,
 	                    schemaName: parsed.schemaName,
 	                    displayName: getSidebarTableDisplayName(conn, tableName),
                         rowCount: tableRowCountMap.get(String(tableName || '').trim().toLowerCase()),
+                        tableComment: rowComment
+                            || tableCommentMap.get(String(tableName || '').trim().toLowerCase())
+                            || tableCommentMap.get(String(parsed.objectName || '').trim().toLowerCase())
+                            || '',
 	                };
 	            });
 
@@ -660,7 +691,7 @@ export const useSidebarTreeLoaders = ({
 
 	            eventEntries.sort((a, b) => a.displayName.toLowerCase().localeCompare(b.displayName.toLowerCase()));
 
-	            const buildTableNode = (entry: { tableName: string; schemaName: string; displayName: string; rowCount?: number }): TreeNode => {
+	            const buildTableNode = (entry: { tableName: string; schemaName: string; displayName: string; rowCount?: number; tableComment?: string }): TreeNode => {
 	                const isPinned = isV2Ui && isSidebarTablePinned(
 	                    currentPinnedSidebarTables,
 	                    conn.id,
@@ -678,6 +709,7 @@ export const useSidebarTreeLoaders = ({
 	                        tableName: entry.tableName,
 	                        schemaName: entry.schemaName,
 	                        rowCount: entry.rowCount,
+                            tableComment: entry.tableComment,
 	                        ...(isPinned ? { pinnedSidebarTable: true } : {}),
 	                    },
 	                    isLeaf: false,

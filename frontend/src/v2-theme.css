@@ -2847,6 +2847,100 @@ body[data-ui-version="v2"] .gn-v2-tree-title.is-redis-db .gn-v2-tree-label {
   gap: 6px;
 }
 
+body[data-ui-version="v2"] .gn-v2-tree-table-comment {
+  max-width: 24em;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--gn-fg-5);
+  font-family: var(--gn-font-sans);
+  font-size: clamp(10px, calc(var(--gn-sidebar-tree-font-size, var(--gn-font-size-sm, 12px)) - 1px), 16px);
+  font-weight: 400 !important;
+  opacity: 0.78;
+}
+
+body[data-ui-version="v2"] .gn-v2-tab-hover-tooltip .ant-tooltip-inner {
+  min-width: 260px;
+  padding: 0;
+}
+
+body[data-ui-version="v2"] .gn-v2-tab-hover-tooltip {
+  pointer-events: auto;
+}
+
+body[data-ui-version="v2"] .gn-v2-tab-hover-card {
+  --gn-v2-tab-hover-grid-columns: 56px minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  color: var(--gn-fg-2);
+  cursor: text;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+body[data-ui-version="v2"] .gn-v2-tab-hover-card * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+body[data-ui-version="v2"] .gn-v2-tab-hover-head {
+  display: grid;
+  grid-template-columns: var(--gn-v2-tab-hover-grid-columns);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+body[data-ui-version="v2"] .gn-v2-tab-hover-head > span {
+  justify-self: start;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--gn-bg-active);
+  color: var(--gn-accent-2);
+  font-family: var(--gn-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+}
+
+body[data-ui-version="v2"] .gn-v2-tab-hover-head > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--gn-fg-1);
+  font-size: var(--gn-font-size-sm, 12px);
+  font-weight: 700;
+  line-height: 18px;
+  white-space: normal;
+}
+
+body[data-ui-version="v2"] .gn-v2-tab-hover-rows {
+  display: grid;
+  gap: 5px;
+}
+
+body[data-ui-version="v2"] .gn-v2-tab-hover-row {
+  display: grid;
+  grid-template-columns: var(--gn-v2-tab-hover-grid-columns);
+  align-items: start;
+  gap: 8px;
+  font-size: var(--gn-font-size-sm, 12px);
+  line-height: 18px;
+}
+
+body[data-ui-version="v2"] .gn-v2-tab-hover-row > span {
+  color: var(--gn-fg-5);
+}
+
+body[data-ui-version="v2"] .gn-v2-tab-hover-row > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--gn-fg-2);
+  font-weight: 600;
+}
+
 body[data-ui-version="v2"] .gn-v2-redis-db-alias {
   color: var(--gn-fg-5);
   font-family: var(--gn-font-sans);
