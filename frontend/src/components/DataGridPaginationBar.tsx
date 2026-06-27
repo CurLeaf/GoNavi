@@ -58,9 +58,11 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
     return null;
   }
 
-  const maxJumpPage = Math.max(1, paginationTotalPages);
+  const maxJumpPage = showKnownPageCount ? Math.max(1, paginationTotalPages) : null;
   const normalizedJumpPage = Number.isFinite(Number(jumpPage)) && Number(jumpPage) > 0
-    ? Math.min(maxJumpPage, Math.max(1, Math.trunc(Number(jumpPage))))
+    ? (maxJumpPage !== null
+      ? Math.min(maxJumpPage, Math.max(1, Math.trunc(Number(jumpPage))))
+      : Math.max(1, Math.trunc(Number(jumpPage))))
     : null;
   const jumpDisabled = !onPageChange || normalizedJumpPage === null || normalizedJumpPage === pagination.current;
   const submitJumpPage = () => {
@@ -68,13 +70,13 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
     if (normalizedJumpPage === pagination.current) return;
     onPageChange(normalizedJumpPage, pagination.pageSize);
   };
-  const jumpPageControl = showKnownPageCount ? (
+  const jumpPageControl = (
     <div className="data-grid-pagination-jump" data-grid-pagination-jump="true">
       <span className="data-grid-pagination-jump-label">{translate('data_grid.pagination.jump_label')}</span>
       <InputNumber
         size="small"
         min={1}
-        max={maxJumpPage}
+        max={maxJumpPage ?? undefined}
         precision={0}
         controls={false}
         value={jumpPage}
@@ -93,7 +95,7 @@ const DataGridPaginationBar: React.FC<DataGridPaginationBarProps> = ({
         {translate('data_grid.pagination.jump_action')}
       </Button>
     </div>
-  ) : null;
+  );
   const sequentialPaginationControl = (
     <div
       className="data-grid-pagination-sequential"

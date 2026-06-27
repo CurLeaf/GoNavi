@@ -1934,7 +1934,7 @@ describe('DataGrid layout', () => {
     expect(emptyPreviewMarkup).not.toContain('data_grid.preview_panel');
   });
 
-  it('keeps unknown-total pagination in sequential mode instead of pretending total pages are known', () => {
+  it('keeps unknown-total pagination sequential while still allowing direct page jumps', () => {
     const markup = renderDataGridWithI18n(
       <DataGrid
         data={[
@@ -1962,10 +1962,11 @@ describe('DataGrid layout', () => {
 
     expect(markup).toContain('第 3 页');
     expect(markup).not.toContain('<strong>3</strong><span>/</span><span>4</span>');
-    expect(markup).not.toContain('data-grid-pagination-jump="true"');
+    expect(markup).toContain('data-grid-pagination-jump="true"');
+    expect(markup).toContain('跳页');
   });
 
-  it('keeps legacy unknown-total pagination in sequential mode instead of numbered pages', () => {
+  it('keeps legacy unknown-total pagination sequential while still allowing direct page jumps', () => {
     const previousUiVersion = mockStoreState.uiVersion;
     mockStoreState.uiVersion = 'legacy';
 
@@ -1998,7 +1999,8 @@ describe('DataGrid layout', () => {
       expect(markup).toContain('第 3 页');
       expect(markup).toContain('data-grid-pagination-sequential="true"');
       expect(markup).not.toContain('class="ant-pagination');
-      expect(markup).not.toContain('data-grid-pagination-jump="true"');
+      expect(markup).toContain('data-grid-pagination-jump="true"');
+      expect(markup).toContain('跳页');
     } finally {
       mockStoreState.uiVersion = previousUiVersion;
     }
@@ -2557,8 +2559,8 @@ describe('DataGrid layout', () => {
     expect(css).toContain('overflow-x: auto;');
     expect(paginationBarSource).toContain("label: translate('data_grid.pagination.page_size_option', { count: value })");
     expect(paginationBarSource).not.toContain("label: `${value}/页`");
-    expect(paginationBarSource).toContain('const maxJumpPage = Math.max(1, paginationTotalPages);');
-    expect(paginationBarSource).toContain('Math.min(maxJumpPage, Math.max(1, Math.trunc(Number(jumpPage))))');
+    expect(paginationBarSource).toContain('const maxJumpPage = showKnownPageCount ? Math.max(1, paginationTotalPages) : null;');
+    expect(paginationBarSource).toContain('max={maxJumpPage ?? undefined}');
     expect(paginationBarSource).toContain('onPressEnter={submitJumpPage}');
     expect(paginationBarSource).toContain('data-grid-pagination-jump="true"');
     expect(css).toContain('.data-grid-pagination-jump-input.ant-input-number-focused');
