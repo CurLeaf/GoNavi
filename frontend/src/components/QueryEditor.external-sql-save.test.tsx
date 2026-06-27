@@ -5429,6 +5429,41 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer!.root)).not.toContain('未提交');
   });
 
+  it('keeps TDengine insert on the regular query path because it has no managed transaction support', async () => {
+    storeState.connections[0].config.type = 'tdengine';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [
+        { columns: ['affectedRows'], rows: [{ affectedRows: 1 }], statementIndex: 1 },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({
+        query: 'INSERT INTO meters(ts, current) VALUES (NOW, 10.2)',
+      })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      expect.stringContaining('INSERT INTO meters'),
+      'query-1',
+    );
+    expect(backendApp.DBQueryMultiTransactional).not.toHaveBeenCalled();
+    expect(messageApi.error).not.toHaveBeenCalledWith(expect.stringContaining('SQL 编辑器托管事务'));
+    expect(textContent(renderer!.root)).toContain('影响行数：1');
+  });
+
   it('reuses the pending managed transaction for follow-up read-only SQL in the same tab', async () => {
     backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
       success: true,

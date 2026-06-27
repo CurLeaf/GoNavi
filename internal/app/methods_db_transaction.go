@@ -369,7 +369,7 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 }
 
 func shouldUseManagedSQLTransaction(dbType string, query string) bool {
-	if strings.EqualFold(strings.TrimSpace(dbType), "trino") {
+	if isManagedSQLTransactionUnsupportedType(dbType) {
 		return false
 	}
 	statements := splitSQLStatements(query)
@@ -392,6 +392,15 @@ func shouldUseManagedSQLTransaction(dbType string, query string) bool {
 		return false
 	}
 	return hasManagedWrite
+}
+
+func isManagedSQLTransactionUnsupportedType(dbType string) bool {
+	switch strings.ToLower(strings.TrimSpace(dbType)) {
+	case "trino", "tdengine", "clickhouse", "iotdb", "rocketmq", "mqtt", "kafka", "rabbitmq":
+		return true
+	default:
+		return false
+	}
 }
 
 func sqlEditorImplicitTransactionSQL(dbType string) (commitSQL string, rollbackSQL string, ok bool) {

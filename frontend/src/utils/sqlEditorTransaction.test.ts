@@ -47,9 +47,15 @@ describe('sqlEditorTransaction', () => {
     ])).toBe(false);
   });
 
-  it('keeps Trino DML on the plain multi-statement execution path', () => {
-    expect(shouldUseSqlEditorManagedTransactionForType('trino', [
-      'UPDATE hive.default.orders SET status = \'done\'',
+  it.each([
+    ['trino', 'UPDATE hive.default.orders SET status = \'done\''],
+    ['tdengine', 'INSERT INTO meters(ts, current) VALUES (NOW, 10.2)'],
+    ['clickhouse', 'INSERT INTO events FORMAT JSONEachRow {"id":1}'],
+    ['iotdb', 'INSERT INTO root.ln.wf01.wt01(timestamp,status) VALUES(1,true)'],
+  ])('keeps %s writes on the plain multi-statement execution path', (dbType, sql) => {
+    expect(shouldUseSqlEditorManagedTransactionForType(dbType, [sql])).toBe(false);
+    expect(canReusePendingSqlEditorTransactionForType(dbType, [
+      'SELECT * FROM users WHERE id = 1',
     ])).toBe(false);
   });
 
