@@ -1451,6 +1451,66 @@ const Sidebar: React.FC<{
       });
   };
 
+  const openSidebarObjectNode = (node: any): boolean => {
+      if (node.type === 'view' || node.type === 'materialized-view') {
+          const { viewName, dbName, id, schemaName } = node.dataRef;
+          addTab({
+              id: node.key,
+              title: viewName,
+              type: 'table',
+              connectionId: id,
+              dbName,
+              tableName: viewName,
+              objectType: node.type === 'materialized-view' ? 'materialized-view' : 'view',
+              schemaName,
+              sidebarLocateKey: String(node.key || ''),
+          });
+          return true;
+      }
+      if (node.type === 'db-trigger') {
+          const { triggerName, triggerTableName, schemaName, dbName, id } = node.dataRef;
+          addTab({
+              id: `trigger-${node.key}`,
+              title: t('sidebar.tab.trigger', { name: triggerName }),
+              type: 'trigger',
+              connectionId: id,
+              dbName,
+              triggerName,
+              triggerTableName,
+              schemaName,
+              sidebarLocateKey: String(node.key || ''),
+          });
+          return true;
+      }
+      if (node.type === 'db-event') {
+          openEventDefinition(node);
+          return true;
+      }
+      if (node.type === 'routine') {
+          const { routineName, routineType, dbName, id } = node.dataRef;
+          const typeLabel = t(routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function');
+          addTab({
+              id: `routine-def-${node.key}`,
+              title: t('sidebar.tab.routine_definition', { type: typeLabel, name: routineName }),
+              type: 'routine-def',
+              connectionId: id,
+              dbName,
+              routineName,
+              routineType
+          });
+          return true;
+      }
+      if (node.type === 'sequence') {
+          openSequenceDefinition(node);
+          return true;
+      }
+      if (node.type === 'package') {
+          openPackageDefinition(node);
+          return true;
+      }
+      return false;
+  };
+
   const onSelect = (keys: React.Key[], info: any) => {
       if (isV2Ui && info?.node?.type === 'v2-table-section') {
           return;
@@ -1514,6 +1574,8 @@ const Sidebar: React.FC<{
                   schemaName,
               } as any);
           }, 250);
+      } else if (openSidebarObjectNode(info.node)) {
+          return;
       }
   };
 

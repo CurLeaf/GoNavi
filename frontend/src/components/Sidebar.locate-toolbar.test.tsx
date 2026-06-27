@@ -665,6 +665,26 @@ describe('Sidebar locate toolbar', () => {
     expect(commandSearchRunSource).toContain("tabId: String(node.key || '')");
   });
 
+  it('opens view routine and trigger nodes from single-click selection', () => {
+    const source = readSidebarSource();
+    const openObjectSource = source.slice(
+      source.indexOf('const openSidebarObjectNode ='),
+      source.indexOf('const onSelect ='),
+    );
+    const onSelectSource = source.slice(
+      source.indexOf('const onSelect ='),
+      source.indexOf('const onExpand ='),
+    );
+
+    expect(openObjectSource).toContain("node.type === 'view' || node.type === 'materialized-view'");
+    expect(openObjectSource).toContain("node.type === 'db-trigger'");
+    expect(openObjectSource).toContain("node.type === 'routine'");
+    expect(openObjectSource).toContain("type: 'table'");
+    expect(openObjectSource).toContain("type: 'trigger'");
+    expect(openObjectSource).toContain("type: 'routine-def'");
+    expect(onSelectSource).toContain('openSidebarObjectNode(info.node)');
+  });
+
   it('wires external SQL directory file actions to dedicated Wails APIs', () => {
     const source = readSidebarSource();
     const loadTablesSource = source.slice(

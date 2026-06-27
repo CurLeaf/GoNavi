@@ -1121,6 +1121,78 @@ describe('QueryEditor external SQL save', () => {
     renderer.unmount();
   });
 
+  it.each(['sqlite', 'clickhouse'])(
+    'activates the data result tab for %s after the sql log tab was open',
+    async (dbType) => {
+      storeState.appearance.uiVersion = 'v2';
+      storeState.connections[0].config.type = dbType;
+      storeState.sqlLogs = [{
+        id: 'log-1',
+        timestamp: Date.now(),
+        sql: 'select old',
+        status: 'success',
+        duration: 12,
+      }];
+      backendApp.DBGetColumns.mockResolvedValue({
+        success: true,
+        data: [{ name: 'id', key: 'PRI' }],
+      });
+      backendApp.DBGetIndexes.mockResolvedValue({ success: true, data: [] });
+      backendApp.DBQueryMulti.mockResolvedValueOnce({
+        success: true,
+        data: [{
+          columns: ['id', 'name'],
+          rows: [{ id: 1, name: 'alpha' }],
+          statementIndex: 1,
+        }],
+      });
+
+      const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+      vi.stubGlobal('window', {
+        addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+          windowListeners[type] ||= [];
+          windowListeners[type].push(listener);
+        }),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+        requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+          callback(0);
+          return 1;
+        }),
+        cancelAnimationFrame: vi.fn(),
+        innerHeight: 900,
+      });
+
+      let renderer!: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<QueryEditor tab={createTab({
+          query: 'SELECT * FROM users',
+        })} />);
+      });
+
+      const openEvent = new CustomEvent('gonavi:show-sql-execution-log', { detail: { mode: 'open' } });
+      await act(async () => {
+        windowListeners['gonavi:show-sql-execution-log']?.forEach((listener) => listener(openEvent));
+      });
+      expect(textContent(renderer.toJSON())).toContain('SQL 执行日志');
+      dataGridState.latestProps = null;
+
+      await act(async () => {
+        await findButton(renderer, '运行').props.onClick();
+      });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(textContent(renderer.toJSON())).toContain('结果 1');
+      expect(dataGridState.latestProps?.columnNames).toEqual(['id', 'name']);
+      expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ id: 1, name: 'alpha' });
+
+      renderer.unmount();
+    },
+  );
+
   it('keeps query result panel visibility isolated per tab', async () => {
     storeState.appearance.uiVersion = 'v2';
     storeState.queryOptions.showQueryResultsPanel = false;
