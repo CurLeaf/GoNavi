@@ -319,6 +319,9 @@ describe('Sidebar locate toolbar', () => {
     const source = readSidebarSource();
 
     expect(source).toContain('if (hasSidebarLazyChildren(children)) return;');
+    expect(source).toContain('if (!info?.expanded && shouldClearSidebarNodeChildrenOnCollapse(info?.node))');
+    expect(source).toContain('...collectSidebarSubtreeKeys(info.node)');
+    expect(source).toContain('clearTreeNodeChildrenByKeys(keysToClear);');
     expect(source).toContain('if (!shouldSkipSidebarLoadOnExpandWhileDragging(isTreeDragging, info))');
     expect(source).toContain('if (shouldLoadSidebarNodeOnExpand(node))');
   });

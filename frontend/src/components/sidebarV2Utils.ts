@@ -798,6 +798,39 @@ export const shouldSkipSidebarLoadOnExpandWhileDragging = (
   return !shouldLoadSidebarNodeOnExpand(info.node);
 };
 
+const SIDEBAR_COLLAPSE_UNLOAD_SUBTREE_LIMIT = 160;
+
+export const collectSidebarSubtreeKeys = (
+  node: Pick<SidebarTreeNode, 'children'> | null | undefined,
+): string[] => {
+  const keys: string[] = [];
+  const visit = (nodes: SidebarTreeNode[] | undefined) => {
+    nodes?.forEach((child) => {
+      const key = String(child.key || '').trim();
+      if (key) {
+        keys.push(key);
+      }
+      if (child.children?.length) {
+        visit(child.children);
+      }
+    });
+  };
+  visit(node?.children);
+  return keys;
+};
+
+export const shouldClearSidebarNodeChildrenOnCollapse = (
+  node: Pick<SidebarTreeNode, 'type' | 'children' | 'isLeaf'> | null | undefined,
+): boolean => {
+  if (!node || node.isLeaf === true || !node.children?.length) {
+    return false;
+  }
+  if (node.type !== 'connection' && node.type !== 'database' && node.type !== 'object-group') {
+    return false;
+  }
+  return collectSidebarSubtreeKeys(node).length >= SIDEBAR_COLLAPSE_UNLOAD_SUBTREE_LIMIT;
+};
+
 export const resolveV2ActiveConnectionId = ({
   activeContextConnectionId,
   activeTabConnectionId,

@@ -155,6 +155,7 @@ import {
   buildSidebarTableChildrenForUi,
   buildV2RailConnectionGroups,
   buildV2SidebarTableSectionedChildren,
+  collectSidebarSubtreeKeys,
   estimateV2TreeHorizontalScrollWidth,
   filterV2CommandSearchTreeItems,
   filterV2ExplorerTreeByKind,
@@ -169,6 +170,7 @@ import {
   resolveSidebarTagDropInsertBefore,
   resolveV2ActiveConnectionId,
   resolveV2CommandSearchPersistentFilter,
+  shouldClearSidebarNodeChildrenOnCollapse,
   shouldSkipSidebarLoadOnExpandWhileDragging,
   shouldSkipSidebarSelectWhileDragging,
   shouldCloseV2CommandSearchOnGlobalKey,
@@ -183,6 +185,7 @@ export {
   buildSidebarTableChildrenForUi,
   buildV2RailConnectionGroups,
   buildV2SidebarTableSectionedChildren,
+  collectSidebarSubtreeKeys,
   estimateV2TreeHorizontalScrollWidth,
   filterV2CommandSearchTreeItems,
   filterV2ExplorerTreeByKind,
@@ -197,6 +200,7 @@ export {
   resolveSidebarTagDropInsertBefore,
   resolveV2ActiveConnectionId,
   resolveV2CommandSearchPersistentFilter,
+  shouldClearSidebarNodeChildrenOnCollapse,
   shouldSkipSidebarLoadOnExpandWhileDragging,
   shouldSkipSidebarSelectWhileDragging,
   shouldCloseV2CommandSearchOnGlobalKey,
@@ -1580,6 +1584,18 @@ const Sidebar: React.FC<{
   };
 
   const onExpand = (newExpandedKeys: React.Key[], info?: any) => {
+    if (!info?.expanded && shouldClearSidebarNodeChildrenOnCollapse(info?.node)) {
+        const collapsedKey = String(info.node?.key || '').trim();
+        const keysToClear = [
+            collapsedKey,
+            ...collectSidebarSubtreeKeys(info.node),
+        ].filter(Boolean);
+        const keysToClearSet = new Set(keysToClear);
+        setExpandedKeys(newExpandedKeys.filter((key) => !keysToClearSet.has(String(key))));
+        setAutoExpandParent(false);
+        clearTreeNodeChildrenByKeys(keysToClear);
+        return;
+    }
     setExpandedKeys(newExpandedKeys);
     setAutoExpandParent(false);
     if (!shouldSkipSidebarLoadOnExpandWhileDragging(isTreeDragging, info)) {
