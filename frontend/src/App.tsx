@@ -154,6 +154,13 @@ const detectNavigatorPlatform = (): string => {
   return navigator.userAgent || '';
 };
 
+const readCurrentVisibleViewport = () => ({
+  availWidth: window.screen?.availWidth || window.innerWidth || 0,
+  availHeight: window.screen?.availHeight || window.innerHeight || 0,
+  availLeft: (window.screen as Screen & { availLeft?: number })?.availLeft || 0,
+  availTop: (window.screen as Screen & { availTop?: number })?.availTop || 0,
+});
+
 
 const mergeSavedConnections = (current: SavedConnection[], imported: SavedConnection[]): SavedConnection[] => {
   const merged = new Map<string, SavedConnection>();
@@ -747,12 +754,7 @@ function App() {
           const bounds = state.windowBounds;
           if (!bounds || bounds.width < 400 || bounds.height < 300) return;
           try {
-              const nextBounds = resolveVisibleStartupWindowBounds(bounds, {
-                  availWidth: window.screen?.availWidth || 0,
-                  availHeight: window.screen?.availHeight || 0,
-                  availLeft: (window.screen as Screen & { availLeft?: number })?.availLeft || 0,
-                  availTop: (window.screen as Screen & { availTop?: number })?.availTop || 0,
-              });
+              const nextBounds = resolveVisibleStartupWindowBounds(bounds, readCurrentVisibleViewport());
               if (
                   nextBounds.x !== bounds.x ||
                   nextBounds.y !== bounds.y ||
@@ -797,6 +799,7 @@ function App() {
       let cancelled = false;
       let hydrated = useStore.persist.hasHydrated();
       let eventSaveTimer: number | null = null;
+      let boundsRepairTimer: number | null = null;
       let lastSaved = '';
 
       const saveWindowState = async () => {
@@ -859,13 +862,79 @@ function App() {
           }, delayMs);
       };
 
+      const repairRuntimeWindowBounds = async () => {
+          if (cancelled || !hydrated) {
+              return;
+          }
+          try {
+              const [isFs, isMax] = await Promise.all([
+                  safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
+                  safeWindowRuntimeCall(() => WindowIsMaximised(), false),
+              ]);
+              if (isFs || isMax) {
+                  return;
+              }
+              const [size, pos] = await Promise.all([
+                  safeWindowRuntimeCall(() => WindowGetSize(), null),
+                  safeWindowRuntimeCall(() => WindowGetPosition(), null),
+              ]);
+              if (!size || !pos) {
+                  return;
+              }
+              const currentBounds = {
+                  width: Math.trunc(Number(size.w || 0)),
+                  height: Math.trunc(Number(size.h || 0)),
+                  x: Math.trunc(Number(pos.x || 0)),
+                  y: Math.trunc(Number(pos.y || 0)),
+              };
+              if (currentBounds.width <= 0 || currentBounds.height <= 0) {
+                  return;
+              }
+              const nextBounds = resolveVisibleStartupWindowBounds(currentBounds, readCurrentVisibleViewport());
+              if (
+                  nextBounds.x === currentBounds.x &&
+                  nextBounds.y === currentBounds.y &&
+                  nextBounds.width === currentBounds.width &&
+                  nextBounds.height === currentBounds.height
+              ) {
+                  return;
+              }
+              void emitWindowDiagnostic('adjust:runtime-window-bounds', {
+                  from: currentBounds,
+                  to: nextBounds,
+              });
+              WindowSetSize(nextBounds.width, nextBounds.height);
+              WindowSetPosition(nextBounds.x, nextBounds.y);
+              lastSaved = `${nextBounds.width},${nextBounds.height},${nextBounds.x},${nextBounds.y}`;
+              useStore.getState().setWindowBounds(nextBounds);
+              window.dispatchEvent(new Event('resize'));
+          } catch {
+              // Wails runtime window APIs are best-effort here.
+          }
+      };
+
+      const scheduleWindowBoundsRepair = (delayMs = 80) => {
+          if (cancelled || !hydrated) {
+              return;
+          }
+          if (boundsRepairTimer !== null) {
+              window.clearTimeout(boundsRepairTimer);
+          }
+          boundsRepairTimer = window.setTimeout(() => {
+              boundsRepairTimer = null;
+              void repairRuntimeWindowBounds();
+          }, delayMs);
+      };
+
       const handleWindowRuntimeChange = () => {
-          scheduleWindowStateSave();
+          scheduleWindowBoundsRepair();
+          scheduleWindowStateSave(260);
       };
 
       const handleVisibilityChange = () => {
           if (document.visibilityState === 'visible') {
-              scheduleWindowStateSave(120);
+              scheduleWindowBoundsRepair();
+              scheduleWindowStateSave(260);
           }
       };
 
@@ -874,6 +943,7 @@ function App() {
       };
 
       if (hydrated) {
+          scheduleWindowBoundsRepair(360);
           scheduleWindowStateSave(320);
       }
       const unsubscribeHydration = useStore.persist.onFinishHydration(() => {
@@ -881,6 +951,7 @@ function App() {
               return;
           }
           hydrated = true;
+          scheduleWindowBoundsRepair(360);
           scheduleWindowStateSave(320);
       });
 
@@ -897,6 +968,9 @@ function App() {
           cancelled = true;
           if (eventSaveTimer !== null) {
               window.clearTimeout(eventSaveTimer);
+          }
+          if (boundsRepairTimer !== null) {
+              window.clearTimeout(boundsRepairTimer);
           }
           window.clearInterval(timer);
           window.removeEventListener('resize', handleWindowRuntimeChange);

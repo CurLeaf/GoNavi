@@ -350,14 +350,27 @@ describe('tool center menu entries', () => {
 
   it('captures window state on startup and lifecycle events instead of waiting only for the polling interval', () => {
     expect(appSource).toContain('const scheduleWindowStateSave = (delayMs = 120) => {');
+    expect(appSource).toContain('const scheduleWindowBoundsRepair = (delayMs = 80) => {');
     expect(appSource).toContain('if (hydrated) {');
+    expect(appSource).toContain('scheduleWindowBoundsRepair(360);');
     expect(appSource).toContain('scheduleWindowStateSave(320);');
     expect(appSource).toContain('const unsubscribeHydration = useStore.persist.onFinishHydration(() => {');
+    expect(appSource).toContain('scheduleWindowBoundsRepair();');
+    expect(appSource).toContain('scheduleWindowStateSave(260);');
     expect(appSource).toContain("window.addEventListener('resize', handleWindowRuntimeChange);");
     expect(appSource).toContain("window.addEventListener('focus', handleWindowRuntimeChange);");
     expect(appSource).toContain("window.addEventListener('pageshow', handleWindowRuntimeChange);");
     expect(appSource).toContain("window.addEventListener('pagehide', handleWindowLifecycleFlush, { capture: true });");
     expect(appSource).toContain("window.addEventListener('beforeunload', handleWindowLifecycleFlush, { capture: true });");
+  });
+
+  it('clamps normal runtime window bounds back into the visible screen after display changes', () => {
+    expect(appSource).toContain('const readCurrentVisibleViewport = () => ({');
+    expect(appSource).toContain('const repairRuntimeWindowBounds = async () => {');
+    expect(appSource).toContain('const nextBounds = resolveVisibleStartupWindowBounds(currentBounds, readCurrentVisibleViewport());');
+    expect(appSource).toContain("void emitWindowDiagnostic('adjust:runtime-window-bounds'");
+    expect(appSource).toContain('WindowSetSize(nextBounds.width, nextBounds.height);');
+    expect(appSource).toContain('WindowSetPosition(nextBounds.x, nextBounds.y);');
   });
 
   it('keeps titlebar double-click on maximise while shortcuts may enter macOS fullscreen', () => {
