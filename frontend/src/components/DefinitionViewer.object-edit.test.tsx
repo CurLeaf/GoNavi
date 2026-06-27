@@ -194,6 +194,47 @@ describe('DefinitionViewer object edit entry', () => {
     }));
   });
 
+  it('opens an editable query tab for event definitions', async () => {
+    storeState.connections[0].config.type = 'mysql';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [{
+        Event: 'daily_cleanup',
+        'Create Event': 'CREATE EVENT `daily_cleanup`\nON SCHEDULE EVERY 1 DAY\nDO DELETE FROM logs',
+      }],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(createTab({
+        id: 'event-def-conn-1-main-daily_cleanup',
+        title: '事件: daily_cleanup',
+        type: 'event-def',
+        eventName: 'daily_cleanup',
+        viewName: undefined,
+        viewKind: undefined,
+      })));
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+
+    await act(async () => {
+      button.props.onClick();
+    });
+
+    const query = storeState.addTab.mock.calls[0][0].query;
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Edit Event: daily_cleanup',
+      type: 'query',
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE EVENT `daily_cleanup`'),
+    }));
+    expect(query).toContain('-- Edit Event: daily_cleanup');
+    expect(query).toContain('ON SCHEDULE EVERY 1 DAY');
+    expect(query).not.toContain('SHOW CREATE EVENT');
+  });
+
   it('uses SQL Server catalog metadata when loading routine definitions', async () => {
     storeState.connections[0].config.type = 'sqlserver';
     backendApp.DBQuery.mockResolvedValue({

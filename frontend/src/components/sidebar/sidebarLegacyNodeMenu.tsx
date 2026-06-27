@@ -171,6 +171,7 @@ export const buildSidebarLegacyNodeMenuItems = (
     openEditRoutine,
     handleDropRoutine,
     openEventDefinition,
+    openEditEvent,
     openSequenceDefinition,
     openPackageDefinition,
     resolveMessagePublishTarget,
@@ -884,17 +885,7 @@ export const buildSidebarLegacyNodeMenuItems = (
                 key: 'edit-event-query',
                 label: t('sidebar.menu.edit_definition'),
                 icon: <EditOutlined />,
-                onClick: () => {
-                    const { eventName, dbName, id } = node.dataRef;
-                    addTab({
-                        id: `query-edit-event-${Date.now()}`,
-                        title: t('sidebar.tab.edit_event', { name: eventName }),
-                        type: 'query',
-                        connectionId: id,
-                        dbName,
-                        query: `SHOW CREATE EVENT \`${String(eventName || '').replace(/`/g, '``')}\`;`
-                    });
-                }
+                onClick: () => void openEditEvent(node)
             },
         ];
     } else if (node.type === 'table') {

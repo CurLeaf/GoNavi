@@ -114,6 +114,38 @@ const resolveCopyObjectNameLabel = (node: any): string => {
   return t('sidebar.copy_object_name.label.table');
 };
 
+const quoteMySqlIdentifier = (raw: string): string => `\`${String(raw || '').replace(/`/g, '``')}\``;
+
+const buildMySqlEventReference = (eventName: string, schemaName?: string): string => {
+  const parsed = splitQualifiedName(eventName);
+  const name = parsed.objectName || eventName;
+  const schema = parsed.schemaName || String(schemaName || '').trim();
+  return [schema, name]
+    .filter(Boolean)
+    .map(quoteMySqlIdentifier)
+    .join('.');
+};
+
+const ensureSidebarObjectEditSqlTerminator = (sql: string): string => {
+  const normalized = String(sql || '').trim();
+  if (!normalized) return '';
+  return /;\s*$/.test(normalized) ? normalized : `${normalized};`;
+};
+
+const extractMySqlEventCreateSql = (rows: any[]): string => {
+  if (!Array.isArray(rows) || rows.length === 0) return '';
+  for (const row of rows) {
+    const keys = Object.keys(row || {});
+    const sqlKey = keys.find(key => key.toLowerCase().includes('create event'));
+    if (!sqlKey) continue;
+    const definition = row[sqlKey];
+    if (definition !== undefined && definition !== null && String(definition).trim()) {
+      return String(definition);
+    }
+  }
+  return '';
+};
+
 export const useSidebarObjectActions = ({
   connections,
   connectionIds,
@@ -986,6 +1018,52 @@ export const useSidebarObjectActions = ({
     });
   };
 
+  const openEditEvent = async (node: any) => {
+    const conn = node.dataRef;
+    const eventName = String(conn?.eventName || '').trim();
+    const dbName = String(conn?.dbName || '').trim();
+    const id = String(conn?.id || '').trim();
+    if (!eventName) return;
+
+    const objectLabel = t('definition_viewer.object.event');
+    const header = [
+      `-- ${t('definition_viewer.edit.comment_title', { object: objectLabel, name: eventName })}`,
+      `-- ${t('definition_viewer.edit.comment_compatibility')}`,
+    ].join('\n') + '\n';
+    let template = `${header}-- ${t('definition_viewer.edit.comment_empty_definition', { name: eventName })}\n`;
+
+    try {
+      const dialect = getMetadataDialect(conn as SavedConnection);
+      if (dialect === 'mysql') {
+        const config = buildRuntimeConfig(conn, dbName);
+        const eventRef = buildMySqlEventReference(eventName, conn?.schemaName || dbName);
+        const result = await DBQuery(
+          buildRpcConnectionConfig(config) as any,
+          dbName,
+          `SHOW CREATE EVENT ${eventRef}`,
+        );
+        if (result.success) {
+          const createSql = extractMySqlEventCreateSql(result.data as any[]);
+          if (createSql) {
+            template = `${header}${ensureSidebarObjectEditSqlTerminator(createSql)}`;
+          }
+        }
+      }
+    } catch {
+      // 降级使用空编辑模板，避免把 SHOW 语句当成可编辑定义。
+    }
+
+    addTab({
+      id: `query-edit-event-${Date.now()}`,
+      title: t('sidebar.tab.edit_event', { name: eventName }),
+      type: 'query',
+      connectionId: id,
+      dbName,
+      query: template,
+      queryMode: 'object-edit',
+    });
+  };
+
   const openSequenceDefinition = (node: any) => {
     const { sequenceName, dbName, id } = node.dataRef;
     addTab({
@@ -1246,6 +1324,7 @@ export const useSidebarObjectActions = ({
     handleRebindSavedQuery,
     openRoutineDefinition,
     openEventDefinition,
+    openEditEvent,
     openSequenceDefinition,
     openPackageDefinition,
     openEditRoutine,

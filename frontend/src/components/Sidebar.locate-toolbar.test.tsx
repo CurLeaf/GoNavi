@@ -692,6 +692,23 @@ describe('Sidebar locate toolbar', () => {
     expect(onSelectSource).toContain('openSidebarObjectNode(info.node)');
   });
 
+  it('opens event edit menu with editable object SQL instead of a SHOW query', () => {
+    const sidebarSource = readSidebarSource();
+    const menuSource = readSourceFile('./sidebar/sidebarLegacyNodeMenu.tsx');
+    const actionsSource = readSourceFile('./sidebar/useSidebarObjectActions.tsx');
+    const eventMenuSource = menuSource.slice(
+      menuSource.indexOf("} else if (node.type === 'db-event') {"),
+      menuSource.indexOf("} else if (node.type === 'table') {"),
+    );
+
+    expect(sidebarSource).toContain('openEditEvent,');
+    expect(eventMenuSource).toContain('onClick: () => void openEditEvent(node)');
+    expect(eventMenuSource).not.toContain('SHOW CREATE EVENT');
+    expect(actionsSource).toContain('const openEditEvent = async (node: any) =>');
+    expect(actionsSource).toContain("queryMode: 'object-edit'");
+    expect(actionsSource).toContain('SHOW CREATE EVENT ${eventRef}');
+  });
+
   it('wires external SQL directory file actions to dedicated Wails APIs', () => {
     const source = readSidebarSource();
     const loadTablesSource = source.slice(
