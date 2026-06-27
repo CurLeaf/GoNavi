@@ -124,7 +124,7 @@ import {
     type V2CellContextMenuActionKey,
     type V2ColumnHeaderContextMenuActionKey,
 } from './V2TableContextMenu';
-import DataGridColumnTitle from './DataGridColumnTitle';
+import DataGridColumnTitle, { type DataGridColumnFilterDraft } from './DataGridColumnTitle';
 import DataGridColumnInfoPopoverContent from './DataGridColumnInfoPopoverContent';
 import DataGridColumnQuickFind from './DataGridColumnQuickFind';
 import DataGridPageFind from './DataGridPageFind';
@@ -1041,29 +1041,6 @@ const DataGrid: React.FC<DataGridProps> = ({
       openTableByName(String(target?.refTableName || '').trim());
   }, [openTableByName]);
 
-  const renderColumnTitle = useCallback((name: string): React.ReactNode => {
-      const normalizedName = String(name || '');
-      const meta = columnMetaMap[normalizedName] || columnMetaMapByLowerName[normalizedName.toLowerCase()];
-      const foreignKeyTarget = foreignKeyMap[normalizedName] || foreignKeyMapByLowerName[normalizedName.toLowerCase()];
-
-      return (
-          <DataGridColumnTitle
-              columnName={normalizedName}
-              columnMeta={meta}
-              foreignKeyTarget={foreignKeyTarget}
-              showColumnType={showColumnType}
-              showColumnComment={showColumnComment}
-              metaFontSize={densityParams.metaFontSize}
-              columnMetaHintColor={columnMetaHintColor}
-              columnMetaTooltipColor={columnMetaTooltipColor}
-              darkMode={darkMode}
-              highlighted={highlightedColumnName === normalizedName}
-              translate={translateDataGrid}
-              onOpenForeignKey={foreignKeyTarget ? () => openForeignKeyTarget(foreignKeyTarget) : undefined}
-          />
-      );
-  }, [columnMetaHintColor, columnMetaTooltipColor, columnMetaMap, columnMetaMapByLowerName, darkMode, densityParams.metaFontSize, foreignKeyMap, foreignKeyMapByLowerName, highlightedColumnName, openForeignKeyTarget, showColumnComment, showColumnType, translateDataGrid]);
-
   const lockVirtualInlineTableScroll = useCallback((lock: boolean) => {
       if (lock) {
           if (virtualInlineScrollLockRef.current) {
@@ -1261,6 +1238,8 @@ const DataGrid: React.FC<DataGridProps> = ({
       addFilter,
       updateFilter,
       removeFilter,
+      applyColumnFilter,
+      clearColumnFilter,
       applyQuickWhereCondition,
       clearQuickWhereCondition,
       clearAllFiltersAndSorts,
@@ -1289,6 +1268,102 @@ const DataGrid: React.FC<DataGridProps> = ({
       resolveDefaultGridFilterOperator,
       resolveNextGridFilterOperatorForColumnChange,
   });
+
+  const columnHeaderFilterEnabled = exportScope === 'table' && !!onApplyFilter;
+  const columnHeaderFilterOpOptions = useMemo(
+      () => filterOpOptions.filter((option) => option.value !== 'CUSTOM'),
+      [filterOpOptions],
+  );
+  const getColumnHeaderFilterState = useCallback((columnName: string) => {
+      const normalizedName = String(columnName || '').trim();
+      const columnFilterConditions = filterConditions.filter((cond) => (
+          String(cond?.column || '') === normalizedName && String(cond?.op || '') !== 'CUSTOM'
+      ));
+      const firstCondition = columnFilterConditions[0];
+      const defaultOperator = resolveDefaultGridFilterOperator(getColumnFilterType(normalizedName));
+      return {
+          active: columnFilterConditions.some((cond) => cond.enabled !== false),
+          defaultOperator,
+          initialOperator: String(firstCondition?.op || defaultOperator),
+          initialValue: String(firstCondition?.value ?? ''),
+          initialValue2: String(firstCondition?.value2 ?? ''),
+      };
+  }, [filterConditions, getColumnFilterType]);
+
+  const applyColumnHeaderFilter = useCallback((columnName: string, draft: DataGridColumnFilterDraft) => {
+      return applyColumnFilter({
+          column: columnName,
+          op: draft.op,
+          value: draft.value,
+          value2: draft.value2,
+      });
+  }, [applyColumnFilter]);
+
+  const renderColumnTitle = useCallback((name: string): React.ReactNode => {
+      const normalizedName = String(name || '');
+      const meta = columnMetaMap[normalizedName] || columnMetaMapByLowerName[normalizedName.toLowerCase()];
+      const foreignKeyTarget = foreignKeyMap[normalizedName] || foreignKeyMapByLowerName[normalizedName.toLowerCase()];
+      const columnFilterState = columnHeaderFilterEnabled ? getColumnHeaderFilterState(normalizedName) : null;
+
+      return (
+          <DataGridColumnTitle
+              columnName={normalizedName}
+              columnMeta={meta}
+              foreignKeyTarget={foreignKeyTarget}
+              showColumnType={showColumnType}
+              showColumnComment={showColumnComment}
+              metaFontSize={densityParams.metaFontSize}
+              columnMetaHintColor={columnMetaHintColor}
+              columnMetaTooltipColor={columnMetaTooltipColor}
+              darkMode={darkMode}
+              highlighted={highlightedColumnName === normalizedName}
+              translate={translateDataGrid}
+              onOpenForeignKey={foreignKeyTarget ? () => openForeignKeyTarget(foreignKeyTarget) : undefined}
+              columnFilter={columnFilterState ? {
+                  active: columnFilterState.active,
+                  operatorOptions: columnHeaderFilterOpOptions,
+                  defaultOperator: columnFilterState.defaultOperator,
+                  initialOperator: columnFilterState.initialOperator,
+                  initialValue: columnFilterState.initialValue,
+                  initialValue2: columnFilterState.initialValue2,
+                  filterLabel: translateDataGrid('data_grid.toolbar.filter'),
+                  applyLabel: translateDataGrid('data_grid.filter.apply'),
+                  clearLabel: translateDataGrid('data_grid.filter.clear'),
+                  valuePlaceholder: translateDataGrid('data_grid.filter.start_value_placeholder'),
+                  secondValuePlaceholder: translateDataGrid('data_grid.filter.end_value_placeholder'),
+                  listValuePlaceholder: translateDataGrid('data_grid.filter.list_values_placeholder'),
+                  noValuePlaceholder: translateDataGrid('data_grid.filter.no_value_placeholder'),
+                  isNoValueOp,
+                  isBetweenOp,
+                  isListOp,
+                  onApply: (draft) => applyColumnHeaderFilter(normalizedName, draft),
+                  onClear: () => clearColumnFilter(normalizedName),
+              } : null}
+          />
+      );
+  }, [
+      applyColumnHeaderFilter,
+      clearColumnFilter,
+      columnHeaderFilterEnabled,
+      columnHeaderFilterOpOptions,
+      columnMetaHintColor,
+      columnMetaTooltipColor,
+      columnMetaMap,
+      columnMetaMapByLowerName,
+      darkMode,
+      densityParams.metaFontSize,
+      foreignKeyMap,
+      foreignKeyMapByLowerName,
+      getColumnHeaderFilterState,
+      highlightedColumnName,
+      isBetweenOp,
+      isListOp,
+      isNoValueOp,
+      openForeignKeyTarget,
+      showColumnComment,
+      showColumnType,
+      translateDataGrid,
+  ]);
 
   const selectedRowKeysRef = useRef(selectedRowKeys);
   const displayDataRef = useRef<any[]>([]);
@@ -2403,6 +2478,9 @@ const DataGrid: React.FC<DataGridProps> = ({
                   if (!onSort) return;
                   const eventTarget = event.target as HTMLElement | null;
                   if (eventTarget?.closest?.('[data-grid-fk-jump="true"]')) return;
+                  if (eventTarget?.closest?.('[data-grid-column-filter-trigger="true"]')) return;
+                  if (eventTarget?.closest?.('[data-grid-column-filter-popover="true"]')) return;
+                  if (eventTarget?.closest?.('.ant-select-dropdown')) return;
                   const headerCell = event.currentTarget as HTMLElement;
                   const upArrow = headerCell.querySelector('.ant-table-column-sorter-up') as HTMLElement | null;
                   const downArrow = headerCell.querySelector('.ant-table-column-sorter-down') as HTMLElement | null;

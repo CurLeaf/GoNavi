@@ -1,9 +1,36 @@
 import React from 'react';
-import { Tooltip } from 'antd';
-import { LinkOutlined } from '@ant-design/icons';
+import { Button, Input, Popover, Select, Tooltip } from 'antd';
+import { FilterOutlined, LinkOutlined } from '@ant-design/icons';
 import { t as defaultTranslate, type I18nParams } from '../i18n';
 
 export type DataGridColumnTitleTranslate = (key: string, params?: I18nParams) => string;
+
+export type DataGridColumnFilterDraft = {
+  op: string;
+  value: string;
+  value2?: string;
+};
+
+export interface DataGridColumnFilterConfig {
+  active: boolean;
+  operatorOptions: Array<{ value: string; label: string }>;
+  defaultOperator: string;
+  initialOperator?: string;
+  initialValue?: string;
+  initialValue2?: string;
+  filterLabel: string;
+  applyLabel: string;
+  clearLabel: string;
+  valuePlaceholder: string;
+  secondValuePlaceholder: string;
+  listValuePlaceholder: string;
+  noValuePlaceholder: string;
+  isNoValueOp: (op: string) => boolean;
+  isBetweenOp: (op: string) => boolean;
+  isListOp: (op: string) => boolean;
+  onApply: (draft: DataGridColumnFilterDraft) => boolean | void;
+  onClear: () => boolean | void;
+}
 
 export interface DataGridColumnTitleProps {
   columnName: string;
@@ -24,7 +51,12 @@ export interface DataGridColumnTitleProps {
   highlighted?: boolean;
   translate?: DataGridColumnTitleTranslate;
   onOpenForeignKey?: () => void;
+  columnFilter?: DataGridColumnFilterConfig | null;
 }
+
+const stopColumnHeaderInteraction = (event: React.SyntheticEvent<HTMLElement>) => {
+  event.stopPropagation();
+};
 
 const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
   columnName,
@@ -39,6 +71,7 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
   highlighted = false,
   translate = defaultTranslate,
   onOpenForeignKey,
+  columnFilter,
 }) => {
   const normalizedName = String(columnName || '');
   const columnType = String(columnMeta?.type || '').trim();
@@ -48,6 +81,24 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
   const shouldShowColumnType = showColumnType && columnType.length > 0;
   const shouldShowColumnComment = showColumnComment && columnComment.length > 0;
   const isSingleLineColumnTitle = !shouldShowColumnType && !shouldShowColumnComment;
+  const [filterPopoverOpen, setFilterPopoverOpen] = React.useState(false);
+  const initialFilterOperator = columnFilter?.initialOperator || columnFilter?.defaultOperator || '=';
+  const [draftFilterOperator, setDraftFilterOperator] = React.useState(initialFilterOperator);
+  const [draftFilterValue, setDraftFilterValue] = React.useState(columnFilter?.initialValue || '');
+  const [draftFilterValue2, setDraftFilterValue2] = React.useState(columnFilter?.initialValue2 || '');
+
+  React.useEffect(() => {
+    if (!filterPopoverOpen || !columnFilter) return;
+    setDraftFilterOperator(columnFilter.initialOperator || columnFilter.defaultOperator || '=');
+    setDraftFilterValue(columnFilter.initialValue || '');
+    setDraftFilterValue2(columnFilter.initialValue2 || '');
+  }, [
+    columnFilter?.defaultOperator,
+    columnFilter?.initialOperator,
+    columnFilter?.initialValue,
+    columnFilter?.initialValue2,
+    filterPopoverOpen,
+  ]);
 
   const hoverLines: string[] = [];
   if (columnType) hoverLines.push(translate('data_grid.column.type_tooltip', { type: columnType }));
@@ -151,35 +202,227 @@ const DataGridColumnTitle: React.FC<DataGridColumnTitleProps> = ({
     </div>
   );
 
-  if (hoverLines.length === 0) {
-    return titleNode;
+  const titleWithOptionalTooltip = (() => {
+    if (hoverLines.length === 0) {
+      return titleNode;
+    }
+
+    const tooltipTextColor = darkMode ? columnMetaTooltipColor : 'var(--gn-fg-1, #fff)';
+
+    return (
+      <Tooltip
+        title={(
+          <pre
+            className="gn-data-grid-column-meta-tooltip-content"
+            style={{
+              maxHeight: 260,
+              overflow: 'auto',
+              margin: 0,
+              fontSize: 12,
+              whiteSpace: 'pre-wrap',
+              color: tooltipTextColor,
+            }}
+          >
+            {hoverLines.join('\n')}
+          </pre>
+        )}
+        rootClassName="gn-data-grid-column-meta-tooltip"
+        styles={{ root: { maxWidth: 640 } }}
+        {...(!darkMode ? { color: 'rgba(0, 0, 0, 0.82)' } : {})}
+      >
+        <span style={{ display: 'inline-flex', maxWidth: '100%' }}>{titleNode}</span>
+      </Tooltip>
+    );
+  })();
+
+  if (!columnFilter) {
+    return titleWithOptionalTooltip;
   }
 
-  const tooltipTextColor = darkMode ? columnMetaTooltipColor : 'var(--gn-fg-1, #fff)';
-
-  return (
-    <Tooltip
-      title={(
-        <pre
-          className="gn-data-grid-column-meta-tooltip-content"
-          style={{
-            maxHeight: 260,
-            overflow: 'auto',
-            margin: 0,
-            fontSize: 12,
-            whiteSpace: 'pre-wrap',
-            color: tooltipTextColor,
+  const noValueOperator = columnFilter.isNoValueOp(draftFilterOperator);
+  const betweenOperator = columnFilter.isBetweenOp(draftFilterOperator);
+  const listOperator = columnFilter.isListOp(draftFilterOperator);
+  const activeColor = darkMode ? '#74d99f' : '#16a34a';
+  const mutedColor = columnFilter.active
+    ? activeColor
+    : (darkMode ? 'rgba(255,255,255,0.52)' : 'rgba(15, 23, 42, 0.46)');
+  const filterButtonTitle = `${columnFilter.filterLabel} ${normalizedName}`;
+  const submitColumnFilter = (event?: React.SyntheticEvent<HTMLElement>) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const applied = columnFilter.onApply({
+      op: draftFilterOperator,
+      value: draftFilterValue,
+      value2: draftFilterValue2,
+    });
+    if (applied !== false) setFilterPopoverOpen(false);
+  };
+  const filterPopoverContent = (
+    <div
+      data-grid-column-filter-popover="true"
+      onClick={stopColumnHeaderInteraction}
+      style={{
+        width: 260,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+      }}
+    >
+      <div
+        style={{
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          fontWeight: 600,
+          color: darkMode ? 'rgba(255,255,255,0.88)' : 'rgba(15,23,42,0.88)',
+        }}
+        title={normalizedName}
+      >
+        {filterButtonTitle}
+      </div>
+      <Select
+        size="small"
+        value={draftFilterOperator}
+        options={columnFilter.operatorOptions}
+        popupMatchSelectWidth={false}
+        getPopupContainer={(triggerNode) => triggerNode.parentElement || document.body}
+        onChange={(value) => {
+          const nextOperator = String(value || columnFilter.defaultOperator || '=');
+          setDraftFilterOperator(nextOperator);
+          if (columnFilter.isNoValueOp(nextOperator)) {
+            setDraftFilterValue('');
+            setDraftFilterValue2('');
+          } else if (!columnFilter.isBetweenOp(nextOperator)) {
+            setDraftFilterValue2('');
+          }
+        }}
+      />
+      {noValueOperator ? (
+        <Input
+          size="small"
+          disabled
+          value={columnFilter.noValuePlaceholder}
+        />
+      ) : listOperator ? (
+        <Input.TextArea
+          value={draftFilterValue}
+          placeholder={columnFilter.listValuePlaceholder}
+          autoSize={{ minRows: 2, maxRows: 4 }}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          onChange={(event) => setDraftFilterValue(event.target.value)}
+        />
+      ) : betweenOperator ? (
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Input
+            size="small"
+            value={draftFilterValue}
+            placeholder={columnFilter.valuePlaceholder}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            onPressEnter={submitColumnFilter}
+            onChange={(event) => setDraftFilterValue(event.target.value)}
+          />
+          <Input
+            size="small"
+            value={draftFilterValue2}
+            placeholder={columnFilter.secondValuePlaceholder}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            onPressEnter={submitColumnFilter}
+            onChange={(event) => setDraftFilterValue2(event.target.value)}
+          />
+        </div>
+      ) : (
+        <Input
+          size="small"
+          value={draftFilterValue}
+          placeholder={columnFilter.valuePlaceholder}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          onPressEnter={submitColumnFilter}
+          onChange={(event) => setDraftFilterValue(event.target.value)}
+        />
+      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <Button
+          size="small"
+          onClick={() => {
+            const cleared = columnFilter.onClear();
+            if (cleared !== false) setFilterPopoverOpen(false);
           }}
         >
-          {hoverLines.join('\n')}
-        </pre>
-      )}
-      rootClassName="gn-data-grid-column-meta-tooltip"
-      styles={{ root: { maxWidth: 640 } }}
-      {...(!darkMode ? { color: 'rgba(0, 0, 0, 0.82)' } : {})}
+          {columnFilter.clearLabel}
+        </Button>
+        <Button
+          type="primary"
+          size="small"
+          onClick={submitColumnFilter}
+        >
+          {columnFilter.applyLabel}
+        </Button>
+      </div>
+    </div>
+  );
+
+  return (
+    <span
+      className="gn-v2-column-title-shell"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        maxWidth: '100%',
+        minWidth: 0,
+      }}
     >
-      <span style={{ display: 'inline-flex', maxWidth: '100%' }}>{titleNode}</span>
-    </Tooltip>
+      <span style={{ display: 'inline-flex', minWidth: 0, maxWidth: 'calc(100% - 24px)' }}>
+        {titleWithOptionalTooltip}
+      </span>
+      <Popover
+        trigger="click"
+        placement="bottomLeft"
+        open={filterPopoverOpen}
+        onOpenChange={setFilterPopoverOpen}
+        content={filterPopoverContent}
+      >
+        <button
+          type="button"
+          data-grid-column-filter-trigger="true"
+          data-grid-column-filter-active={columnFilter.active ? 'true' : undefined}
+          aria-label={filterButtonTitle}
+          title={filterButtonTitle}
+          onClick={(event) => {
+            event.stopPropagation();
+          }}
+          onMouseDown={stopColumnHeaderInteraction}
+          onPointerDown={stopColumnHeaderInteraction}
+          style={{
+            width: 22,
+            height: 22,
+            flex: '0 0 22px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 0,
+            border: columnFilter.active ? `1px solid ${activeColor}` : '1px solid transparent',
+            borderRadius: 6,
+            background: columnFilter.active
+              ? (darkMode ? 'rgba(34, 197, 94, 0.14)' : 'rgba(34, 197, 94, 0.12)')
+              : 'transparent',
+            color: mutedColor,
+            cursor: 'pointer',
+          }}
+        >
+          <FilterOutlined style={{ fontSize: 12 }} />
+        </button>
+      </Popover>
+    </span>
   );
 };
 

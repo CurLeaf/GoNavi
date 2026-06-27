@@ -15,6 +15,13 @@ export type GridFilterConditionState = FilterCondition & {
   value2?: string;
 };
 
+export type GridColumnFilterDraft = {
+  column: string;
+  op: string;
+  value?: string;
+  value2?: string;
+};
+
 type GridSortInfo = {
   columnKey: string;
   order: string;
@@ -65,6 +72,8 @@ export interface UseDataGridFiltersResult {
   addFilter: () => void;
   updateFilter: (id: number, field: keyof GridFilterConditionState, val: string | boolean) => void;
   removeFilter: (id: number) => void;
+  applyColumnFilter: (draft: GridColumnFilterDraft) => boolean;
+  clearColumnFilter: (columnName: string) => boolean;
   applyQuickWhereCondition: (condition?: string) => boolean;
   clearQuickWhereCondition: () => void;
   clearAllFiltersAndSorts: () => void;
@@ -345,6 +354,76 @@ export const useDataGridFilters = ({
     if (onApplyFilter) onApplyFilter(filterConditions);
   }, [applyQuickWhereCondition, filterConditions, onApplyFilter]);
 
+  const applyColumnFilter = React.useCallback((draft: GridColumnFilterDraft): boolean => {
+    const column = String(draft?.column || '').trim();
+    if (!column) return false;
+    if (!applyQuickWhereCondition()) return false;
+
+    const existingColumnConditions = filterConditions.filter((cond) => (
+      String(cond?.column || '') === column && String(cond?.op || '') !== 'CUSTOM'
+    ));
+    const existingPrimary = existingColumnConditions[0];
+    const op = String(draft?.op || resolveDefaultGridFilterOperator(getColumnFilterType(column))).trim();
+    const id = Number.isFinite(Number(existingPrimary?.id)) ? Number(existingPrimary?.id) : nextFilterId;
+    existingColumnConditions.forEach((cond) => {
+      autoDefaultFilterIdsRef.current.delete(cond.id);
+    });
+    autoDefaultFilterIdsRef.current.delete(id);
+
+    const nextCondition: GridFilterConditionState = {
+      id,
+      enabled: true,
+      logic: normalizeFilterLogic(existingPrimary?.logic),
+      column,
+      op,
+      value: isNoValueOp(op) ? '' : String(draft?.value ?? ''),
+      value2: isNoValueOp(op) || !isBetweenOp(op) ? '' : String(draft?.value2 ?? ''),
+    };
+    const nextConditions = [
+      ...filterConditions.filter((cond) => !(
+        String(cond?.column || '') === column && String(cond?.op || '') !== 'CUSTOM'
+      )),
+      nextCondition,
+    ];
+
+    setFilterConditions(nextConditions);
+    if (!existingPrimary) {
+      setNextFilterId((prev) => Math.max(prev, id + 1));
+    }
+    if (onApplyFilter) onApplyFilter(nextConditions);
+    return true;
+  }, [
+    applyQuickWhereCondition,
+    filterConditions,
+    getColumnFilterType,
+    isBetweenOp,
+    isNoValueOp,
+    nextFilterId,
+    normalizeFilterLogic,
+    onApplyFilter,
+    resolveDefaultGridFilterOperator,
+  ]);
+
+  const clearColumnFilter = React.useCallback((columnName: string): boolean => {
+    const column = String(columnName || '').trim();
+    if (!column) return false;
+
+    const nextConditions = filterConditions.filter((cond) => !(
+      String(cond?.column || '') === column && String(cond?.op || '') !== 'CUSTOM'
+    ));
+    if (nextConditions.length === filterConditions.length) return true;
+    if (!applyQuickWhereCondition()) return false;
+
+    filterConditions.forEach((cond) => {
+      if (String(cond?.column || '') === column && String(cond?.op || '') !== 'CUSTOM') {
+        autoDefaultFilterIdsRef.current.delete(cond.id);
+      }
+    });
+    setFilterConditions(nextConditions);
+    if (onApplyFilter) onApplyFilter(nextConditions);
+    return true;
+  }, [applyQuickWhereCondition, filterConditions, onApplyFilter]);
+
   const applyAllFiltersEnabled = React.useCallback(() => {
     setFilterConditions((prev) => prev.map((cond) => ({ ...cond, enabled: true })));
   }, []);
@@ -372,6 +451,8 @@ export const useDataGridFilters = ({
     addFilter,
     updateFilter,
     removeFilter,
+    applyColumnFilter,
+    clearColumnFilter,
     applyQuickWhereCondition,
     clearQuickWhereCondition,
     clearAllFiltersAndSorts,

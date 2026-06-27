@@ -1,0 +1,83 @@
+import React from 'react';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
+import { describe, expect, it, vi } from 'vitest';
+
+import { useDataGridFilters, type UseDataGridFiltersResult } from './useDataGridFilters';
+
+const createFilterHookProps = (
+  overrides: Partial<Parameters<typeof useDataGridFilters>[0]> = {},
+): Parameters<typeof useDataGridFilters>[0] => ({
+  appliedFilterConditions: [],
+  quickWhereCondition: '',
+  showFilter: false,
+  displayColumnNames: ['id', 'code', 'title'],
+  allTableColumnNames: ['id', 'code', 'title'],
+  columnMetaMap: {
+    id: { type: 'bigint' },
+    code: { type: 'varchar(50)' },
+    title: { type: 'varchar(500)' },
+  },
+  dbType: 'mysql',
+  darkMode: false,
+  getColumnFilterType: (columnName) => {
+    if (columnName === 'id') return 'bigint';
+    return 'varchar(255)';
+  },
+  resolveDefaultGridFilterOperator: (columnType) => (
+    String(columnType || '').toLowerCase().includes('char') ? 'CONTAINS' : '='
+  ),
+  resolveNextGridFilterOperatorForColumnChange: () => 'CONTAINS',
+  ...overrides,
+});
+
+describe('useDataGridFilters', () => {
+  it('syncs column-header filters into the shared toolbar filter state without requiring the filter panel to be open', () => {
+    const onApplyFilter = vi.fn();
+    const hookProps = createFilterHookProps({
+      showFilter: false,
+      onApplyFilter,
+    });
+    let latest: UseDataGridFiltersResult | undefined;
+    let renderer: ReactTestRenderer | undefined;
+
+    const Harness = () => {
+      latest = useDataGridFilters(hookProps);
+      return null;
+    };
+
+    act(() => {
+      renderer = create(<Harness />);
+    });
+
+    expect(latest?.filterConditions).toEqual([]);
+
+    act(() => {
+      expect(latest?.applyColumnFilter({
+        column: 'code',
+        op: 'CONTAINS',
+        value: '3551',
+      })).toBe(true);
+    });
+
+    expect(latest?.filterConditions).toMatchObject([{
+      enabled: true,
+      logic: 'AND',
+      column: 'code',
+      op: 'CONTAINS',
+      value: '3551',
+      value2: '',
+    }]);
+    expect(onApplyFilter).toHaveBeenCalledWith([
+      expect.objectContaining({
+        enabled: true,
+        logic: 'AND',
+        column: 'code',
+        op: 'CONTAINS',
+        value: '3551',
+        value2: '',
+      }),
+    ]);
+
+    renderer?.unmount();
+  });
+});

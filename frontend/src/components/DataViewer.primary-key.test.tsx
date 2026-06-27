@@ -438,6 +438,48 @@ describe('DataViewer safe editing locator', () => {
     renderer.unmount();
   });
 
+  it('requeries table preview when a column header filter is applied', async () => {
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'missav_bot';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'id', key: 'PRI' }, { name: 'code', key: '' }],
+    });
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      fields: ['id', 'code'],
+      data: [{ id: 2, code: 'EROFV-3551' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<DataViewer tab={createTab({ dbName: 'missav_bot', tableName: 'videos', title: 'videos' })} />);
+    });
+    await flushPromises();
+
+    backendApp.DBQuery.mockClear();
+    await act(async () => {
+      dataGridState.latestProps?.onApplyFilter([{
+        id: 1,
+        enabled: true,
+        logic: 'AND',
+        column: 'code',
+        op: 'CONTAINS',
+        value: '3551',
+        value2: '',
+      }]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await flushPromises();
+
+    const filteredSelectSql = backendApp.DBQuery.mock.calls
+      .map((call: any[]) => String(call[2] || ''))
+      .find((sql: string) => /select\s+\*\s+from\s+`videos`/i.test(sql) && /where/i.test(sql));
+    expect(filteredSelectSql).toContain("`code` LIKE '%3551%'");
+    renderer!.unmount();
+  });
+
   it('keeps DuckDB table preview writable when primary key metadata arrives for a qualified table name', async () => {
     storeState.connections[0].config.type = 'duckdb';
     storeState.connections[0].config.database = 'main';

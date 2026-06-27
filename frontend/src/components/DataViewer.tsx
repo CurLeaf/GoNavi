@@ -1151,7 +1151,17 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
   }, []);
   const handlePageChange = useCallback((page: number, size: number) => fetchData(page, size), [fetchData]);
   const handleToggleFilter = useCallback(() => setShowFilter(prev => !prev), []);
-  const handleApplyFilter = useCallback((conditions: FilterCondition[]) => setFilterConditions(conditions), []);
+  const handleApplyFilter = useCallback((conditions: FilterCondition[]) => {
+    skipNextAutoFetchRef.current = false;
+    initialLoadRef.current = true;
+    setPagination(prev => ({
+      ...prev,
+      current: 1,
+      totalCountLoading: false,
+      totalCountCancelled: false,
+    }));
+    setFilterConditions(normalizeViewerFilterConditions(conditions));
+  }, []);
   const handleApplyQuickWhereCondition = useCallback((condition: string) => {
     const normalized = normalizeQuickWhereCondition(condition);
     const validation = validateQuickWhereCondition(normalized);
@@ -1159,6 +1169,14 @@ const DataViewer: React.FC<{ tab: TabData; isActive?: boolean }> = React.memo(({
       message.error(validation.message);
       return;
     }
+    skipNextAutoFetchRef.current = false;
+    initialLoadRef.current = true;
+    setPagination(prev => ({
+      ...prev,
+      current: 1,
+      totalCountLoading: false,
+      totalCountCancelled: false,
+    }));
     setQuickWhereCondition(normalized);
   }, []);
 

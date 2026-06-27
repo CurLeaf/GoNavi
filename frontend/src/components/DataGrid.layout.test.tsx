@@ -2463,6 +2463,33 @@ describe('DataGrid layout', () => {
     expect(css).toContain('user-select: text !important;');
   });
 
+  it('wires data-view column header filters through the existing filter state', () => {
+    const source = readDataGridSource();
+    const dataViewerSource = readDataViewerSource();
+    const filterHookSource = readFileSync(new URL('./useDataGridFilters.tsx', import.meta.url), 'utf8');
+    const columnTitleSource = readFileSync(new URL('./DataGridColumnTitle.tsx', import.meta.url), 'utf8');
+
+    expect(filterHookSource).toContain('export type GridColumnFilterDraft');
+    expect(filterHookSource).toContain('const applyColumnFilter = React.useCallback');
+    expect(filterHookSource).toContain('onApplyFilter(nextConditions)');
+    expect(source).toContain("const columnHeaderFilterEnabled = exportScope === 'table' && !!onApplyFilter;");
+    expect(source).toContain("filterOpOptions.filter((option) => option.value !== 'CUSTOM')");
+    expect(source).toContain("eventTarget?.closest?.('[data-grid-column-filter-trigger=\"true\"]')");
+    expect(source).toContain("eventTarget?.closest?.('[data-grid-column-filter-popover=\"true\"]')");
+    expect(source).toContain("eventTarget?.closest?.('.ant-select-dropdown')");
+    expect(source).toContain('onApply: (draft) => applyColumnHeaderFilter(normalizedName, draft)');
+    expect(source).toContain('onClear: () => clearColumnFilter(normalizedName)');
+    expect(dataViewerSource).toContain('skipNextAutoFetchRef.current = false;');
+    expect(dataViewerSource).toContain('setFilterConditions(normalizeViewerFilterConditions(conditions));');
+    expect(columnTitleSource).toContain('data-grid-column-filter-trigger="true"');
+    expect(columnTitleSource).toContain('const submitColumnFilter = (event?: React.SyntheticEvent<HTMLElement>) => {');
+    expect(columnTitleSource).toContain('onClick={submitColumnFilter}');
+    expect(columnTitleSource).toContain('onPressEnter={submitColumnFilter}');
+    expect(columnTitleSource).toContain('getPopupContainer={(triggerNode) => triggerNode.parentElement || document.body}');
+    expect(columnTitleSource).toContain('data-grid-column-filter-active={columnFilter.active ?');
+    expect(columnTitleSource).toContain('data-grid-column-filter-popover="true"');
+  });
+
   it('keeps DataGrid scroll synchronization throttled to animation frames', () => {
     const source = readDataGridSource();
     const secondaryActionsSource = readFileSync(new URL('./DataGridSecondaryActions.tsx', import.meta.url), 'utf8');
