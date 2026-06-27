@@ -537,6 +537,20 @@ const getLastInjectedPrompt = (): string => {
   return event?.detail?.prompt;
 };
 
+const createRunShortcutEvent = () => {
+  const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+  return {
+    ctrlKey: !isMacRuntime,
+    metaKey: isMacRuntime,
+    altKey: false,
+    shiftKey: false,
+    key: 'Enter',
+    target: null,
+    preventDefault: vi.fn(),
+    stopPropagation: vi.fn(),
+  };
+};
+
 const createTab = (overrides: Partial<TabData> = {}): TabData => ({
   id: 'tab-1',
   title: 'query.sql',
@@ -1605,6 +1619,103 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(expect.anything(), 'main', expect.stringContaining('select 2 as two'), 'query-1');
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 1');
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 3');
+  });
+
+  it('does not run SQL from the run shortcut when nothing is selected', async () => {
+    storeState.shortcutOptions.runQuery.mac = { enabled: true, combo: 'Meta+Enter' };
+    storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Enter' };
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        dbName: 'main',
+        query: 'select 1;\nselect 2 as two;\nselect 3;',
+      })} />);
+    });
+    editorState.position = { lineNumber: 2, column: 8 };
+    editorState.selection = null;
+    backendApp.DBQueryMulti.mockClear();
+
+    const event = createRunShortcutEvent();
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+    expect(messageApi.info).toHaveBeenCalledWith('没有可选择的 SQL 语句。');
+  });
+
+  it('runs selected SQL from the run shortcut', async () => {
+    storeState.shortcutOptions.runQuery.mac = { enabled: true, combo: 'Meta+Enter' };
+    storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Enter' };
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['two'], rows: [{ two: 2 }] }],
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        dbName: 'main',
+        query: 'select 1;\nselect 2 as two;\nselect 3;',
+      })} />);
+    });
+    editorState.position = { lineNumber: 1, column: 4 };
+    editorState.selection = {
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 'select 2 as two'.length + 1,
+    };
+
+    const event = createRunShortcutEvent();
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
     expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(expect.anything(), 'main', expect.stringContaining('select 2 as two'), 'query-1');
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 1');
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 3');

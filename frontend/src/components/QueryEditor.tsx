@@ -2573,7 +2573,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.runQuery.label'),
                   keybindings: [keyBinding.keyMod | keyBinding.keyCode],
                   run: () => {
-                      window.dispatchEvent(new CustomEvent('gonavi:run-active-query'));
+                      window.dispatchEvent(new CustomEvent('gonavi:run-active-query', {
+                          detail: { requireSelection: true },
+                      }));
                   },
               });
           }
@@ -4629,6 +4631,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
     }
   };
 
+  const handleRunSelectedShortcut = async () => {
+      if (!getSelectedSQL().trim()) {
+          message.info(translate('query_editor.message.no_selectable_sql'));
+          return;
+      }
+      await handleRun();
+  };
+
   const handleCancel = async () => {
     if (!currentQueryIdRef.current) {
       message.warning(translate('query_editor.message.cancel_no_running'));
@@ -4710,7 +4720,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
           event.preventDefault();
           event.stopPropagation();
-          void handleRun();
+          void handleRunSelectedShortcut();
       };
 
       window.addEventListener('keydown', handleRunShortcut, true);
@@ -4758,7 +4768,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.runQuery.label'),
               keybindings: [keyBinding.keyMod | keyBinding.keyCode],
               run: () => {
-                  window.dispatchEvent(new CustomEvent('gonavi:run-active-query'));
+                  window.dispatchEvent(new CustomEvent('gonavi:run-active-query', {
+                      detail: { requireSelection: true },
+                  }));
               },
           });
       }
@@ -4882,8 +4894,12 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [languagePreference, toggleQueryResultsPanelShortcutBinding, toggleResultPanelVisibility]);
 
   useEffect(() => {
-      const handleRunActiveQuery = () => {
+      const handleRunActiveQuery = (event: Event) => {
           if (!isActive) {
+              return;
+          }
+          if ((event as CustomEvent<{ requireSelection?: boolean }>).detail?.requireSelection) {
+              void handleRunSelectedShortcut();
               return;
           }
           void handleRun();
@@ -4893,7 +4909,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       return () => {
           window.removeEventListener('gonavi:run-active-query', handleRunActiveQuery as EventListener);
       };
-  }, [isActive, handleRun]);
+  }, [isActive, handleRun, handleRunSelectedShortcut]);
 
   // 监听由 TabManager 分发的专用注入事件
   useEffect(() => {
