@@ -143,6 +143,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
             border: darkMode ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(0,0,0,0.08)',
             background: darkMode ? 'rgba(255,255,255,0.03)' : '#fff',
             textAlign: 'left',
+            alignItems: 'stretch',
             marginTop,
             width: maxWidth ? `min(100%, ${maxWidth}px)` : '100%',
             flex: fillHeight ? 1 : undefined,
@@ -171,9 +172,12 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                 className="query-result-message-scroll-body"
                 style={{
                     flex: fillHeight ? 1 : '0 1 auto',
+                    display: 'flex',
+                    alignItems: 'stretch',
+                    width: '100%',
                     minHeight: compact ? 72 : 0,
                     maxHeight: compact ? 160 : undefined,
-                    overflow: 'auto',
+                    overflow: 'hidden',
                     minWidth: 0,
                     borderRadius: 6,
                 }}
@@ -188,8 +192,9 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                     onKeyDown={handleMessageTextareaKeyDown}
                     style={{
                         display: 'block',
+                        flex: '1 1 auto',
                         width: '100%',
-                        minWidth: 'max-content',
+                        minWidth: 0,
                         height: '100%',
                         minHeight: compact ? 72 : 0,
                         padding: 0,
@@ -310,6 +315,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                     <div className={isV2Ui ? 'gn-v2-query-success' : undefined} style={{
                         flex: 1, minHeight: 0, display: 'flex', justifyContent: 'flex-start',
                         flexDirection: 'column', gap: 12, padding: 24, color: '#666', userSelect: 'text',
+                        alignItems: 'stretch',
                         overflow: 'hidden',
                     }}>
                         {renderMessageBlock({

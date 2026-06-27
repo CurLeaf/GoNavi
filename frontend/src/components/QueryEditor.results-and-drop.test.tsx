@@ -495,6 +495,11 @@ const findResultMessageTextarea = (renderer: ReactTestRenderer, mode: 'compact' 
     node.type === 'textarea' && node.props['data-query-result-message-textarea'] === mode,
   );
 
+const findByClassName = (renderer: ReactTestRenderer, className: string) =>
+  renderer.root.find((node) =>
+    typeof node.props?.className === 'string' && node.props.className.includes(className),
+  );
+
 const findEditorAction = (id: string) =>
   editorState.editor.addAction.mock.calls
     .map((call: any[]) => call[0])
@@ -1162,6 +1167,8 @@ describe('QueryEditor external SQL save', () => {
 
     const rendered = textContent(renderer!.toJSON());
     const messageTextarea = findResultMessageTextarea(renderer!);
+    const messageBlock = findByClassName(renderer!, 'query-result-message-block');
+    const messageScrollBody = findByClassName(renderer!, 'query-result-message-scroll-body');
     expect(rendered).toContain('消息 1');
     expect(messageTextarea.props.value).toBe([
       "    select c.queryno,'' ,left(dbo.f_vendor_class(''' + b.groupid + ''',' + colname + '),",
@@ -1174,6 +1181,20 @@ describe('QueryEditor external SQL save', () => {
       display: 'block',
       whiteSpace: 'pre',
       overflow: 'auto',
+      width: '100%',
+      minWidth: 0,
+    });
+    expect(messageTextarea.props.style.minWidth).not.toBe('max-content');
+    expect(messageBlock.props.style).toMatchObject({
+      alignItems: 'stretch',
+      width: '100%',
+    });
+    expect(messageScrollBody.props.style).toMatchObject({
+      display: 'flex',
+      alignItems: 'stretch',
+      width: '100%',
+      overflow: 'hidden',
+      minWidth: 0,
     });
     expect(messageTextarea.props.value).not.toContain('mssql:');
   });
@@ -2645,6 +2666,9 @@ describe('QueryEditor external SQL save', () => {
     expect(source).toContain("flex: fillHeight ? 1 : '0 1 auto'");
     expect(source).toContain('wrap="off"');
     expect(source).toContain("whiteSpace: 'pre'");
+    expect(source).toContain("alignItems: 'stretch'");
+    expect(source).toContain("minWidth: 0");
+    expect(source).not.toContain("minWidth: 'max-content'");
     expect(source).toContain("data-query-result-message-textarea");
     expect(source).toContain("query_editor.results_panel.message.action.copy");
     expect(source).toContain("typeof navigator?.clipboard?.writeText !== 'function'");
@@ -2988,7 +3012,7 @@ describe('QueryEditor external SQL save', () => {
       });
     });
 
-    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'front_end_sys' });
+    expect(storeState.setActiveContext).not.toHaveBeenCalled();
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
       type: 'table',
       connectionId: 'conn-1',
@@ -2998,7 +3022,7 @@ describe('QueryEditor external SQL save', () => {
     }));
   });
 
-  it('keeps sidebar object navigation tied to the dragged database after drop', async () => {
+  it('keeps object hyperlink tab opening tied to the dragged database after drop', async () => {
     const domListeners: Record<string, ((event?: any) => void)[]> = {};
     editorState.domNode = {
       style: { cursor: '' },
@@ -3070,7 +3094,7 @@ describe('QueryEditor external SQL save', () => {
       });
     });
 
-    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'front_end_sys' });
+    expect(storeState.setActiveContext).not.toHaveBeenCalled();
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
       type: 'table',
       connectionId: 'conn-1',
