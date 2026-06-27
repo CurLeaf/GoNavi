@@ -81,8 +81,8 @@ samp {
 }
 
 .sidebar-tree-scroll-shell .ant-tree .ant-tree-node-content-wrapper {
-  width: auto !important;
-  min-width: 0;
+  width: max-content !important;
+  min-width: 100%;
   display: flex !important;
   align-items: center;
   gap: 8px;
@@ -106,7 +106,7 @@ samp {
 
 .sidebar-tree-scroll-shell .ant-tree .ant-tree-title {
   flex: 0 0 auto;
-  min-width: 0;
+  min-width: max-content;
   overflow: visible;
   text-overflow: clip;
 }

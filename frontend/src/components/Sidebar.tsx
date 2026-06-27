@@ -99,8 +99,7 @@ import { Tree, message, Dropdown, MenuProps, Input, Button, Form, Popover, Toolt
   AimOutlined,
   MoreOutlined,
   ToolOutlined,
-  SettingOutlined,
-  BarsOutlined
+  SettingOutlined
 	} from '@ant-design/icons';
 import {
     buildSidebarRootConnectionToken,
@@ -156,6 +155,7 @@ import {
   buildSidebarTableChildrenForUi,
   buildV2RailConnectionGroups,
   buildV2SidebarTableSectionedChildren,
+  collectSidebarSubtreeKeys,
   estimateV2TreeHorizontalScrollWidth,
   filterV2CommandSearchTreeItems,
   filterV2ExplorerTreeByKind,
@@ -170,11 +170,13 @@ import {
   resolveSidebarTagDropInsertBefore,
   resolveV2ActiveConnectionId,
   resolveV2CommandSearchPersistentFilter,
+  shouldClearSidebarNodeChildrenOnCollapse,
   shouldSkipSidebarLoadOnExpandWhileDragging,
   shouldSkipSidebarSelectWhileDragging,
   shouldCloseV2CommandSearchOnGlobalKey,
   shouldRunV2CommandSearchEnter,
   sortSidebarTableEntries,
+  type SidebarConnectionState,
   type SidebarTreeNode as TreeNode,
   type V2CommandSearchItem,
 } from './sidebarV2Utils';
@@ -183,6 +185,7 @@ export {
   buildSidebarTableChildrenForUi,
   buildV2RailConnectionGroups,
   buildV2SidebarTableSectionedChildren,
+  collectSidebarSubtreeKeys,
   estimateV2TreeHorizontalScrollWidth,
   filterV2CommandSearchTreeItems,
   filterV2ExplorerTreeByKind,
@@ -197,6 +200,7 @@ export {
   resolveSidebarTagDropInsertBefore,
   resolveV2ActiveConnectionId,
   resolveV2CommandSearchPersistentFilter,
+  shouldClearSidebarNodeChildrenOnCollapse,
   shouldSkipSidebarLoadOnExpandWhileDragging,
   shouldSkipSidebarSelectWhileDragging,
   shouldCloseV2CommandSearchOnGlobalKey,
@@ -228,7 +232,9 @@ const V2_EXPLORER_FILTER_OPTIONS: Array<{ key: V2ExplorerFilter; labelKey: strin
   { key: 'all', labelKey: 'sidebar.command_search.object_kind.all' },
   { key: 'tables', labelKey: 'sidebar.command_search.object_kind.tables' },
   { key: 'views', labelKey: 'sidebar.command_search.object_kind.views' },
+  { key: 'sequences', labelKey: 'sidebar.command_search.object_kind.sequences' },
   { key: 'routines', labelKey: 'sidebar.command_search.object_kind.routines' },
+  { key: 'packages', labelKey: 'sidebar.command_search.object_kind.packages' },
   { key: 'events', labelKey: 'sidebar.command_search.object_kind.events' },
 ];
 
@@ -366,7 +372,6 @@ const Sidebar: React.FC<{
   onOpenSettings?: () => void;
   onToggleAI?: () => void;
   onToggleLogPanel?: () => void;
-  sqlLogCount?: number;
   uiVersion?: 'legacy' | 'v2';
   onFocusCommandSearch?: () => void;
 }> = React.memo(({
@@ -376,7 +381,6 @@ const Sidebar: React.FC<{
   onOpenSettings,
   onToggleAI,
   onToggleLogPanel,
-  sqlLogCount = 0,
   uiVersion,
   onFocusCommandSearch,
 }) => {
@@ -414,6 +418,8 @@ const Sidebar: React.FC<{
   const recordTableAccess = useStore(state => state.recordTableAccess);
   const setTableSortPreference = useStore(state => state.setTableSortPreference);
   const setSidebarTablePinned = useStore(state => state.setSidebarTablePinned);
+  const queryOptions = useStore(state => state.queryOptions);
+  const setQueryOptions = useStore(state => state.setQueryOptions);
   const addSqlLog = useStore(state => state.addSqlLog);
   const sqlLogs = useStore(state => state.sqlLogs) || [];
   const shortcutOptions = useStore(state => state.shortcutOptions);
@@ -425,6 +431,7 @@ const Sidebar: React.FC<{
   const darkMode = theme === 'dark';
   const resolvedAppearance = resolveAppearanceValues(appearance);
   const opacity = normalizeOpacityForPlatform(resolvedAppearance.opacity);
+  const showSidebarTableComment = queryOptions?.showSidebarTableComment === true;
   const { exportProgressModal, runExportWithProgress } = useExportProgressDialog();
   const disableLocalBackdropFilter = isMacLikePlatform();
   const autoFetchVisible = useAutoFetchVisibility();
@@ -493,6 +500,7 @@ const Sidebar: React.FC<{
   const v2UseLegacySidebarFilter = isV2Ui && v2SidebarSearchMode === 'filter';
   const v2CommandSearchPersistentFilterEnabled = appearance.v2CommandSearchPersistentFilterEnabled === true;
   const v2PersistedSidebarFilter = appearance.v2SidebarPersistedFilter ?? '';
+  const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';
   const [searchValue, setSearchValue] = useState(v2PersistedSidebarFilter);
   const deferredSearchValue = useDeferredValue(searchValue);
   const [searchScopes, setSearchScopes] = useState<SearchScope[]>(['smart']);
@@ -702,8 +710,8 @@ const Sidebar: React.FC<{
       return () => window.removeEventListener('keydown', handleV2CommandSearchGlobalKeyDown, true);
   }, [closeV2CommandSearch, isV2CommandSearchOpen]);
   
-  // Connection Status State: key -> 'success' | 'error'
-  const [connectionStates, setConnectionStates] = useState<Record<string, 'success' | 'error'>>({});
+  // Connection Status State: key -> 'loading' | 'success' | 'error'
+  const [connectionStates, setConnectionStates] = useState<Record<string, SidebarConnectionState>>({});
   const [isTreeDragging, setIsTreeDragging] = useState(false);
 
   // Create Database Modal
@@ -1450,6 +1458,66 @@ const Sidebar: React.FC<{
       });
   };
 
+  const openSidebarObjectNode = (node: any): boolean => {
+      if (node.type === 'view' || node.type === 'materialized-view') {
+          const { viewName, dbName, id, schemaName } = node.dataRef;
+          addTab({
+              id: node.key,
+              title: viewName,
+              type: 'table',
+              connectionId: id,
+              dbName,
+              tableName: viewName,
+              objectType: node.type === 'materialized-view' ? 'materialized-view' : 'view',
+              schemaName,
+              sidebarLocateKey: String(node.key || ''),
+          });
+          return true;
+      }
+      if (node.type === 'db-trigger') {
+          const { triggerName, triggerTableName, schemaName, dbName, id } = node.dataRef;
+          addTab({
+              id: `trigger-${node.key}`,
+              title: t('sidebar.tab.trigger', { name: triggerName }),
+              type: 'trigger',
+              connectionId: id,
+              dbName,
+              triggerName,
+              triggerTableName,
+              schemaName,
+              sidebarLocateKey: String(node.key || ''),
+          });
+          return true;
+      }
+      if (node.type === 'db-event') {
+          openEventDefinition(node);
+          return true;
+      }
+      if (node.type === 'routine') {
+          const { routineName, routineType, dbName, id } = node.dataRef;
+          const typeLabel = t(routineType === 'PROCEDURE' ? 'sidebar.object.procedure' : 'sidebar.object.function');
+          addTab({
+              id: `routine-def-${node.key}`,
+              title: t('sidebar.tab.routine_definition', { type: typeLabel, name: routineName }),
+              type: 'routine-def',
+              connectionId: id,
+              dbName,
+              routineName,
+              routineType
+          });
+          return true;
+      }
+      if (node.type === 'sequence') {
+          openSequenceDefinition(node);
+          return true;
+      }
+      if (node.type === 'package') {
+          openPackageDefinition(node);
+          return true;
+      }
+      return false;
+  };
+
   const onSelect = (keys: React.Key[], info: any) => {
       if (isV2Ui && info?.node?.type === 'v2-table-section') {
           return;
@@ -1483,7 +1551,7 @@ const Sidebar: React.FC<{
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'jvm-mode' || type === 'jvm-resource' || type === 'jvm-diagnostic' || type === 'jvm-monitoring') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: '' });
-      } else if (type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
+      } else if (type === 'view' || type === 'materialized-view' || type === 'sequence' || type === 'package' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') {
           setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
@@ -1513,10 +1581,24 @@ const Sidebar: React.FC<{
                   schemaName,
               } as any);
           }, 250);
+      } else if (openSidebarObjectNode(info.node)) {
+          return;
       }
   };
 
   const onExpand = (newExpandedKeys: React.Key[], info?: any) => {
+    if (!info?.expanded && shouldClearSidebarNodeChildrenOnCollapse(info?.node)) {
+        const collapsedKey = String(info.node?.key || '').trim();
+        const keysToClear = [
+            collapsedKey,
+            ...collectSidebarSubtreeKeys(info.node),
+        ].filter(Boolean);
+        const keysToClearSet = new Set(keysToClear);
+        setExpandedKeys(newExpandedKeys.filter((key) => !keysToClearSet.has(String(key))));
+        setAutoExpandParent(false);
+        clearTreeNodeChildrenByKeys(keysToClear);
+        return;
+    }
     setExpandedKeys(newExpandedKeys);
     setAutoExpandParent(false);
     if (!shouldSkipSidebarLoadOnExpandWhileDragging(isTreeDragging, info)) {
@@ -1545,7 +1627,7 @@ const Sidebar: React.FC<{
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'jvm-mode' || type === 'jvm-resource' || type === 'jvm-diagnostic' || type === 'jvm-monitoring') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: '' });
-      } else if (type === 'table' || type === 'view' || type === 'materialized-view' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
+      } else if (type === 'table' || type === 'view' || type === 'materialized-view' || type === 'sequence' || type === 'package' || type === 'db-trigger' || type === 'db-event' || type === 'routine') {
           setActiveContext({ connectionId: nodeConnectionId || dataRef.id, dbName: dataRef.dbName });
       } else if (type === 'saved-query') setActiveContext({ connectionId: dataRef.connectionId, dbName: dataRef.dbName });
       else if (type === 'redis-db') setActiveContext({ connectionId: dataRef.id, dbName: `db${dataRef.redisDB}` });
@@ -1561,6 +1643,8 @@ const Sidebar: React.FC<{
               connectionId: id,
               dbName,
               tableName,
+              initialViewMode: tableDoubleClickAction === 'open-design' ? 'fields' : undefined,
+              initialViewModeRequestId: tableDoubleClickAction === 'open-design' ? String(Date.now()) : undefined,
               objectType: 'table',
           });
           return;
@@ -1632,6 +1716,12 @@ const Sidebar: React.FC<{
               routineName,
               routineType
           });
+          return;
+      } else if (node.type === 'sequence') {
+          openSequenceDefinition(node);
+          return;
+      } else if (node.type === 'package') {
+          openPackageDefinition(node);
           return;
       } else if (node.type === 'jvm-mode') {
           const { providerMode, id } = node.dataRef;
@@ -1716,7 +1806,7 @@ const Sidebar: React.FC<{
   };
 
   const buildJVMDiagnosticTreeNodes = (conn: SavedConnection): TreeNode[] => {
-      const descriptor = buildJVMDiagnosticActionDescriptor(conn.id, conn.config.jvm?.diagnostic);
+      const descriptor = buildJVMDiagnosticActionDescriptor(conn.id, conn.config.jvm?.diagnostic, t);
       if (!descriptor) {
           return [];
       }
@@ -1839,6 +1929,9 @@ const Sidebar: React.FC<{
       handleRebindSavedQuery,
       openRoutineDefinition,
       openEventDefinition,
+      openEditEvent,
+      openSequenceDefinition,
+      openPackageDefinition,
       openEditRoutine,
       openCreateRoutine,
       handleDropRoutine,
@@ -1946,6 +2039,8 @@ const Sidebar: React.FC<{
       moveConnectionToTag,
       setSidebarTablePinned,
       setTableSortPreference,
+      setQueryOptions,
+      showSidebarTableComment,
       replaceTreeNodeChildren,
       loadDatabases,
       loadTables,
@@ -2073,6 +2168,7 @@ const Sidebar: React.FC<{
       v2TreeMetrics,
       tableSortPreference,
       pinnedSidebarTables,
+      showSidebarTableComment,
       getConnectionNodeForAction,
       buildRuntimeConfig,
       extractObjectName,
@@ -2097,6 +2193,7 @@ const Sidebar: React.FC<{
       hoverTitle,
       statusBadge,
       getV2TreeMetaText,
+      showSidebarTableComment,
       toggleSidebarTablePinned,
       snapshotTreeSelectionBeforeDrag,
       restoreTreeSelectionAfterDrag,
@@ -2183,6 +2280,9 @@ const Sidebar: React.FC<{
     openEditRoutine,
     handleDropRoutine,
     openEventDefinition,
+    openEditEvent,
+    openSequenceDefinition,
+    openPackageDefinition,
     resolveMessagePublishTarget,
     openMessagePublishModal,
     openDesign,
@@ -2544,6 +2644,24 @@ const Sidebar: React.FC<{
                     </div>
                 </div>
                 <div className="gn-v2-active-connection-actions">
+                    <Tooltip title={t('sidebar.menu.new_query')}>
+                        <Button
+                            size="small"
+                            type="text"
+                            className="gn-v2-active-connection-query-action"
+                            icon={<FileTextOutlined />}
+                            aria-label={t('sidebar.menu.new_query')}
+                            data-gonavi-new-query-action="true"
+                            disabled={!activeConnection}
+                            onClick={() => {
+                                if (activeConnection) {
+                                    handleV2ConnectionContextMenuAction(getConnectionNodeForAction(activeConnection), 'new-query');
+                                }
+                            }}
+                        >
+                            {t('sidebar.menu.new_query')}
+                        </Button>
+                    </Tooltip>
                     {onCreateConnection && (
                         <Tooltip title={t('connection.new')}>
                             <Button
@@ -2719,12 +2837,12 @@ const Sidebar: React.FC<{
         {!isV2Ui && (
         <div data-sidebar-legacy-toolbar="true" style={legacyToolbarStyle}>
             <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
-                <Tooltip title="新建组">
+                <Tooltip title={t('sidebar.action.new_group')}>
                     <Button
                         size="small"
                         type="text"
                         icon={<FolderOpenOutlined />}
-                        aria-label="新建组"
+                        aria-label={t('sidebar.action.new_group')}
                         data-sidebar-create-group-action="true"
                         onClick={() => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); }}
                         style={{ color: legacyToolbarButtonColor }}
@@ -2732,12 +2850,12 @@ const Sidebar: React.FC<{
                 </Tooltip>
             </div>
             <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
-                <Tooltip title="批量操作表">
+                <Tooltip title={t('sidebar.action.batch_tables')}>
                     <Button
                         size="small"
                         type="text"
                         icon={<TableOutlined />}
-                        aria-label="批量操作表"
+                        aria-label={t('sidebar.action.batch_tables')}
                         data-sidebar-batch-table-action="true"
                         onClick={() => openBatchTableExportWorkbench()}
                         style={{ color: legacyToolbarButtonColor }}
@@ -2745,12 +2863,12 @@ const Sidebar: React.FC<{
                 </Tooltip>
             </div>
             <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
-                <Tooltip title="批量操作库">
+                <Tooltip title={t('sidebar.action.batch_databases')}>
                     <Button
                         size="small"
                         type="text"
                         icon={<DatabaseOutlined />}
-                        aria-label="批量操作库"
+                        aria-label={t('sidebar.action.batch_databases')}
                         data-sidebar-batch-database-action="true"
                         onClick={() => openBatchDatabaseExportWorkbench()}
                         style={{ color: legacyToolbarButtonColor }}
@@ -2771,13 +2889,13 @@ const Sidebar: React.FC<{
                 </Tooltip>
             </div>
             <div data-sidebar-legacy-toolbar-item="true" style={legacyToolbarItemStyle}>
-                <Tooltip title={canLocateActiveTab ? '定位当前标签页' : '当前标签页没有可定位的内容'}>
+                <Tooltip title={canLocateActiveTab ? t('sidebar.action.locate_current_tab') : t('sidebar.message.locate_current_tab_unavailable')}>
                     <span style={legacyToolbarDisabledWrapStyle}>
                         <Button
                             size="small"
                             type="text"
                             icon={<AimOutlined />}
-                            aria-label="定位当前标签页"
+                            aria-label={t('sidebar.action.locate_current_tab')}
                             data-sidebar-locate-current-tab-action="true"
                             disabled={!canLocateActiveTab}
                             onClick={handleLocateActiveTabInSidebar}
@@ -2841,11 +2959,6 @@ const Sidebar: React.FC<{
 
         {isV2Ui && (
             <div className="gn-v2-sidebar-log-footer">
-                <button type="button" className="gn-v2-sidebar-log-button" onClick={onToggleLogPanel}>
-                    <BarsOutlined />
-                    <span>SQL 执行日志</span>
-                    <small>{sqlLogCount.toLocaleString()}</small>
-                </button>
                 <SlowQueryRailButton
                     className="gn-v2-sidebar-slow-query-button"
                     tooltipPlacement="top"
@@ -2954,8 +3067,16 @@ const Sidebar: React.FC<{
             modalScrollSectionStyle={modalScrollSectionStyle}
             modalHintTextStyle={modalHintTextStyle}
             darkMode={darkMode}
-            tableModalTitle={renderSidebarModalTitle(<TableOutlined />, "批量操作表", "按对象批量导出结构、数据或完整备份。")}
-            databaseModalTitle={renderSidebarModalTitle(<DatabaseOutlined />, "批量操作库", "按数据库批量导出结构，或生成结构加数据的备份。")}
+            tableModalTitle={renderSidebarModalTitle(
+              <TableOutlined />,
+              t('sidebar.modal.batch_tables.title'),
+              t('sidebar.modal.batch_tables.description'),
+            )}
+            databaseModalTitle={renderSidebarModalTitle(
+              <DatabaseOutlined />,
+              t('sidebar.modal.batch_databases.title'),
+              t('sidebar.modal.batch_databases.description'),
+            )}
             isBatchModalOpen={isBatchModalOpen}
             setIsBatchModalOpen={setIsBatchModalOpen}
             selectedConnection={selectedConnection}

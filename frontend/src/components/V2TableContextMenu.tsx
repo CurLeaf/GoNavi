@@ -225,7 +225,7 @@ export const V2TableContextMenuView: React.FC<{
           { action: 'design-table', icon: <EditOutlined />, title: `${t('sidebar.menu.design_table')} · ${t('sidebar.v2_table_menu.design_table_detail')}`, kbd: primaryShortcut('D', shortcutPlatform) },
           { action: 'open-new-tab', icon: <FileAddOutlined />, title: t('sidebar.v2_table_menu.open_in_new_tab'), kbd: primaryShortcut('Enter', shortcutPlatform) },
           { action: 'new-query', icon: <ConsoleSqlOutlined />, title: t('sidebar.menu.new_query') },
-          ...(supportsMessagePublish ? [{ action: 'publish-message' as const, icon: <SendOutlined />, title: '测试发送消息' }] : []),
+          ...(supportsMessagePublish ? [{ action: 'publish-message' as const, icon: <SendOutlined />, title: t('message_publish_modal.title') }] : []),
         ])}
 
         <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_table_menu.metadata_section')}</div>
@@ -264,6 +264,7 @@ export const V2TableContextMenuView: React.FC<{
 
 export type V2TableGroupContextMenuActionKey =
   | 'new-table'
+  | 'toggle-table-comments'
   | 'sort-by-name'
   | 'sort-by-frequency';
 
@@ -273,6 +274,7 @@ export const V2TableGroupContextMenuView: React.FC<{
   dbName?: string;
   count?: number;
   currentSort?: 'name' | 'frequency';
+  showTableComments?: boolean;
   onAction?: (action: V2TableGroupContextMenuActionKey) => void;
 }> = ({
   title,
@@ -280,6 +282,7 @@ export const V2TableGroupContextMenuView: React.FC<{
   dbName,
   count,
   currentSort = 'name',
+  showTableComments = false,
   onAction,
 }) => {
   const sortLabel = currentSort === 'frequency'
@@ -308,6 +311,17 @@ export const V2TableGroupContextMenuView: React.FC<{
       <div className="gn-v2-context-menu-body">
         {renderItems([
           { action: 'new-table', icon: <TableOutlined />, title: t('sidebar.menu.create_table'), kbd: primaryShortcut('N', shortcutPlatform), featured: true },
+        ])}
+
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_table_group_menu.display_section')}</div>
+        {renderItems([
+          {
+            action: 'toggle-table-comments',
+            icon: showTableComments ? <CheckSquareOutlined /> : <FileTextOutlined />,
+            title: t('sidebar.v2_table_group_menu.show_table_comments'),
+            kbd: showTableComments ? t('data_grid.context_menu.current_marker') : undefined,
+            selected: showTableComments,
+          },
         ])}
 
         <div className="gn-v2-context-menu-section-title">{t('data_grid.context_menu.sort_section')}</div>
@@ -435,26 +449,28 @@ export const V2SchemaContextMenuView: React.FC<{
       <V2ContextMenuHeader
         icon={<FolderOpenOutlined />}
         title={schemaName}
-        meta={`${dbName || '当前数据库'} · 模式操作`}
+        meta={t('sidebar.v2_schema_menu.meta', {
+          database: dbName || t('sidebar.v2_table_group_menu.current_database'),
+        })}
         pill="SCHEMA"
       />
 
       <div className="gn-v2-context-menu-body">
-        <div className="gn-v2-context-menu-section-title">维护</div>
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_table_menu.maintenance_section')}</div>
         {renderItems([
-          { action: 'rename-schema', icon: <EditOutlined />, title: '编辑模式', kbd: 'F2', featured: true },
-          { action: 'refresh-schema', icon: <ReloadOutlined />, title: '刷新对象树', kbd: primaryShortcut('R', shortcutPlatform) },
+          { action: 'rename-schema', icon: <EditOutlined />, title: t('sidebar.v2_schema_menu.edit_schema'), kbd: 'F2', featured: true },
+          { action: 'refresh-schema', icon: <ReloadOutlined />, title: t('sidebar.v2_database_menu.refresh_object_tree'), kbd: primaryShortcut('R', shortcutPlatform) },
         ])}
 
-        <div className="gn-v2-context-menu-section-title">导出与备份</div>
+        <div className="gn-v2-context-menu-section-title">{t('sidebar.v2_database_menu.export_backup_section')}</div>
         {renderItems([
-          { action: 'export-schema', icon: <ExportOutlined />, title: '导出当前模式表结构 · SQL' },
-          { action: 'backup-schema-sql', icon: <SaveOutlined />, title: '备份当前模式全部表 · 结构 + 数据' },
+          { action: 'export-schema', icon: <ExportOutlined />, title: t('sidebar.v2_schema_menu.export_current_schema_sql') },
+          { action: 'backup-schema-sql', icon: <SaveOutlined />, title: t('sidebar.v2_schema_menu.backup_current_schema_sql') },
         ])}
 
         <div className="gn-v2-context-menu-divider" />
         {renderItems([
-          { action: 'drop-schema', icon: <DeleteOutlined />, title: '删除模式 · DROP CASCADE', tone: 'danger', kbd: '⌫' },
+          { action: 'drop-schema', icon: <DeleteOutlined />, title: t('sidebar.v2_schema_menu.delete_schema_cascade'), tone: 'danger', kbd: '⌫' },
         ])}
       </div>
     </div>

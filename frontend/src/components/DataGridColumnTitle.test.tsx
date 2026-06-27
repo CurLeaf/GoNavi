@@ -1,10 +1,40 @@
 import React from 'react';
+import { act, create } from 'react-test-renderer';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import DataGridColumnTitle from './DataGridColumnTitle';
 
 vi.mock('antd', () => ({
+  Button: ({ children, type: buttonType, htmlType, ...props }: { children?: React.ReactNode; type?: string; htmlType?: 'button' | 'submit' | 'reset' }) => (
+    <button type={htmlType || 'button'} data-button-type={buttonType} {...props}>
+      {children}
+    </button>
+  ),
+  Form: ({ children, component: Component = 'form', onFinish: _onFinish, ...props }: { children?: React.ReactNode; component?: React.ElementType; onFinish?: () => void }) => (
+    <Component {...props}>{children}</Component>
+  ),
+  Input: Object.assign(
+    ({ onPressEnter: _onPressEnter, ...props }: { onPressEnter?: () => void }) => <input {...props} />,
+    {
+      TextArea: ({ autoSize: _autoSize, ...props }: { autoSize?: unknown }) => <textarea {...props} />,
+    },
+  ),
+  Popover: ({ children, content, open }: { children: React.ReactNode; content?: React.ReactNode; open?: boolean }) => (
+    <span data-popover-open={open ? 'true' : 'false'}>
+      {content}
+      {children}
+    </span>
+  ),
+  Select: ({ options = [], value, onChange }: { options?: Array<{ value: string; label: string }>; value?: string; onChange?: (value: string) => void }) => (
+    <select value={value} onChange={(event) => onChange?.(event.target.value)}>
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  ),
   Tooltip: ({ children, title, rootClassName }: { children: React.ReactNode; title?: React.ReactNode; rootClassName?: string }) => (
     <>
       <div data-testid="tooltip-title">{title}</div>
@@ -12,6 +42,11 @@ vi.mock('antd', () => ({
       {children}
     </>
   ),
+}));
+
+vi.mock('@ant-design/icons', () => ({
+  FilterOutlined: () => <span data-icon="filter" />,
+  LinkOutlined: () => <span data-icon="link" />,
 }));
 
 describe('DataGridColumnTitle', () => {
@@ -109,6 +144,170 @@ describe('DataGridColumnTitle', () => {
 
     expect(markup).toContain('data-grid-fk-jump="true"');
     expect(markup).toContain('data-ref-table-name="customers"');
+  });
+
+  it('renders a compact column filter trigger with active state', () => {
+    const markup = renderToStaticMarkup(
+      <DataGridColumnTitle
+        columnName="status"
+        showColumnType={false}
+        showColumnComment={false}
+        metaFontSize={11}
+        columnMetaHintColor="#999"
+        columnMetaTooltipColor="#fff"
+        darkMode={false}
+        columnFilter={{
+          active: true,
+          operatorOptions: [
+            { value: '=', label: '=' },
+            { value: 'CONTAINS', label: 'Contains' },
+          ],
+          defaultOperator: 'CONTAINS',
+          initialOperator: '=',
+          initialValue: 'active',
+          filterLabel: 'Filter',
+          applyLabel: 'Apply',
+          clearLabel: 'Clear',
+          valuePlaceholder: 'Value',
+          secondValuePlaceholder: 'End value',
+          listValuePlaceholder: 'List values',
+          noValuePlaceholder: 'No value needed',
+          isNoValueOp: () => false,
+          isBetweenOp: () => false,
+          isListOp: () => false,
+          onApply: () => true,
+          onClear: () => true,
+        }}
+      />,
+    );
+
+    expect(markup).toContain('class="gn-v2-column-title-shell"');
+    expect(markup).toContain('data-grid-column-filter-trigger="true"');
+    expect(markup).toContain('data-grid-column-filter-active="true"');
+    expect(markup).toContain('data-grid-column-filter-popover="true"');
+    expect(markup).toContain('Filter status');
+    expect(markup).toContain('value="active"');
+  });
+
+  it('applies the column filter from the popover action button', () => {
+    const onApply = vi.fn(() => true);
+    const renderer = create(
+      <DataGridColumnTitle
+        columnName="code"
+        showColumnType={false}
+        showColumnComment={false}
+        metaFontSize={11}
+        columnMetaHintColor="#999"
+        columnMetaTooltipColor="#fff"
+        darkMode={false}
+        columnFilter={{
+          active: false,
+          operatorOptions: [
+            { value: 'CONTAINS', label: 'Contains' },
+          ],
+          defaultOperator: 'CONTAINS',
+          initialOperator: 'CONTAINS',
+          initialValue: '3551',
+          filterLabel: 'Filter',
+          applyLabel: 'Apply',
+          clearLabel: 'Clear',
+          valuePlaceholder: 'Value',
+          secondValuePlaceholder: 'End value',
+          listValuePlaceholder: 'List values',
+          noValuePlaceholder: 'No value needed',
+          isNoValueOp: () => false,
+          isBetweenOp: () => false,
+          isListOp: () => false,
+          onApply,
+          onClear: () => true,
+        }}
+      />,
+    );
+
+    const applyButton = renderer.root
+      .findAllByType('button')
+      .find((button) => button.children.includes('Apply'));
+
+    expect(applyButton).toBeTruthy();
+    act(() => {
+      applyButton!.props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+
+    expect(onApply).toHaveBeenCalledWith({
+      op: 'CONTAINS',
+      value: '3551',
+      value2: '',
+    });
+  });
+
+  it('keeps column filter operator switching and clearing interactive', () => {
+    const onApply = vi.fn(() => true);
+    const onClear = vi.fn(() => true);
+    const renderer = create(
+      <DataGridColumnTitle
+        columnName="title"
+        showColumnType={false}
+        showColumnComment={false}
+        metaFontSize={11}
+        columnMetaHintColor="#999"
+        columnMetaTooltipColor="#fff"
+        darkMode={false}
+        columnFilter={{
+          active: true,
+          operatorOptions: [
+            { value: '=', label: '=' },
+            { value: 'CONTAINS', label: 'Contains' },
+          ],
+          defaultOperator: 'CONTAINS',
+          initialOperator: 'CONTAINS',
+          initialValue: '3551',
+          filterLabel: 'Filter',
+          applyLabel: 'Apply',
+          clearLabel: 'Clear',
+          valuePlaceholder: 'Value',
+          secondValuePlaceholder: 'End value',
+          listValuePlaceholder: 'List values',
+          noValuePlaceholder: 'No value needed',
+          isNoValueOp: () => false,
+          isBetweenOp: () => false,
+          isListOp: () => false,
+          onApply,
+          onClear,
+        }}
+      />,
+    );
+
+    const operatorSelect = renderer.root.findByType('select');
+    act(() => {
+      operatorSelect.props.onChange({ target: { value: '=' } });
+    });
+
+    const buttons = renderer.root.findAllByType('button');
+    const clearButton = buttons.find((button) => button.children.includes('Clear'));
+    const applyButton = buttons.find((button) => button.children.includes('Apply'));
+
+    expect(clearButton).toBeTruthy();
+    expect(applyButton).toBeTruthy();
+
+    act(() => {
+      applyButton!.props.onClick({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+    });
+    expect(onApply).toHaveBeenLastCalledWith({
+      op: '=',
+      value: '3551',
+      value2: '',
+    });
+
+    act(() => {
+      clearButton!.props.onClick();
+    });
+    expect(onClear).toHaveBeenCalledTimes(1);
   });
 
   it('uses translated tooltip wrappers while preserving raw metadata values', () => {

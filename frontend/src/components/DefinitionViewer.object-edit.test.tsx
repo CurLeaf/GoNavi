@@ -3,6 +3,7 @@ import { act, create } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TabData } from '../types';
+import { I18nProvider } from '../i18n/provider';
 import DefinitionViewer from './DefinitionViewer';
 
 const storeState = vi.hoisted(() => ({
@@ -34,6 +35,9 @@ vi.mock('../store', () => ({
 }));
 
 vi.mock('../../wailsjs/go/app/App', () => backendApp);
+vi.mock('../i18n/runtime', () => ({
+  syncLanguageRuntime: vi.fn(async () => undefined),
+}));
 
 vi.mock('@ant-design/icons', () => ({
   EditOutlined: () => <span data-icon="edit" />,
@@ -63,6 +67,16 @@ const flushPromises = async (count = 6) => {
     await Promise.resolve();
   }
 };
+
+const renderWithI18n = (tab: TabData) => (
+  <I18nProvider
+    preference="en-US"
+    systemLanguages={['en-US']}
+    onPreferenceChange={() => undefined}
+  >
+    <DefinitionViewer tab={tab} />
+  </I18nProvider>
+);
 
 const findButtonText = (node: any): string => (
   (node.children || [])
@@ -98,11 +112,11 @@ describe('DefinitionViewer object edit entry', () => {
   it('opens an editable query tab for view definitions', async () => {
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab()} />);
+      renderer = create(renderWithI18n(createTab()));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
@@ -110,13 +124,15 @@ describe('DefinitionViewer object edit entry', () => {
 
     expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'main' });
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
-      title: '修改视图: reporting.active_users',
+      title: 'Edit View: reporting.active_users',
       type: 'query',
       connectionId: 'conn-1',
       dbName: 'main',
       queryMode: 'object-edit',
       query: expect.stringContaining('CREATE OR REPLACE VIEW reporting.active_users AS'),
     }));
+    expect(storeState.addTab.mock.calls[0][0].query).toContain('-- Edit View: reporting.active_users');
+    expect(storeState.addTab.mock.calls[0][0].query).toContain('-- Confirm the syntax is compatible with the current database before running it');
     expect(storeState.addTab.mock.calls[0][0].query).toContain('SELECT id, name FROM users;');
   });
 
@@ -128,11 +144,11 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab()} />);
+      renderer = create(renderWithI18n(createTab()));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
@@ -152,7 +168,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab({
+      renderer = create(renderWithI18n(createTab({
         id: 'routine-def-conn-1-main-reporting.refresh_stats',
         title: '函数: reporting.refresh_stats',
         type: 'routine-def',
@@ -160,22 +176,63 @@ describe('DefinitionViewer object edit entry', () => {
         routineType: 'FUNCTION',
         viewName: undefined,
         viewKind: undefined,
-      })} />);
+      })));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
     });
 
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
-      title: '修改函数/存储过程: reporting.refresh_stats',
+      title: 'Edit Function/procedure: reporting.refresh_stats',
       type: 'query',
       queryMode: 'object-edit',
       query: expect.stringContaining('CREATE OR REPLACE FUNCTION reporting.refresh_stats()'),
     }));
+  });
+
+  it('opens an editable query tab for event definitions', async () => {
+    storeState.connections[0].config.type = 'mysql';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [{
+        Event: 'daily_cleanup',
+        'Create Event': 'CREATE EVENT `daily_cleanup`\nON SCHEDULE EVERY 1 DAY\nDO DELETE FROM logs',
+      }],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(createTab({
+        id: 'event-def-conn-1-main-daily_cleanup',
+        title: '事件: daily_cleanup',
+        type: 'event-def',
+        eventName: 'daily_cleanup',
+        viewName: undefined,
+        viewKind: undefined,
+      })));
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+
+    await act(async () => {
+      button.props.onClick();
+    });
+
+    const query = storeState.addTab.mock.calls[0][0].query;
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Edit Event: daily_cleanup',
+      type: 'query',
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE EVENT `daily_cleanup`'),
+    }));
+    expect(query).toContain('-- Edit Event: daily_cleanup');
+    expect(query).toContain('ON SCHEDULE EVERY 1 DAY');
+    expect(query).not.toContain('SHOW CREATE EVENT');
   });
 
   it('uses SQL Server catalog metadata when loading routine definitions', async () => {
@@ -187,7 +244,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab({
+      renderer = create(renderWithI18n(createTab({
         id: 'routine-def-conn-1-main-reporting.refresh_stats',
         title: '存储过程: reporting.refresh_stats',
         type: 'routine-def',
@@ -195,7 +252,7 @@ describe('DefinitionViewer object edit entry', () => {
         routineType: 'PROCEDURE',
         viewName: undefined,
         viewKind: undefined,
-      })} />);
+      })));
       await flushPromises();
     });
 
@@ -222,7 +279,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab({
+      renderer = create(renderWithI18n(createTab({
         id: 'routine-def-conn-1-main-reporting.refresh_stats',
         title: '存储过程: reporting.refresh_stats',
         type: 'routine-def',
@@ -230,7 +287,7 @@ describe('DefinitionViewer object edit entry', () => {
         routineType: 'PROCEDURE',
         viewName: undefined,
         viewKind: undefined,
-      })} />);
+      })));
       await flushPromises();
     });
 
@@ -255,7 +312,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab({
+      renderer = create(renderWithI18n(createTab({
         id: 'routine-def-conn-1-main-proc_tally2accept',
         title: '存储过程: proc_tally2accept',
         type: 'routine-def',
@@ -263,11 +320,11 @@ describe('DefinitionViewer object edit entry', () => {
         routineType: 'PROCEDURE',
         viewName: undefined,
         viewKind: undefined,
-      })} />);
+      })));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       button.props.onClick();
@@ -277,6 +334,179 @@ describe('DefinitionViewer object edit entry', () => {
     expect(query).toContain('CREATE OR REPLACE PROCEDURE proc_tally2accept(p_id IN NUMBER)');
     expect(query).toContain('v_count PLS_INTEGER;');
     expect(query).toContain('SELECT COUNT(*) INTO v_count FROM dual;');
+  });
+
+  it('opens an editable query tab for Oracle sequence definitions', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [{
+        SEQUENCE_OWNER: 'H2',
+        SEQUENCE_NAME: 'HWMS_PACK_SEQNO',
+        MIN_VALUE: 1,
+        MAX_VALUE: 999999999999,
+        INCREMENT_BY: 1,
+        CYCLE_FLAG: 'N',
+        ORDER_FLAG: 'N',
+        CACHE_SIZE: 20,
+      }],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(createTab({
+        id: 'sequence-def-conn-1-H2-H2.HWMS_PACK_SEQNO',
+        title: 'Sequence: H2.HWMS_PACK_SEQNO',
+        type: 'sequence-def',
+        sequenceName: 'H2.HWMS_PACK_SEQNO',
+        viewName: undefined,
+        viewKind: undefined,
+      })));
+      await flushPromises();
+    });
+
+    expect(String(backendApp.DBQuery.mock.calls[0][2] || '')).toContain('FROM ALL_SEQUENCES');
+    const editorText = String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''));
+    expect(editorText).toContain('CREATE SEQUENCE H2.HWMS_PACK_SEQNO');
+    expect(editorText).toContain('CACHE 20');
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'query',
+      queryMode: 'object-edit',
+      query: expect.stringContaining('CREATE SEQUENCE H2.HWMS_PACK_SEQNO'),
+    }));
+  });
+
+  it('loads Oracle package specification and body definitions without dropping lines', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'PACKAGE pkg_order AS\n' },
+          { TEXT: '  PROCEDURE sync_order(p_id IN NUMBER);\n' },
+          { TEXT: 'END pkg_order;\n' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'PACKAGE BODY pkg_order AS\n' },
+          { TEXT: '  PROCEDURE sync_order(p_id IN NUMBER) IS\n' },
+          { TEXT: '  BEGIN\n' },
+          { TEXT: '    NULL;\n' },
+          { TEXT: '  END;\n' },
+          { TEXT: 'END pkg_order;\n' },
+        ],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(createTab({
+        id: 'package-def-conn-1-H2-H2.PKG_ORDER',
+        title: 'Package: H2.PKG_ORDER',
+        type: 'package-def',
+        packageName: 'H2.PKG_ORDER',
+        viewName: undefined,
+        viewKind: undefined,
+      })));
+      await flushPromises();
+    });
+
+    expect(String(backendApp.DBQuery.mock.calls[0][2] || '')).toContain("TYPE = 'PACKAGE'");
+    expect(String(backendApp.DBQuery.mock.calls[1][2] || '')).toContain("TYPE = 'PACKAGE BODY'");
+    const editorText = String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''));
+    expect(editorText).toContain('PACKAGE pkg_order AS');
+    expect(editorText).toContain('PROCEDURE sync_order(p_id IN NUMBER);');
+    expect(editorText).toContain('PACKAGE BODY pkg_order AS');
+    expect(editorText).toContain('NULL;');
+
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'PACKAGE pkg_order AS\n' },
+          { TEXT: '  PROCEDURE sync_order(p_id IN NUMBER);\n' },
+          { TEXT: 'END pkg_order;\n' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'PACKAGE BODY pkg_order AS\n' },
+          { TEXT: '  PROCEDURE sync_order(p_id IN NUMBER) IS\n' },
+          { TEXT: '  BEGIN\n' },
+          { TEXT: '    NULL;\n' },
+          { TEXT: '  END sync_order;\n' },
+          { TEXT: 'END pkg_order;\n' },
+        ],
+      });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    const editQuery = String(storeState.addTab.mock.calls[0][0].query || '');
+    expect(editQuery).toContain('CREATE OR REPLACE PACKAGE pkg_order AS');
+    expect(editQuery).toContain('/\nCREATE OR REPLACE PACKAGE BODY pkg_order AS');
+    expect(editQuery).toContain('END sync_order;');
+  });
+
+  it('keeps Oracle routine SQLPlus slash delimiters executable when opening object edit', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    backendApp.DBQuery
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1 AS\n' },
+          { TEXT: 'BEGIN\n' },
+          { TEXT: '  NULL;\n' },
+          { TEXT: 'END cproc_tzhssr_order2sale_A1;\n' },
+          { TEXT: '/\n' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: [
+          { TEXT: 'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1 AS\n' },
+          { TEXT: 'BEGIN\n' },
+          { TEXT: '  NULL;\n' },
+          { TEXT: 'END cproc_tzhssr_order2sale_A1;\n' },
+          { TEXT: '/\n' },
+        ],
+      });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(createTab({
+        id: 'routine-def-conn-1-H2-H2.CPROC_TZHSSR_ORDER2SALE_A1',
+        title: 'Procedure: H2.CPROC_TZHSSR_ORDER2SALE_A1',
+        type: 'routine-def',
+        routineName: 'H2.CPROC_TZHSSR_ORDER2SALE_A1',
+        routineType: 'PROCEDURE',
+        viewName: undefined,
+        viewKind: undefined,
+      })));
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    const editQuery = String(storeState.addTab.mock.calls[0][0].query || '');
+    expect(editQuery).toContain('END cproc_tzhssr_order2sale_A1;\n/');
+    expect(editQuery).not.toContain('/;');
   });
 
   it('reloads the latest object definition before opening object edit', async () => {
@@ -292,11 +522,11 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab()} />);
+      renderer = create(renderWithI18n(createTab()));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       await button.props.onClick();
@@ -326,11 +556,11 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab()} />);
+      renderer = create(renderWithI18n(createTab()));
       await flushPromises();
     });
 
-    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('对象修改'))[0];
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
 
     await act(async () => {
       await button.props.onClick();
@@ -339,7 +569,7 @@ describe('DefinitionViewer object edit entry', () => {
 
     expect(storeState.addTab).not.toHaveBeenCalled();
     expect(String(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')[0].children.join(''))).toContain('SELECT id, name FROM users');
-    expect(findButtonText(renderer.root)).toContain('刷新最新定义失败');
+    expect(findButtonText(renderer.root)).toContain('Failed to refresh the latest definition');
     expect(findButtonText(renderer.root)).toContain('network down');
   });
 
@@ -357,22 +587,47 @@ describe('DefinitionViewer object edit entry', () => {
 
     let renderer: any;
     await act(async () => {
-      renderer = create(<DefinitionViewer tab={createTab()} />);
+      renderer = create(renderWithI18n(createTab()));
       await flushPromises();
     });
 
     await act(async () => {
-      renderer.update(<DefinitionViewer tab={createTab({
+      renderer.update(renderWithI18n(createTab({
         id: 'view-def-conn-1-main-reporting.archived_users',
         title: '视图: reporting.archived_users',
         viewName: 'reporting.archived_users',
-      })} />);
+      })));
       await flushPromises();
     });
 
-    expect(findButtonText(renderer.root)).toContain('加载失败');
+    expect(findButtonText(renderer.root)).toContain('Load failed');
     expect(findButtonText(renderer.root)).toContain('load failed');
     expect(renderer.root.findAll((node: any) => node.props['data-editor'] === 'true')).toHaveLength(0);
     expect(findButtonText(renderer.root)).not.toContain('SELECT id, name FROM users');
+  });
+
+  it('keeps comment-only fallback definitions editable without reintroducing locale-specific detection', async () => {
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [],
+    });
+
+    let renderer: any;
+    await act(async () => {
+      renderer = create(renderWithI18n(createTab()));
+      await flushPromises();
+    });
+
+    const button = renderer.root.findAll((node: any) => node.type === 'button' && findButtonText(node).includes('Edit object'))[0];
+
+    await act(async () => {
+      await button.props.onClick();
+      await flushPromises();
+    });
+
+    const query = String(storeState.addTab.mock.calls[0][0].query || '');
+    expect(query).toContain('-- Edit View: reporting.active_users');
+    expect(query).toContain('-- View definition not found');
+    expect(query).not.toContain('CREATE OR REPLACE VIEW reporting.active_users AS');
   });
 });

@@ -38,10 +38,12 @@ type Message struct {
 
 // ChatRequest AI 对话请求
 type ChatRequest struct {
-	Messages    []Message `json:"messages"`
-	Temperature float64   `json:"temperature"`
-	MaxTokens   int       `json:"maxTokens"`
-	Tools       []Tool    `json:"tools,omitempty"`
+	Messages            []Message `json:"messages"`
+	Temperature         float64   `json:"temperature"`
+	MaxTokens           int       `json:"maxTokens"`
+	Tools               []Tool    `json:"tools,omitempty"`
+	ImageFallbackPrompt string    `json:"-"`
+	ImageOmittedNotice  string    `json:"-"`
 }
 
 // ChatResponse AI 对话响应

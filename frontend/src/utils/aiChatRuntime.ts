@@ -1,6 +1,18 @@
 import { useStore } from '../store';
+import { t as translateCatalog, type I18nParams } from '../i18n';
 
 const genCompressionMessageId = () => `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+type AIChatRuntimeTranslator = (key: string, params?: I18nParams) => string;
+
+const translateRuntimeCopy = (
+  translate: AIChatRuntimeTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: I18nParams,
+): string => {
+  const resolved = (translate || translateCatalog)(key, params);
+  return resolved && resolved !== key ? resolved : fallback;
+};
 
 export const getDynamicMaxContextChars = (modelName?: string) => {
   if (!modelName) return 258000;
@@ -27,7 +39,12 @@ export const getDynamicMaxContextChars = (modelName?: string) => {
   return 258000;
 };
 
-export const compressContextIfNeeded = async (sid: string, messagesPayload: any[], maxLimit: number) => {
+export const compressContextIfNeeded = async (
+  sid: string,
+  messagesPayload: any[],
+  maxLimit: number,
+  translate?: AIChatRuntimeTranslator,
+) => {
   try {
     const chars = messagesPayload.reduce((sum, message) =>
       sum + (message.content?.length || 0) + (message.reasoning_content?.length || 0) + JSON.stringify(message.tool_calls || []).length, 0);
@@ -41,17 +58,25 @@ export const compressContextIfNeeded = async (sid: string, messagesPayload: any[
       id: connectingMsgId,
       role: 'assistant',
       phase: 'connecting',
-      content: '⚙️ 对话已超载，正在启动记忆压缩...',
+      content: translateRuntimeCopy(
+        translate,
+        'ai_chat.panel.status.memory_compressing',
+        '⚙️ Conversation is overloaded. Starting memory compression...',
+      ),
       timestamp: Date.now(),
       loading: true,
     });
 
-    const summaryPrompt = `这是一段超长对话的历史记录。为了释放上下文空间同时保留你的记忆核心，请你仔细阅读并以“技术事实、已探索出的数据结构状态、用户的中心诉求、当前进展”为准则，进行高度浓缩的结构化总结。
-注意：
-1. 客观准确，不能遗漏关键业务逻辑或探索出的表名/字段。
-2. 剔除无效执行过程、客套话、JSON返回值本身。
-3. 请控制在 1000-2000 字左右，输出纯干货 Markdown。
-4. 开头直接输出总结，不要带寒暄。`;
+    const summaryPrompt = translateRuntimeCopy(
+      translate,
+      'ai_chat.panel.prompt.memory_summary',
+      `This is the history of an overlong conversation. To free context space while preserving the core memory, read it carefully and produce a highly condensed structured summary based on technical facts, explored data-structure state, the user's central request, and current progress.
+Notes:
+1. Be objective and accurate; do not omit key business logic or discovered table names/fields.
+2. Remove ineffective execution process, pleasantries, and the JSON return values themselves.
+3. Keep it around 1000-2000 words and output concise Markdown only.
+4. Start directly with the summary; do not include greetings.`,
+    );
 
     const result = await Service.AIChatSend([
       { role: 'system', content: summaryPrompt },
@@ -66,7 +91,11 @@ export const compressContextIfNeeded = async (sid: string, messagesPayload: any[
     useStore.getState().updateAIChatMessage(sid, connectingMsgId, {
       loading: false,
       phase: 'idle',
-      content: '❌ 记忆压缩失败，将尝试原样接续...',
+      content: translateRuntimeCopy(
+        translate,
+        'ai_chat.panel.status.memory_compress_failed',
+        '❌ Memory compression failed. Continuing with the original context...',
+      ),
     });
   } catch (error) {
     console.error('Compression exception:', error);
@@ -74,17 +103,36 @@ export const compressContextIfNeeded = async (sid: string, messagesPayload: any[
   return null;
 };
 
-export const sanitizeErrorMsg = (raw: string): string => {
-  if (!raw || typeof raw !== 'string') return '未知错误';
+export const sanitizeErrorMsg = (raw: string, translate?: AIChatRuntimeTranslator): string => {
+  if (!raw || typeof raw !== 'string') {
+    return translateRuntimeCopy(translate, 'ai_chat.panel.error.unknown', 'Unknown error');
+  }
   if (raw.includes('<html') || raw.includes('<!DOCTYPE') || raw.includes('<head')) {
     const titleMatch = raw.match(/<title[^>]*>([^<]+)<\/title>/i);
     const codeMatch = raw.match(/\b(4\d{2}|5\d{2})\b/);
     const title = titleMatch?.[1]?.trim();
     const code = codeMatch?.[1];
     if (title) return code ? `HTTP ${code}: ${title}` : title;
-    if (code) return `HTTP ${code} 服务端错误`;
-    return '服务端返回了异常 HTML 响应（可能是网关超时或服务不可用）';
+    if (code) {
+      return translateRuntimeCopy(
+        translate,
+        'ai_chat.panel.error.http_server',
+        `HTTP ${code} server error`,
+        { code },
+      );
+    }
+    return translateRuntimeCopy(
+      translate,
+      'ai_chat.panel.error.html_response',
+      'The server returned an abnormal HTML response, possibly a gateway timeout or unavailable service',
+    );
   }
-  if (raw.length > 300) return `${raw.substring(0, 280)}...(已截断)`;
+  if (raw.length > 300) {
+    return `${raw.substring(0, 280)}${translateRuntimeCopy(
+      translate,
+      'ai_chat.panel.error.truncated_suffix',
+      '...(truncated)',
+    )}`;
+  }
   return raw;
 };

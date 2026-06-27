@@ -93,7 +93,7 @@ import {
 } from "./connectionModal/connectionModalConfig";
 import ConnectionModalStep2 from "./connectionModal/ConnectionModalStep2";
 import {
-  CONNECTION_TYPE_GROUPS,
+  buildConnectionTypeGroups,
   getAllConnectionTypeCatalogItems,
   getConnectionTypeDefaultPort as getDefaultPortByType,
   getConnectionTypeHint,
@@ -2247,7 +2247,7 @@ const ConnectionModal: React.FC<{
 
   const dbTypeGroups = useMemo(
     () =>
-      CONNECTION_TYPE_GROUPS.map((group) => ({
+      buildConnectionTypeGroups(t).map((group) => ({
         ...group,
         items: group.items.map((item) => ({
           ...item,
@@ -2416,7 +2416,7 @@ const ConnectionModal: React.FC<{
                       {item.name}
                     </Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      {getConnectionTypeHint(item.key)}
+                      {getConnectionTypeHint(item.key, t)}
                     </Text>
                   </div>
                 </Card>

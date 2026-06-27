@@ -745,7 +745,7 @@ func newPahoMQTTRuntime(config connection.ConnectionConfig) (mqttRuntime, error)
 	client := pahomqtt.NewClient(options)
 	token := client.Connect()
 	if !token.WaitTimeout(timeout + 5*time.Second) {
-		return nil, fmt.Errorf("MQTT 连接超时")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.mqtt_connect_timeout", nil)
 	}
 	if err := token.Error(); err != nil {
 		return nil, err
@@ -861,7 +861,7 @@ func (r *pahoMQTTRuntime) FetchMessages(ctx context.Context, request mqttFetchRe
 
 	token := r.client.Subscribe(request.Topic, request.QoS, callback)
 	if !token.WaitTimeout(r.timeout) {
-		return nil, fmt.Errorf("MQTT 订阅超时")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.mqtt_subscribe_timeout", nil)
 	}
 	if err := token.Error(); err != nil {
 		return nil, fmt.Errorf("MQTT 订阅失败：%w", err)
@@ -920,7 +920,7 @@ func (r *pahoMQTTRuntime) Publish(ctx context.Context, command mqttPublishComman
 		}
 	}
 	if !token.WaitTimeout(wait) {
-		return 0, fmt.Errorf("MQTT 发布超时")
+		return 0, localizedDatabaseRuntimeError("db.backend.error.mqtt_publish_timeout", nil)
 	}
 	if err := token.Error(); err != nil {
 		return 0, err

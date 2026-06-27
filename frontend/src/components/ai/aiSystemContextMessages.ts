@@ -12,6 +12,10 @@ import {
   appendDatabaseInspectionGuidanceMessages,
   appendJVMInspectionGuidanceMessages,
 } from './aiSystemInspectionGuidance';
+import {
+  translateInspectionCopy,
+  type AIInspectionTranslator,
+} from './aiInspectionI18n';
 
 export interface AISystemContextMessage {
   role: 'system';
@@ -30,12 +34,14 @@ interface BuildAISystemContextMessagesOptions {
   userPromptSettings: AIUserPromptSettings;
   overrideJVMPlanContext?: JVMAIPlanContext;
   overrideJVMDiagnosticPlanContext?: JVMDiagnosticPlanContext;
+  translate?: AIInspectionTranslator;
 }
 
 const appendCustomPrompt = (
   messages: AISystemContextMessage[],
-  label: string,
+  key: string,
   content: string,
+  translate?: AIInspectionTranslator,
 ) => {
   const trimmed = String(content || '').trim();
   if (!trimmed) {
@@ -43,7 +49,12 @@ const appendCustomPrompt = (
   }
   messages.push({
     role: 'system',
-    content: `以下是当前用户的自定义补充提示词（${label}）。在不违反安全规则和事实约束的前提下，请优先遵循：\n${trimmed}`,
+    content: translateInspectionCopy(
+      translate,
+      key,
+      'The user has provided an additional prompt for this context. Follow it when it does not conflict with safety rules or factual constraints:\n{{content}}',
+      { content: trimmed },
+    ),
   });
 };
 
@@ -51,15 +62,16 @@ const appendCustomPromptGroup = (
   messages: AISystemContextMessage[],
   prompts: string[],
   userPromptSettings: AIUserPromptSettings,
+  translate?: AIInspectionTranslator,
 ) => {
-  appendCustomPrompt(messages, '全局', userPromptSettings.global);
+  appendCustomPrompt(messages, 'ai_chat.system.context.custom_prompt.global', userPromptSettings.global, translate);
   prompts.forEach((prompt) => {
     if (prompt === 'database') {
-      appendCustomPrompt(messages, '数据库会话', userPromptSettings.database);
+      appendCustomPrompt(messages, 'ai_chat.system.context.custom_prompt.database', userPromptSettings.database, translate);
     } else if (prompt === 'jvm') {
-      appendCustomPrompt(messages, 'JVM 资源分析', userPromptSettings.jvm);
+      appendCustomPrompt(messages, 'ai_chat.system.context.custom_prompt.jvm', userPromptSettings.jvm, translate);
     } else if (prompt === 'jvmDiagnostic') {
-      appendCustomPrompt(messages, 'JVM 诊断', userPromptSettings.jvmDiagnostic);
+      appendCustomPrompt(messages, 'ai_chat.system.context.custom_prompt.jvm_diagnostic', userPromptSettings.jvmDiagnostic, translate);
     }
   });
 };
@@ -69,6 +81,7 @@ const appendSkillPromptGroup = (
   scopes: string[],
   skills: AISkillConfig[],
   availableToolNames: string[],
+  translate?: AIInspectionTranslator,
 ) => {
   const wantedScopes = new Set<string>(['global', ...scopes]);
   const availableToolNameSet = new Set(availableToolNames);
@@ -89,20 +102,59 @@ const appendSkillPromptGroup = (
     if (!promptText) {
       return;
     }
+    const requiredTools = Array.isArray(skill.requiredTools) && skill.requiredTools.length > 0
+      ? skill.requiredTools.join(', ')
+      : '';
     const requiredToolText = Array.isArray(skill.requiredTools) && skill.requiredTools.length > 0
-      ? `\n依赖工具：${skill.requiredTools.join(', ')}`
+      ? translateInspectionCopy(
+        translate,
+        'ai_chat.system.context.skill_prompt.required_tools',
+        `\nRequired tools: ${requiredTools}`,
+        { requiredTools },
+      )
       : '';
     messages.push({
       role: 'system',
-      content: `以下是当前启用的 Skill「${skill.name}」${skill.description ? `（${skill.description}）` : ''}。请在本次回答中遵循它的约束和工作方式：${requiredToolText}\n${promptText}`,
+      content: translateInspectionCopy(
+        translate,
+        skill.description ? 'ai_chat.system.context.skill_prompt' : 'ai_chat.system.context.skill_prompt_without_description',
+        skill.description
+          ? 'The active Skill "{{skillName}}" ({{skillDescription}}) applies to this response. Follow its constraints and workflow:{{requiredTools}}\n{{content}}'
+          : 'The active Skill "{{skillName}}" applies to this response. Follow its constraints and workflow:{{requiredTools}}\n{{content}}',
+        {
+          skillName: skill.name,
+          skillDescription: skill.description || '',
+          requiredTools: requiredToolText,
+          content: promptText,
+        },
+      ),
     });
   });
 };
 
 const resolveDatabaseDisplayType = (config: ConnectionConfig | undefined): string => {
   const dbType = config?.type || 'unknown';
-  return dbType === 'diros' ? 'Doris' : dbType.charAt(0).toUpperCase() + dbType.slice(1);
+  const displayTypes: Record<string, string> = {
+    clickhouse: 'ClickHouse',
+    diros: 'Doris',
+    duckdb: 'DuckDB',
+    mongodb: 'MongoDB',
+    mysql: 'MySQL',
+    postgresql: 'PostgreSQL',
+    redis: 'Redis',
+    sqlite: 'SQLite',
+    sqlserver: 'SQL Server',
+    tdengine: 'TDengine',
+  };
+  return displayTypes[dbType] || dbType.charAt(0).toUpperCase() + dbType.slice(1);
 };
+
+const contextCopy = (
+  translate: AIInspectionTranslator | undefined,
+  key: string,
+  fallback: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) => translateInspectionCopy(translate, key, fallback, params);
 
 const resolveActiveTab = (params: {
   tabs: TabData[];
@@ -165,6 +217,7 @@ export function buildAISystemContextMessages({
   userPromptSettings,
   overrideJVMPlanContext,
   overrideJVMDiagnosticPlanContext,
+  translate,
 }: BuildAISystemContextMessagesOptions): AISystemContextMessage[] {
   const connectionKey = activeContext?.connectionId ? `${activeContext.connectionId}:${activeContext.dbName || ''}` : 'default';
   const activeContextItems = aiContexts[connectionKey] || [];
@@ -189,29 +242,60 @@ export function buildAISystemContextMessages({
     const diagnosticTransport = overrideJVMDiagnosticPlanContext?.transport || diagnostic?.transport || 'agent-bridge';
     const readOnly = activeConnection.config.jvm?.readOnly !== false;
     const environment = activeConnection.config.jvm?.environment || 'unknown';
+    const diagnosticPolicy = contextCopy(
+      translate,
+      readOnly ? 'ai_chat.system.context.jvm_diagnostic_policy.read_only' : 'ai_chat.system.context.jvm_diagnostic_policy.writable',
+      readOnly
+        ? 'Default to read-only diagnostic reasoning: only generate observe, trace, and troubleshooting commands, and never assume anything has already executed.'
+        : 'Diagnostic commands may be generated, but provide a plan first and let the user decide whether to run it.',
+    );
+    const permissionAllowed = contextCopy(
+      translate,
+      'ai_chat.system.context.permission.allowed',
+      'allowed',
+    );
+    const permissionDenied = contextCopy(
+      translate,
+      'ai_chat.system.context.permission.denied',
+      'denied',
+    );
     systemMessages.push({
       role: 'system',
-      content: `你是 GoNavi 的 JVM 诊断助手。当前页签是 Arthas 兼容诊断工作台，目标是输出可回填到诊断控制台的结构化诊断计划。
+      content: contextCopy(
+        translate,
+        'ai_chat.system.context.jvm_diagnostic_prompt',
+        `You are GoNavi's JVM diagnostic assistant. The active tab is an Arthas-compatible diagnostic workspace. Produce a structured diagnostic plan that can be filled back into the diagnostic console.
 
-当前连接：${activeConnection.name}
-目标主机：${activeConnection.config.host || '-'}
-诊断 transport：${diagnosticTransport}
-运行环境：${environment}
-连接策略：${readOnly ? '默认按只读诊断思路回答，只生成观察、trace、排障命令，不要假设已经执行。' : '允许生成诊断命令，但仍然必须先给计划，再由用户决定是否执行。'}
-命令权限：observe=${diagnostic?.allowObserveCommands !== false ? '允许' : '禁止'}，trace=${diagnostic?.allowTraceCommands === true ? '允许' : '禁止'}，mutating=${diagnostic?.allowMutatingCommands === true ? '允许' : '禁止'}
+Current connection: {{connectionName}}
+Target host: {{host}}
+Diagnostic transport: {{transport}}
+Runtime environment: {{environment}}
+Connection policy: {{connectionPolicy}}
+Command permissions: observe={{observeAllowed}}, trace={{traceAllowed}}, mutating={{mutatingAllowed}}
 
-回答规则：
-1. 可以先给一小段分析，但必须包含且只包含一个 \`\`\`json 代码块。
-2. JSON 字段严格限定为 intent、transport、command、riskLevel、reason、expectedSignals。
-3. transport 必须填写当前值 ${diagnosticTransport}，不要编造其他 transport。
-4. command 必须是单条诊断命令，不要带 shell 提示符、换行拼接、多条命令或代码围栏。
-5. riskLevel 只能是 low、medium、high。
-6. expectedSignals 必须是字符串数组，描述执行后需要重点观察的信号。
-7. 如果命令权限不允许某类操作，就不要输出该类命令；无法满足时直接说明限制。`,
+Response rules:
+1. You may include a short analysis first, but the response must contain exactly one \`\`\`json code block.
+2. JSON fields are strictly limited to intent, transport, command, riskLevel, reason, and expectedSignals.
+3. transport must be the current value {{transport}}; do not invent another transport.
+4. command must be a single diagnostic command without a shell prompt, line-joined commands, multiple commands, or a code fence.
+5. riskLevel must be low, medium, or high.
+6. expectedSignals must be an array of strings describing the signals to observe after execution.
+7. If permissions do not allow a class of operation, do not output that class of command; if the request cannot be satisfied, state the limitation directly.`,
+        {
+          connectionName: activeConnection.name,
+          host: activeConnection.config.host || '-',
+          transport: diagnosticTransport,
+          environment,
+          connectionPolicy: diagnosticPolicy,
+          observeAllowed: diagnostic?.allowObserveCommands !== false ? permissionAllowed : permissionDenied,
+          traceAllowed: diagnostic?.allowTraceCommands === true ? permissionAllowed : permissionDenied,
+          mutatingAllowed: diagnostic?.allowMutatingCommands === true ? permissionAllowed : permissionDenied,
+        },
+      ),
     });
-    appendJVMInspectionGuidanceMessages(systemMessages, availableToolNames);
-    appendCustomPromptGroup(systemMessages, ['jvmDiagnostic'], userPromptSettings);
-    appendSkillPromptGroup(systemMessages, ['jvmDiagnostic'], skills, availableToolNames);
+    appendJVMInspectionGuidanceMessages(systemMessages, availableToolNames, translate);
+    appendCustomPromptGroup(systemMessages, ['jvmDiagnostic'], userPromptSettings, translate);
+    appendSkillPromptGroup(systemMessages, ['jvmDiagnostic'], skills, availableToolNames, translate);
     return systemMessages;
   }
 
@@ -224,28 +308,60 @@ export function buildAISystemContextMessages({
     const resourcePath = activeTab.resourcePath || '';
     const readOnly = activeConnection.config.jvm?.readOnly !== false;
     const environment = activeConnection.config.jvm?.environment || 'unknown';
+    const connectionPolicy = contextCopy(
+      translate,
+      readOnly ? 'ai_chat.system.context.jvm_runtime_policy.read_only' : 'ai_chat.system.context.jvm_runtime_policy.writable',
+      readOnly
+        ? 'This is a read-only connection. Only analyze and generate change plans; never assume writes have already executed.'
+        : 'This is a writable connection, but every modification must first produce a preview and wait for human confirmation.',
+    );
+    const resourcePathLine = resourcePath
+      ? contextCopy(
+        translate,
+        'ai_chat.system.context.jvm_runtime_resource_path',
+        'Current resource path: {{resourcePath}}',
+        { resourcePath },
+      )
+      : contextCopy(
+        translate,
+        'ai_chat.system.context.jvm_runtime_resource_path_unselected',
+        'No specific resource path is currently selected.',
+      );
     systemMessages.push({
       role: 'system',
-      content: `你是 GoNavi 的 JVM 运行时分析助手。当前上下文不是 SQL，而是 JVM 资源工作台。
+      content: contextCopy(
+        translate,
+        'ai_chat.system.context.jvm_runtime_prompt',
+        `You are GoNavi's JVM runtime analysis assistant. The current context is not SQL; it is the JVM resource workspace.
 
-当前连接：${activeConnection.name}
-目标主机：${activeConnection.config.host || '-'}
-Provider 模式：${providerMode}
-运行环境：${environment}
-连接策略：${readOnly ? '只读连接，只能分析和生成变更计划，绝不能假设已执行写入。' : '可写连接，但任何修改都必须先生成预览并等待人工确认。'}
-${resourcePath ? `当前资源路径：${resourcePath}` : '当前未选中具体资源路径。'}
+Current connection: {{connectionName}}
+Target host: {{host}}
+Provider mode: {{providerMode}}
+Runtime environment: {{environment}}
+Connection policy: {{connectionPolicy}}
+{{resourcePathLine}}
 
-回答规则：
-1. 你可以解释资源结构、风险、修改建议和回滚建议。
-2. 如果用户要求生成 JVM 修改方案，必须输出一个唯一的 \`\`\`json 代码块，并且 JSON 字段严格限定为 targetType、selector、action、payload、reason。
-3. action 优先使用当前资源快照或元数据里已经声明的 supportedActions；如果当前资源没有声明，再基于快照内容谨慎推断。
-4. selector.resourcePath 优先使用当前资源路径；如果当前路径未知，就明确说明无法精确定位，不要编造路径。
-5. payload 只能使用 {"format":"json","value":{...}} 或 {"format":"text","value":"..."} 这两种包装形式，不要输出脚本、命令或裸值。
-6. 不要输出脚本、命令或“已经执行成功”之类的表述。`,
+Response rules:
+1. You may explain resource structure, risk, modification suggestions, and rollback suggestions.
+2. If the user asks for a JVM change plan, output exactly one \`\`\`json code block, and limit JSON fields to targetType, selector, action, payload, and reason.
+3. Prefer actions declared by the current resource snapshot or metadata in supportedActions. If none are declared, infer cautiously from the snapshot.
+4. Prefer the current resource path for selector.resourcePath. If the path is unknown, state that exact targeting is unavailable instead of inventing a path.
+5. payload may only use {"format":"json","value":{...}} or {"format":"text","value":"..."}; do not output scripts, commands, or bare values.
+6. Do not output scripts, commands, or statements such as "already executed successfully".`,
+        {
+          connectionName: activeConnection.name,
+          host: activeConnection.config.host || '-',
+          providerMode,
+          environment,
+          connectionPolicy,
+          resourcePath,
+          resourcePathLine,
+        },
+      ),
     });
-    appendJVMInspectionGuidanceMessages(systemMessages, availableToolNames);
-    appendCustomPromptGroup(systemMessages, ['jvm'], userPromptSettings);
-    appendSkillPromptGroup(systemMessages, ['jvm'], skills, availableToolNames);
+    appendJVMInspectionGuidanceMessages(systemMessages, availableToolNames, translate);
+    appendCustomPromptGroup(systemMessages, ['jvm'], userPromptSettings, translate);
+    appendSkillPromptGroup(systemMessages, ['jvm'], skills, availableToolNames, translate);
     return systemMessages;
   }
 
@@ -264,54 +380,74 @@ ${resourcePath ? `当前资源路径：${resourcePath}` : '当前未选中具体
     const ddlChunks = activeContextItems.map((item) => `-- Table: ${item.dbName}.${item.tableName}\n${item.ddl}`).join('\n\n');
     systemMessages.push({
       role: 'system',
-      content: `你是一个专业的数据库助手。当前连接的数据库类型是 ${dbDisplayType}。请使用 ${dbDisplayType} 方言生成 SQL。以下是用户关联的表结构信息，请在回答时优先参考：\n\n${ddlChunks}`,
+      content: contextCopy(
+        translate,
+        'ai_chat.system.context.database_with_schema',
+        'You are a professional database assistant. The current connection database type is {{dbType}}. Generate SQL using the {{dbType}} dialect. The user has attached table schema information; prioritize it when answering:\n\n{{ddlChunks}}',
+        { dbType: dbDisplayType, ddlChunks },
+      ),
     });
   } else if (targetConnId && targetDbName) {
     const connection = connections.find((item) => item.id === targetConnId);
     const dbDisplayType = resolveDatabaseDisplayType(connection?.config);
     systemMessages.push({
       role: 'system',
-      content: `你是一个专业的数据库助手。当前连接的数据库类型是 ${dbDisplayType}，当前数据库名为 ${targetDbName}。如果用户需要查询特定的表或者有关当前库的信息，你可以调用提供的 get_tables 工具来主动获取数据表信息。`,
+      content: contextCopy(
+        translate,
+        'ai_chat.system.context.database_with_target',
+        'You are a professional database assistant. The current connection database type is {{dbType}}, and the current database name is {{dbName}}. If the user needs a specific table or information about the current database, call the provided get_tables tool to actively fetch table information.',
+        { dbType: dbDisplayType, dbName: targetDbName },
+      ),
     });
   } else {
     const connList = connections.map((connection) => `{id: "${connection.id}", name: "${connection.name}", type: "${connection.config?.type || 'unknown'}"}`).join(', ');
+    const renderedConnList = connList || contextCopy(
+      translate,
+      'ai_chat.system.context.no_connections',
+      'no connections',
+    );
     systemMessages.push({
       role: 'system',
-      content: `你是一个专业的数据库助手。用户目前在界面上没有选中任何具体的数据库或数据表用于充当上下文。
+      content: contextCopy(
+        translate,
+        'ai_chat.system.context.database_without_context',
+        `You are a professional database assistant. The user has not selected any specific database or table in the interface as context.
 
-重要规则：
-1. 如果你需要帮用户寻找目标表，千万不要凭空猜测表名！必须调用工具去获取真实数据。
-2. 完整工作流程：get_connections → get_databases → get_tables → get_columns → 生成 SQL。每一步都不可跳过。
-3. 【连接优先级 - 极重要】获取连接列表后，必须按以下优先级依次检索：
-   - 第一优先：host 为 localhost、127.0.0.1、或包含"本地"的连接
-   - 第二优先：name 或 host 包含"开发"、"dev"、"local" 的连接，或 host 为 10.x、192.168.x、172.16-31.x 等内网 IP 的连接
-   - 第三优先：其他连接（如"测试"、"生产"等）
-   如果在高优先级连接中已找到目标表，直接使用该连接，不再查找低优先级连接。
-4. 如果在当前数据库中未找到目标表，必须继续查询其他数据库，不要放弃。
-5. 只有当所有可能的数据库都已检查完毕，或者已经明确找到目标表时，才可以停止。
-6. 如果是常规问答（不涉及数据库查询）则正常作答即可。
+Important rules:
+1. If you need to help the user find a target table, never guess the table name. Call tools to fetch real data.
+2. Complete workflow: get_connections -> get_databases -> get_tables -> get_columns -> generate SQL. Do not skip any step.
+3. Connection priority is critical. After retrieving connections, check them in this order:
+   - First priority: host is localhost or 127.0.0.1, or the connection name indicates a local environment.
+   - Second priority: name or host indicates a development/local environment, or host is a private-network IP such as 10.x, 192.168.x, or 172.16-31.x.
+   - Third priority: other connections such as testing or production.
+   If the target table is found in a higher-priority connection, use that connection directly and do not search lower-priority connections.
+4. If the target table is not found in the current database, continue querying other databases instead of giving up.
+5. Stop only when every possible database has been checked or the target table has clearly been found.
+6. For ordinary questions that do not involve database queries, answer normally.
 
-SQL 生成规则（极重要，必须严格遵守）：
-7. 如果用户提到“当前页签”“当前 SQL”“当前编辑器”“这条语句”，但消息里没有贴出具体内容，优先调用 inspect_active_tab 读取当前活动页签上下文，不要猜测当前工作区里打开的内容。
-8. 如果用户提到“当前开了哪些页签”“工作区里有哪些 tab”“我现在打开了哪些查询”，优先调用 inspect_workspace_tabs 盘点当前工作区，再决定深入哪个页签。
-9. 【字段精确性 - 绝对红线】生成 SQL 之前，必须先调用 get_columns 获取目标表的真实字段列表。SQL 中的每一个字段名必须与 get_columns 返回的 field 字段完全一致（区分大小写）。不得自行拼凑、缩写或联想字段名（例如字段是 channel 就必须写 channel，不得写成 pay_channel）。
-10. 如果用户在问索引优化、联表关系、触发器副作用、约束或 DDL 细节，在 get_columns 之后继续按需调用 get_indexes、get_foreign_keys、get_triggers、get_table_ddl，再给结论。
-11. 生成 SQL 时禁止使用 "database.table" 格式的限定前缀，只写表名本身。
-12. 报告结果时，连接名/ID 和数据库名必须严格来自同一个 get_tables 调用的实际参数。禁止将 A 连接的 connectionId 与 B 连接的 dbName 混搭。
-13. 如果有多个名称相似的数据库，请明确告诉用户目标表具体位于哪个数据库。
-14. 【关键】每个 SQL 代码块的第一行必须添加上下文声明注释，格式严格为：-- @context connectionId=<连接ID> dbName=<数据库名>。connectionId 和 dbName 必须来自同一个成功的 get_tables 调用（即你在该调用中传入的实际参数值）。示例：
+SQL generation rules:
+7. If the user mentions the current tab, current SQL, current editor, or this statement without pasting the content, call inspect_active_tab first to read the active tab context instead of guessing what is open.
+8. If the user asks which tabs are open or what queries are currently in the workspace, call inspect_workspace_tabs first, then decide which tab to inspect further.
+9. Field accuracy is an absolute rule. Before generating SQL, call get_columns to get the real target-table field list. Every field name in SQL must exactly match the field value returned by get_columns, including case. Do not compose, abbreviate, or infer field names.
+10. If the user asks about index optimization, join relationships, trigger side effects, constraints, or DDL details, call get_indexes, get_foreign_keys, get_triggers, and get_table_ddl as needed after get_columns, then provide the conclusion.
+11. When generating SQL, do not use a "database.table" qualified prefix; write only the table name.
+12. When reporting results, the connection name/ID and database name must come from the same actual get_tables call parameters. Do not mix connectionId from one connection with dbName from another.
+13. If multiple databases have similar names, clearly tell the user which database contains the target table.
+14. The first line of each SQL code block must be a context declaration comment in this exact format: -- @context connectionId=<connectionId> dbName=<dbName>. connectionId and dbName must come from the same successful get_tables call parameters. Example:
 \`\`\`sql
 -- @context connectionId=1770778676549 dbName=mkefu_test
 SELECT * FROM users WHERE status = 1;
 \`\`\`
 
-当前存在的连接：[${connList || '无连接'}]`,
+Existing connections: [{{connList}}]`,
+        { connList: renderedConnList },
+      ),
     });
   }
 
-  appendDatabaseInspectionGuidanceMessages(systemMessages, availableToolNames);
+  appendDatabaseInspectionGuidanceMessages(systemMessages, availableToolNames, translate);
 
-  appendCustomPromptGroup(systemMessages, ['database'], userPromptSettings);
-  appendSkillPromptGroup(systemMessages, ['database'], skills, availableToolNames);
+  appendCustomPromptGroup(systemMessages, ['database'], userPromptSettings, translate);
+  appendSkillPromptGroup(systemMessages, ['database'], skills, availableToolNames, translate);
   return systemMessages;
 }

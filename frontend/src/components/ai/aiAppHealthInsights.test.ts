@@ -1,8 +1,103 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { buildAIAppHealthSnapshot } from './aiAppHealthInsights';
 
 describe('buildAIAppHealthSnapshot', () => {
+  it('localizes app health wrappers while keeping raw runtime details unchanged', () => {
+    const translate = (key: string, params?: Record<string, unknown>) => {
+      const suffix = params
+        ? ` ${Object.entries(params).map(([paramKey, value]) => `${paramKey}=${value}`).join(',')}`
+        : '';
+      return `T:${key}${suffix}`;
+    };
+
+    const snapshot = buildAIAppHealthSnapshot({
+      providers: [{
+        id: 'provider-1',
+        type: 'openai',
+        name: 'OpenAI 主账号',
+        apiKey: '',
+        hasSecret: true,
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-5.4',
+        models: ['gpt-5.4'],
+        maxTokens: 32000,
+        temperature: 0.2,
+      }],
+      activeProviderId: 'provider-1',
+      mcpServers: [{
+        id: 'server-1',
+        name: 'GoNavi MCP',
+        transport: 'stdio',
+        command: 'gonavi-mcp-server',
+        args: ['stdio'],
+        env: {},
+        enabled: true,
+        timeoutSeconds: 20,
+      }],
+      mcpClientStatuses: [{
+        client: 'codex',
+        displayName: 'Codex',
+        installed: true,
+        matchesCurrent: true,
+        clientDetected: true,
+        clientCommand: 'codex',
+        clientPath: 'C:/Tools/codex.exe',
+        configPath: 'C:/Users/demo/.codex/config.toml',
+        command: 'gonavi-mcp-server',
+        args: ['stdio'],
+        message: '已接入当前 GoNavi MCP',
+      }],
+      mcpTools: [{
+        alias: 'inspect_app_health',
+        originalName: 'inspect_app_health',
+        serverId: 'server-1',
+        serverName: 'GoNavi MCP',
+        title: 'Inspect app health',
+      }],
+      userPromptSettings: {
+        global: '回答前先核对上下文。',
+        database: '',
+        jvm: '',
+        jvmDiagnostic: '',
+      },
+      tabs: [],
+      appLogReadResult: {
+        success: false,
+        message: 'raw log backend failure',
+      },
+      connectionFailureReadResult: {
+        success: false,
+        message: 'raw connection log failure',
+      },
+      translate,
+    } as any);
+
+    expect(snapshot.appLog.message).toBe('T:ai_chat.inspection.app_health.app_log.unread detail=raw log backend failure');
+    expect(snapshot.connectionFailures.message).toBe(
+      'T:ai_chat.inspection.app_health.connection_failures.unread detail=raw connection log failure',
+    );
+    expect(snapshot.warnings).toContain('T:ai_chat.inspection.app_health.warning.app_log_unread');
+    expect(snapshot.warnings).toContain('T:ai_chat.inspection.app_health.warning.connection_failures_unread');
+    expect(snapshot.warnings).toContain('T:ai_chat.inspection.app_health.warning.no_workspace_tabs');
+    expect(snapshot.nextActions).toContain('T:ai_chat.inspection.app_health.next_action.enable_app_log_reading');
+    expect(snapshot.nextActions).toContain('T:ai_chat.inspection.app_health.next_action.open_sql_tab');
+    expect(snapshot.message).toBe('T:ai_chat.inspection.app_health.message.needs_attention count=3');
+  });
+
+  it('keeps app health production source free of legacy Chinese wrappers', () => {
+    const source = readFileSync('src/components/ai/aiAppHealthInsights.ts', 'utf8');
+
+    expect(source).not.toContain('当前还没有记录到 AI 消息渲染异常');
+    expect(source).not.toContain('GoNavi 应用日志暂不可读');
+    expect(source).not.toContain('连接失败日志暂不可读');
+    expect(source).not.toContain('当前无法读取 GoNavi 应用日志');
+    expect(source).not.toContain('最近应用日志里有 ');
+    expect(source).not.toContain('当前 AI 应用健康总览通过');
+  });
+
   it('marks the app health as degraded when logs and connection failures show runtime problems', () => {
     const snapshot = buildAIAppHealthSnapshot({
       providers: [{
@@ -93,8 +188,8 @@ describe('buildAIAppHealthSnapshot', () => {
     expect(snapshot.summary.appLogErrorCount).toBe(1);
     expect(snapshot.summary.recentConnectionFailureCount).toBe(2);
     expect(snapshot.summary.activeTabTitle).toBe('订单查询');
-    expect(snapshot.warnings).toContain('最近应用日志里有 1 条 ERROR，需要优先查看 inspect_app_logs');
-    expect(snapshot.nextActions).toContain('调用 inspect_recent_connection_failures 查看最新连接失败根因，再决定是否检查当前连接或保存连接配置');
+    expect(snapshot.warnings).toContain('Recent application logs contain 1 ERROR entries; inspect_app_logs should be checked first');
+    expect(snapshot.nextActions).toContain('Call inspect_recent_connection_failures to review the latest connection failure cause, then decide whether to inspect the current connection or saved connection config');
     expect(snapshot.appLog.lines).toHaveLength(0);
     expect(snapshot.appLog.linesOmitted).toBe(true);
   });
@@ -125,8 +220,8 @@ describe('buildAIAppHealthSnapshot', () => {
     });
 
     expect(snapshot.status).toBe('blocked');
-    expect(snapshot.blockers).toContain('当前活动供应商缺少 API Key / Secret');
-    expect(snapshot.blockers).toContain('当前活动供应商缺少接口地址');
+    expect(snapshot.blockers).toContain('The active provider is missing an API Key / Secret');
+    expect(snapshot.blockers).toContain('The active provider is missing a base URL');
     expect(snapshot.summary.chatReady).toBe(false);
   });
 
@@ -237,8 +332,8 @@ describe('buildAIAppHealthSnapshot', () => {
     expect(snapshot.status).toBe('degraded');
     expect(snapshot.summary.hasLastAIMessageRenderError).toBe(true);
     expect(snapshot.summary.lastAIMessageRenderErrorId).toBe('msg-1');
-    expect(snapshot.warnings).toContain('最近记录到 AI 消息渲染异常，可能影响回复气泡展示或 Markdown 渲染');
-    expect(snapshot.nextActions).toContain('调用 inspect_ai_last_render_error 查看最近一次气泡渲染异常的 messageId、内容预览和组件栈');
+    expect(snapshot.warnings).toContain('A recent AI message render error was recorded and may affect reply bubble display or Markdown rendering');
+    expect(snapshot.nextActions).toContain('Call inspect_ai_last_render_error to review the latest bubble render error messageId, content preview, and component stack');
     expect(snapshot.lastRenderError.errorMessage).toBe('Cannot read properties of undefined');
   });
 });

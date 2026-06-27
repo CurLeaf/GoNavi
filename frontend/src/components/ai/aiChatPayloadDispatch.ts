@@ -5,6 +5,7 @@ import type {
 } from '../../types';
 import type { AIChatToolDefinition } from '../../utils/aiToolRegistry';
 import { sanitizeErrorMsg } from '../../utils/aiChatRuntime';
+import { t as translateCatalog, type I18nParams } from '../../i18n';
 
 interface AIChatService {
   AIChatStream?: (sid: string, messages: any[], tools: AIChatToolDefinition[]) => Promise<any>;
@@ -28,6 +29,7 @@ interface DispatchAIChatPayloadOptions {
   jvmPlanContext?: JVMAIPlanContext;
   jvmDiagnosticPlanContext?: JVMDiagnosticPlanContext;
   unavailableContent?: string;
+  translate?: (key: string, params?: I18nParams) => string;
   onNonStreamSuccess?: () => void;
 }
 
@@ -84,6 +86,7 @@ export const dispatchAIChatPayload = async ({
   jvmPlanContext,
   jvmDiagnosticPlanContext,
   unavailableContent,
+  translate = (key, params) => translateCatalog(key, params, 'en-US'),
   onNonStreamSuccess,
 }: DispatchAIChatPayloadOptions): Promise<'stream' | 'send' | 'unavailable' | 'error'> => {
   try {
@@ -97,8 +100,8 @@ export const dispatchAIChatPayload = async ({
       const result = service?.AIChatSendInSession
         ? await service.AIChatSendInSession(sid, messages, tools)
         : await service!.AIChatSend!(messages, tools);
-      const rawError = result?.error || '未知错误';
-      const cleanError = sanitizeErrorMsg(rawError);
+      const rawError = result?.error || translate('common.unknown');
+      const cleanError = sanitizeErrorMsg(rawError, translate);
 
       settleAssistantMessage({
         sid,
@@ -122,7 +125,7 @@ export const dispatchAIChatPayload = async ({
       return 'send';
     }
 
-    const resolvedUnavailableContent = unavailableContent || (pendingAssistantMessageId ? '❌ AI Service 未就绪' : '');
+    const resolvedUnavailableContent = unavailableContent || (pendingAssistantMessageId ? translate('ai_chat.panel.message.service_not_ready') : '');
     if (resolvedUnavailableContent) {
       settleAssistantMessage({
         sid,
@@ -141,7 +144,7 @@ export const dispatchAIChatPayload = async ({
     return 'unavailable';
   } catch (error: any) {
     const rawError = error?.message || String(error);
-    const cleanError = sanitizeErrorMsg(rawError);
+    const cleanError = sanitizeErrorMsg(rawError, translate);
     settleAssistantMessage({
       sid,
       addAIChatMessage,
@@ -149,7 +152,7 @@ export const dispatchAIChatPayload = async ({
       nextMessageId,
       pendingAssistantMessageId,
       patch: {
-        content: `❌ 发送失败: ${cleanError}`,
+        content: translate('ai_chat.panel.message.send_failed', { detail: cleanError }),
         rawError: cleanError !== rawError ? rawError : undefined,
         jvmPlanContext,
         jvmDiagnosticPlanContext,

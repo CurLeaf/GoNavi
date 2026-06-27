@@ -1165,7 +1165,12 @@ export const getUriPlaceholder = (dbType: string) => {
     return "rabbitmq://guest:guest@127.0.0.1:15672/%2F?defaultQueue=orders.queue&exchange=events.topic&timeout=30";
   }
   if (dbType === "redis") {
-    return "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster 或 redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster";
+    return t("connection.modal.example.or", {
+      first:
+        "redis://:pass@127.0.0.1:6379,127.0.0.2:6379/0?topology=cluster",
+      second:
+        "redis://:pass@10.0.0.1:26379,10.0.0.2:26379/0?topology=sentinel&master=mymaster",
+    });
   }
   if (dbType === "oracle") {
     return "oracle://user:pass@127.0.0.1:1521/ORCLPDB1";

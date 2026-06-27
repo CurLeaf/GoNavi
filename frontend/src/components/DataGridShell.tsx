@@ -9,6 +9,7 @@ import DataGridModals from './DataGridModals';
 import DataGridPreviewPanel from './DataGridPreviewPanel';
 import DataGridSecondaryActions from './DataGridSecondaryActions';
 import DataGridToolbarFrame from './DataGridToolbarFrame';
+import LogPanel from './LogPanel';
 import { DataGridJsonView, DataGridTextView } from './DataGridRecordViews';
 import { DataGridV2DdlSideWorkspace, DataGridV2DdlView } from './DataGridV2DdlWorkspace';
 import { DataGridV2ErView, DataGridV2FieldsView } from './DataGridV2MetadataViews';
@@ -82,6 +83,7 @@ const DataGridShell: React.FC<DataGridShellProps> = (props) => {
     closeBatchEditModal,
     closeCellEditMode,
     closeCellEditor,
+    closeDdlView,
     closeJsonEditor,
     closeRowEditor,
     closestCenter,
@@ -479,12 +481,6 @@ const renderDataTableView = () => (
   ), [columnMetaMap, columnMetaMapByLowerName, currentConnConfig, dbType, displayColumnNames, effectiveEditLocator, rowEditorOpen, rowEditorRowKey]);
 
   const handleRefreshGrid = useCallback(() => {
-      clearAutoCommitTimer();
-      autoCommitFailedTokenRef.current = -1;
-      setAddedRows([]);
-      setModifiedRows({});
-      setDeletedRowKeys(new Set());
-      setModifiedColumns({});
       setSelectedRowKeys([]);
       const normalizedTableName = String(tableName || '').trim();
       const normalizedDbName = String(dbName || '').trim();
@@ -496,7 +492,7 @@ const renderDataTableView = () => (
           setMetadataReloadVersion((value: number) => value + 1);
       }
       if (onReload) onReload();
-  }, [clearAutoCommitTimer, connectionId, dbName, onReload, tableName]);
+  }, [connectionId, dbName, onReload, tableName]);
 
   const handleResetPendingChanges = useCallback(() => {
       clearAutoCommitTimer();
@@ -760,6 +756,7 @@ const renderDataTableView = () => (
                 ddlText={ddlText}
                 darkMode={darkMode}
                 onDdlViewLayoutChange={setDdlViewLayout}
+                onClose={closeDdlView}
                 onReload={() => {
                     void handleOpenTableDdl({ asView: true });
                 }}
@@ -778,6 +775,7 @@ const renderDataTableView = () => (
                 ddlText={ddlText}
                 darkMode={darkMode}
                 onDdlViewLayoutChange={setDdlViewLayout}
+                onClose={closeDdlView}
                 onReload={() => {
                     void handleOpenTableDdl({ asView: true });
                 }}
@@ -795,6 +793,8 @@ const renderDataTableView = () => (
                 onOpenTable={onOpenErTable}
                 translate={translateDataGrid}
             />
+        ) : isV2Ui && viewMode === 'sqlLog' ? (
+            <LogPanel variant="embedded" />
         ) : viewMode === 'json' ? (
             <DataGridJsonView
                 darkMode={darkMode}
@@ -804,14 +804,18 @@ const renderDataTableView = () => (
                 translate={translateDataGrid}
                 onOpenJsonEditor={handleOpenJsonEditor}
             />
-	        ) : (
-	            <DataGridTextView
+        ) : (
+            <DataGridTextView
                 darkMode={darkMode}
                 rowCount={textViewRows.length}
                 textRecordIndex={textRecordIndex}
                 canModifyData={canModifyData}
                 currentTextRow={currentTextRow}
                 displayOutputColumnNames={displayOutputColumnNames}
+                columnMetaMap={columnMetaMap}
+                columnMetaMapByLowerName={columnMetaMapByLowerName}
+                showColumnType={showColumnType}
+                showColumnComment={showColumnComment}
                 translate={translateDataGrid}
                 onPrev={() => setTextRecordIndex((i: number) => Math.max(0, i - 1))}
                 onNext={() => setTextRecordIndex((i: number) => Math.min(textViewRows.length - 1, i + 1))}

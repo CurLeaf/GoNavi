@@ -84,7 +84,8 @@ describe('mcpCommandDraft helpers', () => {
   it('reports unclosed quotes instead of producing a broken parse', () => {
     expect(splitShellLikeCommand('uvx "broken command')).toEqual({
       tokens: ['uvx'],
-      error: '命令中存在未闭合的引号，请检查后重试。',
+      error: 'The command contains an unclosed quote. Check it and try again.',
+      errorKey: 'ai_settings.mcp_server.command_parse.error.unclosed_quote',
     });
   });
 });

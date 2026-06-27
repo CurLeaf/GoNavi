@@ -1,176 +1,251 @@
 import type { AIBuiltinToolInfo } from "./aiBuiltinToolInfo.types";
 
-export const BUILTIN_AI_INSPECTION_MCP_TOOL_INFO: AIBuiltinToolInfo[] = [
+type InspectionToolInfoTranslator = (key: string) => string;
+
+const MCP_TOOL_INFO_KEY_PREFIX = "ai_chat.inspection.tool_info";
+
+const translateToolInfo = (
+  t: InspectionToolInfoTranslator | undefined,
+  key: string,
+  fallback: string,
+): string => {
+  if (!t) return fallback;
+  const translated = t(key);
+  return translated && translated !== key ? translated : fallback;
+};
+
+const MCP_TOOL_INFO_COPY: Record<
+  string,
   {
-    name: "inspect_mcp_setup",
+    icon: string;
+    desc: string;
+    detail: string;
+    paramsSummary: string;
+    toolDescription: string;
+    params?: Record<string, string>;
+  }
+> = {
+  inspect_mcp_setup: {
     icon: "🪛",
-    desc: "查看当前 MCP 配置与外部接入状态",
+    desc: "Inspect current MCP configuration and external access",
     detail:
-      "返回当前本地配置了哪些 MCP 服务、哪些已启用、每个服务声明了什么启动命令，以及 Claude Code / Codex 本机客户端写入状态、OpenClaw / Hermans 远程 Agent 接入边界与命令检测结果。适合用户问“我现在配了哪些 MCP”“为什么外部客户端还用不了”“MCP 到底写没写进去”时先读真实状态。",
-    params: "无参数",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_mcp_setup",
-        description:
-          "读取当前本地 MCP 配置快照，包括 MCP 服务列表、启用状态、启动命令、环境变量 key、已发现工具，以及外部客户端的 GoNavi MCP 写入状态、本机 CLI 检测结果和远程 Agent 接入边界。适用于用户提到 MCP 服务配置、Claude/Codex/OpenClaw/Hermans 是否已接入、为什么外部客户端用不了、当前到底启用了哪些 MCP 时，先读取真实配置再回答。",
-        parameters: { type: "object", properties: {} },
-      },
-    },
+      "Returns the local MCP services, enabled state, declared startup commands, Claude Code / Codex local client write status, OpenClaw / Hermans remote Agent boundaries, and command detection results. Use it first when the user asks which MCP services are configured, why external clients cannot use them, or whether MCP was written into client configs.",
+    paramsSummary: "No parameters",
+    toolDescription:
+      "Read the current local MCP configuration snapshot, including MCP service list, enabled state, startup commands, environment variable keys, discovered tools, external client GoNavi MCP write status, local CLI detection results, and remote Agent access boundaries. Use it when the user mentions MCP service configuration, Claude/Codex/OpenClaw/Hermans access, external clients not working, or which MCP services are enabled.",
   },
-  {
-    name: "inspect_mcp_remote_access",
+  inspect_mcp_remote_access: {
     icon: "🌉",
-    desc: "查看 OpenClaw/Hermans 远程 MCP 接入方式",
+    desc: "Inspect OpenClaw/Hermans remote MCP access",
     detail:
-      "返回 GoNavi Streamable HTTP MCP 的本机启动命令、远程 URL/鉴权填写方式、OpenClaw/Hermans 云端 Agent 接入边界、可选桥接方案和安全提醒。适合用户说“OpenClaw 在云上怎么连 Windows GoNavi”“不要把数据库密码交给 Agent”“HTTP MCP 该怎么暴露”时先读这份远程接入快照。",
-    params: "publicUrl?, localAddr?, path?, exposeStrategy?, tokenConfigured?",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_mcp_remote_access",
-        description:
-          "读取 GoNavi MCP 远程 Agent 接入快照，返回 Streamable HTTP 模式启动命令、/mcp URL、Bearer Token 鉴权要求、OpenClaw/Hermans 云端接入步骤、数据库密码留在 Windows 本机的安全边界，以及隧道/反向代理/Tailscale 等暴露方式的风险提示。适用于用户提到 OpenClaw、Hermans、云端 Linux Agent、远程 MCP、不要复制数据库密码、或本机 GoNavi 如何给外部 Agent 访问表结构时优先调用。",
-        parameters: {
-          type: "object",
-          properties: {
-            publicUrl: { type: "string", description: "可选，云端 Agent 最终能访问的 HTTPS 或私有网络 URL；如果没带 /mcp，工具会按 path 补上" },
-            localAddr: { type: "string", description: "可选，Windows 本机 HTTP MCP 监听地址，默认 127.0.0.1:8765；不建议直接绑定 0.0.0.0" },
-            path: { type: "string", description: "可选，Streamable HTTP MCP 路径，默认 /mcp" },
-            exposeStrategy: {
-              type: "string",
-              enum: ["reverse_proxy", "ssh_reverse_tunnel", "cloudflare_tunnel", "tailscale", "custom"],
-              description: "可选，计划使用的远程暴露方式，用于返回对应风险提醒",
-            },
-            tokenConfigured: { type: "boolean", description: "可选，是否已经准备随机 Bearer Token；传 false 会返回鉴权告警" },
-          },
-        },
-      },
+      "Returns GoNavi Streamable HTTP MCP local startup commands, remote URL and authentication guidance, OpenClaw/Hermans cloud Agent access boundaries, optional bridging approaches, and safety reminders. Use it when the user asks how cloud OpenClaw connects to Windows GoNavi, how to keep database passwords away from Agents, or how to expose HTTP MCP.",
+    paramsSummary: "publicUrl?, localAddr?, path?, exposeStrategy?, tokenConfigured?",
+    toolDescription:
+      "Read the GoNavi MCP remote Agent access snapshot, including Streamable HTTP mode startup commands, /mcp URL, Bearer Token authentication requirements, OpenClaw/Hermans cloud access steps, the boundary that keeps database passwords on the Windows host, and risk reminders for tunnel, reverse proxy, Tailscale, or other exposure strategies.",
+    params: {
+      publicUrl: "Optional. HTTPS or private-network URL reachable by the remote Agent. If /mcp is missing, the tool appends the configured path.",
+      localAddr: "Optional. Windows local HTTP MCP listen address. Default 127.0.0.1:8765. Binding directly to 0.0.0.0 is not recommended.",
+      path: "Optional. Streamable HTTP MCP path. Default /mcp.",
+      exposeStrategy: "Optional. Planned remote exposure strategy used to return matching risk reminders.",
+      tokenConfigured: "Optional. Whether a random Bearer Token is already configured. Passing false returns an authentication warning.",
     },
   },
-  {
-    name: "inspect_mcp_runtime_failures",
+  inspect_mcp_runtime_failures: {
     icon: "🧯",
-    desc: "诊断 MCP 启动与调用失败",
+    desc: "Diagnose MCP startup and tool-call failures",
     detail:
-      "读取 gonavi.log 中最近的 MCP 启动、工具发现、工具调用和 HTTP MCP 子进程异常，结合当前已保存 MCP 服务与已发现工具，返回失败类型、疑似原因、涉及服务和下一步修复动作。适合用户反馈“新增 MCP 测试失败”“工具发现 0 个”“MCP 工具调用失败”“HTTP MCP 启动失败”时先调用。",
-    params: "serverName?, keyword?, lineLimit?(默认 160), includeLines?(默认 false)",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_mcp_runtime_failures",
-        description:
-          "读取 GoNavi 应用日志中的 MCP 运行期失败信号，归类 MCP 服务启动失败、工具发现失败、工具调用失败和 HTTP MCP 子进程异常，并结合当前 MCP 服务配置与已发现工具数量返回疑似原因和 nextActions。适用于用户提到新增 MCP 测试失败、工具发现 0 个、MCP 工具调用失败、stdio 断开、命令找不到、Docker MCP 退出或 HTTP MCP 启动失败时，先读取该工具，不要只凭弹窗文案猜测。",
-        parameters: {
-          type: "object",
-          properties: {
-            serverName: { type: "string", description: "可选，只看某个 MCP 服务名或日志中的 server= 名称，例如 GitHub、Browser、DockerFetch" },
-            keyword: { type: "string", description: "可选，在 MCP 相关日志里继续按关键词过滤，例如 timeout、stdio、permission、401、docker" },
-            lineLimit: { type: "number", description: "可选，最多读取多少行日志尾部，默认 160，最大 200" },
-            includeLines: { type: "boolean", description: "可选，是否附带脱敏后的 MCP 日志原文行，默认 false；需要引用原文时再开启" },
-          },
-        },
-      },
+      "Reads recent MCP startup, tool discovery, tool-call, and HTTP MCP subprocess failures from gonavi.log, combines them with saved MCP services and discovered tools, and returns failure types, likely causes, involved services, and next repair actions. Use it first when users report failed MCP tests, 0 discovered tools, MCP tool-call failures, or HTTP MCP startup failures.",
+    paramsSummary: "serverName?, keyword?, lineLimit?(default 160), includeLines?(default false)",
+    toolDescription:
+      "Read MCP runtime failure signals from GoNavi application logs, classify MCP service startup failures, tool discovery failures, tool-call failures, and HTTP MCP subprocess exits, then combine current MCP service configuration and discovered tool counts to return likely causes and nextActions.",
+    params: {
+      serverName: "Optional. Inspect only one MCP service name or server= name from logs, such as GitHub, Browser, or DockerFetch.",
+      keyword: "Optional. Filter MCP-related logs by keyword, such as timeout, stdio, permission, 401, or docker.",
+      lineLimit: "Optional. Maximum number of tail log lines to read. Default 160, maximum 200.",
+      includeLines: "Optional. Whether to include redacted raw MCP log lines. Default false; enable only when original lines need to be quoted.",
     },
   },
-  {
-    name: "inspect_mcp_authoring_guide",
+  inspect_mcp_authoring_guide: {
     icon: "🧭",
-    desc: "查看新增 MCP 的填写指引",
+    desc: "Inspect the add-MCP authoring guide",
     detail:
-      "返回新增 MCP 表单里各字段的作用、推荐填写顺序、完整命令自动拆分规则，以及 npx / Node / uvx / Python / Docker / EXE 模板样例。适合用户问“command/args/env 到底怎么填”“给我一个 npx / node / uvx / python / docker 示例”“为什么启动命令不能整行填”时，先读这份真实接入指引。",
-    params: "无参数",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_mcp_authoring_guide",
-        description:
-          "读取 GoNavi 当前内置的 MCP 新增指引，包括推荐填写顺序、字段作用、常见命令示例、完整命令自动拆分规则，以及 npx / Node / uvx / Python / Docker / EXE 模板样例。适用于用户提到新增 MCP 不知道 command、args、env、timeout 怎么填，或想要一个最接近的模板时，先读取这份真实前端接入指南，不要凭记忆口述。",
-        parameters: { type: "object", properties: {} },
-      },
-    },
+      "Returns the purpose of each add-MCP form field, recommended filling order, full-command auto-splitting rules, and npx / Node / uvx / Python / Docker / EXE templates. Use it before answering questions about command, args, env, templates, or why a full startup command should not be pasted into one field.",
+    paramsSummary: "No parameters",
+    toolDescription:
+      "Read GoNavi's current built-in MCP authoring guide, including recommended field order, field purpose, common command examples, full-command auto-splitting rules, and npx / Node / uvx / Python / Docker / EXE template examples.",
   },
-  {
-    name: "inspect_mcp_docker_setup",
+  inspect_mcp_docker_setup: {
     icon: "🐳",
-    desc: "检查 Docker MCP 启动配置",
+    desc: "Inspect Docker MCP startup configuration",
     detail:
-      "读取当前已保存的 Docker MCP 服务，检查 command/args 是否正确拆成 docker、run、--rm、-i、镜像名和容器参数，并返回缺失参数、已发现工具数、超时建议和下一步修复动作。适合用户按 Docker README 新增 MCP 后工具发现失败、容器一启动就退出、或不确定 docker run 参数该怎么填时调用。",
-    params: "serverId?, includeDisabled?(默认 true)",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_mcp_docker_setup",
-        description:
-          "检查当前已保存 Docker MCP 服务的启动参数，返回 Docker MCP 服务列表、docker run/-i/镜像名/--rm/env/timeout 状态、工具发现数量、配置告警和 nextActions。适用于用户提到 Docker MCP、docker run、容器化 MCP、工具发现 0 个、容器 stdio 断开、或 AI 准备指导用户修复 Docker MCP 配置时，先读取真实配置快照。",
-        parameters: {
-          type: "object",
-          properties: {
-            serverId: { type: "string", description: "可选，只检查某个 MCP serverId；不传则检查全部 Docker MCP" },
-            includeDisabled: { type: "boolean", description: "可选，是否包含已禁用 Docker MCP，默认 true" },
-          },
-        },
-      },
+      "Reads saved Docker MCP services, checks whether command and args are split into docker, run, --rm, -i, image name, and container arguments correctly, then returns missing arguments, discovered tool count, timeout advice, and next repair actions. Use it when Docker README setup discovers 0 tools, the container exits immediately, or docker run arguments may be filled incorrectly.",
+    paramsSummary: "serverId?, includeDisabled?(default true)",
+    toolDescription:
+      "Inspect startup arguments for saved Docker MCP services and return docker run/-i/image/--rm/env/timeout status, discovered tool counts, configuration warnings, and nextActions. Use it before guiding users through Docker MCP repairs.",
+    params: {
+      serverId: "Optional. Inspect only one MCP serverId. If omitted, all Docker MCP services are inspected.",
+      includeDisabled: "Optional. Whether to include disabled Docker MCP services. Default true.",
     },
   },
-  {
-    name: "inspect_mcp_draft",
+  inspect_mcp_draft: {
     icon: "🧪",
-    desc: "校验 MCP 新增草稿",
+    desc: "Validate an add-MCP draft",
     detail:
-      "按完整启动命令或分字段草稿试算 GoNavi 的 MCP 新增配置，返回自动拆分结果、启动预览、可应用草稿、命令参数用途提示、环境变量用途提示、字段校验问题、推荐模板和下一步修复建议；命令参数里的敏感值会脱敏。适合用户贴出一整行 MCP 启动命令、问 command/args/env/timeout 该怎么拆，或保存前想确认配置有没有明显问题时使用。",
-    params: "fullCommand?, command?, args?, envText?, timeoutSeconds?, templateKey?, name?",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_mcp_draft",
-        description:
-          "校验一份待新增的 MCP 服务草稿。支持传 fullCommand/rawCommand/commandLine 让 GoNavi 自动拆分，也支持传 command、args、envText、timeoutSeconds 和 templateKey 做分字段校验；返回解析后的字段、脱敏启动命令预览、suggestedServerSeed、命令参数用途提示、环境变量 key 的用途和风险提示、错误/告警、推荐模板和 nextActions。适用于用户贴出 MCP README 启动命令、问新增 MCP 参数怎么填、或 AI 准备指导用户保存前，先用真实校验器试算；结果不会回显 api-key/token/password 等敏感参数值。",
-        parameters: {
-          type: "object",
-          properties: {
-            fullCommand: { type: "string", description: "可选，README 或用户贴出的一整行 MCP 启动命令，例如 $env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio" },
-            command: { type: "string", description: "可选，分字段草稿里的启动命令，只应是 npx、node、uvx、python 或 exe 路径本身" },
-            args: {
-              oneOf: [
-                { type: "array", items: { type: "string" } },
-                { type: "string" },
-              ],
-              description: "可选，分字段草稿里的命令参数；数组更准确，也可传逗号或换行分隔字符串",
-            },
-            envText: { type: "string", description: "可选，环境变量草稿，每行 KEY=VALUE；不要传 export、set 或 $env: 前缀" },
-            timeoutSeconds: { type: "number", description: "可选，单次工具发现或调用超时秒数；推荐 20，慢启动服务可用 45 或 60" },
-            templateKey: { type: "string", enum: ["npx", "uvx", "node", "python", "docker", "exe"], description: "可选，先套用一个内置模板再覆盖用户传入字段" },
-            name: { type: "string", description: "可选，MCP 服务名称，例如 GitHub、Filesystem、Browser" },
-          },
-        },
-      },
+      "Simulates GoNavi add-MCP configuration from a full startup command or per-field draft, returning auto-split results, startup preview, applicable draft, command argument hints, environment variable hints, validation issues, recommended templates, and next repair suggestions. Sensitive values in command arguments are redacted.",
+    paramsSummary: "fullCommand?, command?, args?, envText?, timeoutSeconds?, templateKey?, name?",
+    toolDescription:
+      "Validate a pending MCP service draft. Supports fullCommand/rawCommand/commandLine for automatic splitting, or command, args, envText, timeoutSeconds, and templateKey for per-field validation. Returns parsed fields, redacted startup preview, suggestedServerSeed, command argument hints, environment variable key purpose and risk hints, errors, warnings, recommended templates, and nextActions without echoing api-key/token/password values.",
+    params: {
+      fullCommand: "Optional. A full MCP startup command from README or the user, such as $env:GITHUB_TOKEN=...; uvx mcp-server-github --stdio.",
+      command: "Optional. Startup command in a per-field draft. It should be only npx, node, uvx, python, or an exe path.",
+      args: "Optional. Command arguments in a per-field draft. Arrays are more accurate, but comma-separated or newline-separated strings are also accepted.",
+      envText: "Optional. Environment variable draft, one KEY=VALUE per line. Do not pass export, set, or $env: prefixes.",
+      timeoutSeconds: "Optional. Timeout seconds for one tool discovery or call. Recommended 20; slow-start services can use 45 or 60.",
+      templateKey: "Optional. Apply a built-in template first, then override it with user-supplied fields.",
+      name: "Optional. MCP service name, such as GitHub, Filesystem, or Browser.",
     },
   },
-  {
-    name: "inspect_mcp_tool_schema",
+  inspect_mcp_tool_schema: {
     icon: "🧩",
-    desc: "查看 MCP 工具参数怎么传",
+    desc: "Inspect MCP tool argument schema",
     detail:
-      "按 alias、serverId 或关键词查看当前已发现 MCP 工具的 inputSchema，返回必填参数、字段类型、枚举值、嵌套对象路径和调用前提示。适合新增 MCP 成功后，用户或 AI 不知道某个 MCP 工具到底该传哪些参数时先读真实 schema。",
-    params: "alias?, serverId?, keyword?, includeSchema?(默认 false), limit?(默认 8)",
+      "Reads the inputSchema for currently discovered MCP tools by alias, serverId, or keyword, returning required parameters, field types, enum values, nested object paths, and pre-call hints. Use it after MCP discovery succeeds when a user or AI needs to know what arguments an MCP tool accepts.",
+    paramsSummary: "alias?, serverId?, keyword?, includeSchema?(default false), limit?(default 8)",
+    toolDescription:
+      "Read parameter schema summaries for currently discovered MCP tools, filterable by alias, serverId, or keyword, and return required fields, types, enum values, nested parameter paths, and pre-call hints. Use it before writing arguments JSON for external MCP tool calls or after parameter-related tool-call errors.",
+    params: {
+      alias: "Optional. Query by exact MCP tool alias, such as github_create_issue. Prefer reading the real alias from inspect_mcp_setup first.",
+      serverId: "Optional. Only inspect tools discovered under one MCP serverId.",
+      keyword: "Optional. Filter by tool alias, original name, title, description, or service name.",
+      includeSchema: "Optional. Whether to include the full raw inputSchema. Default false; enable only for complex nested schema inspection.",
+      limit: "Optional. Maximum number of matching tools to return. Default 8, maximum 30.",
+    },
+  },
+};
+
+const createMcpToolInfo = (
+  name: keyof typeof MCP_TOOL_INFO_COPY,
+  properties: Record<string, any> = {},
+  parameterExtras: Record<string, any> = {},
+): AIBuiltinToolInfo => {
+  const copy = MCP_TOOL_INFO_COPY[name];
+  const translatedProperties = Object.fromEntries(
+    Object.entries(properties).map(([paramName, schema]) => [
+      paramName,
+      {
+        ...schema,
+        description: copy.params?.[paramName],
+      },
+    ]),
+  );
+
+  return {
+    name,
+    icon: copy.icon,
+    desc: copy.desc,
+    detail: copy.detail,
+    params: copy.paramsSummary,
     tool: {
       type: "function",
       function: {
-        name: "inspect_mcp_tool_schema",
-        description:
-          "读取当前已发现 MCP 工具的参数 schema 摘要，可按 alias、serverId 或关键词过滤，并返回必填字段、类型、枚举值、嵌套参数路径和调用前提示。适用于用户问某个 MCP 工具参数怎么填、AI 准备调用外部 MCP 工具但不确定 arguments JSON 怎么写、或工具调用报参数错误时，先读取真实 inputSchema 再继续。",
+        name,
+        description: copy.toolDescription,
         parameters: {
           type: "object",
-          properties: {
-            alias: { type: "string", description: "可选，按 MCP 工具 alias 精确查询，例如 github_create_issue；优先通过 inspect_mcp_setup 获取真实 alias" },
-            serverId: { type: "string", description: "可选，只看某个 MCP serverId 下发现的工具" },
-            keyword: { type: "string", description: "可选，按工具 alias、原始名称、标题、描述或服务名做关键词筛选" },
-            includeSchema: { type: "boolean", description: "可选，是否附带完整原始 inputSchema，默认 false；需要深查复杂嵌套 schema 时再开启" },
-            limit: { type: "number", description: "可选，最多返回多少个匹配工具，默认 8，最大 30" },
-          },
+          properties: translatedProperties,
+          ...parameterExtras,
         },
       },
     },
-  },
+  };
+};
+
+export const BUILTIN_AI_INSPECTION_MCP_TOOL_INFO: AIBuiltinToolInfo[] = [
+  createMcpToolInfo("inspect_mcp_setup"),
+  createMcpToolInfo("inspect_mcp_remote_access", {
+    publicUrl: { type: "string" },
+    localAddr: { type: "string" },
+    path: { type: "string" },
+    exposeStrategy: {
+      type: "string",
+      enum: ["reverse_proxy", "ssh_reverse_tunnel", "cloudflare_tunnel", "tailscale", "custom"],
+    },
+    tokenConfigured: { type: "boolean" },
+  }),
+  createMcpToolInfo("inspect_mcp_runtime_failures", {
+    serverName: { type: "string" },
+    keyword: { type: "string" },
+    lineLimit: { type: "number" },
+    includeLines: { type: "boolean" },
+  }),
+  createMcpToolInfo("inspect_mcp_authoring_guide"),
+  createMcpToolInfo("inspect_mcp_docker_setup", {
+    serverId: { type: "string" },
+    includeDisabled: { type: "boolean" },
+  }),
+  createMcpToolInfo("inspect_mcp_draft", {
+    fullCommand: { type: "string" },
+    command: { type: "string" },
+    args: {
+      oneOf: [
+        { type: "array", items: { type: "string" } },
+        { type: "string" },
+      ],
+    },
+    envText: { type: "string" },
+    timeoutSeconds: { type: "number" },
+    templateKey: { type: "string", enum: ["npx", "uvx", "node", "python", "docker", "exe"] },
+    name: { type: "string" },
+  }),
+  createMcpToolInfo("inspect_mcp_tool_schema", {
+    alias: { type: "string" },
+    serverId: { type: "string" },
+    keyword: { type: "string" },
+    includeSchema: { type: "boolean" },
+    limit: { type: "number" },
+  }),
 ];
+
+export const localizeBuiltinInspectionMcpToolInfo = (
+  t?: InspectionToolInfoTranslator,
+): AIBuiltinToolInfo[] =>
+  BUILTIN_AI_INSPECTION_MCP_TOOL_INFO.map((tool) => {
+    const copy = MCP_TOOL_INFO_COPY[tool.name];
+    if (!copy) return tool;
+
+    const keyPrefix = `${MCP_TOOL_INFO_KEY_PREFIX}.${tool.name}`;
+    const originalProperties = tool.tool.function.parameters?.properties || {};
+    const translatedProperties = Object.fromEntries(
+      Object.entries(originalProperties).map(([paramName, schema]) => {
+        const fallback = copy.params?.[paramName];
+        if (!fallback || !schema || typeof schema !== "object") {
+          return [paramName, schema];
+        }
+        return [
+          paramName,
+          {
+            ...schema,
+            description: translateToolInfo(t, `${keyPrefix}.param.${paramName}`, fallback),
+          },
+        ];
+      }),
+    );
+
+    return {
+      ...tool,
+      desc: translateToolInfo(t, `${keyPrefix}.desc`, copy.desc),
+      detail: translateToolInfo(t, `${keyPrefix}.detail`, copy.detail),
+      params: translateToolInfo(t, `${keyPrefix}.params`, copy.paramsSummary),
+      tool: {
+        ...tool.tool,
+        function: {
+          ...tool.tool.function,
+          description: translateToolInfo(t, `${keyPrefix}.tool_description`, copy.toolDescription),
+          parameters: {
+            ...tool.tool.function.parameters,
+            properties: translatedProperties,
+          },
+        },
+      },
+    };
+  });

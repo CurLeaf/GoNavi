@@ -68,13 +68,12 @@ describe('redisDbAlias helpers', () => {
   });
 
   it('builds the sidebar label with and without an alias', () => {
-    expect(buildRedisDbNodeLabel(0, 'cache')).toBe('db0 (cache)');
+    expect(buildRedisDbNodeLabel(0, 'cache')).toBe('db0 cache');
     expect(buildRedisDbNodeLabel(3, '')).toBe('db3');
     expect(buildRedisDbNodeLabel(0, '   ')).toBe('db0');
   });
 
-  it('appends the key-count suffix after the alias', () => {
-    expect(buildRedisDbNodeLabel(0, 'cache', ' (12)')).toBe('db0 (cache) (12)');
-    expect(buildRedisDbNodeLabel(0, '', ' (12)')).toBe('db0 (12)');
+  it('does not append key counts to the sidebar label', () => {
+    expect(buildRedisDbNodeLabel(0, '12')).toBe('db0 12');
   });
 });

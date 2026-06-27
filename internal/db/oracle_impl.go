@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,15 @@ type OracleDB struct {
 
 var _ SessionExecerProvider = (*OracleDB)(nil)
 var _ TransactionExecerProvider = (*OracleDB)(nil)
+
+var (
+	oracleTriggerCreatePattern = regexp.MustCompile(`(?is)^\s*CREATE\s+(?:OR\s+REPLACE\s+)?TRIGGER\b`)
+	oracleTriggerTimingPattern = regexp.MustCompile(`(?is)^\s*(?:BEFORE|AFTER|INSTEAD\s+OF)\b`)
+)
+
+func oracleRuntimeError(key string, params map[string]any) error {
+	return fmt.Errorf("%s", localizedDriverRuntimeText(key, params))
+}
 
 func (o *OracleDB) getDSN(config connection.ConnectionConfig) string {
 	// oracle://user:pass@host:port/service_name
@@ -358,7 +368,7 @@ func (o *OracleDB) GetCreateStatement(dbName, tableName string) (string, error) 
 	if firstErr != nil {
 		return "", firstErr
 	}
-	return "", fmt.Errorf("未找到建表语句")
+	return "", oracleRuntimeError("db.backend.error.create_table_statement_not_found", nil)
 }
 
 func (o *OracleDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
@@ -585,7 +595,18 @@ func (o *OracleDB) appendOracleCommentDDL(baseDDL string, dbName string, tableNa
 	if len(commentLines) == 0 {
 		return baseDDL
 	}
-	return strings.TrimRight(baseDDL, " \t\r\n") + "\n" + strings.Join(commentLines, "\n")
+	return ensureOracleDDLStatementTerminator(baseDDL) + "\n\n" + strings.Join(commentLines, "\n")
+}
+
+func ensureOracleDDLStatementTerminator(ddl string) string {
+	trimmed := strings.TrimRight(ddl, " \t\r\n")
+	if trimmed == "" {
+		return trimmed
+	}
+	if strings.HasSuffix(trimmed, ";") || strings.HasSuffix(trimmed, "/") {
+		return trimmed
+	}
+	return trimmed + ";"
 }
 
 func (o *OracleDB) fetchOracleTableComment(schema string, table string) string {
@@ -757,7 +778,7 @@ func parseOracleColumns(data []map[string]interface{}) []connection.ColumnDefini
 
 func (o *OracleDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	if strings.TrimSpace(tableName) == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, oracleRuntimeError("db.backend.error.table_name_required", nil)
 	}
 
 	for _, candidate := range oracleMetadataNamePairs(dbName, tableName) {
@@ -902,7 +923,7 @@ func (o *OracleDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDe
 		if len(data) == 0 {
 			continue
 		}
-		return parseOracleTriggers(data), nil
+		return o.parseOracleTriggers(data), nil
 	}
 	return []connection.TriggerDefinition{}, nil
 }
@@ -911,28 +932,165 @@ func buildOracleTriggersQuery(schema string, table string) string {
 	metadataTableName := escapeOracleMetadataLiteralExact(table)
 	metadataSchemaName := escapeOracleMetadataLiteralExact(schema)
 	if strings.TrimSpace(schema) == "" {
-		return fmt.Sprintf(`SELECT trigger_name, trigger_type, triggering_event
+		return fmt.Sprintf(`SELECT USER AS "OWNER", USER AS "TABLE_OWNER", table_name AS "TABLE_NAME", trigger_name AS "TRIGGER_NAME", trigger_type AS "TRIGGER_TYPE", triggering_event AS "TRIGGERING_EVENT", when_clause AS "WHEN_CLAUSE", trigger_body AS "TRIGGER_BODY"
 		FROM user_triggers
-		WHERE table_name = '%s'`, metadataTableName)
+		WHERE table_name = '%s'
+		ORDER BY trigger_name`, metadataTableName)
 	}
-	return fmt.Sprintf(`SELECT trigger_name, trigger_type, triggering_event
+	return fmt.Sprintf(`SELECT owner AS "OWNER", table_owner AS "TABLE_OWNER", table_name AS "TABLE_NAME", trigger_name AS "TRIGGER_NAME", trigger_type AS "TRIGGER_TYPE", triggering_event AS "TRIGGERING_EVENT", when_clause AS "WHEN_CLAUSE", trigger_body AS "TRIGGER_BODY"
 		FROM all_triggers
-		WHERE table_owner = '%s' AND table_name = '%s'`,
+		WHERE table_owner = '%s' AND table_name = '%s'
+		ORDER BY owner, trigger_name`,
 		metadataSchemaName, metadataTableName)
 }
 
-func parseOracleTriggers(data []map[string]interface{}) []connection.TriggerDefinition {
+func (o *OracleDB) parseOracleTriggers(data []map[string]interface{}) []connection.TriggerDefinition {
 	var triggers []connection.TriggerDefinition
 	for _, row := range data {
+		owner := oracleRowString(row, "OWNER")
+		triggerName := oracleRowString(row, "TRIGGER_NAME")
+		statement := strings.TrimSpace(o.fetchOracleTriggerDDL(owner, triggerName))
+		if statement == "" {
+			statement = buildOracleTriggerDDLFromMetadata(row)
+		}
+
 		trig := connection.TriggerDefinition{
-			Name:      fmt.Sprintf("%v", row["TRIGGER_NAME"]),
-			Timing:    fmt.Sprintf("%v", row["TRIGGER_TYPE"]),
-			Event:     fmt.Sprintf("%v", row["TRIGGERING_EVENT"]),
-			Statement: "SOURCE HIDDEN", // Requires more complex query to get body
+			Name:      triggerName,
+			Timing:    oracleRowString(row, "TRIGGER_TYPE"),
+			Event:     oracleRowString(row, "TRIGGERING_EVENT"),
+			Statement: statement,
 		}
 		triggers = append(triggers, trig)
 	}
 	return triggers
+}
+
+func (o *OracleDB) fetchOracleTriggerDDL(owner string, triggerName string) string {
+	if strings.TrimSpace(triggerName) == "" {
+		return ""
+	}
+	for _, candidate := range oracleMetadataNamePairs(owner, triggerName) {
+		metadataTriggerName := escapeOracleMetadataLiteralExact(candidate.table)
+		metadataOwnerName := escapeOracleMetadataLiteralExact(candidate.schema)
+		query := fmt.Sprintf("SELECT DBMS_METADATA.GET_DDL('TRIGGER', '%s', '%s') as ddl FROM DUAL",
+			metadataTriggerName, metadataOwnerName)
+		if candidate.schema == "" {
+			query = fmt.Sprintf("SELECT DBMS_METADATA.GET_DDL('TRIGGER', '%s') as ddl FROM DUAL", metadataTriggerName)
+		}
+
+		data, _, err := o.Query(query)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		ddl := oracleRowString(data[0], "DDL", "ddl", "TRIGGER_DEFINITION", "trigger_definition")
+		if ddl != "" {
+			return ensureOracleDDLStatementTerminator(ddl)
+		}
+	}
+	return ""
+}
+
+func buildOracleTriggerDDLFromMetadata(row map[string]interface{}) string {
+	body := strings.TrimSpace(oracleRowString(row, "TRIGGER_BODY"))
+	if body == "" || strings.EqualFold(body, "SOURCE HIDDEN") {
+		return ""
+	}
+
+	if startsWithOracleTriggerCreate(body) {
+		return ensureOracleDDLStatementTerminator(body)
+	}
+
+	triggerName := oracleRowString(row, "TRIGGER_NAME")
+	if triggerName == "" {
+		return ""
+	}
+
+	if strings.HasPrefix(strings.ToUpper(body), "TRIGGER ") {
+		return ensureOracleDDLStatementTerminator("CREATE OR REPLACE " + body)
+	}
+
+	triggerOwner := oracleRowString(row, "OWNER")
+	tableOwner := oracleRowString(row, "TABLE_OWNER")
+	tableName := oracleRowString(row, "TABLE_NAME")
+	triggerRef := quoteOracleTableRef(triggerOwner, triggerName)
+
+	if startsWithOracleTriggerTiming(body) {
+		return ensureOracleDDLStatementTerminator(fmt.Sprintf("CREATE OR REPLACE TRIGGER %s\n%s", triggerRef, body))
+	}
+
+	triggerClause := buildOracleTriggerClause(
+		oracleRowString(row, "TRIGGER_TYPE"),
+		oracleRowString(row, "TRIGGERING_EVENT"),
+		oracleTriggerTableRef(tableOwner, tableName),
+	)
+	if triggerClause == "" {
+		return ""
+	}
+
+	lines := []string{
+		fmt.Sprintf("CREATE OR REPLACE TRIGGER %s", triggerRef),
+		triggerClause,
+	}
+	if shouldAppendOracleForEachRow(oracleRowString(row, "TRIGGER_TYPE")) {
+		lines = append(lines, "FOR EACH ROW")
+	}
+	if whenClause := normalizeOracleTriggerWhenClause(oracleRowString(row, "WHEN_CLAUSE")); whenClause != "" {
+		lines = append(lines, whenClause)
+	}
+	lines = append(lines, body)
+	return ensureOracleDDLStatementTerminator(strings.Join(lines, "\n"))
+}
+
+func startsWithOracleTriggerCreate(sql string) bool {
+	return oracleTriggerCreatePattern.MatchString(sql)
+}
+
+func startsWithOracleTriggerTiming(sql string) bool {
+	return oracleTriggerTimingPattern.MatchString(sql)
+}
+
+func oracleTriggerTableRef(tableOwner string, tableName string) string {
+	if strings.TrimSpace(tableName) == "" {
+		return ""
+	}
+	return quoteOracleTableRef(tableOwner, tableName)
+}
+
+func buildOracleTriggerClause(triggerType string, event string, tableRef string) string {
+	normalizedType := strings.ToUpper(strings.TrimSpace(triggerType))
+	normalizedEvent := strings.TrimSpace(event)
+	if tableRef == "" || normalizedEvent == "" {
+		return ""
+	}
+
+	switch {
+	case strings.HasPrefix(normalizedType, "BEFORE"):
+		return fmt.Sprintf("BEFORE %s ON %s", normalizedEvent, tableRef)
+	case strings.HasPrefix(normalizedType, "AFTER"):
+		return fmt.Sprintf("AFTER %s ON %s", normalizedEvent, tableRef)
+	case strings.HasPrefix(normalizedType, "INSTEAD OF"):
+		return fmt.Sprintf("INSTEAD OF %s ON %s", normalizedEvent, tableRef)
+	case strings.Contains(normalizedType, "COMPOUND"):
+		return fmt.Sprintf("FOR %s ON %s", normalizedEvent, tableRef)
+	default:
+		return fmt.Sprintf("%s %s ON %s", strings.TrimSpace(triggerType), normalizedEvent, tableRef)
+	}
+}
+
+func shouldAppendOracleForEachRow(triggerType string) bool {
+	normalizedType := strings.ToUpper(strings.TrimSpace(triggerType))
+	return strings.Contains(normalizedType, "EACH ROW") && !strings.HasPrefix(normalizedType, "INSTEAD OF")
+}
+
+func normalizeOracleTriggerWhenClause(whenClause string) string {
+	trimmed := strings.TrimSpace(whenClause)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "(") && strings.HasSuffix(trimmed, ")") {
+		return "WHEN " + trimmed
+	}
+	return "WHEN (" + trimmed + ")"
 }
 
 func splitOracleQualifiedTableName(raw string) (string, string) {
@@ -955,7 +1113,10 @@ func (o *OracleDB) loadColumnTypeMap(tableName string) (map[string]string, error
 
 	columns, err := o.GetColumns(schema, table)
 	if err != nil {
-		return nil, fmt.Errorf("加载列元数据失败（表=%s）：%w；请检查 ALL_TAB_COLUMNS 查询权限与表是否存在", tableName, err)
+		return nil, oracleRuntimeError("db.backend.error.oracle_column_metadata_load_failed", map[string]any{
+			"table":  tableName,
+			"detail": err.Error(),
+		})
 	}
 
 	for _, col := range columns {
@@ -1123,7 +1284,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		if err != nil {
 			return fmt.Errorf("删除失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "删除"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionDelete); err != nil {
 			return err
 		}
 	}
@@ -1156,7 +1317,7 @@ func (o *OracleDB) ApplyChanges(tableName string, changes connection.ChangeSet) 
 		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "更新"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionUpdate); err != nil {
 			return err
 		}
 	}

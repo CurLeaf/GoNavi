@@ -21,6 +21,8 @@ func splitSQLStatements(sql string) []string {
 	var dollarTag string // postgres/kingbase: $$...$$ or $tag$...$tag$
 	plsqlDepth := 0
 	plsqlDeclareBeginSkips := 0
+	plsqlCaseDepth := 0
+	skipNextPLSQLCaseEndToken := false
 	justClosedPLSQLBlock := false
 
 	push := func() {
@@ -119,6 +121,16 @@ func splitSQLStatements(sql string) []string {
 				tokenEnd++
 			}
 			token := strings.ToLower(text[tokenStart:tokenEnd])
+			if token == "case" && plsqlDepth > 0 {
+				if skipNextPLSQLCaseEndToken {
+					skipNextPLSQLCaseEndToken = false
+				} else {
+					plsqlCaseDepth++
+					justClosedPLSQLBlock = false
+				}
+			} else if token != "case" {
+				skipNextPLSQLCaseEndToken = false
+			}
 			if token == "begin" && plsqlDeclareBeginSkips > 0 {
 				plsqlDeclareBeginSkips--
 				justClosedPLSQLBlock = false
@@ -131,12 +143,23 @@ func splitSQLStatements(sql string) []string {
 				justClosedPLSQLBlock = false
 			} else if plsqlDepth == 0 && shouldEnterPLSQLCreateRoutineBlock(text, cur.String(), token, tokenEnd) {
 				plsqlDepth++
-				plsqlDeclareBeginSkips++
+				if !isCreatePackageHeaderPrefix(cur.String()) {
+					plsqlDeclareBeginSkips++
+				}
+				justClosedPLSQLBlock = false
+			} else if token == "end" && plsqlDepth > 0 && plsqlCaseDepth > 0 {
+				plsqlCaseDepth--
+				if nextSQLSignificantToken(text, tokenEnd) == "case" {
+					skipNextPLSQLCaseEndToken = true
+				}
 				justClosedPLSQLBlock = false
 			} else if token == "end" && plsqlDepth > 0 && !isPLSQLControlEnd(text, tokenEnd) {
 				plsqlDepth--
 				if plsqlDeclareBeginSkips > plsqlDepth {
 					plsqlDeclareBeginSkips = plsqlDepth
+				}
+				if plsqlCaseDepth > plsqlDepth {
+					plsqlCaseDepth = plsqlDepth
 				}
 				justClosedPLSQLBlock = plsqlDepth == 0
 			}
@@ -155,6 +178,15 @@ func splitSQLStatements(sql string) []string {
 			inLineComment = true
 			cur.WriteByte(ch)
 			continue
+		}
+
+		if ch == '/' && (justClosedPLSQLBlock || strings.TrimSpace(cur.String()) == "") {
+			if lineEnd, ok := standaloneSQLSlashLineEnd(text, i); ok {
+				push()
+				justClosedPLSQLBlock = false
+				i = lineEnd
+				continue
+			}
 		}
 
 		// 块注释开始
@@ -222,6 +254,68 @@ func isSQLIdentifierStart(ch byte) bool {
 
 func isSQLIdentifierPart(ch byte) bool {
 	return isSQLIdentifierStart(ch) || (ch >= '0' && ch <= '9') || ch == '$' || ch == '#'
+}
+
+func isSQLHorizontalWhitespace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\f'
+}
+
+func standaloneSQLSlashLineEnd(text string, pos int) (int, bool) {
+	if pos < 0 || pos >= len(text) || text[pos] != '/' {
+		return 0, false
+	}
+	lineStart := strings.LastIndexByte(text[:pos], '\n') + 1
+	for i := lineStart; i < pos; i++ {
+		if !isSQLHorizontalWhitespace(text[i]) {
+			return 0, false
+		}
+	}
+	lineEnd, standalone, _ := scanSQLStandaloneSlashLineSuffix(text, pos)
+	if !standalone {
+		return 0, false
+	}
+	return lineEnd, true
+}
+
+func scanSQLStandaloneSlashLineSuffix(text string, pos int) (lineEnd int, standalone bool, complete bool) {
+	if pos < 0 || pos >= len(text) || text[pos] != '/' {
+		return 0, false, true
+	}
+	seenOptionalSemicolon := false
+	for i := pos + 1; i < len(text); i++ {
+		if text[i] == '\n' {
+			return i, true, true
+		}
+		if text[i] == ';' && !seenOptionalSemicolon {
+			seenOptionalSemicolon = true
+			continue
+		}
+		if text[i] == '-' {
+			if i+1 >= len(text) {
+				return len(text), true, false
+			}
+			if text[i+1] == '-' {
+				lineEnd := scanSQLLineCommentEnd(text, i+2)
+				if lineEnd >= len(text) {
+					return lineEnd, true, false
+				}
+				return lineEnd, true, true
+			}
+		}
+		if !isSQLHorizontalWhitespace(text[i]) {
+			return 0, false, true
+		}
+	}
+	return len(text), true, false
+}
+
+func scanSQLLineCommentEnd(text string, pos int) int {
+	for i := pos; i < len(text); i++ {
+		if text[i] == '\n' {
+			return i
+		}
+	}
+	return len(text)
 }
 
 func skipSQLWhitespaceAndComments(text string, pos int) int {
@@ -339,7 +433,36 @@ func isCreateRoutineHeaderPrefix(text string) bool {
 		currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
 	}
 
-	return currentToken == "procedure" || currentToken == "function"
+	if currentToken == "procedure" || currentToken == "function" {
+		return true
+	}
+	if currentToken != "package" {
+		return false
+	}
+	currentToken, _ = nextSQLSignificantTokenSpan(text, currentEnd)
+	return currentToken == "" || currentToken == "body" || isSQLIdentifierStart(currentToken[0])
+}
+
+func isCreatePackageHeaderPrefix(text string) bool {
+	currentToken, currentEnd := nextSQLSignificantTokenSpan(text, 0)
+	if currentToken != "create" {
+		return false
+	}
+
+	currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+	if currentToken == "or" {
+		currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+		if currentToken != "replace" {
+			return false
+		}
+		currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+	}
+
+	for currentToken == "editionable" || currentToken == "noneditionable" {
+		currentToken, currentEnd = nextSQLSignificantTokenSpan(text, currentEnd)
+	}
+
+	return currentToken == "package"
 }
 
 func nextSQLSignificantTokenSpan(text string, pos int) (string, int) {

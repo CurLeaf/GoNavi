@@ -4,26 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import AISettingsMCPSection from './AISettingsMCPSection';
 import type { AISettingsMCPSectionProps } from './AISettingsMCPSection';
+import { I18nProvider } from '../../i18n/provider';
 import { buildOverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
-
-const findElement = (node: any, predicate: (element: any) => boolean): any => {
-  if (node == null || typeof node === 'boolean' || typeof node === 'string' || typeof node === 'number') {
-    return null;
-  }
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      const match = findElement(item, predicate);
-      if (match) {
-        return match;
-      }
-    }
-    return null;
-  }
-  if (predicate(node)) {
-    return node;
-  }
-  return findElement(node.props?.children, predicate);
-};
 
 const buildMCPSectionProps = (patch: Partial<AISettingsMCPSectionProps> = {}): AISettingsMCPSectionProps => ({
   mcpClientStatuses: [
@@ -98,41 +80,82 @@ const buildMCPSectionProps = (patch: Partial<AISettingsMCPSectionProps> = {}): A
   ...patch,
 });
 
+const renderSectionWithMockedHTTPPanel = async (props: AISettingsMCPSectionProps) => {
+  const captured: { httpPanelProps?: any } = {};
+
+  vi.resetModules();
+  vi.doMock('./AIMCPHTTPServerPanel', () => ({
+    default: (panelProps: any) => {
+      captured.httpPanelProps = panelProps;
+      return null;
+    },
+  }));
+  vi.doMock('./AIMCPClientInstallPanel', () => ({ default: () => null }));
+  vi.doMock('./AIMCPQuickAddServerPanel', () => ({ default: () => null }));
+  vi.doMock('./AIMCPFieldGuideCard', () => ({ default: () => null }));
+  vi.doMock('./AIMCPServerCard', () => ({ default: () => null }));
+
+  const { default: MockedAISettingsMCPSection } = await import('./AISettingsMCPSection');
+  renderToStaticMarkup(<MockedAISettingsMCPSection {...props} />);
+
+  vi.doUnmock('./AIMCPHTTPServerPanel');
+  vi.doUnmock('./AIMCPClientInstallPanel');
+  vi.doUnmock('./AIMCPQuickAddServerPanel');
+  vi.doUnmock('./AIMCPFieldGuideCard');
+  vi.doUnmock('./AIMCPServerCard');
+
+  return captured;
+};
+
 describe('AISettingsMCPSection', () => {
   it('renders the extracted MCP client installer and server management entry point', () => {
     const markup = renderToStaticMarkup(
       <AISettingsMCPSection {...buildMCPSectionProps()} />,
     );
 
-    expect(markup).toContain('GoNavi MCP HTTP 服务');
-    expect(markup).toContain('可自定义本机监听端口和 Bearer Token');
+    expect(markup).toContain('GoNavi MCP HTTP service');
+    expect(markup).toContain('customize the local listen port and Bearer Token');
     expect(markup).toContain('http://127.0.0.1:8765/mcp');
-    expect(markup).toContain('复制 Authorization');
-    expect(markup).toContain('接入外部客户端');
-    expect(markup).toContain('尚未把当前 GoNavi MCP 接入到这里');
-    expect(markup).toContain('一行命令快速新增');
-    expect(markup).toContain('先选最接近的模板');
-    expect(markup).toContain('解析并新增草稿');
-    expect(markup).toContain('新增 MCP 参数速查');
+    expect(markup).toContain('Copy Authorization');
+    expect(markup).toContain('Connect external client');
+    expect(markup).toContain('Current GoNavi MCP is not connected here yet');
+    expect(markup).toContain('Quick add from one command');
+    expect(markup).toContain('Choose the closest template');
+    expect(markup).toContain('Parse and add draft');
+    expect(markup).toContain('New MCP parameter quick reference');
     expect(markup).toContain('command');
     expect(markup).toContain('args');
     expect(markup).toContain('env');
     expect(markup).toContain('timeout');
-    expect(markup).toContain('只填程序名或启动器本身');
-    expect(markup).toContain('应填：');
-    expect(markup).toContain('填 npx、node、uvx、python、docker，或某个 exe 的绝对路径');
-    expect(markup).toContain('不要填整行命令，例如不要填 npx -y pkg --stdio');
-    expect(markup).toContain('把脚本名、模块名、开关参数拆开逐项填写');
-    expect(markup).toContain('不要再填 npx/node/uvx/python/docker');
-    expect(markup).toContain('给 MCP Server 传入 KEY=VALUE 形式的配置');
-    expect(markup).toContain('不要写 export、set 或 $env: 前缀');
-    expect(markup).toContain('单次工具发现或调用最多等待多久');
-    expect(markup).toContain('常见启动方式模板');
-    expect(markup).toContain('npx 包');
+    expect(markup).toContain('Enter only the program name or launcher itself');
+    expect(markup).toContain('Fill:');
+    expect(markup).toContain('Enter npx, node, uvx, python, docker, or an absolute path to an exe');
+    expect(markup).toContain('Do not enter the whole command line, such as npx -y pkg --stdio');
+    expect(markup).toContain('Split script names, module names, and flags into separate entries');
+    expect(markup).toContain('Do not enter npx/node/uvx/python/docker again');
+    expect(markup).toContain('Pass KEY=VALUE configuration to the MCP Server');
+    expect(markup).toContain('Do not write export, set, or a $env: prefix');
+    expect(markup).toContain('Maximum wait time for one tool discovery or call');
+    expect(markup).toContain('Common startup templates');
+    expect(markup).toContain('npx package');
     expect(markup).toContain('npx -y @modelcontextprotocol/server-filesystem --stdio');
-    expect(markup).toContain('Node 脚本');
-    expect(markup).toContain('Docker 镜像');
+    expect(markup).toContain('Node script');
+    expect(markup).toContain('Docker image');
     expect(markup).toContain('docker run -i --rm image');
+    expect(markup).toContain('Add MCP service');
+    expect(markup).toContain('No MCP service yet');
+    expect(markup).toContain('npx -y package --stdio');
+  });
+
+  it('renders the MCP quick reference in Chinese when an i18n provider is available', () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider preference="zh-CN" systemLanguages={['zh-CN']} onPreferenceChange={() => {}}>
+        <AISettingsMCPSection {...buildMCPSectionProps()} />
+      </I18nProvider>,
+    );
+
+    expect(markup).toContain('新增 MCP 参数速查');
+    expect(markup).toContain('应填：');
     expect(markup).toContain('新增 MCP 服务');
     expect(markup).toContain('还没有 MCP 服务');
     expect(markup).toContain('npx -y package --stdio');
@@ -181,52 +204,44 @@ describe('AISettingsMCPSection', () => {
       />,
     );
 
-    expect(markup).toContain('常见填错现象');
-    expect(markup).toContain('测试提示找不到命令');
-    expect(markup).toContain('认证失败、401 或 403');
-    expect(markup).toContain('当前只支持 stdio');
-    expect(markup).toContain('不要把密钥写进聊天内容');
-    expect(markup).toContain('已发现工具和参数提示');
+    expect(markup).toContain('Common setup mistakes');
+    expect(markup).toContain('Test says the command cannot be found');
+    expect(markup).toContain('Authentication failed, 401, or 403');
+    expect(markup).toContain('the current GoNavi add flow does not directly support it');
+    expect(markup).toContain('do not put secrets into chat content');
+    expect(markup).toContain('Discovered tools and parameter hints');
     expect(markup).toContain('execute_sql');
-    expect(markup).toContain('参数 4 个，必填 2 个');
-    expect(markup).toContain('最小 arguments 示例');
+    expect(markup).toContain('4 parameters, 2 required; an asterisk marks required fields.');
+    expect(markup).toContain('Minimum arguments example:');
     expect(markup).toContain('&quot;connectionId&quot;:&quot;&lt;connectionId&gt;&quot;');
     expect(markup).toContain('&quot;sql&quot;:&quot;&lt;sql&gt;&quot;');
     expect(markup).toContain('connectionId*: string');
     expect(markup).toContain('sql*: string');
     expect(markup).toContain('allowMutating: boolean');
     expect(markup).toContain('legacy_tool');
-    expect(markup).toContain('未声明 inputSchema');
+    expect(markup).toContain('No inputSchema declared; check the service docs or use /mcptool before calling.');
   });
 
-  it('toggles the in-app MCP HTTP service from the switch panel', () => {
+  it('toggles the in-app MCP HTTP service from the switch panel', async () => {
     const onToggleHTTPServer = vi.fn();
-    const tree = AISettingsMCPSection(buildMCPSectionProps({
+    const captured = await renderSectionWithMockedHTTPPanel(buildMCPSectionProps({
       onToggleHTTPServer,
     }));
 
-    const httpPanel = findElement(
-      tree,
-      (node) => node.props?.onToggle === onToggleHTTPServer,
-    );
-    expect(httpPanel).toBeTruthy();
-    httpPanel.props.onToggle(true);
+    expect(captured.httpPanelProps).toBeTruthy();
+    captured.httpPanelProps.onToggle(true);
 
     expect(onToggleHTTPServer).toHaveBeenCalledWith(true);
   });
 
-  it('passes MCP HTTP draft updates through the switch panel', () => {
+  it('passes MCP HTTP draft updates through the switch panel', async () => {
     const onUpdateHTTPServerDraft = vi.fn();
-    const tree = AISettingsMCPSection(buildMCPSectionProps({
+    const captured = await renderSectionWithMockedHTTPPanel(buildMCPSectionProps({
       onUpdateHTTPServerDraft,
     }));
 
-    const httpPanel = findElement(
-      tree,
-      (node) => node.props?.onDraftChange === onUpdateHTTPServerDraft,
-    );
-    expect(httpPanel).toBeTruthy();
-    httpPanel.props.onDraftChange({ addr: '127.0.0.1:9123' });
+    expect(captured.httpPanelProps).toBeTruthy();
+    captured.httpPanelProps.onDraftChange({ addr: '127.0.0.1:9123' });
 
     expect(onUpdateHTTPServerDraft).toHaveBeenCalledWith({ addr: '127.0.0.1:9123' });
   });

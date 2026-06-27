@@ -4,9 +4,11 @@ import {
   V2_COMMAND_SEARCH_INITIAL_TREE_LIMIT,
   V2_COMMAND_SEARCH_MAX_TREE_RESULTS,
   buildV2CommandSearchTreeIndex,
+  collectSidebarSubtreeKeys,
   filterV2CommandSearchTreeItems,
   parseV2CommandSearchQuery,
   resolveSidebarDatabaseTreePruneKeys,
+  shouldClearSidebarNodeChildrenOnCollapse,
   type V2CommandSearchItem,
 } from './sidebarV2Utils';
 
@@ -112,5 +114,30 @@ describe('sidebarV2 command search performance helpers', () => {
       },
       maxLoadedDatabases: 2,
     })).toEqual(['conn-1-db-a', 'conn-1-db-b']);
+  });
+
+  it('clears only large loaded sidebar subtrees on collapse', () => {
+    const routineChildren = Array.from({ length: 180 }, (_, index) => ({
+      key: `routine-${index}`,
+      title: `routine_${index}`,
+      type: 'routine' as const,
+    }));
+    const largeRoutineGroup = {
+      key: 'conn-1-db-a-routines',
+      title: '函数',
+      type: 'object-group' as const,
+      children: routineChildren,
+    };
+
+    expect(collectSidebarSubtreeKeys(largeRoutineGroup)).toHaveLength(180);
+    expect(shouldClearSidebarNodeChildrenOnCollapse(largeRoutineGroup)).toBe(true);
+    expect(shouldClearSidebarNodeChildrenOnCollapse({
+      type: 'object-group',
+      children: routineChildren.slice(0, 8),
+    })).toBe(false);
+    expect(shouldClearSidebarNodeChildrenOnCollapse({
+      type: 'table',
+      children: routineChildren,
+    })).toBe(false);
   });
 });

@@ -76,6 +76,7 @@ describe('resolveEditRowLocator', () => {
     })).toMatchObject({
       strategy: 'none',
       readOnly: true,
+      reason: 'No primary key or usable unique index was found, so changes cannot be submitted safely.',
     });
   });
 
@@ -87,7 +88,49 @@ describe('resolveEditRowLocator', () => {
     })).toMatchObject({
       strategy: 'none',
       readOnly: true,
-      reason: '结果集中缺少主键列 ID，无法安全提交修改。',
+      reason: 'The result set is missing primary key column ID, so changes cannot be submitted safely.',
+    });
+  });
+
+  it('localizes read-only reasons while preserving raw locator names', () => {
+    const translate = (key: string, params?: Record<string, string | number | boolean | null | undefined>) => ({
+      'data_viewer.read_only.reason.primary_key_column_missing': `結果集中缺少主鍵欄位 ${params?.columns}，無法安全提交修改。`,
+      'data_viewer.read_only.reason.no_safe_locator': '未偵測到主鍵或可用唯一索引，無法安全提交修改。',
+      'data_viewer.read_only.reason.oracle_rowid_missing': '未偵測到主鍵或可用唯一索引，且結果集中缺少 Oracle ROWID，無法安全提交修改。',
+      'data_viewer.read_only.reason.duckdb_rowid_missing': '未偵測到主鍵、可用唯一索引或 DuckDB rowid，無法安全提交修改。',
+    }[key] ?? key);
+
+    expect(resolveEditRowLocator({
+      dbType: 'mysql',
+      resultColumns: ['NAME'],
+      primaryKeys: ['TENANT_ID', 'ID'],
+      translate,
+    })).toMatchObject({
+      strategy: 'none',
+      readOnly: true,
+      reason: '結果集中缺少主鍵欄位 TENANT_ID, ID，無法安全提交修改。',
+    });
+
+    expect(resolveEditRowLocator({
+      dbType: 'oracle',
+      resultColumns: ['NAME'],
+      allowOracleRowID: true,
+      translate,
+    })).toMatchObject({
+      strategy: 'none',
+      readOnly: true,
+      reason: '未偵測到主鍵或可用唯一索引，且結果集中缺少 Oracle ROWID，無法安全提交修改。',
+    });
+
+    expect(resolveEditRowLocator({
+      dbType: 'duckdb',
+      resultColumns: ['name'],
+      allowDuckDBRowID: true,
+      translate,
+    })).toMatchObject({
+      strategy: 'none',
+      readOnly: true,
+      reason: '未偵測到主鍵、可用唯一索引或 DuckDB rowid，無法安全提交修改。',
     });
   });
 

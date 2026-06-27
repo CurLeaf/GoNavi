@@ -4,6 +4,7 @@ package db
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -109,11 +110,11 @@ func TestElasticsearchGetDatabases(t *testing.T) {
 		server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodGet && (r.URL.Path == "/" || r.URL.Path == "/*") && !strings.Contains(r.URL.Path, "_") {
 				writeJSON(w, map[string]interface{}{
-					"logs-2024":  map[string]interface{}{},
-					"users":      map[string]interface{}{},
-					".security":  map[string]interface{}{},
-					".kibana_1":  map[string]interface{}{},
-					"products":   map[string]interface{}{},
+					"logs-2024": map[string]interface{}{},
+					"users":     map[string]interface{}{},
+					".security": map[string]interface{}{},
+					".kibana_1": map[string]interface{}{},
+					"products":  map[string]interface{}{},
 				})
 				return
 			}
@@ -247,8 +248,8 @@ func TestElasticsearchGetColumns(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetColumns 失败：%v", err)
 		}
-		if len(columns) != 4 {
-			t.Fatalf("期望 4 个字段，实际 %d", len(columns))
+		if len(columns) != 5 {
+			t.Fatalf("期望 5 个字段（含 _id），实际 %d", len(columns))
 		}
 
 		// 验证字段类型映射
@@ -261,9 +262,15 @@ func TestElasticsearchGetColumns(t *testing.T) {
 				t.Fatalf("字段 %q 类型期望 %q，实际 %q", name, expectedType, typeMap[name])
 			}
 		}
+		if typeMap["_id"] != "keyword" {
+			t.Fatalf("_id 字段类型期望 keyword，实际 %q", typeMap["_id"])
+		}
 
-		// 验证所有字段标记为可空
+		// 验证业务字段标记为可空；_id 是 ES 文档定位列，不沿用 mapping nullable。
 		for _, col := range columns {
+			if col.Name == "_id" {
+				continue
+			}
 			if col.Nullable != "YES" {
 				t.Fatalf("字段 %q Nullable 期望 YES，实际 %q", col.Name, col.Nullable)
 			}
@@ -313,8 +320,8 @@ func TestElasticsearchGetAllColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAllColumns 失败：%v", err)
 	}
-	if len(columns) != 2 {
-		t.Fatalf("期望 2 个字段，实际 %d", len(columns))
+	if len(columns) != 3 {
+		t.Fatalf("期望 3 个字段（含 _id），实际 %d", len(columns))
 	}
 
 	// 验证每个字段都带有表名标识
@@ -605,11 +612,16 @@ func TestElasticsearchGetIndexes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetIndexes 失败：%v", err)
 	}
-	if len(indexes) != 1 {
-		t.Fatalf("期望 1 个索引信息，实际 %d", len(indexes))
+	if len(indexes) != 2 {
+		t.Fatalf("期望 2 个索引信息（含 PRIMARY），实际 %d", len(indexes))
 	}
 
-	idx := indexes[0]
+	primary := indexes[0]
+	if primary.Name != "PRIMARY" || primary.ColumnName != "_id" || primary.IndexType != "PRIMARY" {
+		t.Fatalf("第一个索引应为 _id PRIMARY，实际：%#v", primary)
+	}
+
+	idx := indexes[1]
 	if idx.Name != "test-index" {
 		t.Fatalf("索引名期望 test-index，实际：%s", idx.Name)
 	}
@@ -760,15 +772,15 @@ func TestExtractColumnsFromMapping(t *testing.T) {
 		}
 
 		columns := extractColumnsFromMapping("test-index", mapping)
-		if len(columns) != 3 {
-			t.Fatalf("期望 3 个字段，实际 %d", len(columns))
+		if len(columns) != 4 {
+			t.Fatalf("期望 4 个字段（含 _id），实际 %d", len(columns))
 		}
 
 		typeMap := make(map[string]string)
 		for _, col := range columns {
 			typeMap[col.Name] = col.Type
 		}
-		expectedTypes := map[string]string{"title": "text", "count": "long", "tags": "keyword"}
+		expectedTypes := map[string]string{"_id": "keyword", "title": "text", "count": "long", "tags": "keyword"}
 		for name, expectedType := range expectedTypes {
 			if typeMap[name] != expectedType {
 				t.Fatalf("字段 %q 类型期望 %q，实际 %q", name, expectedType, typeMap[name])
@@ -791,11 +803,18 @@ func TestExtractColumnsFromMapping(t *testing.T) {
 		}
 
 		columns := extractColumnsFromMapping("idx", mapping)
-		if len(columns) != 1 {
-			t.Fatalf("期望 1 个字段，实际 %d", len(columns))
+		if len(columns) != 2 {
+			t.Fatalf("期望 2 个字段（含 _id），实际 %d", len(columns))
 		}
-		if columns[0].Comment != "用户邮箱地址" {
-			t.Fatalf("期望注释 '用户邮箱地址'，实际：%q", columns[0].Comment)
+		var emailComment string
+		for _, col := range columns {
+			if col.Name == "email" {
+				emailComment = col.Comment
+				break
+			}
+		}
+		if emailComment != "用户邮箱地址" {
+			t.Fatalf("期望 email 注释 '用户邮箱地址'，实际：%q", emailComment)
 		}
 	})
 
@@ -831,8 +850,8 @@ func TestExtractColumnsFromMapping(t *testing.T) {
 			},
 		}
 		columns := extractColumnsFromMapping("non-matching-key", mapping)
-		if len(columns) != 1 {
-			t.Fatalf("应自动查找 mapping 数据，期望 1 个字段，实际 %d 个", len(columns))
+		if len(columns) != 2 {
+			t.Fatalf("应自动查找 mapping 数据，期望 2 个字段（含 _id），实际 %d 个", len(columns))
 		}
 	})
 }
@@ -1546,6 +1565,49 @@ func TestElasticsearchSourceFlatten(t *testing.T) {
 	})
 }
 
+func TestElasticsearchSQLSelectDoesNotRequireXPackSQL(t *testing.T) {
+	var capturedPath string
+	var capturedBody string
+	server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/_search") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		capturedPath = r.URL.Path
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = string(body)
+		if strings.Contains(capturedBody, "query_string") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"hits":{"total":{"value":0},"hits":[]}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"hits": {
+				"total": {"value": 1},
+				"hits": [
+					{"_index": "products", "_id": "1", "_source": {"name": "商品A", "price": 99.9}}
+				]
+			}
+		}`))
+	})
+
+	db := newTestESDB(t, server.URL, "")
+	rows, columns, err := db.Query(`SELECT * FROM "products";`)
+	if err != nil {
+		t.Fatalf("ES SQL 查询应通过 _search 转换执行成功：%v", err)
+	}
+	if capturedPath != "/products/_search" {
+		t.Fatalf("ES SQL 查询应转为 products/_search，不应依赖 _sql，实际路径：%s", capturedPath)
+	}
+	if strings.Contains(capturedBody, "query_string") {
+		t.Fatalf("SELECT 查询不应降级为 query_string，实际请求体：%s", capturedBody)
+	}
+	if len(rows) != 1 || rows[0]["name"] != "商品A" {
+		t.Fatalf("期望返回 products 命中数据，实际 rows=%#v columns=%v", rows, columns)
+	}
+}
+
 // ---- extractESSQLFromTable 测试 ----
 
 func TestESExtractSQLFromTable(t *testing.T) {
@@ -1560,6 +1622,8 @@ func TestESExtractSQLFromTable(t *testing.T) {
 		{"通配符表名", `SELECT * FROM "logs-*" LIMIT 10`, "logs-*"},
 		{"多段引号标识符", `SELECT * FROM "iot_pro_biz_operate_log"."index"."20250515" WHERE (("_score">45)) LIMIT 101 OFFSET 0`, "iot_pro_biz_operate_log.index.20250515"},
 		{"两段引号标识符", `SELECT * FROM "my_schema"."my_table" LIMIT 10`, "my_schema.my_table"},
+		{"带分号的引号表名", `SELECT * FROM "app_log_user";`, "app_log_user"},
+		{"带分号的无引号表名", `SELECT * FROM my_index;`, "my_index"},
 		{"非 SELECT 语句", `{"query": {"match_all": {}}}`, ""},
 		{"空语句", ``, ""},
 		{"FROM 语句片段", `FROM "test"`, "test"},
@@ -1591,6 +1655,8 @@ func TestESParseSQL(t *testing.T) {
 		{"带点索引名", `SELECT * FROM "iot.index.2024" LIMIT 200`, "iot.index.2024", 200, 0, true},
 		{"多段引号", `SELECT * FROM "schema"."table" LIMIT 50 OFFSET 10`, "schema.table", 50, 10, true},
 		{"无LIMIT", `SELECT * FROM "my_index"`, "my_index", 0, 0, true},
+		{"带分号", `SELECT * FROM "my_index";`, "my_index", 0, 0, true},
+		{"LIMIT 后带分号", `SELECT * FROM "my_index" LIMIT 100;`, "my_index", 100, 0, true},
 		{"DSL JSON", `{"query": {"match_all": {}}}`, "", 0, 0, false},
 		{"分页_第1页", `SELECT * FROM "app_log_user" LIMIT 101 OFFSET 0`, "app_log_user", 101, 0, true},
 		{"分页_第2页", `SELECT * FROM "app_log_user" LIMIT 101 OFFSET 100`, "app_log_user", 101, 100, true},

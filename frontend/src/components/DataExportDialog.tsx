@@ -2,6 +2,7 @@ import Modal from './common/ResizableDraggableModal';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Form, InputNumber, Select, message } from 'antd';
 import { ExportOutlined } from '@ant-design/icons';
+import { t } from '../i18n';
 
 export type DataExportFormat = 'csv' | 'xlsx' | 'json' | 'md' | 'html';
 export type DataExportScope = 'selected' | 'page' | 'all' | 'filteredAll';
@@ -69,21 +70,23 @@ const validateDialogValues = (
   scopeOptions: DataExportScopeOption[],
 ): string | null => {
   if (!DATA_EXPORT_FORMAT_OPTIONS.some((item) => item.value === values.format)) {
-    return '请选择导出格式';
+    return t('data_export.dialog.validation.format_required');
   }
   if (scopeOptions.length > 0) {
     const matchedScope = scopeOptions.find((item) => String(item.value) === String(values.scope));
     if (!matchedScope || matchedScope.disabled) {
-      return '请选择可用的导出范围';
+      return t('data_export.dialog.validation.scope_required');
     }
   }
   if (values.format === 'xlsx') {
     const rows = Math.trunc(Number(values.xlsxMaxRowsPerSheet) || 0);
     if (!Number.isFinite(rows) || rows <= 0) {
-      return '请输入有效的每个工作表最大行数';
+      return t('data_export.dialog.validation.xlsx_max_rows_required');
     }
     if (rows > MAX_XLSX_ROWS_PER_SHEET) {
-      return `每个工作表最大行数不能超过 ${MAX_XLSX_ROWS_PER_SHEET.toLocaleString()}`;
+      return t('data_export.dialog.validation.xlsx_max_rows_limit', {
+        maxRows: MAX_XLSX_ROWS_PER_SHEET.toLocaleString(),
+      });
     }
   }
   return null;
@@ -108,7 +111,7 @@ const DataExportDialogContent: React.FC<{
   return (
     <div data-export-config-modal="true">
       <Form layout="vertical" colon={false}>
-        <Form.Item label="导出格式" style={{ marginBottom: 16 }}>
+        <Form.Item label={t('data_export.dialog.field.format')} style={{ marginBottom: 16 }}>
           <Select
             value={values.format}
             options={DATA_EXPORT_FORMAT_OPTIONS}
@@ -116,7 +119,7 @@ const DataExportDialogContent: React.FC<{
           />
         </Form.Item>
 
-        <Form.Item label="导出范围" style={{ marginBottom: 8 }}>
+        <Form.Item label={t('data_export.dialog.field.scope')} style={{ marginBottom: 8 }}>
           <Select
             value={values.scope}
             disabled={scopeOptions.length <= 1}
@@ -137,8 +140,10 @@ const DataExportDialogContent: React.FC<{
 
         {values.format === 'xlsx' && (
           <Form.Item
-            label="每个工作表最大行数"
-            extra={`仅 XLSX 生效，最大 ${MAX_XLSX_ROWS_PER_SHEET.toLocaleString()} 行（不含表头）`}
+            label={t('data_export.dialog.field.xlsx_max_rows')}
+            extra={t('data_export.dialog.field.xlsx_max_rows_help', {
+              maxRows: MAX_XLSX_ROWS_PER_SHEET.toLocaleString(),
+            })}
             style={{ marginBottom: 0 }}
           >
             <InputNumber
@@ -183,8 +188,8 @@ export async function showDataExportDialog(
       width: 520,
       centered: true,
       maskClosable: true,
-      okText: options.okText || '开始导出',
-      cancelText: '取消',
+      okText: options.okText || t('data_export.dialog.action.start'),
+      cancelText: t('common.cancel'),
       content: (
         <DataExportDialogContent
           scopeOptions={options.scopeOptions}

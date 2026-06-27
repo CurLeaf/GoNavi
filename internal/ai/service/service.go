@@ -89,7 +89,9 @@ var volcengineCodingPlanAllowedModelFamilies = []string{
 	"kimi-k2",
 }
 
-const volcengineCodingPlanEmptyModelsError = `当前接口未返回可用的火山 Coding Plan 模型，请检查账号权限或切换到"火山方舟"供应商`
+const volcengineCodingPlanModelsEmptyKey = "ai_service.backend.error.volcengine_coding_models_empty"
+const providerImageFallbackPromptKey = "ai_service.backend.provider.image_fallback_prompt"
+const providerImageOmittedNoticeKey = "ai_service.backend.provider.image_omitted_notice"
 
 var claudeCLIHealthCheckFunc = func(config ai.ProviderConfig) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -285,17 +287,56 @@ func (s *Service) localizeProviderHealthCheckRequestError(err error) error {
 	}
 	message := err.Error()
 	switch {
-	case strings.HasPrefix(message, "创建请求失败: "):
+	case strings.HasPrefix(message, "create request failed: "):
 		return fmt.Errorf("%s", s.serviceText("ai_service.backend.error.provider_request_create_failed", map[string]any{
-			"detail": strings.TrimPrefix(message, "创建请求失败: "),
+			"detail": strings.TrimPrefix(message, "create request failed: "),
 		}))
-	case strings.HasPrefix(message, "序列化请求失败: "):
+	case strings.HasPrefix(message, "serialize request failed: "):
 		return fmt.Errorf("%s", s.serviceText("ai_service.backend.error.provider_request_serialize_failed", map[string]any{
-			"detail": strings.TrimPrefix(message, "序列化请求失败: "),
+			"detail": strings.TrimPrefix(message, "serialize request failed: "),
 		}))
 	default:
 		return err
 	}
+}
+
+func trimLocalizedModelListRequestCreateDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.TrimSpace(err.Error())
+	for _, prefix := range []string{"create request failed: "} {
+		if strings.HasPrefix(message, prefix) {
+			return strings.TrimPrefix(message, prefix)
+		}
+	}
+	return message
+}
+
+func localizeModelListRequestCreateError(localizer *i18n.Localizer, err error) error {
+	if err == nil {
+		return nil
+	}
+	key := "ai_service.backend.error.models_request_create_failed"
+	text := serviceTextFromLocalizer(localizer, key, map[string]any{
+		"detail": trimLocalizedModelListRequestCreateDetail(err),
+	})
+	return serviceErrorFromText(key, text, err)
+}
+
+func localizeModelListRequestError(localizer *i18n.Localizer, err error) error {
+	return serviceErrorFromLocalizer(localizer, "ai_service.backend.error.models_request_failed", nil, err)
+}
+
+func localizeModelListHTTPStatusError(localizer *i18n.Localizer, status int, body []byte) error {
+	return fmt.Errorf("%s", serviceTextFromLocalizer(localizer, "ai_service.backend.error.models_http_status_failed", map[string]any{
+		"status": status,
+		"body":   formatProviderHTTPBody(body),
+	}))
+}
+
+func localizeModelListParseError(localizer *i18n.Localizer, err error) error {
+	return serviceErrorFromLocalizer(localizer, "ai_service.backend.error.models_parse_failed", nil, err)
 }
 
 // InitializeLifecycle attaches runtime context without exposing lifecycle internals to Wails bindings.
@@ -678,13 +719,13 @@ func filterVolcengineCodingPlanModels(models []string) []string {
 	return filtered
 }
 
-func filterFetchedModelsForProvider(config ai.ProviderConfig, models []string) ([]string, error) {
+func filterFetchedModelsForProvider(config ai.ProviderConfig, models []string, localizer *i18n.Localizer) ([]string, error) {
 	if !isVolcengineCodingPlanProvider(config) {
 		return models, nil
 	}
 	filtered := filterVolcengineCodingPlanModels(models)
 	if len(filtered) == 0 {
-		return nil, fmt.Errorf(volcengineCodingPlanEmptyModelsError)
+		return nil, fmt.Errorf("%s", serviceTextFromLocalizer(localizer, volcengineCodingPlanModelsEmptyKey, nil))
 	}
 	return filtered, nil
 }
@@ -770,15 +811,15 @@ func resolveModelsURL(config ai.ProviderConfig) string {
 	}
 }
 
-func newModelsRequest(config ai.ProviderConfig) (*http.Request, error) {
+func newModelsRequest(config ai.ProviderConfig, localizer *i18n.Localizer) (*http.Request, error) {
 	config = normalizeProviderConfig(config)
 	url := resolveModelsURL(config)
 	if strings.TrimSpace(url) == "" {
-		return nil, fmt.Errorf("当前供应商不支持远端模型列表")
+		return nil, fmt.Errorf("create request failed: %s", serviceTextFromLocalizer(localizer, "ai_service.backend.error.models_remote_unsupported", nil))
 	}
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建请求失败: %w", err)
+		return nil, fmt.Errorf("create request failed: %w", err)
 	}
 
 	switch normalizedProviderType(config) {
@@ -822,7 +863,7 @@ func newProviderHealthCheckRequest(config ai.ProviderConfig) (*http.Request, err
 	if isMiniMaxAnthropicProvider(config) || isDashScopeBailianAnthropicProvider(config) || isDashScopeCodingPlanAnthropicProvider(config) {
 		return newAnthropicMessagesHealthCheckRequest(config)
 	}
-	return newModelsRequest(config)
+	return newModelsRequest(config, nil)
 }
 
 func newAnthropicMessagesHealthCheckRequest(config ai.ProviderConfig) (*http.Request, error) {
@@ -835,11 +876,11 @@ func newAnthropicMessagesHealthCheckRequest(config ai.ProviderConfig) (*http.Req
 	}
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
-		return nil, fmt.Errorf("序列化请求失败: %w", err)
+		return nil, fmt.Errorf("serialize request failed: %w", err)
 	}
 	req, err := http.NewRequest("POST", resolveAnthropicMessagesURL(config.BaseURL), strings.NewReader(string(bodyBytes)))
 	if err != nil {
-		return nil, fmt.Errorf("创建请求失败: %w", err)
+		return nil, fmt.Errorf("create request failed: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	provider.ApplyAnthropicAuthHeaders(req.Header, config.BaseURL, config.APIKey)
@@ -866,7 +907,10 @@ func (s *Service) AIGetActiveProvider() string {
 
 // AIGetBuiltinPrompts 返回内部置的各类系统提示词，用于前端展示或查询
 func (s *Service) AIGetBuiltinPrompts() map[string]string {
-	return aicontext.GetBuiltinPrompts()
+	localizer := s.serviceLocalizerForLanguage()
+	return aicontext.GetBuiltinPromptsWithTitleLookup(func(key string) string {
+		return serviceTextFromLocalizer(localizer, key, nil)
+	})
 }
 
 // AIGetUserPromptSettings 获取用户级自定义提示词配置
@@ -890,6 +934,7 @@ func (s *Service) AIListModels() map[string]interface{} {
 	s.mu.RLock()
 	var config ai.ProviderConfig
 	found := false
+	localizer := s.serviceLocalizerForLanguageLocked()
 	for _, p := range s.providers {
 		if p.ID == s.activeProvider {
 			config = p
@@ -900,7 +945,11 @@ func (s *Service) AIListModels() map[string]interface{} {
 	s.mu.RUnlock()
 
 	if !found {
-		return map[string]interface{}{"success": false, "models": []string{}, "error": "未找到活跃 Provider"}
+		return map[string]interface{}{
+			"success": false,
+			"models":  []string{},
+			"error":   serviceTextFromLocalizer(localizer, "ai_service.backend.error.active_provider_not_found", nil),
+		}
 	}
 
 	config = normalizeProviderConfig(config)
@@ -915,7 +964,7 @@ func (s *Service) AIListModels() map[string]interface{} {
 		return map[string]interface{}{"success": true, "models": staticModels, "source": "static"}
 	}
 
-	models, err := fetchModelsFunc(config)
+	models, err := fetchModelsFunc(config, localizer)
 	if err != nil {
 		// 回退到配置中的静态模型列表
 		if len(config.Models) > 0 {
@@ -924,7 +973,7 @@ func (s *Service) AIListModels() map[string]interface{} {
 		return map[string]interface{}{"success": false, "models": []string{}, "error": err.Error()}
 	}
 
-	models, err = filterFetchedModelsForProvider(config, models)
+	models, err = filterFetchedModelsForProvider(config, models, localizer)
 	if err != nil {
 		return map[string]interface{}{"success": false, "models": []string{}, "error": err.Error()}
 	}
@@ -935,7 +984,7 @@ func (s *Service) AIListModels() map[string]interface{} {
 // fetchModels 从供应商 API 获取可用模型列表
 var fetchModelsFunc = fetchModels
 
-func fetchModels(config ai.ProviderConfig) ([]string, error) {
+func fetchModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {
 	providerType := normalizedProviderType(config)
 	if staticModels := defaultStaticModelsForProvider(config); len(staticModels) > 0 {
 		return staticModels, nil
@@ -943,37 +992,37 @@ func fetchModels(config ai.ProviderConfig) ([]string, error) {
 
 	switch providerType {
 	case "openai":
-		return fetchOpenAIModels(config)
+		return fetchOpenAIModels(config, localizer)
 	case "anthropic":
-		return fetchAnthropicModels(config)
+		return fetchAnthropicModels(config, localizer)
 	case "gemini":
-		return fetchGeminiModels(config)
+		return fetchGeminiModels(config, localizer)
 	case "cursor-agent":
-		return fetchCursorModels(config)
+		return fetchCursorModels(config, localizer)
 	case "codebuddy-cli":
 		return append([]string(nil), config.Models...), nil
 	default:
-		return fetchOpenAIModels(config)
+		return fetchOpenAIModels(config, localizer)
 	}
 }
 
 // fetchOpenAIModels 获取 OpenAI 兼容 API 的模型列表
-func fetchOpenAIModels(config ai.ProviderConfig) ([]string, error) {
-	req, err := newModelsRequest(config)
+func fetchOpenAIModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {
+	req, err := newModelsRequest(config, localizer)
 	if err != nil {
-		return nil, err
+		return nil, localizeModelListRequestCreateError(localizer, err)
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求模型列表失败: %w", err)
+		return nil, localizeModelListRequestError(localizer, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("获取模型列表失败 (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, localizeModelListHTTPStatusError(localizer, resp.StatusCode, body)
 	}
 
 	var result struct {
@@ -982,7 +1031,7 @@ func fetchOpenAIModels(config ai.ProviderConfig) ([]string, error) {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("解析模型列表失败: %w", err)
+		return nil, localizeModelListParseError(localizer, err)
 	}
 
 	models := make([]string, 0, len(result.Data))
@@ -993,22 +1042,22 @@ func fetchOpenAIModels(config ai.ProviderConfig) ([]string, error) {
 }
 
 // fetchAnthropicModels 获取 Anthropic API 的模型列表
-func fetchAnthropicModels(config ai.ProviderConfig) ([]string, error) {
-	req, err := newModelsRequest(config)
+func fetchAnthropicModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {
+	req, err := newModelsRequest(config, localizer)
 	if err != nil {
-		return nil, err
+		return nil, localizeModelListRequestCreateError(localizer, err)
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求模型列表失败: %w", err)
+		return nil, localizeModelListRequestError(localizer, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("获取模型列表失败 (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, localizeModelListHTTPStatusError(localizer, resp.StatusCode, body)
 	}
 
 	var result struct {
@@ -1017,7 +1066,7 @@ func fetchAnthropicModels(config ai.ProviderConfig) ([]string, error) {
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("解析模型列表失败: %w", err)
+		return nil, localizeModelListParseError(localizer, err)
 	}
 
 	models := make([]string, 0, len(result.Data))
@@ -1028,7 +1077,7 @@ func fetchAnthropicModels(config ai.ProviderConfig) ([]string, error) {
 }
 
 // fetchGeminiModels 获取 Gemini API 的模型列表
-func fetchGeminiModels(config ai.ProviderConfig) ([]string, error) {
+func fetchGeminiModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
 	if baseURL == "" {
 		baseURL = "https://generativelanguage.googleapis.com"
@@ -1036,19 +1085,19 @@ func fetchGeminiModels(config ai.ProviderConfig) ([]string, error) {
 
 	req, err := http.NewRequest("GET", baseURL+"/v1beta/models?key="+config.APIKey, nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建请求失败: %w", err)
+		return nil, localizeModelListRequestCreateError(localizer, err)
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求模型列表失败: %w", err)
+		return nil, localizeModelListRequestError(localizer, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("获取模型列表失败 (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, localizeModelListHTTPStatusError(localizer, resp.StatusCode, body)
 	}
 
 	var result struct {
@@ -1057,7 +1106,7 @@ func fetchGeminiModels(config ai.ProviderConfig) ([]string, error) {
 		} `json:"models"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("解析模型列表失败: %w", err)
+		return nil, localizeModelListParseError(localizer, err)
 	}
 
 	models := make([]string, 0, len(result.Models))
@@ -1072,22 +1121,22 @@ func fetchGeminiModels(config ai.ProviderConfig) ([]string, error) {
 	return models, nil
 }
 
-func fetchCursorModels(config ai.ProviderConfig) ([]string, error) {
-	req, err := newModelsRequest(config)
+func fetchCursorModels(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {
+	req, err := newModelsRequest(config, localizer)
 	if err != nil {
-		return nil, err
+		return nil, localizeModelListRequestCreateError(localizer, err)
 	}
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求模型列表失败: %w", err)
+		return nil, localizeModelListRequestError(localizer, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("获取模型列表失败 (HTTP %d): %s", resp.StatusCode, string(body))
+		return nil, localizeModelListHTTPStatusError(localizer, resp.StatusCode, body)
 	}
 
 	var result struct {
@@ -1096,7 +1145,7 @@ func fetchCursorModels(config ai.ProviderConfig) ([]string, error) {
 		} `json:"items"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("解析模型列表失败: %w", err)
+		return nil, localizeModelListParseError(localizer, err)
 	}
 
 	models := make([]string, 0, len(result.Items))
@@ -1173,6 +1222,8 @@ func (s *Service) aiChatSend(sessionID string, messages []ai.Message, tools []ai
 		logger.Error(err, "AIChatSend 获取 Provider 失败：messages=%d tools=%d", len(messages), len(tools))
 		return map[string]interface{}{"success": false, "error": err.Error()}
 	}
+	imageFallbackPrompt := s.serviceText(providerImageFallbackPromptKey, nil)
+	imageOmittedNotice := s.serviceText(providerImageOmittedNoticeKey, nil)
 
 	started := time.Now()
 	providerName := p.Name()
@@ -1184,7 +1235,12 @@ func (s *Service) aiChatSend(sessionID string, messages []ai.Message, tools []ai
 			providerKey := providerSessionKey(config)
 			providerState, deltaMessages := s.resolveSessionProviderRequest(sessionID, providerKey, messages)
 			requestMessages = deltaMessages
-			resp, updatedState, err := sessionAwareProvider.ChatWithState(context.Background(), providerState, ai.ChatRequest{Messages: requestMessages, Tools: tools})
+			resp, updatedState, err := sessionAwareProvider.ChatWithState(context.Background(), providerState, ai.ChatRequest{
+				Messages:            requestMessages,
+				Tools:               tools,
+				ImageFallbackPrompt: imageFallbackPrompt,
+				ImageOmittedNotice:  imageOmittedNotice,
+			})
 			if err != nil {
 				logger.Warnf("AIChatSend 失败：sessionID=%s provider=%s messages=%d tools=%d duration=%s err=%s", sessionID, providerName, len(messages), len(tools), time.Since(started).Round(time.Millisecond), provider.RedactAIUpstreamLogText(err.Error()))
 				return map[string]interface{}{"success": false, "error": err.Error()}
@@ -1224,7 +1280,12 @@ func (s *Service) aiChatSend(sessionID string, messages []ai.Message, tools []ai
 		}
 	}
 
-	resp, err := p.Chat(context.Background(), ai.ChatRequest{Messages: requestMessages, Tools: tools})
+	resp, err := p.Chat(context.Background(), ai.ChatRequest{
+		Messages:            requestMessages,
+		Tools:               tools,
+		ImageFallbackPrompt: imageFallbackPrompt,
+		ImageOmittedNotice:  imageOmittedNotice,
+	})
 	if err != nil {
 		logger.Warnf("AIChatSend 失败：sessionID=%s provider=%s messages=%d tools=%d duration=%s err=%s", sessionID, providerName, len(messages), len(tools), time.Since(started).Round(time.Millisecond), provider.RedactAIUpstreamLogText(err.Error()))
 		return map[string]interface{}{"success": false, "error": err.Error()}
@@ -1283,6 +1344,8 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 
 		started := time.Now()
 		providerName := p.Name()
+		imageFallbackPrompt := s.serviceText(providerImageFallbackPromptKey, nil)
+		imageOmittedNotice := s.serviceText(providerImageOmittedNoticeKey, nil)
 		contentChunks := 0
 		thinkingChunks := 0
 		toolCallChunks := 0
@@ -1297,7 +1360,12 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 			providerKey := providerSessionKey(config)
 			providerState, deltaMessages := s.resolveSessionProviderRequest(sessionID, providerKey, messages)
 			requestMessages = deltaMessages
-			updatedProviderState, err = sessionAwareProvider.ChatStreamWithState(streamCtx, providerState, ai.ChatRequest{Messages: requestMessages, Tools: tools}, func(chunk ai.StreamChunk) {
+			updatedProviderState, err = sessionAwareProvider.ChatStreamWithState(streamCtx, providerState, ai.ChatRequest{
+				Messages:            requestMessages,
+				Tools:               tools,
+				ImageFallbackPrompt: imageFallbackPrompt,
+				ImageOmittedNotice:  imageOmittedNotice,
+			}, func(chunk ai.StreamChunk) {
 				if chunk.Content != "" {
 					contentChunks++
 					assistantContent.WriteString(chunk.Content)
@@ -1325,15 +1393,25 @@ func (s *Service) AIChatStream(sessionID string, messages []ai.Message, tools []
 				})
 			})
 		} else {
-			err = p.ChatStream(streamCtx, ai.ChatRequest{Messages: messages, Tools: tools}, func(chunk ai.StreamChunk) {
+			err = p.ChatStream(streamCtx, ai.ChatRequest{
+				Messages:            requestMessages,
+				Tools:               tools,
+				ImageFallbackPrompt: imageFallbackPrompt,
+				ImageOmittedNotice:  imageOmittedNotice,
+			}, func(chunk ai.StreamChunk) {
 				if chunk.Content != "" {
 					contentChunks++
+					assistantContent.WriteString(chunk.Content)
 				}
 				if chunk.Thinking != "" || chunk.ReasoningContent != "" {
 					thinkingChunks++
+					if chunk.ReasoningContent != "" {
+						assistantReasoning.WriteString(chunk.ReasoningContent)
+					}
 				}
 				if len(chunk.ToolCalls) > 0 {
 					toolCallChunks++
+					assistantToolCalls = append([]ai.ToolCall(nil), chunk.ToolCalls...)
 				}
 				if chunk.Error != "" {
 					errorChunks++
@@ -1400,8 +1478,15 @@ func (s *Service) AIChatCancel(sessionID string) {
 // AICheckSQL 检查 SQL 的安全性
 func (s *Service) AICheckSQL(sql string) ai.SafetyResult {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.guard.Check(sql)
+	result := s.guard.Check(sql)
+	localizer := s.serviceLocalizerForLanguageLocked()
+	s.mu.RUnlock()
+
+	if result.WarningMessage != "" {
+		result.WarningMessage = serviceTextFromLocalizer(localizer, result.WarningMessage, nil)
+	}
+
+	return result
 }
 
 // --- 内部方法 ---
@@ -1414,6 +1499,7 @@ func (s *Service) getActiveProvider() (provider.Provider, error) {
 func (s *Service) getActiveProviderRuntime() (provider.Provider, ai.ProviderConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	localizer := s.serviceLocalizerForLanguageLocked()
 
 	if s.activeProvider == "" && len(s.providers) > 0 {
 		s.activeProvider = s.providers[0].ID
@@ -1427,7 +1513,7 @@ func (s *Service) getActiveProviderRuntime() (provider.Provider, ai.ProviderConf
 		}
 	}
 
-	return nil, ai.ProviderConfig{}, fmt.Errorf("未配置 AI Provider，请先在设置中配置")
+	return nil, ai.ProviderConfig{}, fmt.Errorf("%s", serviceTextFromLocalizer(localizer, "ai_service.backend.error.provider_not_configured", nil))
 }
 
 func providerSessionKey(config ai.ProviderConfig) string {
@@ -1584,7 +1670,7 @@ func (s *Service) storeSessionProviderRuntime(sessionID string, providerKey stri
 	} else {
 		messageBytes, err := json.Marshal(messages)
 		if err != nil {
-			return fmt.Errorf("序列化会话 Provider 消息失败: %w", err)
+			return s.serviceError("ai_service.backend.error.session_provider_messages_serialize_failed", nil, err)
 		}
 		sessionData.ProviderMessages = json.RawMessage(messageBytes)
 	}
@@ -1607,7 +1693,7 @@ func (s *Service) loadConfig() {
 	s.contextLevel = snapshot.ContextLevel
 	s.userPromptSettings = snapshot.UserPromptSettings
 	s.mcpServers = normalizeMCPServerConfigs(snapshot.MCPServers)
-	s.skills = normalizeSkillConfigs(snapshot.Skills)
+	s.skills = normalizeSkillConfigs(snapshot.Skills, s.serviceLocalizerForLanguage())
 }
 
 func (s *Service) saveConfig() error {
@@ -1685,7 +1771,7 @@ func (s *Service) loadOrCreateSessionFile(sessionID string) (sessionFileData, er
 	}
 	return sessionFileData{
 		ID:        sessionID,
-		Title:     "新的对话",
+		Title:     s.serviceText("ai_chat.panel.session.default_title", nil),
 		UpdatedAt: time.Now().UnixMilli(),
 		Messages:  json.RawMessage("[]"),
 	}, nil
@@ -1694,7 +1780,7 @@ func (s *Service) loadOrCreateSessionFile(sessionID string) (sessionFileData, er
 func (s *Service) saveSessionFile(sessionID string, sessionData sessionFileData) error {
 	dir := s.sessionsDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("创建 sessions 目录失败: %w", err)
+		return s.serviceError("ai_service.backend.error.sessions_dir_create_failed", nil, err)
 	}
 	if strings.TrimSpace(sessionData.ID) == "" {
 		sessionData.ID = sessionID
@@ -1704,9 +1790,12 @@ func (s *Service) saveSessionFile(sessionID string, sessionData sessionFileData)
 	}
 	data, err := json.Marshal(sessionData)
 	if err != nil {
-		return fmt.Errorf("序列化会话数据失败: %w", err)
+		return s.serviceError("ai_service.backend.error.session_serialize_failed", nil, err)
 	}
-	return os.WriteFile(s.sessionFilePath(sessionID), data, 0o644)
+	if err := os.WriteFile(s.sessionFilePath(sessionID), data, 0o644); err != nil {
+		return s.serviceError("ai_service.backend.error.session_write_failed", nil, err)
+	}
+	return nil
 }
 
 // AIGetSessions 获取所有会话的元数据列表（不含消息体）
@@ -1755,7 +1844,7 @@ func (s *Service) AIGetSessions() []map[string]interface{} {
 func (s *Service) AILoadSession(sessionID string) map[string]interface{} {
 	sessionData, err := s.loadSessionFile(sessionID)
 	if err != nil {
-		return map[string]interface{}{"success": false, "error": "会话不存在"}
+		return map[string]interface{}{"success": false, "error": s.serviceText("ai_service.backend.error.session_missing", nil)}
 	}
 	return map[string]interface{}{
 		"success":   true,
@@ -1782,7 +1871,7 @@ func (s *Service) AISaveSession(sessionID string, title string, updatedAt float6
 // AIDeleteSession 删除会话文件
 func (s *Service) AIDeleteSession(sessionID string) error {
 	if err := os.Remove(s.sessionFilePath(sessionID)); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("删除会话失败: %w", err)
+		return s.serviceError("ai_service.backend.error.session_delete_failed", nil, err)
 	}
 	s.mu.Lock()
 	delete(s.sessionProviders, sessionID)

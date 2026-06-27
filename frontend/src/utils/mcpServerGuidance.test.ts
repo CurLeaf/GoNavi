@@ -1,32 +1,87 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+import { catalogs } from '../i18n/catalog';
 import {
   MCP_AUTHORING_NOTES,
+  MCP_FIELD_GUIDES,
+  MCP_SERVER_FILL_STEPS,
   MCP_TROUBLESHOOTING_GUIDES,
 } from './mcpServerGuidance';
 
-describe('mcpServerGuidance', () => {
-  it('keeps actionable troubleshooting hints for common MCP setup mistakes', () => {
-    const symptoms = MCP_TROUBLESHOOTING_GUIDES.map((item) => item.symptom);
-    const allGuidance = MCP_TROUBLESHOOTING_GUIDES
-      .flatMap((item) => [item.likelyCause, item.fix, item.example || ''])
-      .join('\n');
+const source = readFileSync(new URL('./mcpServerGuidance.ts', import.meta.url), 'utf8');
+const supportedLanguages = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
 
-    expect(symptoms).toContain('测试提示找不到命令');
-    expect(symptoms).toContain('认证失败、401 或 403');
-    expect(allGuidance).toContain('命令参数');
-    expect(allGuidance).toContain('command=npx');
-    expect(allGuidance).toContain('KEY=VALUE');
-    expect(allGuidance).toContain('当前只支持 stdio');
+const getPlaceholders = (value: string) =>
+  Array.from(value.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g), (match) => match[1]).sort();
+
+describe('mcpServerGuidance', () => {
+  it('keeps MCP guide copy behind i18n keys instead of hard-coded Chinese source text', () => {
+    expect(source).not.toMatch(/[\p{Script=Han}]/u);
+    expect(MCP_SERVER_FILL_STEPS.every((item) => item.titleKey.startsWith('ai_settings.mcp_server.guide.step.'))).toBe(true);
+    expect(MCP_FIELD_GUIDES.every((item) => item.titleKey.startsWith('ai_settings.mcp_server.guide.field.'))).toBe(true);
+    expect(MCP_TROUBLESHOOTING_GUIDES.every((item) => item.symptomKey.startsWith('ai_settings.mcp_server.guide.troubleshooting.'))).toBe(true);
+    expect(MCP_AUTHORING_NOTES.every((key) => key.startsWith('ai_settings.mcp_server.guide.note.'))).toBe(true);
   });
 
-  it('warns users to keep secrets in local env config instead of chat content', () => {
-    const notes = MCP_AUTHORING_NOTES.join('\n');
+  it('keeps raw examples in MCP guidance metadata', () => {
+    const allExamples = MCP_TROUBLESHOOTING_GUIDES
+      .map((item) => item.example || '')
+      .join('\n');
 
-    expect(notes).toContain('本机配置');
-    expect(notes).toContain('不要把密钥写进聊天内容');
-    expect(notes).toContain('command 填 npx');
-    expect(notes).toContain('PowerShell $env:KEY=VALUE;');
-    expect(notes).toContain('Windows set KEY=VALUE &&');
+    expect(allExamples).toContain('command=npx');
+    expect(allExamples).toContain('KEY=VALUE');
+    expect(allExamples).toContain('stdio');
+  });
+
+  it('retains stable guide identities for rendering and snapshots', () => {
+    expect(MCP_SERVER_FILL_STEPS.map((item) => item.key)).toEqual([
+      'template',
+      'name',
+      'command',
+      'args',
+      'env-timeout',
+    ]);
+
+    expect(MCP_FIELD_GUIDES.map((item) => item.key)).toEqual([
+      'name',
+      'enabled',
+      'transport',
+      'command',
+      'args',
+      'env',
+      'timeout',
+    ]);
+
+    expect(MCP_TROUBLESHOOTING_GUIDES.map((item) => item.key)).toEqual([
+      'command-not-found',
+      'timeout-or-no-tools',
+      'auth-failed',
+      'stdio-only',
+    ]);
+  });
+
+  it('keeps MCP guide and section catalog keys available in all supported languages', () => {
+    const baseCatalog = catalogs['en-US'] as Record<string, string>;
+    const requiredKeys = Object.keys(baseCatalog)
+      .filter((key) => key.startsWith('ai_settings.mcp_server.guide.') || key.startsWith('ai_settings.mcp_server.section.'))
+      .sort();
+
+    expect(requiredKeys.length).toBeGreaterThan(0);
+
+    for (const language of supportedLanguages) {
+      const catalog = catalogs[language] as Record<string, string>;
+      for (const key of requiredKeys) {
+        expect(catalog[key], `${language}:${key}`).toBeTruthy();
+        expect(getPlaceholders(catalog[key]), `${language}:${key}`).toEqual(getPlaceholders(baseCatalog[key]));
+      }
+    }
+
+    expect(getPlaceholders(baseCatalog['ai_settings.mcp_server.guide.full_command.placeholder'])).toEqual(['example']);
+    expect(getPlaceholders(baseCatalog['ai_settings.mcp_server.guide.full_command.parsed_summary'])).toEqual([
+      'argsCount',
+      'command',
+      'envCount',
+    ]);
   });
 });

@@ -438,6 +438,48 @@ describe('DataViewer safe editing locator', () => {
     renderer.unmount();
   });
 
+  it('requeries table preview when a column header filter is applied', async () => {
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'missav_bot';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'id', key: 'PRI' }, { name: 'code', key: '' }],
+    });
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      fields: ['id', 'code'],
+      data: [{ id: 2, code: 'EROFV-3551' }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<DataViewer tab={createTab({ dbName: 'missav_bot', tableName: 'videos', title: 'videos' })} />);
+    });
+    await flushPromises();
+
+    backendApp.DBQuery.mockClear();
+    await act(async () => {
+      dataGridState.latestProps?.onApplyFilter([{
+        id: 1,
+        enabled: true,
+        logic: 'AND',
+        column: 'code',
+        op: 'CONTAINS',
+        value: '3551',
+        value2: '',
+      }]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await flushPromises();
+
+    const filteredSelectSql = backendApp.DBQuery.mock.calls
+      .map((call: any[]) => String(call[2] || ''))
+      .find((sql: string) => /select\s+\*\s+from\s+`videos`/i.test(sql) && /where/i.test(sql));
+    expect(filteredSelectSql).toContain("`code` LIKE '%3551%'");
+    renderer!.unmount();
+  });
+
   it('keeps DuckDB table preview writable when primary key metadata arrives for a qualified table name', async () => {
     storeState.connections[0].config.type = 'duckdb';
     storeState.connections[0].config.database = 'main';
@@ -531,6 +573,49 @@ describe('DataViewer safe editing locator', () => {
 
     expect(messageApi.error).toHaveBeenCalledWith('DuckDB query exceeded the connection timeout and was interrupted. Increase the connection timeout, or reduce the sort/filter scope and retry.');
     expect(storeState.addSqlLog.mock.calls.some((call: any[]) => String(call[0]?.message || '').includes('context deadline exceeded'))).toBe(true);
+    renderer.unmount();
+  });
+
+  it.each([
+    [
+      'zh-TW',
+      '資料庫連線逾時：mysql 127.0.0.1:3306/crm：網路逾時',
+      '查詢超過連線逾時時間，已中斷。請調高連線逾時時間，或縮小查詢範圍後再試。',
+    ],
+    [
+      'ja-JP',
+      'データベース接続がタイムアウトしました: mysql 127.0.0.1:3306/crm: ネットワークタイムアウト',
+      'クエリが接続タイムアウトを超えたため中断されました。接続タイムアウトを延長するか、クエリ範囲を絞って再試行してください。',
+    ],
+    [
+      'de-DE',
+      'Zeitüberschreitung bei der Datenbankverbindung: mysql 127.0.0.1:3306/crm: Netzwerk-Timeout',
+      'Die Abfrage hat das Verbindungstimeout überschritten und wurde unterbrochen. Erhöhen Sie das Verbindungstimeout oder verkleinern Sie den Abfragebereich und versuchen Sie es erneut.',
+    ],
+    [
+      'ru-RU',
+      'Тайм-аут подключения к базе данных: mysql 127.0.0.1:3306/crm: тайм-аут сети',
+      'Запрос превысил тайм-аут подключения и был прерван. Увеличьте тайм-аут подключения или сократите область запроса и повторите попытку.',
+    ],
+  ])('maps localized connection-timeout wrappers to viewer timeout copy for %s', async (locale, backendMessage, expectedMessage) => {
+    storeState.languagePreference = locale;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'crm';
+    backendApp.DBGetColumns.mockResolvedValue({
+      success: true,
+      data: [{ name: 'ID', key: '' }, { name: 'NAME', key: '' }],
+    });
+    backendApp.DBQuery.mockResolvedValue({
+      success: false,
+      message: backendMessage,
+      fields: [],
+      data: [],
+    });
+
+    const renderer = await renderAndReload(createTab({ id: `tab-timeout-${locale}`, dbName: 'crm', tableName: 'orders', title: 'orders' }));
+
+    expect(messageApi.error).toHaveBeenCalledWith(expectedMessage);
+    expect(storeState.addSqlLog.mock.calls.some((call: any[]) => String(call[0]?.message || '').includes(backendMessage))).toBe(true);
     renderer.unmount();
   });
 

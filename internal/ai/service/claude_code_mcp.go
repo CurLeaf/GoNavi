@@ -2,6 +2,7 @@ package aiservice
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,6 +21,10 @@ const (
 	codexClientCommandName              = "codex"
 )
 
+type mcpClientInstallTextFunc func(string, map[string]any) string
+
+var errMCPClientUserHomeDirUnavailable = errors.New("user home directory is unavailable")
+
 var claudeCodeConfigPathFunc = func() (string, error) {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -27,7 +32,7 @@ var claudeCodeConfigPathFunc = func() (string, error) {
 	}
 	homeDir = strings.TrimSpace(homeDir)
 	if homeDir == "" {
-		return "", fmt.Errorf("无法确定用户目录")
+		return "", errMCPClientUserHomeDirUnavailable
 	}
 	return filepath.Join(homeDir, ".claude.json"), nil
 }
@@ -39,7 +44,7 @@ var codexConfigPathFunc = func() (string, error) {
 	}
 	homeDir = strings.TrimSpace(homeDir)
 	if homeDir == "" {
-		return "", fmt.Errorf("无法确定用户目录")
+		return "", errMCPClientUserHomeDirUnavailable
 	}
 	return filepath.Join(homeDir, ".codex", "config.toml"), nil
 }
@@ -62,12 +67,12 @@ type codexMCPServerConfig struct {
 
 // AIGetMCPClientInstallStatuses 返回 GoNavi MCP 在常见外部客户端中的安装状态。
 func (s *Service) AIGetMCPClientInstallStatuses() []ai.MCPClientInstallStatus {
-	command, args, resolveErr := resolveCurrentLocalMCPCommand()
+	command, args, resolveErr := resolveCurrentLocalMCPCommand(s.serviceText)
 	return []ai.MCPClientInstallStatus{
-		inspectClaudeCodeMCPInstallStatus(command, args, resolveErr),
-		inspectCodexMCPInstallStatus(command, args, resolveErr),
-		buildRemoteMCPClientInstallStatus("openclaw", "OpenClaw"),
-		buildRemoteMCPClientInstallStatus("hermans", "Hermans"),
+		inspectClaudeCodeMCPInstallStatus(command, args, resolveErr, s.serviceText),
+		inspectCodexMCPInstallStatus(command, args, resolveErr, s.serviceText),
+		buildRemoteMCPClientInstallStatus("openclaw", "OpenClaw", s.serviceText),
+		buildRemoteMCPClientInstallStatus("hermans", "Hermans", s.serviceText),
 	}
 }
 
@@ -75,15 +80,15 @@ func (s *Service) AIGetMCPClientInstallStatuses() []ai.MCPClientInstallStatus {
 func (s *Service) AIInstallClaudeCodeMCP() (ai.MCPClientInstallResult, error) {
 	configPath, err := claudeCodeConfigPathFunc()
 	if err != nil {
-		return ai.MCPClientInstallResult{}, fmt.Errorf("定位 Claude Code 配置失败: %w", err)
+		return ai.MCPClientInstallResult{}, fmt.Errorf("%s", s.serviceText("ai.service.mcp_client.claude_code.config_path_failed", map[string]any{"detail": localizeMCPClientPathDetail(s.serviceText, err)}))
 	}
 
 	executablePath, err := localMCPExecutablePathFunc()
 	if err != nil {
-		return ai.MCPClientInstallResult{}, fmt.Errorf("定位当前 GoNavi 可执行文件失败: %w", err)
+		return ai.MCPClientInstallResult{}, fmt.Errorf("%s", s.serviceText("ai.service.mcp_client.executable_path_failed", map[string]any{"detail": err.Error()}))
 	}
 
-	command, args, err := resolveLocalMCPCommand(executablePath)
+	command, args, err := resolveLocalMCPCommand(executablePath, s.serviceText)
 	if err != nil {
 		return ai.MCPClientInstallResult{}, err
 	}
@@ -94,14 +99,14 @@ func (s *Service) AIInstallClaudeCodeMCP() (ai.MCPClientInstallResult, error) {
 		Args:    append([]string(nil), args...),
 		Env:     map[string]string{},
 	}
-	if err := upsertClaudeCodeMCPServerConfig(configPath, gonaviMCPServerID, serverConfig); err != nil {
+	if err := upsertClaudeCodeMCPServerConfig(configPath, gonaviMCPServerID, serverConfig, s.serviceText); err != nil {
 		return ai.MCPClientInstallResult{}, err
 	}
 
 	return ai.MCPClientInstallResult{
 		Success:    true,
 		Client:     "claude-code",
-		Message:    "已写入 Claude Code 用户级 MCP 配置，重启 Claude CLI 后可在 /mcp 的 User MCPs 中看到 GoNavi。",
+		Message:    s.serviceText("ai.service.mcp_client.claude_code.install_success", nil),
 		ConfigPath: configPath,
 		Command:    command,
 		Args:       append([]string(nil), args...),
@@ -112,15 +117,15 @@ func (s *Service) AIInstallClaudeCodeMCP() (ai.MCPClientInstallResult, error) {
 func (s *Service) AIInstallCodexMCP() (ai.MCPClientInstallResult, error) {
 	configPath, err := codexConfigPathFunc()
 	if err != nil {
-		return ai.MCPClientInstallResult{}, fmt.Errorf("定位 Codex 配置失败: %w", err)
+		return ai.MCPClientInstallResult{}, fmt.Errorf("%s", s.serviceText("ai.service.mcp_client.codex.config_path_failed", map[string]any{"detail": localizeMCPClientPathDetail(s.serviceText, err)}))
 	}
 
 	executablePath, err := localMCPExecutablePathFunc()
 	if err != nil {
-		return ai.MCPClientInstallResult{}, fmt.Errorf("定位当前 GoNavi 可执行文件失败: %w", err)
+		return ai.MCPClientInstallResult{}, fmt.Errorf("%s", s.serviceText("ai.service.mcp_client.executable_path_failed", map[string]any{"detail": err.Error()}))
 	}
 
-	command, args, err := resolveLocalMCPCommand(executablePath)
+	command, args, err := resolveLocalMCPCommand(executablePath, s.serviceText)
 	if err != nil {
 		return ai.MCPClientInstallResult{}, err
 	}
@@ -130,36 +135,38 @@ func (s *Service) AIInstallCodexMCP() (ai.MCPClientInstallResult, error) {
 		Args:              append([]string(nil), args...),
 		StartupTimeoutSec: defaultCodexMCPStartupTimeoutSecond,
 	}
-	if err := upsertCodexMCPServerConfig(configPath, gonaviMCPServerID, serverConfig); err != nil {
+	if err := upsertCodexMCPServerConfig(configPath, gonaviMCPServerID, serverConfig, s.serviceText); err != nil {
 		return ai.MCPClientInstallResult{}, err
 	}
 
 	return ai.MCPClientInstallResult{
 		Success:    true,
 		Client:     "codex",
-		Message:    "已写入 Codex 用户级 MCP 配置，重启 Codex CLI 或桌面端后可看到 GoNavi。",
+		Message:    s.serviceText("ai.service.mcp_client.codex.install_success", nil),
 		ConfigPath: configPath,
 		Command:    command,
 		Args:       append([]string(nil), args...),
 	}, nil
 }
 
-func resolveCurrentLocalMCPCommand() (string, []string, error) {
+func resolveCurrentLocalMCPCommand(textFuncs ...mcpClientInstallTextFunc) (string, []string, error) {
+	text := firstMCPClientInstallText(textFuncs)
 	executablePath, err := localMCPExecutablePathFunc()
 	if err != nil {
-		return "", nil, fmt.Errorf("定位当前 GoNavi 可执行文件失败: %w", err)
+		return "", nil, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.executable_path_failed", map[string]any{"detail": err.Error()}))
 	}
-	command, args, err := resolveLocalMCPCommand(executablePath)
+	command, args, err := resolveLocalMCPCommand(executablePath, text)
 	if err != nil {
 		return "", nil, err
 	}
 	return command, args, nil
 }
 
-func resolveLocalMCPCommand(executablePath string) (string, []string, error) {
+func resolveLocalMCPCommand(executablePath string, textFuncs ...mcpClientInstallTextFunc) (string, []string, error) {
+	text := firstMCPClientInstallText(textFuncs)
 	executablePath = strings.TrimSpace(executablePath)
 	if executablePath == "" {
-		return "", nil, fmt.Errorf("当前 GoNavi 可执行文件路径为空")
+		return "", nil, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.executable_path_empty", nil))
 	}
 
 	cleaned := filepath.Clean(executablePath)
@@ -188,7 +195,33 @@ func detectLocalCLICommand(commandName string) (bool, string) {
 	return true, filepath.Clean(resolvedPath)
 }
 
-func inspectClaudeCodeMCPInstallStatus(expectedCommand string, expectedArgs []string, expectedErr error) ai.MCPClientInstallStatus {
+func mcpClientInstallText(text mcpClientInstallTextFunc, key string, params map[string]any) string {
+	if text == nil {
+		return serviceTextFromLocalizer(nil, key, params)
+	}
+	return text(key, params)
+}
+
+func firstMCPClientInstallText(textFuncs []mcpClientInstallTextFunc) mcpClientInstallTextFunc {
+	if len(textFuncs) == 0 {
+		return nil
+	}
+	return textFuncs[0]
+}
+
+func localizeMCPClientPathDetail(text mcpClientInstallTextFunc, err error) string {
+	if err == nil {
+		return ""
+	}
+	detail := strings.TrimSpace(err.Error())
+	if errors.Is(err, errMCPClientUserHomeDirUnavailable) || detail == errMCPClientUserHomeDirUnavailable.Error() {
+		return mcpClientInstallText(text, "ai.service.mcp_client.user_home_dir_unavailable", nil)
+	}
+	return detail
+}
+
+func inspectClaudeCodeMCPInstallStatus(expectedCommand string, expectedArgs []string, expectedErr error, textFuncs ...mcpClientInstallTextFunc) ai.MCPClientInstallStatus {
+	text := firstMCPClientInstallText(textFuncs)
 	configPath, pathErr := claudeCodeConfigPathFunc()
 	clientDetected, clientPath := detectLocalCLICommand(claudeCodeClientCommandName)
 	status := ai.MCPClientInstallStatus{
@@ -199,14 +232,14 @@ func inspectClaudeCodeMCPInstallStatus(expectedCommand string, expectedArgs []st
 		ClientCommand:  claudeCodeClientCommandName,
 		ClientPath:     clientPath,
 		ConfigPath:     strings.TrimSpace(configPath),
-		Message:        "未检测到 Claude Code 用户级 GoNavi MCP 配置",
+		Message:        mcpClientInstallText(text, "ai.service.mcp_client.claude_code.status.missing", nil),
 	}
 	if pathErr != nil {
-		status.Message = fmt.Sprintf("定位 Claude Code 配置失败: %v", pathErr)
+		status.Message = mcpClientInstallText(text, "ai.service.mcp_client.claude_code.config_path_failed", map[string]any{"detail": localizeMCPClientPathDetail(text, pathErr)})
 		return status
 	}
 
-	serverConfig, found, err := readClaudeCodeMCPServerConfig(configPath, gonaviMCPServerID)
+	serverConfig, found, err := readClaudeCodeMCPServerConfig(configPath, gonaviMCPServerID, text)
 	if err != nil {
 		status.Installed = found
 		status.Message = err.Error()
@@ -224,22 +257,23 @@ func inspectClaudeCodeMCPInstallStatus(expectedCommand string, expectedArgs []st
 	status.Command = strings.TrimSpace(serverConfig.Command)
 	status.Args = append([]string(nil), serverConfig.Args...)
 	if expectedErr != nil {
-		status.Message = fmt.Sprintf("已检测到 Claude Code 中的 GoNavi MCP 记录，但当前 GoNavi 安装路径校验失败：%v", expectedErr)
+		status.Message = mcpClientInstallText(text, "ai.service.mcp_client.claude_code.status.path_check_failed", map[string]any{"detail": expectedErr.Error()})
 		return status
 	}
 
 	status.MatchesCurrent = strings.EqualFold(strings.TrimSpace(serverConfig.Type), "stdio") &&
 		sameMCPCommand(serverConfig.Command, serverConfig.Args, expectedCommand, expectedArgs)
 	if status.MatchesCurrent {
-		status.Message = "已检测到 Claude Code 用户级 GoNavi MCP 配置，且与当前 GoNavi 安装路径一致"
+		status.Message = mcpClientInstallText(text, "ai.service.mcp_client.claude_code.status.connected", nil)
 		return status
 	}
 
-	status.Message = "已检测到 Claude Code 中的 GoNavi MCP 记录，但与当前 GoNavi 安装路径不一致，建议更新"
+	status.Message = mcpClientInstallText(text, "ai.service.mcp_client.claude_code.status.path_mismatch", nil)
 	return status
 }
 
-func inspectCodexMCPInstallStatus(expectedCommand string, expectedArgs []string, expectedErr error) ai.MCPClientInstallStatus {
+func inspectCodexMCPInstallStatus(expectedCommand string, expectedArgs []string, expectedErr error, textFuncs ...mcpClientInstallTextFunc) ai.MCPClientInstallStatus {
+	text := firstMCPClientInstallText(textFuncs)
 	configPath, pathErr := codexConfigPathFunc()
 	clientDetected, clientPath := detectLocalCLICommand(codexClientCommandName)
 	status := ai.MCPClientInstallStatus{
@@ -250,14 +284,14 @@ func inspectCodexMCPInstallStatus(expectedCommand string, expectedArgs []string,
 		ClientCommand:  codexClientCommandName,
 		ClientPath:     clientPath,
 		ConfigPath:     strings.TrimSpace(configPath),
-		Message:        "未检测到 Codex 用户级 GoNavi MCP 配置",
+		Message:        mcpClientInstallText(text, "ai.service.mcp_client.codex.status.missing", nil),
 	}
 	if pathErr != nil {
-		status.Message = fmt.Sprintf("定位 Codex 配置失败: %v", pathErr)
+		status.Message = mcpClientInstallText(text, "ai.service.mcp_client.codex.config_path_failed", map[string]any{"detail": localizeMCPClientPathDetail(text, pathErr)})
 		return status
 	}
 
-	serverConfig, found, err := readCodexMCPServerConfig(configPath, gonaviMCPServerID)
+	serverConfig, found, err := readCodexMCPServerConfig(configPath, gonaviMCPServerID, text)
 	if err != nil {
 		status.Installed = found
 		status.Message = err.Error()
@@ -275,33 +309,35 @@ func inspectCodexMCPInstallStatus(expectedCommand string, expectedArgs []string,
 	status.Command = strings.TrimSpace(serverConfig.Command)
 	status.Args = append([]string(nil), serverConfig.Args...)
 	if expectedErr != nil {
-		status.Message = fmt.Sprintf("已检测到 Codex 中的 GoNavi MCP 记录，但当前 GoNavi 安装路径校验失败：%v", expectedErr)
+		status.Message = mcpClientInstallText(text, "ai.service.mcp_client.codex.status.path_check_failed", map[string]any{"detail": expectedErr.Error()})
 		return status
 	}
 
 	status.MatchesCurrent = sameMCPCommand(serverConfig.Command, serverConfig.Args, expectedCommand, expectedArgs) &&
 		(serverConfig.StartupTimeoutSec == 0 || serverConfig.StartupTimeoutSec == defaultCodexMCPStartupTimeoutSecond)
 	if status.MatchesCurrent {
-		status.Message = "已检测到 Codex 用户级 GoNavi MCP 配置，且与当前 GoNavi 安装路径一致"
+		status.Message = mcpClientInstallText(text, "ai.service.mcp_client.codex.status.connected", nil)
 		return status
 	}
 
-	status.Message = "已检测到 Codex 中的 GoNavi MCP 记录，但与当前 GoNavi 安装路径不一致，建议更新"
+	status.Message = mcpClientInstallText(text, "ai.service.mcp_client.codex.status.path_mismatch", nil)
 	return status
 }
 
-func buildRemoteMCPClientInstallStatus(client string, displayName string) ai.MCPClientInstallStatus {
+func buildRemoteMCPClientInstallStatus(client string, displayName string, textFuncs ...mcpClientInstallTextFunc) ai.MCPClientInstallStatus {
+	text := firstMCPClientInstallText(textFuncs)
 	return ai.MCPClientInstallStatus{
 		Client:         client,
 		DisplayName:    displayName,
 		InstallMode:    "remote",
 		ClientDetected: false,
-		Message:        fmt.Sprintf("%s 通常部署在云端或远端环境；请通过远程 MCP 桥接接入 Windows GoNavi，数据库密码仍保存在 GoNavi 本机。", displayName),
+		Message:        mcpClientInstallText(text, "ai.service.mcp_client.remote.status.message", map[string]any{"label": displayName}),
 	}
 }
 
-func readClaudeCodeMCPServerConfig(configPath string, serverID string) (claudeCodeMCPServerConfig, bool, error) {
-	root, err := readClaudeCodeConfig(configPath)
+func readClaudeCodeMCPServerConfig(configPath string, serverID string, textFuncs ...mcpClientInstallTextFunc) (claudeCodeMCPServerConfig, bool, error) {
+	text := firstMCPClientInstallText(textFuncs)
+	root, err := readClaudeCodeConfig(configPath, text)
 	if err != nil {
 		return claudeCodeMCPServerConfig{}, false, err
 	}
@@ -312,7 +348,7 @@ func readClaudeCodeMCPServerConfig(configPath string, serverID string) (claudeCo
 	}
 	mcpServers, ok := rawServers.(map[string]any)
 	if !ok {
-		return claudeCodeMCPServerConfig{}, false, fmt.Errorf("Claude Code 配置格式异常：mcpServers 不是对象")
+		return claudeCodeMCPServerConfig{}, false, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.claude_code.config_format_invalid", map[string]any{"path": "mcpServers", "expected": "an object"}))
 	}
 
 	rawServer, exists := mcpServers[strings.TrimSpace(serverID)]
@@ -321,12 +357,12 @@ func readClaudeCodeMCPServerConfig(configPath string, serverID string) (claudeCo
 	}
 	serverMap, ok := rawServer.(map[string]any)
 	if !ok {
-		return claudeCodeMCPServerConfig{}, true, fmt.Errorf("Claude Code 配置格式异常：mcpServers.%s 不是对象", strings.TrimSpace(serverID))
+		return claudeCodeMCPServerConfig{}, true, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.claude_code.config_format_invalid", map[string]any{"path": fmt.Sprintf("mcpServers.%s", strings.TrimSpace(serverID)), "expected": "an object"}))
 	}
 
 	args, err := decodeJSONLikeStringSlice(serverMap["args"])
 	if err != nil {
-		return claudeCodeMCPServerConfig{}, true, fmt.Errorf("Claude Code 配置格式异常：mcpServers.%s.args 不是字符串数组", strings.TrimSpace(serverID))
+		return claudeCodeMCPServerConfig{}, true, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.claude_code.config_format_invalid", map[string]any{"path": fmt.Sprintf("mcpServers.%s.args", strings.TrimSpace(serverID)), "expected": "a string array"}))
 	}
 	return claudeCodeMCPServerConfig{
 		Type:    strings.TrimSpace(anyString(serverMap["type"])),
@@ -335,13 +371,14 @@ func readClaudeCodeMCPServerConfig(configPath string, serverID string) (claudeCo
 	}, true, nil
 }
 
-func upsertClaudeCodeMCPServerConfig(configPath string, serverID string, serverConfig claudeCodeMCPServerConfig) error {
-	root, err := readClaudeCodeConfig(configPath)
+func upsertClaudeCodeMCPServerConfig(configPath string, serverID string, serverConfig claudeCodeMCPServerConfig, textFuncs ...mcpClientInstallTextFunc) error {
+	text := firstMCPClientInstallText(textFuncs)
+	root, err := readClaudeCodeConfig(configPath, text)
 	if err != nil {
 		return err
 	}
 
-	mcpServers, err := ensureJSONMap(root, "mcpServers")
+	mcpServers, err := ensureJSONMap(root, "mcpServers", text)
 	if err != nil {
 		return err
 	}
@@ -356,25 +393,26 @@ func upsertClaudeCodeMCPServerConfig(configPath string, serverID string, serverC
 
 	data, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
-		return fmt.Errorf("序列化 Claude Code 配置失败: %w", err)
+		return fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.claude_code.config_serialize_failed", map[string]any{"detail": err.Error()}))
 	}
 
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		return fmt.Errorf("创建 Claude Code 配置目录失败: %w", err)
+		return fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.claude_code.config_dir_create_failed", map[string]any{"detail": err.Error()}))
 	}
 	if err := os.WriteFile(configPath, append(data, '\n'), 0o644); err != nil {
-		return fmt.Errorf("写入 Claude Code 配置失败: %w", err)
+		return fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.claude_code.config_write_failed", map[string]any{"detail": err.Error()}))
 	}
 	return nil
 }
 
-func readClaudeCodeConfig(configPath string) (map[string]any, error) {
+func readClaudeCodeConfig(configPath string, textFuncs ...mcpClientInstallTextFunc) (map[string]any, error) {
+	text := firstMCPClientInstallText(textFuncs)
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]any{}, nil
 		}
-		return nil, fmt.Errorf("读取 Claude Code 配置失败: %w", err)
+		return nil, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.claude_code.config_read_failed", map[string]any{"detail": err.Error()}))
 	}
 
 	if strings.TrimSpace(string(data)) == "" {
@@ -383,7 +421,7 @@ func readClaudeCodeConfig(configPath string) (map[string]any, error) {
 
 	var root map[string]any
 	if err := json.Unmarshal(data, &root); err != nil {
-		return nil, fmt.Errorf("解析 Claude Code 配置失败: %w", err)
+		return nil, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.claude_code.config_parse_failed", map[string]any{"detail": err.Error()}))
 	}
 	if root == nil {
 		return map[string]any{}, nil
@@ -391,9 +429,10 @@ func readClaudeCodeConfig(configPath string) (map[string]any, error) {
 	return root, nil
 }
 
-func ensureJSONMap(root map[string]any, key string) (map[string]any, error) {
+func ensureJSONMap(root map[string]any, key string, textFuncs ...mcpClientInstallTextFunc) (map[string]any, error) {
+	text := firstMCPClientInstallText(textFuncs)
 	if root == nil {
-		return nil, fmt.Errorf("JSON 根对象不能为空")
+		return nil, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.claude_code.config_format_invalid", map[string]any{"path": "JSON root", "expected": "an object"}))
 	}
 
 	value, exists := root[key]
@@ -405,34 +444,36 @@ func ensureJSONMap(root map[string]any, key string) (map[string]any, error) {
 
 	typed, ok := value.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("Claude Code 配置格式异常：%s 不是对象", key)
+		return nil, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.claude_code.config_format_invalid", map[string]any{"path": key, "expected": "an object"}))
 	}
 	return typed, nil
 }
 
-func readCodexMCPServerConfig(configPath string, serverID string) (codexMCPServerConfig, bool, error) {
+func readCodexMCPServerConfig(configPath string, serverID string, textFuncs ...mcpClientInstallTextFunc) (codexMCPServerConfig, bool, error) {
+	text := firstMCPClientInstallText(textFuncs)
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return codexMCPServerConfig{}, false, nil
 		}
-		return codexMCPServerConfig{}, false, fmt.Errorf("读取 Codex 配置失败: %w", err)
+		return codexMCPServerConfig{}, false, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.codex.config_read_failed", map[string]any{"detail": err.Error()}))
 	}
-	return parseCodexMCPServerConfig(string(data), serverID)
+	return parseCodexMCPServerConfig(string(data), serverID, textFuncs...)
 }
 
-func upsertCodexMCPServerConfig(configPath string, serverID string, serverConfig codexMCPServerConfig) error {
+func upsertCodexMCPServerConfig(configPath string, serverID string, serverConfig codexMCPServerConfig, textFuncs ...mcpClientInstallTextFunc) error {
+	text := firstMCPClientInstallText(textFuncs)
 	data, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("读取 Codex 配置失败: %w", err)
+		return fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.codex.config_read_failed", map[string]any{"detail": err.Error()}))
 	}
 
 	updated := replaceOrAppendCodexMCPServerBlock(string(data), strings.TrimSpace(serverID), renderCodexMCPServerBlock(serverID, serverConfig))
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		return fmt.Errorf("创建 Codex 配置目录失败: %w", err)
+		return fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.codex.config_dir_create_failed", map[string]any{"detail": err.Error()}))
 	}
 	if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
-		return fmt.Errorf("写入 Codex 配置失败: %w", err)
+		return fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.codex.config_write_failed", map[string]any{"detail": err.Error()}))
 	}
 	return nil
 }
@@ -454,7 +495,8 @@ func renderCodexMCPServerBlock(serverID string, serverConfig codexMCPServerConfi
 	return strings.Join(lines, "\n") + "\n"
 }
 
-func parseCodexMCPServerConfig(content string, serverID string) (codexMCPServerConfig, bool, error) {
+func parseCodexMCPServerConfig(content string, serverID string, textFuncs ...mcpClientInstallTextFunc) (codexMCPServerConfig, bool, error) {
+	text := firstMCPClientInstallText(textFuncs)
 	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
 	mainHeader := fmt.Sprintf("[mcp_servers.%s]", strings.TrimSpace(serverID))
 	result := codexMCPServerConfig{}
@@ -485,19 +527,19 @@ func parseCodexMCPServerConfig(content string, serverID string) (codexMCPServerC
 		case "command":
 			parsed, err := parseTOMLString(value)
 			if err != nil {
-				return result, true, fmt.Errorf("Codex 配置格式异常：mcp_servers.%s.command 解析失败", strings.TrimSpace(serverID))
+				return result, true, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.codex.config_format_invalid", map[string]any{"path": fmt.Sprintf("mcp_servers.%s.command", strings.TrimSpace(serverID)), "expected": "a TOML string"}))
 			}
 			result.Command = parsed
 		case "args":
 			parsed, err := parseTOMLStringArray(value)
 			if err != nil {
-				return result, true, fmt.Errorf("Codex 配置格式异常：mcp_servers.%s.args 解析失败", strings.TrimSpace(serverID))
+				return result, true, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.codex.config_format_invalid", map[string]any{"path": fmt.Sprintf("mcp_servers.%s.args", strings.TrimSpace(serverID)), "expected": "a TOML string array"}))
 			}
 			result.Args = parsed
 		case "startup_timeout_sec":
 			parsed, err := strconv.Atoi(strings.TrimSpace(value))
 			if err != nil {
-				return result, true, fmt.Errorf("Codex 配置格式异常：mcp_servers.%s.startup_timeout_sec 解析失败", strings.TrimSpace(serverID))
+				return result, true, fmt.Errorf("%s", mcpClientInstallText(text, "ai.service.mcp_client.codex.config_format_invalid", map[string]any{"path": fmt.Sprintf("mcp_servers.%s.startup_timeout_sec", strings.TrimSpace(serverID)), "expected": "an integer"}))
 			}
 			result.StartupTimeoutSec = parsed
 		}
@@ -583,12 +625,12 @@ func splitTOMLAssignment(line string) (string, string, bool) {
 func parseTOMLString(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if len(value) < 2 {
-		return "", fmt.Errorf("字符串格式非法")
+		return "", fmt.Errorf("invalid string format")
 	}
 	switch value[0] {
 	case '\'':
 		if value[len(value)-1] != '\'' {
-			return "", fmt.Errorf("单引号字符串未闭合")
+			return "", fmt.Errorf("single-quoted string is not closed")
 		}
 		return value[1 : len(value)-1], nil
 	case '"':
@@ -598,7 +640,7 @@ func parseTOMLString(value string) (string, error) {
 		}
 		return parsed, nil
 	default:
-		return "", fmt.Errorf("不是字符串")
+		return "", fmt.Errorf("not a string")
 	}
 }
 
@@ -608,7 +650,7 @@ func parseTOMLStringArray(value string) ([]string, error) {
 		return []string{}, nil
 	}
 	if !strings.HasPrefix(value, "[") || !strings.HasSuffix(value, "]") {
-		return nil, fmt.Errorf("不是数组")
+		return nil, fmt.Errorf("not an array")
 	}
 
 	inner := strings.TrimSpace(value[1 : len(value)-1])
@@ -628,7 +670,7 @@ func parseTOMLStringArray(value string) ([]string, error) {
 			break
 		}
 		if !strings.HasPrefix(inner, ",") {
-			return nil, fmt.Errorf("数组分隔符非法")
+			return nil, fmt.Errorf("invalid array separator")
 		}
 		inner = strings.TrimSpace(inner[1:])
 	}
@@ -638,13 +680,13 @@ func parseTOMLStringArray(value string) ([]string, error) {
 func consumeTOMLQuotedString(value string) (string, string, error) {
 	value = strings.TrimLeft(value, " \t")
 	if value == "" {
-		return "", "", fmt.Errorf("字符串为空")
+		return "", "", fmt.Errorf("string is empty")
 	}
 	switch value[0] {
 	case '\'':
 		end := strings.IndexByte(value[1:], '\'')
 		if end < 0 {
-			return "", "", fmt.Errorf("单引号字符串未闭合")
+			return "", "", fmt.Errorf("single-quoted string is not closed")
 		}
 		end++
 		return value[1:end], value[end+1:], nil
@@ -668,9 +710,9 @@ func consumeTOMLQuotedString(value string) (string, string, error) {
 				return parsed, value[index+1:], nil
 			}
 		}
-		return "", "", fmt.Errorf("双引号字符串未闭合")
+		return "", "", fmt.Errorf("double-quoted string is not closed")
 	default:
-		return "", "", fmt.Errorf("不是字符串")
+		return "", "", fmt.Errorf("not a string")
 	}
 }
 
@@ -685,13 +727,13 @@ func decodeJSONLikeStringSlice(value any) ([]string, error) {
 		for _, item := range typed {
 			str, ok := item.(string)
 			if !ok {
-				return nil, fmt.Errorf("数组元素不是字符串")
+				return nil, fmt.Errorf("array element is not a string")
 			}
 			result = append(result, str)
 		}
 		return result, nil
 	default:
-		return nil, fmt.Errorf("不是字符串数组")
+		return nil, fmt.Errorf("not a string array")
 	}
 }
 

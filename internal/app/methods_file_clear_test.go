@@ -105,7 +105,7 @@ func TestBuildTableDataClearSQL_TruncateRejectsUnsupportedDialect(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected truncate to reject sqlite")
 	}
-	if !strings.Contains(err.Error(), "不支持截断表") {
+	if !strings.Contains(err.Error(), "file.backend.error.table_data_truncate_unsupported") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

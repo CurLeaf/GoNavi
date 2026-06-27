@@ -31,10 +31,12 @@ import { buildShortcutSnapshot } from './aiShortcutInsights';
 import { buildAILastRenderErrorSnapshot } from './aiLastRenderErrorInsights';
 import { buildRecentConnectionFailureSnapshot } from './aiConnectionFailureInsights';
 import { buildMCPRuntimeFailureSnapshot } from './aiMCPRuntimeFailureInsights';
+import { translateInspectionCopy } from './aiInspectionI18n';
 import type {
   AISnapshotInspectionRuntime,
   SnapshotInspectionResult,
 } from './aiSnapshotInspectionToolTypes';
+import type { I18nParams } from '../../i18n';
 
 interface ExecuteDiagnosticsSnapshotToolCallOptions {
   toolName: string;
@@ -52,8 +54,20 @@ interface ExecuteDiagnosticsSnapshotToolCallOptions {
   sqlSnippets?: SqlSnippet[];
   skills?: AISkillConfig[];
   userPromptSettings?: AIUserPromptSettings;
+  translate?: (key: string, params?: I18nParams) => string;
   runtime?: AISnapshotInspectionRuntime;
 }
+
+const translateDiagnosticsCopy = (
+  translate: ExecuteDiagnosticsSnapshotToolCallOptions['translate'],
+  key: string,
+  fallback: string,
+  params?: I18nParams,
+): string => (
+  translate
+    ? translateInspectionCopy(translate, key, fallback, params)
+    : fallback
+);
 
 export async function executeDiagnosticsSnapshotToolCall({
   toolName,
@@ -71,6 +85,7 @@ export async function executeDiagnosticsSnapshotToolCall({
   sqlSnippets = [],
   skills = [],
   userPromptSettings,
+  translate,
   runtime,
 }: ExecuteDiagnosticsSnapshotToolCallOptions): Promise<SnapshotInspectionResult | null> {
   switch (toolName) {
@@ -83,6 +98,7 @@ export async function executeDiagnosticsSnapshotToolCall({
           keyword: args.keyword,
           limit: args.limit,
           includePreview: args.includePreview !== false,
+          translate,
         })),
         success: true,
       };
@@ -96,6 +112,7 @@ export async function executeDiagnosticsSnapshotToolCall({
           limit: args.limit,
           includeContent: args.includeContent !== false,
           previewLimit: args.previewLimit,
+          translate,
         })),
         success: true,
       };
@@ -112,6 +129,7 @@ export async function executeDiagnosticsSnapshotToolCall({
           mcpTools,
           skills,
           userPromptSettings,
+          translate,
         })),
         success: true,
       };
@@ -122,6 +140,7 @@ export async function executeDiagnosticsSnapshotToolCall({
           minLines: args.minLines,
           limit: args.limit,
           includeRecommendations: args.includeRecommendations !== false,
+          translate,
         })),
         success: true,
       };
@@ -143,6 +162,7 @@ export async function executeDiagnosticsSnapshotToolCall({
           keyword: args.keyword,
           dbName: args.dbName,
           activityKind: args.activityKind,
+          translate,
         })),
         success: true,
       };
@@ -158,6 +178,7 @@ export async function executeDiagnosticsSnapshotToolCall({
           connections,
           sqlLogs,
           includeSqlPreview: args.includeSqlPreview !== false,
+          translate,
         })),
         success: true,
       };
@@ -165,10 +186,27 @@ export async function executeDiagnosticsSnapshotToolCall({
     case 'inspect_app_logs': {
       const readResult = typeof runtime?.readAppLogTail === 'function'
         ? await runtime.readAppLogTail(Number(args.lineLimit) || 80, String(args.keyword || ''))
-        : { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
+        : {
+          success: false,
+          message: translateDiagnosticsCopy(
+            translate,
+            'ai_chat.inspection.diagnostics.error.read_app_logs_unsupported',
+            'The current environment does not support reading GoNavi app logs',
+          ),
+        };
       if (!readResult?.success) {
+        const detail = String(readResult?.message || translateDiagnosticsCopy(
+          translate,
+          'ai_chat.inspection.diagnostics.error.unknown',
+          'unknown error',
+        ));
         return {
-          content: `读取 GoNavi 应用日志失败: ${readResult?.message || '未知错误'}`,
+          content: translateDiagnosticsCopy(
+            translate,
+            'ai_chat.inspection.diagnostics.error.read_app_logs_failed',
+            `Failed to read GoNavi app logs: ${detail}`,
+            { detail },
+          ),
           success: false,
         };
       }
@@ -177,24 +215,52 @@ export async function executeDiagnosticsSnapshotToolCall({
           readResult,
           keyword: args.keyword,
           lineLimit: args.lineLimit,
+          translate,
         })),
         success: true,
       };
     }
     case 'inspect_ai_upstream_logs': {
-      const keyword = String(args.requestId || args.provider || args.keyword || 'AI 上游请求').trim();
+      const keyword = String(args.requestId || args.provider || args.keyword || '').trim();
+      const readKeyword = keyword || 'requestId=';
       const readResult = typeof runtime?.readAppLogTail === 'function'
-        ? await runtime.readAppLogTail(Number(args.lineLimit) || 160, keyword)
-        : { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
+        ? await runtime.readAppLogTail(Number(args.lineLimit) || 160, readKeyword)
+        : {
+          success: false,
+          message: translateDiagnosticsCopy(
+            translate,
+            'ai_chat.inspection.diagnostics.error.read_app_logs_unsupported',
+            'The current environment does not support reading GoNavi app logs',
+          ),
+        };
       if (!readResult?.success) {
+        const detail = String(readResult?.message || translateDiagnosticsCopy(
+          translate,
+          'ai_chat.inspection.diagnostics.error.unknown',
+          'unknown error',
+        ));
         return {
-          content: `读取 AI 上游请求日志失败: ${readResult?.message || '未知错误'}`,
+          content: translateDiagnosticsCopy(
+            translate,
+            'ai_chat.inspection.diagnostics.error.read_ai_upstream_logs_failed',
+            `Failed to read AI upstream request logs: ${detail}`,
+            { detail },
+          ),
           success: false,
         };
       }
+      const snapshotReadResult = keyword || !readResult?.data || typeof readResult.data !== 'object'
+        ? readResult
+        : {
+          ...readResult,
+          data: {
+            ...readResult.data,
+            keyword,
+          },
+        };
       return {
         content: JSON.stringify(buildAIUpstreamLogSnapshot({
-          readResult,
+          readResult: snapshotReadResult,
           provider: args.provider,
           requestId: args.requestId,
           keyword: args.keyword,
@@ -204,6 +270,7 @@ export async function executeDiagnosticsSnapshotToolCall({
           includeLines: args.includeLines === true,
           bodyPreviewLimit: args.bodyPreviewLimit,
           includePayloadSummary: args.includePayloadSummary !== false,
+          translate,
         })),
         success: true,
       };
@@ -211,10 +278,27 @@ export async function executeDiagnosticsSnapshotToolCall({
     case 'inspect_recent_connection_failures': {
       const readResult = typeof runtime?.readAppLogTail === 'function'
         ? await runtime.readAppLogTail(Number(args.lineLimit) || 120, String(args.keyword || ''))
-        : { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
+        : {
+          success: false,
+          message: translateDiagnosticsCopy(
+            translate,
+            'ai_chat.inspection.diagnostics.error.read_app_logs_unsupported',
+            'The current environment does not support reading GoNavi app logs',
+          ),
+        };
       if (!readResult?.success) {
+        const detail = String(readResult?.message || translateDiagnosticsCopy(
+          translate,
+          'ai_chat.inspection.diagnostics.error.unknown',
+          'unknown error',
+        ));
         return {
-          content: `读取最近连接失败记录失败: ${readResult?.message || '未知错误'}`,
+          content: translateDiagnosticsCopy(
+            translate,
+            'ai_chat.inspection.diagnostics.error.read_recent_connection_failures_failed',
+            `Failed to read recent connection failure records: ${detail}`,
+            { detail },
+          ),
           success: false,
         };
       }
@@ -223,6 +307,7 @@ export async function executeDiagnosticsSnapshotToolCall({
           readResult,
           keyword: args.keyword,
           lineLimit: args.lineLimit,
+          translate,
         })),
         success: true,
       };
@@ -231,10 +316,23 @@ export async function executeDiagnosticsSnapshotToolCall({
       const keyword = String(args.serverName || args.keyword || 'MCP').trim();
       const readResult = typeof runtime?.readAppLogTail === 'function'
         ? await runtime.readAppLogTail(Number(args.lineLimit) || 160, keyword)
-        : { success: false, message: '当前环境暂不支持读取 GoNavi 应用日志' };
+        : {
+          success: false,
+          message: translateDiagnosticsCopy(
+            translate,
+            'ai_chat.inspection.mcp_runtime.error.read_logs_unsupported',
+            'The current environment does not support reading GoNavi app logs',
+          ),
+        };
       if (!readResult?.success) {
+        const detail = String(readResult?.message || 'unknown error');
         return {
-          content: `读取 MCP 运行期失败日志失败: ${readResult?.message || '未知错误'}`,
+          content: translateDiagnosticsCopy(
+            translate,
+            'ai_chat.inspection.mcp_runtime.error.read_logs_failed',
+            `Failed to read MCP runtime failure logs: ${detail}`,
+            { detail },
+          ),
           success: false,
         };
       }
@@ -250,13 +348,14 @@ export async function executeDiagnosticsSnapshotToolCall({
           serverName: args.serverName,
           lineLimit: args.lineLimit,
           includeLines: args.includeLines === true,
+          translate,
         })),
         success: true,
       };
     }
     case 'inspect_ai_last_render_error':
       return {
-        content: JSON.stringify(buildAILastRenderErrorSnapshot()),
+        content: JSON.stringify(buildAILastRenderErrorSnapshot(translate)),
         success: true,
       };
     case 'inspect_saved_queries':

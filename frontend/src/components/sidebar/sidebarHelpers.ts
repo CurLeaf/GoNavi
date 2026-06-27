@@ -18,7 +18,7 @@ export const V2_RAIL_UNGROUPED_CONNECTION_GROUP_ID = '__gonavi-v2-ungrouped-conn
 // === 共享类型 ===
 
 /** V2 资源管理器过滤维度 */
-export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'routines' | 'events';
+export type V2ExplorerFilter = 'all' | 'tables' | 'views' | 'sequences' | 'routines' | 'packages' | 'events';
 
 // === 纯函数 ===
 
@@ -94,9 +94,11 @@ export const isV2SidebarObjectNode = (
   return node?.type === 'table'
       || node?.type === 'view'
       || node?.type === 'materialized-view'
+      || node?.type === 'sequence'
       || node?.type === 'db-trigger'
       || node?.type === 'db-event'
-      || node?.type === 'routine';
+      || node?.type === 'routine'
+      || node?.type === 'package';
 };
 
 // === 第二期：依赖 i18n 但不依赖 TreeNode 内部类型的工具函数 ===
@@ -125,7 +127,9 @@ export const resolveV2ObjectGroupTitle = (
   const groupKey = String(node?.dataRef?.groupKey || '');
   if (groupKey === 'tables') return t('sidebar.v2_table_group_menu.title');
   if (groupKey === 'views') return t('sidebar.object_group.views');
+  if (groupKey === 'sequences') return t('sidebar.object_group.sequences');
   if (groupKey === 'routines') return t('sidebar.object_group.routines');
+  if (groupKey === 'packages') return t('sidebar.object_group.packages');
   if (groupKey === 'triggers') return t('sidebar.object_group.triggers');
   if (groupKey === 'events') return t('sidebar.object_group.events');
   if (groupKey === 'materializedViews') return t('sidebar.object_group.materialized_views');
@@ -139,7 +143,7 @@ export const resolveV2ObjectGroupTitle = (
 export const resolveSidebarTableNameForCopy = (
   node: Pick<SidebarNodeLike, 'title' | 'dataRef'> | null | undefined,
 ): string => {
-  return String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.eventName || node?.title || '').trim();
+  return String(node?.dataRef?.tableName || node?.dataRef?.viewName || node?.dataRef?.sequenceName || node?.dataRef?.packageName || node?.dataRef?.eventName || node?.title || '').trim();
 };
 
 // === 命令搜索相关类型与解析（V2 Command Search）===

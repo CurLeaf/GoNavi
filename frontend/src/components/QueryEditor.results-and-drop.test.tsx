@@ -7,6 +7,7 @@ import { readV2ThemeCss } from '../test/readV2ThemeCss';
 import { setCurrentLanguage } from '../i18n';
 import type { SavedQuery, TabData } from '../types';
 import { ORACLE_ROWID_LOCATOR_COLUMN } from '../utils/rowLocator';
+import { formatSqlExecutionError } from '../utils/sqlErrorSemantics';
 import { clearQueryTabDraft, clearSQLFileTabDraft, getQueryTabDraft, getSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
 import { normalizeQueryResultMessages } from './queryEditor/QueryEditorHelpers';
 import QueryEditor, {
@@ -14,6 +15,7 @@ import QueryEditor, {
   resolveQueryEditorNavigationDecorations,
   resolveQueryEditorNavigationTarget,
 } from './QueryEditor';
+import QueryEditorResultsPanel from './QueryEditorResultsPanel';
 
 const storeState = vi.hoisted(() => ({
   connections: [
@@ -357,11 +359,20 @@ vi.mock('./DataGrid', () => ({
   GONAVI_ROW_KEY: '__gonavi_row_key__',
 }));
 
+vi.mock('./LogPanel', () => ({
+  default: ({ executionError }: any) => (
+    <div data-log-panel="true">
+      {executionError || 'log-panel'}
+    </div>
+  ),
+}));
+
 vi.mock('@ant-design/icons', () => {
   const Icon = () => <span />;
   return {
     BugOutlined: Icon,
     ClearOutlined: Icon,
+    CopyOutlined: Icon,
     PlayCircleOutlined: Icon,
     SaveOutlined: Icon,
     FormatPainterOutlined: Icon,
@@ -461,10 +472,14 @@ vi.mock('antd', () => {
   };
 });
 
-const textContent = (node: any): string =>
-  (node.children || [])
+const textContent = (node: any): string => {
+  if (node == null) return '';
+  if (typeof node === 'string') return node;
+  if (Array.isArray(node)) return node.map((item) => textContent(item)).join('');
+  return (node.children || [])
     .map((item: any) => (typeof item === 'string' ? item : textContent(item)))
     .join('');
+};
 
 const findButton = (renderer: ReactTestRenderer, text: string) =>
   renderer.root.findAll((node) => node.type === 'button' && textContent(node).includes(text))[0];
@@ -474,6 +489,16 @@ const findButtons = (renderer: ReactTestRenderer, text: string) =>
 
 const findExactButton = (renderer: ReactTestRenderer, text: string) =>
   renderer.root.findAll((node) => node.type === 'button' && textContent(node) === text)[0];
+
+const findResultMessageTextarea = (renderer: ReactTestRenderer, mode: 'compact' | 'full' = 'full') =>
+  renderer.root.find((node) =>
+    node.type === 'textarea' && node.props['data-query-result-message-textarea'] === mode,
+  );
+
+const findByClassName = (renderer: ReactTestRenderer, className: string) =>
+  renderer.root.find((node) =>
+    typeof node.props?.className === 'string' && node.props.className.includes(className),
+  );
 
 const findEditorAction = (id: string) =>
   editorState.editor.addAction.mock.calls
@@ -510,6 +535,20 @@ const getLastInjectedPrompt = (): string => {
   const event = dispatchCalls[dispatchCalls.length - 1]?.[0];
   expect(event?.type).toBe('gonavi:ai:inject-prompt');
   return event?.detail?.prompt;
+};
+
+const createRunShortcutEvent = () => {
+  const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+  return {
+    ctrlKey: !isMacRuntime,
+    metaKey: isMacRuntime,
+    altKey: false,
+    shiftKey: false,
+    key: 'Enter',
+    target: null,
+    preventDefault: vi.fn(),
+    stopPropagation: vi.fn(),
+  };
 };
 
 const createTab = (overrides: Partial<TabData> = {}): TabData => ({
@@ -723,6 +762,134 @@ describe('QueryEditor external SQL save', () => {
     renderer?.unmount();
   });
 
+  it('runs the whole Oracle procedure when the cursor is in the exception tail', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['affectedRows'], rows: [{ affectedRows: 1 }] }],
+    });
+    const plsql = [
+      '-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1',
+      '-- 请确认语法兼容当前数据库后执行',
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+      '  p_sourceid IN VARCHAR2,',
+      '  p_msg_out OUT NVARCHAR2',
+      ') AS',
+      '  v_ecnt NUMBER;',
+      '  CURSOR cur_ware IS',
+      '    SELECT d.goodsid',
+      '    FROM t_order_d d',
+      '    ORDER BY CASE',
+      "      WHEN d.goodsqty > 0 THEN '1'",
+      "      ELSE '2'",
+      '    END, d.goodsid;',
+      'BEGIN',
+      '  FOR row_ware IN cur_ware LOOP',
+      '    IF row_ware.goodsid IS NOT NULL THEN',
+      '      BEGIN',
+      '        SELECT COUNT(*) INTO v_ecnt FROM dual;',
+      '      EXCEPTION',
+      '        WHEN no_data_found THEN',
+      '          v_ecnt := 0;',
+      '      END;',
+      '    END IF;',
+      '  END LOOP;',
+      "  p_msg_out := '';",
+      'EXCEPTION',
+      '  WHEN OTHERS THEN',
+      "    p_msg_out := substr('订单核销失败，错误信息：' || SQLERRM || '，错误位置：' ||",
+      '                        dbms_utility.format_error_backtrace, 1, 1000);',
+      'END cproc_tzhssr_order2sale_A1;',
+      '/;',
+    ].join('\n');
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ORCLPDB1', query: plsql, queryMode: 'object-edit' })} />);
+    });
+
+    const tailLine = plsql.split('\n').findIndex((line) => line.includes('p_msg_out := substr')) + 1;
+    editorState.position = { lineNumber: tailLine, column: 5 };
+    editorState.selection = {
+      startLineNumber: tailLine,
+      startColumn: 5,
+      endLineNumber: tailLine,
+      endColumn: 5,
+      positionLineNumber: tailLine,
+      positionColumn: 5,
+    };
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
+    expect(executedSql).toContain('CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1');
+    expect(executedSql).toContain('p_msg_out OUT NVARCHAR2');
+    expect(executedSql).toContain('p_msg_out := substr');
+    expect(executedSql).not.toBe(plsql.split('\n').slice(tailLine - 1).join('\n'));
+    expect(executedSql).not.toContain('/;');
+    renderer?.unmount();
+  });
+
+  it('runs the preceding Oracle procedure when the cursor is on the SQLPlus slash delimiter', async () => {
+    storeState.connections[0].config.type = 'oracle';
+    storeState.connections[0].config.database = 'ORCLPDB1';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['affectedRows'], rows: [{ affectedRows: 1 }] }],
+    });
+    const plsql = [
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+      '  p_sourceid IN VARCHAR2,',
+      '  p_msg_out OUT NVARCHAR2',
+      ') AS',
+      'BEGIN',
+      "  p_msg_out := '';",
+      'EXCEPTION',
+      '  WHEN OTHERS THEN',
+      '    p_msg_out := SQLERRM;',
+      'END cproc_tzhssr_order2sale_A1;',
+      '/;',
+    ].join('\n');
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'ORCLPDB1', query: plsql, queryMode: 'object-edit' })} />);
+    });
+
+    const slashLine = plsql.split('\n').findIndex((line) => line.startsWith('/')) + 1;
+    editorState.position = { lineNumber: slashLine, column: 1 };
+    editorState.selection = {
+      startLineNumber: slashLine,
+      startColumn: 1,
+      endLineNumber: slashLine,
+      endColumn: 1,
+      positionLineNumber: slashLine,
+      positionColumn: 1,
+    };
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const executedSql = String(backendApp.DBQueryMulti.mock.calls[0][2]);
+    expect(executedSql).toContain('CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1');
+    expect(executedSql).toContain('p_msg_out OUT NVARCHAR2');
+    expect(executedSql).toContain('END cproc_tzhssr_order2sale_A1;');
+    expect(executedSql).not.toContain('/;');
+    renderer?.unmount();
+  });
+
   it('renders result grid for sqlserver exec statements that return rows', async () => {
     storeState.connections[0].config.type = 'sqlserver';
     storeState.connections[0].config.database = 'master';
@@ -777,19 +944,21 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(textContent(renderer!.toJSON())).toContain('消息 1');
-    expect(textContent(renderer!.toJSON())).toContain("Table 'users'. Scan count 1, logical reads 3.");
-    expect(dataGridState.latestProps?.columnNames).not.toEqual([]);
+    expect(findResultMessageTextarea(renderer!).props.value).toBe("Table 'users'. Scan count 1, logical reads 3.");
+    expect(dataGridState.latestProps).toBeNull();
   });
 
-  it('normalizes sqlserver mssql-prefixed message lines line-by-line', () => {
+  it('preserves sqlserver message indentation and blank lines after stripping mssql prefixes', () => {
     expect(normalizeQueryResultMessages([
       "mssql:     select c.queryno,'' ,left(dbo.f_vendor_class(''' + b.groupid + ''',' + colname + '),",
       "mssql:         'char','',''),'自动生成',0,isdefault,defaultoperator,defaultvalue,defaultvalue2,ishaving",
+      '',
       "        where funcno = @funcno and tabname = '$vendorclass'",
     ])).toEqual([
-      "select c.queryno,'' ,left(dbo.f_vendor_class(''' + b.groupid + ''',' + colname + '),",
-      "'char','',''),'自动生成',0,isdefault,defaultoperator,defaultvalue,defaultvalue2,ishaving",
-      "where funcno = @funcno and tabname = '$vendorclass'",
+      "    select c.queryno,'' ,left(dbo.f_vendor_class(''' + b.groupid + ''',' + colname + '),",
+      "        'char','',''),'自动生成',0,isdefault,defaultoperator,defaultvalue,defaultvalue2,ishaving",
+      '',
+      "        where funcno = @funcno and tabname = '$vendorclass'",
     ]);
   });
 
@@ -820,6 +989,42 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer!.toJSON())).toContain('结果 1');
     expect(textContent(renderer!.toJSON())).toContain('结果 2');
     expect(dataGridState.latestProps?.columnNames).toEqual(['name']);
+  });
+
+  it('hides redundant sqlserver affected-row status result after a query result', async () => {
+    storeState.connections[0].config.type = 'sqlserver';
+    storeState.connections[0].config.database = 'hydee';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [
+        {
+          columns: ['dddwno', 'dddwlist'],
+          rows: [{ dddwno: '001', dddwlist: 'demo' }],
+        },
+        { columns: ['affectedRows'], rows: [{ affectedRows: 846 }] },
+      ],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ dbName: 'hydee', query: 'select * from c_dddw' })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const rendered = textContent(renderer!.toJSON());
+    expect(rendered).toContain('结果 1');
+    expect(rendered).not.toContain('结果 2');
+    expect(rendered).not.toContain('影响行数：846');
+    expect(dataGridState.latestProps?.columnNames).toEqual(['dddwno', 'dddwlist']);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ dddwno: '001', dddwlist: 'demo' });
+    expect(messageApi.success).toHaveBeenCalledWith('已执行完成，生成 1 个结果集。');
   });
 
   it('prefers the first displayable sqlserver procedure result when empty result sets are returned', async () => {
@@ -932,13 +1137,16 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(textContent(renderer!.toJSON())).toContain('消息 2');
-    expect(textContent(renderer!.toJSON())).toContain("insert into c_dyscript(projectid,name) values (1,'demo')");
+    expect(textContent(renderer!.toJSON())).toContain('消息 1');
+    expect(findResultMessageTextarea(renderer!).props.value).toBe([
+      "insert into c_dyscript(projectid,name) values (1,'demo')",
+      "insert into c_dyscript(projectid,name) values (2,'next')",
+    ].join('\n'));
     expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
     expect(dataGridState.latestProps).toBeNull();
   });
 
-  it('strips mssql prefixes before rendering sqlserver message-only results', async () => {
+  it('preserves sqlserver message indentation in the rendered result message textarea', async () => {
     storeState.connections[0].config.type = 'sqlserver';
     storeState.connections[0].config.database = 'hydee';
     backendApp.DBQueryMulti.mockResolvedValueOnce({
@@ -951,6 +1159,7 @@ describe('QueryEditor external SQL save', () => {
           messages: [
             "mssql:     select c.queryno,'' ,left(dbo.f_vendor_class(''' + b.groupid + ''',' + colname + '),",
             "mssql:         'char','',''),'自动生成',0,isdefault,defaultoperator,defaultvalue,defaultvalue2,ishaving",
+            '',
             "        where funcno = @funcno and tabname = '$vendorclass'",
           ],
         },
@@ -971,11 +1180,37 @@ describe('QueryEditor external SQL save', () => {
     });
 
     const rendered = textContent(renderer!.toJSON());
+    const messageTextarea = findResultMessageTextarea(renderer!);
+    const messageBlock = findByClassName(renderer!, 'query-result-message-block');
+    const messageScrollBody = findByClassName(renderer!, 'query-result-message-scroll-body');
     expect(rendered).toContain('消息 1');
-    expect(rendered).toContain("select c.queryno,'' ,left(dbo.f_vendor_class");
-    expect(rendered).toContain("'char','',''),'自动生成'");
-    expect(rendered).toContain("where funcno = @funcno and tabname = '$vendorclass'");
-    expect(rendered).not.toContain('mssql:');
+    expect(messageTextarea.props.value).toBe([
+      "    select c.queryno,'' ,left(dbo.f_vendor_class(''' + b.groupid + ''',' + colname + '),",
+      "        'char','',''),'自动生成',0,isdefault,defaultoperator,defaultvalue,defaultvalue2,ishaving",
+      '',
+      "        where funcno = @funcno and tabname = '$vendorclass'",
+    ].join('\n'));
+    expect(messageTextarea.props.wrap).toBe('off');
+    expect(messageTextarea.props.style).toMatchObject({
+      display: 'block',
+      whiteSpace: 'pre',
+      overflow: 'auto',
+      width: '100%',
+      minWidth: 0,
+    });
+    expect(messageTextarea.props.style.minWidth).not.toBe('max-content');
+    expect(messageBlock.props.style).toMatchObject({
+      alignItems: 'stretch',
+      width: '100%',
+    });
+    expect(messageScrollBody.props.style).toMatchObject({
+      display: 'flex',
+      alignItems: 'stretch',
+      width: '100%',
+      overflow: 'hidden',
+      minWidth: 0,
+    });
+    expect(messageTextarea.props.value).not.toContain('mssql:');
   });
 
   it('renders top-level sqlserver print messages when result sets contain only status rows', async () => {
@@ -1004,8 +1239,8 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(textContent(renderer!.toJSON())).toContain('消息 2');
-    expect(textContent(renderer!.toJSON())).toContain("insert into c_dyscript(projectid,name) values (1,'demo')");
+    expect(textContent(renderer!.toJSON())).toContain('消息 1');
+    expect(findResultMessageTextarea(renderer!).props.value).toBe("insert into c_dyscript(projectid,name) values (1,'demo')");
     expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
     expect(dataGridState.latestProps).toBeNull();
   });
@@ -1240,6 +1475,49 @@ describe('QueryEditor external SQL save', () => {
     );
   });
 
+  it('falls back to read-only results when query locator metadata stalls', async () => {
+    vi.useFakeTimers();
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['NAME'], rows: [{ NAME: 'alpha' }] }],
+    });
+    backendApp.DBGetColumns.mockReturnValueOnce(new Promise(() => {}));
+    backendApp.DBGetIndexes.mockReturnValueOnce(new Promise(() => {}));
+
+    try {
+      let renderer!: ReactTestRenderer;
+      await act(async () => {
+        renderer = create(<QueryEditor tab={createTab({ dbName: 'main', query: 'SELECT NAME FROM users' })} />);
+      });
+
+      await act(async () => {
+        findButton(renderer!, '运行').props.onClick();
+        await Promise.resolve();
+      });
+
+      expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(
+        expect.anything(),
+        'main',
+        'SELECT NAME FROM users LIMIT 5000',
+        'query-1',
+      );
+      expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ NAME: 'alpha' });
+      expect(dataGridState.latestProps?.tableName).toBe('users');
+      expect(dataGridState.latestProps?.readOnly).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps MySQL information_schema routine results read-only without a locator warning', async () => {
     const sql = [
       'SELECT ROUTINE_SCHEMA, ROUTINE_NAME, DEFINER, SECURITY_TYPE',
@@ -1346,6 +1624,103 @@ describe('QueryEditor external SQL save', () => {
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 3');
   });
 
+  it('does not run SQL from the run shortcut when nothing is selected', async () => {
+    storeState.shortcutOptions.runQuery.mac = { enabled: true, combo: 'Meta+Enter' };
+    storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Enter' };
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        dbName: 'main',
+        query: 'select 1;\nselect 2 as two;\nselect 3;',
+      })} />);
+    });
+    editorState.position = { lineNumber: 2, column: 8 };
+    editorState.selection = null;
+    backendApp.DBQueryMulti.mockClear();
+
+    const event = createRunShortcutEvent();
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+    expect(messageApi.info).toHaveBeenCalledWith('没有可选择的 SQL 语句。');
+  });
+
+  it('runs selected SQL from the run shortcut', async () => {
+    storeState.shortcutOptions.runQuery.mac = { enabled: true, combo: 'Meta+Enter' };
+    storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Enter' };
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['two'], rows: [{ two: 2 }] }],
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        dbName: 'main',
+        query: 'select 1;\nselect 2 as two;\nselect 3;',
+      })} />);
+    });
+    editorState.position = { lineNumber: 1, column: 4 };
+    editorState.selection = {
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 'select 2 as two'.length + 1,
+    };
+
+    const event = createRunShortcutEvent();
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(backendApp.DBQueryMulti).toHaveBeenCalledWith(expect.anything(), 'main', expect.stringContaining('select 2 as two'), 'query-1');
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 1');
+    expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 3');
+  });
+
   it('renders V2 empty state copy for the active non-Chinese language', async () => {
     storeState.appearance.uiVersion = 'v2';
     storeState.languagePreference = 'en-US';
@@ -1353,7 +1728,7 @@ describe('QueryEditor external SQL save', () => {
 
     let renderer: ReactTestRenderer;
     await act(async () => {
-      renderer = create(<QueryEditor tab={createTab()} />);
+      renderer = create(<QueryEditor tab={createTab({ resultPanelVisible: true })} />);
     });
 
     const rendered = textContent(renderer!.toJSON());
@@ -1454,7 +1829,7 @@ describe('QueryEditor external SQL save', () => {
     editorState.position = { lineNumber: 3, column: 1 };
 
     await act(async () => {
-      const runButton = findButton(renderer!, 'Run');
+      const runButton = findButton(renderer!, '运行');
       runButton.props.onMouseDown?.({ preventDefault: vi.fn() });
       await runButton.props.onClick();
     });
@@ -1494,7 +1869,7 @@ describe('QueryEditor external SQL save', () => {
     };
 
     await act(async () => {
-      const runButton = findButton(renderer!, 'Run');
+      const runButton = findButton(renderer!, '运行');
       runButton.props.onMouseDown?.({ preventDefault: vi.fn() });
       await runButton.props.onClick();
     });
@@ -1536,7 +1911,7 @@ describe('QueryEditor external SQL save', () => {
     };
 
     await act(async () => {
-      const runButton = findButton(renderer!, '运行');
+      const runButton = findButton(renderer!, 'Run');
       runButton.props.onMouseDown?.({ preventDefault: vi.fn() });
       await runButton.props.onClick();
     });
@@ -1545,7 +1920,7 @@ describe('QueryEditor external SQL save', () => {
       await Promise.resolve();
     });
 
-    expect(textContent(renderer!.toJSON())).toContain('结果 1');
+    expect(textContent(renderer!.toJSON())).toContain('Result 1');
     backendApp.DBQueryMulti.mockClear();
     messageApi.info.mockClear();
 
@@ -1563,7 +1938,7 @@ describe('QueryEditor external SQL save', () => {
     });
 
     await act(async () => {
-      const runButton = findButton(renderer!, '运行');
+      const runButton = findButton(renderer!, 'Run');
       runButton.props.onMouseDown?.({ preventDefault: vi.fn() });
       await runButton.props.onClick();
     });
@@ -1694,13 +2069,15 @@ describe('QueryEditor external SQL save', () => {
         await findButton(renderer, 'Run').props.onClick();
       });
       await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
 
-      const rendered = textContent(renderer.toJSON());
-      expect(rendered).toContain('Statement 2 failed: driver exploded');
-      expect(rendered).not.toContain('第 2 条语句执行失败：driver exploded');
+    const rendered = textContent(renderer.toJSON());
+    expect(rendered).toContain(formatSqlExecutionError('driver exploded', {
+      prefix: 'Statement 2 failed:',
+    }));
+    expect(rendered).not.toContain('第 2 条语句执行失败：driver exploded');
     });
 
     it('shows the Mongo zero-result success toast in English', async () => {
@@ -1771,11 +2148,11 @@ describe('QueryEditor external SQL save', () => {
       expect(messageApi.success).not.toHaveBeenCalledWith('已执行完成，生成 2 个结果集。');
     });
 
-    it('shows the non-Mongo zero-result success toast in English', async () => {
-      storeState.languagePreference = 'en-US';
-      setCurrentLanguage('en-US');
-      const query = 'update users set active = 1 where 1 = 0;';
-      backendApp.DBQueryMulti.mockResolvedValueOnce({ success: true, data: [] });
+  it('shows the non-Mongo zero-result success toast in English', async () => {
+    storeState.languagePreference = 'en-US';
+    setCurrentLanguage('en-US');
+    const query = 'update users set active = 1 where 1 = 0;';
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({ success: true, data: [] });
 
       let renderer!: ReactTestRenderer;
       await act(async () => {
@@ -1800,12 +2177,13 @@ describe('QueryEditor external SQL save', () => {
         await Promise.resolve();
       });
 
-      expect(backendApp.DBQueryWithCancel).not.toHaveBeenCalled();
-      expect(backendApp.DBQueryMulti).toHaveBeenCalledTimes(1);
-      expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('update users set active = 1 where 1 = 0');
-      expect(messageApi.success).toHaveBeenCalledWith('Execution succeeded.');
-      expect(messageApi.success).not.toHaveBeenCalledWith('执行成功。');
-    });
+    expect(backendApp.DBQueryWithCancel).not.toHaveBeenCalled();
+    expect(backendApp.DBQueryMulti).not.toHaveBeenCalled();
+    expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalledTimes(1);
+    expect(String(backendApp.DBQueryMultiTransactional.mock.calls[0][2])).toContain('update users set active = 1 where 1 = 0');
+    expect(messageApi.success).toHaveBeenCalledWith('Execution succeeded.');
+    expect(messageApi.success).not.toHaveBeenCalledWith('执行成功。');
+  });
 
     it('shows the wrapped execution failure toast in English while preserving raw error detail', async () => {
       storeState.languagePreference = 'en-US';
@@ -1839,7 +2217,7 @@ describe('QueryEditor external SQL save', () => {
       expect(backendApp.DBQueryWithCancel).not.toHaveBeenCalled();
       expect(backendApp.DBQueryMulti).toHaveBeenCalledTimes(1);
       expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).toContain('select 1');
-      expect(messageApi.error).toHaveBeenCalledWith('Query execution failed: driver exploded');
+      expect(messageApi.error).toHaveBeenCalledWith(`Query execution failed: ${formatSqlExecutionError('driver exploded')}`);
       expect(messageApi.error).not.toHaveBeenCalledWith('Error executing query: driver exploded');
     });
   });
@@ -1894,7 +2272,7 @@ describe('QueryEditor external SQL save', () => {
         await Promise.resolve();
       });
 
-      expect(messageApi.error).toHaveBeenCalledWith('Refresh failed: network down');
+      expect(messageApi.error).toHaveBeenCalledWith(`Refresh failed: ${formatSqlExecutionError('network down')}`);
       expect(messageApi.error).not.toHaveBeenCalledWith('刷新失败: network down');
     });
 
@@ -1920,7 +2298,7 @@ describe('QueryEditor external SQL save', () => {
         await Promise.resolve();
       });
 
-      expect(messageApi.error).toHaveBeenCalledWith('Refresh failed: socket closed');
+      expect(messageApi.error).toHaveBeenCalledWith(`Refresh failed: ${formatSqlExecutionError('socket closed')}`);
       expect(messageApi.error).not.toHaveBeenCalledWith('刷新失败: socket closed');
     });
   });
@@ -2393,6 +2771,15 @@ describe('QueryEditor external SQL save', () => {
 
     expect(source).toContain("textAlign: 'left'");
     expect(source).toContain("justifyContent: 'flex-start'");
+    expect(source).toContain('query-result-message-block');
+    expect(source).toContain('query-result-message-header');
+    expect(source).toContain('query-result-message-scroll-body');
+    expect(source).toContain("flex: fillHeight ? 1 : '0 1 auto'");
+    expect(source).toContain('wrap="off"');
+    expect(source).toContain("whiteSpace: 'pre'");
+    expect(source).toContain("alignItems: 'stretch'");
+    expect(source).toContain("minWidth: 0");
+    expect(source).not.toContain("minWidth: 'max-content'");
     expect(source).toContain("data-query-result-message-textarea");
     expect(source).toContain("query_editor.results_panel.message.action.copy");
     expect(source).toContain("typeof navigator?.clipboard?.writeText !== 'function'");
@@ -2406,18 +2793,57 @@ describe('QueryEditor external SQL save', () => {
     expect(source).toContain("if (isEditableElement(event.target) && !inEditorPane) {");
   });
 
-  it('embeds the sql execution log as a result tab instead of a standalone workspace panel in v2', () => {
+  it('keeps the embedded sql execution log limited to v2 query editor result tabs', () => {
     const panelSource = readFileSync(new URL('./QueryEditorResultsPanel.tsx', import.meta.url), 'utf8');
     const editorSource = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
 
     expect(panelSource).toContain('QUERY_EDITOR_SQL_LOG_TAB_KEY');
+    expect(panelSource).toContain('const shouldShowSqlLogTab = isV2Ui && (sqlLogCount > 0 || activeResultKey === QUERY_EDITOR_SQL_LOG_TAB_KEY);');
     expect(panelSource).toContain('<LogPanel');
     expect(panelSource).toContain('variant="embedded"');
     expect(panelSource).toContain('executionError={executionError}');
     expect(panelSource).toContain("t('log_panel.short_title')");
     expect(panelSource).toContain('[logTabItem, ...resultTabItems]');
     expect(editorSource).toContain("window.addEventListener('gonavi:show-sql-execution-log'");
+    expect(editorSource).toContain("event instanceof CustomEvent && event.detail?.mode === 'open'");
     expect(editorSource).toContain('setActiveResultKey(QUERY_EDITOR_SQL_LOG_TAB_KEY)');
+  });
+
+  it('does not render the embedded sql execution log tab in legacy UI', () => {
+    const renderResultsPanel = (isV2Ui: boolean) => create(
+      <QueryEditorResultsPanel
+        resultSets={[]}
+        activeResultKey=""
+        loading={false}
+        executionError=""
+        sqlLogCount={1}
+        darkMode={false}
+        isV2Ui={isV2Ui}
+        currentDb="main"
+        currentConnectionId="conn-1"
+        toggleShortcutLabel=""
+        onActiveResultKeyChange={vi.fn()}
+        onHide={vi.fn()}
+        onCloseResult={vi.fn()}
+        onCloseOtherResultTabs={vi.fn()}
+        onCloseResultTabsToLeft={vi.fn()}
+        onCloseResultTabsToRight={vi.fn()}
+        onCloseAllResultTabs={vi.fn()}
+        onReloadResult={vi.fn()}
+        onResultPageChange={vi.fn()}
+        onDiagnoseExecutionError={vi.fn()}
+      />,
+    );
+
+    const legacyRenderer = renderResultsPanel(false);
+    expect(legacyRenderer.root.findAll((node) => node.props?.['data-log-panel'] === 'true')).toHaveLength(0);
+    expect(legacyRenderer.root.findAll((node) => node.props?.['data-tab-key'] === '__gonavi_sql_execution_log__')).toHaveLength(0);
+    legacyRenderer.unmount();
+
+    const v2Renderer = renderResultsPanel(true);
+    expect(v2Renderer.root.findAll((node) => node.props?.['data-log-panel'] === 'true')).toHaveLength(1);
+    expect(v2Renderer.root.findAll((node) => node.props?.['data-tab-key'] === '__gonavi_sql_execution_log__')).toHaveLength(1);
+    v2Renderer.unmount();
   });
 
   it('keeps the v2 query editor toolbar grouped and compact', () => {
@@ -2433,6 +2859,10 @@ describe('QueryEditor external SQL save', () => {
     expect(toolbarSource).toContain('gn-v2-query-toolbar-actions');
     expect(toolbarSource).toContain('gn-v2-query-toolbar-connection-select');
     expect(toolbarSource).toContain('gn-v2-query-toolbar-database-select');
+    expect(toolbarSource).toContain('FULL_NAME_TOOLTIP_DELAY_SECONDS = 1');
+    expect(toolbarSource).toContain('mouseEnterDelay={FULL_NAME_TOOLTIP_DELAY_SECONDS}');
+    expect(toolbarSource).toContain('optionRender={(option) => renderFullNameSelectTooltip(option.data.fullName)}');
+    expect(toolbarSource).toContain('labelRender={(option) => renderFullNameSelectTooltip(option.label ?? option.value)}');
     expect(toolbarSource).toContain('gn-v2-query-toolbar-max-rows-select');
     expect(toolbarSource).toContain('QueryEditorTransactionSettings');
     expect(transactionSettingsSource).toContain('gn-v2-query-toolbar-transaction-mode-select');
@@ -2442,8 +2872,9 @@ describe('QueryEditor external SQL save', () => {
     expect(transactionSettingsSource).toContain('query_editor.transaction.mode.auto');
     expect(transactionSettingsSource).not.toContain("label: '手动提交'");
     expect(transactionSettingsSource).not.toContain("label: '自动提交'");
-    expect(transactionSettingsSource).toContain('query_editor.transaction.delay.immediate');
-    expect(transactionSettingsSource).toContain("label: '3s'");
+    expect(transactionSettingsSource).toContain('query_editor.transaction.delay.immediate_commit');
+    expect(transactionSettingsSource).toContain('query_editor.transaction.delay.seconds_commit');
+    expect(transactionSettingsSource).not.toContain("label: '3s'");
     expect(source).toContain('QueryEditorTransactionToolbar');
     expect(transactionToolbarSource).toContain("className={isV2Ui ? 'gn-v2-query-transaction-toolbar' : undefined}");
     expect(transactionToolbarSource).toContain(": null;");
@@ -2470,8 +2901,8 @@ describe('QueryEditor external SQL save', () => {
 
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-selects');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-toolbar-actions');
-    expect(css).toContain('width: 74px !important;');
-    expect(css).toContain('width: 62px !important;');
+    expect(css).toContain('width: 78px !important;');
+    expect(css).toContain('width: 104px !important;');
     expect(css).toContain('flex: 0 0 auto !important;');
     expect(css).toContain('justify-content: flex-start;');
     expect(css).toContain('height: 32px !important;');
@@ -2503,16 +2934,20 @@ describe('QueryEditor external SQL save', () => {
     const modalSource = readFileSync(new URL('./SnippetSettingsModal.tsx', import.meta.url), 'utf8');
     const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
 
-    expect(modalSource).toContain('片段语法说明（可编辑）');
     expect(modalSource).toContain('data-sql-snippet-syntax-help-editor="true"');
     expect(modalSource).toContain("defaultActiveKey={['snippet-help']}");
     expect(modalSource).toContain('footer={null}');
     expect(modalSource).toContain('data-sql-snippet-action-row="true"');
-    expect(modalSource).toContain('body: { paddingTop: 8, paddingBottom: 24 }');
-    expect(modalSource).toContain("size=\"large\"");
-    expect(modalSource).toContain('minWidth: 96');
+    expect(modalSource).toContain('data-sql-snippet-content-region="true"');
+    expect(modalSource).toContain('data-sql-snippet-editor-scroll-region="true"');
+    expect(modalSource).toContain('maxHeight: embedded ? snippetModalEmbeddedBodyMaxHeight : snippetModalBodyMaxHeight');
+    expect(modalSource).toContain('data-sql-snippet-syntax-reference-scroll-region="true"');
+    expect(modalSource).toContain('data-sql-snippet-editor-panel-scroll-region="true"');
+    expect(modalSource).toContain("flex: '0 0 auto'");
+    expect(modalSource).toContain("size=\"middle\"");
+    expect(modalSource).toContain('minWidth: 84');
     expect(modalSource).toContain('syntaxHelp');
-    expect(modalSource).toContain('占位符语法参考');
+    expect(modalSource).toContain("t('snippet_settings.syntax_reference.label')");
     expect(source).toContain('s.syntaxHelp || s.description || s.body');
   });
 
@@ -2688,7 +3123,7 @@ describe('QueryEditor external SQL save', () => {
       });
     });
 
-    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'front_end_sys' });
+    expect(storeState.setActiveContext).not.toHaveBeenCalled();
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
       type: 'table',
       connectionId: 'conn-1',
@@ -2698,7 +3133,7 @@ describe('QueryEditor external SQL save', () => {
     }));
   });
 
-  it('keeps sidebar object navigation tied to the dragged database after drop', async () => {
+  it('keeps object hyperlink tab opening tied to the dragged database after drop', async () => {
     const domListeners: Record<string, ((event?: any) => void)[]> = {};
     editorState.domNode = {
       style: { cursor: '' },
@@ -2770,7 +3205,7 @@ describe('QueryEditor external SQL save', () => {
       });
     });
 
-    expect(storeState.setActiveContext).toHaveBeenCalledWith({ connectionId: 'conn-1', dbName: 'front_end_sys' });
+    expect(storeState.setActiveContext).not.toHaveBeenCalled();
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
       type: 'table',
       connectionId: 'conn-1',

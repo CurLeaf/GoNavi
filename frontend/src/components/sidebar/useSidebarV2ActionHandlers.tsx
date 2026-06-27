@@ -5,6 +5,7 @@ import type { FormInstance } from 'antd/es/form';
 import Modal from '../common/ResizableDraggableModal';
 import { t } from '../../i18n';
 import type { SavedConnection } from '../../types';
+import type { QueryOptions } from '../../store';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
 import { resolveConnectionAccentColor, resolveConnectionIconType } from '../../utils/connectionVisual';
 import { buildTableSelectQuery } from '../../utils/objectQueryTemplates';
@@ -20,6 +21,7 @@ import {
 } from '../V2TableContextMenu';
 import {
   isSidebarTablePinned,
+  type SidebarConnectionState,
   type SidebarTreeNode as TreeNode,
   type V2RailConnectionGroup,
 } from '../sidebarV2Utils';
@@ -32,7 +34,7 @@ type UseSidebarV2ActionHandlersArgs = {
   treeDataRef: MutableRefObject<TreeNode[]>;
   findTreeNodeByKeyRef: MutableRefObject<(nodes: TreeNode[], targetKey: React.Key) => TreeNode | null>;
   refreshV2TableContextMenuStatsRef: MutableRefObject<(node: any) => void>;
-  setConnectionStates: Dispatch<SetStateAction<Record<string, 'success' | 'error'>>>;
+  setConnectionStates: Dispatch<SetStateAction<Record<string, SidebarConnectionState>>>;
   setExpandedKeys: Dispatch<SetStateAction<React.Key[]>>;
   setLoadedKeys: Dispatch<SetStateAction<React.Key[]>>;
   setTargetConnection: Dispatch<SetStateAction<any>>;
@@ -54,6 +56,8 @@ type UseSidebarV2ActionHandlersArgs = {
   moveConnectionToTag: (connectionId: string, tagId: string | null) => void;
   setSidebarTablePinned: (connectionId: string, dbName: string, tableName: string, schemaName: string, pinned: boolean) => void;
   setTableSortPreference: (connectionId: string, dbName: string, sortBy: 'name' | 'frequency') => void;
+  setQueryOptions: (options: Partial<QueryOptions>) => void;
+  showSidebarTableComment: boolean;
   replaceTreeNodeChildren: (key: React.Key, children: TreeNode[] | undefined) => void;
   loadDatabases: (node: any) => Promise<void>;
   loadTables: (node: any) => Promise<void>;
@@ -117,6 +121,8 @@ export const useSidebarV2ActionHandlers = ({
   moveConnectionToTag,
   setSidebarTablePinned,
   setTableSortPreference,
+  setQueryOptions,
+  showSidebarTableComment,
   replaceTreeNodeChildren,
   loadDatabases,
   loadTables,
@@ -261,6 +267,9 @@ export const useSidebarV2ActionHandlers = ({
       case 'new-table':
         openNewTableDesign(node);
         return;
+      case 'toggle-table-comments':
+        setQueryOptions({ showSidebarTableComment: !showSidebarTableComment });
+        return;
       case 'sort-by-name':
         handleTableGroupSortAction(node, 'name');
         return;
@@ -363,7 +372,7 @@ export const useSidebarV2ActionHandlers = ({
     if (!conn?.config) return;
     const res = await DBReleaseConnection(buildRpcConnectionConfig(conn.config, { id: conn.id }) as any);
     if (res && res.success === false) {
-      throw new Error(res.message || '释放连接失败');
+      throw new Error(String(res.message || '').trim());
     }
   };
 
@@ -392,7 +401,7 @@ export const useSidebarV2ActionHandlers = ({
     try {
       await releaseConnectionResources(conn);
     } catch (error: any) {
-      message.warning(error?.message || '连接已从侧边栏断开，但后端连接释放失败');
+      message.warning(String(error?.message || '').trim() || t('sidebar.message.connection_release_failed_from_sidebar'));
     }
     message.success(t('connection.sidebar.disconnect.success'));
   };

@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { MCPServerDraftIssue, MCPServerDraftValidation } from '../../utils/mcpServerValidation';
 import { buildMCPHintStyle, mcpLabelStyle } from './AIMCPHelpBlock';
@@ -14,20 +16,20 @@ interface AIMCPServerValidationPanelProps {
 const getIssueTone = (issue: MCPServerDraftIssue, darkMode: boolean) => {
   if (issue.severity === 'error') {
     return {
-      label: '需修复',
+      labelKey: 'ai_settings.mcp_server.validation.severity.error',
       color: '#dc2626',
       bg: darkMode ? 'rgba(220,38,38,0.18)' : 'rgba(220,38,38,0.10)',
     };
   }
   if (issue.severity === 'warning') {
     return {
-      label: '建议检查',
+      labelKey: 'ai_settings.mcp_server.validation.severity.warning',
       color: '#b45309',
       bg: darkMode ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.12)',
     };
   }
   return {
-    label: '提示',
+    labelKey: 'ai_settings.mcp_server.validation.severity.info',
     color: '#2563eb',
     bg: darkMode ? 'rgba(59,130,246,0.18)' : 'rgba(59,130,246,0.12)',
   };
@@ -39,12 +41,17 @@ const AIMCPServerValidationPanel: React.FC<AIMCPServerValidationPanelProps> = ({
   darkMode,
   overlayTheme,
 }) => {
+  const i18n = useOptionalI18n();
+  const copy = (
+    key: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => (i18n?.t ?? ((catalogKey, catalogParams) => catalogTranslate('en-US', catalogKey, catalogParams)))(key, params);
   const hasIssues = validation.issues.length > 0;
   const summaryText = validation.errorCount > 0
-    ? `发现 ${validation.errorCount} 个必须修复的问题，修复后才能测试或保存。`
+    ? copy('ai_settings.mcp_server.validation.summary.errors', { count: validation.errorCount })
     : validation.warningCount > 0
-      ? `发现 ${validation.warningCount} 个建议检查项，仍可测试和保存。`
-      : '当前配置可以测试和保存。';
+      ? copy('ai_settings.mcp_server.validation.summary.warnings', { count: validation.warningCount })
+      : copy('ai_settings.mcp_server.validation.summary.ready');
 
   return (
     <div
@@ -58,7 +65,9 @@ const AIMCPServerValidationPanel: React.FC<AIMCPServerValidationPanelProps> = ({
         gap: 8,
       }}
     >
-      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>配置检查</div>
+      <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>
+        {copy('ai_settings.mcp_server.validation.title')}
+      </div>
       <div style={buildMCPHintStyle(validation.errorCount > 0 ? '#dc2626' : overlayTheme.mutedText)}>
         {summaryText}
       </div>
@@ -90,7 +99,7 @@ const AIMCPServerValidationPanel: React.FC<AIMCPServerValidationPanelProps> = ({
                       background: tone.bg,
                     }}
                   >
-                    {tone.label}
+                    {copy(tone.labelKey)}
                   </span>
                   <span style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{issue.title}</span>
                 </div>

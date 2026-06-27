@@ -73,3 +73,13 @@ func TestReadAppLogTailByPathFiltersByKeywordCaseInsensitively(t *testing.T) {
 		t.Fatalf("unexpected level breakdown after keyword filter: %#v", snapshot.LevelBreakdown)
 	}
 }
+
+func TestReadAppLogTailByPathUsesLocalizedMissingLogMessage(t *testing.T) {
+	result := readAppLogTailByPath("", 10, "")
+	if result.Success {
+		t.Fatalf("expected missing log path to fail")
+	}
+	if result.Message != "file.backend.error.app_log_file_not_found" {
+		t.Fatalf("expected localized missing log key, got %q", result.Message)
+	}
+}

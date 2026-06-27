@@ -20,6 +20,8 @@ const toolbarLegacyLiterals = [
 
 const requiredKeys = [
   'query_editor.transaction.delay.immediate',
+  'query_editor.transaction.delay.immediate_commit',
+  'query_editor.transaction.delay.seconds_commit',
   'query_editor.transaction.mode.tooltip',
   'query_editor.transaction.mode.manual',
   'query_editor.transaction.mode.auto',

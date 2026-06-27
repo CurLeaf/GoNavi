@@ -59,5 +59,15 @@ describe('sidebarCoreUtils', () => {
       title: 'trg_users_audit',
       dataRef: {},
     })).toBe('trg_users_audit');
+    expect(resolveSidebarObjectDragText({
+      type: 'sequence',
+      title: 'SEQ_PERSON_ID',
+      dataRef: { sequenceName: 'MYCIMLED.SEQ_PERSON_ID' },
+    })).toBe('MYCIMLED.SEQ_PERSON_ID');
+    expect(resolveSidebarObjectDragText({
+      type: 'package',
+      title: 'PKG_PERSON',
+      dataRef: { packageName: 'MYCIMLED.PKG_PERSON' },
+    })).toBe('MYCIMLED.PKG_PERSON');
   });
 });

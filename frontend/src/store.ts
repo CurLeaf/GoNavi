@@ -78,6 +78,12 @@ import {
   normalizeConnectionProtectionConfig,
   resolveConnectionProtectionConfig,
 } from "./utils/connectionReadOnly";
+import {
+  DEFAULT_QUERY_EDITOR_EDITOR_HEIGHT_RATIO,
+  sanitizeQueryEditorEditorHeightRatio,
+} from "./utils/queryEditorSplitLayout";
+
+export type TableDoubleClickAction = "open-data" | "open-design";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
@@ -85,6 +91,7 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   opacity: number;
   blur: number;
   useNativeMacWindowControls: boolean;
+  tableDoubleClickAction: TableDoubleClickAction;
   v2SidebarSearchMode: "command" | "filter";
   v2CommandSearchPersistentFilterEnabled: boolean;
   v2SidebarPersistedFilter: string;
@@ -100,6 +107,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   opacity: 1.0,
   blur: 0,
   useNativeMacWindowControls: false,
+  tableDoubleClickAction: "open-data",
   v2SidebarSearchMode: "command",
   v2CommandSearchPersistentFilterEnabled: false,
   v2SidebarPersistedFilter: "",
@@ -124,6 +132,12 @@ const sanitizeV2SidebarSearchMode = (
   value: unknown,
 ): AppearanceSettings["v2SidebarSearchMode"] => {
   return value === "filter" ? "filter" : DEFAULT_APPEARANCE.v2SidebarSearchMode;
+};
+
+const sanitizeTableDoubleClickAction = (
+  value: unknown,
+): TableDoubleClickAction => {
+  return value === "open-design" ? "open-design" : DEFAULT_APPEARANCE.tableDoubleClickAction;
 };
 
 const sanitizeV2SidebarPersistedFilter = (value: unknown): string => {
@@ -444,6 +458,14 @@ const toTrimmedString = (value: unknown, fallback = ""): string => {
   }
   return fallback;
 };
+
+const indexedStoreFallback = (
+  key:
+    | "store.fallback.connection_name"
+    | "store.fallback.connection_tag_name"
+    | "store.fallback.sql_snippet_name",
+  index: number,
+): string => translate(key, { index: index + 1 });
 
 const normalizeClickHouseProtocol = (
   value: unknown,
@@ -943,7 +965,7 @@ const sanitizeSavedConnection = (
   const displayType = config.type === "diros" ? "doris" : config.type;
   const fallbackName = config.host
     ? `${displayType}-${config.host}`
-    : `连接-${index + 1}`;
+    : indexedStoreFallback("store.fallback.connection_name", index);
   const name = toTrimmedString(raw.name, fallbackName) || fallbackName;
   const includeDatabases = sanitizeStringArray(raw.includeDatabases, 256);
   const includeRedisDatabases = sanitizeNumberArray(
@@ -1007,8 +1029,11 @@ const sanitizeConnectionTags = (value: unknown): ConnectionTag[] => {
     if (idSet.has(id)) return;
     idSet.add(id);
 
-    const name =
-      toTrimmedString(raw.name, `标签-${index + 1}`) || `标签-${index + 1}`;
+    const fallbackName = indexedStoreFallback(
+      "store.fallback.connection_tag_name",
+      index,
+    );
+    const name = toTrimmedString(raw.name, fallbackName) || fallbackName;
     const connectionIds = sanitizeStringArray(raw.connectionIds, 256);
 
     result.push({ id, name, connectionIds });
@@ -1210,8 +1235,10 @@ export interface SqlLog {
 export interface QueryOptions {
   maxRows: number;
   showColumnComment: boolean;
+  showSidebarTableComment?: boolean;
   showColumnType: boolean;
   showQueryResultsPanel: boolean;
+  queryEditorEditorHeightRatio: number;
 }
 
 export interface DataEditTransactionOptions {
@@ -1482,12 +1509,16 @@ const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
     const body = toTrimmedString(raw.body);
     if (!prefix || !body) return;
     const id = toTrimmedString(raw.id, `snippet-${index + 1}`) || `snippet-${index + 1}`;
+    const fallbackName = indexedStoreFallback(
+      "store.fallback.sql_snippet_name",
+      index,
+    );
     if (seenIds.has(id)) return;
     seenIds.add(id);
     result.push({
       id,
       prefix,
-      name: toTrimmedString(raw.name, `片段-${index + 1}`) || `片段-${index + 1}`,
+      name: toTrimmedString(raw.name, fallbackName) || fallbackName,
       description: toTrimmedString(raw.description) || undefined,
       syntaxHelp: toTrimmedString(raw.syntaxHelp) || undefined,
       body,
@@ -1577,7 +1608,9 @@ const sanitizeTableExportHistoryEntry = (
       : "idle";
   return {
     jobId,
-    targetName: toTrimmedString(raw.targetName, "未命名对象") || "未命名对象",
+    targetName:
+      toTrimmedString(raw.targetName, translate("data_export.progress.value.target_fallback")) ||
+      translate("data_export.progress.value.target_fallback"),
     startedAt: normalizeTimestamp(raw.startedAt),
     finishedAt: normalizeTimestamp(raw.finishedAt),
     format: toTrimmedString(raw.format).slice(0, 32),
@@ -1662,7 +1695,9 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
 
     result.push({
       id,
-      title: toTrimmedString(raw.title, "新建查询") || "新建查询",
+      title:
+        toTrimmedString(raw.title, translate("sidebar.tab.new_query")) ||
+        translate("sidebar.tab.new_query"),
       type: "query",
       connectionId: toTrimmedString(raw.connectionId),
       dbName: toTrimmedString(raw.dbName),
@@ -1893,18 +1928,34 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
   const maxRows = Number(raw.maxRows);
   const showColumnComment =
     typeof raw.showColumnComment === "boolean" ? raw.showColumnComment : true;
+  const showSidebarTableComment =
+    typeof raw.showSidebarTableComment === "boolean"
+      ? raw.showSidebarTableComment
+      : false;
   const showColumnType =
     typeof raw.showColumnType === "boolean" ? raw.showColumnType : true;
   const showQueryResultsPanel =
     typeof raw.showQueryResultsPanel === "boolean" ? raw.showQueryResultsPanel : false;
+  const queryEditorEditorHeightRatio = sanitizeQueryEditorEditorHeightRatio(
+    raw.queryEditorEditorHeightRatio,
+  );
   if (!Number.isFinite(maxRows) || maxRows <= 0) {
-    return { maxRows: 5000, showColumnComment, showColumnType, showQueryResultsPanel };
+    return {
+      maxRows: 5000,
+      showColumnComment,
+      showSidebarTableComment,
+      showColumnType,
+      showQueryResultsPanel,
+      queryEditorEditorHeightRatio,
+    };
   }
   return {
     maxRows: Math.min(50000, Math.trunc(maxRows)),
     showColumnComment,
+    showSidebarTableComment,
     showColumnType,
     showQueryResultsPanel,
+    queryEditorEditorHeightRatio,
   };
 };
 
@@ -2043,6 +2094,9 @@ const sanitizeAppearance = (
       typeof appearance.useNativeMacWindowControls === "boolean"
         ? appearance.useNativeMacWindowControls
         : DEFAULT_APPEARANCE.useNativeMacWindowControls,
+    tableDoubleClickAction: sanitizeTableDoubleClickAction(
+      appearance.tableDoubleClickAction,
+    ),
     v2SidebarSearchMode: sanitizeV2SidebarSearchMode(
       appearance.v2SidebarSearchMode,
     ),
@@ -2241,7 +2295,8 @@ function _debouncedPersistSession(sessionId: string) {
     const messages = state.aiChatHistory[sessionId];
     const sessionMeta = state.aiChatSessions.find((s) => s.id === sessionId);
     if (!messages && !sessionMeta) return; // session 已被删除，跳过
-    const title = sessionMeta?.title || "新的对话";
+    const title =
+      sessionMeta?.title || translate("ai_chat.panel.session.default_title");
     const updatedAt = sessionMeta?.updatedAt || Date.now();
     const messagesJSON = JSON.stringify(messages || []);
     const Service = (window as any).go?.aiservice?.Service;
@@ -2328,8 +2383,10 @@ export const useStore = create<AppState>()(
       queryOptions: {
         maxRows: 5000,
         showColumnComment: true,
+        showSidebarTableComment: false,
         showColumnType: true,
         showQueryResultsPanel: false,
+        queryEditorEditorHeightRatio: DEFAULT_QUERY_EDITOR_EDITOR_HEIGHT_RATIO,
       },
       dataEditTransactionOptions: {
         commitMode: "manual",
@@ -3367,7 +3424,10 @@ export const useStore = create<AppState>()(
           const existingSession = newSessions.find((s) => s.id === sessionId);
 
           if (!existingSession) {
-            let title = message.role === "user" ? message.content : "新的对话";
+            let title =
+              message.role === "user"
+                ? message.content
+                : translate("ai_chat.panel.session.default_title");
             if (title.length > 20) {
               title = title.substring(0, 20) + "...";
             }

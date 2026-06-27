@@ -1,4 +1,6 @@
 import type { AIChatMessage } from '../../types';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
 
 interface AIChatSessionMeta {
   id: string;
@@ -49,6 +51,7 @@ export const buildAIChatSessionsSnapshot = (params: {
   keyword?: unknown;
   limit?: unknown;
   includePreview?: unknown;
+  translate?: AIInspectionTranslator;
 }) => {
   const {
     aiChatSessions = [],
@@ -85,7 +88,11 @@ export const buildAIChatSessionsSnapshot = (params: {
 
     return {
       id: sessionId,
-      title: String(meta?.title || '').trim() || '未命名会话',
+      title: String(meta?.title || '').trim() || translateInspectionCopy(
+        params.translate,
+        'ai_chat.inspection.ai_sessions.untitled',
+        'Untitled session',
+      ),
       updatedAt,
       isActive: sessionId === activeSessionId,
       messageCount: messages.length,
@@ -155,6 +162,7 @@ export const buildAIMessageFlowSnapshot = (params: {
   limit?: unknown;
   includeContent?: unknown;
   previewLimit?: unknown;
+  translate?: AIInspectionTranslator;
 }) => {
   const {
     aiChatSessions = [],
@@ -164,6 +172,7 @@ export const buildAIMessageFlowSnapshot = (params: {
     limit,
     includeContent = true,
     previewLimit,
+    translate,
   } = params;
 
   const requestedSessionId = String(sessionId || activeSessionId || '').trim();
@@ -209,17 +218,52 @@ export const buildAIMessageFlowSnapshot = (params: {
   }
 
   const warnings = [
-    unresolvedToolCalls.length > 0 ? `有 ${unresolvedToolCalls.length} 个工具调用没有匹配到 tool 结果消息` : '',
-    consecutiveAssistantPairs.length > 0 ? `发现 ${consecutiveAssistantPairs.length} 组连续 assistant 消息，可能存在回复被拆成多个气泡` : '',
-    emptyAssistantMessages.length > 0 ? `发现 ${emptyAssistantMessages.length} 条空 assistant 消息` : '',
-    messages.some((message) => message.loading) ? '会话中仍有 loading 消息，可能还在流式生成或上次中断未清理' : '',
+    unresolvedToolCalls.length > 0 ? translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.message_flow.warning.unresolved_tool_calls',
+      `${unresolvedToolCalls.length} tool calls have no matching tool result messages.`,
+      { count: unresolvedToolCalls.length },
+    ) : '',
+    consecutiveAssistantPairs.length > 0 ? translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.message_flow.warning.consecutive_assistant',
+      `${consecutiveAssistantPairs.length} consecutive assistant message pairs were found; one reply may have been split into multiple bubbles.`,
+      { count: consecutiveAssistantPairs.length },
+    ) : '',
+    emptyAssistantMessages.length > 0 ? translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.message_flow.warning.empty_assistant',
+      `${emptyAssistantMessages.length} empty assistant messages were found.`,
+      { count: emptyAssistantMessages.length },
+    ) : '',
+    messages.some((message) => message.loading) ? translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.message_flow.warning.loading_message',
+      'The session still contains a loading message; streaming may still be active or a previous interruption was not cleaned up.',
+    ) : '',
   ].filter(Boolean);
 
   const nextActions = [
-    unresolvedToolCalls.length > 0 ? '优先核对 useAIChatLocalTools 是否为每个 tool_call_id 写入 tool 消息' : '',
-    consecutiveAssistantPairs.length > 0 ? '检查流式追加逻辑是否复用了同一个 assistantMsgId，而不是为同一轮回复新建 assistant 消息' : '',
-    emptyAssistantMessages.length > 0 ? '检查异常或取消路径是否留下了空 assistant 占位消息' : '',
-    warnings.length === 0 ? '消息流未发现明显结构异常，可继续结合 inspect_ai_last_render_error 或 inspect_app_logs 排查渲染/运行时问题' : '',
+    unresolvedToolCalls.length > 0 ? translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.message_flow.next_action.check_tool_results',
+      'Check whether useAIChatLocalTools writes a tool message for every tool_call_id.',
+    ) : '',
+    consecutiveAssistantPairs.length > 0 ? translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.message_flow.next_action.check_stream_append',
+      'Check whether streaming append logic reuses the same assistantMsgId instead of creating a new assistant message for the same reply.',
+    ) : '',
+    emptyAssistantMessages.length > 0 ? translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.message_flow.next_action.check_empty_assistant',
+      'Check whether exception or cancellation paths left empty assistant placeholder messages.',
+    ) : '',
+    warnings.length === 0 ? translateInspectionCopy(
+      translate,
+      'ai_chat.inspection.message_flow.next_action.inspect_render_or_logs',
+      'No obvious message-flow structure issue was found; continue with inspect_ai_last_render_error or inspect_app_logs for rendering/runtime diagnostics.',
+    ) : '',
   ].filter(Boolean);
 
   const recentMessages = messages.slice(-safeLimit).map((message) => {

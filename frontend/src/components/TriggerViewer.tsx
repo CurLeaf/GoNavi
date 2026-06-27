@@ -10,6 +10,7 @@ import { normalizeOceanBaseProtocol } from '../utils/oceanBaseProtocol';
 import { splitQualifiedNameLast } from '../utils/qualifiedName';
 import { buildEditableTriggerSql } from '../utils/triggerEditSql';
 import { buildSqlServerObjectDefinitionQueries } from '../utils/sqlServerObjectDefinition';
+import { useI18n } from '../i18n/provider';
 
 interface TriggerViewerProps {
     tab: TabData;
@@ -102,6 +103,7 @@ const buildOracleLikeTriggerDDLFromMetadata = (
 };
 
 const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
+    const { t } = useI18n();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [triggerDefinition, setTriggerDefinition] = useState<string>('');
@@ -156,6 +158,8 @@ const TriggerViewer: React.FC<TriggerViewerProps> = ({ tab }) => {
         return driver === 'sphinx' || driver === 'sphinxql';
     };
 
+    const commentLine = (key: string, params?: Record<string, any>): string => `-- ${t(key, params)}`;
+
     const buildShowTriggerQueries = (dialect: string, triggerName: string, dbName: string): string[] => {
         const { schema, name } = parseSchemaAndName(triggerName);
         const safeTriggerName = escapeSQLLiteral(name);
@@ -208,13 +212,13 @@ LIMIT 1`];
             case 'sqlite':
                 return [`SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = '${safeTriggerName}'`];
             case 'duckdb':
-                return [`-- DuckDB 不支持触发器`];
+                return [commentLine('trigger_viewer.editor.unsupported.duckdb')];
             case 'tdengine':
-                return [`-- TDengine 不支持触发器`];
+                return [commentLine('trigger_viewer.editor.unsupported.tdengine')];
             case 'mongodb':
-                return [`-- MongoDB 不支持触发器`];
+                return [commentLine('trigger_viewer.editor.unsupported.mongodb')];
             default:
-                return [`-- 暂不支持该数据库类型的触发器定义查看`];
+                return [commentLine('trigger_viewer.editor.unsupported.generic')];
         }
     };
 
@@ -278,7 +282,7 @@ LIMIT 1`];
 
     const extractTriggerDefinition = (dialect: string, data: any[], fallbackTriggerName: string, fallbackTableName: string): string => {
         if (!data || data.length === 0) {
-            return '-- 未找到触发器定义';
+            return commentLine('trigger_viewer.editor.definition_not_found');
         }
 
         const row = data[0] as Record<string, any>;
@@ -353,14 +357,14 @@ LIMIT 1`];
     const loadTriggerDefinition = async (): Promise<{ success: boolean; definition?: string; error?: string }> => {
         const conn = connections.find(c => c.id === tab.connectionId);
         if (!conn) {
-            return { success: false, error: '未找到数据库连接' };
+            return { success: false, error: t('trigger_viewer.error.connection_not_found') };
         }
 
         const triggerName = tab.triggerName || '';
         const dbName = tab.dbName || '';
 
         if (!triggerName) {
-            return { success: false, error: '触发器名称为空' };
+            return { success: false, error: t('trigger_viewer.error.trigger_name_empty') };
         }
 
         const dialect = getMetadataDialect(conn);
@@ -368,7 +372,7 @@ LIMIT 1`];
         const sphinxLike = isSphinxConnection(conn) && dialect === 'mysql';
 
         if (!queries.length || String(queries[0] || '').startsWith('--')) {
-            return { success: true, definition: String(queries[0] || '-- 暂不支持该数据库类型的触发器定义查看') };
+            return { success: true, definition: String(queries[0] || commentLine('trigger_viewer.editor.unsupported.generic')) };
         }
 
         try {
@@ -393,27 +397,42 @@ LIMIT 1`];
             if (result.success) {
                 if (sphinxLike) {
                     const version = await getVersionHint(config, dbName);
-                    const versionText = version ? `（版本: ${version}）` : '';
+                    const versionText = version ? t('trigger_viewer.editor.sphinx.version_suffix', { version }) : '';
                     return {
                         success: true,
-                        definition: `-- 当前 Sphinx 实例${versionText}未返回触发器定义。\n-- 已执行多套兼容查询，可能是版本能力限制或对象类型不支持。`
+                        definition: [
+                            commentLine('trigger_viewer.editor.sphinx.empty_result', { version: versionText }),
+                            commentLine('trigger_viewer.editor.sphinx.compat_queries_hint'),
+                        ].join('\n'),
                     };
                 }
-                return { success: true, definition: '-- 未找到触发器定义' };
+                return { success: true, definition: commentLine('trigger_viewer.editor.definition_not_found') };
             }
 
             if (sphinxLike) {
                 const version = await getVersionHint(config, dbName);
-                const versionText = version ? `（版本: ${version}）` : '';
+                const versionText = version ? t('trigger_viewer.editor.sphinx.version_suffix', { version }) : '';
+                const failedMessage = result.message
+                    ? `${t('trigger_viewer.editor.sphinx.failed_message_label')}: ${result.message}`
+                    : t('trigger_viewer.editor.sphinx.failed_message_unknown');
                 return {
                     success: true,
-                    definition: `-- 当前 Sphinx 实例${versionText}不支持触发器定义查询。\n-- 已自动尝试兼容语句，返回失败信息: ${result.message || 'unknown error'}`
+                    definition: [
+                        commentLine('trigger_viewer.editor.sphinx.unsupported_query', { version: versionText }),
+                        commentLine('trigger_viewer.editor.sphinx.compat_queries_hint'),
+                        `-- ${failedMessage}`,
+                    ].join('\n'),
                 };
             }
 
-            return { success: false, error: result.message || '查询触发器定义失败' };
+            return {
+                success: false,
+                error: result.message
+                    ? t('trigger_viewer.error.query_failed_detail', { detail: result.message })
+                    : t('trigger_viewer.error.query_failed'),
+            };
         } catch (e: any) {
-            return { success: false, error: '查询触发器定义失败: ' + (e?.message || String(e)) };
+            return { success: false, error: t('trigger_viewer.error.query_failed_detail', { detail: e?.message || String(e) }) };
         }
     };
 
@@ -430,7 +449,7 @@ LIMIT 1`];
                 loadedDefinitionKeyRef.current = objectIdentityKey;
                 setTriggerDefinition(String(result.definition || ''));
             } else {
-                setError(result.error || '查询触发器定义失败');
+                setError(result.error || t('trigger_viewer.error.query_failed'));
             }
             setLoading(false);
         };
@@ -440,7 +459,7 @@ LIMIT 1`];
         return () => {
             cancelled = true;
         };
-    }, [tab.connectionId, tab.dbName, tab.triggerName, connections, objectIdentityKey]);
+    }, [tab.connectionId, tab.dbName, tab.triggerName, connections, objectIdentityKey, t]);
 
     useEffect(() => () => {
         isMountedRef.current = false;
@@ -449,7 +468,7 @@ LIMIT 1`];
     if (loading) {
         return (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                <Spin tip="加载触发器定义..." />
+                <Spin tip={t('trigger_viewer.loading.definition')} />
             </div>
         );
     }
@@ -460,7 +479,7 @@ LIMIT 1`];
     if (error && !hasDefinition) {
         return (
             <div style={{ padding: 16 }}>
-                <Alert type="error" message="加载失败" description={error} showIcon />
+                <Alert type="error" message={t('trigger_viewer.error.load_failed')} description={error} showIcon />
             </div>
         );
     }
@@ -477,7 +496,7 @@ LIMIT 1`];
                 return;
             }
             if (!result.success) {
-                setError(result.error || '查询触发器定义失败');
+                setError(result.error || t('trigger_viewer.error.query_failed'));
                 return;
             }
             const latestDefinition = String(result.definition || '');
@@ -486,11 +505,11 @@ LIMIT 1`];
             setActiveContext({ connectionId: tab.connectionId, dbName });
             addTab({
                 id: `query-edit-trigger-${tab.connectionId}-${dbName}-${Date.now()}`,
-                title: `修改触发器: ${triggerName}`,
+                title: t('trigger_viewer.tab.edit_trigger_title', { name: triggerName }),
                 type: 'query',
                 connectionId: tab.connectionId,
                 dbName,
-                query: buildEditableTriggerSql(triggerName, latestDefinition),
+                query: buildEditableTriggerSql(triggerName, latestDefinition, { translate: t }),
                 queryMode: 'object-edit',
             });
         } finally {
@@ -504,16 +523,16 @@ LIMIT 1`];
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <div style={{ padding: '8px 16px', borderBottom: darkMode ? '1px solid #303030' : '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <strong>触发器: </strong>{tab.triggerName}
-                    {tab.dbName && <span style={{ marginLeft: 16, color: '#888' }}>数据库: {tab.dbName}</span>}
+                    <strong>{t('trigger_viewer.field.trigger')}: </strong>{tab.triggerName}
+                    {tab.dbName && <span style={{ marginLeft: 16, color: '#888' }}>{t('trigger_viewer.field.database')}: {tab.dbName}</span>}
                 </div>
                 <Button size="small" icon={<EditOutlined />} onClick={openObjectEditQuery} disabled={!triggerName} loading={openingObjectEdit}>
-                    对象修改
+                    {t('trigger_viewer.action.edit_object')}
                 </Button>
             </div>
             {error && hasDefinition && (
                 <div style={{ padding: '8px 16px 0' }}>
-                    <Alert type="warning" message="刷新最新定义失败" description={error} showIcon />
+                    <Alert type="warning" message={t('trigger_viewer.warning.refresh_latest_failed')} description={error} showIcon />
                 </div>
             )}
             <div style={{ flex: 1, minHeight: 0 }}>

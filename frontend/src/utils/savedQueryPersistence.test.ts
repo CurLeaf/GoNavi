@@ -7,6 +7,7 @@ import { LEGACY_PERSIST_KEY } from './legacyConnectionStorage';
 import {
   bootstrapSavedQueries,
   readLegacySavedQueriesFromPayload,
+  saveSavedQueryToBackend,
   stripLegacySavedQueries,
 } from './savedQueryPersistence';
 
@@ -158,8 +159,22 @@ describe('saved query persistence', () => {
     ]);
   });
 
+  it('localizes missing context errors when saving a query', async () => {
+    setCurrentLanguage('en-US');
+
+    await expect(saveSavedQueryToBackend(undefined, {
+      id: 'missing-context',
+      name: 'Missing context',
+      sql: '',
+      connectionId: '',
+      dbName: '',
+      createdAt: 100,
+    })).rejects.toThrow('Saved query is missing SQL, connection, or database context');
+  });
+
   it('does not hardcode Chinese generated saved query names', () => {
     const source = readFileSync(new URL('./savedQueryPersistence.ts', import.meta.url), 'utf8');
     expect(source).not.toContain('`查询-${index + 1}`');
+    expect(source).not.toContain('保存查询缺少 SQL、连接或数据库上下文');
   });
 });

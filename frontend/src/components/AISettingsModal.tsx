@@ -30,8 +30,9 @@ import {
     EMPTY_SKILL,
     PROVIDER_PRESETS,
     findPreset,
+    localizeProviderPreset,
+    localizeProviderPresets,
     matchProviderPreset,
-    type ProviderPreset,
     waitForAIService,
 } from './ai/aiSettingsModalConfig';
 interface AISettingsModalProps {
@@ -40,6 +41,7 @@ interface AISettingsModalProps {
     darkMode: boolean;
     overlayTheme: OverlayWorkbenchTheme;
     focusProviderId?: string;
+    onBeforeExternalMCPUse?: () => Promise<void>;
 }
 
 const DEFAULT_MCP_HTTP_SERVER_STATUS: AIMCPHTTPServerStatus = {
@@ -78,7 +80,7 @@ const normalizeMCPHTTPAuthorizationToken = (value: string): string => {
     return withoutHeaderName.replace(/^Bearer\s+/i, '').trim();
 };
 
-const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId }) => {
+const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMode, overlayTheme, focusProviderId, onBeforeExternalMCPUse }) => {
     const { t } = useI18n();
     const defaultMCPHTTPServerStatus = useMemo<AIMCPHTTPServerStatus>(() => ({
         ...DEFAULT_MCP_HTTP_SERVER_STATUS,
@@ -118,6 +120,19 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
     const watchedType = Form.useWatch('type', form);
     const watchedPresetKey = Form.useWatch('presetKey', form);
     const watchedApiFormat = Form.useWatch('apiFormat', form) || 'openai';
+    const localizedProviderPresets = useMemo(
+        () => localizeProviderPresets(PROVIDER_PRESETS, t),
+        [t],
+    );
+    const findLocalizedPreset = useCallback(
+        (key: string) => localizeProviderPreset(findPreset(key), t),
+        [t],
+    );
+    const matchLocalizedProviderPreset = useCallback(
+        (provider: Pick<AIProviderConfig, 'type' | 'baseUrl' | 'apiFormat'>) =>
+            localizeProviderPreset(matchProviderPreset(provider), t),
+        [t],
+    );
     const skillRequiredToolOptions = useMemo(() => ([
         ...BUILTIN_AI_TOOL_INFO.map((tool) => ({
             label: `${tool.name} · ${t('ai_settings.tools.builtin_tool_label')}`,
@@ -167,9 +182,13 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
         resolveAIService,
         messageApi,
         copyTextToClipboard,
-        onBeforeInstall: () => setLoading(true),
+        onBeforeInstall: async () => {
+            setLoading(true);
+            await onBeforeExternalMCPUse?.();
+        },
         onAfterInstall: () => setLoading(false),
         onConfigChanged: () => window.dispatchEvent(new CustomEvent('gonavi:ai:config-changed')),
+        translate: t,
     });
 
     const loadConfig = useCallback(async () => {
@@ -346,7 +365,8 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             
             // 构建 payload，处理 model/models 逻辑
             const preset = findPreset(values.presetKey);
-            const isCustomLike = values.presetKey === 'custom' || values.presetKey === 'ollama' || values.presetKey === 'codebuddy' || values.presetKey === 'cursor';
+            const localizedPreset = localizeProviderPreset(preset, t);
+            const isCustomLike = ['custom', 'ollama', 'codebuddy', 'cursor'].includes(values.presetKey);
             const { model: finalModel, models: resolvedModels } = resolvePresetModelSelection({
                 presetKey: values.presetKey,
                 presetDefaultModel: preset.defaultModel,
@@ -355,7 +375,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                 customModels: values.models,
             });
             // 内置供应商自动使用 preset label 作为名称
-            const finalName = isCustomLike ? (values.name || preset.label) : preset.label;
+            const finalName = isCustomLike ? (values.name || localizedPreset.label) : localizedPreset.label;
             
             const finalBaseUrl = resolvePresetBaseURL({
                 presetKey: values.presetKey,
@@ -515,6 +535,9 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
             }
             if (!checked && typeof Service.AIStopMCPHTTPServer !== 'function') {
                 throw new Error(t('ai_settings.mcp_http.error.stop_unsupported_version'));
+            }
+            if (checked) {
+                await onBeforeExternalMCPUse?.();
             }
             const nextStatus = checked
                 ? await Service.AIStartMCPHTTPServer({
@@ -722,7 +745,7 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                               editingProvider={editingProvider}
                               isEditing={isEditing}
                               form={form}
-                              providerPresets={PROVIDER_PRESETS}
+                              providerPresets={localizedProviderPresets}
                               watchedPresetKey={watchedPresetKey}
                               watchedApiFormat={watchedApiFormat}
                               loading={loading}
@@ -734,8 +757,8 @@ const AISettingsModal: React.FC<AISettingsModalProps> = ({ open, onClose, darkMo
                               cardBorder={cardBorder}
                               inputBg={inputBg}
                               onPrimaryPasswordVisibleChange={setPrimaryPasswordVisible}
-                              resolveProviderPreset={matchProviderPreset}
-                              resolvePresetByKey={findPreset}
+                              resolveProviderPreset={matchLocalizedProviderPreset}
+                              resolvePresetByKey={findLocalizedPreset}
                               onAddProvider={handleAddProvider}
                               onEditProvider={handleEditProvider}
                               onDeleteProvider={handleDeleteProvider}

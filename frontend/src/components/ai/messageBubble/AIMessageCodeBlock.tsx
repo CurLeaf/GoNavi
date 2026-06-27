@@ -5,6 +5,9 @@ import mermaid from 'mermaid';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
+import { t as catalogTranslate } from '../../../i18n/catalog';
+import type { I18nParams } from '../../../i18n/types';
+import { useOptionalI18n } from '../../../i18n/provider';
 import Modal from '../../common/ResizableDraggableModal';
 import type { OverlayWorkbenchTheme } from '../../../utils/overlayWorkbenchTheme';
 import { buildAIReadonlyPreviewSQL } from '../../../utils/aiSqlLimit';
@@ -31,8 +34,23 @@ interface HighlightedCodeBlockProps {
   activeDbName?: string;
 }
 
+const useMessageCopy = () => {
+  const i18n = useOptionalI18n();
+  return (key: string, params?: I18nParams) => (
+    i18n?.t ?? ((catalogKey, catalogParams) => catalogTranslate('en-US', catalogKey, catalogParams))
+  )(key, params);
+};
+
+const escapeHtml = (value: string) => value
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
 const MermaidRenderer: React.FC<{ chart: string; darkMode: boolean }> = ({ chart, darkMode }) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
+  const copy = useMessageCopy();
 
   React.useEffect(() => {
     if (!containerRef.current) {
@@ -48,21 +66,22 @@ const MermaidRenderer: React.FC<{ chart: string; darkMode: boolean }> = ({ chart
         }
       })().catch((error: any) => {
         if (containerRef.current) {
-          containerRef.current.innerHTML = `<div style="color:#ef4444; padding:12px; background:rgba(239,68,68,0.1); border-radius:6px; font-size:12px">Mermaid 解析失败: ${error.message}</div>`;
+          containerRef.current.innerHTML = `<div style="color:#ef4444; padding:12px; background:rgba(239,68,68,0.1); border-radius:6px; font-size:12px">${escapeHtml(copy('ai_chat.message.mermaid.parse_failed', { detail: error?.message || '' }))}</div>`;
         }
       });
     } catch (error: any) {
       if (containerRef.current) {
-        containerRef.current.innerHTML = `<div style="color:#ef4444; padding:12px; background:rgba(239,68,68,0.1); border-radius:6px; font-size:12px">Mermaid 渲染异常: ${error.message}</div>`;
+        containerRef.current.innerHTML = `<div style="color:#ef4444; padding:12px; background:rgba(239,68,68,0.1); border-radius:6px; font-size:12px">${escapeHtml(copy('ai_chat.message.mermaid.render_failed', { detail: error?.message || '' }))}</div>`;
       }
     }
-  }, [chart, darkMode]);
+  }, [chart, copy, darkMode]);
 
   return <div ref={containerRef} className="ai-mermaid-container" style={{ margin: '16px 0', display: 'flex', justifyContent: 'flex-start', overflowX: 'auto' }} />;
 };
 
 const CodeCopyButton: React.FC<{ text: string }> = ({ text }) => {
   const [copied, setCopied] = useState(false);
+  const copy = useMessageCopy();
 
   return (
     <span
@@ -83,12 +102,13 @@ const CodeCopyButton: React.FC<{ text: string }> = ({ text }) => {
       onMouseLeave={(event) => { event.currentTarget.style.opacity = copied ? '1' : '0.6'; }}
     >
       {copied ? <CheckOutlined style={{ color: '#52c41a' }} /> : <CopyOutlined />}
-      <span style={{ marginLeft: 4 }}>{copied ? '已复制' : '复制代码'}</span>
+      <span style={{ marginLeft: 4 }}>{copied ? copy('ai_chat.message.code.copied') : copy('ai_chat.message.code.copy')}</span>
     </span>
   );
 };
 
 const CodeRunButton: React.FC<{ text: string; connectionId?: string; dbName?: string }> = ({ text, connectionId, dbName }) => {
+  const copy = useMessageCopy();
   const contextMatch = text.match(/^--\s*@context\s+connectionId=(\S+)\s+dbName=(\S+)/m);
   const resolvedConnId = contextMatch?.[1] || connectionId;
   const resolvedDbName = contextMatch?.[2] || dbName;
@@ -106,15 +126,15 @@ const CodeRunButton: React.FC<{ text: string; connectionId?: string; dbName?: st
       if (Service?.AICheckSQL) {
         const result = await Service.AICheckSQL(text);
         if (!result.allowed) {
-          message.error(`🔒 安全策略拦截：当前安全级别不允许执行 ${result.operationType} 类型的 SQL。请在 AI 设置中调整安全级别。`);
+          message.error(copy('ai_chat.message.security.blocked', { operationType: result.operationType }));
           return;
         }
         if (result.requiresConfirm) {
           Modal.confirm({
-            title: '⚠️ 安全确认',
-            content: result.warningMessage || `此 SQL 为 ${result.operationType} 操作，确定要执行吗？`,
-            okText: '确认执行',
-            cancelText: '取消',
+            title: copy('ai_chat.message.security.confirm_title'),
+            content: result.warningMessage || copy('ai_chat.message.security.default_warning', { operationType: result.operationType }),
+            okText: copy('ai_chat.message.security.confirm_execute'),
+            cancelText: copy('common.cancel'),
             okButtonProps: { danger: true },
             onOk: () => {
               window.dispatchEvent(new CustomEvent('gonavi:insert-sql', { detail: sqlDetail(true) }));
@@ -131,7 +151,7 @@ const CodeRunButton: React.FC<{ text: string; connectionId?: string; dbName?: st
 
   return (
     <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-      <Tooltip title="将该段 SQL 注入查询工作区（可快捷修改或执行）">
+      <Tooltip title={copy('ai_chat.message.code.insert_tooltip')}>
         <span
           className="ai-code-run-btn"
           onClick={() => {
@@ -150,10 +170,10 @@ const CodeRunButton: React.FC<{ text: string; connectionId?: string; dbName?: st
           onMouseLeave={(event) => { event.currentTarget.style.opacity = '0.6'; }}
         >
           <PlayCircleOutlined />
-          <span style={{ marginLeft: 4 }}>插入</span>
+          <span style={{ marginLeft: 4 }}>{copy('ai_chat.message.code.insert')}</span>
         </span>
       </Tooltip>
-      <Tooltip title="立即执行（受 AI 安全策略管控）">
+      <Tooltip title={copy('ai_chat.message.code.execute_tooltip')}>
         <span
           className="ai-code-run-btn"
           onClick={handleExecute}
@@ -170,7 +190,7 @@ const CodeRunButton: React.FC<{ text: string; connectionId?: string; dbName?: st
           onMouseLeave={(event) => { event.currentTarget.style.opacity = '0.6'; }}
         >
           <PlayCircleOutlined />
-          <span style={{ marginLeft: 4 }}>执行</span>
+          <span style={{ marginLeft: 4 }}>{copy('ai_chat.message.code.execute')}</span>
         </span>
       </Tooltip>
     </div>
@@ -187,6 +207,7 @@ const HighlightedCodeBlock: React.FC<HighlightedCodeBlockProps> = ({
   activeConnectionId,
   activeDbName,
 }) => {
+  const copy = useMessageCopy();
   const [expanded, setExpanded] = useState(false);
   const [previewData, setPreviewData] = useState<any[] | null>(null);
   const [previewCols, setPreviewCols] = useState<string[]>([]);
@@ -220,10 +241,10 @@ const HighlightedCodeBlock: React.FC<HighlightedCodeBlockProps> = ({
         setPreviewData(rows.slice(0, 20));
         setPreviewExpanded(true);
       } else {
-        setPreviewError(response.message || '查询无结果');
+        setPreviewError(response.message || copy('ai_chat.message.code.query_no_result'));
       }
     } catch (error: any) {
-      setPreviewError(error?.message || '执行失败');
+      setPreviewError(error?.message || copy('ai_chat.message.code.execute_failed'));
     } finally {
       setPreviewLoading(false);
     }
@@ -247,7 +268,7 @@ const HighlightedCodeBlock: React.FC<HighlightedCodeBlockProps> = ({
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           {isSql && <CodeRunButton text={codeText} connectionId={activeConnectionId} dbName={activeDbName} />}
           {isSelectQuery && activeConnectionConfig && (
-            <Tooltip title="在聊天内预览查询结果（最多20行）">
+            <Tooltip title={copy('ai_chat.message.code.preview_tooltip')}>
               <span
                 onClick={handleInlineExecute}
                 style={{
@@ -271,7 +292,7 @@ const HighlightedCodeBlock: React.FC<HighlightedCodeBlockProps> = ({
                 }}
               >
                 {previewLoading ? '⏳' : '👁'}
-                <span style={{ marginLeft: 4 }}>{previewLoading ? '执行中...' : '预览'}</span>
+                <span style={{ marginLeft: 4 }}>{previewLoading ? copy('ai_chat.message.code.executing') : copy('ai_chat.message.code.preview')}</span>
               </span>
             </Tooltip>
           )}
@@ -322,7 +343,7 @@ const HighlightedCodeBlock: React.FC<HighlightedCodeBlockProps> = ({
             onClick={() => setExpanded(true)}
           >
             <span style={{ fontSize: 12, color: overlayTheme.iconColor, background: darkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)', padding: '2px 8px', borderRadius: 12 }}>
-              展开全部代码
+              {copy('ai_chat.message.code.expand_all')}
             </span>
           </div>
         )}
@@ -338,7 +359,7 @@ const HighlightedCodeBlock: React.FC<HighlightedCodeBlockProps> = ({
             }}
             onClick={() => setExpanded(false)}
           >
-            <span style={{ fontSize: 12, color: overlayTheme.iconColor }}>收起代码</span>
+            <span style={{ fontSize: 12, color: overlayTheme.iconColor }}>{copy('ai_chat.message.code.collapse')}</span>
           </div>
         )}
       </div>
@@ -351,8 +372,8 @@ const HighlightedCodeBlock: React.FC<HighlightedCodeBlockProps> = ({
       {previewExpanded && previewData && previewData.length > 0 && (
         <div style={{ borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 12px', background: darkMode ? 'rgba(250,173,20,0.08)' : 'rgba(250,173,20,0.05)' }}>
-            <span style={{ fontSize: 11, color: overlayTheme.mutedText }}>📊 预览结果（{previewData.length} 行 × {previewCols.length} 列）</span>
-            <span style={{ fontSize: 11, color: overlayTheme.mutedText, cursor: 'pointer' }} onClick={() => setPreviewExpanded(false)}>收起 ▴</span>
+            <span style={{ fontSize: 11, color: overlayTheme.mutedText }}>📊 {copy('ai_chat.message.code.preview_result', { rows: previewData.length, columns: previewCols.length })}</span>
+            <span style={{ fontSize: 11, color: overlayTheme.mutedText, cursor: 'pointer' }} onClick={() => setPreviewExpanded(false)}>{copy('ai_chat.message.code.preview_collapse')} ▴</span>
           </div>
           <div style={{ overflowX: 'auto', maxHeight: 200, overflowY: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'var(--gn-font-mono)' }}>
@@ -385,7 +406,7 @@ const HighlightedCodeBlock: React.FC<HighlightedCodeBlockProps> = ({
           style={{ padding: '4px 12px', cursor: 'pointer', fontSize: 11, color: overlayTheme.mutedText, background: darkMode ? 'rgba(250,173,20,0.05)' : 'rgba(250,173,20,0.03)', borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)'}` }}
           onClick={() => setPreviewExpanded(true)}
         >
-          📊 查看结果（{previewData.length} 行）▾
+          📊 {copy('ai_chat.message.code.view_result', { rows: previewData.length })} ▾
         </div>
       )}
     </div>

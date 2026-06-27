@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Card, InputNumber, Segmented, Select, Space, Typography } from 'antd';
 
 import DataGrid, { GONAVI_ROW_KEY } from '../components/DataGrid';
+import { t } from '../i18n';
 import { useStore } from '../store';
 import type { EditRowLocator } from '../utils/rowLocator';
 import type { DataTableDensity } from '../utils/dataGridDisplay';
@@ -286,13 +287,13 @@ const PerfDataGridHarness: React.FC = () => {
         }}
       >
         <Space wrap align="center" size={12}>
-          <Text strong>DataGrid 性能复现页</Text>
+          <Text strong>{t('dev.perf_data_grid.title')}</Text>
           <Segmented
             value={uiVersion}
             onChange={(value) => setUiVersion(value as HarnessUiVersion)}
             options={[
-              { label: '旧版 UI', value: 'legacy' },
-              { label: '新版 UI', value: 'v2' },
+              { label: t('dev.perf_data_grid.ui_version.legacy'), value: 'legacy' },
+              { label: t('dev.perf_data_grid.ui_version.v2'), value: 'v2' },
             ]}
           />
           <InputNumber
@@ -301,7 +302,7 @@ const PerfDataGridHarness: React.FC = () => {
             step={500}
             value={rowCount}
             onChange={(value) => setRowCount(Number(value) || 10000)}
-            addonBefore="行数"
+            addonBefore={t('dev.perf_data_grid.rows')}
           />
           <InputNumber
             min={8}
@@ -309,16 +310,16 @@ const PerfDataGridHarness: React.FC = () => {
             step={2}
             value={columnCount}
             onChange={(value) => setColumnCount(Number(value) || 24)}
-            addonBefore="列数"
+            addonBefore={t('dev.perf_data_grid.columns')}
           />
           <Select
             value={density}
             style={{ width: 140 }}
             onChange={(value) => setDensity(value)}
             options={[
-              { value: 'comfortable', label: '标准' },
-              { value: 'standard', label: '紧凑' },
-              { value: 'compact', label: '极紧凑' },
+              { value: 'comfortable', label: t('dev.perf_data_grid.density.comfortable') },
+              { value: 'standard', label: t('dev.perf_data_grid.density.standard') },
+              { value: 'compact', label: t('dev.perf_data_grid.density.compact') },
             ]}
           />
           <Button
@@ -326,14 +327,20 @@ const PerfDataGridHarness: React.FC = () => {
               window.dispatchEvent(new Event('resize'));
             }}
           >
-            触发布局重算
+            {t('dev.perf_data_grid.trigger_layout')}
           </Button>
         </Space>
         <Alert
           type="info"
           showIcon
-          message="这个页面只用于开发态滚动性能采样"
-          description={`当前 ${uiVersion === 'v2' ? '新版' : '旧版'} UI，${data.length} 行 / ${columnNames.length} 列。直接在表格区域做纵向、横向、Shift+滚轮滚动采样。`}
+          message={t('dev.perf_data_grid.notice.message')}
+          description={t('dev.perf_data_grid.notice.description', {
+            uiVersion: uiVersion === 'v2'
+              ? t('dev.perf_data_grid.ui_version.v2_short')
+              : t('dev.perf_data_grid.ui_version.legacy_short'),
+            rows: data.length,
+            columns: columnNames.length,
+          })}
         />
         <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <DataGrid

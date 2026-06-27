@@ -34,6 +34,12 @@ const readDataGridSource = () => [
   './DataGridCore.tsx',
   './DataGridShell.tsx',
 ].map((file) => readFileSync(new URL(file, import.meta.url), 'utf8')).join('\n');
+const readDataViewerSource = (): string =>
+  readFileSync(new URL('./DataViewer.tsx', import.meta.url), 'utf8');
+const readDataGridSecondaryActionsSource = (): string =>
+  readFileSync(new URL('./DataGridSecondaryActions.tsx', import.meta.url), 'utf8');
+const readDataGridShellSource = (): string =>
+  readFileSync(new URL('./DataGridShell.tsx', import.meta.url), 'utf8');
 
 const mockStoreState = vi.hoisted(() => ({
   languagePreference: 'system' as LanguagePreference,
@@ -172,6 +178,7 @@ describe('DataGrid layout', () => {
     expect(markup).toContain('data-grid-column-quick-find-action="true"');
     expect(markup).toContain('字段显示');
     expect(markup).toContain('跳列');
+    expect(markup).toContain('日志');
     expect(markup).toContain(zhObjectDesignLabel);
     expect(markup).toContain('data-grid-page-find="true"');
     expect(markup).toContain('data-grid-page-find-prev="true"');
@@ -188,6 +195,27 @@ describe('DataGrid layout', () => {
     expect(markup).not.toContain('class="ant-pagination');
     expect(markup).not.toContain('class="data-grid-pagination-kicker"');
     expect(markup).toContain('当前页查找...');
+  });
+
+  it('opens the embedded SQL log view from the shared V2 SQL log event in table data tabs', () => {
+    const source = readDataGridSource();
+    const dataViewerSource = readDataViewerSource();
+    const secondaryActionsSource = readDataGridSecondaryActionsSource();
+    const shellSource = readDataGridShellSource();
+
+    expect(dataViewerSource).toContain('isActive={isActive}');
+    expect(dataViewerSource).toContain('enableSqlLogEvent');
+    expect(source).toContain("isActive = true");
+    expect(source).toContain("enableSqlLogEvent = false");
+    expect(source).toContain("'gonavi:show-sql-execution-log'");
+    expect(source).toContain("if (!enableSqlLogEvent || !isV2Ui || !isActive) return;");
+    expect(source).toContain("handleViewModeChange('sqlLog');");
+    expect(source).toContain("'sqlLog'");
+    expect(shellSource).toContain('import LogPanel from');
+    expect(shellSource).toContain("viewMode === 'sqlLog'");
+    expect(shellSource).toContain('<LogPanel variant="embedded" />');
+    expect(secondaryActionsSource).toContain("key: 'sqlLog'");
+    expect(secondaryActionsSource).toContain("translate('log_panel.short_title')");
   });
 
   it('localizes DataGrid error boundary, column drag affordances, and legacy row context menu labels through i18n keys', () => {
@@ -1358,8 +1386,13 @@ describe('DataGrid layout', () => {
     expect(bottomDdlMarkup).toContain(rawTableName);
     expect(bottomDdlMarkup).toContain(rawDdl);
     expect(sideDdlMarkup).toContain('aria-label="[data_grid.ddl.sidebar_aria]"');
+    expect(sideDdlMarkup).toContain('gn-v2-data-grid-ddl-title');
+    expect(sideDdlMarkup).toContain('gn-v2-data-grid-ddl-actions');
     expect(sideDdlMarkup).toContain('[common.close]');
     expect(sideDdlMarkup).toContain('[data_grid.ddl.loading]');
+    const v2ThemeCss = readV2ThemeCss();
+    expect(v2ThemeCss).toMatch(/\.gn-v2-data-grid-ddl-view\.is-side\s+\.gn-v2-data-grid-ddl-actions\s*\{[^}]*flex-wrap:\s*nowrap;/s);
+    expect(v2ThemeCss).toMatch(/\.gn-v2-data-grid-ddl-view\.is-side\s+\.gn-v2-data-grid-ddl-title\s*\{[^}]*overflow:\s*hidden;/s);
     expect(ddlWorkspaceTranslateCalls.map((call) => call.key)).toEqual([
       'data_grid.ddl.layout_bottom',
       'data_grid.ddl.layout_side',
@@ -1676,6 +1709,8 @@ describe('DataGrid layout', () => {
         'data_grid.record_view.next': 'Next label',
         'data_grid.record_view.record_position': `Record label ${params?.current} of ${params?.total}`,
         'data_grid.record_view.edit_current': 'Edit current label',
+        'data_grid.column.type_tooltip': `TYPE ${params?.type}`,
+        'data_grid.column.comment_tooltip': `COMMENT ${params?.comment}`,
         'data_grid.preview_panel.no_cell_title': 'Select cell title',
         'data_grid.preview_panel.no_cell_description': 'Select cell description',
         'data_grid.json_editor.format': 'Format JSON label',
@@ -1807,6 +1842,10 @@ describe('DataGrid layout', () => {
         canModifyData
         currentTextRow={{ raw_sql: 'GitHub release HTTP 500 checksum abc123' }}
         displayOutputColumnNames={['raw_sql']}
+        columnMetaMap={{ raw_sql: { type: 'varchar(128)', comment: 'SQL text payload' } }}
+        columnMetaMapByLowerName={{}}
+        showColumnType
+        showColumnComment
         translate={translate}
         onPrev={() => {}}
         onNext={() => {}}
@@ -1819,8 +1858,32 @@ describe('DataGrid layout', () => {
     expect(textRecordMarkup).toContain('Record label 1 of 2');
     expect(textRecordMarkup).toContain('Edit current label');
     expect(textRecordMarkup).toContain('raw_sql');
+    expect(textRecordMarkup).toContain('TYPE varchar(128)');
+    expect(textRecordMarkup).toContain('COMMENT SQL text payload');
     expect(textRecordMarkup).toContain('GitHub release HTTP 500 checksum abc123');
     expect(textRecordMarkup).not.toContain('data_grid.record_view');
+
+    const hiddenTextRecordMarkup = renderToStaticMarkup(
+      <DataGridTextView
+        darkMode={false}
+        rowCount={1}
+        textRecordIndex={0}
+        canModifyData={false}
+        currentTextRow={{ raw_sql: 'select 1' }}
+        displayOutputColumnNames={['raw_sql']}
+        columnMetaMap={{ raw_sql: { type: 'varchar(128)', comment: 'SQL text payload' } }}
+        columnMetaMapByLowerName={{}}
+        showColumnType={false}
+        showColumnComment={false}
+        translate={translate}
+        onPrev={() => {}}
+        onNext={() => {}}
+        onEditCurrent={() => {}}
+        formatTextViewValue={(value) => String(value)}
+      />,
+    );
+    expect(hiddenTextRecordMarkup).not.toContain('TYPE varchar(128)');
+    expect(hiddenTextRecordMarkup).not.toContain('COMMENT SQL text payload');
 
     const previewWithCellMarkup = renderToStaticMarkup(
       <DataGridPreviewPanel
@@ -1871,7 +1934,7 @@ describe('DataGrid layout', () => {
     expect(emptyPreviewMarkup).not.toContain('data_grid.preview_panel');
   });
 
-  it('keeps unknown-total pagination in sequential mode instead of pretending total pages are known', () => {
+  it('keeps unknown-total pagination sequential while still allowing direct page jumps', () => {
     const markup = renderDataGridWithI18n(
       <DataGrid
         data={[
@@ -1899,7 +1962,48 @@ describe('DataGrid layout', () => {
 
     expect(markup).toContain('第 3 页');
     expect(markup).not.toContain('<strong>3</strong><span>/</span><span>4</span>');
-    expect(markup).not.toContain('data-grid-pagination-jump="true"');
+    expect(markup).toContain('data-grid-pagination-jump="true"');
+    expect(markup).toContain('跳页');
+  });
+
+  it('keeps legacy unknown-total pagination sequential while still allowing direct page jumps', () => {
+    const previousUiVersion = mockStoreState.uiVersion;
+    mockStoreState.uiVersion = 'legacy';
+
+    try {
+      const markup = renderDataGridWithI18n(
+        <DataGrid
+          data={[
+            {
+              __gonavi_row_key__: 'row-1',
+              id: 1,
+              name: 'alpha',
+            },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="users"
+          dbName="main"
+          connectionId="conn-1"
+          readOnly
+          pagination={{
+            current: 3,
+            pageSize: 100,
+            total: 400,
+            totalKnown: false,
+          }}
+          onPageChange={() => {}}
+        />,
+      );
+
+      expect(markup).toContain('第 3 页');
+      expect(markup).toContain('data-grid-pagination-sequential="true"');
+      expect(markup).not.toContain('class="ant-pagination');
+      expect(markup).toContain('data-grid-pagination-jump="true"');
+      expect(markup).toContain('跳页');
+    } finally {
+      mockStoreState.uiVersion = previousUiVersion;
+    }
   });
 
   it('renders the v2 DataGrid toolbar using the redesigned topbar hooks', () => {
@@ -1951,50 +2055,60 @@ describe('DataGrid layout', () => {
   });
 
   it('renders a non-data row number column when enabled', () => {
-    const markup = renderToStaticMarkup(
-      <DataGrid
-        data={[
-          {
-            __gonavi_row_key__: 'row-1',
-            id: 1,
-            name: 'alpha',
-          },
-        ]}
-        columnNames={['id', 'name']}
-        loading={false}
-        tableName="events"
-        dbName="main"
-        connectionId="conn-1"
-        readOnly
-        showRowNumberColumn
-        pagination={{
-          current: 2,
-          pageSize: 50,
-          total: 51,
-        }}
-        onPageChange={() => {}}
-      />,
-    );
+    const previousLanguage = getCurrentLanguage();
+    setCurrentLanguage('zh-CN');
 
-    expect(markup).toContain('aria-label="行号"');
-    expect(markup).toContain('<span aria-label="行号">#</span>');
-    expect(markup).not.toContain('>行号<');
-    expect(markup).toContain('data-grid-row-number-title="true"');
-    expect(markup).toContain('data-grid-column-title-single-line="true"');
-    expect(markup).toContain('justify-content:center');
-    expect(markup).toContain('align-items:center');
-    expect(markup).toContain('min-height:var(--gonavi-header-min-height, 40px)');
-    expect(markup).toContain('text-align:center');
-    expect(markup).toContain('padding-inline:0');
-    expect(markup).toContain('vertical-align:middle');
-    expect(markup).toContain('data-grid-row-number="true"');
-    expect(markup).toContain('51');
+    try {
+      const markup = renderToStaticMarkup(
+        <DataGrid
+          data={[
+            {
+              __gonavi_row_key__: 'row-1',
+              id: 1,
+              name: 'alpha',
+            },
+          ]}
+          columnNames={['id', 'name']}
+          loading={false}
+          tableName="events"
+          dbName="main"
+          connectionId="conn-1"
+          readOnly
+          showRowNumberColumn
+          pagination={{
+            current: 2,
+            pageSize: 50,
+            total: 51,
+          }}
+          onPageChange={() => {}}
+        />,
+      );
+
+      expect(markup).toContain('aria-label="行号"');
+      expect(markup).toContain('<span aria-label="行号">#</span>');
+      expect(markup).not.toContain('>行号<');
+      expect(markup).toContain('data-grid-row-number-title="true"');
+      expect(markup).toContain('data-grid-column-title-single-line="true"');
+      expect(markup).toContain('justify-content:center');
+      expect(markup).toContain('align-items:center');
+      expect(markup).toContain('min-height:var(--gonavi-header-min-height, 40px)');
+      expect(markup).toContain('text-align:center');
+      expect(markup).toContain('padding-inline:0');
+      expect(markup).toContain('vertical-align:middle');
+      expect(markup).toContain('data-grid-row-number="true"');
+      expect(markup).toContain('51');
+    } finally {
+      setCurrentLanguage(previousLanguage);
+    }
   });
 
-  it('clears modified cell markers when refreshing the grid', () => {
+  it('keeps pending cell markers when refreshing the grid', () => {
     const source = readDataGridSource();
 
-    expect(source).toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setModifiedColumns\(\{\}\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}, \[[\s\S]*clearAutoCommitTimer[\s\S]*onReload[\s\S]*\]\);/);
+    expect(source).toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setSelectedRowKeys\(\[\]\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}, \[[\s\S]*onReload[\s\S]*\]\);/);
+    expect(source).not.toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setAddedRows\(\[\]\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}\,/);
+    expect(source).not.toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setModifiedRows\(\{\}\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}\,/);
+    expect(source).not.toMatch(/const handleRefreshGrid = useCallback\(\(\) => \{[\s\S]*setDeletedRowKeys\(new Set\(\)\);[\s\S]*if \(onReload\) onReload\(\);[\s\S]*\}\,/);
   });
 
   it('routes temporal inline editors through the current connection config', () => {
@@ -2207,17 +2321,54 @@ describe('DataGrid layout', () => {
     expect(source).toContain("type DataGridExportScope = 'selected' | 'page' | 'all' | 'filteredAll';");
     expect(source).toContain('const handleOpenExportDialog = useCallback(async () => {');
     expect(source).toContain('await runExportWithProgress({');
-    expect(source).toContain("title: '导出查询结果'");
-    expect(source).toContain("label: '筛选结果（全部）'");
-    expect(source).toContain("label: '全表数据'");
+    expect(source).toContain("translateDataGrid('file.backend.dialog.export_query_result')");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.selected_rows')");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.selected_rows_count'");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.selected_rows_description')");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.current_page'");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.current_page_description')");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.all_results_requery')");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.all_results_cached'");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.all_results_requery_description')");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.all_results_cached_description')");
+    expect(source).not.toContain("title: '导出查询结果'");
+    expect(source).not.toContain("title: `导出 ${defaultName || '查询结果'}`");
+    expect(source).not.toContain("? '全部结果（重新查询）'");
+    expect(source).not.toContain(": `全部结果（当前缓存 ${mergedDisplayData.length} 条）`");
+    expect(source).not.toContain("label: selectedCount > 0 ? `选中行 (${selectedCount} 条)` : '选中行'");
+    expect(source).not.toContain("description: '仅导出当前结果集中已勾选的行。'");
+    expect(source).not.toContain("label: `当前页 (${queryResultCurrentPageRows.length} 条)`");
+    expect(source).not.toContain("description: '直接按当前结果页缓存导出。'");
+    expect(source).not.toContain("? '后台会重新执行 SQL，避免只导出当前页或当前缓存。'");
+    expect(source).not.toContain(": '当前查询缺少可重放 SQL 时，将导出当前缓存的全部结果。'");
+    expect(source).toContain("translateDataGrid('file.backend.dialog.export_table'");
+    expect(source).toContain("translateDataGrid('file.backend.dialog.export_data')");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.current_page'");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.current_page_requery_description')");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.current_page_unavailable_description')");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.filtered_results_all')");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.filtered_results_all_requery_description')");
+    expect(source).toContain("translateDataGrid('data_grid.export.scope.filtered_results_all_unavailable_description')");
+    expect(source).toContain("translateDataGrid('data_export.workbench.scope.all.label')");
+    expect(source).toContain("translateDataGrid('data_export.workbench.scope.all.description')");
+    expect(source).not.toContain("title: `导出 ${tableName || '数据'}`");
+    expect(source).not.toContain("label: `当前页 (${displayData.length} 条)`");
+    expect(source).not.toContain("? '后台按当前分页条件重新查询后导出当前页。'");
+    expect(source).not.toContain(": '当前页依赖前端临时状态，建议直接使用快捷导出。'");
+    expect(source).not.toContain("label: '筛选结果（全部）'");
+    expect(source).not.toContain("? '按当前筛选条件重新查询数据库并导出全部筛选结果。'");
+    expect(source).not.toContain(": '当前数据源或当前状态暂不支持在工作台重放筛选导出。'");
+    expect(source).not.toContain("label: '全表数据'");
+    expect(source).not.toContain("description: '后台重新查询整张表并导出全部数据。'");
     expect(source).toContain("const fallbackAllSql = String(resultSql || '').trim();");
     expect(source).toContain("const backendExportSql = exportAllSql || fallbackAllSql;");
     expect(source).toContain("if (backendExportSql && connectionId) {");
     expect(source).toContain("label: allRowsLabel");
     expect(exportDialogSource).toContain('data-export-config-modal="true"');
-    expect(exportDialogSource).toContain('label="导出格式"');
-    expect(exportDialogSource).toContain('label="每个工作表最大行数"');
-    expect(exportDialogSource).toContain('仅 XLSX 生效');
+    expect(exportDialogSource).toContain("import { t } from '../i18n';");
+    expect(exportDialogSource).toContain("label={t('data_export.dialog.field.format')}");
+    expect(exportDialogSource).toContain("label={t('data_export.dialog.field.xlsx_max_rows')}");
+    expect(exportDialogSource).toContain("t('data_export.dialog.field.xlsx_max_rows_help'");
     expect(source).toContain('const queryResultCurrentPageRows = useMemo(() => {');
     expect(source).toContain('const resolveContextMenuPosition = useCallback((x: number, y: number, estimatedWidth: number, estimatedHeight: number) => {');
     expect(source).toContain('const rect = element.getBoundingClientRect();');
@@ -2310,6 +2461,33 @@ describe('DataGrid layout', () => {
     expect(css).toContain('[data-grid-quick-where-input="true"]');
     expect(css).toContain('font-size: var(--gn-font-size, 14px) !important;');
     expect(css).toContain('user-select: text !important;');
+  });
+
+  it('wires data-view column header filters through the existing filter state', () => {
+    const source = readDataGridSource();
+    const dataViewerSource = readDataViewerSource();
+    const filterHookSource = readFileSync(new URL('./useDataGridFilters.tsx', import.meta.url), 'utf8');
+    const columnTitleSource = readFileSync(new URL('./DataGridColumnTitle.tsx', import.meta.url), 'utf8');
+
+    expect(filterHookSource).toContain('export type GridColumnFilterDraft');
+    expect(filterHookSource).toContain('const applyColumnFilter = React.useCallback');
+    expect(filterHookSource).toContain('onApplyFilter(nextConditions)');
+    expect(source).toContain("const columnHeaderFilterEnabled = exportScope === 'table' && !!onApplyFilter;");
+    expect(source).toContain("filterOpOptions.filter((option) => option.value !== 'CUSTOM')");
+    expect(source).toContain("eventTarget?.closest?.('[data-grid-column-filter-trigger=\"true\"]')");
+    expect(source).toContain("eventTarget?.closest?.('[data-grid-column-filter-popover=\"true\"]')");
+    expect(source).toContain("eventTarget?.closest?.('.ant-select-dropdown')");
+    expect(source).toContain('onApply: (draft) => applyColumnHeaderFilter(normalizedName, draft)');
+    expect(source).toContain('onClear: () => clearColumnFilter(normalizedName)');
+    expect(dataViewerSource).toContain('skipNextAutoFetchRef.current = false;');
+    expect(dataViewerSource).toContain('setFilterConditions(normalizeViewerFilterConditions(conditions));');
+    expect(columnTitleSource).toContain('data-grid-column-filter-trigger="true"');
+    expect(columnTitleSource).toContain('const submitColumnFilter = (event?: React.SyntheticEvent<HTMLElement>) => {');
+    expect(columnTitleSource).toContain('onClick={submitColumnFilter}');
+    expect(columnTitleSource).toContain('onPressEnter={submitColumnFilter}');
+    expect(columnTitleSource).toContain('getPopupContainer={(triggerNode) => triggerNode.parentElement || document.body}');
+    expect(columnTitleSource).toContain('data-grid-column-filter-active={columnFilter.active ?');
+    expect(columnTitleSource).toContain('data-grid-column-filter-popover="true"');
   });
 
   it('keeps DataGrid scroll synchronization throttled to animation frames', () => {
@@ -2408,8 +2586,8 @@ describe('DataGrid layout', () => {
     expect(css).toContain('overflow-x: auto;');
     expect(paginationBarSource).toContain("label: translate('data_grid.pagination.page_size_option', { count: value })");
     expect(paginationBarSource).not.toContain("label: `${value}/页`");
-    expect(paginationBarSource).toContain('const maxJumpPage = Math.max(1, paginationTotalPages);');
-    expect(paginationBarSource).toContain('Math.min(maxJumpPage, Math.max(1, Math.trunc(Number(jumpPage))))');
+    expect(paginationBarSource).toContain('const maxJumpPage = showKnownPageCount ? Math.max(1, paginationTotalPages) : null;');
+    expect(paginationBarSource).toContain('max={maxJumpPage ?? undefined}');
     expect(paginationBarSource).toContain('onPressEnter={submitJumpPage}');
     expect(paginationBarSource).toContain('data-grid-pagination-jump="true"');
     expect(css).toContain('.data-grid-pagination-jump-input.ant-input-number-focused');
@@ -2419,11 +2597,26 @@ describe('DataGrid layout', () => {
   it('keeps the DataGrid performance harness aligned with legacy and v2 comparison controls', () => {
     const harnessSource = readFileSync(new URL('../dev/PerfDataGridHarness.tsx', import.meta.url), 'utf8');
     expect(harnessSource).toContain("options={[");
-    expect(harnessSource).toContain("{ label: '旧版 UI', value: 'legacy' }");
-    expect(harnessSource).toContain("{ label: '新版 UI', value: 'v2' }");
-    expect(harnessSource).toContain("{ value: 'comfortable', label: '标准' }");
-    expect(harnessSource).toContain("{ value: 'standard', label: '紧凑' }");
-    expect(harnessSource).toContain("{ value: 'compact', label: '极紧凑' }");
+    expect(harnessSource).toContain("t('dev.perf_data_grid.ui_version.legacy')");
+    expect(harnessSource).toContain("t('dev.perf_data_grid.ui_version.v2')");
+    expect(harnessSource).toContain("t('dev.perf_data_grid.density.comfortable')");
+    expect(harnessSource).toContain("t('dev.perf_data_grid.density.standard')");
+    expect(harnessSource).toContain("t('dev.perf_data_grid.density.compact')");
+    [
+      'DataGrid 性能复现页',
+      '旧版 UI',
+      '新版 UI',
+      '行数',
+      '列数',
+      '标准',
+      '紧凑',
+      '极紧凑',
+      '触发布局重算',
+      '这个页面只用于开发态滚动性能采样',
+      '直接在表格区域做纵向、横向、Shift+滚轮滚动采样',
+    ].forEach((rawSnippet) => {
+      expect(harnessSource).not.toContain(rawSnippet);
+    });
     expect(harnessSource).toContain("document.body.setAttribute('data-ui-version', uiVersion);");
     expect(harnessSource).toContain("if (value === null || value === undefined || value === '') {");
     expect(harnessSource).toContain("const currentState = useStore.getState();");

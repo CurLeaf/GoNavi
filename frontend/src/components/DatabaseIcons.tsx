@@ -328,20 +328,32 @@ export const getDbIcon = (type: string, color?: string, size?: number): React.Re
     return <Component size={size} color={color} />;
 };
 
-/** 获取数据库图标显示名称（中文） */
-export const getDbIconLabel = (type: string): string => {
+type DbIconLabelTranslator = (key: string) => string;
+
+const translateDbIconLabel = (
+    translate: DbIconLabelTranslator | undefined,
+    key: string,
+    fallback: string,
+): string => {
+    if (!translate) return fallback;
+    const translated = translate(key);
+    return translated && translated !== key ? translated : fallback;
+};
+
+/** 获取数据库图标显示名称 */
+export const getDbIconLabel = (type: string, translate?: DbIconLabelTranslator): string => {
     const labels: Record<string, string> = {
         mysql: 'MySQL', mariadb: 'MariaDB', oceanbase: 'OceanBase', postgres: 'PostgreSQL',
         redis: 'Redis', mongodb: 'MongoDB', jvm: 'JVM',
         oracle: 'Oracle',
         sqlserver: 'SQL Server', clickhouse: 'ClickHouse', sqlite: 'SQLite',
         starrocks: 'StarRocks',
-        duckdb: 'DuckDB', kingbase: '金仓', dameng: '达梦',
-        vastbase: 'VastBase', opengauss: 'OpenGauss', gaussdb: 'GaussDB', goldendb: 'GoldenDB', highgo: '瀚高', iris: 'InterSystems IRIS', tdengine: 'TDengine', iotdb: 'Apache IoTDB', rocketmq: 'RocketMQ', mqtt: 'MQTT', kafka: 'Kafka', rabbitmq: 'RabbitMQ',
+        duckdb: 'DuckDB', kingbase: 'Kingbase', dameng: 'Dameng',
+        vastbase: 'VastBase', opengauss: 'OpenGauss', gaussdb: 'GaussDB', goldendb: 'GoldenDB', highgo: 'HighGo', iris: 'InterSystems IRIS', tdengine: 'TDengine', iotdb: 'Apache IoTDB', rocketmq: 'RocketMQ', mqtt: 'MQTT', kafka: 'Kafka', rabbitmq: 'RabbitMQ',
         chroma: 'Chroma',
         qdrant: 'Qdrant',
         elasticsearch: 'Elasticsearch',
-        custom: '自定义',
+        custom: translateDbIconLabel(translate, 'connection_modal.db_icon_label.custom', 'Custom'),
     };
     return labels[type?.toLowerCase()] || type;
 };

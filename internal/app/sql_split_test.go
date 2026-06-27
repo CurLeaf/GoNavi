@@ -211,6 +211,220 @@ END;`,
 	}
 }
 
+func TestSplitSQLStatements_OracleCreateProcedureSkipsSqlPlusSlashDelimiter(t *testing.T) {
+	input := `CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_new(
+    p_sourceid IN VARCHAR2
+) IS
+    v_memcardno VARCHAR2(40);
+    v_ecnt NUMBER;
+    CURSOR cur_ware IS
+        SELECT d.goodsid, d.goodsqty
+        FROM t_order_d d
+        WHERE d.sourceid = p_sourceid;
+BEGIN
+    FOR row_ware IN cur_ware LOOP
+        v_ecnt := row_ware.goodsqty;
+    END LOOP;
+END;
+/
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_new(
+    p_sourceid IN VARCHAR2
+) IS
+    v_memcardno VARCHAR2(40);
+    v_ecnt NUMBER;
+    CURSOR cur_ware IS
+        SELECT d.goodsid, d.goodsqty
+        FROM t_order_d d
+        WHERE d.sourceid = p_sourceid;
+BEGIN
+    FOR row_ware IN cur_ware LOOP
+        v_ecnt := row_ware.goodsqty;
+    END LOOP;
+END;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
+func TestSplitSQLStatements_OracleCreateProcedureKeepsCursorCaseExpression(t *testing.T) {
+	input := `CREATE OR REPLACE PROCEDURE proc_accept_to_add(
+    p_acceptno IN t_accept_h.acceptno%TYPE
+) IS
+    CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS
+        SELECT si.compid, si.batid, si.wareid
+        FROM   t_store_i si
+        ORDER  BY CASE
+                      WHEN p_ind = '1' THEN
+                       to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))
+                      WHEN p_ind = '2' THEN
+                       lpad(to_char(floor(si.wareqty)), 10, '0')
+                      ELSE
+                       to_char(si.batid)
+                  END,si.batid;
+BEGIN
+    NULL;
+END;
+/
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`CREATE OR REPLACE PROCEDURE proc_accept_to_add(
+    p_acceptno IN t_accept_h.acceptno%TYPE
+) IS
+    CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS
+        SELECT si.compid, si.batid, si.wareid
+        FROM   t_store_i si
+        ORDER  BY CASE
+                      WHEN p_ind = '1' THEN
+                       to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))
+                      WHEN p_ind = '2' THEN
+                       lpad(to_char(floor(si.wareqty)), 10, '0')
+                      ELSE
+                       to_char(si.batid)
+                  END,si.batid;
+BEGIN
+    NULL;
+END;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
+func TestSplitSQLStatements_OracleCreateProcedureSkipsCommentedSqlPlusSlashDelimiter(t *testing.T) {
+	input := `-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1
+-- 请确认语法兼容当前数据库后执行
+CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_sourceid     IN VARCHAR2,
+    p_saleno_out   OUT VARCHAR2,
+    p_msg_out      OUT NVARCHAR2
+) AS
+    v_saleno VARCHAR2(40);
+    v_ecnt NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_ecnt FROM dual;
+    p_saleno_out := v_saleno;
+    p_msg_out := 'OK';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := SQLERRM;
+END cproc_tzhssr_order2sale_A1;
+/ -- SQLPlus delimiter from PL/SQL tools
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1
+-- 请确认语法兼容当前数据库后执行
+CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_sourceid     IN VARCHAR2,
+    p_saleno_out   OUT VARCHAR2,
+    p_msg_out      OUT NVARCHAR2
+) AS
+    v_saleno VARCHAR2(40);
+    v_ecnt NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_ecnt FROM dual;
+    p_saleno_out := v_saleno;
+    p_msg_out := 'OK';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := SQLERRM;
+END cproc_tzhssr_order2sale_A1;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
+func TestSplitSQLStatements_OracleCreateProcedureSkipsSemicolonAfterSqlPlusSlashDelimiter(t *testing.T) {
+	input := `-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1
+-- 请确认语法兼容当前数据库后执行
+CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_sourceid     IN VARCHAR2,
+    p_msg_out      OUT NVARCHAR2
+) AS
+    v_ecnt NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_ecnt FROM dual;
+    p_msg_out := '';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := substr('订单核销失败，错误信息：' || SQLERRM || '，错误位置：' ||
+                            dbms_utility.format_error_backtrace, 1, 1000);
+END cproc_tzhssr_order2sale_A1;
+/;
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1
+-- 请确认语法兼容当前数据库后执行
+CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_sourceid     IN VARCHAR2,
+    p_msg_out      OUT NVARCHAR2
+) AS
+    v_ecnt NUMBER;
+BEGIN
+    SELECT COUNT(*) INTO v_ecnt FROM dual;
+    p_msg_out := '';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := substr('订单核销失败，错误信息：' || SQLERRM || '，错误位置：' ||
+                            dbms_utility.format_error_backtrace, 1, 1000);
+END cproc_tzhssr_order2sale_A1;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
+func TestSplitSQLStatements_OraclePackageSpecAndBodyStayWhole(t *testing.T) {
+	input := `CREATE OR REPLACE PACKAGE pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER);
+END pkg_order;
+/
+CREATE OR REPLACE PACKAGE BODY pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER) IS
+    BEGIN
+        NULL;
+    END sync_order;
+END pkg_order;
+/ -- SQLPlus delimiter from PL/SQL tools
+SELECT 1 FROM dual;`
+	got := splitSQLStatements(input)
+	want := []string{
+		`CREATE OR REPLACE PACKAGE pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER);
+END pkg_order;`,
+		`CREATE OR REPLACE PACKAGE BODY pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER) IS
+    BEGIN
+        NULL;
+    END sync_order;
+END pkg_order;`,
+		"SELECT 1 FROM dual",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
+func TestSplitSQLStatements_DoesNotTreatSlashOperatorLineAsDelimiter(t *testing.T) {
+	input := "SELECT 10\n/\n2 FROM dual;"
+	got := splitSQLStatements(input)
+	want := []string{"SELECT 10\n/\n2 FROM dual"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("splitSQLStatements(%q) = %#v, want %#v", input, got, want)
+	}
+}
+
 func TestSplitSQLStatements_TransactionBeginStillSplits(t *testing.T) {
 	input := "BEGIN; UPDATE accounts SET balance = balance - 1 WHERE id = 1; COMMIT;"
 	got := splitSQLStatements(input)

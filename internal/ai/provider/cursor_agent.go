@@ -64,7 +64,7 @@ func (p *CursorAgentProvider) Name() string {
 
 func (p *CursorAgentProvider) Validate() error {
 	if strings.TrimSpace(p.config.APIKey) == "" {
-		return fmt.Errorf("API Key 不能为空")
+		return fmt.Errorf("API key is required")
 	}
 	return nil
 }
@@ -234,7 +234,7 @@ func (p *CursorAgentProvider) ChatWithState(ctx context.Context, state json.RawM
 	sessionState.LastRunID = runID
 	nextState, err := json.Marshal(sessionState)
 	if err != nil {
-		return nil, nil, fmt.Errorf("序列化 Cursor 会话状态失败: %w", err)
+		return nil, nil, fmt.Errorf("serialize Cursor session state failed: %w", err)
 	}
 
 	return &ai.ChatResponse{
@@ -344,19 +344,19 @@ func (p *CursorAgentProvider) ChatStreamWithState(ctx context.Context, state jso
 			}
 		case "error":
 			if payload == "" {
-				callback(ai.StreamChunk{Error: "Cursor 流式请求失败", Done: true})
+				callback(ai.StreamChunk{Error: "Cursor stream request failed", Done: true})
 				completedExplicitly = true
 				return true, nil
 			}
 			var event cursorErrorEvent
 			if err := json.Unmarshal([]byte(payload), &event); err != nil {
-				callback(ai.StreamChunk{Error: "Cursor 流式请求失败", Done: true})
+				callback(ai.StreamChunk{Error: "Cursor stream request failed", Done: true})
 				completedExplicitly = true
 				return true, nil
 			}
 			errMessage := strings.TrimSpace(event.Message)
 			if errMessage == "" {
-				errMessage = "Cursor 流式请求失败"
+				errMessage = "Cursor stream request failed"
 			}
 			callback(ai.StreamChunk{Error: errMessage, Done: true})
 			completedExplicitly = true
@@ -390,7 +390,7 @@ func (p *CursorAgentProvider) ChatStreamWithState(ctx context.Context, state jso
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("读取 Cursor 流式响应失败: %w", err)
+		return nil, fmt.Errorf("read Cursor stream response failed: %w", err)
 	}
 
 	if len(currentDataLines) > 0 || strings.TrimSpace(currentEventType) != "" {
@@ -405,7 +405,7 @@ func (p *CursorAgentProvider) ChatStreamWithState(ctx context.Context, state jso
 
 	if !completedExplicitly {
 		if !receivedAssistantText && !receivedResultText {
-			callback(ai.StreamChunk{Error: "未收到任何有效响应内容，请检查 Cursor 配置或模型权限", Done: true})
+			callback(ai.StreamChunk{Error: "No valid response content was received. Check the Cursor configuration or model access.", Done: true})
 			return marshalCursorSessionState(sessionState)
 		}
 		callback(ai.StreamChunk{Done: true})
@@ -427,7 +427,7 @@ func (p *CursorAgentProvider) createAgent(ctx context.Context, req ai.ChatReques
 	agentID := strings.TrimSpace(responseBody.Agent.ID)
 	runID := strings.TrimSpace(responseBody.Run.ID)
 	if agentID == "" || runID == "" {
-		return "", "", fmt.Errorf("Cursor 创建 agent 成功，但未返回有效的 agentId/runId")
+		return "", "", fmt.Errorf("Cursor created an agent but returned no valid agentId/runId")
 	}
 	return agentID, runID, nil
 }
@@ -452,10 +452,10 @@ func buildCursorCreateAgentRequest(req ai.ChatRequest, model string) (cursorCrea
 func buildCursorPrompt(messages []ai.Message) (string, error) {
 	prompt := strings.TrimSpace(buildPrompt(messages))
 	if prompt == "" && requestMessagesContainImages(messages) {
-		return "请结合这些图片继续分析并回答。", nil
+		return providerImageFallbackPrompt(""), nil
 	}
 	if prompt == "" {
-		return "", fmt.Errorf("请求内容不能为空")
+		return "", fmt.Errorf("request content is required")
 	}
 	return prompt, nil
 }
@@ -489,7 +489,7 @@ func buildCursorImageInputs(messages []ai.Message) ([]cursorImageInput, error) {
 			}
 			mimeType, rawBase64, err := ParseDataURI(trimmed)
 			if err != nil {
-				return nil, fmt.Errorf("解析图片数据失败: %w", err)
+				return nil, fmt.Errorf("parse image data failed: %w", err)
 			}
 			images = append(images, cursorImageInput{
 				Data:     rawBase64,
@@ -498,7 +498,7 @@ func buildCursorImageInputs(messages []ai.Message) ([]cursorImageInput, error) {
 		}
 	}
 	if len(images) > 5 {
-		return nil, fmt.Errorf("Cursor 最多支持 5 张图片，当前请求包含 %d 张", len(images))
+		return nil, fmt.Errorf("Cursor supports at most 5 images per request; got %d", len(images))
 	}
 	return images, nil
 }
@@ -531,7 +531,7 @@ func (p *CursorAgentProvider) getRun(ctx context.Context, agentID string, runID 
 	endpoint := ResolveCursorAPIEndpoint(p.baseURL, fmt.Sprintf("agents/%s/runs/%s", agentID, runID))
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建 Cursor run 查询失败: %w", err)
+		return nil, fmt.Errorf("create Cursor run request failed: %w", err)
 	}
 	httpReq.Header.Set("Accept", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
@@ -541,18 +541,18 @@ func (p *CursorAgentProvider) getRun(ctx context.Context, agentID string, runID 
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("查询 Cursor run 状态失败: %w", err)
+		return nil, fmt.Errorf("request Cursor run status failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("Cursor run 查询失败 (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+		return nil, fmt.Errorf("Cursor run request failed (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
 	}
 
 	responseBody := cursorRunResponse{}
 	if err := json.NewDecoder(resp.Body).Decode(&responseBody); err != nil {
-		return nil, fmt.Errorf("解析 Cursor run 响应失败: %w", err)
+		return nil, fmt.Errorf("parse Cursor run response failed: %w", err)
 	}
 	return &responseBody, nil
 }
@@ -577,7 +577,7 @@ func (p *CursorAgentProvider) createRun(ctx context.Context, agentID string, req
 	}
 	runID := strings.TrimSpace(responseBody.Run.ID)
 	if runID == "" {
-		return "", fmt.Errorf("Cursor 创建 follow-up run 成功，但未返回有效 runId")
+		return "", fmt.Errorf("Cursor created a follow-up run but returned no valid runId")
 	}
 	return runID, nil
 }
@@ -589,7 +589,7 @@ func (p *CursorAgentProvider) openRunStream(ctx context.Context, agentID string,
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		logAIUpstreamRequestFinish(requestLog, 0, err)
-		return nil, fmt.Errorf("创建 Cursor 流式请求失败: %w", err)
+		return nil, fmt.Errorf("create Cursor stream request failed: %w", err)
 	}
 	httpReq.Header.Set("Authorization", "Bearer "+p.config.APIKey)
 	httpReq.Header.Set("Accept", "text/event-stream")
@@ -601,12 +601,12 @@ func (p *CursorAgentProvider) openRunStream(ctx context.Context, agentID string,
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
 		logAIUpstreamRequestFinish(requestLog, 0, err)
-		return nil, fmt.Errorf("发送 Cursor 流式请求失败: %w", err)
+		return nil, fmt.Errorf("request Cursor stream failed: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		statusErr := fmt.Errorf("Cursor API 返回错误 (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+		statusErr := fmt.Errorf("Cursor API returned error (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
 		logAIUpstreamRequestFinish(requestLog, resp.StatusCode, statusErr)
 		return nil, statusErr
 	}
@@ -620,7 +620,7 @@ func (p *CursorAgentProvider) doJSONRequest(ctx context.Context, method string, 
 	if body != nil {
 		bodyBytes, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("序列化 Cursor 请求失败: %w", err)
+			return fmt.Errorf("serialize Cursor request failed: %w", err)
 		}
 		requestBody = bytes.NewReader(bodyBytes)
 	}
@@ -629,7 +629,7 @@ func (p *CursorAgentProvider) doJSONRequest(ctx context.Context, method string, 
 	httpReq, err := http.NewRequestWithContext(ctx, method, endpoint, requestBody)
 	if err != nil {
 		logAIUpstreamRequestFinish(requestLog, 0, err)
-		return fmt.Errorf("创建 Cursor 请求失败: %w", err)
+		return fmt.Errorf("create Cursor request failed: %w", err)
 	}
 
 	if body != nil {
@@ -646,13 +646,13 @@ func (p *CursorAgentProvider) doJSONRequest(ctx context.Context, method string, 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
 		logAIUpstreamRequestFinish(requestLog, 0, err)
-		return fmt.Errorf("发送 Cursor 请求失败: %w", err)
+		return fmt.Errorf("request Cursor failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		statusErr := fmt.Errorf("Cursor API 返回错误 (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+		statusErr := fmt.Errorf("Cursor API returned error (HTTP %d): %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
 		logAIUpstreamRequestFinish(requestLog, resp.StatusCode, statusErr)
 		return statusErr
 	}
@@ -660,7 +660,7 @@ func (p *CursorAgentProvider) doJSONRequest(ctx context.Context, method string, 
 	if target != nil {
 		if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
 			logAIUpstreamRequestFinish(requestLog, resp.StatusCode, err)
-			return fmt.Errorf("解析 Cursor 响应失败: %w", err)
+			return fmt.Errorf("parse Cursor response failed: %w", err)
 		}
 	}
 
@@ -674,7 +674,7 @@ func parseCursorSessionState(state json.RawMessage) (cursorSessionState, error) 
 	}
 	var result cursorSessionState
 	if err := json.Unmarshal(state, &result); err != nil {
-		return cursorSessionState{}, fmt.Errorf("解析 Cursor 会话状态失败: %w", err)
+		return cursorSessionState{}, fmt.Errorf("parse Cursor session state failed: %w", err)
 	}
 	return result, nil
 }
@@ -685,7 +685,7 @@ func marshalCursorSessionState(state cursorSessionState) (json.RawMessage, error
 	}
 	bytes, err := json.Marshal(state)
 	if err != nil {
-		return nil, fmt.Errorf("序列化 Cursor 会话状态失败: %w", err)
+		return nil, fmt.Errorf("serialize Cursor session state failed: %w", err)
 	}
 	return json.RawMessage(bytes), nil
 }
@@ -711,7 +711,7 @@ func isCursorRunFailureStatus(status string) bool {
 func cursorRunStatusMessage(status string, result string) string {
 	normalizedStatus := strings.ToUpper(strings.TrimSpace(status))
 	if text := strings.TrimSpace(result); text != "" {
-		return fmt.Sprintf("Cursor 运行结束（%s）：%s", normalizedStatus, text)
+		return fmt.Sprintf("Cursor run finished (%s): %s", normalizedStatus, text)
 	}
-	return fmt.Sprintf("Cursor 运行结束（%s）", normalizedStatus)
+	return fmt.Sprintf("Cursor run finished (%s)", normalizedStatus)
 }

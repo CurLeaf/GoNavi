@@ -1,21 +1,26 @@
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
 
 import { DB_ICON_TYPES, getDbIcon, getDbIconLabel } from './DatabaseIcons';
+
+const source = readFileSync(new URL('./DatabaseIcons.tsx', import.meta.url), 'utf8');
+const translate = (key: string) =>
+  key === 'connection_modal.db_icon_label.custom' ? 'T:custom' : key;
 
 const BRAND_ICON_CASES: Array<[string, string, string]> = [
   ['elasticsearch', 'Elasticsearch', 'elasticsearch.svg'],
   ['oceanbase', 'OceanBase', 'oceanbase.png'],
   ['oracle', 'Oracle', 'oracle.ico'],
   ['starrocks', 'StarRocks', 'starrocks.png'],
-  ['kingbase', '金仓', 'kingbase.ico'],
-  ['dameng', '达梦', 'dameng.png'],
+  ['kingbase', 'Kingbase', 'kingbase.ico'],
+  ['dameng', 'Dameng', 'dameng.png'],
   ['vastbase', 'VastBase', 'vastbase.svg'],
   ['opengauss', 'OpenGauss', 'opengauss.ico'],
   ['gaussdb', 'GaussDB', 'gaussdb.ico'],
   ['goldendb', 'GoldenDB', 'goldendb.ico'],
-  ['highgo', '瀚高', 'highgo.ico'],
+  ['highgo', 'HighGo', 'highgo.ico'],
   ['iris', 'InterSystems IRIS', 'iris.png'],
   ['tdengine', 'TDengine', 'tdengine.ico'],
   ['iotdb', 'Apache IoTDB', 'iotdb.svg'],
@@ -47,5 +52,15 @@ describe('DatabaseIcons', () => {
     expect(jvmMarkup).toContain('data-db-icon-frame="true"');
     expect(mysqlMarkup).toContain('width:22px');
     expect(jvmMarkup).toContain('width:22px');
+  });
+
+  it('localizes the custom icon label without translating database brand names', () => {
+    expect(getDbIconLabel('custom', translate)).toBe('T:custom');
+    expect(getDbIconLabel('mysql', translate)).toBe('MySQL');
+    expect(getDbIconLabel('kingbase', translate)).toBe('Kingbase');
+    expect(getDbIconLabel('dameng', translate)).toBe('Dameng');
+    expect(getDbIconLabel('highgo', translate)).toBe('HighGo');
+    expect(source).not.toContain("custom: '自定义'");
+    expect(source).not.toMatch(/kingbase:\s*'金仓'|dameng:\s*'达梦'|highgo:\s*'瀚高'/);
   });
 });

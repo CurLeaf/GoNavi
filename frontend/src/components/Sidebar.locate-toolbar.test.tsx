@@ -38,10 +38,22 @@ import Sidebar, {
   sortSidebarTableEntries,
 } from './Sidebar';
 import {
+  buildSearchScopeOptions as buildCoreSearchScopeOptions,
+  SEARCH_SCOPE_OPTIONS as CORE_SEARCH_SCOPE_OPTIONS,
+} from './sidebarCoreUtils';
+import {
+  buildSidebarTableChildrenForUi as buildV2UtilsSidebarTableChildrenForUi,
+  buildV2ExplorerFilterOptions,
+  buildV2SidebarTableSectionedChildren as buildV2UtilsSidebarTableSectionedChildren,
+  V2_EXPLORER_FILTER_OPTIONS as V2_UTILS_EXPLORER_FILTER_OPTIONS,
+} from './sidebarV2Utils';
+import {
   buildSidebarRootConnectionToken,
   buildSidebarRootTagToken,
   buildSidebarTablePinKey,
 } from '../store';
+import { renderSidebarV2TreeTitle } from './sidebar/SidebarTreeTitle';
+import { buildSidebarTableStatusSQL } from './sidebar/sidebarMetadataLoaders';
 import {
   DEFAULT_SHORTCUT_OPTIONS,
   cloneShortcutOptions,
@@ -60,6 +72,12 @@ import {
 } from './V2TableContextMenu';
 
 const readSourceFile = (relativePath: string) => readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const readCssRuleBlock = (css: string, selector: string) => {
+  const match = css.match(new RegExp(`${escapeRegExp(selector)}\\s*\\{(?<body>[^}]*)\\}`, 's'));
+  expect(match, `Missing CSS rule for ${selector}`).not.toBeNull();
+  return match?.groups?.body ?? '';
+};
 const readSidebarSource = () => [
   readSourceFile('./Sidebar.tsx'),
   readSourceFile('./sidebar/sidebarHelpers.ts'),
@@ -184,6 +202,8 @@ vi.mock('../store', () => ({
     recordTableAccess: mocks.noop,
     setTableSortPreference: mocks.noop,
     setSidebarTablePinned: mocks.noop,
+    queryOptions: { showSidebarTableComment: false },
+    setQueryOptions: mocks.noop,
     addSqlLog: mocks.noop,
     sqlLogs: [],
     shortcutOptions: mocks.state.shortcutOptions ?? cloneShortcutOptions(DEFAULT_SHORTCUT_OPTIONS),
@@ -236,9 +256,15 @@ vi.mock('../utils/appearance', async () => {
   };
 });
 
-const renderSidebarMarkup = (props: React.ComponentProps<typeof Sidebar> = {}) => renderToStaticMarkup(
+type SidebarTestLanguage = (typeof SUPPORTED_LANGUAGES)[number];
+
+const renderSidebarMarkup = (
+  props: React.ComponentProps<typeof Sidebar> = {},
+  language: SidebarTestLanguage = getCurrentLanguage(),
+) => renderToStaticMarkup(
   <I18nProvider
-    preference={getCurrentLanguage()}
+    preference={language}
+    systemLanguages={[language]}
     onPreferenceChange={() => undefined}
   >
     <Sidebar {...props} />
@@ -297,8 +323,22 @@ describe('Sidebar locate toolbar', () => {
     const source = readSidebarSource();
 
     expect(source).toContain('if (hasSidebarLazyChildren(children)) return;');
+    expect(source).toContain('if (!info?.expanded && shouldClearSidebarNodeChildrenOnCollapse(info?.node))');
+    expect(source).toContain('...collectSidebarSubtreeKeys(info.node)');
+    expect(source).toContain('clearTreeNodeChildrenByKeys(keysToClear);');
     expect(source).toContain('if (!shouldSkipSidebarLoadOnExpandWhileDragging(isTreeDragging, info))');
     expect(source).toContain('if (shouldLoadSidebarNodeOnExpand(node))');
+  });
+
+  it('uses the appearance preference to switch table double-click to the embedded object designer', () => {
+    const source = readSidebarSource();
+
+    expect(source).toContain("const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';");
+    expect(source).toContain("type: 'table',");
+    expect(source).toContain("initialViewMode: tableDoubleClickAction === 'open-design' ? 'fields' : undefined");
+    expect(source).toContain("initialViewModeRequestId: tableDoubleClickAction === 'open-design' ? String(Date.now()) : undefined");
+    expect(source).not.toContain("if (tableDoubleClickAction === 'open-design') {\n              openDesign(node, 'columns', false);");
+    expect(source).toContain('recordTableAccess(id, dbName, tableName);');
   });
 
   it('parses v2 command search prefixes into real search modes', () => {
@@ -626,10 +666,47 @@ describe('Sidebar locate toolbar', () => {
     const source = readSidebarSource();
     const commandSearchRunSource = source.slice(
       source.indexOf("if (node.type === 'table' || node.type === 'view' || node.type === 'materialized-view')"),
-      source.indexOf("if (node.type === 'db-trigger' || node.type === 'db-event' || node.type === 'routine')"),
+      source.indexOf("if (node.type === 'db-trigger' || node.type === 'db-event' || node.type === 'routine' || node.type === 'sequence' || node.type === 'package')"),
     );
 
     expect(commandSearchRunSource).toContain("tabId: String(node.key || '')");
+  });
+
+  it('opens view routine and trigger nodes from single-click selection', () => {
+    const source = readSidebarSource();
+    const openObjectSource = source.slice(
+      source.indexOf('const openSidebarObjectNode ='),
+      source.indexOf('const onSelect ='),
+    );
+    const onSelectSource = source.slice(
+      source.indexOf('const onSelect ='),
+      source.indexOf('const onExpand ='),
+    );
+
+    expect(openObjectSource).toContain("node.type === 'view' || node.type === 'materialized-view'");
+    expect(openObjectSource).toContain("node.type === 'db-trigger'");
+    expect(openObjectSource).toContain("node.type === 'routine'");
+    expect(openObjectSource).toContain("type: 'table'");
+    expect(openObjectSource).toContain("type: 'trigger'");
+    expect(openObjectSource).toContain("type: 'routine-def'");
+    expect(onSelectSource).toContain('openSidebarObjectNode(info.node)');
+  });
+
+  it('opens event edit menu with editable object SQL instead of a SHOW query', () => {
+    const sidebarSource = readSidebarSource();
+    const menuSource = readSourceFile('./sidebar/sidebarLegacyNodeMenu.tsx');
+    const actionsSource = readSourceFile('./sidebar/useSidebarObjectActions.tsx');
+    const eventMenuSource = menuSource.slice(
+      menuSource.indexOf("} else if (node.type === 'db-event') {"),
+      menuSource.indexOf("} else if (node.type === 'table') {"),
+    );
+
+    expect(sidebarSource).toContain('openEditEvent,');
+    expect(eventMenuSource).toContain('onClick: () => void openEditEvent(node)');
+    expect(eventMenuSource).not.toContain('SHOW CREATE EVENT');
+    expect(actionsSource).toContain('const openEditEvent = async (node: any) =>');
+    expect(actionsSource).toContain("queryMode: 'object-edit'");
+    expect(actionsSource).toContain('SHOW CREATE EVENT ${eventRef}');
   });
 
   it('wires external SQL directory file actions to dedicated Wails APIs', () => {
@@ -681,8 +758,8 @@ describe('Sidebar locate toolbar', () => {
     expect(source).not.toContain("justifyContent: 'space-between', borderTop: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, borderBottom: `1px solid ${darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)'}`, background: darkMode ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.015)' }}>");
   });
 
-  it('renders the v2 sidebar rail, command search hint, filter tabs and log footer', () => {
-    const markup = renderSidebarMarkup({ uiVersion: 'v2', sqlLogCount: 2341, onCreateConnection: mocks.noop });
+  it('renders the v2 sidebar rail, command search hint, filter tabs and slow-query footer', () => {
+    const markup = renderSidebarMarkup({ uiVersion: 'v2', onCreateConnection: mocks.noop });
     const source = readSidebarSource();
 
     expect(markup).toContain('gn-v2-sidebar-redesign');
@@ -718,8 +795,10 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain('onClick={() => setV2ExplorerFilter(item.key)}');
     expect(source).toContain('treeData={isV2Ui ? v2VisibleTreeData : displayTreeData}');
     expect(markup).toContain('gn-v2-sidebar-log-footer');
-    expect(markup).toContain('SQL 执行日志');
-    expect(markup).toContain('2,341');
+    expect(markup).toContain('gn-v2-sidebar-slow-query-button');
+    expect(markup).not.toContain('gn-v2-sidebar-log-button');
+    expect(markup).not.toContain('SQL 执行日志');
+    expect(markup).not.toContain('2,341');
     expect(markup).not.toContain('gn-v2-rail-action-group');
     expect(source).toContain('className="gn-v2-rail-primary-actions"');
     expect(markup).toContain('data-sidebar-create-group-action="true"');
@@ -727,6 +806,7 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('data-sidebar-batch-database-action="true"');
     expect(markup).toContain('data-sidebar-open-external-sql-file-action="true"');
     expect(markup).toContain('data-sidebar-locate-current-tab-action="true"');
+    expect(markup).toContain('data-gonavi-new-query-action="true"');
     expect(markup).toContain('data-gonavi-create-connection-action="true"');
     expect(markup).toContain('aria-label="AI 助手"');
     expect(markup).toContain('data-gonavi-ai-entry-action="true"');
@@ -765,7 +845,7 @@ describe('Sidebar locate toolbar', () => {
     const markup = renderSidebarMarkup({ uiVersion: 'v2' });
 
     expect(markup).toContain('data-v2-sidebar-search-mode="filter"');
-    expect(markup).toContain('placeholder="搜索..."');
+    expect(markup).toContain(`placeholder="${t('sidebar.search.placeholder')}"`);
     expect(markup).toContain('value="fs_org"');
     expect(markup).toContain('重置侧栏筛选');
   });
@@ -808,12 +888,16 @@ describe('Sidebar locate toolbar', () => {
     expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.all'");
     expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.tables'");
     expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.views'");
+    expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.sequences'");
     expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.routines'");
+    expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.packages'");
     expect(objectKindSource).toContain("labelKey: 'sidebar.command_search.object_kind.events'");
     expect(objectKindSource).not.toContain("label: '全部'");
     expect(objectKindSource).not.toContain("label: '表'");
     expect(objectKindSource).not.toContain("label: '视图'");
+    expect(objectKindSource).not.toContain("label: '序列'");
     expect(objectKindSource).not.toContain("label: '函数'");
+    expect(objectKindSource).not.toContain("label: '存储包'");
     expect(objectKindSource).not.toContain("label: '事件'");
 
     expect(searchScopeSource).toContain("labelKey: 'sidebar.command_search.scope.smart'");
@@ -859,7 +943,9 @@ describe('Sidebar locate toolbar', () => {
       'sidebar.command_search.object_kind.all',
       'sidebar.command_search.object_kind.tables',
       'sidebar.command_search.object_kind.views',
+      'sidebar.command_search.object_kind.sequences',
       'sidebar.command_search.object_kind.routines',
+      'sidebar.command_search.object_kind.packages',
       'sidebar.command_search.object_kind.events',
       'sidebar.command_search.scope.smart',
       'sidebar.command_search.scope.object',
@@ -887,6 +973,54 @@ describe('Sidebar locate toolbar', () => {
     });
   });
 
+  it('localizes extracted sidebar util search and v2 filter labels through injected translators', () => {
+    const translate = (key: string) => ({
+      'sidebar.search.scope.smart': 'Smart',
+      'sidebar.search.scope.object': 'Object',
+      'sidebar.search.scope.database': 'Database',
+      'sidebar.search.scope.host': 'Host',
+      'sidebar.search.scope.tag': 'Tag',
+      'sidebar.command_search.object_kind.all': 'All',
+      'sidebar.command_search.object_kind.tables': 'Tables',
+      'sidebar.command_search.object_kind.views': 'Views',
+      'sidebar.command_search.object_kind.sequences': 'Sequences',
+      'sidebar.command_search.object_kind.routines': 'Routines',
+      'sidebar.command_search.object_kind.packages': 'Packages',
+      'sidebar.command_search.object_kind.events': 'Events',
+      'table_overview.section.pinned': 'Pinned',
+      'table_overview.section.all': 'All',
+    } as Record<string, string>)[key] || key;
+
+    expect(buildCoreSearchScopeOptions(translate).map((option) => option.label)).toEqual(['Smart', 'Object', 'Database', 'Host', 'Tag']);
+    expect(CORE_SEARCH_SCOPE_OPTIONS.map((option) => option.label)).toEqual([
+      t('sidebar.search.scope.smart', undefined, 'zh-CN'),
+      t('sidebar.search.scope.object', undefined, 'zh-CN'),
+      t('sidebar.search.scope.database', undefined, 'zh-CN'),
+      t('sidebar.search.scope.host', undefined, 'zh-CN'),
+      t('sidebar.search.scope.tag', undefined, 'zh-CN'),
+    ]);
+    expect(buildV2ExplorerFilterOptions(translate).map((option) => option.label)).toEqual(['All', 'Tables', 'Views', 'Sequences', 'Routines', 'Packages', 'Events']);
+    expect(V2_UTILS_EXPLORER_FILTER_OPTIONS.map((option) => option.label)).toEqual(['全部', '表', '视图', '序列', '函数', '存储包', '事件']);
+
+    const tableNodes = [
+      { title: 'orders', key: 'orders', type: 'table' as const, dataRef: { pinnedSidebarTable: true } },
+      { title: 'users', key: 'users', type: 'table' as const, dataRef: { pinnedSidebarTable: false } },
+    ];
+
+    expect(buildV2UtilsSidebarTableSectionedChildren('conn-main-tables', tableNodes, translate).map((node) => node.title)).toEqual([
+      'Pinned',
+      'orders',
+      'All',
+      'users',
+    ]);
+    expect(buildV2UtilsSidebarTableChildrenForUi('conn-main-tables', tableNodes, true, translate).map((node) => node.title)).toEqual([
+      'Pinned',
+      'orders',
+      'All',
+      'users',
+    ]);
+  });
+
   it('keeps the v2 command search footer hints tied to real prefix actions', () => {
     const source = readSidebarSource();
 
@@ -894,8 +1028,8 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("const v2CommandSearchAiMode = v2CommandSearchQuery.mode === 'ai';");
     expect(source).toContain("key: 'action-ask-ai'");
     expect(source).toContain("window.dispatchEvent(new CustomEvent('gonavi:ai:inject-prompt'");
-    expect(source).toContain('<TableOutlined /> <kbd>@</kbd>只搜表对象');
-    expect(source).toContain('<RobotOutlined /> <kbd>?</kbd>发送给 AI');
+    expect(source).toContain("<TableOutlined /> <kbd>@</kbd>{t('sidebar.command_search.footer.object_only')}");
+    expect(source).toContain("<RobotOutlined /> <kbd>?</kbd>{t('sidebar.command_search.footer.ask_ai')}");
     expect(source).not.toContain('提示 · 以「@」开头按表名搜索，以「?」开头让 AI 回答');
   });
 
@@ -924,12 +1058,79 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-tree-title \{[^}]*font-size: var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\);/s);
     expect(css).toMatch(/\.gn-v2-tree-title\.is-mono \.gn-v2-tree-label \{[^}]*font-size: inherit;[^}]*font-weight: 400 !important;/s);
     expect(css).toMatch(/\.gn-v2-tree-count \{[^}]*font-size: clamp\(10px, calc\(var\(--gn-sidebar-tree-font-size, var\(--gn-font-size-sm, 12px\)\) - 1px\), 16px\);/s);
+    expect(css).toMatch(/\.gn-v2-tree-title\.is-redis-db \.gn-v2-tree-label \{[^}]*display: inline-flex;[^}]*gap: 6px;/s);
+    expect(css).toMatch(/\.gn-v2-redis-db-alias \{[^}]*color: var\(--gn-fg-5\);[^}]*opacity: 0\.78;/s);
     expect(css).toMatch(/\.gn-v2-connection-rail \{[^}]*width: calc\(38px \* var\(--gn-ui-scale, 1\)\);[^}]*flex: 0 0 calc\(38px \* var\(--gn-ui-scale, 1\)\);/s);
     expect(css).toMatch(/\.gn-v2-rail-item,\s*body\[data-ui-version="v2"\] \.gn-v2-rail-tool \{[^}]*width: calc\(36px \* var\(--gn-ui-scale, 1\)\);[^}]*height: calc\(38px \* var\(--gn-ui-scale, 1\)\);[^}]*font-size: var\(--gn-font-size-sm, 12px\);/s);
     expect(css).toMatch(/\.gn-v2-rail-tool \{[^}]*height: calc\(32px \* var\(--gn-ui-scale, 1\)\);/s);
     expect(css).toMatch(/\.gn-v2-rail-tool \{[^}]*width: calc\(24px \* var\(--gn-ui-scale, 1\)\);/s);
     expect(css).toMatch(/\.gn-v2-active-connection-trigger \{[^}]*height: 34px;[^}]*border: 0;[^}]*background: transparent;/s);
+    expect(css).toMatch(/\.gn-v2-active-connection-query-action \{[^}]*max-width: 96px;[^}]*font-size: 12px;/s);
     expect(css).not.toContain('.gn-v2-active-connection-trigger:hover');
+  });
+
+  it('shows a prominent v2 new query action before connection creation without reusing the plus icon', () => {
+    mocks.state.connections = [{
+      id: 'conn-local',
+      name: '开发240',
+      config: {
+        type: 'mysql',
+        host: 'front_end_sys_dev',
+        port: 3306,
+      },
+    }];
+    mocks.state.activeContext = { connectionId: 'conn-local', dbName: 'front_end_sys_dev' };
+    mocks.state.appearance = {
+      enabled: true,
+      opacity: 1,
+      blur: 0,
+      uiVersion: 'v2',
+    };
+
+    const markup = renderSidebarMarkup({ uiVersion: 'v2', onCreateConnection: mocks.noop });
+    const sidebarSource = readSourceFile('./Sidebar.tsx');
+    const headerSource = sidebarSource.slice(
+      sidebarSource.indexOf('<div className="gn-v2-active-connection-actions">'),
+      sidebarSource.indexOf('<Tooltip title={v2ConnectionActionsLabel}>', sidebarSource.indexOf('<div className="gn-v2-active-connection-actions">')),
+    );
+    const newQueryActionSource = headerSource.slice(
+      headerSource.indexOf('<Tooltip title={t(\'sidebar.menu.new_query\')}>'),
+      headerSource.indexOf('{onCreateConnection && ('),
+    );
+
+    expect(markup).toContain('data-gonavi-new-query-action="true"');
+    expect(markup).toContain('aria-label="新建查询"');
+    expect(markup).toContain('新建查询');
+    expect(markup.indexOf('data-gonavi-new-query-action="true"')).toBeLessThan(markup.indexOf('data-gonavi-create-connection-action="true"'));
+    expect(newQueryActionSource).toContain('icon={<FileTextOutlined />}');
+    expect(newQueryActionSource).not.toContain('icon={<PlusOutlined />}');
+    expect(newQueryActionSource).toContain("handleV2ConnectionContextMenuAction(getConnectionNodeForAction(activeConnection), 'new-query')");
+    expect(newQueryActionSource).not.toContain("handleV2ConnectionContextMenuAction(activeConnection, 'new-query')");
+    expect(newQueryActionSource).toContain('disabled={!activeConnection}');
+  });
+
+  it('keeps v2 explorer filter tabs on a single line when Oracle object filters are present', () => {
+    const css = readV2ThemeCss();
+
+    expect(css).toMatch(/\.gn-v2-explorer-filter-tabs \{[^}]*flex-wrap: nowrap;[^}]*overflow-x: auto;[^}]*overflow-y: hidden;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-filter-tabs button \{[^}]*flex: 0 0 auto;[^}]*white-space: nowrap;/s);
+  });
+
+  it('shows a pending state while a connection root is loading', () => {
+    const css = readV2ThemeCss();
+    const source = readSidebarSource();
+    const treeLoaderSource = readSourceFile('./sidebar/useSidebarTreeLoaders.tsx');
+    const titleRenderSource = readSourceFile('./sidebar/useSidebarTitleRender.tsx');
+    const v2ContextMenuSource = readSourceFile('./sidebar/useSidebarV2ContextMenu.tsx');
+
+    expect(source).toContain("export type SidebarConnectionState = 'loading' | 'success' | 'error';");
+    expect(treeLoaderSource).toContain("setConnectionStates(prev => ({ ...prev, [conn.id]: 'loading' }));");
+    expect(titleRenderSource).toContain("let status: 'loading' | 'success' | 'error' | 'default' = 'default';");
+    expect(titleRenderSource).toContain("if (connectionStates[node.key] === 'loading') status = 'loading';");
+    expect(v2ContextMenuSource).toContain("const statusMap = new Map<string, 'loading' | 'live' | 'error' | 'idle'>();");
+    expect(v2ContextMenuSource).toContain("value === 'loading' ? 'loading'");
+    expect(css).toMatch(/\.gn-v2-tree-status\.is-loading::before \{[^}]*border: 2px solid rgba\(37, 99, 235, 0\.24\);[^}]*animation: gn-v2-tree-status-spin 0\.8s linear infinite;/s);
+    expect(css).toMatch(/@keyframes gn-v2-tree-status-spin \{[^}]*to \{ transform: rotate\(360deg\); \}/s);
   });
 
   it('keeps v2 tree status dots circular while using virtual horizontal scroll for long labels', () => {
@@ -943,8 +1144,8 @@ describe('Sidebar locate toolbar', () => {
     expect(source).not.toContain("overflowX: isV2Ui ? 'auto' : 'hidden'");
     expect(source).toContain('scrollWidth={isV2Ui ? v2TreeHorizontalScrollWidth : undefined}');
     expect(utilsSource).toContain('export const V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE = 32;');
-    expect(source).toContain('const effectiveTreeHeight = isV2Ui && v2TreeHorizontalScrollWidth');
-    expect(source).toContain('treeHeight - V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE');
+    expect(source).toContain('const effectiveTreeHeight = treeHeight;');
+    expect(source).not.toContain('treeHeight - V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE');
     expect(source).toContain('height={effectiveTreeHeight}');
     expect(source).toContain('treeData={isV2Ui ? v2VisibleTreeData : displayTreeData}');
     expect(source).not.toContain('__v2-tree-horizontal-scroll-spacer__');
@@ -952,24 +1153,43 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \{[^}]*--gn-v2-tree-horizontal-scroll-reserve: 32px;[^}]*overflow: hidden !important;/s);
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.sidebar-tree-scroll-content \{[^}]*display: flex;[^}]*height: 100%;[^}]*padding: 4px 0 0;/s);
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree \{[^}]*flex: 1 1 auto;[^}]*width: 100%;[^}]*min-width: 0;[^}]*height: 100%;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list \{[^}]*height: calc\(100% - var\(--gn-v2-tree-horizontal-scroll-reserve\)\);[^}]*min-height: 0;[^}]*box-sizing: border-box;/s);
-    expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list \{[^}]*height: 100%;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list \{[^}]*position: relative;[^}]*height: 100%;[^}]*min-height: 0;[^}]*box-sizing: border-box;[^}]*padding-bottom: var\(--gn-v2-tree-horizontal-scroll-reserve\);/s);
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder-inner \{[^}]*width: 100%;[^}]*min-width: 100%;/s);
     expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder-inner \{[^}]*width: max-content;/s);
     expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list \{[^}]*position: static !important;/s);
     expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder \{[^}]*calc\(100% - var\(--gn-v2-tree-horizontal-scroll-reserve\)\)/s);
     expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder \{[^}]*overflow-x: auto !important;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*height: 12px !important;[^}]*bottom: calc\(\(var\(--gn-v2-tree-horizontal-scroll-reserve\) - 12px\) \* -1\) !important;/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-holder \{[^}]*padding-bottom: var\(--gn-v2-tree-horizontal-scroll-reserve\);/s);
+    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*height: 12px !important;[^}]*bottom: calc\(\(var\(--gn-v2-tree-horizontal-scroll-reserve\) - 12px\) \/ 2\) !important;/s);
+    expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*bottom: calc\(\(var\(--gn-v2-tree-horizontal-scroll-reserve\) - 12px\) \* -1\) !important;/s);
     expect(css).not.toContain('.gn-v2-tree-horizontal-scroll-spacer');
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \.ant-tree-list-scrollbar-thumb \{[^}]*height: 8px !important;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-node-content-wrapper \{[^}]*display: flex !important;/s);
+    const treeContentWrapperCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-node-content-wrapper');
+    expect(treeContentWrapperCss).toContain('min-width: 100%;');
+    expect(treeContentWrapperCss).toContain('width: max-content !important;');
+    expect(treeContentWrapperCss).toContain('display: flex !important;');
     expect(css).toMatch(/\.gn-v2-tree-title\.is-connection \{[^}]*align-items:\s*center;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-title \{[^}]*flex: 1 1 auto;[^}]*overflow: visible;/s);
-    expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-title > \.gn-v2-tree-title \{[^}]*overflow: visible;/s);
+    const antTreeTitleCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title');
+    expect(antTreeTitleCss).toContain('min-width: max-content;');
+    expect(antTreeTitleCss).toContain('flex: 0 0 auto;');
+    expect(antTreeTitleCss).toContain('overflow: visible;');
+    const antTreeTitleSpanCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title > span');
+    expect(antTreeTitleSpanCss).toContain('min-width: max-content;');
+    expect(antTreeTitleSpanCss).toContain('overflow: visible;');
+    expect(antTreeTitleSpanCss).toContain('text-overflow: clip;');
+    const v2TreeTitleCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-title > .gn-v2-tree-title');
+    expect(v2TreeTitleCss).toContain('width: max-content;');
+    expect(v2TreeTitleCss).toContain('min-width: 100%;');
+    expect(v2TreeTitleCss).toContain('overflow: visible;');
     expect(css).toMatch(/\.gn-v2-tree-status \{[^}]*width: 14px;[^}]*height: 14px;[^}]*flex: 0 0 14px;[^}]*overflow: visible;/s);
     expect(css).toMatch(/\.gn-v2-tree-status::before \{[^}]*width: 7px;[^}]*height: 7px;[^}]*border-radius: 50%;/s);
     expect(css).toMatch(/\.gn-v2-tree-status\.is-success::before \{[^}]*background: #22c55e;[^}]*box-shadow: 0 0 0 4px rgba\(34, 197, 94, 0\.18\);/s);
-    expect(css).toMatch(/\.gn-v2-tree-label \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;/s);
+    const treeLabelCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-tree-label');
+    expect(treeLabelCss).toContain('flex: 0 0 auto;');
+    expect(treeLabelCss).toContain('overflow: visible;');
+    expect(treeLabelCss).toContain('text-overflow: clip;');
+    expect(css).toMatch(/\.gn-v2-tree-title\.is-mono \{[^}]*width: max-content;[^}]*min-width: 100%;[^}]*flex: 0 0 auto;/s);
+    expect(css).toMatch(/\.gn-v2-tree-title\.is-mono \.gn-v2-tree-label \{[^}]*flex: 0 0 auto;[^}]*overflow: visible;[^}]*text-overflow: clip;/s);
     expect(css).toMatch(/\.gn-v2-tree-folder-icon \{[^}]*width: 22px;[^}]*height: 22px;[^}]*flex: 0 0 22px;/s);
     expect(css).not.toContain('.gn-v2-tree-connection-meta');
   });
@@ -994,9 +1214,18 @@ describe('Sidebar locate toolbar', () => {
         type: 'table',
       },
     ] as any, 900);
+    const veryLongWidth = estimateV2TreeHorizontalScrollWidth([
+      {
+        title: `example.main.${'order_detail_with_long_business_suffix_'.repeat(6)}`,
+        key: 'table-very-long',
+        type: 'table',
+      },
+    ] as any, 320);
 
     expect(narrowWidth).toBeGreaterThan(260);
-    expect(narrowWidth).toBeLessThanOrEqual(960);
+    expect(narrowWidth).toBeLessThanOrEqual(2600);
+    expect(veryLongWidth).toBeGreaterThan(960);
+    expect(veryLongWidth).toBeLessThanOrEqual(2600);
     expect(wideWidth).toBeUndefined();
   });
 
@@ -1309,11 +1538,25 @@ describe('Sidebar locate toolbar', () => {
           children: [{ title: 'v_users', key: 'v_users', type: 'view' as const }],
         },
         {
+          title: '序列',
+          key: 'conn-main-sequences',
+          type: 'object-group' as const,
+          dataRef: { groupKey: 'sequences' },
+          children: [{ title: 'seq_person_id', key: 'seq_person_id', type: 'sequence' as const }],
+        },
+        {
           title: '函数',
           key: 'conn-main-routines',
           type: 'object-group' as const,
           dataRef: { groupKey: 'routines' },
           children: [{ title: 'calc_total', key: 'calc_total', type: 'routine' as const }],
+        },
+        {
+          title: '存储包',
+          key: 'conn-main-packages',
+          type: 'object-group' as const,
+          dataRef: { groupKey: 'packages' },
+          children: [{ title: 'pkg_person', key: 'pkg_person', type: 'package' as const }],
         },
         {
           title: '事件',
@@ -1329,12 +1572,16 @@ describe('Sidebar locate toolbar', () => {
       'conn-main-queries',
       'conn-main-tables',
       'conn-main-views',
+      'conn-main-sequences',
       'conn-main-routines',
+      'conn-main-packages',
       'conn-main-events',
     ]);
     expect(filterV2ExplorerTreeByKind(tree, 'tables')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-tables']);
     expect(filterV2ExplorerTreeByKind(tree, 'views')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-views']);
+    expect(filterV2ExplorerTreeByKind(tree, 'sequences')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-sequences']);
     expect(filterV2ExplorerTreeByKind(tree, 'routines')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-routines']);
+    expect(filterV2ExplorerTreeByKind(tree, 'packages')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-packages']);
     expect(filterV2ExplorerTreeByKind(tree, 'events')[0].children?.map((node: { key: string }) => node.key)).toEqual(['conn-main-events']);
   });
 
@@ -1714,8 +1961,8 @@ describe('Sidebar locate toolbar', () => {
     const sectionBuilderSourceEnd = source.indexOf('export const buildSidebarTableChildrenForUi = (');
     const sectionBuilderSource = source.slice(sectionBuilderSourceStart, sectionBuilderSourceEnd);
 
-    expect(sectionBuilderSource).toContain("buildSectionNode('pinned', t('table_overview.section.pinned'))");
-    expect(sectionBuilderSource).toContain("buildSectionNode('all', t('table_overview.section.all'))");
+    expect(sectionBuilderSource).toContain("buildSectionNode('pinned', translate('table_overview.section.pinned'))");
+    expect(sectionBuilderSource).toContain("buildSectionNode('all', translate('table_overview.section.all'))");
     expect(sectionBuilderSource).not.toContain("'置顶'");
     expect(sectionBuilderSource).not.toContain("'全部'");
 
@@ -2101,7 +2348,9 @@ describe('Sidebar locate toolbar', () => {
     expect(starRocksSource).toContain("title: t('sidebar.v2_database_menu.new_external_catalog')");
   });
 
-  it('renders the v2 schema context menu with rename and schema-level export actions', () => {
+  it('localizes the v2 schema context menu while keeping raw schema and SQL tokens', () => {
+    setCurrentLanguage('en-US');
+
     const markup = renderToStaticMarkup(
       <V2SchemaContextMenuView
         dbName="app_db"
@@ -2112,11 +2361,17 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('data-v2-schema-context-menu="true"');
     expect(markup).toContain('sales');
     expect(markup).toContain('SCHEMA');
-    expect(markup).toContain('编辑模式');
-    expect(markup).toContain('刷新对象树');
-    expect(markup).toContain('导出当前模式表结构 · SQL');
-    expect(markup).toContain('备份当前模式全部表 · 结构 + 数据');
-    expect(markup).toContain('删除模式 · DROP CASCADE');
+    expect(markup).toContain('app_db · Schema actions');
+    expect(markup).toContain('Maintenance');
+    expect(markup).toContain('Edit schema');
+    expect(markup).toContain('Refresh object tree');
+    expect(markup).toContain('Export and backup');
+    expect(markup).toContain('Export current schema table structures · SQL');
+    expect(markup).toContain('Back up all current schema tables · schema + data');
+    expect(markup).toContain('Delete schema · DROP CASCADE');
+    ['当前数据库', '模式操作', '维护', '编辑模式', '刷新对象树', '导出与备份', '导出当前模式表结构', '备份当前模式全部表', '删除模式'].forEach((rawSnippet) => {
+      expect(markup).not.toContain(rawSnippet);
+    });
   });
 
   it('renders the v2 connection context menu for host rail actions', () => {
@@ -2312,6 +2567,25 @@ describe('Sidebar locate toolbar', () => {
     expect(source).toContain("title: t('sidebar.tab.new_query_database', { database: node.title })");
     expect(source).toContain("title: buildConnectionRootRedisCommandTabTitle(`db${redisDB}`)");
     expect(source).toContain("title: buildConnectionRootRedisMonitorTabTitle(`db${redisDB}`)");
+  });
+
+  it('keeps redis db key counts in v2 meta and renders aliases separately from the db title', () => {
+    const loaderSource = readSourceFile('./sidebar/useSidebarTreeLoaders.tsx');
+    const redisLoadStart = loaderSource.indexOf("if (conn.config.type === 'redis') {");
+    const redisLoadEnd = loaderSource.indexOf('const res = await DBGetDatabases', redisLoadStart);
+    expect(redisLoadStart).toBeGreaterThanOrEqual(0);
+    expect(redisLoadEnd).toBeGreaterThan(redisLoadStart);
+    const redisLoadSource = loaderSource.slice(redisLoadStart, redisLoadEnd);
+
+    expect(redisLoadSource).toContain('const alias = getRedisDbAlias(redisDbAliases, conn.id, db.index);');
+    expect(redisLoadSource).toContain('title: buildRedisDbNodeLabel(');
+    expect(redisLoadSource).toContain('dataRef: { ...conn, redisDB: db.index, redisKeyCount: keyCount, redisDbAlias: alias }');
+    expect(redisLoadSource).not.toContain("keyCount > 0 ? ` (${keyCount})` : ''");
+
+    const titleSource = readSourceFile('./sidebar/SidebarTreeTitle.tsx');
+    expect(titleSource).toContain("node.type === 'redis-db' ? 'is-redis-db' : ''");
+    expect(titleSource).toContain("const redisDbAlias = node.type === 'redis-db'");
+    expect(titleSource).toContain('className="gn-v2-redis-db-alias"');
   });
 
   it('localizes sidebar JVM probe and resource failure prompts', () => {
@@ -2539,7 +2813,9 @@ describe('Sidebar locate toolbar', () => {
     const objectGroupTitleCases = [
       ['tables', 'sidebar.v2_table_group_menu.title', '表'],
       ['views', 'sidebar.object_group.views', '视图'],
+      ['sequences', 'sidebar.object_group.sequences', '序列'],
       ['routines', 'sidebar.object_group.routines', '函数'],
+      ['packages', 'sidebar.object_group.packages', '存储包'],
       ['triggers', 'sidebar.object_group.triggers', '触发器'],
       ['events', 'sidebar.object_group.events', '事件'],
       ['materializedViews', 'sidebar.object_group.materialized_views', '物化视图'],
@@ -2565,6 +2841,7 @@ describe('Sidebar locate toolbar', () => {
         dbName="mkefu_ai_dev"
         count={15}
         currentSort="frequency"
+        showTableComments
       />,
     );
 
@@ -2576,6 +2853,8 @@ describe('Sidebar locate toolbar', () => {
       sort: t('sidebar.v2_table_group_menu.sort_frequency'),
     }));
     expect(markup).toContain(t('sidebar.menu.create_table'));
+    expect(markup).toContain(t('sidebar.v2_table_group_menu.display_section'));
+    expect(markup).toContain(t('sidebar.v2_table_group_menu.show_table_comments'));
     expect(markup).toContain(t('data_grid.context_menu.sort_section'));
     expect(markup).toContain(t('sidebar.menu.sort_by_name'));
     expect(markup).toContain(t('sidebar.menu.sort_by_frequency'));
@@ -2591,6 +2870,7 @@ describe('Sidebar locate toolbar', () => {
     expect(end).toBeGreaterThan(start);
     const tableGroupCallSource = sidebarSource.slice(start, end);
     expect(tableGroupCallSource).toContain('<V2TableGroupContextMenuView');
+    expect(tableGroupCallSource).toContain('showTableComments={showSidebarTableComment}');
     expect(tableGroupCallSource).not.toContain('title=');
     ['? ? tables', '表 · tables'].forEach((rawSnippet) => {
       expect(tableGroupCallSource).not.toContain(rawSnippet);
@@ -2614,7 +2894,9 @@ describe('Sidebar locate toolbar', () => {
     [
       "if (groupKey === 'tables') return t('sidebar.v2_table_group_menu.title');",
       "if (groupKey === 'views') return t('sidebar.object_group.views');",
+      "if (groupKey === 'sequences') return t('sidebar.object_group.sequences');",
       "if (groupKey === 'routines') return t('sidebar.object_group.routines');",
+      "if (groupKey === 'packages') return t('sidebar.object_group.packages');",
       "if (groupKey === 'triggers') return t('sidebar.object_group.triggers');",
       "if (groupKey === 'events') return t('sidebar.object_group.events');",
       "if (groupKey === 'materializedViews') return t('sidebar.object_group.materialized_views');",
@@ -2641,6 +2923,81 @@ describe('Sidebar locate toolbar', () => {
     ].forEach((rawSnippet) => {
       expect(treeTitleSource).not.toContain(rawSnippet);
     });
+  });
+
+  it('renders sidebar table comments as an opt-in suffix while using the tab-style table hover card', () => {
+    const baseNode = {
+      type: 'table',
+      title: 'users',
+      key: 'conn-main-users',
+      dataRef: {
+        id: 'conn',
+        dbName: 'main',
+        tableName: 'users',
+        tableComment: '用户表',
+      },
+    };
+    const baseOptions = {
+      node: baseNode,
+      hoverTitle: 'users',
+      statusBadge: null,
+      getV2TreeMetaText: () => '',
+      toggleSidebarTablePinned: vi.fn(),
+      snapshotTreeSelectionBeforeDrag: vi.fn(),
+      restoreTreeSelectionAfterDrag: vi.fn(),
+      treeDragSelectSuppressUntilRef: { current: 0 },
+      setIsTreeDragging: vi.fn(),
+    };
+
+    const hiddenSuffixMarkup = renderToStaticMarkup(renderSidebarV2TreeTitle({
+      ...baseOptions,
+      showSidebarTableComment: false,
+    }));
+    expect(hiddenSuffixMarkup).not.toContain('gn-v2-tree-table-comment');
+
+    const visibleSuffixMarkup = renderToStaticMarkup(renderSidebarV2TreeTitle({
+      ...baseOptions,
+      showSidebarTableComment: true,
+    }));
+    expect(visibleSuffixMarkup).toContain('gn-v2-tree-table-comment');
+    expect(visibleSuffixMarkup).toContain('用户表');
+
+    const treeTitleSource = readSourceFile('./sidebar/SidebarTreeTitle.tsx');
+    expect(treeTitleSource).toContain('data-sidebar-table-hover-info="true"');
+    expect(treeTitleSource).toContain('rootClassName="gn-v2-tab-hover-tooltip gn-v2-sidebar-table-hover-tooltip"');
+    expect(treeTitleSource).toContain('title={tableHoverInfo ? undefined : effectiveHoverTitle}');
+    expect(treeTitleSource).toContain("const SIDEBAR_TREE_NODE_CONTENT_SELECTOR = '.ant-tree-node-content-wrapper';");
+    expect(treeTitleSource).toContain("removeAttribute('title')");
+    expect(treeTitleSource).toContain('ref={tableHoverInfo ? clearSidebarTableNativeHoverTitleRef : undefined}');
+    expect(treeTitleSource).toContain('onPointerOverCapture={tableHoverInfo ? clearSidebarTableNativeHoverTitle : undefined}');
+    expect(treeTitleSource).toContain("resolveConnectionHostSummary(dataRef.config)");
+    expect(treeTitleSource).toContain("t('tab_manager.kind_badge.table')");
+    expect(treeTitleSource).toContain("t('tab_manager.hover.kind.table')");
+    expect(treeTitleSource).toContain("t('table_designer.action.table_comment')");
+    expect(treeTitleSource).toContain('mouseEnterDelay={1.2}');
+
+    const css = readV2ThemeCss();
+    expect(css).toMatch(/\.gn-v2-tree-table-comment \{[^}]*max-width: 24em;[^}]*text-overflow: ellipsis;/s);
+    expect(css).toMatch(/\.gn-v2-tab-hover-tooltip \.ant-tooltip-inner \{[^}]*min-width: 260px;[^}]*padding: 0;/s);
+    expect(css).toMatch(/\.gn-v2-tab-hover-card \{[^}]*cursor: text;[^}]*user-select: text;/s);
+    expect(css).toContain('--gn-v2-tab-hover-grid-columns: 56px minmax(0, 1fr);');
+    expect(css).toMatch(/\.gn-v2-tab-hover-row \{[^}]*grid-template-columns: var\(--gn-v2-tab-hover-grid-columns\);/s);
+  });
+
+  it('loads table comments through the sidebar table status metadata query', () => {
+    const mysqlSql = buildSidebarTableStatusSQL({ config: { type: 'mysql' } } as any, 'app');
+    const pgSql = buildSidebarTableStatusSQL({ config: { type: 'postgres' } } as any, 'app');
+    const sqlServerSql = buildSidebarTableStatusSQL({ config: { type: 'sqlserver' } } as any, 'app');
+    const oracleSql = buildSidebarTableStatusSQL({ config: { type: 'oracle' } } as any, 'APP');
+
+    expect(mysqlSql).toContain('TABLE_COMMENT AS table_comment');
+    expect(pgSql).toContain("obj_description(c.oid, 'pg_class') AS table_comment");
+    expect(sqlServerSql).toContain('ep.value AS table_comment');
+    expect(oracleSql).toContain('comments AS table_comment');
+
+    const loaderSource = readSourceFile('./sidebar/useSidebarTreeLoaders.tsx');
+    expect(loaderSource).toContain('tableCommentMap');
+    expect(loaderSource).toContain('tableComment: entry.tableComment');
   });
 
   it('listens for table overview pin changes to refresh the matching sidebar database node', () => {

@@ -130,7 +130,7 @@ const SecurityUpdateSettingsModal = ({
   return (
     <Modal
       rootClassName={SECURITY_UPDATE_MODAL_CLASS}
-      title={(
+      title={embedded ? null : (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
           <div
             style={{
@@ -159,6 +159,7 @@ const SecurityUpdateSettingsModal = ({
       )}
       open={open}
       embedded={embedded}
+      closable={embedded ? false : undefined}
       onCancel={onClose}
       footer={[
         showRetry ? (

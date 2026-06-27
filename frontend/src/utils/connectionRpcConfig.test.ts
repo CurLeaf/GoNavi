@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { connection } from '../../wailsjs/go/models';
 import { buildRpcConnectionConfig } from './connectionRpcConfig';
+import { describeUnsupportedOceanBaseProtocol } from './oceanBaseProtocol';
 
 describe('buildRpcConnectionConfig', () => {
   it('preserves the saved connection id while normalizing numeric fields', () => {
@@ -119,7 +120,7 @@ describe('buildRpcConnectionConfig', () => {
       user: 'root@test',
       database: 'app',
       connectionParams: 'protocol=native',
-    } as any)).toThrow(/不支持.*native/);
+    } as any)).toThrow('OceanBase only supports MySQL/Oracle tenant protocols; "native" is not supported. Switch to MySQL or Oracle.');
   });
 
   it('rejects unsupported OceanBase protocol even when form protocol is explicit MySQL', () => {
@@ -132,7 +133,13 @@ describe('buildRpcConnectionConfig', () => {
       database: 'app',
       oceanBaseProtocol: 'mysql',
       connectionParams: 'protocol=native',
-    } as any)).toThrow(/不支持.*native/);
+    } as any)).toThrow('OceanBase only supports MySQL/Oracle tenant protocols; "native" is not supported. Switch to MySQL or Oracle.');
+  });
+
+  it('localizes unsupported OceanBase protocol wrappers while preserving the raw protocol value', () => {
+    expect(describeUnsupportedOceanBaseProtocol('native', (key, params) => (
+      `${key}:${params?.value}`
+    ))).toBe('connection.oceanbase.error.unsupported_protocol:native');
   });
 
   it('preserves extra connection params for RPC calls', () => {

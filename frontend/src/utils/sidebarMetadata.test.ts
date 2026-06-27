@@ -24,6 +24,13 @@ describe('sidebarMetadata', () => {
     });
   });
 
+  it('falls back to the current database when MySQL-compatible view rows omit schema metadata', () => {
+    expect(normalizeSidebarViewMetadataEntry('mysql', 'information_schema', '', 'CHARACTER_SETS')).toEqual({
+      viewName: 'CHARACTER_SETS',
+      schemaName: 'information_schema',
+    });
+  });
+
   it('uses MySQL metadata queries for custom MySQL-compatible domestic drivers', () => {
     expect(resolveSidebarMetadataDialect('goldendb')).toBe('mysql');
     expect(resolveSidebarMetadataDialect('custom', 'gdb')).toBe('mysql');

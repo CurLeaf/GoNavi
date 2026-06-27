@@ -262,7 +262,7 @@ const buildSidebarTableStatusSQL = (
     case "mysql":
     case "starrocks":
       return [
-        "SELECT TABLE_NAME AS table_name, TABLE_ROWS AS table_rows",
+        "SELECT TABLE_NAME AS table_name, TABLE_COMMENT AS table_comment, TABLE_ROWS AS table_rows",
         "FROM information_schema.tables",
         `WHERE table_schema = '${safeDbName}'`,
         "AND table_type = 'BASE TABLE'",
@@ -275,7 +275,7 @@ const buildSidebarTableStatusSQL = (
     case "opengauss":
     case "gaussdb":
       return [
-        "SELECT n.nspname || '.' || c.relname AS table_name, c.reltuples::bigint AS table_rows",
+        "SELECT n.nspname || '.' || c.relname AS table_name, obj_description(c.oid, 'pg_class') AS table_comment, c.reltuples::bigint AS table_rows",
         "FROM pg_class c",
         "JOIN pg_namespace n ON n.oid = c.relnamespace",
         "WHERE c.relkind = 'r'",
@@ -286,18 +286,19 @@ const buildSidebarTableStatusSQL = (
     case "sqlserver": {
       const safeDb = quoteSqlServerIdentifier(dbName);
       return [
-        "SELECT s.name + '.' + t.name AS table_name, SUM(p.rows) AS table_rows",
+        "SELECT s.name + '.' + t.name AS table_name, ep.value AS table_comment, SUM(p.rows) AS table_rows",
         `FROM ${safeDb}.sys.tables t`,
         `JOIN ${safeDb}.sys.schemas s ON t.schema_id = s.schema_id`,
+        `LEFT JOIN ${safeDb}.sys.extended_properties ep ON ep.major_id = t.object_id AND ep.minor_id = 0 AND ep.name = 'MS_Description'`,
         `LEFT JOIN ${safeDb}.sys.partitions p ON t.object_id = p.object_id AND p.index_id IN (0, 1)`,
         "WHERE t.type = 'U'",
-        "GROUP BY s.name, t.name",
+        "GROUP BY s.name, t.name, ep.value",
         "ORDER BY s.name, t.name",
       ].join("\n");
     }
     case "clickhouse":
       return [
-        "SELECT name AS table_name, total_rows AS table_rows",
+        "SELECT name AS table_name, comment AS table_comment, total_rows AS table_rows",
         "FROM system.tables",
         `WHERE database = '${safeDbName}'`,
         "AND engine NOT IN ('View', 'MaterializedView')",
@@ -307,8 +308,8 @@ const buildSidebarTableStatusSQL = (
     case "dm": {
       const owner = escapeSQLLiteral(dbName).toUpperCase();
       return [
-        "SELECT table_name, num_rows AS table_rows",
-        "FROM all_tables",
+        "SELECT table_name, comments AS table_comment, num_rows AS table_rows",
+        "FROM all_tab_comments JOIN all_tables USING (table_name, owner)",
         `WHERE owner = '${owner}'`,
         "ORDER BY table_name",
       ].join("\n");
@@ -599,6 +600,46 @@ const buildFunctionsMetadataQuerySpecs = (
           inferredType: "FUNCTION",
         },
       ];
+    default:
+      return [];
+  }
+};
+
+const buildSequencesMetadataQuerySpecs = (
+  dialect: string,
+  dbName: string,
+): MetadataQuerySpec[] => {
+  const safeDbName = escapeSQLLiteral(dbName);
+  switch (dialect) {
+    case "oracle":
+    case "dm":
+      return normalizeMetadataQuerySpecs([
+        {
+          sql: safeDbName
+            ? `SELECT SEQUENCE_OWNER AS schema_name, SEQUENCE_NAME AS sequence_name FROM ALL_SEQUENCES WHERE SEQUENCE_OWNER = '${safeDbName.toUpperCase()}' ORDER BY SEQUENCE_NAME`
+            : `SELECT SEQUENCE_NAME AS sequence_name FROM USER_SEQUENCES ORDER BY SEQUENCE_NAME`,
+        },
+      ]);
+    default:
+      return [];
+  }
+};
+
+const buildPackagesMetadataQuerySpecs = (
+  dialect: string,
+  dbName: string,
+): MetadataQuerySpec[] => {
+  const safeDbName = escapeSQLLiteral(dbName);
+  switch (dialect) {
+    case "oracle":
+    case "dm":
+      return normalizeMetadataQuerySpecs([
+        {
+          sql: safeDbName
+            ? `SELECT OWNER AS schema_name, OBJECT_NAME AS package_name FROM ALL_OBJECTS WHERE OWNER = '${safeDbName.toUpperCase()}' AND OBJECT_TYPE = 'PACKAGE' ORDER BY OBJECT_NAME`
+            : `SELECT OBJECT_NAME AS package_name FROM USER_OBJECTS WHERE OBJECT_TYPE = 'PACKAGE' ORDER BY OBJECT_NAME`,
+        },
+      ]);
     default:
       return [];
   }
@@ -977,6 +1018,127 @@ const loadFunctions = async (
   return { routines, supported: hasSuccessfulQuery };
 };
 
+const loadSequences = async (
+  conn: any,
+  dbName: string,
+): Promise<{
+  sequences: Array<{
+    displayName: string;
+    sequenceName: string;
+    schemaName: string;
+  }>;
+  supported: boolean;
+}> => {
+  const dialect = getMetadataDialect(conn as SavedConnection);
+  const querySpecs = buildSequencesMetadataQuerySpecs(dialect, dbName);
+  const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(
+    conn,
+    dbName,
+    querySpecs,
+  );
+  const seen = new Set<string>();
+  const sequences: Array<{
+    displayName: string;
+    sequenceName: string;
+    schemaName: string;
+  }> = [];
+
+  results.forEach((queryResult) => {
+    queryResult.rows.forEach((row) => {
+      const rawSequenceName =
+        getCaseInsensitiveValue(row, [
+          "sequence_name",
+          "sequencename",
+          "object_name",
+          "name",
+        ]) || getFirstRowValue(row);
+      if (!rawSequenceName) return;
+
+      const sequenceParts = splitQualifiedName(rawSequenceName);
+      const schemaName = (
+        getCaseInsensitiveValue(row, [
+          "schema_name",
+          "sequence_owner",
+          "owner",
+        ]) ||
+        sequenceParts.schemaName ||
+        ""
+      ).trim();
+      const objectName = (sequenceParts.objectName || rawSequenceName).trim();
+      const fullName = buildQualifiedName(schemaName, objectName);
+      const uniqueKey = `${schemaName.toLowerCase()}@@${objectName.toLowerCase()}`;
+      if (!fullName || seen.has(uniqueKey)) return;
+      seen.add(uniqueKey);
+      sequences.push({
+        displayName: fullName,
+        sequenceName: fullName,
+        schemaName,
+      });
+    });
+  });
+  return { sequences, supported: hasSuccessfulQuery };
+};
+
+const loadPackages = async (
+  conn: any,
+  dbName: string,
+): Promise<{
+  packages: Array<{
+    displayName: string;
+    packageName: string;
+    schemaName: string;
+  }>;
+  supported: boolean;
+}> => {
+  const dialect = getMetadataDialect(conn as SavedConnection);
+  const querySpecs = buildPackagesMetadataQuerySpecs(dialect, dbName);
+  const { results, hasSuccessfulQuery } = await queryMetadataRowsBySpecs(
+    conn,
+    dbName,
+    querySpecs,
+  );
+  const seen = new Set<string>();
+  const packages: Array<{
+    displayName: string;
+    packageName: string;
+    schemaName: string;
+  }> = [];
+
+  results.forEach((queryResult) => {
+    queryResult.rows.forEach((row) => {
+      const rawPackageName =
+        getCaseInsensitiveValue(row, [
+          "package_name",
+          "packagename",
+          "object_name",
+          "name",
+        ]) || getFirstRowValue(row);
+      if (!rawPackageName) return;
+
+      const packageParts = splitQualifiedName(rawPackageName);
+      const schemaName = (
+        getCaseInsensitiveValue(row, [
+          "schema_name",
+          "owner",
+        ]) ||
+        packageParts.schemaName ||
+        ""
+      ).trim();
+      const objectName = (packageParts.objectName || rawPackageName).trim();
+      const fullName = buildQualifiedName(schemaName, objectName);
+      const uniqueKey = `${schemaName.toLowerCase()}@@${objectName.toLowerCase()}`;
+      if (!fullName || seen.has(uniqueKey)) return;
+      seen.add(uniqueKey);
+      packages.push({
+        displayName: fullName,
+        packageName: fullName,
+        schemaName,
+      });
+    });
+  });
+  return { packages, supported: hasSuccessfulQuery };
+};
+
 const loadDatabaseEvents = async (
   conn: any,
   dbName: string,
@@ -1084,8 +1246,10 @@ export {
   buildDuckDBMacroDDL,
   buildEventsMetadataQuerySpecs,
   buildFunctionsMetadataQuerySpecs,
+  buildPackagesMetadataQuerySpecs,
   buildQualifiedName,
   buildSchemasMetadataQuerySpecs,
+  buildSequencesMetadataQuerySpecs,
   buildSidebarObjectKeyName,
   buildSidebarTableStatusSQL,
   buildTriggersMetadataQuerySpecs,
@@ -1102,7 +1266,9 @@ export {
   loadDatabaseEvents,
   loadDatabaseTriggers,
   loadFunctions,
+  loadPackages,
   loadSchemas,
+  loadSequences,
   loadStarRocksMaterializedViews,
   loadViews,
   normalizeMetadataQuerySpecs,

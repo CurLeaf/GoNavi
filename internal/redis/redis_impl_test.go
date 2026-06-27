@@ -2,6 +2,7 @@ package redis
 
 import (
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/shared/i18n"
 	"bufio"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"math"
 	"math/big"
 	"net"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -358,6 +360,337 @@ func TestRedisClusterKeepsSSHValidation(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "集群模式暂不支持 SSH 隧道") {
 		t.Fatalf("expected cluster SSH error, got %v", err)
+	}
+}
+
+func TestRedisConnectValidationUsesEnglishMessages(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	cases := []struct {
+		name  string
+		run   func() error
+		want  string
+		avoid string
+	}{
+		{
+			name: "node address required",
+			run: func() error {
+				_, err := normalizeRedisSeedAddress("   ", 6379)
+				return err
+			},
+			want:  "Redis node address cannot be empty",
+			avoid: "Redis 节点地址不能为空",
+		},
+		{
+			name: "node port invalid",
+			run: func() error {
+				_, err := normalizeRedisSeedAddress("cache.local:notaport", 6379)
+				return err
+			},
+			want:  "Invalid Redis port: cache.local:notaport",
+			avoid: "无效 Redis 端口",
+		},
+		{
+			name: "address required",
+			run: func() error {
+				_, err := buildRedisSeedAddrs(connection.ConnectionConfig{Type: "redis"})
+				return err
+			},
+			want:  "Redis connection address cannot be empty",
+			avoid: "Redis 连接地址不能为空",
+		},
+		{
+			name: "sentinel master required",
+			run: func() error {
+				client := NewRedisClient()
+				return client.Connect(connection.ConnectionConfig{
+					Type:     "redis",
+					Host:     "127.0.0.1",
+					Port:     26379,
+					Topology: "sentinel",
+				})
+			},
+			want:  "Redis Sentinel mode requires a master name",
+			avoid: "master 名称",
+		},
+		{
+			name: "cluster ssh unsupported",
+			run: func() error {
+				client := NewRedisClient()
+				return client.Connect(connection.ConnectionConfig{
+					Type:     "redis",
+					Host:     "127.0.0.1",
+					Port:     6379,
+					Topology: "cluster",
+					UseSSH:   true,
+				})
+			},
+			want:  "Redis Cluster mode does not support SSH tunnels yet. Disable SSH and try again.",
+			avoid: "集群模式暂不支持 SSH 隧道",
+		},
+		{
+			name: "multi node ssh unsupported",
+			run: func() error {
+				client := NewRedisClient()
+				return client.Connect(connection.ConnectionConfig{
+					Type:   "redis",
+					Host:   "127.0.0.1",
+					Port:   6379,
+					Hosts:  []string{"127.0.0.2:6379"},
+					UseSSH: true,
+				})
+			},
+			want:  "Redis multi-node mode does not support SSH tunnels yet. Disable SSH and try again.",
+			avoid: "多节点模式暂不支持 SSH 隧道",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if err.Error() != tc.want {
+				t.Fatalf("expected %q, got %q", tc.want, err.Error())
+			}
+			if strings.Contains(err.Error(), tc.avoid) {
+				t.Fatalf("expected no Chinese validation text %q, got %q", tc.avoid, err.Error())
+			}
+		})
+	}
+}
+
+func TestRedisConnectFailureWrappersUseEnglishPrefixes(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	cases := []struct {
+		name       string
+		config     connection.ConnectionConfig
+		wantPrefix string
+		avoid      string
+	}{
+		{
+			name: "single",
+			config: connection.ConnectionConfig{
+				Type:    "redis",
+				Host:    "127.0.0.1",
+				Port:    1,
+				Timeout: 1,
+			},
+			wantPrefix: "Redis connection failed: Attempt 1 connection failed: ",
+			avoid:      "Redis 连接失败",
+		},
+		{
+			name: "sentinel",
+			config: connection.ConnectionConfig{
+				Type:                "redis",
+				Host:                "127.0.0.1",
+				Port:                1,
+				Timeout:             1,
+				Topology:            "sentinel",
+				RedisSentinelMaster: "mymaster",
+			},
+			wantPrefix: "Redis Sentinel connection failed: Attempt 1 connection failed: ",
+			avoid:      "Redis Sentinel 连接失败",
+		},
+		{
+			name: "cluster",
+			config: connection.ConnectionConfig{
+				Type:     "redis",
+				Host:     "127.0.0.1",
+				Port:     1,
+				Timeout:  1,
+				Topology: "cluster",
+			},
+			wantPrefix: "Redis Cluster connection failed: Attempt 1 connection failed: ",
+			avoid:      "Redis 集群连接失败",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewRedisClient()
+			err := client.Connect(tc.config)
+			if err == nil {
+				t.Fatal("expected connect error")
+			}
+			if !strings.HasPrefix(err.Error(), tc.wantPrefix) {
+				t.Fatalf("expected prefix %q, got %q", tc.wantPrefix, err.Error())
+			}
+			if strings.Contains(err.Error(), tc.avoid) {
+				t.Fatalf("expected no Chinese wrapper %q, got %q", tc.avoid, err.Error())
+			}
+		})
+	}
+}
+
+func TestRedisConnectSourceUsesLocalizedValidationKeys(t *testing.T) {
+	sourceBytes, err := os.ReadFile("redis_impl.go")
+	if err != nil {
+		t.Fatalf("read redis_impl.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	for _, rawMessage := range []string{
+		`fmt.Errorf("Redis 节点地址不能为空")`,
+		`fmt.Errorf("无效 Redis 节点地址: %s", addr)`,
+		`fmt.Errorf("无效 Redis 端口: %s", addr)`,
+		`fmt.Errorf("Redis 连接地址不能为空")`,
+		`return "集群"`,
+		`return "多节点"`,
+		`fmt.Errorf("Redis %s模式暂不支持 SSH 隧道，请关闭 SSH 后重试", redisTopologyDisplayName(topology))`,
+		`fmt.Errorf("Redis Sentinel 模式需要填写 master 名称")`,
+		`fmt.Sprintf("第%d次 TLS 配置失败: %v", idx+1, err)`,
+		`fmt.Sprintf("第%d次连接失败: %v", idx+1, pingErr)`,
+		`fmt.Errorf("Redis Sentinel 连接失败: %s", strings.Join(failures, "；"))`,
+		`fmt.Errorf("Redis 集群连接失败: %s", strings.Join(failures, "；"))`,
+		`fmt.Errorf("创建 SSH 隧道失败: %w", err)`,
+		`fmt.Errorf("Redis 连接失败: %s", strings.Join(failures, "；"))`,
+	} {
+		if strings.Contains(source, rawMessage) {
+			t.Fatalf("redis_impl.go still contains raw Redis connect validation text %q", rawMessage)
+		}
+	}
+
+	for _, key := range []string{
+		"redis.backend.error.node_address_required",
+		"redis.backend.error.invalid_node_address",
+		"redis.backend.error.invalid_port",
+		"redis.backend.error.address_required",
+		"redis.backend.label.topology_cluster",
+		"redis.backend.label.topology_multi_node",
+		"redis.backend.error.topology_ssh_tunnel_unsupported",
+		"redis.backend.error.sentinel_master_required",
+		"redis.backend.error.connect_tls_setup_failed",
+		"redis.backend.error.connect_attempt_failed",
+		"redis.backend.error.sentinel_connect_failed",
+		"redis.backend.error.cluster_connect_failed",
+		"redis.backend.error.ssh_tunnel_create_failed",
+		"redis.backend.error.connect_failed",
+	} {
+		if !strings.Contains(source, key) {
+			t.Fatalf("redis_impl.go does not reference Redis i18n key %q", key)
+		}
+	}
+}
+
+func TestRedisExecuteCommandClusterSelectValidationUsesEnglishMessages(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	rawClient := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:0"})
+	client := &RedisClientImpl{
+		client:    rawClient,
+		isCluster: true,
+	}
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	cases := []struct {
+		name  string
+		args  []string
+		want  string
+		avoid string
+	}{
+		{
+			name:  "missing database index",
+			args:  []string{"SELECT"},
+			want:  "SELECT command requires a database index",
+			avoid: "SELECT 命令缺少数据库索引",
+		},
+		{
+			name:  "invalid database index",
+			args:  []string{"SELECT", "foo"},
+			want:  "Invalid database index: foo",
+			avoid: "无效数据库索引",
+		},
+		{
+			name:  "database index out of range",
+			args:  []string{"SELECT", "16"},
+			want:  "Database index must be between 0 and 15",
+			avoid: "数据库索引必须在",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := client.ExecuteCommand(tc.args)
+			if err == nil {
+				t.Fatalf("expected cluster SELECT validation error for args %#v", tc.args)
+			}
+			if err.Error() != tc.want {
+				t.Fatalf("expected %q, got %q", tc.want, err.Error())
+			}
+			if strings.Contains(err.Error(), tc.avoid) {
+				t.Fatalf("expected no Chinese validation text %q, got %q", tc.avoid, err.Error())
+			}
+		})
+	}
+}
+
+func TestRedisExecuteCommandSourceUsesLocalizedClusterSelectValidationKeys(t *testing.T) {
+	sourceBytes, err := os.ReadFile("redis_impl.go")
+	if err != nil {
+		t.Fatalf("read redis_impl.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	for _, rawMessage := range []string{
+		`fmt.Errorf("SELECT 命令缺少数据库索引")`,
+		`fmt.Errorf("无效数据库索引: %s", args[1])`,
+		`fmt.Errorf("数据库索引必须在 0-%d 之间", redisClusterLogicalDBCount-1)`,
+	} {
+		if strings.Contains(source, rawMessage) {
+			t.Fatalf("redis_impl.go still contains raw Redis cluster SELECT validation text %q", rawMessage)
+		}
+	}
+
+	for _, key := range []string{
+		"redis.backend.error.select_db_index_required",
+		"redis.backend.error.select_db_index_invalid",
+		"redis.backend.error.select_db_index_out_of_range",
+	} {
+		if !strings.Contains(source, key) {
+			t.Fatalf("redis_impl.go does not reference Redis cluster SELECT i18n key %q", key)
+		}
+	}
+}
+
+func TestRedisSelectDBClusterRangeUsesEnglishMessage(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	t.Cleanup(func() {
+		SetBackendLanguage(i18n.LanguageZhCN)
+	})
+
+	rawClient := goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:0"})
+	client := &RedisClientImpl{
+		client:    rawClient,
+		isCluster: true,
+	}
+	t.Cleanup(func() {
+		_ = client.Close()
+	})
+
+	err := client.SelectDB(redisClusterLogicalDBCount)
+	if err == nil {
+		t.Fatalf("expected SelectDB to reject out-of-range cluster index %d", redisClusterLogicalDBCount)
+	}
+	const want = "Database index must be between 0 and 15"
+	if err.Error() != want {
+		t.Fatalf("expected %q, got %q", want, err.Error())
+	}
+	if strings.Contains(err.Error(), "数据库索引必须在") {
+		t.Fatalf("expected no Chinese SelectDB validation text, got %q", err.Error())
 	}
 }
 

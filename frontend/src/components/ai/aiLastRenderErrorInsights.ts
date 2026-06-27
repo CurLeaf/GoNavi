@@ -1,5 +1,14 @@
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
+
 const DEFAULT_PREVIEW_LIMIT = 240;
 const DEFAULT_STACK_LIMIT = 1200;
+
+const copy = (
+  translate: AIInspectionTranslator | undefined,
+  key: string,
+  fallback: string,
+) => translateInspectionCopy(translate, key, fallback);
 
 const truncateText = (value: unknown, limit: number) => {
   const text = String(value || '');
@@ -25,22 +34,38 @@ const resolveGlobalRenderError = () => {
   return null;
 };
 
-export const buildAILastRenderErrorSnapshot = () => {
+export const buildAILastRenderErrorSnapshot = (translate?: AIInspectionTranslator) => {
   const renderError = resolveGlobalRenderError();
   if (!renderError) {
     return {
       hasError: false,
-      summary: '当前还没有记录到 AI 消息渲染异常。',
+      summary: copy(
+        translate,
+        'ai_chat.inspection.last_render_error.empty_summary',
+        'No AI message render errors have been recorded yet.',
+      ),
       nextActions: [
-        '如果用户反馈 AI 某条消息空白、白块或只出现局部报错，再重新触发问题后读取这里。',
-        '如果是整块 AI 面板异常，再结合 inspect_ai_setup_health 和 inspect_app_logs 一起看。',
+        copy(
+          translate,
+          'ai_chat.inspection.last_render_error.empty_next_action.reproduce',
+          'If the user reports a blank AI message, white block, or localized render error, reproduce it and read this snapshot again.',
+        ),
+        copy(
+          translate,
+          'ai_chat.inspection.last_render_error.empty_next_action.inspect_health',
+          'If the entire AI panel is failing, combine this with inspect_ai_setup_health and inspect_app_logs.',
+        ),
       ],
     };
   }
 
   return {
     hasError: true,
-    summary: '已记录到最近一次 AI 消息渲染异常，可据此定位是哪条消息、哪段渲染逻辑和报错栈摘要。',
+    summary: copy(
+      translate,
+      'ai_chat.inspection.last_render_error.recorded_summary',
+      'A recent AI message render error was recorded, including the message, render path, and stack summary needed for diagnosis.',
+    ),
     messageId: String(renderError.messageId || ''),
     role: String(renderError.role || ''),
     recordedAt: typeof renderError.recordedAt === 'number' ? renderError.recordedAt : null,
@@ -49,8 +74,16 @@ export const buildAILastRenderErrorSnapshot = () => {
     stackPreview: truncateText(renderError.stack, DEFAULT_STACK_LIMIT),
     componentStackPreview: truncateText(renderError.componentStack, DEFAULT_STACK_LIMIT),
     nextActions: [
-      '先按 messageId 和 contentPreview 对照当前会话，确认是哪条气泡触发的渲染异常。',
-      '如果需要继续缩小范围，再结合最近一次用户输入、工具结果和相关组件代码排查。',
+      copy(
+        translate,
+        'ai_chat.inspection.last_render_error.next_action.match_message',
+        'Match messageId and contentPreview against the current conversation to identify which bubble triggered the render error.',
+      ),
+      copy(
+        translate,
+        'ai_chat.inspection.last_render_error.next_action.narrow_scope',
+        'If more narrowing is needed, compare the latest user input, tool results, and related component code.',
+      ),
     ],
   };
 };

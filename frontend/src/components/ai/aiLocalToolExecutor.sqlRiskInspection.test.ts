@@ -70,7 +70,61 @@ describe('aiLocalToolExecutor sql risk inspection', () => {
       },
     });
     expect(payload.activityKinds).toContain('write');
-    expect(payload.warnings).toContain('UPDATE 缺少 WHERE 条件，可能更新整表数据');
-    expect(payload.warnings).toContain('当前 AI 安全策略不允许执行 UPDATE 类型 SQL');
+    expect(payload.warnings).toContain('UPDATE is missing a WHERE clause and may update the entire table.');
+    expect(payload.warnings).toContain('The current AI safety policy does not allow UPDATE SQL.');
+  });
+
+  it('passes the translator into inspect_sql_risk snapshots', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_sql_risk', {
+        sql: 'DELETE FROM accounts',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        checkSQL: vi.fn().mockResolvedValue(undefined),
+      },
+      translate: (key) => ({
+        'ai_chat.inspection.sql_risk.warning.data_change': 'translated executor data change',
+        'ai_chat.inspection.sql_risk.warning.delete_missing_where': 'translated executor delete missing where',
+        'ai_chat.inspection.sql_risk.next_action.explain_and_confirm': 'translated executor explain',
+        'ai_chat.inspection.sql_risk.next_action.confirm_write_scope': 'translated executor confirm scope',
+      })[key] || key,
+    });
+
+    const payload = JSON.parse(result.content);
+    expect(result.success).toBe(true);
+    expect(payload.warnings).toContain('translated executor data change');
+    expect(payload.warnings).toContain('translated executor delete missing where');
+    expect(payload.nextActions).toEqual([
+      'translated executor explain',
+      'translated executor confirm scope',
+    ]);
+    expect(payload.sqlPreview).toBe('DELETE FROM accounts');
+  });
+
+  it('localizes inspect_sql_risk failure wrapper while preserving raw detail', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_sql_risk', {
+        sql: 'UPDATE users SET status = 0',
+      }),
+      connections: [buildConnection()],
+      mcpTools: [],
+      toolContextMap: new Map(),
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        checkSQL: vi.fn().mockRejectedValue(new Error('raw safety service failure')),
+      },
+      translate: (key, params) => ({
+        'ai_chat.inspection.sql_risk.error.inspect_failed': `translated SQL risk failure: ${params?.detail}`,
+      })[key] || key,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.content).toBe('translated SQL risk failure: raw safety service failure');
   });
 });

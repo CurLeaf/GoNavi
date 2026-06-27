@@ -1,4 +1,5 @@
 import type { AIContextItem, SavedConnection } from '../../types';
+import { translateInspectionCopy, type AIInspectionTranslator } from './aiInspectionI18n';
 
 const DEFAULT_DDL_PREVIEW_LIMIT = 320;
 const DEFAULT_DDL_INCLUDE_LIMIT = 4000;
@@ -49,6 +50,7 @@ export const buildAIContextSnapshot = (params: {
   connections: SavedConnection[];
   includeDDL?: boolean;
   ddlLimit?: unknown;
+  translate?: AIInspectionTranslator;
 }) => {
   const {
     activeContext = null,
@@ -56,6 +58,7 @@ export const buildAIContextSnapshot = (params: {
     connections,
     includeDDL = false,
     ddlLimit,
+    translate,
   } = params;
   const contextKey = buildConnectionKey(activeContext);
   const activeContextItems = aiContexts[contextKey] || [];
@@ -79,7 +82,16 @@ export const buildAIContextSnapshot = (params: {
         ddlLimit: normalizeDDLLimit(ddlLimit),
       })),
     message: activeContextItems.length > 0
-      ? `当前已关联 ${activeContextItems.length} 张表结构上下文`
-      : '当前没有已关联的 AI 表结构上下文',
+      ? translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.ai_context.linked_summary',
+        `Currently linked table schema contexts: ${activeContextItems.length}`,
+        { count: activeContextItems.length },
+      )
+      : translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.ai_context.none_linked',
+        'No AI table schema context is currently linked',
+      ),
   };
 };

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -26,6 +27,8 @@ type duckdbRecordingState struct {
 	mu          sync.Mutex
 	execQueries []string
 	execArgs    [][]driver.NamedValue
+	failDelete  error
+	failUpdate  error
 }
 
 func (s *duckdbRecordingState) snapshotExecQueries() []string {
@@ -73,6 +76,12 @@ func (c *duckdbRecordingConn) ExecContext(_ context.Context, query string, args 
 	defer c.state.mu.Unlock()
 	c.state.execQueries = append(c.state.execQueries, query)
 	c.state.execArgs = append(c.state.execArgs, append([]driver.NamedValue(nil), args...))
+	if strings.HasPrefix(query, "DELETE FROM ") && c.state.failDelete != nil {
+		return nil, c.state.failDelete
+	}
+	if strings.HasPrefix(query, "UPDATE ") && c.state.failUpdate != nil {
+		return nil, c.state.failUpdate
+	}
 	return driver.RowsAffected(1), nil
 }
 
@@ -151,10 +160,13 @@ func TestDuckDBApplyChangesUsesUnquotedRowIDLocator(t *testing.T) {
 	if len(args) != 2 || len(args[0]) != 1 || len(args[1]) != 2 {
 		t.Fatalf("执行参数数量不符合预期: %#v", args)
 	}
-	if args[0][0].Value != 21 {
+	if got, ok := args[0][0].Value.(int64); !ok || got != 21 {
 		t.Fatalf("删除 rowid 参数错误: %#v", args[0])
 	}
-	if args[1][0].Value != "renamed" || args[1][1].Value != 17 {
+	if args[1][0].Value != "renamed" {
+		t.Fatalf("更新参数错误: %#v", args[1])
+	}
+	if got, ok := args[1][1].Value.(int64); !ok || got != 17 {
 		t.Fatalf("更新参数错误: %#v", args[1])
 	}
 }

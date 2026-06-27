@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"GoNavi-Wails/internal/connection"
 	"GoNavi-Wails/internal/db"
@@ -60,6 +62,7 @@ type sqlFileExecutionOptions struct {
 	DBType             string
 	BatchMaxStatements int
 	BatchMaxBytes      int
+	Text               fileBackendTextFunc
 	OnProgress         func(sqlFileExecutionProgress)
 }
 
@@ -130,12 +133,16 @@ type appLogTailSnapshot struct {
 }
 
 func normalizeSQLFileName(rawName string) (string, error) {
+	return normalizeSQLFileNameWithText(rawName, nil)
+}
+
+func normalizeSQLFileNameWithText(rawName string, text fileBackendTextFunc) (string, error) {
 	name := strings.TrimSpace(rawName)
 	if name == "" {
-		return "", fmt.Errorf("SQL 文件名不能为空")
+		return "", fmt.Errorf("%s", fileBackendText(text, "file.backend.error.sql_file_name_required", nil))
 	}
 	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
-		return "", fmt.Errorf("SQL 文件名不能包含路径分隔符")
+		return "", fmt.Errorf("%s", fileBackendText(text, "file.backend.error.sql_file_name_no_separator", nil))
 	}
 	if !strings.EqualFold(filepath.Ext(name), ".sql") {
 		name += ".sql"
@@ -144,12 +151,16 @@ func normalizeSQLFileName(rawName string) (string, error) {
 }
 
 func normalizeSQLDirectoryName(rawName string) (string, error) {
+	return normalizeSQLDirectoryNameWithText(rawName, nil)
+}
+
+func normalizeSQLDirectoryNameWithText(rawName string, text fileBackendTextFunc) (string, error) {
 	name := strings.TrimSpace(rawName)
 	if name == "" {
-		return "", fmt.Errorf("目录名不能为空")
+		return "", fmt.Errorf("%s", fileBackendText(text, "file.backend.error.directory_name_required", nil))
 	}
 	if strings.ContainsAny(name, `/\`) || name == "." || name == ".." {
-		return "", fmt.Errorf("目录名不能包含路径分隔符")
+		return "", fmt.Errorf("%s", fileBackendText(text, "file.backend.error.directory_name_no_separator", nil))
 	}
 	return name, nil
 }
@@ -209,25 +220,32 @@ func (r *exportProgressReporter) ForceRunning(current int64, stage string) {
 	r.emit("running", stage, current, "", true)
 }
 
+func (r *exportProgressReporter) text(key string, params map[string]any) string {
+	if r == nil || r.app == nil {
+		return key
+	}
+	return r.app.appText(key, params)
+}
+
 func (r *exportProgressReporter) Finalizing(current int64) {
-	stage := "正在完成文件写入"
+	stageKey := "data_export.progress.stage.finalizing_file_write"
 	if r != nil {
 		switch strings.ToLower(strings.TrimSpace(r.format)) {
 		case "xlsx":
-			stage = "正在封装并压缩 XLSX 文件"
+			stageKey = "data_export.progress.stage.finalizing_xlsx_package"
 		case "csv":
-			stage = "正在完成 CSV 写入"
+			stageKey = "data_export.progress.stage.finalizing_csv_write"
 		}
 	}
-	r.emit("finalizing", stage, current, "", true)
+	r.emit("finalizing", r.text(stageKey, nil), current, "", true)
 }
 
 func (r *exportProgressReporter) Done(current int64) {
-	r.emit("done", "导出完成", current, "", true)
+	r.emit("done", r.text("file.backend.message.export_completed", nil), current, "", true)
 }
 
 func (r *exportProgressReporter) Error(current int64, message string) {
-	r.emit("error", "导出失败", current, message, true)
+	r.emit("error", r.text("data_export.progress.stage.export_failed", nil), current, message, true)
 }
 
 func resolveExportTotalRowValue(value interface{}) (int64, bool) {
@@ -354,7 +372,10 @@ func verifyOptionalDriverAgentReadyForExport(config connection.ConnectionConfig)
 	}
 	if _, err := verifyInstalledOptionalDriverAgentRevision(driverType, executablePath); err != nil {
 		displayName := resolveDriverDisplayName(driverDefinition{Type: driverType})
-		return fmt.Errorf("当前导出依赖最新的 %s driver-agent 流式协议；为避免大结果集回退到高内存缓冲模式，请在驱动管理中重装后重试：%w", displayName, err)
+		return fmt.Errorf("%s", defaultAppText("file.backend.error.export_driver_agent_streaming_required", map[string]any{
+			"driver": displayName,
+			"detail": err.Error(),
+		}))
 	}
 	return nil
 }
@@ -432,143 +453,182 @@ func buildDatabaseExportDefaultFilename(dbName string, includeData bool) string 
 }
 
 func resolveBatchObjectsTargetName(dbName string, objectNames []string) string {
+	return resolveBatchObjectsTargetNameWithText(dbName, objectNames, nil)
+}
+
+func resolveBatchObjectsTargetNameWithText(dbName string, objectNames []string, text fileBackendTextFunc) string {
 	if len(objectNames) == 1 {
 		return objectNames[0]
 	}
 	safeDbName := strings.TrimSpace(dbName)
 	if safeDbName == "" {
-		safeDbName = "当前数据库"
+		safeDbName = fileBackendText(text, "data_export.workbench.target.current_database", nil)
 	}
-	return fmt.Sprintf("%s · %d 个对象", safeDbName, len(objectNames))
+	return fileBackendText(text, "data_export.workbench.target.batch_tables", map[string]any{
+		"database": safeDbName,
+		"count":    len(objectNames),
+	})
 }
 
 func normalizeSQLDirectoryPath(directoryPath string) (string, error) {
+	return normalizeSQLDirectoryPathWithText(directoryPath, nil)
+}
+
+func normalizeSQLDirectoryPathWithText(directoryPath string, text fileBackendTextFunc) (string, error) {
 	target := strings.TrimSpace(directoryPath)
 	if target == "" {
-		return "", fmt.Errorf("目录路径不能为空")
+		return "", fmt.Errorf("%s", fileBackendText(text, "file.backend.error.directory_path_required", nil))
 	}
 	if abs, err := filepath.Abs(target); err == nil {
 		target = abs
 	}
 	info, err := os.Stat(target)
 	if err != nil {
-		return "", fmt.Errorf("无法读取目录信息: %w", err)
+		return "", fmt.Errorf("%s", fileBackendText(text, "file.backend.error.read_directory_info_failed", map[string]any{"detail": err.Error()}))
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("所选路径不是目录")
+		return "", fmt.Errorf("%s", fileBackendText(text, "file.backend.error.selected_path_not_directory", nil))
 	}
 	return target, nil
 }
 
 func normalizeExistingSQLDirectoryPath(directoryPath string) (string, os.FileInfo, error) {
+	return normalizeExistingSQLDirectoryPathWithText(directoryPath, nil)
+}
+
+func normalizeExistingSQLDirectoryPathWithText(directoryPath string, text fileBackendTextFunc) (string, os.FileInfo, error) {
 	target := strings.TrimSpace(directoryPath)
 	if target == "" {
-		return "", nil, fmt.Errorf("目录路径不能为空")
+		return "", nil, fmt.Errorf("%s", fileBackendText(text, "file.backend.error.directory_path_required", nil))
 	}
 	if abs, err := filepath.Abs(target); err == nil {
 		target = abs
 	}
 	info, err := os.Stat(target)
 	if err != nil {
-		return "", nil, fmt.Errorf("无法读取目录信息: %w", err)
+		return "", nil, fmt.Errorf("%s", fileBackendText(text, "file.backend.error.read_directory_info_failed", map[string]any{"detail": err.Error()}))
 	}
 	if !info.IsDir() {
-		return "", nil, fmt.Errorf("所选路径不是目录")
+		return "", nil, fmt.Errorf("%s", fileBackendText(text, "file.backend.error.selected_path_not_directory", nil))
 	}
 	return target, info, nil
 }
 
 func normalizeExistingSQLFilePath(filePath string) (string, os.FileInfo, error) {
+	return normalizeExistingSQLFilePathWithText(filePath, nil)
+}
+
+func normalizeExistingSQLFilePathWithText(filePath string, text fileBackendTextFunc) (string, os.FileInfo, error) {
 	target := strings.TrimSpace(filePath)
 	if target == "" {
-		return "", nil, fmt.Errorf("文件路径不能为空")
+		return "", nil, fmt.Errorf("%s", fileBackendText(text, "file.backend.error.file_path_required", nil))
 	}
 	if abs, err := filepath.Abs(target); err == nil {
 		target = abs
 	}
 	info, err := os.Stat(target)
 	if err != nil {
-		return "", nil, fmt.Errorf("无法读取文件信息: %w", err)
+		return "", nil, fmt.Errorf("%s", fileBackendText(text, "file.backend.error.read_file_info_failed", map[string]any{"detail": err.Error()}))
 	}
 	if info.IsDir() {
-		return "", nil, fmt.Errorf("所选路径不是 SQL 文件")
+		return "", nil, fmt.Errorf("%s", fileBackendText(text, "file.backend.error.selected_path_not_sql_file", nil))
 	}
 	if !strings.EqualFold(filepath.Ext(target), ".sql") {
-		return "", nil, fmt.Errorf("仅支持 SQL 文件")
+		return "", nil, fmt.Errorf("%s", fileBackendText(text, "file.backend.error.sql_file_extension_required", nil))
 	}
 	return target, info, nil
 }
 
 func createSQLFileInDirectory(directoryPath string, rawName string) connection.QueryResult {
-	directory, err := normalizeSQLDirectoryPath(directoryPath)
+	return createSQLFileInDirectoryWithText(directoryPath, rawName, nil)
+}
+
+func createSQLFileInDirectoryWithText(directoryPath string, rawName string, text fileBackendTextFunc) connection.QueryResult {
+	directory, err := normalizeSQLDirectoryPathWithText(directoryPath, text)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	name, err := normalizeSQLFileName(rawName)
+	name, err := normalizeSQLFileNameWithText(rawName, text)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	target := filepath.Join(directory, name)
 	if _, err := os.Stat(target); err == nil {
-		return connection.QueryResult{Success: false, Message: "SQL 文件已存在"}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.sql_file_exists", nil)}
 	} else if !os.IsNotExist(err) {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.read_file_info_failed", map[string]any{"detail": err.Error()})}
 	}
 	if err := os.WriteFile(target, []byte(""), 0o644); err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法创建 SQL 文件: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.create_sql_file_failed", map[string]any{"detail": err.Error()})}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target, "name": filepath.Base(target)}}
 }
 
 func createSQLDirectoryInDirectory(parentPath string, rawName string) connection.QueryResult {
-	parent, err := normalizeSQLDirectoryPath(parentPath)
+	return createSQLDirectoryInDirectoryWithText(parentPath, rawName, nil)
+}
+
+func createSQLDirectoryInDirectoryWithText(parentPath string, rawName string, text fileBackendTextFunc) connection.QueryResult {
+	parent, err := normalizeSQLDirectoryPathWithText(parentPath, text)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	name, err := normalizeSQLDirectoryName(rawName)
+	name, err := normalizeSQLDirectoryNameWithText(rawName, text)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	target := filepath.Join(parent, name)
 	if _, err := os.Stat(target); err == nil {
-		return connection.QueryResult{Success: false, Message: "目录已存在"}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.directory_exists", nil)}
 	} else if !os.IsNotExist(err) {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取目录信息: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.read_directory_info_failed", map[string]any{"detail": err.Error()})}
 	}
 	if err := os.Mkdir(target, 0o755); err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法创建目录: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.create_directory_failed", map[string]any{"detail": err.Error()})}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target, "name": filepath.Base(target)}}
 }
 
 func deleteSQLFileByPath(filePath string) connection.QueryResult {
-	target, _, err := normalizeExistingSQLFilePath(filePath)
+	return deleteSQLFileByPathWithText(filePath, nil)
+}
+
+func deleteSQLFileByPathWithText(filePath string, text fileBackendTextFunc) connection.QueryResult {
+	target, _, err := normalizeExistingSQLFilePathWithText(filePath, text)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if err := os.Remove(target); err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法删除 SQL 文件: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.delete_sql_file_failed", map[string]any{"detail": err.Error()})}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target}}
 }
 
 func deleteSQLDirectoryByPath(directoryPath string) connection.QueryResult {
-	target, _, err := normalizeExistingSQLDirectoryPath(directoryPath)
+	return deleteSQLDirectoryByPathWithText(directoryPath, nil)
+}
+
+func deleteSQLDirectoryByPathWithText(directoryPath string, text fileBackendTextFunc) connection.QueryResult {
+	target, _, err := normalizeExistingSQLDirectoryPathWithText(directoryPath, text)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if err := os.Remove(target); err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法删除目录: %v（仅支持删除空目录）", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.delete_sql_directory_failed", map[string]any{"detail": err.Error()})}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target}}
 }
 
 func renameSQLFileByPath(filePath string, rawName string) connection.QueryResult {
-	source, _, err := normalizeExistingSQLFilePath(filePath)
+	return renameSQLFileByPathWithText(filePath, rawName, nil)
+}
+
+func renameSQLFileByPathWithText(filePath string, rawName string, text fileBackendTextFunc) connection.QueryResult {
+	source, _, err := normalizeExistingSQLFilePathWithText(filePath, text)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	name, err := normalizeSQLFileName(rawName)
+	name, err := normalizeSQLFileNameWithText(rawName, text)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -577,22 +637,26 @@ func renameSQLFileByPath(filePath string, rawName string) connection.QueryResult
 		return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target, "name": filepath.Base(target)}}
 	}
 	if _, err := os.Stat(target); err == nil {
-		return connection.QueryResult{Success: false, Message: "目标 SQL 文件已存在"}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.target_sql_file_exists", nil)}
 	} else if !os.IsNotExist(err) {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取目标文件信息: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.read_target_file_info_failed", map[string]any{"detail": err.Error()})}
 	}
 	if err := os.Rename(source, target); err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法重命名 SQL 文件: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.rename_sql_file_failed", map[string]any{"detail": err.Error()})}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target, "name": filepath.Base(target)}}
 }
 
 func renameSQLDirectoryByPath(directoryPath string, rawName string) connection.QueryResult {
-	source, _, err := normalizeExistingSQLDirectoryPath(directoryPath)
+	return renameSQLDirectoryByPathWithText(directoryPath, rawName, nil)
+}
+
+func renameSQLDirectoryByPathWithText(directoryPath string, rawName string, text fileBackendTextFunc) connection.QueryResult {
+	source, _, err := normalizeExistingSQLDirectoryPathWithText(directoryPath, text)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	name, err := normalizeSQLDirectoryName(rawName)
+	name, err := normalizeSQLDirectoryNameWithText(rawName, text)
 	if err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
@@ -601,12 +665,12 @@ func renameSQLDirectoryByPath(directoryPath string, rawName string) connection.Q
 		return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target, "name": filepath.Base(target)}}
 	}
 	if _, err := os.Stat(target); err == nil {
-		return connection.QueryResult{Success: false, Message: "目标目录已存在"}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.target_directory_exists", nil)}
 	} else if !os.IsNotExist(err) {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取目标目录信息: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.read_target_directory_info_failed", map[string]any{"detail": err.Error()})}
 	}
 	if err := os.Rename(source, target); err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法重命名目录: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.rename_directory_failed", map[string]any{"detail": err.Error()})}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"directoryPath": target, "name": filepath.Base(target)}}
 }
@@ -629,10 +693,23 @@ func normalizeDirectoryDialogPath(currentDir string) string {
 	return defaultDir
 }
 
+type fileBackendTextFunc func(key string, params map[string]any) string
+
+func fileBackendText(text fileBackendTextFunc, key string, params map[string]any) string {
+	if text == nil {
+		return key
+	}
+	return text(key, params)
+}
+
 func readSQLFileByPath(filePath string) connection.QueryResult {
+	return readSQLFileByPathWithText(filePath, nil)
+}
+
+func readSQLFileByPathWithText(filePath string, text fileBackendTextFunc) connection.QueryResult {
 	selection := strings.TrimSpace(filePath)
 	if selection == "" {
-		return connection.QueryResult{Success: false, Message: "文件路径不能为空"}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.file_path_required", nil)}
 	}
 	if abs, err := filepath.Abs(selection); err == nil {
 		selection = abs
@@ -644,10 +721,10 @@ func readSQLFileByPath(filePath string) connection.QueryResult {
 		if os.IsNotExist(err) {
 			data["errorCode"] = sqlFileErrorCodeNotFound
 		}
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err), Data: data}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.read_file_info_failed", map[string]any{"detail": err.Error()}), Data: data}
 	}
 	if fi.IsDir() {
-		return connection.QueryResult{Success: false, Message: "所选路径不是 SQL 文件"}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.selected_path_not_sql_file", nil)}
 	}
 
 	if fi.Size() > maxSQLFileSizeBytes {
@@ -672,7 +749,11 @@ func readSQLFileByPath(filePath string) connection.QueryResult {
 }
 
 func readSQLFileWithMetadataByPath(filePath string) connection.QueryResult {
-	result := readSQLFileByPath(filePath)
+	return readSQLFileWithMetadataByPathWithText(filePath, nil)
+}
+
+func readSQLFileWithMetadataByPathWithText(filePath string, text fileBackendTextFunc) connection.QueryResult {
+	result := readSQLFileByPathWithText(filePath, text)
 	if !result.Success {
 		return result
 	}
@@ -694,9 +775,13 @@ func readSQLFileWithMetadataByPath(filePath string) connection.QueryResult {
 }
 
 func writeSQLFileByPath(filePath string, content string) connection.QueryResult {
+	return writeSQLFileByPathWithText(filePath, content, nil)
+}
+
+func writeSQLFileByPathWithText(filePath string, content string, text fileBackendTextFunc) connection.QueryResult {
 	target := strings.TrimSpace(filePath)
 	if target == "" {
-		return connection.QueryResult{Success: false, Message: "文件路径不能为空"}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.file_path_required", nil)}
 	}
 	if abs, err := filepath.Abs(target); err == nil {
 		target = abs
@@ -704,14 +789,14 @@ func writeSQLFileByPath(filePath string, content string) connection.QueryResult 
 
 	info, err := os.Stat(target)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.read_file_info_failed", map[string]any{"detail": err.Error()})}
 	}
 	if info.IsDir() {
-		return connection.QueryResult{Success: false, Message: "所选路径不是 SQL 文件"}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.selected_path_not_sql_file", nil)}
 	}
 
 	if err := os.WriteFile(target, []byte(content), info.Mode().Perm()); err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法写入 SQL 文件: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.write_failed", map[string]any{"detail": err.Error()})}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target}}
 }
@@ -762,17 +847,21 @@ func normalizeSQLExportTargetPath(filePath string) string {
 }
 
 func writeExportedSQLFileByPath(filePath string, content string) connection.QueryResult {
+	return writeExportedSQLFileByPathWithText(filePath, content, nil)
+}
+
+func writeExportedSQLFileByPathWithText(filePath string, content string, text fileBackendTextFunc) connection.QueryResult {
 	target := normalizeSQLExportTargetPath(filePath)
 	if target == "" {
-		return connection.QueryResult{Success: false, Message: "文件路径不能为空"}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.file_path_required", nil)}
 	}
 	if info, err := os.Stat(target); err == nil && info.IsDir() {
-		return connection.QueryResult{Success: false, Message: "所选路径不是 SQL 文件"}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.selected_path_not_sql_file", nil)}
 	} else if err != nil && !os.IsNotExist(err) {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法读取文件信息: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.read_file_info_failed", map[string]any{"detail": err.Error()})}
 	}
 	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法写入 SQL 文件: %v", err)}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.write_failed", map[string]any{"detail": err.Error()})}
 	}
 	return connection.QueryResult{Success: true, Data: map[string]interface{}{"filePath": target}}
 }
@@ -820,14 +909,14 @@ func buildSQLDirectoryEntries(directory string) ([]SQLDirectoryEntry, error) {
 
 func (a *App) OpenSQLFile() connection.QueryResult {
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select SQL File",
+		Title: a.appText("file.backend.dialog.select_sql_file", nil),
 		Filters: []runtime.FileFilter{
 			{
-				DisplayName: "SQL Files (*.sql)",
+				DisplayName: a.appText("file.backend.filter.sql_files", nil),
 				Pattern:     "*.sql",
 			},
 			{
-				DisplayName: "All Files (*.*)",
+				DisplayName: a.appText("file.backend.filter.all_files_pattern", nil),
 				Pattern:     "*.*",
 			},
 		},
@@ -841,12 +930,12 @@ func (a *App) OpenSQLFile() connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
-	return readSQLFileWithMetadataByPath(selection)
+	return readSQLFileWithMetadataByPathWithText(selection, a.appText)
 }
 
 func (a *App) SelectSQLDirectory(currentDir string) connection.QueryResult {
 	selection, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "选择 SQL 目录",
+		Title:            a.appText("file.backend.dialog.select_sql_directory", nil),
 		DefaultDirectory: normalizeDirectoryDialogPath(currentDir),
 	})
 	if err != nil {
@@ -868,7 +957,7 @@ func (a *App) SelectSQLDirectory(currentDir string) connection.QueryResult {
 func (a *App) ListSQLDirectory(directory string) connection.QueryResult {
 	target := strings.TrimSpace(directory)
 	if target == "" {
-		return connection.QueryResult{Success: false, Message: "目录路径不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.directory_path_required", nil)}
 	}
 	if abs, err := filepath.Abs(target); err == nil {
 		target = abs
@@ -879,7 +968,7 @@ func (a *App) ListSQLDirectory(directory string) connection.QueryResult {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	if !info.IsDir() {
-		return connection.QueryResult{Success: false, Message: "所选路径不是目录"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.selected_path_not_directory", nil)}
 	}
 
 	entries, err := buildSQLDirectoryEntries(target)
@@ -890,15 +979,15 @@ func (a *App) ListSQLDirectory(directory string) connection.QueryResult {
 }
 
 func (a *App) ReadSQLFile(filePath string) connection.QueryResult {
-	return readSQLFileByPath(filePath)
+	return readSQLFileByPathWithText(filePath, a.appText)
 }
 
 func (a *App) ReadAppLogTail(lineLimit int, keyword string) connection.QueryResult {
-	return readAppLogTailByPath(logger.Path(), lineLimit, keyword)
+	return readAppLogTailByPathWithText(logger.Path(), lineLimit, keyword, a.appText)
 }
 
 func (a *App) WriteSQLFile(filePath string, content string) connection.QueryResult {
-	return writeSQLFileByPath(filePath, content)
+	return writeSQLFileByPathWithText(filePath, content, a.appText)
 }
 
 func normalizeAppLogTailLineLimit(input int) int {
@@ -972,9 +1061,13 @@ func buildAppLogLevelBreakdown(lines []string) map[string]int {
 }
 
 func readAppLogTailByPath(filePath string, lineLimit int, keyword string) connection.QueryResult {
+	return readAppLogTailByPathWithText(filePath, lineLimit, keyword, nil)
+}
+
+func readAppLogTailByPathWithText(filePath string, lineLimit int, keyword string, text fileBackendTextFunc) connection.QueryResult {
 	target := strings.TrimSpace(filePath)
 	if target == "" {
-		return connection.QueryResult{Success: false, Message: "当前未找到 GoNavi 日志文件"}
+		return connection.QueryResult{Success: false, Message: fileBackendText(text, "file.backend.error.app_log_file_not_found", nil)}
 	}
 
 	if _, err := os.Stat(target); err != nil {
@@ -1025,40 +1118,40 @@ func readAppLogTailByPath(filePath string, lineLimit int, keyword string) connec
 }
 
 func (a *App) CreateSQLFile(directoryPath string, name string) connection.QueryResult {
-	return createSQLFileInDirectory(directoryPath, name)
+	return createSQLFileInDirectoryWithText(directoryPath, name, a.appText)
 }
 
 func (a *App) CreateSQLDirectory(directoryPath string, name string) connection.QueryResult {
-	return createSQLDirectoryInDirectory(directoryPath, name)
+	return createSQLDirectoryInDirectoryWithText(directoryPath, name, a.appText)
 }
 
 func (a *App) DeleteSQLFile(filePath string) connection.QueryResult {
-	return deleteSQLFileByPath(filePath)
+	return deleteSQLFileByPathWithText(filePath, a.appText)
 }
 
 func (a *App) DeleteSQLDirectory(directoryPath string) connection.QueryResult {
-	return deleteSQLDirectoryByPath(directoryPath)
+	return deleteSQLDirectoryByPathWithText(directoryPath, a.appText)
 }
 
 func (a *App) RenameSQLFile(filePath string, name string) connection.QueryResult {
-	return renameSQLFileByPath(filePath, name)
+	return renameSQLFileByPathWithText(filePath, name, a.appText)
 }
 
 func (a *App) RenameSQLDirectory(directoryPath string, name string) connection.QueryResult {
-	return renameSQLDirectoryByPath(directoryPath, name)
+	return renameSQLDirectoryByPathWithText(directoryPath, name, a.appText)
 }
 
 func (a *App) ExportSQLFile(defaultName string, content string) connection.QueryResult {
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "导出 SQL 文件",
+		Title:           a.appText("query_editor.action.export_sql_file", nil),
 		DefaultFilename: normalizeSQLExportDefaultFilename(defaultName),
 		Filters: []runtime.FileFilter{
 			{
-				DisplayName: "SQL Files (*.sql)",
+				DisplayName: a.appText("file.backend.filter.sql_files", nil),
 				Pattern:     "*.sql",
 			},
 			{
-				DisplayName: "All Files (*.*)",
+				DisplayName: a.appText("file.backend.filter.all_files_pattern", nil),
 				Pattern:     "*.*",
 			},
 		},
@@ -1066,9 +1159,9 @@ func (a *App) ExportSQLFile(defaultName string, content string) connection.Query
 	if err != nil || strings.TrimSpace(filename) == "" {
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
-	result := writeExportedSQLFileByPath(filename, content)
+	result := writeExportedSQLFileByPathWithText(filename, content, a.appText)
 	if result.Success {
-		result.Message = "SQL 文件已导出"
+		result.Message = a.appText("query_editor.message.export_sql_file_success", nil)
 	}
 	return result
 }
@@ -1167,7 +1260,7 @@ func updateSQLFileTransactionState(inTransaction bool, stmt string) bool {
 	}
 }
 
-func executeSQLFileBatch(ctx context.Context, execer sqlFileStatementExecer, batcher sqlFileBatchStatementExecer, dbType string, batchSQL string, useTransaction bool) (bool, error) {
+func executeSQLFileBatch(ctx context.Context, execer sqlFileStatementExecer, batcher sqlFileBatchStatementExecer, dbType string, batchSQL string, useTransaction bool, text fileBackendTextFunc) (bool, error) {
 	if !useTransaction {
 		_, err := batcher.ExecBatchContext(ctx, batchSQL)
 		return false, err
@@ -1184,7 +1277,10 @@ func executeSQLFileBatch(ctx context.Context, execer sqlFileStatementExecer, bat
 	}
 	if _, err := batcher.ExecBatchContext(ctx, batchSQL); err != nil {
 		if _, rollbackErr := execSQLFileStatement(ctx, execer, rollbackSQL); rollbackErr != nil {
-			return false, fmt.Errorf("批量执行失败: %v；回滚失败: %w", err, rollbackErr)
+			return false, errors.New(fileBackendText(text, "file.backend.error.sql_file_batch_rollback_failed", map[string]any{
+				"detail":         err.Error(),
+				"rollbackDetail": rollbackErr.Error(),
+			}))
 		}
 		return true, err
 	}
@@ -1256,7 +1352,11 @@ func executeSQLFileStream(ctx context.Context, dbInst db.Database, reader io.Rea
 
 	recordError := func(index int, stmt string, err error) {
 		result.Failed++
-		errLog := fmt.Sprintf("第 %d 条语句执行失败: %v\n  SQL: %s", index+1, err, sqlFileStatementSnippet(stmt, 200))
+		errLog := fileBackendText(options.Text, "file.backend.message.statement_failed", map[string]any{
+			"index":  index + 1,
+			"detail": err.Error(),
+			"sql":    sqlFileStatementSnippet(stmt, 200),
+		})
 		result.Errors = append(result.Errors, errLog)
 		logger.Warnf("ExecuteSQLFile %s", errLog)
 	}
@@ -1297,14 +1397,17 @@ func executeSQLFileStream(ctx context.Context, dbInst db.Database, reader io.Rea
 
 		startIndex := batch[0].Index
 		batchSQL := joinSQLFileBatchStatements(batch)
-		canFallback, err := executeSQLFileBatch(ctx, execer, batcher, options.DBType, batchSQL, useTransactionalBatch)
+		canFallback, err := executeSQLFileBatch(ctx, execer, batcher, options.DBType, batchSQL, useTransactionalBatch, options.Text)
 		if err != nil {
 			logger.Warnf("ExecuteSQLFile 批量执行 %d 条语句失败，将降级逐条执行：第 %d 条起: %v", len(batch), startIndex+1, err)
 			pending := append([]sqlFilePendingStatement(nil), batch...)
 			batch = batch[:0]
 			batchBytes = 0
 			if !canFallback {
-				return fmt.Errorf("第 %d 条起的批量语句执行失败: %w", startIndex+1, err)
+				return errors.New(fileBackendText(options.Text, "file.backend.error.sql_file_batch_execution_failed", map[string]any{
+					"index":  startIndex + 1,
+					"detail": err.Error(),
+				}))
 			}
 			return executeBatchSequentially(pending)
 		}
@@ -1340,11 +1443,14 @@ func executeSQLFileStream(ctx context.Context, dbInst db.Database, reader io.Rea
 				if err := flushBatch(); err != nil {
 					return err
 				}
-				canFallback, err := executeSQLFileBatch(ctx, execer, batcher, options.DBType, stmt, useTransactionalBatch)
+				canFallback, err := executeSQLFileBatch(ctx, execer, batcher, options.DBType, stmt, useTransactionalBatch, options.Text)
 				if err != nil {
 					logger.Warnf("ExecuteSQLFile 超大语句批量执行失败，将降级单条执行：第 %d 条: %v", index+1, err)
 					if !canFallback {
-						return fmt.Errorf("第 %d 条语句执行失败: %w", index+1, err)
+						return errors.New(fileBackendText(options.Text, "file.backend.error.sql_file_statement_execution_failed", map[string]any{
+							"index":  index + 1,
+							"detail": err.Error(),
+						}))
 					}
 					return executeSingle(sqlFilePendingStatement{Index: index, SQL: stmt})
 				}
@@ -1385,7 +1491,7 @@ func executeSQLFileStream(ctx context.Context, dbInst db.Database, reader io.Rea
 // 前端通过 EventsOn("sqlfile:progress", ...) 监听进度。
 func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, filePath string, jobID string) connection.QueryResult {
 	if strings.TrimSpace(filePath) == "" {
-		return connection.QueryResult{Success: false, Message: "文件路径为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.file_path_empty", nil)}
 	}
 	if strings.TrimSpace(jobID) == "" {
 		jobID = fmt.Sprintf("sqlfile-%d", time.Now().UnixMilli())
@@ -1404,7 +1510,7 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 	// 打开文件
 	f, err := os.Open(filePath)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("无法打开文件: %v", err)}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.open_file_failed", map[string]any{"detail": err.Error()})}
 	}
 	defer f.Close()
 
@@ -1459,6 +1565,7 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 	startTime := time.Now()
 	execResult, streamErr := executeSQLFileStream(ctx, dbInst, cr, sqlFileExecutionOptions{
 		DBType: resolveDDLDBType(runConfig),
+		Text:   a.appText,
 		OnProgress: func(progress sqlFileExecutionProgress) {
 			emitProgress(
 				progress.Status,
@@ -1480,11 +1587,15 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 	errorLogs := execResult.Errors
 
 	if streamErr != nil && streamErr.Error() == "已取消" {
-		emitProgress("cancelled", executedCount, failedCount, executedCount+failedCount, cr.n, "", "用户取消执行")
+		emitProgress("cancelled", executedCount, failedCount, executedCount+failedCount, cr.n, "", a.appText("file.backend.message.user_cancelled", nil))
 		logger.Warnf("ExecuteSQLFile 已取消：executed=%d failed=%d duration=%v", executedCount, failedCount, duration)
 		return connection.QueryResult{
 			Success: false,
-			Message: fmt.Sprintf("执行已取消。已执行 %d 条，失败 %d 条，耗时 %v。", executedCount, failedCount, duration.Round(time.Millisecond)),
+			Message: a.appText("file.backend.message.execution_cancelled", map[string]any{
+				"executed": executedCount,
+				"failed":   failedCount,
+				"duration": duration.Round(time.Millisecond),
+			}),
 		}
 	}
 
@@ -1492,21 +1603,28 @@ func (a *App) ExecuteSQLFile(config connection.ConnectionConfig, dbName string, 
 		emitProgress("error", executedCount, failedCount, executedCount+failedCount, cr.n, "", streamErr.Error())
 		return connection.QueryResult{
 			Success: false,
-			Message: fmt.Sprintf("文件读取错误: %v。已执行 %d 条。", streamErr, executedCount),
+			Message: a.appText("file.backend.error.read_file_error_summary", map[string]any{
+				"detail": streamErr.Error(),
+				"count":  executedCount,
+			}),
 		}
 	}
 
 	emitProgress("done", executedCount, failedCount, executedCount+failedCount, totalSize, "", "")
 
-	summary := fmt.Sprintf("执行完成。成功 %d 条，失败 %d 条，耗时 %v。", executedCount, failedCount, duration.Round(time.Millisecond))
+	summary := a.appText("file.backend.message.execution_completed", map[string]any{
+		"success":  executedCount,
+		"failed":   failedCount,
+		"duration": duration.Round(time.Millisecond),
+	})
 	if len(errorLogs) > 0 {
 		maxShow := 20
 		if len(errorLogs) < maxShow {
 			maxShow = len(errorLogs)
 		}
-		summary += "\n\n错误详情（前 " + fmt.Sprintf("%d", maxShow) + " 条）：\n" + strings.Join(errorLogs[:maxShow], "\n")
+		summary += "\n\n" + a.appText("file.backend.message.execution_error_detail_header", map[string]any{"count": maxShow}) + "\n" + strings.Join(errorLogs[:maxShow], "\n")
 		if len(errorLogs) > maxShow {
-			summary += fmt.Sprintf("\n...还有 %d 条错误未显示", len(errorLogs)-maxShow)
+			summary += "\n" + a.appText("file.backend.message.execution_more_errors", map[string]any{"count": len(errorLogs) - maxShow})
 		}
 	}
 
@@ -1522,9 +1640,9 @@ func (a *App) CancelSQLFileExecution(jobID string) connection.QueryResult {
 	if ctx, exists := a.runningQueries[jobID]; exists {
 		ctx.cancel()
 		delete(a.runningQueries, jobID)
-		return connection.QueryResult{Success: true, Message: "已发送取消请求"}
+		return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.cancel_requested", nil)}
 	}
-	return connection.QueryResult{Success: false, Message: "未找到该任务"}
+	return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.task_not_found", nil)}
 }
 
 // countingReader 包装 io.Reader，追踪已读取的字节数。
@@ -1584,7 +1702,7 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 
 	content, err := readImportedConnectionConfigFile(selection)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: localizedConnectionPackageMessage(a.appText, err)}
 	}
 
 	return connection.QueryResult{Success: true, Data: content}
@@ -1592,11 +1710,11 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 
 func (a *App) ExportConnectionsPackage(options ConnectionExportOptions) connection.QueryResult {
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "Export Connections",
+		Title:           a.appText("file.backend.dialog.export_connections", nil),
 		DefaultFilename: "connections" + connectionPackageExtension,
 		Filters: []runtime.FileFilter{
 			{
-				DisplayName: "GoNavi Connection Package (*.gonavi-conn)",
+				DisplayName: a.appText("file.backend.filter.connection_package", nil),
 				Pattern:     "*.gonavi-conn",
 			},
 		},
@@ -1608,15 +1726,15 @@ func (a *App) ExportConnectionsPackage(options ConnectionExportOptions) connecti
 
 	content, err := a.buildExportedConnectionPackage(options)
 	if err != nil {
-		return connection.QueryResult{Success: false, Message: err.Error()}
+		return connection.QueryResult{Success: false, Message: localizedConnectionPackageExportMessage(a.appText, err)}
 	}
 	if len(content) > connectionImportMaxFileBytes {
-		return connection.QueryResult{Success: false, Message: errConnectionImportFileTooLarge.Error()}
+		return connection.QueryResult{Success: false, Message: localizedConnectionPackageExportMessage(a.appText, errConnectionImportFileTooLarge)}
 	}
 	if err := os.WriteFile(filename, content, 0o644); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
-	return connection.QueryResult{Success: true, Message: "导出完成"}
+	return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.export_completed", nil)}
 }
 
 func normalizeConnectionPackageExportFilename(filename string) string {
@@ -1647,15 +1765,15 @@ func (a *App) SelectSSHKeyFile(currentPath string) connection.QueryResult {
 	}
 
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "选择 SSH 私钥文件",
+		Title:            a.appText("file.backend.dialog.select_ssh_key_file", nil),
 		DefaultDirectory: defaultDir,
 		Filters: []runtime.FileFilter{
 			{
-				DisplayName: "私钥文件",
+				DisplayName: a.appText("file.backend.filter.private_key_files", nil),
 				Pattern:     "*.pem;*.key;*.ppk;*id_rsa*",
 			},
 			{
-				DisplayName: "所有文件",
+				DisplayName: a.appText("file.backend.filter.all_files", nil),
 				Pattern:     "*",
 			},
 		},
@@ -1689,28 +1807,28 @@ func (a *App) SelectCertificateFile(currentPath string, certKind string) connect
 	}
 
 	kind := strings.ToLower(strings.TrimSpace(certKind))
-	title := "选择 TLS 证书文件"
-	displayName := "证书文件"
+	titleKey := "file.backend.dialog.select_tls_certificate_file"
+	displayNameKey := "file.backend.filter.certificate_files"
 	switch kind {
 	case "ca":
-		title = "选择 CA/服务端证书文件"
+		titleKey = "file.backend.dialog.select_ca_server_certificate_file"
 	case "client-cert":
-		title = "选择客户端证书文件"
+		titleKey = "file.backend.dialog.select_client_certificate_file"
 	case "client-key":
-		title = "选择客户端私钥文件"
-		displayName = "私钥文件"
+		titleKey = "file.backend.dialog.select_client_private_key_file"
+		displayNameKey = "file.backend.filter.private_key_files"
 	}
 
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            title,
+		Title:            a.appText(titleKey, nil),
 		DefaultDirectory: defaultDir,
 		Filters: []runtime.FileFilter{
 			{
-				DisplayName: displayName,
+				DisplayName: a.appText(displayNameKey, nil),
 				Pattern:     "*.pem;*.crt;*.cer;*.cert;*.key",
 			},
 			{
-				DisplayName: "所有文件",
+				DisplayName: a.appText("file.backend.filter.all_files", nil),
 				Pattern:     "*",
 			},
 		},
@@ -1746,44 +1864,44 @@ func (a *App) SelectDatabaseFile(currentPath string, driverType string) connecti
 	normalizedType := strings.ToLower(strings.TrimSpace(driverType))
 	filters := []runtime.FileFilter{
 		{
-			DisplayName: "数据库文件",
+			DisplayName: a.appText("file.backend.filter.database_files", nil),
 			Pattern:     "*.db;*.sqlite;*.sqlite3;*.db3;*.duckdb;*.ddb",
 		},
 		{
-			DisplayName: "所有文件",
+			DisplayName: a.appText("file.backend.filter.all_files", nil),
 			Pattern:     "*",
 		},
 	}
-	title := "选择数据库文件"
+	titleKey := "file.backend.dialog.select_database_file"
 	switch normalizedType {
 	case "sqlite":
-		title = "选择 SQLite 数据文件"
+		titleKey = "file.backend.dialog.select_sqlite_file"
 		filters = []runtime.FileFilter{
 			{
-				DisplayName: "SQLite 文件",
+				DisplayName: a.appText("file.backend.filter.sqlite_files", nil),
 				Pattern:     "*.db;*.sqlite;*.sqlite3;*.db3",
 			},
 			{
-				DisplayName: "所有文件",
+				DisplayName: a.appText("file.backend.filter.all_files", nil),
 				Pattern:     "*",
 			},
 		}
 	case "duckdb":
-		title = "选择 DuckDB 数据文件"
+		titleKey = "file.backend.dialog.select_duckdb_file"
 		filters = []runtime.FileFilter{
 			{
-				DisplayName: "DuckDB 文件",
+				DisplayName: a.appText("file.backend.filter.duckdb_files", nil),
 				Pattern:     "*.duckdb;*.ddb;*.db",
 			},
 			{
-				DisplayName: "所有文件",
+				DisplayName: a.appText("file.backend.filter.all_files", nil),
 				Pattern:     "*",
 			},
 		}
 	}
 
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            title,
+		Title:            a.appText(titleKey, nil),
 		DefaultDirectory: defaultDir,
 		Filters:          filters,
 	})
@@ -1801,8 +1919,8 @@ func (a *App) SelectDatabaseFile(currentPath string, driverType string) connecti
 
 // PreviewImportFile 解析导入文件，返回字段列表、总行数、前 5 行预览数据
 func (a *App) PreviewImportFile(filePath string) connection.QueryResult {
-	if filePath == "" {
-		return connection.QueryResult{Success: false, Message: "文件路径不能为空"}
+	if strings.TrimSpace(filePath) == "" {
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.import_file_empty", nil)}
 	}
 
 	preview, err := buildImportPreview(filePath, defaultImportPreviewLimit)
@@ -1821,14 +1939,14 @@ func (a *App) PreviewImportFile(filePath string) connection.QueryResult {
 }
 
 func (a *App) ImportData(config connection.ConnectionConfig, dbName, tableName string) connection.QueryResult {
-	if err := ensureConnectionAllowsDataImport(config, "导入数据"); err != nil {
+	if err := ensureConnectionAllowsDataImport(config, "connection.backend.action.import_data"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	selection, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: fmt.Sprintf("Import into %s", tableName),
+		Title: a.appText("file.backend.dialog.import_data", map[string]any{"table": tableName}),
 		Filters: []runtime.FileFilter{
 			{
-				DisplayName: "Data Files",
+				DisplayName: a.appText("file.backend.filter.data_files", nil),
 				Pattern:     "*.csv;*.json;*.xlsx;*.xls",
 			},
 		},
@@ -2167,7 +2285,7 @@ func formatImportSQLValue(dbType, columnType string, value interface{}) string {
 
 // ImportDataWithProgress 执行导入并发送进度事件
 func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName, tableName, filePath string) connection.QueryResult {
-	if err := ensureConnectionAllowsDataImport(config, "导入数据"); err != nil {
+	if err := ensureConnectionAllowsDataImport(config, "connection.backend.action.import_data"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	runConfig := normalizeRunConfig(config, dbName)
@@ -2201,23 +2319,27 @@ func (a *App) ImportDataWithProgress(config connection.ConnectionConfig, dbName,
 	resultData := consumer.Result()
 	if resultData.Total == 0 {
 		maybeReleaseFileTransferMemory("import-empty", 0, filePath)
-		return connection.QueryResult{Success: true, Message: "无可导入数据"}
+		return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.import_no_data", nil)}
 	}
 
+	summary := a.appText("file.backend.message.import_summary", map[string]any{
+		"imported": resultData.Success,
+		"failed":   resultData.Failed,
+	})
 	result := map[string]interface{}{
 		"success":      resultData.Success,
 		"failed":       resultData.Failed,
 		"total":        resultData.Total,
 		"errorLogs":    resultData.ErrorLogs,
-		"errorSummary": fmt.Sprintf("Imported: %d, Failed: %d", resultData.Success, resultData.Failed),
+		"errorSummary": summary,
 	}
 
 	maybeReleaseFileTransferMemory("import-finished", int64(resultData.Total), filePath)
-	return connection.QueryResult{Success: true, Data: result, Message: fmt.Sprintf("Imported: %d, Failed: %d", resultData.Success, resultData.Failed)}
+	return connection.QueryResult{Success: true, Data: result, Message: summary}
 }
 
 func (a *App) ApplyChanges(config connection.ConnectionConfig, dbName, tableName string, changes connection.ChangeSet) connection.QueryResult {
-	if err := ensureConnectionAllowsDataEdit(config, "提交结果修改"); err != nil {
+	if err := ensureConnectionAllowsDataEdit(config, "connection.backend.action.apply_result_changes"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	runConfig := normalizeRunConfig(config, dbName)
@@ -2232,10 +2354,10 @@ func (a *App) ApplyChanges(config connection.ConnectionConfig, dbName, tableName
 		if err != nil {
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
-		return connection.QueryResult{Success: true, Message: "事务提交成功"}
+		return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.transaction_committed", nil)}
 	}
 
-	return connection.QueryResult{Success: false, Message: "当前数据库类型不支持批量提交"}
+	return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.batch_commit_unsupported", nil)}
 }
 
 // ChangePreview 变更预览结果
@@ -2246,7 +2368,7 @@ type ChangePreview struct {
 }
 
 func (a *App) PreviewChanges(config connection.ConnectionConfig, dbName, tableName string, changes connection.ChangeSet) connection.QueryResult {
-	if err := ensureConnectionAllowsDataEdit(config, "预览结果修改"); err != nil {
+	if err := ensureConnectionAllowsDataEdit(config, "connection.backend.action.preview_result_changes"); err != nil {
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 	runConfig := normalizeRunConfig(config, dbName)
@@ -2284,7 +2406,7 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 		}
 	}
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           fmt.Sprintf("Export %s", tableName),
+		Title:           a.appText("file.backend.dialog.export_table", map[string]any{"table": tableName}),
 		DefaultFilename: fmt.Sprintf("%s.%s", tableName, format),
 	})
 
@@ -2293,7 +2415,7 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 	}
 
 	reporter := newExportProgressReporter(a, options, tableName, filename)
-	reporter.Start("正在准备导出")
+	reporter.Start(a.appText("data_export.progress.stage.preparing_export", nil))
 	runConfig := normalizeRunConfig(config, dbName)
 
 	dbInst, err := a.getDatabase(runConfig)
@@ -2309,13 +2431,13 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 			if reporter != nil {
 				reporter.totalRows = totalRows
 				reporter.totalRowsKnown = true
-				reporter.Start("正在准备导出")
+				reporter.Start(a.appText("data_export.progress.stage.preparing_export", nil))
 			}
 		}
 	}
 
 	if format == "sql" {
-		reporter.Start("正在导出 SQL 文件")
+		reporter.Start(a.appText("data_export.progress.stage.exporting_sql_file", nil))
 		f, err := os.Create(filename)
 		if err != nil {
 			reporter.Error(0, err.Error())
@@ -2343,7 +2465,7 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 		reporter.Finalizing(0)
 		reporter.Done(0)
 		maybeReleaseFileTransferMemory("export-table-sql-finished", 0, filename)
-		return connection.QueryResult{Success: true, Message: "导出完成"}
+		return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.export_completed", nil)}
 	}
 
 	dbType := resolveDDLDBType(config)
@@ -2357,14 +2479,15 @@ func (a *App) ExportTableWithOptions(config connection.ConnectionConfig, dbName 
 	defer f.Close()
 	rowCount, _, err := exportQueryResultToFile(f, dbInst, runConfig, query, options, reporter)
 	if err != nil {
-		reporter.Error(rowCount, "写入失败："+err.Error())
+		errMsg := a.appText("file.backend.error.write_failed", map[string]any{"detail": err.Error()})
+		reporter.Error(rowCount, errMsg)
 		maybeReleaseFileTransferMemory("export-table-error", rowCount, filename)
-		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
+		return connection.QueryResult{Success: false, Message: errMsg}
 	}
 	reporter.Done(rowCount)
 	maybeReleaseFileTransferMemory("export-table-finished", rowCount, filename)
 
-	return connection.QueryResult{Success: true, Message: "导出完成"}
+	return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.export_completed", nil)}
 }
 
 func (a *App) ExportTablesSQL(config connection.ConnectionConfig, dbName string, tableNames []string, includeData bool) connection.QueryResult {
@@ -2384,7 +2507,7 @@ func (a *App) ExportTablesSQLWithOptions(
 	options ExportFileOptions,
 ) connection.QueryResult {
 	if !includeSchema && !includeData {
-		return connection.QueryResult{Success: false, Message: "无效的导出模式"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.invalid_export_mode", nil)}
 	}
 
 	objects := normalizeExportNameList(tableNames)
@@ -2393,28 +2516,28 @@ func (a *App) ExportTablesSQLWithOptions(
 	options.TotalRowsKnown = true
 
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "Export Tables (SQL)",
+		Title:           a.appText("file.backend.dialog.export_tables_sql", nil),
 		DefaultFilename: buildTablesExportDefaultFilename(dbName, objects, includeSchema, includeData),
 	})
 	if err != nil || filename == "" {
 		return connection.QueryResult{Success: false, Message: "已取消"}
 	}
 
-	reporter := newExportProgressReporter(a, options, resolveBatchObjectsTargetName(dbName, objects), filename)
+	reporter := newExportProgressReporter(a, options, resolveBatchObjectsTargetNameWithText(dbName, objects, a.appText), filename)
 	if reporter != nil {
-		reporter.Start("正在准备批量对象导出")
+		reporter.Start(a.appText("data_export.progress.stage.preparing_batch_tables_export", nil))
 	}
 	return a.exportTablesSQLToFile(config, dbName, objects, includeSchema, includeData, filename, reporter)
 }
 
 func (a *App) exportTablesSQL(config connection.ConnectionConfig, dbName string, tableNames []string, includeSchema bool, includeData bool) connection.QueryResult {
 	if !includeSchema && !includeData {
-		return connection.QueryResult{Success: false, Message: "无效的导出模式"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.invalid_export_mode", nil)}
 	}
 	objects := normalizeExportNameList(tableNames)
 
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "Export Tables (SQL)",
+		Title:           a.appText("file.backend.dialog.export_tables_sql", nil),
 		DefaultFilename: buildTablesExportDefaultFilename(dbName, objects, includeSchema, includeData),
 	})
 	if err != nil || filename == "" {
@@ -2434,7 +2557,7 @@ func (a *App) exportTablesSQLToFile(
 	reporter *exportProgressReporter,
 ) connection.QueryResult {
 	if !includeSchema && !includeData {
-		return connection.QueryResult{Success: false, Message: "无效的导出模式"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.invalid_export_mode", nil)}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -2469,7 +2592,11 @@ func (a *App) exportTablesSQLToFile(
 	}
 	for index, objectName := range objects {
 		if reporter != nil {
-			reporter.ForceRunning(int64(index), fmt.Sprintf("正在导出 %s (%d/%d)", objectName, index+1, len(objects)))
+			reporter.ForceRunning(int64(index), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
+				"name":    objectName,
+				"current": index + 1,
+				"total":   len(objects),
+			}))
 		}
 		if err := dumpTableSQL(w, dbInst, runConfig, dbName, objectName, includeSchema, includeData, viewLookup); err != nil {
 			if reporter != nil {
@@ -2478,7 +2605,11 @@ func (a *App) exportTablesSQLToFile(
 			return connection.QueryResult{Success: false, Message: err.Error()}
 		}
 		if reporter != nil {
-			reporter.ForceRunning(int64(index+1), fmt.Sprintf("正在导出 %s (%d/%d)", objectName, index+1, len(objects)))
+			reporter.ForceRunning(int64(index+1), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
+				"name":    objectName,
+				"current": index + 1,
+				"total":   len(objects),
+			}))
 		}
 	}
 	if err := writeSQLFooter(w, runConfig); err != nil {
@@ -2494,7 +2625,7 @@ func (a *App) exportTablesSQLToFile(
 	}
 	return connection.QueryResult{
 		Success: true,
-		Message: "导出完成",
+		Message: a.appText("file.backend.message.export_completed", nil),
 		Data: map[string]interface{}{
 			"filePath":    filename,
 			"objectCount": len(objects),
@@ -2505,11 +2636,11 @@ func (a *App) exportTablesSQLToFile(
 func (a *App) ExportDatabaseSQL(config connection.ConnectionConfig, dbName string, includeData bool) connection.QueryResult {
 	safeDbName := strings.TrimSpace(dbName)
 	if safeDbName == "" {
-		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.database_name_required", nil)}
 	}
 
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           fmt.Sprintf("Export %s (SQL)", safeDbName),
+		Title:           a.appText("file.backend.dialog.export_database_sql", map[string]any{"database": safeDbName}),
 		DefaultFilename: buildDatabaseExportDefaultFilename(safeDbName, includeData),
 	})
 	if err != nil || filename == "" {
@@ -2527,11 +2658,11 @@ func (a *App) ExportDatabasesSQLWithOptions(
 ) connection.QueryResult {
 	normalizedDbNames := normalizeExportNameList(dbNames)
 	if len(normalizedDbNames) == 0 {
-		return connection.QueryResult{Success: false, Message: "请至少选择一个数据库"}
+		return connection.QueryResult{Success: false, Message: a.appText("sidebar.message.select_database_required", nil)}
 	}
 
 	directory, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
-		Title:            "选择批量导出目录",
+		Title:            a.appText("file.backend.dialog.select_batch_export_directory", nil),
 		DefaultDirectory: normalizeDirectoryDialogPath(""),
 	})
 	if err != nil || strings.TrimSpace(directory) == "" {
@@ -2541,14 +2672,18 @@ func (a *App) ExportDatabasesSQLWithOptions(
 	options = normalizeExportFileOptions("sql", options)
 	options.TotalRowsHint = int64(len(normalizedDbNames))
 	options.TotalRowsKnown = true
-	reporter := newExportProgressReporter(a, options, fmt.Sprintf("%d 个数据库", len(normalizedDbNames)), directory)
+	reporter := newExportProgressReporter(a, options, a.appText("data_export.workbench.target.batch_databases", map[string]any{"count": len(normalizedDbNames)}), directory)
 	if reporter != nil {
-		reporter.Start("正在准备批量库导出")
+		reporter.Start(a.appText("data_export.progress.stage.preparing_batch_databases_export", nil))
 	}
 
 	for index, name := range normalizedDbNames {
 		if reporter != nil {
-			reporter.ForceRunning(int64(index), fmt.Sprintf("正在导出 %s (%d/%d)", name, index+1, len(normalizedDbNames)))
+			reporter.ForceRunning(int64(index), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
+				"name":    name,
+				"current": index + 1,
+				"total":   len(normalizedDbNames),
+			}))
 		}
 		targetFile := filepath.Join(directory, buildDatabaseExportDefaultFilename(name, includeData))
 		result := a.exportDatabaseSQLToFile(config, name, includeData, targetFile)
@@ -2559,7 +2694,11 @@ func (a *App) ExportDatabasesSQLWithOptions(
 			return result
 		}
 		if reporter != nil {
-			reporter.ForceRunning(int64(index+1), fmt.Sprintf("正在导出 %s (%d/%d)", name, index+1, len(normalizedDbNames)))
+			reporter.ForceRunning(int64(index+1), a.appText("data_export.progress.stage.exporting_item_with_progress", map[string]any{
+				"name":    name,
+				"current": index + 1,
+				"total":   len(normalizedDbNames),
+			}))
 		}
 	}
 
@@ -2569,7 +2708,7 @@ func (a *App) ExportDatabasesSQLWithOptions(
 	}
 	return connection.QueryResult{
 		Success: true,
-		Message: "导出完成",
+		Message: a.appText("file.backend.message.export_completed", nil),
 		Data: map[string]interface{}{
 			"directoryPath": directory,
 			"fileCount":     len(normalizedDbNames),
@@ -2585,7 +2724,7 @@ func (a *App) exportDatabaseSQLToFile(
 ) connection.QueryResult {
 	safeDbName := strings.TrimSpace(dbName)
 	if safeDbName == "" {
-		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.database_name_required", nil)}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -2624,7 +2763,7 @@ func (a *App) exportDatabaseSQLToFile(
 
 	return connection.QueryResult{
 		Success: true,
-		Message: "导出完成",
+		Message: a.appText("file.backend.message.export_completed", nil),
 		Data: map[string]interface{}{
 			"filePath": filename,
 		},
@@ -2635,10 +2774,10 @@ func (a *App) ExportSchemaSQL(config connection.ConnectionConfig, dbName string,
 	safeDbName := strings.TrimSpace(dbName)
 	safeSchemaName := strings.TrimSpace(schemaName)
 	if safeDbName == "" {
-		return connection.QueryResult{Success: false, Message: "数据库名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.database_name_required", nil)}
 	}
 	if safeSchemaName == "" {
-		return connection.QueryResult{Success: false, Message: "模式名称不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.schema_name_required", nil)}
 	}
 
 	suffix := "schema"
@@ -2647,7 +2786,7 @@ func (a *App) ExportSchemaSQL(config connection.ConnectionConfig, dbName string,
 	}
 
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           fmt.Sprintf("Export %s.%s (SQL)", safeDbName, safeSchemaName),
+		Title:           a.appText("file.backend.dialog.export_database_sql", map[string]any{"database": safeDbName + "." + safeSchemaName}),
 		DefaultFilename: fmt.Sprintf("%s_%s_%s.sql", safeDbName, safeSchemaName, suffix),
 	})
 	if err != nil || filename == "" {
@@ -2669,7 +2808,7 @@ func (a *App) ExportSchemaSQL(config connection.ConnectionConfig, dbName string,
 	filteredViews := filterExportViewLookupBySchema(runConfig, dbName, viewLookup, safeSchemaName)
 	objects := buildExportObjectOrder(runConfig, dbName, filteredTables, filteredViews, true)
 	if len(objects) == 0 {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("未在模式 %s 下获取到可导出的表或视图", safeSchemaName)}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.schema_export_no_objects", map[string]any{"schema": safeSchemaName})}
 	}
 
 	f, err := os.Create(filename)
@@ -2696,7 +2835,7 @@ func (a *App) ExportSchemaSQL(config connection.ConnectionConfig, dbName string,
 		return connection.QueryResult{Success: false, Message: err.Error()}
 	}
 
-	return connection.QueryResult{Success: true, Message: "导出完成"}
+	return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.export_completed", nil)}
 }
 
 type tableDataClearMode string
@@ -2716,13 +2855,17 @@ func supportsTruncateTableForDBType(dbType string) bool {
 }
 
 func buildTableDataClearSQL(config connection.ConnectionConfig, objectName string, mode tableDataClearMode) (string, error) {
+	return buildTableDataClearSQLWithText(config, objectName, mode, nil)
+}
+
+func buildTableDataClearSQLWithText(config connection.ConnectionConfig, objectName string, mode tableDataClearMode, text fileBackendTextFunc) (string, error) {
 	dbType := resolveDDLDBType(config)
 	quotedObject := quoteQualifiedIdentByType(dbType, objectName)
 
 	switch mode {
 	case tableDataClearModeTruncate:
 		if !supportsTruncateTableForDBType(dbType) {
-			return "", fmt.Errorf("当前数据库类型 %s 不支持截断表，请改用清空表", strings.TrimSpace(dbType))
+			return "", errors.New(fileBackendText(text, "file.backend.error.table_data_truncate_unsupported", map[string]any{"type": strings.TrimSpace(dbType)}))
 		}
 		return fmt.Sprintf("TRUNCATE TABLE %s", quotedObject), nil
 	case tableDataClearModeDeleteAll:
@@ -2731,16 +2874,31 @@ func buildTableDataClearSQL(config connection.ConnectionConfig, objectName strin
 		}
 		return fmt.Sprintf("DELETE FROM %s", quotedObject), nil
 	default:
-		return "", fmt.Errorf("不支持的表数据清理模式: %s", mode)
+		return "", errors.New(fileBackendText(text, "file.backend.error.table_data_mode_unsupported", map[string]any{"mode": string(mode)}))
 	}
 }
 
 func tableDataClearActionLabels(mode tableDataClearMode) (actionLabel string, progressLabel string) {
 	switch mode {
 	case tableDataClearModeTruncate:
-		return "截断表", "截断"
+		return "truncate_table", "truncate"
 	default:
-		return "清空表", "清空"
+		return "clear_table", "clear"
+	}
+}
+
+func tableDataClearMessageKeys(mode tableDataClearMode, partial bool) (failureKey string, successKey string) {
+	switch mode {
+	case tableDataClearModeTruncate:
+		if partial {
+			return "file.backend.error.table_data_truncate_failed_partial", "file.backend.message.table_data_truncate_succeeded"
+		}
+		return "file.backend.error.table_data_truncate_failed", "file.backend.message.table_data_truncate_succeeded"
+	default:
+		if partial {
+			return "file.backend.error.table_data_clear_failed_partial", "file.backend.message.table_data_clear_succeeded"
+		}
+		return "file.backend.error.table_data_clear_failed", "file.backend.message.table_data_clear_succeeded"
 	}
 }
 
@@ -2753,7 +2911,7 @@ func (a *App) runTableDataClear(config connection.ConnectionConfig, dbName strin
 
 	// 参数校验
 	if len(tableNames) == 0 {
-		return connection.QueryResult{Success: false, Message: "未指定要处理的表"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.table_data_no_tables", nil)}
 	}
 
 	objects := make([]string, 0, len(tableNames))
@@ -2771,11 +2929,11 @@ func (a *App) runTableDataClear(config connection.ConnectionConfig, dbName strin
 	}
 
 	if len(objects) == 0 {
-		return connection.QueryResult{Success: false, Message: "未指定要处理的表"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.table_data_no_tables", nil)}
 	}
 	const maxBatchSize = 200
 	if len(objects) > maxBatchSize {
-		return connection.QueryResult{Success: false, Message: fmt.Sprintf("单次最多处理 %d 张表，当前选中 %d 张", maxBatchSize, len(objects))}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.table_data_batch_limit", map[string]any{"max": maxBatchSize, "count": len(objects)})}
 	}
 
 	dbInst, err := a.getDatabase(runConfig)
@@ -2787,7 +2945,7 @@ func (a *App) runTableDataClear(config connection.ConnectionConfig, dbName strin
 
 	var executedSQLs []string
 	for i, objectName := range objects {
-		sql, sqlErr := buildTableDataClearSQL(runConfig, objectName, mode)
+		sql, sqlErr := buildTableDataClearSQLWithText(runConfig, objectName, mode, a.appText)
 		if sqlErr != nil {
 			return connection.QueryResult{
 				Success: false,
@@ -2801,10 +2959,8 @@ func (a *App) runTableDataClear(config connection.ConnectionConfig, dbName strin
 
 		if _, err := dbInst.Exec(sql); err != nil {
 			logger.Warnf("%s 第 %d/%d 张表失败：%s table=%s err=%v（已成功%s %d 张）", actionLabel, i+1, len(objects), formatConnSummary(runConfig), objectName, err, progressLabel, len(executedSQLs))
-			errMsg := fmt.Sprintf("%s %s 失败: %v", progressLabel, objectName, err)
-			if len(executedSQLs) > 0 {
-				errMsg += fmt.Sprintf("（注意：前 %d 张表已%s且无法恢复）", len(executedSQLs), progressLabel)
-			}
+			failureKey, _ := tableDataClearMessageKeys(mode, len(executedSQLs) > 0)
+			errMsg := a.appText(failureKey, map[string]any{"table": objectName, "detail": err.Error(), "count": len(executedSQLs)})
 			return connection.QueryResult{
 				Success: false,
 				Message: errMsg,
@@ -2819,9 +2975,10 @@ func (a *App) runTableDataClear(config connection.ConnectionConfig, dbName strin
 
 	logger.Warnf("%s 完成：%s db=%s 共%s %d 张表", actionLabel, formatConnSummary(runConfig), dbName, progressLabel, len(executedSQLs))
 
+	_, successKey := tableDataClearMessageKeys(mode, false)
 	return connection.QueryResult{
 		Success: true,
-		Message: progressLabel + "成功",
+		Message: a.appText(successKey, nil),
 		Data: map[string]interface{}{
 			"executedSQLs": executedSQLs,
 			"count":        len(executedSQLs),
@@ -3463,7 +3620,20 @@ func looksLikeSelectOrWith(sql string) bool {
 		return false
 	}
 	lower := strings.ToLower(trimmed)
-	return strings.HasPrefix(lower, "select ") || strings.HasPrefix(lower, "with ") || lower == "select" || lower == "with"
+	return hasLeadingReadonlySQLKeyword(lower, "select") || hasLeadingReadonlySQLKeyword(lower, "with")
+}
+
+func hasLeadingReadonlySQLKeyword(sql string, keyword string) bool {
+	if sql == keyword {
+		return true
+	}
+	if !strings.HasPrefix(sql, keyword) {
+		return false
+	}
+	if len(sql) <= len(keyword) {
+		return true
+	}
+	return unicode.IsSpace(rune(sql[len(keyword)]))
 }
 
 func escapeSQLLiteral(value string) string {
@@ -3658,7 +3828,7 @@ func (a *App) ExportDataWithOptions(data []map[string]interface{}, columns []str
 	format := options.Format
 	logger.Infof("ExportData 开始：rows=%d cols=%d format=%s defaultName=%s", len(data), len(columns), strings.ToLower(strings.TrimSpace(format)), strings.TrimSpace(defaultName))
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "Export Data",
+		Title:           a.appText("file.backend.dialog.export_data", nil),
 		DefaultFilename: fmt.Sprintf("%s.%s", defaultName, strings.ToLower(format)),
 	})
 
@@ -3668,7 +3838,7 @@ func (a *App) ExportDataWithOptions(data []map[string]interface{}, columns []str
 	}
 	logger.Infof("ExportData 选定文件：%s", filename)
 	reporter := newExportProgressReporter(a, options, defaultName, filename)
-	reporter.Start("正在准备导出")
+	reporter.Start(a.appText("data_export.progress.stage.preparing_export", nil))
 
 	f, err := os.Create(filename)
 	if err != nil {
@@ -3679,15 +3849,16 @@ func (a *App) ExportDataWithOptions(data []map[string]interface{}, columns []str
 	writtenRows, err := writeRowsToFileWithReporter(f, data, columns, options, reporter)
 	if err != nil {
 		logger.Warnf("ExportData 写入失败：file=%s err=%v", filename, err)
-		reporter.Error(writtenRows, "写入失败："+err.Error())
+		errMsg := a.appText("file.backend.error.write_failed", map[string]any{"detail": err.Error()})
+		reporter.Error(writtenRows, errMsg)
 		maybeReleaseFileTransferMemory("export-data-error", writtenRows, filename)
-		return connection.QueryResult{Success: false, Message: "写入失败：" + err.Error()}
+		return connection.QueryResult{Success: false, Message: errMsg}
 	}
 
 	logger.Infof("ExportData 完成：file=%s rows=%d", filename, len(data))
 	reporter.Done(writtenRows)
 	maybeReleaseFileTransferMemory("export-data-finished", writtenRows, filename)
-	return connection.QueryResult{Success: true, Message: "导出完成"}
+	return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.export_completed", nil)}
 }
 
 // ExportQuery exports by executing the provided SELECT query on backend side.
@@ -3699,7 +3870,7 @@ func (a *App) ExportQuery(config connection.ConnectionConfig, dbName string, que
 func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName string, query string, defaultName string, options ExportFileOptions) connection.QueryResult {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return connection.QueryResult{Success: false, Message: "查询语句不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.query_required", nil)}
 	}
 
 	if defaultName == "" {
@@ -3714,7 +3885,7 @@ func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName 
 	}
 
 	filename, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-		Title:           "Export Query Result",
+		Title:           a.appText("file.backend.dialog.export_query_result", nil),
 		DefaultFilename: fmt.Sprintf("%s.%s", defaultName, strings.ToLower(format)),
 	})
 	if err != nil || filename == "" {
@@ -3723,7 +3894,7 @@ func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName 
 	}
 	logger.Infof("ExportQuery 开始：type=%s db=%s format=%s file=%s sql=%q", strings.TrimSpace(config.Type), strings.TrimSpace(dbName), strings.ToLower(strings.TrimSpace(format)), filename, sqlSnippet(query))
 	reporter := newExportProgressReporter(a, options, defaultName, filename)
-	reporter.Start("正在准备导出")
+	reporter.Start(a.appText("data_export.progress.stage.preparing_export", nil))
 
 	runConfig := normalizeRunConfig(config, dbName)
 	dbInst, err := a.getDatabase(runConfig)
@@ -3734,8 +3905,7 @@ func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName 
 
 	query = sanitizeSQLForPgLike(resolveDDLDBType(config), query)
 	if !looksLikeSelectOrWith(query) {
-		reporter.Error(0, "仅支持 SELECT/WITH 查询导出")
-		return connection.QueryResult{Success: false, Message: "仅支持 SELECT/WITH 查询导出"}
+		return connection.QueryResult{Success: false, Message: a.appText("file.backend.error.select_with_query_required", nil)}
 	}
 
 	f, err := os.Create(filename)
@@ -3756,7 +3926,7 @@ func (a *App) ExportQueryWithOptions(config connection.ConnectionConfig, dbName 
 	logger.Infof("ExportQuery 完成：file=%s rows=%d cols=%d", filename, rowCount, len(columns))
 	reporter.Done(rowCount)
 	maybeReleaseFileTransferMemory("export-query-finished", rowCount, filename)
-	return connection.QueryResult{Success: true, Message: "导出完成"}
+	return connection.QueryResult{Success: true, Message: a.appText("file.backend.message.export_completed", nil)}
 }
 
 func queryDataForExport(dbInst db.Database, config connection.ConnectionConfig, query string) ([]map[string]interface{}, []string, error) {
@@ -3824,7 +3994,7 @@ func (c *countingExportConsumer) SetColumns(columns []string) error {
 		}
 	}
 	if c.reporter != nil {
-		c.reporter.ForceRunning(c.rowCount, "正在写入文件")
+		c.reporter.ForceRunning(c.rowCount, c.reporter.text("data_export.progress.stage.writing_file", nil))
 	}
 	return nil
 }
@@ -3837,7 +4007,7 @@ func (c *countingExportConsumer) ConsumeRow(row map[string]interface{}) error {
 	}
 	c.rowCount++
 	if c.reporter != nil {
-		c.reporter.Rows(c.rowCount, "正在写入文件")
+		c.reporter.Rows(c.rowCount, c.reporter.text("data_export.progress.stage.writing_file", nil))
 	}
 	return nil
 }
@@ -3864,7 +4034,7 @@ func (c *countingExportConsumer) ConsumeRowValues(values []interface{}) error {
 	}
 	c.rowCount++
 	if c.reporter != nil {
-		c.reporter.Rows(c.rowCount, "正在写入文件")
+		c.reporter.Rows(c.rowCount, c.reporter.text("data_export.progress.stage.writing_file", nil))
 	}
 	return nil
 }
@@ -4438,7 +4608,7 @@ func exportQueryResultToFile(f *os.File, dbInst db.Database, config connection.C
 	}
 
 	if reporter != nil {
-		reporter.Start("正在查询数据")
+		reporter.Start(reporter.text("data_export.progress.stage.querying_data", nil))
 	}
 	consumer := &countingExportConsumer{delegate: writer, reporter: reporter}
 	streamErr := streamQueryDataForExport(dbInst, config, query, consumer)
@@ -4506,7 +4676,7 @@ func writeRowsToFileWithReporter(f *os.File, data []map[string]interface{}, colu
 		return 0, err
 	}
 	if reporter != nil {
-		reporter.ForceRunning(0, "正在写入文件")
+		reporter.ForceRunning(0, reporter.text("data_export.progress.stage.writing_file", nil))
 	}
 	for index, row := range data {
 		if err := writer.ConsumeRow(row); err != nil {
@@ -4514,7 +4684,7 @@ func writeRowsToFileWithReporter(f *os.File, data []map[string]interface{}, colu
 			return int64(index), err
 		}
 		if reporter != nil {
-			reporter.Rows(int64(index+1), "正在写入文件")
+			reporter.Rows(int64(index+1), reporter.text("data_export.progress.stage.writing_file", nil))
 		}
 	}
 	if reporter != nil {

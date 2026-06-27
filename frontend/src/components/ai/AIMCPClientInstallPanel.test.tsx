@@ -62,25 +62,25 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('这里是在把 GoNavi MCP 接入 Claude Code / Codex / OpenClaw / Hermans');
-    expect(markup).toContain('给外部工具调用');
-    expect(markup).toContain('OpenClaw、Hermans 这类云端 Agent 会提供远程接入说明');
-    expect(markup).toContain('接入外部客户端');
-    expect(markup).toContain('选择外部客户端');
-    expect(markup).toContain('选择目标客户端');
-    expect(markup).toContain('写入或复制配置');
-    expect(markup).toContain('重启或配置目标端');
-    expect(markup).toContain('未接入');
-    expect(markup).toContain('需更新');
-    expect(markup).toContain('外部工具接入状态：已存在旧配置，需更新');
-    expect(markup).toContain('外部工具接入状态：未接入');
-    expect(markup).toContain('复制配置路径');
-    expect(markup).toContain('复制启动命令');
-    expect(markup).toContain('更新 Codex 接入配置');
-    expect(markup).toContain('已选客户端状态');
-    expect(markup).toContain('CLI 检测：已检测到 codex');
-    expect(markup).toContain('当前已选中，将只对这个客户端执行写入或更新');
-    expect(markup).toContain('当前目标客户端：Codex');
+    expect(markup).toContain('This connects GoNavi MCP to Claude Code / Codex / OpenClaw / Hermans');
+    expect(markup).toContain('external tool calls');
+    expect(markup).toContain('Cloud Agents such as OpenClaw and Hermans use remote connection guidance');
+    expect(markup).toContain('Connect external client');
+    expect(markup).toContain('Select external client');
+    expect(markup).toContain('Choose target client');
+    expect(markup).toContain('Write or copy config');
+    expect(markup).toContain('Restart or configure target');
+    expect(markup).toContain('Not connected');
+    expect(markup).toContain('Update needed');
+    expect(markup).toContain('External tool connection status: old config found, update needed');
+    expect(markup).toContain('External tool connection status: not connected');
+    expect(markup).toContain('Copy config path');
+    expect(markup).toContain('Copy launch command');
+    expect(markup).toContain('Update Codex connection config');
+    expect(markup).toContain('Selected client status');
+    expect(markup).toContain('CLI detection: Detected codex');
+    expect(markup).toContain('Selected. Only this client will be written or updated');
+    expect(markup).toContain('Current target client: Codex');
   });
 
   it('shows an already-connected label and supports prewriting config when the client command is not detected locally', () => {
@@ -131,10 +131,10 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('安装到 Claude Code（外部工具）');
-    expect(markup).toContain('CLI 检测：未检测到 claude');
-    expect(markup).toContain('未检测到本机 claude 命令');
-    expect(markup).toContain('已接入');
+    expect(markup).toContain('Install to Claude Code (external tool)');
+    expect(markup).toContain('CLI detection: claude was not detected');
+    expect(markup).toContain('Local claude command was not detected');
+    expect(markup).toContain('Connected');
   });
 
   it('renders remote Agent clients as bridge guidance instead of local installs', () => {
@@ -188,35 +188,35 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('远程桥接');
-    expect(markup).toContain('当前已选中，将复制远程接入说明');
-    expect(markup).toContain('远程接入边界');
-    expect(markup).toContain('云端 Agent 默认通过 schema-only MCP 工具读取连接摘要、库表和 DDL');
-    expect(markup).toContain('不注册 execute_sql');
-    expect(markup).toContain('OpenClaw 远程 MCP 快速配置');
-    expect(markup).toContain('公网/隧道 URL');
-    expect(markup).toContain('云端 Agent 能访问到的 Streamable HTTP MCP 地址');
-    expect(markup).toContain('不要填 Windows 本机的 127.0.0.1');
+    expect(markup).toContain('Remote bridge');
+    expect(markup).toContain('Selected. The remote connection guide will be copied');
+    expect(markup).toContain('Remote connection boundary');
+    expect(markup).toContain('Cloud Agents read connection summaries, tables, and DDL through schema-only MCP tools by default');
+    expect(markup).toContain('execute_sql is not registered');
+    expect(markup).toContain('OpenClaw Remote MCP quick setup');
+    expect(markup).toContain('Public/tunnel URL');
+    expect(markup).toContain('Enter the Streamable HTTP MCP address reachable by the cloud Agent');
+    expect(markup).toContain('Do not use the Windows local 127.0.0.1 address');
     expect(markup).toContain('Bearer Token');
-    expect(markup).toContain('Windows 启动命令和云端 Agent 配置必须一致');
-    expect(markup).toContain('不要把数据库密码当 token 填进去');
-    expect(markup).toContain('本机监听地址');
-    expect(markup).toContain('MCP 路径');
-    expect(markup).toContain('配置到云端 Agent');
-    expect(markup).toContain('无 GUI / CLI 生成配置');
+    expect(markup).toContain('the Windows launch command and cloud Agent config must match');
+    expect(markup).toContain('do not put a database password here');
+    expect(markup).toContain('Local listen address');
+    expect(markup).toContain('MCP path');
+    expect(markup).toContain('Configure in cloud Agent');
+    expect(markup).toContain('Generate config without GUI / CLI');
     expect(markup).toContain('&quot;type&quot;: &quot;streamable-http&quot;');
-    expect(markup).toContain('&quot;url&quot;: &quot;https://&lt;你的域名或隧道地址&gt;/mcp&quot;');
-    expect(markup).toContain('&quot;Authorization&quot;: &quot;Bearer &lt;随机token&gt;&quot;');
-    expect(markup).toContain('GoNavi.exe mcp-server remote-config --client openclaw --url https://&lt;你的域名或隧道地址&gt;/mcp --token &lt;随机token&gt; --schema-only');
-    expect(markup).toContain('Windows 启动 GoNavi MCP HTTP');
-    expect(markup).toContain('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token &lt;随机token&gt; --schema-only');
-    expect(markup).toContain('独立二进制：gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp --token &lt;随机token&gt; --schema-only');
-    expect(markup).toContain('验证顺序');
-    expect(markup).toContain('安全边界');
-    expect(markup).toContain('数据库账号和密码仍保存在 Windows GoNavi');
-    expect(markup).toContain('默认 --schema-only 不注册 execute_sql');
-    expect(markup).toContain('CLI 检测：远程 Agent 不需要检测本机 openclaw 命令');
-    expect(markup).toContain('复制 OpenClaw 远程接入说明');
+    expect(markup).toContain('&quot;url&quot;: &quot;https://&lt;your-domain-or-tunnel&gt;/mcp&quot;');
+    expect(markup).toContain('&quot;Authorization&quot;: &quot;Bearer &lt;random-token&gt;&quot;');
+    expect(markup).toContain('GoNavi.exe mcp-server remote-config --client openclaw --url https://&lt;your-domain-or-tunnel&gt;/mcp --token &lt;random-token&gt; --schema-only');
+    expect(markup).toContain('Start GoNavi MCP HTTP on Windows');
+    expect(markup).toContain('GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token &lt;random-token&gt; --schema-only');
+    expect(markup).toContain('Standalone binary: gonavi-mcp-server http --addr 127.0.0.1:8765 --path /mcp --token &lt;random-token&gt; --schema-only');
+    expect(markup).toContain('Verification order');
+    expect(markup).toContain('Security boundary');
+    expect(markup).toContain('Database accounts and passwords stay in Windows GoNavi');
+    expect(markup).toContain('--schema-only does not register execute_sql by default');
+    expect(markup).toContain('CLI detection: Remote Agent does not need local openclaw command detection');
+    expect(markup).toContain('Copy OpenClaw remote connection guide');
   });
 
   it('makes repeated install avoidance explicit when the selected client already matches current GoNavi', () => {
@@ -267,9 +267,9 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('当前状态：已接入当前 GoNavi，无需重复操作');
-    expect(markup).toContain('Claude Code 已接入，无需重复安装');
-    expect(markup).toContain('下面的主按钮会自动禁用，避免重复写入');
+    expect(markup).toContain('Current status: Connected to current GoNavi; no repeated action needed');
+    expect(markup).toContain('Claude Code is connected; no reinstall needed');
+    expect(markup).toContain('the main button is disabled to avoid repeated writes');
   });
 
   it('prefers the client that already matches current GoNavi over another stale installed record', () => {
@@ -320,7 +320,7 @@ describe('AIMCPClientInstallPanel', () => {
       />,
     );
 
-    expect(markup).toContain('已选客户端状态');
-    expect(markup).toContain('当前状态：已接入当前 GoNavi，无需重复操作');
+    expect(markup).toContain('Selected client status');
+    expect(markup).toContain('Current status: Connected to current GoNavi; no repeated action needed');
   });
 });

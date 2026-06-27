@@ -10,8 +10,23 @@ export interface MCPServerDraftSeedInput {
   timeoutSeconds?: number;
 }
 
+export type MCPServerDraftSeedTranslator = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) => string;
+
 const stripCommandSuffix = (value: string): string =>
   value.replace(/\.(exe|cmd|bat|ps1|c?m?[jt]s|py)$/iu, '');
+
+const translateDraftSeedCopy = (
+  translate: MCPServerDraftSeedTranslator | undefined,
+  key: string,
+  fallback: string,
+): string => {
+  if (!translate) return fallback;
+  const translated = translate(key);
+  return translated && translated !== key ? translated : fallback;
+};
 
 const toDisplayNamePart = (value: string): string => {
   const text = String(value || '').trim();
@@ -86,10 +101,14 @@ export const buildMCPServerDraftSeed = ({
   env = {},
   name,
   timeoutSeconds,
-}: MCPServerDraftSeedInput): Partial<AIMCPServerConfig> => {
+}: MCPServerDraftSeedInput, translate?: MCPServerDraftSeedTranslator): Partial<AIMCPServerConfig> => {
   const normalizedArgs = args.map((arg) => String(arg || '').trim()).filter(Boolean);
   const commandName = toDisplayNamePart(command).toLowerCase();
-  const namePart = toDisplayNamePart(name || pickDraftNameCandidate(command, normalizedArgs)) || 'MCP 服务';
+  const namePart = toDisplayNamePart(name || pickDraftNameCandidate(command, normalizedArgs)) || translateDraftSeedCopy(
+    translate,
+    'ai_settings.mcp_server.draft.default_name',
+    'MCP service',
+  );
 
   return {
     name: namePart,
@@ -104,8 +123,9 @@ export const buildMCPServerDraftSeed = ({
 
 export const buildMCPQuickAddServerSeed = (
   draft: ParsedMCPCommandDraft,
+  translate?: MCPServerDraftSeedTranslator,
 ): Partial<AIMCPServerConfig> => buildMCPServerDraftSeed({
   command: draft.command,
   args: draft.args,
   env: draft.env,
-});
+}, translate);

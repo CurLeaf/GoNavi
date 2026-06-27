@@ -1,6 +1,16 @@
 const SQL_EDITOR_DML_KEYWORDS = new Set(['insert', 'update', 'delete', 'replace', 'merge', 'upsert']);
 const SQL_EDITOR_READ_KEYWORDS = new Set(['select', 'with', 'show', 'describe', 'desc', 'explain', 'pragma', 'values']);
 const SQL_EDITOR_TRANSACTION_CONTROL_KEYWORDS = new Set(['begin', 'commit', 'rollback', 'savepoint', 'release']);
+const SQL_EDITOR_MANAGED_TRANSACTION_UNSUPPORTED_TYPES = new Set([
+    'trino',
+    'tdengine',
+    'clickhouse',
+    'iotdb',
+    'rocketmq',
+    'mqtt',
+    'kafka',
+    'rabbitmq',
+]);
 
 type SqlEditorWithAnalysis = {
     keyword: string;
@@ -253,7 +263,7 @@ export const shouldUseSqlEditorManagedTransactionForType = (
     type: string,
     statements: string[],
 ): boolean => {
-    if (String(type || '').trim().toLowerCase() === 'trino') {
+    if (SQL_EDITOR_MANAGED_TRANSACTION_UNSUPPORTED_TYPES.has(String(type || '').trim().toLowerCase())) {
         return false;
     }
     let hasManagedWrite = false;
@@ -274,3 +284,26 @@ export const shouldUseSqlEditorManagedTransactionForType = (
 
 export const shouldUseSqlEditorManagedTransaction = (statements: string[]): boolean =>
     shouldUseSqlEditorManagedTransactionForType('', statements);
+
+export const canReusePendingSqlEditorTransactionForType = (
+    type: string,
+    statements: string[],
+): boolean => {
+    if (SQL_EDITOR_MANAGED_TRANSACTION_UNSUPPORTED_TYPES.has(String(type || '').trim().toLowerCase())) {
+        return false;
+    }
+    let hasReadStatement = false;
+    for (const statement of statements) {
+        const trimmed = String(statement || '').trim();
+        if (!trimmed) continue;
+        if (isSqlEditorTransactionControlStatement(trimmed)) return false;
+        if (sqlEditorStatementHasManagedWrite(trimmed)) return false;
+        const keyword = resolveSqlEditorOperationKeyword(trimmed);
+        if (!SQL_EDITOR_READ_KEYWORDS.has(keyword)) return false;
+        hasReadStatement = true;
+    }
+    return hasReadStatement;
+};
+
+export const canReusePendingSqlEditorTransaction = (statements: string[]): boolean =>
+    canReusePendingSqlEditorTransactionForType('', statements);

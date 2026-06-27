@@ -1,9 +1,14 @@
 import type { TabData, TableExportScope, TableExportScopeOption } from '../types';
+import { t } from '../i18n';
 
 export const DEFAULT_TABLE_EXPORT_SCOPE_OPTION: TableExportScopeOption = {
   value: 'all',
-  label: '全表数据',
-  description: '后台重新查询整张表并导出全部数据。',
+  get label() {
+    return t('data_export.workbench.scope.all.label');
+  },
+  get description() {
+    return t('data_export.workbench.scope.all.description');
+  },
 };
 
 export const buildTableExportHistoryKey = (
@@ -129,10 +134,11 @@ export const buildTableExportTab = (input: BuildTableExportTabInput): TabData =>
   const tableName = String(input.tableName || '').trim();
   const scopeOptions = normalizeScopeOptions(input.scopeOptions);
   const initialScope = resolveInitialScope(scopeOptions, input.initialScope);
-  const objectLabel = tableName || '未命名对象';
+  const objectLabel = tableName || t('data_export.progress.value.target_fallback');
   return {
     id: `table-export-${connectionId}-${dbName}-${tableName}`,
-    title: String(input.title || `导出 ${objectLabel}`).trim() || `导出 ${objectLabel}`,
+    title: String(input.title || t('data_export.workbench.task.export_target', { name: objectLabel })).trim()
+      || t('data_export.workbench.task.export_target', { name: objectLabel }),
     type: 'table-export',
     exportWorkbenchMode: 'single',
     connectionId,
@@ -157,7 +163,7 @@ export const buildBatchTableExportWorkbenchTab = (
   const scopeSuffix = dbName || 'all';
   return {
     id: `table-export-batch-tables-${connectionId || 'none'}-${scopeSuffix}`,
-    title: String(input.title || '批量导出对象').trim() || '批量导出对象',
+    title: String(input.title || t('sidebar.tab.batch_export_objects')).trim() || t('sidebar.tab.batch_export_objects'),
     type: 'table-export',
     exportWorkbenchMode: 'batch-tables',
     connectionId,
@@ -172,7 +178,7 @@ export const buildBatchDatabaseExportWorkbenchTab = (
   const connectionId = String(input.connectionId || '').trim();
   return {
     id: `table-export-batch-databases-${connectionId || 'none'}`,
-    title: String(input.title || '批量导出库').trim() || '批量导出库',
+    title: String(input.title || t('sidebar.tab.batch_export_databases')).trim() || t('sidebar.tab.batch_export_databases'),
     type: 'table-export',
     exportWorkbenchMode: 'batch-databases',
     connectionId,

@@ -10,8 +10,9 @@ import (
 )
 
 type releaseRecordingDB struct {
-	closed  int
-	connect func(config connection.ConnectionConfig) error
+	closed   int
+	connect  func(config connection.ConnectionConfig) error
+	closeErr error
 }
 
 func (f *releaseRecordingDB) Connect(config connection.ConnectionConfig) error {
@@ -22,7 +23,7 @@ func (f *releaseRecordingDB) Connect(config connection.ConnectionConfig) error {
 }
 func (f *releaseRecordingDB) Close() error {
 	f.closed++
-	return nil
+	return f.closeErr
 }
 func (f *releaseRecordingDB) Ping() error { return nil }
 func (f *releaseRecordingDB) Query(query string) ([]map[string]interface{}, []string, error) {
@@ -263,6 +264,49 @@ func TestTestConnectionUsesIsolatedConnectionAndClosesIt(t *testing.T) {
 	}
 	if len(app.dbCache) != 0 {
 		t.Fatalf("test connection must not write global db cache, got %d entries", len(app.dbCache))
+	}
+}
+
+func TestTestConnectionReturnsLocalizedCloseFailure(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	proxySnapshot := currentGlobalProxyConfig()
+	defer func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+		if _, err := setGlobalProxyConfig(proxySnapshot.Enabled, proxySnapshot.Proxy); err != nil {
+			t.Fatalf("restore global proxy failed: %v", err)
+		}
+	}()
+	if _, err := setGlobalProxyConfig(false, proxySnapshot.Proxy); err != nil {
+		t.Fatalf("disable global proxy failed: %v", err)
+	}
+
+	testDB := &releaseRecordingDB{closeErr: errors.New("close failed")}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return testDB, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewApp()
+	result := app.TestConnection(connection.ConnectionConfig{
+		Type:     "mysql",
+		Host:     "127.0.0.1",
+		Port:     3306,
+		User:     "root",
+		Database: "app",
+	})
+
+	if result.Success {
+		t.Fatalf("expected localized close failure, got success with %q", result.Message)
+	}
+	if want := app.appText("db.backend.error.test_connection_close_failed", map[string]any{"detail": "close failed"}); result.Message != want {
+		t.Fatalf("expected localized close failure message %q, got %q", want, result.Message)
+	}
+	if testDB.closed != 1 {
+		t.Fatalf("expected isolated test connection to be closed once, got %d", testDB.closed)
 	}
 }
 

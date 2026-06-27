@@ -1,13 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8');
+const source = [
+  readFileSync(new URL('./Sidebar.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('./sidebar/useSidebarObjectActions.tsx', import.meta.url), 'utf8'),
+].join('\n');
 const locales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
 
 const requiredKeys = [
   'sidebar.copy_object_name.label.table',
   'sidebar.copy_object_name.label.view',
   'sidebar.copy_object_name.label.materialized_view',
+  'sidebar.copy_object_name.label.sequence',
+  'sidebar.copy_object_name.label.package',
   'sidebar.copy_object_name.label.event',
   'sidebar.copy_object_name.empty',
   'sidebar.copy_object_name.copied',
@@ -27,6 +32,8 @@ describe('Sidebar copy object name i18n', () => {
     expect(source).not.toContain('`复制${label}失败: `');
     expect(source).toContain("t('sidebar.copy_object_name.label.view')");
     expect(source).toContain("t('sidebar.copy_object_name.label.materialized_view')");
+    expect(source).toContain("t('sidebar.copy_object_name.label.sequence')");
+    expect(source).toContain("t('sidebar.copy_object_name.label.package')");
     expect(source).toContain("t('sidebar.copy_object_name.label.event')");
     expect(source).toContain("t('sidebar.copy_object_name.label.table')");
     expect(source).toContain("t('sidebar.copy_object_name.empty'");

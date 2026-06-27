@@ -10,6 +10,7 @@ import (
 	"GoNavi-Wails/internal/db"
 	"GoNavi-Wails/internal/logger"
 	"GoNavi-Wails/internal/utils"
+	"GoNavi-Wails/shared/i18n"
 )
 
 // SQL 诊断工作台后端入口。
@@ -51,6 +52,14 @@ var explainSupportedDBTypes = map[string]bool{
 // 需要给足时间避免大查询超时。
 const explainStatementTimeoutFloor = 5 * time.Minute
 
+func defaultExplainBackendText(key string, params map[string]any) string {
+	localizer, err := i18n.NewLocalizer(i18n.LanguageZhCN)
+	if err != nil {
+		return key
+	}
+	return localizer.T(key, params)
+}
+
 // DiagnoseQuery 是 SQL 诊断工作台对外暴露的入口。
 // 输入用户 SQL（仅允许 SELECT/WITH），返回执行计划归一化结果。
 // PR1 仅返回 ExplainResult；索引建议（Suggestions）在 PR2 规则引擎接入后填充。
@@ -59,10 +68,10 @@ const explainStatementTimeoutFloor = 5 * time.Minute
 func (a *App) DiagnoseQuery(config connection.ConnectionConfig, dbName, query string) connection.QueryResult {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return connection.QueryResult{Success: false, Message: "查询语句不能为空"}
+		return connection.QueryResult{Success: false, Message: a.appText("sql_analysis.backend.error.query_required", nil)}
 	}
 	if !looksLikeSelectOrWith(query) {
-		return connection.QueryResult{Success: false, Message: "诊断仅支持 SELECT / WITH 查询；写操作请使用 EXPLAIN PLAN 模式（PR2 支持）"}
+		return connection.QueryResult{Success: false, Message: a.appText("sql_analysis.backend.error.select_only", nil)}
 	}
 
 	runConfig := normalizeRunConfig(config, dbName)
@@ -70,7 +79,7 @@ func (a *App) DiagnoseQuery(config connection.ConnectionConfig, dbName, query st
 	if !explainSupportedDBTypes[dbType] {
 		return connection.QueryResult{
 			Success: false,
-			Message: fmt.Sprintf("当前数据源（%s）暂不支持 SQL 诊断；一期支持 MySQL/PostgreSQL/SQLite/ClickHouse/Oracle/SQLServer/OceanBase", dbType),
+			Message: a.appText("sql_analysis.backend.error.unsupported_db_type", map[string]any{"dbType": dbType}),
 		}
 	}
 
@@ -88,13 +97,14 @@ func (a *App) DiagnoseQuery(config connection.ConnectionConfig, dbName, query st
 	suggestions := runExplainRules(plan)
 	report := connection.DiagnoseReport{Plan: plan, Suggestions: suggestions}
 	logger.Infof("DiagnoseQuery 完成：type=%s nodes=%d suggestions=%d", dbType, len(plan.Nodes), len(suggestions))
-	return connection.QueryResult{Success: true, Message: "诊断完成", Data: report}
+	return connection.QueryResult{Success: true, Message: a.appText("sql_analysis.backend.message.completed", nil), Data: report}
 }
 
 // executeExplain 决定走哪条 EXPLAIN 执行路径：
 //  1. 若 dbInst 实现 ExplainExecer（driver-agent 在 PR2 接入），优先用驱动原生实现
 //  2. 否则走 app 层 fallback：buildExplainQuery 构造 EXPLAIN 语句，通过 QueryMulti 执行
 func (a *App) executeExplain(dbInst db.Database, config connection.ConnectionConfig, dbType, query string) (connection.ExplainResult, error) {
+	text := a.appText
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -109,23 +119,23 @@ func (a *App) executeExplain(dbInst db.Database, config connection.ConnectionCon
 		logger.Infof("DiagnoseQuery 走 ExplainExecer 路径：type=%s", dbType)
 		raw, format, err := explainer.Explain(ctx, query)
 		if err != nil {
-			return connection.ExplainResult{}, fmt.Errorf("驱动 EXPLAIN 执行失败：%w", err)
+			return connection.ExplainResult{}, fmt.Errorf("%s", text("sql_analysis.backend.error.driver_explain_failed", map[string]any{"detail": err.Error()}))
 		}
-		return parseExplainRaw(dbType, query, raw, format)
+		return parseExplainRawWithText(dbType, query, raw, format, text)
 	}
 
 	// Fallback：app 层构造 EXPLAIN 语句
-	wrappedSQL, postQueries, preferFormat, cleanupQueries, err := buildExplainQuery(dbType, query)
+	wrappedSQL, postQueries, preferFormat, cleanupQueries, err := buildExplainQueryWithText(dbType, query, text)
 	if err != nil {
 		return connection.ExplainResult{}, err
 	}
 	defer runExplainCleanup(dbInst, cleanupQueries)
 
-	raw, actualFormat, execErr := executeExplainStatements(ctx, dbInst, dbType, wrappedSQL, postQueries, preferFormat)
+	raw, actualFormat, execErr := executeExplainStatementsWithText(ctx, dbInst, dbType, wrappedSQL, postQueries, preferFormat, text)
 	if execErr != nil {
-		return connection.ExplainResult{}, fmt.Errorf("执行 EXPLAIN 失败：%w", execErr)
+		return connection.ExplainResult{}, fmt.Errorf("%s", text("sql_analysis.backend.error.explain_execution_failed", map[string]any{"detail": execErr.Error()}))
 	}
-	return parseExplainRaw(dbType, query, raw, actualFormat)
+	return parseExplainRawWithText(dbType, query, raw, actualFormat, text)
 }
 
 // runExplainCleanup 执行清理语句（如 Oracle DELETE FROM plan_table），失败仅记日志不阻塞主流程。
@@ -144,6 +154,10 @@ func runExplainCleanup(dbInst db.Database, cleanupQueries []string) {
 // executeExplainStatements 执行 EXPLAIN 主语句和后置查询（Oracle 的 DBMS_XPLAN.DISPLAY）。
 // 返回拼接后的原文 + 实际格式（可能与 preferFormat 不同，比如 MySQL 5.7 不支持 FORMAT=JSON 时降级）。
 func executeExplainStatements(ctx context.Context, dbInst db.Database, dbType, wrappedSQL string, postQueries []string, preferFormat connection.ExplainFormat) (string, connection.ExplainFormat, error) {
+	return executeExplainStatementsWithText(ctx, dbInst, dbType, wrappedSQL, postQueries, preferFormat, defaultExplainBackendText)
+}
+
+func executeExplainStatementsWithText(ctx context.Context, dbInst db.Database, dbType, wrappedSQL string, postQueries []string, preferFormat connection.ExplainFormat, text func(string, map[string]any) string) (string, connection.ExplainFormat, error) {
 	statements := []string{wrappedSQL}
 	statements = append(statements, postQueries...)
 	fullSQL := strings.Join(statements, ";\n")
@@ -154,21 +168,21 @@ func executeExplainStatements(ctx context.Context, dbInst db.Database, dbType, w
 		if err != nil {
 			return "", preferFormat, err
 		}
-		return collectExplainRaw(results, preferFormat)
+		return collectExplainRawWithText(results, preferFormat, text)
 	}
 	if multi, ok := dbInst.(db.MultiResultQuerierContext); ok {
 		results, err := multi.QueryMultiContext(ctx, fullSQL)
 		if err != nil {
 			return "", preferFormat, err
 		}
-		return collectExplainRaw(results, preferFormat)
+		return collectExplainRawWithText(results, preferFormat, text)
 	}
 	if multi, ok := dbInst.(db.MultiResultQuerier); ok {
 		results, err := multi.QueryMulti(fullSQL)
 		if err != nil {
 			return "", preferFormat, err
 		}
-		return collectExplainRaw(results, preferFormat)
+		return collectExplainRawWithText(results, preferFormat, text)
 	}
 
 	// 单结果 fallback：只执行第一条 EXPLAIN，忽略 postQueries（不适合 Oracle/SQLServer）
@@ -176,21 +190,28 @@ func executeExplainStatements(ctx context.Context, dbInst db.Database, dbType, w
 	if err != nil {
 		return "", preferFormat, err
 	}
-	return collectExplainRaw([]connection.ResultSetData{{Rows: data}}, preferFormat)
+	return collectExplainRawWithText([]connection.ResultSetData{{Rows: data}}, preferFormat, text)
 }
 
 // collectExplainRaw 把多个结果集合并为单个原文，并探测实际格式。
 // MySQL FORMAT=JSON 返回 1 行 1 列包含完整 JSON 文本；表格模式返回多行多列。
 func collectExplainRaw(results []connection.ResultSetData, preferFormat connection.ExplainFormat) (string, connection.ExplainFormat, error) {
+	return collectExplainRawWithText(results, preferFormat, defaultExplainBackendText)
+}
+
+func collectExplainRawWithText(results []connection.ResultSetData, preferFormat connection.ExplainFormat, text func(string, map[string]any) string) (string, connection.ExplainFormat, error) {
+	if text == nil {
+		text = defaultExplainBackendText
+	}
 	if len(results) == 0 {
-		return "", preferFormat, fmt.Errorf("EXPLAIN 未返回结果")
+		return "", preferFormat, fmt.Errorf("%s", text("sql_analysis.backend.error.explain_result_missing", nil))
 	}
 
 	// 大多数方言只有 1 个结果集；Oracle 有 2 个（EXPLAIN PLAN 影响 + DBMS_XPLAN.DISPLAY 查询）
 	// 取最后一个非空结果集作为 EXPLAIN 输出（DISPLAY 在 post 查询中）
 	last := pickLastNonEmptyResult(results)
 	if last == nil {
-		return "", preferFormat, fmt.Errorf("EXPLAIN 返回空结果集")
+		return "", preferFormat, fmt.Errorf("%s", text("sql_analysis.backend.error.explain_result_empty", nil))
 	}
 
 	// 单列单行 + 值是 JSON/XML 字符串 → 直接当原文
@@ -254,6 +275,13 @@ func detectExplainFormat(text string, preferFormat connection.ExplainFormat) con
 // 每方言在 explain_parse_<dbtype>.go 中实现 parseXxxExplain，这里按 dbType 分发。
 // 未实现的方言返回原文 + 警告，保证主流程不阻塞。
 func parseExplainRaw(dbType, sourceSQL, raw string, format connection.ExplainFormat) (connection.ExplainResult, error) {
+	return parseExplainRawWithText(dbType, sourceSQL, raw, format, defaultExplainBackendText)
+}
+
+func parseExplainRawWithText(dbType, sourceSQL, raw string, format connection.ExplainFormat, text func(string, map[string]any) string) (connection.ExplainResult, error) {
+	if text == nil {
+		text = defaultExplainBackendText
+	}
 	switch dbType {
 	case "mysql", "mariadb", "diros", "starrocks", "oceanbase":
 		return parseMySQLExplain(dbType, sourceSQL, raw, format)
@@ -268,7 +296,7 @@ func parseExplainRaw(dbType, sourceSQL, raw string, format connection.ExplainFor
 	case "sqlserver":
 		return parseSQLServerExplain(sourceSQL, raw, format)
 	default:
-		return connection.ExplainResult{}, fmt.Errorf("不支持的 EXPLAIN 方言：%s", dbType)
+		return connection.ExplainResult{}, fmt.Errorf("%s", text("sql_analysis.backend.error.explain_dialect_unsupported", map[string]any{"dbType": dbType}))
 	}
 }
 
@@ -295,6 +323,13 @@ func getDiagnoseTimeout(config connection.ConnectionConfig) time.Duration {
 //
 // 参考现有风格：buildListViewQueries (methods_file.go:3102) 的 switch-case 模式。
 func buildExplainQuery(dbType, query string) (wrappedSQL string, postQueries []string, preferFormat connection.ExplainFormat, cleanupQueries []string, err error) {
+	return buildExplainQueryWithText(dbType, query, defaultExplainBackendText)
+}
+
+func buildExplainQueryWithText(dbType, query string, text func(string, map[string]any) string) (wrappedSQL string, postQueries []string, preferFormat connection.ExplainFormat, cleanupQueries []string, err error) {
+	if text == nil {
+		text = defaultExplainBackendText
+	}
 	sql := strings.TrimRight(strings.TrimSpace(query), ";")
 	switch dbType {
 	case "mysql", "mariadb", "oceanbase":
@@ -329,6 +364,6 @@ func buildExplainQuery(dbType, query string) (wrappedSQL string, postQueries []s
 		post := []string{"SET SHOWPLAN_XML OFF;"}
 		return wrapped, post, connection.ExplainFormatXML, nil, nil
 	default:
-		return "", nil, "", nil, fmt.Errorf("方言 %s 的 EXPLAIN 构造未实现", dbType)
+		return "", nil, "", nil, fmt.Errorf("%s", text("sql_analysis.backend.error.explain_query_not_implemented", map[string]any{"dbType": dbType}))
 	}
 }

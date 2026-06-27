@@ -1,13 +1,18 @@
+import { t as translateCatalog, type I18nParams } from '../i18n';
+
 type ToolQueryResult = {
   success?: boolean;
   data?: unknown;
   message?: string;
 };
 
+type TableSchemaTranslate = (key: string, params?: I18nParams) => string;
+
 type ResolveAITableSchemaToolResultParams = {
   tableName: string;
   fetchDDL: () => Promise<ToolQueryResult>;
   fetchColumns: () => Promise<ToolQueryResult>;
+  translate?: TableSchemaTranslate;
 };
 
 const stringifyToolData = (data: unknown): string => (
@@ -36,15 +41,61 @@ const normalizeAIColumn = (raw: unknown) => {
   };
 };
 
-const buildColumnFallbackContent = (tableName: string, ddlError: string, columns: unknown[]): string => {
+const translateTableSchemaCopy = (
+  translate: TableSchemaTranslate | undefined,
+  key: string,
+  fallback: string,
+  params?: I18nParams,
+): string => {
+  const t = translate || ((catalogKey, catalogParams) => translateCatalog(catalogKey, catalogParams, 'en-US'));
+  const translated = t(key, params);
+  return translated && translated !== key ? translated : fallback;
+};
+
+const buildColumnFallbackContent = (
+  tableName: string,
+  ddlError: string,
+  columns: unknown[],
+  translate?: TableSchemaTranslate,
+): string => {
   const normalizedColumns = columns.map(normalizeAIColumn).filter((column) => column.field.trim());
   const fieldNames = normalizedColumns.map((column) => column.field).join(', ');
+  const fieldsText = fieldNames || translateTableSchemaCopy(
+    translate,
+    'ai_chat.inspection.table_schema.value.none',
+    'none',
+  );
+  const detail = JSON.stringify(normalizedColumns);
   return [
-    `⚠️ 表 ${tableName} 的 DDL 获取失败，已降级为字段元数据摘要。`,
-    `DDL 错误：${ddlError || '未知错误'}`,
-    '该结果不包含完整索引、约束、触发器等 DDL 信息；请基于字段列表继续分析，不要因为 DDL 权限失败而停止。',
-    `可用字段：${fieldNames || '无'}`,
-    `详细信息：${JSON.stringify(normalizedColumns)}`,
+    translateTableSchemaCopy(
+      translate,
+      'ai_chat.inspection.table_schema.warning.ddl_fallback',
+      `DDL fetch failed for table ${tableName}; fell back to column metadata summary.`,
+      { tableName },
+    ),
+    translateTableSchemaCopy(
+      translate,
+      'ai_chat.inspection.table_schema.warning.ddl_error',
+      `DDL error: ${ddlError || 'Unknown error'}`,
+      { detail: ddlError || translateTableSchemaCopy(translate, 'ai_chat.inspection.table_schema.error.unknown', 'Unknown error') },
+    ),
+    translateTableSchemaCopy(
+      translate,
+      'ai_chat.inspection.table_schema.warning.fallback_limitation',
+      'This result does not include complete index, constraint, trigger, or other DDL information; continue analysis from the column list and do not stop solely because DDL permissions failed.',
+    ),
+    translateTableSchemaCopy(
+      translate,
+      'ai_chat.inspection.table_schema.warning.available_fields',
+      `Available fields: ${fieldsText}`,
+      { fields: fieldsText },
+    ),
+    translateTableSchemaCopy(
+      translate,
+      'ai_chat.inspection.table_schema.warning.detail',
+      `Details: ${detail}`,
+      { detail },
+    ),
   ].join('\n');
 };
 
@@ -52,6 +103,7 @@ export const resolveAITableSchemaToolResult = async ({
   tableName,
   fetchDDL,
   fetchColumns,
+  translate,
 }: ResolveAITableSchemaToolResultParams): Promise<{ success: boolean; content: string }> => {
   const ddlResult = await fetchDDL();
   if (ddlResult?.success) {
@@ -61,9 +113,17 @@ export const resolveAITableSchemaToolResult = async ({
   const ddlError = ddlResult?.message || 'Failed to fetch DDL';
   const columnResult = await fetchColumns();
   if (columnResult?.success && Array.isArray(columnResult.data)) {
-    return { success: true, content: buildColumnFallbackContent(tableName, ddlError, columnResult.data) };
+    return { success: true, content: buildColumnFallbackContent(tableName, ddlError, columnResult.data, translate) };
   }
 
   const columnError = columnResult?.message || 'Failed to fetch columns';
-  return { success: false, content: `获取建表语句失败：${ddlError}；降级获取字段列表也失败：${columnError}` };
+  return {
+    success: false,
+    content: translateTableSchemaCopy(
+      translate,
+      'ai_chat.inspection.table_schema.error.ddl_and_columns_failed',
+      `Failed to fetch table DDL: ${ddlError}; fallback column metadata also failed: ${columnError}`,
+      { ddlDetail: ddlError, columnDetail: columnError },
+    ),
+  };
 };

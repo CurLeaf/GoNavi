@@ -1,6 +1,7 @@
 import type { IndexDefinition } from '../types';
 import { resolveUniqueKeyGroupsFromIndexes } from '../components/dataGridCopyInsert';
 import { isOracleLikeDialect } from './sqlDialect';
+import { t as translateCatalog, type I18nParams } from '../i18n';
 
 export const ORACLE_ROWID_LOCATOR_COLUMN = '__gonavi_oracle_rowid__';
 export const DUCKDB_ROWID_LOCATOR_COLUMN = '__gonavi_duckdb_rowid__';
@@ -24,6 +25,7 @@ export type ResolveEditRowLocatorParams = {
   indexes?: IndexDefinition[];
   allowOracleRowID?: boolean;
   allowDuckDBRowID?: boolean;
+  translate?: RowLocatorTranslator;
 };
 
 export type ResolveRowLocatorValuesResult =
@@ -34,6 +36,8 @@ export type RowLocatorMessages = {
   noSafeLocator?: () => string;
   emptyLocatorValue?: (column: string) => string;
 };
+
+type RowLocatorTranslator = (key: string, params?: I18nParams) => string;
 
 const normalizeColumnName = (value: string): string => String(value || '').trim();
 
@@ -55,6 +59,23 @@ const buildReadOnlyLocator = (reason: string): EditRowLocator => ({
   reason,
 });
 
+const ROW_LOCATOR_REASON_KEYS = {
+  noSafeLocator: 'data_viewer.read_only.reason.no_safe_locator',
+  oracleRowIDMissing: 'data_viewer.read_only.reason.oracle_rowid_missing',
+  duckDBRowIDMissing: 'data_viewer.read_only.reason.duckdb_rowid_missing',
+  primaryKeyColumnMissing: 'data_viewer.read_only.reason.primary_key_column_missing',
+} as const;
+
+const translateReason = (
+  translate: RowLocatorTranslator | undefined,
+  key: string,
+  params?: I18nParams,
+): string => {
+  const fallback = translateCatalog(key, params, 'en-US');
+  const translated = translate ? translate(key, params) : fallback;
+  return translated && translated !== key ? translated : fallback;
+};
+
 export const resolveEditRowLocator = ({
   dbType,
   resultColumns,
@@ -62,6 +83,7 @@ export const resolveEditRowLocator = ({
   indexes,
   allowOracleRowID = false,
   allowDuckDBRowID = false,
+  translate,
 }: ResolveEditRowLocatorParams): EditRowLocator => {
   const columns = (resultColumns || []).map(normalizeColumnName).filter(Boolean);
   const primaryKeyColumns = (primaryKeys || []).map(normalizeColumnName).filter(Boolean);
@@ -76,7 +98,11 @@ export const resolveEditRowLocator = ({
         readOnly: false,
       };
     }
-    return buildReadOnlyLocator(`结果集中缺少主键列 ${missing.join(', ')}，无法安全提交修改。`);
+    return buildReadOnlyLocator(translateReason(
+      translate,
+      ROW_LOCATOR_REASON_KEYS.primaryKeyColumnMissing,
+      { columns: missing.join(', ') },
+    ));
   }
 
   const uniqueKeyGroups = resolveUniqueKeyGroupsFromIndexes(indexes);
@@ -113,14 +139,14 @@ export const resolveEditRowLocator = ({
   }
 
   if (allowOracleRowID && isOracleLikeDialect(dbType)) {
-    return buildReadOnlyLocator('未检测到主键或可用唯一索引，且结果中缺少 Oracle ROWID，无法安全提交修改。');
+    return buildReadOnlyLocator(translateReason(translate, ROW_LOCATOR_REASON_KEYS.oracleRowIDMissing));
   }
 
   if (allowDuckDBRowID && String(dbType || '').trim().toLowerCase() === 'duckdb') {
-    return buildReadOnlyLocator('未检测到主键、可用唯一索引或 DuckDB rowid，无法安全提交修改。');
+    return buildReadOnlyLocator(translateReason(translate, ROW_LOCATOR_REASON_KEYS.duckDBRowIDMissing));
   }
 
-  return buildReadOnlyLocator('未检测到主键或可用唯一索引，无法安全提交修改。');
+  return buildReadOnlyLocator(translateReason(translate, ROW_LOCATOR_REASON_KEYS.noSafeLocator));
 };
 
 export const resolveRowLocatorValues = (

@@ -3,6 +3,7 @@ import { Alert, Button, Input, Segmented, Typography, message } from 'antd'
 import { HistoryOutlined, SearchOutlined } from '@ant-design/icons'
 import { useStore } from '../../store'
 import type { ConnectionConfig, TabData } from '../../types'
+import { useI18n } from '../../i18n/provider'
 import { ExplainReportView } from './ExplainWorkbench'
 import { SlowQueryPanelContent } from './SlowQueryPanel'
 
@@ -23,6 +24,7 @@ const normalizeConnectionConfig = (connection: any): ConnectionConfig => ({
 })
 
 export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
+  const { t } = useI18n()
   const connections = useStore((state) => state.connections)
   const connection = useMemo(
     () => connections.find((item) => item.id === tab.connectionId) || null,
@@ -51,12 +53,12 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
 
   const triggerDiagnose = useCallback(() => {
     if (!sqlDraft.trim()) {
-      message.warning('请输入要诊断的 SQL')
+      message.warning(t('sql_analysis.workbench.validation.sql_required'))
       return
     }
     setActiveView('diagnose')
     setDiagnoseRunKey((previous) => previous + 1)
-  }, [sqlDraft])
+  }, [sqlDraft, t])
 
   const handlePickSlowQuery = useCallback((sql: string) => {
     const nextSql = String(sql || '')
@@ -83,8 +85,8 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
         <Alert
           type="warning"
           showIcon
-          message="当前工作台对应的连接已不可用"
-          description="请重新选择一个有效连接后再打开 SQL 分析工作台。"
+          message={t('sql_analysis.workbench.alert.connection_missing_title')}
+          description={t('sql_analysis.workbench.alert.connection_missing_description')}
         />
       </div>
     )
@@ -96,7 +98,7 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
       <div className="gn-sql-analysis-workbench-header">
         <div className="gn-sql-analysis-workbench-header-main">
           <Title level={5} style={{ margin: 0 }}>
-            SQL 分析工作台
+            {t('sql_analysis.workbench.title')}
           </Title>
           <Text type="secondary">
             {connection?.name || tab.connectionId}
@@ -113,7 +115,7 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
               label: (
                 <span className="gn-sql-analysis-view-switcher-label">
                   <HistoryOutlined />
-                  <span>慢 SQL</span>
+                  <span>{t('sql_analysis.workbench.view.slow_query')}</span>
                 </span>
               ),
             },
@@ -122,7 +124,7 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
               label: (
                 <span className="gn-sql-analysis-view-switcher-label">
                   <SearchOutlined />
-                  <span>SQL 诊断</span>
+                  <span>{t('sql_analysis.workbench.view.diagnose')}</span>
                 </span>
               ),
             },
@@ -146,13 +148,13 @@ export default function SqlAnalysisWorkbench({ tab }: { tab: TabData }) {
               <Input.TextArea
                 value={sqlDraft}
                 onChange={(event) => setSqlDraft(event.target.value)}
-                placeholder="输入要诊断的 SQL，或从慢 SQL 列表点击条目带入"
+                placeholder={t('sql_analysis.workbench.editor.placeholder')}
                 autoSize={{ minRows: 5, maxRows: 10 }}
               />
               <div className="gn-sql-analysis-editor-actions">
-                <Text type="secondary">支持从慢 SQL 列表点击条目直接带入</Text>
+                <Text type="secondary">{t('sql_analysis.workbench.editor.hint')}</Text>
                 <Button type="primary" icon={<SearchOutlined />} onClick={triggerDiagnose}>
-                  运行诊断
+                  {t('sql_analysis.workbench.action.run')}
                 </Button>
               </div>
             </div>

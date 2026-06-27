@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"GoNavi-Wails/internal/ai"
+	"GoNavi-Wails/shared/i18n"
 )
 
 func TestDefaultStaticModelsForProvider_DoesNotReturnBailianStaticModels(t *testing.T) {
@@ -91,7 +92,7 @@ func TestResolveModelsURL_UsesDashScopeCompatibleModelsEndpointForBailianAnthrop
 
 func TestAIListModels_ReturnsStaticModelsForDashScopeCodingPlanWithoutRemoteFetch(t *testing.T) {
 	originalFetchModelsFunc := fetchModelsFunc
-	fetchModelsFunc = func(config ai.ProviderConfig) ([]string, error) {
+	fetchModelsFunc = func(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {
 		t.Fatalf("expected Coding Plan model list to stay static and skip remote fetch, got config %#v", config)
 		return nil, nil
 	}

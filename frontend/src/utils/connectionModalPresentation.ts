@@ -127,11 +127,11 @@ export const getConnectionConfigLayoutKindLabel = (
     case 'file':
       return t('connection.modal.layoutKind.file');
     case 'search':
-      return '搜索引擎';
+      return t('connection.modal.layoutKind.search');
     case 'vector':
-      return '向量数据库';
+      return t('connection.modal.layoutKind.vector');
     case 'timeseries':
-      return '时序数据库';
+      return t('connection.modal.layoutKind.timeseries');
     case 'custom':
       return t('connection.modal.layoutKind.custom');
     case 'jvm':

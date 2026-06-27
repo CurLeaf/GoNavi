@@ -9,6 +9,7 @@ import {
   DatabaseOutlined,
   EyeOutlined,
   FilterOutlined,
+  KeyOutlined,
   PlusOutlined,
   RobotOutlined,
   TableOutlined,
@@ -31,7 +32,6 @@ import {
 import type { SearchScope } from '../sidebarCoreUtils';
 import {
   buildV2CommandSearchTreeIndex,
-  V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE,
   estimateV2TreeHorizontalScrollWidth,
   filterV2CommandSearchTreeItems,
   filterV2ExplorerTreeByKind,
@@ -398,12 +398,14 @@ export const useSidebarSearchModel = ({
           node.type === 'table'
           || node.type === 'view'
           || node.type === 'materialized-view'
+          || node.type === 'sequence'
           || node.type === 'db-trigger'
           || node.type === 'db-event'
           || node.type === 'routine'
+          || node.type === 'package'
         ) {
           const conn = connectionById.get(String(dataRef.id || ''));
-          const objectName = String(dataRef.tableName || dataRef.viewName || dataRef.triggerName || dataRef.eventName || dataRef.routineName || node.title || '').trim();
+          const objectName = String(dataRef.tableName || dataRef.viewName || dataRef.sequenceName || dataRef.triggerName || dataRef.eventName || dataRef.routineName || dataRef.packageName || node.title || '').trim();
           const displayName = String(node.title || extractObjectName(objectName) || objectName).trim();
           result.push({
             key: `node-${node.key}`,
@@ -412,7 +414,9 @@ export const useSidebarSearchModel = ({
             meta: [conn?.name || dataRef.id, dataRef.dbName].filter(Boolean).join(' · '),
             icon: node.type === 'table'
               ? <TableOutlined />
-              : (node.type === 'db-event' ? <ClockCircleOutlined /> : (node.type === 'routine' ? <CodeOutlined /> : <EyeOutlined />)),
+              : (node.type === 'sequence'
+                ? <KeyOutlined />
+                : (node.type === 'db-event' ? <ClockCircleOutlined /> : ((node.type === 'routine' || node.type === 'package') ? <CodeOutlined /> : <EyeOutlined />))),
             node,
           });
         }
@@ -432,7 +436,7 @@ export const useSidebarSearchModel = ({
     return sqlLogs.slice(0, 5).map((log) => ({
       key: `recent-${log.id}`,
       kind: 'recent',
-      title: log.sql.replace(/\s+/g, ' ').trim() || 'SQL 记录',
+      title: log.sql.replace(/\s+/g, ' ').trim() || t('sidebar.command_search.recent_sql_fallback'),
       meta: `${new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${log.duration}ms${log.dbName ? ` · ${log.dbName}` : ''}`,
       icon: <ClockCircleOutlined />,
       sql: log.sql,
@@ -445,7 +449,7 @@ export const useSidebarSearchModel = ({
       key: 'action-new-query',
       kind: 'action',
       title: t('query.new'),
-      meta: '打开一个新的 SQL 编辑页',
+      meta: t('sidebar.command_search.action.new_query.meta'),
       shortcut: resolveShortcutDisplay(shortcutOptions, 'newQueryTab', activeShortcutPlatform),
       icon: <PlusOutlined />,
       onRun: () => window.dispatchEvent(new CustomEvent('gonavi:create-query-tab')),
@@ -453,8 +457,8 @@ export const useSidebarSearchModel = ({
     {
       key: 'action-new-connection',
       kind: 'action',
-      title: '新建数据源',
-      meta: '创建数据库、运行时或其他数据源连接',
+      title: t('sidebar.command_search.action.new_connection.title'),
+      meta: t('sidebar.command_search.action.new_connection.meta'),
       shortcut: resolveShortcutDisplay(shortcutOptions, 'newConnection', activeShortcutPlatform),
       icon: <ThunderboltOutlined />,
       onRun: () => onCreateConnection?.(),
@@ -462,8 +466,8 @@ export const useSidebarSearchModel = ({
     {
       key: 'action-open-ai',
       kind: 'action',
-      title: '打开 AI 数据洞察',
-      meta: '让 AI 分析当前数据库上下文',
+      title: t('sidebar.command_search.action.open_ai.title'),
+      meta: t('sidebar.command_search.action.open_ai.meta'),
       shortcut: resolveShortcutDisplay(shortcutOptions, 'toggleAIPanel', activeShortcutPlatform),
       icon: <RobotOutlined />,
       onRun: () => onToggleAI?.(),
@@ -471,8 +475,8 @@ export const useSidebarSearchModel = ({
     {
       key: 'action-open-sql-log',
       kind: 'action',
-      title: '查看 SQL 执行日志',
-      meta: '打开最近执行记录面板',
+      title: t('sidebar.command_search.action.open_sql_log.title'),
+      meta: t('sidebar.command_search.action.open_sql_log.meta'),
       shortcut: resolveShortcutDisplay(shortcutOptions, 'toggleLogPanel', activeShortcutPlatform),
       icon: <BarsOutlined />,
       onRun: () => onToggleLogPanel?.(),
@@ -513,7 +517,7 @@ export const useSidebarSearchModel = ({
     return [{
       key: 'action-ask-ai',
       kind: 'action',
-      title: '让 AI 回答',
+      title: t('sidebar.command_search.action.ask_ai.title'),
       meta: v2CommandSearchQuery.aiPrompt,
       shortcut: '↵',
       icon: <RobotOutlined />,
@@ -607,9 +611,7 @@ export const useSidebarSearchModel = ({
     () => estimateV2TreeHorizontalScrollWidth(v2VisibleTreeData, treeViewportWidth),
     [treeViewportWidth, v2VisibleTreeData],
   );
-  const effectiveTreeHeight = isV2Ui && v2TreeHorizontalScrollWidth
-    ? Math.max(1, treeHeight - V2_TREE_HORIZONTAL_SCROLL_BOTTOM_RESERVE)
-    : treeHeight;
+  const effectiveTreeHeight = treeHeight;
   const v2TreeMetrics = useMemo(() => {
     const databaseTableCounts = new Map<React.Key, number>();
     const objectGroupCounts = new Map<React.Key, number>();

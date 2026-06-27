@@ -8,9 +8,9 @@ describe('mcpArgumentHints', () => {
     const profile = buildMCPArgumentHintProfile('npx', ['-y']);
 
     expect(profile?.title).toContain('npx');
-    expect(profile?.orderHint).toContain('-y -> 包名 -> --stdio');
-    expect(profile?.nextActions).toContain('补充 MCP 包名，示例：@modelcontextprotocol/server-filesystem');
-    expect(profile?.nextActions).toContain('补充 stdio 参数，示例：--stdio');
+    expect(profile?.orderHint).toContain('-y -> package -> --stdio');
+    expect(profile?.nextActions).toContain('Add MCP package name, example: @modelcontextprotocol/server-filesystem');
+    expect(profile?.nextActions).toContain('Add stdio argument, example: --stdio');
   });
 
   it('recognizes a complete node script launch', () => {
@@ -25,8 +25,8 @@ describe('mcpArgumentHints', () => {
     const profile = buildMCPArgumentHintProfile('C:\\Python312\\python.exe', ['-m']);
 
     expect(profile?.commandName).toBe('python');
-    expect(profile?.orderHint).toContain('-m -> 模块名 -> --stdio');
-    expect(profile?.nextActions).toContain('补充 模块名，示例：your_mcp_server');
+    expect(profile?.orderHint).toContain('-m -> module name -> --stdio');
+    expect(profile?.nextActions).toContain('Add Module name, example: your_mcp_server');
   });
 
   it('guides docker users to keep stdin and provide an image', () => {
@@ -34,8 +34,8 @@ describe('mcpArgumentHints', () => {
 
     expect(profile?.title).toContain('Docker');
     expect(profile?.orderHint).toContain('run -> --rm -> -i');
-    expect(profile?.nextActions).toContain('补充 保持标准输入，示例：-i');
-    expect(profile?.nextActions).toContain('补充 镜像名，示例：mcp/server-fetch:latest');
+    expect(profile?.nextActions).toContain('Add Keep standard input, example: -i');
+    expect(profile?.nextActions).toContain('Add Image name, example: mcp/server-fetch:latest');
   });
 
   it('detects full command lines pasted into the command field', () => {
@@ -43,17 +43,17 @@ describe('mcpArgumentHints', () => {
 
     expect(profile?.normalizedCommand).toBe('docker');
     expect(profile?.inlineArgs).toEqual(['run', '--rm', 'mcp/server-fetch:latest']);
-    expect(profile?.commandFieldWarning).toContain('启动命令字段里还包含 3 个参数');
+    expect(profile?.commandFieldWarning).toContain('The startup command field still contains 3 arguments');
     expect(profile?.steps.find((item) => item.key === 'run')?.satisfied).toBe(true);
     expect(profile?.steps.find((item) => item.key === 'image')?.satisfied).toBe(true);
-    expect(profile?.nextActions).toContain('补充 保持标准输入，示例：-i');
+    expect(profile?.nextActions).toContain('Add Keep standard input, example: -i');
   });
 
   it('falls back to executable guidance for custom binaries', () => {
     const profile = buildMCPArgumentHintProfile('D:\\tools\\acme-mcp-server.exe', []);
 
-    expect(profile?.title).toContain('本机可执行文件');
-    expect(profile?.summary).toContain('GoNavi 会原样按标签顺序传入');
+    expect(profile?.title).toContain('Local executable');
+    expect(profile?.summary).toContain('GoNavi passes arguments in tag order unchanged');
   });
 
   it('explains common business arguments beyond startup order', () => {
@@ -71,17 +71,17 @@ describe('mcpArgumentHints', () => {
     expect(profile?.businessHints).toEqual(expect.arrayContaining([
       expect.objectContaining({
         key: 'directory',
-        label: '授权目录',
+        label: 'Allowed directory',
         category: 'path',
       }),
       expect.objectContaining({
         key: 'transport',
-        label: '传输模式',
+        label: 'Transport mode',
         category: 'mode',
       }),
       expect.objectContaining({
         key: 'port',
-        label: '端口',
+        label: 'Port',
         category: 'network',
       }),
     ]));
@@ -99,25 +99,25 @@ describe('mcpArgumentHints', () => {
     expect(hints).toEqual(expect.arrayContaining([
       expect.objectContaining({
         argument: '--tenant',
-        label: '未识别参数',
+        label: 'Unrecognized argument',
         category: 'generic',
       }),
       expect.objectContaining({
         argument: 'prod',
-        label: '未识别参数的值',
+        label: 'Unrecognized argument value',
       }),
       expect.objectContaining({
         argument: '--workspace',
-        label: '工作区目录',
+        label: 'Workspace directory',
         category: 'path',
       }),
       expect.objectContaining({
         argument: 'D:\\Work',
-        label: '工作区目录的值',
+        label: 'Workspace directory value',
       }),
       expect.objectContaining({
         argument: 'extra-target',
-        label: '位置参数',
+        label: 'Positional argument',
       }),
     ]));
   });
@@ -155,8 +155,8 @@ describe('mcpArgumentHints', () => {
         sensitive: true,
       }),
       expect.objectContaining({
-        argument: '<已隐藏>',
-        label: 'Token的值',
+        argument: '<hidden>',
+        label: 'Token value',
         sensitive: true,
       }),
     ]));

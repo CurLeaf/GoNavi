@@ -11,6 +11,11 @@ export interface MCPServerDraftIssue {
   detail: string;
 }
 
+export type MCPServerValidationTranslator = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) => string;
+
 export interface MCPServerDraftValidation {
   issues: MCPServerDraftIssue[];
   errorCount: number;
@@ -47,6 +52,113 @@ const toTrimmedString = (value: unknown): string => String(value ?? '').trim();
 
 const countIssues = (issues: MCPServerDraftIssue[], severity: MCPServerDraftIssueSeverity): number =>
   issues.filter((issue) => issue.severity === severity).length;
+
+const ISSUE_COPY = {
+  nameMissing: {
+    titleKey: 'ai_settings.mcp_server.validation.issue.name_missing.title',
+    detailKey: 'ai_settings.mcp_server.validation.issue.name_missing.detail',
+    fallbackTitle: 'Service name is empty',
+    fallbackDetail: 'Use a purpose name such as Browser, GitHub, or Filesystem; otherwise it can only be identified by command after saving.',
+  },
+  transportUnsupported: {
+    titleKey: 'ai_settings.mcp_server.validation.issue.transport_unsupported.title',
+    detailKey: 'ai_settings.mcp_server.validation.issue.transport_unsupported.detail',
+    fallbackTitle: 'Transport is not supported',
+    fallbackDetail: 'GoNavi can only add stdio MCP services here. Keep the transport set to stdio.',
+  },
+  commandMissing: {
+    titleKey: 'ai_settings.mcp_server.validation.issue.command_missing.title',
+    detailKey: 'ai_settings.mcp_server.validation.issue.command_missing.detail',
+    fallbackTitle: 'Startup command is missing',
+    fallbackDetail: 'Enter at least node, uvx, python, or a local executable path. Put the script name and --stdio in command arguments.',
+  },
+  commandWholeLine: {
+    titleKey: 'ai_settings.mcp_server.validation.issue.command_whole_line.title',
+    detailKey: 'ai_settings.mcp_server.validation.issue.command_whole_line.detail',
+    fallbackTitle: 'Startup command may contain the whole command line',
+    fallbackDetail: 'Put only the executable itself in startup command. Move the script name, module name, --stdio, and environment variables into arguments or environment variables.',
+  },
+  argsMissingForLauncher: {
+    titleKey: 'ai_settings.mcp_server.validation.issue.args_missing_for_launcher.title',
+    detailKey: 'ai_settings.mcp_server.validation.issue.args_missing_for_launcher.detail',
+    fallbackTitle: 'Command arguments may be missing the script or module name',
+    fallbackDetail: 'Launchers such as node, python, uvx, and npx usually also need server.js, -m your_server, or a package name as an argument.',
+  },
+  dockerRunMissing: {
+    titleKey: 'ai_settings.mcp_server.validation.issue.docker_run_missing.title',
+    detailKey: 'ai_settings.mcp_server.validation.issue.docker_run_missing.detail',
+    fallbackTitle: 'Docker arguments are missing run',
+    fallbackDetail: 'Docker MCP usually uses command=docker, with run, --rm, -i, the image name, and service arguments entered separately in args.',
+  },
+  dockerInteractiveMissing: {
+    titleKey: 'ai_settings.mcp_server.validation.issue.docker_interactive_missing.title',
+    detailKey: 'ai_settings.mcp_server.validation.issue.docker_interactive_missing.detail',
+    fallbackTitle: 'Docker arguments are missing -i',
+    fallbackDetail: 'MCP needs to keep reading standard input. Add -i or --interactive for docker run, otherwise tool discovery may disconnect immediately.',
+  },
+  dockerImageMissing: {
+    titleKey: 'ai_settings.mcp_server.validation.issue.docker_image_missing.title',
+    detailKey: 'ai_settings.mcp_server.validation.issue.docker_image_missing.detail',
+    fallbackTitle: 'Docker arguments may be missing the image name',
+    fallbackDetail: 'Enter the image name from the README after docker run options, for example mcp/server-fetch:latest.',
+  },
+  argsContainEnvOrShellGlue: {
+    titleKey: 'ai_settings.mcp_server.validation.issue.args_contain_env_or_shell_glue.title',
+    detailKey: 'ai_settings.mcp_server.validation.issue.args_contain_env_or_shell_glue.detail',
+    fallbackTitle: 'Command arguments may include environment variables or shell glue',
+    fallbackDetail: 'KEY=VALUE, $env:KEY=VALUE, set, env, and && belong in full-command auto split or in the environment variables field.',
+  },
+  timeoutOutOfRange: {
+    titleKey: 'ai_settings.mcp_server.validation.issue.timeout_out_of_range.title',
+    detailKey: 'ai_settings.mcp_server.validation.issue.timeout_out_of_range.detail',
+    fallbackTitle: 'Timeout is outside the recommended range',
+    fallbackDetail: 'GoNavi will clamp it between 3 and 120 seconds. Regular local services usually use 20 seconds; slow-starting services can use 45 or 60 seconds.',
+  },
+  envInvalidLines: {
+    titleKey: 'ai_settings.mcp_server.validation.issue.env_invalid_lines.title',
+    detailKey: 'ai_settings.mcp_server.validation.issue.env_invalid_lines.detail',
+    fallbackTitle: 'Environment variables contain invalid lines',
+    fallbackDetail: ({ count, lines }: { count: number; lines: string }) =>
+      `Each line must be KEY=VALUE. ${count} line(s) will not be saved: ${lines}`,
+  },
+} as const;
+
+const buildIssueCopy = (
+  copy: {
+    titleKey: string;
+    detailKey: string;
+    fallbackTitle: string;
+    fallbackDetail: string | ((params: { count: number; lines: string }) => string);
+  },
+  translate?: MCPServerValidationTranslator,
+  params?: Record<string, string | number | boolean | null | undefined>,
+): Pick<MCPServerDraftIssue, 'title' | 'detail'> => {
+  const title = translate ? translate(copy.titleKey, params) : copy.fallbackTitle;
+  const detail = translate
+    ? translate(copy.detailKey, params)
+    : typeof copy.fallbackDetail === 'function'
+      ? copy.fallbackDetail({
+          count: Number(params?.count || 0),
+          lines: String(params?.lines || ''),
+        })
+      : copy.fallbackDetail;
+  return { title, detail };
+};
+
+const pushIssue = (
+  issues: MCPServerDraftIssue[],
+  key: string,
+  severity: MCPServerDraftIssueSeverity,
+  copy: Parameters<typeof buildIssueCopy>[0],
+  translate?: MCPServerValidationTranslator,
+  params?: Record<string, string | number | boolean | null | undefined>,
+) => {
+  issues.push({
+    key,
+    severity,
+    ...buildIssueCopy(copy, translate, params),
+  });
+};
 
 const firstShellToken = (value: string): string => {
   const { tokens } = splitShellLikeCommand(value);
@@ -124,6 +236,7 @@ const hasDockerImageArg = (args: string[]): boolean => {
 export const validateMCPServerDraft = (
   server: Pick<AIMCPServerConfig, 'name' | 'transport' | 'command' | 'args' | 'timeoutSeconds'>,
   parsedEnvDraft?: Pick<ParsedMCPEnvDraft, 'invalidLines'>,
+  translate?: MCPServerValidationTranslator,
 ): MCPServerDraftValidation => {
   const issues: MCPServerDraftIssue[] = [];
   const command = toTrimmedString(server.command);
@@ -131,100 +244,48 @@ export const validateMCPServerDraft = (
   const timeoutSeconds = Number(server.timeoutSeconds);
 
   if (!toTrimmedString(server.name)) {
-    issues.push({
-      key: 'name-missing',
-      severity: 'warning',
-      title: '服务名称为空',
-      detail: '建议写成 Browser、GitHub、Filesystem 这类用途名；否则保存后只能靠命令名识别。',
-    });
+    pushIssue(issues, 'name-missing', 'warning', ISSUE_COPY.nameMissing, translate);
   }
 
   if (server.transport !== 'stdio') {
-    issues.push({
-      key: 'transport-unsupported',
-      severity: 'error',
-      title: '传输方式不支持',
-      detail: '当前 GoNavi 新增 MCP 服务只支持 stdio，请保持传输方式为 stdio。',
-    });
+    pushIssue(issues, 'transport-unsupported', 'error', ISSUE_COPY.transportUnsupported, translate);
   }
 
   if (!command) {
-    issues.push({
-      key: 'command-missing',
-      severity: 'error',
-      title: '启动命令未填写',
-      detail: '至少填写 node、uvx、python 或本机 exe 路径；脚本名和 --stdio 放到命令参数里。',
-    });
+    pushIssue(issues, 'command-missing', 'error', ISSUE_COPY.commandMissing, translate);
   } else if (commandLooksLikeWholeLine(command)) {
-    issues.push({
-      key: 'command-whole-line',
-      severity: 'warning',
-      title: '启动命令可能填成了整行命令',
-      detail: '启动命令只填可执行程序本身；把脚本名、模块名、--stdio 和环境变量拆到命令参数或环境变量里。',
-    });
+    pushIssue(issues, 'command-whole-line', 'warning', ISSUE_COPY.commandWholeLine, translate);
   }
 
   if (command && launcherUsuallyNeedsArgs(command) && args.length === 0) {
-    issues.push({
-      key: 'args-missing-for-launcher',
-      severity: 'warning',
-      title: '命令参数可能缺少脚本或模块名',
-      detail: 'node、python、uvx、npx 这类启动器通常还需要 server.js、-m your_server 或包名作为参数。',
-    });
+    pushIssue(issues, 'args-missing-for-launcher', 'warning', ISSUE_COPY.argsMissingForLauncher, translate);
   }
 
   if (command && isDockerCommand(command)) {
     if (!hasDockerRunArg(args)) {
-      issues.push({
-        key: 'docker-run-missing',
-        severity: 'warning',
-        title: 'Docker 参数缺少 run',
-        detail: 'Docker MCP 通常需要 command=docker，args 里单独填写 run、--rm、-i、镜像名和服务参数。',
-      });
+      pushIssue(issues, 'docker-run-missing', 'warning', ISSUE_COPY.dockerRunMissing, translate);
     }
     if (!hasDockerInteractiveArg(args)) {
-      issues.push({
-        key: 'docker-interactive-missing',
-        severity: 'warning',
-        title: 'Docker 参数缺少 -i',
-        detail: 'MCP 需要持续读取标准输入；docker run 场景请加 -i 或 --interactive，否则工具发现可能立即断开。',
-      });
+      pushIssue(issues, 'docker-interactive-missing', 'warning', ISSUE_COPY.dockerInteractiveMissing, translate);
     }
     if (!hasDockerImageArg(args)) {
-      issues.push({
-        key: 'docker-image-missing',
-        severity: 'warning',
-        title: 'Docker 参数可能缺少镜像名',
-        detail: '请在 docker run 选项之后填写 README 提供的镜像名，例如 mcp/server-fetch:latest。',
-      });
+      pushIssue(issues, 'docker-image-missing', 'warning', ISSUE_COPY.dockerImageMissing, translate);
     }
   }
 
   if (argsContainEnvOrShellGlue(args)) {
-    issues.push({
-      key: 'args-contain-env-or-shell-glue',
-      severity: 'warning',
-      title: '命令参数里疑似混入环境变量或 Shell 连接符',
-      detail: 'KEY=VALUE、$env:KEY=VALUE、set、env、&& 这类内容应放到完整命令自动拆分或环境变量输入框里。',
-    });
+    pushIssue(issues, 'args-contain-env-or-shell-glue', 'warning', ISSUE_COPY.argsContainEnvOrShellGlue, translate);
   }
 
   if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 3 || timeoutSeconds > 120) {
-    issues.push({
-      key: 'timeout-out-of-range',
-      severity: 'warning',
-      title: '超时时间不在推荐范围内',
-      detail: 'GoNavi 最终会限制在 3 到 120 秒之间；本机常规服务建议 20 秒，慢启动服务建议 45 或 60 秒。',
-    });
+    pushIssue(issues, 'timeout-out-of-range', 'warning', ISSUE_COPY.timeoutOutOfRange, translate);
   }
 
   const invalidEnvLines = parsedEnvDraft?.invalidLines || [];
   if (invalidEnvLines.length > 0) {
-    issues.push({
-      key: 'env-invalid-lines',
-      severity: 'error',
-      title: '环境变量存在无效行',
-      detail: `每行必须是 KEY=VALUE，当前有 ${invalidEnvLines.length} 行不会保存：${invalidEnvLines.slice(0, 2).join(' / ')}`,
+    pushIssue(issues, 'env-invalid-lines', 'error', ISSUE_COPY.envInvalidLines, translate, {
+      count: invalidEnvLines.length,
+      lines: invalidEnvLines.slice(0, 2).join(' / '),
     });
   }
 

@@ -23,24 +23,40 @@ func hasSourceQuery(config SyncConfig) bool {
 	return strings.TrimSpace(config.SourceQuery) != ""
 }
 
+func localizedSyncBackendDetailText(key string, err error) string {
+	detail := ""
+	if err != nil {
+		detail = err.Error()
+	}
+	return localizedSyncBackendText(key, map[string]any{
+		"detail": detail,
+	})
+}
+
+func syncWrapDetailError(key string, err error) error {
+	return syncWrapError(key, map[string]any{
+		"detail": err.Error(),
+	}, err)
+}
+
 func validateSourceQuerySyncConfig(config SyncConfig) (string, error) {
 	sourceQuery := strings.TrimSpace(config.SourceQuery)
 	if sourceQuery == "" {
-		return "", fmt.Errorf("源查询 SQL 不能为空")
+		return "", syncTextError("data_sync.backend.validation.source_query_required", nil)
 	}
 
 	content := strings.ToLower(strings.TrimSpace(config.Content))
 	if content != "" && content != "data" {
-		return "", fmt.Errorf("SQL 结果集同步当前仅支持“仅同步数据”")
+		return "", syncTextError("data_sync.backend.validation.query_mode_data_only", nil)
 	}
 
 	if len(config.Tables) != 1 {
-		return "", fmt.Errorf("SQL 结果集同步要求且仅允许选择一个目标表")
+		return "", syncTextError("data_sync.backend.validation.single_target_table_required", nil)
 	}
 
 	tableName := strings.TrimSpace(config.Tables[0])
 	if tableName == "" {
-		return "", fmt.Errorf("目标表不能为空")
+		return "", syncTextError("data_sync.backend.validation.target_table_required", nil)
 	}
 	return tableName, nil
 }
@@ -60,10 +76,12 @@ func resolveSinglePKColumn(cols []connection.ColumnDefinition) (string, error) {
 		}
 	}
 	if len(pkCols) == 0 {
-		return "", fmt.Errorf("目标表无主键，不支持基于 SQL 结果集的差异分析")
+		return "", syncTextError("data_sync.backend.error.target_pk_required_for_query_diff", nil)
 	}
 	if len(pkCols) > 1 {
-		return "", fmt.Errorf("目标表为复合主键（%s），暂不支持基于 SQL 结果集的差异分析", strings.Join(pkCols, ","))
+		return "", syncTextError("data_sync.backend.error.target_composite_pk_query_diff_unsupported", map[string]any{
+			"columns": strings.Join(pkCols, ","),
+		})
 	}
 	return pkCols[0], nil
 }
@@ -77,10 +95,12 @@ func loadSourceQuerySyncContext(config SyncConfig, sourceDB db.Database, targetD
 	targetType, targetSchema, targetTable, targetQueryTable := resolveTargetQueryTable(config, tableName)
 	targetCols, err := targetDB.GetColumns(targetSchema, targetTable)
 	if err != nil {
-		return sourceQuerySyncContext{}, fmt.Errorf("获取目标表字段失败: %w", err)
+		return sourceQuerySyncContext{}, syncWrapDetailError("data_sync.backend.error.load_target_columns_failed", err)
 	}
 	if len(targetCols) == 0 {
-		return sourceQuerySyncContext{}, fmt.Errorf("目标表 %s 不存在或未读取到字段定义", tableName)
+		return sourceQuerySyncContext{}, syncTextError("data_sync.backend.error.target_table_columns_missing", map[string]any{
+			"table": tableName,
+		})
 	}
 
 	ctx := sourceQuerySyncContext{
@@ -97,7 +117,7 @@ func loadSourceQuerySyncContext(config SyncConfig, sourceDB db.Database, targetD
 	if needSourceRows {
 		sourceRows, _, err := sourceDB.Query(strings.TrimSpace(config.SourceQuery))
 		if err != nil {
-			return sourceQuerySyncContext{}, fmt.Errorf("执行源查询失败: %w", err)
+			return sourceQuerySyncContext{}, syncWrapDetailError("data_sync.backend.error.execute_source_query_failed", err)
 		}
 		ctx.SourceRows = sourceRows
 	}
@@ -113,7 +133,7 @@ func loadSourceQuerySyncContext(config SyncConfig, sourceDB db.Database, targetD
 	if needTargetRows {
 		targetRows, _, err := targetDB.Query(fmt.Sprintf("SELECT * FROM %s", quoteQualifiedIdentByType(targetType, targetQueryTable)))
 		if err != nil {
-			return sourceQuerySyncContext{}, fmt.Errorf("读取目标表失败: %w", err)
+			return sourceQuerySyncContext{}, syncWrapDetailError("data_sync.backend.error.read_target_table_failed", err)
 		}
 		ctx.TargetRows = targetRows
 	}
@@ -204,24 +224,30 @@ func (s *SyncEngine) analyzeSourceQuery(config SyncConfig) SyncAnalyzeResult {
 	}
 
 	totalTables := 1
-	s.progress(config.JobID, 0, totalTables, tableName, "差异分析开始")
+	analysisStartedStage := localizedSyncBackendText("data_sync.progress.stage.analysis_started", nil)
+	analysisCompletedStage := localizedSyncBackendText("data_sync.progress.stage.analysis_completed", nil)
+	analyzedTargetTablesMessage := localizedSyncBackendText("data_sync.backend.result.analyzed_target_tables", map[string]any{
+		"count": totalTables,
+	})
+	sourceQueryDiffCompletedSummary := localizedSyncBackendText("data_sync.backend.summary.source_query_diff_completed", nil)
+	s.progress(config.JobID, 0, totalTables, tableName, analysisStartedStage)
 
 	sourceDB, err := newSyncDatabase(config.SourceConfig.Type)
 	if err != nil {
-		return SyncAnalyzeResult{Success: false, Message: "初始化源数据库驱动失败: " + err.Error()}
+		return SyncAnalyzeResult{Success: false, Message: localizedSyncBackendDetailText("data_sync.backend.error.init_source_driver_failed", err)}
 	}
 	targetDB, err := newSyncDatabase(config.TargetConfig.Type)
 	if err != nil {
-		return SyncAnalyzeResult{Success: false, Message: "初始化目标数据库驱动失败: " + err.Error()}
+		return SyncAnalyzeResult{Success: false, Message: localizedSyncBackendDetailText("data_sync.backend.error.init_target_driver_failed", err)}
 	}
 
 	if err := sourceDB.Connect(config.SourceConfig); err != nil {
-		return SyncAnalyzeResult{Success: false, Message: "源数据库连接失败: " + err.Error()}
+		return SyncAnalyzeResult{Success: false, Message: localizedSyncBackendDetailText("data_sync.backend.error.connect_source_failed", err)}
 	}
 	defer sourceDB.Close()
 
 	if err := targetDB.Connect(config.TargetConfig); err != nil {
-		return SyncAnalyzeResult{Success: false, Message: "目标数据库连接失败: " + err.Error()}
+		return SyncAnalyzeResult{Success: false, Message: localizedSyncBackendDetailText("data_sync.backend.error.connect_target_failed", err)}
 	}
 	defer targetDB.Close()
 
@@ -233,8 +259,8 @@ func (s *SyncEngine) analyzeSourceQuery(config SyncConfig) SyncAnalyzeResult {
 	if err != nil {
 		summary.Message = err.Error()
 		result.Tables = append(result.Tables, summary)
-		result.Message = "已完成 1 个目标表的差异分析"
-		s.progress(config.JobID, totalTables, totalTables, tableName, "差异分析完成")
+		result.Message = analyzedTargetTablesMessage
+		s.progress(config.JobID, totalTables, totalTables, tableName, analysisCompletedStage)
 		return result
 	}
 
@@ -244,8 +270,8 @@ func (s *SyncEngine) analyzeSourceQuery(config SyncConfig) SyncAnalyzeResult {
 		if scanErr != nil {
 			summary.Message = scanErr.Error()
 			result.Tables = append(result.Tables, summary)
-			result.Message = "已完成 1 个目标表的差异分析"
-			s.progress(config.JobID, totalTables, totalTables, tableName, "差异分析完成")
+			result.Message = analyzedTargetTablesMessage
+			s.progress(config.JobID, totalTables, totalTables, tableName, analysisCompletedStage)
 			return result
 		}
 		summary.CanSync = true
@@ -255,10 +281,10 @@ func (s *SyncEngine) analyzeSourceQuery(config SyncConfig) SyncAnalyzeResult {
 		summary.Deletes = counts.Deletes
 		summary.Same = counts.Same
 		summary.TargetTableExists = true
-		summary.Message = "SQL 结果集差异分析完成"
+		summary.Message = sourceQueryDiffCompletedSummary
 		result.Tables = append(result.Tables, summary)
-		result.Message = "已完成 1 个目标表的差异分析"
-		s.progress(config.JobID, totalTables, totalTables, tableName, "差异分析完成")
+		result.Message = analyzedTargetTablesMessage
+		s.progress(config.JobID, totalTables, totalTables, tableName, analysisCompletedStage)
 		return result
 	}
 
@@ -266,8 +292,8 @@ func (s *SyncEngine) analyzeSourceQuery(config SyncConfig) SyncAnalyzeResult {
 	if err != nil {
 		summary.Message = err.Error()
 		result.Tables = append(result.Tables, summary)
-		result.Message = "已完成 1 个目标表的差异分析"
-		s.progress(config.JobID, totalTables, totalTables, tableName, "差异分析完成")
+		result.Message = analyzedTargetTablesMessage
+		s.progress(config.JobID, totalTables, totalTables, tableName, analysisCompletedStage)
 		return result
 	}
 
@@ -279,30 +305,30 @@ func (s *SyncEngine) analyzeSourceQuery(config SyncConfig) SyncAnalyzeResult {
 	summary.Deletes = len(deletes)
 	summary.Same = same
 	summary.TargetTableExists = true
-	summary.Message = "SQL 结果集差异分析完成"
+	summary.Message = sourceQueryDiffCompletedSummary
 	result.Tables = append(result.Tables, summary)
-	result.Message = "已完成 1 个目标表的差异分析"
-	s.progress(config.JobID, totalTables, totalTables, tableName, "差异分析完成")
+	result.Message = analyzedTargetTablesMessage
+	s.progress(config.JobID, totalTables, totalTables, tableName, analysisCompletedStage)
 	return result
 }
 
 func (s *SyncEngine) previewSourceQuery(config SyncConfig, limit int) (TableDiffPreview, error) {
 	sourceDB, err := newSyncDatabase(config.SourceConfig.Type)
 	if err != nil {
-		return TableDiffPreview{}, fmt.Errorf("初始化源数据库驱动失败: %w", err)
+		return TableDiffPreview{}, syncWrapDetailError("data_sync.backend.error.init_source_driver_failed", err)
 	}
 	targetDB, err := newSyncDatabase(config.TargetConfig.Type)
 	if err != nil {
-		return TableDiffPreview{}, fmt.Errorf("初始化目标数据库驱动失败: %w", err)
+		return TableDiffPreview{}, syncWrapDetailError("data_sync.backend.error.init_target_driver_failed", err)
 	}
 
 	if err := sourceDB.Connect(config.SourceConfig); err != nil {
-		return TableDiffPreview{}, fmt.Errorf("源数据库连接失败: %w", err)
+		return TableDiffPreview{}, syncWrapDetailError("data_sync.backend.error.connect_source_failed", err)
 	}
 	defer sourceDB.Close()
 
 	if err := targetDB.Connect(config.TargetConfig); err != nil {
-		return TableDiffPreview{}, fmt.Errorf("目标数据库连接失败: %w", err)
+		return TableDiffPreview{}, syncWrapDetailError("data_sync.backend.error.connect_target_failed", err)
 	}
 	defer targetDB.Close()
 
@@ -311,12 +337,13 @@ func (s *SyncEngine) previewSourceQuery(config SyncConfig, limit int) (TableDiff
 		return TableDiffPreview{}, err
 	}
 
+	previewSummary := localizedSyncBackendText("data_sync.plan.source_query_preview", nil)
 	sourceType := resolveMigrationDBType(config.SourceConfig)
 	out := TableDiffPreview{
 		Table:         ctx.TableName,
 		PKColumn:      ctx.PKColumn,
 		ColumnTypes:   make(map[string]string, len(ctx.TargetCols)),
-		SchemaSummary: "SQL 结果集同步预览",
+		SchemaSummary: previewSummary,
 		Inserts:       make([]PreviewRow, 0, limit),
 		Updates:       make([]PreviewUpdateRow, 0, limit),
 		Deletes:       make([]PreviewRow, 0, limit),
@@ -386,7 +413,7 @@ func (s *SyncEngine) previewSourceQuery(config SyncConfig, limit int) (TableDiff
 		Table:         ctx.TableName,
 		PKColumn:      ctx.PKColumn,
 		ColumnTypes:   make(map[string]string, len(ctx.TargetCols)),
-		SchemaSummary: "SQL 结果集同步预览",
+		SchemaSummary: previewSummary,
 		TotalInserts:  len(inserts),
 		TotalUpdates:  len(updates),
 		TotalDeletes:  len(deletes),
@@ -459,25 +486,30 @@ func (s *SyncEngine) runSourceQuerySync(config SyncConfig) SyncResult {
 
 	totalTables := 1
 	tableMode := normalizeSyncMode(config.Mode)
-	s.progress(config.JobID, 0, totalTables, tableName, "开始同步")
-	s.appendLog(config.JobID, &result, "info", fmt.Sprintf("同步来源：SQL 结果集 -> 目标表 %s；模式：%s", tableName, tableMode))
+	syncStartedStage := localizedSyncBackendText("data_sync.progress.stage.sync_started", nil)
+	syncSourceLog := localizedSyncBackendText("data_sync.backend.log.source_query_sync_source", map[string]any{
+		"table": tableName,
+		"mode":  tableMode,
+	})
+	s.progress(config.JobID, 0, totalTables, tableName, syncStartedStage)
+	s.appendLog(config.JobID, &result, "info", syncSourceLog)
 
 	sourceDB, err := newSyncDatabase(config.SourceConfig.Type)
 	if err != nil {
-		return s.fail(config.JobID, totalTables, result, "初始化源数据库驱动失败: "+err.Error())
+		return s.fail(config.JobID, totalTables, result, localizedSyncBackendDetailText("data_sync.backend.error.init_source_driver_failed", err))
 	}
 	targetDB, err := newSyncDatabase(config.TargetConfig.Type)
 	if err != nil {
-		return s.fail(config.JobID, totalTables, result, "初始化目标数据库驱动失败: "+err.Error())
+		return s.fail(config.JobID, totalTables, result, localizedSyncBackendDetailText("data_sync.backend.error.init_target_driver_failed", err))
 	}
 
 	if err := sourceDB.Connect(config.SourceConfig); err != nil {
-		return s.fail(config.JobID, totalTables, result, "源数据库连接失败: "+err.Error())
+		return s.fail(config.JobID, totalTables, result, localizedSyncBackendDetailText("data_sync.backend.error.connect_source_failed", err))
 	}
 	defer sourceDB.Close()
 
 	if err := targetDB.Connect(config.TargetConfig); err != nil {
-		return s.fail(config.JobID, totalTables, result, "目标数据库连接失败: "+err.Error())
+		return s.fail(config.JobID, totalTables, result, localizedSyncBackendDetailText("data_sync.backend.error.connect_target_failed", err))
 	}
 	defer targetDB.Close()
 

@@ -5,7 +5,7 @@
  * user works with several connections that each use those indices for a
  * different purpose, the numbers are indistinguishable in the sidebar. An alias
  * map lets the user label, for example, `db0` as `cache` and have the sidebar
- * render `db0 (cache)`.
+ * render `db0 cache`.
  *
  * The map is purely a client-side display preference and is keyed by
  * connection id so aliases stay independent across connections. The underlying
@@ -128,17 +128,14 @@ export const setRedisDbAlias = (
 
 /**
  * Build the sidebar label for a Redis DB node. Returns `dbN` when there is no
- * alias, and `dbN (alias)` when one is set. `suffix` carries the existing
- * key-count fragment (e.g. ` (12)`) and is always appended last so the alias
- * stays adjacent to the index.
+ * alias, and `dbN alias` when one is set. Key counts are intentionally not
+ * included here: V2 renders them via the node meta slot to avoid duplicates.
  */
 export const buildRedisDbNodeLabel = (
   dbIndex: number,
   alias: string,
-  suffix = '',
 ): string => {
   const base = `db${dbIndex}`;
   const sanitizedAlias = sanitizeRedisDbAlias(alias);
-  const labelled = sanitizedAlias ? `${base} (${sanitizedAlias})` : base;
-  return `${labelled}${suffix}`;
+  return sanitizedAlias ? `${base} ${sanitizedAlias}` : base;
 };

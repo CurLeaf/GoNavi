@@ -24,7 +24,7 @@ func NewCustomProvider(config ai.ProviderConfig) (Provider, error) {
 		apiFormat = "openai"
 	}
 	if strings.TrimSpace(config.BaseURL) == "" && apiFormat != "claude-cli" && apiFormat != "codebuddy-cli" {
-		return nil, fmt.Errorf("自定义 Provider 必须指定 Base URL")
+		return nil, fmt.Errorf("custom provider Base URL is required")
 	}
 
 	var innerProvider Provider

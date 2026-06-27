@@ -1,10 +1,89 @@
 import React from 'react';
 import { DBShowCreateTable } from '../../wailsjs/go/app/App';
+import { t as catalogTranslate } from '../i18n/catalog';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { formatDdlForDisplay } from '../utils/ddlFormat';
 
-type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er';
+type GridViewMode = 'table' | 'json' | 'text' | 'fields' | 'ddl' | 'er' | 'sqlLog';
 type DdlViewLayoutMode = 'bottom' | 'side';
+type TranslateParams = Record<string, string | number | boolean | null | undefined>;
+const GRID_VIEW_MODES: GridViewMode[] = ['table', 'json', 'text', 'fields', 'ddl', 'er', 'sqlLog'];
+const V2_ONLY_GRID_VIEW_MODES = new Set<GridViewMode>(['fields', 'ddl', 'er', 'sqlLog']);
+const DDL_VIEW_LAYOUT_STORAGE_KEY = 'gonavi.dataGrid.ddlViewLayout';
+let sharedDdlViewOpen = false;
+let sharedDdlViewLayout: DdlViewLayoutMode | null = null;
+const ddlViewLayoutListeners = new Set<(layout: DdlViewLayoutMode) => void>();
+
+const sanitizeDdlViewLayout = (value: unknown): DdlViewLayoutMode => (
+  value === 'side' ? 'side' : 'bottom'
+);
+
+const readPersistedDdlViewLayout = (): DdlViewLayoutMode => {
+  try {
+    const storage = typeof window !== 'undefined' ? window.localStorage : undefined;
+    return sanitizeDdlViewLayout(storage?.getItem(DDL_VIEW_LAYOUT_STORAGE_KEY));
+  } catch {
+    return 'bottom';
+  }
+};
+
+const persistDdlViewLayout = (layout: DdlViewLayoutMode) => {
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage?.setItem(DDL_VIEW_LAYOUT_STORAGE_KEY, layout);
+    }
+  } catch {
+    // Ignore storage failures in restricted runtimes.
+  }
+};
+
+const readSharedDdlViewLayout = (): DdlViewLayoutMode => {
+  if (!sharedDdlViewLayout) {
+    sharedDdlViewLayout = readPersistedDdlViewLayout();
+  }
+  return sharedDdlViewLayout;
+};
+
+const setSharedDdlViewLayout = (layout: DdlViewLayoutMode) => {
+  sharedDdlViewLayout = layout;
+  persistDdlViewLayout(layout);
+  ddlViewLayoutListeners.forEach((listener) => listener(layout));
+};
+
+const setSharedDdlViewOpen = (open: boolean) => {
+  sharedDdlViewOpen = open;
+};
+
+const shouldRestoreSharedDdlView = () => sharedDdlViewOpen;
+
+export const resetDataGridDdlViewSharedStateForTests = () => {
+  sharedDdlViewOpen = false;
+  sharedDdlViewLayout = null;
+  ddlViewLayoutListeners.clear();
+};
+
+const buildDdlContextKey = (currentConnConfig: unknown, dbName?: string, tableName?: string) => {
+  const config = (currentConnConfig || {}) as Record<string, unknown>;
+  return [
+    String(config.type || ''),
+    String(config.host || ''),
+    String(config.port || ''),
+    String(config.database || ''),
+    dbName || '',
+    tableName || '',
+  ].join('\u0001');
+};
+
+const resolveInitialGridViewMode = (
+  initialViewMode: GridViewMode | undefined,
+  isV2Ui: boolean,
+  canViewDdl: boolean,
+): GridViewMode | null => {
+  if (!initialViewMode || !GRID_VIEW_MODES.includes(initialViewMode)) return null;
+  if (!isV2Ui && V2_ONLY_GRID_VIEW_MODES.has(initialViewMode)) return null;
+  if (initialViewMode === 'ddl' && !canViewDdl) return null;
+  return initialViewMode;
+};
 
 interface UseDataGridDdlViewParams {
   canViewDdl: boolean;
@@ -12,6 +91,7 @@ interface UseDataGridDdlViewParams {
   dbName?: string;
   tableName?: string;
   isV2Ui: boolean;
+  isActive?: boolean;
   cellEditMode: boolean;
   selectedRowKeys: React.Key[];
   mergedDisplayDataRef: React.MutableRefObject<any[]>;
@@ -22,6 +102,9 @@ interface UseDataGridDdlViewParams {
     error: (content: string) => void;
   };
   dbType?: string;
+  translate?: (key: string, params?: TranslateParams) => string;
+  initialViewMode?: GridViewMode;
+  initialViewModeRequestId?: string;
 }
 
 export interface UseDataGridDdlViewResult {
@@ -41,6 +124,7 @@ export interface UseDataGridDdlViewResult {
   handleViewModeChange: (nextMode: GridViewMode) => void;
   handleDdlSidebarResizeStart: (event: React.MouseEvent<HTMLDivElement>) => void;
   resetDdlViewState: () => void;
+  closeDdlView: () => void;
 }
 
 export const useDataGridDdlView = ({
@@ -49,6 +133,7 @@ export const useDataGridDdlView = ({
   dbName,
   tableName,
   isV2Ui,
+  isActive = true,
   cellEditMode,
   selectedRowKeys,
   mergedDisplayDataRef,
@@ -57,33 +142,88 @@ export const useDataGridDdlView = ({
   setTextRecordIndex,
   messageApi,
   dbType,
+  translate,
+  initialViewMode,
+  initialViewModeRequestId,
 }: UseDataGridDdlViewParams): UseDataGridDdlViewResult => {
-  const [viewMode, setViewMode] = React.useState<GridViewMode>('table');
+  const canRestoreSharedDdlView = isV2Ui && canViewDdl && !!currentConnConfig && !!tableName && shouldRestoreSharedDdlView();
+  const shouldStartWithSharedDdlView = isActive && canRestoreSharedDdlView;
+  const initialResolvedViewMode = resolveInitialGridViewMode(initialViewMode, isV2Ui, canViewDdl);
+  const [viewMode, setViewMode] = React.useState<GridViewMode>(() => (
+    shouldStartWithSharedDdlView ? 'ddl' : (initialResolvedViewMode || 'table')
+  ));
   const [ddlModalOpen, setDdlModalOpen] = React.useState(false);
-  const [ddlLoading, setDdlLoading] = React.useState(false);
+  const [ddlLoading, setDdlLoading] = React.useState(shouldStartWithSharedDdlView);
   const [ddlText, setDdlText] = React.useState('');
-  const [ddlViewLayout, setDdlViewLayout] = React.useState<DdlViewLayoutMode>('bottom');
+  const [ddlViewLayoutState, setDdlViewLayoutState] = React.useState<DdlViewLayoutMode>(readSharedDdlViewLayout);
   const [ddlSidebarWidth, setDdlSidebarWidth] = React.useState(420);
   const [ddlSidebarResizePreviewX, setDdlSidebarResizePreviewX] = React.useState<number | null>(null);
   const ddlSidebarResizeRef = React.useRef<{
     startX: number;
     startWidth: number;
     previewWidth: number;
+    previewX: number | null;
+    previewElement?: HTMLElement | null;
+    previewFrame?: number | null;
     moveHandler?: (event: MouseEvent) => void;
     upHandler?: () => void;
   } | null>(null);
   const ddlRequestSeqRef = React.useRef(0);
+  const ddlRequestedContextKeyRef = React.useRef<string | null>(null);
+  const ddlContextKey = React.useMemo(
+    () => buildDdlContextKey(currentConnConfig, dbName, tableName),
+    [currentConnConfig, dbName, tableName],
+  );
 
-  const isTableSurfaceActive = viewMode === 'table' || (isV2Ui && viewMode === 'ddl' && ddlViewLayout === 'side');
+  const ddlViewLayout = ddlViewLayoutState;
+  const resolvedViewMode: GridViewMode = isActive
+    && canRestoreSharedDdlView
+    && (viewMode === 'table' || viewMode === 'ddl')
+    ? 'ddl'
+    : viewMode;
+  const isDdlContextPending = resolvedViewMode === 'ddl'
+    && isActive
+    && canRestoreSharedDdlView
+    && ddlRequestedContextKeyRef.current !== ddlContextKey;
+  const resolvedDdlLoading = ddlLoading || isDdlContextPending;
+  const resolvedDdlText = isDdlContextPending ? '' : ddlText;
+  const isTableSurfaceActive = resolvedViewMode === 'table' || (isV2Ui && resolvedViewMode === 'ddl' && ddlViewLayout === 'side');
+
+  const translateMessage = React.useCallback((key: string, params?: TranslateParams) => {
+    return translate ? translate(key, params) : catalogTranslate('zh-CN', key, params);
+  }, [translate]);
+
+  const setDdlViewLayout: React.Dispatch<React.SetStateAction<DdlViewLayoutMode>> = React.useCallback((nextLayout) => {
+    const currentLayout = readSharedDdlViewLayout();
+    const resolvedLayout = sanitizeDdlViewLayout(
+      typeof nextLayout === 'function' ? nextLayout(currentLayout) : nextLayout,
+    );
+    setSharedDdlViewLayout(resolvedLayout);
+  }, []);
+
+  React.useEffect(() => {
+    const handleSharedDdlViewLayoutChange = (nextLayout: DdlViewLayoutMode) => {
+      setDdlViewLayoutState((currentLayout) => (
+        currentLayout === nextLayout ? currentLayout : nextLayout
+      ));
+    };
+    ddlViewLayoutListeners.add(handleSharedDdlViewLayoutChange);
+    handleSharedDdlViewLayoutChange(readSharedDdlViewLayout());
+    return () => {
+      ddlViewLayoutListeners.delete(handleSharedDdlViewLayoutChange);
+    };
+  }, []);
 
   const handleOpenTableDdl = React.useCallback(async (options?: { asView?: boolean }) => {
     if (!canViewDdl || !currentConnConfig || !tableName) {
-      messageApi.error('当前表缺少连接或表名，无法查看 DDL');
+      messageApi.error(translateMessage('data_grid.message.ddl_missing_context'));
       return;
     }
     const asView = options?.asView === true && isV2Ui;
     const requestSeq = ++ddlRequestSeqRef.current;
+    ddlRequestedContextKeyRef.current = ddlContextKey;
     if (asView) {
+      setSharedDdlViewOpen(true);
       setViewMode('ddl');
       setDdlModalOpen(false);
     } else {
@@ -98,32 +238,60 @@ export const useDataGridDdlView = ({
         setDdlText(formatDdlForDisplay(res.data, dbType || String((currentConnConfig as any)?.type || '')));
         return;
       }
-      messageApi.error(res.message || '获取 DDL 失败');
+      messageApi.error(res.message || translateMessage('data_grid.message.ddl_load_failed'));
     } catch (error: any) {
       if (requestSeq !== ddlRequestSeqRef.current) return;
-      messageApi.error(error?.message || '获取 DDL 失败');
+      messageApi.error(error?.message || translateMessage('data_grid.message.ddl_load_failed'));
     } finally {
       if (requestSeq === ddlRequestSeqRef.current) {
         setDdlLoading(false);
       }
     }
-  }, [canViewDdl, currentConnConfig, dbName, dbType, isV2Ui, messageApi, tableName]);
+  }, [canViewDdl, currentConnConfig, dbName, dbType, ddlContextKey, isV2Ui, messageApi, tableName, translateMessage]);
 
   React.useEffect(() => {
-    if (isV2Ui || (viewMode !== 'fields' && viewMode !== 'ddl' && viewMode !== 'er')) return;
+    if (isV2Ui || (viewMode !== 'fields' && viewMode !== 'ddl' && viewMode !== 'er' && viewMode !== 'sqlLog')) return;
     setViewMode('table');
   }, [isV2Ui, viewMode]);
 
+  const closeDdlView = React.useCallback(() => {
+    setSharedDdlViewOpen(false);
+    ddlRequestedContextKeyRef.current = null;
+    ddlRequestSeqRef.current += 1;
+    setViewMode('table');
+    setDdlModalOpen(false);
+    setDdlLoading(false);
+    setDdlText('');
+    setDdlSidebarResizePreviewX(null);
+  }, []);
+
+  React.useEffect(() => {
+    if (!isActive || !isV2Ui || !shouldRestoreSharedDdlView()) return;
+    if (!canViewDdl || !currentConnConfig || !tableName) return;
+    if (ddlRequestedContextKeyRef.current === ddlContextKey) return;
+    void handleOpenTableDdl({ asView: true });
+  }, [canViewDdl, currentConnConfig, ddlContextKey, handleOpenTableDdl, isActive, isV2Ui, tableName]);
+
   const handleViewModeChange = React.useCallback((nextMode: GridViewMode) => {
-    if ((nextMode === 'fields' || nextMode === 'ddl' || nextMode === 'er') && !isV2Ui) {
+    if ((nextMode === 'fields' || nextMode === 'ddl' || nextMode === 'er' || nextMode === 'sqlLog') && !isV2Ui) {
+      setSharedDdlViewOpen(false);
       setViewMode('table');
       return;
     }
-    if (nextMode === 'ddl') {
-      void handleOpenTableDdl({ asView: true });
-      setViewMode('ddl');
+    if (nextMode === 'sqlLog') {
+      setSharedDdlViewOpen(false);
+      setViewMode('sqlLog');
       return;
     }
+    if (nextMode === 'ddl') {
+      if (isV2Ui && resolvedViewMode === 'ddl') {
+        closeDdlView();
+        return;
+      }
+      void handleOpenTableDdl({ asView: true });
+      return;
+    }
+    setSharedDdlViewOpen(false);
     if (nextMode === 'json' && cellEditMode) {
       closeCellEditModeRef.current();
     }
@@ -139,22 +307,80 @@ export const useDataGridDdlView = ({
     }
 
     setViewMode(nextMode);
-  }, [cellEditMode, closeCellEditModeRef, handleOpenTableDdl, isV2Ui, mergedDisplayDataRef, rowKeyStr, selectedRowKeys, setTextRecordIndex]);
+  }, [cellEditMode, closeCellEditModeRef, closeDdlView, handleOpenTableDdl, isV2Ui, mergedDisplayDataRef, resolvedViewMode, rowKeyStr, selectedRowKeys, setTextRecordIndex]);
+
+  const appliedInitialViewModeKeyRef = React.useRef('');
+  React.useEffect(() => {
+    if (!isActive) return;
+    const nextInitialViewMode = resolveInitialGridViewMode(initialViewMode, isV2Ui, canViewDdl);
+    if (!nextInitialViewMode) return;
+    const applyKey = `${ddlContextKey}\u0001${nextInitialViewMode}\u0001${initialViewModeRequestId || ''}`;
+    if (appliedInitialViewModeKeyRef.current === applyKey) return;
+    appliedInitialViewModeKeyRef.current = applyKey;
+    handleViewModeChange(nextInitialViewMode);
+  }, [canViewDdl, ddlContextKey, handleViewModeChange, initialViewMode, initialViewModeRequestId, isActive, isV2Ui]);
 
   const handleDdlSidebarResizeStart = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
     const startX = event.clientX;
     const startWidth = ddlSidebarWidth;
+    const resizerElement = event.currentTarget;
+    const workspaceElement = resizerElement.parentElement;
+    const previewElement = workspaceElement?.querySelector?.('[data-grid-ddl-resize-preview="true"]') as HTMLElement | null | undefined;
+    const workspaceWidth = workspaceElement?.getBoundingClientRect?.().width;
+    const resizerWidth = resizerElement.getBoundingClientRect?.().width || 8;
+    const resolvePreviewX = (width: number, fallbackX: number) => (
+      typeof workspaceWidth === 'number' && workspaceWidth > 0
+        ? Math.max(0, workspaceWidth - width - resizerWidth / 2)
+        : fallbackX
+    );
+    const applyPreviewElementPosition = (x: number | null) => {
+      if (!previewElement) return;
+      if (x === null) {
+        previewElement.style.opacity = '0';
+        previewElement.style.transform = 'translate3d(0, 0, 0)';
+        return;
+      }
+      previewElement.style.opacity = '1';
+      previewElement.style.transform = `translateX(${x}px)`;
+    };
+    const schedulePreviewElementPosition = (x: number) => {
+      const state = ddlSidebarResizeRef.current;
+      if (!state?.previewElement) return false;
+      state.previewX = x;
+      if (state.previewFrame !== null && state.previewFrame !== undefined) return true;
+      const run = () => {
+        const current = ddlSidebarResizeRef.current;
+        if (!current?.previewElement) return;
+        current.previewFrame = null;
+        applyPreviewElementPosition(current.previewX);
+      };
+      if (typeof requestAnimationFrame === 'function') {
+        state.previewFrame = requestAnimationFrame(run);
+      } else {
+        run();
+      }
+      return true;
+    };
+    const startPreviewX = resolvePreviewX(startWidth, startX);
     const moveHandler = (moveEvent: MouseEvent) => {
       const nextWidth = Math.max(320, Math.min(760, startWidth + (startX - moveEvent.clientX)));
       if (ddlSidebarResizeRef.current) {
         ddlSidebarResizeRef.current.previewWidth = nextWidth;
       }
-      setDdlSidebarResizePreviewX(moveEvent.clientX);
+      const nextPreviewX = resolvePreviewX(nextWidth, moveEvent.clientX);
+      if (!schedulePreviewElementPosition(nextPreviewX)) {
+        setDdlSidebarResizePreviewX(nextPreviewX);
+      }
     };
     const upHandler = () => {
-      const nextWidth = ddlSidebarResizeRef.current?.previewWidth ?? startWidth;
+      const resizeState = ddlSidebarResizeRef.current;
+      const nextWidth = resizeState?.previewWidth ?? startWidth;
+      if (resizeState?.previewFrame !== null && resizeState?.previewFrame !== undefined && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(resizeState.previewFrame);
+      }
+      applyPreviewElementPosition(null);
       setDdlSidebarWidth(nextWidth);
       setDdlSidebarResizePreviewX(null);
       document.removeEventListener('mousemove', moveHandler);
@@ -162,27 +388,41 @@ export const useDataGridDdlView = ({
       ddlSidebarResizeRef.current = null;
     };
 
-    ddlSidebarResizeRef.current = { startX, startWidth, previewWidth: startWidth, moveHandler, upHandler };
+    ddlSidebarResizeRef.current = {
+      startX,
+      startWidth,
+      previewWidth: startWidth,
+      previewX: startPreviewX,
+      previewElement,
+      previewFrame: null,
+      moveHandler,
+      upHandler,
+    };
+    if (previewElement) {
+      applyPreviewElementPosition(startPreviewX);
+    } else {
+      setDdlSidebarResizePreviewX(startPreviewX);
+    }
     document.addEventListener('mousemove', moveHandler);
     document.addEventListener('mouseup', upHandler);
   }, [ddlSidebarWidth]);
 
   const resetDdlViewState = React.useCallback(() => {
+    ddlRequestedContextKeyRef.current = null;
     ddlRequestSeqRef.current += 1;
     setDdlModalOpen(false);
     setDdlLoading(false);
     setDdlText('');
-    setDdlViewLayout('bottom');
     setDdlSidebarResizePreviewX(null);
   }, []);
 
   return {
-    viewMode,
+    viewMode: resolvedViewMode,
     setViewMode,
     ddlModalOpen,
     setDdlModalOpen,
-    ddlLoading,
-    ddlText,
+    ddlLoading: resolvedDdlLoading,
+    ddlText: resolvedDdlText,
     ddlViewLayout,
     setDdlViewLayout,
     ddlSidebarWidth,
@@ -193,5 +433,6 @@ export const useDataGridDdlView = ({
     handleViewModeChange,
     handleDdlSidebarResizeStart,
     resetDdlViewState,
+    closeDdlView,
   };
 };

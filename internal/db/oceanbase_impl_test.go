@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"GoNavi-Wails/internal/connection"
+	"GoNavi-Wails/shared/i18n"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 )
@@ -856,6 +858,52 @@ func TestOceanBaseOracleGetCreateStatementFallsBackToShowCreateTable(t *testing.
 	}
 	if !slices.Contains(queries, `SHOW CREATE TABLE "SYS"."test"`) {
 		t.Fatalf("expected SHOW CREATE TABLE fallback, got: %v", queries)
+	}
+}
+
+func TestOceanBaseOracleCreateStatementFallbackErrorUsesCurrentLanguage(t *testing.T) {
+	SetBackendLanguage(i18n.LanguageEnUS)
+	defer SetBackendLanguage(i18n.LanguageZhCN)
+
+	dbConn, _ := openOracleRecordingDB(t)
+	oceanbaseDB := &OceanBaseDB{}
+	oceanbaseDB.bindConnectedDatabase(dbConn, 0, oceanBaseProtocolOracle)
+
+	_, err := oceanbaseDB.GetCreateStatement("SYS", "test")
+	if err == nil {
+		t.Fatal("GetCreateStatement() expected error")
+	}
+
+	message := err.Error()
+	if strings.Contains(message, "未找到建表语句") || strings.Contains(message, "兜底失败") {
+		t.Fatalf("expected localized English fallback error, got %q", message)
+	}
+	if !strings.Contains(message, "The CREATE TABLE statement was not found") {
+		t.Fatalf("expected localized create-table-not-found detail, got %q", message)
+	}
+	if !strings.Contains(message, "OceanBase Oracle SHOW CREATE TABLE fallback failed") {
+		t.Fatalf("expected localized fallback wrapper, got %q", message)
+	}
+}
+
+func TestOceanBaseOracleCreateStatementSourceUsesI18nKeys(t *testing.T) {
+	sourceBytes, err := os.ReadFile("oceanbase_impl.go")
+	if err != nil {
+		t.Fatalf("read oceanbase_impl.go: %v", err)
+	}
+	source := string(sourceBytes)
+
+	if strings.Contains(source, `fmt.Errorf("未找到建表语句")`) {
+		t.Fatal("oceanbase_impl.go still contains raw create-statement-not-found error")
+	}
+	if strings.Contains(source, "OceanBase Oracle SHOW CREATE TABLE 兜底失败") {
+		t.Fatal("oceanbase_impl.go still contains raw OceanBase SHOW CREATE TABLE fallback wrapper")
+	}
+	if !strings.Contains(source, "db.backend.error.create_table_statement_not_found") {
+		t.Fatal("oceanbase_impl.go does not reference db.backend.error.create_table_statement_not_found")
+	}
+	if !strings.Contains(source, "db.backend.error.oceanbase_oracle_show_create_table_fallback_failed") {
+		t.Fatal("oceanbase_impl.go does not reference OceanBase SHOW CREATE TABLE fallback i18n key")
 	}
 }
 

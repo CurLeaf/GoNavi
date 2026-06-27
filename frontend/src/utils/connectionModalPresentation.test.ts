@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 import { setCurrentLanguage } from '../i18n';
 import {
@@ -10,6 +11,8 @@ import {
   resolveConnectionTestFailureFeedback,
   summarizeConnectionTestFailureMessage,
 } from './connectionModalPresentation';
+
+const source = readFileSync(new URL('./connectionModalPresentation.ts', import.meta.url), 'utf8');
 
 const sectionKeyEntries = [
   ['identity', 'identity'],
@@ -37,6 +40,9 @@ const layoutKindEntries = [
   ['postgres-compatible', 'postgresCompatible'],
   ['oracle', 'oracle'],
   ['file', 'file'],
+  ['search', 'search'],
+  ['vector', 'vector'],
+  ['timeseries', 'timeseries'],
   ['custom', 'custom'],
   ['jvm', 'jvm'],
   ['generic-sql', 'genericSql'],
@@ -276,6 +282,9 @@ describe('connectionModalPresentation', () => {
       description: 'Name the connection and define the basic metadata shown in the connection tree.',
     });
     expect(getConnectionConfigLayoutKindLabel('mysql-compatible')).toBe('MySQL-compatible');
+    expect(getConnectionConfigLayoutKindLabel('search')).toBe('Search engines');
+    expect(getConnectionConfigLayoutKindLabel('vector')).toBe('Vector databases');
+    expect(getConnectionConfigLayoutKindLabel('timeseries')).toBe('Time-series databases');
     expect(getStoredSecretPlaceholder({
       hasStoredSecret: true,
       emptyPlaceholder: 'Password',
@@ -321,6 +330,16 @@ describe('connectionModalPresentation', () => {
         expect(label).not.toBe('');
         expect(label).not.toBe(`connection.modal.layoutKind.${keySuffix}`);
       });
+    });
+  });
+
+  it('keeps layout kind labels out of hard-coded Chinese UI copy', () => {
+    [
+      "return '搜索引擎'",
+      "return '向量数据库'",
+      "return '时序数据库'",
+    ].forEach((snippet) => {
+      expect(source).not.toContain(snippet);
     });
   });
 });

@@ -1,9 +1,49 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import type { AIProviderConfig } from '../../types';
 import { buildAIProviderSnapshot } from './aiProviderInsights';
 
 describe('aiProviderInsights', () => {
+  it('localizes provider summary wrappers while keeping provider names and hosts raw', () => {
+    const snapshot = buildAIProviderSnapshot({
+      providers: [{
+        id: 'provider-1',
+        type: 'openai',
+        name: 'OpenAI 主账号',
+        apiKey: '',
+        hasSecret: true,
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-5.4',
+        models: ['gpt-5.4'],
+        maxTokens: 32000,
+        temperature: 0.2,
+      }],
+      activeProviderId: 'provider-1',
+      dynamicModels: ['gpt-5.4'],
+      translate: (key, params) => {
+        const suffix = params
+          ? ` ${Object.entries(params).map(([paramKey, value]) => `${paramKey}=${value}`).join(',')}`
+          : '';
+        return `T:${key}${suffix}`;
+      },
+    });
+
+    expect(snapshot.activeProvider?.name).toBe('OpenAI 主账号');
+    expect(snapshot.activeProvider?.baseUrlHost).toBe('api.openai.com');
+    expect(snapshot.message).toBe('T:ai_chat.inspection.provider.message.active_ready count=1,provider=OpenAI 主账号');
+  });
+
+  it('keeps provider production source free of legacy Chinese wrappers', () => {
+    const source = readFileSync('src/components/ai/aiProviderInsights.ts', 'utf8');
+
+    expect(source).not.toContain('当前没有配置 AI 供应商');
+    expect(source).not.toContain('当前正在使用');
+    expect(source).not.toContain('当前共配置');
+    expect(source).not.toContain('尚未选择活动供应商');
+  });
+
   it('returns a sanitized provider snapshot with missing-secret and missing-model diagnostics', () => {
     const providers: AIProviderConfig[] = [
       {
@@ -66,7 +106,7 @@ describe('aiProviderInsights', () => {
       issues: ['missing_secret', 'missing_base_url', 'missing_selected_model', 'missing_declared_models'],
       status: 'needs_attention',
     });
-    expect(snapshot.message).toContain('正在使用 OpenAI 主账号');
+    expect(snapshot.message).toContain('using OpenAI 主账号');
     expect(JSON.stringify(snapshot)).not.toContain('apiKey');
     expect(JSON.stringify(snapshot)).not.toContain('secret-token');
   });

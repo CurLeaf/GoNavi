@@ -1,5 +1,8 @@
 import type { SavedConnection, TabData } from '../../types';
+import type { I18nParams } from '../../i18n';
 import { findSqlStatementRanges } from '../../utils/sqlStatementSelection';
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
 
 type SqlRiskLevel = 'none' | 'low' | 'medium' | 'high' | 'critical';
 type SqlActivityKind = 'read' | 'write' | 'ddl' | 'transaction' | 'session' | 'routine' | 'other';
@@ -7,6 +10,11 @@ type SqlActivityKind = 'read' | 'write' | 'ddl' | 'transaction' | 'session' | 'r
 interface SqlSafetyCheckResult {
   allowed?: boolean;
   operationType?: string;
+}
+
+interface LocalizableText {
+  key: string;
+  fallback: string;
 }
 
 const SQL_PREVIEW_LIMIT = 12000;
@@ -105,6 +113,12 @@ const escalateRisk = (current: SqlRiskLevel, next: SqlRiskLevel): SqlRiskLevel =
 const hasWhereClause = (statement: string): boolean =>
   /\bwhere\b/i.test(stripCommentsAndLiterals(statement));
 
+const translateText = (
+  translate: AIInspectionTranslator | undefined,
+  { key, fallback }: LocalizableText,
+  params?: I18nParams,
+): string => translateInspectionCopy(translate, key, fallback, params);
+
 const normalizeLimit = (limit: unknown): number => {
   const value = Math.floor(Number(limit) || SQL_PREVIEW_LIMIT);
   if (value < 200) return 200;
@@ -112,7 +126,7 @@ const normalizeLimit = (limit: unknown): number => {
   return value;
 };
 
-const buildStatementRisk = (statement: string) => {
+const buildStatementRisk = (statement: string, translate?: AIInspectionTranslator) => {
   const token = resolveFirstToken(statement);
   const activityKind = classifySqlActivity(token);
   const normalized = stripCommentsAndLiterals(statement);
@@ -121,39 +135,66 @@ const buildStatementRisk = (statement: string) => {
 
   if (!token) {
     riskLevel = 'none';
-    warnings.push('未识别到有效 SQL 操作关键字');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.sql_risk.warning.unrecognized_operation',
+      fallback: 'No valid SQL operation keyword was recognized.',
+    }));
   }
   if (activityKind === 'write') {
     riskLevel = escalateRisk(riskLevel, 'high');
-    warnings.push('该语句会修改数据，执行前应确认目标库、条件和影响范围');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.sql_risk.warning.data_change',
+      fallback: 'This statement modifies data. Confirm the target database, conditions, and impact scope before execution.',
+    }));
   }
   if (activityKind === 'ddl') {
     riskLevel = escalateRisk(riskLevel, 'high');
-    warnings.push('该语句会修改数据库结构或对象，建议先备份并确认回滚方案');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.sql_risk.warning.ddl_change',
+      fallback: 'This statement modifies database structures or objects. Back up first and confirm the rollback plan.',
+    }));
   }
   if (activityKind === 'routine') {
     riskLevel = escalateRisk(riskLevel, 'medium');
-    warnings.push('该语句会调用例程或过程，可能存在隐式写入或副作用');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.sql_risk.warning.routine_side_effect',
+      fallback: 'This statement calls a routine or procedure and may have implicit writes or side effects.',
+    }));
   }
   if (/^\s*delete\b/i.test(normalized) && !hasWhereClause(statement)) {
     riskLevel = escalateRisk(riskLevel, 'critical');
-    warnings.push('DELETE 缺少 WHERE 条件，可能删除整表数据');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.sql_risk.warning.delete_missing_where',
+      fallback: 'DELETE is missing a WHERE clause and may delete the entire table.',
+    }));
   }
   if (/^\s*update\b/i.test(normalized) && !hasWhereClause(statement)) {
     riskLevel = escalateRisk(riskLevel, 'critical');
-    warnings.push('UPDATE 缺少 WHERE 条件，可能更新整表数据');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.sql_risk.warning.update_missing_where',
+      fallback: 'UPDATE is missing a WHERE clause and may update the entire table.',
+    }));
   }
   if (/\btruncate\s+(?:table\s+)?[A-Za-z0-9_`"[\].]+/i.test(normalized)) {
     riskLevel = escalateRisk(riskLevel, 'critical');
-    warnings.push('TRUNCATE 会快速清空表数据，通常不可按行回滚');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.sql_risk.warning.truncate',
+      fallback: 'TRUNCATE quickly clears table data and usually cannot be rolled back row by row.',
+    }));
   }
   if (/\bdrop\s+(database|schema|table|view|materialized\s+view)\b/i.test(normalized)) {
     riskLevel = escalateRisk(riskLevel, 'critical');
-    warnings.push('DROP 会删除数据库对象，执行前必须确认对象和备份');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.sql_risk.warning.drop_object',
+      fallback: 'DROP deletes database objects. Confirm the object and backup before execution.',
+    }));
   }
   if (/\bgrant\b|\brevoke\b/i.test(normalized)) {
     riskLevel = escalateRisk(riskLevel, 'high');
-    warnings.push('GRANT / REVOKE 会改变权限边界，应确认授权对象和范围');
+    warnings.push(translateText(translate, {
+      key: 'ai_chat.inspection.sql_risk.warning.permission_change',
+      fallback: 'GRANT / REVOKE changes permission boundaries. Confirm the grantee and scope.',
+    }));
   }
 
   return {
@@ -196,6 +237,7 @@ export const buildSqlRiskSnapshot = (params: {
   activeTabId?: string | null;
   connections: SavedConnection[];
   safetyCheck?: SqlSafetyCheckResult;
+  translate?: AIInspectionTranslator;
 }) => {
   const { source, sql, activeTab } = resolveActiveSqlSource({
     sql: params.sql,
@@ -212,8 +254,14 @@ export const buildSqlRiskSnapshot = (params: {
       hasSql: false,
       source,
       message: activeTab
-        ? '当前活动页签不是 SQL 查询页签，或编辑区没有 SQL 内容'
-        : '未传入 SQL，且当前没有可读取的活动 SQL 查询页签',
+        ? translateText(params.translate, {
+            key: 'ai_chat.inspection.sql_risk.message.no_active_query_sql',
+            fallback: 'The current active tab is not a SQL query tab, or the editor has no SQL content.',
+          })
+        : translateText(params.translate, {
+            key: 'ai_chat.inspection.sql_risk.message.no_sql',
+            fallback: 'No SQL was provided, and there is no readable active SQL query tab.',
+          }),
       activeTab: activeTab ? {
         id: activeTab.id,
         title: activeTab.title,
@@ -222,18 +270,24 @@ export const buildSqlRiskSnapshot = (params: {
       safetyCheck: params.safetyCheck || null,
       riskLevel: 'none' as SqlRiskLevel,
       warnings: [],
-      nextActions: ['先传入 sql 参数，或切换到包含 SQL 草稿的查询页签'],
+      nextActions: [translateText(params.translate, {
+        key: 'ai_chat.inspection.sql_risk.next_action.provide_sql',
+        fallback: 'Pass the sql argument first, or switch to a query tab that contains a SQL draft.',
+      })],
     };
   }
 
   const statements = findSqlStatementRanges(sql).map((range) => range.text.trim()).filter(Boolean);
-  const statementRisks = statements.map(buildStatementRisk);
+  const statementRisks = statements.map((statement) => buildStatementRisk(statement, params.translate));
   let riskLevel: SqlRiskLevel = statements.length > 0 ? 'low' : 'none';
   const warnings: string[] = [];
 
   if (statements.length > 1) {
     riskLevel = escalateRisk(riskLevel, 'medium');
-    warnings.push(`检测到 ${statements.length} 条 SQL 语句，批量执行前应逐条确认影响范围`);
+    warnings.push(translateText(params.translate, {
+      key: 'ai_chat.inspection.sql_risk.warning.multi_statement',
+      fallback: '{{count}} SQL statements were detected. Confirm the impact scope of each statement before batch execution.',
+    }, { count: statements.length }));
   }
 
   for (const statementRisk of statementRisks) {
@@ -245,7 +299,16 @@ export const buildSqlRiskSnapshot = (params: {
 
   if (params.safetyCheck?.allowed === false) {
     riskLevel = escalateRisk(riskLevel, 'high');
-    warnings.push(`当前 AI 安全策略不允许执行 ${params.safetyCheck.operationType || '该'} 类型 SQL`);
+    const operationType = String(params.safetyCheck.operationType || '').trim();
+    warnings.push(operationType
+      ? translateText(params.translate, {
+          key: 'ai_chat.inspection.sql_risk.warning.safety_blocked',
+          fallback: 'The current AI safety policy does not allow {{operationType}} SQL.',
+        }, { operationType })
+      : translateText(params.translate, {
+          key: 'ai_chat.inspection.sql_risk.warning.safety_blocked_unknown',
+          fallback: 'The current AI safety policy does not allow this SQL operation type.',
+        }));
   }
 
   const activityKinds = Array.from(new Set(statementRisks.map((item) => item.activityKind)));
@@ -277,7 +340,19 @@ export const buildSqlRiskSnapshot = (params: {
     statements: statementRisks,
     warnings,
     nextActions: warnings.length > 0
-      ? ['先向用户说明风险点，再要求用户确认是否继续', '写入或 DDL 语句应先确认 WHERE、备份、目标库和影响范围']
-      : ['只读查询风险较低，仍建议先核对目标连接和库名'],
+      ? [
+          translateText(params.translate, {
+            key: 'ai_chat.inspection.sql_risk.next_action.explain_and_confirm',
+            fallback: 'Explain the risk points to the user first, then ask the user to confirm whether to continue.',
+          }),
+          translateText(params.translate, {
+            key: 'ai_chat.inspection.sql_risk.next_action.confirm_write_scope',
+            fallback: 'For write or DDL statements, confirm WHERE clauses, backups, target database, and impact scope first.',
+          }),
+        ]
+      : [translateText(params.translate, {
+          key: 'ai_chat.inspection.sql_risk.next_action.read_only_check_target',
+          fallback: 'Read-only queries are lower risk, but still confirm the target connection and database name first.',
+        })],
   };
 };

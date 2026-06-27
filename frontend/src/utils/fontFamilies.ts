@@ -35,8 +35,12 @@ const CJK_FONT_KEYWORDS = [
 export type FontFamilyOption = {
   value: string;
   label: string;
+  labelKey?: string;
+  isDefault?: boolean;
   keywords?: string[];
 };
+
+type FontFamilyLabelTranslator = (key: string) => string;
 
 export type InstalledFontFamily = {
   family: string;
@@ -132,7 +136,13 @@ const LINUX_MONO_FONTS: FontFamilyOption[] = [
 ];
 
 const SHARED_UI_FONTS: FontFamilyOption[] = [
-  { value: DEFAULT_UI_FONT_FAMILY, label: '默认 UI 字体', keywords: ['default', 'system'] },
+  {
+    value: DEFAULT_UI_FONT_FAMILY,
+    label: 'Default UI font',
+    labelKey: 'app.theme.font_family.default_ui_option',
+    isDefault: true,
+    keywords: ['default', 'system'],
+  },
   { value: '"Inter", sans-serif', label: 'Inter', keywords: ['shared'] },
   { value: '"PingFang SC", sans-serif', label: 'PingFang SC', keywords: ['shared', '苹方'] },
   { value: '"Microsoft YaHei", sans-serif', label: 'Microsoft YaHei', keywords: ['shared', '雅黑'] },
@@ -141,7 +151,13 @@ const SHARED_UI_FONTS: FontFamilyOption[] = [
 ];
 
 const SHARED_MONO_FONTS: FontFamilyOption[] = [
-  { value: DEFAULT_MONO_FONT_FAMILY, label: '默认代码字体', keywords: ['default', 'system', 'mono'] },
+  {
+    value: DEFAULT_MONO_FONT_FAMILY,
+    label: 'Default code font',
+    labelKey: 'app.theme.font_family.default_mono_option',
+    isDefault: true,
+    keywords: ['default', 'system', 'mono'],
+  },
   { value: '"JetBrains Mono", monospace', label: 'JetBrains Mono', keywords: ['shared'] },
   { value: '"Cascadia Code", monospace', label: 'Cascadia Code', keywords: ['shared'] },
   { value: '"Fira Code", monospace', label: 'Fira Code', keywords: ['shared'] },
@@ -170,17 +186,32 @@ const dedupeFontOptions = (options: FontFamilyOption[]): FontFamilyOption[] => {
     result.push({
       value: normalizedValue,
       label: option.label,
+      labelKey: option.labelKey,
+      isDefault: option.isDefault,
       keywords: option.keywords,
     });
   });
   return result;
 };
 
+const localizeFontOptions = (
+  options: FontFamilyOption[],
+  translate?: FontFamilyLabelTranslator,
+): FontFamilyOption[] => {
+  if (!translate) {
+    return options;
+  }
+  return options.map((option) => ({
+    ...option,
+    label: option.labelKey ? translate(option.labelKey) : option.label,
+  }));
+};
+
 const sortFontOptions = (options: FontFamilyOption[]): FontFamilyOption[] => {
   const defaultOptions: FontFamilyOption[] = [];
   const regularOptions: FontFamilyOption[] = [];
   options.forEach((option) => {
-    if (option.label.startsWith('默认')) {
+    if (option.isDefault) {
       defaultOptions.push(option);
       return;
     }
@@ -328,6 +359,7 @@ export const getLinuxCJKFontInstallHint = (
 export const getPlatformFontFamilyOptions = (
   platform: string,
   kind: "ui" | "mono",
+  translate?: FontFamilyLabelTranslator,
 ): FontFamilyOption[] => {
   const normalizedPlatform = String(platform || "").toLowerCase();
   const platformOptions =
@@ -338,21 +370,22 @@ export const getPlatformFontFamilyOptions = (
         : normalizedPlatform === "linux"
           ? (kind === "ui" ? LINUX_UI_FONTS : LINUX_MONO_FONTS)
           : [];
-  return sortFontOptions(dedupeFontOptions([
+  return localizeFontOptions(sortFontOptions(dedupeFontOptions([
     ...platformOptions,
     ...(kind === "ui" ? SHARED_UI_FONTS : SHARED_MONO_FONTS),
-  ]));
+  ])), translate);
 };
 
 export const buildFontFamilyOptions = (
   platform: string,
   kind: 'ui' | 'mono',
   installedFamilies: Array<string | InstalledFontFamily>,
+  translate?: FontFamilyLabelTranslator,
 ): FontFamilyOption[] => {
-  return sortFontOptions(dedupeFontOptions([
+  return localizeFontOptions(sortFontOptions(dedupeFontOptions([
     ...buildInstalledFontOptions(installedFamilies, kind),
     ...getPlatformFontFamilyOptions(platform, kind),
-  ]));
+  ])), translate);
 };
 
 export const matchFontFamilyOption = (

@@ -11,9 +11,9 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import type { SqlSnippet } from '../types';
 import { useStore } from '../store';
+import { useI18n } from '../i18n/provider';
 import { BUILTIN_SNIPPET_MAP } from '../utils/sqlSnippetDefaults';
 import type { OverlayWorkbenchTheme } from '../utils/overlayWorkbenchTheme';
-import { useI18n } from '../i18n/provider';
 interface SnippetSettingsModalProps {
   open: boolean;
   onClose: () => void;
@@ -76,6 +76,10 @@ export default function SnippetSettingsModal({
   const textColor = darkMode ? 'rgba(255,255,255,0.85)' : 'rgba(16,24,40,0.9)';
   const mutedColor = darkMode ? 'rgba(255,255,255,0.5)' : 'rgba(16,24,40,0.55)';
   const selectedBg = darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)';
+  const newSnippetAction = t('snippet_settings.action.new');
+  const snippetModalBodyMaxHeight = 'calc(100vh - 128px)';
+  const snippetModalEmbeddedBodyMaxHeight = '100%';
+  const snippetSyntaxReferenceMaxHeight = 'min(220px, 32vh)';
 
   const sortedSnippets = useMemo(
     () => [...sqlSnippets].sort((a, b) => a.prefix.localeCompare(b.prefix)),
@@ -105,15 +109,15 @@ export default function SnippetSettingsModal({
   const handleSave = useCallback(() => {
     const prefix = draft.prefix.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20);
     if (!prefix) {
-      void message.warning('前缀不能为空');
+      void message.warning(t('snippet_settings.message.prefix_required'));
       return;
     }
     if (!draft.name.trim()) {
-      void message.warning('名称不能为空');
+      void message.warning(t('snippet_settings.message.name_required'));
       return;
     }
     if (!draft.body.trim()) {
-      void message.warning('片段内容不能为空');
+      void message.warning(t('snippet_settings.message.body_required'));
       return;
     }
 
@@ -121,7 +125,7 @@ export default function SnippetSettingsModal({
       (s) => s.prefix.toLowerCase() === prefix && s.id !== draft.id,
     );
     if (duplicate) {
-      void message.warning(`前缀 "${prefix}" 已被其他片段使用`);
+      void message.warning(t('snippet_settings.message.prefix_duplicate', { prefix }));
       return;
     }
 
@@ -139,8 +143,8 @@ export default function SnippetSettingsModal({
     saveSqlSnippet(toSave);
     setSelectedId(toSave.id);
     setIsCreating(false);
-    void message.success('片段已保存');
-  }, [draft, sqlSnippets, saveSqlSnippet]);
+    void message.success(t('snippet_settings.message.saved'));
+  }, [draft, sqlSnippets, saveSqlSnippet, t]);
 
   const handleDelete = useCallback(
     (id: string) => {
@@ -149,9 +153,9 @@ export default function SnippetSettingsModal({
         setSelectedId(null);
         setDraft(emptyDraft());
       }
-      void message.success('片段已删除');
+      void message.success(t('snippet_settings.message.deleted'));
     },
-    [deleteSqlSnippet, selectedId],
+    [deleteSqlSnippet, selectedId, t],
   );
 
   const handleReset = useCallback(
@@ -161,22 +165,22 @@ export default function SnippetSettingsModal({
       if (original && selectedId === id) {
         setDraft({ ...original, syntaxHelp: original.syntaxHelp || '' });
       }
-      void message.success('已重置为默认');
+      void message.success(t('snippet_settings.message.reset_default'));
     },
-    [resetBuiltinSqlSnippet, selectedId],
+    [resetBuiltinSqlSnippet, selectedId, t],
   );
 
   const syntaxHelpItems = useMemo(
     () => [
       {
         key: 'snippet-help',
-        label: '片段语法说明（可编辑）',
+        label: t('snippet_settings.syntax_help.label'),
         children: (
           <Input.TextArea
             data-sql-snippet-syntax-help-editor="true"
             value={draft.syntaxHelp || ''}
             onChange={(e) => setDraft((d) => ({ ...d, syntaxHelp: e.target.value }))}
-            placeholder="展示在补全详情中的用法说明，例如占位符含义、参数约定或注意事项"
+            placeholder={t('snippet_settings.syntax_help.placeholder')}
             maxLength={1000}
             autoSize={{ minRows: 4, maxRows: 8 }}
             style={{
@@ -189,34 +193,47 @@ export default function SnippetSettingsModal({
       },
       {
         key: 'syntax',
-        label: '占位符语法参考',
+        label: t('snippet_settings.syntax_reference.label'),
         children: (
-          <div style={{ fontSize: 12, lineHeight: 1.8, color: mutedColor, fontFamily: 'var(--gn-font-mono)' }}>
-            <div>{'${1:占位符}   第一个 Tab 位，占位符为提示文字'}</div>
-            <div>{'${2:默认值}   第二个 Tab 位，默认值可直接确认'}</div>
-            <div>{'$0            最终光标位置'}</div>
-            <div>{'${1:表名}     同一数字在多处出现时会同步编辑'}</div>
-            <div style={{ marginTop: 6, fontWeight: 600, color: textColor }}>{'内置变量（展开时自动替换为实际值）：'}</div>
-            <div>{'${CURRENT_YEAR}-${CURRENT_MONTH}-${CURRENT_DATE}  当前日期'}</div>
-            <div>{'${CURRENT_HOUR}:${CURRENT_MINUTE}:${CURRENT_SECOND}  当前时间'}</div>
-            <div>{'${CURRENT_SECONDS_UNIX}  Unix 时间戳'}</div>
-            <div>{'${UUID}       随机 UUID'}</div>
-            <div>{'${RANDOM}     6 位随机数'}</div>
+          <div
+            data-sql-snippet-syntax-reference-scroll-region="true"
+            style={{
+              maxHeight: snippetSyntaxReferenceMaxHeight,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              overscrollBehavior: 'contain',
+              paddingRight: 6,
+              fontSize: 12,
+              lineHeight: 1.8,
+              color: mutedColor,
+              fontFamily: 'var(--gn-font-mono)',
+            }}
+          >
+            <div>{t('snippet_settings.syntax_reference.first_tabstop')}</div>
+            <div>{t('snippet_settings.syntax_reference.second_tabstop')}</div>
+            <div>{t('snippet_settings.syntax_reference.final_cursor')}</div>
+            <div>{t('snippet_settings.syntax_reference.linked_tabstop')}</div>
+            <div style={{ marginTop: 6, fontWeight: 600, color: textColor }}>{t('snippet_settings.syntax_reference.builtin_variables')}</div>
+            <div>{t('snippet_settings.syntax_reference.current_date')}</div>
+            <div>{t('snippet_settings.syntax_reference.current_time')}</div>
+            <div>{t('snippet_settings.syntax_reference.unix_seconds')}</div>
+            <div>{t('snippet_settings.syntax_reference.uuid')}</div>
+            <div>{t('snippet_settings.syntax_reference.random')}</div>
             <div style={{ marginTop: 8, fontFamily: 'inherit', color: textColor }}>
-              {'示例：SELECT ${1:列名} FROM ${2:表名} WHERE date >= \'${CURRENT_YEAR}-${CURRENT_MONTH}-${CURRENT_DATE}\';$0'}
+              {t('snippet_settings.syntax_reference.example')}
             </div>
           </div>
         ),
       },
     ],
-    [draft.syntaxHelp, mutedColor, textColor],
+    [draft.syntaxHelp, mutedColor, snippetSyntaxReferenceMaxHeight, t, textColor],
   );
 
   const showEditor = isCreating || selectedSnippet;
 
   return (
     <Modal
-      title={
+      title={embedded ? null : (
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0 }}>
           <div
             style={{
@@ -233,30 +250,50 @@ export default function SnippetSettingsModal({
             <CodeOutlined />
           </div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 16, fontWeight: 600, color: textColor }}>代码片段管理</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: textColor }}>{t('app.tools.entry.snippets.title')}</div>
             <div style={{ fontSize: 12, color: mutedColor, lineHeight: 1.5 }}>
-              管理 SQL 代码片段，输入前缀后按 Tab 展开
+              {t('app.tools.entry.snippets.description')}
             </div>
-            </div>
+          </div>
         </div>
-      }
+      )}
       open={open}
       embedded={embedded}
+      closable={embedded ? false : undefined}
       onCancel={onClose}
       width={820}
       styles={{
         content: shellStyle,
         header: { background: 'transparent', borderBottom: 'none', paddingBottom: 8 },
-        body: { paddingTop: 8, paddingBottom: 24 },
+        body: {
+          paddingTop: 8,
+          paddingBottom: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          height: embedded ? '100%' : undefined,
+          maxHeight: embedded ? snippetModalEmbeddedBodyMaxHeight : snippetModalBodyMaxHeight,
+          minHeight: 0,
+          overflow: 'hidden',
+        },
       }}
       footer={null}
     >
-      <div style={{ display: 'flex', gap: 16, minHeight: 420 }}>
+      <div
+        data-sql-snippet-content-region="true"
+        style={{
+          display: 'flex',
+          gap: 16,
+          flex: embedded ? '1 1 0' : '1 1 420px',
+          minHeight: 0,
+          overflow: 'hidden',
+        }}
+      >
         {/* Left: snippet list */}
         <div
           style={{
             width: 220,
             flexShrink: 0,
+            minHeight: 0,
             borderRadius: 14,
             border: overlayTheme.sectionBorder,
             background: overlayTheme.sectionBg,
@@ -266,7 +303,7 @@ export default function SnippetSettingsModal({
           }}
         >
           <div style={{ padding: '8px 12px 4px', fontSize: 12, color: mutedColor, fontWeight: 600 }}>
-            片段列表
+            {t('snippet_settings.list.title')}
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             <List
@@ -315,7 +352,7 @@ export default function SnippetSettingsModal({
                         }}
                         color="blue"
                       >
-                        内置
+                        {t('snippet_settings.tag.builtin')}
                       </Tag>
                     )}
                   </div>
@@ -325,68 +362,83 @@ export default function SnippetSettingsModal({
           </div>
           <div style={{ padding: 8 }}>
             <Button type="dashed" icon={<PlusOutlined />} block size="small" onClick={handleNew}>
-              新建片段
+              {newSnippetAction}
             </Button>
           </div>
         </div>
 
         {/* Right: editor */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
           {showEditor ? (
             <div
               style={{
                 ...panelStyle,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 12,
                 height: '100%',
+                minHeight: 0,
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                overscrollBehavior: 'contain',
+                paddingRight: 12,
               }}
+              data-sql-snippet-editor-panel-scroll-region="true"
             >
-              <div style={{ display: 'flex', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 12, flex: '0 0 auto' }}>
                 <div style={{ flex: 0.4 }}>
-                  <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>前缀</div>
+                  <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>{t('snippet_settings.field.prefix.label')}</div>
                   <Input
                     value={draft.prefix}
                     onChange={(e) =>
                       setDraft((d) => ({ ...d, prefix: e.target.value.toLowerCase() }))
                     }
-                    placeholder="如 sel, ins"
+                    placeholder={t('snippet_settings.field.prefix.placeholder')}
                     maxLength={20}
                     size="small"
                   />
                 </div>
                 <div style={{ flex: 0.6 }}>
-                  <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>名称</div>
+                  <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>{t('snippet_settings.field.name.label')}</div>
                   <Input
                     value={draft.name}
                     onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-                    placeholder="片段显示名称"
+                    placeholder={t('snippet_settings.field.name.placeholder')}
                     maxLength={60}
                     size="small"
                   />
                 </div>
               </div>
 
-              <div>
-                <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>描述（可选）</div>
+              <div style={{ flex: '0 0 auto', marginTop: 10 }}>
+                <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>{t('snippet_settings.field.description.label')}</div>
                 <Input
                   value={draft.description || ''}
                   onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-                  placeholder="补全详情中的描述文字"
+                  placeholder={t('snippet_settings.field.description.placeholder')}
                   maxLength={200}
                   size="small"
                 />
               </div>
 
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>片段内容</div>
+              <div
+                data-sql-snippet-editor-scroll-region="true"
+                style={{
+                  flex: '0 0 auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minHeight: 0,
+                  marginTop: 10,
+                }}
+              >
+                <div style={{ fontSize: 12, color: mutedColor, marginBottom: 4 }}>{t('snippet_settings.field.body.label')}</div>
                 <Input.TextArea
                   value={draft.body}
                   onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
                   placeholder={'SELECT ${1:columns} FROM ${2:table_name}$0;'}
                   style={{
-                    flex: 1,
-                    minHeight: 120,
+                    height: 220,
+                    minHeight: 160,
+                    maxHeight: 260,
                     fontFamily: 'var(--gn-font-mono)',
                     fontSize: 13,
                     resize: 'none',
@@ -396,7 +448,7 @@ export default function SnippetSettingsModal({
                   size="small"
                   defaultActiveKey={['snippet-help']}
                   items={syntaxHelpItems}
-                  style={{ marginTop: 8, background: 'transparent' }}
+                  style={{ marginTop: 8, background: 'transparent', flex: '0 0 auto' }}
                 />
               </div>
 
@@ -412,7 +464,7 @@ export default function SnippetSettingsModal({
                 fontSize: 13,
               }}
             >
-              选择左侧片段编辑，或点击「新建片段」
+              {t('snippet_settings.empty_state', { action: newSnippetAction })}
             </div>
           )}
         </div>
@@ -421,46 +473,47 @@ export default function SnippetSettingsModal({
         data-sql-snippet-action-row="true"
         style={{
           display: 'flex',
-          gap: 12,
+          flex: '0 0 auto',
+          gap: 10,
           justifyContent: 'flex-end',
           alignItems: 'center',
-          paddingTop: 18,
-          marginTop: 18,
+          paddingTop: 8,
+          marginTop: 8,
           borderTop: overlayTheme.sectionBorder,
         }}
       >
         {showEditor && draft.isBuiltin && draft.createdAt && (
           <Popconfirm
-            title="重置为默认"
-            description="将恢复此内置片段的原始内容"
+            title={t('snippet_settings.confirm.reset.title')}
+            description={t('snippet_settings.confirm.reset.description')}
             onConfirm={() => handleReset(draft.id)}
           >
-            <Button icon={<UndoOutlined />} size="large" style={{ minWidth: 118 }}>
-              重置为默认
+            <Button icon={<UndoOutlined />} size="middle" style={{ minWidth: 104 }}>
+              {t('snippet_settings.action.reset')}
             </Button>
           </Popconfirm>
         )}
         {showEditor && !draft.isBuiltin && !isCreating && (
           <Popconfirm
-            title="删除片段"
-            description="确定要删除此片段吗？"
+            title={t('snippet_settings.confirm.delete.title')}
+            description={t('snippet_settings.confirm.delete.description')}
             onConfirm={() => handleDelete(draft.id)}
           >
-            <Button danger icon={<DeleteOutlined />} size="large" style={{ minWidth: 96 }}>
-              删除
+            <Button danger icon={<DeleteOutlined />} size="middle" style={{ minWidth: 84 }}>
+              {t('snippet_settings.action.delete')}
             </Button>
           </Popconfirm>
         )}
         {showEditor && (
-          <Button type="primary" icon={<SaveOutlined />} size="large" style={{ minWidth: 96 }} onClick={handleSave}>
-            保存
+          <Button type="primary" icon={<SaveOutlined />} size="middle" style={{ minWidth: 84 }} onClick={handleSave}>
+            {t('snippet_settings.action.save')}
           </Button>
         )}
-        <Button size="large" style={{ minWidth: 96 }} onClick={onClose}>
-          关闭
+        <Button size="middle" style={{ minWidth: 84 }} onClick={onClose}>
+          {t('snippet_settings.action.close')}
         </Button>
         {onBack ? (
-          <Button size="large" style={{ minWidth: 124 }} onClick={onBack}>
+          <Button size="middle" style={{ minWidth: 104 }} onClick={onBack}>
             {t('common.back_to_previous')}
           </Button>
         ) : null}

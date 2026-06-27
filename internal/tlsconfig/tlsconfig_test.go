@@ -6,11 +6,14 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode"
 )
 
 func TestBuildClientConfigLoadsCAAndClientCertificate(t *testing.T) {
@@ -68,6 +71,95 @@ func TestBuildClientConfigRequiresClientCertificateAndKeyTogether(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected error")
 	}
+}
+
+func TestBuildClientConfigErrorsUseEnglishWrappers(t *testing.T) {
+	dir := t.TempDir()
+	missingCAPath := filepath.Join(dir, "missing-ca.pem")
+	invalidCAPath := filepath.Join(dir, "invalid-ca.pem")
+	if err := os.WriteFile(invalidCAPath, []byte("not a certificate"), 0600); err != nil {
+		t.Fatalf("write invalid CA: %v", err)
+	}
+	badCertPath := filepath.Join(dir, "bad-client.pem")
+	badKeyPath := filepath.Join(dir, "bad-client.key")
+	if err := os.WriteFile(badCertPath, []byte("not a cert"), 0600); err != nil {
+		t.Fatalf("write bad cert: %v", err)
+	}
+	if err := os.WriteFile(badKeyPath, []byte("not a key"), 0600); err != nil {
+		t.Fatalf("write bad key: %v", err)
+	}
+
+	cases := []struct {
+		name       string
+		options    ClientConfigOptions
+		wantParts  []string
+		wantUnwrap error
+	}{
+		{
+			name: "missing CA",
+			options: ClientConfigOptions{
+				Enabled: true,
+				CAPath:  missingCAPath,
+			},
+			wantParts:  []string{"failed to read TLS CA certificate", missingCAPath},
+			wantUnwrap: os.ErrNotExist,
+		},
+		{
+			name: "invalid CA",
+			options: ClientConfigOptions{
+				Enabled: true,
+				CAPath:  invalidCAPath,
+			},
+			wantParts: []string{"TLS CA certificate is not a valid PEM/DER file", invalidCAPath},
+		},
+		{
+			name: "missing client key",
+			options: ClientConfigOptions{
+				Enabled:  true,
+				CertPath: badCertPath,
+			},
+			wantParts: []string{"TLS client certificate and private key must be configured together"},
+		},
+		{
+			name: "invalid client pair",
+			options: ClientConfigOptions{
+				Enabled:  true,
+				CertPath: badCertPath,
+				KeyPath:  badKeyPath,
+			},
+			wantParts: []string{"failed to load TLS client certificate", "cert=" + badCertPath, "key=" + badKeyPath},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := BuildClientConfig(tc.options)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			message := err.Error()
+			if containsHan(message) {
+				t.Fatalf("error wrapper must not contain Chinese text: %q", message)
+			}
+			for _, part := range tc.wantParts {
+				if !strings.Contains(message, part) {
+					t.Fatalf("error = %q, want to contain %q", message, part)
+				}
+			}
+			if tc.wantUnwrap != nil && !errors.Is(err, tc.wantUnwrap) {
+				t.Fatalf("error should unwrap to %v, got %v", tc.wantUnwrap, err)
+			}
+		})
+	}
+}
+
+func containsHan(text string) bool {
+	for _, r := range text {
+		if unicode.In(r, unicode.Han) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeSelfSignedCertificate(t *testing.T, dir string) (string, string, []byte) {

@@ -1,6 +1,6 @@
 import { splitQualifiedNameLast } from './qualifiedName';
 
-export type SidebarLocateObjectGroup = 'tables' | 'views' | 'materializedViews' | 'triggers' | 'routines' | 'externalSqlFiles';
+export type SidebarLocateObjectGroup = 'tables' | 'views' | 'materializedViews' | 'triggers' | 'routines' | 'sequences' | 'packages' | 'externalSqlFiles';
 export type SidebarLocateDatabaseObjectGroup = Exclude<SidebarLocateObjectGroup, 'externalSqlFiles'>;
 
 export interface SidebarLocateDatabaseObjectRequest {
@@ -57,6 +57,8 @@ export interface SidebarLocateTabLike {
   triggerName?: string;
   triggerTableName?: string;
   routineName?: string;
+  sequenceName?: string;
+  packageName?: string;
   schemaName?: string;
   sidebarLocateKey?: string;
   filePath?: string;
@@ -84,12 +86,16 @@ const inferObjectGroup = (detail: Record<string, unknown>, connectionId: string,
   if (explicitGroup === 'materializedViews' || explicitGroup === 'materialized-view') return 'materializedViews';
   if (explicitGroup === 'triggers' || explicitGroup === 'trigger') return 'triggers';
   if (explicitGroup === 'routines' || explicitGroup === 'routine') return 'routines';
+  if (explicitGroup === 'sequences' || explicitGroup === 'sequence') return 'sequences';
+  if (explicitGroup === 'packages' || explicitGroup === 'package') return 'packages';
 
   const explicitType = toTrimmedString(detail.objectType);
   if (explicitType === 'view' || explicitType === 'views') return 'views';
   if (explicitType === 'materialized' || explicitType === 'materialized-view') return 'materializedViews';
   if (explicitType === 'trigger' || explicitType === 'triggers') return 'triggers';
   if (explicitType === 'routine' || explicitType === 'routines') return 'routines';
+  if (explicitType === 'sequence' || explicitType === 'sequences') return 'sequences';
+  if (explicitType === 'package' || explicitType === 'packages') return 'packages';
 
   const tabId = toTrimmedString(detail.tabId);
   const dbNodeKey = `${connectionId}-${dbName}`;
@@ -97,6 +103,8 @@ const inferObjectGroup = (detail: Record<string, unknown>, connectionId: string,
   if (tabId.startsWith(`${dbNodeKey}-view-`)) return 'views';
   if (tabId.startsWith(`${dbNodeKey}-trigger-`)) return 'triggers';
   if (tabId.startsWith(`${dbNodeKey}-routine-`) || tabId.startsWith(`routine-def-${connectionId}-${dbName}-`)) return 'routines';
+  if (tabId.startsWith(`${dbNodeKey}-sequence-`) || tabId.startsWith(`sequence-def-${connectionId}-${dbName}-`)) return 'sequences';
+  if (tabId.startsWith(`${dbNodeKey}-package-`) || tabId.startsWith(`package-def-${connectionId}-${dbName}-`)) return 'packages';
 
   return 'tables';
 };
@@ -117,7 +125,7 @@ export const normalizeSidebarLocateObjectRequest = (detail: unknown): SidebarLoc
 
   const connectionId = toTrimmedString(raw.connectionId);
   const dbName = toTrimmedString(raw.dbName);
-  const tableName = toTrimmedString(raw.tableName || raw.objectName || raw.viewName || raw.triggerName || raw.routineName);
+  const tableName = toTrimmedString(raw.tableName || raw.objectName || raw.viewName || raw.triggerName || raw.routineName || raw.sequenceName || raw.packageName);
 
   if (!connectionId || !dbName || !tableName) {
     return null;
@@ -155,8 +163,12 @@ export const normalizeSidebarLocateObjectRequestFromTab = (tab: SidebarLocateTab
       ? toTrimmedString(tab.triggerName || tab.tableName)
       : tab.type === 'routine-def'
         ? toTrimmedString(tab.routineName || tab.tableName)
-        : toTrimmedString(tab.tableName || tab.viewName);
-  if (tab.type !== 'table' && tab.type !== 'view-def' && tab.type !== 'trigger' && tab.type !== 'routine-def') {
+        : tab.type === 'sequence-def'
+          ? toTrimmedString(tab.sequenceName || tab.tableName)
+          : tab.type === 'package-def'
+            ? toTrimmedString(tab.packageName || tab.tableName)
+            : toTrimmedString(tab.tableName || tab.viewName);
+  if (tab.type !== 'table' && tab.type !== 'view-def' && tab.type !== 'trigger' && tab.type !== 'routine-def' && tab.type !== 'sequence-def' && tab.type !== 'package-def') {
     return null;
   }
 
@@ -172,7 +184,11 @@ export const normalizeSidebarLocateObjectRequestFromTab = (tab: SidebarLocateTab
         ? 'triggers'
         : (tab.type === 'routine-def'
           ? 'routines'
-          : (tab.objectType === 'materialized-view' ? 'materializedViews' : (tab.objectType === 'view' ? 'views' : undefined)))),
+          : (tab.type === 'sequence-def'
+            ? 'sequences'
+            : (tab.type === 'package-def'
+              ? 'packages'
+              : (tab.objectType === 'materialized-view' ? 'materializedViews' : (tab.objectType === 'view' ? 'views' : undefined)))))),
   });
 };
 

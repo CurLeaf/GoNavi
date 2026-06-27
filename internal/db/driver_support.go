@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -211,7 +212,9 @@ func resolveExternalDriverRoot(downloadDir string) (string, error) {
 		root = abs
 	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		return "", fmt.Errorf("创建驱动目录失败：%w", err)
+		return "", fmt.Errorf("%s%w", localizedDriverRuntimeText("driver_manager.backend.error.create_directory_failed", map[string]any{
+			"detail": "",
+		}), err)
 	}
 	return root, nil
 }
@@ -268,16 +271,28 @@ func optionalGoDriverRuntimeReady(driverType string) (bool, string) {
 	if !IsOptionalGoDriver(normalized) {
 		return true, ""
 	}
+	displayName := driverDisplayName(normalized)
 	executablePath, err := ResolveOptionalDriverAgentExecutablePath("", normalized)
 	if err != nil {
-		return false, fmt.Sprintf("%s 驱动代理路径解析失败，请在驱动管理中重新安装启用", driverDisplayName(normalized))
+		return false, localizedDriverRuntimeText("driver_manager.backend.status.agent_path_failed", map[string]any{"name": displayName})
 	}
 	info, statErr := os.Stat(executablePath)
 	if statErr != nil || info.IsDir() {
-		return false, fmt.Sprintf("%s 驱动代理缺失，请在驱动管理中重新安装启用", driverDisplayName(normalized))
+		return false, localizedDriverRuntimeText("driver_manager.backend.status.agent_missing", map[string]any{"name": displayName})
 	}
 	if validateErr := ValidateOptionalDriverAgentExecutable(normalized, executablePath); validateErr != nil {
-		return false, fmt.Sprintf("%s；请在驱动管理中重新安装启用", validateErr.Error())
+		var archErr *driverAgentArchMismatchError
+		if errors.As(validateErr, &archErr) {
+			return false, localizedDriverRuntimeText("driver_manager.backend.status.agent_arch_incompatible_detail", map[string]any{
+				"name":    displayName,
+				"file":    archErr.fileLabel,
+				"process": archErr.processLabel,
+			})
+		}
+		return false, localizedDriverRuntimeText("driver_manager.backend.status.agent_unavailable_reinstall", map[string]any{
+			"name":   displayName,
+			"detail": validateErr.Error(),
+		})
 	}
 	return true, ""
 }
@@ -286,7 +301,7 @@ func optionalGoDriverRuntimeReady(driverType string) (bool, string) {
 func DriverRuntimeSupportStatus(driverType string) (bool, string) {
 	normalized := normalizeRuntimeDriverType(driverType)
 	if normalized == "" {
-		return false, "未识别的数据源类型"
+		return false, localizedDriverRuntimeText("driver_manager.backend.status.unrecognized_driver_type", nil)
 	}
 	if normalized == "custom" {
 		return true, ""
@@ -295,8 +310,9 @@ func DriverRuntimeSupportStatus(driverType string) (bool, string) {
 		return true, ""
 	}
 	if IsOptionalGoDriver(normalized) {
+		displayName := driverDisplayName(normalized)
 		if !IsOptionalGoDriverBuildIncluded(normalized) {
-			return false, fmt.Sprintf("%s 当前发行包为精简构建，未内置该驱动；如需使用请安装 Full 版", driverDisplayName(normalized))
+			return false, localizedDriverRuntimeText("driver_manager.backend.status.slim_build_required", map[string]any{"name": displayName})
 		}
 		if optionalGoDriverInstalled(normalized) {
 			if ready, reason := optionalGoDriverRuntimeReady(normalized); !ready {
@@ -304,7 +320,7 @@ func DriverRuntimeSupportStatus(driverType string) (bool, string) {
 			}
 			return true, ""
 		}
-		return false, fmt.Sprintf("%s 纯 Go 驱动未启用，请先在驱动管理中点击“安装启用”", driverDisplayName(normalized))
+		return false, localizedDriverRuntimeText("driver_manager.backend.status.optional_disabled", map[string]any{"name": displayName})
 	}
 	return true, ""
 }

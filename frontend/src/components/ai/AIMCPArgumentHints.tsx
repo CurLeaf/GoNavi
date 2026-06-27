@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import { buildMCPArgumentDetailHints } from '../../utils/mcpArgumentDetailHints';
 import { buildMCPArgumentHintProfile } from '../../utils/mcpArgumentHints';
@@ -40,13 +42,13 @@ const mergeArgs = (left: string[], right: string[]): string[] => {
 };
 
 const businessHintCategoryLabel = {
-  secret: '敏感',
-  path: '路径',
-  endpoint: '地址',
-  network: '网络',
-  mode: '模式',
-  runtime: '运行时',
-  generic: '业务',
+  secret: 'ai_settings.mcp_server.argument_hints.category.secret',
+  path: 'ai_settings.mcp_server.argument_hints.category.path',
+  endpoint: 'ai_settings.mcp_server.argument_hints.category.endpoint',
+  network: 'ai_settings.mcp_server.argument_hints.category.network',
+  mode: 'ai_settings.mcp_server.argument_hints.category.mode',
+  runtime: 'ai_settings.mcp_server.argument_hints.category.runtime',
+  generic: 'ai_settings.mcp_server.argument_hints.category.generic',
 };
 
 const businessHintCategoryColor = {
@@ -68,7 +70,12 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
   darkMode,
   overlayTheme,
 }) => {
-  const profile = buildMCPArgumentHintProfile(command, args);
+  const i18n = useOptionalI18n();
+  const copy = (
+    key: string,
+    params?: Record<string, string | number | boolean | null | undefined>,
+  ) => (i18n?.t ?? ((catalogKey, catalogParams) => catalogTranslate('en-US', catalogKey, catalogParams)))(key, params);
+  const profile = buildMCPArgumentHintProfile(command, args, copy);
   if (!profile) {
     return null;
   }
@@ -76,7 +83,7 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
   const argumentHints = buildMCPArgumentDetailHints(profile.commandName, [
     ...profile.inlineArgs,
     ...(args || []),
-  ]);
+  ], copy);
   const canApplyMissingArgs = Boolean(onArgsChange && missingRequiredArgs.length > 0 && profile.inlineArgs.length === 0);
   const canSplitInlineArgs = Boolean(onCommandArgsChange && profile.inlineArgs.length > 0);
 
@@ -93,7 +100,7 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
       }}
     >
       <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>
-        当前命令 {profile.commandName} 的参数提示
+        {copy('ai_settings.mcp_server.argument_hints.current_command', { command: profile.commandName })}
       </div>
       <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>
         {profile.title}
@@ -127,7 +134,7 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
       {argumentHints.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>
-            参数逐项说明
+            {copy('ai_settings.mcp_server.argument_hints.argument_details')}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
             {argumentHints.map((hint) => (
@@ -157,14 +164,18 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
                       background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)',
                     }}
                   >
-                    {businessHintCategoryLabel[hint.category]}
+                    {copy(businessHintCategoryLabel[hint.category])}
                   </span>
-                  {hint.sensitive ? <span style={buildMCPHintStyle('#b45309')}>值已脱敏</span> : null}
+                  {hint.sensitive ? (
+                    <span style={buildMCPHintStyle('#b45309')}>
+                      {copy('ai_settings.mcp_server.argument_hints.masked_value')}
+                    </span>
+                  ) : null}
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{hint.label}</div>
                 <div style={buildMCPHintStyle(overlayTheme.mutedText)}>{hint.detail}</div>
                 <div style={buildMCPHintStyle(hint.sensitive ? '#b45309' : overlayTheme.mutedText)}>
-                  应填：{hint.valueHint}
+                  {copy('ai_settings.mcp_server.argument_hints.value_hint_prefix')}{hint.valueHint}
                 </div>
               </div>
             ))}
@@ -174,7 +185,7 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
       {profile.businessHints.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ ...mcpLabelStyle, color: overlayTheme.titleText }}>
-            已识别业务参数
+            {copy('ai_settings.mcp_server.argument_hints.business_arguments')}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
             {profile.businessHints.map((hint) => (
@@ -204,14 +215,18 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
                       background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)',
                     }}
                   >
-                    {businessHintCategoryLabel[hint.category]}
+                    {copy(businessHintCategoryLabel[hint.category])}
                   </span>
-                  {hint.sensitive ? <span style={buildMCPHintStyle('#b45309')}>不要截图真实值</span> : null}
+                  {hint.sensitive ? (
+                    <span style={buildMCPHintStyle('#b45309')}>
+                      {copy('ai_settings.mcp_server.argument_hints.dont_screenshot')}
+                    </span>
+                  ) : null}
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: overlayTheme.titleText }}>{hint.label}</div>
                 <div style={buildMCPHintStyle(overlayTheme.mutedText)}>{hint.detail}</div>
                 <div style={buildMCPHintStyle(hint.sensitive ? '#b45309' : overlayTheme.mutedText)}>
-                  应填：{hint.valueHint}
+                  {copy('ai_settings.mcp_server.argument_hints.value_hint_prefix')}{hint.valueHint}
                 </div>
               </div>
             ))}
@@ -220,11 +235,13 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
       ) : null}
       {profile.nextActions.length > 0 ? (
         <div style={buildMCPHintStyle('#b45309')}>
-          下一步：{profile.nextActions.join('；')}
+          {copy('ai_settings.mcp_server.argument_hints.next_actions', {
+            actions: profile.nextActions.join(copy('ai_settings.mcp_server.argument_hints.action_separator')),
+          })}
         </div>
       ) : (
         <div style={buildMCPHintStyle(overlayTheme.mutedText)}>
-          必填参数看起来已经齐了，测试失败时再对照 README 检查业务参数和环境变量。
+          {copy('ai_settings.mcp_server.argument_hints.required_complete')}
         </div>
       )}
       {canApplyMissingArgs ? (
@@ -243,7 +260,9 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
             cursor: 'pointer',
           }}
         >
-          一键补齐缺失必填参数：{missingRequiredArgs.join(' / ')}
+          {copy('ai_settings.mcp_server.argument_hints.fill_missing_required', {
+            args: missingRequiredArgs.join(' / '),
+          })}
         </button>
       ) : null}
       {canSplitInlineArgs ? (
@@ -265,7 +284,10 @@ const AIMCPArgumentHints: React.FC<AIMCPArgumentHintsProps> = ({
             cursor: 'pointer',
           }}
         >
-          一键拆分启动命令字段：保留 {profile.normalizedCommand}，移动 {profile.inlineArgs.length} 个参数
+          {copy('ai_settings.mcp_server.argument_hints.split_inline_args', {
+            command: profile.normalizedCommand,
+            count: profile.inlineArgs.length,
+          })}
         </button>
       ) : null}
     </div>

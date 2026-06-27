@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -435,6 +436,206 @@ END;`
 	}
 }
 
+func TestDBQueryMultiKeepsOracleCreateProcedureCursorCaseExpressionAsSingleStatement(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeBatchWriteDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type: "oracle",
+		Host: "127.0.0.1",
+		Port: 1521,
+		User: "app",
+	}
+	query := `CREATE OR REPLACE PROCEDURE proc_accept_to_add(
+    p_acceptno IN t_accept_h.acceptno%TYPE
+) IS
+    CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS
+        SELECT si.compid, si.batid, si.wareid
+        FROM   t_store_i si
+        ORDER  BY CASE
+                      WHEN p_ind = '1' THEN
+                       to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))
+                      WHEN p_ind = '2' THEN
+                       lpad(to_char(floor(si.wareqty)), 10, '0')
+                      ELSE
+                       to_char(si.batid)
+                  END,si.batid;
+BEGIN
+    NULL;
+END;`
+
+	result := app.DBQueryMulti(config, "ORCLPDB1", query, "oracle-create-procedure-cursor-case-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.batchCalls != 0 {
+		t.Fatalf("expected CREATE PROCEDURE to skip batch path, got batchCalls=%d", fakeDB.batchCalls)
+	}
+	if fakeDB.execCalls != 1 || len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one sequential exec call, got execCalls=%d queries=%#v", fakeDB.execCalls, fakeDB.execQueries)
+	}
+	if fakeDB.execQueries[0] != query {
+		t.Fatalf("expected CREATE PROCEDURE to stay intact, got %q", fakeDB.execQueries[0])
+	}
+}
+
+func TestDBQueryMultiSkipsOracleSqlPlusSlashDelimiter(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeBatchWriteDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type: "oracle",
+		Host: "127.0.0.1",
+		Port: 1521,
+		User: "app",
+	}
+	query := `CREATE OR REPLACE PROCEDURE proc_tally2accept(
+    p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE
+) IS
+    v_count PLS_INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;
+END;
+/`
+	wantExecuted := `CREATE OR REPLACE PROCEDURE proc_tally2accept(
+    p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE
+) IS
+    v_count PLS_INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;
+END;`
+
+	result := app.DBQueryMulti(config, "ORCLPDB1", query, "oracle-sqlplus-slash-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.execCalls != 1 || len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one sequential exec call, got execCalls=%d queries=%#v", fakeDB.execCalls, fakeDB.execQueries)
+	}
+	if fakeDB.execQueries[0] != wantExecuted {
+		t.Fatalf("expected slash delimiter to be skipped, got %q", fakeDB.execQueries[0])
+	}
+}
+
+func TestDBQueryMultiSkipsOracleSqlPlusSlashDelimiterWithSemicolon(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeBatchWriteDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type: "oracle",
+		Host: "127.0.0.1",
+		Port: 1521,
+		User: "app",
+	}
+	query := `CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_msg_out OUT NVARCHAR2
+) AS
+BEGIN
+    p_msg_out := '';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := SQLERRM;
+END cproc_tzhssr_order2sale_A1;
+/;`
+	wantExecuted := `CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(
+    p_msg_out OUT NVARCHAR2
+) AS
+BEGIN
+    p_msg_out := '';
+EXCEPTION
+    WHEN OTHERS THEN
+        p_msg_out := SQLERRM;
+END cproc_tzhssr_order2sale_A1;`
+
+	result := app.DBQueryMulti(config, "ORCLPDB1", query, "oracle-sqlplus-slash-semicolon-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.execCalls != 1 || len(fakeDB.execQueries) != 1 {
+		t.Fatalf("expected one sequential exec call, got execCalls=%d queries=%#v", fakeDB.execCalls, fakeDB.execQueries)
+	}
+	if fakeDB.execQueries[0] != wantExecuted {
+		t.Fatalf("expected slash delimiter with semicolon to be skipped, got %q", fakeDB.execQueries[0])
+	}
+}
+
+func TestDBQueryMultiKeepsOraclePackageSpecAndBodyTogether(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	fakeDB := &fakeBatchWriteDB{}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{
+		Type: "oracle",
+		Host: "127.0.0.1",
+		Port: 1521,
+		User: "app",
+	}
+	query := `CREATE OR REPLACE PACKAGE pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER);
+END pkg_order;
+/
+CREATE OR REPLACE PACKAGE BODY pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER) IS
+    BEGIN
+        NULL;
+    END sync_order;
+END pkg_order;
+/ -- SQLPlus delimiter from PL/SQL tools`
+	wantExecuted := []string{
+		`CREATE OR REPLACE PACKAGE pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER);
+END pkg_order;`,
+		`CREATE OR REPLACE PACKAGE BODY pkg_order AS
+    PROCEDURE sync_order(p_id IN NUMBER) IS
+    BEGIN
+        NULL;
+    END sync_order;
+END pkg_order;`,
+	}
+
+	result := app.DBQueryMulti(config, "ORCLPDB1", query, "oracle-package-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.execCalls != 2 || len(fakeDB.execQueries) != 2 {
+		t.Fatalf("expected two sequential exec calls, got execCalls=%d queries=%#v", fakeDB.execCalls, fakeDB.execQueries)
+	}
+	if !reflect.DeepEqual(fakeDB.execQueries, wantExecuted) {
+		t.Fatalf("expected package spec/body to stay intact, got %#v", fakeDB.execQueries)
+	}
+}
+
 var _ db.BatchWriteExecer = (*fakeBatchWriteDB)(nil)
 var _ db.SessionExecerProvider = (*fakeBatchWriteDB)(nil)
 var _ db.QueryMessageExecer = (*fakeBatchWriteDB)(nil)
@@ -684,6 +885,84 @@ func TestDBQueryMultiTransactionalKeepsDMLTransactionOpenUntilCommit(t *testing.
 	}
 	if got := fakeDB.execQueries[len(fakeDB.execQueries)-1]; got != "COMMIT" {
 		t.Fatalf("expected final exec to be COMMIT, got %q", got)
+	}
+}
+
+func TestDBQueryMultiInTransactionReusesPendingManagedSessionForReadQueries(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	updateStmt := "UPDATE users SET name = 'new' WHERE id = 1"
+	readStmt := "SELECT name FROM users WHERE id = 1"
+	fakeDB := &fakeTransactionalDB{
+		fakeBatchWriteDB: fakeBatchWriteDB{
+			execAffected: map[string]int64{
+				updateStmt: 1,
+			},
+			queryMap: map[string][]map[string]interface{}{
+				readStmt: {
+					{"name": "new"},
+				},
+			},
+			fieldMap: map[string][]string{
+				readStmt: {"name"},
+			},
+		},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, User: "root"}
+
+	startResult := app.DBQueryMultiTransactional(config, "main", updateStmt, "tx-query")
+	if !startResult.Success {
+		t.Fatalf("expected transactional update success, got failure: %s", startResult.Message)
+	}
+	if startResult.TransactionID == "" || !startResult.TransactionPending {
+		t.Fatalf("expected pending transaction metadata, got id=%q pending=%v", startResult.TransactionID, startResult.TransactionPending)
+	}
+	if fakeDB.txSession == nil {
+		t.Fatal("expected transaction provider session to be opened")
+	}
+	if fakeDB.txSession.closed {
+		t.Fatal("expected transaction session to stay open before follow-up read")
+	}
+
+	readResult := app.DBQueryMultiInTransaction(startResult.TransactionID, readStmt, "tx-query-read")
+	if !readResult.Success {
+		t.Fatalf("expected in-transaction read success, got failure: %s", readResult.Message)
+	}
+	if readResult.TransactionID != startResult.TransactionID || !readResult.TransactionPending {
+		t.Fatalf("expected follow-up read to preserve pending transaction metadata, got id=%q pending=%v", readResult.TransactionID, readResult.TransactionPending)
+	}
+	if fakeDB.txSession.queryCalls == 0 {
+		t.Fatal("expected follow-up read to execute on the pinned transaction session")
+	}
+	if fakeDB.txSession.closed {
+		t.Fatal("expected transaction session to remain open after follow-up read")
+	}
+
+	resultSets, ok := readResult.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData from in-transaction read, got %T", readResult.Data)
+	}
+	if len(resultSets) != 1 {
+		t.Fatalf("expected one read result set, got %#v", resultSets)
+	}
+	if got := resultSets[0].Rows[0]["name"]; got != "new" {
+		t.Fatalf("expected in-transaction read to return updated value, got %#v", got)
+	}
+
+	rollbackResult := app.DBRollbackTransaction(startResult.TransactionID)
+	if !rollbackResult.Success {
+		t.Fatalf("expected rollback success after follow-up read, got failure: %s", rollbackResult.Message)
+	}
+	if !fakeDB.txSession.closed {
+		t.Fatal("expected transaction session to close after rollback")
 	}
 }
 
@@ -1522,6 +1801,51 @@ func TestDBQueryMultiKeepsAllResultSetsFromSingleSQLServerStatement(t *testing.T
 	}
 	if fakeDB.execCalls != 0 {
 		t.Fatalf("expected exec path to be skipped, got execCalls=%d", fakeDB.execCalls)
+	}
+}
+
+func TestDBQueryMultiNormalizesSingleSQLServerSelectAffectedRowsStatementIndex(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "select * from c_dddw"
+	fakeDB := &fakeBatchWriteDB{
+		multiResult: map[string][]connection.ResultSetData{
+			query: {
+				{
+					Rows:    []map[string]interface{}{{"dddwno": "001", "dddwlist": "demo"}},
+					Columns: []string{"dddwno", "dddwlist"},
+				},
+				{
+					Rows:    []map[string]interface{}{{"affectedRows": int64(846)}},
+					Columns: []string{"affectedRows"},
+				},
+			},
+		},
+		queryErr: map[string]error{},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "sqlserver", Host: "127.0.0.1", Port: 1433, User: "sa"}
+
+	result := app.DBQueryMulti(config, "hydee", query, "sqlserver-select-affectedrows-index-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 2 {
+		t.Fatalf("expected two result sets, got %#v", resultSets)
+	}
+	if resultSets[0].StatementIndex != 1 || resultSets[1].StatementIndex != 1 {
+		t.Fatalf("expected select result and trailing affectedRows result to share statementIndex=1, got %#v", resultSets)
 	}
 }
 

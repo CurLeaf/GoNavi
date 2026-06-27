@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
+import { MCP_SERVER_DRAFT_TEMPLATES } from '../../utils/mcpServerTemplates';
 import { buildMCPDraftInspectionSnapshot } from './aiMCPDraftInspectionInsights';
+
+const templateTitle = (key: string) => {
+  const template = MCP_SERVER_DRAFT_TEMPLATES.find((item) => item.key === key);
+  if (!template) {
+    throw new Error(`Missing MCP draft template: ${key}`);
+  }
+  return template.title;
+};
 
 describe('aiMCPDraftInspectionInsights', () => {
   it('parses a full MCP launch command and returns reusable field values', () => {
@@ -29,7 +38,7 @@ describe('aiMCPDraftInspectionInsights', () => {
         known: true,
       }],
     });
-    expect(snapshot.draft.envHints?.nextActions.join('\n')).toContain('密钥类变量只保存在本机配置');
+    expect(snapshot.draft.envHints?.nextActions.join('\n')).toContain('Secret-like variables are stored only in local configuration');
     expect(snapshot.draft.timeoutSeconds).toBe(45);
     expect(snapshot.draft.suggestedServerSeed).toMatchObject({
       name: 'mcp-server-github',
@@ -42,11 +51,11 @@ describe('aiMCPDraftInspectionInsights', () => {
     });
     expect(snapshot.draft.recommendedTemplate).toMatchObject({
       key: 'uvx',
-      title: 'uvx 工具',
+      title: templateTitle('uvx'),
       confidence: 'high',
     });
     expect(snapshot.validation.canSave).toBe(true);
-    expect(snapshot.nextActions).toContain('当前草稿可以保存并测试工具发现；如果发现 0 个工具，再检查服务是否支持 stdio。');
+    expect(snapshot.nextActions).toContain('The current draft can be saved and tested for tool discovery; if it discovers 0 tools, check whether the service supports stdio.');
     expect(JSON.stringify(snapshot)).not.toContain('ghp test');
   });
 
@@ -67,8 +76,8 @@ describe('aiMCPDraftInspectionInsights', () => {
       'env-invalid-lines',
       'timeout-out-of-range',
     ]));
-    expect(snapshot.nextActions.join('\n')).toContain('把整行命令放到完整命令框自动拆分');
-    expect(snapshot.nextActions.join('\n')).toContain('环境变量改成每行 KEY=VALUE');
+    expect(snapshot.nextActions.join('\n')).toContain('Put the whole command into the full command field for auto-splitting');
+    expect(snapshot.nextActions.join('\n')).toContain('Write environment variables as one KEY=VALUE per line');
   });
 
   it('applies the docker template and explains docker-specific missing args', () => {
@@ -81,7 +90,7 @@ describe('aiMCPDraftInspectionInsights', () => {
     expect(snapshot.draft.command).toBe('docker');
     expect(snapshot.draft.recommendedTemplate).toMatchObject({
       key: 'docker',
-      title: 'Docker 镜像',
+      title: templateTitle('docker'),
     });
     expect(snapshot.draft.suggestedServerSeed).toMatchObject({
       name: 'docker',
@@ -90,7 +99,58 @@ describe('aiMCPDraftInspectionInsights', () => {
     });
     expect(snapshot.validation.issues.map((issue) => issue.key)).toContain('docker-interactive-missing');
     expect(snapshot.validation.issues.map((issue) => issue.key)).toContain('docker-image-missing');
-    expect(snapshot.nextActions.join('\n')).toContain('Docker MCP 的 args 里补 -i');
-    expect(snapshot.nextActions.join('\n')).toContain('Docker MCP 的 args 里补 README 提供的镜像名');
+    expect(snapshot.nextActions.join('\n')).toContain('Add -i or --interactive to Docker MCP args');
+    expect(snapshot.nextActions.join('\n')).toContain('Add the image name from README to Docker MCP args');
+  });
+
+  it('localizes draft inspection wrapper copy while preserving raw command details', () => {
+    const translate = (key: string) => ({
+      'ai_chat.inspection.mcp_draft.default_name': 'T_DEFAULT_DRAFT',
+      'ai_chat.inspection.mcp_draft.parse.no_full_command': 'T_NO_FULL_COMMAND',
+      'ai_chat.inspection.mcp_draft.next_action.command_whole_line': 'T_SPLIT_COMMAND',
+      'ai_chat.inspection.mcp_draft.next_action.env_lines': 'T_ENV_LINES',
+      'ai_chat.inspection.mcp_draft.next_action.timeout': 'T_TIMEOUT',
+      'ai_chat.inspection.mcp_draft.next_action.send_full_command': 'T_SEND_FULL_COMMAND',
+    }[key] || key);
+
+    const snapshot = buildMCPDraftInspectionSnapshot({
+      command: 'npx -y @modelcontextprotocol/server-filesystem --stdio',
+      args: ['env', 'GITHUB_TOKEN=abc'],
+      envText: 'export TOKEN=abc',
+      timeoutSeconds: 1,
+      translate,
+    } as Parameters<typeof buildMCPDraftInspectionSnapshot>[0] & { translate: typeof translate });
+
+    expect(snapshot.draft.name).toBe('T_DEFAULT_DRAFT');
+    expect(snapshot.parse.error).toBe('T_NO_FULL_COMMAND');
+    expect(snapshot.nextActions).toEqual([
+      'T_SPLIT_COMMAND',
+      'T_ENV_LINES',
+      'T_TIMEOUT',
+      'T_SEND_FULL_COMMAND',
+    ]);
+    expect(snapshot.draft.command).toBe('npx -y @modelcontextprotocol/server-filesystem --stdio');
+    expect(snapshot.draft.args).toEqual(['env', 'GITHUB_TOKEN=***']);
+    expect(JSON.stringify(snapshot)).not.toContain('GITHUB_TOKEN=abc');
+  });
+
+  it('localizes recommended template copy while keeping launch preview raw', () => {
+    const translate = (key: string) => ({
+      'ai_settings.mcp_server.template.uvx.title': 'T_TEMPLATE_UVX_TITLE',
+      'ai_settings.mcp_server.template.uvx.description': 'T_TEMPLATE_UVX_DESCRIPTION',
+    }[key] || key);
+
+    const snapshot = buildMCPDraftInspectionSnapshot({
+      fullCommand: 'uvx mcp-server-fetch --stdio',
+      translate,
+    } as Parameters<typeof buildMCPDraftInspectionSnapshot>[0] & { translate: typeof translate });
+
+    expect(snapshot.draft.recommendedTemplate).toMatchObject({
+      key: 'uvx',
+      title: 'T_TEMPLATE_UVX_TITLE',
+      description: 'T_TEMPLATE_UVX_DESCRIPTION',
+      exampleLaunchPreview: 'uvx some-mcp-server',
+      confidence: 'high',
+    });
   });
 });

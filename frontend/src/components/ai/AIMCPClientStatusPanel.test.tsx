@@ -30,15 +30,17 @@ describe('AIMCPClientStatusPanel', () => {
       />,
     );
 
-    expect(markup).toContain('已选客户端状态');
-    expect(markup).toContain('当前目标客户端：Hermans');
-    expect(markup).toContain('需要通过远程 MCP 桥接调用当前 GoNavi');
-    expect(markup).toContain('远程接入边界');
-    expect(markup).toContain('不注册 execute_sql');
-    expect(markup).toContain('Hermans 远程 MCP 快速配置');
-    expect(markup).toContain('CLI 检测：远程 Agent 不需要检测本机 hermans 命令');
-    expect(markup).toContain('刷新状态');
-    expect(markup).toContain('复制配置路径');
-    expect(markup).toContain('复制启动命令');
+    expect(markup).toContain('Selected client status');
+    expect(markup).toContain('Current target client: Hermans');
+    expect(markup).toContain('needs a remote MCP bridge to call this GoNavi');
+    expect(markup).toContain('Remote connection boundary');
+    expect(markup).toContain('--schema-only does not register execute_sql by default');
+    expect(markup).toContain('Hermans Remote MCP quick setup');
+    expect(markup).toContain('Configure in cloud Agent');
+    expect(markup).toContain('CLI detection: Remote Agent does not need local hermans command detection');
+    expect(markup).toContain('Hermans 这类远程 Agent 请通过远程 MCP 桥接接入 Windows GoNavi，不要复制数据库密码。');
+    expect(markup).toContain('Refresh status');
+    expect(markup).toContain('Copy config path');
+    expect(markup).toContain('Copy launch command');
   });
 });

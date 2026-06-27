@@ -4,16 +4,20 @@ import { getConnectionWorkbenchState } from './startupReadiness';
 
 describe('startup readiness helpers', () => {
   it('blocks sidebar interactions before local store hydration completes', () => {
-    expect(getConnectionWorkbenchState(false, false)).toEqual({
+    const translate = (key: string) => `T(${key})`;
+
+    expect(getConnectionWorkbenchState(false, false, translate)).toEqual({
       ready: false,
-      message: '正在加载本地配置...',
+      message: 'T(app.startup_readiness.loading_local_config)',
     });
   });
 
   it('keeps sidebar blocked until secure config bootstrap finishes', () => {
-    expect(getConnectionWorkbenchState(true, false)).toEqual({
+    const translate = (key: string) => `T(${key})`;
+
+    expect(getConnectionWorkbenchState(true, false, translate)).toEqual({
       ready: false,
-      message: '正在加载安全配置...',
+      message: 'T(app.startup_readiness.loading_security_config)',
     });
   });
 

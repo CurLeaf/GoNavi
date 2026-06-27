@@ -138,7 +138,7 @@ func (e *ElasticsearchDB) Close() error {
 // Ping 检测 Elasticsearch 连通性。
 func (e *ElasticsearchDB) Ping() error {
 	if e.client == nil {
-		return fmt.Errorf("连接未打开")
+		return localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 	timeout := e.pingTimeout
 	if timeout <= 0 {
@@ -174,7 +174,7 @@ func (e *ElasticsearchDB) QueryContext(ctx context.Context, query string) ([]map
 // queryWithContext 查询的核心实现，被 Query 和 QueryContext 共用。
 func (e *ElasticsearchDB) queryWithContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if e.client == nil {
-		return nil, nil, fmt.Errorf("连接未打开")
+		return nil, nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 
 	query = strings.TrimSpace(query)
@@ -325,7 +325,7 @@ func (e *ElasticsearchDB) ExecContext(_ context.Context, _ string) (int64, error
 // GetDatabases 列出所有 Elasticsearch 索引。
 func (e *ElasticsearchDB) GetDatabases() ([]string, error) {
 	if e.client == nil {
-		return nil, fmt.Errorf("连接未打开")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -361,7 +361,7 @@ func (e *ElasticsearchDB) GetDatabases() ([]string, error) {
 // GetTables 对 ES 而言索引即表，返回索引自身名称及别名。
 func (e *ElasticsearchDB) GetTables(dbName string) ([]string, error) {
 	if e.client == nil {
-		return nil, fmt.Errorf("连接未打开")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 
 	target := strings.TrimSpace(dbName)
@@ -381,7 +381,7 @@ func (e *ElasticsearchDB) GetTables(dbName string) ([]string, error) {
 // GetCreateStatement 返回索引的 settings + mappings 组合 JSON。
 func (e *ElasticsearchDB) GetCreateStatement(dbName, tableName string) (string, error) {
 	if e.client == nil {
-		return "", fmt.Errorf("连接未打开")
+		return "", localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 
 	indexName := resolveEsIndexName(dbName, tableName, e.database)
@@ -421,7 +421,7 @@ func (e *ElasticsearchDB) GetCreateStatement(dbName, tableName string) (string, 
 // GetColumns 返回索引的 mapping 字段定义。
 func (e *ElasticsearchDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	if e.client == nil {
-		return nil, fmt.Errorf("连接未打开")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 
 	indexName := resolveEsIndexName(dbName, tableName, e.database)
@@ -439,7 +439,7 @@ func (e *ElasticsearchDB) GetColumns(dbName, tableName string) ([]connection.Col
 // GetAllColumns 返回索引的全部字段定义（带表名标识）。
 func (e *ElasticsearchDB) GetAllColumns(dbName string) ([]connection.ColumnDefinitionWithTable, error) {
 	if e.client == nil {
-		return nil, fmt.Errorf("连接未打开")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 
 	target := strings.TrimSpace(dbName)
@@ -471,7 +471,7 @@ func (e *ElasticsearchDB) GetAllColumns(dbName string) ([]connection.ColumnDefin
 // GetIndexes 返回索引的 settings 中定义的分片与副本信息。
 func (e *ElasticsearchDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	if e.client == nil {
-		return nil, fmt.Errorf("连接未打开")
+		return nil, localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 
 	indexName := resolveEsIndexName(dbName, tableName, e.database)
@@ -625,7 +625,7 @@ func isESMetaField(name string) bool {
 // ApplyChanges 实现 BatchApplier 接口，通过 ES _bulk API 批量提交增删改。
 func (e *ElasticsearchDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if e.client == nil {
-		return fmt.Errorf("连接未打开")
+		return localizedDatabaseRuntimeError("db.backend.error.connection_not_open", nil)
 	}
 
 	indexName := resolveEsIndexName(tableName, "", e.database)

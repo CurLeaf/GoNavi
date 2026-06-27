@@ -15,6 +15,10 @@ const isWhitespace = (ch: string): boolean => (
   ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f'
 );
 
+const isHorizontalWhitespace = (ch: string): boolean => (
+  ch === ' ' || ch === '\t' || ch === '\r' || ch === '\f'
+);
+
 const isSqlIdentifierStart = (ch: string): boolean => /^[A-Za-z_]$/.test(ch);
 
 const isSqlIdentifierPart = (ch: string): boolean => /^[A-Za-z0-9_$#]$/.test(ch);
@@ -59,6 +63,69 @@ const nextSqlSignificantChar = (text: string, position: number): string => {
   return index >= text.length ? '' : text[index];
 };
 
+const resolveStandaloneSqlSlashLineEnd = (text: string, index: number): number | null => {
+  if (text[index] !== '/') return null;
+
+  const lineStart = text.lastIndexOf('\n', Math.max(0, index - 1)) + 1;
+  for (let pos = lineStart; pos < index; pos++) {
+    if (!isHorizontalWhitespace(text[pos])) {
+      return null;
+    }
+  }
+
+  let lineEnd = index + 1;
+  let seenOptionalSemicolon = false;
+  while (lineEnd < text.length && text[lineEnd] !== '\n') {
+    if (text[lineEnd] === ';' && !seenOptionalSemicolon) {
+      seenOptionalSemicolon = true;
+      lineEnd += 1;
+      continue;
+    }
+    if (text[lineEnd] === '-' && text[lineEnd + 1] === '-') {
+      while (lineEnd < text.length && text[lineEnd] !== '\n') {
+        lineEnd += 1;
+      }
+      return lineEnd;
+    }
+    if (!isHorizontalWhitespace(text[lineEnd])) {
+      return null;
+    }
+    lineEnd += 1;
+  }
+  return lineEnd;
+};
+
+const resolveStandaloneSqlSlashLineAtOffset = (
+  text: string,
+  offset: number,
+): { lineStart: number; lineEnd: number; slashIndex: number } | null => {
+  const lineStart = text.lastIndexOf('\n', Math.max(0, offset - 1)) + 1;
+  const nextLineBreak = text.indexOf('\n', lineStart);
+  const lineEnd = nextLineBreak === -1 ? text.length : nextLineBreak;
+
+  let slashIndex = lineStart;
+  while (slashIndex < lineEnd && isHorizontalWhitespace(text[slashIndex])) {
+    slashIndex += 1;
+  }
+  if (slashIndex >= lineEnd || text[slashIndex] !== '/') {
+    return null;
+  }
+
+  const resolvedLineEnd = resolveStandaloneSqlSlashLineEnd(text, slashIndex);
+  if (resolvedLineEnd === null || resolvedLineEnd !== lineEnd) {
+    return null;
+  }
+
+  return { lineStart, lineEnd, slashIndex };
+};
+
+const findPreviousSqlStatementRange = (
+  ranges: SqlStatementRange[],
+  offset: number,
+): SqlStatementRange | null => (
+  [...ranges].reverse().find((range) => range.end <= offset) || null
+);
+
 const shouldEnterPlsqlBeginBlock = (text: string, tokenEnd: number): boolean => {
   const nextChar = nextSqlSignificantChar(text, tokenEnd);
   if (!nextChar || nextChar === ';') return false;
@@ -92,7 +159,32 @@ const isCreateRoutineHeaderPrefix = (text: string): boolean => {
     current = nextSqlSignificantTokenSpan(text, current.end);
   }
 
-  return current.token === 'procedure' || current.token === 'function';
+  if (current.token === 'procedure' || current.token === 'function') {
+    return true;
+  }
+  if (current.token !== 'package') {
+    return false;
+  }
+  current = nextSqlSignificantTokenSpan(text, current.end);
+  return current.token === '' || current.token === 'body' || isSqlIdentifierStart(current.token[0] || '');
+};
+
+const isCreatePackageHeaderPrefix = (text: string): boolean => {
+  let current = nextSqlSignificantTokenSpan(text, 0);
+  if (current.token !== 'create') return false;
+
+  current = nextSqlSignificantTokenSpan(text, current.end);
+  if (current.token === 'or') {
+    current = nextSqlSignificantTokenSpan(text, current.end);
+    if (current.token !== 'replace') return false;
+    current = nextSqlSignificantTokenSpan(text, current.end);
+  }
+
+  while (['editionable', 'noneditionable'].includes(current.token)) {
+    current = nextSqlSignificantTokenSpan(text, current.end);
+  }
+
+  return current.token === 'package';
 };
 
 const shouldEnterPlsqlCreateRoutineBlock = (
@@ -150,6 +242,8 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
   let dollarTag: string | null = null;
   let plsqlDepth = 0;
   let plsqlDeclareBeginSkips = 0;
+  let plsqlCaseDepth = 0;
+  let skipNextPlsqlCaseEndToken = false;
   let justClosedPLSQLBlock = false;
 
   const push = (end: number) => {
@@ -193,6 +287,18 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
         index++;
         inBlockComment = true;
         continue;
+      }
+      if ((justClosedPLSQLBlock || !text.slice(statementStart, index).trim()) && ch === '/') {
+        const slashLineEnd = resolveStandaloneSqlSlashLineEnd(text, index);
+        if (slashLineEnd !== null) {
+          push(index);
+          statementStart = slashLineEnd < text.length && text[slashLineEnd] === '\n'
+            ? slashLineEnd + 1
+            : slashLineEnd;
+          index = slashLineEnd;
+          justClosedPLSQLBlock = false;
+          continue;
+        }
       }
       if (ch === '#') {
         inLineComment = true;
@@ -242,6 +348,16 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
         tokenEnd++;
       }
       const token = text.slice(index, tokenEnd).toLowerCase();
+      if (token === 'case' && plsqlDepth > 0) {
+        if (skipNextPlsqlCaseEndToken) {
+          skipNextPlsqlCaseEndToken = false;
+        } else {
+          plsqlCaseDepth++;
+          justClosedPLSQLBlock = false;
+        }
+      } else if (token !== 'case') {
+        skipNextPlsqlCaseEndToken = false;
+      }
       if (token === 'begin' && plsqlDeclareBeginSkips > 0) {
         plsqlDeclareBeginSkips--;
         justClosedPLSQLBlock = false;
@@ -254,12 +370,23 @@ export const findSqlStatementRanges = (sql: string): SqlStatementRange[] => {
         justClosedPLSQLBlock = false;
       } else if (plsqlDepth === 0 && shouldEnterPlsqlCreateRoutineBlock(text, statementStart, token, tokenEnd)) {
         plsqlDepth++;
-        plsqlDeclareBeginSkips++;
+        if (!isCreatePackageHeaderPrefix(text.slice(statementStart, tokenEnd - token.length))) {
+          plsqlDeclareBeginSkips++;
+        }
+        justClosedPLSQLBlock = false;
+      } else if (token === 'end' && plsqlDepth > 0 && plsqlCaseDepth > 0) {
+        plsqlCaseDepth--;
+        if (nextSqlSignificantToken(text, tokenEnd) === 'case') {
+          skipNextPlsqlCaseEndToken = true;
+        }
         justClosedPLSQLBlock = false;
       } else if (token === 'end' && plsqlDepth > 0 && !isPlsqlControlEnd(text, tokenEnd)) {
         plsqlDepth--;
         if (plsqlDeclareBeginSkips > plsqlDepth) {
           plsqlDeclareBeginSkips = plsqlDepth;
+        }
+        if (plsqlCaseDepth > plsqlDepth) {
+          plsqlCaseDepth = plsqlDepth;
         }
         justClosedPLSQLBlock = plsqlDepth === 0;
       }
@@ -295,6 +422,11 @@ export const resolveCurrentSqlStatementRange = (sql: string, cursorOffset: numbe
     return containingRange;
   }
 
+  const slashLine = resolveStandaloneSqlSlashLineAtOffset(text, offset);
+  if (slashLine) {
+    return findPreviousSqlStatementRange(ranges, slashLine.lineStart);
+  }
+
   const nextRange = ranges.find((range) => offset < range.start);
   if (nextRange) {
     return nextRange;
@@ -319,6 +451,14 @@ export const resolveExecutableSql = (
   const statement = ranges.find((range) => offset >= range.start && offset <= range.end);
   if (statement?.text.trim()) {
     return { sql: statement.text, source: 'statement' };
+  }
+
+  const slashLine = resolveStandaloneSqlSlashLineAtOffset(text, offset);
+  if (slashLine) {
+    const previousStatement = findPreviousSqlStatementRange(ranges, slashLine.lineStart);
+    return previousStatement?.text.trim()
+      ? { sql: previousStatement.text, source: 'statement' }
+      : null;
   }
 
   const lineStart = text.lastIndexOf('\n', Math.max(0, offset - 1)) + 1;

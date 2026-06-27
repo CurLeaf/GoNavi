@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
   formatJVMDiagnosticChunkText,
   formatJVMDiagnosticChunksForDisplay,
   formatJVMDiagnosticCommandTypeLabel,
+  formatJVMDiagnosticEventLabel,
   formatJVMDiagnosticPhaseLabel,
   formatJVMDiagnosticRiskLabel,
   formatJVMDiagnosticSourceLabel,
@@ -17,11 +19,59 @@ describe("jvmDiagnosticPresentation", () => {
   it("groups presets by category in a stable order", () => {
     const groups = groupJVMDiagnosticPresets();
     expect(groups.map((group) => group.label)).toEqual([
-      "观察类命令",
-      "跟踪类命令",
-      "高风险命令",
+      "Observation commands",
+      "Trace commands",
+      "High-risk commands",
     ]);
     expect(groups[0].items.some((item) => item.label === "thread")).toBe(true);
+  });
+
+  it("uses translator values for diagnostic presentation labels and preset descriptions", () => {
+    const translate = (key: string) =>
+      ({
+        "jvm_diagnostic.presentation.category.observe": "Observation commands",
+        "jvm_diagnostic.presentation.category.trace": "Trace commands",
+        "jvm_diagnostic.presentation.category.mutating": "High-risk commands",
+        "jvm_diagnostic.presentation.phase.running": "Running",
+        "jvm_diagnostic.presentation.phase.completed": "Completed",
+        "jvm_diagnostic.presentation.event.done": "Execution finished",
+        "jvm_diagnostic.presentation.risk.high": "High risk",
+        "jvm_diagnostic.presentation.command_type.trace": "Trace",
+        "jvm_diagnostic.presentation.source.ai_plan": "AI plan",
+        "jvm_diagnostic.presentation.fallback.unknown": "Unknown",
+        "jvm_diagnostic.presentation.chunk.empty_event": "Empty event",
+        "jvm_diagnostic.completion.preset.thread-top.documentation":
+          "Inspect the busiest threads.",
+      })[key] || key;
+
+    const groups = groupJVMDiagnosticPresets(undefined, translate);
+    expect(groups.map((group) => group.label)).toEqual([
+      "Observation commands",
+      "Trace commands",
+      "High-risk commands",
+    ]);
+    expect(groups[0].items[0].description).toBe("Inspect the busiest threads.");
+    expect(formatJVMDiagnosticPhaseLabel("completed", translate)).toBe("Completed");
+    expect(formatJVMDiagnosticEventLabel("done", translate)).toBe("Execution finished");
+    expect(formatJVMDiagnosticRiskLabel("high", translate)).toBe("High risk");
+    expect(formatJVMDiagnosticCommandTypeLabel("trace", translate)).toBe("Trace");
+    expect(formatJVMDiagnosticSourceLabel("ai-plan", translate)).toBe("AI plan");
+    expect(formatJVMDiagnosticPhaseLabel(undefined, translate)).toBe("Unknown");
+    expect(formatJVMDiagnosticChunkText({ sessionId: "sess-1" }, translate)).toBe(
+      "Empty event",
+    );
+  });
+
+  it("keeps diagnostic presentation source free of user-visible Chinese literals", () => {
+    const source = readFileSync(
+      new URL("./jvmDiagnosticPresentation.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(source).not.toMatch(
+      /查看最繁忙线程|查看 JVM 运行总览|观察类命令|执行中|低风险|手动输入|未知|空事件/,
+    );
+    expect(source).toContain("jvm_diagnostic.presentation.risk.low");
   });
 
   it("formats chunk text with localized phase prefix when content exists", () => {
@@ -31,7 +81,7 @@ describe("jvmDiagnosticPresentation", () => {
         phase: "running",
         content: "thread -n 5",
       }),
-    ).toBe("执行中：thread -n 5");
+    ).toBe("Running: thread -n 5");
   });
 
   it("redacts sensitive values in diagnostic output chunks", () => {
@@ -233,11 +283,11 @@ describe("jvmDiagnosticPresentation", () => {
   });
 
   it("localizes diagnostic status, transport, risk and source labels", () => {
-    expect(formatJVMDiagnosticPhaseLabel("completed")).toBe("已完成");
+    expect(formatJVMDiagnosticPhaseLabel("completed")).toBe("Completed");
     expect(formatJVMDiagnosticTransportLabel("arthas-tunnel")).toBe("Arthas Tunnel");
-    expect(formatJVMDiagnosticRiskLabel("high")).toBe("高风险");
-    expect(formatJVMDiagnosticCommandTypeLabel("trace")).toBe("跟踪类");
-    expect(formatJVMDiagnosticSourceLabel("ai-plan")).toBe("AI 计划");
+    expect(formatJVMDiagnosticRiskLabel("high")).toBe("High risk");
+    expect(formatJVMDiagnosticCommandTypeLabel("trace")).toBe("Trace");
+    expect(formatJVMDiagnosticSourceLabel("ai-plan")).toBe("AI plan");
   });
 
   it("maps risk levels to tag colors", () => {

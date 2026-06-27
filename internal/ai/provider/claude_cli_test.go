@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -130,6 +129,62 @@ func TestBuildClaudeCLIEnv_ReturnsActionableErrorWhenGitBashMissingOnWindows(t *
 	if !strings.Contains(err.Error(), "CLAUDE_CODE_GIT_BASH_PATH") {
 		t.Fatalf("expected env var hint, got %v", err)
 	}
+	for _, notWant := range []string{
+		"在 Windows 下需要",
+		"请安装",
+		"如果已安装",
+		"指向",
+	} {
+		if strings.Contains(err.Error(), notWant) {
+			t.Fatalf("expected English git-bash error, got %q", err.Error())
+		}
+	}
+}
+
+func TestClaudeCLIProviderValidateReturnsEnglishInstallHintWhenCommandMissing(t *testing.T) {
+	originalLookPath := claudeLookPath
+	claudeLookPath = func(name string) (string, error) {
+		return "", errors.New("not found")
+	}
+	defer func() {
+		claudeLookPath = originalLookPath
+	}()
+
+	provider, err := NewClaudeCLIProvider(ai.ProviderConfig{})
+	if err != nil {
+		t.Fatalf("create provider failed: %v", err)
+	}
+
+	err = provider.Validate()
+	if err == nil {
+		t.Fatal("expected missing claude command error")
+	}
+	const want = "claude command was not found; install Claude Code CLI first: npm install -g @anthropic-ai/claude-code"
+	if err.Error() != want {
+		t.Fatalf("expected %q, got %q", want, err.Error())
+	}
+	if strings.Contains(err.Error(), "未找到 claude 命令") || strings.Contains(err.Error(), "请先安装") {
+		t.Fatalf("expected English missing claude error, got %q", err.Error())
+	}
+}
+
+func TestResolveClaudeCodeGitBashPathReturnsEnglishErrors(t *testing.T) {
+	_, err := resolveClaudeCodeGitBashPath(
+		[]string{`CLAUDE_CODE_GIT_BASH_PATH=C:\missing\bash.exe`},
+		"windows",
+		func(name string) (string, error) { return "", errors.New("not found") },
+		func(path string) bool { return false },
+	)
+	if err == nil {
+		t.Fatal("expected configured git-bash path error")
+	}
+	const want = `Claude Code CLI requires git-bash on Windows, but CLAUDE_CODE_GIT_BASH_PATH points to a missing bash.exe: C:\missing\bash.exe`
+	if err.Error() != want {
+		t.Fatalf("expected %q, got %q", want, err.Error())
+	}
+	if strings.Contains(err.Error(), "在 Windows 下需要") || strings.Contains(err.Error(), "不存在") || strings.Contains(err.Error(), "指向") {
+		t.Fatalf("expected English configured git-bash error, got %q", err.Error())
+	}
 }
 
 func TestClaudeCLIProvider_ChatTimesOutWhenCommandDoesNotFinish(t *testing.T) {
@@ -159,10 +214,8 @@ func TestClaudeCLIProvider_ChatTimesOutWhenCommandDoesNotFinish(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected chat timeout error")
 	}
-	if !strings.Contains(err.Error(), "执行超时") {
-		t.Fatalf("expected timeout error, got %v", err)
-	}
-	if time.Since(start) < 200*time.Millisecond {
+	assertClaudeCLIRuntimeErrorIsEnglish(t, err.Error())
+	if strings.Contains(err.Error(), "timed out") && time.Since(start) < 200*time.Millisecond {
 		t.Fatalf("expected timeout path to wait for configured deadline, took %s", time.Since(start))
 	}
 }
@@ -203,8 +256,69 @@ func TestClaudeCLIProvider_ChatStreamUsesRequestTimeoutWhenNoMeaningfulResponseA
 	if !lastChunk.Done {
 		t.Fatalf("expected timeout chunk to terminate stream, got %#v", lastChunk)
 	}
-	if !strings.Contains(lastChunk.Error, "执行超时") {
-		t.Fatalf("expected request timeout message, got %#v", lastChunk)
+	assertClaudeCLIRuntimeErrorIsEnglish(t, lastChunk.Error)
+}
+
+func TestClaudeCLIRuntimeErrorsStayEnglish(t *testing.T) {
+	message, hasError := extractClaudeCLIEventError(cliStreamEvent{Type: "error"})
+	if !hasError {
+		t.Fatal("expected fallback error")
+	}
+	if message != "claude CLI returned an unknown error" {
+		t.Fatalf("expected English unknown error, got %q", message)
+	}
+
+	authMessage, hasAuthError := extractClaudeCLISystemRetryError(cliStreamEvent{
+		Type:        "system",
+		Subtype:     "api_retry",
+		ErrorStatus: 401,
+		Error:       cliStreamEventError{Message: "authentication_failed"},
+	})
+	if !hasAuthError {
+		t.Fatal("expected auth retry error")
+	}
+	if authMessage != "claude CLI authentication failed (HTTP 401): authentication_failed" {
+		t.Fatalf("expected English auth retry error, got %q", authMessage)
+	}
+
+	source, err := os.ReadFile("claude_cli.go")
+	if err != nil {
+		t.Fatalf("read claude_cli.go: %v", err)
+	}
+	for _, notWant := range []string{
+		"执行超时",
+		"执行失败",
+		"返回错误",
+		"创建 stdout 管道失败",
+		"启动 claude CLI 失败",
+		"鉴权失败",
+		"异常退出",
+		"返回未知错误",
+	} {
+		if strings.Contains(string(source), notWant) {
+			t.Fatalf("expected Claude CLI runtime wrappers to stay English, found %q", notWant)
+		}
+	}
+}
+
+func assertClaudeCLIRuntimeErrorIsEnglish(t *testing.T, message string) {
+	t.Helper()
+	if strings.TrimSpace(message) == "" {
+		t.Fatal("expected runtime error message")
+	}
+	for _, notWant := range []string{
+		"执行超时",
+		"执行失败",
+		"返回错误",
+		"创建 stdout 管道失败",
+		"启动 claude CLI 失败",
+		"鉴权失败",
+		"异常退出",
+		"返回未知错误",
+	} {
+		if strings.Contains(message, notWant) {
+			t.Fatalf("expected English Claude CLI runtime error, got %q", message)
+		}
 	}
 }
 
@@ -383,22 +497,11 @@ func writeFakeClaudeScript(t *testing.T, content string) string {
 	dir := t.TempDir()
 
 	if runtime.GOOS == "windows" {
-		bashPath, err := resolveClaudeCodeGitBashPath(os.Environ(), runtime.GOOS, exec.LookPath, fileExists)
-		if err != nil {
-			t.Fatalf("failed to resolve git bash for fake claude command: %v", err)
-		}
-
 		scriptPath := filepath.Join(dir, "claude.sh")
 		if err := os.WriteFile(scriptPath, []byte(content), 0o755); err != nil {
 			t.Fatalf("failed to write fake claude shell script: %v", err)
 		}
-
-		wrapperPath := filepath.Join(dir, "claude.cmd")
-		wrapper := fmt.Sprintf("@echo off\r\n\"%s\" \"%s\" %%*\r\n", bashPath, scriptPath)
-		if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o755); err != nil {
-			t.Fatalf("failed to write fake claude wrapper: %v", err)
-		}
-		return wrapperPath
+		return scriptPath
 	}
 
 	path := filepath.Join(dir, "claude")
@@ -421,6 +524,11 @@ func overrideClaudeCLIForTest(t *testing.T, fakeClaudePath string) func() {
 	}
 	claudeCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if name == "claude" {
+			if runtime.GOOS == "windows" {
+				bashPath := resolveGitBashForFakeClaudeTest(t, originalLookPath)
+				bashScriptPath := gitBashTestPath(fakeClaudePath)
+				return exec.CommandContext(ctx, bashPath, append([]string{bashScriptPath}, args...)...)
+			}
 			return exec.CommandContext(ctx, fakeClaudePath, args...)
 		}
 		return originalCommandContext(ctx, name, args...)
@@ -436,4 +544,36 @@ func overrideClaudeCLIForTest(t *testing.T, fakeClaudePath string) func() {
 		claudeCommandContext = originalCommandContext
 		_ = os.Setenv("PATH", originalPath)
 	}
+}
+
+func resolveGitBashForFakeClaudeTest(t *testing.T, lookPath func(string) (string, error)) string {
+	t.Helper()
+	if configured := strings.TrimSpace(os.Getenv("CLAUDE_CODE_GIT_BASH_PATH")); configured != "" && fileExists(configured) {
+		return configured
+	}
+	gitPath, err := lookPath("git.exe")
+	if err == nil {
+		gitDir := parentWindowsPath(gitPath)
+		for _, candidate := range []string{
+			joinWindowsPath(parentWindowsPath(gitDir), "bin", "bash.exe"),
+			joinWindowsPath(gitDir, "bash.exe"),
+		} {
+			if candidate != "" && fileExists(candidate) {
+				return candidate
+			}
+		}
+	}
+	t.Fatalf("failed to resolve Git for Windows bash.exe for fake claude command")
+	return ""
+}
+
+func gitBashTestPath(path string) string {
+	slashed := strings.ReplaceAll(path, `\`, `/`)
+	volume := filepath.VolumeName(slashed)
+	if len(volume) == 2 && volume[1] == ':' {
+		drive := strings.ToLower(volume[:1])
+		rest := strings.TrimPrefix(slashed[len(volume):], "/")
+		return "/" + drive + "/" + rest
+	}
+	return slashed
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { DatabaseOutlined, HistoryOutlined, TableOutlined, WarningOutlined } from '@ant-design/icons';
+import { useI18n } from '../../i18n/provider';
 
 export type AIChatPanelMode = 'chat' | 'insights' | 'history';
 
@@ -40,6 +41,8 @@ const AIChatPanelModeContent: React.FC<AIChatPanelModeContentProps> = ({
   activeSessionId,
   onSelectSession,
 }) => {
+  const { t } = useI18n();
+
   if (mode === 'insights') {
     return (
       <div className="gn-v2-ai-insights-list">
@@ -60,7 +63,7 @@ const AIChatPanelModeContent: React.FC<AIChatPanelModeContentProps> = ({
     if (sessions.length === 0) {
       return (
         <div className="gn-v2-ai-history-list">
-          <div className="gn-v2-ai-empty-note">暂无历史会话</div>
+          <div className="gn-v2-ai-empty-note">{t('ai_chat.panel.history.empty')}</div>
         </div>
       );
     }
@@ -76,7 +79,7 @@ const AIChatPanelModeContent: React.FC<AIChatPanelModeContentProps> = ({
           >
             <span>
               <HistoryOutlined />
-              <strong>{session.title || '新对话'}</strong>
+              <strong>{session.title || t('ai_chat.panel.session.default_title')}</strong>
             </span>
             <small>
               {new Date(session.updatedAt).toLocaleString(undefined, {

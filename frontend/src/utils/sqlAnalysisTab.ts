@@ -1,4 +1,5 @@
 import type { TabData } from '../types'
+import { t } from '../i18n'
 
 export type SqlAnalysisView = 'diagnose' | 'slow-query'
 
@@ -26,12 +27,15 @@ export const buildSqlAnalysisWorkbenchTab = (
   const connectionId = String(input.connectionId || '').trim()
   const dbName = String(input.dbName || '').trim()
   const view = input.view === 'slow-query' ? 'slow-query' : 'diagnose'
-  const title = String(input.title || (dbName ? `SQL 分析 · ${dbName}` : 'SQL 分析')).trim()
+  const defaultTitle = dbName
+    ? t('sql_analysis.workbench.tab_title_with_database', { database: dbName })
+    : t('sql_analysis.workbench.tab_title')
+  const title = String(input.title || defaultTitle).trim()
   const query = typeof input.query === 'string' ? input.query : ''
 
   return {
     id: resolveSqlAnalysisWorkbenchTabId(connectionId, dbName || undefined),
-    title: title || (dbName ? `SQL 分析 · ${dbName}` : 'SQL 分析'),
+    title: title || defaultTitle,
     type: 'sql-analysis',
     connectionId,
     ...(dbName ? { dbName } : {}),

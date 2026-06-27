@@ -5,8 +5,9 @@ import { useStore } from '../../store';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIComposerNotice, AIComposerNoticeAction } from '../../utils/aiComposerNotice';
 import type { AIProviderConfig } from '../../types';
-import { getAIChatSendShortcutLabel } from '../../utils/aiChatSendShortcut';
-import type { ShortcutPlatform, ShortcutPlatformBinding } from '../../utils/shortcuts';
+import { t as catalogTranslate } from '../../i18n/catalog';
+import { useOptionalI18n } from '../../i18n/provider';
+import { DEFAULT_SHORTCUT_OPTIONS, getShortcutDisplayLabel, type ShortcutPlatform, type ShortcutPlatformBinding } from '../../utils/shortcuts';
 import AIContextSelectorModal from './AIContextSelectorModal';
 import AISlashCommandMenu from './AISlashCommandMenu';
 import AIChatComposerNotice from './AIChatComposerNotice';
@@ -58,6 +59,9 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
     onModelChange, onFetchModels, textareaRef, darkMode, textColor, mutedColor, overlayTheme,
     contextUsageChars, maxContextChars, isV2Ui = false
 }) => {
+    const i18n = useOptionalI18n();
+    const t = i18n?.t ?? ((key: string, params?: Record<string, string | number | boolean | null | undefined>) =>
+        catalogTranslate('en-US', key, params));
     const aiContexts = useStore(state => state.aiContexts);
     const addAIContext = useStore(state => state.addAIContext);
     const removeAIContext = useStore(state => state.removeAIContext);
@@ -70,7 +74,8 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         loadingModels,
         activeContext,
         activeContextItems,
-    }), [activeProvider, dynamicModels, loadingModels, activeContext, activeContextItems]);
+        translate: t,
+    }), [activeProvider, dynamicModels, loadingModels, activeContext, activeContextItems, t]);
     const composerStatusKey = React.useMemo(() => [
         composerReadiness.status,
         composerReadiness.activeProvider?.id || '',
@@ -122,6 +127,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         connectionKey,
         addAIContext,
         removeAIContext,
+        translate: t,
     });
 
     const {
@@ -131,6 +137,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
         handleRemoveDraftAttachment,
     } = useAIChatDraftAttachments({
         setDraftAttachments,
+        translate: t,
     });
 
     const {
@@ -142,6 +149,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
     } = useAISlashCommandMenu({
         setInput,
         textareaRef,
+        translate: t,
     });
 
     const handleComposerNoticeAction = React.useCallback(() => {
@@ -149,6 +157,22 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
             onComposerAction(composerNotice.action.key);
         }
     }, [composerNotice?.action?.key, onComposerAction]);
+    const sendShortcutLabel = React.useMemo(() => {
+        if (sendShortcutBinding?.enabled === false) {
+            return t('ai_chat.input.shortcut.disabled');
+        }
+        const combo = sendShortcutBinding?.combo || DEFAULT_SHORTCUT_OPTIONS.sendAIChatMessage.windows.combo;
+        return t('ai_chat.input.shortcut.send_with_combo', {
+            shortcut: getShortcutDisplayLabel(combo, shortcutPlatform),
+        });
+    }, [sendShortcutBinding?.combo, sendShortcutBinding?.enabled, shortcutPlatform, t]);
+    const connectionTooltipLabel = t('ai_chat.input.context.connection_tooltip');
+    const memoryLimitLabel = maxContextChars !== undefined
+        ? `${(maxContextChars / 1000).toFixed(0)}k`
+        : '';
+    const memoryTooltipLabel = memoryLimitLabel
+        ? t('ai_chat.input.context.memory_tooltip', { limit: memoryLimitLabel })
+        : '';
     const composerActionHandler = typeof onComposerAction === 'function' ? onComposerAction : undefined;
     const composerNoticeActionHandler = composerNotice?.action?.key && composerActionHandler
         ? handleComposerNoticeAction
@@ -222,7 +246,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                             value={input}
                             onChange={(e) => handleComposerInputChange(e.target.value)}
                             onKeyDown={handleKeyDown as any}
-                            placeholder={`输入消息... (${getAIChatSendShortcutLabel(sendShortcutBinding, shortcutPlatform)}，Shift+Enter 换行，/ 快捷命令)`}
+                            placeholder={t('ai_chat.input.placeholder', { shortcut: sendShortcutLabel })}
                             variant="borderless"
                             autoSize={{ minRows: 1, maxRows: 8 }}
                             style={{ color: textColor, width: '100%', padding: 0, resize: 'none' }}
@@ -231,7 +255,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                             {activeConnName && (
-                                <Tooltip title="当前数据查询上下文">
+                                <Tooltip title={connectionTooltipLabel}>
                                     <div style={{
                                         display: 'flex', alignItems: 'center', gap: 4,
                                         fontSize: 11, padding: '2px 8px', borderRadius: 12,
@@ -256,7 +280,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                             />
 
                             {contextUsageChars !== undefined && maxContextChars !== undefined && (
-                                <Tooltip title={`当前会话记忆已用字符。达到限制（${(maxContextChars/1000).toFixed(0)}k）时将触发自动压缩。`}>
+                                <Tooltip title={memoryTooltipLabel}>
                                     <div style={{
                                         display: 'flex', alignItems: 'center', gap: 4,
                                         fontSize: 10, padding: '2px 6px', borderRadius: 12, border: '1px solid transparent',
@@ -375,7 +399,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                             value={input}
                             onChange={(e) => handleComposerInputChange(e.target.value)}
                             onKeyDown={handleKeyDown as any}
-                            placeholder={`输入消息... ${getAIChatSendShortcutLabel(sendShortcutBinding, shortcutPlatform)} · / 命令`}
+                            placeholder={t('ai_chat.input.placeholder_compact', { shortcut: sendShortcutLabel })}
                             variant="borderless"
                             autoSize={{ minRows: 1, maxRows: 8 }}
                             style={{ color: textColor, width: '100%', padding: 0, resize: 'none' }}
@@ -400,7 +424,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 </div>
                 <div className="gn-v2-ai-model-bar">
                     {activeConnName && (
-                        <Tooltip title="当前数据查询上下文">
+                        <Tooltip title={connectionTooltipLabel}>
                             <div className="gn-v2-ai-context-chip">
                                 <span className="gn-v2-ai-context-live-dot" />
                                 <DatabaseOutlined />
@@ -421,7 +445,7 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                     <div className="gn-v2-ai-model-spacer" />
 
                     {contextUsageChars !== undefined && maxContextChars !== undefined && (
-                        <Tooltip title={`当前会话记忆已用字符。达到限制（${(maxContextChars/1000).toFixed(0)}k）时将触发自动压缩。`}>
+                        <Tooltip title={memoryTooltipLabel}>
                             <div className={`gn-v2-ai-token-meter${contextUsageChars > maxContextChars * 0.8 ? ' is-warn' : ''}`}>
                                 <span className="gn-v2-ai-token-bar" aria-hidden="true">
                                     <span style={{ width: `${Math.min(100, (contextUsageChars / Math.max(1, maxContextChars)) * 100)}%` }} />

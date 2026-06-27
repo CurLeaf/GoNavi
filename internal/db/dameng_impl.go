@@ -282,7 +282,7 @@ func (d *DamengDB) GetCreateStatement(dbName, tableName string) (string, error) 
 			return fmt.Sprintf("%v", val), nil
 		}
 	}
-	return "", fmt.Errorf("未找到建表语句")
+	return "", localizedDatabaseRuntimeError("db.backend.error.create_table_statement_not_found", nil)
 }
 
 func (d *DamengDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {

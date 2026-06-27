@@ -1,226 +1,278 @@
 import type { AIBuiltinToolInfo } from "./aiBuiltinToolInfo.types";
 
-export const BUILTIN_AI_INSPECTION_CONTEXT_TOOL_INFO: AIBuiltinToolInfo[] = [
+type InspectionToolInfoTranslator = (key: string) => string;
+type ToolParameterSchema = { description?: string } & Record<string, unknown>;
+
+const CONTEXT_TOOL_INFO_KEY_PREFIX = "ai_chat.inspection.tool_info";
+
+const translateToolInfo = (
+  t: InspectionToolInfoTranslator | undefined,
+  key: string,
+  fallback: string,
+): string => {
+  if (!t) return fallback;
+  const translated = t(key);
+  return translated && translated !== key ? translated : fallback;
+};
+
+const CONTEXT_TOOL_INFO_COPY: Record<
+  string,
   {
-    name: "inspect_ai_guidance",
+    icon: string;
+    desc: string;
+    detail: string;
+    paramsSummary: string;
+    toolDescription: string;
+    params?: Record<string, string>;
+    required?: string[];
+  }
+> = {
+  inspect_ai_guidance: {
     icon: "🧠",
-    desc: "查看当前 AI 提示词与 Skills 配置",
+    desc: "Inspect current AI prompts and Skills configuration",
     detail:
-      "返回当前用户自定义的全局/数据库/JVM 提示词，以及当前启用的 Skills、作用域、依赖工具和 skill prompt 内容。适合用户问“你现在到底带了哪些提示词”“为什么你会这样回答”“当前有哪些 Skills 在生效”时先读真实配置。",
-    params: "无参数",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_ai_guidance",
-        description:
-          "读取当前 AI 的提示与技能配置快照，包括用户自定义提示词、当前启用的 Skills、作用域、依赖工具和各自的 system prompt。适用于用户提到当前提示词、当前 Skill、为什么 AI 当前会这样回答、当前有哪些规则在生效时，先读取真实配置再解释。",
-        parameters: { type: "object", properties: {} },
-      },
-    },
+      "Returns current user-defined global, database, and JVM prompts, plus enabled Skills, scopes, dependency tools, and skill prompt content. Use it when users ask which prompts are currently attached, why AI answers this way, or which Skills are active.",
+    paramsSummary: "No parameters",
+    toolDescription:
+      "Read the current AI prompt and skill configuration snapshot, including user-defined prompts, enabled Skills, scopes, dependency tools, and each system prompt.",
   },
-  {
-    name: "inspect_ai_context",
+  inspect_ai_context: {
     icon: "🧷",
-    desc: "查看当前 AI 已关联的表结构上下文",
+    desc: "Inspect currently attached AI table-schema context",
     detail:
-      "返回当前对话已经挂载到 AI 上下文里的表清单、所属连接与数据库，以及每张表的 DDL 预览。适合用户说“看看我现在带了哪些表结构”“当前 AI 上下文是什么”时，先读取真实挂载状态再继续分析。",
-    params: "includeDDL?(默认 false), ddlLimit?(默认 4000)",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_ai_context",
-        description:
-          "读取当前对话已经关联到 AI 上下文里的表结构快照，包括连接、数据库、表名，以及可选的 DDL 内容。适用于用户提到当前 AI 上下文、当前关联表、当前挂载的表结构时，先读取真实状态，避免模型凭记忆复述。",
-        parameters: {
-          type: "object",
-          properties: {
-            includeDDL: { type: "boolean", description: "可选，是否附带每张表的 DDL 内容，默认 false" },
-            ddlLimit: { type: "number", description: "可选，DDL 截断长度，默认 4000，最大 12000" },
-          },
-        },
-      },
+      "Returns the tables currently attached to the AI conversation context, their connection and database, and optional DDL previews. Use it when users ask which table structures are attached or what the current AI context contains.",
+    paramsSummary: "includeDDL?(default false), ddlLimit?(default 4000)",
+    toolDescription:
+      "Read the table-schema snapshot currently attached to the AI conversation context, including connection, database, table name, and optional DDL content.",
+    params: {
+      includeDDL: "Optional. Whether to include each table's DDL content. Default false.",
+      ddlLimit: "Optional. DDL truncation length. Default 4000, maximum 12000.",
     },
   },
-  {
-    name: "inspect_current_connection",
+  inspect_current_connection: {
     icon: "🛰️",
-    desc: "查看当前活动连接/数据源摘要",
+    desc: "Inspect the current active connection or data source summary",
     detail:
-      "返回当前活动连接的类型、地址、端口、当前数据库、是否启用 SSH/代理/HTTP 隧道，以及当前活动页签绑定的表信息。适合用户问“我现在连的是哪个库”“这个连接走没走 SSH”“当前数据源是什么类型”时先读取真实连接状态。",
-    params: "无参数",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_current_connection",
-        description:
-          "读取当前活动连接或当前页签对应数据源的真实摘要，包括连接类型、地址、端口、当前数据库、SSH/代理/HTTP 隧道状态，以及当前页签绑定的表上下文。适用于用户提到当前连接、当前数据源、当前库地址、是否走 SSH、当前连的是哪种数据库时，先读取真实界面上下文，避免模型猜测。",
-        parameters: { type: "object", properties: {} },
-      },
-    },
+      "Returns current active connection type, address, port, current database, SSH/proxy/HTTP tunnel state, and table information bound to the active tab. Use it when users ask which database is connected, whether SSH is used, or what type the current data source is.",
+    paramsSummary: "No parameters",
+    toolDescription:
+      "Read the real summary of the current active connection or active-tab data source, including connection type, address, port, current database, SSH/proxy/HTTP tunnel state, and table context bound to the active tab.",
   },
-  {
-    name: "inspect_connection_capabilities",
+  inspect_connection_capabilities: {
     icon: "🧱",
-    desc: "查看当前连接支持哪些前端能力",
+    desc: "Inspect frontend capabilities supported by the current connection",
     detail:
-      "返回当前或指定连接的数据源能力矩阵，包括是否支持查询编辑器、SQL 导出、复制 INSERT、新建/重命名/删除数据库、结果是否强制只读，以及是否倾向手动总数或近似计数。适合用户问“为什么这里不能建库/删库”“这个数据源为什么结果不能编辑”“这个类型支持哪些操作”时，先读取真实能力边界。",
-    params: "connectionId?(默认取当前活动连接)",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_connection_capabilities",
-        description:
-          "读取当前活动连接或指定 saved connection 的前端能力矩阵，包括是否支持查询编辑器、SQL 导出、复制 INSERT、新建/重命名/删除数据库、结果是否强制只读，以及是否适合手动总数或近似计数。适用于用户提到当前连接为什么不能建库、为什么结果集不能编辑、某种数据库类型到底支持哪些前端动作时，先读取真实能力配置，避免模型凭经验猜测。",
-        parameters: {
-          type: "object",
-          properties: {
-            connectionId: { type: "string", description: "可选，指定要查看的连接 ID；不传时默认读取当前活动连接" },
-          },
-        },
-      },
+      "Returns the data-source capability matrix for the current or specified connection, including query editor support, SQL export, copy INSERT, create/rename/delete database support, forced read-only result state, and whether manual or approximate counts are preferred. Use it when users ask why database creation, deletion, result editing, or other actions are unavailable.",
+    paramsSummary: "connectionId?(default current active connection)",
+    toolDescription:
+      "Read the frontend capability matrix for the current active connection or specified saved connection, including query editor support, SQL export, copy INSERT, create/rename/delete database support, forced read-only result state, and count strategy preferences.",
+    params: {
+      connectionId: "Optional. Connection ID to inspect. If omitted, the current active connection is used.",
     },
   },
-  {
-    name: "inspect_saved_connections",
+  inspect_saved_connections: {
     icon: "🧭",
-    desc: "查看本地已保存连接清单",
+    desc: "Inspect locally saved connections",
     detail:
-      "可按关键词或数据库类型过滤，返回本地保存的数据源列表、连接类型分布，以及每条连接的地址、当前库、SSH/代理/HTTP 隧道状态。适合用户问“我本地存了哪些连接”“帮我找 mysql / postgres 连接”“哪条连接配置了 SSH”时先读真实本地连接资产。",
-    params: "keyword?, type?, limit?",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_saved_connections",
-        description:
-          "读取本地已保存连接清单，可按关键词和数据库类型过滤，并返回每条连接的类型、地址、当前库、SSH/代理/HTTP 隧道等摘要。适用于用户提到本地保存了哪些连接、要找哪条 mysql/postgres 连接、哪条连接启用了 SSH 或代理时，先读取真实本地连接资产再回答。",
-        parameters: {
-          type: "object",
-          properties: {
-            keyword: { type: "string", description: "可选，按连接名、ID、类型、主机、数据库名或 SSH/代理地址做关键词筛选" },
-            type: { type: "string", description: "可选，只看某种数据库类型，例如 mysql、postgres、redis、mongodb" },
-            limit: { type: "number", description: "可选，最多返回多少条连接，默认 20，最大 100" },
-          },
-        },
-      },
+      "Filters local saved data sources by keyword or database type and returns the data-source list, type distribution, address, current database, and SSH/proxy/HTTP tunnel state. Use it when users ask which connections are saved locally, want to find mysql or postgres connections, or need to know which connection has SSH configured.",
+    paramsSummary: "keyword?, type?, limit?",
+    toolDescription:
+      "Read locally saved connections, optionally filtered by keyword and database type, and return each connection's type, address, current database, SSH/proxy/HTTP tunnel summary, and related metadata.",
+    params: {
+      keyword: "Optional. Filter by connection name, ID, type, host, database name, SSH address, or proxy address.",
+      type: "Optional. Only inspect one database type, such as mysql, postgres, redis, or mongodb.",
+      limit: "Optional. Maximum number of connections to return. Default 20, maximum 100.",
     },
   },
-  {
-    name: "inspect_redis_topology",
+  inspect_redis_topology: {
     icon: "🧰",
-    desc: "诊断 Redis 单机/哨兵/集群配置",
+    desc: "Diagnose Redis standalone, Sentinel, and Cluster configuration",
     detail:
-      "读取本地 Redis 连接拓扑摘要，返回单机、Sentinel、Cluster 的节点、master、认证状态、DB 范围、脱敏 URI 示例、状态分级和下一步动作。适合用户问 Redis 哨兵/集群怎么配、为什么切库后失败、Cluster 多 DB 怎么处理时先读真实配置。",
-    params: "connectionId?, keyword?, limit?, includeRecommendations?(默认 true)",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_redis_topology",
-        description:
-          "读取本地 Redis 连接的单机、Sentinel、Cluster 拓扑配置摘要，返回节点列表、Sentinel master、认证状态、DB 选择、TLS/SSH/代理状态、后端适配器、脱敏 URI 示例、状态分级、阻断原因、潜在配置风险和建议。适用于用户提到 Redis 哨兵、Redis Cluster、切换数据库失败、多节点地址、Sentinel master、Cluster 逻辑库或跨网络访问 Redis 时，先读取真实连接配置再回答；结果不会回显 Redis 密码或 Sentinel 密码。",
-        parameters: {
-          type: "object",
-          properties: {
-            connectionId: { type: "string", description: "可选，只诊断某个 Redis 连接 ID" },
-            keyword: { type: "string", description: "可选，按连接名、地址、拓扑、Sentinel master 或节点地址筛选" },
-            limit: { type: "number", description: "可选，最多返回多少条 Redis 连接，默认 20，最大 100" },
-            includeRecommendations: { type: "boolean", description: "可选，是否返回修复建议，默认 true" },
-          },
-        },
-      },
+      "Reads local Redis connection topology summaries and returns standalone, Sentinel, and Cluster nodes, master, authentication state, DB range, redacted URI examples, status level, and next actions. Use it when users ask how to configure Redis Sentinel or Cluster, why DB switching fails, or how Cluster multi-DB behavior works.",
+    paramsSummary: "connectionId?, keyword?, limit?, includeRecommendations?(default true)",
+    toolDescription:
+      "Read local Redis standalone, Sentinel, and Cluster topology summaries, returning nodes, Sentinel master, authentication state, DB selection, TLS/SSH/proxy state, backend adapter, redacted URI examples, status level, blockers, potential configuration risks, and recommendations. Results do not echo Redis or Sentinel passwords.",
+    params: {
+      connectionId: "Optional. Diagnose only one Redis connection ID.",
+      keyword: "Optional. Filter by connection name, address, topology, Sentinel master, or node address.",
+      limit: "Optional. Maximum number of Redis connections to return. Default 20, maximum 100.",
+      includeRecommendations: "Optional. Whether to return repair recommendations. Default true.",
     },
   },
-  {
-    name: "inspect_external_sql_directories",
+  inspect_external_sql_directories: {
     icon: "🗂️",
-    desc: "查看本地外部 SQL 目录资产",
+    desc: "Inspect local external SQL directory assets",
     detail:
-      "可按关键词、连接或数据库过滤，返回本地配置的外部 SQL 目录、目录路径、绑定连接/数据库，以及当前是否已经打开这些目录里的 SQL 文件。适合用户提到“外部 SQL 目录”“某个脚本在哪个目录”“现在打开的 SQL 文件来自哪个外部目录”时，先读真实资产。",
-    params: "keyword?, connectionId?, dbName?, limit?",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_external_sql_directories",
-        description:
-          "读取本地配置的外部 SQL 目录清单，可按关键词、连接和数据库过滤，并返回目录路径、绑定连接/数据库，以及当前打开的外部 SQL 文件页签摘要。适用于用户提到外部 SQL 目录、某个 SQL 文件放在哪、当前打开的脚本来自哪个目录时，先读取真实本地资产再回答。",
-        parameters: {
-          type: "object",
-          properties: {
-            keyword: { type: "string", description: "可选，按目录名、路径、连接名或数据库名做关键词筛选" },
-            connectionId: { type: "string", description: "可选，只看绑定到某个连接的外部 SQL 目录" },
-            dbName: { type: "string", description: "可选，只看绑定到某个数据库的外部 SQL 目录" },
-            limit: { type: "number", description: "可选，最多返回多少条目录，默认 20，最大 100" },
-          },
-        },
-      },
+      "Filters local external SQL directories by keyword, connection, or database, and returns directory path, bound connection/database, and whether SQL files from those directories are currently open. Use it when users mention external SQL directories, ask which directory contains a script, or need to identify the external directory for an open SQL file.",
+    paramsSummary: "keyword?, connectionId?, dbName?, limit?",
+    toolDescription:
+      "Read locally configured external SQL directories, optionally filtered by keyword, connection, and database, and return directory path, bound connection/database, and summaries of currently open external SQL file tabs.",
+    params: {
+      keyword: "Optional. Filter by directory name, path, connection name, or database name.",
+      connectionId: "Optional. Only inspect external SQL directories bound to one connection.",
+      dbName: "Optional. Only inspect external SQL directories bound to one database.",
+      limit: "Optional. Maximum number of directories to return. Default 20, maximum 100.",
     },
   },
-  {
-    name: "inspect_external_sql_file",
+  inspect_external_sql_file: {
     icon: "📄",
-    desc: "读取外部 SQL 文件内容",
+    desc: "Read external SQL file content",
     detail:
-      "传入具体 filePath，读取已配置外部 SQL 目录中的 SQL 文件内容，并返回所属目录、绑定连接/数据库、是否已有打开页签，以及截断后的正文预览。适合用户提到“看一下这个目录里的某个脚本”“帮我解释 report.sql 在写什么”时，先读取真实文件内容再分析。",
-    params: "filePath, previewCharLimit?",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_external_sql_file",
-        description:
-          "读取指定外部 SQL 文件的内容预览，仅用于已配置外部 SQL 目录中的 SQL 文件。返回文件路径、所属目录、绑定连接/数据库、是否已在工作区打开，以及截断后的正文内容。适用于用户提到某个目录中的具体 SQL 脚本、想让 AI 直接解释脚本逻辑、或想确认某个外部 SQL 文件内容时，先读真实文件再回答。",
-        parameters: {
-          type: "object",
-          properties: {
-            filePath: { type: "string", description: "必填，要读取的 SQL 文件绝对路径，通常先通过 inspect_external_sql_directories 找到" },
-            previewCharLimit: { type: "number", description: "可选，正文预览最多返回多少字符，默认 12000，最大 40000" },
-          },
-          required: ["filePath"],
-        },
-      },
+      "Reads a specific SQL file inside a configured external SQL directory and returns its directory, bound connection/database, whether it already has an open tab, and a truncated content preview. Use it when users ask to inspect a script in a directory or explain what report.sql does.",
+    paramsSummary: "filePath, previewCharLimit?",
+    toolDescription:
+      "Read the content preview of a specified external SQL file, only for SQL files inside configured external SQL directories. Return file path, owning directory, bound connection/database, whether it is already open in the workspace, and truncated body content.",
+    params: {
+      filePath: "Required. Absolute path of the SQL file to read, usually found with inspect_external_sql_directories first.",
+      previewCharLimit: "Optional. Maximum characters returned in the content preview. Default 12000, maximum 40000.",
     },
+    required: ["filePath"],
   },
-  {
-    name: "inspect_active_tab",
+  inspect_active_tab: {
     icon: "📍",
-    desc: "查看当前活动页签上下文",
+    desc: "Inspect the current active tab context",
     detail:
-      "返回当前活动页签的类型、连接、数据库、表名，以及当前 SQL / 命令页签里的草稿内容（超长会截断）。适合用户说“看我当前这条 SQL”“优化这个编辑器里的语句”时，先让 AI 直接读取当前工作区上下文。",
-    params: "includeContent?(默认 true)",
-    tool: {
-      type: "function",
-      function: {
-        name: "inspect_active_tab",
-        description:
-          "获取当前活动页签的上下文快照，包括页签类型、连接、数据库、表名，以及当前 SQL / 命令页签里的草稿内容。适用于用户提到当前页签、当前 SQL、当前编辑器、这条语句时，先读取真实界面上下文，避免让模型猜测。",
-        parameters: {
-          type: "object",
-          properties: {
-            includeContent: { type: "boolean", description: "可选，是否附带页签中的 SQL / 命令草稿内容，默认 true" },
-          },
-        },
-      },
+      "Returns the current active tab type, connection, database, table name, and draft content in the current SQL or command tab, truncated when long. Use it when users mention the current SQL, ask to optimize the editor statement, or refer to the current tab.",
+    paramsSummary: "includeContent?(default true)",
+    toolDescription:
+      "Get the current active tab context snapshot, including tab type, connection, database, table name, and draft content from the current SQL or command tab.",
+    params: {
+      includeContent: "Optional. Whether to include SQL or command draft content from the tab. Default true.",
     },
   },
-  {
-    name: "inspect_workspace_tabs",
+  inspect_workspace_tabs: {
     icon: "🗃️",
-    desc: "查看当前工作区打开的页签总览",
+    desc: "Inspect currently open workspace tabs",
     detail:
-      "返回当前工作区里打开的页签列表、哪个是活动页签，以及每个页签对应的连接、数据库、表名等上下文。适合用户说“我现在开了哪些 SQL”“看看我工作区里有哪些页签”“帮我对比这几个查询页签”时，先读取真实工作区布局再继续分析。",
-    params: "limit?(默认 12), includeContent?(默认 false)",
+      "Returns the list of tabs open in the current workspace, which one is active, and each tab's connection, database, table name, and related context. Use it when users ask which SQL tabs are open, what exists in the workspace, or want to compare several query tabs.",
+    paramsSummary: "limit?(default 12), includeContent?(default false)",
+    toolDescription:
+      "Get an overview of currently open workspace tabs, including active tab, tab type, connection, database, table name, and optional SQL or command draft content.",
+    params: {
+      limit: "Optional. Maximum number of tabs to return. Default 12, maximum 30.",
+      includeContent: "Optional. Whether to include SQL or command draft content from tabs. Default false.",
+    },
+  },
+};
+
+const createContextToolInfo = (
+  name: keyof typeof CONTEXT_TOOL_INFO_COPY,
+  properties: Record<string, any> = {},
+): AIBuiltinToolInfo => {
+  const copy = CONTEXT_TOOL_INFO_COPY[name];
+  const translatedProperties = Object.fromEntries(
+    Object.entries(properties).map(([paramName, schema]) => [
+      paramName,
+      {
+        ...schema,
+        description: copy.params?.[paramName] || schema.description || "",
+      },
+    ]),
+  );
+
+  return {
+    name,
+    icon: copy.icon,
+    desc: copy.desc,
+    detail: copy.detail,
+    params: copy.paramsSummary,
     tool: {
       type: "function",
       function: {
-        name: "inspect_workspace_tabs",
-        description:
-          "获取当前工作区已打开页签的总览，包括活动页签、页签类型、连接、数据库、表名，以及可选的 SQL / 命令草稿内容。适用于用户提到当前工作区、打开了哪些页签、哪几个查询页签、想对比多个编辑器内容时，先读取真实界面状态，避免模型猜测。",
+        name,
+        description: copy.toolDescription,
         parameters: {
           type: "object",
-          properties: {
-            limit: { type: "number", description: "可选，最多返回多少个页签，默认 12，最大 30" },
-            includeContent: { type: "boolean", description: "可选，是否附带页签中的 SQL / 命令草稿内容，默认 false" },
-          },
+          properties: translatedProperties,
+          ...(copy.required ? { required: copy.required } : {}),
         },
       },
     },
-  },
-];
+  };
+};
+
+export const localizeBuiltinInspectionContextToolInfo = (
+  t?: InspectionToolInfoTranslator,
+): AIBuiltinToolInfo[] =>
+  ([
+    createContextToolInfo("inspect_ai_guidance"),
+    createContextToolInfo("inspect_ai_context", {
+      includeDDL: { type: "boolean" },
+      ddlLimit: { type: "number" },
+    }),
+    createContextToolInfo("inspect_current_connection"),
+    createContextToolInfo("inspect_connection_capabilities", {
+      connectionId: { type: "string" },
+    }),
+    createContextToolInfo("inspect_saved_connections", {
+      keyword: { type: "string" },
+      type: { type: "string" },
+      limit: { type: "number" },
+    }),
+    createContextToolInfo("inspect_redis_topology", {
+      connectionId: { type: "string" },
+      keyword: { type: "string" },
+      limit: { type: "number" },
+      includeRecommendations: { type: "boolean" },
+    }),
+    createContextToolInfo("inspect_external_sql_directories", {
+      keyword: { type: "string" },
+      connectionId: { type: "string" },
+      dbName: { type: "string" },
+      limit: { type: "number" },
+    }),
+    createContextToolInfo("inspect_external_sql_file", {
+      filePath: { type: "string" },
+      previewCharLimit: { type: "number" },
+    }),
+    createContextToolInfo("inspect_active_tab", {
+      includeContent: { type: "boolean" },
+    }),
+    createContextToolInfo("inspect_workspace_tabs", {
+      limit: { type: "number" },
+      includeContent: { type: "boolean" },
+    }),
+  ]).map((tool) => {
+    const keyPrefix = `${CONTEXT_TOOL_INFO_KEY_PREFIX}.${tool.name}`;
+    const properties = tool.tool.function.parameters.properties as
+      | Record<string, ToolParameterSchema>
+      | undefined;
+    const translatedProperties = Object.fromEntries(
+      Object.entries(properties || {}).map(([paramName, schema]) => [
+        paramName,
+        {
+          ...schema,
+          description: translateToolInfo(
+            t,
+            `${keyPrefix}.param.${paramName}`,
+            schema.description || "",
+          ),
+        },
+      ]),
+    );
+
+    return {
+      ...tool,
+      desc: translateToolInfo(t, `${keyPrefix}.desc`, tool.desc),
+      detail: translateToolInfo(t, `${keyPrefix}.detail`, tool.detail),
+      params: translateToolInfo(t, `${keyPrefix}.params`, tool.params),
+      tool: {
+        ...tool.tool,
+        function: {
+          ...tool.tool.function,
+          description: translateToolInfo(
+            t,
+            `${keyPrefix}.tool_description`,
+            tool.tool.function.description,
+          ),
+          parameters: {
+            ...tool.tool.function.parameters,
+            properties: translatedProperties,
+          },
+        },
+      },
+    };
+  });
+
+export const BUILTIN_AI_INSPECTION_CONTEXT_TOOL_INFO: AIBuiltinToolInfo[] =
+  localizeBuiltinInspectionContextToolInfo();

@@ -109,7 +109,9 @@ describe('aiLocalToolExecutor inspect_ai_setup_health', () => {
     expect(result.content).toContain('"chatStatus":"ready"');
     expect(result.content).toContain('"enabledMCPServerCount":1');
     expect(result.content).toContain('"currentExternalClientCount":0');
-    expect(result.content).toContain('如需让外部 Agent 使用 GoNavi MCP');
-    expect(result.content).toContain('当前聊天已就绪，但还没有挂载任何表结构上下文');
+    expect(result.content).toContain('To let external Agents use GoNavi MCP');
+    expect(result.content).toContain('Chat is ready, but no table schema context is attached yet');
+    expect(result.content).toContain('结构审查');
+    expect(result.content).toContain('回答前先核对上下文。');
   });
 });

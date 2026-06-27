@@ -1,8 +1,92 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { buildAISafetySnapshot } from './aiSafetyInsights';
 
+const source = readFileSync(new URL('./aiSafetyInsights.ts', import.meta.url), 'utf8');
+const executorSource = readFileSync(new URL('./aiSnapshotInspectionAIConfigToolExecutor.ts', import.meta.url), 'utf8');
+const locales = ['zh-CN', 'zh-TW', 'en-US', 'ja-JP', 'de-DE', 'ru-RU'] as const;
+const requiredSafetyKeys = [
+  'ai_chat.inspection.safety.rule.readonly',
+  'ai_chat.inspection.safety.rule.readwrite',
+  'ai_chat.inspection.safety.rule.full',
+  'ai_chat.inspection.safety.restriction.readonly_blocks_mutating',
+  'ai_chat.inspection.safety.restriction.non_query_confirmation',
+  'ai_chat.inspection.safety.restriction.mcp_allow_mutating',
+  'ai_chat.inspection.safety.restriction.active_result_readonly',
+  'ai_chat.inspection.safety.restriction.jvm_readonly',
+  'ai_chat.inspection.safety.restriction.jvm_mutating_disabled',
+  'ai_chat.inspection.safety.recommendation.enable_readwrite_for_dml',
+  'ai_chat.inspection.safety.recommendation.enable_full_for_ddl',
+  'ai_chat.inspection.safety.recommendation.full_required_for_schema',
+  'ai_chat.inspection.safety.recommendation.open_editable_grid',
+  'ai_chat.inspection.safety.recommendation.confirm_jvm_policy',
+  'ai_chat.inspection.safety.recommendation.enable_jvm_mutating',
+  'ai_chat.inspection.safety.message.active',
+  'ai_chat.inspection.safety.message.no_connection',
+] as const;
+
 describe('buildAISafetySnapshot', () => {
+  it('localizes safety labels, restrictions, recommendations and summary while preserving raw connection names', () => {
+    const snapshot = buildAISafetySnapshot({
+      safetyLevel: 'readonly',
+      connections: [
+        {
+          id: 'conn-1',
+          name: '生产主库',
+          config: {
+            type: 'mysql',
+            host: '127.0.0.1',
+            port: 3306,
+            user: 'root',
+          },
+        },
+      ],
+      activeContext: { connectionId: 'conn-1', dbName: 'orders' },
+      translate: (key, params) => {
+        const suffix = params
+          ? ` ${Object.entries(params).map(([paramKey, value]) => `${paramKey}=${value}`).join(',')}`
+          : '';
+        return `T:${key}${suffix}`;
+      },
+    });
+
+    expect(snapshot.safetyLabel).toBe('T:ai_chat.inspection.runtime.safety.readonly');
+    expect(snapshot.sqlRuleText).toBe('T:ai_chat.inspection.safety.rule.readonly');
+    expect(snapshot.effectiveRestrictions).toContain('T:ai_chat.inspection.safety.rule.readonly');
+    expect(snapshot.effectiveRestrictions).toContain('T:ai_chat.inspection.safety.restriction.readonly_blocks_mutating');
+    expect(snapshot.recommendations).toContain('T:ai_chat.inspection.safety.recommendation.enable_readwrite_for_dml');
+    expect(snapshot.message).toBe('T:ai_chat.inspection.safety.message.active safety=T:ai_chat.inspection.runtime.safety.readonly,connection=生产主库');
+    expect(snapshot.activeConnection?.connectionName).toBe('生产主库');
+  });
+
+  it('keeps safety production source free of legacy Chinese wrappers and threads translate from the executor', () => {
+    expect(executorSource).toContain('buildAISafetySnapshot({');
+    expect(executorSource).toMatch(/buildAISafetySnapshot\(\{[\s\S]*translate,/);
+
+    [
+      '只读模式仅允许查询语句。',
+      '当前安全级别下，任何 DML/DDL 都会被直接阻止。',
+      '任何允许通过的非查询语句都仍然需要人工确认。',
+      '当前 JVM 诊断明确禁止 mutating 命令',
+      '如需执行 INSERT/UPDATE/DELETE',
+      '当前 AI 安全级别为',
+      '当前没有活动连接',
+    ].forEach((legacyCopy) => {
+      expect(source).not.toContain(legacyCopy);
+    });
+  });
+
+  it('keeps safety inspection catalog keys available in every locale', () => {
+    locales.forEach((locale) => {
+      const catalog = JSON.parse(readFileSync(new URL(`../../../../shared/i18n/${locale}.json`, import.meta.url), 'utf8')) as Record<string, string>;
+      requiredSafetyKeys.forEach((key) => {
+        expect(catalog[key], `${locale}:${key}`).toBeTruthy();
+      });
+    });
+  });
+
   it('describes readonly ai safety when no active connection is selected', () => {
     const snapshot = buildAISafetySnapshot({
       safetyLevel: 'readonly',
@@ -14,8 +98,8 @@ describe('buildAISafetySnapshot', () => {
     expect(snapshot.permissionMatrix.allowDML).toBe(false);
     expect(snapshot.permissionMatrix.allowDDL).toBe(false);
     expect(snapshot.hasActiveConnection).toBe(false);
-    expect(snapshot.effectiveRestrictions).toContain('只读模式仅允许查询语句。');
-    expect(snapshot.recommendations).toContain('如需执行 INSERT/UPDATE/DELETE，请先把 AI 安全级别切到读写模式。');
+    expect(snapshot.effectiveRestrictions).toContain('Read-only mode only allows query statements.');
+    expect(snapshot.recommendations).toContain('Switch AI safety level to read/write mode before executing INSERT/UPDATE/DELETE.');
   });
 
   it('includes jvm connection restrictions and MCP write confirmation hints', () => {
@@ -60,7 +144,7 @@ describe('buildAISafetySnapshot', () => {
     expect(snapshot.activeConnection?.readOnly).toBe(true);
     expect(snapshot.jvmGuards?.allowMutatingCommands).toBe(false);
     expect(snapshot.effectiveRestrictions.join('\n')).toContain('allowMutating=true');
-    expect(snapshot.effectiveRestrictions.join('\n')).toContain('当前 JVM 诊断明确禁止 mutating 命令');
+    expect(snapshot.effectiveRestrictions.join('\n')).toContain('Current JVM diagnostics explicitly disallow mutating commands');
   });
 
   it('describes full safety mode as allowing other statements with confirmation', () => {
@@ -72,7 +156,7 @@ describe('buildAISafetySnapshot', () => {
     expect(snapshot.safetyLevel).toBe('full');
     expect(snapshot.permissionMatrix.allowDML).toBe(true);
     expect(snapshot.permissionMatrix.allowDDL).toBe(true);
-    expect(snapshot.sqlRuleText).toContain('允许所有 SQL 操作');
-    expect(snapshot.effectiveRestrictions.join('\n')).toContain('高风险或未识别语句仍会要求确认');
+    expect(snapshot.sqlRuleText).toContain('allows all SQL operations');
+    expect(snapshot.effectiveRestrictions.join('\n')).toContain('high-risk or unrecognized statements still require confirmation');
   });
 });

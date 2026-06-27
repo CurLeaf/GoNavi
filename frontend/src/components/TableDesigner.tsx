@@ -1111,7 +1111,7 @@ ${selectedTrigger.statement}`;
     setActiveContext({ connectionId: tab.connectionId, dbName });
     addTab({
       id: `query-edit-trigger-${tab.connectionId}-${dbName}-${tab.tableName || ''}-${selectedTrigger.name}-${Date.now()}`,
-      title: `修改触发器: ${selectedTrigger.name}`,
+      title: t('table_designer.tab.edit_trigger_title', { name: selectedTrigger.name }, i18nLanguage),
       type: 'query',
       connectionId: tab.connectionId,
       dbName,
@@ -1657,6 +1657,7 @@ ${selectedTrigger.statement}`;
           charset: targetCharset,
           collation: targetCollation,
           starRocksOptions: buildStarRocksCreateOptions(),
+          translate: (key, params) => t(key, params, i18nLanguage),
       });
   };
 
@@ -1901,6 +1902,7 @@ END;`;
           columnNames: form.columnNames,
           kind: form.kind,
           indexType: form.indexType,
+          translate: (key, params) => t(key, params, i18nLanguage),
       });
   };
 
@@ -2288,7 +2290,7 @@ END;`;
           if (tableInfo.dbType === 'duckdb') {
               const pkChange = summarizeDuckDbPrimaryKeyChange(originalColumns, columns);
               if (pkChange.isUnsupportedChange) {
-                  message.warning('DuckDB 当前仅支持为无主键表新增主键；已有主键的修改或删除需要通过重建表完成。');
+                  message.warning(t('table_designer.message.duckdb_primary_key_change_unsupported', undefined, i18nLanguage));
                   return;
               }
           }
@@ -2297,6 +2299,7 @@ END;`;
               tableName: tableInfo.qualifiedName,
               originalColumns,
               columns,
+              translate: (key, params) => t(key, params, i18nLanguage),
           });
 
           if (!sql.trim()) {

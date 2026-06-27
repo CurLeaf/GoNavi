@@ -5,6 +5,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -18,9 +19,41 @@ type DuckDB struct {
 	pingTimeout time.Duration
 }
 
+func duckDBRuntimeError(key string, params map[string]any) error {
+	return errors.New(localizedDriverRuntimeText(key, params))
+}
+
+func duckDBWrapRuntimeError(prefixKey string, err error) error {
+	return fmt.Errorf("%s%w", localizedDriverRuntimeText(prefixKey, nil), err)
+}
+
+func duckDBConnectionNotOpenError() error {
+	return duckDBRuntimeError("db.backend.error.connection_not_open", nil)
+}
+
+func duckDBTableNameRequiredError() error {
+	return duckDBRuntimeError("db.backend.error.table_name_required", nil)
+}
+
+func duckDBCreateTableStatementNotFoundError() error {
+	return duckDBRuntimeError("db.backend.error.create_table_statement_not_found", nil)
+}
+
+func duckDBDeleteFailedError(err error) error {
+	return duckDBRuntimeError("db.backend.error.row_delete_failed", map[string]any{"detail": err.Error()})
+}
+
+func duckDBUpdateKeyConditionsRequiredError() error {
+	return duckDBRuntimeError("db.backend.error.row_update_key_conditions_required", nil)
+}
+
+func duckDBUpdateFailedError(err error) error {
+	return duckDBRuntimeError("db.backend.error.row_update_failed", map[string]any{"detail": err.Error()})
+}
+
 func (d *DuckDB) Connect(config connection.ConnectionConfig) error {
 	if supported, reason := duckDBBuildSupportStatus(); !supported {
-		return fmt.Errorf("DuckDB 驱动不可用：%s", reason)
+		return duckDBRuntimeError("db.backend.error.duckdb_driver_unavailable", map[string]any{"detail": reason})
 	}
 
 	dsn := strings.TrimSpace(config.Host)
@@ -33,7 +66,7 @@ func (d *DuckDB) Connect(config connection.ConnectionConfig) error {
 
 	db, err := sql.Open("duckdb", dsn)
 	if err != nil {
-		return fmt.Errorf("打开数据库连接失败：%w", err)
+		return duckDBWrapRuntimeError("db.backend.error.connection_open_failed_prefix", err)
 	}
 	d.conn = db
 	d.pingTimeout = getConnectTimeout(config)
@@ -41,7 +74,7 @@ func (d *DuckDB) Connect(config connection.ConnectionConfig) error {
 	if err := d.Ping(); err != nil {
 		_ = db.Close()
 		d.conn = nil
-		return fmt.Errorf("连接建立后验证失败：%w", err)
+		return duckDBWrapRuntimeError("db.backend.error.connection_verify_failed_prefix", err)
 	}
 	return nil
 }
@@ -55,7 +88,7 @@ func (d *DuckDB) Close() error {
 
 func (d *DuckDB) Ping() error {
 	if d.conn == nil {
-		return fmt.Errorf("连接未打开")
+		return duckDBConnectionNotOpenError()
 	}
 	timeout := d.pingTimeout
 	if timeout <= 0 {
@@ -68,7 +101,7 @@ func (d *DuckDB) Ping() error {
 
 func (d *DuckDB) QueryContext(ctx context.Context, query string) ([]map[string]interface{}, []string, error) {
 	if d.conn == nil {
-		return nil, nil, fmt.Errorf("连接未打开")
+		return nil, nil, duckDBConnectionNotOpenError()
 	}
 	rows, err := d.conn.QueryContext(ctx, query)
 	if err != nil {
@@ -80,7 +113,7 @@ func (d *DuckDB) QueryContext(ctx context.Context, query string) ([]map[string]i
 
 func (d *DuckDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	if d.conn == nil {
-		return nil, nil, fmt.Errorf("连接未打开")
+		return nil, nil, duckDBConnectionNotOpenError()
 	}
 	rows, err := d.conn.Query(query)
 	if err != nil {
@@ -92,7 +125,7 @@ func (d *DuckDB) Query(query string) ([]map[string]interface{}, []string, error)
 
 func (d *DuckDB) ExecBatchContext(ctx context.Context, query string) (int64, error) {
 	if d.conn == nil {
-		return 0, fmt.Errorf("连接未打开")
+		return 0, duckDBConnectionNotOpenError()
 	}
 	res, err := d.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -103,7 +136,7 @@ func (d *DuckDB) ExecBatchContext(ctx context.Context, query string) (int64, err
 
 func (d *DuckDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error) {
 	if d.conn == nil {
-		return nil, fmt.Errorf("连接未打开")
+		return nil, duckDBConnectionNotOpenError()
 	}
 	conn, err := d.conn.Conn(ctx)
 	if err != nil {
@@ -114,7 +147,7 @@ func (d *DuckDB) OpenSessionExecer(ctx context.Context) (StatementExecer, error)
 
 func (d *DuckDB) ExecContext(ctx context.Context, query string) (int64, error) {
 	if d.conn == nil {
-		return 0, fmt.Errorf("连接未打开")
+		return 0, duckDBConnectionNotOpenError()
 	}
 	res, err := d.conn.ExecContext(ctx, query)
 	if err != nil {
@@ -125,7 +158,7 @@ func (d *DuckDB) ExecContext(ctx context.Context, query string) (int64, error) {
 
 func (d *DuckDB) Exec(query string) (int64, error) {
 	if d.conn == nil {
-		return 0, fmt.Errorf("连接未打开")
+		return 0, duckDBConnectionNotOpenError()
 	}
 	res, err := d.conn.Exec(query)
 	if err != nil {
@@ -210,7 +243,7 @@ ORDER BY table_catalog, table_schema, table_name`, escapeDuckDBLiteral(path.Cata
 func (d *DuckDB) GetCreateStatement(dbName, tableName string) (string, error) {
 	path := normalizeDuckDBObjectPath(dbName, tableName)
 	if path.Object == "" {
-		return "", fmt.Errorf("表名不能为空")
+		return "", duckDBTableNameRequiredError()
 	}
 
 	escapedTable := escapeDuckDBLiteral(path.Object)
@@ -251,13 +284,13 @@ func (d *DuckDB) GetCreateStatement(dbName, tableName string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("未找到建表语句")
+	return "", duckDBCreateTableStatementNotFoundError()
 }
 
 func (d *DuckDB) GetColumns(dbName, tableName string) ([]connection.ColumnDefinition, error) {
 	path := normalizeDuckDBObjectPath(dbName, tableName)
 	if path.Object == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, duckDBTableNameRequiredError()
 	}
 
 	query := fmt.Sprintf(`
@@ -353,7 +386,7 @@ ORDER BY table_catalog, table_schema, table_name, ordinal_position`, escapeDuckD
 func (d *DuckDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
 	path := normalizeDuckDBObjectPath(dbName, tableName)
 	if path.Object == "" {
-		return nil, fmt.Errorf("表名不能为空")
+		return nil, duckDBTableNameRequiredError()
 	}
 
 	constraintQuery := buildDuckDBConstraintMetadataQuery(path, true)
@@ -395,7 +428,7 @@ func (d *DuckDB) GetTriggers(dbName, tableName string) ([]connection.TriggerDefi
 
 func (d *DuckDB) ApplyChanges(tableName string, changes connection.ChangeSet) error {
 	if d.conn == nil {
-		return fmt.Errorf("连接未打开")
+		return duckDBConnectionNotOpenError()
 	}
 
 	tx, err := d.conn.Begin()
@@ -446,7 +479,7 @@ func (d *DuckDB) ApplyChanges(tableName string, changes connection.ChangeSet) er
 		}
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", qualifiedTable, strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("删除失败：%v", err)
+			return duckDBDeleteFailedError(err)
 		}
 	}
 
@@ -464,12 +497,12 @@ func (d *DuckDB) ApplyChanges(tableName string, changes connection.ChangeSet) er
 		wheres, whereArgs := buildWhere(update.Keys)
 		args = append(args, whereArgs...)
 		if len(wheres) == 0 {
-			return fmt.Errorf("更新操作需要主键条件")
+			return duckDBUpdateKeyConditionsRequiredError()
 		}
 
 		query := fmt.Sprintf("UPDATE %s SET %s WHERE %s", qualifiedTable, strings.Join(sets, ", "), strings.Join(wheres, " AND "))
 		if _, err := tx.Exec(query, args...); err != nil {
-			return fmt.Errorf("更新失败：%v", err)
+			return duckDBUpdateFailedError(err)
 		}
 	}
 

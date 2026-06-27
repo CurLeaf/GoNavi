@@ -212,8 +212,37 @@ func TestExecuteSQLFileStreamFallsBackToSequentialWhenBatchFails(t *testing.T) {
 	if fakeDB.execQueries[0] != "START TRANSACTION" || fakeDB.execQueries[1] != "ROLLBACK" {
 		t.Fatalf("expected failed batch to roll back before sequential fallback, got %#v", fakeDB.execQueries)
 	}
-	if len(result.Errors) != 1 || !strings.Contains(result.Errors[0], "第 2 条语句执行失败") {
+	if len(result.Errors) != 1 || result.Errors[0] != "file.backend.message.statement_failed" {
 		t.Fatalf("expected per-statement error for second statement, got %#v", result.Errors)
+	}
+}
+
+func TestExecuteSQLFileStreamUsesLocalizedStatementFailure(t *testing.T) {
+	fakeDB := &fakeSQLFileBatchDB{failBatch: true, failExecSQL: "VALUES (2)"}
+	input := strings.Join([]string{
+		"INSERT INTO demo(id) VALUES (1);",
+		"INSERT INTO demo(id) VALUES (2);",
+	}, "\n")
+
+	result, err := executeSQLFileStream(context.Background(), fakeDB, strings.NewReader(input), sqlFileExecutionOptions{
+		DBType:             "mysql",
+		BatchMaxStatements: 100,
+		BatchMaxBytes:      1024,
+		Text: func(key string, params map[string]any) string {
+			if key != "file.backend.message.statement_failed" {
+				t.Fatalf("unexpected i18n key %q", key)
+			}
+			return fmt.Sprintf("localized statement %v failed: %v SQL=%v", params["index"], params["detail"], params["sql"])
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("executeSQLFileStream returned error: %v", err)
+	}
+	if len(result.Errors) != 1 {
+		t.Fatalf("expected one localized statement error, got %#v", result.Errors)
+	}
+	if !strings.Contains(result.Errors[0], "localized statement 2 failed") || !strings.Contains(result.Errors[0], "VALUES (2)") {
+		t.Fatalf("expected localized per-statement error with raw SQL snippet, got %#v", result.Errors)
 	}
 }
 
@@ -404,5 +433,154 @@ func TestStreamSQLFileKeepsOracleCreateProcedureTogether(t *testing.T) {
 	}
 	if statements[1] != "SELECT 1 FROM dual" {
 		t.Fatalf("unexpected second statement: %q", statements[1])
+	}
+}
+
+func TestStreamSQLFileKeepsOracleCreateProcedureCursorCaseExpressionTogether(t *testing.T) {
+	input := strings.Join([]string{
+		"CREATE OR REPLACE PROCEDURE proc_accept_to_add(",
+		"  p_acceptno IN t_accept_h.acceptno%TYPE",
+		") IS",
+		"  CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS",
+		"    SELECT si.compid, si.batid, si.wareid",
+		"    FROM t_store_i si",
+		"    ORDER BY CASE",
+		"      WHEN p_ind = '1' THEN",
+		"        to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))",
+		"      WHEN p_ind = '2' THEN",
+		"        lpad(to_char(floor(si.wareqty)), 10, '0')",
+		"      ELSE",
+		"        to_char(si.batid)",
+		"    END,si.batid;",
+		"BEGIN",
+		"  NULL;",
+		"END;",
+		"/",
+		"SELECT 1 FROM dual;",
+	}, "\n")
+	var statements []string
+
+	count, err := streamSQLFile(&chunkedReader{data: []byte(input), step: 4}, func(index int, stmt string) error {
+		statements = append(statements, stmt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamSQLFile returned error: %v", err)
+	}
+	if count != 2 || len(statements) != 2 {
+		t.Fatalf("expected 2 statements, got count=%d statements=%#v", count, statements)
+	}
+	if statements[0] != strings.Join([]string{
+		"CREATE OR REPLACE PROCEDURE proc_accept_to_add(",
+		"  p_acceptno IN t_accept_h.acceptno%TYPE",
+		") IS",
+		"  CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS",
+		"    SELECT si.compid, si.batid, si.wareid",
+		"    FROM t_store_i si",
+		"    ORDER BY CASE",
+		"      WHEN p_ind = '1' THEN",
+		"        to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))",
+		"      WHEN p_ind = '2' THEN",
+		"        lpad(to_char(floor(si.wareqty)), 10, '0')",
+		"      ELSE",
+		"        to_char(si.batid)",
+		"    END,si.batid;",
+		"BEGIN",
+		"  NULL;",
+		"END;",
+	}, "\n") {
+		t.Fatalf("unexpected create procedure statement: %q", statements[0])
+	}
+	if statements[1] != "SELECT 1 FROM dual" {
+		t.Fatalf("unexpected second statement: %q", statements[1])
+	}
+}
+
+func TestStreamSQLFileSkipsOracleSqlPlusSlashDelimiter(t *testing.T) {
+	input := strings.Join([]string{
+		"CREATE OR REPLACE PROCEDURE proc_tally2accept(",
+		"  p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE",
+		") IS",
+		"  v_count PLS_INTEGER;",
+		"BEGIN",
+		"  SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;",
+		"END;",
+		"/",
+		"SELECT 1 FROM dual;",
+	}, "\n")
+	var statements []string
+
+	count, err := streamSQLFile(&chunkedReader{data: []byte(input), step: 2}, func(index int, stmt string) error {
+		statements = append(statements, stmt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamSQLFile returned error: %v", err)
+	}
+	if count != 2 || len(statements) != 2 {
+		t.Fatalf("expected 2 statements, got count=%d statements=%#v", count, statements)
+	}
+	if statements[0] != strings.Join([]string{
+		"CREATE OR REPLACE PROCEDURE proc_tally2accept(",
+		"  p_tallyacceptno IN t_tally_accept_h.acceptno%TYPE",
+		") IS",
+		"  v_count PLS_INTEGER;",
+		"BEGIN",
+		"  SELECT COUNT(*) INTO v_count FROM t_tally_accept_h WHERE acceptno = p_tallyacceptno;",
+		"END;",
+	}, "\n") {
+		t.Fatalf("unexpected create procedure statement: %q", statements[0])
+	}
+	if statements[1] != "SELECT 1 FROM dual" {
+		t.Fatalf("unexpected second statement: %q", statements[1])
+	}
+}
+
+func TestStreamSQLFileKeepsOraclePackageSpecAndBodyTogether(t *testing.T) {
+	input := strings.Join([]string{
+		"CREATE OR REPLACE PACKAGE pkg_order AS",
+		"  PROCEDURE sync_order(p_id IN NUMBER);",
+		"END pkg_order;",
+		"/",
+		"CREATE OR REPLACE PACKAGE BODY pkg_order AS",
+		"  PROCEDURE sync_order(p_id IN NUMBER) IS",
+		"  BEGIN",
+		"    NULL;",
+		"  END sync_order;",
+		"END pkg_order;",
+		"/ -- SQLPlus delimiter from PL/SQL tools",
+		"SELECT 1 FROM dual;",
+	}, "\n")
+	var statements []string
+
+	count, err := streamSQLFile(&chunkedReader{data: []byte(input), step: 3}, func(index int, stmt string) error {
+		statements = append(statements, stmt)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("streamSQLFile returned error: %v", err)
+	}
+	if count != 3 || len(statements) != 3 {
+		t.Fatalf("expected 3 statements, got count=%d statements=%#v", count, statements)
+	}
+	if statements[0] != strings.Join([]string{
+		"CREATE OR REPLACE PACKAGE pkg_order AS",
+		"  PROCEDURE sync_order(p_id IN NUMBER);",
+		"END pkg_order;",
+	}, "\n") {
+		t.Fatalf("unexpected package spec statement: %q", statements[0])
+	}
+	if statements[1] != strings.Join([]string{
+		"CREATE OR REPLACE PACKAGE BODY pkg_order AS",
+		"  PROCEDURE sync_order(p_id IN NUMBER) IS",
+		"  BEGIN",
+		"    NULL;",
+		"  END sync_order;",
+		"END pkg_order;",
+	}, "\n") {
+		t.Fatalf("unexpected package body statement: %q", statements[1])
+	}
+	if statements[2] != "SELECT 1 FROM dual" {
+		t.Fatalf("unexpected third statement: %q", statements[2])
 	}
 }

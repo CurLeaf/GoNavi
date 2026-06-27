@@ -18,7 +18,26 @@ import (
 	"golang.org/x/crypto/blowfish"
 )
 
-var errNavicatSecretDecryptFailed = errors.New("解密 Navicat 密码失败")
+type navicatTextFunc func(string, map[string]any) string
+
+func navicatText(text navicatTextFunc, key string, params map[string]any) string {
+	if text != nil {
+		return text(key, params)
+	}
+	return defaultAppText(key, params)
+}
+
+func navicatError(text navicatTextFunc, key string, params map[string]any) error {
+	return errors.New(navicatText(text, key, params))
+}
+
+func navicatWrapError(text navicatTextFunc, key string, params map[string]any, err error) error {
+	message := navicatText(text, key, params)
+	if err == nil {
+		return errors.New(message)
+	}
+	return fmt.Errorf("%s: %w", message, err)
+}
 
 type navicatNCXDocument struct {
 	Connections []navicatNCXConnection `xml:"Connection"`
@@ -72,6 +91,10 @@ func isNavicatNCX(content string) bool {
 }
 
 func parseNavicatNCX(content string) ([]connection.SavedConnectionInput, error) {
+	return parseNavicatNCXWithText(content, defaultAppText)
+}
+
+func parseNavicatNCXWithText(content string, text navicatTextFunc) ([]connection.SavedConnectionInput, error) {
 	var doc navicatNCXDocument
 	if err := xml.Unmarshal([]byte(content), &doc); err != nil {
 		return nil, err
@@ -79,7 +102,7 @@ func parseNavicatNCX(content string) ([]connection.SavedConnectionInput, error) 
 
 	inputs := make([]connection.SavedConnectionInput, 0, len(doc.Connections))
 	for _, item := range doc.Connections {
-		input, ok, err := parseNavicatNCXConnection(item)
+		input, ok, err := parseNavicatNCXConnectionWithText(item, text)
 		if err != nil {
 			return nil, err
 		}
@@ -91,6 +114,10 @@ func parseNavicatNCX(content string) ([]connection.SavedConnectionInput, error) 
 }
 
 func parseNavicatNCXConnection(item navicatNCXConnection) (connection.SavedConnectionInput, bool, error) {
+	return parseNavicatNCXConnectionWithText(item, defaultAppText)
+}
+
+func parseNavicatNCXConnectionWithText(item navicatNCXConnection, text navicatTextFunc) (connection.SavedConnectionInput, bool, error) {
 	configType, defaultPort, supported := resolveNavicatConnectionType(item.ConnType)
 	if !supported {
 		return connection.SavedConnectionInput{}, false, nil
@@ -130,27 +157,28 @@ func parseNavicatNCXConnection(item navicatNCXConnection) (connection.SavedConne
 		config.Database = ""
 	}
 
-	password, err := decodeNavicatSecret(item.Password)
+	name := resolveNavicatConnectionName(item, config)
+
+	password, err := decodeNavicatSecretWithText(item.Password, text)
 	if err != nil {
-		return connection.SavedConnectionInput{}, false, fmt.Errorf("连接 %s 的密码解析失败: %w", resolveNavicatConnectionName(item, config), err)
+		return connection.SavedConnectionInput{}, false, navicatWrapError(text, "file.backend.error.navicat_connection_password_parse_failed", map[string]any{"name": name}, err)
 	}
 	config.Password = password
 
 	applyNavicatSSLConfig(&config, item)
 
-	sshPassword, err := decodeNavicatSecret(item.SSHPassword)
+	sshPassword, err := decodeNavicatSecretWithText(item.SSHPassword, text)
 	if err != nil {
-		return connection.SavedConnectionInput{}, false, fmt.Errorf("连接 %s 的 SSH 密码解析失败: %w", resolveNavicatConnectionName(item, config), err)
+		return connection.SavedConnectionInput{}, false, navicatWrapError(text, "file.backend.error.navicat_connection_ssh_password_parse_failed", map[string]any{"name": name}, err)
 	}
 	applyNavicatSSHConfig(&config, item, sshPassword)
 
-	proxyPassword, err := decodeNavicatSecret(item.HTTPProxyPassword)
+	proxyPassword, err := decodeNavicatSecretWithText(item.HTTPProxyPassword, text)
 	if err != nil {
-		return connection.SavedConnectionInput{}, false, fmt.Errorf("连接 %s 的代理密码解析失败: %w", resolveNavicatConnectionName(item, config), err)
+		return connection.SavedConnectionInput{}, false, navicatWrapError(text, "file.backend.error.navicat_connection_proxy_password_parse_failed", map[string]any{"name": name}, err)
 	}
 	applyNavicatHTTPProxyConfig(&config, item, proxyPassword)
 
-	name := resolveNavicatConnectionName(item, config)
 	return connection.SavedConnectionInput{
 		ID:     connectionID,
 		Name:   name,
@@ -292,6 +320,14 @@ func applyNavicatHTTPProxyConfig(config *connection.ConnectionConfig, item navic
 }
 
 func decodeNavicatSecret(raw string) (string, error) {
+	return decodeNavicatSecretWithError(raw, navicatError(defaultAppText, "file.backend.error.navicat_secret_decrypt_failed", nil))
+}
+
+func decodeNavicatSecretWithText(raw string, text navicatTextFunc) (string, error) {
+	return decodeNavicatSecretWithError(raw, navicatError(text, "file.backend.error.navicat_secret_decrypt_failed", nil))
+}
+
+func decodeNavicatSecretWithError(raw string, decryptErr error) (string, error) {
 	text := strings.TrimSpace(raw)
 	if text == "" {
 		return "", nil
@@ -300,7 +336,7 @@ func decodeNavicatSecret(raw string) (string, error) {
 		return text, nil
 	}
 
-	plain, err := decryptNavicatHexSecret(text)
+	plain, err := decryptNavicatHexSecret(text, decryptErr)
 	if err != nil {
 		return "", err
 	}
@@ -321,19 +357,19 @@ func looksLikeNavicatHex(raw string) bool {
 	return true
 }
 
-func decryptNavicatHexSecret(raw string) (string, error) {
+func decryptNavicatHexSecret(raw string, decryptErr error) (string, error) {
 	ciphertext, err := hex.DecodeString(strings.TrimSpace(raw))
 	if err != nil {
 		return "", err
 	}
 
-	if plaintext, err := decryptNavicatHexSecretV1(ciphertext); err == nil {
+	if plaintext, err := decryptNavicatHexSecretV1(ciphertext, decryptErr); err == nil {
 		return plaintext, nil
 	}
-	if plaintext, err := decryptNavicatHexSecretV2(ciphertext); err == nil {
+	if plaintext, err := decryptNavicatHexSecretV2(ciphertext, decryptErr); err == nil {
 		return plaintext, nil
 	}
-	return "", errNavicatSecretDecryptFailed
+	return "", decryptErr
 }
 
 func newNavicatCryptoV1() (*navicatCryptoV1, error) {
@@ -350,15 +386,15 @@ func newNavicatCryptoV1() (*navicatCryptoV1, error) {
 	}, nil
 }
 
-func decryptNavicatHexSecretV1(ciphertext []byte) (string, error) {
+func decryptNavicatHexSecretV1(ciphertext []byte, decryptErr error) (string, error) {
 	cryptoV1, err := newNavicatCryptoV1()
 	if err != nil {
 		return "", err
 	}
-	return cryptoV1.decrypt(ciphertext)
+	return cryptoV1.decrypt(ciphertext, decryptErr)
 }
 
-func (c *navicatCryptoV1) decrypt(ciphertext []byte) (string, error) {
+func (c *navicatCryptoV1) decrypt(ciphertext []byte, decryptErr error) (string, error) {
 	blockSize := c.block.BlockSize()
 	currentVector := append([]byte(nil), c.initialVector...)
 	roundBytes := len(ciphertext) / blockSize * blockSize
@@ -378,18 +414,18 @@ func (c *navicatCryptoV1) decrypt(ciphertext []byte) (string, error) {
 	}
 
 	if !isLikelyNavicatPlaintext(plaintext) {
-		return "", errNavicatSecretDecryptFailed
+		return "", decryptErr
 	}
 	return string(plaintext), nil
 }
 
-func decryptNavicatHexSecretV2(ciphertext []byte) (string, error) {
+func decryptNavicatHexSecretV2(ciphertext []byte, decryptErr error) (string, error) {
 	block, err := aes.NewCipher([]byte("libcckeylibcckey"))
 	if err != nil {
 		return "", err
 	}
 	if len(ciphertext) == 0 || len(ciphertext)%block.BlockSize() != 0 {
-		return "", errNavicatSecretDecryptFailed
+		return "", decryptErr
 	}
 
 	plaintext := make([]byte, len(ciphertext))
@@ -402,24 +438,24 @@ func decryptNavicatHexSecretV2(ciphertext []byte) (string, error) {
 		currentVector = ciphertext[offset : offset+block.BlockSize()]
 	}
 
-	plaintext, err = stripPKCS7Padding(plaintext, block.BlockSize())
+	plaintext, err = stripPKCS7Padding(plaintext, block.BlockSize(), decryptErr)
 	if err != nil || !isLikelyNavicatPlaintext(plaintext) {
-		return "", errNavicatSecretDecryptFailed
+		return "", decryptErr
 	}
 	return string(plaintext), nil
 }
 
-func stripPKCS7Padding(data []byte, blockSize int) ([]byte, error) {
+func stripPKCS7Padding(data []byte, blockSize int, decryptErr error) ([]byte, error) {
 	if len(data) == 0 || len(data)%blockSize != 0 {
-		return nil, errNavicatSecretDecryptFailed
+		return nil, decryptErr
 	}
 	paddingLength := int(data[len(data)-1])
 	if paddingLength <= 0 || paddingLength > blockSize || paddingLength > len(data) {
-		return nil, errNavicatSecretDecryptFailed
+		return nil, decryptErr
 	}
 	for _, value := range data[len(data)-paddingLength:] {
 		if int(value) != paddingLength {
-			return nil, errNavicatSecretDecryptFailed
+			return nil, decryptErr
 		}
 	}
 	return data[:len(data)-paddingLength], nil

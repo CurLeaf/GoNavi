@@ -1,3 +1,6 @@
+import type { AIInspectionTranslator } from './aiInspectionI18n';
+import { translateInspectionCopy } from './aiInspectionI18n';
+
 export interface CodebaseHotspotEntry {
   path: string;
   lines: number;
@@ -17,163 +20,369 @@ export interface CodebaseHotspotSnapshotOptions {
   minLines?: number;
   limit?: number;
   includeRecommendations?: boolean;
+  translate?: AIInspectionTranslator;
 }
 
-const CODEBASE_HOTSPOT_SNAPSHOT: CodebaseHotspotEntry[] = [
+interface LocalizableText {
+  key: string;
+  fallback: string;
+}
+
+interface CodebaseHotspotSourceEntry {
+  id: string;
+  path: string;
+  lines: number;
+  area: string;
+  riskLevel: CodebaseHotspotEntry['riskLevel'];
+  readiness: CodebaseHotspotEntry['readiness'];
+  why: LocalizableText;
+  preferredNextSlice: LocalizableText;
+  safeSeam: LocalizableText;
+  suggestedSlices: LocalizableText[];
+  testTargets: string[];
+  verificationPlan: Array<LocalizableText | string>;
+}
+
+const keyFor = (id: string, field: string): string => `ai_chat.inspection.codebase_hotspots.${id}.${field}`;
+
+const CODEBASE_HOTSPOT_SNAPSHOT: CodebaseHotspotSourceEntry[] = [
   {
+    id: 'sidebar',
     path: 'frontend/src/components/Sidebar.tsx',
     lines: 8901,
     area: 'workspace-navigation',
     riskLevel: 'critical',
     readiness: 'needsCharacterizationTests',
-    why: '左侧树、命令面板、上下文菜单和连接动作集中在单文件，修改入口多且回归面大。',
-    preferredNextSlice: '外部 SQL 目录弹窗',
-    safeSeam: '优先抽出无状态弹窗/菜单配置，再处理依赖连接树状态的动作分发。',
-    suggestedSlices: ['V2 命令面板', '外部 SQL 目录弹窗', '连接树动作', '批量操作弹窗'],
+    why: {
+      key: keyFor('sidebar', 'why'),
+      fallback: 'The left tree, command palette, context menus, and connection actions are concentrated in one file, so change entry points are numerous and regression risk is high.',
+    },
+    preferredNextSlice: {
+      key: keyFor('sidebar', 'preferred_next_slice'),
+      fallback: 'External SQL directory dialog',
+    },
+    safeSeam: {
+      key: keyFor('sidebar', 'safe_seam'),
+      fallback: 'Extract stateless dialog and menu configuration first, then handle action dispatch that depends on connection tree state.',
+    },
+    suggestedSlices: [
+      { key: keyFor('sidebar', 'suggested_slice.v2_command_palette'), fallback: 'V2 command palette' },
+      { key: keyFor('sidebar', 'suggested_slice.external_sql_directory_dialog'), fallback: 'External SQL directory dialog' },
+      { key: keyFor('sidebar', 'suggested_slice.connection_tree_actions'), fallback: 'Connection tree actions' },
+      { key: keyFor('sidebar', 'suggested_slice.batch_operation_dialogs'), fallback: 'Batch operation dialogs' },
+    ],
     testTargets: ['Sidebar.locate-toolbar.test.tsx', 'sidebarV2Utils.test.ts'],
     verificationPlan: [
       'npm --prefix frontend test -- Sidebar.locate-toolbar.test.tsx sidebarV2Utils.test.ts',
       'npm --prefix frontend run build',
-      '浏览器打开侧边栏，验证连接树、右键菜单和外部 SQL 目录入口可用。',
+      {
+        key: keyFor('sidebar', 'verification.browser_smoke'),
+        fallback: 'Open the sidebar in a browser and verify the connection tree, context menus, and external SQL directory entry.',
+      },
     ],
   },
   {
+    id: 'data_grid',
     path: 'frontend/src/components/DataGrid.tsx',
     lines: 8080,
     area: 'result-grid',
     riskLevel: 'critical',
     readiness: 'needsCharacterizationTests',
-    why: '结果展示、编辑、DDL、导出和列操作耦合，容易让单点修复影响查询结果区。',
-    preferredNextSlice: '结果导出工具栏',
-    safeSeam: '优先抽出纯展示工具栏和菜单项生成，不先移动数据编辑事务状态。',
-    suggestedSlices: ['结果导出工具栏', '列头菜单', 'DDL 视图', '单元格编辑事务提示'],
+    why: {
+      key: keyFor('data_grid', 'why'),
+      fallback: 'Result display, editing, DDL, export, and column operations are coupled, so a focused fix can affect the query result area.',
+    },
+    preferredNextSlice: {
+      key: keyFor('data_grid', 'preferred_next_slice'),
+      fallback: 'Result export toolbar',
+    },
+    safeSeam: {
+      key: keyFor('data_grid', 'safe_seam'),
+      fallback: 'Extract the pure display toolbar and menu item generation first; do not move data-editing transaction state yet.',
+    },
+    suggestedSlices: [
+      { key: keyFor('data_grid', 'suggested_slice.result_export_toolbar'), fallback: 'Result export toolbar' },
+      { key: keyFor('data_grid', 'suggested_slice.column_header_menu'), fallback: 'Column header menu' },
+      { key: keyFor('data_grid', 'suggested_slice.ddl_view'), fallback: 'DDL view' },
+      { key: keyFor('data_grid', 'suggested_slice.cell_edit_transaction_hint'), fallback: 'Cell edit transaction hint' },
+    ],
     testTargets: ['DataGrid.layout.test.tsx', 'DataGrid.ddl.test.tsx'],
     verificationPlan: [
       'npm --prefix frontend test -- DataGrid.layout.test.tsx DataGrid.ddl.test.tsx',
       'npm --prefix frontend run build',
-      '浏览器执行查询并验证结果表、导出、列菜单和表格编辑入口。',
+      {
+        key: keyFor('data_grid', 'verification.browser_smoke'),
+        fallback: 'Run a query in the browser and verify the result table, export, column menu, and table editing entry.',
+      },
     ],
   },
   {
+    id: 'connection_modal',
     path: 'frontend/src/components/ConnectionModal.tsx',
     lines: 6811,
     area: 'connection-form',
     riskLevel: 'critical',
     readiness: 'readyToExtract',
-    why: '多数据源连接表单仍集中在一个组件，新增数据源或密钥规则时容易互相影响。',
-    preferredNextSlice: 'TLS 配置区',
-    safeSeam: '连接表单已有 presentation utils，可先抽出按数据源显示的配置分区组件。',
-    suggestedSlices: ['SSH/代理配置区', 'TLS 配置区', 'MongoDB 配置区', 'JVM 配置区'],
+    why: {
+      key: keyFor('connection_modal', 'why'),
+      fallback: 'Multi-source connection forms are still concentrated in one component, so adding data sources or secret rules can affect each other.',
+    },
+    preferredNextSlice: {
+      key: keyFor('connection_modal', 'preferred_next_slice'),
+      fallback: 'TLS configuration section',
+    },
+    safeSeam: {
+      key: keyFor('connection_modal', 'safe_seam'),
+      fallback: 'The connection form already has presentation utilities; first extract configuration sections shown per data source.',
+    },
+    suggestedSlices: [
+      { key: keyFor('connection_modal', 'suggested_slice.ssh_proxy_section'), fallback: 'SSH/proxy configuration section' },
+      { key: keyFor('connection_modal', 'suggested_slice.tls_section'), fallback: 'TLS configuration section' },
+      { key: keyFor('connection_modal', 'suggested_slice.mongodb_section'), fallback: 'MongoDB configuration section' },
+      { key: keyFor('connection_modal', 'suggested_slice.jvm_section'), fallback: 'JVM configuration section' },
+    ],
     testTargets: ['ConnectionModal.edit-password.test.tsx', 'connectionModalPresentation.test.ts'],
     verificationPlan: [
       'npm --prefix frontend test -- ConnectionModal.edit-password.test.tsx connectionModalPresentation.test.ts',
       'npm --prefix frontend run build',
-      '浏览器打开新增/编辑连接弹窗，切换 MySQL、Oracle、MongoDB、Redis 表单。',
+      {
+        key: keyFor('connection_modal', 'verification.browser_smoke'),
+        fallback: 'Open the add/edit connection dialog in a browser and switch MySQL, Oracle, MongoDB, and Redis forms.',
+      },
     ],
   },
   {
+    id: 'query_editor',
     path: 'frontend/src/components/QueryEditor.tsx',
     lines: 5275,
     area: 'sql-editor',
     riskLevel: 'critical',
     readiness: 'readyToExtract',
-    why: 'SQL 编辑、执行、事务、结果区布局和快捷键状态集中，事务和结果区回归风险高。',
-    preferredNextSlice: '编辑器工具栏',
-    safeSeam: '工具栏 JSX 可通过 props 透传状态和回调，避免触碰 SQL 执行、事务和结果分页逻辑。',
-    suggestedSlices: ['结果区工具栏', '事务状态条', '执行日志提示', '编辑器快捷键绑定'],
+    why: {
+      key: keyFor('query_editor', 'why'),
+      fallback: 'SQL editing, execution, transactions, result layout, and shortcut state are concentrated, so transaction and result-panel regressions are likely.',
+    },
+    preferredNextSlice: {
+      key: keyFor('query_editor', 'preferred_next_slice'),
+      fallback: 'Editor toolbar',
+    },
+    safeSeam: {
+      key: keyFor('query_editor', 'safe_seam'),
+      fallback: 'The toolbar JSX can pass state and callbacks through props, avoiding SQL execution, transaction, and result pagination logic.',
+    },
+    suggestedSlices: [
+      { key: keyFor('query_editor', 'suggested_slice.result_toolbar'), fallback: 'Result area toolbar' },
+      { key: keyFor('query_editor', 'suggested_slice.transaction_status_bar'), fallback: 'Transaction status bar' },
+      { key: keyFor('query_editor', 'suggested_slice.execution_log_hint'), fallback: 'Execution log hint' },
+      { key: keyFor('query_editor', 'suggested_slice.editor_shortcut_binding'), fallback: 'Editor shortcut binding' },
+    ],
     testTargets: ['QueryEditor.result-panel.test.tsx', 'useSqlEditorTransactionController.test.ts'],
     verificationPlan: [
       'npm --prefix frontend test -- QueryEditor.external-sql-save.test.tsx useSqlEditorTransactionController.test.tsx',
       'npm --prefix frontend run build',
-      '浏览器打开 SQL 编辑器，验证连接/库选择、运行、保存、美化、结果区显隐和 AI 菜单。',
+      {
+        key: keyFor('query_editor', 'verification.browser_smoke'),
+        fallback: 'Open the SQL editor in a browser and verify connection/database selection, run, save, format, result visibility, and the AI menu.',
+      },
     ],
   },
   {
+    id: 'table_designer',
     path: 'frontend/src/components/TableDesigner.tsx',
     lines: 3549,
     area: 'table-designer',
     riskLevel: 'high',
     readiness: 'needsCharacterizationTests',
-    why: '字段编辑、索引、外键、分区和 DDL 生成集中，数据库方言差异容易扩散。',
-    preferredNextSlice: '字段编辑表格',
-    safeSeam: '先补字段类型/长度/NULL/默认值快照测试，再抽字段编辑表格。',
-    suggestedSlices: ['字段编辑表格', '索引配置面板', '外键配置面板', '方言 DDL 预览'],
+    why: {
+      key: keyFor('table_designer', 'why'),
+      fallback: 'Field editing, indexes, foreign keys, partitions, and DDL generation are concentrated, so database dialect differences can spread easily.',
+    },
+    preferredNextSlice: {
+      key: keyFor('table_designer', 'preferred_next_slice'),
+      fallback: 'Field editing table',
+    },
+    safeSeam: {
+      key: keyFor('table_designer', 'safe_seam'),
+      fallback: 'Add field type, length, NULL, and default value snapshot tests first, then extract the field editing table.',
+    },
+    suggestedSlices: [
+      { key: keyFor('table_designer', 'suggested_slice.field_editing_table'), fallback: 'Field editing table' },
+      { key: keyFor('table_designer', 'suggested_slice.index_panel'), fallback: 'Index configuration panel' },
+      { key: keyFor('table_designer', 'suggested_slice.foreign_key_panel'), fallback: 'Foreign key configuration panel' },
+      { key: keyFor('table_designer', 'suggested_slice.dialect_ddl_preview'), fallback: 'Dialect DDL preview' },
+    ],
     testTargets: ['TableDesigner.*.test.tsx', 'tableDesignerSchemaSql.test.ts'],
     verificationPlan: [
       'npm --prefix frontend test -- tableDesignerSchemaSql.test.ts',
       'npm --prefix frontend run build',
-      '浏览器打开对象设计，验证字段、索引、外键和 DDL 预览。',
+      {
+        key: keyFor('table_designer', 'verification.browser_smoke'),
+        fallback: 'Open object design in a browser and verify fields, indexes, foreign keys, and DDL preview.',
+      },
     ],
   },
   {
+    id: 'redis_viewer',
     path: 'frontend/src/components/RedisViewer.tsx',
     lines: 2120,
     area: 'redis-browser',
     riskLevel: 'high',
     readiness: 'readyToExtract',
-    why: 'Key 浏览、不同数据结构编辑、TTL、编码显示和新增弹窗集中，Redis Cluster/Sentinel 后续验证面较宽。',
-    preferredNextSlice: 'Key 搜索栏',
-    safeSeam: '先抽出搜索栏和拓扑提示，避免提前改动各数据结构编辑器。',
-    suggestedSlices: ['Key 搜索栏', 'String/List/Set/ZSet/Hash/Stream 编辑器', '新增 Key 弹窗'],
+    why: {
+      key: keyFor('redis_viewer', 'why'),
+      fallback: 'Key browsing, data-structure editing, TTL, encoding display, and the add dialog are concentrated, so Redis Cluster/Sentinel follow-up validation is broad.',
+    },
+    preferredNextSlice: {
+      key: keyFor('redis_viewer', 'preferred_next_slice'),
+      fallback: 'Key search bar',
+    },
+    safeSeam: {
+      key: keyFor('redis_viewer', 'safe_seam'),
+      fallback: 'Extract the search bar and topology hint first, avoiding early changes to each data-structure editor.',
+    },
+    suggestedSlices: [
+      { key: keyFor('redis_viewer', 'suggested_slice.key_search_bar'), fallback: 'Key search bar' },
+      { key: keyFor('redis_viewer', 'suggested_slice.structure_editors'), fallback: 'String/List/Set/ZSet/Hash/Stream editors' },
+      { key: keyFor('redis_viewer', 'suggested_slice.add_key_dialog'), fallback: 'Add key dialog' },
+    ],
     testTargets: ['redisViewerTree.test.ts', 'RedisViewer.*.test.tsx'],
     verificationPlan: [
       'npm --prefix frontend test -- redisViewerTree.test.ts',
       'npm --prefix frontend run build',
-      '浏览器打开 Redis 连接，验证 key 搜索、刷新、TTL 和新增入口。',
+      {
+        key: keyFor('redis_viewer', 'verification.browser_smoke'),
+        fallback: 'Open a Redis connection in a browser and verify key search, refresh, TTL, and the add entry.',
+      },
     ],
   },
   {
+    id: 'driver_manager',
     path: 'frontend/src/components/DriverManagerModal.tsx',
     lines: 1729,
     area: 'driver-manager',
     riskLevel: 'high',
     readiness: 'readyToExtract',
-    why: '驱动安装、状态展示、下载和可选代理逻辑较多，适合继续拆出状态卡片和操作区。',
-    preferredNextSlice: '驱动状态列表',
-    safeSeam: '状态列表是展示型组件，可先抽出再保留安装/下载动作在父组件。',
-    suggestedSlices: ['驱动状态列表', '安装操作区', '下载日志区'],
+    why: {
+      key: keyFor('driver_manager', 'why'),
+      fallback: 'Driver installation, status display, downloads, and optional proxy logic are substantial, so status cards and action areas are good next extraction targets.',
+    },
+    preferredNextSlice: {
+      key: keyFor('driver_manager', 'preferred_next_slice'),
+      fallback: 'Driver status list',
+    },
+    safeSeam: {
+      key: keyFor('driver_manager', 'safe_seam'),
+      fallback: 'The status list is presentational; extract it first while keeping install and download actions in the parent component.',
+    },
+    suggestedSlices: [
+      { key: keyFor('driver_manager', 'suggested_slice.driver_status_list'), fallback: 'Driver status list' },
+      { key: keyFor('driver_manager', 'suggested_slice.install_actions'), fallback: 'Install action area' },
+      { key: keyFor('driver_manager', 'suggested_slice.download_logs'), fallback: 'Download log area' },
+    ],
     testTargets: ['DriverManagerModal.*.test.tsx'],
     verificationPlan: [
       'npm --prefix frontend test -- DriverManagerModal.*.test.tsx',
       'npm --prefix frontend run build',
-      '浏览器打开驱动管理，验证状态展示、安装按钮和日志区域。',
+      {
+        key: keyFor('driver_manager', 'verification.browser_smoke'),
+        fallback: 'Open driver management in a browser and verify status display, install buttons, and the log area.',
+      },
     ],
   },
   {
+    id: 'data_sync',
     path: 'frontend/src/components/DataSyncModal.tsx',
     lines: 1526,
     area: 'data-sync',
     riskLevel: 'high',
     readiness: 'needsCharacterizationTests',
-    why: '数据同步连接、表映射、预检查和执行结果集中，数据库方言问题容易隐藏。',
-    preferredNextSlice: '同步预检查结果',
-    safeSeam: '先把预检查结果做成纯展示组件，保留连接选择和执行动作在父组件。',
-    suggestedSlices: ['连接选择区', '表映射区', '同步预检查结果', '执行日志区'],
+    why: {
+      key: keyFor('data_sync', 'why'),
+      fallback: 'Data sync connections, table mapping, prechecks, and execution results are concentrated, so database dialect issues can be hidden.',
+    },
+    preferredNextSlice: {
+      key: keyFor('data_sync', 'preferred_next_slice'),
+      fallback: 'Sync precheck results',
+    },
+    safeSeam: {
+      key: keyFor('data_sync', 'safe_seam'),
+      fallback: 'Make precheck results a pure display component first, keeping connection selection and execution actions in the parent component.',
+    },
+    suggestedSlices: [
+      { key: keyFor('data_sync', 'suggested_slice.connection_selection'), fallback: 'Connection selection area' },
+      { key: keyFor('data_sync', 'suggested_slice.table_mapping'), fallback: 'Table mapping area' },
+      { key: keyFor('data_sync', 'suggested_slice.precheck_results'), fallback: 'Sync precheck results' },
+      { key: keyFor('data_sync', 'suggested_slice.execution_logs'), fallback: 'Execution log area' },
+    ],
     testTargets: ['DataSyncModal.*.test.tsx'],
     verificationPlan: [
       'npm --prefix frontend test -- DataSyncModal.*.test.tsx',
       'npm --prefix frontend run build',
-      '浏览器打开数据同步，验证连接选择、表映射、预检查和执行日志。',
+      {
+        key: keyFor('data_sync', 'verification.browser_smoke'),
+        fallback: 'Open data sync in a browser and verify connection selection, table mapping, precheck, and execution logs.',
+      },
     ],
   },
   {
+    id: 'jvm_diagnostic',
     path: 'frontend/src/components/JVMDiagnosticConsole.tsx',
     lines: 1146,
     area: 'jvm-diagnostics',
     riskLevel: 'medium',
     readiness: 'readyToExtract',
-    why: '诊断命令、输出块、权限提示和会话状态可继续拆分，降低 JVM 诊断回归面。',
-    preferredNextSlice: '诊断输出区',
-    safeSeam: '输出区主要依赖命令结果数组，可先抽成展示组件。',
-    suggestedSlices: ['命令输入区', '诊断输出区', '权限提示区'],
+    why: {
+      key: keyFor('jvm_diagnostic', 'why'),
+      fallback: 'Diagnostic commands, output blocks, permission hints, and session state can continue to be split to lower JVM diagnostics regression risk.',
+    },
+    preferredNextSlice: {
+      key: keyFor('jvm_diagnostic', 'preferred_next_slice'),
+      fallback: 'Diagnostic output area',
+    },
+    safeSeam: {
+      key: keyFor('jvm_diagnostic', 'safe_seam'),
+      fallback: 'The output area mainly depends on the command result array, so it can be extracted as a display component first.',
+    },
+    suggestedSlices: [
+      { key: keyFor('jvm_diagnostic', 'suggested_slice.command_input'), fallback: 'Command input area' },
+      { key: keyFor('jvm_diagnostic', 'suggested_slice.diagnostic_output'), fallback: 'Diagnostic output area' },
+      { key: keyFor('jvm_diagnostic', 'suggested_slice.permission_hint'), fallback: 'Permission hint area' },
+    ],
     testTargets: ['JVMDiagnosticConsole.*.test.tsx'],
     verificationPlan: [
       'npm --prefix frontend test -- JVMDiagnosticConsole.*.test.tsx',
       'npm --prefix frontend run build',
-      '浏览器打开 JVM 诊断面板，验证命令输入、输出和权限提示。',
+      {
+        key: keyFor('jvm_diagnostic', 'verification.browser_smoke'),
+        fallback: 'Open the JVM diagnostics panel in a browser and verify command input, output, and permission hints.',
+      },
     ],
   },
 ];
+
+const NEXT_ACTIONS: LocalizableText[] = [
+  {
+    key: 'ai_chat.inspection.codebase_hotspots.next_action.pick_ready_slice',
+    fallback: 'Prefer a slice with readiness=readyToExtract and existing test coverage for small-step extraction; avoid rewriting an entire large component directly.',
+  },
+  {
+    key: 'ai_chat.inspection.codebase_hotspots.next_action.confirm_safe_seam',
+    fallback: 'Confirm the safeSeam before every extraction, and do not cross SQL execution, transaction, connection secret, or database dialect boundaries.',
+  },
+  {
+    key: 'ai_chat.inspection.codebase_hotspots.next_action.run_targeted_tests',
+    fallback: 'After extraction, run the corresponding component tests, related utils tests, and npm --prefix frontend run build at minimum.',
+  },
+  {
+    key: 'ai_chat.inspection.codebase_hotspots.next_action.browser_smoke',
+    fallback: 'For visible UI extraction, open the real page in a browser for one smoke verification.',
+  },
+];
+
+const translateText = (
+  translate: AIInspectionTranslator | undefined,
+  { key, fallback }: LocalizableText,
+): string => translateInspectionCopy(translate, key, fallback);
 
 const normalizeKeyword = (value: unknown): string => String(value || '').trim().toLowerCase();
 
@@ -185,6 +394,25 @@ const clampNumber = (value: unknown, fallback: number, min: number, max: number)
   return Math.max(min, Math.min(max, Math.floor(parsed)));
 };
 
+const localizeEntry = (
+  entry: CodebaseHotspotSourceEntry,
+  translate: AIInspectionTranslator | undefined,
+): CodebaseHotspotEntry => ({
+  path: entry.path,
+  lines: entry.lines,
+  area: entry.area,
+  riskLevel: entry.riskLevel,
+  readiness: entry.readiness,
+  why: translateText(translate, entry.why),
+  preferredNextSlice: translateText(translate, entry.preferredNextSlice),
+  safeSeam: translateText(translate, entry.safeSeam),
+  suggestedSlices: entry.suggestedSlices.map((item) => translateText(translate, item)),
+  testTargets: entry.testTargets,
+  verificationPlan: entry.verificationPlan.map((item) => (
+    typeof item === 'string' ? item : translateText(translate, item)
+  )),
+});
+
 const matchesKeyword = (entry: CodebaseHotspotEntry, keyword: string): boolean => {
   if (!keyword) {
     return true;
@@ -193,7 +421,10 @@ const matchesKeyword = (entry: CodebaseHotspotEntry, keyword: string): boolean =
     entry.path,
     entry.area,
     entry.riskLevel,
+    entry.readiness,
     entry.why,
+    entry.preferredNextSlice,
+    entry.safeSeam,
     ...entry.suggestedSlices,
     ...entry.testTargets,
   ].some((item) => item.toLowerCase().includes(keyword));
@@ -204,11 +435,13 @@ export const buildCodebaseHotspotSnapshot = ({
   minLines,
   limit,
   includeRecommendations = true,
+  translate,
 }: CodebaseHotspotSnapshotOptions = {}) => {
   const normalizedKeyword = normalizeKeyword(keyword);
   const normalizedMinLines = clampNumber(minLines, 1000, 1, 20000);
   const normalizedLimit = clampNumber(limit, 8, 1, 30);
-  const matched = CODEBASE_HOTSPOT_SNAPSHOT
+  const localizedEntries = CODEBASE_HOTSPOT_SNAPSHOT.map((entry) => localizeEntry(entry, translate));
+  const matched = localizedEntries
     .filter((entry) => entry.lines >= normalizedMinLines)
     .filter((entry) => matchesKeyword(entry, normalizedKeyword))
     .slice(0, normalizedLimit);
@@ -220,7 +453,11 @@ export const buildCodebaseHotspotSnapshot = ({
     source: 'static_maintainability_snapshot',
     evidence: {
       measuredAt: '2026-06-12',
-      note: '基于当前仓库前端文件行数热点快照；拆分前应优先选择 readyToExtract 且已有测试覆盖的 slice。',
+      note: translateInspectionCopy(
+        translate,
+        'ai_chat.inspection.codebase_hotspots.evidence.note',
+        'Based on the current repository frontend file-line hotspot snapshot; before extraction, prefer slices that are readyToExtract and already covered by tests.',
+      ),
     },
     filters: {
       keyword: normalizedKeyword || undefined,
@@ -250,12 +487,7 @@ export const buildCodebaseHotspotSnapshot = ({
       verificationPlan: includeRecommendations ? entry.verificationPlan : [],
     })),
     nextActions: includeRecommendations
-      ? [
-        '优先选择 readiness=readyToExtract 且已有测试覆盖的 slice 做小步拆分，避免直接重写整个大组件。',
-        '每次拆分都要先确认 safeSeam，不跨越 SQL 执行、事务、连接密钥或数据库方言边界。',
-        '拆分后至少运行对应组件测试、相关 utils 测试和 npm --prefix frontend run build。',
-        '涉及可见 UI 的拆分需要用浏览器打开真实页面做一次冒烟验证。',
-      ]
+      ? NEXT_ACTIONS.map((item) => translateText(translate, item))
       : [],
   };
 };

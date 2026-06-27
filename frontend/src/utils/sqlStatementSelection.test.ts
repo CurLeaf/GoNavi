@@ -128,6 +128,312 @@ describe('sqlStatementSelection', () => {
     });
   });
 
+  it('skips standalone SQL*Plus slash delimiters after Oracle CREATE PROCEDURE definitions', () => {
+    const sql = [
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_new(',
+      '  p_sourceid IN VARCHAR2',
+      ') IS',
+      '  v_memcardno VARCHAR2(40);',
+      '  v_ecnt NUMBER;',
+      '  CURSOR cur_ware IS',
+      '    SELECT d.goodsid, d.goodsqty',
+      '    FROM t_order_d d',
+      '    WHERE d.sourceid = p_sourceid;',
+      'BEGIN',
+      '  FOR row_ware IN cur_ware LOOP',
+      '    v_ecnt := row_ware.goodsqty;',
+      '  END LOOP;',
+      'END;',
+      '/',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_new(',
+        '  p_sourceid IN VARCHAR2',
+        ') IS',
+        '  v_memcardno VARCHAR2(40);',
+        '  v_ecnt NUMBER;',
+        '  CURSOR cur_ware IS',
+        '    SELECT d.goodsid, d.goodsqty',
+        '    FROM t_order_d d',
+        '    WHERE d.sourceid = p_sourceid;',
+        'BEGIN',
+        '  FOR row_ware IN cur_ware LOOP',
+        '    v_ecnt := row_ware.goodsqty;',
+        '  END LOOP;',
+        'END;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('v_memcardno'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+  });
+
+  it('keeps Oracle CREATE PROCEDURE cursor CASE expressions as one executable statement', () => {
+    const sql = [
+      'CREATE OR REPLACE PROCEDURE proc_accept_to_add(',
+      '  p_acceptno IN t_accept_h.acceptno%TYPE',
+      ') IS',
+      '  CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS',
+      '    SELECT si.compid, si.batid, si.wareid',
+      '    FROM t_store_i si',
+      '    ORDER BY CASE',
+      "      WHEN p_ind = '1' THEN",
+      "        to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))",
+      "      WHEN p_ind = '2' THEN",
+      "        lpad(to_char(floor(si.wareqty)), 10, '0')",
+      '      ELSE',
+      '        to_char(si.batid)',
+      '    END,si.batid;',
+      'BEGIN',
+      '  NULL;',
+      'END;',
+      '/',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'CREATE OR REPLACE PROCEDURE proc_accept_to_add(',
+        '  p_acceptno IN t_accept_h.acceptno%TYPE',
+        ') IS',
+        '  CURSOR cur_store_same(p_ind s_sys_ini.inipara%TYPE) IS',
+        '    SELECT si.compid, si.batid, si.wareid',
+        '    FROM t_store_i si',
+        '    ORDER BY CASE',
+        "      WHEN p_ind = '1' THEN",
+        "        to_char(si.invalidate - to_date('19700101', 'yyyymmdd'))",
+        "      WHEN p_ind = '2' THEN",
+        "        lpad(to_char(floor(si.wareqty)), 10, '0')",
+        '      ELSE',
+        '        to_char(si.batid)',
+        '    END,si.batid;',
+        'BEGIN',
+        '  NULL;',
+        'END;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('ORDER BY CASE'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+    expect(resolveExecutableSql(sql, sql.indexOf('NULL'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+  });
+
+  it('skips SQL*Plus slash delimiter comments after named Oracle procedure endings', () => {
+    const sql = [
+      '-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1',
+      '-- 请确认语法兼容当前数据库后执行',
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+      '  p_sourceid IN VARCHAR2,',
+      '  p_msg_out OUT NVARCHAR2',
+      ') AS',
+      '  v_saleno VARCHAR2(40);',
+      '  v_ecnt NUMBER;',
+      'BEGIN',
+      '  SELECT COUNT(*) INTO v_ecnt FROM dual;',
+      "  p_msg_out := 'OK';",
+      'EXCEPTION',
+      '  WHEN OTHERS THEN',
+      '    p_msg_out := SQLERRM;',
+      'END cproc_tzhssr_order2sale_A1;',
+      '/ -- SQLPlus delimiter from PL/SQL tools',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        '-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1',
+        '-- 请确认语法兼容当前数据库后执行',
+        'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+        '  p_sourceid IN VARCHAR2,',
+        '  p_msg_out OUT NVARCHAR2',
+        ') AS',
+        '  v_saleno VARCHAR2(40);',
+        '  v_ecnt NUMBER;',
+        'BEGIN',
+        '  SELECT COUNT(*) INTO v_ecnt FROM dual;',
+        "  p_msg_out := 'OK';",
+        'EXCEPTION',
+        '  WHEN OTHERS THEN',
+        '    p_msg_out := SQLERRM;',
+        'END cproc_tzhssr_order2sale_A1;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('CREATE OR REPLACE'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+    expect(resolveExecutableSql(sql, sql.indexOf('p_msg_out := SQLERRM'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+  });
+
+  it('keeps large Oracle procedures intact when the cursor is in the exception tail', () => {
+    const sql = [
+      '-- 修改函数/存储过程：H2.cproc_tzhssr_order2sale_A1',
+      '-- 请确认语法兼容当前数据库后执行',
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+      '  p_sourceid IN VARCHAR2,',
+      '  p_msg_out OUT NVARCHAR2',
+      ') AS',
+      '  v_ecnt NUMBER;',
+      '  CURSOR cur_ware IS',
+      '    SELECT d.goodsid, d.goodsqty',
+      '    FROM t_order_d d',
+      '    ORDER BY CASE',
+      "      WHEN d.goodsqty > 0 THEN '1'",
+      "      ELSE '2'",
+      '    END, d.goodsid;',
+      'BEGIN',
+      '  FOR row_ware IN cur_ware LOOP',
+      '    IF row_ware.goodsqty > 0 THEN',
+      '      BEGIN',
+      '        SELECT COUNT(*) INTO v_ecnt FROM dual;',
+      '      EXCEPTION',
+      '        WHEN no_data_found THEN',
+      '          v_ecnt := 0;',
+      '      END;',
+      '    ELSE',
+      '      BEGIN',
+      '        v_ecnt := 0;',
+      '      END;',
+      '    END IF;',
+      '  END LOOP;',
+      "  p_msg_out := '';",
+      'EXCEPTION',
+      '  WHEN OTHERS THEN',
+      "    p_msg_out := substr('订单核销失败，错误信息：' || SQLERRM || '，错误位置：' ||",
+      '                        dbms_utility.format_error_backtrace, 1, 1000);',
+      'END cproc_tzhssr_order2sale_A1;',
+      '/ -- SQLPlus delimiter from PL/SQL tools',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toHaveLength(2);
+    expect(ranges[0]).toContain('CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1');
+    expect(ranges[0]).toContain('p_msg_out OUT NVARCHAR2');
+    expect(ranges[0]).toContain('EXCEPTION');
+    expect(ranges[0]).toContain('END cproc_tzhssr_order2sale_A1;');
+    expect(ranges[1]).toBe('SELECT 1 FROM dual');
+    expect(resolveExecutableSql(sql, sql.indexOf('p_msg_out := substr'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+    expect(resolveExecutableSql(sql, sql.indexOf('/ -- SQLPlus delimiter'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+    expect(resolveCurrentSqlStatementRange(sql, sql.indexOf('/ -- SQLPlus delimiter'))?.text).toBe(ranges[0]);
+  });
+
+  it('skips optional semicolons after SQL*Plus slash delimiters', () => {
+    const sql = [
+      'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+      '  p_msg_out OUT NVARCHAR2',
+      ') AS',
+      'BEGIN',
+      "  p_msg_out := '';",
+      'EXCEPTION',
+      '  WHEN OTHERS THEN',
+      '    p_msg_out := SQLERRM;',
+      'END cproc_tzhssr_order2sale_A1;',
+      '/;',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'CREATE OR REPLACE PROCEDURE cproc_tzhssr_order2sale_A1(',
+        '  p_msg_out OUT NVARCHAR2',
+        ') AS',
+        'BEGIN',
+        "  p_msg_out := '';",
+        'EXCEPTION',
+        '  WHEN OTHERS THEN',
+        '    p_msg_out := SQLERRM;',
+        'END cproc_tzhssr_order2sale_A1;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('/;'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+  });
+
+  it('keeps Oracle PACKAGE specification and body definitions as complete executable statements', () => {
+    const sql = [
+      'CREATE OR REPLACE PACKAGE pkg_order AS',
+      '  PROCEDURE sync_order(p_id IN NUMBER);',
+      'END pkg_order;',
+      '/',
+      'CREATE OR REPLACE PACKAGE BODY pkg_order AS',
+      '  PROCEDURE sync_order(p_id IN NUMBER) IS',
+      '  BEGIN',
+      '    NULL;',
+      '  END sync_order;',
+      'END pkg_order;',
+      '/ -- SQLPlus delimiter from PL/SQL tools',
+      'SELECT 1 FROM dual;',
+    ].join('\n');
+
+    const ranges = findSqlStatementRanges(sql).map((range) => range.text);
+
+    expect(ranges).toEqual([
+      [
+        'CREATE OR REPLACE PACKAGE pkg_order AS',
+        '  PROCEDURE sync_order(p_id IN NUMBER);',
+        'END pkg_order;',
+      ].join('\n'),
+      [
+        'CREATE OR REPLACE PACKAGE BODY pkg_order AS',
+        '  PROCEDURE sync_order(p_id IN NUMBER) IS',
+        '  BEGIN',
+        '    NULL;',
+        '  END sync_order;',
+        'END pkg_order;',
+      ].join('\n'),
+      'SELECT 1 FROM dual',
+    ]);
+    expect(resolveExecutableSql(sql, sql.indexOf('PROCEDURE sync_order'))).toEqual({
+      sql: ranges[0],
+      source: 'statement',
+    });
+    expect(resolveExecutableSql(sql, sql.indexOf('NULL'))).toEqual({
+      sql: ranges[1],
+      source: 'statement',
+    });
+  });
+
+  it('does not treat a slash operator line as a SQL*Plus delimiter', () => {
+    const sql = 'SELECT 10\n/\n2 FROM dual;';
+
+    expect(findSqlStatementRanges(sql).map((range) => range.text)).toEqual([
+      'SELECT 10\n/\n2 FROM dual',
+    ]);
+  });
+
   it('keeps PostgreSQL dollar-quoted CREATE FUNCTION definitions as one executable statement', () => {
     const sql = [
       'CREATE OR REPLACE FUNCTION refresh_stats() RETURNS void AS $$',

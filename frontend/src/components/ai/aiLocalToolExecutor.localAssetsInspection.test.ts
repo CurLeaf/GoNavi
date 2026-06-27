@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { t as translateCatalog } from '../../i18n/catalog';
 import type { AIToolCall, SavedConnection } from '../../types';
 import { executeLocalAIToolCall } from './aiLocalToolExecutor';
 
@@ -191,7 +192,7 @@ describe('aiLocalToolExecutor local asset inspection tools', () => {
     expect(result.content).toContain('"toolResultChars":21000');
     expect(result.content).toContain('"tableName":"orders"');
     expect(result.content).toContain('"mcpToolCount":1');
-    expect(result.content).toContain('最近工具结果较长');
+    expect(result.content).toContain('Recent tool results are long');
   });
 
   it('returns an ai support bundle with health, message flow, context budget, and remote MCP evidence', async () => {
@@ -295,6 +296,7 @@ describe('aiLocalToolExecutor local asset inspection tools', () => {
         getDatabases: vi.fn(),
         getTables: vi.fn(),
       },
+      translate: (key, params) => translateCatalog('zh-CN', key, params),
     });
 
     expect(result.success).toBe(true);

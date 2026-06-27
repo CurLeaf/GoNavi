@@ -121,4 +121,45 @@ describe('aiLocalToolExecutor inspect_app_health', () => {
     expect(result.content).toContain('inspect_recent_connection_failures');
     expect(readAppLogTail).toHaveBeenCalledWith(120, '');
   });
+
+  it('passes the local translator into inspect_app_health snapshot wrappers', async () => {
+    const result = await executeLocalAIToolCall({
+      toolCall: buildToolCall('inspect_app_health', {
+        lineLimit: 120,
+      }),
+      connections: [buildConnection()],
+      tabs: [],
+      activeTabId: null,
+      mcpTools: [],
+      toolContextMap: new Map(),
+      translate: (key, params) => {
+        const suffix = params
+          ? ` ${Object.entries(params).map(([paramKey, value]) => `${paramKey}=${value}`).join(',')}`
+          : '';
+        return `T:${key}${suffix}`;
+      },
+      runtime: {
+        getDatabases: vi.fn(),
+        getTables: vi.fn(),
+        getAIRuntimeState: vi.fn().mockResolvedValue({
+          activeProviderId: '',
+          providers: [],
+          safetyLevel: 'readonly',
+          contextLevel: 'schema_only',
+        }),
+        getMCPServers: vi.fn().mockResolvedValue([]),
+        getMCPClientInstallStatuses: vi.fn().mockResolvedValue([]),
+        readAppLogTail: vi.fn()
+          .mockResolvedValueOnce({ success: false, message: 'raw log backend failure' })
+          .mockResolvedValueOnce({ success: false, message: 'raw connection log failure' }),
+      },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.content).toContain('T:ai_chat.inspection.app_health.app_log.unread detail=raw log backend failure');
+    expect(result.content).toContain(
+      'T:ai_chat.inspection.app_health.connection_failures.unread detail=raw connection log failure',
+    );
+    expect(result.content).toContain('T:ai_chat.inspection.app_health.warning.no_workspace_tabs');
+  });
 });

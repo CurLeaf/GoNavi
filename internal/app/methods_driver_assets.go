@@ -466,11 +466,11 @@ func downloadOptionalDriverBundleToCache(bundleURL string, onProgress func(downl
 	reader, err := zip.OpenReader(cachePath)
 	if err != nil {
 		_ = os.Remove(cachePath)
-		return "", fmt.Errorf("打开驱动总包失败：%w", err)
+		return "", fmt.Errorf("open driver bundle failed: %w", err)
 	}
 	if err := reader.Close(); err != nil {
 		_ = os.Remove(cachePath)
-		return "", fmt.Errorf("关闭驱动总包失败：%w", err)
+		return "", fmt.Errorf("close driver bundle failed: %w", err)
 	}
 	cleanupOptionalDriverBundleCache(cachePath)
 	return cachePath, nil
@@ -479,7 +479,7 @@ func downloadOptionalDriverBundleToCache(bundleURL string, onProgress func(downl
 func acquireOptionalDriverBundlePath(bundleURL string, onProgress func(downloaded, total int64), onWaiting func()) (string, error) {
 	trimmedURL := strings.TrimSpace(bundleURL)
 	if trimmedURL == "" {
-		return "", fmt.Errorf("驱动总包下载地址为空")
+		return "", newLocalizedDriverBackendError("driver_manager.backend.error.bundle_url_empty", nil, nil)
 	}
 
 	for {
@@ -515,7 +515,7 @@ func acquireOptionalDriverBundlePath(bundleURL string, onProgress func(downloade
 			}
 			optionalDriverBundleDownloadMu.Unlock()
 			if err == nil {
-				err = fmt.Errorf("驱动总包缓存文件不可用")
+				err = fmt.Errorf("driver bundle cache file is unavailable")
 			}
 			return "", err
 		}
@@ -727,7 +727,7 @@ func resolveDriverDisplayName(definition driverDefinition) string {
 	if strings.TrimSpace(definition.Type) != "" {
 		return strings.TrimSpace(definition.Type)
 	}
-	return "未知"
+	return defaultAppText("driver_manager.backend.driver_fallback_name", nil)
 }
 
 func activateOptionalDriverAgentBinary(driverType string, installPath string, runtimePath string) error {
@@ -800,7 +800,7 @@ func copyAgentBinary(sourcePath, targetPath string) error {
 
 func extractZipFileToPath(file *zip.File, targetPath string) error {
 	if file == nil {
-		return fmt.Errorf("zip 条目为空")
+		return newLocalizedDriverBackendError("driver_manager.backend.error.zip_entry_empty", nil, nil)
 	}
 	src, err := file.Open()
 	if err != nil {
@@ -897,13 +897,13 @@ func copyOptionalDriverSupportFilesFromDirectory(driverType string, sourceDir st
 	sourceRoot := strings.TrimSpace(sourceDir)
 	targetRoot := strings.TrimSpace(targetDir)
 	if sourceRoot == "" || targetRoot == "" {
-		return fmt.Errorf("运行时依赖目录为空")
+		return newLocalizedDriverBackendError("driver_manager.backend.error.runtime_dependency_directory_empty", nil, nil)
 	}
 	for _, name := range names {
 		sourcePath := filepath.Join(sourceRoot, name)
 		targetPath := filepath.Join(targetRoot, name)
 		if err := copyOptionalDriverSupportFile(sourcePath, targetPath); err != nil {
-			return fmt.Errorf("复制 %s 失败：%w", name, err)
+			return newLocalizedDriverBackendError("driver_manager.backend.error.copy_runtime_dependency_entry_failed", map[string]any{"name": name}, err)
 		}
 	}
 	return nil
@@ -951,15 +951,15 @@ func extractOptionalDriverSupportFilesFromZip(files []*zip.File, driverType stri
 	}
 	targetRoot := strings.TrimSpace(targetDir)
 	if targetRoot == "" {
-		return fmt.Errorf("运行时依赖目标目录为空")
+		return newLocalizedDriverBackendError("driver_manager.backend.error.runtime_dependency_target_directory_empty", nil, nil)
 	}
 	for _, name := range names {
 		entry := findOptionalDriverSupportFileInZip(files, agentEntryName, name)
 		if entry == nil {
-			return fmt.Errorf("驱动包缺少运行时依赖：%s", name)
+			return newLocalizedDriverBackendError("driver_manager.backend.error.runtime_dependency_entry_missing", map[string]any{"name": name}, nil)
 		}
 		if err := extractZipFileToPath(entry, filepath.Join(targetRoot, name)); err != nil {
-			return fmt.Errorf("解压运行时依赖 %s 失败：%w", name, err)
+			return newLocalizedDriverBackendError("driver_manager.backend.error.extract_runtime_dependency_failed", map[string]any{"name": name}, err)
 		}
 	}
 	return nil
@@ -1041,7 +1041,7 @@ func preloadOptionalDriverPackageSizes(definitions []driverDefinition) map[strin
 func loadReleaseAssetSizesCached(cacheKey string, fetch func() (*githubRelease, error)) (map[string]int64, map[string]bool, error) {
 	key := strings.TrimSpace(cacheKey)
 	if key == "" {
-		return nil, nil, fmt.Errorf("缓存 key 为空")
+		return nil, nil, newLocalizedDriverBackendError("driver_manager.backend.error.cache_key_empty", nil, nil)
 	}
 
 	driverReleaseSizeMu.RLock()
@@ -1150,7 +1150,7 @@ func buildReleaseAssetNameMap(release *githubRelease) map[string]bool {
 
 func fetchDriverBundleAssetSizeIndex(release *githubRelease) (map[string]int64, error) {
 	if release == nil {
-		return nil, fmt.Errorf("release 为空")
+		return nil, newLocalizedDriverBackendError("driver_manager.backend.error.release_empty", nil, nil)
 	}
 	indexURL := ""
 	for _, asset := range release.Assets {
@@ -1160,7 +1160,7 @@ func fetchDriverBundleAssetSizeIndex(release *githubRelease) (map[string]int64, 
 		}
 	}
 	if indexURL == "" {
-		return nil, fmt.Errorf("未找到驱动总包索引资产")
+		return nil, newLocalizedDriverBackendError("driver_manager.backend.error.bundle_index_asset_missing", nil, nil)
 	}
 
 	client := newHTTPClientWithGlobalProxy(driverReleaseAssetSizeProbeTimeout)
@@ -1177,17 +1177,21 @@ func fetchDriverBundleAssetSizeIndex(release *githubRelease) (map[string]int64, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("拉取驱动总包索引失败：HTTP %d", resp.StatusCode)
+		return nil, newLocalizedDriverBackendError(
+			"driver_manager.backend.error.bundle_index_fetch_failed",
+			nil,
+			fmt.Errorf("HTTP %d", resp.StatusCode),
+		)
 	}
 
 	limited := io.LimitReader(resp.Body, driverBundleIndexMaxSize)
 	decoder := json.NewDecoder(limited)
 	var index driverBundleAssetIndex
 	if err := decoder.Decode(&index); err != nil {
-		return nil, fmt.Errorf("解析驱动总包索引失败：%w", err)
+		return nil, newLocalizedDriverBackendError("driver_manager.backend.error.bundle_index_parse_failed", nil, err)
 	}
 	if len(index.Assets) == 0 {
-		return nil, fmt.Errorf("驱动总包索引为空")
+		return nil, newLocalizedDriverBackendError("driver_manager.backend.error.bundle_index_empty", nil, nil)
 	}
 	return index.Assets, nil
 }
@@ -1272,7 +1276,7 @@ func resolveLatestPublishedDriverDownloadURLForVersion(definition driverDefiniti
 func fetchReleaseByTag(tag string) (*githubRelease, error) {
 	tagName := strings.TrimSpace(tag)
 	if tagName == "" {
-		return nil, fmt.Errorf("Tag 为空")
+		return nil, newLocalizedDriverBackendError("driver_manager.backend.error.tag_empty", nil, nil)
 	}
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/%s", driverReleaseRepo, url.PathEscape(tagName))
 	return fetchDriverReleaseByURL(apiURL)
@@ -1281,7 +1285,7 @@ func fetchReleaseByTag(tag string) (*githubRelease, error) {
 func fetchDriverReleaseByURL(apiURL string) (*githubRelease, error) {
 	urlText := strings.TrimSpace(apiURL)
 	if urlText == "" {
-		return nil, fmt.Errorf("API 地址为空")
+		return nil, newLocalizedDriverBackendError("driver_manager.backend.error.api_url_empty", nil, nil)
 	}
 
 	client := newHTTPClientWithGlobalProxy(driverReleaseAssetSizeProbeTimeout)
@@ -1298,7 +1302,11 @@ func fetchDriverReleaseByURL(apiURL string) (*githubRelease, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("拉取 Release 信息失败：HTTP %d", resp.StatusCode)
+		return nil, newLocalizedDriverBackendError(
+			"driver_manager.backend.error.release_info_fetch_failed",
+			nil,
+			fmt.Errorf("HTTP %d", resp.StatusCode),
+		)
 	}
 
 	var release githubRelease
@@ -1308,9 +1316,9 @@ func fetchDriverReleaseByURL(apiURL string) (*githubRelease, error) {
 	return &release, nil
 }
 
-func resolveDriverPackageSizeText(definition driverDefinition, pkg installedDriverPackage, packageMetaExists bool, packageSizeBytesMap map[string]int64) string {
+func resolveDriverPackageSizeText(definition driverDefinition, pkg installedDriverPackage, packageMetaExists bool, packageSizeBytesMap map[string]int64, text func(string, map[string]any) string) string {
 	if definition.BuiltIn {
-		return "内置"
+		return driverManagerLocalizedText(text, "driver_manager.package_size.built_in", nil, "Built-in")
 	}
 
 	normalizedType := normalizeDriverType(definition.Type)
@@ -1325,9 +1333,20 @@ func resolveDriverPackageSizeText(definition driverDefinition, pkg installedDriv
 	}
 
 	if !db.IsOptionalGoDriverBuildIncluded(normalizedType) {
-		return "待发布"
+		return driverManagerLocalizedText(text, "driver_manager.package_size.pending_release", nil, "Pending release")
 	}
 	return "-"
+}
+
+func driverManagerLocalizedText(text func(string, map[string]any) string, key string, params map[string]any, fallback string) string {
+	if text == nil {
+		return fallback
+	}
+	localized := text(key, params)
+	if localized == "" {
+		return fallback
+	}
+	return localized
 }
 
 func readInstalledPackageSizeBytes(pkg installedDriverPackage) int64 {

@@ -9,24 +9,52 @@ import (
 type PromptTemplate string
 
 const (
-	PromptSQLGenerate PromptTemplate = "sql_generate"
-	PromptSQLExplain  PromptTemplate = "sql_explain"
-	PromptSQLOptimize PromptTemplate = "sql_optimize"
-	PromptDataAnalyze PromptTemplate = "data_analyze"
+	PromptSQLGenerate   PromptTemplate = "sql_generate"
+	PromptSQLExplain    PromptTemplate = "sql_explain"
+	PromptSQLOptimize   PromptTemplate = "sql_optimize"
+	PromptDataAnalyze   PromptTemplate = "data_analyze"
 	PromptSchemaInsight PromptTemplate = "schema_insight"
-	PromptGeneralChat PromptTemplate = "general_chat"
+	PromptGeneralChat   PromptTemplate = "general_chat"
 )
 
 // GetBuiltinPrompts 获取所有内置系统提示词集合，用于前端展示
 func GetBuiltinPrompts() map[string]string {
-	return map[string]string{
-		"通用聊天助手": buildGeneralChatPrompt(),
-		"SQL 生成器": buildSQLGeneratePrompt(),
-		"SQL 解析器": buildSQLExplainPrompt(),
-		"SQL 优化器": buildSQLOptimizePrompt(),
-		"数据洞察分析": buildDataAnalyzePrompt(),
-		"表结构审查": buildSchemaInsightPrompt(),
+	return GetBuiltinPromptsWithTitleLookup(nil)
+}
+
+type BuiltinPromptLookup func(key string) string
+type BuiltinPromptTitleLookup = BuiltinPromptLookup
+type DatabaseContextTextLookup func(key string, params map[string]any) string
+
+var builtinPromptEntries = []struct {
+	titleKey      string
+	fallbackTitle string
+	prompt        func(BuiltinPromptLookup) string
+}{
+	{"ai_service.backend.builtin_prompt.title.general_chat", "General chat assistant", buildGeneralChatPromptWithLookup},
+	{"ai_service.backend.builtin_prompt.title.sql_generate", "SQL generator", buildSQLGeneratePromptWithLookup},
+	{"ai_service.backend.builtin_prompt.title.sql_explain", "SQL explainer", buildSQLExplainPromptWithLookup},
+	{"ai_service.backend.builtin_prompt.title.sql_optimize", "SQL optimizer", buildSQLOptimizePromptWithLookup},
+	{"ai_service.backend.builtin_prompt.title.data_analyze", "Data insight analyst", buildDataAnalyzePromptWithLookup},
+	{"ai_service.backend.builtin_prompt.title.schema_insight", "Schema reviewer", buildSchemaInsightPromptWithLookup},
+}
+
+// GetBuiltinPromptsWithTitleLookup returns builtin prompt bodies with localized display titles.
+func GetBuiltinPromptsWithTitleLookup(lookup BuiltinPromptTitleLookup) map[string]string {
+	prompts := make(map[string]string, len(builtinPromptEntries))
+	for _, entry := range builtinPromptEntries {
+		prompts[localizedBuiltinPromptTitle(lookup, entry.titleKey, entry.fallbackTitle)] = entry.prompt(lookup)
 	}
+	return prompts
+}
+
+func localizedBuiltinPromptTitle(lookup BuiltinPromptLookup, key string, fallback string) string {
+	if lookup != nil {
+		if title := strings.TrimSpace(lookup(key)); title != "" && title != key {
+			return title
+		}
+	}
+	return fallback
 }
 
 // BuildSystemPrompt 根据模板类型和上下文构建 System Prompt
@@ -59,31 +87,56 @@ func BuildSystemPrompt(template PromptTemplate, dbCtx *DatabaseContext) string {
 
 // FormatDatabaseContext 将数据库上下文格式化为 LLM 友好的文本
 func FormatDatabaseContext(ctx *DatabaseContext) string {
+	return FormatDatabaseContextWithTextLookup(ctx, nil)
+}
+
+// FormatDatabaseContextWithTextLookup formats database metadata with localized markdown shell text.
+func FormatDatabaseContextWithTextLookup(ctx *DatabaseContext, lookup DatabaseContextTextLookup) string {
 	if ctx == nil || len(ctx.Tables) == 0 {
 		return ""
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("## 当前数据库上下文\n\n数据库类型: %s\n数据库名: %s\n\n",
-		ctx.DatabaseType, ctx.DatabaseName))
+	b.WriteString(databaseContextText(lookup, "ai_service.backend.database_context.title", nil))
+	b.WriteString("\n\n")
+	b.WriteString(databaseContextText(lookup, "ai_service.backend.database_context.database_type", map[string]any{
+		"type": ctx.DatabaseType,
+	}))
+	b.WriteString("\n")
+	b.WriteString(databaseContextText(lookup, "ai_service.backend.database_context.database_name", map[string]any{
+		"name": ctx.DatabaseName,
+	}))
+	b.WriteString("\n\n")
 
-	b.WriteString("### 表结构\n\n")
+	b.WriteString(databaseContextText(lookup, "ai_service.backend.database_context.table_schema", nil))
+	b.WriteString("\n\n")
 	for _, table := range ctx.Tables {
-		b.WriteString(fmt.Sprintf("#### 表: %s", table.Name))
+		b.WriteString(databaseContextText(lookup, "ai_service.backend.database_context.table_heading", map[string]any{
+			"table": table.Name,
+		}))
 		if table.Comment != "" {
 			b.WriteString(fmt.Sprintf(" (%s)", table.Comment))
 		}
 		if table.RowCount > 0 {
-			b.WriteString(fmt.Sprintf(" [约 %d 行]", table.RowCount))
+			b.WriteString(" ")
+			b.WriteString(databaseContextText(lookup, "ai_service.backend.database_context.row_count", map[string]any{
+				"count": fmt.Sprintf("%d", table.RowCount),
+			}))
 		}
 		b.WriteString("\n\n")
 
-		b.WriteString("| 列名 | 类型 | 可空 | 主键 | 备注 |\n")
+		b.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
+			databaseContextText(lookup, "ai_service.backend.database_context.column_name", nil),
+			databaseContextText(lookup, "ai_service.backend.database_context.column_type", nil),
+			databaseContextText(lookup, "ai_service.backend.database_context.column_nullable", nil),
+			databaseContextText(lookup, "ai_service.backend.database_context.column_primary_key", nil),
+			databaseContextText(lookup, "ai_service.backend.database_context.column_comment", nil),
+		))
 		b.WriteString("|------|------|------|------|------|\n")
 		for _, col := range table.Columns {
-			nullable := "否"
+			nullable := databaseContextText(lookup, "ai_service.backend.database_context.value_no", nil)
 			if col.Nullable {
-				nullable = "是"
+				nullable = databaseContextText(lookup, "ai_service.backend.database_context.value_yes", nil)
 			}
 			pk := ""
 			if col.PrimaryKey {
@@ -99,11 +152,12 @@ func FormatDatabaseContext(ctx *DatabaseContext) string {
 		b.WriteString("\n")
 
 		if len(table.Indexes) > 0 {
-			b.WriteString("**索引:**\n")
+			b.WriteString(databaseContextText(lookup, "ai_service.backend.database_context.indexes", nil))
+			b.WriteString("\n")
 			for _, idx := range table.Indexes {
 				unique := ""
 				if idx.Unique {
-					unique = " (唯一)"
+					unique = databaseContextText(lookup, "ai_service.backend.database_context.unique_index", nil)
 				}
 				b.WriteString(fmt.Sprintf("- %s: [%s]%s\n",
 					idx.Name, strings.Join(idx.Columns, ", "), unique))
@@ -112,7 +166,10 @@ func FormatDatabaseContext(ctx *DatabaseContext) string {
 		}
 
 		if len(table.SampleRows) > 0 {
-			b.WriteString(fmt.Sprintf("**采样数据 (%d 行):**\n\n", len(table.SampleRows)))
+			b.WriteString(databaseContextText(lookup, "ai_service.backend.database_context.sample_data", map[string]any{
+				"count": fmt.Sprintf("%d", len(table.SampleRows)),
+			}))
+			b.WriteString("\n\n")
 			if len(table.SampleRows) > 0 {
 				// 使用第一行的 key 作为标题
 				first := table.SampleRows[0]
@@ -137,78 +194,197 @@ func FormatDatabaseContext(ctx *DatabaseContext) string {
 	return b.String()
 }
 
-func buildSQLGeneratePrompt() string {
-	return `你是 GoNavi AI 助手，一位顶级的数据库开发专家和 SQL 查询构建师。根据用户的自然语言需求，生成精准、优雅、高性能的 SQL 查询或 Redis 命令。
+func databaseContextText(lookup DatabaseContextTextLookup, key string, params map[string]any) string {
+	if lookup != nil {
+		if text := lookup(key, params); strings.TrimSpace(text) != "" && text != key {
+			return text
+		}
+	}
+	return defaultDatabaseContextText(key, params)
+}
 
-严苛输出规则：
-1. 首要目标是输出纯粹的代码：始终将代码放在正确语言标识（如 sql 或 bash）的 markdown 代码块中。
-2. 保持精简：不要添加过多的前置闲聊，直奔主题。
-3. 保护生产安全：优先使用参数化查询或安全防范写法避免 SQL 注入。对于未指定条件的 DELETE/UPDATE 语句，必须提出强烈的红线警告！！
-4. 性能至上：对大型查询默认添加合理的 LIMIT 限制（如 LIMIT 100），在 JOIN 和聚合时优先选择最高效的范式写法。
-5. 适度注释：对于存在复杂逻辑嵌套的代码，请在代码块内使用单行注释简要说明思路。`
+func defaultDatabaseContextText(key string, params map[string]any) string {
+	switch key {
+	case "ai_service.backend.database_context.title":
+		return "## Current database context"
+	case "ai_service.backend.database_context.database_type":
+		return fmt.Sprintf("Database type: %s", stringParam(params, "type"))
+	case "ai_service.backend.database_context.database_name":
+		return fmt.Sprintf("Database name: %s", stringParam(params, "name"))
+	case "ai_service.backend.database_context.table_schema":
+		return "### Table structure"
+	case "ai_service.backend.database_context.table_heading":
+		return fmt.Sprintf("#### Table: %s", stringParam(params, "table"))
+	case "ai_service.backend.database_context.row_count":
+		count := stringParam(params, "count")
+		if count == "1" {
+			return "[about 1 row]"
+		}
+		return fmt.Sprintf("[about %s rows]", count)
+	case "ai_service.backend.database_context.column_name":
+		return "Column"
+	case "ai_service.backend.database_context.column_type":
+		return "Type"
+	case "ai_service.backend.database_context.column_nullable":
+		return "Nullable"
+	case "ai_service.backend.database_context.column_primary_key":
+		return "Primary key"
+	case "ai_service.backend.database_context.column_comment":
+		return "Comment"
+	case "ai_service.backend.database_context.value_yes":
+		return "Yes"
+	case "ai_service.backend.database_context.value_no":
+		return "No"
+	case "ai_service.backend.database_context.indexes":
+		return "**Indexes:**"
+	case "ai_service.backend.database_context.unique_index":
+		return " (unique)"
+	case "ai_service.backend.database_context.sample_data":
+		count := stringParam(params, "count")
+		if count == "1" {
+			return "**Sample data (1 row):**"
+		}
+		return fmt.Sprintf("**Sample data (%s rows):**", count)
+	default:
+		return key
+	}
+}
+
+func stringParam(params map[string]any, key string) string {
+	if params == nil {
+		return ""
+	}
+	return fmt.Sprint(params[key])
+}
+
+func buildSQLGeneratePrompt() string {
+	return buildSQLGeneratePromptWithLookup(nil)
+}
+
+func buildSQLGeneratePromptWithLookup(lookup BuiltinPromptLookup) string {
+	return localizedBuiltinPromptBody(lookup, "ai_service.backend.builtin_prompt.body.sql_generate", defaultSQLGeneratePrompt())
+}
+
+func localizedBuiltinPromptBody(lookup BuiltinPromptLookup, key string, fallback string) string {
+	if lookup != nil {
+		if body := strings.TrimSpace(lookup(key)); body != "" && body != key {
+			return body
+		}
+	}
+	return fallback
+}
+
+func defaultSQLGeneratePrompt() string {
+	return `You are the GoNavi AI assistant, an expert database developer and SQL query builder. Generate accurate, elegant, and high-performance SQL queries or Redis commands from the user's natural-language request.
+
+Strict output rules:
+1. Prioritize pure code output: always place code in a markdown code block with the correct language identifier, such as sql or bash.
+2. Stay concise: avoid excessive preamble and get straight to the answer.
+3. Protect production safety: prefer parameterized queries or defensive patterns to prevent SQL injection. For DELETE or UPDATE statements without explicit conditions, raise a strong red-line warning.
+4. Optimize for performance: add reasonable LIMIT clauses for large queries by default, such as LIMIT 100, and prefer efficient patterns for JOIN and aggregation.
+5. Comment only when helpful: for complex nested logic, add brief single-line comments inside the code block to explain the idea.`
 }
 
 func buildSQLExplainPrompt() string {
-	return `你是 GoNavi AI 助手，一位深耕数据库领域多年的资深开发工程师。请用专业、条理分明且深入浅出的开发者语言向用户全盘解析 SQL 语句的底层意图与执行逻辑。
+	return buildSQLExplainPromptWithLookup(nil)
+}
 
-解析规范：
-1. 宏观逻辑解构：用简短的一句话概括这条 SQL 在业务上想要解决什么问题。
-2. 步进逻辑拆解：按执行器真实的执行顺序（FROM -> JOIN -> WHERE -> GROUP BY -> SELECT -> ORDER BY）拆解每个关键子句的作用。
-3. 性能排雷点：敏锐指出可能存在的性能陷阱（如隐式类型转换、没有走索引的函数调用、潜在的笛卡尔积/全表扫描等）。
-4. 严谨的排版：使用列表呈现关键点，重点词汇加粗，确保长文不累赘。`
+func buildSQLExplainPromptWithLookup(lookup BuiltinPromptLookup) string {
+	return localizedBuiltinPromptBody(lookup, "ai_service.backend.builtin_prompt.body.sql_explain", defaultSQLExplainPrompt())
+}
+
+func defaultSQLExplainPrompt() string {
+	return `You are the GoNavi AI assistant, a senior database engineer with deep practical experience. Explain the underlying intent and execution logic of the user's SQL statement in professional, well-structured, and approachable developer language.
+
+Explanation guidelines:
+1. Macro logic breakdown: summarize in one concise sentence what business problem this SQL is trying to solve.
+2. Step-by-step execution walkthrough: break down each key clause in the executor's real order, such as FROM -> JOIN -> WHERE -> GROUP BY -> SELECT -> ORDER BY.
+3. Performance risk scan: point out likely performance traps, such as implicit type conversions, function calls that prevent index usage, possible Cartesian products, or full table scans.
+4. Rigorous formatting: use lists for key points, emphasize important terms in bold, and keep long explanations readable.`
 }
 
 func buildSQLOptimizePrompt() string {
-	return `你是 GoNavi AI 助手，一名曾主导过千万级高并发系统的全栈性能工程专家与高级 DBA。请对用户提供的原始 SQL 进行冷酷、精确的诊断并开出性能重构处方。
+	return buildSQLOptimizePromptWithLookup(nil)
+}
 
-诊断与处方要求：
-1. 性能瓶颈透视：精准点出当前语句死穴（不合理的驱动表、无法利用覆盖索引、多此一举的子查询等）。
-2. 重构版本的 SQL：如果存在性能提升空间，直接向用户展示彻底优化过的高性能写法，并确保逻辑等价性。
-3. 剖析原因：不仅要告诉用户“怎么改”，更要说清楚执行器“为什么这样会更快”。
-4. 索引构建建议：若现有结构无法支撑需求，提出明确的 DDL 级别的 CREATE INDEX 语句建议，并强调其依据（如满足最左前缀匹配）。
-5. 优先级评估：在回答的最后标注本次优化建议的紧迫性（高：阻断级/锁表风险；中：吞吐量瓶颈；低：长效微调）。`
+func buildSQLOptimizePromptWithLookup(lookup BuiltinPromptLookup) string {
+	return localizedBuiltinPromptBody(lookup, "ai_service.backend.builtin_prompt.body.sql_optimize", defaultSQLOptimizePrompt())
+}
+
+func defaultSQLOptimizePrompt() string {
+	return `You are the GoNavi AI assistant, a full-stack performance engineer and senior DBA with experience leading high-concurrency systems at large scale. Diagnose the user's original SQL with cold precision and provide a performance refactoring prescription.
+
+Diagnosis and prescription requirements:
+1. Performance bottleneck scan: identify the statement's weak points precisely, such as an unreasonable driving table, inability to use covering indexes, or unnecessary subqueries.
+2. Refactored SQL: if there is room for performance improvement, show the user a thoroughly optimized high-performance version while preserving logical equivalence.
+3. Explain the cause: do not only say what to change; explain why the executor will run faster after the change.
+4. Index construction advice: when the current structure cannot support the workload, propose concrete DDL-level CREATE INDEX statements and state the basis, such as leftmost-prefix matching.
+5. Priority assessment: end the answer by marking the urgency of the optimization advice, using high for blocking or lock-risk issues, medium for throughput bottlenecks, and low for long-term tuning.`
 }
 
 func buildDataAnalyzePrompt() string {
-	return `你是 GoNavi AI 助手，一位具备极致敏锐商业嗅觉的高级数据分析专家。你将审视用户通过查询得到的数据样本，从中提炼出蕴含的真金白银般的信息。
+	return buildDataAnalyzePromptWithLookup(nil)
+}
 
-洞察目标：
-1. 硬统计：总观数据行数、核心数值指标（极值、平均值、聚合中位数等）的冰冷现实。
-2. 趋势与异动：如果数据带有时间戳，敏锐捕捉其上升或下降趋势；如果有异类离群值，将其高亮标注。
-3. 商业价值挖掘：不能只翻译数据，要在数据的表象上结合你的 AI 见识，给出一条有建设性的、能帮助业务决策层或开发者的业务层行动建议。
-4. 展现格式：你的分析应该是“标题 + 浓缩要点”的极简研报形式，杜绝毫无波澜的流水账。`
+func buildDataAnalyzePromptWithLookup(lookup BuiltinPromptLookup) string {
+	return localizedBuiltinPromptBody(lookup, "ai_service.backend.builtin_prompt.body.data_analyze", defaultDataAnalyzePrompt())
+}
+
+func defaultDataAnalyzePrompt() string {
+	return `You are the GoNavi AI assistant, a senior data analysis expert with sharp business instincts. Review the data sample produced by the user's query and extract the valuable information hidden in it.
+
+Insight goals:
+1. Hard statistics: summarize the overall row count and key numeric metrics, such as extremes, averages, and aggregate medians.
+2. Trends and anomalies: if the data contains timestamps, detect rising or falling trends; if there are outliers, highlight them clearly.
+3. Business value mining: do not merely translate the data. Combine the visible data patterns with AI judgment and give one constructive action suggestion that can help business decision makers or developers.
+4. Presentation format: structure the analysis as a concise mini report with a title and condensed bullet points, and avoid flat, mechanical narration.`
 }
 
 func buildSchemaInsightPrompt() string {
-	return `你是 GoNavi AI 助手，一位统筹数据库宏观生命周期的首席数据库架构师。在这个环节里，你需要对用户提供的数据库表结构执行最严厉的范式与前瞻性审查。
+	return buildSchemaInsightPromptWithLookup(nil)
+}
 
-审查视界：
-1. 规范化博弈：是否存在明显的反三范式设计？这种冗余是否有助于性能（适当的反范式），还是纯粹的设计失误？
-2. 索引健壮性审查：评估主键选择（如自增、UUID 的利弊），是否存在冗余索引阻碍写入？以及是否遗漏了高频的联合索引。
-3. 物理容量前瞻：审视数据类型分配（如使用过大的 VARCHAR、没必要的 BIGINT 等可能带来的空间挥霍）。
-4. 代码级指引：如果存在结构性缺陷，不要只发牢骚，直接给出包含具体优化的 ALTER TABLE 结构修改建议脚本。`
+func buildSchemaInsightPromptWithLookup(lookup BuiltinPromptLookup) string {
+	return localizedBuiltinPromptBody(lookup, "ai_service.backend.builtin_prompt.body.schema_insight", defaultSchemaInsightPrompt())
+}
+
+func defaultSchemaInsightPrompt() string {
+	return `You are the GoNavi AI assistant, a chief database architect responsible for the full database lifecycle. In this mode, perform a strict normalization and forward-looking review of the table structures provided by the user.
+
+Review lens:
+1. Normalization trade-offs: identify obvious denormalized designs and judge whether the redundancy supports performance appropriately or is simply a design flaw.
+2. Index robustness review: assess primary key choices, such as auto-increment keys versus UUIDs, redundant indexes that slow writes, and missing high-frequency composite indexes.
+3. Physical capacity foresight: inspect data type allocation, such as oversized VARCHAR fields or unnecessary BIGINT columns that may waste storage.
+4. Code-level guidance: when structural defects exist, do not only complain. Provide concrete ALTER TABLE improvement scripts where appropriate.`
 }
 
 func buildGeneralChatPrompt() string {
-	return `你是 GoNavi AI 助手，一款深度集成在数据库/缓存客户端（GoNavi）内部的专属智能专家系统。
-你的目标是成为开发者、DBA 和数据科学家最得力的超级外脑，提供专业、精准、具有前瞻性的数据端解决方案。
-
-核心人设与交互基调：
-- 绝对专业：对各流派数据库产品（MySQL、PostgreSQL、DuckDB、Redis）底层机制、执行计划和索引原理有不可动摇的专业判断力。
-- 直击痛点：谢绝套话与无效寒暄，若用户的意图明确，首屏直接给出可以直接粘贴运行的优雅代码。
-- 结构化与可读性：恰到好处地使用 Markdown 标题、加粗和代码块（必须带正确的语言标识 如 sql/json/bash），以工匠精神打磨每一次排版。
-- 零容忍的生产红线：当你察觉用户的 SQL 有潜在灾难风险（比如没有 WHERE 条件的批量更新/删除、可能锁爆生产表的严重慢查询），必须立即触发红色预警提示阻止用户。
-
-你的综合能力版图：
-1. 📝 自然语言驱动：翻译人类意图为精准的查询语句。
-2. 🔍 底层原理解析：剥丝抽茧分析查询背后的执行逻辑与性能隐患。
-3. ⚡ 专家级调优：指出并化解性能瓶颈，给出覆盖全维度的索引调优思路。
-4. 📊 数据洞察炼金：不仅聚合数据，更能从结果集中挖掘商业维度的深度规律。
-5. 🏗️ 架构先知视界：全局审阅表结构设计局限，提出抗数据膨胀级别的架构演进方案。
-
-互动守则：
-- 永远使用专业、具有合作感且充满信心的中文与用户探讨问题。
-- 当被要求提供任何数据库代码时，需结合相关数据库引擎的最佳实践。如果不清楚当前方言版本，请以标准实现为主基调并好心指出版别差异（如 MySQL 8 窗口函数 等）。
-- 绝不轻易拒绝：如果用户要求写 SQL 但并未显式挂载任何表的详细 DDL，请尽最大努力根据对话上下文中带入的【纯表名列表】去推测他要查询哪个表。如果实在无法推断，请温柔且专业地向用户解释目前已知的表有哪些，并询问到底想查哪张表。`
+	return buildGeneralChatPromptWithLookup(nil)
 }
 
+func buildGeneralChatPromptWithLookup(lookup BuiltinPromptLookup) string {
+	return localizedBuiltinPromptBody(lookup, "ai_service.backend.builtin_prompt.body.general_chat", defaultGeneralChatPrompt())
+}
+
+func defaultGeneralChatPrompt() string {
+	return `You are the GoNavi AI assistant, a dedicated expert system deeply integrated into the GoNavi database and cache client.
+Your goal is to be the most useful second brain for developers, DBAs, and data scientists by providing professional, precise, and forward-looking data-side solutions.
+
+Core persona and interaction tone:
+- Professionally grounded: make sound judgments about database products such as MySQL, PostgreSQL, DuckDB, and Redis, including execution plans, indexing, and storage behavior.
+- Direct and practical: avoid empty chatter. When the user's intent is clear, lead with elegant code or steps they can use directly.
+- Structured and readable: use Markdown headings, emphasis, and fenced code blocks with the correct language identifier, such as sql, json, or bash.
+- Production safety first: if a SQL statement may create serious risk, such as DELETE or UPDATE without a WHERE clause or a query that can lock a large production table, raise a clear warning before proceeding.
+
+Capability map:
+1. Natural-language to data operations: translate human intent into accurate queries or commands.
+2. Execution reasoning: explain the logic and performance implications behind queries.
+3. Expert optimization: identify bottlenecks and propose indexing or rewrite strategies.
+4. Data insight: extract meaningful patterns from result sets instead of merely restating rows.
+5. Architecture review: evaluate schema design limitations and suggest evolution paths that can withstand data growth.
+
+Interaction rules:
+- Use professional, collaborative language and adapt to the user's selected interface language.
+- When asked for database code, combine the answer with the relevant engine's best practices. If the exact version is unknown, use a standards-oriented baseline and note important version differences, such as MySQL 8 window functions.
+- Do not refuse too quickly: if the user asks for SQL but no detailed DDL is attached, use the conversation context and any plain table-name list to infer the likely target table. If inference is not possible, explain what is known and ask which table they want to query.`
+}

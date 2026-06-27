@@ -345,6 +345,39 @@ describe('DriverManagerModal i18n', () => {
     expect(source).not.toContain("await installDriverFromLocalPath(row, directoryPath, '目录', { silentToast: true, skipRefresh: true });");
   });
 
+  it('localizes install watchdog and version switch chrome without translating raw driver values', () => {
+    const source = readFileSync(new URL('./DriverManagerModal.tsx', import.meta.url), 'utf8');
+
+    [
+      'driver_manager.message.install_watchdog_timeout',
+      'driver_manager.message.install_failed_fallback',
+      'driver_manager.version.switch_pending',
+      'driver_manager.version.current_fallback',
+      'driver_manager.version.target_fallback',
+      'driver_manager.version.installed_with_version',
+      'driver_manager.version.installed',
+      'driver_manager.version.needs_reinstall_suffix',
+      'driver_manager.action.switch_version',
+    ].forEach((key) => {
+      expect(source).toContain(key);
+    });
+
+    [
+      '仍未完成。后台任务可能仍在下载或构建',
+      '安装 ${row.name} 失败',
+      '当前已安装',
+      '当前版本',
+      '目标版本',
+      '已选择',
+      '点击“切换版本”生效',
+      '已安装',
+      '需重装',
+      '切换版本',
+    ].forEach((legacyCopy) => {
+      expect(source).not.toContain(legacyCopy);
+    });
+  });
+
   it.each([
     ['legacy', 'zh-CN', '驱动管理', '安装所有驱动', '搜索驱动名称/类型（如 DuckDB、clickhouse）', '驱动日志 - ClickHouse', '安装目录：', '驱动可执行文件：', '当前驱动暂无操作日志。'],
     ['v2', 'en-US', 'Driver Manager', 'Install all drivers', 'Search driver name/type (for example DuckDB, clickhouse)', 'Driver Logs - ClickHouse', 'Install directory:', 'Driver executable:', 'This driver has no operation logs yet.'],

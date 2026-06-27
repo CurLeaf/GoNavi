@@ -69,6 +69,7 @@ describe('store appearance persistence', () => {
     expect(appearance.opacity).toBe(0.75);
     expect(appearance.blur).toBe(6);
     expect(appearance.useNativeMacWindowControls).toBe(true);
+    expect(appearance.tableDoubleClickAction).toBe('open-data');
     expect(appearance.v2SidebarSearchMode).toBe('command');
     expect(appearance.v2CommandSearchPersistentFilterEnabled).toBe(false);
     expect(appearance.v2SidebarPersistedFilter).toBe('');
@@ -93,11 +94,13 @@ describe('store appearance persistence', () => {
     useStore.getState().setAppearance({
       showDataTableVerticalBorders: true,
       dataTableDensity: 'compact',
+      tableDoubleClickAction: 'open-design',
     });
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.appearance.showDataTableVerticalBorders).toBe(true);
     expect(persisted.state.appearance.dataTableDensity).toBe('compact');
+    expect(persisted.state.appearance.tableDoubleClickAction).toBe('open-design');
 
     vi.resetModules();
     const reloaded = await importStore();
@@ -105,6 +108,21 @@ describe('store appearance persistence', () => {
 
     expect(appearance.showDataTableVerticalBorders).toBe(true);
     expect(appearance.dataTableDensity).toBe('compact');
+    expect(appearance.tableDoubleClickAction).toBe('open-design');
+  });
+
+  it('sanitizes invalid table double-click appearance settings', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        appearance: {
+          tableDoubleClickAction: 'open-random',
+        },
+      },
+      version: 10,
+    }));
+
+    const { useStore } = await importStore();
+    expect(useStore.getState().appearance.tableDoubleClickAction).toBe('open-data');
   });
 
   it('persists language preference and sanitizes unsupported persisted values', async () => {
@@ -998,6 +1016,117 @@ describe('store appearance persistence', () => {
       reloadedI18n.t('sidebar.sql_directory.default_name'),
       'migrations',
     ]);
+  });
+
+  it('uses localized store fallback names when restoring persisted records', async () => {
+    const i18n = await import('./i18n');
+    i18n.setCurrentLanguage('en-US');
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        connectionTags: [
+          {
+            id: 'tag-empty-name',
+            name: '   ',
+            connectionIds: [],
+          },
+        ],
+        sqlSnippets: [
+          {
+            id: 'snippet-empty-name',
+            prefix: 'demo',
+            name: '   ',
+            body: 'select 1;',
+            isBuiltin: false,
+            createdAt: 1,
+          },
+        ],
+        tabs: [
+          {
+            id: 'query-empty-title',
+            title: '   ',
+            type: 'query',
+            query: 'select 1;',
+          },
+        ],
+        tableExportHistories: {
+          'conn-1::main::users': [
+            {
+              jobId: 'job-1',
+              targetName: '   ',
+              startedAt: 1,
+              finishedAt: 0,
+              format: 'csv',
+              scope: 'table',
+              scopeLabel: 'Table',
+              strategyLabel: 'Export',
+              status: 'running',
+              stage: '',
+              current: 0,
+              total: 0,
+              totalRowsKnown: false,
+              filePath: '',
+              message: '',
+            },
+          ],
+        },
+        activeTabId: 'query-empty-title',
+      },
+      version: 11,
+    }));
+
+    vi.resetModules();
+    const reloadedI18n = await import('./i18n');
+    reloadedI18n.setCurrentLanguage('en-US');
+    const reloaded = await importStore();
+
+    expect(reloaded.useStore.getState().connectionTags[0]?.name).toBe(
+      reloadedI18n.t('store.fallback.connection_tag_name', { index: 1 }),
+    );
+    expect(reloaded.useStore.getState().sqlSnippets[0]?.name).toBe(
+      reloadedI18n.t('store.fallback.sql_snippet_name', { index: 1 }),
+    );
+    expect(reloaded.useStore.getState().tabs[0]?.title).toBe(
+      reloadedI18n.t('sidebar.tab.new_query'),
+    );
+    expect(
+      reloaded.useStore.getState().tableExportHistories['conn-1::main::users']?.[0]?.targetName,
+    ).toBe(
+      reloadedI18n.t('data_export.progress.value.target_fallback'),
+    );
+  });
+
+  it('uses localized AI session fallback titles for non-user first messages', async () => {
+    vi.useFakeTimers();
+    try {
+      const i18n = await import('./i18n');
+      i18n.setCurrentLanguage('ja-JP');
+      const { useStore } = await importStore();
+
+      useStore.getState().addAIChatMessage('assistant-first', {
+        id: 'message-1',
+        role: 'assistant',
+        content: '',
+        timestamp: 1,
+      });
+
+      expect(useStore.getState().aiChatSessions[0]?.title).toBe(
+        i18n.t('ai_chat.panel.session.default_title'),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps store fallback titles out of production source literals', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('./store.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('`连接-${index + 1}`');
+    expect(source).not.toContain('`标签-${index + 1}`');
+    expect(source).not.toContain('`片段-${index + 1}`');
+    expect(source).not.toContain('"未命名对象"');
+    expect(source).not.toContain('"新建查询"');
+    expect(source).not.toContain('"新的对话"');
   });
 
   it('persists open query tab drafts and restores them after reload', async () => {

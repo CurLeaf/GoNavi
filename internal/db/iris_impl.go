@@ -139,7 +139,7 @@ func (i *IrisDB) Connect(config connection.ConnectionConfig) error {
 
 	db, err := sql.Open("iris", i.getDSN(runConfig))
 	if err != nil {
-		return fmt.Errorf("打开数据库连接失败：%w", err)
+		return wrapDatabaseConnectionOpenError(err)
 	}
 	configureSQLConnectionPool(db, "iris")
 	i.conn = db
@@ -147,7 +147,7 @@ func (i *IrisDB) Connect(config connection.ConnectionConfig) error {
 	if err := i.Ping(); err != nil {
 		_ = db.Close()
 		i.conn = nil
-		return fmt.Errorf("连接建立后验证失败：%w", err)
+		return wrapDatabaseConnectionVerifyError(err)
 	}
 	cleanupOnFailure = false
 	return nil
@@ -490,7 +490,7 @@ func (i *IrisDB) ApplyChanges(tableName string, changes connection.ChangeSet) er
 		if err != nil {
 			return fmt.Errorf("删除失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "删除"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionDelete); err != nil {
 			return err
 		}
 	}
@@ -507,7 +507,7 @@ func (i *IrisDB) ApplyChanges(tableName string, changes connection.ChangeSet) er
 		if err != nil {
 			return fmt.Errorf("更新失败：%v", err)
 		}
-		if err := requireSingleRowAffected(res, "更新"); err != nil {
+		if err := requireSingleRowAffected(res, rowMutationActionUpdate); err != nil {
 			return err
 		}
 	}
@@ -547,13 +547,13 @@ func buildIRISInfoSchemaWhereQuery(table string, ref irisTableRef) string {
 func parseIRISTableRef(defaultSchema, raw string) (irisTableRef, error) {
 	text := strings.TrimSpace(raw)
 	if text == "" {
-		return irisTableRef{}, fmt.Errorf("表名不能为空")
+		return irisTableRef{}, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 	}
 	if schemaPart, tablePart, ok := splitIRISTablePath(text); ok {
 		schema := cleanIRISIdentifier(schemaPart)
 		table := cleanIRISIdentifier(tablePart)
 		if table == "" {
-			return irisTableRef{}, fmt.Errorf("表名不能为空")
+			return irisTableRef{}, localizedDatabaseRuntimeError("db.backend.error.table_name_required", nil)
 		}
 		return irisTableRef{Schema: schema, Table: table}, nil
 	}

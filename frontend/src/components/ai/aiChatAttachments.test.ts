@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { strToU8, zipSync } from 'fflate';
 import {
@@ -12,7 +13,115 @@ const makeFile = (parts: BlobPart[], name: string, type: string): File => {
   return Object.assign(blob, { name, lastModified: 0 }) as File;
 };
 
+const source = readFileSync(new URL('./aiChatAttachments.ts', import.meta.url), 'utf8');
+
+const translateAttachmentWarning = (
+  key: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+): string => ({
+  'ai_chat.input.attachment.excel.worksheet_header': `[Worksheet: ${params?.sheetName}]`,
+  'ai_chat.input.attachment.kind.text': 'Text',
+  'ai_chat.input.attachment.kind.markdown': 'Markdown',
+  'ai_chat.input.attachment.kind.pdf': 'PDF',
+  'ai_chat.input.attachment.kind.word': 'Word',
+  'ai_chat.input.attachment.kind.excel': 'Excel',
+  'ai_chat.input.attachment.kind.document': 'File',
+  'ai_chat.input.attachment.warning.pdf_partial_text': 'PDF used lightweight text extraction; scanned or compressed-font content may not be fully readable.',
+  'ai_chat.input.attachment.warning.pdf_no_text': 'No readable text was extracted from the PDF; if it is scanned or uses complex encoding, copy the body before sending.',
+  'ai_chat.input.attachment.warning.legacy_office_partial_text': 'Legacy Office binary files only use lightweight text snippet extraction; convert to docx/xlsx before uploading for more complete content.',
+  'ai_chat.input.attachment.warning.too_large': `File exceeds ${params?.size}; file metadata was attached but the body was not read.`,
+  'ai_chat.input.attachment.warning.unsupported_type': 'This file type was attached, but body text was not extracted yet; use markdown, txt, docx, xlsx, or pdf if the model needs the content.',
+  'ai_chat.input.attachment.warning.extract_failed': `Attachment body extraction failed: ${params?.detail}`,
+  'ai_chat.input.attachment.prompt.content_truncated': '[Attachment body truncated]',
+  'ai_chat.input.attachment.prompt.heading': `### Attachment ${params?.index}: ${params?.name}`,
+  'ai_chat.input.attachment.prompt.kind': `- Type: ${params?.kind}`,
+  'ai_chat.input.attachment.prompt.mime': `- MIME: ${params?.mimeType}`,
+  'ai_chat.input.attachment.prompt.size': `- Size: ${params?.size}`,
+  'ai_chat.input.attachment.prompt.extract_warning': `- Extraction note: ${params?.message}`,
+  'ai_chat.input.attachment.prompt.text_truncated': '- Extraction note: Body text was truncated before sending.',
+  'ai_chat.input.attachment.prompt.no_text': 'No readable attachment body was extracted.',
+  'ai_chat.input.attachment.prompt.default_user_content': 'Continue based on the following attachment content.',
+  'ai_chat.input.attachment.prompt.wrapper_start': '<User Uploaded Attachments>',
+  'ai_chat.input.attachment.prompt.wrapper_end': '</User Uploaded Attachments>',
+}[key] || key);
+
 describe('aiChatAttachments', () => {
+  it('uses i18n keys instead of legacy Chinese PDF and legacy Office warnings', () => {
+    expect(source).toContain('ai_chat.input.attachment.excel.worksheet_header');
+    expect(source).toContain('ai_chat.input.attachment.warning.pdf_partial_text');
+    expect(source).toContain('ai_chat.input.attachment.warning.pdf_no_text');
+    expect(source).toContain('ai_chat.input.attachment.warning.legacy_office_partial_text');
+    expect(source).toContain('ai_chat.input.attachment.warning.too_large');
+    expect(source).toContain('ai_chat.input.attachment.warning.unsupported_type');
+    expect(source).toContain('ai_chat.input.attachment.warning.extract_failed');
+    expect(source).toContain('ai_chat.input.attachment.prompt.heading');
+    expect(source).toContain('ai_chat.input.attachment.prompt.kind');
+    expect(source).toContain('ai_chat.input.attachment.prompt.mime');
+    expect(source).toContain('ai_chat.input.attachment.prompt.size');
+    expect(source).toContain('ai_chat.input.attachment.prompt.extract_warning');
+    expect(source).toContain('ai_chat.input.attachment.prompt.text_truncated');
+    expect(source).toContain('ai_chat.input.attachment.prompt.no_text');
+    expect(source).toContain('ai_chat.input.attachment.prompt.default_user_content');
+    expect(source).toContain('ai_chat.input.attachment.prompt.wrapper_start');
+    expect(source).toContain('ai_chat.input.attachment.prompt.wrapper_end');
+    expect(source).not.toContain('PDF 已使用轻量文本提取');
+    expect(source).not.toContain('未从 PDF 中提取到可读文本');
+    expect(source).not.toContain('旧版 Office 二进制格式仅做轻量文本片段提取');
+    expect(source).not.toContain('文件超过 ');
+    expect(source).not.toContain('当前文件类型已附加，但暂未提取正文');
+    expect(source).not.toContain('附件正文提取失败：');
+    expect(source).not.toContain('[工作表: ');
+    expect(source).not.toContain('读取文件失败');
+    expect(source).not.toContain('[附件正文过长，已截断]');
+    expect(source).not.toContain('### 附件 ');
+    expect(source).not.toContain('- 类型: ');
+    expect(source).not.toContain('- 大小: ');
+    expect(source).not.toContain('- 提取说明: ');
+    expect(source).not.toContain('未提取到可发送的附件正文。');
+    expect(source).not.toContain('请根据以下附件内容继续处理。');
+    expect(source).not.toContain('<用户上传附件>');
+    expect(source).not.toContain('</用户上传附件>');
+  });
+
+  it('keeps attachment prompt and worksheet keys present in all six catalogs', () => {
+    const catalogs = [
+      '../../../../shared/i18n/zh-CN.json',
+      '../../../../shared/i18n/zh-TW.json',
+      '../../../../shared/i18n/en-US.json',
+      '../../../../shared/i18n/ja-JP.json',
+      '../../../../shared/i18n/de-DE.json',
+      '../../../../shared/i18n/ru-RU.json',
+    ].map((path) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')));
+
+    const requiredKeys = [
+      'ai_chat.input.attachment.excel.worksheet_header',
+      'ai_chat.input.attachment.kind.markdown',
+      'ai_chat.input.attachment.kind.pdf',
+      'ai_chat.input.attachment.kind.word',
+      'ai_chat.input.attachment.kind.excel',
+      'ai_chat.input.attachment.kind.document',
+      'ai_chat.input.attachment.prompt.content_truncated',
+      'ai_chat.input.attachment.prompt.heading',
+      'ai_chat.input.attachment.prompt.kind',
+      'ai_chat.input.attachment.prompt.mime',
+      'ai_chat.input.attachment.prompt.size',
+      'ai_chat.input.attachment.prompt.extract_warning',
+      'ai_chat.input.attachment.prompt.text_truncated',
+      'ai_chat.input.attachment.prompt.no_text',
+      'ai_chat.input.attachment.prompt.default_user_content',
+      'ai_chat.input.attachment.prompt.wrapper_start',
+      'ai_chat.input.attachment.prompt.wrapper_end',
+      'ai_chat.input.attachment.message.warning',
+      'ai_chat.input.attachment.message.read_failed',
+    ];
+
+    for (const catalog of catalogs) {
+      for (const key of requiredKeys) {
+        expect(catalog[key]).toBeTruthy();
+      }
+    }
+  });
+
   it('extracts markdown text so it can be sent to AI', async () => {
     const attachment = await createAIChatAttachmentFromFile(makeFile(['# Report\n\nhello'], 'report.md', 'text/markdown'));
 
@@ -37,19 +146,84 @@ describe('aiChatAttachments', () => {
       'xl/sharedStrings.xml': strToU8('<sst><si><t>姓名</t></si><si><t>张三</t></si></sst>'),
       'xl/worksheets/sheet1.xml': strToU8('<worksheet><sheetData><row><c t="s"><v>0</v></c><c><v>100</v></c></row><row><c t="s"><v>1</v></c><c><v>88</v></c></row></sheetData></worksheet>'),
     });
-    const attachment = await createAIChatAttachmentFromFile(makeFile([bytes], 'score.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
+    const attachment = await createAIChatAttachmentFromFile(
+      makeFile([bytes], 'score.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+      translateAttachmentWarning,
+    );
 
     expect(attachment.kind).toBe('excel');
+    expect(attachment.text).toContain('[Worksheet: sheet1]');
     expect(attachment.text).toContain('姓名\t100');
     expect(attachment.text).toContain('张三\t88');
   });
 
   it('extracts lightweight PDF literal text and keeps a warning about limitations', async () => {
-    const attachment = await createAIChatAttachmentFromFile(makeFile(['%PDF-1.4\nBT (Invoice total 42) Tj ET\n%%EOF'], 'invoice.pdf', 'application/pdf'));
+    const attachment = await createAIChatAttachmentFromFile(
+      makeFile(['%PDF-1.4\nBT (Invoice total 42) Tj ET\n%%EOF'], 'invoice.pdf', 'application/pdf'),
+      translateAttachmentWarning,
+    );
 
     expect(attachment.kind).toBe('pdf');
     expect(attachment.text).toContain('Invoice total 42');
-    expect(attachment.extractWarning).toContain('轻量文本提取');
+    expect(attachment.extractWarning).toBe('PDF used lightweight text extraction; scanned or compressed-font content may not be fully readable.');
+  });
+
+  it('returns a localized fallback warning when a PDF yields no readable text', async () => {
+    const attachment = await createAIChatAttachmentFromFile(
+      makeFile([new Uint8Array([0x00, 0x01, 0x02, 0x03])], 'scan.pdf', 'application/pdf'),
+      translateAttachmentWarning,
+    );
+
+    expect(attachment.kind).toBe('pdf');
+    expect(attachment.text).toBe('');
+    expect(attachment.extractWarning).toBe('No readable text was extracted from the PDF; if it is scanned or uses complex encoding, copy the body before sending.');
+  });
+
+  it('extracts lightweight legacy Office text and keeps a localized warning about the limited result', async () => {
+    const attachment = await createAIChatAttachmentFromFile(
+      makeFile(['Legacy DOC Budget 2026 forecast'], 'budget.doc', 'application/msword'),
+      translateAttachmentWarning,
+    );
+
+    expect(attachment.kind).toBe('word');
+    expect(attachment.text).toContain('Legacy DOC Budget 2026 forecast');
+    expect(attachment.extractWarning).toBe('Legacy Office binary files only use lightweight text snippet extraction; convert to docx/xlsx before uploading for more complete content.');
+  });
+
+  it('returns a localized warning when the file exceeds the readable size limit', async () => {
+    const oversized = new Uint8Array(15 * 1024 * 1024 + 1);
+    const attachment = await createAIChatAttachmentFromFile(
+      makeFile([oversized], 'oversized.txt', 'text/plain'),
+      translateAttachmentWarning,
+    );
+
+    expect(attachment.kind).toBe('text');
+    expect(attachment.extractWarning).toBe('File exceeds 15.0 MB; file metadata was attached but the body was not read.');
+    expect(attachment.text).toBeUndefined();
+  });
+
+  it('returns a localized warning for attached file types without body extraction support yet', async () => {
+    const attachment = await createAIChatAttachmentFromFile(
+      makeFile([new Uint8Array([0x01, 0x02, 0x03])], 'archive.bin', 'application/octet-stream'),
+      translateAttachmentWarning,
+    );
+
+    expect(attachment.kind).toBe('document');
+    expect(attachment.extractWarning).toBe('This file type was attached, but body text was not extracted yet; use markdown, txt, docx, xlsx, or pdf if the model needs the content.');
+    expect(attachment.text).toBeUndefined();
+  });
+
+  it('returns a localized extraction failure wrapper and preserves raw detail', async () => {
+    const brokenFile = makeFile([], 'broken.txt', 'text/plain');
+    brokenFile.text = async () => {
+      throw new Error('disk read failed');
+    };
+
+    const attachment = await createAIChatAttachmentFromFile(brokenFile, translateAttachmentWarning);
+
+    expect(attachment.kind).toBe('text');
+    expect(attachment.extractWarning).toBe('Attachment body extraction failed: disk read failed');
+    expect(attachment.text).toBeUndefined();
   });
 
   it('appends non-image attachments to the upstream user content', () => {
@@ -60,10 +234,10 @@ describe('aiChatAttachments', () => {
       size: 12,
       kind: 'text',
       text: '核心指标下降',
-    }]);
+    }], translateAttachmentWarning as any);
 
     expect(content).toContain('帮我总结');
-    expect(content).toContain('<用户上传附件>');
+    expect(content).toContain('<User Uploaded Attachments>');
     expect(content).toContain('核心指标下降');
   });
 
@@ -77,5 +251,46 @@ describe('aiChatAttachments', () => {
       kind: 'image',
       dataUrl: 'data:image/png;base64,abc',
     }])).toBe('');
+  });
+
+  it('builds localized attachment prompt copy instead of legacy Chinese wrappers', () => {
+    const prompt = buildAIChatAttachmentPromptText([{
+      id: 'att-1',
+      name: 'report.md',
+      mimeType: 'text/markdown',
+      size: 18,
+      kind: 'markdown',
+      text: 'Revenue dropped',
+      textTruncated: true,
+      extractWarning: 'PDF used lightweight text extraction; scanned or compressed-font content may not be fully readable.',
+    }], translateAttachmentWarning as any);
+
+    expect(prompt).toContain('### Attachment 1: report.md');
+    expect(prompt).toContain('- Type: Markdown');
+    expect(prompt).toContain('- MIME: text/markdown');
+    expect(prompt).toContain('- Size: 18 B');
+    expect(prompt).toContain('- Extraction note: PDF used lightweight text extraction; scanned or compressed-font content may not be fully readable.');
+    expect(prompt).toContain('- Extraction note: Body text was truncated before sending.');
+    expect(prompt).not.toContain('### 附件 1');
+    expect(prompt).not.toContain('- 类型: ');
+    expect(prompt).not.toContain('- 提取说明: ');
+  });
+
+  it('uses localized default prompt wrapper and empty-body fallback when translator is provided', () => {
+    const content = appendAIChatAttachmentsToContent('', [{
+      id: 'att-2',
+      name: 'empty.pdf',
+      mimeType: 'application/pdf',
+      size: 10,
+      kind: 'pdf',
+      text: '',
+    }], translateAttachmentWarning as any);
+
+    expect(content).toContain('Continue based on the following attachment content.');
+    expect(content).toContain('<User Uploaded Attachments>');
+    expect(content).toContain('</User Uploaded Attachments>');
+    expect(content).toContain('No readable attachment body was extracted.');
+    expect(content).not.toContain('请根据以下附件内容继续处理。');
+    expect(content).not.toContain('未提取到可发送的附件正文。');
   });
 });

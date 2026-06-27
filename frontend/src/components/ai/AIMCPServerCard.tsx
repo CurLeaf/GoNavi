@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { useOptionalI18n } from '../../i18n/provider';
 import type { OverlayWorkbenchTheme } from '../../utils/overlayWorkbenchTheme';
 import type { AIMCPServerConfig, AIMCPToolDescriptor } from '../../types';
 import { parseMCPCommandDraft } from '../../utils/mcpCommandDraft';
@@ -38,12 +39,13 @@ export const AIMCPServerCard: React.FC<AIMCPServerCardProps> = ({
   onSave,
   onDelete,
 }) => {
+  const i18n = useOptionalI18n();
   const [rawCommandDraft, setRawCommandDraft] = React.useState('');
   const [envDraft, setEnvDraft] = React.useState(() => formatMCPEnvDraft(server.env));
   const launchPreview = buildMCPLaunchPreview(server.command, server.args);
   const parsedCommandDraft = parseMCPCommandDraft(rawCommandDraft);
   const parsedEnvDraft = parseMCPEnvDraft(envDraft);
-  const validation = validateMCPServerDraft(server, parsedEnvDraft);
+  const validation = validateMCPServerDraft(server, parsedEnvDraft, i18n?.t);
 
   React.useEffect(() => {
     setEnvDraft(formatMCPEnvDraft(server.env));

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"GoNavi-Wails/internal/ai"
+	"GoNavi-Wails/shared/i18n"
 )
 
 func TestIsVolcengineCodingPlanProvider_MatchesCodingPlanBaseURL(t *testing.T) {
@@ -69,7 +70,7 @@ func TestFilterFetchedModelsForProvider_DoesNotFilterVolcengineArk(t *testing.T)
 	filtered, err := filterFetchedModelsForProvider(ai.ProviderConfig{
 		Type:    "openai",
 		BaseURL: "https://ark.cn-beijing.volces.com/api/v3",
-	}, rawModels)
+	}, rawModels, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestFilterFetchedModelsForProvider_DoesNotFilterVolcengineArk(t *testing.T)
 
 func TestAIListModels_ReturnsFailureWhenVolcengineCodingPlanModelsAreFilteredEmpty(t *testing.T) {
 	originalFetchModelsFunc := fetchModelsFunc
-	fetchModelsFunc = func(config ai.ProviderConfig) ([]string, error) {
+	fetchModelsFunc = func(config ai.ProviderConfig, localizer *i18n.Localizer) ([]string, error) {
 		return []string{
 			"qwen3-14b-20250429",
 			"wan2-1-14b-t2v-250225",
@@ -91,6 +92,7 @@ func TestAIListModels_ReturnsFailureWhenVolcengineCodingPlanModelsAreFilteredEmp
 	}()
 
 	service := NewService()
+	service.AISetLanguage("zh-CN")
 	service.providers = []ai.ProviderConfig{
 		{
 			ID:      "provider-coding",

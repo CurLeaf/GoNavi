@@ -19,6 +19,7 @@ import {
   opTypeColor,
   formatNumber,
 } from '../../utils/explainTypes'
+import { useI18n } from '../../i18n/provider'
 
 // 执行计划图主组件。
 // 使用 react-flow 渲染扁平节点数组，dagre 自动计算树形布局。
@@ -144,6 +145,7 @@ const ExplainGraphNodeRenderer = memo(function ExplainGraphNodeRenderer({
 }: {
   data: ExplainGraphNodeData
 }) {
+  const { t } = useI18n()
   const { node, isSelected } = data
   const color = opTypeColor(node.opType)
   const hasFullScan = node.flags?.includes('FULL_SCAN')
@@ -168,38 +170,38 @@ const ExplainGraphNodeRenderer = memo(function ExplainGraphNodeRenderer({
       <div style={{ fontWeight: 600, color, marginBottom: 4 }}>{node.opDetail || node.opType}</div>
       {node.table && (
         <div style={{ color: 'var(--gn-text-muted, #495057)', marginBottom: 2 }}>
-          <span style={{ opacity: 0.6 }}>表：</span>
+          <span style={{ opacity: 0.6 }}>{t('sql_analysis.explain_graph.label.table')}</span>
           <code style={{ fontSize: 11 }}>{node.table}</code>
         </div>
       )}
       {node.index && (
         <div style={{ color: 'var(--gn-text-muted, #495057)', marginBottom: 2 }}>
-          <span style={{ opacity: 0.6 }}>索引：</span>
+          <span style={{ opacity: 0.6 }}>{t('sql_analysis.explain_graph.label.index')}</span>
           <code style={{ fontSize: 11 }}>{node.index}</code>
         </div>
       )}
       <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
         {node.estRows !== undefined && node.estRows > 0 && (
           <span style={{ color: 'var(--gn-text-muted, #495057)' }}>
-            估算 <strong>{formatNumber(node.estRows)}</strong>
+            {t('sql_analysis.explain_graph.metric.est_rows')} <strong>{formatNumber(node.estRows)}</strong>
           </span>
         )}
         {node.actualRows !== undefined && node.actualRows > 0 && (
           <span style={{ color: 'var(--gn-text-muted, #495057)' }}>
-            实际 <strong>{formatNumber(node.actualRows)}</strong>
+            {t('sql_analysis.explain_graph.metric.actual_rows')} <strong>{formatNumber(node.actualRows)}</strong>
           </span>
         )}
         {node.cost !== undefined && node.cost > 0 && (
           <span style={{ color: 'var(--gn-text-muted, #495057)' }}>
-            成本 <strong>{node.cost.toFixed(1)}</strong>
+            {t('sql_analysis.explain_graph.metric.cost')} <strong>{node.cost.toFixed(1)}</strong>
           </span>
         )}
       </div>
       {(hasFullScan || hasFilesort || hasTempTable) && (
         <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
-          {hasFullScan && <FlagBadge color="#fa5252" text="全表扫描" />}
-          {hasFilesort && <FlagBadge color="#f08c00" text="额外排序" />}
-          {hasTempTable && <FlagBadge color="#7048e8" text="临时表" />}
+          {hasFullScan && <FlagBadge color="#fa5252" text={t('sql_analysis.explain_graph.flag.full_scan')} />}
+          {hasFilesort && <FlagBadge color="#f08c00" text={t('sql_analysis.explain_graph.flag.filesort')} />}
+          {hasTempTable && <FlagBadge color="#7048e8" text={t('sql_analysis.explain_graph.flag.temp_table')} />}
         </div>
       )}
     </div>

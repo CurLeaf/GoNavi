@@ -56,6 +56,7 @@ import {
   bootstrapSecureConfig,
   finalizeSecurityUpdateStatus,
   mergeSecurityUpdateStatusWithLegacySource,
+  prepareSecureConfigForExternalMCP,
   startSecurityUpdateFromBootstrap,
 } from './utils/secureConfigBootstrap';
 import { bootstrapSavedQueries } from './utils/savedQueryPersistence';
@@ -153,6 +154,13 @@ const detectNavigatorPlatform = (): string => {
   return navigator.userAgent || '';
 };
 
+const readCurrentVisibleViewport = () => ({
+  availWidth: window.screen?.availWidth || window.innerWidth || 0,
+  availHeight: window.screen?.availHeight || window.innerHeight || 0,
+  availLeft: (window.screen as Screen & { availLeft?: number })?.availLeft || 0,
+  availTop: (window.screen as Screen & { availTop?: number })?.availTop || 0,
+});
+
 
 const mergeSavedConnections = (current: SavedConnection[], imported: SavedConnection[]): SavedConnection[] => {
   const merged = new Map<string, SavedConnection>();
@@ -248,6 +256,7 @@ function App() {
   const effectiveSidebarTreeFontSize = sidebarTreeFontSizeFollowsGlobal
       ? effectiveFontSize
       : (sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize) ?? effectiveFontSize);
+  const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';
   const tabDisplaySettings = useMemo(
       () => sanitizeTabDisplaySettings(appearance.tabDisplay),
       [appearance.tabDisplay],
@@ -358,12 +367,12 @@ function App() {
   const [fontFamiliesLoadError, setFontFamiliesLoadError] = useState<string | null>(null);
   const hasLoadedInstalledFontsRef = useRef(false);
   const uiFontOptions = useMemo(
-      () => buildFontFamilyOptions(runtimePlatform, 'ui', installedFontFamilies),
-      [installedFontFamilies, runtimePlatform],
+      () => buildFontFamilyOptions(runtimePlatform, 'ui', installedFontFamilies, t),
+      [installedFontFamilies, runtimePlatform, t],
   );
   const monoFontOptions = useMemo(
-      () => buildFontFamilyOptions(runtimePlatform, 'mono', installedFontFamilies),
-      [installedFontFamilies, runtimePlatform],
+      () => buildFontFamilyOptions(runtimePlatform, 'mono', installedFontFamilies, t),
+      [installedFontFamilies, runtimePlatform, t],
   );
   const linuxCJKFontInstallHint = getLinuxCJKFontInstallHint(runtimePlatform, installedFontFamilies);
   const [isStoreHydrated, setIsStoreHydrated] = useState(() => useStore.persist.hasHydrated());
@@ -390,7 +399,6 @@ function App() {
   const aiPanelVisible = useStore(state => state.aiPanelVisible);
   const toggleAIPanel = useStore(state => state.toggleAIPanel);
   const setAIPanelVisible = useStore(state => state.setAIPanelVisible);
-  const sqlLogCount = useStore(state => state.sqlLogs.length);
   const globalProxyInvalidHintShownRef = React.useRef(false);
   const windowDiagSequenceRef = React.useRef(0);
   const windowDiagLastSignatureRef = React.useRef('');
@@ -562,6 +570,7 @@ function App() {
           try {
               const result = await bootstrapSecureConfig({
                   backend: (window as any).go?.app?.App,
+                  autoStartLegacySecurityUpdate: true,
                   replaceConnections,
                   replaceGlobalProxy,
                   t,
@@ -745,12 +754,7 @@ function App() {
           const bounds = state.windowBounds;
           if (!bounds || bounds.width < 400 || bounds.height < 300) return;
           try {
-              const nextBounds = resolveVisibleStartupWindowBounds(bounds, {
-                  availWidth: window.screen?.availWidth || 0,
-                  availHeight: window.screen?.availHeight || 0,
-                  availLeft: (window.screen as Screen & { availLeft?: number })?.availLeft || 0,
-                  availTop: (window.screen as Screen & { availTop?: number })?.availTop || 0,
-              });
+              const nextBounds = resolveVisibleStartupWindowBounds(bounds, readCurrentVisibleViewport());
               if (
                   nextBounds.x !== bounds.x ||
                   nextBounds.y !== bounds.y ||
@@ -795,6 +799,7 @@ function App() {
       let cancelled = false;
       let hydrated = useStore.persist.hasHydrated();
       let eventSaveTimer: number | null = null;
+      let boundsRepairTimer: number | null = null;
       let lastSaved = '';
 
       const saveWindowState = async () => {
@@ -857,13 +862,79 @@ function App() {
           }, delayMs);
       };
 
+      const repairRuntimeWindowBounds = async () => {
+          if (cancelled || !hydrated) {
+              return;
+          }
+          try {
+              const [isFs, isMax] = await Promise.all([
+                  safeWindowRuntimeCall(() => WindowIsFullscreen(), false),
+                  safeWindowRuntimeCall(() => WindowIsMaximised(), false),
+              ]);
+              if (isFs || isMax) {
+                  return;
+              }
+              const [size, pos] = await Promise.all([
+                  safeWindowRuntimeCall(() => WindowGetSize(), null),
+                  safeWindowRuntimeCall(() => WindowGetPosition(), null),
+              ]);
+              if (!size || !pos) {
+                  return;
+              }
+              const currentBounds = {
+                  width: Math.trunc(Number(size.w || 0)),
+                  height: Math.trunc(Number(size.h || 0)),
+                  x: Math.trunc(Number(pos.x || 0)),
+                  y: Math.trunc(Number(pos.y || 0)),
+              };
+              if (currentBounds.width <= 0 || currentBounds.height <= 0) {
+                  return;
+              }
+              const nextBounds = resolveVisibleStartupWindowBounds(currentBounds, readCurrentVisibleViewport());
+              if (
+                  nextBounds.x === currentBounds.x &&
+                  nextBounds.y === currentBounds.y &&
+                  nextBounds.width === currentBounds.width &&
+                  nextBounds.height === currentBounds.height
+              ) {
+                  return;
+              }
+              void emitWindowDiagnostic('adjust:runtime-window-bounds', {
+                  from: currentBounds,
+                  to: nextBounds,
+              });
+              WindowSetSize(nextBounds.width, nextBounds.height);
+              WindowSetPosition(nextBounds.x, nextBounds.y);
+              lastSaved = `${nextBounds.width},${nextBounds.height},${nextBounds.x},${nextBounds.y}`;
+              useStore.getState().setWindowBounds(nextBounds);
+              window.dispatchEvent(new Event('resize'));
+          } catch {
+              // Wails runtime window APIs are best-effort here.
+          }
+      };
+
+      const scheduleWindowBoundsRepair = (delayMs = 80) => {
+          if (cancelled || !hydrated) {
+              return;
+          }
+          if (boundsRepairTimer !== null) {
+              window.clearTimeout(boundsRepairTimer);
+          }
+          boundsRepairTimer = window.setTimeout(() => {
+              boundsRepairTimer = null;
+              void repairRuntimeWindowBounds();
+          }, delayMs);
+      };
+
       const handleWindowRuntimeChange = () => {
-          scheduleWindowStateSave();
+          scheduleWindowBoundsRepair();
+          scheduleWindowStateSave(260);
       };
 
       const handleVisibilityChange = () => {
           if (document.visibilityState === 'visible') {
-              scheduleWindowStateSave(120);
+              scheduleWindowBoundsRepair();
+              scheduleWindowStateSave(260);
           }
       };
 
@@ -872,6 +943,7 @@ function App() {
       };
 
       if (hydrated) {
+          scheduleWindowBoundsRepair(360);
           scheduleWindowStateSave(320);
       }
       const unsubscribeHydration = useStore.persist.onFinishHydration(() => {
@@ -879,6 +951,7 @@ function App() {
               return;
           }
           hydrated = true;
+          scheduleWindowBoundsRepair(360);
           scheduleWindowStateSave(320);
       });
 
@@ -895,6 +968,9 @@ function App() {
           cancelled = true;
           if (eventSaveTimer !== null) {
               window.clearTimeout(eventSaveTimer);
+          }
+          if (boundsRepairTimer !== null) {
+              window.clearTimeout(boundsRepairTimer);
           }
           window.clearInterval(timer);
           window.removeEventListener('resize', handleWindowRuntimeChange);
@@ -1298,6 +1374,51 @@ function App() {
   const handleStartSecurityUpdate = useCallback(() => {
       void runSecurityUpdateRound('start');
   }, [runSecurityUpdateRound]);
+  const handlePrepareExternalMCPUse = useCallback(async () => {
+      const backendApp = (window as any).go?.app?.App;
+      const result = await prepareSecureConfigForExternalMCP({
+          backend: backendApp,
+          replaceConnections,
+          replaceGlobalProxy,
+          t,
+      });
+      if (result.error) {
+          throw result.error;
+      }
+      if (!result.status) {
+          return;
+      }
+
+      const nextStatus = normalizeSecurityUpdateStatus(result.status);
+      const shouldOpenSettings = nextStatus.overallStatus === 'needs_attention' || nextStatus.overallStatus === 'rolled_back';
+      applySecurityUpdateStatus(nextStatus, {
+          openSettings: shouldOpenSettings,
+          refreshFocus: shouldOpenSettings,
+      });
+
+      if (nextStatus.overallStatus === 'completed') {
+          setSecurityUpdateHasLegacySensitiveItems(false);
+          setSecurityUpdateRawPayload(null);
+          setIsSecurityUpdateSettingsOpen(false);
+          return;
+      }
+
+      const hasConnectionIssue = nextStatus.issues.some((issue) =>
+          issue.scope === 'connection' && issue.status !== 'updated',
+      );
+      if (nextStatus.overallStatus === 'rolled_back' || hasConnectionIssue) {
+          throw new Error(t('app.security_update.message.needs_attention'));
+      }
+      if (nextStatus.overallStatus === 'needs_attention') {
+          void message.warning(t('app.security_update.message.needs_attention'));
+      }
+  }, [
+      applySecurityUpdateStatus,
+      normalizeSecurityUpdateStatus,
+      replaceConnections,
+      replaceGlobalProxy,
+      t,
+  ]);
   const handleRetrySecurityUpdate = useCallback(() => {
       void runSecurityUpdateRound('retry');
   }, [runSecurityUpdateRound]);
@@ -1967,6 +2088,7 @@ function App() {
       setToolCenterBackGroupKey(group);
       setActiveToolCenterGroupKey(group);
       setActiveToolCenterPane({ key, group });
+      setIsToolsModalOpen(true);
   }, []);
   const handleReturnToToolCenter = useCallback((closeChild?: () => void) => {
       const returnGroup = toolCenterBackGroupKey ?? 'config';
@@ -2091,23 +2213,23 @@ function App() {
 
 
   const {
-      handleCloseLogPanel: handleCloseLegacyLogPanel,
+      handleCloseLogPanel: handleCloseAppLogPanel,
       handleLogResizeStart,
-      handleToggleLogPanel: toggleLegacyLogPanel,
+      handleToggleLogPanel: toggleAppLogPanel,
       isLogPanelOpen,
       logGhostRef,
       logPanelHeight,
   } = useAppLogPanelResize();
   const handleToggleLogPanel = useCallback(() => {
       if (isV2Ui) {
-          window.dispatchEvent(new CustomEvent('gonavi:show-sql-execution-log'));
+          window.dispatchEvent(new CustomEvent('gonavi:show-sql-execution-log', { detail: { mode: 'open' } }));
           return;
       }
-      toggleLegacyLogPanel();
-  }, [isV2Ui, toggleLegacyLogPanel]);
+      toggleAppLogPanel();
+  }, [isV2Ui, toggleAppLogPanel]);
   const handleCloseLogPanel = useCallback(() => {
-      handleCloseLegacyLogPanel();
-  }, [handleCloseLegacyLogPanel]);
+      handleCloseAppLogPanel();
+  }, [handleCloseAppLogPanel]);
   
   const handleCreateConnection = useCallback(() => {
       setSecurityUpdateRepairSource(null);
@@ -2472,13 +2594,14 @@ function App() {
 
   useEffect(() => {
       const handleOpenSnippetSettingsEvent = () => {
-          setIsSnippetModalOpen(true);
+          setIsSnippetModalOpen(false);
+          handleOpenToolCenterPane('workspace', 'snippet-settings');
       };
       window.addEventListener('gonavi:open-snippet-settings', handleOpenSnippetSettingsEvent as EventListener);
       return () => {
           window.removeEventListener('gonavi:open-snippet-settings', handleOpenSnippetSettingsEvent as EventListener);
       };
-  }, []);
+  }, [handleOpenToolCenterPane]);
 
   useEffect(() => {
       const handleOpenTabDisplaySettingsEvent = () => {
@@ -2895,7 +3018,6 @@ function App() {
                             onOpenSettings={handleOpenSettingsModal}
                             onToggleAI={toggleAIPanel}
                             onToggleLogPanel={handleToggleLogPanel}
-                            sqlLogCount={sqlLogCount}
                             uiVersion={appearance.uiVersion}
                             onFocusCommandSearch={handleFocusSidebarSearch}
                         />
@@ -3354,11 +3476,8 @@ function App() {
                   <Modal
                     embedded
                     open
-                    title={renderUtilityModalTitle(
-                      <HddOutlined />,
-                      t('app.data_root.title'),
-                      t('app.data_root.description'),
-                    )}
+                    title={null}
+                    closable={false}
                     onCancel={closeToolCenterPane}
                     footer={[
                       <Button key="close" onClick={closeToolCenterPane}>
@@ -3504,11 +3623,8 @@ function App() {
                   <Modal
                     embedded
                     open
-                    title={renderUtilityModalTitle(
-                      <LinkOutlined />,
-                      t('app.shortcuts.title'),
-                      t('app.shortcuts.description'),
-                    )}
+                    title={null}
+                    closable={false}
                     onCancel={() => {
                       setCapturingShortcutAction(null);
                       closeToolCenterPane();
@@ -4049,6 +4165,7 @@ function App() {
             darkMode={darkMode}
             overlayTheme={overlayTheme}
             focusProviderId={focusedAIProviderId}
+            onBeforeExternalMCPUse={handlePrepareExternalMCPUse}
           />
           )}
           <ConnectionPackagePasswordModal
@@ -4114,7 +4231,7 @@ function App() {
                 ) : null,
                 isLatestUpdateDownloaded ? (
                     <Button key="install-direct" type="primary" icon={<DownloadOutlined />} onClick={handleInstallFromProgress}>
-                        {isMacRuntime ? t('app.about.action.open_install_directory') : t('app.about.action.install_update')}
+                        {t('app.about.action.install_update')}
                     </Button>
                 ) : null,
             ].filter(Boolean)}
@@ -4748,6 +4865,21 @@ function App() {
                                           />
                                       </div>
                                       <div>
+                                          <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.data_table.table_double_click_action')}</div>
+                                          <Segmented
+                                              block
+                                              options={[
+                                                  { label: t('app.theme.data_table.table_double_click_action.open_data'), value: 'open-data' },
+                                                  { label: t('app.theme.data_table.table_double_click_action.open_design'), value: 'open-design' },
+                                              ]}
+                                              value={tableDoubleClickAction}
+                                              onChange={(value) => setAppearance({ tableDoubleClickAction: value as 'open-data' | 'open-design' })}
+                                          />
+                                          <div style={{ ...utilityMutedTextStyle, marginTop: 8 }}>
+                                              {t('app.theme.data_table.table_double_click_action_hint')}
+                                          </div>
+                                      </div>
+                                      <div>
                                           <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.data_table.density')}</div>
                                           <Segmented
                                               block
@@ -5111,7 +5243,7 @@ function App() {
               ] : (updateDownloadProgress.status === 'done' ? [
                   <Button key="close" onClick={hideUpdateDownloadProgress}>{t('common.close')}</Button>,
                   <Button key="install" type="primary" onClick={handleInstallFromProgress}>
-                      {isMacRuntime ? t('app.about.action.open_install_directory') : t('app.about.action.install_update')}
+                      {t('app.about.action.install_update')}
                   </Button>
               ] : (updateDownloadProgress.status === 'error' ? [
                   <Button key="close" onClick={hideUpdateDownloadProgress}>{t('common.close')}</Button>

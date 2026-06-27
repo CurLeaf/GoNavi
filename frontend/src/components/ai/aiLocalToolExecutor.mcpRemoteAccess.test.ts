@@ -50,12 +50,23 @@ describe('aiLocalToolExecutor inspect_mcp_remote_access', () => {
           },
         ]),
       },
+      translate: (key, params) => {
+        if (key === 'ai_chat.inspection.mcp_remote.message.with_public_url') {
+          return `translated remote access ${params?.publicUrl}`;
+        }
+        if (key === 'ai_chat.inspection.mcp_remote.security.recommended_bind_address') {
+          return 'translated bind address';
+        }
+        return key;
+      },
     });
 
     expect(result.success).toBe(true);
     expect(result.content).toContain('"mode":"streamable-http"');
     expect(result.content).toContain('"publicUrl":"https://mcp.example.com/gonavi/mcp"');
-    expect(result.content).toContain('Authorization: Bearer <随机token>');
+    expect(result.content).toContain('translated remote access https://mcp.example.com/gonavi/mcp');
+    expect(result.content).toContain('translated bind address');
+    expect(result.content).toContain('Authorization: Bearer <random-token>');
     expect(result.content).toContain('"displayName":"Hermans"');
     expect(result.content).toContain('"cloudAgentNeedsDatabasePassword":false');
   });

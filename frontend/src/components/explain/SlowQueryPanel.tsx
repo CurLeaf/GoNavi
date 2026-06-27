@@ -3,6 +3,7 @@ import { Button, Empty, Modal, Segmented, Spin, Tooltip, Typography, message } f
 import { ReloadOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { ClearSlowQueries, GetSlowQueries } from '../../../wailsjs/go/app/App'
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig'
+import { useI18n } from '../../i18n/provider'
 import type { ConnectionConfig } from '../../types'
 import { formatMs, formatNumber } from '../../utils/explainTypes'
 
@@ -53,6 +54,7 @@ export function SlowQueryPanelContent({
   onPickQuery,
   activeToken,
 }: SlowQueryPanelContentProps) {
+  const { t } = useI18n()
   const [loading, setLoading] = useState(false)
   const [records, setRecords] = useState<SlowQueryRecord[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -64,7 +66,7 @@ export function SlowQueryPanelContent({
     try {
       const result = await GetSlowQueries(buildRpcConnectionConfig(config), dbName, sortBy, 100)
       if (!result.success) {
-        setError(result.message || '加载失败')
+        setError(result.message || t('sql_analysis.slow_query.error.load_failed'))
         setRecords([])
       } else {
         setRecords((result.data as SlowQueryRecord[]) ?? [])
@@ -74,7 +76,7 @@ export function SlowQueryPanelContent({
     } finally {
       setLoading(false)
     }
-  }, [config, dbName, sortBy])
+  }, [config, dbName, sortBy, t])
 
   useEffect(() => {
     if (activeToken === null || activeToken === undefined || activeToken === '') {
@@ -86,12 +88,12 @@ export function SlowQueryPanelContent({
   const handleClear = useCallback(async () => {
     const result = await ClearSlowQueries(buildRpcConnectionConfig(config), dbName)
     if (result.success) {
-      message.success('已清空慢查询历史')
+      message.success(t('sql_analysis.slow_query.message.cleared'))
       setRecords([])
     } else {
-      message.error(result.message || '清空失败')
+      message.error(result.message || t('sql_analysis.slow_query.error.clear_failed'))
     }
-  }, [config, dbName])
+  }, [config, dbName, t])
 
   const handlePick = useCallback(
     (record: SlowQueryRecord) => {
@@ -111,16 +113,16 @@ export function SlowQueryPanelContent({
           value={sortBy}
           onChange={(v) => setSortBy(v as SortBy)}
           options={[
-            { label: '按耗时', value: 'duration' },
-            { label: '按扫描行数', value: 'rowsRead' },
-            { label: '按时间', value: 'recent' },
+            { label: t('sql_analysis.slow_query.sort.duration'), value: 'duration' },
+            { label: t('sql_analysis.slow_query.sort.rows_read'), value: 'rowsRead' },
+            { label: t('sql_analysis.slow_query.sort.recent'), value: 'recent' },
           ]}
         />
         <div style={{ display: 'flex', gap: 8 }}>
-          <Tooltip title="刷新">
+          <Tooltip title={t('common.refresh')}>
             <Button icon={<ReloadOutlined />} onClick={() => void reload()} loading={loading} />
           </Tooltip>
-          <Tooltip title="清空当前连接的历史">
+          <Tooltip title={t('sql_analysis.slow_query.tooltip.clear_current')}>
             <Button danger icon={<DeleteOutlined />} onClick={() => void handleClear()} disabled={records.length === 0} />
           </Tooltip>
         </div>
@@ -128,19 +130,19 @@ export function SlowQueryPanelContent({
 
       {loading && (
         <div style={{ textAlign: 'center', padding: '40px 0' }}>
-          <Spin tip="加载慢查询历史..." />
+          <Spin tip={t('sql_analysis.slow_query.loading')} />
         </div>
       )}
 
       {error && (
         <Paragraph type="danger" style={{ padding: 16 }}>
-          <Text strong>加载失败：</Text>
+          <Text strong>{t('sql_analysis.slow_query.error.title')}</Text>
           {error}
         </Paragraph>
       )}
 
       {!loading && !error && sorted.length === 0 && (
-        <Empty description="暂无慢查询记录（阈值 500ms）" style={{ padding: '40px 0' }} />
+        <Empty description={t('sql_analysis.slow_query.empty', { threshold: 500 })} style={{ padding: '40px 0' }} />
       )}
 
       {!loading && !error && sorted.length > 0 && (
@@ -155,6 +157,7 @@ export function SlowQueryPanelContent({
 }
 
 export default function SlowQueryPanel({ open, onClose, config, dbName, onPickQuery }: SlowQueryPanelProps) {
+  const { t } = useI18n()
   return (
     <Modal
       open={open}
@@ -165,9 +168,9 @@ export default function SlowQueryPanel({ open, onClose, config, dbName, onPickQu
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <ThunderboltOutlined style={{ color: '#fa5252' }} />
-          <Title level={5} style={{ margin: 0 }}>慢 SQL 历史</Title>
+          <Title level={5} style={{ margin: 0 }}>{t('sql_analysis.slow_query.title')}</Title>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            {dbName || '(当前连接)'}
+            {dbName || t('sql_analysis.slow_query.current_connection')}
           </Text>
         </div>
       }
@@ -189,6 +192,7 @@ export default function SlowQueryPanel({ open, onClose, config, dbName, onPickQu
 }
 
 function SlowQueryCard({ record, onPick }: { record: SlowQueryRecord; onPick: () => void }) {
+  const { t } = useI18n()
   const duration = record.durationMs ?? 0
   const durationColor = duration >= 5000 ? '#fa5252' : duration >= 1000 ? '#f08c00' : '#495057'
 
@@ -209,18 +213,18 @@ function SlowQueryCard({ record, onPick }: { record: SlowQueryRecord; onPick: ()
           <span style={{ color: durationColor, fontWeight: 600 }}>{formatMs(duration)}</span>
           {record.rowsRead !== undefined && record.rowsRead > 0 && (
             <span style={{ color: 'var(--gn-text-muted, #6c757d)' }}>
-              扫描 <strong>{formatNumber(record.rowsRead)}</strong>
+              {t('sql_analysis.slow_query.metric.rows_read')} <strong>{formatNumber(record.rowsRead)}</strong>
             </span>
           )}
           {record.rowsReturned !== undefined && record.rowsReturned > 0 && (
             <span style={{ color: 'var(--gn-text-muted, #6c757d)' }}>
-              返回 <strong>{formatNumber(record.rowsReturned)}</strong>
+              {t('sql_analysis.slow_query.metric.rows_returned')} <strong>{formatNumber(record.rowsReturned)}</strong>
             </span>
           )}
         </div>
         <div style={{ color: 'var(--gn-text-muted, #6c757d)' }}>
           {record.dbType && <code style={{ marginRight: 8 }}>{record.dbType}</code>}
-          {record.executedAt && formatRelativeTime(record.executedAt)}
+          {record.executedAt && formatRelativeTime(record.executedAt, t)}
         </div>
       </div>
       <pre
@@ -234,19 +238,26 @@ function SlowQueryCard({ record, onPick }: { record: SlowQueryRecord; onPick: ()
           overflow: 'hidden',
         }}
       >
-        {record.sqlPreview || '(无 SQL 预览)'}
+        {record.sqlPreview || t('sql_analysis.slow_query.preview.empty')}
       </pre>
     </div>
   )
 }
 
 // formatRelativeTime 把 ISO 时间字符串格式化为相对时间（"3分钟前"）。
-function formatRelativeTime(isoTime: string): string {
+function formatRelativeTime(
+  isoTime: string,
+  t: ReturnType<typeof useI18n>['t'],
+): string {
   const ts = Date.parse(isoTime)
   if (isNaN(ts)) return ''
   const diffMs = Date.now() - ts
-  if (diffMs < 60_000) return '刚刚'
-  if (diffMs < 3600_000) return `${Math.floor(diffMs / 60_000)} 分钟前`
-  if (diffMs < 86400_000) return `${Math.floor(diffMs / 3600_000)} 小时前`
-  return `${Math.floor(diffMs / 86400_000)} 天前`
+  if (diffMs < 60_000) return t('sql_analysis.slow_query.relative.just_now')
+  if (diffMs < 3600_000) {
+    return t('sql_analysis.slow_query.relative.minutes_ago', { count: Math.floor(diffMs / 60_000) })
+  }
+  if (diffMs < 86400_000) {
+    return t('sql_analysis.slow_query.relative.hours_ago', { count: Math.floor(diffMs / 3600_000) })
+  }
+  return t('sql_analysis.slow_query.relative.days_ago', { count: Math.floor(diffMs / 86400_000) })
 }

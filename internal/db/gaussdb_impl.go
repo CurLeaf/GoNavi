@@ -105,7 +105,7 @@ func (g *GaussDB) getDSN(config connection.ConnectionConfig) string {
 func (g *GaussDB) Connect(config connection.ConnectionConfig) error {
 	if supported, reason := DriverRuntimeSupportStatus("gaussdb"); !supported {
 		if strings.TrimSpace(reason) == "" {
-			reason = "GaussDB 纯 Go 驱动未启用，请先在驱动管理中安装启用"
+			reason = localizedDriverRuntimeText("driver_manager.backend.status.optional_disabled", map[string]any{"name": "GaussDB"})
 		}
 		return fmt.Errorf("%s", reason)
 	}
