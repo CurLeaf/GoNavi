@@ -57,6 +57,7 @@ const storeState = vi.hoisted(() => ({
     showColumnComment: true,
     showColumnType: true,
     showQueryResultsPanel: false,
+    queryEditorEditorHeightRatio: 0.5,
   },
   setQueryOptions: vi.fn(),
   sqlEditorTransactionOptions: {
@@ -581,6 +582,29 @@ const createDefaultConnections = () => ([
   },
 ]);
 
+const createQueryEditorSplitNodeMock = (element: any) => {
+  const className = String(element?.props?.className || '');
+  if (className.includes('gn-v2-query-monaco-shell')) {
+    return {
+      style: {},
+      getBoundingClientRect: () => ({ height: 300 }),
+    };
+  }
+  if (className.includes('gn-v2-query-editor-pane')) {
+    return {
+      style: {},
+      getBoundingClientRect: () => ({ height: 405 }),
+    };
+  }
+  if (className.includes('gn-v2-query-editor')) {
+    return {
+      style: {},
+      getBoundingClientRect: () => ({ height: 805 }),
+    };
+  }
+  return null;
+};
+
 describe('QueryEditor external SQL save', () => {
   beforeEach(() => {
     const completionState = (globalThis as any).__gonaviSqlCompletionState;
@@ -619,11 +643,13 @@ describe('QueryEditor external SQL save', () => {
     storeState.activeTabId = 'tab-1';
     storeState.aiPanelVisible = false;
     storeState.setAIPanelVisible.mockReset();
+    storeState.appearance.uiVersion = 'legacy';
     storeState.queryOptions = {
       maxRows: 5000,
       showColumnComment: true,
       showColumnType: true,
       showQueryResultsPanel: false,
+      queryEditorEditorHeightRatio: 0.5,
     };
     storeState.sqlEditorTransactionOptions = {
       commitMode: 'manual',
@@ -8187,6 +8213,11 @@ describe('QueryEditor external SQL save', () => {
     await act(async () => {
       renderer = create(<QueryEditor tab={createTab({ resultPanelVisible: true })} />);
     });
+    await act(async () => {
+      frameCallbacks.splice(0).forEach((callback) => callback(0));
+    });
+    vi.mocked(window.requestAnimationFrame).mockClear();
+    editorState.editor.layout.mockClear();
 
     const resizer = renderer.root.find((node) => node.props?.title === '拖动调整高度');
     await act(async () => {
@@ -8209,6 +8240,60 @@ describe('QueryEditor external SQL save', () => {
     expect(editorState.editor.layout).toHaveBeenCalledTimes(2);
     expect(document.removeEventListener).toHaveBeenCalledWith('mousemove', expect.any(Function));
     expect(document.removeEventListener).toHaveBeenCalledWith('mouseup', expect.any(Function));
+  });
+
+  it('persists the editor and result panel split ratio after dragging the splitter', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    const moveListeners: Array<(event: MouseEvent) => void> = [];
+    const upListeners: Array<() => void> = [];
+    vi.mocked(document.addEventListener).mockImplementation((type: string, listener: any) => {
+      if (type === 'mousemove') moveListeners.push(listener);
+      if (type === 'mouseup') upListeners.push(listener);
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <QueryEditor tab={createTab({ resultPanelVisible: true })} />,
+        { createNodeMock: createQueryEditorSplitNodeMock },
+      );
+    });
+
+    const resizer = renderer.root.find((node) => node.props?.title === '拖动调整高度');
+    await act(async () => {
+      resizer.props.onMouseDown({ clientY: 300, preventDefault: vi.fn() });
+      moveListeners.forEach((listener) => listener({ clientY: 420 } as MouseEvent));
+    });
+    await act(async () => {
+      upListeners.forEach((listener) => listener());
+    });
+
+    expect(storeState.setQueryOptions).toHaveBeenCalledWith({
+      queryEditorEditorHeightRatio: 0.6,
+    });
+  });
+
+  it('applies the persisted editor and result split ratio when opening another query tab', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.activeTabId = 'tab-2';
+    storeState.queryOptions = {
+      ...storeState.queryOptions,
+      queryEditorEditorHeightRatio: 0.75,
+    };
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(
+        <QueryEditor tab={createTab({ id: 'tab-2', resultPanelVisible: true })} />,
+        { createNodeMock: createQueryEditorSplitNodeMock },
+      );
+    });
+
+    const editorShell = renderer.root.find((node) => {
+      const className = String(node.props?.className || '');
+      return className.includes('gn-v2-query-monaco-shell');
+    });
+    expect(editorShell.props.style.height).toBe(525);
   });
 
   it('inserts sidebar object text when dropped into the SQL editor', async () => {

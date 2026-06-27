@@ -37,6 +37,12 @@ import { buildSqlAnalysisWorkbenchTab } from '../utils/sqlAnalysisTab';
 import { isLocalizedUntitledQueryTitle } from '../utils/queryTabTitle';
 import { buildSqlServerObjectDefinitionQueries } from '../utils/sqlServerObjectDefinition';
 import {
+    clampQueryEditorEditorHeight,
+    resolveQueryEditorEditorHeightFromRatio,
+    resolveQueryEditorEditorHeightRatio,
+    sanitizeQueryEditorEditorHeightRatio,
+} from '../utils/queryEditorSplitLayout';
+import {
     DUCKDB_ROWID_LOCATOR_COLUMN,
     ORACLE_ROWID_LOCATOR_COLUMN,
     type EditRowLocator,
@@ -783,6 +789,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const setSqlFormatOptions = useStore(state => state.setSqlFormatOptions);
   const queryOptions = useStore(state => state.queryOptions);
   const setQueryOptions = useStore(state => state.setQueryOptions);
+  const queryEditorEditorHeightRatio = sanitizeQueryEditorEditorHeightRatio(
+      queryOptions?.queryEditorEditorHeightRatio,
+  );
   const sqlEditorTransactionOptions = useStore(state => state.sqlEditorTransactionOptions);
   const setSqlEditorTransactionOptions = useStore(state => state.setSqlEditorTransactionOptions);
   const [isResultPanelVisible, setIsResultPanelVisible] = useState(
@@ -1801,11 +1810,78 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       setCurrentQueryId('');
   };
 
+  const resolveEditorSplitAvailableHeight = useCallback(() => {
+      const rootRect = queryEditorRootRef.current?.getBoundingClientRect?.();
+      const paneRect = editorPaneRef.current?.getBoundingClientRect?.();
+      const shellRect = editorShellRef.current?.getBoundingClientRect?.();
+      const rootHeight = Number(rootRect?.height || 0);
+      const paneHeight = Number(paneRect?.height || 0);
+      const shellHeight = Number(shellRect?.height || 0);
+      if (!Number.isFinite(rootHeight) || rootHeight <= 0) {
+          return 0;
+      }
+      const nonEditorPaneHeight = paneHeight > 0 && shellHeight > 0
+          ? Math.max(0, paneHeight - shellHeight)
+          : 0;
+      const availableHeight = rootHeight - nonEditorPaneHeight;
+      return Number.isFinite(availableHeight) && availableHeight > 0 ? availableHeight : 0;
+  }, []);
+
   const clampEditorHeight = useCallback((height: number) => {
+      const availableHeight = resolveEditorSplitAvailableHeight();
+      if (availableHeight > 0) {
+          return clampQueryEditorEditorHeight(height, availableHeight);
+      }
       const viewportHeight = Number.isFinite(window.innerHeight) ? window.innerHeight : 800;
       const maxHeight = Math.max(100, viewportHeight - 200);
       return Math.max(100, Math.min(maxHeight, height));
-  }, []);
+  }, [resolveEditorSplitAvailableHeight]);
+
+  const applyEditorHeightRatio = useCallback(() => {
+      const availableHeight = resolveEditorSplitAvailableHeight();
+      if (availableHeight <= 0 || dragRef.current) return;
+      const nextHeight = resolveQueryEditorEditorHeightFromRatio(
+          queryEditorEditorHeightRatio,
+          availableHeight,
+      );
+      pendingEditorHeightRef.current = nextHeight;
+      setEditorHeight(previousHeight => previousHeight === nextHeight ? previousHeight : nextHeight);
+  }, [queryEditorEditorHeightRatio, resolveEditorSplitAvailableHeight]);
+
+  useEffect(() => {
+      if (!isResultPanelVisible || !isActive) return;
+      let frame: number | null = null;
+      const requestFrame = typeof window.requestAnimationFrame === 'function'
+          ? window.requestAnimationFrame.bind(window)
+          : (callback: FrameRequestCallback) => window.setTimeout(() => callback(Date.now()), 16);
+      const cancelFrame = typeof window.cancelAnimationFrame === 'function'
+          ? window.cancelAnimationFrame.bind(window)
+          : window.clearTimeout.bind(window);
+      const scheduleApply = () => {
+          if (frame !== null) return;
+          frame = requestFrame(() => {
+              frame = null;
+              applyEditorHeightRatio();
+          });
+      };
+
+      scheduleApply();
+      const ResizeObserverCtor = typeof ResizeObserver === 'function' ? ResizeObserver : null;
+      const resizeObserver = ResizeObserverCtor ? new ResizeObserverCtor(scheduleApply) : null;
+      if (resizeObserver) {
+          if (queryEditorRootRef.current) resizeObserver.observe(queryEditorRootRef.current);
+          if (editorPaneRef.current) resizeObserver.observe(editorPaneRef.current);
+      }
+      window.addEventListener('resize', scheduleApply);
+      return () => {
+          if (frame !== null) {
+              cancelFrame(frame);
+              frame = null;
+          }
+          resizeObserver?.disconnect();
+          window.removeEventListener('resize', scheduleApply);
+      };
+  }, [applyEditorHeightRatio, isActive, isResultPanelVisible, tab.id]);
 
   const applyEditorHeightToDom = useCallback(() => {
       const nextHeight = pendingEditorHeightRef.current;
@@ -1856,15 +1932,26 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           pendingEditorHeightRef.current = finalHeight;
           applyEditorHeightToDom();
           setEditorHeight(finalHeight);
+          const availableHeight = resolveEditorSplitAvailableHeight();
+          if (availableHeight > 0) {
+              setQueryOptions({
+                  queryEditorEditorHeightRatio: resolveQueryEditorEditorHeightRatio(
+                      finalHeight,
+                      availableHeight,
+                  ),
+              });
+          }
       }
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
-  }, [applyEditorHeightToDom, cancelEditorResizeFrame, handleMouseMove]);
+  }, [applyEditorHeightToDom, cancelEditorResizeFrame, handleMouseMove, resolveEditorSplitAvailableHeight, setQueryOptions]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
       e.preventDefault();
-      dragRef.current = { startY: e.clientY, startHeight: editorHeight, currentHeight: editorHeight };
-      pendingEditorHeightRef.current = editorHeight;
+      const currentEditorHeight = Number(editorShellRef.current?.getBoundingClientRect?.().height || editorHeight);
+      const startHeight = Number.isFinite(currentEditorHeight) && currentEditorHeight > 0 ? currentEditorHeight : editorHeight;
+      dragRef.current = { startY: e.clientY, startHeight, currentHeight: startHeight };
+      pendingEditorHeightRef.current = startHeight;
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
   }, [editorHeight, handleMouseMove, handleMouseUp]);

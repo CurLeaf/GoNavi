@@ -78,6 +78,10 @@ import {
   normalizeConnectionProtectionConfig,
   resolveConnectionProtectionConfig,
 } from "./utils/connectionReadOnly";
+import {
+  DEFAULT_QUERY_EDITOR_EDITOR_HEIGHT_RATIO,
+  sanitizeQueryEditorEditorHeightRatio,
+} from "./utils/queryEditorSplitLayout";
 
 export type TableDoubleClickAction = "open-data" | "open-design";
 
@@ -1234,6 +1238,7 @@ export interface QueryOptions {
   showSidebarTableComment?: boolean;
   showColumnType: boolean;
   showQueryResultsPanel: boolean;
+  queryEditorEditorHeightRatio: number;
 }
 
 export interface DataEditTransactionOptions {
@@ -1931,8 +1936,18 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     typeof raw.showColumnType === "boolean" ? raw.showColumnType : true;
   const showQueryResultsPanel =
     typeof raw.showQueryResultsPanel === "boolean" ? raw.showQueryResultsPanel : false;
+  const queryEditorEditorHeightRatio = sanitizeQueryEditorEditorHeightRatio(
+    raw.queryEditorEditorHeightRatio,
+  );
   if (!Number.isFinite(maxRows) || maxRows <= 0) {
-    return { maxRows: 5000, showColumnComment, showSidebarTableComment, showColumnType, showQueryResultsPanel };
+    return {
+      maxRows: 5000,
+      showColumnComment,
+      showSidebarTableComment,
+      showColumnType,
+      showQueryResultsPanel,
+      queryEditorEditorHeightRatio,
+    };
   }
   return {
     maxRows: Math.min(50000, Math.trunc(maxRows)),
@@ -1940,6 +1955,7 @@ const sanitizeQueryOptions = (value: unknown): QueryOptions => {
     showSidebarTableComment,
     showColumnType,
     showQueryResultsPanel,
+    queryEditorEditorHeightRatio,
   };
 };
 
@@ -2370,6 +2386,7 @@ export const useStore = create<AppState>()(
         showSidebarTableComment: false,
         showColumnType: true,
         showQueryResultsPanel: false,
+        queryEditorEditorHeightRatio: DEFAULT_QUERY_EDITOR_EDITOR_HEIGHT_RATIO,
       },
       dataEditTransactionOptions: {
         commitMode: "manual",
