@@ -44,6 +44,7 @@ const requiredKeys = [
   'query_editor.action.more',
   'query_editor.action.format',
   'query_editor.action.format_sql',
+  'query_editor.action.format_sql_with_shortcut',
   'query_editor.action.ai_generate_sql_menu',
   'query_editor.action.ai_explain_sql_menu',
   'query_editor.action.ai_optimize_sql_menu',

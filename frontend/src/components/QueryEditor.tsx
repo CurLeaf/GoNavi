@@ -726,6 +726,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const runQueryActionRef = useRef<any>(null);
   const selectCurrentStatementActionRef = useRef<any>(null);
   const saveQueryActionRef = useRef<any>(null);
+  const formatSqlActionRef = useRef<any>(null);
   const aiContextMenuActionDisposablesRef = useRef<any[]>([]);
   const toggleQueryResultsPanelActionRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(getTabQueryValue(tab));
@@ -854,6 +855,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   );
   const saveQueryShortcutBinding = useMemo(
       () => resolveShortcutBinding(shortcutOptions, 'saveQuery', activeShortcutPlatform),
+      [activeShortcutPlatform, shortcutOptions],
+  );
+  const formatSqlShortcutBinding = useMemo(
+      () => resolveShortcutBinding(shortcutOptions, 'formatSql', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
   );
   const toggleQueryResultsPanelShortcutBinding = useMemo(
@@ -2700,6 +2705,23 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           }
       }
 
+      const formatBinding = formatSqlShortcutBinding;
+      if (formatBinding?.enabled && formatBinding.combo) {
+          const keyBinding = comboToMonacoKeyBinding(
+              formatBinding.combo, monaco.KeyMod, monaco.KeyCode
+          );
+          if (keyBinding) {
+              formatSqlActionRef.current = editor.addAction({
+                  id: 'gonavi.formatSql',
+                  label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.formatSql.label'),
+                  keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+                  run: () => {
+                      window.dispatchEvent(new CustomEvent('gonavi:format-active-query'));
+                  },
+              });
+          }
+      }
+
       // 注册 / 斜杠命令 AI 快捷补全
       refreshQueryEditorSlashCommandDefs();
       const toggleResultsBinding = toggleQueryResultsPanelShortcutBinding;
@@ -3601,6 +3623,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           void message.error(translate('query_editor.message.format_failed'));
       }
   };
+
+  const handleFormatRef = useRef(handleFormat);
+  useEffect(() => {
+      handleFormatRef.current = handleFormat;
+  });
+
+  useEffect(() => {
+      const handleFormatActiveQuery = () => {
+          if (!isActive) {
+              return;
+          }
+          handleFormatRef.current();
+      };
+
+      window.addEventListener('gonavi:format-active-query', handleFormatActiveQuery as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:format-active-query', handleFormatActiveQuery as EventListener);
+      };
+  }, [isActive]);
 
   const handleRestoreLastFormat = () => {
       const previousQuery = tab.formatRestoreSnapshot?.query;
@@ -4935,6 +4976,39 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [languagePreference, saveQueryShortcutBinding]);
 
   useEffect(() => {
+      if (formatSqlActionRef.current) {
+          formatSqlActionRef.current.dispose();
+          formatSqlActionRef.current = null;
+      }
+
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      const binding = formatSqlShortcutBinding;
+      if (!binding?.enabled || !binding.combo) return;
+
+      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      if (keyBinding) {
+          formatSqlActionRef.current = editor.addAction({
+              id: 'gonavi.formatSql',
+              label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.formatSql.label'),
+              keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+              run: () => {
+                  window.dispatchEvent(new CustomEvent('gonavi:format-active-query'));
+              },
+          });
+      }
+
+      return () => {
+          if (formatSqlActionRef.current) {
+              formatSqlActionRef.current.dispose();
+              formatSqlActionRef.current = null;
+          }
+      };
+  }, [languagePreference, formatSqlShortcutBinding]);
+
+  useEffect(() => {
       const editor = editorRef.current;
       if (!editor) return;
 
@@ -5275,6 +5349,39 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [isActive, saveQueryShortcutBinding, handleQuickSave]);
 
   useEffect(() => {
+      const binding = formatSqlShortcutBinding;
+      if (!binding?.enabled || !binding.combo) {
+          return;
+      }
+
+      const handleFormatShortcut = (event: KeyboardEvent) => {
+          if (!isActive) {
+              return;
+          }
+          if (!isShortcutMatch(event, binding.combo)) {
+              return;
+          }
+
+          const editor = editorRef.current;
+          const targetNode = resolveEventTargetNode(event.target);
+          const editorHasFocus = !!editor?.hasTextFocus?.();
+          const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
+          if (!editorHasFocus && !inQueryEditor && !isDocumentLevelShortcutTarget(targetNode)) {
+              return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          handleFormatRef.current();
+      };
+
+      window.addEventListener('keydown', handleFormatShortcut, true);
+      return () => {
+          window.removeEventListener('keydown', handleFormatShortcut, true);
+      };
+  }, [isActive, formatSqlShortcutBinding]);
+
+  useEffect(() => {
       const binding = toggleQueryResultsPanelShortcutBinding;
       if (!binding?.enabled || !binding.combo) {
           return;
@@ -5451,6 +5558,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         pendingTransactionToolbar={pendingSqlTransaction ? sqlEditorTransactionToolbar : null}
         runQueryShortcutBinding={runQueryShortcutBinding}
         saveQueryShortcutBinding={saveQueryShortcutBinding}
+        formatSqlShortcutBinding={formatSqlShortcutBinding}
         toggleQueryResultsPanelShortcutBinding={toggleQueryResultsPanelShortcutBinding}
         activeShortcutPlatform={activeShortcutPlatform}
         isResultPanelVisible={isResultPanelVisible}

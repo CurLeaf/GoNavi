@@ -132,6 +132,7 @@ describe('shortcut localization', () => {
     try {
       expect(SHORTCUT_ACTION_META.runQuery.label).toBe('Run SQL');
       expect(SHORTCUT_ACTION_META.saveQuery.description).toBe('Save the current query tab; unnamed queries open the save dialog');
+      expect(SHORTCUT_ACTION_META.formatSql.label).toBe('Format SQL');
       expect(SHORTCUT_ACTION_META.toggleQueryResultsPanel.label).toBe('Toggle Results Panel');
       expect(SHORTCUT_ACTION_META.toggleQueryResultsPanel.description).toBe('Show or hide the results area below the query editor');
       expect(SHORTCUT_ACTION_META.sendAIChatMessage.description).toContain('Shift+Enter');
@@ -145,6 +146,7 @@ describe('shortcut localization', () => {
 
       setCurrentLanguage('zh-CN');
       expect(SHORTCUT_ACTION_META.runQuery.label).toBe('执行 SQL');
+      expect(SHORTCUT_ACTION_META.formatSql.label).toBe('美化 SQL');
       expect(findReservedConflict('Ctrl+S')?.label).toBe('浏览器保存');
     } finally {
       setCurrentLanguage('zh-CN');
@@ -313,6 +315,18 @@ describe('shortcut defaults', () => {
     });
     expect(SHORTCUT_ACTION_META.saveQuery).toMatchObject({
       label: '保存查询',
+      scope: 'queryEditor',
+      allowInEditable: true,
+    });
+  });
+
+  it('registers format SQL as a query editor shortcut', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.formatSql).toEqual({
+      mac: { combo: 'Alt+Shift+F', enabled: true },
+      windows: { combo: 'Alt+Shift+F', enabled: true },
+    });
+    expect(SHORTCUT_ACTION_META.formatSql).toMatchObject({
+      label: '美化 SQL',
       scope: 'queryEditor',
       allowInEditable: true,
     });
@@ -502,6 +516,13 @@ describe('comboToMonacoKeyBinding', () => {
     expect(comboToMonacoKeyBinding('Ctrl+Shift+R', mockKeyMod, mockKeyCode)).toEqual({
       keyMod: mockKeyMod.CtrlCmd | mockKeyMod.Shift,
       keyCode: mockKeyCode.KeyR,
+    });
+  });
+
+  it('maps Alt+Shift+F correctly', () => {
+    expect(comboToMonacoKeyBinding('Alt+Shift+F', mockKeyMod, mockKeyCode)).toEqual({
+      keyMod: mockKeyMod.Alt | mockKeyMod.Shift,
+      keyCode: mockKeyCode.KeyF,
     });
   });
 

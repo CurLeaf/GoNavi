@@ -301,8 +301,8 @@ vi.mock('@monaco-editor/react', () => ({
       editorState.latestOnChange = onChange;
       onMount?.(editorState.editor, {
         editor: { setTheme: vi.fn() },
-        KeyMod: { CtrlCmd: 2048, WinCtrl: 256 },
-        KeyCode: { KeyM: 77, KeyQ: 81, KeyS: 83 },
+        KeyMod: { CtrlCmd: 2048, WinCtrl: 256, Alt: 512, Shift: 1024 },
+        KeyCode: { KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83 },
         languages: {
           CompletionItemKind: { Keyword: 1, Function: 2, Field: 3 },
           CompletionItemInsertTextRule: { InsertAsSnippet: 1 },
@@ -2968,6 +2968,8 @@ describe('QueryEditor external SQL save', () => {
     await act(async () => {
       renderer = create(<QueryEditor tab={createTab({ resultPanelVisible: true })} />);
     });
+    vi.mocked(window.requestAnimationFrame).mockClear();
+    frameCallbacks.length = 0;
 
     const resizer = renderer.root.find((node) => node.props?.title === '拖动调整高度');
     await act(async () => {

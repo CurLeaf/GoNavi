@@ -307,8 +307,8 @@ vi.mock('@monaco-editor/react', () => ({
       editorState.latestOnChange = onChange;
       onMount?.(editorState.editor, {
         editor: { setTheme: vi.fn() },
-        KeyMod: { CtrlCmd: 2048, WinCtrl: 256 },
-        KeyCode: { KeyM: 77, KeyQ: 81, KeyS: 83 },
+        KeyMod: { CtrlCmd: 2048, WinCtrl: 256, Alt: 512, Shift: 1024 },
+        KeyCode: { KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83 },
         languages: {
           CompletionItemKind: { Keyword: 1, Function: 2, Field: 3 },
           CompletionItemInsertTextRule: { InsertAsSnippet: 1 },
@@ -2482,6 +2482,25 @@ describe('QueryEditor external SQL save', () => {
         createdAt: expect.any(Number),
       },
     });
+  });
+
+  it('registers a configurable Monaco shortcut action for SQL formatting', async () => {
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: 'select * from users where id=1' })} />);
+    });
+
+    const formatAction = findEditorAction('gonavi.formatSql');
+    expect(formatAction).toMatchObject({
+      id: 'gonavi.formatSql',
+      label: 'GoNavi: 美化 SQL',
+      keybindings: [512 | 1024 | 70],
+    });
+
+    formatAction.run();
+
+    expect(window.dispatchEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'gonavi:format-active-query' }),
+    );
   });
 
   it('restores the last pre-beautify SQL snapshot after reopening a query tab', async () => {
