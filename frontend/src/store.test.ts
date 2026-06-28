@@ -1117,6 +1117,55 @@ describe('store appearance persistence', () => {
     }
   });
 
+  it('keeps streaming-only AI message patches from reordering the session list', async () => {
+    vi.useFakeTimers();
+    try {
+      const { useStore } = await importStore();
+      useStore.setState({
+        aiChatSessions: [
+          { id: 'session-other', title: 'other', updatedAt: 20 },
+          { id: 'session-stream', title: 'stream', updatedAt: 10 },
+        ],
+        aiChatHistory: {
+          'session-stream': [
+            {
+              id: 'assistant-1',
+              role: 'assistant',
+              phase: 'connecting',
+              content: '',
+              timestamp: 1,
+              loading: true,
+            },
+          ],
+        },
+      });
+
+      const sessionsBeforeStreamingPatch = useStore.getState().aiChatSessions;
+      useStore.getState().updateAIChatMessage('session-stream', 'assistant-1', {
+        thinking: 'planning',
+        phase: 'thinking',
+      });
+
+      expect(useStore.getState().aiChatSessions).toBe(sessionsBeforeStreamingPatch);
+      expect(useStore.getState().aiChatSessions.map((session) => session.id)).toEqual([
+        'session-other',
+        'session-stream',
+      ]);
+
+      useStore.getState().updateAIChatMessage('session-stream', 'assistant-1', {
+        loading: false,
+        phase: 'idle',
+      });
+
+      expect(useStore.getState().aiChatSessions.map((session) => session.id)).toEqual([
+        'session-stream',
+        'session-other',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps store fallback titles out of production source literals', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(new URL('./store.ts', import.meta.url), 'utf8');
@@ -1261,6 +1310,93 @@ describe('store appearance persistence', () => {
       connectionId: 'conn-1',
       dbName: 'sys',
     });
+  });
+
+  it('returns to the source tab after closing an object edit tab opened from a hyperlink', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'query-source',
+      title: '查询 1',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      query: 'select * from users;',
+    });
+    useStore.getState().addTab({
+      id: 'query-other-1',
+      title: '查询 2',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      query: 'select 2;',
+    });
+    useStore.getState().addTab({
+      id: 'query-other-2',
+      title: '查询 3',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      query: 'select 3;',
+    });
+    useStore.getState().setActiveTab('query-source');
+    useStore.getState().addTab({
+      id: 'query-edit-object',
+      title: '修改对象',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      query: 'CREATE OR REPLACE VIEW users_view AS SELECT * FROM users;',
+      queryMode: 'object-edit',
+      returnToTabId: 'query-source',
+    });
+
+    expect(useStore.getState().activeTabId).toBe('query-edit-object');
+
+    useStore.getState().closeTab('query-edit-object');
+
+    expect(useStore.getState().activeTabId).toBe('query-source');
+    expect(useStore.getState().activeContext).toEqual({
+      connectionId: 'conn-1',
+      dbName: 'sys',
+    });
+  });
+
+  it('keeps the existing close fallback when the object edit source tab is gone', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().addTab({
+      id: 'query-source',
+      title: '查询 1',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      query: 'select 1;',
+    });
+    useStore.getState().addTab({
+      id: 'query-other',
+      title: '查询 2',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      query: 'select 2;',
+    });
+    useStore.getState().addTab({
+      id: 'query-edit-object',
+      title: '修改对象',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'sys',
+      query: 'CREATE OR REPLACE VIEW users_view AS SELECT 1;',
+      queryMode: 'object-edit',
+      returnToTabId: 'query-source',
+    });
+    useStore.getState().closeTab('query-source');
+    useStore.getState().setActiveTab('query-edit-object');
+
+    useStore.getState().closeTab('query-edit-object');
+
+    expect(useStore.getState().activeTabId).toBe('query-other');
   });
 
   it('reuses the same table-export tab for the same connection and table identity', async () => {

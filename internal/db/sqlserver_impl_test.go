@@ -3,12 +3,16 @@
 package db
 
 import (
+	"database/sql"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
 	"GoNavi-Wails/shared/i18n"
+
+	_ "modernc.org/sqlite"
 )
 
 var rawSQLServerTableNameRequiredText = string([]rune{0x8868, 0x540d, 0x4e0d, 0x80fd, 0x4e3a, 0x7a7a})
@@ -69,6 +73,60 @@ func TestSQLServerRowsAffectedDoesNotHideDMLRowsAffectedErrors(t *testing.T) {
 	)
 	if !errors.Is(err, rowErr) {
 		t.Fatalf("expected rows affected error to propagate for DML, got %v", err)
+	}
+}
+
+func TestScanSQLServerFallbackResultSetPreservesRowsWhenMessageLoopYieldsNoResult(t *testing.T) {
+	dbConn, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = dbConn.Close()
+	})
+
+	rows, err := dbConn.Query("SELECT 'config:roomType:add' AS menuName")
+	if err != nil {
+		t.Fatalf("query rows: %v", err)
+	}
+	defer rows.Close()
+
+	resultSet, err := scanSQLServerFallbackResultSet(rows)
+	if err != nil {
+		t.Fatalf("scanSQLServerFallbackResultSet returned error: %v", err)
+	}
+	if !reflect.DeepEqual(resultSet.Columns, []string{"menuName"}) {
+		t.Fatalf("expected SELECT columns to be preserved, got %#v", resultSet.Columns)
+	}
+	if len(resultSet.Rows) != 1 || resultSet.Rows[0]["menuName"] != "config:roomType:add" {
+		t.Fatalf("expected SELECT rows to be preserved, got %#v", resultSet.Rows)
+	}
+}
+
+func TestScanSQLServerFallbackResultSetPreservesColumnsWhenResultHasNoRows(t *testing.T) {
+	dbConn, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = dbConn.Close()
+	})
+
+	rows, err := dbConn.Query("SELECT 1 AS menuName WHERE 1 = 0")
+	if err != nil {
+		t.Fatalf("query empty rows: %v", err)
+	}
+	defer rows.Close()
+
+	resultSet, err := scanSQLServerFallbackResultSet(rows)
+	if err != nil {
+		t.Fatalf("scanSQLServerFallbackResultSet returned error: %v", err)
+	}
+	if len(resultSet.Rows) != 0 {
+		t.Fatalf("expected empty rows, got %#v", resultSet.Rows)
+	}
+	if !reflect.DeepEqual(resultSet.Columns, []string{"menuName"}) {
+		t.Fatalf("expected empty SELECT columns to be preserved, got %#v", resultSet.Columns)
 	}
 }
 

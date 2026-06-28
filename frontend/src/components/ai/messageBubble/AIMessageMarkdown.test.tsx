@@ -10,6 +10,16 @@ import { buildOverlayWorkbenchTheme } from '../../../utils/overlayWorkbenchTheme
 
 vi.mock('antd', () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => children,
+  Modal: Object.assign(
+    ({ children, open }: { children?: React.ReactNode; open?: boolean }) => (open ? <div>{children}</div> : null),
+    {
+      info: vi.fn(),
+      success: vi.fn(),
+      error: vi.fn(),
+      warning: vi.fn(),
+      confirm: vi.fn(),
+    },
+  ),
   message: { error: vi.fn() },
 }));
 

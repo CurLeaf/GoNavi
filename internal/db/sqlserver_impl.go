@@ -33,7 +33,7 @@ type sqlServerSessionExecer struct {
 
 func scanSQLServerRowsWithMessages(ctx context.Context, rows *sql.Rows, retmsg *sqlexp.ReturnMessage) ([]connection.ResultSetData, []string, error) {
 	if rows == nil {
-		return []connection.ResultSetData{{Rows: []map[string]interface{}{}, Columns: []string{}}}, nil, nil
+		return []connection.ResultSetData{emptySQLServerRowsResultSet()}, nil, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -95,15 +95,40 @@ func scanSQLServerRowsWithMessages(ctx context.Context, rows *sql.Rows, retmsg *
 		})
 	}
 	if len(resultSets) == 0 {
-		resultSets = []connection.ResultSetData{{
-			Rows:    []map[string]interface{}{},
-			Columns: []string{},
-		}}
+		fallbackResult, err := scanSQLServerFallbackResultSet(rows)
+		if err != nil {
+			return resultSets, allMessages, err
+		}
+		resultSets = []connection.ResultSetData{fallbackResult}
 	}
 	if err := rows.Err(); err != nil {
 		return resultSets, allMessages, err
 	}
 	return resultSets, allMessages, nil
+}
+
+func emptySQLServerRowsResultSet() connection.ResultSetData {
+	return connection.ResultSetData{
+		Rows:    []map[string]interface{}{},
+		Columns: []string{},
+	}
+}
+
+func scanSQLServerFallbackResultSet(rows *sql.Rows) (connection.ResultSetData, error) {
+	data, columns, err := scanRows(rows)
+	if err != nil {
+		return emptySQLServerRowsResultSet(), err
+	}
+	if data == nil {
+		data = []map[string]interface{}{}
+	}
+	if columns == nil {
+		columns = []string{}
+	}
+	return connection.ResultSetData{
+		Rows:    data,
+		Columns: columns,
+	}, nil
 }
 
 // quoteBracket escapes ] in identifiers for safe use in SQL Server [bracket] notation

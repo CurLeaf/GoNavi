@@ -6,6 +6,7 @@ export type ShortcutAction =
   | 'runQuery'
   | 'selectCurrentStatement'
   | 'saveQuery'
+  | 'formatSql'
   | 'toggleQueryResultsPanel'
   | 'sendAIChatMessage'
   | 'focusSidebarSearch'
@@ -103,6 +104,7 @@ export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'runQuery',
   'selectCurrentStatement',
   'saveQuery',
+  'formatSql',
   'toggleQueryResultsPanel',
   'sendAIChatMessage',
   'focusSidebarSearch',
@@ -152,6 +154,12 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
   saveQuery: {
     labelKey: 'app.shortcuts.action.saveQuery.label',
     descriptionKey: 'app.shortcuts.action.saveQuery.description',
+    scope: 'queryEditor',
+    allowInEditable: true,
+  },
+  formatSql: {
+    labelKey: 'app.shortcuts.action.formatSql.label',
+    descriptionKey: 'app.shortcuts.action.formatSql.description',
     scope: 'queryEditor',
     allowInEditable: true,
   },
@@ -254,6 +262,10 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   saveQuery: {
     mac: { combo: 'Meta+S', enabled: true },
     windows: { combo: 'Ctrl+S', enabled: true },
+  },
+  formatSql: {
+    mac: { combo: 'Alt+Shift+F', enabled: true },
+    windows: { combo: 'Alt+Shift+F', enabled: true },
   },
   toggleQueryResultsPanel: {
     mac: { combo: 'Meta+Shift+M', enabled: true },

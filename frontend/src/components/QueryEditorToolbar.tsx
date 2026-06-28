@@ -35,6 +35,7 @@ type QueryEditorToolbarProps = {
   pendingTransactionToolbar: React.ReactNode;
   runQueryShortcutBinding: ShortcutPlatformBinding;
   saveQueryShortcutBinding: ShortcutPlatformBinding;
+  formatSqlShortcutBinding: ShortcutPlatformBinding;
   toggleQueryResultsPanelShortcutBinding: ShortcutPlatformBinding;
   activeShortcutPlatform: ShortcutPlatform;
   isResultPanelVisible: boolean;
@@ -95,6 +96,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   pendingTransactionToolbar,
   runQueryShortcutBinding,
   saveQueryShortcutBinding,
+  formatSqlShortcutBinding,
   toggleQueryResultsPanelShortcutBinding,
   activeShortcutPlatform,
   isResultPanelVisible,
@@ -150,6 +152,15 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
       : isResultPanelVisible
         ? t("query_editor.action.hide_results_panel")
         : t("query_editor.action.show_results_panel");
+  const formatSqlTitle =
+    formatSqlShortcutBinding.enabled && formatSqlShortcutBinding.combo
+      ? t("query_editor.action.format_sql_with_shortcut", {
+          shortcut: getShortcutDisplayLabel(
+            formatSqlShortcutBinding.combo,
+            activeShortcutPlatform,
+          ),
+        })
+      : t("query_editor.action.format_sql");
   const aiMenuItems: MenuProps["items"] = [
     {
       key: "ai-generate",
@@ -360,7 +371,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
         className={isV2Ui ? "gn-v2-query-toolbar-action-pair" : undefined}
         style={{ display: "flex", gap: "8px", alignItems: "center" }}
       >
-        <Tooltip title={t("query_editor.action.format_sql")}>
+        <Tooltip title={formatSqlTitle}>
           <Button icon={<FormatPainterOutlined />} onClick={onFormat}>
             {t("query_editor.action.format")}
           </Button>

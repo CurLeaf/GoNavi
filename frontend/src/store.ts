@@ -1495,6 +1495,23 @@ interface AppState {
   setAIActiveSessionId: (sessionId: string | null) => void;
 }
 
+const AI_STREAMING_MESSAGE_UPDATE_KEYS = new Set<keyof AIChatMessage>([
+  "content",
+  "thinking",
+  "reasoning_content",
+  "phase",
+]);
+
+const isAIStreamingOnlyMessageUpdate = (
+  updates: Partial<AIChatMessage>,
+): boolean => {
+  const updateKeys = Object.keys(updates) as Array<keyof AIChatMessage>;
+  return (
+    updateKeys.length > 0 &&
+    updateKeys.every((key) => AI_STREAMING_MESSAGE_UPDATE_KEYS.has(key))
+  );
+};
+
 const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
   if (!Array.isArray(value)) return DEFAULT_SQL_SNIPPETS;
   const result: SqlSnippet[] = [];
@@ -1729,6 +1746,17 @@ const sanitizeActiveTabId = (activeTabId: unknown, tabs: TabData[]): string | nu
     return id;
   }
   return tabs[0]?.id || null;
+};
+
+const resolveCloseTabActiveTabId = (
+  closedTab: TabData | undefined,
+  newTabs: TabData[],
+): string | null => {
+  const returnToTabId = toTrimmedString(closedTab?.returnToTabId);
+  if (returnToTabId && newTabs.some((tab) => tab.id === returnToTabId)) {
+    return returnToTabId;
+  }
+  return newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
 };
 
 const resolveActiveContextFromTab = (
@@ -2901,11 +2929,11 @@ export const useStore = create<AppState>()(
 
       closeTab: (id) =>
         set((state) => {
+          const closedTab = state.tabs.find((t) => t.id === id);
           const newTabs = state.tabs.filter((t) => t.id !== id);
           let newActiveId = state.activeTabId;
           if (state.activeTabId === id) {
-            newActiveId =
-              newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
+            newActiveId = resolveCloseTabActiveTabId(closedTab, newTabs);
           }
           return {
             tabs: newTabs,
@@ -3455,9 +3483,7 @@ export const useStore = create<AppState>()(
           const newMessages = [...messages];
           newMessages[idx] = { ...newMessages[idx], ...updates };
           const history = { ...state.aiChatHistory, [sessionId]: newMessages };
-          const isContentOnlyUpdate =
-            Object.keys(updates).length === 1 && "content" in updates;
-          if (!isContentOnlyUpdate) {
+          if (!isAIStreamingOnlyMessageUpdate(updates)) {
             let newSessions = [...state.aiChatSessions];
             const existingSession = newSessions.find((s) => s.id === sessionId);
             if (existingSession) {

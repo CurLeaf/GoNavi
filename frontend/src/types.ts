@@ -468,6 +468,7 @@ export interface TabData {
   query?: string;
   resultPanelVisible?: boolean;
   queryMode?: "standard" | "object-edit";
+  returnToTabId?: string;
   filePath?: string;
   initialTab?: string;
   initialViewMode?: "table" | "json" | "text" | "fields" | "ddl" | "er" | "sqlLog";

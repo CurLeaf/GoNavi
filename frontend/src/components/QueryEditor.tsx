@@ -726,6 +726,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const runQueryActionRef = useRef<any>(null);
   const selectCurrentStatementActionRef = useRef<any>(null);
   const saveQueryActionRef = useRef<any>(null);
+  const formatSqlActionRef = useRef<any>(null);
   const aiContextMenuActionDisposablesRef = useRef<any[]>([]);
   const toggleQueryResultsPanelActionRef = useRef<any>(null);
   const lastExternalQueryRef = useRef<string>(getTabQueryValue(tab));
@@ -773,6 +774,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const addTab = useStore(state => state.addTab);
   const setActiveContext = useStore(state => state.setActiveContext);
   const updateQueryTabDraft = useStore(state => state.updateQueryTabDraft);
+  const activeTabId = useStore(state => state.activeTabId);
   const savedQueries = useStore(state => state.savedQueries);
   const currentConnectionIdRef = useRef(currentConnectionId);
   const currentDbRef = useRef(currentDb);
@@ -854,6 +856,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   );
   const saveQueryShortcutBinding = useMemo(
       () => resolveShortcutBinding(shortcutOptions, 'saveQuery', activeShortcutPlatform),
+      [activeShortcutPlatform, shortcutOptions],
+  );
+  const formatSqlShortcutBinding = useMemo(
+      () => resolveShortcutBinding(shortcutOptions, 'formatSql', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
   );
   const toggleQueryResultsPanelShortcutBinding = useMemo(
@@ -2110,8 +2116,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           dbName: targetDbName,
           query: editSql,
           queryMode: 'object-edit',
+          returnToTabId: activeTabId || undefined,
       });
-  }, [addTab]);
+  }, [activeTabId, addTab]);
 
   const openDefinitionObjectEditTab = useCallback(async (
       navigationTarget: Extract<QueryEditorNavigationTarget, { type: 'view' | 'materialized-view' | 'sequence' | 'package' }>,
@@ -2199,8 +2206,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               objectLabel,
           ),
           queryMode: 'object-edit',
+          returnToTabId: activeTabId || undefined,
       });
-  }, [addTab]);
+  }, [activeTabId, addTab]);
 
   const openTriggerObjectEditTab = useCallback(async (
       navigationTarget: Extract<QueryEditorNavigationTarget, { type: 'trigger' }>,
@@ -2235,8 +2243,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           dbName: targetDbName,
           query: buildEditableTriggerSql(targetTriggerName, latestDefinition, { translate }),
           queryMode: 'object-edit',
+          returnToTabId: activeTabId || undefined,
       });
-  }, [addTab]);
+  }, [activeTabId, addTab]);
 
   // Setup Autocomplete and Editor
   const handleEditorDidMount: OnMount = (editor, monaco) => {
@@ -2598,6 +2607,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   initialViewMode: 'fields',
                   initialViewModeRequestId: String(Date.now()),
                   objectType: 'table',
+                  returnToTabId: activeTabId || undefined,
               });
               return;
           }
@@ -2695,6 +2705,23 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   keybindings: [keyBinding.keyMod | keyBinding.keyCode],
                   run: () => {
                       window.dispatchEvent(new CustomEvent('gonavi:save-active-query'));
+                  },
+              });
+          }
+      }
+
+      const formatBinding = formatSqlShortcutBinding;
+      if (formatBinding?.enabled && formatBinding.combo) {
+          const keyBinding = comboToMonacoKeyBinding(
+              formatBinding.combo, monaco.KeyMod, monaco.KeyCode
+          );
+          if (keyBinding) {
+              formatSqlActionRef.current = editor.addAction({
+                  id: 'gonavi.formatSql',
+                  label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.formatSql.label'),
+                  keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+                  run: () => {
+                      window.dispatchEvent(new CustomEvent('gonavi:format-active-query'));
                   },
               });
           }
@@ -3601,6 +3628,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           void message.error(translate('query_editor.message.format_failed'));
       }
   };
+
+  const handleFormatRef = useRef(handleFormat);
+  useEffect(() => {
+      handleFormatRef.current = handleFormat;
+  });
+
+  useEffect(() => {
+      const handleFormatActiveQuery = () => {
+          if (!isActive) {
+              return;
+          }
+          handleFormatRef.current();
+      };
+
+      window.addEventListener('gonavi:format-active-query', handleFormatActiveQuery as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:format-active-query', handleFormatActiveQuery as EventListener);
+      };
+  }, [isActive]);
 
   const handleRestoreLastFormat = () => {
       const previousQuery = tab.formatRestoreSnapshot?.query;
@@ -4935,6 +4981,39 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [languagePreference, saveQueryShortcutBinding]);
 
   useEffect(() => {
+      if (formatSqlActionRef.current) {
+          formatSqlActionRef.current.dispose();
+          formatSqlActionRef.current = null;
+      }
+
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      const binding = formatSqlShortcutBinding;
+      if (!binding?.enabled || !binding.combo) return;
+
+      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      if (keyBinding) {
+          formatSqlActionRef.current = editor.addAction({
+              id: 'gonavi.formatSql',
+              label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.formatSql.label'),
+              keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+              run: () => {
+                  window.dispatchEvent(new CustomEvent('gonavi:format-active-query'));
+              },
+          });
+      }
+
+      return () => {
+          if (formatSqlActionRef.current) {
+              formatSqlActionRef.current.dispose();
+              formatSqlActionRef.current = null;
+          }
+      };
+  }, [languagePreference, formatSqlShortcutBinding]);
+
+  useEffect(() => {
       const editor = editorRef.current;
       if (!editor) return;
 
@@ -5275,6 +5354,39 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [isActive, saveQueryShortcutBinding, handleQuickSave]);
 
   useEffect(() => {
+      const binding = formatSqlShortcutBinding;
+      if (!binding?.enabled || !binding.combo) {
+          return;
+      }
+
+      const handleFormatShortcut = (event: KeyboardEvent) => {
+          if (!isActive) {
+              return;
+          }
+          if (!isShortcutMatch(event, binding.combo)) {
+              return;
+          }
+
+          const editor = editorRef.current;
+          const targetNode = resolveEventTargetNode(event.target);
+          const editorHasFocus = !!editor?.hasTextFocus?.();
+          const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
+          if (!editorHasFocus && !inQueryEditor && !isDocumentLevelShortcutTarget(targetNode)) {
+              return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          handleFormatRef.current();
+      };
+
+      window.addEventListener('keydown', handleFormatShortcut, true);
+      return () => {
+          window.removeEventListener('keydown', handleFormatShortcut, true);
+      };
+  }, [isActive, formatSqlShortcutBinding]);
+
+  useEffect(() => {
       const binding = toggleQueryResultsPanelShortcutBinding;
       if (!binding?.enabled || !binding.combo) {
           return;
@@ -5451,6 +5563,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         pendingTransactionToolbar={pendingSqlTransaction ? sqlEditorTransactionToolbar : null}
         runQueryShortcutBinding={runQueryShortcutBinding}
         saveQueryShortcutBinding={saveQueryShortcutBinding}
+        formatSqlShortcutBinding={formatSqlShortcutBinding}
         toggleQueryResultsPanelShortcutBinding={toggleQueryResultsPanelShortcutBinding}
         activeShortcutPlatform={activeShortcutPlatform}
         isResultPanelVisible={isResultPanelVisible}
