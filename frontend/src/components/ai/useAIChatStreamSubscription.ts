@@ -57,7 +57,10 @@ interface AIChatStreamState {
     content: string;
   };
   flushPending: boolean;
+  lastFlushAt: number | null;
 }
+
+const AI_CHAT_STREAM_FLUSH_INTERVAL_MS = 80;
 
 const createAIChatStreamState = (sid: string): AIChatStreamState => ({
   sid,
@@ -65,6 +68,7 @@ const createAIChatStreamState = (sid: string): AIChatStreamState => ({
   isFirstCompletion: false,
   streamBuffer: { thinking: '', reasoningContent: '', content: '' },
   flushPending: false,
+  lastFlushAt: null,
 });
 
 const resetAIChatStreamProgress = (state: AIChatStreamState) => {
@@ -74,6 +78,7 @@ const resetAIChatStreamProgress = (state: AIChatStreamState) => {
   state.streamBuffer.reasoningContent = '';
   state.streamBuffer.content = '';
   state.flushPending = false;
+  state.lastFlushAt = null;
 };
 
 const translatePanelCopy = (
@@ -131,9 +136,25 @@ export const useAIChatStreamSubscription = ({
 
     // 缓冲高频 token，避免把流式吞吐直接转成同步重绘风暴
     const streamBuffer = streamState.streamBuffer;
+    let flushTimerId: ReturnType<typeof setTimeout> | null = null;
+    let flushFrameId: number | null = null;
+
+    const cancelScheduledFlush = () => {
+      if (flushTimerId !== null) {
+        clearTimeout(flushTimerId);
+        flushTimerId = null;
+      }
+      if (flushFrameId !== null && typeof cancelAnimationFrame === 'function') {
+        cancelAnimationFrame(flushFrameId);
+      }
+      flushFrameId = null;
+      streamState.flushPending = false;
+    };
 
     const flushStreamBuffer = () => {
       streamState.flushPending = false;
+      flushTimerId = null;
+      flushFrameId = null;
       if (!streamState.assistantMsgId) return;
       const current = useStore.getState().aiChatHistory[sid];
       const existing = current?.find((message) => message.id === streamState.assistantMsgId);
@@ -157,7 +178,41 @@ export const useAIChatStreamSubscription = ({
 
       if (Object.keys(updates).length > 0) {
         updateAIChatMessage(sid, streamState.assistantMsgId, updates);
+        streamState.lastFlushAt = Date.now();
       }
+    };
+
+    const requestFlushFrame = () => {
+      if (typeof requestAnimationFrame !== 'function') {
+        flushStreamBuffer();
+        return;
+      }
+
+      let completedSynchronously = false;
+      const frameId = requestAnimationFrame(() => {
+        completedSynchronously = true;
+        flushFrameId = null;
+        flushStreamBuffer();
+      });
+      flushFrameId = completedSynchronously ? null : frameId;
+    };
+
+    const scheduleStreamFlush = () => {
+      if (streamState.flushPending) return;
+      streamState.flushPending = true;
+
+      const lastFlushAt = streamState.lastFlushAt;
+      const delay =
+        lastFlushAt === null
+          ? 0
+          : Math.max(0, AI_CHAT_STREAM_FLUSH_INTERVAL_MS - (Date.now() - lastFlushAt));
+
+      if (delay > 0) {
+        flushTimerId = setTimeout(requestFlushFrame, delay);
+        return;
+      }
+
+      requestFlushFrame();
     };
 
     const handler = (data: AIChatStreamChunk) => {
@@ -202,6 +257,7 @@ export const useAIChatStreamSubscription = ({
             jvmDiagnosticPlanContext: pendingJVMDiagnosticPlanContextRef.current,
           });
         }
+        cancelScheduledFlush();
         resetAIChatStreamProgress(streamState);
         setSending(false);
         return;
@@ -275,14 +331,12 @@ export const useAIChatStreamSubscription = ({
       }
 
       if (streamBuffer.thinking || streamBuffer.reasoningContent || streamBuffer.content) {
-        if (!streamState.flushPending) {
-          streamState.flushPending = true;
-          requestAnimationFrame(flushStreamBuffer);
-        }
+        scheduleStreamFlush();
       }
 
       if (data.done) {
         if (streamBuffer.thinking || streamBuffer.reasoningContent || streamBuffer.content) {
+          cancelScheduledFlush();
           flushStreamBuffer();
         }
         const doneAssistantId = streamState.assistantMsgId;
@@ -380,6 +434,7 @@ export const useAIChatStreamSubscription = ({
 
     EventsOn(eventName, handler);
     return () => {
+      cancelScheduledFlush();
       EventsOff(eventName);
     };
   }, [

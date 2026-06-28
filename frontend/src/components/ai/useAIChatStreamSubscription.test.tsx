@@ -41,6 +41,7 @@ const translate = (
   params?: Record<string, string | number | boolean | null | undefined>,
 ) => (translatedCopy[key] || key).replace(/\{\{(\w+)\}\}/g, (_match, name) => String(params?.[name] ?? ''));
 let nextId = 0;
+let patchMessageCalls = 0;
 
 const emitStreamChunk = async (data: any) => {
   const handler = runtimeMock.handlers.get(`ai:stream:${SESSION_ID}`);
@@ -71,6 +72,7 @@ const patchMessage = (
   messageId: string,
   patch: Parameters<ReturnType<typeof useStore.getState>['updateAIChatMessage']>[2],
 ) => {
+  patchMessageCalls += 1;
   useStore.setState((state) => {
     const messages = state.aiChatHistory[sessionId];
     if (!messages) {
@@ -132,6 +134,7 @@ describe('useAIChatStreamSubscription', () => {
 
   beforeEach(() => {
     nextId = 0;
+    patchMessageCalls = 0;
     aiChatStreamMock.mockClear();
     generateTitleForSessionMock.mockClear();
     runtimeMock.handlers.clear();
@@ -185,6 +188,7 @@ describe('useAIChatStreamSubscription', () => {
   });
 
   it('keeps streamed chunks in the same assistant message after a parent rerender', async () => {
+    vi.useFakeTimers();
     let renderer: ReactTestRenderer | undefined;
 
     await act(async () => {
@@ -193,6 +197,9 @@ describe('useAIChatStreamSubscription', () => {
 
     await emitStreamChunk({ content: 'Hello' });
     await emitStreamChunk({ content: ' world' });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(90);
+    });
 
     const messages = useStore.getState().aiChatHistory[SESSION_ID] || [];
     const assistantMessages = messages.filter((message) => message.role === 'assistant');
@@ -204,6 +211,41 @@ describe('useAIChatStreamSubscription', () => {
       content: 'Hello world',
       loading: true,
     });
+
+    await act(async () => {
+      renderer?.unmount();
+    });
+  });
+
+  it('coalesces high-frequency thinking chunks before writing them to the store', async () => {
+    vi.useFakeTimers();
+    let renderer: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      renderer = create(<StreamHarness />);
+    });
+
+    await emitStreamChunk({ thinking: 'A' });
+    const callsAfterScheduling = patchMessageCalls;
+    await emitStreamChunk({ thinking: 'B' });
+    await emitStreamChunk({ thinking: 'C' });
+
+    expect(patchMessageCalls).toBe(callsAfterScheduling);
+    expect(
+      (useStore.getState().aiChatHistory[SESSION_ID] || []).find((message) => message.id === 'assistant-connecting'),
+    ).not.toHaveProperty('thinking');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(90);
+    });
+
+    expect(
+      (useStore.getState().aiChatHistory[SESSION_ID] || []).find((message) => message.id === 'assistant-connecting'),
+    ).toMatchObject({
+      thinking: 'ABC',
+      phase: 'thinking',
+    });
+    expect(patchMessageCalls).toBe(callsAfterScheduling + 1);
 
     await act(async () => {
       renderer?.unmount();

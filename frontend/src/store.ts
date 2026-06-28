@@ -1495,6 +1495,23 @@ interface AppState {
   setAIActiveSessionId: (sessionId: string | null) => void;
 }
 
+const AI_STREAMING_MESSAGE_UPDATE_KEYS = new Set<keyof AIChatMessage>([
+  "content",
+  "thinking",
+  "reasoning_content",
+  "phase",
+]);
+
+const isAIStreamingOnlyMessageUpdate = (
+  updates: Partial<AIChatMessage>,
+): boolean => {
+  const updateKeys = Object.keys(updates) as Array<keyof AIChatMessage>;
+  return (
+    updateKeys.length > 0 &&
+    updateKeys.every((key) => AI_STREAMING_MESSAGE_UPDATE_KEYS.has(key))
+  );
+};
+
 const sanitizeSqlSnippets = (value: unknown): SqlSnippet[] => {
   if (!Array.isArray(value)) return DEFAULT_SQL_SNIPPETS;
   const result: SqlSnippet[] = [];
@@ -3455,9 +3472,7 @@ export const useStore = create<AppState>()(
           const newMessages = [...messages];
           newMessages[idx] = { ...newMessages[idx], ...updates };
           const history = { ...state.aiChatHistory, [sessionId]: newMessages };
-          const isContentOnlyUpdate =
-            Object.keys(updates).length === 1 && "content" in updates;
-          if (!isContentOnlyUpdate) {
+          if (!isAIStreamingOnlyMessageUpdate(updates)) {
             let newSessions = [...state.aiChatSessions];
             const existingSession = newSessions.find((s) => s.id === sessionId);
             if (existingSession) {

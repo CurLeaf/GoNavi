@@ -1117,6 +1117,55 @@ describe('store appearance persistence', () => {
     }
   });
 
+  it('keeps streaming-only AI message patches from reordering the session list', async () => {
+    vi.useFakeTimers();
+    try {
+      const { useStore } = await importStore();
+      useStore.setState({
+        aiChatSessions: [
+          { id: 'session-other', title: 'other', updatedAt: 20 },
+          { id: 'session-stream', title: 'stream', updatedAt: 10 },
+        ],
+        aiChatHistory: {
+          'session-stream': [
+            {
+              id: 'assistant-1',
+              role: 'assistant',
+              phase: 'connecting',
+              content: '',
+              timestamp: 1,
+              loading: true,
+            },
+          ],
+        },
+      });
+
+      const sessionsBeforeStreamingPatch = useStore.getState().aiChatSessions;
+      useStore.getState().updateAIChatMessage('session-stream', 'assistant-1', {
+        thinking: 'planning',
+        phase: 'thinking',
+      });
+
+      expect(useStore.getState().aiChatSessions).toBe(sessionsBeforeStreamingPatch);
+      expect(useStore.getState().aiChatSessions.map((session) => session.id)).toEqual([
+        'session-other',
+        'session-stream',
+      ]);
+
+      useStore.getState().updateAIChatMessage('session-stream', 'assistant-1', {
+        loading: false,
+        phase: 'idle',
+      });
+
+      expect(useStore.getState().aiChatSessions.map((session) => session.id)).toEqual([
+        'session-stream',
+        'session-other',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps store fallback titles out of production source literals', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(new URL('./store.ts', import.meta.url), 'utf8');
