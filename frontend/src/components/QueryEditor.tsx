@@ -774,6 +774,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const addTab = useStore(state => state.addTab);
   const setActiveContext = useStore(state => state.setActiveContext);
   const updateQueryTabDraft = useStore(state => state.updateQueryTabDraft);
+  const activeTabId = useStore(state => state.activeTabId);
   const savedQueries = useStore(state => state.savedQueries);
   const currentConnectionIdRef = useRef(currentConnectionId);
   const currentDbRef = useRef(currentDb);
@@ -2115,8 +2116,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           dbName: targetDbName,
           query: editSql,
           queryMode: 'object-edit',
+          returnToTabId: activeTabId || undefined,
       });
-  }, [addTab]);
+  }, [activeTabId, addTab]);
 
   const openDefinitionObjectEditTab = useCallback(async (
       navigationTarget: Extract<QueryEditorNavigationTarget, { type: 'view' | 'materialized-view' | 'sequence' | 'package' }>,
@@ -2204,8 +2206,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               objectLabel,
           ),
           queryMode: 'object-edit',
+          returnToTabId: activeTabId || undefined,
       });
-  }, [addTab]);
+  }, [activeTabId, addTab]);
 
   const openTriggerObjectEditTab = useCallback(async (
       navigationTarget: Extract<QueryEditorNavigationTarget, { type: 'trigger' }>,
@@ -2240,8 +2243,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           dbName: targetDbName,
           query: buildEditableTriggerSql(targetTriggerName, latestDefinition, { translate }),
           queryMode: 'object-edit',
+          returnToTabId: activeTabId || undefined,
       });
-  }, [addTab]);
+  }, [activeTabId, addTab]);
 
   // Setup Autocomplete and Editor
   const handleEditorDidMount: OnMount = (editor, monaco) => {
@@ -2603,6 +2607,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   initialViewMode: 'fields',
                   initialViewModeRequestId: String(Date.now()),
                   objectType: 'table',
+                  returnToTabId: activeTabId || undefined,
               });
               return;
           }

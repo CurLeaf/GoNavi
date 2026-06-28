@@ -1748,6 +1748,17 @@ const sanitizeActiveTabId = (activeTabId: unknown, tabs: TabData[]): string | nu
   return tabs[0]?.id || null;
 };
 
+const resolveCloseTabActiveTabId = (
+  closedTab: TabData | undefined,
+  newTabs: TabData[],
+): string | null => {
+  const returnToTabId = toTrimmedString(closedTab?.returnToTabId);
+  if (returnToTabId && newTabs.some((tab) => tab.id === returnToTabId)) {
+    return returnToTabId;
+  }
+  return newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
+};
+
 const resolveActiveContextFromTab = (
   tab: TabData | null | undefined,
 ): { connectionId: string; dbName: string } | null => {
@@ -2918,11 +2929,11 @@ export const useStore = create<AppState>()(
 
       closeTab: (id) =>
         set((state) => {
+          const closedTab = state.tabs.find((t) => t.id === id);
           const newTabs = state.tabs.filter((t) => t.id !== id);
           let newActiveId = state.activeTabId;
           if (state.activeTabId === id) {
-            newActiveId =
-              newTabs.length > 0 ? newTabs[newTabs.length - 1].id : null;
+            newActiveId = resolveCloseTabActiveTabId(closedTab, newTabs);
           }
           return {
             tabs: newTabs,

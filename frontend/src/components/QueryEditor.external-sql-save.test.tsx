@@ -1842,6 +1842,7 @@ describe('QueryEditor external SQL save', () => {
       initialViewMode: 'fields',
       initialViewModeRequestId: expect.any(String),
       objectType: 'table',
+      returnToTabId: 'tab-1',
     });
     expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'gonavi:locate-sidebar-object',
@@ -1889,6 +1890,7 @@ describe('QueryEditor external SQL save', () => {
       initialViewMode: 'fields',
       initialViewModeRequestId: expect.any(String),
       objectType: 'table',
+      returnToTabId: 'tab-1',
     }));
     expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'gonavi:locate-sidebar-object',
@@ -1958,6 +1960,7 @@ describe('QueryEditor external SQL save', () => {
       connectionId: 'conn-1',
       dbName: 'main',
       queryMode: 'object-edit',
+      returnToTabId: 'tab-1',
       query: expect.stringContaining('CREATE OR REPLACE PROCEDURE reporting.refresh_stats()'),
     }));
     expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -4297,6 +4300,7 @@ describe('QueryEditor external SQL save', () => {
       connectionId: 'conn-1',
       dbName: 'main',
       queryMode: 'object-edit',
+      returnToTabId: 'tab-1',
       query: expect.stringContaining('CREATE OR REPLACE VIEW reporting.active_users AS'),
     }));
     expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -4371,6 +4375,7 @@ describe('QueryEditor external SQL save', () => {
       connectionId: 'conn-1',
       dbName: 'main',
       queryMode: 'object-edit',
+      returnToTabId: 'tab-1',
       query: expect.stringContaining('CREATE TRIGGER audit.users_bi'),
     }));
     expect(storeState.addTab).toHaveBeenCalledWith(expect.objectContaining({
@@ -4380,6 +4385,7 @@ describe('QueryEditor external SQL save', () => {
       connectionId: 'conn-1',
       dbName: 'main',
       queryMode: 'object-edit',
+      returnToTabId: 'tab-1',
       query: expect.stringContaining('CREATE OR REPLACE PROCEDURE reporting.refresh_stats()'),
     }));
     expect((window as any).dispatchEvent).not.toHaveBeenCalledWith(expect.objectContaining({
