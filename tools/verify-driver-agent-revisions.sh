@@ -140,17 +140,43 @@ agent_variants_for() {
 
 probe_agent_revision() {
   local agent_path="$1"
+  local stdout_file stderr_file probe_exit
   local request
   request='{"id":1,"method":"metadata"}'
-  printf '%s\n' "$request" | "$agent_path" | python3 -c '
+  stdout_file="$(mktemp "${TMPDIR:-/tmp}/gonavi-agent-revision-stdout.XXXXXX")"
+  stderr_file="$(mktemp "${TMPDIR:-/tmp}/gonavi-agent-revision-stderr.XXXXXX")"
+
+  if ! printf '%s\n' "$request" | "$agent_path" >"$stdout_file" 2>"$stderr_file"; then
+    [[ -s "$stderr_file" ]] && sed "s/^/   stderr: /" "$stderr_file" >&2
+    rm -f "$stdout_file" "$stderr_file"
+    return 1
+  fi
+
+  python3 - "$stdout_file" <<'PY'
 import json
 import sys
+from pathlib import Path
 
-line = sys.stdin.readline()
-payload = json.loads(line)
+lines = [
+    line.strip()
+    for line in Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()
+    if line.strip()
+]
+if not lines:
+    raise SystemExit(1)
+try:
+    payload = json.loads(lines[0])
+except json.JSONDecodeError:
+    raise SystemExit(1)
 data = payload.get("data") or {}
 print(data.get("agentRevision", ""))
-'
+PY
+  probe_exit=$?
+  if [[ "$probe_exit" -ne 0 && -s "$stderr_file" ]]; then
+    sed "s/^/   stderr: /" "$stderr_file" >&2
+  fi
+  rm -f "$stdout_file" "$stderr_file"
+  return "$probe_exit"
 }
 
 probe_host_agent_revision() {
