@@ -543,4 +543,79 @@ describe('main browser mock', () => {
     expect(dayjsLocaleMock).toHaveBeenCalledWith('ja');
     expect(syncLanguageRuntimeMock.mock.calls.map(([language]) => language)).toEqual(['ja-JP']);
   });
+
+  it('updates the resolved locale when the system browser language changes', async () => {
+    const windowListeners = new Map<string, Set<EventListener>>();
+    const windowMock = {
+      addEventListener: vi.fn((type: string, listener: EventListener) => {
+        const listeners = windowListeners.get(type) ?? new Set<EventListener>();
+        listeners.add(listener);
+        windowListeners.set(type, listeners);
+      }),
+      removeEventListener: vi.fn((type: string, listener: EventListener) => {
+        windowListeners.get(type)?.delete(listener);
+      }),
+      dispatchEvent: vi.fn((event: Event) => {
+        windowListeners.get(event.type)?.forEach((listener) => listener(event));
+        return true;
+      }),
+    };
+    vi.stubGlobal('window', windowMock);
+
+    let navigatorLanguages = ['en-US'];
+    const navigatorMock = {};
+    Object.defineProperty(navigatorMock, 'languages', {
+      configurable: true,
+      get: () => navigatorLanguages,
+    });
+    Object.defineProperty(navigatorMock, 'language', {
+      configurable: true,
+      get: () => navigatorLanguages[0] ?? '',
+    });
+    vi.stubGlobal('navigator', navigatorMock);
+
+    const setLanguagePreference = vi.fn();
+    vi.doMock('./store', () => ({
+      useStore: Object.assign(
+        <T,>(selector: (state: { languagePreference: string; setLanguagePreference: (nextPreference: string) => void }) => T): T =>
+          React.useSyncExternalStore(
+            () => () => {},
+            () => selector({ languagePreference: 'system', setLanguagePreference }),
+            () => selector({ languagePreference: 'system', setLanguagePreference }),
+          ),
+        {
+          persist: {
+            hasHydrated: () => true,
+            onFinishHydration: () => () => {},
+          },
+        },
+      ),
+    }));
+
+    let renderer: TestRenderer.ReactTestRenderer | null = null;
+    renderRootImpl = (node) => {
+      act(() => {
+        renderer = TestRenderer.create(node as React.ReactElement);
+      });
+    };
+
+    await importMain();
+    const { getCurrentLanguage } = await import('./i18n');
+    await act(async () => {});
+
+    expect(renderer).not.toBeNull();
+    expect(getCurrentLanguage()).toBe('en-US');
+
+    dayjsLocaleMock.mockClear();
+    syncLanguageRuntimeMock.mockClear();
+
+    await act(async () => {
+      navigatorLanguages = ['zh-CN'];
+      windowMock.dispatchEvent(new Event('languagechange'));
+    });
+
+    expect(getCurrentLanguage()).toBe('zh-CN');
+    expect(dayjsLocaleMock).toHaveBeenCalledWith('zh-cn');
+    expect(syncLanguageRuntimeMock.mock.calls.map(([language]) => language)).toEqual(['zh-CN']);
+  });
 });

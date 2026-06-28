@@ -598,6 +598,25 @@ const readBrowserLanguages = (): string[] => {
     return navigator.language ? [navigator.language] : [];
 };
 
+const serializeBrowserLanguages = (languages: readonly string[]) => languages.join('\n');
+
+const deserializeBrowserLanguages = (snapshot: string) =>
+    snapshot ? snapshot.split('\n').filter(Boolean) : [];
+
+const getBrowserLanguageSnapshot = () => serializeBrowserLanguages(readBrowserLanguages());
+
+const subscribeBrowserLanguageChange = (listener: () => void) => {
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+        return () => {};
+    }
+    window.addEventListener('languagechange', listener);
+    return () => {
+        if (typeof window.removeEventListener === 'function') {
+            window.removeEventListener('languagechange', listener);
+        }
+    };
+};
+
 const subscribeStoreHydration = (listener: () => void) => {
     if (useStore.persist.hasHydrated()) {
         listener();
@@ -618,12 +637,17 @@ const Root = ({ rootComponent }: { rootComponent: React.ReactNode }) => {
     );
     const languagePreference = useStore((state) => state.languagePreference);
     const setLanguagePreference = useStore((state) => state.setLanguagePreference);
+    const browserLanguageSnapshot = useSyncExternalStore(
+        subscribeBrowserLanguageChange,
+        getBrowserLanguageSnapshot,
+        getBrowserLanguageSnapshot,
+    );
 
     if (!isStoreHydrated) {
         return null;
     }
 
-    const systemLanguages = readBrowserLanguages();
+    const systemLanguages = deserializeBrowserLanguages(browserLanguageSnapshot);
     const resolvedLanguage = setCurrentLanguage(languagePreference, systemLanguages);
     applyDayjsLocale(resolvedLanguage);
 
