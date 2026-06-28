@@ -588,7 +588,45 @@ jobs:
           export GOCACHE="${RUNNER_TEMP}/go-build-${{ matrix.os_name }}-${{ matrix.arch_name }}-${REVISION_HASH}"
           mkdir -p "$GOCACHE"
           echo "🧭 可选驱动使用隔离 GOCACHE：$GOCACHE"
-          IFS=',' read -r -a DRIVERS <<< "$CHANGED_DRIVER_AGENTS"
+          normalize_driver_token() {
+            local value
+            value="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+            case "$value" in
+              "") return 1 ;;
+              doris|diros) echo "doris" ;;
+              open_gauss|open-gauss) echo "opengauss" ;;
+              gaussdb|gauss_db|gauss-db) echo "gaussdb" ;;
+              elastic|elasticsearch) echo "elasticsearch" ;;
+              mariadb|oceanbase|starrocks|sphinx|sqlserver|sqlite|duckdb|dameng|kingbase|highgo|vastbase|opengauss|gaussdb|iris|mongodb|tdengine|iotdb|clickhouse)
+                echo "$value"
+                ;;
+              *)
+                echo "❌ 不支持的 driver-agent：${1:-}" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          build_driver_name() {
+            case "$1" in
+              doris) echo "diros" ;;
+              *) echo "$1" ;;
+            esac
+          }
+
+          declare -a RAW_DRIVERS=()
+          declare -a DRIVERS=()
+          IFS=',' read -r -a RAW_DRIVERS <<< "$CHANGED_DRIVER_AGENTS"
+          for RAW_DRIVER in "${RAW_DRIVERS[@]}"; do
+            DRIVER="$(normalize_driver_token "$RAW_DRIVER")" || continue
+            DRIVERS+=("$DRIVER")
+          done
+          if [ ${#DRIVERS[@]} -eq 0 ]; then
+            echo "🧭 没有需要构建的 driver-agent"
+            exit 0
+          fi
+          NORMALIZED_CHANGED_DRIVER_AGENTS="$(IFS=,; echo "${DRIVERS[*]}")"
+          echo "🧭 归一后的 driver-agent 构建列表：${NORMALIZED_CHANGED_DRIVER_AGENTS}"
           OUTDIR="drivers/${{ matrix.os_name }}"
           mkdir -p "$OUTDIR"
           DUCKDB_WINDOWS_LIBRARY_VERSION="v1.4.4"
@@ -644,10 +682,7 @@ jobs:
           }
 
           for DRIVER in "${DRIVERS[@]}"; do
-            BUILD_DRIVER="$DRIVER"
-            if [ "$DRIVER" = "doris" ]; then
-              BUILD_DRIVER="diros"
-            fi
+            BUILD_DRIVER="$(build_driver_name "$DRIVER")"
             if [ "$DRIVER" = "duckdb" ] && [ "$GOOS" = "windows" ] && [ "$GOARCH" != "amd64" ]; then
               echo "⚠️ 跳过 DuckDB driver（当前平台 ${GOOS}/${GOARCH} 不受支持，仅支持 windows/amd64）"
               continue
@@ -742,7 +777,7 @@ jobs:
           bash ./tools/verify-driver-agent-revisions.sh \
             --assets-dir drivers \
             --platform "$TARGET_PLATFORM" \
-            --drivers "$CHANGED_DRIVER_AGENTS"
+            --drivers "$NORMALIZED_CHANGED_DRIVER_AGENTS"
 
       # macOS Packaging
       - name: Package macOS DMG
