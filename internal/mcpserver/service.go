@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 
 	"GoNavi-Wails/internal/ai"
@@ -555,7 +556,7 @@ func (s *Service) ExecuteSQL(ctx context.Context, req *mcp.CallToolRequest, args
 	}
 
 	normalizedResults, truncated := normalizeResultSets(resultSets, normalizeMaxRowsPerResult(args.MaxRowsPerResult))
-	return successResult(), executeSQLResult{
+	output := executeSQLResult{
 		ConnectionID:   view.ID,
 		DBName:         dbName,
 		StatementCount: inspection.StatementCount,
@@ -565,11 +566,20 @@ func (s *Service) ExecuteSQL(ctx context.Context, req *mcp.CallToolRequest, args
 		Truncated:      truncated,
 		Statements:     toStatementSummaries(inspection.Statements),
 		Results:        normalizedResults,
-	}, nil
+	}
+	return textResult(formatExecuteSQLResultContent(output)), output, nil
 }
 
 func successResult() *mcp.CallToolResult {
 	return &mcp.CallToolResult{}
+}
+
+func textResult(text string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: text},
+		},
+	}
 }
 
 func toolError(format string, args ...interface{}) *mcp.CallToolResult {
@@ -920,6 +930,128 @@ func normalizeResultSets(resultSets []connection.ResultSetData, maxRows int) ([]
 		})
 	}
 	return normalized, truncatedAny
+}
+
+func formatExecuteSQLResultContent(result executeSQLResult) string {
+	var builder strings.Builder
+	builder.WriteString("SQL 执行成功")
+	if result.QueryID != "" {
+		builder.WriteString("，queryId=")
+		builder.WriteString(result.QueryID)
+	}
+	builder.WriteString("\n")
+	builder.WriteString(fmt.Sprintf("语句数：%d，结果集：%d", result.StatementCount, len(result.Results)))
+	if result.Truncated {
+		builder.WriteString("，结果已截断")
+	}
+	if result.Message != "" {
+		builder.WriteString("\n消息：")
+		builder.WriteString(result.Message)
+	}
+	if len(result.Results) == 0 {
+		builder.WriteString("\n无结果集返回。")
+		return builder.String()
+	}
+
+	for index, resultSet := range result.Results {
+		builder.WriteString("\n\n")
+		builder.WriteString(fmt.Sprintf("结果集 %d", index+1))
+		if resultSet.StatementIndex > 0 {
+			builder.WriteString(fmt.Sprintf("（语句 #%d）", resultSet.StatementIndex))
+		}
+		builder.WriteString(fmt.Sprintf("：%d 行", resultSet.RowCount))
+		if resultSet.Truncated {
+			builder.WriteString(fmt.Sprintf("，仅显示前 %d 行", len(resultSet.Rows)))
+		}
+		if len(resultSet.Messages) > 0 {
+			builder.WriteString("\n消息：")
+			builder.WriteString(strings.Join(resultSet.Messages, "\n"))
+		}
+		if len(resultSet.Columns) == 0 {
+			if len(resultSet.Rows) == 0 {
+				builder.WriteString("\n无列/行数据。")
+				continue
+			}
+			resultSet.Columns = inferColumnsFromRows(resultSet.Rows)
+		}
+		if len(resultSet.Columns) == 0 {
+			continue
+		}
+		builder.WriteString("\n")
+		builder.WriteString(formatMarkdownTable(resultSet.Columns, resultSet.Rows))
+	}
+	return builder.String()
+}
+
+func inferColumnsFromRows(rows []map[string]interface{}) []string {
+	seen := make(map[string]struct{})
+	columns := []string{}
+	for _, row := range rows {
+		keys := make([]string, 0, len(row))
+		for key := range row {
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			seen[key] = struct{}{}
+			columns = append(columns, key)
+		}
+	}
+	return columns
+}
+
+func formatMarkdownTable(columns []string, rows []map[string]interface{}) string {
+	var builder strings.Builder
+	builder.WriteString("|")
+	for _, column := range columns {
+		builder.WriteString(" ")
+		builder.WriteString(escapeMarkdownTableCell(column))
+		builder.WriteString(" |")
+	}
+	builder.WriteString("\n|")
+	for range columns {
+		builder.WriteString(" --- |")
+	}
+	for _, row := range rows {
+		builder.WriteString("\n|")
+		for _, column := range columns {
+			builder.WriteString(" ")
+			builder.WriteString(escapeMarkdownTableCell(formatSQLValue(row[column])))
+			builder.WriteString(" |")
+		}
+	}
+	return builder.String()
+}
+
+func formatSQLValue(value interface{}) string {
+	if value == nil {
+		return "NULL"
+	}
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case []byte:
+		return string(typed)
+	case fmt.Stringer:
+		return typed.String()
+	}
+	data, err := json.Marshal(value)
+	if err == nil {
+		return string(data)
+	}
+	return fmt.Sprint(value)
+}
+
+func escapeMarkdownTableCell(value string) string {
+	value = strings.ReplaceAll(value, "\\", "\\\\")
+	value = strings.ReplaceAll(value, "|", "\\|")
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	value = strings.ReplaceAll(value, "\n", "<br>")
+	return value
 }
 
 func toStatementSummaries(items []appcore.SQLStatementInspection) []sqlStatementSummary {
