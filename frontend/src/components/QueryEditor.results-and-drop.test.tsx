@@ -1241,7 +1241,9 @@ describe('QueryEditor external SQL save', () => {
       overflow: 'auto',
       width: '100%',
       minWidth: 0,
+      padding: '10px 12px',
     });
+    expect(messageTextarea.props.style.padding).not.toBe(0);
     expect(messageTextarea.props.style.minWidth).not.toBe('max-content');
     expect(messageBlock.props.style).toMatchObject({
       alignItems: 'stretch',
@@ -1253,7 +1255,10 @@ describe('QueryEditor external SQL save', () => {
       width: '100%',
       overflow: 'hidden',
       minWidth: 0,
+      borderRadius: 6,
     });
+    expect(messageScrollBody.props.style.border).toContain('1px solid');
+    expect(messageScrollBody.props.style.background).toBeTruthy();
     expect(messageTextarea.props.value).not.toContain('mssql:');
   });
 
