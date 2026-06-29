@@ -535,6 +535,9 @@ func TestResolveCreateStatementWithFallback_SQLServerBuildsFallbackDDL(t *testin
 			{Name: "id", Type: "int", Nullable: "NO", Key: "PRI", Extra: "auto_increment", Comment: "主键"},
 			{Name: "display_name", Type: "nvarchar(128)", Nullable: "YES", Default: &defaultValue, Comment: "显示名's"},
 		},
+		indexes: []connection.IndexDefinition{
+			{Name: "IX_Users_DisplayName", ColumnName: "display_name", SeqInIndex: 1, NonUnique: 1},
+		},
 	}
 
 	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{
@@ -550,11 +553,15 @@ func TestResolveCreateStatementWithFallback_SQLServerBuildsFallbackDDL(t *testin
 	if dbInst.colsSchema != "appdb" || dbInst.colsTable != "dbo.Users" {
 		t.Fatalf("expected SQL Server column lookup to use database and raw table, got %q.%q", dbInst.colsSchema, dbInst.colsTable)
 	}
+	if dbInst.indexSchema != "appdb" || dbInst.indexTable != "dbo.Users" {
+		t.Fatalf("expected SQL Server index lookup to use database and raw table, got %q.%q", dbInst.indexSchema, dbInst.indexTable)
+	}
 	for _, want := range []string{
 		`CREATE TABLE [dbo].[Users]`,
 		`[id] int IDENTITY(1,1) NOT NULL`,
 		`[display_name] nvarchar(128) DEFAULT ((0))`,
 		`PRIMARY KEY ([id])`,
+		`CREATE INDEX [IX_Users_DisplayName] ON [dbo].[Users] ([display_name]);`,
 		`EXEC sp_addextendedproperty @name = N'MS_Description', @value = N'主键', @level0type = N'SCHEMA', @level0name = N'dbo', @level1type = N'TABLE', @level1name = N'Users', @level2type = N'COLUMN', @level2name = N'id';`,
 		`@value = N'显示名''s'`,
 	} {
