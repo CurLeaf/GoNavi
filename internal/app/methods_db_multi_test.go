@@ -38,6 +38,8 @@ type fakeNativeMultiResultDB struct {
 type fakeEmptyNativeMultiResultDB struct {
 	*fakeBatchWriteDB
 	multiCalls int
+	results    []connection.ResultSetData
+	messages   []string
 }
 
 func (f *fakeNativeMultiResultDB) QueryMulti(query string) ([]connection.ResultSetData, error) {
@@ -91,6 +93,9 @@ func (f *fakeEmptyNativeMultiResultDB) QueryMultiContextWithMessages(ctx context
 	f.multiCalls++
 	if err := f.queryErr[query]; err != nil {
 		return nil, nil, err
+	}
+	if f.results != nil {
+		return cloneResultSets(f.results), append([]string(nil), f.messages...), nil
 	}
 	return []connection.ResultSetData{}, nil, nil
 }
@@ -1686,6 +1691,68 @@ func TestDBQueryMultiFallsBackWhenNativeReadOnlyBatchReturnsEmptyResults(t *test
 	}
 	if got := resultSets[0].Rows[0]["value"]; got != 1 {
 		t.Fatalf("expected fallback SELECT result value=1, got %#v", got)
+	}
+}
+
+func TestDBQueryMultiFallsBackWhenNativeReadOnlyBatchReturnsBlankResultSet(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "SELECT * FROM mes_work_order"
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"id": 1, "code": "MO-1"},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"id", "code"},
+		},
+		queryErr: map[string]error{},
+	}
+	fakeDB := &fakeEmptyNativeMultiResultDB{
+		fakeBatchWriteDB: baseDB,
+		results: []connection.ResultSetData{{
+			Rows:     []map[string]interface{}{},
+			Columns:  []string{},
+			Messages: []string{"driver returned an empty native result set"},
+		}},
+		messages: []string{"driver returned an empty native result set"},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, User: "root"}
+
+	result := app.DBQueryMulti(config, "main", query, "blank-native-read-fallback-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.multiCalls != 1 {
+		t.Fatalf("expected one native multi-result attempt, got %d", fakeDB.multiCalls)
+	}
+	if baseDB.session == nil {
+		t.Fatal("expected blank native result set to fall back to pinned session query")
+	}
+	if baseDB.session.queryCalls != 1 {
+		t.Fatalf("expected fallback to query through pinned session once, got %d", baseDB.session.queryCalls)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 1 {
+		t.Fatalf("expected one fallback result set, got %#v", resultSets)
+	}
+	if !reflect.DeepEqual(resultSets[0].Columns, []string{"id", "code"}) {
+		t.Fatalf("expected fallback columns, got %#v", resultSets[0].Columns)
+	}
+	if got := resultSets[0].Rows[0]["code"]; got != "MO-1" {
+		t.Fatalf("expected fallback SELECT result code=MO-1, got %#v", got)
 	}
 }
 

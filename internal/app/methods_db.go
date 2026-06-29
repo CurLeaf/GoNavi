@@ -1094,9 +1094,9 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 
-	// 某些 optional driver-agent 的原生多结果集路径会异常返回“成功但无任何结果集”。
+	// 某些 optional driver-agent 的原生多结果集路径会异常返回“成功但无可展示列/行”。
 	// 对只读查询这是不可信信号，回退到逐条执行可以避免普通 SELECT 在结果面板中被吃空。
-	if useNativeMultiResult && allReadOnly && results != nil && len(results) == 0 && len(resultMessages) == 0 {
+	if useNativeMultiResult && nativeReadOnlyResultsMissingTabularPayload(allReadOnly, results) {
 		logger.Warnf("DBQueryMulti 原生多结果集返回空结果，将回退逐条执行：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 		results = nil
 	}
@@ -1360,6 +1360,21 @@ func normalizeNativeResultStatementIndexes(dbType string, statements []string, r
 			results[idx].StatementIndex = idx + 1
 		}
 	}
+}
+
+func nativeReadOnlyResultsMissingTabularPayload(allReadOnly bool, results []connection.ResultSetData) bool {
+	if !allReadOnly || results == nil {
+		return false
+	}
+	if len(results) == 0 {
+		return true
+	}
+	for _, result := range results {
+		if len(result.Columns) > 0 || len(result.Rows) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func shouldUseNativeMultiResultBatch(dbType string, statements []string, allReadOnly bool) bool {

@@ -4341,11 +4341,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 updateResultPanelVisibility(true);
             }
             const shouldReplaceAllResults = didExecuteWholeEditor;
-            setResultSets(prev => {
-                const merged = mergeResultSets(prev, nextResultSets, shouldReplaceAllResults);
-                setActiveResultKey(resolveActiveResultKeyAfterMerge(merged, nextResultSets));
-                return merged;
-            });
+            const mergedResultSets = mergeResultSets(resultSets, nextResultSets, shouldReplaceAllResults);
+            setResultSets(mergedResultSets);
+            setActiveResultKey(resolveActiveResultKeyAfterMerge(mergedResultSets, nextResultSets));
             if (didExecuteAppendedSql || didExecuteWholeEditor) {
                 lastExecutedEditorQueryRef.current = currentQuery;
             }
@@ -4715,11 +4713,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 updateResultPanelVisibility(true);
             }
             const shouldReplaceAllResults = didExecuteWholeEditor;
-            setResultSets(prev => {
-                const merged = mergeResultSets(prev, nextResultSets, shouldReplaceAllResults);
-                setActiveResultKey(resolveActiveResultKeyAfterMerge(merged, nextResultSets));
-                return merged;
-            });
+            const mergedResultSets = mergeResultSets(resultSets, nextResultSets, shouldReplaceAllResults);
+            setResultSets(mergedResultSets);
+            setActiveResultKey(resolveActiveResultKeyAfterMerge(mergedResultSets, nextResultSets));
             if (didExecuteAppendedSql || didExecuteWholeEditor) {
                 lastExecutedEditorQueryRef.current = currentQuery;
             }
