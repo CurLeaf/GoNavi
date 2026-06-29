@@ -102,11 +102,16 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   v2SidebarSearchMode: "command" | "filter";
   v2CommandSearchPersistentFilterEnabled: boolean;
   v2SidebarPersistedFilter: string;
+  v2SidebarRailScale: number;
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
   tabDisplay: TabDisplaySettings;
   redisDbAliases: RedisDbAliasMap;
 }
+
+export const DEFAULT_V2_SIDEBAR_RAIL_SCALE = 1.0;
+export const MIN_V2_SIDEBAR_RAIL_SCALE = 1.0;
+export const MAX_V2_SIDEBAR_RAIL_SCALE = 1.8;
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   uiVersion: "legacy",
@@ -118,6 +123,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   v2SidebarSearchMode: "command",
   v2CommandSearchPersistentFilterEnabled: false,
   v2SidebarPersistedFilter: "",
+  v2SidebarRailScale: DEFAULT_V2_SIDEBAR_RAIL_SCALE,
   customUIFontFamily: null,
   customMonoFontFamily: null,
   tabDisplay: DEFAULT_TAB_DISPLAY_SETTINGS,
@@ -153,6 +159,16 @@ const sanitizeV2SidebarPersistedFilter = (value: unknown): string => {
   }
   return value.trim().slice(0, MAX_SIDEBAR_PERSISTED_FILTER_LENGTH);
 };
+
+export const sanitizeV2SidebarRailScale = (value: unknown): number => {
+  return normalizeFloatInRange(
+    value,
+    DEFAULT_V2_SIDEBAR_RAIL_SCALE,
+    MIN_V2_SIDEBAR_RAIL_SCALE,
+    MAX_V2_SIDEBAR_RAIL_SCALE,
+  );
+};
+
 const MAX_URI_LENGTH = 4096;
 const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
@@ -2192,6 +2208,9 @@ const sanitizeAppearance = (
         : DEFAULT_APPEARANCE.v2CommandSearchPersistentFilterEnabled,
     v2SidebarPersistedFilter: sanitizeV2SidebarPersistedFilter(
       appearance.v2SidebarPersistedFilter,
+    ),
+    v2SidebarRailScale: sanitizeV2SidebarRailScale(
+      appearance.v2SidebarRailScale,
     ),
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),

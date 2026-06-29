@@ -2678,6 +2678,8 @@
   "app.theme.appearance.transparency_blur_title": "透明与模糊效果",
   "app.theme.appearance.ui_scale_hint": "* 建议小屏设备設定为 85%-95%",
   "app.theme.appearance.ui_scale_title": "界面缩放 (UI Scale)",
+  "app.theme.appearance.sidebar_rail_scale_hint": "僅影響 V2 左側導覽軌，適合在大螢幕上放大按鈕與連線圖示。",
+  "app.theme.appearance.sidebar_rail_scale_title": "左側導覽按鈕大小",
   "app.theme.appearance.windows_acrylic_hint": "Windows 使用系统 Acrylic 效果，模糊程度由系统控制",
   "app.theme.data_table.column_width_hint": "标准模式預設列宽 200px；紧凑模式預設列宽 140px。已手动拖拽调整的列宽优先保留。",
   "app.theme.data_table.column_width_mode": "資料表列宽模式",

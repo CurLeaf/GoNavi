@@ -21,7 +21,13 @@ import SecurityUpdateIntroModal from './components/SecurityUpdateIntroModal';
 import SecurityUpdateProgressModal from './components/SecurityUpdateProgressModal';
 import SecurityUpdateSettingsModal from './components/SecurityUpdateSettingsModal';
 import LanguageSettingsPanel from './components/LanguageSettingsPanel';
-import { DEFAULT_APPEARANCE, useStore } from './store';
+import {
+  DEFAULT_APPEARANCE,
+  MAX_V2_SIDEBAR_RAIL_SCALE,
+  MIN_V2_SIDEBAR_RAIL_SCALE,
+  sanitizeV2SidebarRailScale,
+  useStore,
+} from './store';
 import { SavedConnection, SecurityUpdateIssue, SecurityUpdateStatus } from './types';
 import { blurToFilter, normalizeBlurForPlatform, normalizeOpacityForPlatform, isWindowsPlatform, resolveAppearanceValues } from './utils/appearance';
 import { buildFontFamilyOptions, DEFAULT_MONO_FONT_FAMILY, DEFAULT_UI_FONT_FAMILY, getLinuxCJKFontInstallHint, matchFontFamilyOption, resolveMonoFontFamily, resolveUIFontFamily, sanitizeFontFamilyInput, type FontFamilyOption, type InstalledFontFamily } from './utils/fontFamilies';
@@ -271,6 +277,7 @@ function App() {
   const effectiveSidebarTreeFontSize = sidebarTreeFontSizeFollowsGlobal
       ? effectiveFontSize
       : (sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize) ?? effectiveFontSize);
+  const effectiveSidebarRailScale = sanitizeV2SidebarRailScale(appearance.v2SidebarRailScale);
   const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';
   const tabDisplaySettings = useMemo(
       () => sanitizeTabDisplaySettings(appearance.tabDisplay),
@@ -2727,6 +2734,7 @@ function App() {
     document.documentElement.style.setProperty('--gn-font-size-mono', `${Math.max(10, Math.round(effectiveDataTableFontSize * 0.92))}px`);
     document.documentElement.style.setProperty('--gn-data-table-font-size', `${effectiveDataTableFontSize}px`);
     document.documentElement.style.setProperty('--gn-sidebar-tree-font-size', `${effectiveSidebarTreeFontSize}px`);
+    document.documentElement.style.setProperty('--gn-sidebar-rail-scale', `${effectiveSidebarRailScale}`);
     document.documentElement.style.setProperty('--gn-control-height', `${tokenControlHeight}px`);
     document.documentElement.style.setProperty('--gn-control-height-sm', `${tokenControlHeightSM}px`);
   }, [
@@ -2737,6 +2745,7 @@ function App() {
     resolvedMonoFontFamily,
     resolvedUiFontFamily,
     runtimePlatform,
+    effectiveSidebarRailScale,
     effectiveSidebarTreeFontSize,
     effectiveUiScale,
     tokenControlHeight,
@@ -4693,6 +4702,27 @@ function App() {
                                       <span style={{ width: 56 }}>{effectiveFontSize}px</span>
                                   </div>
                               </div>
+                              {appearance.uiVersion === 'v2' && (
+                                  <div style={utilityPanelStyle}>
+                                      <div style={{ marginBottom: 8, fontWeight: 500 }}>{t('app.theme.appearance.sidebar_rail_scale_title')}</div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                          <Slider
+                                            min={MIN_V2_SIDEBAR_RAIL_SCALE}
+                                            max={MAX_V2_SIDEBAR_RAIL_SCALE}
+                                            step={0.05}
+                                            value={effectiveSidebarRailScale}
+                                            onChange={(value) => setAppearance({
+                                                v2SidebarRailScale: sanitizeV2SidebarRailScale(value),
+                                            })}
+                                            style={{ flex: 1 }}
+                                          />
+                                          <span style={{ width: 56 }}>{Math.round(effectiveSidebarRailScale * 100)}%</span>
+                                      </div>
+                                      <div style={{ ...utilityMutedTextStyle, marginTop: 4 }}>
+                                          {t('app.theme.appearance.sidebar_rail_scale_hint')}
+                                      </div>
+                                  </div>
+                              )}
                               <div style={utilityPanelStyle}>
                                   <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.font_family.title')}</div>
                                   <div style={{ display: 'grid', gap: 14 }}>

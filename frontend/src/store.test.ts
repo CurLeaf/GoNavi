@@ -73,6 +73,7 @@ describe('store appearance persistence', () => {
     expect(appearance.v2SidebarSearchMode).toBe('command');
     expect(appearance.v2CommandSearchPersistentFilterEnabled).toBe(false);
     expect(appearance.v2SidebarPersistedFilter).toBe('');
+    expect(appearance.v2SidebarRailScale).toBe(1);
     expect(appearance.showDataTableVerticalBorders).toBe(false);
     expect(appearance.dataTableDensity).toBe('comfortable');
     expect(appearance.dataTableFontSize).toBeNull();
@@ -95,12 +96,14 @@ describe('store appearance persistence', () => {
       showDataTableVerticalBorders: true,
       dataTableDensity: 'compact',
       tableDoubleClickAction: 'open-design',
+      v2SidebarRailScale: 1.55,
     });
 
     const persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
     expect(persisted.state.appearance.showDataTableVerticalBorders).toBe(true);
     expect(persisted.state.appearance.dataTableDensity).toBe('compact');
     expect(persisted.state.appearance.tableDoubleClickAction).toBe('open-design');
+    expect(persisted.state.appearance.v2SidebarRailScale).toBe(1.55);
 
     vi.resetModules();
     const reloaded = await importStore();
@@ -109,6 +112,7 @@ describe('store appearance persistence', () => {
     expect(appearance.showDataTableVerticalBorders).toBe(true);
     expect(appearance.dataTableDensity).toBe('compact');
     expect(appearance.tableDoubleClickAction).toBe('open-design');
+    expect(appearance.v2SidebarRailScale).toBe(1.55);
   });
 
   it('restores query tabs from crash-recovery snapshots even when persisted tabs are missing', async () => {
@@ -156,6 +160,20 @@ describe('store appearance persistence', () => {
 
     const { useStore } = await importStore();
     expect(useStore.getState().appearance.tableDoubleClickAction).toBe('open-data');
+  });
+
+  it('sanitizes persisted v2 sidebar rail scale settings into the supported range', async () => {
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        appearance: {
+          v2SidebarRailScale: 99,
+        },
+      },
+      version: 13,
+    }));
+
+    const { useStore } = await importStore();
+    expect(useStore.getState().appearance.v2SidebarRailScale).toBe(1);
   });
 
   it('persists language preference and sanitizes unsupported persisted values', async () => {

@@ -2678,6 +2678,8 @@
   "app.theme.appearance.transparency_blur_title": "Эффекты прозрачности и размытия",
   "app.theme.appearance.ui_scale_hint": "* Для небольших экранов рекомендуется 85%-95%",
   "app.theme.appearance.ui_scale_title": "Масштаб UI (UI Scale)",
+  "app.theme.appearance.sidebar_rail_scale_hint": "Влияет только на левую навигационную панель V2 и помогает увеличить кнопки и значки подключений на больших экранах.",
+  "app.theme.appearance.sidebar_rail_scale_title": "Размер кнопок левой навигации",
   "app.theme.appearance.windows_acrylic_hint": "Windows использует системный эффект Acrylic. Сила размытия управляется системой.",
   "app.theme.data_table.column_width_hint": "В стандартном режиме ширина столбца по умолчанию 200px; в компактном режиме 140px. Вручную измененные ширины столбцов сохраняются в приоритете.",
   "app.theme.data_table.column_width_mode": "Режим ширины столбцов таблицы данных",

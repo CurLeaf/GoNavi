@@ -2678,6 +2678,8 @@
   "app.theme.appearance.transparency_blur_title": "Transparenz- und Weichzeichnungseffekte",
   "app.theme.appearance.ui_scale_hint": "* Für kleine Bildschirme werden 85%-95% empfohlen",
   "app.theme.appearance.ui_scale_title": "UI-Skalierung (UI Scale)",
+  "app.theme.appearance.sidebar_rail_scale_hint": "Wirkt sich nur auf die linke V2-Navigationsleiste aus und vergrößert dort Buttons und Verbindungsicons für große Displays.",
+  "app.theme.appearance.sidebar_rail_scale_title": "Größe der linken Navigationsbuttons",
   "app.theme.appearance.windows_acrylic_hint": "Windows verwendet den systemeigenen Acrylic-Effekt. Die Unschärfestärke wird vom System gesteuert.",
   "app.theme.data_table.column_width_hint": "Der Standardmodus nutzt 200px, der kompakte Modus 140px als Standardspaltenbreite. Manuell angepasste Spaltenbreiten bleiben vorrangig erhalten.",
   "app.theme.data_table.column_width_mode": "Spaltenbreitenmodus der Datentabelle",

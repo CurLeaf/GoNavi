@@ -2678,6 +2678,8 @@
   "app.theme.appearance.transparency_blur_title": "透明度とぼかし効果",
   "app.theme.appearance.ui_scale_hint": "* 小さい画面では 85%-95% を推奨します",
   "app.theme.appearance.ui_scale_title": "UI スケール (UI Scale)",
+  "app.theme.appearance.sidebar_rail_scale_hint": "V2 左側ナビゲーションレールにのみ適用されます。大画面でボタンや接続アイコンを見やすく拡大できます。",
+  "app.theme.appearance.sidebar_rail_scale_title": "左側ナビゲーションボタンのサイズ",
   "app.theme.appearance.windows_acrylic_hint": "Windows ではシステムの Acrylic 効果を使用します。ぼかしの強さはシステムにより制御されます。",
   "app.theme.data_table.column_width_hint": "標準モードの既定列幅は 200px、コンパクトモードの既定列幅は 140px です。手動で調整した列幅は優先して保持されます。",
   "app.theme.data_table.column_width_mode": "データテーブル列幅モード",
