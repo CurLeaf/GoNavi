@@ -5940,6 +5940,8 @@
   "query_editor.action.ai_schema_analysis": "Schema-Analyse",
   "query_editor.action.export_sql_file": "SQL-Datei exportieren",
   "query_editor.action.format": "Formatieren",
+  "query_editor.action.find_in_editor": "Suchen",
+  "query_editor.action.find_in_editor_with_shortcut": "Im Editor suchen ({{shortcut}})",
   "query_editor.action.format_sql": "SQL formatieren",
   "query_editor.action.format_sql_with_shortcut": "SQL formatieren ({{shortcut}})",
   "query_editor.action.hide_results_panel": "Ergebnisbereich ausblenden",

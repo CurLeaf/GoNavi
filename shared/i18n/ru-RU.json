@@ -5940,6 +5940,8 @@
   "query_editor.action.ai_schema_analysis": "Анализ схемы",
   "query_editor.action.export_sql_file": "Экспортировать SQL-файл",
   "query_editor.action.format": "Форматировать",
+  "query_editor.action.find_in_editor": "Поиск",
+  "query_editor.action.find_in_editor_with_shortcut": "Поиск в редакторе ({{shortcut}})",
   "query_editor.action.format_sql": "Форматировать SQL",
   "query_editor.action.format_sql_with_shortcut": "Форматировать SQL ({{shortcut}})",
   "query_editor.action.hide_results_panel": "Скрыть область результатов",

@@ -5940,6 +5940,8 @@
   "query_editor.action.ai_schema_analysis": "結構描述分析",
   "query_editor.action.export_sql_file": "匯出 SQL 檔案",
   "query_editor.action.format": "格式化",
+  "query_editor.action.find_in_editor": "搜尋",
+  "query_editor.action.find_in_editor_with_shortcut": "編輯器內搜尋（{{shortcut}}）",
   "query_editor.action.format_sql": "格式化 SQL",
   "query_editor.action.format_sql_with_shortcut": "格式化 SQL（{{shortcut}}）",
   "query_editor.action.hide_results_panel": "隱藏結果區",

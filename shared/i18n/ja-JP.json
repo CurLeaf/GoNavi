@@ -5940,6 +5940,8 @@
   "query_editor.action.ai_schema_analysis": "スキーマ分析",
   "query_editor.action.export_sql_file": "SQL ファイルをエクスポート",
   "query_editor.action.format": "整形",
+  "query_editor.action.find_in_editor": "検索",
+  "query_editor.action.find_in_editor_with_shortcut": "エディター内を検索（{{shortcut}}）",
   "query_editor.action.format_sql": "SQL を整形",
   "query_editor.action.format_sql_with_shortcut": "SQL を整形（{{shortcut}}）",
   "query_editor.action.hide_results_panel": "結果エリアを非表示",

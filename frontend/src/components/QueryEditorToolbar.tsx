@@ -6,6 +6,7 @@ import {
   FormatPainterOutlined,
   PlayCircleOutlined,
   RobotOutlined,
+  SearchOutlined,
   SaveOutlined,
   SettingOutlined,
   StopOutlined,
@@ -51,6 +52,7 @@ type QueryEditorToolbarProps = {
   onRun: () => void;
   onCancel: () => void;
   onQuickSave: () => void;
+  onFindInEditor: () => void;
   onFormat: () => void;
   onToggleResultPanelVisibility: () => void;
   onAIAction: (action: "generate" | "explain" | "optimize" | "schema") => void;
@@ -112,6 +114,7 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
   onRun,
   onCancel,
   onQuickSave,
+  onFindInEditor,
   onFormat,
   onToggleResultPanelVisibility,
   onAIAction,
@@ -161,6 +164,17 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
           ),
         })
       : t("query_editor.action.format_sql");
+  const findInEditorShortcutCombo =
+    activeShortcutPlatform === "mac" ? "Meta+F" : "Ctrl+F";
+  const findInEditorTitle = t(
+    "query_editor.action.find_in_editor_with_shortcut",
+    {
+      shortcut: getShortcutDisplayLabel(
+        findInEditorShortcutCombo,
+        activeShortcutPlatform,
+      ),
+    },
+  );
   const aiMenuItems: MenuProps["items"] = [
     {
       key: "ai-generate",
@@ -371,6 +385,11 @@ const QueryEditorToolbar: React.FC<QueryEditorToolbarProps> = ({
         className={isV2Ui ? "gn-v2-query-toolbar-action-pair" : undefined}
         style={{ display: "flex", gap: "8px", alignItems: "center" }}
       >
+        <Tooltip title={findInEditorTitle}>
+          <Button icon={<SearchOutlined />} onClick={onFindInEditor}>
+            {t("query_editor.action.find_in_editor")}
+          </Button>
+        </Tooltip>
         <Tooltip title={formatSqlTitle}>
           <Button icon={<FormatPainterOutlined />} onClick={onFormat}>
             {t("query_editor.action.format")}

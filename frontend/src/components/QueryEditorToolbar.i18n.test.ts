@@ -42,6 +42,8 @@ const requiredKeys = [
   'query_editor.action.save',
   'query_editor.action.save_with_shortcut',
   'query_editor.action.more',
+  'query_editor.action.find_in_editor',
+  'query_editor.action.find_in_editor_with_shortcut',
   'query_editor.action.format',
   'query_editor.action.format_sql',
   'query_editor.action.format_sql_with_shortcut',

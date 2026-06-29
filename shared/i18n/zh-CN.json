@@ -5940,6 +5940,8 @@
   "query_editor.action.ai_schema_analysis": "Schema 分析",
   "query_editor.action.export_sql_file": "导出 SQL 文件",
   "query_editor.action.format": "美化",
+  "query_editor.action.find_in_editor": "搜索",
+  "query_editor.action.find_in_editor_with_shortcut": "编辑器内搜索（{{shortcut}}）",
   "query_editor.action.format_sql": "美化 SQL",
   "query_editor.action.format_sql_with_shortcut": "美化 SQL（{{shortcut}}）",
   "query_editor.action.hide_results_panel": "隐藏结果区",

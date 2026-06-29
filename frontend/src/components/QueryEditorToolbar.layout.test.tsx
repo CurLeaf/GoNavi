@@ -80,6 +80,19 @@ describe('QueryEditorToolbar layout', () => {
     expect(transactionDelayCss).toContain('flex: 0 0 104px !important;');
   });
 
+  it('keeps editor search action grouped with formatting actions', () => {
+    const toolbarSource = readFileSync(new URL('./QueryEditorToolbar.tsx', import.meta.url), 'utf8');
+    const formatActionPairStart = toolbarSource.indexOf('SearchOutlined');
+    const formatActionPairEnd = toolbarSource.indexOf('!isV2Ui && (');
+    const formatActionPairSource = toolbarSource.slice(formatActionPairStart, formatActionPairEnd);
+
+    expect(toolbarSource).toContain('SearchOutlined');
+    expect(formatActionPairSource).toContain('query_editor.action.find_in_editor');
+    expect(formatActionPairSource).toContain('query_editor.action.find_in_editor_with_shortcut');
+    expect(formatActionPairSource).toContain('onClick={onFindInEditor}');
+    expect(formatActionPairSource).toContain('FormatPainterOutlined');
+  });
+
   it('shows delayed full-name tooltips for truncated connection and database selectors', () => {
     const toolbarSource = readFileSync(new URL('./QueryEditorToolbar.tsx', import.meta.url), 'utf8');
     const css = readV2ThemeCss();
