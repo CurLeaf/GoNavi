@@ -199,6 +199,29 @@ describe('store appearance persistence', () => {
     expect(reloaded.useStore.getState().languagePreference).toBe('zh-CN');
   });
 
+  it('persists theme preference and falls back to the resolved theme when missing', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setThemePreference('system');
+    let persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.themePreference).toBe('system');
+
+    vi.resetModules();
+    let reloaded = await importStore();
+    expect(reloaded.useStore.getState().themePreference).toBe('system');
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        theme: 'dark',
+      },
+      version: 13,
+    }));
+
+    vi.resetModules();
+    reloaded = await importStore();
+    expect(reloaded.useStore.getState().themePreference).toBe('dark');
+  });
+
   it('persists custom font families and sanitizes blank values', async () => {
     const { useStore } = await importStore();
 

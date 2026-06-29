@@ -2720,6 +2720,8 @@
   "app.theme.mode.dark.label": "ダークテーマ",
   "app.theme.mode.light.description": "明るい環境に適し、軽やかな階層感になります。",
   "app.theme.mode.light.label": "ライトテーマ",
+  "app.theme.mode.system.description": "OS の外観設定に追従して自動で切り替えます。",
+  "app.theme.mode.system.label": "システムに追従",
   "app.theme.nav.appearance.description": "スケール、フォント、透明度",
   "app.theme.nav.appearance.title": "外観パラメータ",
   "app.theme.nav.theme.description": "ライト/ダーク切り替え",

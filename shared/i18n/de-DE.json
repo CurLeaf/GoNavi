@@ -2720,6 +2720,8 @@
   "app.theme.mode.dark.label": "Dunkles Theme",
   "app.theme.mode.light.description": "Geeignet für helle Umgebungen mit leichterer visueller Hierarchie.",
   "app.theme.mode.light.label": "Helles Theme",
+  "app.theme.mode.system.description": "Folgt dem Erscheinungsbild des Betriebssystems und wechselt automatisch.",
+  "app.theme.mode.system.label": "System folgen",
   "app.theme.nav.appearance.description": "Skalierung, Schrift und Transparenz",
   "app.theme.nav.appearance.title": "Darstellungsparameter",
   "app.theme.nav.theme.description": "Wechsel zwischen hell und dunkel",

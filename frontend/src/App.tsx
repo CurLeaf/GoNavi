@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined } from '@ant-design/icons';
-import { BrowserOpenURL, Environment, EventsOn, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
+import { BrowserOpenURL, Environment, EventsOn, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetDarkTheme, WindowSetLightTheme, WindowSetPosition, WindowSetSize, WindowSetSystemDefaultTheme, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
@@ -166,6 +166,13 @@ const readCurrentVisibleViewport = () => ({
   availTop: (window.screen as Screen & { availTop?: number })?.availTop || 0,
 });
 
+const getSystemThemeMode = (): 'light' | 'dark' => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return 'light';
+  }
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+};
+
 
 const mergeSavedConnections = (current: SavedConnection[], imported: SavedConnection[]): SavedConnection[] => {
   const merged = new Map<string, SavedConnection>();
@@ -223,7 +230,9 @@ function App() {
   const connectionModalWarmupDoneRef = useRef(false);
   const windowState = useStore(state => state.windowState);
   const themeMode = useStore(state => state.theme);
+  const themePreference = useStore(state => state.themePreference);
   const setTheme = useStore(state => state.setTheme);
+  const setThemePreference = useStore(state => state.setThemePreference);
   const appearance = useStore(state => state.appearance);
   const setAppearance = useStore(state => state.setAppearance);
   const uiScale = useStore(state => state.uiScale);
@@ -240,6 +249,7 @@ function App() {
   const shortcutOptions = useStore(state => state.shortcutOptions);
   const updateShortcut = useStore(state => state.updateShortcut);
   const resetShortcutOptions = useStore(state => state.resetShortcutOptions);
+  const [systemThemeMode, setSystemThemeMode] = useState<'light' | 'dark'>(() => getSystemThemeMode());
   const darkMode = themeMode === 'dark';
   const isV2Ui = appearance.uiVersion === 'v2';
   const effectiveUiScale = Math.min(MAX_UI_SCALE, Math.max(MIN_UI_SCALE, Number(uiScale) || DEFAULT_UI_SCALE));
@@ -285,6 +295,44 @@ function App() {
       (key: TabDisplayElementKey) => t(TAB_DISPLAY_ELEMENT_META[key].descriptionKey),
       [t],
   );
+  useEffect(() => {
+      if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+          return;
+      }
+      const mediaQueryList = window.matchMedia('(prefers-color-scheme: dark)');
+      const applySystemTheme = (matches: boolean) => {
+          setSystemThemeMode(matches ? 'dark' : 'light');
+      };
+      applySystemTheme(mediaQueryList.matches);
+      const handleChange = (event: MediaQueryListEvent) => {
+          applySystemTheme(event.matches);
+      };
+      if (typeof mediaQueryList.addEventListener === 'function') {
+          mediaQueryList.addEventListener('change', handleChange);
+          return () => {
+              mediaQueryList.removeEventListener('change', handleChange);
+          };
+      }
+      mediaQueryList.addListener(handleChange);
+      return () => {
+          mediaQueryList.removeListener(handleChange);
+      };
+  }, []);
+  useEffect(() => {
+      const resolvedTheme = themePreference === 'system' ? systemThemeMode : themePreference;
+      if (themeMode !== resolvedTheme) {
+          setTheme(resolvedTheme);
+      }
+      if (themePreference === 'system') {
+          void safeWindowRuntimeCall(() => WindowSetSystemDefaultTheme(), undefined);
+          return;
+      }
+      if (resolvedTheme === 'dark') {
+          void safeWindowRuntimeCall(() => WindowSetDarkTheme(), undefined);
+          return;
+      }
+      void safeWindowRuntimeCall(() => WindowSetLightTheme(), undefined);
+  }, [setTheme, systemThemeMode, themeMode, themePreference]);
   const setTabDisplaySettings = useCallback((settings: Partial<TabDisplaySettings>) => {
       setAppearance({
           tabDisplay: applyTabDisplaySettingsPatch(tabDisplaySettings, settings),
@@ -2814,7 +2862,7 @@ function App() {
                   handleToggleLogPanel();
                   break;
               case 'toggleTheme':
-                  setTheme(themeMode === 'dark' ? 'light' : 'dark');
+                  setThemePreference(themeMode === 'dark' ? 'light' : 'dark');
                   break;
               case 'openShortcutManager':
                   setIsShortcutModalOpen(true);
@@ -2834,7 +2882,7 @@ function App() {
       return () => {
           window.removeEventListener('keydown', handleGlobalShortcut, true);
       };
-  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, shortcutOptions, switchActiveTabByOffset, themeMode, setTheme, toggleAIPanel, useNativeMacWindowControls]);
+  }, [activeShortcutPlatform, handleCreateConnection, handleManualResetWindowZoom, handleNewQuery, handleTitleBarWindowToggle, handleToggleLogPanel, isMacRuntime, shortcutOptions, switchActiveTabByOffset, themeMode, setThemePreference, toggleAIPanel, useNativeMacWindowControls]);
 
   useEffect(() => {
       if (!capturingShortcutAction) {
@@ -4573,17 +4621,18 @@ function App() {
                               </div>
                               <div style={utilityPanelStyle}>
                                   <div style={{ marginBottom: 10, fontWeight: 600 }}>{t('app.theme.mode_title')}</div>
-                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12 }}>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12 }}>
                                       {[
                                           { key: 'light', label: t('app.theme.mode.light.label'), description: t('app.theme.mode.light.description') },
                                           { key: 'dark', label: t('app.theme.mode.dark.label'), description: t('app.theme.mode.dark.description') },
+                                          { key: 'system', label: t('app.theme.mode.system.label'), description: t('app.theme.mode.system.description') },
                                       ].map((item) => {
-                                          const active = themeMode === item.key;
+                                          const active = themePreference === item.key;
                                           return (
                                               <button
                                                   key={item.key}
                                                   type="button"
-                                                  onClick={() => setTheme(item.key as 'light' | 'dark')}
+                                                  onClick={() => setThemePreference(item.key as 'light' | 'dark' | 'system')}
                                                   style={{
                                                       textAlign: 'left',
                                                       padding: '14px 14px',

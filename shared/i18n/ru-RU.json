@@ -2720,6 +2720,8 @@
   "app.theme.mode.dark.label": "Темная тема",
   "app.theme.mode.light.description": "Подходит для яркой среды и более легкой визуальной иерархии.",
   "app.theme.mode.light.label": "Светлая тема",
+  "app.theme.mode.system.description": "Следует за оформлением системы и переключается автоматически.",
+  "app.theme.mode.system.label": "Как в системе",
   "app.theme.nav.appearance.description": "Масштаб, шрифт и прозрачность",
   "app.theme.nav.appearance.title": "Параметры внешнего вида",
   "app.theme.nav.theme.description": "Переключение светлой и темной темы",

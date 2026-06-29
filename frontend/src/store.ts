@@ -89,6 +89,8 @@ import {
 } from "./utils/queryEditorSplitLayout";
 
 export type TableDoubleClickAction = "open-data" | "open-design";
+export type ThemeMode = "light" | "dark";
+export type ThemePreference = ThemeMode | "system";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
@@ -1275,7 +1277,8 @@ interface AppState {
   activeContext: { connectionId: string; dbName: string } | null;
   savedQueries: SavedQuery[];
   externalSQLDirectories: ExternalSQLDirectory[];
-  theme: "light" | "dark";
+  theme: ThemeMode;
+  themePreference: ThemePreference;
   languagePreference: LanguagePreference;
   appearance: AppearanceSettings;
   uiScale: number;
@@ -1390,7 +1393,8 @@ interface AppState {
   saveExternalSQLDirectory: (directory: ExternalSQLDirectory) => void;
   deleteExternalSQLDirectory: (id: string) => void;
 
-  setTheme: (theme: "light" | "dark") => void;
+  setTheme: (theme: ThemeMode) => void;
+  setThemePreference: (themePreference: ThemePreference) => void;
   setLanguagePreference: (languagePreference: LanguagePreference) => void;
   setAppearance: (appearance: Partial<AppearanceSettings>) => void;
   setRedisDbAlias: (
@@ -1968,8 +1972,13 @@ const hasLegacyConnectionSecrets = (
   });
 };
 
-const sanitizeTheme = (value: unknown): "light" | "dark" =>
+const sanitizeTheme = (value: unknown): ThemeMode =>
   value === "dark" ? "dark" : "light";
+
+const sanitizeThemePreference = (
+  value: unknown,
+  fallbackTheme: ThemeMode = "light",
+): ThemePreference => (value === "system" ? "system" : sanitizeTheme(value ?? fallbackTheme));
 
 const sanitizeLanguagePreference = (value: unknown): LanguagePreference => {
   if (
@@ -2450,6 +2459,7 @@ export const useStore = create<AppState>()(
       savedQueries: [],
       externalSQLDirectories: [],
       theme: "light",
+      themePreference: "light",
       languagePreference: DEFAULT_LANGUAGE_PREFERENCE,
       appearance: { ...DEFAULT_APPEARANCE },
       uiScale: DEFAULT_UI_SCALE,
@@ -3258,6 +3268,10 @@ export const useStore = create<AppState>()(
         })),
 
       setTheme: (theme) => set({ theme }),
+      setThemePreference: (themePreference) =>
+        set({
+          themePreference: sanitizeThemePreference(themePreference),
+        }),
       setLanguagePreference: (languagePreference) =>
         set({
           languagePreference: sanitizeLanguagePreference(languagePreference),
@@ -3769,6 +3783,10 @@ export const useStore = create<AppState>()(
           state.externalSQLDirectories,
         );
         nextState.theme = sanitizeTheme(state.theme);
+        nextState.themePreference = sanitizeThemePreference(
+          state.themePreference,
+          nextState.theme,
+        );
         nextState.languagePreference = sanitizeLanguagePreference(
           state.languagePreference,
         );
@@ -3870,6 +3888,10 @@ export const useStore = create<AppState>()(
             state.externalSQLDirectories,
           ),
           theme: sanitizeTheme(state.theme),
+          themePreference: sanitizeThemePreference(
+            state.themePreference,
+            sanitizeTheme(state.theme),
+          ),
           languagePreference: sanitizeLanguagePreference(
             state.languagePreference,
           ),
@@ -3921,6 +3943,7 @@ export const useStore = create<AppState>()(
           sidebarRootOrder: state.sidebarRootOrder,
           externalSQLDirectories: state.externalSQLDirectories,
           theme: state.theme,
+          themePreference: state.themePreference,
           languagePreference: state.languagePreference,
           appearance: state.appearance,
           uiScale: state.uiScale,

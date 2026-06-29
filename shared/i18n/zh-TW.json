@@ -2720,6 +2720,8 @@
   "app.theme.mode.dark.label": "深色主題",
   "app.theme.mode.light.description": "適合明亮環境，視覺層次更輕盈。",
   "app.theme.mode.light.label": "淺色主題",
+  "app.theme.mode.system.description": "跟隨作業系統外觀並自動切換。",
+  "app.theme.mode.system.label": "跟隨系統",
   "app.theme.nav.appearance.description": "縮放、字型與透明度",
   "app.theme.nav.appearance.title": "外觀參數",
   "app.theme.nav.theme.description": "淺色與深色切換",
