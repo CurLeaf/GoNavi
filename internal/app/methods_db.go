@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1796,7 +1797,12 @@ func resolveCreateStatementWithFallbackWithText(dbInst db.Database, config conne
 		return "", colErr
 	}
 
-	fallbackDDL, buildErr := buildFallbackCreateStatementWithText(dbType, ddlSchemaName, ddlTableName, columns, text)
+	var indexes []connection.IndexDefinition
+	if indexRows, idxErr := dbInst.GetIndexes(metadataSchemaName, metadataTableName); idxErr == nil {
+		indexes = indexRows
+	}
+
+	fallbackDDL, buildErr := buildFallbackCreateStatementWithText(dbType, ddlSchemaName, ddlTableName, columns, indexes, text)
 	if buildErr != nil {
 		if sourceErr != nil {
 			return "", sourceErr
@@ -1901,10 +1907,10 @@ func hasCreateTableOrViewHead(sqlText string) bool {
 }
 
 func buildFallbackCreateStatement(dbType string, schemaName string, tableName string, columns []connection.ColumnDefinition) (string, error) {
-	return buildFallbackCreateStatementWithText(dbType, schemaName, tableName, columns, defaultDBBackendText)
+	return buildFallbackCreateStatementWithText(dbType, schemaName, tableName, columns, nil, defaultDBBackendText)
 }
 
-func buildFallbackCreateStatementWithText(dbType string, schemaName string, tableName string, columns []connection.ColumnDefinition, text func(string, map[string]any) string) (string, error) {
+func buildFallbackCreateStatementWithText(dbType string, schemaName string, tableName string, columns []connection.ColumnDefinition, indexes []connection.IndexDefinition, text func(string, map[string]any) string) (string, error) {
 	if text == nil {
 		text = defaultDBBackendText
 	}
@@ -1962,6 +1968,7 @@ func buildFallbackCreateStatementWithText(dbType string, schemaName string, tabl
 	if len(primaryKeys) > 0 {
 		columnLines = append(columnLines, "  PRIMARY KEY ("+strings.Join(primaryKeys, ", ")+")")
 	}
+	indexStatements := buildFallbackIndexStatements(dbType, qualifiedTable, primaryKeys, indexes)
 
 	ddl := strings.Builder{}
 	ddl.WriteString("CREATE TABLE ")
@@ -1969,11 +1976,117 @@ func buildFallbackCreateStatementWithText(dbType string, schemaName string, tabl
 	ddl.WriteString(" (\n")
 	ddl.WriteString(strings.Join(columnLines, ",\n"))
 	ddl.WriteString("\n);")
+	if len(indexStatements) > 0 {
+		ddl.WriteString("\n")
+		ddl.WriteString(strings.Join(indexStatements, "\n"))
+	}
 	if len(columnCommentLines) > 0 {
 		ddl.WriteString("\n")
 		ddl.WriteString(strings.Join(columnCommentLines, "\n"))
 	}
 	return ddl.String(), nil
+}
+
+type fallbackIndexGroup struct {
+	Name    string
+	Unique  bool
+	Columns []string
+}
+
+func buildFallbackIndexStatements(dbType string, qualifiedTable string, primaryKeys []string, indexes []connection.IndexDefinition) []string {
+	grouped := groupFallbackIndexDefinitions(indexes)
+	if len(grouped) == 0 {
+		return nil
+	}
+
+	statements := make([]string, 0, len(grouped))
+	for _, idx := range grouped {
+		if strings.TrimSpace(idx.Name) == "" || len(idx.Columns) == 0 {
+			continue
+		}
+		if sameFallbackColumnNameList(idx.Columns, primaryKeys) {
+			continue
+		}
+
+		quotedColumns := make([]string, 0, len(idx.Columns))
+		for _, columnName := range idx.Columns {
+			columnName = strings.TrimSpace(columnName)
+			if columnName == "" {
+				continue
+			}
+			quotedColumns = append(quotedColumns, quoteIdentByType(dbType, columnName))
+		}
+		if len(quotedColumns) == 0 {
+			continue
+		}
+
+		prefix := "CREATE INDEX"
+		if idx.Unique {
+			prefix = "CREATE UNIQUE INDEX"
+		}
+		statements = append(statements, fmt.Sprintf(
+			"%s %s ON %s (%s);",
+			prefix,
+			quoteIdentByType(dbType, idx.Name),
+			qualifiedTable,
+			strings.Join(quotedColumns, ", "),
+		))
+	}
+
+	return statements
+}
+
+func groupFallbackIndexDefinitions(indexes []connection.IndexDefinition) []fallbackIndexGroup {
+	if len(indexes) == 0 {
+		return nil
+	}
+
+	groupMap := make(map[string][]connection.IndexDefinition)
+	order := make([]string, 0)
+	for _, idx := range indexes {
+		name := strings.TrimSpace(idx.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := groupMap[name]; !ok {
+			order = append(order, name)
+		}
+		groupMap[name] = append(groupMap[name], idx)
+	}
+
+	grouped := make([]fallbackIndexGroup, 0, len(order))
+	for _, name := range order {
+		rows := groupMap[name]
+		sort.SliceStable(rows, func(i, j int) bool {
+			return rows[i].SeqInIndex < rows[j].SeqInIndex
+		})
+
+		group := fallbackIndexGroup{Name: name, Unique: true}
+		for _, row := range rows {
+			if row.NonUnique != 0 {
+				group.Unique = false
+			}
+			columnName := strings.TrimSpace(row.ColumnName)
+			if columnName != "" {
+				group.Columns = append(group.Columns, columnName)
+			}
+		}
+		grouped = append(grouped, group)
+	}
+
+	return grouped
+}
+
+func sameFallbackColumnNameList(a []string, b []string) bool {
+	if len(a) == 0 || len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !strings.EqualFold(strings.TrimSpace(a[i]), strings.TrimSpace(b[i])) {
+			return false
+		}
+	}
+	return true
 }
 
 func buildFallbackColumnCommentStatement(dbType string, schemaName string, tableName string, qualifiedTable string, columnName string, comment string) string {

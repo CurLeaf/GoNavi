@@ -13,6 +13,8 @@ type fakeCreateStatementDB struct {
 	createErr  error
 	columns    []connection.ColumnDefinition
 	columnsErr error
+	indexes    []connection.IndexDefinition
+	indexesErr error
 	queryRows  []map[string]interface{}
 	queryErr   error
 
@@ -20,7 +22,10 @@ type fakeCreateStatementDB struct {
 	createTable  string
 	colsSchema   string
 	colsTable    string
+	indexSchema  string
+	indexTable   string
 	columnsCalls int
+	indexCalls   int
 	queries      []string
 }
 
@@ -49,7 +54,10 @@ func (f *fakeCreateStatementDB) GetAllColumns(dbName string) ([]connection.Colum
 	return nil, nil
 }
 func (f *fakeCreateStatementDB) GetIndexes(dbName, tableName string) ([]connection.IndexDefinition, error) {
-	return nil, nil
+	f.indexCalls++
+	f.indexSchema = dbName
+	f.indexTable = tableName
+	return f.indexes, f.indexesErr
 }
 func (f *fakeCreateStatementDB) GetForeignKeys(dbName, tableName string) ([]connection.ForeignKeyDefinition, error) {
 	return nil, nil
@@ -275,6 +283,49 @@ func TestResolveCreateStatementWithFallback_KingbaseIncludesColumnComments(t *te
 		if !strings.Contains(ddl, want) {
 			t.Fatalf("expected fallback DDL to contain %q, got: %s", want, ddl)
 		}
+	}
+}
+
+func TestResolveCreateStatementWithFallback_KingbaseIncludesSecondaryIndexes(t *testing.T) {
+	t.Parallel()
+
+	dbInst := &fakeCreateStatementDB{
+		createSQL: "SHOW CREATE TABLE not directly supported in Kingbase/Postgres via SQL",
+		columns: []connection.ColumnDefinition{
+			{Name: "id", Type: "bigint", Nullable: "NO", Key: "PRI"},
+			{Name: "tenant_id", Type: "bigint", Nullable: "NO"},
+			{Name: "api_name", Type: "character varying(100 char)", Nullable: "YES"},
+		},
+		indexes: []connection.IndexDefinition{
+			{Name: "mes_third_sys_log_pkey", ColumnName: "id", NonUnique: 0, SeqInIndex: 1, IndexType: "BTREE"},
+			{Name: "idx_mes_third_sys_log_tenant_api", ColumnName: "tenant_id", NonUnique: 1, SeqInIndex: 1, IndexType: "BTREE"},
+			{Name: "idx_mes_third_sys_log_tenant_api", ColumnName: "api_name", NonUnique: 1, SeqInIndex: 2, IndexType: "BTREE"},
+			{Name: "uk_mes_third_sys_log_api", ColumnName: "api_name", NonUnique: 0, SeqInIndex: 1, IndexType: "BTREE"},
+		},
+	}
+
+	ddl, err := resolveCreateStatementWithFallback(dbInst, connection.ConnectionConfig{
+		Type: "kingbase",
+	}, "demo_db", "ldf_server.mes_third_sys_log")
+	if err != nil {
+		t.Fatalf("resolveCreateStatementWithFallback() unexpected error: %v", err)
+	}
+	if dbInst.indexCalls != 1 {
+		t.Fatalf("expected one GetIndexes call, got %d", dbInst.indexCalls)
+	}
+	if dbInst.indexSchema != "ldf_server" || dbInst.indexTable != "mes_third_sys_log" {
+		t.Fatalf("expected index target ldf_server.mes_third_sys_log, got %q.%q", dbInst.indexSchema, dbInst.indexTable)
+	}
+	for _, want := range []string{
+		`CREATE INDEX idx_mes_third_sys_log_tenant_api ON ldf_server.mes_third_sys_log (tenant_id, api_name);`,
+		`CREATE UNIQUE INDEX uk_mes_third_sys_log_api ON ldf_server.mes_third_sys_log (api_name);`,
+	} {
+		if !strings.Contains(ddl, want) {
+			t.Fatalf("expected fallback DDL to contain %q, got: %s", want, ddl)
+		}
+	}
+	if strings.Contains(ddl, `CREATE UNIQUE INDEX mes_third_sys_log_pkey`) {
+		t.Fatalf("primary key index should not be emitted separately, got: %s", ddl)
 	}
 }
 
