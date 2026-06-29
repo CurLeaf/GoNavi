@@ -1225,6 +1225,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		isReadStmt := isReadOnlySQLQuery(runConfig.Type, stmt)
 		tryQueryStmtFirst := shouldTryQueryResultFirst(runConfig.Type, stmt)
 		if isReadStmt || tryQueryStmtFirst {
+			preferPlainReadQuery := isReadStmt && shouldPreferPlainReadQueryResult(runConfig.Type)
 			var (
 				data             []map[string]interface{}
 				columns          []string
@@ -1248,7 +1249,9 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				}
 				return err
 			}
-			if sessionMultiQueryMessageTarget != nil {
+			if preferPlainReadQuery {
+				err = runStatementQuery()
+			} else if sessionMultiQueryMessageTarget != nil {
 				statementResults, messages, err = sessionMultiQueryMessageTarget.QueryMultiContextWithMessages(ctx, stmt)
 				usedMultiResult = true
 			} else if sessionMultiQueryTarget != nil {
@@ -1394,7 +1397,7 @@ func nativeReadOnlyResultsMissingTabularPayload(allReadOnly bool, results []conn
 
 func shouldUseNativeMultiResultBatch(dbType string, statements []string, allReadOnly bool) bool {
 	if allReadOnly {
-		return true
+		return !shouldPreferPlainReadQueryResult(dbType)
 	}
 	if !strings.EqualFold(strings.TrimSpace(dbType), "sqlserver") {
 		return false
@@ -1410,6 +1413,15 @@ func shouldUseNativeMultiResultBatch(dbType string, statements []string, allRead
 		return false
 	}
 	return true
+}
+
+func shouldPreferPlainReadQueryResult(dbType string) bool {
+	switch resolveDDLDBType(connection.ConnectionConfig{Type: dbType}) {
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
+		return true
+	default:
+		return false
+	}
 }
 
 func shouldTryQueryResultFirst(dbType string, query string) bool {

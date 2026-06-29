@@ -1787,7 +1787,7 @@ func TestDBQueryMultiFallsBackToPlainQueryWhenSequentialMultiStillReturnsBlankRe
 	}
 
 	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
-	config := connection.ConnectionConfig{Type: "kingbase", Host: "127.0.0.1", Port: 54321, User: "system"}
+	config := connection.ConnectionConfig{Type: "mysql", Host: "127.0.0.1", Port: 3306, User: "root"}
 
 	result := app.DBQueryMulti(config, "ldf_server_dbs_dev", query, "sequential-blank-native-read-fallback-test")
 	if !result.Success {
@@ -1814,6 +1814,67 @@ func TestDBQueryMultiFallsBackToPlainQueryWhenSequentialMultiStillReturnsBlankRe
 	}
 	if got := resultSets[0].Rows[0]["work_order"]; got != "MO-20260629" {
 		t.Fatalf("expected fallback SELECT result work_order=MO-20260629, got %#v", got)
+	}
+}
+
+func TestDBQueryMultiPrefersPlainQueryForKingbaseReadResults(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "SELECT * FROM ldf_server.mes_work_order"
+	nativeEmptyRowsResult := []connection.ResultSetData{{
+		Rows:    []map[string]interface{}{},
+		Columns: []string{"id", "work_order"},
+	}}
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"id": 1001, "work_order": "MO-20260629"},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"id", "work_order"},
+		},
+		multiResult: map[string][]connection.ResultSetData{
+			query: nativeEmptyRowsResult,
+		},
+		queryErr: map[string]error{},
+	}
+	fakeDB := &fakeNativeMultiResultDB{fakeBatchWriteDB: baseDB}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "kingbase", Host: "127.0.0.1", Port: 54321, User: "system"}
+
+	result := app.DBQueryMulti(config, "ldf_server_dbs_dev", query, "kingbase-plain-query-result-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.multiCalls != 0 {
+		t.Fatalf("expected kingbase read query to skip top-level native multi-result path, got %d calls", fakeDB.multiCalls)
+	}
+	if baseDB.session == nil {
+		t.Fatal("expected DBQueryMulti to open a pinned session for kingbase read query")
+	}
+	if baseDB.session.queryCalls != 1 {
+		t.Fatalf("expected kingbase read query to use plain session query once, got %d calls", baseDB.session.queryCalls)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 1 {
+		t.Fatalf("expected one result set, got %#v", resultSets)
+	}
+	if !reflect.DeepEqual(resultSets[0].Columns, []string{"id", "work_order"}) {
+		t.Fatalf("expected plain query columns, got %#v", resultSets[0].Columns)
+	}
+	if got := resultSets[0].Rows[0]["work_order"]; got != "MO-20260629" {
+		t.Fatalf("expected plain query SELECT result work_order=MO-20260629, got %#v", got)
 	}
 }
 
