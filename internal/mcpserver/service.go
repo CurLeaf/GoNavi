@@ -38,6 +38,12 @@ type databaseArgs struct {
 	DBName       string `json:"dbName,omitempty" jsonschema:"可选数据库/Schema 名称。为空时优先使用保存连接里的默认数据库"`
 }
 
+type objectsArgs struct {
+	ConnectionID string   `json:"connectionId" jsonschema:"get_connections 返回的连接 ID"`
+	DBName       string   `json:"dbName,omitempty" jsonschema:"可选数据库/Schema 名称。为空时优先使用保存连接里的默认数据库"`
+	ObjectTypes  []string `json:"objectTypes,omitempty" jsonschema:"可选对象类型过滤，例如 table、view、function、procedure、package、queue、topic、exchange。为空返回全部支持对象"`
+}
+
 type tableArgs struct {
 	ConnectionID string `json:"connectionId" jsonschema:"get_connections 返回的连接 ID"`
 	DBName       string `json:"dbName,omitempty" jsonschema:"可选数据库/Schema 名称。为空时优先使用保存连接里的默认数据库"`
@@ -81,6 +87,19 @@ type getTablesResult struct {
 	ConnectionID string   `json:"connectionId"`
 	DBName       string   `json:"dbName,omitempty"`
 	Tables       []string `json:"tables"`
+	Views        []string `json:"views"`
+}
+
+type getViewsResult struct {
+	ConnectionID string   `json:"connectionId"`
+	DBName       string   `json:"dbName,omitempty"`
+	Views        []string `json:"views"`
+}
+
+type getObjectsResult struct {
+	ConnectionID string                      `json:"connectionId"`
+	DBName       string                      `json:"dbName,omitempty"`
+	Objects      []connection.DatabaseObject `json:"objects"`
 }
 
 type getAllColumnsResult struct {
@@ -230,10 +249,73 @@ func (s *Service) GetTables(ctx context.Context, req *mcp.CallToolRequest, args 
 		return toolError("解析表列表失败: %v", err), getTablesResult{}, nil
 	}
 
+	views := []string{}
+	viewResult := s.backend.DBGetViews(view.Config, dbName)
+	if viewResult.Success {
+		if decodedViews, decodeErr := decodeNamedStringSlice(viewResult.Data, "View", "view", "name"); decodeErr == nil {
+			views = decodedViews
+		}
+	}
+
 	return successResult(), getTablesResult{
 		ConnectionID: view.ID,
 		DBName:       dbName,
 		Tables:       ensureNonNilStrings(tables),
+		Views:        ensureNonNilStrings(views),
+	}, nil
+}
+
+func (s *Service) GetViews(ctx context.Context, req *mcp.CallToolRequest, args databaseArgs) (*mcp.CallToolResult, getViewsResult, error) {
+	_ = ctx
+	_ = req
+
+	view, errResult := s.resolveConnection(args.ConnectionID)
+	if errResult != nil {
+		return errResult, getViewsResult{}, nil
+	}
+
+	dbName := effectiveDBName(args.DBName, view.Config)
+	queryResult := s.backend.DBGetViews(view.Config, dbName)
+	if !queryResult.Success {
+		return toolError("获取视图列表失败: %s", strings.TrimSpace(queryResult.Message)), getViewsResult{}, nil
+	}
+
+	views, err := decodeNamedStringSlice(queryResult.Data, "View", "view", "name")
+	if err != nil {
+		return toolError("解析视图列表失败: %v", err), getViewsResult{}, nil
+	}
+
+	return successResult(), getViewsResult{
+		ConnectionID: view.ID,
+		DBName:       dbName,
+		Views:        ensureNonNilStrings(views),
+	}, nil
+}
+
+func (s *Service) GetObjects(ctx context.Context, req *mcp.CallToolRequest, args objectsArgs) (*mcp.CallToolResult, getObjectsResult, error) {
+	_ = ctx
+	_ = req
+
+	view, errResult := s.resolveConnection(args.ConnectionID)
+	if errResult != nil {
+		return errResult, getObjectsResult{}, nil
+	}
+
+	dbName := effectiveDBName(args.DBName, view.Config)
+	queryResult := s.backend.DBGetObjects(view.Config, dbName)
+	if !queryResult.Success {
+		return toolError("获取数据库对象列表失败: %s", strings.TrimSpace(queryResult.Message)), getObjectsResult{}, nil
+	}
+
+	objects, err := decodeDatabaseObjects(queryResult.Data)
+	if err != nil {
+		return toolError("解析数据库对象列表失败: %v", err), getObjectsResult{}, nil
+	}
+
+	return successResult(), getObjectsResult{
+		ConnectionID: view.ID,
+		DBName:       dbName,
+		Objects:      filterDatabaseObjects(objects, args.ObjectTypes),
 	}, nil
 }
 
@@ -737,6 +819,67 @@ func decodeResultSets(data interface{}) ([]connection.ResultSetData, error) {
 	}
 }
 
+func decodeDatabaseObjects(data interface{}) ([]connection.DatabaseObject, error) {
+	switch items := data.(type) {
+	case nil:
+		return []connection.DatabaseObject{}, nil
+	case []connection.DatabaseObject:
+		return ensureNonNilDatabaseObjects(append([]connection.DatabaseObject(nil), items...)), nil
+	default:
+		var decoded []connection.DatabaseObject
+		if err := remarshal(data, &decoded); err != nil {
+			return nil, err
+		}
+		return ensureNonNilDatabaseObjects(decoded), nil
+	}
+}
+
+func filterDatabaseObjects(items []connection.DatabaseObject, objectTypes []string) []connection.DatabaseObject {
+	if len(objectTypes) == 0 {
+		return ensureNonNilDatabaseObjects(items)
+	}
+	allowed := make(map[string]struct{}, len(objectTypes))
+	for _, objectType := range objectTypes {
+		normalized := strings.ToLower(strings.TrimSpace(objectType))
+		if normalized == "" {
+			continue
+		}
+		switch normalized {
+		case "routine", "routines":
+			allowed["function"] = struct{}{}
+			allowed["procedure"] = struct{}{}
+		case "functions":
+			allowed["function"] = struct{}{}
+		case "procedures":
+			allowed["procedure"] = struct{}{}
+		case "views":
+			allowed["view"] = struct{}{}
+		case "tables":
+			allowed["table"] = struct{}{}
+		case "queues":
+			allowed["queue"] = struct{}{}
+		case "topics":
+			allowed["topic"] = struct{}{}
+		case "exchanges":
+			allowed["exchange"] = struct{}{}
+		case "packages":
+			allowed["package"] = struct{}{}
+		default:
+			allowed[normalized] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return ensureNonNilDatabaseObjects(items)
+	}
+	result := make([]connection.DatabaseObject, 0, len(items))
+	for _, item := range items {
+		if _, ok := allowed[strings.ToLower(strings.TrimSpace(item.Type))]; ok {
+			result = append(result, item)
+		}
+	}
+	return ensureNonNilDatabaseObjects(result)
+}
+
 func remarshal(from interface{}, to interface{}) error {
 	payload, err := json.Marshal(from)
 	if err != nil {
@@ -843,6 +986,13 @@ func ensureNonNilRows(items []map[string]interface{}) []map[string]interface{} {
 func ensureNonNilResultSets(items []connection.ResultSetData) []connection.ResultSetData {
 	if items == nil {
 		return []connection.ResultSetData{}
+	}
+	return items
+}
+
+func ensureNonNilDatabaseObjects(items []connection.DatabaseObject) []connection.DatabaseObject {
+	if items == nil {
+		return []connection.DatabaseObject{}
 	}
 	return items
 }

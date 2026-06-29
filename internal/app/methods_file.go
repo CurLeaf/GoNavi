@@ -3291,10 +3291,12 @@ func buildListViewQueries(config connection.ConnectionConfig, dbName string) []s
 	switch dbType {
 	case "mysql", "mariadb", "oceanbase", "diros", "starrocks", "sphinx":
 		queries := []string{
-			fmt.Sprintf(`SELECT TABLE_SCHEMA AS schema_name, TABLE_NAME AS object_name, TABLE_TYPE AS table_type FROM information_schema.tables WHERE TABLE_TYPE='VIEW' AND TABLE_SCHEMA='%s' ORDER BY TABLE_NAME`, escapedDbName),
+			fmt.Sprintf(`SELECT TABLE_SCHEMA AS schema_name, TABLE_NAME AS object_name, TABLE_TYPE AS table_type FROM information_schema.tables WHERE TABLE_TYPE='VIEW' AND %s ORDER BY TABLE_NAME`, mysqlMetadataSchemaPredicate("TABLE_SCHEMA", dbName)),
 		}
 		if strings.TrimSpace(dbName) != "" {
 			queries = append(queries, fmt.Sprintf("SHOW FULL TABLES FROM %s WHERE Table_type = 'VIEW'", quoteIdentByType("mysql", dbName)))
+		} else {
+			queries = append(queries, "SHOW FULL TABLES WHERE Table_type = 'VIEW'")
 		}
 		return queries
 	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":

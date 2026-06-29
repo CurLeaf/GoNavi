@@ -1675,6 +1675,27 @@ func (a *App) DBGetTables(config connection.ConnectionConfig, dbName string) con
 	return connection.QueryResult{Success: true, Data: resData}
 }
 
+func (a *App) DBGetViews(config connection.ConnectionConfig, dbName string) connection.QueryResult {
+	runConfig := normalizeRunConfig(config, dbName)
+	if strings.EqualFold(strings.TrimSpace(runConfig.Type), "redis") {
+		return connection.QueryResult{Success: true, Data: []map[string]string{}}
+	}
+
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		logger.Error(err, "DBGetViews 获取连接失败：%s", formatConnSummary(runConfig))
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	views := mapValuesSorted(listViewNameLookup(dbInst, runConfig, dbName))
+	resData := make([]map[string]string, 0, len(views))
+	for _, name := range views {
+		resData = append(resData, map[string]string{"View": name})
+	}
+
+	return connection.QueryResult{Success: true, Data: resData}
+}
+
 func (a *App) DBShowCreateTable(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
 	dbType := resolveDDLDBType(config)
 	runConfig := buildRunConfigForDDL(config, dbType, dbName)

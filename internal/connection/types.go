@@ -155,6 +155,17 @@ type QueryResult struct {
 	TransactionPending bool        `json:"transactionPending,omitempty"`
 }
 
+// DatabaseObject 描述数据库或类数据库数据源中的可浏览对象。
+type DatabaseObject struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Schema   string `json:"schema,omitempty"`
+	Database string `json:"database,omitempty"`
+	Parent   string `json:"parent,omitempty"`
+	RawType  string `json:"rawType,omitempty"`
+	Comment  string `json:"comment,omitempty"`
+}
+
 // ColumnDefinition 描述表的一个列定义。
 type ColumnDefinition struct {
 	Name     string  `json:"name"`

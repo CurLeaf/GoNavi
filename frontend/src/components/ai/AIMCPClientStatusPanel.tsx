@@ -122,7 +122,7 @@ const AIMCPClientStatusPanel: React.FC<AIMCPClientStatusPanelProps> = ({
         >
           {copy(
             'ai_chat.mcp_client.install.status.remote_boundary',
-            'Remote connection boundary: database connection info and passwords stay in Windows GoNavi. Cloud Agents read connection summaries, tables, and DDL through schema-only MCP tools by default, and execute_sql is not registered. For cross-machine access, use GoNavi Streamable HTTP mode with a token, tunnel, or reverse proxy.',
+            'Remote connection boundary: database connection info and passwords stay in Windows GoNavi. Cloud Agents read connection summaries, object lists, tables, views, and DDL through schema-only MCP tools by default, and execute_sql is not registered. For cross-machine access, use GoNavi Streamable HTTP mode with a token, tunnel, or reverse proxy.',
           )}
         </div>
       )}

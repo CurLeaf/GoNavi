@@ -315,7 +315,7 @@ export const buildRemoteMCPClientGuide = (
     `- ${translateMCPClientCopy(
       translate,
       'ai_settings.mcp_server.remote_quick_start.guide.goal.tools_only',
-      'The cloud Agent only reads get_connections/get_databases/get_tables/get_columns/get_table_ddl results through MCP tools.',
+      'The cloud Agent only reads get_connections/get_databases/get_objects/get_tables/get_views/get_columns/get_table_ddl results through MCP tools.',
     )}`,
     `- ${translateMCPClientCopy(
       translate,

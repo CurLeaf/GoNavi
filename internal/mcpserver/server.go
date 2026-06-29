@@ -37,8 +37,18 @@ func NewServerWithOptions(backend Backend, options ServerOptions) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_tables",
-		Description: "根据 connectionId 和可选 dbName 获取表列表。dbName 为空时优先使用保存连接里的默认数据库。",
+		Description: "根据 connectionId 和可选 dbName 获取表列表，并在返回结果的 views 字段附带视图列表。dbName 为空时优先使用保存连接里的默认数据库。",
 	}, service.GetTables)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_views",
+		Description: "根据 connectionId 和可选 dbName 获取视图列表。dbName 为空时优先使用保存连接里的默认数据库。",
+	}, service.GetViews)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "get_objects",
+		Description: "根据 connectionId 和可选 dbName 获取数据库对象清单，覆盖表、视图、触发器、函数、过程、序列、包、事件，以及消息队列类 topic/queue/exchange 等对象。",
+	}, service.GetObjects)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_all_columns",
