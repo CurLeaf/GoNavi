@@ -98,6 +98,10 @@ func TestCollectMySQLDatabaseNames_ReturnsOriginalErrorWhenNoDatabaseResolved(t 
 			return []map[string]interface{}{
 				{"Database": nil},
 			}, nil, nil
+		case mysqlDatabaseQueries[2]:
+			return []map[string]interface{}{
+				{"database_name": nil},
+			}, nil, nil
 		default:
 			return nil, nil, errors.New("unexpected query")
 		}
@@ -107,6 +111,36 @@ func TestCollectMySQLDatabaseNames_ReturnsOriginalErrorWhenNoDatabaseResolved(t 
 	}
 	if !errors.Is(err, expectErr) {
 		t.Fatalf("错误不符合预期: %v", err)
+	}
+}
+
+func TestCollectMySQLDatabaseNames_FallsBackToInformationSchemaSchemata(t *testing.T) {
+	t.Parallel()
+
+	got, err := collectMySQLDatabaseNames(func(query string) ([]map[string]interface{}, []string, error) {
+		switch query {
+		case mysqlDatabaseQueries[0]:
+			return nil, nil, errors.New("show databases denied")
+		case mysqlDatabaseQueries[1]:
+			return []map[string]interface{}{
+				{"Database": nil},
+			}, nil, nil
+		case mysqlDatabaseQueries[2]:
+			return []map[string]interface{}{
+				{"SCHEMA_NAME": "leite-finance"},
+				{"database_name": "analytics"},
+			}, []string{"SCHEMA_NAME", "database_name"}, nil
+		default:
+			return nil, nil, errors.New("unexpected query")
+		}
+	})
+	if err != nil {
+		t.Fatalf("collectMySQLDatabaseNames 返回错误: %v", err)
+	}
+
+	want := []string{"leite-finance", "analytics"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected database names, got=%v want=%v", got, want)
 	}
 }
 
