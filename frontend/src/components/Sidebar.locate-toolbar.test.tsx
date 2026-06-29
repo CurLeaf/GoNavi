@@ -804,6 +804,12 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('data-sidebar-create-group-action="true"');
     expect(markup).toContain('data-sidebar-batch-table-action="true"');
     expect(markup).toContain('data-sidebar-batch-database-action="true"');
+    expect(source).toContain('openBatchTableExport: () => openBatchOperationModal(),');
+    expect(source).toContain('openBatchDatabaseExport: () => openBatchDatabaseModal(),');
+    expect(source).toContain('onClick={() => openBatchOperationModal()}');
+    expect(source).toContain('onClick={() => openBatchDatabaseModal()}');
+    expect(source).not.toContain('openBatchTableExport: () => openBatchTableExportWorkbench()');
+    expect(source).not.toContain('openBatchDatabaseExport: () => openBatchDatabaseExportWorkbench()');
     expect(markup).toContain('data-sidebar-open-external-sql-file-action="true"');
     expect(markup).toContain('data-sidebar-locate-current-tab-action="true"');
     expect(markup).toContain('data-gonavi-new-query-action="true"');

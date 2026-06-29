@@ -11,6 +11,8 @@ const requiredKeys = [
   'sidebar.action.batch_tables',
   'sidebar.action.batch_databases',
   'sidebar.action.clear_tables',
+  'sidebar.action.delete_tables',
+  'sidebar.action.delete_database_count',
   'sidebar.action.export_schema',
   'sidebar.action.export_data_only',
   'sidebar.action.backup_schema_data',
@@ -63,6 +65,7 @@ describe('Sidebar batch actions i18n', () => {
 
     [
       '清空表',
+      '删除表',
       '导出结构',
       '仅数据(INSERT)',
       '备份(结构+数据)',
@@ -118,6 +121,8 @@ describe('Sidebar batch actions i18n', () => {
 
     [
       'sidebar.action.clear_tables',
+      'sidebar.action.delete_tables',
+      'sidebar.action.delete_database_count',
       'sidebar.action.export_schema',
       'sidebar.action.export_data_only',
       'sidebar.action.backup_schema_data',
@@ -148,6 +153,10 @@ describe('Sidebar batch actions i18n', () => {
       expect(batchModalSource, key).toContain(`t('${key}'`);
     });
 
+    expect(batchModalSource).toContain('handleBatchDeleteTables');
+    expect(batchModalSource).toContain('handleBatchDbDelete');
+    expect(batchModalSource).toContain("item.objectType === 'table'");
+
     [
       'sidebar.tab.batch_export_objects',
       'sidebar.tab.batch_export_objects_database',
@@ -170,6 +179,8 @@ describe('Sidebar batch actions i18n', () => {
       requiredKeys.forEach((key) => {
         expect(catalog[key], `${locale}:${key}`).toBeTruthy();
       });
+      expect(placeholders(catalog['sidebar.action.delete_database_count'])).toEqual(['count']);
+      expect(placeholders(catalog['sidebar.action.delete_tables'])).toEqual([]);
       expect(placeholders(catalog['sidebar.tab.batch_export_objects'])).toEqual([]);
       expect(placeholders(catalog['sidebar.tab.batch_export_objects_database'])).toEqual(['database']);
       expect(placeholders(catalog['sidebar.tab.batch_export_databases'])).toEqual([]);

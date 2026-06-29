@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from 'react';
 import { Modal, message } from 'antd';
 
-import { DBGetDatabases, DBGetTables } from '../../../wailsjs/go/app/App';
+import { DBGetDatabases, DBGetTables, DropDatabase, DropTable } from '../../../wailsjs/go/app/App';
 import type { SavedConnection } from '../../types';
 import { t } from '../../i18n';
 import { buildRpcConnectionConfig } from '../../utils/connectionRpcConfig';
@@ -25,6 +25,7 @@ export type BatchSelectionScope = 'filtered' | 'all';
 export interface BatchObjectItem {
   title: string;
   key: string;
+  dbName?: string;
   objectName: string;
   objectType: BatchObjectType;
   dataRef: any;
@@ -510,6 +511,86 @@ export const useSidebarBatchExport = ({
       }
   };
 
+  const handleBatchDeleteTables = async () => {
+      const selectedTables = batchTables.filter(item => checkedTableKeys.includes(item.key) && item.objectType === 'table');
+      if (selectedTables.length === 0) {
+          message.warning(t('sidebar.message.select_table_required'));
+          return;
+      }
+
+      const { conn, dbName } = batchDbContext || {};
+      if (!conn || !dbName) {
+          message.warning(t('sidebar.message.select_connection_or_database_first'));
+          return;
+      }
+      const tableNames = selectedTables.map(t => t.objectName);
+
+      const ok = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+              title: t('sidebar.modal.confirm_delete_selected_tables.title'),
+              content: t('sidebar.modal.confirm_delete_selected_tables.content', {
+                  connection: conn.name,
+                  database: dbName,
+                  count: tableNames.length,
+              }),
+              okText: t('sidebar.action.delete'),
+              okButtonProps: { danger: true },
+              cancelText: t('sidebar.action.cancel'),
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+          });
+      });
+      if (!ok) return;
+
+      setIsBatchModalOpen(false);
+      const hide = message.loading(t('sidebar.message.deleting_selected_tables', { count: tableNames.length }), 0);
+      const startTime = Date.now();
+      const successKeys: string[] = [];
+      let failed: { table: string; error: string } | null = null;
+      try {
+          for (const item of selectedTables) {
+              const res = await DropTable(normalizeConnConfig(conn.config) as any, dbName, item.objectName);
+              if (!res.success) {
+                  failed = { table: item.objectName, error: res.message || t('common.unknown') };
+                  break;
+              }
+              successKeys.push(item.key);
+          }
+      } catch (e: any) {
+          failed = { table: tableNames[successKeys.length] || tableNames[0], error: e?.message || String(e) };
+      } finally {
+          hide();
+      }
+
+      if (successKeys.length > 0) {
+          const successKeySet = new Set(successKeys);
+          setBatchTables(prev => prev.filter(item => !successKeySet.has(item.key)));
+          setCheckedTableKeys(prev => prev.filter(key => !successKeySet.has(key)));
+      }
+
+      const duration = Date.now() - startTime;
+      const logSql = `/* Drop Tables (${tableNames.length} tables) */\n${tableNames.map(name => `DROP TABLE ${name}`).join(';\n')};`;
+      addSqlLog({
+          id: Date.now().toString(),
+          timestamp: Date.now(),
+          sql: logSql,
+          status: failed ? 'error' : 'success',
+          duration,
+          message: failed ? failed.error : t('sidebar.message.delete_tables_success', { count: successKeys.length }),
+          dbName,
+          affectedRows: successKeys.length,
+      });
+
+      if (failed) {
+          message.error(t('sidebar.message.delete_tables_failed', {
+              table: failed.table,
+              error: failed.error,
+          }));
+          return;
+      }
+      message.success(t('sidebar.message.delete_tables_success', { count: successKeys.length }));
+  };
+
   const handleCheckAll = (checked: boolean) => {
       if (batchSelectionScope === 'all') {
           setCheckedTableKeys(checked ? allBatchObjectKeys : []);
@@ -678,6 +759,81 @@ export const useSidebarBatchExport = ({
       }
   };
 
+  const handleBatchDbDelete = async () => {
+      const selectedDbs = batchDatabases.filter(db => checkedDbKeys.includes(db.key));
+      if (selectedDbs.length === 0) {
+          message.warning(t('sidebar.message.select_database_required'));
+          return;
+      }
+      if (!batchConnContext?.config) {
+          message.warning(t('sidebar.message.select_connection_or_database_first'));
+          return;
+      }
+
+      const ok = await new Promise<boolean>((resolve) => {
+          Modal.confirm({
+              title: t('sidebar.modal.confirm_delete_selected_databases.title'),
+              content: t('sidebar.modal.confirm_delete_selected_databases.content', {
+                  connection: batchConnContext.name,
+                  count: selectedDbs.length,
+              }),
+              okText: t('sidebar.action.delete'),
+              okButtonProps: { danger: true },
+              cancelText: t('sidebar.action.cancel'),
+              onOk: () => resolve(true),
+              onCancel: () => resolve(false),
+          });
+      });
+      if (!ok) return;
+
+      setIsBatchDbModalOpen(false);
+      const hide = message.loading(t('sidebar.message.deleting_selected_databases', { count: selectedDbs.length }), 0);
+      const startTime = Date.now();
+      const successKeys: string[] = [];
+      let failed: { database: string; error: string } | null = null;
+      try {
+          for (const dbItem of selectedDbs) {
+              const res = await DropDatabase(normalizeConnConfig(batchConnContext.config) as any, dbItem.dbName);
+              if (!res.success) {
+                  failed = { database: dbItem.dbName, error: res.message || t('common.unknown') };
+                  break;
+              }
+              successKeys.push(dbItem.key);
+          }
+      } catch (e: any) {
+          failed = { database: selectedDbs[successKeys.length]?.dbName || selectedDbs[0]?.dbName || '', error: e?.message || String(e) };
+      } finally {
+          hide();
+      }
+
+      if (successKeys.length > 0) {
+          const successKeySet = new Set(successKeys);
+          setBatchDatabases(prev => prev.filter(item => !successKeySet.has(item.key)));
+          setCheckedDbKeys(prev => prev.filter(key => !successKeySet.has(key)));
+      }
+
+      const duration = Date.now() - startTime;
+      const dbNames = selectedDbs.map(db => db.dbName);
+      addSqlLog({
+          id: Date.now().toString(),
+          timestamp: Date.now(),
+          sql: `/* Drop Databases (${dbNames.length} databases) */\n${dbNames.map(name => `DROP DATABASE ${name}`).join(';\n')};`,
+          status: failed ? 'error' : 'success',
+          duration,
+          message: failed ? failed.error : t('sidebar.message.delete_databases_success', { count: successKeys.length }),
+          affectedRows: successKeys.length,
+      });
+
+      if (failed) {
+          message.error(t('sidebar.message.delete_databases_failed', {
+              database: failed.database,
+              error: failed.error,
+          }));
+          return;
+      }
+      message.success(t('sidebar.message.delete_databases_success', { count: successKeys.length }));
+  };
+
   const handleCheckAllDb = (checked: boolean) => {
       if (checked) {
           setCheckedDbKeys(batchDatabases.map(db => db.key));
@@ -724,12 +880,14 @@ export const useSidebarBatchExport = ({
       handleDatabaseChange,
       handleBatchExport,
       handleBatchClear,
+      handleBatchDeleteTables,
       handleCheckAll,
       handleInvertSelection,
       openBatchDatabaseModal,
       openBatchDatabaseExportWorkbench,
       handleDbConnectionChange,
       handleBatchDbExport,
+      handleBatchDbDelete,
       handleCheckAllDb,
       handleInvertSelectionDb,
   };
