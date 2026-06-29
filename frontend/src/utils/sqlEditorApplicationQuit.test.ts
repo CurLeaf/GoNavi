@@ -57,7 +57,7 @@ describe('sqlEditorApplicationQuit', () => {
     })]);
   });
 
-  it('collects dirty saved-query tabs and ignores unnamed temporary query tabs', async () => {
+  it('collects dirty saved-query tabs and unnamed temporary query tabs', async () => {
     const savedQuery = createSavedQuery();
     const savedTab = createQueryTab({
       id: 'tab-2',
@@ -75,7 +75,7 @@ describe('sqlEditorApplicationQuit', () => {
 
     const targets = await collectApplicationQuitUnsavedSQLTargets([savedTab, unnamedTab], [savedQuery], vi.fn());
 
-    expect(targets).toHaveLength(1);
+    expect(targets).toHaveLength(2);
     expect(targets[0]).toMatchObject({
       kind: 'saved-query',
       tabId: 'tab-2',
@@ -84,9 +84,30 @@ describe('sqlEditorApplicationQuit', () => {
       connectionId: 'conn-1',
       dbName: 'main',
     });
+    expect(targets[1]).toMatchObject({
+      kind: 'unsaved-query',
+      tabId: 'tab-3',
+      title: 'New query',
+      draft: 'select * from draft_only;',
+      connectionId: 'conn-1',
+      dbName: 'main',
+    });
   });
 
-  it('saves external SQL files and existing saved queries before application quit', async () => {
+  it('ignores blank unnamed temporary query tabs', async () => {
+    const unnamedTab = createQueryTab({
+      id: 'tab-3',
+      title: 'New query',
+      query: '',
+    });
+    setQueryTabDraft('tab-3', '   ');
+
+    const targets = await collectApplicationQuitUnsavedSQLTargets([unnamedTab], [], vi.fn());
+
+    expect(targets).toEqual([]);
+  });
+
+  it('saves external SQL files, existing saved queries, and unnamed query drafts before application quit', async () => {
     const saveQuery = vi.fn(async (query: SavedQuery) => query);
     const writeSQLFile = vi.fn(async () => ({ success: true }));
 
@@ -107,6 +128,14 @@ describe('sqlEditorApplicationQuit', () => {
         connectionId: 'conn-2',
         dbName: 'reporting',
       },
+      {
+        kind: 'unsaved-query',
+        tabId: 'tab-3',
+        title: 'New query',
+        draft: 'select 3;',
+        connectionId: 'conn-3',
+        dbName: 'scratch',
+      },
     ], saveQuery, writeSQLFile);
 
     expect(writeSQLFile).toHaveBeenCalledWith('/tmp/file.sql', 'select 1;');
@@ -115,6 +144,12 @@ describe('sqlEditorApplicationQuit', () => {
       sql: 'select 2;',
       connectionId: 'conn-2',
       dbName: 'reporting',
+    }));
+    expect(saveQuery).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'New query',
+      sql: 'select 3;',
+      connectionId: 'conn-3',
+      dbName: 'scratch',
     }));
   });
 });

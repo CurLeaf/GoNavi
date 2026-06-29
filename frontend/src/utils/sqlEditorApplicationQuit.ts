@@ -31,6 +31,14 @@ export type ApplicationQuitUnsavedSQLTarget =
       draft: string;
       connectionId: string;
       dbName: string;
+    }
+  | {
+      kind: 'unsaved-query';
+      tabId: string;
+      title: string;
+      draft: string;
+      connectionId: string;
+      dbName: string;
     };
 
 export type ReadSQLFileForQuit = (filePath: string) => Promise<QueryResultLike>;
@@ -62,6 +70,13 @@ const hasSavedQueryUnsavedChanges = (
   return draft !== String(savedQuery.sql ?? '')
     || connectionId !== toTrimmedString(savedQuery.connectionId)
     || dbName !== toTrimmedString(savedQuery.dbName);
+};
+
+let applicationQuitSavedQueryIdSeed = 0;
+
+const createApplicationQuitSavedQueryId = (): string => {
+  applicationQuitSavedQueryIdSeed += 1;
+  return `saved-${Date.now()}-${applicationQuitSavedQueryIdSeed}`;
 };
 
 export const buildApplicationQuitUnsavedSQLLabel = (
@@ -105,9 +120,20 @@ export const collectApplicationQuitUnsavedSQLTargets = async (
       continue;
     }
 
-    const savedQuery = resolveSavedQueryForTab(tab, savedQueries);
-    if (!savedQuery) continue;
     const draft = getQueryTabDraft(tab.id, String(tab.query ?? ''));
+    const savedQuery = resolveSavedQueryForTab(tab, savedQueries);
+    if (!savedQuery) {
+      if (!draft.trim()) continue;
+      targets.push({
+        kind: 'unsaved-query',
+        tabId: tab.id,
+        title: resolveTabTitle(tab, 'SQL Query'),
+        draft,
+        connectionId: toTrimmedString(tab.connectionId),
+        dbName: toTrimmedString(tab.dbName),
+      });
+      continue;
+    }
     if (!hasSavedQueryUnsavedChanges(tab, savedQuery, draft)) continue;
     targets.push({
       kind: 'saved-query',
@@ -137,11 +163,23 @@ export const saveApplicationQuitUnsavedSQLTargets = async (
       continue;
     }
 
+    if (target.kind === 'saved-query') {
+      await saveQuery({
+        ...target.savedQuery,
+        sql: target.draft,
+        connectionId: target.connectionId,
+        dbName: target.dbName,
+      });
+      continue;
+    }
+
     await saveQuery({
-      ...target.savedQuery,
+      id: createApplicationQuitSavedQueryId(),
+      name: target.title,
       sql: target.draft,
       connectionId: target.connectionId,
       dbName: target.dbName,
+      createdAt: Date.now(),
     });
   }
 };
