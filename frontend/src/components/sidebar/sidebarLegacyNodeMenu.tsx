@@ -649,6 +649,19 @@ export const buildSidebarLegacyNodeMenuItems = (
                     onClick: () => openCreateStarRocksExternalCatalog(node)
                 },
             ] : []),
+            {
+                key: 'new-query',
+                label: t('sidebar.menu.new_query'),
+                icon: <ConsoleSqlOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'new-query')
+            },
+            {
+                key: 'run-sql',
+                label: t('sidebar.sql_file_exec.title'),
+                icon: <FileAddOutlined />,
+                onClick: () => handleV2DatabaseContextMenuAction(node, 'run-sql')
+            },
+            { type: 'divider' },
             ...(capabilities.supportsRenameDatabase ? [{
                 key: 'rename-db',
                 label: t('sidebar.menu.rename_database'),
@@ -693,19 +706,7 @@ export const buildSidebarLegacyNodeMenuItems = (
                 label: t('sidebar.menu.close_database'),
                 icon: <DisconnectOutlined />,
                 onClick: () => handleV2DatabaseContextMenuAction(node, 'disconnect-db')
-            },
-             {
-                 key: 'new-query',
-                 label: t('sidebar.menu.new_query'),
-                 icon: <ConsoleSqlOutlined />,
-                 onClick: () => handleV2DatabaseContextMenuAction(node, 'new-query')
-              },
-             {
-                  key: 'run-sql',
-                  label: t('sidebar.sql_file_exec.title'),
-                  icon: <FileAddOutlined />,
-                  onClick: () => handleV2DatabaseContextMenuAction(node, 'run-sql')
-              }
+            }
        ];
     } else if (node.type === 'view') {
         return [

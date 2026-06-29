@@ -1012,6 +1012,58 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
         );
     };
 
+    const renderTableOverviewMetaBadges = useCallback((table: TableStatRow, compact = false) => {
+        const items = [
+            ...(table.updateTime ? [{
+                key: 'updated',
+                label: t('table_overview.metric.updated_at'),
+                value: table.updateTime,
+            }] : []),
+            ...(table.createTime ? [{
+                key: 'created',
+                label: t('table_overview.metric.created_at'),
+                value: table.createTime,
+            }] : []),
+        ];
+        if (items.length === 0) return null;
+        return (
+            <div
+                style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                    marginTop: compact ? 8 : 0,
+                    marginBottom: compact ? 0 : 10,
+                }}
+            >
+                {items.map((item) => (
+                    <Tooltip key={item.key} title={`${item.label}: ${item.value}`} mouseEnterDelay={0.4}>
+                        <span
+                            style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                maxWidth: '100%',
+                                padding: compact ? '1px 7px' : '2px 8px',
+                                borderRadius: 999,
+                                background: darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                                color: textSecondary,
+                                fontSize: compact ? 10 : 11,
+                                lineHeight: compact ? '16px' : '18px',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            <span style={{ opacity: 0.72 }}>{item.label}</span>
+                            <span style={{ color: textPrimary, fontVariantNumeric: 'tabular-nums' }}>{item.value}</span>
+                        </span>
+                    </Tooltip>
+                ))}
+            </div>
+        );
+    }, [darkMode, t, textPrimary, textSecondary]);
+
     const renderCardTableContent = (table: TableStatRow) => (
         <div
             className={isV2Ui ? 'gn-v2-table-card' : undefined}
@@ -1044,6 +1096,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                     </div>
                 </Tooltip>
             )}
+            {renderTableOverviewMetaBadges(table)}
             <div className={isV2Ui ? 'gn-v2-table-card-meta' : undefined} style={{ display: 'flex', gap: 16, fontSize: 12, color: textMuted }}>
                 <span title={t('table_overview.sort.rows')} style={{ minWidth: 52 }}>📊 {formatRows(table.rows)}</span>
                 <span title={t('table_overview.metric.data_size')} style={{ minWidth: 72 }}>💾 {formatSize(table.dataSize)}</span>
@@ -1150,6 +1203,7 @@ const TableOverview: React.FC<TableOverviewProps> = ({ tab }) => {
                                     {rowSecondary}
                                 </div>
                             </Tooltip>
+                            {renderTableOverviewMetaBadges(table, true)}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, flexWrap: 'wrap', fontSize: 12 }}>
                             <div style={{ minWidth: 96, textAlign: 'right' }}>
