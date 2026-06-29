@@ -111,6 +111,39 @@ describe('store appearance persistence', () => {
     expect(appearance.tableDoubleClickAction).toBe('open-design');
   });
 
+  it('restores query tabs from crash-recovery snapshots even when persisted tabs are missing', async () => {
+    storage.setItem('gonavi-query-tab-drafts-v1', JSON.stringify([
+      {
+        tabId: 'query-recovery-1',
+        title: '异常恢复 SQL',
+        query: 'select 1;',
+        connectionId: 'conn-1',
+        dbName: 'main',
+        updatedAt: 1719655200000,
+      },
+    ]));
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        theme: 'dark',
+      },
+      version: 13,
+    }));
+
+    const { useStore } = await importStore();
+    const tabs = useStore.getState().tabs;
+
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]).toMatchObject({
+      id: 'query-recovery-1',
+      title: '异常恢复 SQL',
+      type: 'query',
+      connectionId: 'conn-1',
+      dbName: 'main',
+      query: 'select 1;',
+    });
+    expect(useStore.getState().activeTabId).toBe('query-recovery-1');
+  });
+
   it('sanitizes invalid table double-click appearance settings', async () => {
     storage.setItem('lite-db-storage', JSON.stringify({
       state: {

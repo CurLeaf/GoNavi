@@ -47,7 +47,12 @@ import {
     ORACLE_ROWID_LOCATOR_COLUMN,
     type EditRowLocator,
 } from '../utils/rowLocator';
-import { getQueryTabDraft, hasQueryTabDraft, setQueryTabDraft, setSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
+import {
+    clearQueryTabDraft,
+    getQueryTabDraft,
+    hasQueryTabDraft,
+    persistQueryTabDraftSnapshot,
+} from '../utils/sqlFileTabDrafts';
 import { buildEditableTriggerSql } from '../utils/triggerEditSql';
 import {
     getColumnDefinitionComment,
@@ -778,6 +783,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const savedQueries = useStore(state => state.savedQueries);
   const currentConnectionIdRef = useRef(currentConnectionId);
   const currentDbRef = useRef(currentDb);
+  const draftSnapshotTab = useMemo(() => ({
+      id: tab.id,
+      title: tab.title,
+      connectionId: tab.connectionId,
+      dbName: tab.dbName,
+      filePath: tab.filePath,
+      savedQueryId: tab.savedQueryId,
+      readOnly: tab.readOnly,
+  }), [tab.connectionId, tab.dbName, tab.filePath, tab.id, tab.readOnly, tab.savedQueryId, tab.title]);
   const connectionsRef = useRef(connections);
   const columnsCacheRef = useRef<Record<string, ColumnDefinition[]>>({});
   const saveQuery = useStore(state => state.saveQuery);
@@ -948,12 +962,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const syncQueryDraft = useCallback((nextQuery: string) => {
       const next = String(nextQuery ?? '');
       lastLocalQueryRef.current = next;
-      if (isExternalSQLFileTab) {
-          setSQLFileTabDraft(tab.id, next);
-          return;
-      }
-      setQueryTabDraft(tab.id, next);
-  }, [isExternalSQLFileTab, tab.id]);
+      persistQueryTabDraftSnapshot(draftSnapshotTab, next, {
+          connectionId: currentConnectionIdRef.current,
+          dbName: currentDbRef.current,
+      });
+  }, [draftSnapshotTab]);
 
   const applyQueryState = useCallback((nextQuery: string) => {
       const next = String(nextQuery ?? '');
@@ -964,8 +977,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [isExternalSQLFileTab, syncQueryDraft]);
 
   useEffect(() => {
-      setQueryTabDraft(tab.id, query);
-  }, [query, tab.id]);
+      persistQueryTabDraftSnapshot(draftSnapshotTab, query, {
+          connectionId: currentConnectionIdRef.current || currentConnectionId,
+          dbName: currentDbRef.current || currentDb,
+      });
+  }, [currentConnectionId, currentDb, draftSnapshotTab, query]);
 
   useEffect(() => {
       currentConnectionIdRef.current = currentConnectionId;
@@ -1017,13 +1033,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       });
   }, [currentConnectionId, currentDb, isExternalSQLFileTab, tab.id, updateQueryTabDraft]);
 
+  const getCurrentQuery = useCallback(() => {
+      const val = editorRef.current?.getValue?.();
+      if (typeof val === 'string') return val;
+      return query || '';
+  }, [query]);
+
   useEffect(() => {
       if (!isExternalSQLFileTab) return;
-      setSQLFileTabDraft(tab.id, getCurrentQuery());
+      persistQueryTabDraftSnapshot(draftSnapshotTab, getCurrentQuery(), {
+          connectionId: currentConnectionIdRef.current,
+          dbName: currentDbRef.current,
+      });
       return () => {
-          setSQLFileTabDraft(tab.id, getCurrentQuery());
+          persistQueryTabDraftSnapshot(draftSnapshotTab, getCurrentQuery(), {
+              connectionId: currentConnectionIdRef.current,
+              dbName: currentDbRef.current,
+          });
       };
-  }, [isExternalSQLFileTab, tab.id]);
+  }, [draftSnapshotTab, getCurrentQuery, isExternalSQLFileTab]);
 
   // 当此 Tab 成为活跃 Tab 时，将本实例的状态同步到模块级共享变量
   // 确保 completion provider 始终使用当前活跃 Tab 的上下文
@@ -1197,12 +1225,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   useEffect(() => {
       refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
   }, [currentDb, refreshObjectDecorations]);
-
-  const getCurrentQuery = () => {
-      const val = editorRef.current?.getValue?.();
-      if (typeof val === 'string') return val;
-      return query || '';
-  };
 
   const insertTextIntoEditorAtPosition = useCallback((text: string, position?: { lineNumber: number; column: number } | null) => {
       const editor = editorRef.current;
@@ -5187,6 +5209,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           dbName: currentDb || tab.dbName || '',
           savedQueryId: persisted.id,
       });
+      clearQueryTabDraft(tab.id);
       return persisted;
   };
 
@@ -5216,7 +5239,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   filePath,
                   savedQueryId: undefined,
               });
-              setSQLFileTabDraft(tab.id, sql);
+              clearQueryTabDraft(tab.id);
               message.success(translate('query_editor.message.sql_file_saved'));
           } catch (error) {
               message.error(translate('query_editor.message.save_sql_file_failed', {
