@@ -2489,7 +2489,7 @@
   "app.connection_package.message.imported_connections": "{{count}} Verbindungen importiert",
   "app.connection_package.message.imported_with_missing_passwords": "{{count}} Verbindungen importiert. Einige Verbindungen enthalten keine Passwörter. Bearbeiten Sie diese Verbindungen und geben Sie vor dem Speichern die Passwörter ein.",
   "app.connection_package.message.no_connections_to_export": "Keine Verbindungen zum Exportieren",
-  "app.connection_package.message.unsupported_file_format": "Dateiformatfehler: Unterstützt werden nur GoNavi-Wiederherstellungspakete, historische JSON-Verbindungsarrays oder MySQL Workbench XML",
+  "app.connection_package.message.unsupported_file_format": "Dateiformatfehler: Unterstützt werden nur GoNavi-Wiederherstellungspakete, historische JSON-Verbindungsarrays, MySQL Workbench XML oder Navicat NCX",
   "app.connection.message.editable_load_failed": "Die Details der gespeicherten Verbindung konnten nicht geladen werden. Stattdessen wird die maskierte Konfiguration geöffnet.",
   "app.connection.message.editable_load_failed_with_detail": "Die Details der gespeicherten Verbindung konnten nicht geladen werden: {{detail}}. Stattdessen wird die maskierte Konfiguration geöffnet.",
   "app.data_root.action.migrate_and_switch": "Vorhandene Daten migrieren und wechseln",

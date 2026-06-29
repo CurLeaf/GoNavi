@@ -2489,7 +2489,7 @@
   "app.connection_package.message.imported_connections": "成功导入 {{count}} 个连接",
   "app.connection_package.message.imported_with_missing_passwords": "成功导入 {{count}} 个连接，部分连接未包含密码，请编辑对应连接并输入密码后保存",
   "app.connection_package.message.no_connections_to_export": "没有连接可导出",
-  "app.connection_package.message.unsupported_file_format": "文件格式错误：仅支持 GoNavi 恢复包、历史 JSON 连接数组或 MySQL Workbench XML",
+  "app.connection_package.message.unsupported_file_format": "文件格式错误：仅支持 GoNavi 恢复包、历史 JSON 连接数组、MySQL Workbench XML 或 Navicat NCX",
   "app.connection.message.editable_load_failed": "读取已保存连接详情失败，当前将打开脱敏配置",
   "app.connection.message.editable_load_failed_with_detail": "读取已保存连接详情失败：{{detail}}，当前将打开脱敏配置",
   "app.data_root.action.migrate_and_switch": "迁移现有数据并切换",

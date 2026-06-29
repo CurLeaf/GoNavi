@@ -1689,6 +1689,10 @@ func (a *App) ImportConfigFile() connection.QueryResult {
 				DisplayName: "MySQL Workbench Connections (*.xml)",
 				Pattern:     "*.xml",
 			},
+			{
+				DisplayName: "Navicat Connections (*.ncx)",
+				Pattern:     "*.ncx",
+			},
 		},
 	})
 

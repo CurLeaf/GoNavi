@@ -157,6 +157,23 @@ func TestExternalSQLFileBackendMessagesUseLocalizedText(t *testing.T) {
 	}
 }
 
+func TestImportConfigFileAllowsNavicatNCXSelection(t *testing.T) {
+	sourceBytes, err := os.ReadFile("methods_file.go")
+	if err != nil {
+		t.Fatalf("read methods_file.go: %v", err)
+	}
+	source := methodsFileFunctionSource(t, string(sourceBytes), "func (a *App) ImportConfigFile() connection.QueryResult")
+
+	for _, want := range []string{
+		"Navicat Connections (*.ncx)",
+		`Pattern:     "*.ncx"`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Fatalf("ImportConfigFile missing Navicat NCX selector %q", want)
+		}
+	}
+}
+
 func TestExternalSQLFileBackendCatalogKeysExist(t *testing.T) {
 	catalogs, err := i18n.LoadCatalogs()
 	if err != nil {

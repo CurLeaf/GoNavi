@@ -2489,7 +2489,7 @@
   "app.connection_package.message.imported_connections": "成功匯入 {{count}} 個連線",
   "app.connection_package.message.imported_with_missing_passwords": "成功匯入 {{count}} 個連線，部分連線未包含密碼，請編輯對應連線並輸入密碼後儲存",
   "app.connection_package.message.no_connections_to_export": "沒有連線可匯出",
-  "app.connection_package.message.unsupported_file_format": "檔案格式錯誤：僅支援 GoNavi 恢復包、歷史 JSON 連線陣列或 MySQL Workbench XML",
+  "app.connection_package.message.unsupported_file_format": "檔案格式錯誤：僅支援 GoNavi 恢復包、歷史 JSON 連線陣列、MySQL Workbench XML 或 Navicat NCX",
   "app.connection.message.editable_load_failed": "讀取已儲存連線詳情失敗，將改為開啟脫敏設定",
   "app.connection.message.editable_load_failed_with_detail": "讀取已儲存連線詳情失敗：{{detail}}，將改為開啟脫敏設定",
   "app.data_root.action.migrate_and_switch": "遷移现有資料并切换",

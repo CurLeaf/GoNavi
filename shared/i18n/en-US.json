@@ -2489,7 +2489,7 @@
   "app.connection_package.message.imported_connections": "Imported {{count}} connections",
   "app.connection_package.message.imported_with_missing_passwords": "Imported {{count}} connections. Some connections do not include passwords; edit those connections and enter passwords before saving.",
   "app.connection_package.message.no_connections_to_export": "No connections to export",
-  "app.connection_package.message.unsupported_file_format": "File format error: only GoNavi recovery packages, legacy JSON connection arrays, or MySQL Workbench XML are supported",
+  "app.connection_package.message.unsupported_file_format": "File format error: only GoNavi recovery packages, legacy JSON connection arrays, MySQL Workbench XML, or Navicat NCX are supported",
   "app.connection.message.editable_load_failed": "Failed to load the saved connection details. The masked configuration will be opened instead.",
   "app.connection.message.editable_load_failed_with_detail": "Failed to load the saved connection details: {{detail}}. The masked configuration will be opened instead.",
   "app.data_root.action.migrate_and_switch": "Migrate Existing Data and Switch",

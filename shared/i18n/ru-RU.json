@@ -2489,7 +2489,7 @@
   "app.connection_package.message.imported_connections": "Импортировано подключений: {{count}}",
   "app.connection_package.message.imported_with_missing_passwords": "Импортировано подключений: {{count}}. В некоторых подключениях нет паролей; отредактируйте эти подключения, введите пароли и сохраните.",
   "app.connection_package.message.no_connections_to_export": "Нет подключений для экспорта",
-  "app.connection_package.message.unsupported_file_format": "Ошибка формата файла: поддерживаются только пакеты восстановления GoNavi, старые массивы подключений JSON или MySQL Workbench XML",
+  "app.connection_package.message.unsupported_file_format": "Ошибка формата файла: поддерживаются только пакеты восстановления GoNavi, старые массивы подключений JSON, MySQL Workbench XML или Navicat NCX",
   "app.connection.message.editable_load_failed": "Не удалось загрузить сведения сохраненного подключения. Вместо этого будет открыта маскированная конфигурация.",
   "app.connection.message.editable_load_failed_with_detail": "Не удалось загрузить сведения сохраненного подключения: {{detail}}. Вместо этого будет открыта маскированная конфигурация.",
   "app.data_root.action.migrate_and_switch": "Перенести существующие данные и переключиться",

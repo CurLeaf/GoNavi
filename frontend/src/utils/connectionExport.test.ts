@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { setCurrentLanguage } from '../i18n';
+import { setCurrentLanguage, t } from '../i18n';
 import {
   detectConnectionImportKind,
   isConnectionPackagePasswordRequiredError,
@@ -102,6 +102,10 @@ describe('connectionExport', () => {
 <Connections>
   <Connection ConnType="MYSQL" ConnectionName="Local MySQL" Host="127.0.0.1" Port="3306" UserName="root" Password="ABCD" SavePassword="true" />
 </Connections>`)).toBe('navicat-ncx');
+  });
+
+  it('mentions Navicat NCX in unsupported import format guidance', () => {
+    expect(t('app.connection_package.message.unsupported_file_format', undefined, 'zh-CN')).toContain('Navicat NCX');
   });
 
   it('returns invalid for malformed or unsupported content', () => {
