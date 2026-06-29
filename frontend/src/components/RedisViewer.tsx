@@ -150,6 +150,13 @@ const isRedisKeyGoneErrorMessage = (messageText: string): boolean => {
 
 const normalizeToolbarText = (value: unknown): string => String(value || '').trim();
 
+const mergeRedisKeyInfoLists = (existing: RedisKeyInfo[], incoming: RedisKeyInfo[]): RedisKeyInfo[] => {
+    const keyMap = new Map<string, RedisKeyInfo>();
+    existing.forEach((item) => keyMap.set(item.key, item));
+    incoming.forEach((item) => keyMap.set(item.key, item));
+    return Array.from(keyMap.values());
+};
+
 const resolveRedisTopology = (connection?: { config?: { topology?: string; hosts?: string[] } }): 'single' | 'replica' | 'cluster' | 'sentinel' => {
     const topology = normalizeToolbarText(connection?.config?.topology).toLowerCase();
     if (topology === 'replica') return 'replica';
@@ -215,6 +222,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
     const [searchMode, setSearchMode] = useState<RedisSearchMode>('fuzzy');
     const [cursor, setCursor] = useState<string>('0');
     const [hasMore, setHasMore] = useState(false);
+    const [loadingAllKeys, setLoadingAllKeys] = useState(false);
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [keyValue, setKeyValue] = useState<RedisValue | null>(null);
     const [valueLoading, setValueLoading] = useState(false);
@@ -333,6 +341,28 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         };
     }, [connection, redisDB]);
 
+    const scanRedisKeysPage = useCallback(async (
+        config: Record<string, any>,
+        pattern: string,
+        fromCursor: string,
+        targetCount: number
+    ): Promise<{ scannedKeys: RedisKeyInfo[]; nextCursor: string }> => {
+        const res = await (window as any).go.app.App.RedisScanKeys(
+            buildRpcConnectionConfig(config),
+            pattern,
+            fromCursor,
+            targetCount
+        );
+        if (!res?.success) {
+            throw new Error(String(res?.message || 'Unknown error'));
+        }
+        const result = res.data;
+        return {
+            scannedKeys: Array.isArray(result?.keys) ? result.keys : [],
+            nextCursor: normalizeRedisCursor(result?.cursor),
+        };
+    }, []);
+
     const loadKeys = useCallback(async (
         pattern: string = '*',
         fromCursor: string = '0',
@@ -349,29 +379,17 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
 
         setLoading(true);
         try {
-            const res = await (window as any).go.app.App.RedisScanKeys(buildRpcConnectionConfig(config), normalizedPattern, fromCursor, effectiveTargetCount);
+            const { scannedKeys, nextCursor } = await scanRedisKeysPage(config, normalizedPattern, fromCursor, effectiveTargetCount);
             if (requestId !== latestLoadRequestIdRef.current) {
                 return;
             }
-            if (res.success) {
-                const result = res.data;
-                const scannedKeys = Array.isArray(result?.keys) ? result.keys : [];
-                const nextCursor = normalizeRedisCursor(result?.cursor);
-                if (append) {
-                    setKeys(prev => {
-                        const keyMap = new Map<string, RedisKeyInfo>();
-                        prev.forEach(item => keyMap.set(item.key, item));
-                        scannedKeys.forEach((item: RedisKeyInfo) => keyMap.set(item.key, item));
-                        return Array.from(keyMap.values());
-                    });
-                } else {
-                    setKeys(scannedKeys);
-                }
-                setCursor(nextCursor);
-                setHasMore(nextCursor !== '0');
+            if (append) {
+                setKeys(prev => mergeRedisKeyInfoLists(prev, scannedKeys));
             } else {
-                message.error(tr('redis_viewer.message.load_keys_failed', { detail: res.message }));
+                setKeys(scannedKeys);
             }
+            setCursor(nextCursor);
+            setHasMore(nextCursor !== '0');
         } catch (e: any) {
             if (requestId !== latestLoadRequestIdRef.current) {
                 return;
@@ -382,7 +400,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                 setLoading(false);
             }
         }
-    }, [getConfig, tr]);
+    }, [getConfig, scanRedisKeysPage, tr]);
 
     useEffect(() => {
         loadKeys(searchPattern, '0', false, getRedisScanLoadCount(searchPattern, false));
@@ -423,6 +441,53 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
         }
         loadKeys(searchPattern, cursor, true, getRedisScanLoadCount(searchPattern, true));
     };
+
+    const handleLoadAllKeys = useCallback(async () => {
+        const config = getConfig();
+        if (!config || loading || !hasMore) {
+            return;
+        }
+
+        const normalizedPattern = searchPattern.trim() || '*';
+        const batchSize = getRedisScanLoadCount(normalizedPattern, true);
+        const requestId = latestLoadRequestIdRef.current + 1;
+        latestLoadRequestIdRef.current = requestId;
+
+        setLoading(true);
+        setLoadingAllKeys(true);
+        try {
+            let nextCursor = '0';
+            const keyMap = new Map<string, RedisKeyInfo>();
+
+            do {
+                const { scannedKeys, nextCursor: scannedCursor } = await scanRedisKeysPage(
+                    config,
+                    normalizedPattern,
+                    nextCursor,
+                    batchSize
+                );
+                if (requestId !== latestLoadRequestIdRef.current) {
+                    return;
+                }
+                scannedKeys.forEach((item) => keyMap.set(item.key, item));
+                nextCursor = scannedCursor;
+            } while (nextCursor !== '0');
+
+            setKeys(Array.from(keyMap.values()));
+            setCursor('0');
+            setHasMore(false);
+        } catch (e: any) {
+            if (requestId !== latestLoadRequestIdRef.current) {
+                return;
+            }
+            message.error(tr('redis_viewer.message.load_keys_failed', { detail: e?.message || String(e) }));
+        } finally {
+            if (requestId === latestLoadRequestIdRef.current) {
+                setLoading(false);
+                setLoadingAllKeys(false);
+            }
+        }
+    }, [getConfig, hasMore, loading, scanRedisKeysPage, searchPattern, tr]);
 
     const handleRefresh = () => {
         setCursor('0');
@@ -1928,6 +1993,7 @@ const RedisViewer: React.FC<RedisViewerProps> = ({ connectionId, redisDB }) => {
                             <Button size="small" style={actionButtonStyle} icon={<ReloadOutlined />} onClick={handleRefresh}>{tr('redis_viewer.action.refresh')}</Button>
                             <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={() => setNewKeyModalOpen(true)}>{tr('redis_viewer.action.new_key')}</Button>
                             <Button size="small" style={primaryActionButtonStyle} onClick={handleSelectAllLoadedKeys} disabled={keys.length === 0}>{tr('redis_viewer.action.select_all_loaded')}</Button>
+                            <Button size="small" style={actionButtonStyle} onClick={handleLoadAllKeys} disabled={!hasMore || loading} loading={loadingAllKeys}>{tr('redis_viewer.action.load_all')}</Button>
                             <Button size="small" style={actionButtonStyle} onClick={handleClearAllSelectedKeys} disabled={selectedKeys.length === 0}>{tr('redis_viewer.action.clear_selection')}</Button>
                         </Space>
                         <Popconfirm
