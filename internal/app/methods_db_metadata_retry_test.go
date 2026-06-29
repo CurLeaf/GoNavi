@@ -24,21 +24,23 @@ func requireDuckDBOptionalDriverRuntime(t *testing.T) {
 }
 
 type fakeMetadataRetryDB struct {
-	columns      []connection.ColumnDefinition
-	indexes      []connection.IndexDefinition
-	columnsErr   error
-	indexesErr   error
-	queryResults []fakeMetadataQueryResult
-	queryRows    []map[string]interface{}
-	queryFields  []string
-	queryErr     error
-	queries      []string
-	columnCalls  int
-	indexCalls   int
-	columnSchema string
-	columnTable  string
-	indexSchema  string
-	indexTable   string
+	columns       []connection.ColumnDefinition
+	indexes       []connection.IndexDefinition
+	columnsErr    error
+	indexesErr    error
+	queryResults  []fakeMetadataQueryResult
+	queryRows     []map[string]interface{}
+	queryFields   []string
+	queryErr      error
+	queries       []string
+	columnCalls   int
+	indexCalls    int
+	columnSchema  string
+	columnTable   string
+	indexSchema   string
+	indexTable    string
+	connectCalls  int
+	connectConfig connection.ConnectionConfig
 }
 
 type fakeMetadataQueryResult struct {
@@ -48,9 +50,13 @@ type fakeMetadataQueryResult struct {
 	err    error
 }
 
-func (f *fakeMetadataRetryDB) Connect(config connection.ConnectionConfig) error { return nil }
-func (f *fakeMetadataRetryDB) Close() error                                     { return nil }
-func (f *fakeMetadataRetryDB) Ping() error                                      { return nil }
+func (f *fakeMetadataRetryDB) Connect(config connection.ConnectionConfig) error {
+	f.connectCalls++
+	f.connectConfig = config
+	return nil
+}
+func (f *fakeMetadataRetryDB) Close() error { return nil }
+func (f *fakeMetadataRetryDB) Ping() error  { return nil }
 func (f *fakeMetadataRetryDB) Query(query string) ([]map[string]interface{}, []string, error) {
 	f.queries = append(f.queries, query)
 	for _, result := range f.queryResults {
@@ -222,6 +228,82 @@ func TestDBGetIndexesUsesSearchPathForPostgresPureTableMetadata(t *testing.T) {
 	}
 	if dbInst.indexSchema != "" || dbInst.indexTable != "users" {
 		t.Fatalf("expected postgres pure table index metadata to pass empty schema/users, got %q.%q", dbInst.indexSchema, dbInst.indexTable)
+	}
+}
+
+func TestDBGetColumnsKeepsCurrentDatabaseForKingbaseQualifiedTableMetadata(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	dbInst := &fakeMetadataRetryDB{
+		columns: []connection.ColumnDefinition{{Name: "id", Key: "PRI"}},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return dbInst, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.DBGetColumns(connection.ConnectionConfig{
+		Type:     "kingbase",
+		Host:     "127.0.0.1",
+		Port:     54321,
+		User:     "system",
+		Database: "ldf_server_dbs_dev",
+	}, "ldf_server_dbs_dev", "ldf_server.mes_work_order")
+
+	if !result.Success {
+		t.Fatalf("expected DBGetColumns success, got failure: %s", result.Message)
+	}
+	if dbInst.connectConfig.Database != "ldf_server_dbs_dev" {
+		t.Fatalf("expected kingbase metadata connection to keep current database, got %q", dbInst.connectConfig.Database)
+	}
+	if dbInst.columnSchema != "ldf_server" || dbInst.columnTable != "mes_work_order" {
+		t.Fatalf("expected kingbase qualified column metadata to pass ldf_server/mes_work_order, got %q.%q", dbInst.columnSchema, dbInst.columnTable)
+	}
+}
+
+func TestDBGetIndexesKeepsCurrentDatabaseForKingbaseQualifiedTableMetadata(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	originalResolveDialConfigWithProxyFunc := resolveDialConfigWithProxyFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+		resolveDialConfigWithProxyFunc = originalResolveDialConfigWithProxyFunc
+	})
+
+	dbInst := &fakeMetadataRetryDB{
+		indexes: []connection.IndexDefinition{{Name: "mes_work_order_pkey", ColumnName: "id", NonUnique: 0}},
+	}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return dbInst, nil
+	}
+	resolveDialConfigWithProxyFunc = func(raw connection.ConnectionConfig) (connection.ConnectionConfig, error) {
+		return raw, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	result := app.DBGetIndexes(connection.ConnectionConfig{
+		Type:     "kingbase",
+		Host:     "127.0.0.1",
+		Port:     54321,
+		User:     "system",
+		Database: "ldf_server_dbs_dev",
+	}, "ldf_server_dbs_dev", "ldf_server.mes_work_order")
+
+	if !result.Success {
+		t.Fatalf("expected DBGetIndexes success, got failure: %s", result.Message)
+	}
+	if dbInst.connectConfig.Database != "ldf_server_dbs_dev" {
+		t.Fatalf("expected kingbase metadata connection to keep current database, got %q", dbInst.connectConfig.Database)
+	}
+	if dbInst.indexSchema != "ldf_server" || dbInst.indexTable != "mes_work_order" {
+		t.Fatalf("expected kingbase qualified index metadata to pass ldf_server/mes_work_order, got %q.%q", dbInst.indexSchema, dbInst.indexTable)
 	}
 }
 
