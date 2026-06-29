@@ -79,26 +79,29 @@ type managedSQLTransaction struct {
 
 // App struct
 type App struct {
-	ctx                context.Context
-	startedAt          time.Time
-	dbCache            map[string]cachedDatabase // Cache for DB connections
-	connectFailures    map[string]cachedConnectFailure
-	mu                 sync.RWMutex // Mutex for cache access
-	updateMu           sync.Mutex
-	updateState        updateState
-	i18nMu             sync.RWMutex
-	localizer          *i18n.Localizer
-	queryMu            sync.RWMutex
-	configDir          string
-	secretStore        secretstore.SecretStore
-	runningQueries     map[string]queryContext // queryID -> cancelFunc and start time
-	sqlTransactionMu   sync.Mutex
-	sqlTransactions    map[string]*managedSQLTransaction
-	jvmPreviewTokenMu  sync.Mutex
-	jvmPreviewTokens   map[string]jvmPreviewConfirmationToken
-	jvmPreviewTokenTTL time.Duration
-	keepAliveCancel    context.CancelFunc
-	keepAliveDone      chan struct{}
+	ctx                           context.Context
+	startedAt                     time.Time
+	dbCache                       map[string]cachedDatabase // Cache for DB connections
+	connectFailures               map[string]cachedConnectFailure
+	mu                            sync.RWMutex // Mutex for cache access
+	updateMu                      sync.Mutex
+	updateState                   updateState
+	i18nMu                        sync.RWMutex
+	localizer                     *i18n.Localizer
+	applicationQuitMu             sync.Mutex
+	allowApplicationQuit          bool
+	applicationQuitPromptInFlight bool
+	queryMu                       sync.RWMutex
+	configDir                     string
+	secretStore                   secretstore.SecretStore
+	runningQueries                map[string]queryContext // queryID -> cancelFunc and start time
+	sqlTransactionMu              sync.Mutex
+	sqlTransactions               map[string]*managedSQLTransaction
+	jvmPreviewTokenMu             sync.Mutex
+	jvmPreviewTokens              map[string]jvmPreviewConfirmationToken
+	jvmPreviewTokenTTL            time.Duration
+	keepAliveCancel               context.CancelFunc
+	keepAliveDone                 chan struct{}
 }
 
 // NewApp creates a new App application struct

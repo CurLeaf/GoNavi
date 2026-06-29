@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Layout, Button, ConfigProvider, theme, message, Spin, Slider, Progress, Switch, Input, InputNumber, Select, Segmented, Tooltip } from 'antd';
 import { PlusOutlined, ConsoleSqlOutlined, UploadOutlined, DownloadOutlined, CloudDownloadOutlined, BugOutlined, ToolOutlined, GlobalOutlined, InfoCircleOutlined, GithubOutlined, SkinOutlined, CheckOutlined, MinusOutlined, BorderOutlined, CloseOutlined, SettingOutlined, LinkOutlined, BgColorsOutlined, AppstoreOutlined, RobotOutlined, FolderOpenOutlined, HddOutlined, SafetyCertificateOutlined, SwitcherOutlined, CodeOutlined, RightOutlined } from '@ant-design/icons';
-import { BrowserOpenURL, Environment, Quit, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
+import { BrowserOpenURL, Environment, EventsOn, WindowFullscreen, WindowGetPosition, WindowGetSize, WindowIsFullscreen, WindowIsMaximised, WindowIsMinimised, WindowIsNormal, WindowMaximise, WindowMinimise, WindowSetPosition, WindowSetSize, WindowUnfullscreen, WindowUnmaximise } from '../wailsjs/runtime';
 import Sidebar from './components/Sidebar';
 import TabManager from './components/TabManager';
 import ConnectionModal from './components/ConnectionModal';
@@ -109,11 +109,16 @@ import {
 } from './utils/aiEntryLayout';
 import { DEFAULT_AI_PANEL_WIDTH, resolveOverlayAIPanelWidth, shouldOverlayAIPanel } from './utils/aiPanelLayout';
 import { safeWindowRuntimeCall } from './utils/wailsRuntime';
+import {
+  buildApplicationQuitUnsavedSQLLabel,
+  collectApplicationQuitUnsavedSQLTargets,
+  saveApplicationQuitUnsavedSQLTargets,
+} from './utils/sqlEditorApplicationQuit';
 import { useAppUpdateManager } from './hooks/useAppUpdateManager';
 import { useAppLogPanelResize } from './hooks/useAppLogPanelResize';
 import { useAppSidebarResize } from './hooks/useAppSidebarResize';
 import { useAppUtilityStyles } from './hooks/useAppUtilityStyles';
-import { ApplyDataRootDirectory, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
+import { ApplyDataRootDirectory, CancelApplicationQuit, ForceQuitApplication, GetDataRootDirectoryInfo, GetSavedConnections, ListInstalledFontFamilies, OpenDataRootDirectory, SelectDataRootDirectory, SetMacNativeWindowControls, SetWindowTranslucency } from '../wailsjs/go/app/App';
 import { getAntdLocale } from './i18n/frameworkLocale';
 import { useI18n } from './i18n/provider';
 import './App.css';
@@ -1258,6 +1263,10 @@ function App() {
   const tabs = useStore(state => state.tabs);
   const activeTabId = useStore(state => state.activeTabId);
   const setActiveTab = useStore(state => state.setActiveTab);
+  const savedQueries = useStore(state => state.savedQueries);
+  const saveQuery = useStore(state => state.saveQuery);
+  const applicationQuitConfirmRef = useRef<{ destroy: () => void } | null>(null);
+  const applicationQuitHandlingRef = useRef(false);
   const openSecurityUpdateSettings = useCallback((focusTarget: SecurityUpdateSettingsFocusTarget | null = null) => {
       setIsSecurityUpdateIntroOpen(false);
       setSecurityUpdateSettingsFocusTarget(focusTarget);
@@ -1731,6 +1740,110 @@ function App() {
       const nextIndex = (baseIndex + offset + tabs.length) % tabs.length;
       setActiveTab(tabs[nextIndex].id);
   }, [activeTabId, setActiveTab, tabs]);
+
+  const resetApplicationQuitRequest = useCallback(() => {
+      applicationQuitHandlingRef.current = false;
+      applicationQuitConfirmRef.current = null;
+      void CancelApplicationQuit();
+  }, []);
+
+  const forceQuitApplication = useCallback(async () => {
+      const res = await ForceQuitApplication();
+      if (res && res.success === false) {
+          throw new Error(res.message || t('common.unknown'));
+      }
+  }, [t]);
+
+  const handleApplicationQuitRequest = useCallback(async () => {
+      if (applicationQuitHandlingRef.current) {
+          return;
+      }
+      applicationQuitHandlingRef.current = true;
+
+      let targets;
+      try {
+          targets = await collectApplicationQuitUnsavedSQLTargets(tabs, savedQueries);
+      } catch (error) {
+          resetApplicationQuitRequest();
+          message.error(t('app.quit.unsaved_sql.inspect_failed', {
+              detail: error instanceof Error ? error.message : String(error),
+          }));
+          return;
+      }
+
+      if (targets.length === 0) {
+          try {
+              await forceQuitApplication();
+          } catch (error) {
+              resetApplicationQuitRequest();
+              message.error(t('app.quit.message.quit_failed', {
+                  detail: error instanceof Error ? error.message : String(error),
+              }));
+          }
+          return;
+      }
+
+      const label = buildApplicationQuitUnsavedSQLLabel(targets);
+      let destroyConfirm: (() => void) | null = null;
+      const confirmRef = Modal.confirm({
+          title: t('app.quit.unsaved_sql.title'),
+          content: t(targets.length === 1
+              ? 'app.quit.unsaved_sql.content_single'
+              : 'app.quit.unsaved_sql.content_multiple', { label }),
+          okText: t('app.quit.unsaved_sql.save_exit'),
+          cancelText: t('app.quit.unsaved_sql.cancel'),
+          closable: true,
+          maskClosable: false,
+          okButtonProps: { danger: true, type: 'primary' },
+          footer: (_, { OkBtn, CancelBtn }) => (
+              <>
+                  <Button
+                    onClick={() => {
+                        destroyConfirm?.();
+                        applicationQuitConfirmRef.current = null;
+                        void forceQuitApplication().catch((error) => {
+                            resetApplicationQuitRequest();
+                            message.error(t('app.quit.message.quit_failed', {
+                                detail: error instanceof Error ? error.message : String(error),
+                            }));
+                        });
+                    }}
+                  >
+                      {t('app.quit.unsaved_sql.confirm_exit')}
+                  </Button>
+                  <CancelBtn />
+                  <OkBtn />
+              </>
+          ),
+          onCancel: () => {
+              resetApplicationQuitRequest();
+          },
+          onOk: async () => {
+              try {
+                  await saveApplicationQuitUnsavedSQLTargets(targets, saveQuery);
+                  message.success(t('app.quit.unsaved_sql.saved'));
+                  await forceQuitApplication();
+              } catch (error) {
+                  resetApplicationQuitRequest();
+                  message.error(t('app.quit.unsaved_sql.save_failed_cancel_exit', {
+                      detail: error instanceof Error ? error.message : String(error),
+                  }));
+                  throw error;
+              }
+          },
+      });
+      destroyConfirm = confirmRef.destroy;
+      applicationQuitConfirmRef.current = confirmRef;
+  }, [forceQuitApplication, resetApplicationQuitRequest, saveQuery, savedQueries, t, tabs]);
+
+  useEffect(() => {
+      const offBeforeClose = EventsOn('app:before-close-request', () => {
+          void handleApplicationQuitRequest();
+      });
+      return () => {
+          offBeforeClose();
+      };
+  }, [handleApplicationQuitRequest]);
 
   const closeConnectionPackageDialog = useCallback(() => {
       setConnectionPackageDialog(createClosedConnectionPackageDialogState());
@@ -2955,7 +3068,7 @@ function App() {
                         danger
                         className="titlebar-close-btn"
                         style={{ height: '100%', borderRadius: 0, width: titleBarButtonWidth }} 
-                        onClick={Quit} 
+                        onClick={() => { void handleApplicationQuitRequest(); }}
                       />
                   </div>
               )}

@@ -14,6 +14,10 @@ export function CancelQuery(arg1) {
   return window['go']['app']['App']['CancelQuery'](arg1);
 }
 
+export function CancelApplicationQuit() {
+  return window['go']['app']['App']['CancelApplicationQuit']();
+}
+
 export function CancelSQLFileExecution(arg1) {
   return window['go']['app']['App']['CancelSQLFileExecution'](arg1);
 }
@@ -260,6 +264,10 @@ export function ExportTablesSQL(arg1, arg2, arg3, arg4) {
 
 export function ExportTablesSQLWithOptions(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['app']['App']['ExportTablesSQLWithOptions'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
+export function ForceQuitApplication() {
+  return window['go']['app']['App']['ForceQuitApplication']();
 }
 
 export function GenerateQueryID() {

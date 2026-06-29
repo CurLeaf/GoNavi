@@ -1,0 +1,120 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SavedQuery, TabData } from '../types';
+import { clearQueryTabDraft, setQueryTabDraft, setSQLFileTabDraft } from './sqlFileTabDrafts';
+import {
+  collectApplicationQuitUnsavedSQLTargets,
+  saveApplicationQuitUnsavedSQLTargets,
+} from './sqlEditorApplicationQuit';
+
+const createQueryTab = (overrides: Partial<TabData>): TabData => ({
+  id: 'tab-1',
+  title: 'Query',
+  type: 'query',
+  connectionId: 'conn-1',
+  dbName: 'main',
+  query: '',
+  ...overrides,
+});
+
+const createSavedQuery = (overrides: Partial<SavedQuery> = {}): SavedQuery => ({
+  id: 'saved-1',
+  name: 'Saved query',
+  sql: 'select 1;',
+  connectionId: 'conn-1',
+  dbName: 'main',
+  createdAt: 1,
+  ...overrides,
+});
+
+describe('sqlEditorApplicationQuit', () => {
+  beforeEach(() => {
+    clearQueryTabDraft('tab-1');
+    clearQueryTabDraft('tab-2');
+    clearQueryTabDraft('tab-3');
+  });
+
+  it('collects dirty external SQL file tabs by comparing the draft with disk content', async () => {
+    const tab = createQueryTab({
+      id: 'tab-1',
+      title: 'work_order.sql',
+      filePath: '/tmp/work_order.sql',
+      query: 'select * from old_table;',
+    });
+    setSQLFileTabDraft('tab-1', 'select * from mes_work_order;');
+    const readSQLFile = vi.fn().mockResolvedValue({
+      success: true,
+      data: { content: 'select * from old_table;' },
+    });
+
+    const targets = await collectApplicationQuitUnsavedSQLTargets([tab], [], readSQLFile);
+
+    expect(targets).toEqual([expect.objectContaining({
+      kind: 'sql-file',
+      tabId: 'tab-1',
+      title: 'work_order.sql',
+      filePath: '/tmp/work_order.sql',
+      draft: 'select * from mes_work_order;',
+    })]);
+  });
+
+  it('collects dirty saved-query tabs and ignores unnamed temporary query tabs', async () => {
+    const savedQuery = createSavedQuery();
+    const savedTab = createQueryTab({
+      id: 'tab-2',
+      title: 'Saved query',
+      savedQueryId: 'saved-1',
+      query: 'select 1;',
+    });
+    const unnamedTab = createQueryTab({
+      id: 'tab-3',
+      title: 'New query',
+      query: 'select * from draft_only;',
+    });
+    setQueryTabDraft('tab-2', 'select 2;');
+    setQueryTabDraft('tab-3', 'select * from draft_only;');
+
+    const targets = await collectApplicationQuitUnsavedSQLTargets([savedTab, unnamedTab], [savedQuery], vi.fn());
+
+    expect(targets).toHaveLength(1);
+    expect(targets[0]).toMatchObject({
+      kind: 'saved-query',
+      tabId: 'tab-2',
+      title: 'Saved query',
+      draft: 'select 2;',
+      connectionId: 'conn-1',
+      dbName: 'main',
+    });
+  });
+
+  it('saves external SQL files and existing saved queries before application quit', async () => {
+    const saveQuery = vi.fn(async (query: SavedQuery) => query);
+    const writeSQLFile = vi.fn(async () => ({ success: true }));
+
+    await saveApplicationQuitUnsavedSQLTargets([
+      {
+        kind: 'sql-file',
+        tabId: 'tab-1',
+        title: 'file.sql',
+        filePath: '/tmp/file.sql',
+        draft: 'select 1;',
+      },
+      {
+        kind: 'saved-query',
+        tabId: 'tab-2',
+        title: 'Saved query',
+        savedQuery: createSavedQuery(),
+        draft: 'select 2;',
+        connectionId: 'conn-2',
+        dbName: 'reporting',
+      },
+    ], saveQuery, writeSQLFile);
+
+    expect(writeSQLFile).toHaveBeenCalledWith('/tmp/file.sql', 'select 1;');
+    expect(saveQuery).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'saved-1',
+      sql: 'select 2;',
+      connectionId: 'conn-2',
+      dbName: 'reporting',
+    }));
+  });
+});
