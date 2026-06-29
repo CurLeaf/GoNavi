@@ -10,9 +10,9 @@ export function ApplyChanges(arg1:connection.ConnectionConfig,arg2:string,arg3:s
 
 export function ApplyDataRootDirectory(arg1:string,arg2:boolean):Promise<connection.QueryResult>;
 
-export function CancelQuery(arg1:string):Promise<connection.QueryResult>;
-
 export function CancelApplicationQuit():Promise<connection.QueryResult>;
+
+export function CancelQuery(arg1:string):Promise<connection.QueryResult>;
 
 export function CancelSQLFileExecution(arg1:string):Promise<connection.QueryResult>;
 
@@ -52,9 +52,13 @@ export function DBGetForeignKeys(arg1:connection.ConnectionConfig,arg2:string,ar
 
 export function DBGetIndexes(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 
+export function DBGetObjects(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
+
 export function DBGetTables(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function DBGetTriggers(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
+
+export function DBGetViews(arg1:connection.ConnectionConfig,arg2:string):Promise<connection.QueryResult>;
 
 export function DBQuery(arg1:connection.ConnectionConfig,arg2:string,arg3:string):Promise<connection.QueryResult>;
 

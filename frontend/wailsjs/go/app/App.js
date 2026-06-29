@@ -10,12 +10,12 @@ export function ApplyDataRootDirectory(arg1, arg2) {
   return window['go']['app']['App']['ApplyDataRootDirectory'](arg1, arg2);
 }
 
-export function CancelQuery(arg1) {
-  return window['go']['app']['App']['CancelQuery'](arg1);
-}
-
 export function CancelApplicationQuit() {
   return window['go']['app']['App']['CancelApplicationQuit']();
+}
+
+export function CancelQuery(arg1) {
+  return window['go']['app']['App']['CancelQuery'](arg1);
 }
 
 export function CancelSQLFileExecution(arg1) {
@@ -94,12 +94,20 @@ export function DBGetIndexes(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBGetIndexes'](arg1, arg2, arg3);
 }
 
+export function DBGetObjects(arg1, arg2) {
+  return window['go']['app']['App']['DBGetObjects'](arg1, arg2);
+}
+
 export function DBGetTables(arg1, arg2) {
   return window['go']['app']['App']['DBGetTables'](arg1, arg2);
 }
 
 export function DBGetTriggers(arg1, arg2, arg3) {
   return window['go']['app']['App']['DBGetTriggers'](arg1, arg2, arg3);
+}
+
+export function DBGetViews(arg1, arg2) {
+  return window['go']['app']['App']['DBGetViews'](arg1, arg2);
 }
 
 export function DBQuery(arg1, arg2, arg3) {
