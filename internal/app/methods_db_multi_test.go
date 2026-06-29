@@ -1756,6 +1756,67 @@ func TestDBQueryMultiFallsBackWhenNativeReadOnlyBatchReturnsBlankResultSet(t *te
 	}
 }
 
+func TestDBQueryMultiFallsBackToPlainQueryWhenSequentialMultiStillReturnsBlankResultSet(t *testing.T) {
+	originalNewDatabaseFunc := newDatabaseFunc
+	t.Cleanup(func() {
+		newDatabaseFunc = originalNewDatabaseFunc
+	})
+
+	query := "SELECT * FROM ldf_server.mes_work_order"
+	blankNativeResult := []connection.ResultSetData{{
+		Rows:    []map[string]interface{}{},
+		Columns: []string{},
+	}}
+	baseDB := &fakeBatchWriteDB{
+		queryMap: map[string][]map[string]interface{}{
+			query: {
+				{"work_order": "MO-20260629"},
+			},
+		},
+		fieldMap: map[string][]string{
+			query: {"work_order"},
+		},
+		multiResult: map[string][]connection.ResultSetData{
+			query: blankNativeResult,
+		},
+		queryErr: map[string]error{},
+	}
+	fakeDB := &fakeNativeMultiResultDB{fakeBatchWriteDB: baseDB}
+	newDatabaseFunc = func(dbType string) (db.Database, error) {
+		return fakeDB, nil
+	}
+
+	app := NewAppWithSecretStore(secretstore.NewUnavailableStore("test"))
+	config := connection.ConnectionConfig{Type: "kingbase", Host: "127.0.0.1", Port: 54321, User: "system"}
+
+	result := app.DBQueryMulti(config, "ldf_server_dbs_dev", query, "sequential-blank-native-read-fallback-test")
+	if !result.Success {
+		t.Fatalf("expected DBQueryMulti success, got failure: %s", result.Message)
+	}
+	if fakeDB.multiCalls != 1 {
+		t.Fatalf("expected one top-level native multi-result attempt, got %d", fakeDB.multiCalls)
+	}
+	if baseDB.session == nil {
+		t.Fatal("expected DBQueryMulti to open a pinned session for sequential fallback")
+	}
+	if baseDB.session.queryCalls != 2 {
+		t.Fatalf("expected sequential multi-result attempt plus plain query fallback, got %d calls", baseDB.session.queryCalls)
+	}
+	resultSets, ok := result.Data.([]connection.ResultSetData)
+	if !ok {
+		t.Fatalf("expected []connection.ResultSetData, got %T", result.Data)
+	}
+	if len(resultSets) != 1 {
+		t.Fatalf("expected one plain query fallback result set, got %#v", resultSets)
+	}
+	if !reflect.DeepEqual(resultSets[0].Columns, []string{"work_order"}) {
+		t.Fatalf("expected fallback columns, got %#v", resultSets[0].Columns)
+	}
+	if got := resultSets[0].Rows[0]["work_order"]; got != "MO-20260629" {
+		t.Fatalf("expected fallback SELECT result work_order=MO-20260629, got %#v", got)
+	}
+}
+
 func TestDBQueryMultiUsesPinnedSessionForSequentialFallback(t *testing.T) {
 	originalNewDatabaseFunc := newDatabaseFunc
 	t.Cleanup(func() {

@@ -1232,6 +1232,22 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				statementResults []connection.ResultSetData
 				usedMultiResult  bool
 			)
+			runStatementQuery := func() error {
+				if sessionQueryMessageTarget != nil {
+					data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
+				} else if sessionQueryTarget != nil {
+					data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
+				} else if q, ok := dbInst.(db.QueryMessageExecer); ok {
+					data, columns, messages, err = q.QueryContextWithMessages(ctx, stmt)
+				} else if q, ok := dbInst.(interface {
+					QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
+				}); ok {
+					data, columns, err = q.QueryContext(ctx, stmt)
+				} else {
+					data, columns, err = dbInst.Query(stmt)
+				}
+				return err
+			}
 			if sessionMultiQueryMessageTarget != nil {
 				statementResults, messages, err = sessionMultiQueryMessageTarget.QueryMultiContextWithMessages(ctx, stmt)
 				usedMultiResult = true
@@ -1247,18 +1263,17 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 			} else if q, ok := dbInst.(db.MultiResultQuerier); ok {
 				statementResults, err = q.QueryMulti(stmt)
 				usedMultiResult = true
-			} else if sessionQueryMessageTarget != nil {
-				data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
-			} else if sessionQueryTarget != nil {
-				data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
-			} else if q, ok := dbInst.(db.QueryMessageExecer); ok {
-				data, columns, messages, err = q.QueryContextWithMessages(ctx, stmt)
-			} else if q, ok := dbInst.(interface {
-				QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
-			}); ok {
-				data, columns, err = q.QueryContext(ctx, stmt)
 			} else {
-				data, columns, err = dbInst.Query(stmt)
+				err = runStatementQuery()
+			}
+			if err == nil && usedMultiResult && nativeReadOnlyResultsMissingTabularPayload(isReadStmt, statementResults) {
+				logger.Warnf("DBQueryMulti 逐条多结果集返回空结果，将回退普通查询（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
+				usedMultiResult = false
+				statementResults = nil
+				data = nil
+				columns = nil
+				messages = nil
+				err = runStatementQuery()
 			}
 			if err == nil {
 				if usedMultiResult {

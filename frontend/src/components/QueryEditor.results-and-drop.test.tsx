@@ -1105,6 +1105,50 @@ describe('QueryEditor external SQL save', () => {
     expect(textContent(renderer!.toJSON())).not.toContain('影响行数：0');
   });
 
+  it('shows the data result tab in V2 when the SQL log tab is already visible', async () => {
+    storeState.appearance.uiVersion = 'v2';
+    storeState.sqlLogs = [{
+      id: 'log-existing',
+      timestamp: Date.now(),
+      sql: 'SELECT * FROM ldf_server.mes_work_order',
+      status: 'success',
+      duration: 120,
+    }];
+    storeState.connections[0].config.type = 'kingbase';
+    storeState.connections[0].config.database = 'ldf_server_dbs_dev';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{
+        statementIndex: 1,
+        columns: ['work_order'],
+        rows: [{ work_order: 'MO-20260629' }],
+      }],
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({
+        dbName: 'ldf_server_dbs_dev',
+        query: 'SELECT * FROM ldf_server.mes_work_order;',
+        resultPanelVisible: true,
+      })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const rendered = textContent(renderer!.toJSON());
+    expect(rendered).toContain('日志');
+    expect(rendered).toContain('结果 1');
+    expect(dataGridState.latestProps?.columnNames).toEqual(['work_order']);
+    expect(dataGridState.latestProps?.data?.[0]).toMatchObject({ work_order: 'MO-20260629' });
+  });
+
   it('prefers sqlserver print output messages over affected-row status results', async () => {
     storeState.connections[0].config.type = 'sqlserver';
     storeState.connections[0].config.database = 'hydee';
