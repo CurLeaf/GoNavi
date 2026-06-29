@@ -49,6 +49,8 @@ type RedisViewerKeyToolbarProps = {
   selectedKeyCount: number;
   searchMode: RedisSearchMode;
   searchInput: string;
+  canLoadAll?: boolean;
+  loadingAllKeys?: boolean;
   mutedPillTagStyle: React.CSSProperties;
   actionButtonStyle: React.CSSProperties;
   primaryActionButtonStyle: React.CSSProperties;
@@ -61,6 +63,7 @@ type RedisViewerKeyToolbarProps = {
   onRefresh: () => void;
   onCreateKey: () => void;
   onSelectAllLoadedKeys: () => void;
+  onLoadAllKeys: () => void;
   onClearAllSelectedKeys: () => void;
   onDeleteSelectedKeys: () => void;
 };
@@ -73,6 +76,8 @@ const RedisViewerKeyToolbar: React.FC<RedisViewerKeyToolbarProps> = ({
   selectedKeyCount,
   searchMode,
   searchInput,
+  canLoadAll = false,
+  loadingAllKeys = false,
   mutedPillTagStyle,
   actionButtonStyle,
   primaryActionButtonStyle,
@@ -85,6 +90,7 @@ const RedisViewerKeyToolbar: React.FC<RedisViewerKeyToolbarProps> = ({
   onRefresh,
   onCreateKey,
   onSelectAllLoadedKeys,
+  onLoadAllKeys,
   onClearAllSelectedKeys,
   onDeleteSelectedKeys,
 }) => {
@@ -141,6 +147,7 @@ const RedisViewerKeyToolbar: React.FC<RedisViewerKeyToolbarProps> = ({
           <Button size="small" style={actionButtonStyle} icon={<ReloadOutlined />} onClick={onRefresh}>{tr('redis_viewer.action.refresh')}</Button>
           <Button size="small" style={actionButtonStyle} icon={<PlusOutlined />} onClick={onCreateKey}>{tr('redis_viewer.action.new_key')}</Button>
           <Button size="small" style={primaryActionButtonStyle} onClick={onSelectAllLoadedKeys} disabled={keyCount === 0}>{tr('redis_viewer.action.select_all_loaded')}</Button>
+          <Button size="small" style={actionButtonStyle} onClick={onLoadAllKeys} disabled={!canLoadAll} loading={loadingAllKeys}>{tr('redis_viewer.action.load_all')}</Button>
           <Button size="small" style={actionButtonStyle} onClick={onClearAllSelectedKeys} disabled={selectedKeyCount === 0}>{tr('redis_viewer.action.clear_selection')}</Button>
         </Space>
         <Popconfirm

@@ -52,6 +52,7 @@ describe('RedisViewer i18n', () => {
       '刷新',
       '新建',
       '全选全部',
+      '加载全部',
       '取消全选',
       '确定删除选中的',
       '删除选中',
@@ -63,6 +64,7 @@ describe('RedisViewer i18n', () => {
     expect(keyToolbarSource).toContain("tr('redis_viewer.title.key_explorer'");
     expect(keyToolbarSource).toContain("tr('redis_viewer.label.keys_count'");
     expect(keyToolbarSource).toContain("tr('redis_viewer.label.node_count'");
+    expect(keyToolbarSource).toContain("tr('redis_viewer.action.load_all'");
     expect(keyToolbarSource).toContain("tr('redis_viewer.confirm.delete_selected'");
     expect(keyToolbarSource).toContain("tr('redis_viewer.action.delete_selected'");
     expect(keyToolbarSource).toContain('master: {sentinelMaster}');

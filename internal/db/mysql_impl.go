@@ -592,6 +592,7 @@ func normalizeMySQLAddress(host string, port int) string {
 var mysqlDatabaseQueries = []string{
 	"SHOW DATABASES",
 	"SELECT DATABASE() AS `Database`",
+	"SELECT schema_name AS database_name FROM information_schema.schemata ORDER BY schema_name",
 }
 
 var mysqlDatabaseNameKeys = []string{

@@ -10,6 +10,13 @@
   - 入参：`connectionId`
 - `get_tables`
   - 入参：`connectionId`、可选 `dbName`
+  - 返回表列表，并在 `views` 字段附带视图列表，兼容旧客户端只调用 `get_tables` 的场景
+- `get_views`
+  - 入参：`connectionId`、可选 `dbName`
+  - 返回视图列表
+- `get_objects`
+  - 入参：`connectionId`、可选 `dbName`、可选 `objectTypes`
+  - 返回表、视图、触发器、函数、过程、序列、包、事件，以及消息队列类 `topic/queue/exchange` 等对象清单
 - `get_columns`
   - 入参：`connectionId`、可选 `dbName`、`tableName`
 - `get_table_ddl`
@@ -20,7 +27,7 @@
   - 如果 SQL 包含 DDL/DML，必须显式传 `allowMutating=true`
   - `maxRowsPerResult` 用来限制单个结果集返回的行数，默认 `200`
 
-远程 Agent 只需要库表结构时，启动 HTTP 模式请加 `--schema-only`。该模式不注册 `execute_sql`，只保留连接摘要、库表、字段、索引、外键、触发器和 DDL 工具。
+远程 Agent 只需要结构元数据时，启动 HTTP 模式请加 `--schema-only`。该模式不注册 `execute_sql`，只保留连接摘要、对象清单、表/视图、字段、索引、外键、触发器和 DDL 工具。
 
 ## 运行方式
 
@@ -121,7 +128,7 @@ OpenClaw、Hermans 这类部署在云端或远端 Linux 的 Agent，不能直接
 2. 在 Windows 本机启动 `GoNavi.exe mcp-server http --addr 127.0.0.1:8765 --path /mcp --token <随机token> --schema-only`。
 3. 通过 SSH 隧道、反向代理或内网网关把 `http://127.0.0.1:8765/mcp` 暴露为云端 Agent 可访问的 HTTPS 地址。
 4. 在 OpenClaw / Hermans 中添加远程 MCP Server，transport 选择 Streamable HTTP，URL 指向 `/mcp` 地址，并设置请求头 `Authorization: Bearer <随机token>`。
-5. 先调用 `get_connections` 获取 `connectionId`，再调用 `get_databases`、`get_tables`、`get_columns`、`get_table_ddl` 等工具读取结构。
+5. 先调用 `get_connections` 获取 `connectionId`，再调用 `get_databases`、`get_objects`、`get_tables`、`get_views`、`get_columns`、`get_table_ddl` 等工具读取结构。
 
 如果目标 Agent 支持 `mcpServers` JSON，可按下面的通用片段配置：
 

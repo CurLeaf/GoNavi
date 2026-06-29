@@ -137,6 +137,22 @@ const collectRenderedText = (node: any): string => {
   return '';
 };
 
+const findButtonByText = (renderer: ReactTestRenderer, text: string) => {
+  return renderer.root.findAllByType('button').find((node) => collectRenderedText(node.props.children).includes(text));
+};
+
+const countLeafNodes = (nodes: any[]): number => {
+  return nodes.reduce((total, node) => {
+    if (!node || typeof node !== 'object') {
+      return total;
+    }
+    if (node.nodeType === 'leaf') {
+      return total + 1;
+    }
+    return total + countLeafNodes(Array.isArray(node.children) ? node.children : []);
+  }, 0);
+};
+
 describe('RedisViewer tree interactions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -238,7 +254,66 @@ describe('RedisViewer tree interactions', () => {
     const renderedText = collectRenderedText(renderer!.toJSON());
     expect(renderedText).toContain('db2');
     expect(renderedText).toContain('Cluster');
-    expect(renderedText).toContain('3 节点');
+    expect(renderedText).toContain('3 nodes');
+
+    renderer!.unmount();
+  });
+
+  it('loads every key page when the load-all action is clicked', async () => {
+    redisBackend.RedisScanKeys.mockReset();
+    redisBackend.RedisScanKeys
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          cursor: '1',
+          keys: [
+            { key: 'app:user:1', type: 'string', ttl: -1 },
+            { key: 'app:user:2', type: 'string', ttl: -1 },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          cursor: '1',
+          keys: [
+            { key: 'app:user:1', type: 'string', ttl: -1 },
+            { key: 'app:user:2', type: 'string', ttl: -1 },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        data: {
+          cursor: '0',
+          keys: [
+            { key: 'app:user:3', type: 'string', ttl: -1 },
+          ],
+        },
+      });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<RedisViewer connectionId="redis-1" redisDB={0} />);
+    });
+    await flushEffects();
+
+    const loadAllButton = findButtonByText(renderer!, 'Load all');
+    expect(loadAllButton).toBeTruthy();
+
+    await act(async () => {
+      loadAllButton!.props.onClick?.();
+    });
+    await flushEffects();
+
+    expect(redisBackend.RedisScanKeys).toHaveBeenCalledTimes(3);
+    expect(redisBackend.RedisScanKeys.mock.calls[1]?.[2]).toBe('0');
+    expect(redisBackend.RedisScanKeys.mock.calls[2]?.[2]).toBe('1');
+
+    expect(countLeafNodes(antdState.treeProps.treeData)).toBe(3);
+
+    const renderedText = collectRenderedText(renderer!.toJSON());
+    expect(renderedText).toContain('Loaded 3 Keys');
 
     renderer!.unmount();
   });

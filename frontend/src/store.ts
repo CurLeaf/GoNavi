@@ -74,6 +74,11 @@ import {
   type SavedQueryBackend,
 } from "./utils/savedQueryPersistence";
 import {
+  clearQueryTabDraft,
+  getPersistedQueryTabDraftEntry,
+  listPersistedQueryTabDraftEntries,
+} from "./utils/sqlFileTabDrafts";
+import {
   deriveLegacyConnectionReadOnlyFlag,
   normalizeConnectionProtectionConfig,
   resolveConnectionProtectionConfig,
@@ -84,6 +89,8 @@ import {
 } from "./utils/queryEditorSplitLayout";
 
 export type TableDoubleClickAction = "open-data" | "open-design";
+export type ThemeMode = "light" | "dark";
+export type ThemePreference = ThemeMode | "system";
 
 export interface AppearanceSettings extends DataGridDisplaySettings {
   uiVersion: "legacy" | "v2";
@@ -95,11 +102,16 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   v2SidebarSearchMode: "command" | "filter";
   v2CommandSearchPersistentFilterEnabled: boolean;
   v2SidebarPersistedFilter: string;
+  v2SidebarRailScale: number;
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
   tabDisplay: TabDisplaySettings;
   redisDbAliases: RedisDbAliasMap;
 }
+
+export const DEFAULT_V2_SIDEBAR_RAIL_SCALE = 1.0;
+export const MIN_V2_SIDEBAR_RAIL_SCALE = 1.0;
+export const MAX_V2_SIDEBAR_RAIL_SCALE = 1.8;
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
   uiVersion: "legacy",
@@ -111,6 +123,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   v2SidebarSearchMode: "command",
   v2CommandSearchPersistentFilterEnabled: false,
   v2SidebarPersistedFilter: "",
+  v2SidebarRailScale: DEFAULT_V2_SIDEBAR_RAIL_SCALE,
   customUIFontFamily: null,
   customMonoFontFamily: null,
   tabDisplay: DEFAULT_TAB_DISPLAY_SETTINGS,
@@ -146,6 +159,16 @@ const sanitizeV2SidebarPersistedFilter = (value: unknown): string => {
   }
   return value.trim().slice(0, MAX_SIDEBAR_PERSISTED_FILTER_LENGTH);
 };
+
+export const sanitizeV2SidebarRailScale = (value: unknown): number => {
+  return normalizeFloatInRange(
+    value,
+    DEFAULT_V2_SIDEBAR_RAIL_SCALE,
+    MIN_V2_SIDEBAR_RAIL_SCALE,
+    MAX_V2_SIDEBAR_RAIL_SCALE,
+  );
+};
+
 const MAX_URI_LENGTH = 4096;
 const MAX_HOST_ENTRY_LENGTH = 512;
 const MAX_HOST_ENTRIES = 64;
@@ -1270,7 +1293,8 @@ interface AppState {
   activeContext: { connectionId: string; dbName: string } | null;
   savedQueries: SavedQuery[];
   externalSQLDirectories: ExternalSQLDirectory[];
-  theme: "light" | "dark";
+  theme: ThemeMode;
+  themePreference: ThemePreference;
   languagePreference: LanguagePreference;
   appearance: AppearanceSettings;
   uiScale: number;
@@ -1385,7 +1409,8 @@ interface AppState {
   saveExternalSQLDirectory: (directory: ExternalSQLDirectory) => void;
   deleteExternalSQLDirectory: (id: string) => void;
 
-  setTheme: (theme: "light" | "dark") => void;
+  setTheme: (theme: ThemeMode) => void;
+  setThemePreference: (themePreference: ThemePreference) => void;
   setLanguagePreference: (languagePreference: LanguagePreference) => void;
   setAppearance: (appearance: Partial<AppearanceSettings>) => void;
   setRedisDbAlias: (
@@ -1681,18 +1706,29 @@ const sanitizeTableExportHistories = (
 };
 
 const sanitizeQueryTabs = (value: unknown): TabData[] => {
-  if (!Array.isArray(value)) return [];
+  const entries = Array.isArray(value) ? value : [];
   const result: TabData[] = [];
   const seenIds = new Set<string>();
 
-  value.forEach((entry, index) => {
+  entries.forEach((entry, index) => {
     if (!entry || typeof entry !== "object") return;
     const raw = entry as Record<string, unknown>;
     if (raw.type !== "query") return;
 
-    const query = typeof raw.query === "string" ? raw.query.slice(0, MAX_PERSISTED_QUERY_LENGTH) : "";
-    const filePath = toTrimmedString(raw.filePath);
-    const savedQueryId = toTrimmedString(raw.savedQueryId);
+    let id = toTrimmedString(raw.id, `query-${index + 1}`) || `query-${index + 1}`;
+    const persistedDraft = getPersistedQueryTabDraftEntry(id);
+    const query =
+      typeof raw.query === "string" && raw.query.trim()
+        ? raw.query.slice(0, MAX_PERSISTED_QUERY_LENGTH)
+        : String(persistedDraft?.query || "").slice(
+            0,
+            MAX_PERSISTED_QUERY_LENGTH,
+          );
+    const filePath = toTrimmedString(raw.filePath, persistedDraft?.filePath);
+    const savedQueryId = toTrimmedString(
+      raw.savedQueryId,
+      persistedDraft?.savedQueryId,
+    );
     const rawFormatRestoreSnapshot =
       raw.formatRestoreSnapshot && typeof raw.formatRestoreSnapshot === "object"
         ? (raw.formatRestoreSnapshot as Record<string, unknown>)
@@ -1704,7 +1740,6 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
     const formatRestoreCreatedAt = Number(rawFormatRestoreSnapshot?.createdAt);
     if (!query.trim() && !filePath && !savedQueryId) return;
 
-    let id = toTrimmedString(raw.id, `query-${index + 1}`) || `query-${index + 1}`;
     if (seenIds.has(id)) {
       id = `${id}-${index + 1}`;
     }
@@ -1713,11 +1748,20 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
     result.push({
       id,
       title:
-        toTrimmedString(raw.title, translate("sidebar.tab.new_query")) ||
+        toTrimmedString(
+          raw.title,
+          toTrimmedString(
+            persistedDraft?.title,
+            translate("sidebar.tab.new_query"),
+          ),
+        ) ||
         translate("sidebar.tab.new_query"),
       type: "query",
-      connectionId: toTrimmedString(raw.connectionId),
-      dbName: toTrimmedString(raw.dbName),
+      connectionId: toTrimmedString(
+        raw.connectionId,
+        persistedDraft?.connectionId,
+      ),
+      dbName: toTrimmedString(raw.dbName, persistedDraft?.dbName),
       query,
       resultPanelVisible:
         typeof raw.resultPanelVisible === "boolean"
@@ -1725,7 +1769,7 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
           : undefined,
       filePath: filePath || undefined,
       savedQueryId: savedQueryId || undefined,
-      readOnly: raw.readOnly === true,
+      readOnly: raw.readOnly === true || persistedDraft?.readOnly === true,
       formatRestoreSnapshot: formatRestoreQuery
         ? {
             query: formatRestoreQuery,
@@ -1734,6 +1778,31 @@ const sanitizeQueryTabs = (value: unknown): TabData[] => {
               : Date.now(),
           }
         : undefined,
+    });
+  });
+
+  listPersistedQueryTabDraftEntries().forEach((entry) => {
+    if (seenIds.has(entry.tabId)) {
+      return;
+    }
+    const filePath = toTrimmedString(entry.filePath);
+    const savedQueryId = toTrimmedString(entry.savedQueryId);
+    if (!entry.query.trim() && !filePath && !savedQueryId) {
+      return;
+    }
+    seenIds.add(entry.tabId);
+    result.push({
+      id: entry.tabId,
+      title:
+        toTrimmedString(entry.title, translate("sidebar.tab.new_query")) ||
+        translate("sidebar.tab.new_query"),
+      type: "query",
+      connectionId: toTrimmedString(entry.connectionId),
+      dbName: toTrimmedString(entry.dbName) || undefined,
+      query: entry.query.slice(0, MAX_PERSISTED_QUERY_LENGTH),
+      filePath: filePath || undefined,
+      savedQueryId: savedQueryId || undefined,
+      readOnly: entry.readOnly === true,
     });
   });
 
@@ -1919,8 +1988,13 @@ const hasLegacyConnectionSecrets = (
   });
 };
 
-const sanitizeTheme = (value: unknown): "light" | "dark" =>
+const sanitizeTheme = (value: unknown): ThemeMode =>
   value === "dark" ? "dark" : "light";
+
+const sanitizeThemePreference = (
+  value: unknown,
+  fallbackTheme: ThemeMode = "light",
+): ThemePreference => (value === "system" ? "system" : sanitizeTheme(value ?? fallbackTheme));
 
 const sanitizeLanguagePreference = (value: unknown): LanguagePreference => {
   if (
@@ -2134,6 +2208,9 @@ const sanitizeAppearance = (
         : DEFAULT_APPEARANCE.v2CommandSearchPersistentFilterEnabled,
     v2SidebarPersistedFilter: sanitizeV2SidebarPersistedFilter(
       appearance.v2SidebarPersistedFilter,
+    ),
+    v2SidebarRailScale: sanitizeV2SidebarRailScale(
+      appearance.v2SidebarRailScale,
     ),
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),
@@ -2401,6 +2478,7 @@ export const useStore = create<AppState>()(
       savedQueries: [],
       externalSQLDirectories: [],
       theme: "light",
+      themePreference: "light",
       languagePreference: DEFAULT_LANGUAGE_PREFERENCE,
       appearance: { ...DEFAULT_APPEARANCE },
       uiScale: DEFAULT_UI_SCALE,
@@ -2930,6 +3008,9 @@ export const useStore = create<AppState>()(
       closeTab: (id) =>
         set((state) => {
           const closedTab = state.tabs.find((t) => t.id === id);
+          if (closedTab?.type === "query") {
+            clearQueryTabDraft(closedTab.id);
+          }
           const newTabs = state.tabs.filter((t) => t.id !== id);
           let newActiveId = state.activeTabId;
           if (state.activeTabId === id) {
@@ -2950,6 +3031,9 @@ export const useStore = create<AppState>()(
         set((state) => {
           const keep = state.tabs.find((t) => t.id === id);
           if (!keep) return state;
+          state.tabs
+            .filter((tab) => tab.id !== id && tab.type === "query")
+            .forEach((tab) => clearQueryTabDraft(tab.id));
           return {
             tabs: [keep],
             activeTabId: id,
@@ -2961,6 +3045,10 @@ export const useStore = create<AppState>()(
         set((state) => {
           const index = state.tabs.findIndex((t) => t.id === id);
           if (index === -1) return state;
+          state.tabs
+            .slice(0, index)
+            .filter((tab) => tab.type === "query")
+            .forEach((tab) => clearQueryTabDraft(tab.id));
           const newTabs = state.tabs.slice(index);
           const activeStillExists = state.activeTabId
             ? newTabs.some((t) => t.id === state.activeTabId)
@@ -2980,6 +3068,10 @@ export const useStore = create<AppState>()(
         set((state) => {
           const index = state.tabs.findIndex((t) => t.id === id);
           if (index === -1) return state;
+          state.tabs
+            .slice(index + 1)
+            .filter((tab) => tab.type === "query")
+            .forEach((tab) => clearQueryTabDraft(tab.id));
           const newTabs = state.tabs.slice(0, index + 1);
           const activeStillExists = state.activeTabId
             ? newTabs.some((t) => t.id === state.activeTabId)
@@ -2999,6 +3091,13 @@ export const useStore = create<AppState>()(
         set((state) => {
           const targetConnectionId = String(connectionId || "").trim();
           if (!targetConnectionId) return state;
+          state.tabs
+            .filter(
+              (tab) =>
+                tab.type === "query" &&
+                String(tab.connectionId || "").trim() === targetConnectionId,
+            )
+            .forEach((tab) => clearQueryTabDraft(tab.id));
           const newTabs = state.tabs.filter(
             (t) => String(t.connectionId || "").trim() !== targetConnectionId,
           );
@@ -3030,6 +3129,15 @@ export const useStore = create<AppState>()(
           const targetConnectionId = String(connectionId || "").trim();
           const targetDbName = String(dbName || "").trim();
           if (!targetConnectionId || !targetDbName) return state;
+          state.tabs
+            .filter((tab) => {
+              if (tab.type !== "query") return false;
+              const sameConnection =
+                String(tab.connectionId || "").trim() === targetConnectionId;
+              const sameDb = String(tab.dbName || "").trim() === targetDbName;
+              return sameConnection && sameDb;
+            })
+            .forEach((tab) => clearQueryTabDraft(tab.id));
           const newTabs = state.tabs.filter((tab) => {
             const sameConnection =
               String(tab.connectionId || "").trim() === targetConnectionId;
@@ -3080,7 +3188,13 @@ export const useStore = create<AppState>()(
           return { tabs: nextTabs };
         }),
 
-      closeAllTabs: () => set(() => ({ tabs: [], activeTabId: null, activeContext: null })),
+      closeAllTabs: () =>
+        set((state) => {
+          state.tabs
+            .filter((tab) => tab.type === "query")
+            .forEach((tab) => clearQueryTabDraft(tab.id));
+          return { tabs: [], activeTabId: null, activeContext: null };
+        }),
 
       setActiveTab: (id) =>
         set((state) => ({
@@ -3173,6 +3287,10 @@ export const useStore = create<AppState>()(
         })),
 
       setTheme: (theme) => set({ theme }),
+      setThemePreference: (themePreference) =>
+        set({
+          themePreference: sanitizeThemePreference(themePreference),
+        }),
       setLanguagePreference: (languagePreference) =>
         set({
           languagePreference: sanitizeLanguagePreference(languagePreference),
@@ -3684,6 +3802,10 @@ export const useStore = create<AppState>()(
           state.externalSQLDirectories,
         );
         nextState.theme = sanitizeTheme(state.theme);
+        nextState.themePreference = sanitizeThemePreference(
+          state.themePreference,
+          nextState.theme,
+        );
         nextState.languagePreference = sanitizeLanguagePreference(
           state.languagePreference,
         );
@@ -3785,6 +3907,10 @@ export const useStore = create<AppState>()(
             state.externalSQLDirectories,
           ),
           theme: sanitizeTheme(state.theme),
+          themePreference: sanitizeThemePreference(
+            state.themePreference,
+            sanitizeTheme(state.theme),
+          ),
           languagePreference: sanitizeLanguagePreference(
             state.languagePreference,
           ),
@@ -3836,6 +3962,7 @@ export const useStore = create<AppState>()(
           sidebarRootOrder: state.sidebarRootOrder,
           externalSQLDirectories: state.externalSQLDirectories,
           theme: state.theme,
+          themePreference: state.themePreference,
           languagePreference: state.languagePreference,
           appearance: state.appearance,
           uiScale: state.uiScale,

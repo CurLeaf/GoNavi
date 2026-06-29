@@ -6192,6 +6192,55 @@ describe('QueryEditor external SQL save', () => {
     expect(messageApi.warning).not.toHaveBeenCalled();
   });
 
+  it('keeps Kingbase schema-qualified query results writable without treating the schema as the database', async () => {
+    storeState.connections[0].config.type = 'kingbase';
+    storeState.connections[0].config.database = 'ldf_server_dbs_dev';
+    backendApp.DBQueryMulti.mockResolvedValueOnce({
+      success: true,
+      data: [{
+        columns: ['id', 'work_order_no'],
+        rows: [{ id: 1001, work_order_no: 'MO-1001' }],
+      }],
+    });
+    backendApp.DBGetColumns.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'id', key: 'PRI' }, { name: 'work_order_no', key: '' }],
+    });
+    backendApp.DBGetIndexes.mockResolvedValueOnce({
+      success: true,
+      data: [{ name: 'mes_work_order_pkey', columnName: 'id', nonUnique: 0, seqInIndex: 1 }],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({
+        dbName: 'ldf_server_dbs_dev',
+        query: 'SELECT * FROM ldf_server.mes_work_order',
+      })} />);
+    });
+
+    await act(async () => {
+      await findButton(renderer!, '运行').props.onClick();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(backendApp.DBGetColumns).toHaveBeenCalledWith(expect.anything(), 'ldf_server_dbs_dev', 'ldf_server.mes_work_order');
+    expect(backendApp.DBGetIndexes).toHaveBeenCalledWith(expect.anything(), 'ldf_server_dbs_dev', 'ldf_server.mes_work_order');
+    expect(dataGridState.latestProps?.tableName).toBe('ldf_server.mes_work_order');
+    expect(dataGridState.latestProps?.pkColumns).toEqual(['id']);
+    expect(dataGridState.latestProps?.editLocator).toMatchObject({
+      strategy: 'primary-key',
+      columns: ['id'],
+      valueColumns: ['id'],
+      readOnly: false,
+    });
+    expect(dataGridState.latestProps?.readOnly).toBe(false);
+    expect(messageApi.warning).not.toHaveBeenCalled();
+  });
+
   it('uses hidden Oracle ROWID for query results without primary or unique keys', async () => {
     storeState.connections[0].config.type = 'oracle';
     storeState.connections[0].config.database = 'ORCLPDB1';

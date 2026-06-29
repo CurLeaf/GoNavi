@@ -142,6 +142,21 @@ describe('TableOverview tdengine compatibility', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     storeState.appearance = { uiVersion: 'legacy', tableDoubleClickAction: 'open-data' };
+    storeState.connections = [
+      {
+        id: 'conn-1',
+        config: {
+          type: 'tdengine',
+          host: '127.0.0.1',
+          port: 6041,
+          user: 'root',
+          password: 'taosdata',
+          database: 'metrics',
+          useSSH: false,
+          ssh: { host: '', port: 22, user: '', password: '', keyPath: '' },
+        },
+      },
+    ];
     backendApp.DBGetTables.mockResolvedValue({
       success: true,
       data: [
@@ -248,5 +263,57 @@ describe('TableOverview tdengine compatibility', () => {
       type: 'design',
       tableName: 'd001',
     }));
+  });
+
+  it('renders comment and temporal metadata in the legacy table list when available', async () => {
+    storeState.connections = [
+      {
+        id: 'conn-1',
+        config: {
+          type: 'mysql',
+          host: '127.0.0.1',
+          port: 3306,
+          user: 'root',
+          password: 'secret',
+          database: 'app_db',
+          useSSH: false,
+          ssh: { host: '', port: 22, user: '', password: '', keyPath: '' },
+        },
+      },
+    ];
+    backendApp.DBQuery.mockResolvedValue({
+      success: true,
+      data: [
+        {
+          TABLE_NAME: 'orders',
+          TABLE_COMMENT: '订单表',
+          TABLE_ROWS: 128,
+          DATA_LENGTH: 2048,
+          INDEX_LENGTH: 1024,
+          ENGINE: 'InnoDB',
+          CREATE_TIME: '2026-05-01 09:00:00',
+          UPDATE_TIME: '2026-06-02 10:30:00',
+        },
+      ],
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<TableOverview tab={{
+        id: 'tab-1',
+        title: '表概览 - app_db',
+        type: 'table-overview',
+        connectionId: 'conn-1',
+        dbName: 'app_db',
+      } as any} />);
+    });
+    await flushPromises();
+
+    expect(backendApp.DBQuery).toHaveBeenCalled();
+    const renderedText = collectText(renderer!.toJSON());
+    expect(renderedText).toContain('orders');
+    expect(renderedText).toContain('订单表');
+    expect(renderedText).toContain('2026-06-02 10:30:00');
+    expect(renderedText).toContain('2026-05-01 09:00:00');
   });
 });

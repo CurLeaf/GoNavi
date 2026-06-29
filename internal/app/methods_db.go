@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1094,9 +1095,9 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		return connection.QueryResult{Success: false, Message: err.Error(), QueryID: queryID}
 	}
 
-	// 某些 optional driver-agent 的原生多结果集路径会异常返回“成功但无任何结果集”。
+	// 某些 optional driver-agent 的原生多结果集路径会异常返回“成功但无可展示列/行”。
 	// 对只读查询这是不可信信号，回退到逐条执行可以避免普通 SELECT 在结果面板中被吃空。
-	if useNativeMultiResult && allReadOnly && results != nil && len(results) == 0 && len(resultMessages) == 0 {
+	if useNativeMultiResult && nativeReadOnlyResultsMissingTabularPayload(allReadOnly, results) {
 		logger.Warnf("DBQueryMulti 原生多结果集返回空结果，将回退逐条执行：%s SQL片段=%q", formatConnSummary(runConfig), sqlSnippet(query))
 		results = nil
 	}
@@ -1225,6 +1226,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		isReadStmt := isReadOnlySQLQuery(runConfig.Type, stmt)
 		tryQueryStmtFirst := shouldTryQueryResultFirst(runConfig.Type, stmt)
 		if isReadStmt || tryQueryStmtFirst {
+			preferPlainReadQuery := isReadStmt && shouldPreferPlainReadQueryResult(runConfig.Type)
 			var (
 				data             []map[string]interface{}
 				columns          []string
@@ -1232,7 +1234,25 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 				statementResults []connection.ResultSetData
 				usedMultiResult  bool
 			)
-			if sessionMultiQueryMessageTarget != nil {
+			runStatementQuery := func() error {
+				if sessionQueryMessageTarget != nil {
+					data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
+				} else if sessionQueryTarget != nil {
+					data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
+				} else if q, ok := dbInst.(db.QueryMessageExecer); ok {
+					data, columns, messages, err = q.QueryContextWithMessages(ctx, stmt)
+				} else if q, ok := dbInst.(interface {
+					QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
+				}); ok {
+					data, columns, err = q.QueryContext(ctx, stmt)
+				} else {
+					data, columns, err = dbInst.Query(stmt)
+				}
+				return err
+			}
+			if preferPlainReadQuery {
+				err = runStatementQuery()
+			} else if sessionMultiQueryMessageTarget != nil {
 				statementResults, messages, err = sessionMultiQueryMessageTarget.QueryMultiContextWithMessages(ctx, stmt)
 				usedMultiResult = true
 			} else if sessionMultiQueryTarget != nil {
@@ -1247,18 +1267,17 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 			} else if q, ok := dbInst.(db.MultiResultQuerier); ok {
 				statementResults, err = q.QueryMulti(stmt)
 				usedMultiResult = true
-			} else if sessionQueryMessageTarget != nil {
-				data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
-			} else if sessionQueryTarget != nil {
-				data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
-			} else if q, ok := dbInst.(db.QueryMessageExecer); ok {
-				data, columns, messages, err = q.QueryContextWithMessages(ctx, stmt)
-			} else if q, ok := dbInst.(interface {
-				QueryContext(context.Context, string) ([]map[string]interface{}, []string, error)
-			}); ok {
-				data, columns, err = q.QueryContext(ctx, stmt)
 			} else {
-				data, columns, err = dbInst.Query(stmt)
+				err = runStatementQuery()
+			}
+			if err == nil && usedMultiResult && nativeReadOnlyResultsMissingTabularPayload(isReadStmt, statementResults) {
+				logger.Warnf("DBQueryMulti 逐条多结果集返回空结果，将回退普通查询（第 %d/%d 条）：%s SQL片段=%q", idx+1, len(statements), formatConnSummary(runConfig), sqlSnippet(stmt))
+				usedMultiResult = false
+				statementResults = nil
+				data = nil
+				columns = nil
+				messages = nil
+				err = runStatementQuery()
 			}
 			if err == nil {
 				if usedMultiResult {
@@ -1362,9 +1381,24 @@ func normalizeNativeResultStatementIndexes(dbType string, statements []string, r
 	}
 }
 
+func nativeReadOnlyResultsMissingTabularPayload(allReadOnly bool, results []connection.ResultSetData) bool {
+	if !allReadOnly || results == nil {
+		return false
+	}
+	if len(results) == 0 {
+		return true
+	}
+	for _, result := range results {
+		if len(result.Columns) > 0 || len(result.Rows) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func shouldUseNativeMultiResultBatch(dbType string, statements []string, allReadOnly bool) bool {
 	if allReadOnly {
-		return true
+		return !shouldPreferPlainReadQueryResult(dbType)
 	}
 	if !strings.EqualFold(strings.TrimSpace(dbType), "sqlserver") {
 		return false
@@ -1380,6 +1414,15 @@ func shouldUseNativeMultiResultBatch(dbType string, statements []string, allRead
 		return false
 	}
 	return true
+}
+
+func shouldPreferPlainReadQueryResult(dbType string) bool {
+	switch resolveDDLDBType(connection.ConnectionConfig{Type: dbType}) {
+	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
+		return true
+	default:
+		return false
+	}
 }
 
 func shouldTryQueryResultFirst(dbType string, query string) bool {
@@ -1660,6 +1703,27 @@ func (a *App) DBGetTables(config connection.ConnectionConfig, dbName string) con
 	return connection.QueryResult{Success: true, Data: resData}
 }
 
+func (a *App) DBGetViews(config connection.ConnectionConfig, dbName string) connection.QueryResult {
+	runConfig := normalizeRunConfig(config, dbName)
+	if strings.EqualFold(strings.TrimSpace(runConfig.Type), "redis") {
+		return connection.QueryResult{Success: true, Data: []map[string]string{}}
+	}
+
+	dbInst, err := a.getDatabase(runConfig)
+	if err != nil {
+		logger.Error(err, "DBGetViews 获取连接失败：%s", formatConnSummary(runConfig))
+		return connection.QueryResult{Success: false, Message: err.Error()}
+	}
+
+	views := mapValuesSorted(listViewNameLookup(dbInst, runConfig, dbName))
+	resData := make([]map[string]string, 0, len(views))
+	for _, name := range views {
+		resData = append(resData, map[string]string{"View": name})
+	}
+
+	return connection.QueryResult{Success: true, Data: resData}
+}
+
 func (a *App) DBShowCreateTable(config connection.ConnectionConfig, dbName string, tableName string) connection.QueryResult {
 	dbType := resolveDDLDBType(config)
 	runConfig := buildRunConfigForDDL(config, dbType, dbName)
@@ -1733,7 +1797,12 @@ func resolveCreateStatementWithFallbackWithText(dbInst db.Database, config conne
 		return "", colErr
 	}
 
-	fallbackDDL, buildErr := buildFallbackCreateStatementWithText(dbType, ddlSchemaName, ddlTableName, columns, text)
+	var indexes []connection.IndexDefinition
+	if indexRows, idxErr := dbInst.GetIndexes(metadataSchemaName, metadataTableName); idxErr == nil {
+		indexes = indexRows
+	}
+
+	fallbackDDL, buildErr := buildFallbackCreateStatementWithText(dbType, ddlSchemaName, ddlTableName, columns, indexes, text)
 	if buildErr != nil {
 		if sourceErr != nil {
 			return "", sourceErr
@@ -1838,10 +1907,10 @@ func hasCreateTableOrViewHead(sqlText string) bool {
 }
 
 func buildFallbackCreateStatement(dbType string, schemaName string, tableName string, columns []connection.ColumnDefinition) (string, error) {
-	return buildFallbackCreateStatementWithText(dbType, schemaName, tableName, columns, defaultDBBackendText)
+	return buildFallbackCreateStatementWithText(dbType, schemaName, tableName, columns, nil, defaultDBBackendText)
 }
 
-func buildFallbackCreateStatementWithText(dbType string, schemaName string, tableName string, columns []connection.ColumnDefinition, text func(string, map[string]any) string) (string, error) {
+func buildFallbackCreateStatementWithText(dbType string, schemaName string, tableName string, columns []connection.ColumnDefinition, indexes []connection.IndexDefinition, text func(string, map[string]any) string) (string, error) {
 	if text == nil {
 		text = defaultDBBackendText
 	}
@@ -1899,6 +1968,7 @@ func buildFallbackCreateStatementWithText(dbType string, schemaName string, tabl
 	if len(primaryKeys) > 0 {
 		columnLines = append(columnLines, "  PRIMARY KEY ("+strings.Join(primaryKeys, ", ")+")")
 	}
+	indexStatements := buildFallbackIndexStatements(dbType, qualifiedTable, primaryKeys, indexes)
 
 	ddl := strings.Builder{}
 	ddl.WriteString("CREATE TABLE ")
@@ -1906,11 +1976,117 @@ func buildFallbackCreateStatementWithText(dbType string, schemaName string, tabl
 	ddl.WriteString(" (\n")
 	ddl.WriteString(strings.Join(columnLines, ",\n"))
 	ddl.WriteString("\n);")
+	if len(indexStatements) > 0 {
+		ddl.WriteString("\n")
+		ddl.WriteString(strings.Join(indexStatements, "\n"))
+	}
 	if len(columnCommentLines) > 0 {
 		ddl.WriteString("\n")
 		ddl.WriteString(strings.Join(columnCommentLines, "\n"))
 	}
 	return ddl.String(), nil
+}
+
+type fallbackIndexGroup struct {
+	Name    string
+	Unique  bool
+	Columns []string
+}
+
+func buildFallbackIndexStatements(dbType string, qualifiedTable string, primaryKeys []string, indexes []connection.IndexDefinition) []string {
+	grouped := groupFallbackIndexDefinitions(indexes)
+	if len(grouped) == 0 {
+		return nil
+	}
+
+	statements := make([]string, 0, len(grouped))
+	for _, idx := range grouped {
+		if strings.TrimSpace(idx.Name) == "" || len(idx.Columns) == 0 {
+			continue
+		}
+		if sameFallbackColumnNameList(idx.Columns, primaryKeys) {
+			continue
+		}
+
+		quotedColumns := make([]string, 0, len(idx.Columns))
+		for _, columnName := range idx.Columns {
+			columnName = strings.TrimSpace(columnName)
+			if columnName == "" {
+				continue
+			}
+			quotedColumns = append(quotedColumns, quoteIdentByType(dbType, columnName))
+		}
+		if len(quotedColumns) == 0 {
+			continue
+		}
+
+		prefix := "CREATE INDEX"
+		if idx.Unique {
+			prefix = "CREATE UNIQUE INDEX"
+		}
+		statements = append(statements, fmt.Sprintf(
+			"%s %s ON %s (%s);",
+			prefix,
+			quoteIdentByType(dbType, idx.Name),
+			qualifiedTable,
+			strings.Join(quotedColumns, ", "),
+		))
+	}
+
+	return statements
+}
+
+func groupFallbackIndexDefinitions(indexes []connection.IndexDefinition) []fallbackIndexGroup {
+	if len(indexes) == 0 {
+		return nil
+	}
+
+	groupMap := make(map[string][]connection.IndexDefinition)
+	order := make([]string, 0)
+	for _, idx := range indexes {
+		name := strings.TrimSpace(idx.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := groupMap[name]; !ok {
+			order = append(order, name)
+		}
+		groupMap[name] = append(groupMap[name], idx)
+	}
+
+	grouped := make([]fallbackIndexGroup, 0, len(order))
+	for _, name := range order {
+		rows := groupMap[name]
+		sort.SliceStable(rows, func(i, j int) bool {
+			return rows[i].SeqInIndex < rows[j].SeqInIndex
+		})
+
+		group := fallbackIndexGroup{Name: name, Unique: true}
+		for _, row := range rows {
+			if row.NonUnique != 0 {
+				group.Unique = false
+			}
+			columnName := strings.TrimSpace(row.ColumnName)
+			if columnName != "" {
+				group.Columns = append(group.Columns, columnName)
+			}
+		}
+		grouped = append(grouped, group)
+	}
+
+	return grouped
+}
+
+func sameFallbackColumnNameList(a []string, b []string) bool {
+	if len(a) == 0 || len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !strings.EqualFold(strings.TrimSpace(a[i]), strings.TrimSpace(b[i])) {
+			return false
+		}
+	}
+	return true
 }
 
 func buildFallbackColumnCommentStatement(dbType string, schemaName string, tableName string, qualifiedTable string, columnName string, comment string) string {

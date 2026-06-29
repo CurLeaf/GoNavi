@@ -804,6 +804,12 @@ describe('Sidebar locate toolbar', () => {
     expect(markup).toContain('data-sidebar-create-group-action="true"');
     expect(markup).toContain('data-sidebar-batch-table-action="true"');
     expect(markup).toContain('data-sidebar-batch-database-action="true"');
+    expect(source).toContain('openBatchTableExport: () => openBatchOperationModal(),');
+    expect(source).toContain('openBatchDatabaseExport: () => openBatchDatabaseModal(),');
+    expect(source).toContain('onClick={() => openBatchOperationModal()}');
+    expect(source).toContain('onClick={() => openBatchDatabaseModal()}');
+    expect(source).not.toContain('openBatchTableExport: () => openBatchTableExportWorkbench()');
+    expect(source).not.toContain('openBatchDatabaseExport: () => openBatchDatabaseExportWorkbench()');
     expect(markup).toContain('data-sidebar-open-external-sql-file-action="true"');
     expect(markup).toContain('data-sidebar-locate-current-tab-action="true"');
     expect(markup).toContain('data-gonavi-new-query-action="true"');
@@ -1163,6 +1169,10 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*height: 12px !important;[^}]*bottom: calc\(\(var\(--gn-v2-tree-horizontal-scroll-reserve\) - 12px\) \/ 2\) !important;/s);
     expect(css).not.toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \{[^}]*bottom: calc\(\(var\(--gn-v2-tree-horizontal-scroll-reserve\) - 12px\) \* -1\) !important;/s);
     expect(css).not.toContain('.gn-v2-tree-horizontal-scroll-spacer');
+    const horizontalScrollbarCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-list-scrollbar-horizontal');
+    expect(horizontalScrollbarCss).toContain('border-radius: 999px !important;');
+    expect(horizontalScrollbarCss).toContain('background: color-mix(in srgb, var(--gn-bg-panel-2) 88%, var(--gn-bg-panel) 12%) !important;');
+    expect(horizontalScrollbarCss).toContain('box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gn-br-2) 40%, transparent) !important;');
     expect(css).toMatch(/\.gn-v2-explorer-tree-shell \.ant-tree-list-scrollbar-horizontal \.ant-tree-list-scrollbar-thumb \{[^}]*height: 8px !important;/s);
     const treeContentWrapperCss = readCssRuleBlock(css, 'body[data-ui-version="v2"] .gn-v2-explorer-tree-shell .ant-tree-node-content-wrapper');
     expect(treeContentWrapperCss).toContain('min-width: 100%;');

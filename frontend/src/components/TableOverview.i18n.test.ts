@@ -37,6 +37,10 @@ const normalizedVisibleTableSectionsSource = visibleTableSectionsSource.replace(
 
 const renderOverviewSectionTitleSource = source.slice(
   source.indexOf('const renderOverviewSectionTitle = (section: OverviewTableSection) => {'),
+  source.indexOf('const renderTableOverviewMetaBadges = useCallback((table: TableStatRow, compact = false) => {'),
+);
+const metaBadgesSource = source.slice(
+  source.indexOf('const renderTableOverviewMetaBadges = useCallback((table: TableStatRow, compact = false) => {'),
   source.indexOf('const renderCardTableContent = (table: TableStatRow) => ('),
 );
 const normalizedRenderOverviewSectionTitleSource = renderOverviewSectionTitleSource.replace(/\s+/g, ' ').trim();
@@ -59,6 +63,8 @@ const aiPromptSource = source.slice(
 );
 
 const requiredTableOperationKeys = [
+  'table_overview.metric.created_at',
+  'table_overview.metric.updated_at',
   'table_overview.tab.design_table_title',
   'table_overview.tab.table_structure_title',
   'table_overview.message.load_tables_failed',
@@ -121,18 +127,26 @@ describe('TableOverview i18n', () => {
     expect(cardSource).not.toContain('title="行数"');
     expect(cardSource).not.toContain('title="数据大小"');
     expect(cardSource).not.toContain('title="引擎"');
+    expect(cardSource).not.toContain('最近修改');
+    expect(cardSource).not.toContain('创建时间');
     expect(cardSource).toContain("title={t('table_overview.sort.rows')}");
     expect(cardSource).toContain("title={t('table_overview.metric.data_size')}");
     expect(cardSource).toContain("title={t('table_overview.metric.engine')}");
+    expect(cardSource).toContain('{renderTableOverviewMetaBadges(table)}');
+    expect(metaBadgesSource).toContain("t('table_overview.metric.updated_at')");
+    expect(metaBadgesSource).toContain("t('table_overview.metric.created_at')");
 
     expect(listSource).not.toContain('`${table.engine} 表`');
     expect(listSource).not.toContain("'双击打开数据，右键查看更多操作'");
+    expect(listSource).not.toContain('最近修改');
+    expect(listSource).not.toContain('创建时间');
     expect(listSource).not.toContain("<div style={{ color: textMuted }}>行数</div>");
     expect(listSource).not.toContain("<div style={{ color: textMuted }}>数据大小</div>");
     expect(listSource).not.toContain("<div style={{ color: textMuted }}>索引大小</div>");
     expect(listSource).not.toContain("<div style={{ color: textMuted }}>相对大小</div>");
     expect(listSource).toContain("t('table_overview.row.engine_table', { engine: table.engine })");
     expect(listSource).toContain("t('table_overview.row.open_hint')");
+    expect(listSource).toContain('{renderTableOverviewMetaBadges(table, true)}');
     expect(listSource).toContain("t('table_overview.sort.rows')");
     expect(listSource).toContain("t('table_overview.metric.data_size')");
     expect(listSource).toContain("t('table_overview.metric.index_size')");
@@ -239,7 +253,6 @@ describe('TableOverview i18n', () => {
       "t('table_overview.message.rename_table_failed'",
       "t('table_overview.menu.copy_table_name')",
       "t('table_overview.menu.table_structure')",
-      "t('table_overview.menu.export_xlsx')",
     ].forEach(text => {
       expect(tableOperationSource).toContain(text);
     });

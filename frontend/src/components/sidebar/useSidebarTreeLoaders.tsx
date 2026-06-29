@@ -487,14 +487,25 @@ export const useSidebarTreeLoaders = ({
                     : { success: false, data: [] as any[] };
                 const tableRowCountMap = new Map<string, number>();
                 const tableCommentMap = new Map<string, string>();
-                const putTableComment = (rawTableName: string, rawComment: string) => {
+                const tableSchemaMap = new Map<string, string>();
+                const buildTableMetadataKeys = (rawTableName: string, rawSchemaName = ''): string[] => {
                     const tableName = String(rawTableName || '').trim();
-                    const comment = String(rawComment || '').trim();
-                    if (!tableName || !comment) return;
-                    const keys = new Set<string>([tableName.toLowerCase()]);
+                    if (!tableName) return [];
                     const parsed = splitQualifiedName(tableName);
-                    if (parsed.objectName) keys.add(parsed.objectName.toLowerCase());
-                    keys.forEach((metadataKey) => tableCommentMap.set(metadataKey, comment));
+                    const schemaName = String(rawSchemaName || parsed.schemaName || '').trim();
+                    const objectName = String(parsed.objectName || tableName).trim();
+                    const keys = new Set<string>([tableName.toLowerCase()]);
+                    if (objectName) keys.add(objectName.toLowerCase());
+                    const qualifiedName = buildQualifiedName(schemaName, objectName || tableName);
+                    if (qualifiedName) keys.add(qualifiedName.toLowerCase());
+                    return Array.from(keys);
+                };
+                const putTableComment = (rawTableName: string, rawComment: string, rawSchemaName = '') => {
+                    const comment = String(rawComment || '').trim();
+                    if (!comment) return;
+                    buildTableMetadataKeys(rawTableName, rawSchemaName).forEach((metadataKey) => {
+                        tableCommentMap.set(metadataKey, comment);
+                    });
                 };
                 if (tableStatsResult?.success && Array.isArray(tableStatsResult.data)) {
                     tableStatsResult.data.forEach((row: Record<string, any>) => {
@@ -504,6 +515,12 @@ export const useSidebarTreeLoaders = ({
                             || ''
                         ).trim();
                         if (!rawTableName) return;
+                        const rawSchemaName = getCaseInsensitiveValue(row, ['schema_name', 'SCHEMA_NAME', 'owner', 'OWNER']);
+                        buildTableMetadataKeys(rawTableName, rawSchemaName).forEach((metadataKey) => {
+                            if (rawSchemaName) {
+                                tableSchemaMap.set(metadataKey, rawSchemaName);
+                            }
+                        });
                         putTableComment(rawTableName, getCaseInsensitiveValue(row, [
                             'table_comment',
                             'TABLE_COMMENT',
@@ -512,15 +529,22 @@ export const useSidebarTreeLoaders = ({
                             'comments',
                             'COMMENTS',
                             'MS_Description',
-                        ]));
+                        ]), rawSchemaName);
                         const rowCount = parseMetadataRowCount(row);
                         if (rowCount === undefined) return;
-                        tableRowCountMap.set(rawTableName.toLowerCase(), rowCount);
+                        buildTableMetadataKeys(rawTableName, rawSchemaName).forEach((metadataKey) => {
+                            tableRowCountMap.set(metadataKey, rowCount);
+                        });
                     });
                 }
 	            const tableEntries = tableRows.map((row: any) => {
 	                const tableName = Object.values(row)[0] as string;
 	                const parsed = splitQualifiedName(tableName);
+                    const metadataKeys = buildTableMetadataKeys(tableName);
+                    const rowSchemaName = getCaseInsensitiveValue(row, ['schema_name', 'SCHEMA_NAME', 'owner', 'OWNER']);
+                    const mappedSchemaName = rowSchemaName
+                        || metadataKeys.map((metadataKey) => tableSchemaMap.get(metadataKey)).find((value): value is string => !!value)
+                        || parsed.schemaName;
                     const rowComment = getCaseInsensitiveValue(row, [
                         'table_comment',
                         'TABLE_COMMENT',
@@ -531,12 +555,15 @@ export const useSidebarTreeLoaders = ({
                     ]);
 	                return {
 	                    tableName,
-	                    schemaName: parsed.schemaName,
+	                    schemaName: mappedSchemaName,
 	                    displayName: getSidebarTableDisplayName(conn, tableName),
-                        rowCount: tableRowCountMap.get(String(tableName || '').trim().toLowerCase()),
+                        rowCount: metadataKeys
+                            .map((metadataKey) => tableRowCountMap.get(metadataKey))
+                            .find((value) => value !== undefined),
                         tableComment: rowComment
-                            || tableCommentMap.get(String(tableName || '').trim().toLowerCase())
-                            || tableCommentMap.get(String(parsed.objectName || '').trim().toLowerCase())
+                            || metadataKeys
+                                .map((metadataKey) => tableCommentMap.get(metadataKey))
+                                .find((value) => !!value)
                             || '',
 	                };
 	            });
@@ -559,6 +586,18 @@ export const useSidebarTreeLoaders = ({
             const packageRows: any[] = Array.isArray(packagesResult.packages) ? packagesResult.packages : [];
             const eventRows: any[] = Array.isArray(eventsResult.events) ? eventsResult.events : [];
             const schemaRows: string[] = Array.isArray(schemasResult.schemas) ? schemasResult.schemas : [];
+            const normalizedSchemaRows = schemaRows
+                .map((schemaName) => String(schemaName || '').trim())
+                .filter((schemaName) => schemaName !== '');
+            const normalizedTableEntries = tableEntries.map((entry) => {
+                if (entry.schemaName || normalizedSchemaRows.length !== 1) {
+                    return entry;
+                }
+                return {
+                    ...entry,
+                    schemaName: normalizedSchemaRows[0],
+                };
+            });
 
             const viewEntries = viewRows.map((entry: SidebarViewMetadataEntry) => {
                 const parsed = splitQualifiedName(entry.viewName);
@@ -666,7 +705,7 @@ export const useSidebarTreeLoaders = ({
 	            const sortPreferenceKey = `${conn.id}-${conn.dbName}`;
 	            const sortBy = currentTableSortPreference[sortPreferenceKey] || 'name';
 
-	            const sortedTableEntries = sortSidebarTableEntries(tableEntries, {
+	            const sortedTableEntries = sortSidebarTableEntries(normalizedTableEntries, {
 	                connectionId: conn.id,
 	                dbName: conn.dbName,
 	                sortBy,

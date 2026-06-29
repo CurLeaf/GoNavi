@@ -35,6 +35,12 @@ describe('QueryEditor i18n source guards', () => {
     expect(queryEditorSource).not.toContain('翻页未返回结果集');
   });
 
+  it('routes editor search through a localized Monaco action', () => {
+    expect(queryEditorSource).toContain('query_editor.action.find_in_editor');
+    expect(queryEditorSource).toContain('gonavi:find-active-query');
+    expect(queryEditorSource).toContain("editor.getAction?.('actions.find')");
+  });
+
   it('uses a localized wrapper for save query failures', () => {
     expect(queryEditorSource).toContain('query_editor.message.save_query_failed');
     expect(queryEditorSource).not.toContain('保存查询失败: ');

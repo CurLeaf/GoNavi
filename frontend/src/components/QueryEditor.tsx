@@ -47,7 +47,12 @@ import {
     ORACLE_ROWID_LOCATOR_COLUMN,
     type EditRowLocator,
 } from '../utils/rowLocator';
-import { getQueryTabDraft, hasQueryTabDraft, setQueryTabDraft, setSQLFileTabDraft } from '../utils/sqlFileTabDrafts';
+import {
+    clearQueryTabDraft,
+    getQueryTabDraft,
+    hasQueryTabDraft,
+    persistQueryTabDraftSnapshot,
+} from '../utils/sqlFileTabDrafts';
 import { buildEditableTriggerSql } from '../utils/triggerEditSql';
 import {
     getColumnDefinitionComment,
@@ -726,6 +731,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const runQueryActionRef = useRef<any>(null);
   const selectCurrentStatementActionRef = useRef<any>(null);
   const saveQueryActionRef = useRef<any>(null);
+  const findInEditorActionRef = useRef<any>(null);
   const formatSqlActionRef = useRef<any>(null);
   const aiContextMenuActionDisposablesRef = useRef<any[]>([]);
   const toggleQueryResultsPanelActionRef = useRef<any>(null);
@@ -778,6 +784,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const savedQueries = useStore(state => state.savedQueries);
   const currentConnectionIdRef = useRef(currentConnectionId);
   const currentDbRef = useRef(currentDb);
+  const draftSnapshotTab = useMemo(() => ({
+      id: tab.id,
+      title: tab.title,
+      connectionId: tab.connectionId,
+      dbName: tab.dbName,
+      filePath: tab.filePath,
+      savedQueryId: tab.savedQueryId,
+      readOnly: tab.readOnly,
+  }), [tab.connectionId, tab.dbName, tab.filePath, tab.id, tab.readOnly, tab.savedQueryId, tab.title]);
   const connectionsRef = useRef(connections);
   const columnsCacheRef = useRef<Record<string, ColumnDefinition[]>>({});
   const saveQuery = useStore(state => state.saveQuery);
@@ -866,6 +881,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       () => resolveShortcutBinding(shortcutOptions, 'toggleQueryResultsPanel', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
   );
+  const findInEditorShortcutCombo = useMemo(
+      () => activeShortcutPlatform === 'mac' ? 'Meta+F' : 'Ctrl+F',
+      [activeShortcutPlatform],
+  );
   const primaryShortcutModifierLabel = useMemo(
       () => getShortcutPrimaryModifierDisplayLabel(activeShortcutPlatform),
       [activeShortcutPlatform],
@@ -884,6 +903,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           return nextVisible;
       });
   }, [tab.id, updateQueryTabDraft]);
+  const handleOpenEditorFind = useCallback(() => {
+      const editor = editorRef.current;
+      if (!editor) {
+          return;
+      }
+
+      editor.focus?.();
+      try {
+          const findAction = editor.getAction?.('actions.find');
+          if (findAction?.run) {
+              void findAction.run();
+              return;
+          }
+      } catch {
+          // Fall back to Monaco's built-in command id if the action lookup fails.
+      }
+
+      editor.trigger?.('keyboard', 'actions.find', null);
+  }, []);
   const handleShowSqlExecutionLog = useCallback((mode: 'open' | 'toggle' = 'toggle') => {
       if (!isActive) {
           return;
@@ -948,12 +986,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const syncQueryDraft = useCallback((nextQuery: string) => {
       const next = String(nextQuery ?? '');
       lastLocalQueryRef.current = next;
-      if (isExternalSQLFileTab) {
-          setSQLFileTabDraft(tab.id, next);
-          return;
-      }
-      setQueryTabDraft(tab.id, next);
-  }, [isExternalSQLFileTab, tab.id]);
+      persistQueryTabDraftSnapshot(draftSnapshotTab, next, {
+          connectionId: currentConnectionIdRef.current,
+          dbName: currentDbRef.current,
+      });
+  }, [draftSnapshotTab]);
 
   const applyQueryState = useCallback((nextQuery: string) => {
       const next = String(nextQuery ?? '');
@@ -964,8 +1001,11 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [isExternalSQLFileTab, syncQueryDraft]);
 
   useEffect(() => {
-      setQueryTabDraft(tab.id, query);
-  }, [query, tab.id]);
+      persistQueryTabDraftSnapshot(draftSnapshotTab, query, {
+          connectionId: currentConnectionIdRef.current || currentConnectionId,
+          dbName: currentDbRef.current || currentDb,
+      });
+  }, [currentConnectionId, currentDb, draftSnapshotTab, query]);
 
   useEffect(() => {
       currentConnectionIdRef.current = currentConnectionId;
@@ -1017,13 +1057,25 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       });
   }, [currentConnectionId, currentDb, isExternalSQLFileTab, tab.id, updateQueryTabDraft]);
 
+  const getCurrentQuery = useCallback(() => {
+      const val = editorRef.current?.getValue?.();
+      if (typeof val === 'string') return val;
+      return query || '';
+  }, [query]);
+
   useEffect(() => {
       if (!isExternalSQLFileTab) return;
-      setSQLFileTabDraft(tab.id, getCurrentQuery());
+      persistQueryTabDraftSnapshot(draftSnapshotTab, getCurrentQuery(), {
+          connectionId: currentConnectionIdRef.current,
+          dbName: currentDbRef.current,
+      });
       return () => {
-          setSQLFileTabDraft(tab.id, getCurrentQuery());
+          persistQueryTabDraftSnapshot(draftSnapshotTab, getCurrentQuery(), {
+              connectionId: currentConnectionIdRef.current,
+              dbName: currentDbRef.current,
+          });
       };
-  }, [isExternalSQLFileTab, tab.id]);
+  }, [draftSnapshotTab, getCurrentQuery, isExternalSQLFileTab]);
 
   // 当此 Tab 成为活跃 Tab 时，将本实例的状态同步到模块级共享变量
   // 确保 completion provider 始终使用当前活跃 Tab 的上下文
@@ -1197,12 +1249,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   useEffect(() => {
       refreshObjectDecorations(QUERY_EDITOR_LIVE_DECORATION_MAX_TEXT_LENGTH);
   }, [currentDb, refreshObjectDecorations]);
-
-  const getCurrentQuery = () => {
-      const val = editorRef.current?.getValue?.();
-      if (typeof val === 'string') return val;
-      return query || '';
-  };
 
   const insertTextIntoEditorAtPosition = useCallback((text: string, position?: { lineNumber: number; column: number } | null) => {
       const editor = editorRef.current;
@@ -2708,6 +2754,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   },
               });
           }
+      }
+
+      const findInEditorKeyBinding = comboToMonacoKeyBinding(
+          findInEditorShortcutCombo, monaco.KeyMod, monaco.KeyCode
+      );
+      if (findInEditorKeyBinding) {
+          findInEditorActionRef.current = editor.addAction({
+              id: 'gonavi.findInEditor',
+              label: buildQueryEditorMonacoActionLabel('query_editor.action.find_in_editor'),
+              keybindings: [findInEditorKeyBinding.keyMod | findInEditorKeyBinding.keyCode],
+              run: () => {
+                  window.dispatchEvent(new CustomEvent('gonavi:find-active-query'));
+              },
+          });
       }
 
       const formatBinding = formatSqlShortcutBinding;
@@ -4341,11 +4401,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 updateResultPanelVisibility(true);
             }
             const shouldReplaceAllResults = didExecuteWholeEditor;
-            setResultSets(prev => {
-                const merged = mergeResultSets(prev, nextResultSets, shouldReplaceAllResults);
-                setActiveResultKey(resolveActiveResultKeyAfterMerge(merged, nextResultSets));
-                return merged;
-            });
+            const mergedResultSets = mergeResultSets(resultSets, nextResultSets, shouldReplaceAllResults);
+            setResultSets(mergedResultSets);
+            setActiveResultKey(resolveActiveResultKeyAfterMerge(mergedResultSets, nextResultSets));
             if (didExecuteAppendedSql || didExecuteWholeEditor) {
                 lastExecutedEditorQueryRef.current = currentQuery;
             }
@@ -4715,11 +4773,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                 updateResultPanelVisibility(true);
             }
             const shouldReplaceAllResults = didExecuteWholeEditor;
-            setResultSets(prev => {
-                const merged = mergeResultSets(prev, nextResultSets, shouldReplaceAllResults);
-                setActiveResultKey(resolveActiveResultKeyAfterMerge(merged, nextResultSets));
-                return merged;
-            });
+            const mergedResultSets = mergeResultSets(resultSets, nextResultSets, shouldReplaceAllResults);
+            setResultSets(mergedResultSets);
+            setActiveResultKey(resolveActiveResultKeyAfterMerge(mergedResultSets, nextResultSets));
             if (didExecuteAppendedSql || didExecuteWholeEditor) {
                 lastExecutedEditorQueryRef.current = currentQuery;
             }
@@ -4981,6 +5037,40 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [languagePreference, saveQueryShortcutBinding]);
 
   useEffect(() => {
+      if (findInEditorActionRef.current) {
+          findInEditorActionRef.current.dispose();
+          findInEditorActionRef.current = null;
+      }
+
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      const keyBinding = comboToMonacoKeyBinding(
+          findInEditorShortcutCombo,
+          monaco.KeyMod,
+          monaco.KeyCode,
+      );
+      if (keyBinding) {
+          findInEditorActionRef.current = editor.addAction({
+              id: 'gonavi.findInEditor',
+              label: buildQueryEditorMonacoActionLabel('query_editor.action.find_in_editor'),
+              keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+              run: () => {
+                  window.dispatchEvent(new CustomEvent('gonavi:find-active-query'));
+              },
+          });
+      }
+
+      return () => {
+          if (findInEditorActionRef.current) {
+              findInEditorActionRef.current.dispose();
+              findInEditorActionRef.current = null;
+          }
+      };
+  }, [findInEditorShortcutCombo, languagePreference]);
+
+  useEffect(() => {
       if (formatSqlActionRef.current) {
           formatSqlActionRef.current.dispose();
           formatSqlActionRef.current = null;
@@ -5076,6 +5166,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           window.removeEventListener('gonavi:run-active-query', handleRunActiveQuery as EventListener);
       };
   }, [isActive, handleRun, handleRunSelectedShortcut]);
+
+  useEffect(() => {
+      const handleFindActiveQuery = () => {
+          if (!isActive) {
+              return;
+          }
+          handleOpenEditorFind();
+      };
+
+      window.addEventListener('gonavi:find-active-query', handleFindActiveQuery as EventListener);
+      return () => {
+          window.removeEventListener('gonavi:find-active-query', handleFindActiveQuery as EventListener);
+      };
+  }, [handleOpenEditorFind, isActive]);
 
   // 监听由 TabManager 分发的专用注入事件
   useEffect(() => {
@@ -5191,6 +5295,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           dbName: currentDb || tab.dbName || '',
           savedQueryId: persisted.id,
       });
+      clearQueryTabDraft(tab.id);
       return persisted;
   };
 
@@ -5220,7 +5325,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   filePath,
                   savedQueryId: undefined,
               });
-              setSQLFileTabDraft(tab.id, sql);
+              clearQueryTabDraft(tab.id);
               message.success(translate('query_editor.message.sql_file_saved'));
           } catch (error) {
               message.error(translate('query_editor.message.save_sql_file_failed', {
@@ -5319,6 +5424,38 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           onClick: () => openSqlAnalysisWorkbench('slow-query'),
       },
   ];
+
+  useEffect(() => {
+      const handleFindShortcut = (event: KeyboardEvent) => {
+          if (!isActive) {
+              return;
+          }
+          if (!isShortcutMatch(event, findInEditorShortcutCombo)) {
+              return;
+          }
+
+          const editor = editorRef.current;
+          const targetNode = resolveEventTargetNode(event.target);
+          const editorHasFocus = !!editor?.hasTextFocus?.();
+          const inEditorPane = !!(targetNode && editorPaneRef.current?.contains(targetNode));
+          const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
+          if (isEditableElement(event.target) && !inEditorPane) {
+              return;
+          }
+          if (!editorHasFocus && !inEditorPane && !inQueryEditor && !isDocumentLevelShortcutTarget(targetNode)) {
+              return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          handleOpenEditorFind();
+      };
+
+      window.addEventListener('keydown', handleFindShortcut, true);
+      return () => {
+          window.removeEventListener('keydown', handleFindShortcut, true);
+      };
+  }, [findInEditorShortcutCombo, handleOpenEditorFind, isActive]);
 
   useEffect(() => {
       const binding = saveQueryShortcutBinding;
@@ -5586,6 +5723,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
         onRun={handleRun}
         onCancel={handleCancel}
         onQuickSave={handleQuickSave}
+        onFindInEditor={handleOpenEditorFind}
         onFormat={handleFormat}
         onToggleResultPanelVisibility={toggleResultPanelVisibility}
         onAIAction={handleAIAction}

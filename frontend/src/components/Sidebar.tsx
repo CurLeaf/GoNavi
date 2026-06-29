@@ -773,12 +773,14 @@ const Sidebar: React.FC<{
       handleDatabaseChange,
       handleBatchExport,
       handleBatchClear,
+      handleBatchDeleteTables,
       handleCheckAll,
       handleInvertSelection,
       openBatchDatabaseModal,
       openBatchDatabaseExportWorkbench,
       handleDbConnectionChange,
       handleBatchDbExport,
+      handleBatchDbDelete,
       handleCheckAllDb,
       handleInvertSelectionDb,
   } = useSidebarBatchExport({
@@ -2618,8 +2620,8 @@ const Sidebar: React.FC<{
     },
     handlers: {
       openCreateTagModal: () => { setRenameViewTarget(null); createTagForm.resetFields(); setIsCreateTagModalOpen(true); },
-      openBatchTableExport: () => openBatchTableExportWorkbench(),
-      openBatchDatabaseExport: () => openBatchDatabaseExportWorkbench(),
+      openBatchTableExport: () => openBatchOperationModal(),
+      openBatchDatabaseExport: () => openBatchDatabaseModal(),
       openExternalSqlFile: handleOpenSQLFileFromToolbar,
       locateActiveTab: handleLocateActiveTabInSidebar,
       toggleAI: onToggleAI ?? (() => {}),
@@ -2857,7 +2859,7 @@ const Sidebar: React.FC<{
                         icon={<TableOutlined />}
                         aria-label={t('sidebar.action.batch_tables')}
                         data-sidebar-batch-table-action="true"
-                        onClick={() => openBatchTableExportWorkbench()}
+                        onClick={() => openBatchOperationModal()}
                         style={{ color: legacyToolbarButtonColor }}
                     />
                 </Tooltip>
@@ -2870,7 +2872,7 @@ const Sidebar: React.FC<{
                         icon={<DatabaseOutlined />}
                         aria-label={t('sidebar.action.batch_databases')}
                         data-sidebar-batch-database-action="true"
-                        onClick={() => openBatchDatabaseExportWorkbench()}
+                        onClick={() => openBatchDatabaseModal()}
                         style={{ color: legacyToolbarButtonColor }}
                     />
                 </Tooltip>
@@ -3097,6 +3099,7 @@ const Sidebar: React.FC<{
             handleConnectionChange={handleConnectionChange}
             handleDatabaseChange={handleDatabaseChange}
             handleBatchClear={handleBatchClear}
+            handleBatchDeleteTables={handleBatchDeleteTables}
             handleBatchExport={handleBatchExport}
             handleCheckAll={handleCheckAll}
             handleInvertSelection={handleInvertSelection}
@@ -3108,6 +3111,7 @@ const Sidebar: React.FC<{
             setCheckedDbKeys={setCheckedDbKeys}
             handleDbConnectionChange={handleDbConnectionChange}
             handleBatchDbExport={handleBatchDbExport}
+            handleBatchDbDelete={handleBatchDbDelete}
             handleCheckAllDb={handleCheckAllDb}
             handleInvertSelectionDb={handleInvertSelectionDb}
         />

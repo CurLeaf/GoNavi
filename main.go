@@ -61,6 +61,7 @@ func main() {
 			aiService.Shutdown()
 			application.Shutdown()
 		},
+		OnBeforeClose: app.NewBeforeCloseHandler(application),
 		Bind: []interface{}{
 			application,
 			aiService,

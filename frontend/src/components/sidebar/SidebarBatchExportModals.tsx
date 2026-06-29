@@ -13,15 +13,10 @@ import Modal from '../common/ResizableDraggableModal';
 import type { SavedConnection } from '../../types';
 import { t } from '../../i18n';
 import type {
+  BatchObjectItem,
   BatchObjectFilterType,
   BatchSelectionScope,
 } from './useSidebarBatchExport';
-
-type BatchObjectItem = {
-  key: string;
-  dbName?: string;
-  title: React.ReactNode;
-};
 
 type SidebarBatchExportModalsProps = {
   connections: SavedConnection[];
@@ -55,6 +50,7 @@ type SidebarBatchExportModalsProps = {
   handleConnectionChange: (connectionId: string) => void;
   handleDatabaseChange: (databaseName: string) => void;
   handleBatchClear: () => void;
+  handleBatchDeleteTables: () => void;
   handleBatchExport: (mode: 'schema' | 'dataOnly' | 'backup') => void;
   handleCheckAll: (checked: boolean) => void;
   handleInvertSelection: () => void;
@@ -66,6 +62,7 @@ type SidebarBatchExportModalsProps = {
   setCheckedDbKeys: (keys: string[]) => void;
   handleDbConnectionChange: (connectionId: string) => void;
   handleBatchDbExport: (includeData: boolean) => void;
+  handleBatchDbDelete: () => void;
   handleCheckAllDb: (checked: boolean) => void;
   handleInvertSelectionDb: () => void;
 };
@@ -102,6 +99,7 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
   handleConnectionChange,
   handleDatabaseChange,
   handleBatchClear,
+  handleBatchDeleteTables,
   handleBatchExport,
   handleCheckAll,
   handleInvertSelection,
@@ -113,9 +111,13 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
   setCheckedDbKeys,
   handleDbConnectionChange,
   handleBatchDbExport,
+  handleBatchDbDelete,
   handleCheckAllDb,
   handleInvertSelectionDb,
-}) => (
+}) => {
+  const selectedTableCount = batchTables.filter(item => checkedTableKeys.includes(item.key) && item.objectType === 'table').length;
+
+  return (
   <>
     <Modal
       title={tableModalTitle}
@@ -130,6 +132,15 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
             {t('sidebar.action.cancel')}
           </Button>
           <Space size={8} wrap style={{ marginLeft: 'auto' }}>
+            <Button
+              key="delete-tables"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => handleBatchDeleteTables()}
+              disabled={selectedTableCount === 0}
+            >
+              {t('sidebar.action.delete_tables')}
+            </Button>
             <Button
               key="clear"
               danger
@@ -341,6 +352,15 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
           {t('sidebar.action.cancel')}
         </Button>,
         <Button
+          key="delete-databases"
+          danger
+          icon={<DeleteOutlined />}
+          onClick={() => handleBatchDbDelete()}
+          disabled={checkedDbKeys.length === 0}
+        >
+          {t('sidebar.action.delete_database_count', { count: checkedDbKeys.length })}
+        </Button>,
+        <Button
           key="export-schema"
           icon={<ExportOutlined />}
           onClick={() => handleBatchDbExport(false)}
@@ -430,4 +450,5 @@ export const SidebarBatchExportModals: React.FC<SidebarBatchExportModalsProps> =
       )}
     </Modal>
   </>
-);
+  );
+};

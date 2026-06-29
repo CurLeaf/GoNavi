@@ -180,6 +180,8 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                     overflow: 'hidden',
                     minWidth: 0,
                     borderRadius: 6,
+                    border: darkMode ? '1px solid rgba(255,255,255,0.14)' : '1px solid rgba(0,0,0,0.10)',
+                    background: darkMode ? 'rgba(0,0,0,0.18)' : 'rgba(0,0,0,0.018)',
                 }}
             >
                 <textarea
@@ -197,7 +199,7 @@ const QueryEditorResultsPanel: React.FC<QueryEditorResultsPanelProps> = ({
                         minWidth: 0,
                         height: '100%',
                         minHeight: compact ? 72 : 0,
-                        padding: 0,
+                        padding: compact ? '8px 10px' : '10px 12px',
                         margin: 0,
                         border: 'none',
                         resize: 'none',

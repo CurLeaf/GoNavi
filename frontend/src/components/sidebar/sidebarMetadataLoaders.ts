@@ -308,7 +308,7 @@ const buildSidebarTableStatusSQL = (
     case "dm": {
       const owner = escapeSQLLiteral(dbName).toUpperCase();
       return [
-        "SELECT table_name, comments AS table_comment, num_rows AS table_rows",
+        "SELECT owner AS schema_name, table_name, comments AS table_comment, num_rows AS table_rows",
         "FROM all_tab_comments JOIN all_tables USING (table_name, owner)",
         `WHERE owner = '${owner}'`,
         "ORDER BY table_name",

@@ -23,7 +23,26 @@ const isOracleLikeDialect = (dialect: string): boolean => {
 
 const keepsQualifiedTableNameForMetadata = (dialect: string): boolean => {
   const normalized = String(dialect || '').trim().toLowerCase();
-  return normalized === 'duckdb';
+  return normalized === 'duckdb' || isPostgresLikeDialect(normalized);
+};
+
+const isPostgresLikeDialect = (dialect: string): boolean => {
+  const normalized = String(dialect || '').trim().toLowerCase();
+  return normalized === 'postgres'
+    || normalized === 'postgresql'
+    || normalized === 'pg'
+    || normalized === 'kingbase'
+    || normalized === 'kingbase8'
+    || normalized === 'kingbasees'
+    || normalized === 'kingbasev8'
+    || normalized === 'highgo'
+    || normalized === 'vastbase'
+    || normalized === 'opengauss'
+    || normalized === 'open_gauss'
+    || normalized === 'open-gauss'
+    || normalized === 'gaussdb'
+    || normalized === 'gauss_db'
+    || normalized === 'gauss-db';
 };
 
 const isQuotedIdentifier = (part: string): boolean => {
@@ -85,16 +104,21 @@ export const extractQueryResultTableRef = (
     ? defaultOracleSchema || normalizeCurrentDbName(currentDb, dialect)
     : normalizeCurrentDbName(currentDb, dialect);
   const metadataDbName = owner || fallbackSchema;
-  const tableName = isOracleLikeDialect(dialect) && owner
+  const qualifiedTableName = owner ? `${owner}.${metadataTableName}` : metadataTableName;
+  const pgLikeQualifiedMetadata = isPostgresLikeDialect(dialect) && owner;
+  const resolvedMetadataDbName = pgLikeQualifiedMetadata
+    ? normalizeCurrentDbName(currentDb, dialect)
+    : metadataDbName;
+  const tableName = (isOracleLikeDialect(dialect) && owner) || pgLikeQualifiedMetadata
     ? `${owner}.${metadataTableName}`
     : (keepsQualifiedTableNameForMetadata(dialect) && owner ? `${owner}.${metadataTableName}` : metadataTableName);
   const resolvedMetadataTableName = keepsQualifiedTableNameForMetadata(dialect) && owner
-    ? `${owner}.${metadataTableName}`
+    ? qualifiedTableName
     : metadataTableName;
 
   return {
     tableName,
-    metadataDbName,
+    metadataDbName: resolvedMetadataDbName || metadataDbName,
     metadataTableName: resolvedMetadataTableName,
   };
 };

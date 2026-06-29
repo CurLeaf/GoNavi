@@ -18,6 +18,8 @@ type fakeBackend struct {
 	editableErr         error
 	databasesResult     connection.QueryResult
 	tablesResult        connection.QueryResult
+	viewsResult         connection.QueryResult
+	objectsResult       connection.QueryResult
 	allColumnsResult    connection.QueryResult
 	columnsResult       connection.QueryResult
 	indexesResult       connection.QueryResult
@@ -48,6 +50,14 @@ func (f *fakeBackend) DBGetDatabases(config connection.ConnectionConfig) connect
 
 func (f *fakeBackend) DBGetTables(config connection.ConnectionConfig, dbName string) connection.QueryResult {
 	return f.tablesResult
+}
+
+func (f *fakeBackend) DBGetViews(config connection.ConnectionConfig, dbName string) connection.QueryResult {
+	return f.viewsResult
+}
+
+func (f *fakeBackend) DBGetObjects(config connection.ConnectionConfig, dbName string) connection.QueryResult {
+	return f.objectsResult
 }
 
 func (f *fakeBackend) DBGetAllColumns(config connection.ConnectionConfig, dbName string) connection.QueryResult {
@@ -209,6 +219,125 @@ func TestGetAllColumnsReturnsCrossTableColumnSummaries(t *testing.T) {
 	}
 	if len(out.Columns) != 2 || out.Columns[0].TableName != "users" || out.Columns[1].Name != "user_id" {
 		t.Fatalf("unexpected all columns output: %#v", out)
+	}
+}
+
+func TestGetViewsReturnsViewNames(t *testing.T) {
+	backend := &fakeBackend{
+		editableConnection: connection.SavedConnectionView{
+			ID: "mysql-main",
+			Config: connection.ConnectionConfig{
+				Type:     "mysql",
+				Database: "app",
+			},
+		},
+		viewsResult: connection.QueryResult{
+			Success: true,
+			Data: []map[string]string{
+				{"View": "active_users"},
+				{"View": "reporting.monthly_orders"},
+			},
+		},
+	}
+
+	service := NewService(backend)
+	result, out, err := service.GetViews(context.Background(), nil, databaseArgs{
+		ConnectionID: "mysql-main",
+		DBName:       "app",
+	})
+	if err != nil {
+		t.Fatalf("GetViews returned error: %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("expected success result, got %#v", result)
+	}
+	if len(out.Views) != 2 || out.Views[0] != "active_users" || out.Views[1] != "reporting.monthly_orders" {
+		t.Fatalf("unexpected views output: %#v", out)
+	}
+}
+
+func TestGetTablesIncludesViewsInDedicatedField(t *testing.T) {
+	backend := &fakeBackend{
+		editableConnection: connection.SavedConnectionView{
+			ID: "mysql-main",
+			Config: connection.ConnectionConfig{
+				Type:     "mysql",
+				Database: "app",
+			},
+		},
+		tablesResult: connection.QueryResult{
+			Success: true,
+			Data: []map[string]string{
+				{"Table": "users"},
+			},
+		},
+		viewsResult: connection.QueryResult{
+			Success: true,
+			Data: []map[string]string{
+				{"View": "active_users"},
+			},
+		},
+	}
+
+	service := NewService(backend)
+	result, out, err := service.GetTables(context.Background(), nil, databaseArgs{
+		ConnectionID: "mysql-main",
+		DBName:       "app",
+	})
+	if err != nil {
+		t.Fatalf("GetTables returned error: %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("expected success result, got %#v", result)
+	}
+	if len(out.Tables) != 1 || out.Tables[0] != "users" {
+		t.Fatalf("unexpected tables output: %#v", out)
+	}
+	if len(out.Views) != 1 || out.Views[0] != "active_users" {
+		t.Fatalf("expected GetTables to expose views separately, got %#v", out)
+	}
+}
+
+func TestGetObjectsReturnsDatabaseObjectsAndFiltersByType(t *testing.T) {
+	backend := &fakeBackend{
+		editableConnection: connection.SavedConnectionView{
+			ID: "mysql-main",
+			Config: connection.ConnectionConfig{
+				Type:     "mysql",
+				Database: "app",
+			},
+		},
+		objectsResult: connection.QueryResult{
+			Success: true,
+			Data: []connection.DatabaseObject{
+				{Database: "app", Name: "users", Type: "table"},
+				{Database: "app", Name: "active_users", Type: "view"},
+				{Database: "app", Schema: "public", Name: "refresh_cache", Type: "function"},
+				{Database: "app", Name: "orders.events", Type: "queue"},
+			},
+		},
+	}
+
+	service := NewService(backend)
+	result, out, err := service.GetObjects(context.Background(), nil, objectsArgs{
+		ConnectionID: "mysql-main",
+		DBName:       "app",
+		ObjectTypes:  []string{"function", "queues"},
+	})
+	if err != nil {
+		t.Fatalf("GetObjects returned error: %v", err)
+	}
+	if result == nil || result.IsError {
+		t.Fatalf("expected success result, got %#v", result)
+	}
+	if len(out.Objects) != 2 {
+		t.Fatalf("expected 2 filtered objects, got %#v", out.Objects)
+	}
+	if out.Objects[0].Type != "function" || out.Objects[1].Type != "queue" {
+		t.Fatalf("unexpected filtered objects: %#v", out.Objects)
+	}
+	if out.Objects[1].Name != "orders.events" {
+		t.Fatalf("queue names must preserve dots, got %#v", out.Objects[1])
 	}
 }
 

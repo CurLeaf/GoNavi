@@ -188,6 +188,8 @@ describe("i18n catalog", () => {
       "app.theme.mode.dark.label",
       "app.theme.mode.light.description",
       "app.theme.mode.light.label",
+      "app.theme.mode.system.description",
+      "app.theme.mode.system.label",
       "app.theme.mode_title",
       "app.theme.data_table.table_double_click_action",
       "app.theme.data_table.table_double_click_action.open_data",

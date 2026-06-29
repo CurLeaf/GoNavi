@@ -57,6 +57,22 @@ describe('extractQueryResultTableRef', () => {
       });
   });
 
+  it('keeps PostgreSQL-like schema-qualified table names while using the current database for metadata lookups', () => {
+    expect(extractQueryResultTableRef('SELECT * FROM ldf_server.mes_work_order', 'kingbase', 'ldf_server_dbs_dev'))
+      .toEqual({
+        tableName: 'ldf_server.mes_work_order',
+        metadataDbName: 'ldf_server_dbs_dev',
+        metadataTableName: 'ldf_server.mes_work_order',
+      });
+
+    expect(extractQueryResultTableRef('SELECT * FROM ops.jobs LIMIT 20', 'postgres', 'app_db'))
+      .toEqual({
+        tableName: 'ops.jobs',
+        metadataDbName: 'app_db',
+        metadataTableName: 'ops.jobs',
+      });
+  });
+
   it('keeps DuckDB schema-qualified table names for metadata lookups', () => {
     expect(extractQueryResultTableRef('SELECT * FROM main.events LIMIT 500', 'duckdb', 'main'))
       .toEqual({

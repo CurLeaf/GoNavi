@@ -10,6 +10,10 @@ const appCss = readFileSync(
   fileURLToPath(new globalThis.URL('./App.css', import.meta.url)),
   'utf8',
 );
+const v2ThemeCss = readFileSync(
+  fileURLToPath(new globalThis.URL('./v2-theme.css', import.meta.url)),
+  'utf8',
+);
 const linuxCJKFontBannerSource = readFileSync(
   fileURLToPath(new globalThis.URL('./components/LinuxCJKFontBanner.tsx', import.meta.url)),
   'utf8',
@@ -321,7 +325,7 @@ describe('tool center menu entries', () => {
       ['newConnection', 'handleCreateConnection();'],
       ['toggleAIPanel', 'toggleAIPanel();'],
       ['toggleLogPanel', 'handleToggleLogPanel();'],
-      ['toggleTheme', 'setTheme('],
+      ['toggleTheme', 'setThemePreference('],
       ['openShortcutManager', 'setIsShortcutModalOpen(true);'],
       ['toggleMacFullscreen', 'handleTitleBarWindowToggle({ allowMacNativeFullscreen: true });'],
       ['resetWindowZoom', 'handleManualResetWindowZoom();'],
@@ -410,12 +414,20 @@ describe('global appearance tokens', () => {
     expect(appSource).toContain("setProperty('--gn-font-size-mono'");
     expect(appSource).toContain("setProperty('--gn-data-table-font-size'");
     expect(appSource).toContain("setProperty('--gn-sidebar-tree-font-size'");
+    expect(appSource).toContain("setProperty('--gn-sidebar-rail-scale'");
     expect(appSource).toContain("setProperty('--gn-control-height'");
     expect(appSource).toContain("setProperty('--gn-control-height-sm'");
     expect(appSource).toContain('fontFamily: resolvedUiFontFamily');
     expect(appSource).toContain('fontFamilyCode: resolvedMonoFontFamily');
+    expect(appSource).toContain('const effectiveSidebarRailScale = sanitizeV2SidebarRailScale(appearance.v2SidebarRailScale);');
+    expect(appSource).toContain("t('app.theme.appearance.sidebar_rail_scale_title')");
+    expect(appSource).toContain("t('app.theme.appearance.sidebar_rail_scale_hint')");
+    expect(appSource).toContain('v2SidebarRailScale: sanitizeV2SidebarRailScale(value)');
     expect(appSource).toContain("t('app.theme.data_table.font_size')");
     expect(appSource).toContain("t('app.theme.data_table.sidebar_tree_font_size')");
+    expect(v2ThemeCss).toContain('--gn-sidebar-rail-scale');
+    expect(v2ThemeCss).toContain('font-size: calc(var(--gn-font-size-sm, 12px) * var(--gn-sidebar-rail-scale, 1));');
+    expect(v2ThemeCss).toContain('width: calc(38px * var(--gn-v2-rail-scale));');
     expect(appSource).toContain("const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';");
     expect(appSource).toContain("t('app.theme.data_table.table_double_click_action')");
     expect(appSource).toContain("t('app.theme.data_table.table_double_click_action.open_data')");

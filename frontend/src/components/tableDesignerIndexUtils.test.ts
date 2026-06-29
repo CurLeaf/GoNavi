@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { buildIndexCreateSqlPreview } from './tableDesignerIndexSql';
 import {
   hasIndexFormChanged,
   normalizeIndexFormFromRow,
@@ -25,6 +26,33 @@ describe('tableDesignerIndexUtils', () => {
       kind: 'UNIQUE',
       indexType: 'BTREE',
     });
+  });
+
+  it('preserves SQL Server existing index metadata for create preview reuse', () => {
+    const row: IndexDisplaySnapshot = {
+      key: 'IX_Users_Email',
+      name: 'IX_Users_Email',
+      indexType: 'nonclustered',
+      nonUnique: 0,
+      columnNames: ['email'],
+    };
+
+    const form = normalizeIndexFormFromRow(row, ['NORMAL', 'UNIQUE']);
+    expect(form).toEqual({
+      name: 'IX_Users_Email',
+      columnNames: ['email'],
+      kind: 'UNIQUE',
+      indexType: 'NONCLUSTERED',
+    });
+
+    expect(buildIndexCreateSqlPreview({
+      dbType: 'sqlserver',
+      tableRef: '[dbo].[Users]',
+      name: form.name,
+      columnNames: form.columnNames,
+      kind: form.kind,
+      indexType: form.indexType,
+    }).sql).toBe('CREATE UNIQUE NONCLUSTERED INDEX [IX_Users_Email] ON [dbo].[Users] ([email]);');
   });
 
   it('detects no-op index edits as unchanged', () => {
