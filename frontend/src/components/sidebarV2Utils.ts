@@ -825,7 +825,7 @@ export const shouldClearSidebarNodeChildrenOnCollapse = (
   if (!node || node.isLeaf === true || !node.children?.length) {
     return false;
   }
-  if (node.type !== 'connection' && node.type !== 'database' && node.type !== 'object-group') {
+  if (node.type !== 'connection' && node.type !== 'database') {
     return false;
   }
   return collectSidebarSubtreeKeys(node).length >= SIDEBAR_COLLAPSE_UNLOAD_SUBTREE_LIMIT;

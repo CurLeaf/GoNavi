@@ -116,28 +116,33 @@ describe('sidebarV2 command search performance helpers', () => {
     })).toEqual(['conn-1-db-a', 'conn-1-db-b']);
   });
 
-  it('clears only large loaded sidebar subtrees on collapse', () => {
-    const routineChildren = Array.from({ length: 180 }, (_, index) => ({
-      key: `routine-${index}`,
-      title: `routine_${index}`,
-      type: 'routine' as const,
+  it('keeps large table groups loaded on collapse and only unloads reloadable database trees', () => {
+    const tableChildren = Array.from({ length: 180 }, (_, index) => ({
+      key: `table-${index}`,
+      title: `table_${index}`,
+      type: 'table' as const,
     }));
-    const largeRoutineGroup = {
-      key: 'conn-1-db-a-routines',
-      title: '函数',
+    const largeTableGroup = {
+      key: 'conn-1-db-a-tables',
+      title: '表',
       type: 'object-group' as const,
-      children: routineChildren,
+      dataRef: { groupKey: 'tables' },
+      children: tableChildren,
     };
 
-    expect(collectSidebarSubtreeKeys(largeRoutineGroup)).toHaveLength(180);
-    expect(shouldClearSidebarNodeChildrenOnCollapse(largeRoutineGroup)).toBe(true);
+    expect(collectSidebarSubtreeKeys(largeTableGroup)).toHaveLength(180);
+    expect(shouldClearSidebarNodeChildrenOnCollapse(largeTableGroup)).toBe(false);
     expect(shouldClearSidebarNodeChildrenOnCollapse({
       type: 'object-group',
-      children: routineChildren.slice(0, 8),
+      children: tableChildren.slice(0, 8),
     })).toBe(false);
     expect(shouldClearSidebarNodeChildrenOnCollapse({
+      type: 'database',
+      children: tableChildren,
+    })).toBe(true);
+    expect(shouldClearSidebarNodeChildrenOnCollapse({
       type: 'table',
-      children: routineChildren,
+      children: tableChildren,
     })).toBe(false);
   });
 });
