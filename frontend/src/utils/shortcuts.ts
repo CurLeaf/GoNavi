@@ -5,6 +5,7 @@ import { getCurrentLanguage, t } from '../i18n';
 export type ShortcutAction =
   | 'runQuery'
   | 'selectCurrentStatement'
+  | 'duplicateCurrentLine'
   | 'saveQuery'
   | 'formatSql'
   | 'toggleQueryResultsPanel'
@@ -43,6 +44,7 @@ export interface ShortcutActionMeta {
   requiredKey?: string;
   disallowShift?: boolean;
   platformOnly?: 'mac';
+  allowedReservedMonacoCommandIds?: string[];
 }
 
 interface ShortcutActionMetaDefinition extends Omit<ShortcutActionMeta, 'label' | 'description'> {
@@ -103,6 +105,7 @@ const KEY_ALIASES: Record<string, string> = {
 export const SHORTCUT_ACTION_ORDER: ShortcutAction[] = [
   'runQuery',
   'selectCurrentStatement',
+  'duplicateCurrentLine',
   'saveQuery',
   'formatSql',
   'toggleQueryResultsPanel',
@@ -139,6 +142,7 @@ const createShortcutActionMeta = (
   requiredKey: definition.requiredKey,
   disallowShift: definition.disallowShift,
   platformOnly: definition.platformOnly,
+  allowedReservedMonacoCommandIds: definition.allowedReservedMonacoCommandIds,
 });
 
 const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMetaDefinition> = {
@@ -150,6 +154,13 @@ const SHORTCUT_ACTION_META_DEFINITIONS: Record<ShortcutAction, ShortcutActionMet
     labelKey: 'app.shortcuts.action.selectCurrentStatement.label',
     descriptionKey: 'app.shortcuts.action.selectCurrentStatement.description',
     scope: 'queryEditor',
+  },
+  duplicateCurrentLine: {
+    labelKey: 'app.shortcuts.action.duplicateCurrentLine.label',
+    descriptionKey: 'app.shortcuts.action.duplicateCurrentLine.description',
+    scope: 'queryEditor',
+    allowInEditable: true,
+    allowedReservedMonacoCommandIds: ['editor.action.addSelectionToNextFindMatch'],
   },
   saveQuery: {
     labelKey: 'app.shortcuts.action.saveQuery.label',
@@ -258,6 +269,10 @@ export const DEFAULT_SHORTCUT_OPTIONS: ShortcutOptions = {
   selectCurrentStatement: {
     mac: { combo: 'Meta+E', enabled: true },
     windows: { combo: 'Ctrl+E', enabled: true },
+  },
+  duplicateCurrentLine: {
+    mac: { combo: 'Meta+D', enabled: true },
+    windows: { combo: 'Ctrl+D', enabled: true },
   },
   saveQuery: {
     mac: { combo: 'Meta+S', enabled: true },
@@ -476,15 +491,33 @@ export const isImeComposingKeyEvent = (
   const keyCode = Number(event.keyCode ?? nativeEvent?.keyCode ?? 0);
   const which = Number(event.which ?? nativeEvent?.which ?? 0);
 
-  return Boolean(
+  // Primary IME indicators — reliable across all browsers/WebViews.
+  if (
     globalImeCompositionActive
     || event.isComposing
     || nativeEvent?.isComposing
-    || isMonacoImeInputTarget(event.target)
     || key === 'Process'
     || keyCode === 229
-    || which === 229,
-  );
+    || which === 229
+  ) {
+    return true;
+  }
+
+  // Fallback: some WebViews (notably older Wails/macOS WKWebView builds) emit
+  // real key codes (e.g. keyCode 49 for digit "1") during IME candidate
+  // selection without setting isComposing or keyCode 229.  In that case the
+  // only observable signal is the `ime-input` CSS class on the Monaco
+  // textarea.  However, we must NOT use the CSS class alone for events that
+  // carry a modifier key (Ctrl / Meta / Alt), because the class can persist
+  // even when the user is pressing a shortcut (e.g. Cmd+E) while a CJK input
+  // method is simply *enabled* (not actively composing).  Blocking modifier-
+  // key combos would break all window-level shortcuts for CJK users.
+  const hasModifier = Boolean(event.ctrlKey || event.metaKey || event.altKey);
+  if (!hasModifier && isMonacoImeInputTarget(event.target)) {
+    return true;
+  }
+
+  return false;
 };
 
 export const eventToShortcut = (event: KeyboardEvent | ReactKeyboardEvent): string => {
@@ -802,6 +835,25 @@ export const findReservedConflicts = (normalizedCombo: string, platform?: Shortc
     .map((r) => ({ label: r.label, context: r.context, monacoCommandId: r.monacoCommandId }));
 };
 
+export const findReservedConflictsForAction = (
+  action: ShortcutAction,
+  normalizedCombo: string,
+  platform?: ShortcutPlatform,
+): ConflictInfo[] => {
+  const conflicts = findReservedConflicts(normalizedCombo, platform);
+  const allowedMonacoCommandIds = new Set(
+    SHORTCUT_ACTION_META[action].allowedReservedMonacoCommandIds || [],
+  );
+  if (allowedMonacoCommandIds.size === 0) {
+    return conflicts;
+  }
+  return conflicts.filter((conflict) => (
+    conflict.context !== 'monaco'
+    || !conflict.monacoCommandId
+    || !allowedMonacoCommandIds.has(conflict.monacoCommandId)
+  ));
+};
+
 export interface MonacoKeyBinding {
   keyMod: number;
   keyCode: number;
@@ -876,9 +928,9 @@ export const comboToMonacoKeyBinding = (
 
   for (const piece of pieces) {
     if (piece === 'Ctrl') {
-      keyMod |= keyModEnum.CtrlCmd ?? 0;
-    } else if (piece === 'Meta') {
       keyMod |= keyModEnum.WinCtrl ?? 0;
+    } else if (piece === 'Meta') {
+      keyMod |= keyModEnum.CtrlCmd ?? 0;
     } else if (piece === 'Alt') {
       keyMod |= keyModEnum.Alt ?? 0;
     } else if (piece === 'Shift') {

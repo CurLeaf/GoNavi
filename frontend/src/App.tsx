@@ -92,7 +92,7 @@ import {
   ShortcutAction,
   canRecordShortcutForAction,
   eventToShortcut,
-  findReservedConflicts,
+  findReservedConflictsForAction,
   getShortcutDisplay,
   getShortcutDisplayLabel,
   getShortcutPlatform,
@@ -2203,7 +2203,11 @@ function App() {
       for (const action of SHORTCUT_ACTION_ORDER) {
           const binding = resolveShortcutBinding(shortcutOptions, action, activeShortcutPlatform);
           if (!binding?.enabled || !binding.combo) continue;
-          const conflicts = findReservedConflicts(normalizeShortcutCombo(binding.combo), activeShortcutPlatform);
+          const conflicts = findReservedConflictsForAction(
+              action,
+              normalizeShortcutCombo(binding.combo),
+              activeShortcutPlatform,
+          );
           if (conflicts.length > 0) {
               map[action] = conflicts;
           }
@@ -2935,7 +2939,11 @@ function App() {
               return;
           }
 
-          const reservedConflicts = findReservedConflicts(normalizedCombo, activeShortcutPlatform);
+          const reservedConflicts = findReservedConflictsForAction(
+              capturingShortcutAction,
+              normalizedCombo,
+              activeShortcutPlatform,
+          );
           if (reservedConflicts.length > 0) {
               const { hasMonaco, hasOther, monacoLabels, otherLabels, otherContexts } = splitConflictsByContext(reservedConflicts);
               if (hasMonaco) {

@@ -7,6 +7,7 @@ import {
   DEFAULT_SHORTCUT_OPTIONS,
   findReservedConflict,
   findReservedConflicts,
+  findReservedConflictsForAction,
   describeConflictContext,
   normalizeShortcutCombo,
   RESERVED_SHORTCUTS,
@@ -107,6 +108,26 @@ describe('findReservedConflicts', () => {
       label: '编辑器查找',
       monacoCommandId: 'actions.find',
     });
+  });
+});
+
+describe('findReservedConflictsForAction', () => {
+  it('allows duplicate current line to reuse Monaco add-selection shortcut on Windows', () => {
+    expect(findReservedConflicts('Ctrl+D', 'windows')).toEqual([
+      expect.objectContaining({
+        monacoCommandId: 'editor.action.addSelectionToNextFindMatch',
+      }),
+    ]);
+    expect(findReservedConflictsForAction('duplicateCurrentLine', 'Ctrl+D', 'windows')).toEqual([]);
+  });
+
+  it('allows duplicate current line to reuse Monaco add-selection shortcut on macOS', () => {
+    expect(findReservedConflicts('Meta+D', 'mac')).toEqual([
+      expect.objectContaining({
+        monacoCommandId: 'editor.action.addSelectionToNextFindMatch',
+      }),
+    ]);
+    expect(findReservedConflictsForAction('duplicateCurrentLine', 'Meta+D', 'mac')).toEqual([]);
   });
 });
 
@@ -303,8 +324,21 @@ describe('shortcut defaults', () => {
       windows: { combo: 'Ctrl+E', enabled: true },
     });
     expect(SHORTCUT_ACTION_META.selectCurrentStatement).toMatchObject({
-      label: '选择当前语句',
+      label: '选择当前行并复制',
       scope: 'queryEditor',
+    });
+  });
+
+  it('registers duplicate current line as a query editor shortcut', () => {
+    expect(DEFAULT_SHORTCUT_OPTIONS.duplicateCurrentLine).toEqual({
+      mac: { combo: 'Meta+D', enabled: true },
+      windows: { combo: 'Ctrl+D', enabled: true },
+    });
+    expect(SHORTCUT_ACTION_META.duplicateCurrentLine).toMatchObject({
+      label: '复制当前行到下一行',
+      scope: 'queryEditor',
+      allowInEditable: true,
+      allowedReservedMonacoCommandIds: ['editor.action.addSelectionToNextFindMatch'],
     });
   });
 
@@ -507,14 +541,14 @@ describe('comboToMonacoKeyBinding', () => {
 
   it('maps Ctrl+Enter correctly', () => {
     expect(comboToMonacoKeyBinding('Ctrl+Enter', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.CtrlCmd,
+      keyMod: mockKeyMod.WinCtrl,
       keyCode: mockKeyCode.Enter,
     });
   });
 
   it('maps Ctrl+Shift+R correctly', () => {
     expect(comboToMonacoKeyBinding('Ctrl+Shift+R', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.CtrlCmd | mockKeyMod.Shift,
+      keyMod: mockKeyMod.WinCtrl | mockKeyMod.Shift,
       keyCode: mockKeyCode.KeyR,
     });
   });
@@ -528,7 +562,7 @@ describe('comboToMonacoKeyBinding', () => {
 
   it('maps Meta+Enter (macOS variant)', () => {
     expect(comboToMonacoKeyBinding('Meta+Enter', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.WinCtrl,
+      keyMod: mockKeyMod.CtrlCmd,
       keyCode: mockKeyCode.Enter,
     });
   });
@@ -542,7 +576,7 @@ describe('comboToMonacoKeyBinding', () => {
 
   it('maps Ctrl+, (comma)', () => {
     expect(comboToMonacoKeyBinding('Ctrl+,', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.CtrlCmd,
+      keyMod: mockKeyMod.WinCtrl,
       keyCode: mockKeyCode.OemComma,
     });
   });
@@ -557,14 +591,14 @@ describe('comboToMonacoKeyBinding', () => {
 
   it('maps Ctrl+Digit1', () => {
     expect(comboToMonacoKeyBinding('Ctrl+1', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.CtrlCmd,
+      keyMod: mockKeyMod.WinCtrl,
       keyCode: mockKeyCode.Digit1,
     });
   });
 
   it('maps Ctrl+Alt+Delete', () => {
     expect(comboToMonacoKeyBinding('Ctrl+Alt+Delete', mockKeyMod, mockKeyCode)).toEqual({
-      keyMod: mockKeyMod.CtrlCmd | mockKeyMod.Alt,
+      keyMod: mockKeyMod.WinCtrl | mockKeyMod.Alt,
       keyCode: mockKeyCode.Delete,
     });
   });

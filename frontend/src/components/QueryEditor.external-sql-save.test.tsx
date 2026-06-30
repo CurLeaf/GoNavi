@@ -76,6 +76,10 @@ const storeState = vi.hoisted(() => ({
       mac: { enabled: false, combo: '' },
       windows: { enabled: false, combo: '' },
     },
+    duplicateCurrentLine: {
+      mac: { enabled: false, combo: '' },
+      windows: { enabled: false, combo: '' },
+    },
     saveQuery: {
       mac: { enabled: true, combo: 'Meta+S' },
       windows: { enabled: true, combo: 'Ctrl+S' },
@@ -92,6 +96,27 @@ const storeState = vi.hoisted(() => ({
 }));
 
 const storeSubscribers = vi.hoisted(() => new Set<() => void>());
+const runtimeEventListeners = vi.hoisted(() => new Map<string, Set<(...args: any[]) => void>>());
+
+const runtimeApi = vi.hoisted(() => ({
+  EventsOn: vi.fn((eventName: string, handler: (...args: any[]) => void) => {
+    const listeners = runtimeEventListeners.get(eventName) ?? new Set<(...args: any[]) => void>();
+    listeners.add(handler);
+    runtimeEventListeners.set(eventName, listeners);
+    return () => {
+      const current = runtimeEventListeners.get(eventName);
+      if (!current) {
+        return;
+      }
+      current.delete(handler);
+      if (current.size === 0) {
+        runtimeEventListeners.delete(eventName);
+      }
+    };
+  }),
+  ClipboardSetText: vi.fn(async () => true),
+  LogInfo: vi.fn(),
+}));
 
 const notifyStoreSubscribers = () => {
   storeSubscribers.forEach((subscriber) => subscriber());
@@ -294,6 +319,8 @@ vi.mock('../store', () => {
   return { useStore };
 });
 
+vi.mock('../../wailsjs/runtime', () => runtimeApi);
+
 vi.mock('../../wailsjs/go/app/App', () => backendApp);
 
 vi.mock('../utils/autoFetchVisibility', () => ({
@@ -308,7 +335,7 @@ vi.mock('@monaco-editor/react', () => ({
       onMount?.(editorState.editor, {
         editor: { setTheme: vi.fn() },
         KeyMod: { CtrlCmd: 2048, WinCtrl: 256, Alt: 512, Shift: 1024 },
-        KeyCode: { KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83 },
+        KeyCode: { KeyD: 68, KeyE: 69, KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83 },
         languages: {
           CompletionItemKind: { Keyword: 1, Function: 2, Field: 3 },
           CompletionItemInsertTextRule: { InsertAsSnippet: 1 },
@@ -396,6 +423,7 @@ vi.mock('@ant-design/icons', () => {
     CloseOutlined: Icon,
     StopOutlined: Icon,
     RobotOutlined: Icon,
+    SearchOutlined: Icon,
     DatabaseOutlined: Icon,
     EyeOutlined: Icon,
     EyeInvisibleOutlined: Icon,
@@ -616,6 +644,8 @@ describe('QueryEditor external SQL save', () => {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
@@ -626,6 +656,27 @@ describe('QueryEditor external SQL save', () => {
     vi.stubGlobal('document', {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
+      body: { nodeName: 'BODY', appendChild: vi.fn() },
+      documentElement: { nodeName: 'HTML' },
+      execCommand: vi.fn(() => true),
+      createElement: vi.fn((tagName: string) => ({
+        tagName: String(tagName || '').toUpperCase(),
+        className: '',
+        style: {},
+        setAttribute: vi.fn(),
+        focus: vi.fn(),
+        select: vi.fn(),
+        setSelectionRange: vi.fn(),
+        remove: vi.fn(),
+      })),
+    });
+    const currentNavigator = globalThis.navigator as any;
+    vi.stubGlobal('navigator', {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+      platform: currentNavigator?.platform || 'MacIntel',
+      userAgent: currentNavigator?.userAgent || 'Vitest',
     });
     setCurrentLanguage('zh-CN');
     storeState.languagePreference = 'zh-CN';
@@ -633,8 +684,12 @@ describe('QueryEditor external SQL save', () => {
     storeState.shortcutOptions.runQuery.windows = { enabled: false, combo: '' };
     storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: false, combo: '' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: false, combo: '' };
+    storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: false, combo: '' };
+    storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: false, combo: '' };
     storeState.shortcutOptions.saveQuery.mac = { enabled: true, combo: 'Meta+S' };
     storeState.shortcutOptions.saveQuery.windows = { enabled: true, combo: 'Ctrl+S' };
+    runtimeApi.EventsOn.mockClear();
+    runtimeEventListeners.clear();
     storeState.addTab.mockReset();
     storeState.setActiveContext.mockReset();
     storeState.saveQuery.mockReset();
@@ -661,6 +716,10 @@ describe('QueryEditor external SQL save', () => {
         windows: { enabled: false, combo: '' },
       },
       selectCurrentStatement: {
+        mac: { enabled: false, combo: '' },
+        windows: { enabled: false, combo: '' },
+      },
+      duplicateCurrentLine: {
         mac: { enabled: false, combo: '' },
         windows: { enabled: false, combo: '' },
       },
@@ -744,6 +803,7 @@ describe('QueryEditor external SQL save', () => {
     editorState.editor.updateOptions.mockClear();
     editorState.editor.pushUndoStop.mockClear();
     editorState.editor.addAction.mockClear();
+    editorState.editor.getContribution.mockClear();
     storeState.updateQueryTabDraft.mockReset();
     storeSubscribers.clear();
     editorState.editor.layout.mockClear();
@@ -898,6 +958,8 @@ describe('QueryEditor external SQL save', () => {
       }),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
@@ -961,6 +1023,8 @@ describe('QueryEditor external SQL save', () => {
       }),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
@@ -1033,6 +1097,8 @@ describe('QueryEditor external SQL save', () => {
       }),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
@@ -1087,6 +1153,8 @@ describe('QueryEditor external SQL save', () => {
       }),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;
@@ -2713,6 +2781,9 @@ describe('QueryEditor external SQL save', () => {
     const initialOptions = editorState.editor.updateOptions.mock.calls[0]?.[0];
     expect(initialOptions).toMatchObject({
       fixedOverflowWidgets: true,
+      find: {
+        addExtraSpaceOnTop: true,
+      },
       hover: {
         enabled: true,
         delay: 1000,
@@ -2776,6 +2847,8 @@ describe('QueryEditor external SQL save', () => {
     storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Q' };
     storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
+    storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: true, combo: 'Meta+D' };
+    storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: true, combo: 'Ctrl+D' };
 
     await act(async () => {
       create(<QueryEditor tab={createTab()} />);
@@ -2788,7 +2861,10 @@ describe('QueryEditor external SQL save', () => {
       label: 'GoNavi: Run SQL',
     });
     expect(findEditorAction('gonavi.selectCurrentStatement')).toMatchObject({
-      label: 'GoNavi: Select Current Statement',
+      label: 'GoNavi: Select Current Line and Copy',
+    });
+    expect(findEditorAction('gonavi.duplicateCurrentLine')).toMatchObject({
+      label: 'GoNavi: Duplicate Current Line Below',
     });
     expect(findEditorAction('gonavi.saveQuery')).toMatchObject({
       label: 'GoNavi: Save Query',
@@ -2800,6 +2876,8 @@ describe('QueryEditor external SQL save', () => {
     storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Q' };
     storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
+    storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: true, combo: 'Meta+D' };
+    storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: true, combo: 'Ctrl+D' };
 
     await act(async () => {
       create(<QueryEditor tab={createTab()} />);
@@ -2812,7 +2890,10 @@ describe('QueryEditor external SQL save', () => {
       label: 'GoNavi: 执行 SQL',
     });
     expect(findEditorAction('gonavi.selectCurrentStatement')).toMatchObject({
-      label: 'GoNavi: 选择当前语句',
+      label: 'GoNavi: 选择当前行并复制',
+    });
+    expect(findEditorAction('gonavi.duplicateCurrentLine')).toMatchObject({
+      label: 'GoNavi: 复制当前行到下一行',
     });
     expect(findEditorAction('gonavi.saveQuery')).toMatchObject({
       label: 'GoNavi: 保存查询',
@@ -2826,7 +2907,8 @@ describe('QueryEditor external SQL save', () => {
 
     expect(findEditorActionLabels('gonavi.queryEditor.showObjectInfo')).toContain('GoNavi: Show Object Info');
     expect(findEditorActionLabels('gonavi.runQuery')).toContain('GoNavi: Run SQL');
-    expect(findEditorActionLabels('gonavi.selectCurrentStatement')).toContain('GoNavi: Select Current Statement');
+    expect(findEditorActionLabels('gonavi.selectCurrentStatement')).toContain('GoNavi: Select Current Line and Copy');
+    expect(findEditorActionLabels('gonavi.duplicateCurrentLine')).toContain('GoNavi: Duplicate Current Line Below');
     expect(findEditorActionLabels('gonavi.saveQuery')).toContain('GoNavi: Save Query');
     expect(findEditorAction('gonavi.queryEditor.showObjectInfo')).toMatchObject({
       label: 'GoNavi: Show Object Info',
@@ -2835,7 +2917,10 @@ describe('QueryEditor external SQL save', () => {
       label: 'GoNavi: Run SQL',
     });
     expect(findEditorAction('gonavi.selectCurrentStatement')).toMatchObject({
-      label: 'GoNavi: Select Current Statement',
+      label: 'GoNavi: Select Current Line and Copy',
+    });
+    expect(findEditorAction('gonavi.duplicateCurrentLine')).toMatchObject({
+      label: 'GoNavi: Duplicate Current Line Below',
     });
     expect(findEditorAction('gonavi.saveQuery')).toMatchObject({
       label: 'GoNavi: Save Query',
@@ -2964,7 +3049,7 @@ describe('QueryEditor external SQL save', () => {
     }
   });
 
-  it('shows "No selectable SQL statement." in English when selecting the current statement without selectable SQL', async () => {
+  it('shows "No copyable content on the current line." in English when selecting an empty current line', async () => {
     storeState.languagePreference = 'en-US';
     setCurrentLanguage('en-US');
     storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
@@ -2982,11 +3067,11 @@ describe('QueryEditor external SQL save', () => {
       await selectCurrentStatementAction.run();
     });
 
-    expect(messageApi.info).toHaveBeenCalledWith('No selectable SQL statement.');
-    expect(messageApi.info).not.toHaveBeenCalledWith('没有可选择的 SQL 语句。');
+    expect(messageApi.info).toHaveBeenCalledWith('No copyable content on the current line.');
+    expect(messageApi.info).not.toHaveBeenCalledWith('当前行没有可复制内容。');
   });
 
-  it('selects only the current SQL statement when the editor content uses CRLF line endings', async () => {
+  it('selects and copies only the current line when the editor content uses CRLF line endings', async () => {
     storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
     storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
     const sql = [
@@ -3010,12 +3095,266 @@ describe('QueryEditor external SQL save', () => {
       await selectCurrentStatementAction.run();
     });
 
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    expect(messageApi.success).toHaveBeenCalledWith('已复制到剪贴板');
     expect(editorState.selection).toMatchObject({
       startLineNumber: 5,
       startColumn: 1,
       endLineNumber: 5,
-      endColumn: 'SELECT a.id, a.name FROM third_table a ORDER BY a.id;'.length,
+      endColumn: 'SELECT a.id, a.name FROM third_table a ORDER BY a.id;'.length + 1,
     });
+  });
+
+  it('falls back to the browser clipboard when the Monaco copy command is unavailable', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+Q' };
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+Q' };
+    (document.execCommand as any).mockReturnValueOnce(false);
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+    editorState.position = { lineNumber: 2, column: 8 };
+    editorState.selection = null;
+
+    const selectCurrentStatementAction = findEditorAction('gonavi.selectCurrentStatement');
+    expect(selectCurrentStatementAction).toBeTruthy();
+
+    await act(async () => {
+      await selectCurrentStatementAction.run();
+    });
+
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('SELECT 2 AS two;');
+    expect(messageApi.success).toHaveBeenCalledWith('已复制到剪贴板');
+    expect(messageApi.error).not.toHaveBeenCalled();
+    expect(editorState.selection).toMatchObject({
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 'SELECT 2 AS two;'.length + 1,
+    });
+  });
+
+  it('duplicates the current line below and keeps the caret column', async () => {
+    storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: true, combo: 'Meta+D' };
+    storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: true, combo: 'Ctrl+D' };
+    editorState.position = { lineNumber: 2, column: 6 };
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nFROM dual',
+        readOnly: true,
+      })} />);
+    });
+
+    const duplicateCurrentLineAction = findEditorAction('gonavi.duplicateCurrentLine');
+    expect(duplicateCurrentLineAction).toBeTruthy();
+
+    await act(async () => {
+      duplicateCurrentLineAction.run();
+    });
+
+    expect(editorState.value).toBe('SELECT 1;\nFROM dual\nFROM dual');
+    expect(editorState.position).toEqual({ lineNumber: 3, column: 6 });
+    expect(editorState.selection).toMatchObject({
+      startLineNumber: 3,
+      startColumn: 6,
+      endLineNumber: 3,
+      endColumn: 6,
+    });
+    expect(editorState.editor.pushUndoStop).toHaveBeenCalled();
+  });
+
+  it('intercepts Ctrl/Cmd+E at window level and copies the current line instead of leaking to host search', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+E' };
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+E' };
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+    editorState.position = { lineNumber: 2, column: 8 };
+    editorState.selection = null;
+    (window.dispatchEvent as any).mockClear();
+    (navigator.clipboard.writeText as any).mockClear();
+
+    const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+    const event = {
+      ctrlKey: !isMacRuntime,
+      metaKey: isMacRuntime,
+      altKey: false,
+      shiftKey: false,
+      key: 'e',
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+      await Promise.resolve();
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(messageApi.success).toHaveBeenCalledWith('已复制到剪贴板');
+    expect(editorState.editor.setSelections).not.toHaveBeenCalled();
+    expect(editorState.selection).toMatchObject({
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 'SELECT 2 AS two;'.length + 1,
+    });
+    expect(
+      (window.dispatchEvent as any).mock.calls.map((call: any[]) => call[0]?.type),
+    ).not.toContain('gonavi:find-active-query');
+  });
+
+  it('intercepts Ctrl/Cmd+D at window level and duplicates the current line below', async () => {
+    storeState.shortcutOptions.duplicateCurrentLine.mac = { enabled: true, combo: 'Meta+D' };
+    storeState.shortcutOptions.duplicateCurrentLine.windows = { enabled: true, combo: 'Ctrl+D' };
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+    editorState.position = { lineNumber: 2, column: 8 };
+    editorState.selection = null;
+    (window.dispatchEvent as any).mockClear();
+
+    const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+    const event = {
+      ctrlKey: !isMacRuntime,
+      metaKey: isMacRuntime,
+      altKey: false,
+      shiftKey: false,
+      key: 'd',
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+      await Promise.resolve();
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(editorState.value).toBe('SELECT 1;\nSELECT 2 AS two;\nSELECT 2 AS two;\nSELECT 3;');
+    expect(editorState.position).toEqual({ lineNumber: 3, column: 8 });
+    expect(
+      (window.dispatchEvent as any).mock.calls.map((call: any[]) => call[0]?.type),
+    ).not.toContain('gonavi:find-active-query');
+  });
+
+  it('responds to the macOS native Cmd+E fallback event and copies the current line', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+E' };
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+E' };
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+    editorState.position = { lineNumber: 2, column: 8 };
+    editorState.selection = null;
+    (document.execCommand as any).mockClear();
+
+    const nativeListeners = runtimeEventListeners.get('gonavi:native-select-current-line');
+    expect(nativeListeners?.size ?? 0).toBeGreaterThan(0);
+
+    await act(async () => {
+      nativeListeners?.forEach((listener) => listener());
+      await Promise.resolve();
+    });
+
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(messageApi.success).toHaveBeenCalledWith('已复制到剪贴板');
+    expect(editorState.editor.setSelections).not.toHaveBeenCalled();
+    expect(editorState.selection).toMatchObject({
+      startLineNumber: 2,
+      startColumn: 1,
+      endLineNumber: 2,
+      endColumn: 'SELECT 2 AS two;'.length + 1,
+    });
+  });
+
+  it('uses the last tracked cursor position for the macOS native Cmd+E fallback when the live cursor is unavailable', async () => {
+    storeState.shortcutOptions.selectCurrentStatement.mac = { enabled: true, combo: 'Meta+E' };
+    storeState.shortcutOptions.selectCurrentStatement.windows = { enabled: true, combo: 'Ctrl+E' };
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({
+        query: 'SELECT 1;\nSELECT 2 AS two;\nSELECT 3;',
+        readOnly: true,
+      })} />);
+    });
+
+    await act(async () => {
+      editorState.cursorPositionListeners.forEach((listener) => listener({
+        position: { lineNumber: 2, column: 8 },
+      }));
+    });
+    editorState.position = null as any;
+    editorState.selection = null;
+    (document.execCommand as any).mockClear();
+
+    const nativeListeners = runtimeEventListeners.get('gonavi:native-select-current-line');
+    expect(nativeListeners?.size ?? 0).toBeGreaterThan(0);
+
+    await act(async () => {
+      nativeListeners?.forEach((listener) => listener());
+      await Promise.resolve();
+    });
+
+    expect(editorState.editor.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 8 });
+    expect(document.execCommand).toHaveBeenCalledWith('copy');
+    expect(messageApi.success).toHaveBeenCalledWith('已复制到剪贴板');
   });
 
   it('shows the object info miss toast in English when the cursor is not on a recognized table or column', async () => {
@@ -8162,6 +8501,19 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-results .query-result-tabs > .ant-tabs-nav .ant-tabs-tab-btn {');
     expect(css).toContain('user-select: none;');
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-results .query-result-tab-text {');
+  });
+
+  it('keeps Monaco find widget offset styles scoped to the v2 query editor shell', () => {
+    const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+    const css = readV2ThemeCss();
+
+    expect(source).toContain('QUERY_EDITOR_MONACO_FIND_WIDGET_OFFSET_PX = 10');
+    expect(source).toContain("editor.contrib.findController");
+    expect(source).toContain('MutationObserver');
+    expect(source).toContain('gn-v2-query-monaco-shell-find-visible');
+    expect(source).toContain('heightInPx: QUERY_EDITOR_MONACO_FIND_WIDGET_OFFSET_PX');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-monaco-shell .monaco-editor .find-widget.visible {');
+    expect(css).toContain('top: 10px !important;');
   });
 
   it('keeps the v2 query editor toolbar grouped and compact', () => {

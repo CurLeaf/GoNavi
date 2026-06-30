@@ -232,6 +232,8 @@ describe("i18n catalog", () => {
       "app.shortcuts.action.openShortcutManager.description",
       "app.shortcuts.action.openShortcutManager.label",
       "app.shortcuts.action.record",
+      "app.shortcuts.action.duplicateCurrentLine.description",
+      "app.shortcuts.action.duplicateCurrentLine.label",
       "app.shortcuts.action.resetWindowZoom.description",
       "app.shortcuts.action.resetWindowZoom.label",
       "app.shortcuts.action.restore_defaults",
@@ -1006,13 +1008,15 @@ describe("i18n catalog", () => {
 
   it("keeps QueryEditor local editor interaction toasts in catalogs instead of source literals", () => {
     const toastKeys = [
-      "query_editor.message.no_selectable_sql",
+      "query_editor.message.current_line_no_copyable_content",
+      "data_grid.message.copied_to_clipboard",
+      "connection_modal.message.copy_failed",
       "query_editor.message.object_info_target_not_found",
     ] as const;
     const source = readQueryEditorSource();
     const selectStatementSource = sliceBetween(
       source,
-      "const handleSelectCurrentStatement = () => {",
+      "const handleSelectCurrentStatement = async () => {",
       "  const syncQueryToEditor = (sql: string) => {",
     );
     const objectInfoActionSource = sliceBetween(
@@ -1028,13 +1032,21 @@ describe("i18n catalog", () => {
       }
     }
 
-    expect(selectStatementSource).toContain("query_editor.message.no_selectable_sql");
+    expect(selectStatementSource).toContain("query_editor.message.current_line_no_copyable_content");
+    expect(selectStatementSource).toContain("data_grid.message.copied_to_clipboard");
+    expect(selectStatementSource).toContain("connection_modal.message.copy_failed");
     expect(objectInfoActionSource).toContain("query_editor.message.object_info_target_not_found");
 
-    expect(selectStatementSource).not.toContain("没有可选择的 SQL 语句。");
+    expect(selectStatementSource).not.toContain("当前行没有可复制内容。");
+    expect(selectStatementSource).not.toContain("已复制到剪贴板");
+    expect(selectStatementSource).not.toContain("复制失败");
     expect(objectInfoActionSource).not.toContain("当前光标未定位到可识别的表或字段。");
 
-    assertSourceDoesNotInlineCatalogValues(selectStatementSource, ["query_editor.message.no_selectable_sql"]);
+    assertSourceDoesNotInlineCatalogValues(selectStatementSource, [
+      "query_editor.message.current_line_no_copyable_content",
+      "data_grid.message.copied_to_clipboard",
+      "connection_modal.message.copy_failed",
+    ]);
     assertSourceDoesNotInlineCatalogValues(objectInfoActionSource, ["query_editor.message.object_info_target_not_found"]);
   });
 
@@ -2171,6 +2183,7 @@ describe("i18n catalog", () => {
 
   it("keeps QueryEditor Monaco action labels in catalogs instead of source literals", () => {
     const actionLabelKeys = [
+      "app.shortcuts.action.duplicateCurrentLine.label",
       "app.shortcuts.action.runQuery.label",
       "app.shortcuts.action.selectCurrentStatement.label",
       "app.shortcuts.action.saveQuery.label",
@@ -2197,6 +2210,11 @@ describe("i18n catalog", () => {
         source,
         "      const binding = selectCurrentStatementShortcutBinding;",
         "  }, [languagePreference, selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);",
+      ),
+      sliceBetween(
+        source,
+        "      const binding = duplicateCurrentLineShortcutBinding;",
+        "  }, [duplicateCurrentLineShortcutBinding, handleDuplicateCurrentLine, languagePreference]);",
       ),
       sliceBetween(
         source,

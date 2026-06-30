@@ -380,6 +380,7 @@ vi.mock('@ant-design/icons', () => {
     CloseOutlined: Icon,
     StopOutlined: Icon,
     RobotOutlined: Icon,
+    SearchOutlined: Icon,
     DatabaseOutlined: Icon,
     EyeOutlined: Icon,
     EyeInvisibleOutlined: Icon,
@@ -587,6 +588,8 @@ describe('QueryEditor external SQL save', () => {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
       requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
         callback(0);
         return 1;

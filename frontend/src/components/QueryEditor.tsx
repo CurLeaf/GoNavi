@@ -1,4 +1,4 @@
-﻿import Modal from './common/ResizableDraggableModal';
+import Modal from './common/ResizableDraggableModal';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Editor, { type OnMount } from './MonacoEditor';
 import { message, Input, Form, MenuProps } from 'antd';
@@ -8,10 +8,11 @@ import { TabData, ColumnDefinition } from '../types';
 import { useStore } from '../store';
 import { DBQuery, DBQueryWithCancel, DBQueryMulti, DBQueryMultiInTransaction, DBQueryMultiTransactional, DBGetTables, DBGetAllColumns, DBGetDatabases, DBGetColumns, CancelQuery, GenerateQueryID, WriteSQLFile, ExportSQLFile } from '../../wailsjs/go/app/App';
 import { GONAVI_ROW_KEY } from './DataGrid';
+import { EventsOn } from '../../wailsjs/runtime';
 import { findConnectionMutatingStatements } from '../utils/connectionReadOnly';
 import { getDataSourceCapabilities, shouldShowOceanBaseRowNumberColumn } from '../utils/dataSourceCapabilities';
 import { applyMongoQueryAutoLimit, convertMongoShellToJsonCommand } from "../utils/mongodb";
-import { getShortcutDisplayLabel, getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, isEditableElement, isImeComposingKeyEvent, isShortcutMatch, comboToMonacoKeyBinding, resolveShortcutBinding } from "../utils/shortcuts";
+import { getShortcutDisplayLabel, getShortcutPlatform, getShortcutPrimaryModifierDisplayLabel, isEditableElement, isImeComposingKeyEvent, isShortcutMatch, comboToMonacoKeyBinding, normalizeShortcutCombo, resolveShortcutBinding } from "../utils/shortcuts";
 import { useAutoFetchVisibility } from '../utils/autoFetchVisibility';
 import { buildRpcConnectionConfig } from '../utils/connectionRpcConfig';
 import { isPostgresSchemaDialect } from '../utils/connectionDriverType';
@@ -26,7 +27,7 @@ import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/q
 import { quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
 import { formatSqlExecutionError, hasLocalizedSqlTimeoutKeyword } from '../utils/sqlErrorSemantics';
 import { canReusePendingSqlEditorTransactionForType, shouldUseSqlEditorManagedTransactionForType } from '../utils/sqlEditorTransaction';
-import { findSqlStatementRanges, resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/sqlStatementSelection';
+import { findSqlStatementRanges, resolveExecutableSql } from '../utils/sqlStatementSelection';
 import { isMacLikePlatform } from '../utils/appearance';
 import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
 import { buildMySQLCompatibleViewMetadataSqls, isSidebarViewTableType, normalizeSidebarViewName } from '../utils/sidebarMetadata';
@@ -147,11 +148,85 @@ export {
 const buildQueryEditorMonacoActionLabel = (key: string): string =>
     `GoNavi: ${translate(key)}`;
 
+const QUERY_EDITOR_MONACO_FIND_WIDGET_OFFSET_PX = 10;
+const QUERY_EDITOR_MONACO_FIND_OPTIONS = {
+    addExtraSpaceOnTop: true,
+} as const;
+const QUERY_EDITOR_NATIVE_SELECT_CURRENT_LINE_EVENT = 'gonavi:native-select-current-line';
+
+type QueryEditorMonacoFindStateChangeEvent = {
+    isRevealed?: boolean;
+};
+
+type QueryEditorMonacoFindState = {
+    isRevealed?: boolean;
+    onFindReplaceStateChange?: (
+        listener: (event: QueryEditorMonacoFindStateChangeEvent) => void,
+    ) => { dispose?: () => void } | void;
+};
+
+type QueryEditorMonacoFindController = {
+    getState?: () => QueryEditorMonacoFindState | null;
+};
+
 const QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER = '{SQL}';
 
 const escapeQueryEditorObjectEditSqlLiteral = (value: unknown): string => (
     String(value || '').replace(/'/g, "''")
 );
+
+const CLIPBOARD_WRITE_TIMEOUT_MS = 2000;
+
+const copyQueryEditorTextToClipboard = async (text: string): Promise<boolean> => {
+    const tryAsyncClipboardWrite = async (): Promise<boolean> => {
+        if (typeof navigator?.clipboard?.writeText !== 'function') {
+            return false;
+        }
+
+        try {
+            const written = await Promise.race([
+                navigator.clipboard.writeText(text).then(() => true as const),
+                new Promise<false>((resolve) => setTimeout(() => resolve(false), CLIPBOARD_WRITE_TIMEOUT_MS)),
+            ]);
+            return written;
+        } catch {
+            return false;
+        }
+    };
+
+    if (typeof document?.createElement === 'function' && typeof document?.execCommand === 'function') {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', 'true');
+        textarea.setAttribute('aria-hidden', 'true');
+        Object.assign(textarea.style, {
+            position: 'fixed',
+            top: '0',
+            left: '-9999px',
+            opacity: '0',
+            pointerEvents: 'none',
+        });
+
+        try {
+            document.body?.appendChild?.(textarea);
+            textarea.focus?.();
+            textarea.select?.();
+            textarea.setSelectionRange?.(0, text.length);
+            if (document.execCommand('copy')) {
+                return true;
+            }
+        } catch {
+            // Fall through to async clipboard APIs when execCommand is unavailable.
+        } finally {
+            textarea.remove?.();
+        }
+    }
+
+    if (await tryAsyncClipboardWrite()) {
+        return true;
+    }
+    return false;
+};
 
 const getQueryEditorObjectEditRawValue = (row: Record<string, any>, candidateKeys: string[]): any => {
     const keyMap = new Map<string, any>();
@@ -728,8 +803,13 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const editorShellRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
+  const findWidgetOffsetZoneIdRef = useRef<string | null>(null);
+  const findWidgetOffsetVisibleRef = useRef(false);
+  const findWidgetStateDisposableRef = useRef<{ dispose?: () => void } | null>(null);
+  const findWidgetDomObserverRef = useRef<MutationObserver | null>(null);
   const runQueryActionRef = useRef<any>(null);
   const selectCurrentStatementActionRef = useRef<any>(null);
+  const duplicateCurrentLineActionRef = useRef<any>(null);
   const saveQueryActionRef = useRef<any>(null);
   const findInEditorActionRef = useRef<any>(null);
   const formatSqlActionRef = useRef<any>(null);
@@ -869,6 +949,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       () => resolveShortcutBinding(shortcutOptions, 'selectCurrentStatement', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
   );
+  const duplicateCurrentLineShortcutBinding = useMemo(
+      () => resolveShortcutBinding(shortcutOptions, 'duplicateCurrentLine', activeShortcutPlatform),
+      [activeShortcutPlatform, shortcutOptions],
+  );
   const saveQueryShortcutBinding = useMemo(
       () => resolveShortcutBinding(shortcutOptions, 'saveQuery', activeShortcutPlatform),
       [activeShortcutPlatform, shortcutOptions],
@@ -922,6 +1006,131 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       editor.trigger?.('keyboard', 'actions.find', null);
   }, []);
+  const disconnectQueryEditorFindWidgetObserver = useCallback(() => {
+      findWidgetDomObserverRef.current?.disconnect?.();
+      findWidgetDomObserverRef.current = null;
+  }, []);
+  const clearQueryEditorFindWidgetOffset = useCallback((editorInstance?: any) => {
+      editorShellRef.current?.classList?.remove?.('gn-v2-query-monaco-shell-find-visible');
+      findWidgetOffsetVisibleRef.current = false;
+      const editor = editorInstance || editorRef.current;
+      const currentZoneId = findWidgetOffsetZoneIdRef.current;
+      if (!currentZoneId || !editor?.changeViewZones) {
+          findWidgetOffsetZoneIdRef.current = null;
+          return;
+      }
+      editor.changeViewZones((accessor: any) => {
+          accessor.removeZone(currentZoneId);
+      });
+      findWidgetOffsetZoneIdRef.current = null;
+  }, []);
+  const syncQueryEditorFindWidgetOffset = useCallback((editorInstance: any, visible: boolean) => {
+      const editor = editorInstance || editorRef.current;
+      const shouldOffset = isV2Ui && visible;
+      editorShellRef.current?.classList?.toggle?.('gn-v2-query-monaco-shell-find-visible', shouldOffset);
+      const currentVisible = findWidgetOffsetVisibleRef.current;
+      const hasZone = Boolean(findWidgetOffsetZoneIdRef.current);
+
+      if (currentVisible === shouldOffset && (!shouldOffset || hasZone)) {
+          return;
+      }
+      findWidgetOffsetVisibleRef.current = shouldOffset;
+
+      if (!editor?.changeViewZones) {
+          return;
+      }
+
+      const currentZoneId = findWidgetOffsetZoneIdRef.current;
+      if (!shouldOffset && !currentZoneId) {
+          return;
+      }
+
+      editor.changeViewZones((accessor: any) => {
+          if (currentZoneId) {
+              accessor.removeZone(currentZoneId);
+              findWidgetOffsetZoneIdRef.current = null;
+          }
+          if (!shouldOffset || typeof document === 'undefined' || typeof document.createElement !== 'function') {
+              return;
+          }
+          const domNode = document.createElement('div');
+          domNode.className = 'gn-v2-query-find-widget-offset-zone';
+          domNode.setAttribute('aria-hidden', 'true');
+          findWidgetOffsetZoneIdRef.current = accessor.addZone({
+              afterLineNumber: 0,
+              heightInPx: QUERY_EDITOR_MONACO_FIND_WIDGET_OFFSET_PX,
+              domNode,
+              suppressMouseDown: true,
+          });
+      });
+  }, [isV2Ui]);
+  const bindQueryEditorFindWidgetDomObserver = useCallback((editorInstance?: any) => {
+      const editor = editorInstance || editorRef.current;
+      disconnectQueryEditorFindWidgetObserver();
+      if (!editor || !isV2Ui) {
+          return;
+      }
+
+      const resolveFindWidgetVisible = () => {
+          const shell = editorShellRef.current;
+          const findWidget = shell?.querySelector?.('.monaco-editor .find-widget');
+          if (!findWidget || !('classList' in findWidget)) {
+              return false;
+          }
+          return findWidget.classList.contains('visible') && !findWidget.classList.contains('hiddenEditor');
+      };
+
+      const syncFromDom = () => {
+          syncQueryEditorFindWidgetOffset(editor, resolveFindWidgetVisible());
+      };
+
+      syncFromDom();
+
+      if (typeof MutationObserver !== 'function' || !editorShellRef.current) {
+          return;
+      }
+
+      const observer = new MutationObserver(() => {
+          syncFromDom();
+      });
+      observer.observe(editorShellRef.current, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          attributeFilter: ['class'],
+      });
+      findWidgetDomObserverRef.current = observer;
+
+      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(() => {
+              syncFromDom();
+          });
+      }
+  }, [disconnectQueryEditorFindWidgetObserver, isV2Ui, syncQueryEditorFindWidgetOffset]);
+  const bindQueryEditorFindWidgetOffset = useCallback((editorInstance?: any) => {
+      const editor = editorInstance || editorRef.current;
+      findWidgetStateDisposableRef.current?.dispose?.();
+      findWidgetStateDisposableRef.current = null;
+      clearQueryEditorFindWidgetOffset(editor);
+      if (!editor || !isV2Ui) {
+          return;
+      }
+
+      const findController = editor.getContribution?.('editor.contrib.findController') as QueryEditorMonacoFindController | null;
+      const findState = findController?.getState?.();
+      bindQueryEditorFindWidgetDomObserver(editor);
+      if (!findState) {
+          return;
+      }
+
+      syncQueryEditorFindWidgetOffset(editor, Boolean(findState.isRevealed));
+      findWidgetStateDisposableRef.current = findState.onFindReplaceStateChange?.((event) => {
+          if (!event?.isRevealed) {
+              return;
+          }
+          syncQueryEditorFindWidgetOffset(editor, Boolean(findState.isRevealed));
+      }) || null;
+  }, [bindQueryEditorFindWidgetDomObserver, clearQueryEditorFindWidgetOffset, isV2Ui, syncQueryEditorFindWidgetOffset]);
   const handleShowSqlExecutionLog = useCallback((mode: 'open' | 'toggle' = 'toggle') => {
       if (!isActive) {
           return;
@@ -948,6 +1157,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       translate: (key, params) => translate(key, params),
   });
   const autoFetchVisible = useAutoFetchVisibility();
+
+  useEffect(() => {
+      const editor = editorRef.current;
+      if (!editor) {
+          return;
+      }
+      bindQueryEditorFindWidgetOffset(editor);
+      return () => {
+          disconnectQueryEditorFindWidgetObserver();
+          findWidgetStateDisposableRef.current?.dispose?.();
+          findWidgetStateDisposableRef.current = null;
+          clearQueryEditorFindWidgetOffset(editor);
+      };
+  }, [bindQueryEditorFindWidgetOffset, clearQueryEditorFindWidgetOffset, disconnectQueryEditorFindWidgetObserver]);
 
   useEffect(() => {
       const nextContextKey = [
@@ -1319,34 +1542,87 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       }
   }, [insertTextIntoEditorAtPosition, mergeSidebarDropObjectMetadata, refreshObjectDecorations]);
 
-  const handleSelectCurrentStatement = () => {
+  const handleSelectCurrentStatement = async () => {
       const editor = editorRef.current;
       const monaco = monacoRef.current;
       const model = editor?.getModel?.();
-      const position = editor?.getPosition?.();
-      if (!editor || !monaco || !model || !position) {
+      if (!editor || !monaco?.Range || !model) {
           return;
       }
 
-      const fullSQL = String(model.getValue?.() || '');
-      const normalizedPosition = normalizeEditorPosition(position);
+      const normalizedPosition = normalizeEditorPosition(editor.getPosition?.())
+          || normalizeEditorPosition(lastEditorCursorPositionRef.current);
       if (!normalizedPosition) {
           return;
       }
-      const cursorOffset = getNormalizedOffsetAtPosition(fullSQL, normalizedPosition);
-      const range = resolveCurrentSqlStatementRange(fullSQL, cursorOffset);
-      if (!range) {
-          void message.info(translate('query_editor.message.no_selectable_sql'));
+      lastEditorCursorPositionRef.current = normalizedPosition;
+      const lineNumber = normalizedPosition.lineNumber;
+      const lineText = String(model.getLineContent?.(lineNumber) || '');
+      if (!lineText.trim()) {
+          void message.info(translate('query_editor.message.current_line_no_copyable_content'));
           return;
       }
 
-      const start = getNormalizedPositionAtOffset(fullSQL, range.start);
-      const end = getNormalizedPositionAtOffset(fullSQL, range.end);
-      const selection = new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column);
-      editor.setSelections?.([selection]);
+      const maxColumn = Number(model.getLineMaxColumn?.(lineNumber) || 1);
+      const selection = new monaco.Range(lineNumber, 1, lineNumber, maxColumn);
+      editor.setPosition?.(normalizedPosition);
       editor.setSelection(selection);
       editor.revealRangeInCenterIfOutsideViewport?.(selection);
+
+      const copied = await copyQueryEditorTextToClipboard(lineText);
+      editor.setSelection(selection);
       editor.focus?.();
+      if (copied) {
+          void message.success(translate('data_grid.message.copied_to_clipboard'));
+          return;
+      }
+
+      void message.error(translate('connection_modal.message.copy_failed'));
+  };
+
+  const handleDuplicateCurrentLine = () => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      const model = editor?.getModel?.();
+      const normalizedPosition = normalizeEditorPosition(editor?.getPosition?.());
+      if (!editor || !monaco?.Range || !model || !normalizedPosition) {
+          return;
+      }
+
+      const lineNumber = normalizedPosition.lineNumber;
+      const lineText = String(model.getLineContent?.(lineNumber) || '');
+      const maxColumn = Number(model.getLineMaxColumn?.(lineNumber) || (lineText.length + 1));
+      const modelValue = String(model.getValue?.() || '');
+      const lineBreak = typeof model.getEOL?.() === 'string'
+          ? model.getEOL()
+          : (modelValue.includes('\r\n') ? '\r\n' : '\n');
+      const insertRange = new monaco.Range(lineNumber, maxColumn, lineNumber, maxColumn);
+      const nextColumn = Math.min(normalizedPosition.column, lineText.length + 1);
+
+      editor.executeEdits?.('gonavi-duplicate-current-line', [{
+          range: insertRange,
+          text: `${lineBreak}${lineText}`,
+          forceMoveMarkers: true,
+      }]);
+      editor.pushUndoStop?.();
+
+      const nextPosition = { lineNumber: lineNumber + 1, column: nextColumn };
+      const cursorSelection = new monaco.Range(
+          nextPosition.lineNumber,
+          nextPosition.column,
+          nextPosition.lineNumber,
+          nextPosition.column,
+      );
+      editor.setSelections?.([cursorSelection]);
+      editor.setSelection?.(cursorSelection);
+      editor.setPosition?.(nextPosition);
+      editor.revealLineInCenterIfOutsideViewport?.(nextPosition.lineNumber);
+      editor.focus?.();
+
+      const nextValue = editor.getValue?.();
+      if (typeof nextValue === 'string') {
+          applyQueryState(nextValue);
+      }
   };
 
   const buildQueryEditorAiContextMenuActions = useCallback(() => ([
@@ -2301,12 +2577,14 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       editor.updateOptions?.({
           fixedOverflowWidgets: true,
+          find: QUERY_EDITOR_MONACO_FIND_OPTIONS,
           hover: {
               enabled: true,
               delay: QUERY_EDITOR_HOVER_DELAY_MS,
               above: false,
           },
       });
+      bindQueryEditorFindWidgetOffset(editor);
 
       const applyNavigationHoverStateAtPosition = (targetPosition: { lineNumber: number; column: number } | null) => {
           if (!ctrlMetaPressedRef.current) {
@@ -2735,6 +3013,21 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.selectCurrentStatement.label'),
                   keybindings: [keyBinding.keyMod | keyBinding.keyCode],
                   run: handleSelectCurrentStatement,
+              });
+          }
+      }
+
+      const duplicateLineBinding = duplicateCurrentLineShortcutBinding;
+      if (duplicateLineBinding?.enabled && duplicateLineBinding.combo) {
+          const keyBinding = comboToMonacoKeyBinding(
+              duplicateLineBinding.combo, monaco.KeyMod, monaco.KeyCode,
+          );
+          if (keyBinding) {
+              duplicateCurrentLineActionRef.current = editor.addAction({
+                  id: 'gonavi.duplicateCurrentLine',
+                  label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.duplicateCurrentLine.label'),
+                  keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+                  run: handleDuplicateCurrentLine,
               });
           }
       }
@@ -5004,6 +5297,37 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   }, [languagePreference, selectCurrentStatementShortcutBinding, handleSelectCurrentStatement]);
 
   useEffect(() => {
+      if (duplicateCurrentLineActionRef.current) {
+          duplicateCurrentLineActionRef.current.dispose();
+          duplicateCurrentLineActionRef.current = null;
+      }
+
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco) return;
+
+      const binding = duplicateCurrentLineShortcutBinding;
+      if (!binding?.enabled || !binding.combo) return;
+
+      const keyBinding = comboToMonacoKeyBinding(binding.combo, monaco.KeyMod, monaco.KeyCode);
+      if (keyBinding) {
+          duplicateCurrentLineActionRef.current = editor.addAction({
+              id: 'gonavi.duplicateCurrentLine',
+              label: buildQueryEditorMonacoActionLabel('app.shortcuts.action.duplicateCurrentLine.label'),
+              keybindings: [keyBinding.keyMod | keyBinding.keyCode],
+              run: handleDuplicateCurrentLine,
+          });
+      }
+
+      return () => {
+          if (duplicateCurrentLineActionRef.current) {
+              duplicateCurrentLineActionRef.current.dispose();
+              duplicateCurrentLineActionRef.current = null;
+          }
+      };
+  }, [duplicateCurrentLineShortcutBinding, handleDuplicateCurrentLine, languagePreference]);
+
+  useEffect(() => {
       if (saveQueryActionRef.current) {
           saveQueryActionRef.current.dispose();
           saveQueryActionRef.current = null;
@@ -5180,6 +5504,94 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           window.removeEventListener('gonavi:find-active-query', handleFindActiveQuery as EventListener);
       };
   }, [handleOpenEditorFind, isActive]);
+
+  useEffect(() => {
+      const binding = selectCurrentStatementShortcutBinding;
+      if (!binding?.enabled || !binding.combo) {
+          return;
+      }
+
+      const handleSelectCurrentStatementShortcut = (event: KeyboardEvent) => {
+          if (!isActive) {
+              return;
+          }
+          if (!isShortcutMatch(event, binding.combo)) {
+              return;
+          }
+
+          const editor = editorRef.current;
+          const targetNode = resolveEventTargetNode(event.target);
+          const editorHasFocus = !!editor?.hasTextFocus?.();
+          const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
+          if (!editorHasFocus && !inQueryEditor && !isDocumentLevelShortcutTarget(targetNode)) {
+              return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          void handleSelectCurrentStatement();
+      };
+
+      window.addEventListener('keydown', handleSelectCurrentStatementShortcut, true);
+      return () => {
+          window.removeEventListener('keydown', handleSelectCurrentStatementShortcut, true);
+      };
+  }, [handleSelectCurrentStatement, isActive, selectCurrentStatementShortcutBinding]);
+
+  useEffect(() => {
+      const binding = selectCurrentStatementShortcutBinding;
+      if (
+          activeShortcutPlatform !== 'mac'
+          || !binding?.enabled
+          || normalizeShortcutCombo(binding.combo) !== 'Meta+E'
+      ) {
+          return;
+      }
+
+      try {
+          return EventsOn(QUERY_EDITOR_NATIVE_SELECT_CURRENT_LINE_EVENT, () => {
+              if (!isActive) {
+                  return;
+              }
+              void handleSelectCurrentStatement();
+          });
+      } catch {
+          return;
+      }
+  }, [activeShortcutPlatform, handleSelectCurrentStatement, isActive, selectCurrentStatementShortcutBinding]);
+
+  useEffect(() => {
+      const binding = duplicateCurrentLineShortcutBinding;
+      if (!binding?.enabled || !binding.combo) {
+          return;
+      }
+
+      const handleDuplicateCurrentLineShortcut = (event: KeyboardEvent) => {
+          if (!isActive) {
+              return;
+          }
+          if (!isShortcutMatch(event, binding.combo)) {
+              return;
+          }
+
+          const editor = editorRef.current;
+          const targetNode = resolveEventTargetNode(event.target);
+          const editorHasFocus = !!editor?.hasTextFocus?.();
+          const inQueryEditor = !!(targetNode && queryEditorRootRef.current?.contains(targetNode));
+          if (!editorHasFocus && !inQueryEditor && !isDocumentLevelShortcutTarget(targetNode)) {
+              return;
+          }
+
+          event.preventDefault();
+          event.stopPropagation();
+          handleDuplicateCurrentLine();
+      };
+
+      window.addEventListener('keydown', handleDuplicateCurrentLineShortcut, true);
+      return () => {
+          window.removeEventListener('keydown', handleDuplicateCurrentLineShortcut, true);
+      };
+  }, [duplicateCurrentLineShortcutBinding, handleDuplicateCurrentLine, isActive]);
 
   // 监听由 TabManager 分发的专用注入事件
   useEffect(() => {
@@ -5749,6 +6161,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
             minimap: { enabled: false }, 
             automaticLayout: true,
             fixedOverflowWidgets: true,
+            find: QUERY_EDITOR_MONACO_FIND_OPTIONS,
             hover: {
               enabled: true,
               delay: QUERY_EDITOR_HOVER_DELAY_MS,
