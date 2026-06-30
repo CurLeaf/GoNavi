@@ -114,6 +114,19 @@ func TestRedisBackendOperationMessagesUseLocalizedText(t *testing.T) {
 			rawMessages: []string{`Message: "清空成功"`},
 			keys:        []string{"redis.backend.message.flush_success"},
 		},
+		"func (a *App) RedisExportKeys": {
+			keys: []string{
+				"redis.backend.error.export_no_keys",
+				"redis.backend.message.export_success",
+			},
+		},
+		"func (a *App) RedisImportKeys": {
+			keys: []string{
+				"redis.backend.error.import_no_keys_selected",
+				"redis.backend.error.import_payload_invalid",
+				"redis.backend.message.import_success",
+			},
+		},
 	}
 
 	for signature, check := range checks {
@@ -146,9 +159,14 @@ func TestRedisBackendOperationMessageCatalogKeysExist(t *testing.T) {
 		"redis.backend.message.delete_success",
 		"redis.backend.message.add_success",
 		"redis.backend.message.flush_success",
+		"redis.backend.message.export_success",
+		"redis.backend.message.import_success",
 		"redis.backend.error.command_required",
 		"redis.backend.error.argument_required",
 		"redis.backend.error.argument_invalid_type",
+		"redis.backend.error.export_no_keys",
+		"redis.backend.error.import_no_keys_selected",
+		"redis.backend.error.import_payload_invalid",
 		"redis.backend.label.topology_sentinel",
 		"redis.backend.label.topology_cluster",
 		"redis.backend.label.topology_multi_node",

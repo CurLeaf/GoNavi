@@ -449,6 +449,7 @@ export const useSidebarTreeLoaders = ({
       const loadKey = `tables-${conn.id}-${dbName}`;
       if (loadingNodesRef.current.has(loadKey)) return;
       loadingNodesRef.current.add(loadKey);
+      setConnectionStates(prev => ({ ...prev, [key as string]: 'loading' }));
       
       const dbQueries = savedQueries.filter(q => q.connectionId === conn.id && q.dbName === dbName);
       const queriesNode: TreeNode = {

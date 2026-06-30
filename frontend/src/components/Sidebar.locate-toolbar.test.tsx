@@ -1122,7 +1122,7 @@ describe('Sidebar locate toolbar', () => {
     expect(css).toMatch(/\.gn-v2-explorer-filter-tabs button \{[^}]*flex: 0 0 auto;[^}]*white-space: nowrap;/s);
   });
 
-  it('shows a pending state while a connection root is loading', () => {
+  it('shows a pending state while a database node is loading', () => {
     const css = readV2ThemeCss();
     const source = readSidebarSource();
     const treeLoaderSource = readSourceFile('./sidebar/useSidebarTreeLoaders.tsx');
@@ -1131,6 +1131,7 @@ describe('Sidebar locate toolbar', () => {
 
     expect(source).toContain("export type SidebarConnectionState = 'loading' | 'success' | 'error';");
     expect(treeLoaderSource).toContain("setConnectionStates(prev => ({ ...prev, [conn.id]: 'loading' }));");
+    expect(treeLoaderSource).toContain("setConnectionStates(prev => ({ ...prev, [key as string]: 'loading' }));");
     expect(titleRenderSource).toContain("let status: 'loading' | 'success' | 'error' | 'default' = 'default';");
     expect(titleRenderSource).toContain("if (connectionStates[node.key] === 'loading') status = 'loading';");
     expect(v2ContextMenuSource).toContain("const statusMap = new Map<string, 'loading' | 'live' | 'error' | 'idle'>();");

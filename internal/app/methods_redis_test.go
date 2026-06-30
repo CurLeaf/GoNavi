@@ -2,6 +2,9 @@ package app
 
 import (
 	"errors"
+	"fmt"
+	"reflect"
+	"sort"
 	"testing"
 
 	"GoNavi-Wails/internal/connection"
@@ -122,6 +125,243 @@ func (c *scriptedRedisClient) Connect(config connection.ConnectionConfig) error 
 		*c.connectCalls = append(*c.connectCalls, config)
 	}
 	return c.connectErr
+}
+
+type redisTransferTestClient struct {
+	capturingRedisClient
+	scanPages      []*redislib.RedisScanResult
+	scanCallCount  int
+	keyTypes       map[string]string
+	ttls           map[string]int64
+	stringValues   map[string]string
+	hashValues     map[string]map[string]string
+	listValues     map[string][]string
+	setValues      map[string][]string
+	zsetValues     map[string][]redislib.ZSetMember
+	streamValues   map[string][]redislib.StreamEntry
+	existingKeys   map[string]bool
+	deletedKeys    []string
+	setStringCalls []struct {
+		key   string
+		value string
+		ttl   int64
+	}
+	setTTLCalls []struct {
+		key string
+		ttl int64
+	}
+	setHashFieldCalls []struct {
+		key   string
+		field string
+		value string
+	}
+	listPushCalls []struct {
+		key    string
+		values []string
+	}
+	setAddCalls []struct {
+		key     string
+		members []string
+	}
+	zsetAddCalls []struct {
+		key     string
+		members []redislib.ZSetMember
+	}
+	streamAddCalls []struct {
+		key    string
+		fields map[string]string
+		id     string
+	}
+}
+
+func (c *redisTransferTestClient) ScanKeys(pattern string, cursor uint64, count int64) (*redislib.RedisScanResult, error) {
+	if c.scanCallCount >= len(c.scanPages) {
+		return &redislib.RedisScanResult{Cursor: "0"}, nil
+	}
+	page := c.scanPages[c.scanCallCount]
+	c.scanCallCount++
+	return page, nil
+}
+
+func (c *redisTransferTestClient) GetKeyType(key string) (string, error) {
+	if value, ok := c.keyTypes[key]; ok {
+		return value, nil
+	}
+	return "", fmt.Errorf("missing key type for %s", key)
+}
+
+func (c *redisTransferTestClient) GetTTL(key string) (int64, error) {
+	if value, ok := c.ttls[key]; ok {
+		return value, nil
+	}
+	return -1, nil
+}
+
+func (c *redisTransferTestClient) DeleteKeys(keys []string) (int64, error) {
+	c.deletedKeys = append(c.deletedKeys, keys...)
+	for _, key := range keys {
+		if c.existingKeys != nil {
+			delete(c.existingKeys, key)
+		}
+	}
+	return int64(len(keys)), nil
+}
+
+func (c *redisTransferTestClient) KeyExists(key string) (bool, error) {
+	if c.existingKeys == nil {
+		return false, nil
+	}
+	return c.existingKeys[key], nil
+}
+
+func (c *redisTransferTestClient) GetString(key string) (string, error) {
+	if value, ok := c.stringValues[key]; ok {
+		return value, nil
+	}
+	return "", fmt.Errorf("missing string value for %s", key)
+}
+
+func (c *redisTransferTestClient) SetString(key, value string, ttl int64) error {
+	c.setStringCalls = append(c.setStringCalls, struct {
+		key   string
+		value string
+		ttl   int64
+	}{key: key, value: value, ttl: ttl})
+	if c.existingKeys == nil {
+		c.existingKeys = make(map[string]bool)
+	}
+	c.existingKeys[key] = true
+	return nil
+}
+
+func (c *redisTransferTestClient) GetHash(key string) (map[string]string, error) {
+	if value, ok := c.hashValues[key]; ok {
+		cloned := make(map[string]string, len(value))
+		for field, item := range value {
+			cloned[field] = item
+		}
+		return cloned, nil
+	}
+	return nil, fmt.Errorf("missing hash value for %s", key)
+}
+
+func (c *redisTransferTestClient) SetHashField(key, field, value string) error {
+	c.setHashFieldCalls = append(c.setHashFieldCalls, struct {
+		key   string
+		field string
+		value string
+	}{key: key, field: field, value: value})
+	if c.existingKeys == nil {
+		c.existingKeys = make(map[string]bool)
+	}
+	c.existingKeys[key] = true
+	return nil
+}
+
+func (c *redisTransferTestClient) GetList(key string, start, stop int64) ([]string, error) {
+	if value, ok := c.listValues[key]; ok {
+		return append([]string(nil), value...), nil
+	}
+	return nil, fmt.Errorf("missing list value for %s", key)
+}
+
+func (c *redisTransferTestClient) ListPush(key string, values ...string) error {
+	c.listPushCalls = append(c.listPushCalls, struct {
+		key    string
+		values []string
+	}{key: key, values: append([]string(nil), values...)})
+	if c.existingKeys == nil {
+		c.existingKeys = make(map[string]bool)
+	}
+	c.existingKeys[key] = true
+	return nil
+}
+
+func (c *redisTransferTestClient) GetSet(key string) ([]string, error) {
+	if value, ok := c.setValues[key]; ok {
+		return append([]string(nil), value...), nil
+	}
+	return nil, fmt.Errorf("missing set value for %s", key)
+}
+
+func (c *redisTransferTestClient) SetAdd(key string, members ...string) error {
+	c.setAddCalls = append(c.setAddCalls, struct {
+		key     string
+		members []string
+	}{key: key, members: append([]string(nil), members...)})
+	if c.existingKeys == nil {
+		c.existingKeys = make(map[string]bool)
+	}
+	c.existingKeys[key] = true
+	return nil
+}
+
+func (c *redisTransferTestClient) GetZSet(key string, start, stop int64) ([]redislib.ZSetMember, error) {
+	if value, ok := c.zsetValues[key]; ok {
+		return append([]redislib.ZSetMember(nil), value...), nil
+	}
+	return nil, fmt.Errorf("missing zset value for %s", key)
+}
+
+func (c *redisTransferTestClient) ZSetAdd(key string, members ...redislib.ZSetMember) error {
+	c.zsetAddCalls = append(c.zsetAddCalls, struct {
+		key     string
+		members []redislib.ZSetMember
+	}{key: key, members: append([]redislib.ZSetMember(nil), members...)})
+	if c.existingKeys == nil {
+		c.existingKeys = make(map[string]bool)
+	}
+	c.existingKeys[key] = true
+	return nil
+}
+
+func (c *redisTransferTestClient) GetStream(key, start, stop string, count int64) ([]redislib.StreamEntry, error) {
+	values, ok := c.streamValues[key]
+	if !ok {
+		return nil, fmt.Errorf("missing stream value for %s", key)
+	}
+	startIndex := 0
+	if start != "" && start != "-" {
+		for index, item := range values {
+			if item.ID == start {
+				startIndex = index
+				break
+			}
+		}
+	}
+	if startIndex >= len(values) {
+		return []redislib.StreamEntry{}, nil
+	}
+	endIndex := len(values)
+	if count > 0 && startIndex+int(count) < endIndex {
+		endIndex = startIndex + int(count)
+	}
+	return append([]redislib.StreamEntry(nil), values[startIndex:endIndex]...), nil
+}
+
+func (c *redisTransferTestClient) StreamAdd(key string, fields map[string]string, id string) (string, error) {
+	cloned := make(map[string]string, len(fields))
+	for field, value := range fields {
+		cloned[field] = value
+	}
+	c.streamAddCalls = append(c.streamAddCalls, struct {
+		key    string
+		fields map[string]string
+		id     string
+	}{key: key, fields: cloned, id: id})
+	if c.existingKeys == nil {
+		c.existingKeys = make(map[string]bool)
+	}
+	c.existingKeys[key] = true
+	return id, nil
+}
+
+func (c *redisTransferTestClient) SetTTL(key string, ttl int64) error {
+	c.setTTLCalls = append(c.setTTLCalls, struct {
+		key string
+		ttl int64
+	}{key: key, ttl: ttl})
+	return nil
 }
 
 func TestRedisTestConnectionUsesIsolatedClientAndClosesIt(t *testing.T) {
@@ -599,5 +839,207 @@ func TestRedisDeleteHashFieldAcceptsStringSlice(t *testing.T) {
 	}
 	if len(client.deletedHashFields) != 2 || client.deletedHashFields[0] != "nickname" || client.deletedHashFields[1] != "avatar" {
 		t.Fatalf("unexpected deleted hash fields: %v", client.deletedHashFields)
+	}
+}
+
+func TestBuildRedisExportPayloadCollectsPagedKeysAndSerializesAllSupportedShapes(t *testing.T) {
+	client := &redisTransferTestClient{
+		scanPages: []*redislib.RedisScanResult{
+			{
+				Keys: []redislib.RedisKeyInfo{
+					{Key: "beta"},
+					{Key: "alpha"},
+				},
+				Cursor: "1",
+			},
+			{
+				Keys: []redislib.RedisKeyInfo{
+					{Key: "alpha"},
+					{Key: "events"},
+				},
+				Cursor: "0",
+			},
+		},
+		keyTypes: map[string]string{
+			"alpha":  "string",
+			"beta":   "set",
+			"events": "stream",
+		},
+		ttls: map[string]int64{
+			"alpha":  120,
+			"beta":   -1,
+			"events": 45,
+		},
+		stringValues: map[string]string{
+			"alpha": "value-1",
+		},
+		setValues: map[string][]string{
+			"beta": {"member-b", "member-a"},
+		},
+		streamValues: map[string][]redislib.StreamEntry{
+			"events": {
+				{ID: "1710000000000-0", Fields: map[string]string{"kind": "start"}},
+				{ID: "1710000000001-0", Fields: map[string]string{"kind": "finish"}},
+			},
+		},
+	}
+
+	payload, err := buildRedisExportPayload(client, 7, RedisExportKeysOptions{
+		Scope:   "all",
+		Pattern: "app:*",
+	})
+	if err != nil {
+		t.Fatalf("buildRedisExportPayload returned error: %v", err)
+	}
+
+	if payload.Format != redisTransferFileFormat || payload.Version != redisTransferFileVersion {
+		t.Fatalf("unexpected redis transfer header: %+v", payload)
+	}
+	if payload.Database != 7 || payload.Scope != "all" || payload.Pattern != "app:*" {
+		t.Fatalf("unexpected redis transfer metadata: %+v", payload)
+	}
+	if got := len(payload.Keys); got != 3 {
+		t.Fatalf("expected 3 exported keys, got %d", got)
+	}
+	if payload.Keys[0].Key != "alpha" || payload.Keys[1].Key != "beta" || payload.Keys[2].Key != "events" {
+		t.Fatalf("expected sorted exported keys, got %+v", payload.Keys)
+	}
+
+	if value, ok := payload.Keys[0].Value.(string); !ok || value != "value-1" {
+		t.Fatalf("expected string payload for alpha, got %#v", payload.Keys[0].Value)
+	}
+
+	setMembers, ok := payload.Keys[1].Value.([]string)
+	if !ok {
+		t.Fatalf("expected set payload slice, got %#v", payload.Keys[1].Value)
+	}
+	if !reflect.DeepEqual(setMembers, []string{"member-a", "member-b"}) {
+		t.Fatalf("expected sorted set members, got %v", setMembers)
+	}
+
+	streamEntries, ok := payload.Keys[2].Value.([]redislib.StreamEntry)
+	if !ok {
+		t.Fatalf("expected stream payload slice, got %#v", payload.Keys[2].Value)
+	}
+	if len(streamEntries) != 2 || streamEntries[1].Fields["kind"] != "finish" {
+		t.Fatalf("unexpected stream payload: %+v", streamEntries)
+	}
+}
+
+func TestImportRedisTransferPayloadHonorsConflictMode(t *testing.T) {
+	basePayload := redisTransferFile{
+		Keys: []redisTransferEntry{
+			{Key: "existing", Type: "string", TTL: 90, Value: "updated"},
+			{Key: "profile", Type: "hash", TTL: 30, Value: map[string]string{"name": "neo", "role": "admin"}},
+			{Key: "events", Type: "stream", TTL: -1, Value: []redislib.StreamEntry{{ID: "1710000000000-0", Fields: map[string]string{"status": "ok"}}}},
+		},
+	}
+
+	skipClient := &redisTransferTestClient{
+		existingKeys: map[string]bool{
+			"existing": true,
+		},
+	}
+	skipSummary, err := importRedisTransferPayload(skipClient, basePayload, RedisImportKeysOptions{ConflictMode: "skip"})
+	if err != nil {
+		t.Fatalf("importRedisTransferPayload(skip) returned error: %v", err)
+	}
+	if skipSummary["imported"] != 2 || skipSummary["skipped"] != 1 || skipSummary["total"] != 3 {
+		t.Fatalf("unexpected skip import summary: %+v", skipSummary)
+	}
+	if len(skipClient.deletedKeys) != 0 {
+		t.Fatalf("skip mode should not delete existing keys, got %v", skipClient.deletedKeys)
+	}
+	if len(skipClient.setStringCalls) != 0 {
+		t.Fatalf("skip mode should not overwrite existing string keys, got %+v", skipClient.setStringCalls)
+	}
+	if len(skipClient.setHashFieldCalls) != 2 {
+		t.Fatalf("expected hash fields to import in skip mode, got %+v", skipClient.setHashFieldCalls)
+	}
+	sort.Slice(skipClient.setHashFieldCalls, func(i, j int) bool {
+		return skipClient.setHashFieldCalls[i].field < skipClient.setHashFieldCalls[j].field
+	})
+	if skipClient.setHashFieldCalls[0].field != "name" || skipClient.setHashFieldCalls[1].field != "role" {
+		t.Fatalf("unexpected imported hash fields: %+v", skipClient.setHashFieldCalls)
+	}
+	if len(skipClient.setTTLCalls) != 1 || skipClient.setTTLCalls[0].key != "profile" || skipClient.setTTLCalls[0].ttl != 30 {
+		t.Fatalf("expected imported hash ttl to be restored, got %+v", skipClient.setTTLCalls)
+	}
+	if len(skipClient.streamAddCalls) != 1 || skipClient.streamAddCalls[0].id != "1710000000000-0" {
+		t.Fatalf("expected stream entry import in skip mode, got %+v", skipClient.streamAddCalls)
+	}
+
+	overwriteClient := &redisTransferTestClient{
+		existingKeys: map[string]bool{
+			"existing": true,
+		},
+	}
+	overwriteSummary, err := importRedisTransferPayload(overwriteClient, basePayload, RedisImportKeysOptions{ConflictMode: "overwrite"})
+	if err != nil {
+		t.Fatalf("importRedisTransferPayload(overwrite) returned error: %v", err)
+	}
+	if overwriteSummary["imported"] != 3 || overwriteSummary["skipped"] != 0 || overwriteSummary["total"] != 3 {
+		t.Fatalf("unexpected overwrite import summary: %+v", overwriteSummary)
+	}
+	if !reflect.DeepEqual(overwriteClient.deletedKeys, []string{"existing"}) {
+		t.Fatalf("expected overwrite mode to delete the existing key first, got %v", overwriteClient.deletedKeys)
+	}
+	if len(overwriteClient.setStringCalls) != 1 {
+		t.Fatalf("expected overwrite mode to restore one string key, got %+v", overwriteClient.setStringCalls)
+	}
+	if overwriteClient.setStringCalls[0].key != "existing" || overwriteClient.setStringCalls[0].value != "updated" || overwriteClient.setStringCalls[0].ttl != 90 {
+		t.Fatalf("unexpected overwrite string restore call: %+v", overwriteClient.setStringCalls[0])
+	}
+}
+
+func TestImportRedisTransferPayloadHonorsSelectedScope(t *testing.T) {
+	payload := redisTransferFile{
+		Keys: []redisTransferEntry{
+			{Key: "existing", Type: "string", TTL: 90, Value: "updated"},
+			{Key: "profile", Type: "hash", TTL: 30, Value: map[string]string{"name": "neo"}},
+			{Key: "events", Type: "stream", TTL: -1, Value: []redislib.StreamEntry{{ID: "1710000000000-0", Fields: map[string]string{"status": "ok"}}}},
+		},
+	}
+
+	client := &redisTransferTestClient{
+		existingKeys: map[string]bool{
+			"existing": true,
+		},
+	}
+	result, err := importRedisTransferPayload(client, payload, RedisImportKeysOptions{
+		Scope:        "selected",
+		Keys:         []string{"profile", "events"},
+		ConflictMode: "overwrite",
+	})
+	if err != nil {
+		t.Fatalf("importRedisTransferPayload(selected) returned error: %v", err)
+	}
+	if result["imported"] != 2 || result["skipped"] != 0 || result["total"] != 2 {
+		t.Fatalf("unexpected selected import summary: %+v", result)
+	}
+	if len(client.deletedKeys) != 0 {
+		t.Fatalf("selected import should not touch unselected keys, got %v", client.deletedKeys)
+	}
+	if len(client.setStringCalls) != 0 {
+		t.Fatalf("selected import should not restore unselected string keys, got %+v", client.setStringCalls)
+	}
+	if len(client.setHashFieldCalls) != 1 || client.setHashFieldCalls[0].key != "profile" {
+		t.Fatalf("expected only selected hash key import, got %+v", client.setHashFieldCalls)
+	}
+	if len(client.streamAddCalls) != 1 || client.streamAddCalls[0].key != "events" {
+		t.Fatalf("expected only selected stream key import, got %+v", client.streamAddCalls)
+	}
+}
+
+func TestSelectRedisTransferEntriesForImportRequiresSelectedKeys(t *testing.T) {
+	payload := redisTransferFile{
+		Keys: []redisTransferEntry{
+			{Key: "alpha", Type: "string", TTL: -1, Value: "1"},
+		},
+	}
+
+	_, err := selectRedisTransferEntriesForImport(payload, RedisImportKeysOptions{Scope: "selected"})
+	if !errors.Is(err, errRedisImportNoKeysSelected) {
+		t.Fatalf("expected errRedisImportNoKeysSelected, got %v", err)
 	}
 }
