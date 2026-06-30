@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Editor from './MonacoEditor';
 import { Button, Spin, Alert } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
@@ -125,6 +125,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
     const [openingObjectEdit, setOpeningObjectEdit] = useState(false);
     const isMountedRef = useRef(true);
     const loadedDefinitionKeyRef = useRef('');
+    const editorRef = useRef<any>(null);
 
     const connections = useStore(state => state.connections);
     const theme = useStore(state => state.theme);
@@ -896,6 +897,44 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             name: normalizedObjectName,
         }),
     };
+    const editorModelPath = `gonavi-definition://${encodeURIComponent(objectIdentityKey)}`;
+
+    const refreshEditorLayout = useCallback(() => {
+        const editor = editorRef.current;
+        if (!editor) {
+            return;
+        }
+
+        const run = () => {
+            editor.layout?.();
+            editor.render?.();
+            editor.setScrollTop?.(0);
+            editor.setScrollLeft?.(0);
+        };
+
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => run());
+            return;
+        }
+
+        setTimeout(run, 0);
+    }, []);
+
+    const handleEditorMount = useCallback((editor: any) => {
+        editorRef.current = editor;
+        refreshEditorLayout();
+    }, [refreshEditorLayout]);
+
+    useEffect(() => {
+        if (!displayedDefinition) {
+            return;
+        }
+        refreshEditorLayout();
+    }, [displayedDefinition, refreshEditorLayout]);
+
+    useEffect(() => () => {
+        editorRef.current = null;
+    }, []);
 
     const openObjectEditQuery = async () => {
         if (!normalizedObjectName || openingObjectEdit) return;
@@ -967,15 +1006,19 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
             )}
             <div style={{ flex: 1, minHeight: 0 }}>
                 <Editor
+                    path={editorModelPath}
                     height="100%"
                     language="sql"
                     theme={darkMode ? 'transparent-dark' : 'transparent-light'}
                     value={displayedDefinition}
+                    onMount={handleEditorMount}
                     options={{
                         readOnly: true,
                         minimap: { enabled: false },
                         fontSize: 14,
+                        lineHeight: 24,
                         lineNumbers: 'on',
+                        lineNumbersMinChars: 4,
                         scrollBeyondLastLine: false,
                         wordWrap: 'on',
                         automaticLayout: true,

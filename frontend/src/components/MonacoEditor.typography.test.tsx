@@ -64,6 +64,15 @@ describe('MonacoEditor typography', () => {
     expect(markup).toContain('&quot;lineHeight&quot;:21');
   });
 
+  it('derives line height from the final explicit editor font size', () => {
+    const markup = renderToStaticMarkup(
+      <MonacoEditor options={{ fontSize: 18, minimap: { enabled: false } }} />,
+    );
+
+    expect(markup).toContain('&quot;fontSize&quot;:18');
+    expect(markup).toContain('&quot;lineHeight&quot;:29');
+  });
+
   it('uses data-table font size for data-oriented editors in v2', () => {
     storeState.fontSize = 16;
     storeState.appearance.dataTableFontSizeFollowGlobal = false;

@@ -129,13 +129,17 @@ const MonacoEditor: React.FC<MonacoEditorProps> = ({
     const resolvedFontSize = gonaviTypography === 'data'
       ? effectiveDataTableFontSize
       : Math.max(10, Math.round(effectiveDataTableFontSize * 0.92));
+    const effectiveEditorFontSize = Math.max(
+      10,
+      Math.round(Number(options?.fontSize) || resolvedFontSize),
+    );
 
     return {
       ...options,
       editContext: false,
       fontFamily: options?.fontFamily ?? monoFontFamily ?? DEFAULT_MONO_FONT_FAMILY,
       fontSize: options?.fontSize ?? resolvedFontSize,
-      lineHeight: options?.lineHeight ?? Math.max(18, Math.round(resolvedFontSize * 1.62)),
+      lineHeight: options?.lineHeight ?? Math.max(18, Math.round(effectiveEditorFontSize * 1.62)),
     };
   }, [
     dataTableFontSize,
