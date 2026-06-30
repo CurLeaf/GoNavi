@@ -612,6 +612,12 @@ const createDefaultConnections = () => ([
 
 const createQueryEditorSplitNodeMock = (element: any) => {
   const className = String(element?.props?.className || '');
+  if (className.includes('gn-v2-query-monaco-stage')) {
+    return {
+      style: {},
+      getBoundingClientRect: () => ({ height: 300 }),
+    };
+  }
   if (className.includes('gn-v2-query-monaco-shell')) {
     return {
       style: {},
@@ -8503,17 +8509,15 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-results .query-result-tab-text {');
   });
 
-  it('keeps Monaco find widget offset styles scoped to the v2 query editor shell', () => {
+  it('keeps Monaco find widget spacing scoped to the v2 query editor shell', () => {
     const source = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
     const css = readV2ThemeCss();
 
-    expect(source).toContain('QUERY_EDITOR_MONACO_FIND_WIDGET_OFFSET_PX = 10');
-    expect(source).toContain("editor.contrib.findController");
-    expect(source).toContain('MutationObserver');
-    expect(source).toContain('gn-v2-query-monaco-shell-find-visible');
-    expect(source).toContain('heightInPx: QUERY_EDITOR_MONACO_FIND_WIDGET_OFFSET_PX');
-    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-monaco-shell .monaco-editor .find-widget.visible {');
-    expect(css).toContain('top: 10px !important;');
+    expect(source).toContain('addExtraSpaceOnTop: true');
+    expect(css).toContain('body[data-ui-version="v2"] .gn-v2-query-monaco-stage:has(.monaco-editor .find-widget.visible:not(.hiddenEditor)) {');
+    expect(css).toContain('padding-top: 24px;');
+    expect(css).toContain('overflow: visible;');
+    expect(css).not.toContain('body[data-ui-version="v2"] .gn-v2-query-monaco-stage .monaco-editor .find-widget {');
   });
 
   it('keeps the v2 query editor toolbar grouped and compact', () => {
@@ -8715,11 +8719,11 @@ describe('QueryEditor external SQL save', () => {
       );
     });
 
-    const editorShell = renderer.root.find((node) => {
+    const editorStage = renderer.root.find((node) => {
       const className = String(node.props?.className || '');
-      return className.includes('gn-v2-query-monaco-shell');
+      return className.includes('gn-v2-query-monaco-stage');
     });
-    expect(editorShell.props.style.height).toBe(525);
+    expect(editorStage.props.style.height).toBe(525);
   });
 
   it('inserts sidebar object text when dropped into the SQL editor', async () => {

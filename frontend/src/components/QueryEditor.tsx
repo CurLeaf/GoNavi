@@ -148,26 +148,10 @@ export {
 const buildQueryEditorMonacoActionLabel = (key: string): string =>
     `GoNavi: ${translate(key)}`;
 
-const QUERY_EDITOR_MONACO_FIND_WIDGET_OFFSET_PX = 10;
 const QUERY_EDITOR_MONACO_FIND_OPTIONS = {
     addExtraSpaceOnTop: true,
 } as const;
 const QUERY_EDITOR_NATIVE_SELECT_CURRENT_LINE_EVENT = 'gonavi:native-select-current-line';
-
-type QueryEditorMonacoFindStateChangeEvent = {
-    isRevealed?: boolean;
-};
-
-type QueryEditorMonacoFindState = {
-    isRevealed?: boolean;
-    onFindReplaceStateChange?: (
-        listener: (event: QueryEditorMonacoFindStateChangeEvent) => void,
-    ) => { dispose?: () => void } | void;
-};
-
-type QueryEditorMonacoFindController = {
-    getState?: () => QueryEditorMonacoFindState | null;
-};
 
 const QUERY_EDITOR_SQL_PROMPT_PLACEHOLDER = '{SQL}';
 
@@ -800,13 +784,10 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   // Resizing state
   const [editorHeight, setEditorHeight] = useState(300);
+  const editorStageRef = useRef<HTMLDivElement | null>(null);
   const editorShellRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
-  const findWidgetOffsetZoneIdRef = useRef<string | null>(null);
-  const findWidgetOffsetVisibleRef = useRef(false);
-  const findWidgetStateDisposableRef = useRef<{ dispose?: () => void } | null>(null);
-  const findWidgetDomObserverRef = useRef<MutationObserver | null>(null);
   const runQueryActionRef = useRef<any>(null);
   const selectCurrentStatementActionRef = useRef<any>(null);
   const duplicateCurrentLineActionRef = useRef<any>(null);
@@ -1006,131 +987,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
       editor.trigger?.('keyboard', 'actions.find', null);
   }, []);
-  const disconnectQueryEditorFindWidgetObserver = useCallback(() => {
-      findWidgetDomObserverRef.current?.disconnect?.();
-      findWidgetDomObserverRef.current = null;
-  }, []);
-  const clearQueryEditorFindWidgetOffset = useCallback((editorInstance?: any) => {
-      editorShellRef.current?.classList?.remove?.('gn-v2-query-monaco-shell-find-visible');
-      findWidgetOffsetVisibleRef.current = false;
-      const editor = editorInstance || editorRef.current;
-      const currentZoneId = findWidgetOffsetZoneIdRef.current;
-      if (!currentZoneId || !editor?.changeViewZones) {
-          findWidgetOffsetZoneIdRef.current = null;
-          return;
-      }
-      editor.changeViewZones((accessor: any) => {
-          accessor.removeZone(currentZoneId);
-      });
-      findWidgetOffsetZoneIdRef.current = null;
-  }, []);
-  const syncQueryEditorFindWidgetOffset = useCallback((editorInstance: any, visible: boolean) => {
-      const editor = editorInstance || editorRef.current;
-      const shouldOffset = isV2Ui && visible;
-      editorShellRef.current?.classList?.toggle?.('gn-v2-query-monaco-shell-find-visible', shouldOffset);
-      const currentVisible = findWidgetOffsetVisibleRef.current;
-      const hasZone = Boolean(findWidgetOffsetZoneIdRef.current);
-
-      if (currentVisible === shouldOffset && (!shouldOffset || hasZone)) {
-          return;
-      }
-      findWidgetOffsetVisibleRef.current = shouldOffset;
-
-      if (!editor?.changeViewZones) {
-          return;
-      }
-
-      const currentZoneId = findWidgetOffsetZoneIdRef.current;
-      if (!shouldOffset && !currentZoneId) {
-          return;
-      }
-
-      editor.changeViewZones((accessor: any) => {
-          if (currentZoneId) {
-              accessor.removeZone(currentZoneId);
-              findWidgetOffsetZoneIdRef.current = null;
-          }
-          if (!shouldOffset || typeof document === 'undefined' || typeof document.createElement !== 'function') {
-              return;
-          }
-          const domNode = document.createElement('div');
-          domNode.className = 'gn-v2-query-find-widget-offset-zone';
-          domNode.setAttribute('aria-hidden', 'true');
-          findWidgetOffsetZoneIdRef.current = accessor.addZone({
-              afterLineNumber: 0,
-              heightInPx: QUERY_EDITOR_MONACO_FIND_WIDGET_OFFSET_PX,
-              domNode,
-              suppressMouseDown: true,
-          });
-      });
-  }, [isV2Ui]);
-  const bindQueryEditorFindWidgetDomObserver = useCallback((editorInstance?: any) => {
-      const editor = editorInstance || editorRef.current;
-      disconnectQueryEditorFindWidgetObserver();
-      if (!editor || !isV2Ui) {
-          return;
-      }
-
-      const resolveFindWidgetVisible = () => {
-          const shell = editorShellRef.current;
-          const findWidget = shell?.querySelector?.('.monaco-editor .find-widget');
-          if (!findWidget || !('classList' in findWidget)) {
-              return false;
-          }
-          return findWidget.classList.contains('visible') && !findWidget.classList.contains('hiddenEditor');
-      };
-
-      const syncFromDom = () => {
-          syncQueryEditorFindWidgetOffset(editor, resolveFindWidgetVisible());
-      };
-
-      syncFromDom();
-
-      if (typeof MutationObserver !== 'function' || !editorShellRef.current) {
-          return;
-      }
-
-      const observer = new MutationObserver(() => {
-          syncFromDom();
-      });
-      observer.observe(editorShellRef.current, {
-          subtree: true,
-          childList: true,
-          attributes: true,
-          attributeFilter: ['class'],
-      });
-      findWidgetDomObserverRef.current = observer;
-
-      if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
-          window.requestAnimationFrame(() => {
-              syncFromDom();
-          });
-      }
-  }, [disconnectQueryEditorFindWidgetObserver, isV2Ui, syncQueryEditorFindWidgetOffset]);
-  const bindQueryEditorFindWidgetOffset = useCallback((editorInstance?: any) => {
-      const editor = editorInstance || editorRef.current;
-      findWidgetStateDisposableRef.current?.dispose?.();
-      findWidgetStateDisposableRef.current = null;
-      clearQueryEditorFindWidgetOffset(editor);
-      if (!editor || !isV2Ui) {
-          return;
-      }
-
-      const findController = editor.getContribution?.('editor.contrib.findController') as QueryEditorMonacoFindController | null;
-      const findState = findController?.getState?.();
-      bindQueryEditorFindWidgetDomObserver(editor);
-      if (!findState) {
-          return;
-      }
-
-      syncQueryEditorFindWidgetOffset(editor, Boolean(findState.isRevealed));
-      findWidgetStateDisposableRef.current = findState.onFindReplaceStateChange?.((event) => {
-          if (!event?.isRevealed) {
-              return;
-          }
-          syncQueryEditorFindWidgetOffset(editor, Boolean(findState.isRevealed));
-      }) || null;
-  }, [bindQueryEditorFindWidgetDomObserver, clearQueryEditorFindWidgetOffset, isV2Ui, syncQueryEditorFindWidgetOffset]);
   const handleShowSqlExecutionLog = useCallback((mode: 'open' | 'toggle' = 'toggle') => {
       if (!isActive) {
           return;
@@ -1157,20 +1013,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       translate: (key, params) => translate(key, params),
   });
   const autoFetchVisible = useAutoFetchVisibility();
-
-  useEffect(() => {
-      const editor = editorRef.current;
-      if (!editor) {
-          return;
-      }
-      bindQueryEditorFindWidgetOffset(editor);
-      return () => {
-          disconnectQueryEditorFindWidgetObserver();
-          findWidgetStateDisposableRef.current?.dispose?.();
-          findWidgetStateDisposableRef.current = null;
-          clearQueryEditorFindWidgetOffset(editor);
-      };
-  }, [bindQueryEditorFindWidgetOffset, clearQueryEditorFindWidgetOffset, disconnectQueryEditorFindWidgetObserver]);
 
   useEffect(() => {
       const nextContextKey = [
@@ -2141,15 +1983,15 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const resolveEditorSplitAvailableHeight = useCallback(() => {
       const rootRect = queryEditorRootRef.current?.getBoundingClientRect?.();
       const paneRect = editorPaneRef.current?.getBoundingClientRect?.();
-      const shellRect = editorShellRef.current?.getBoundingClientRect?.();
+      const editorContainerRect = (editorStageRef.current || editorShellRef.current)?.getBoundingClientRect?.();
       const rootHeight = Number(rootRect?.height || 0);
       const paneHeight = Number(paneRect?.height || 0);
-      const shellHeight = Number(shellRect?.height || 0);
+      const editorContainerHeight = Number(editorContainerRect?.height || 0);
       if (!Number.isFinite(rootHeight) || rootHeight <= 0) {
           return 0;
       }
-      const nonEditorPaneHeight = paneHeight > 0 && shellHeight > 0
-          ? Math.max(0, paneHeight - shellHeight)
+      const nonEditorPaneHeight = paneHeight > 0 && editorContainerHeight > 0
+          ? Math.max(0, paneHeight - editorContainerHeight)
           : 0;
       const availableHeight = rootHeight - nonEditorPaneHeight;
       return Number.isFinite(availableHeight) && availableHeight > 0 ? availableHeight : 0;
@@ -2213,8 +2055,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const applyEditorHeightToDom = useCallback(() => {
       const nextHeight = pendingEditorHeightRef.current;
-      if (editorShellRef.current) {
-          editorShellRef.current.style.height = `${nextHeight}px`;
+      const editorContainer = editorStageRef.current || editorShellRef.current;
+      if (editorContainer) {
+          editorContainer.style.height = `${nextHeight}px`;
       }
       editorRef.current?.layout?.();
   }, []);
@@ -2276,7 +2119,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
       e.preventDefault();
-      const currentEditorHeight = Number(editorShellRef.current?.getBoundingClientRect?.().height || editorHeight);
+      const currentEditorHeight = Number((editorStageRef.current || editorShellRef.current)?.getBoundingClientRect?.().height || editorHeight);
       const startHeight = Number.isFinite(currentEditorHeight) && currentEditorHeight > 0 ? currentEditorHeight : editorHeight;
       dragRef.current = { startY: e.clientY, startHeight, currentHeight: startHeight };
       pendingEditorHeightRef.current = startHeight;
@@ -2584,7 +2427,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               above: false,
           },
       });
-      bindQueryEditorFindWidgetOffset(editor);
 
       const applyNavigationHoverStateAtPosition = (targetPosition: { lineNumber: number; column: number } | null) => {
           if (!ctrlMetaPressedRef.current) {
@@ -6092,6 +5934,20 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           onFinish={(action) => void finishPendingSqlTransaction(action, 'manual')}
       />
   );
+  const queryEditorStageStyle: React.CSSProperties = isResultPanelVisible
+      ? {
+          height: editorHeight,
+          minHeight: '100px',
+      }
+      : {
+          flex: '1 1 auto',
+          minHeight: 0,
+      };
+  const resolvedQueryEditorStageStyle: React.CSSProperties = isV2Ui
+      ? {
+          ...queryEditorStageStyle,
+      } as React.CSSProperties
+      : queryEditorStageStyle;
 
   return (
     <div ref={queryEditorRootRef} className={isV2Ui ? 'gn-v2-query-editor' : undefined} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -6142,36 +5998,42 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       />
       
       <div
-        ref={editorShellRef}
-        className={isV2Ui ? 'gn-v2-query-monaco-shell' : undefined}
-        style={isResultPanelVisible ? { height: editorHeight, minHeight: '100px' } : { flex: '1 1 auto', minHeight: 0 }}
+        ref={editorStageRef}
+        className={isV2Ui ? 'gn-v2-query-monaco-stage' : undefined}
+        style={resolvedQueryEditorStageStyle}
       >
-        <Editor 
-          height="100%" 
-          gonaviTypography="code"
-          defaultLanguage="sql" 
-          theme={darkMode ? "transparent-dark" : "transparent-light"}
-          defaultValue={query}
-          onChange={(val) => {
-              const nextValue = val || '';
-              syncQueryDraft(nextValue);
-          }}
-          onMount={handleEditorDidMount}
-          options={{ 
-            minimap: { enabled: false }, 
-            automaticLayout: true,
-            fixedOverflowWidgets: true,
-            find: QUERY_EDITOR_MONACO_FIND_OPTIONS,
-            hover: {
-              enabled: true,
-              delay: QUERY_EDITOR_HOVER_DELAY_MS,
-              above: false,
-            },
-            scrollBeyondLastLine: false,
-            quickSuggestions: { other: true, comments: false, strings: false },
-            suggestOnTriggerCharacters: true,
-          }}
-        />
+        <div
+          ref={editorShellRef}
+          className={isV2Ui ? 'gn-v2-query-monaco-shell' : undefined}
+          style={isV2Ui ? { flex: '1 1 auto', minHeight: 0 } : undefined}
+        >
+          <Editor 
+            height="100%" 
+            gonaviTypography="code"
+            defaultLanguage="sql" 
+            theme={darkMode ? "transparent-dark" : "transparent-light"}
+            defaultValue={query}
+            onChange={(val) => {
+                const nextValue = val || '';
+                syncQueryDraft(nextValue);
+            }}
+            onMount={handleEditorDidMount}
+            options={{ 
+              minimap: { enabled: false }, 
+              automaticLayout: true,
+              fixedOverflowWidgets: true,
+              find: QUERY_EDITOR_MONACO_FIND_OPTIONS,
+              hover: {
+                enabled: true,
+                delay: QUERY_EDITOR_HOVER_DELAY_MS,
+                above: false,
+              },
+              scrollBeyondLastLine: false,
+              quickSuggestions: { other: true, comments: false, strings: false },
+              suggestOnTriggerCharacters: true,
+            }}
+          />
+        </div>
       </div>
 
       {isResultPanelVisible && (
