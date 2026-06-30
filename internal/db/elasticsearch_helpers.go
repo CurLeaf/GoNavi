@@ -237,6 +237,12 @@ var reSQLOffset = regexp.MustCompile(`(?i)\bOFFSET\s+(\d+)`)
 // reSQLOrderBy 匹配 ORDER BY 子句。
 var reSQLOrderBy = regexp.MustCompile(`(?i)\bORDER\s+BY\s+(.+?)(?:\bLIMIT\b|\bOFFSET\b|$)`)
 
+func trimESTrailingClauseSyntax(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimRight(s, " \t\r\n;；")
+	return strings.TrimSpace(s)
+}
+
 // parseESSQL 解析简单 SELECT SQL 为结构化组成部分。
 func parseESSQL(sql string) (esParsedSQL, bool) {
 	upper := strings.ToUpper(strings.TrimSpace(sql))
@@ -255,7 +261,7 @@ func parseESSQL(sql string) (esParsedSQL, bool) {
 	// 提取 SELECT 列列表
 	selectEnd := strings.Index(upper, " FROM ")
 	if selectEnd > 6 {
-		parsed.Columns = strings.TrimSpace(sql[6:selectEnd])
+		parsed.Columns = trimESTrailingClauseSyntax(sql[6:selectEnd])
 	} else {
 		parsed.Columns = "*"
 	}
@@ -263,13 +269,13 @@ func parseESSQL(sql string) (esParsedSQL, bool) {
 	// 提取 WHERE 子句
 	whereMatch := regexp.MustCompile(`(?i)\bWHERE\s+(.+?)(?:\bORDER\b|\bLIMIT\b|\bOFFSET\b|$)`).FindStringSubmatch(sql)
 	if len(whereMatch) >= 2 {
-		parsed.Where = strings.TrimSpace(whereMatch[1])
+		parsed.Where = trimESTrailingClauseSyntax(whereMatch[1])
 	}
 
 	// 提取 ORDER BY
 	orderMatch := reSQLOrderBy.FindStringSubmatch(sql)
 	if len(orderMatch) >= 2 {
-		parsed.OrderBy = strings.TrimSpace(orderMatch[1])
+		parsed.OrderBy = trimESTrailingClauseSyntax(orderMatch[1])
 	}
 
 	// 提取 LIMIT

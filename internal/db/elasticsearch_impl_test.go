@@ -1608,6 +1608,54 @@ func TestElasticsearchSQLSelectDoesNotRequireXPackSQL(t *testing.T) {
 	}
 }
 
+func TestElasticsearchSQLWhereWithTrailingSemicolonPreservesNumericRange(t *testing.T) {
+	var capturedBody string
+	server := newMockESServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/log_manage_entity_v2/_search" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		capturedBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"hits": {
+				"total": {"value": 1},
+				"hits": [
+					{"_index": "log_manage_entity_v2", "_id": "1", "_source": {"operateTime": 1782282529001, "message": "ok"}}
+				]
+			}
+		}`))
+	})
+
+	db := newTestESDB(t, server.URL, "")
+	rows, _, err := db.Query(`select * from log_manage_entity_v2 where operateTime > 1782282529000;`)
+	if err != nil {
+		t.Fatalf("带分号的 ES SQL 查询应执行成功：%v", err)
+	}
+	if len(rows) != 1 || rows[0]["message"] != "ok" {
+		t.Fatalf("期望返回 1 条命中数据，实际 rows=%#v", rows)
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(capturedBody), &payload); err != nil {
+		t.Fatalf("解析发往 ES 的请求体失败：%v body=%s", err, capturedBody)
+	}
+	query, _ := payload["query"].(map[string]interface{})
+	rangeNode, _ := query["range"].(map[string]interface{})
+	fieldNode, _ := rangeNode["operateTime"].(map[string]interface{})
+	gtValue, exists := fieldNode["gt"]
+	if !exists {
+		t.Fatalf("期望生成 range.gt 条件，实际 payload=%v", payload)
+	}
+	if _, ok := gtValue.(float64); !ok {
+		t.Fatalf("operateTime.gt 应保持为数值，实际类型=%T 值=%v body=%s", gtValue, gtValue, capturedBody)
+	}
+	if gtValue.(float64) != 1782282529000 {
+		t.Fatalf("operateTime.gt 数值错误，实际=%v body=%s", gtValue, capturedBody)
+	}
+}
+
 // ---- extractESSQLFromTable 测试 ----
 
 func TestESExtractSQLFromTable(t *testing.T) {
@@ -1682,6 +1730,28 @@ func TestESParseSQL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestESParseSQLTrimsTrailingSemicolonFromClauses(t *testing.T) {
+	t.Run("WHERE 末尾分号不应进入条件值", func(t *testing.T) {
+		parsed, ok := parseESSQL(`select * from log_manage_entity_v2 where operateTime > 1782282529000;`)
+		if !ok {
+			t.Fatal("parseESSQL 应成功解析带分号的 WHERE 查询")
+		}
+		if parsed.Where != "operateTime > 1782282529000" {
+			t.Fatalf("WHERE 子句不应包含尾部分号，实际=%q", parsed.Where)
+		}
+	})
+
+	t.Run("ORDER BY 末尾分号不应进入排序子句", func(t *testing.T) {
+		parsed, ok := parseESSQL(`select * from log_manage_entity_v2 order by operateTime desc;`)
+		if !ok {
+			t.Fatal("parseESSQL 应成功解析带分号的 ORDER BY 查询")
+		}
+		if parsed.OrderBy != "operateTime desc" {
+			t.Fatalf("ORDER BY 子句不应包含尾部分号，实际=%q", parsed.OrderBy)
+		}
+	})
 }
 
 func TestESConvertWhere(t *testing.T) {
