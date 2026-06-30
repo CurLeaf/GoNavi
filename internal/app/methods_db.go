@@ -998,6 +998,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 	}()
 
 	runConfig := normalizeRunConfig(config, dbName)
+	resolvedDBType := resolveDDLDBType(runConfig)
 	buildStatementExecutionFailedMessage := func(index int, err error, previousSuccessCount int) string {
 		message := a.appText("db.backend.error.multi_statement_execution_failed", map[string]any{
 			"index":  index,
@@ -1059,7 +1060,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 			break
 		}
 	}
-	useNativeMultiResult := shouldUseNativeMultiResultBatch(runConfig.Type, statements, allReadOnly)
+	useNativeMultiResult := shouldUseNativeMultiResultBatch(resolvedDBType, statements, allReadOnly)
 
 	runMultiQuery := func(inst db.Database) ([]connection.ResultSetData, []string, error) {
 		if !useNativeMultiResult {
@@ -1226,7 +1227,7 @@ func (a *App) DBQueryMulti(config connection.ConnectionConfig, dbName string, qu
 		isReadStmt := isReadOnlySQLQuery(runConfig.Type, stmt)
 		tryQueryStmtFirst := shouldTryQueryResultFirst(runConfig.Type, stmt)
 		if isReadStmt || tryQueryStmtFirst {
-			preferPlainReadQuery := isReadStmt && shouldPreferPlainReadQueryResult(runConfig.Type)
+			preferPlainReadQuery := isReadStmt && shouldPreferPlainReadQueryResult(resolvedDBType)
 			var (
 				data             []map[string]interface{}
 				columns          []string
@@ -1417,8 +1418,13 @@ func shouldUseNativeMultiResultBatch(dbType string, statements []string, allRead
 }
 
 func shouldPreferPlainReadQueryResult(dbType string) bool {
-	switch resolveDDLDBType(connection.ConnectionConfig{Type: dbType}) {
-	case "postgres", "kingbase", "highgo", "vastbase", "opengauss", "gaussdb":
+	switch strings.ToLower(strings.TrimSpace(dbType)) {
+	case "postgres", "postgresql",
+		"kingbase", "kingbase8", "kingbasees", "kingbasev8",
+		"highgo", "vastbase",
+		"opengauss", "open_gauss", "open-gauss",
+		"gaussdb", "gauss_db", "gauss-db",
+		"dameng", "dm", "dm8":
 		return true
 	default:
 		return false

@@ -265,6 +265,7 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 	if text == nil {
 		text = defaultDBBackendText
 	}
+	resolvedDBType := resolveDDLDBType(runConfig)
 	buildStatementExecutionFailedError := func(index int, err error) error {
 		return fmt.Errorf("%s", text("db.backend.error.multi_statement_execution_failed", map[string]any{
 			"index":  index,
@@ -298,7 +299,15 @@ func executeManagedSQLTransactionStatements(ctx context.Context, session db.Stat
 				usedMultiResult  bool
 				err              error
 			)
-			if sessionMultiQueryMessageTarget != nil {
+			if isReadStmt && shouldPreferPlainReadQueryResult(resolvedDBType) {
+				if sessionQueryMessageTarget != nil {
+					data, columns, messages, err = sessionQueryMessageTarget.QueryContextWithMessages(ctx, stmt)
+				} else if sessionQueryTarget != nil {
+					data, columns, err = sessionQueryTarget.QueryContext(ctx, stmt)
+				} else {
+					err = buildTransactionQueryUnsupportedError()
+				}
+			} else if sessionMultiQueryMessageTarget != nil {
 				statementResults, messages, err = sessionMultiQueryMessageTarget.QueryMultiContextWithMessages(ctx, stmt)
 				usedMultiResult = true
 			} else if sessionMultiQueryTarget != nil {
