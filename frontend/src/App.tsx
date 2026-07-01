@@ -71,6 +71,7 @@ import {
   hasLegacyMigratableSensitiveItems,
   stripLegacyPersistedConnectionById,
 } from './utils/legacyConnectionStorage';
+import { DEFAULT_QUERY_TEMPLATE } from './components/queryEditor/QueryEditorHelpers';
 import {
   getSecurityUpdateStatusMeta,
   resolveSecurityUpdateEntryVisibility,
@@ -279,6 +280,7 @@ function App() {
       : (sanitizeSidebarTreeFontSize(appearance.sidebarTreeFontSize) ?? effectiveFontSize);
   const effectiveSidebarRailScale = sanitizeV2SidebarRailScale(appearance.v2SidebarRailScale);
   const tableDoubleClickAction = appearance.tableDoubleClickAction === 'open-design' ? 'open-design' : 'open-data';
+  const newQuerySqlTemplate = appearance.newQuerySqlTemplate ?? DEFAULT_QUERY_TEMPLATE;
   const tabDisplaySettings = useMemo(
       () => sanitizeTabDisplaySettings(appearance.tabDisplay),
       [appearance.tabDisplay],
@@ -4815,6 +4817,33 @@ function App() {
                                                   ? t('app.theme.font_family.mono_fallback_hint')
                                                   : t('app.theme.font_family.mono_hint')}
                                           </div>
+                                      </div>
+                                  </div>
+                              </div>
+                              <div style={utilityPanelStyle}>
+                                  <div style={{ marginBottom: 10, fontWeight: 500 }}>{t('app.theme.query_template.title')}</div>
+                                  <div style={{ display: 'grid', gap: 10 }}>
+                                      <div style={utilityMutedTextStyle}>
+                                          {t('app.theme.query_template.description')}
+                                      </div>
+                                      <Input.TextArea
+                                          value={newQuerySqlTemplate}
+                                          autoSize={{ minRows: 3, maxRows: 8 }}
+                                          spellCheck={false}
+                                          onChange={(event) => setAppearance({ newQuerySqlTemplate: event.target.value })}
+                                          style={{ fontFamily: 'var(--gn-font-mono)' }}
+                                      />
+                                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                                          <div style={utilityMutedTextStyle}>
+                                              {t('app.theme.query_template.hint')}
+                                          </div>
+                                          <Button
+                                              size="small"
+                                              disabled={appearance.newQuerySqlTemplate === null}
+                                              onClick={() => setAppearance({ newQuerySqlTemplate: null })}
+                                          >
+                                              {t('app.theme.query_template.reset_default')}
+                                          </Button>
                                       </div>
                                   </div>
                               </div>

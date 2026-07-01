@@ -682,11 +682,25 @@ export const splitCompletionSchemaAndTable = (qualified: string): { schema: stri
 
 export const DEFAULT_QUERY_TEMPLATE = 'SELECT * FROM ';
 
+export const resolveNewQueryDefaultTemplate = (
+    template: string | null | undefined,
+): string => {
+    if (template === null || template === undefined) {
+        return DEFAULT_QUERY_TEMPLATE;
+    }
+    return String(template)
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n');
+};
+
 export const getTabQueryValue = (tab: TabData): string => (
     typeof tab.query === 'string' ? tab.query : ''
 );
 
-export const getInitialEditorQuery = (tab: TabData): string => {
+export const getInitialEditorQuery = (
+    tab: TabData,
+    defaultQueryTemplate: string | null | undefined = DEFAULT_QUERY_TEMPLATE,
+): string => {
     if (hasQueryTabDraft(tab.id)) {
         return getQueryTabDraft(tab.id);
     }
@@ -694,7 +708,7 @@ export const getInitialEditorQuery = (tab: TabData): string => {
     if (tabQuery || tab.filePath || tab.savedQueryId || tab.readOnly) {
         return tabQuery;
     }
-    return DEFAULT_QUERY_TEMPLATE;
+    return resolveNewQueryDefaultTemplate(defaultQueryTemplate);
 };
 
 export const resolveNextResultSetIndex = (sets: Array<{ key?: string }>): number => {

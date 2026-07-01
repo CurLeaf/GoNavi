@@ -82,6 +82,7 @@ describe('store appearance persistence', () => {
     expect(appearance.sidebarTreeFontSizeFollowGlobal).toBe(true);
     expect(appearance.customUIFontFamily).toBeNull();
     expect(appearance.customMonoFontFamily).toBeNull();
+    expect(appearance.newQuerySqlTemplate).toBeNull();
     expect(appearance.tabDisplay).toEqual({
       layout: 'single',
       primaryElements: ['connection', 'kind', 'object'],
@@ -258,6 +259,50 @@ describe('store appearance persistence', () => {
 
     expect(appearance.customUIFontFamily).toBe('IBM Plex Sans, PingFang SC');
     expect(appearance.customMonoFontFamily).toBeNull();
+  });
+
+  it('persists the new query SQL template while preserving blank and trailing-space overrides', async () => {
+    const { useStore } = await importStore();
+
+    useStore.getState().setAppearance({
+      newQuerySqlTemplate: 'SELECT * FROM ',
+    });
+    expect(useStore.getState().appearance.newQuerySqlTemplate).toBe('SELECT * FROM ');
+
+    useStore.getState().setAppearance({
+      newQuerySqlTemplate: 'SELECT id,\r\n       name\nFROM users;\r',
+    });
+
+    let persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.appearance.newQuerySqlTemplate).toBe('SELECT id,\n       name\nFROM users;\n');
+
+    vi.resetModules();
+    let reloaded = await importStore();
+    expect(reloaded.useStore.getState().appearance.newQuerySqlTemplate).toBe('SELECT id,\n       name\nFROM users;\n');
+
+    reloaded.useStore.getState().setAppearance({
+      newQuerySqlTemplate: '',
+    });
+
+    persisted = JSON.parse(storage.getItem('lite-db-storage') || '{}');
+    expect(persisted.state.appearance.newQuerySqlTemplate).toBe('');
+
+    vi.resetModules();
+    reloaded = await importStore();
+    expect(reloaded.useStore.getState().appearance.newQuerySqlTemplate).toBe('');
+
+    storage.setItem('lite-db-storage', JSON.stringify({
+      state: {
+        appearance: {
+          newQuerySqlTemplate: 123,
+        },
+      },
+      version: 13,
+    }));
+
+    vi.resetModules();
+    reloaded = await importStore();
+    expect(reloaded.useStore.getState().appearance.newQuerySqlTemplate).toBeNull();
   });
 
   it('persists v2 sidebar search preferences and sanitizes filter text', async () => {

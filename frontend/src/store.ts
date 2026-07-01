@@ -105,6 +105,7 @@ export interface AppearanceSettings extends DataGridDisplaySettings {
   v2SidebarRailScale: number;
   customUIFontFamily: string | null;
   customMonoFontFamily: string | null;
+  newQuerySqlTemplate: string | null;
   tabDisplay: TabDisplaySettings;
   redisDbAliases: RedisDbAliasMap;
 }
@@ -126,6 +127,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   v2SidebarRailScale: DEFAULT_V2_SIDEBAR_RAIL_SCALE,
   customUIFontFamily: null,
   customMonoFontFamily: null,
+  newQuerySqlTemplate: null,
   tabDisplay: DEFAULT_TAB_DISPLAY_SETTINGS,
   redisDbAliases: DEFAULT_REDIS_DB_ALIASES,
   ...DEFAULT_DATA_GRID_DISPLAY_SETTINGS,
@@ -140,6 +142,7 @@ const DEFAULT_STARTUP_FULLSCREEN = false;
 const LEGACY_DEFAULT_OPACITY = 0.95;
 const OPACITY_EPSILON = 1e-6;
 const MAX_SIDEBAR_PERSISTED_FILTER_LENGTH = 120;
+const MAX_NEW_QUERY_SQL_TEMPLATE_LENGTH = 32 * 1024;
 
 const sanitizeV2SidebarSearchMode = (
   value: unknown,
@@ -158,6 +161,19 @@ const sanitizeV2SidebarPersistedFilter = (value: unknown): string => {
     return DEFAULT_APPEARANCE.v2SidebarPersistedFilter;
   }
   return value.trim().slice(0, MAX_SIDEBAR_PERSISTED_FILTER_LENGTH);
+};
+
+const sanitizeNewQuerySqlTemplate = (value: unknown): string | null => {
+  if (value === null || value === undefined) {
+    return DEFAULT_APPEARANCE.newQuerySqlTemplate;
+  }
+  if (typeof value !== "string") {
+    return DEFAULT_APPEARANCE.newQuerySqlTemplate;
+  }
+  return value
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .slice(0, MAX_NEW_QUERY_SQL_TEMPLATE_LENGTH);
 };
 
 export const sanitizeV2SidebarRailScale = (value: unknown): number => {
@@ -2214,6 +2230,7 @@ const sanitizeAppearance = (
     ),
     customUIFontFamily: sanitizeFontFamilyInput(appearance.customUIFontFamily),
     customMonoFontFamily: sanitizeFontFamilyInput(appearance.customMonoFontFamily),
+    newQuerySqlTemplate: sanitizeNewQuerySqlTemplate(appearance.newQuerySqlTemplate),
     tabDisplay: sanitizeTabDisplaySettings(appearance.tabDisplay),
     redisDbAliases: sanitizeRedisDbAliases(appearance.redisDbAliases),
     showDataTableVerticalBorders:

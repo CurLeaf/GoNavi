@@ -124,6 +124,7 @@ import {
     queryCompletionMetadataRowsBySpecs,
     readSidebarSqlDropText,
     matchLeadingSelectTableReference,
+    resolveNewQueryDefaultTemplate,
     resolveEventTargetNode,
     resolveNextResultSetIndex,
     resolveOracleExactCaseTableReference,
@@ -759,7 +760,11 @@ const resetSharedQueryEditorMetadata = () => {
 
 
 const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isActive = true }) => {
-  const [query, setQuery] = useState(getInitialEditorQuery(tab));
+  const appearance = useStore(state => state.appearance);
+  const [query, setQuery] = useState(() => getInitialEditorQuery(
+      tab,
+      resolveNewQueryDefaultTemplate(appearance.newQuerySqlTemplate),
+  ));
   const isExternalSQLFileTab = Boolean(String(tab.filePath || '').trim());
   const isObjectEditQueryTab = tab.type === 'query' && tab.queryMode === 'object-edit';
   
@@ -860,7 +865,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const theme = useStore(state => state.theme);
   const languagePreference = useStore((state) => state.languagePreference);
   void languagePreference;
-  const appearance = useStore(state => state.appearance);
   const darkMode = theme === 'dark';
   const isV2Ui = appearance.uiVersion === 'v2';
   const sqlFormatOptions = useStore(state => state.sqlFormatOptions);

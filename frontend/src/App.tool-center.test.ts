@@ -451,8 +451,17 @@ describe('global appearance tokens', () => {
     expect(linuxCJKFontBannerSource).not.toContain('Font Settings');
     expect(appSource).toContain("t('app.theme.font_family.linux_cjk_install_prefix')");
     expect(appSource).toContain("t('app.theme.font_family.linux_cjk_install_suffix')");
+    expect(appSource).toContain("t('app.theme.query_template.title')");
+    expect(appSource).toContain("t('app.theme.query_template.description')");
+    expect(appSource).toContain("t('app.theme.query_template.hint')");
+    expect(appSource).toContain("t('app.theme.query_template.reset_default')");
+    expect(appSource).toContain("const newQuerySqlTemplate = appearance.newQuerySqlTemplate ?? DEFAULT_QUERY_TEMPLATE;");
+    expect(appSource).toContain("onChange={(event) => setAppearance({ newQuerySqlTemplate: event.target.value })}");
+    expect(appSource).toContain("onClick={() => setAppearance({ newQuerySqlTemplate: null })}");
     expect(appSource).not.toContain('Ubuntu/Linux 未检测到中文 CJK 字体');
     expect(appSource).not.toContain('，然后重启 GoNavi。');
+    expect(appSource).not.toContain('新建查询默认 SQL');
+    expect(appSource).not.toContain('清空后新建查询将保持空白');
     expect(appSource).toContain('setIsLinuxCJKFontBannerDismissed(true)');
     expect(appSource).toContain('matchFontFamilyOption');
     expect(appSource).toContain('showSearch');

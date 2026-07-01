@@ -49,7 +49,10 @@ const storeState = vi.hoisted(() => ({
   saveQuery: vi.fn(),
   theme: 'light',
   languagePreference: 'zh-CN' as 'zh-CN' | 'en-US',
-  appearance: { uiVersion: 'legacy' as 'legacy' | 'v2' },
+  appearance: {
+    uiVersion: 'legacy' as 'legacy' | 'v2',
+    newQuerySqlTemplate: null as string | null,
+  },
   sqlFormatOptions: { keywordCase: 'upper' as const },
   setSqlFormatOptions: vi.fn(),
   queryOptions: {
@@ -705,6 +708,7 @@ describe('QueryEditor external SQL save', () => {
     storeState.aiPanelVisible = false;
     storeState.setAIPanelVisible.mockReset();
     storeState.appearance.uiVersion = 'legacy';
+    storeState.appearance.newQuerySqlTemplate = null;
     storeState.queryOptions = {
       maxRows: 5000,
       showColumnComment: true,
@@ -831,6 +835,26 @@ describe('QueryEditor external SQL save', () => {
     });
 
     expect(editorState.value).toBe('SELECT * FROM ');
+  });
+
+  it('uses the customized new query template for a fresh blank query tab', async () => {
+    storeState.appearance.newQuerySqlTemplate = 'SELECT id,\n       name\nFROM users;';
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    expect(editorState.value).toBe('SELECT id,\n       name\nFROM users;');
+  });
+
+  it('allows a blank new query template when the default content is cleared', async () => {
+    storeState.appearance.newQuerySqlTemplate = '';
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    expect(editorState.value).toBe('');
   });
 
   it('keeps the query results panel hidden by default on first entry', async () => {
