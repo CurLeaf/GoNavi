@@ -1019,6 +1019,7 @@ const DefinitionViewer: React.FC<DefinitionViewerProps> = ({ tab }) => {
                         lineHeight: 24,
                         lineNumbers: 'on',
                         lineNumbersMinChars: 4,
+                        stickyScroll: { enabled: false },
                         scrollBeyondLastLine: false,
                         wordWrap: 'on',
                         automaticLayout: true,
