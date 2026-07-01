@@ -1760,6 +1760,132 @@ describe('QueryEditor external SQL save', () => {
     });
   });
 
+  it('prioritizes SQL keywords for a new statement instead of leaking previous statement columns', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({
+      success: true,
+      data: [{ Database: 'main' }, { Database: 'analytics' }],
+    });
+    backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'main') {
+        return { success: true, data: [{ Tables_in_main: 'users' }] };
+      }
+      if (dbName === 'analytics') {
+        return { success: true, data: [{ Tables_in_analytics: 'events' }] };
+      }
+      return { success: true, data: [] };
+    });
+    backendApp.DBGetAllColumns.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'main') {
+        return {
+          success: true,
+          data: [{ tableName: 'users', name: 'updated_by', type: 'varchar(32)' }],
+        };
+      }
+      if (dbName === 'analytics') {
+        return {
+          success: true,
+          data: [{ tableName: 'events', name: 'update_time', type: 'timestamp' }],
+        };
+      }
+      return { success: true, data: [] };
+    });
+
+    editorState.value = 'SELECT *\nFROM analytics.events;\nupdate';
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.latestOnChange?.(editorState.value);
+    const result = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 3, column: 'update'.length + 1 },
+    );
+    const labels = result.suggestions.map((item: any) => item.label);
+
+    expect(labels[0]).toBe('UPDATE');
+    expect(labels).not.toContain('update_time');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
+  it('limits column completion to tables referenced before the cursor in the current statement', async () => {
+    let renderer!: ReactTestRenderer;
+    autoFetchState.visible = true;
+    storeState.connections[0].config.type = 'mysql';
+    storeState.connections[0].config.database = 'main';
+    backendApp.DBGetDatabases.mockResolvedValueOnce({
+      success: true,
+      data: [{ Database: 'main' }, { Database: 'analytics' }],
+    });
+    backendApp.DBGetTables.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'main') {
+        return { success: true, data: [{ Tables_in_main: 'users' }] };
+      }
+      if (dbName === 'analytics') {
+        return { success: true, data: [{ Tables_in_analytics: 'events' }] };
+      }
+      return { success: true, data: [] };
+    });
+    backendApp.DBGetAllColumns.mockImplementation(async (_config: any, dbName: string) => {
+      if (dbName === 'main') {
+        return {
+          success: true,
+          data: [{ tableName: 'users', name: 'updated_by', type: 'varchar(32)' }],
+        };
+      }
+      if (dbName === 'analytics') {
+        return {
+          success: true,
+          data: [{ tableName: 'events', name: 'update_time', type: 'timestamp' }],
+        };
+      }
+      return { success: true, data: [] };
+    });
+
+    editorState.value = 'SELECT * FROM analytics.events;\nSELECT * FROM main.users WHERE upd';
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: editorState.value, dbName: 'main' })} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const sqlProvider = findSqlCompletionProvider();
+    expect(sqlProvider).toBeTruthy();
+
+    editorState.latestOnChange?.(editorState.value);
+    const result = await sqlProvider.provideCompletionItems(
+      editorState.editor.getModel(),
+      { lineNumber: 2, column: 'SELECT * FROM main.users WHERE upd'.length + 1 },
+    );
+    const labels = result.suggestions.map((item: any) => item.label);
+
+    expect(labels).toContain('updated_by');
+    expect(labels).not.toContain('update_time');
+
+    await act(async () => {
+      renderer.unmount();
+    });
+  });
+
   it('resolves database and table targets for ctrl/cmd navigation', () => {
     const tables = [
       { dbName: 'main', tableName: 'users' },
@@ -7617,6 +7743,86 @@ describe('QueryEditor external SQL save', () => {
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 1 as a');
     expect(String(backendApp.DBQueryMulti.mock.calls[0][2])).not.toContain('select 3 as c');
     expect(messageApi.info).not.toHaveBeenCalledWith('没有可执行的 SQL。');
+  });
+
+  it('runs the statement at the cursor end from the keyboard shortcut when nothing is selected', async () => {
+    storeState.shortcutOptions.runQuery.mac = { enabled: true, combo: 'Meta+Enter' };
+    storeState.shortcutOptions.runQuery.windows = { enabled: true, combo: 'Ctrl+Enter' };
+    backendApp.DBQueryMultiTransactional.mockResolvedValueOnce({
+      success: true,
+      data: [{ columns: ['affectedRows'], rows: [{ affectedRows: 1 }] }],
+    });
+    const windowListeners: Record<string, ((event?: any) => void)[]> = {};
+    vi.stubGlobal('window', {
+      addEventListener: vi.fn((type: string, listener: (event?: any) => void) => {
+        windowListeners[type] ||= [];
+        windowListeners[type].push(listener);
+      }),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      setTimeout,
+      clearTimeout,
+      requestAnimationFrame: vi.fn((callback: FrameRequestCallback) => {
+        callback(0);
+        return 1;
+      }),
+      cancelAnimationFrame: vi.fn(),
+      innerHeight: 900,
+    });
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({
+        dbName: 'main',
+        query: [
+          "SELECT * FROM uk_back_corp WHERE mobile = '18823406451';",
+          "UPDATE uk_user SET email = NULL WHERE email = 'liuzhen@mail.chat5188.com'",
+        ].join('\n'),
+      })} />);
+    });
+
+    editorState.selection = null;
+    editorState.position = {
+      lineNumber: 2,
+      column: "UPDATE uk_user SET email = NULL WHERE email = 'liuzhen@mail.chat5188.com'".length + 1,
+    };
+    editorState.cursorPositionListeners.forEach((listener) => {
+      listener({ position: editorState.position });
+    });
+
+    const isMacRuntime = /(Mac|iPhone|iPad|iPod)/i.test(`${navigator.platform || ''} ${navigator.userAgent || ''}`);
+    const event = {
+      ctrlKey: !isMacRuntime,
+      metaKey: isMacRuntime,
+      altKey: false,
+      shiftKey: false,
+      key: 'Enter',
+      target: null,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    await act(async () => {
+      windowListeners.keydown?.forEach((listener) => listener(event));
+      for (let i = 0; i < 6; i += 1) {
+        await Promise.resolve();
+      }
+    });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(backendApp.DBQueryMultiTransactional).toHaveBeenCalledWith(
+      expect.anything(),
+      'main',
+      "UPDATE uk_user SET email = NULL WHERE email = 'liuzhen@mail.chat5188.com'",
+      'query-1',
+    );
+    expect(String(backendApp.DBQueryMultiTransactional.mock.calls[0][2])).not.toContain('SELECT * FROM uk_back_corp');
+    expect(messageApi.info).not.toHaveBeenCalledWith('没有可选择的 SQL 语句。');
+
+    await act(async () => {
+      renderer!.unmount();
+    });
   });
 
   it('shows "No executable SQL." in English when the cursor is on a blank line', async () => {

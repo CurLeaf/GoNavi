@@ -27,7 +27,7 @@ import { extractQueryResultTableRef, type QueryResultTableRef } from '../utils/q
 import { quoteIdentPart, quoteQualifiedIdent } from '../utils/sql';
 import { formatSqlExecutionError, hasLocalizedSqlTimeoutKeyword } from '../utils/sqlErrorSemantics';
 import { canReusePendingSqlEditorTransactionForType, shouldUseSqlEditorManagedTransactionForType } from '../utils/sqlEditorTransaction';
-import { findSqlStatementRanges, resolveExecutableSql } from '../utils/sqlStatementSelection';
+import { findSqlStatementRanges, resolveCurrentSqlStatementRange, resolveExecutableSql } from '../utils/sqlStatementSelection';
 import { isMacLikePlatform } from '../utils/appearance';
 import { splitSidebarQualifiedName } from '../utils/sidebarLocate';
 import { buildMySQLCompatibleViewMetadataSqls, isSidebarViewTableType, normalizeSidebarViewName } from '../utils/sidebarMetadata';
@@ -3218,9 +3218,18 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               };
 
               const fullText = model.getValue();
+              const cursorOffset = getNormalizedOffsetAtPosition(fullText, {
+                  lineNumber: Number(position?.lineNumber || 1),
+                  column: Number(position?.column || 1),
+              });
+              const currentStatementRange = resolveCurrentSqlStatementRange(fullText, cursorOffset);
 
               // 获取当前行光标前的内容
               const linePrefix = model.getLineContent(position.lineNumber).slice(0, position.column - 1);
+              const currentStatementPrefix = currentStatementRange
+                  ? fullText.slice(currentStatementRange.start, cursorOffset)
+                  : fullText.slice(0, cursorOffset);
+              const completionScopeText = currentStatementPrefix || linePrefix;
 
               // 0) 三段式 db.table.column 格式：当输入 db.table. 时提示列
               const threePartMatch = linePrefix.match(QUERY_EDITOR_SQL_THREE_PART_COMPLETION_REGEX);
@@ -3358,7 +3367,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   }
 
                   // 否则检查是否是表别名或表名，提示列
-                  const aliasMap = buildQueryEditorAliasMap(fullText, sharedCurrentDb || '');
+                  const aliasMap = buildQueryEditorAliasMap(completionScopeText, sharedCurrentDb || '');
 
                   const tableInfo = aliasMap[qualifier.toLowerCase()];
                   if (tableInfo) {
@@ -3392,7 +3401,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               tableRegex.lastIndex = 0;
               const foundTables = new Set<string>();
               let match;
-              while ((match = tableRegex.exec(fullText)) !== null) {
+              while ((match = tableRegex.exec(completionScopeText)) !== null) {
                   const t = normalizeQualifiedName(match[1] || '');
                   if (!t) continue;
                   // 存储完整标识 db.table 或 table
@@ -3414,11 +3423,22 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               };
               const expectsTableName = /\b(?:FROM|JOIN|UPDATE|INTO|DELETE\s+FROM|TABLE|DESCRIBE|DESC|EXPLAIN)\s+[`"]?[\w.]*$/i.test(linePrefix);
               const expectsRoutineName = /\bCALL\s+[`"]?[\w.]*$/i.test(linePrefix);
+              const matchesKeywordPrefix = wordPrefix.length > 0
+                  && dialectKeywords.some((keyword) => keyword.toLowerCase().startsWith(wordPrefix));
+              const statementPrefixBeforeWord = currentStatementPrefix.slice(
+                  0,
+                  Math.max(0, currentStatementPrefix.length - String(word.word || '').length),
+              );
+              const isNewStatementKeywordContext = !expectsTableName
+                  && !expectsRoutineName
+                  && matchesKeywordPrefix
+                  && !statementPrefixBeforeWord.trim();
               const shouldBoostKeywords = !expectsTableName
                   && !expectsRoutineName
-                  && wordPrefix.length > 0
-                  && dialectKeywords.some((keyword) => keyword.toLowerCase().startsWith(wordPrefix));
-              const sortGroups = shouldBoostKeywords
+                  && matchesKeywordPrefix;
+              const sortGroups = isNewStatementKeywordContext
+                  ? { keyword: '00', func: '10', routineCurrent: '11', routineOther: '12', tableCurrent: '20', tableOther: '21', columnCurrent: '30', columnOther: '31', db: '40' }
+                  : shouldBoostKeywords
                   ? { keyword: '00', func: '05', routineCurrent: '06', routineOther: '07', columnCurrent: '10', columnOther: '11', tableCurrent: '20', tableOther: '21', db: '30' }
                   : expectsRoutineName
                       ? { keyword: '30', func: '40', routineCurrent: '00', routineOther: '01', columnCurrent: '20', columnOther: '21', tableCurrent: '10', tableOther: '11', db: '35' }
@@ -3480,7 +3500,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
               const referencedColumns: CompletionColumnMeta[] = [];
               if (!expectsTableName) {
-                  const aliasMapForReferencedTables = buildQueryEditorAliasMap(fullText, currentDatabase);
+                  const aliasMapForReferencedTables = buildQueryEditorAliasMap(completionScopeText, currentDatabase);
                   const seenReferencedTables = new Set<string>();
                   for (const tableInfo of Object.values(aliasMapForReferencedTables)) {
                       const key = `${String(tableInfo.dbName || '').toLowerCase()}.${String(tableInfo.tableName || '').toLowerCase()}`;
@@ -3652,14 +3672,23 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                       sortText: sortGroups.func + f.name,
                   }));
 
-              const suggestions = [
-                  ...relevantColumns,   // FROM 表的列最优先
-                  ...tableSuggestions,  // 表次之
-                  ...dbSuggestions,     // 数据库
-                  ...routineSuggestions, // 存储过程/函数
-                  ...funcSuggestions,   // 内置函数
-                  ...keywordSuggestions // 关键字最后
-              ];
+              const suggestions = isNewStatementKeywordContext
+                  ? [
+                      ...keywordSuggestions,
+                      ...funcSuggestions,
+                      ...tableSuggestions,
+                      ...dbSuggestions,
+                      ...routineSuggestions,
+                      ...relevantColumns,
+                  ]
+                  : [
+                      ...relevantColumns,   // FROM 表的列最优先
+                      ...tableSuggestions,  // 表次之
+                      ...dbSuggestions,     // 数据库
+                      ...routineSuggestions, // 存储过程/函数
+                      ...funcSuggestions,   // 内置函数
+                      ...keywordSuggestions // 关键字最后
+                  ];
               return { suggestions };
           }
       }));
@@ -4956,10 +4985,6 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   };
 
   const handleRunSelectedShortcut = async () => {
-      if (!getSelectedSQL().trim()) {
-          message.info(translate('query_editor.message.no_selectable_sql'));
-          return;
-      }
       await handleRun();
   };
 
