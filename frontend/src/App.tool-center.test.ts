@@ -161,6 +161,18 @@ describe('tool center menu entries', () => {
     expect(shortcutSource).not.toContain('renderUtilityModalTitle');
   });
 
+  it('does not render an extra top back button in the tool center detail header', () => {
+    const detailHeaderSource = appSource.slice(
+      appSource.indexOf("{activeToolCenterPane ? ("),
+      appSource.indexOf('<div style={toolCenterDetailBodyStyle}>', appSource.indexOf("{activeToolCenterPane ? (")),
+    );
+
+    expect(detailHeaderSource).toContain('activeToolCenterPaneItem?.title ?? activeToolCenterGroup.title');
+    expect(detailHeaderSource).toContain('activeToolCenterPaneItem?.description ?? activeToolCenterGroup.description');
+    expect(detailHeaderSource).not.toContain('<Button onClick={closeToolCenterPane}>');
+    expect(detailHeaderSource).not.toContain("{t('common.back_to_previous')}");
+  });
+
   it('keeps the v2 AI entry in the sidebar and the legacy AI entry on the content edge', () => {
     expect(appSource).toContain('onToggleAI={toggleAIPanel}');
     expect(appSource).toContain('renderLegacyAIEdgeHandle');
@@ -234,6 +246,17 @@ describe('tool center menu entries', () => {
     expect(appSource).toContain('const resizeGuideColor = isV2Ui');
     expect(appSource).toContain("'var(--gn-accent, #16a34a)'");
     expect(appSource).toContain("darkMode ? 'rgba(246, 196, 83, 0.55)' : 'rgba(24, 144, 255, 0.5)'");
+  });
+
+  it('keeps tool center and settings v2 accents on the green palette instead of legacy yellow or blue tokens', () => {
+    expect(appSource).toContain("const v2AntPrimaryColor = darkMode ? '#22c55e' : '#16a34a';");
+    expect(appSource).toContain("colorPrimary: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#f6c453' : '#1677ff')");
+    expect(appSource).toContain("background: active\n                                  ? overlayTheme.selectedBg");
+    expect(appSource).toContain("background: active\n                                    ? overlayTheme.selectedText");
+    expect(appSource).toContain("background: active\n                                        ? overlayTheme.iconBg");
+    expect(appSource).toContain("color: active\n                                        ? overlayTheme.iconColor");
+    expect(appSource).toContain("background: isV2Ui ? v2AntPrimaryBgColor : (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)')");
+    expect(appSource).toContain("color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff')");
   });
 
   it('does not start sidebar resize from right-clicking the resize handle', () => {

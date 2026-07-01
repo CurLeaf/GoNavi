@@ -23,4 +23,14 @@ describe('buildOverlayWorkbenchTheme', () => {
     const darkTheme = buildOverlayWorkbenchTheme(true, { disableBackdropFilter: true });
     expect(darkTheme.shellBackdropFilter).toBe('none');
   });
+
+  it('builds v2 theme tokens from explicit uiVersion instead of reading body state', () => {
+    const darkTheme = buildOverlayWorkbenchTheme(true, { uiVersion: 'v2' });
+    const lightTheme = buildOverlayWorkbenchTheme(false, { uiVersion: 'v2' });
+
+    expect(darkTheme.iconColor).toBe('#22c55e');
+    expect(darkTheme.selectedText).toBe('#4ade80');
+    expect(lightTheme.iconColor).toBe('#16a34a');
+    expect(lightTheme.selectedText).toBe('#15803d');
+  });
 });

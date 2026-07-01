@@ -457,8 +457,11 @@ const Sidebar: React.FC<{
   };
   const bgMain = getBg('#141414');
   const overlayTheme = useMemo(
-      () => buildOverlayWorkbenchTheme(darkMode, { disableBackdropFilter: disableLocalBackdropFilter }),
-      [darkMode, disableLocalBackdropFilter, appearance.uiVersion],
+      () => buildOverlayWorkbenchTheme(darkMode, {
+          disableBackdropFilter: disableLocalBackdropFilter,
+          uiVersion: isV2Ui ? 'v2' : 'legacy',
+      }),
+      [darkMode, disableLocalBackdropFilter, isV2Ui],
   );
   const modalPanelStyle = useMemo(() => ({
       background: overlayTheme.shellBg,
@@ -2920,6 +2923,7 @@ const Sidebar: React.FC<{
         >
             <div className="sidebar-tree-scroll-content">
                 <Tree
+                    key={isV2Ui ? `v2-tree-${v2ExplorerFilter}` : 'legacy-tree'}
                     ref={treeRef}
                     showIcon
                     draggable={{

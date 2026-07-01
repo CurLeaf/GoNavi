@@ -1310,6 +1310,7 @@ function App() {
       darkMode,
       effectiveOpacity,
       effectiveUiScale,
+      isV2Ui,
       resolvedAppearance,
       sidebarWidth,
   });
@@ -2979,6 +2980,16 @@ function App() {
   const resizeGuideColor = isV2Ui
       ? 'var(--gn-accent, #16a34a)'
       : (darkMode ? 'rgba(246, 196, 83, 0.55)' : 'rgba(24, 144, 255, 0.5)');
+  const v2AntPrimaryColor = darkMode ? '#22c55e' : '#16a34a';
+  const v2AntPrimaryHoverColor = darkMode ? '#4ade80' : '#15803d';
+  const v2AntPrimaryActiveColor = darkMode ? '#16a34a' : '#166534';
+  const v2AntPrimaryBgColor = darkMode ? 'rgba(34, 197, 94, 0.20)' : '#dcfce7';
+  const v2AntPrimaryBgHoverColor = darkMode ? 'rgba(34, 197, 94, 0.28)' : '#bbf7d0';
+  const v2AntPrimaryBorderColor = darkMode ? 'rgba(34, 197, 94, 0.42)' : '#86efac';
+  const v2AntPrimaryBorderHoverColor = darkMode ? 'rgba(74, 222, 128, 0.58)' : '#4ade80';
+  const v2AntControlActiveBg = darkMode ? 'rgba(34, 197, 94, 0.16)' : 'rgba(34, 197, 94, 0.10)';
+  const v2AntControlActiveHoverBg = darkMode ? 'rgba(34, 197, 94, 0.24)' : 'rgba(34, 197, 94, 0.16)';
+  const v2AntControlOutline = darkMode ? 'rgba(34, 197, 94, 0.42)' : 'rgba(22, 163, 74, 0.22)';
   const antdTheme = useMemo(() => ({
       algorithm: darkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
       token: {
@@ -3000,20 +3011,20 @@ function App() {
           colorFillAlter: darkMode
               ? `rgba(38, 38, 38, ${effectiveOpacity})`
               : `rgba(250, 250, 250, ${effectiveOpacity})`,
-          colorPrimary: darkMode ? '#f6c453' : '#1677ff',
-          colorPrimaryHover: darkMode ? '#ffd666' : '#4096ff',
-          colorPrimaryActive: darkMode ? '#d8a93b' : '#0958d9',
-          colorInfo: darkMode ? '#f6c453' : '#1677ff',
-          colorLink: darkMode ? '#ffd666' : '#1677ff',
-          colorLinkHover: darkMode ? '#ffe58f' : '#4096ff',
-          colorLinkActive: darkMode ? '#d8a93b' : '#0958d9',
-          colorPrimaryBg: darkMode ? 'rgba(246, 196, 83, 0.22)' : '#e6f4ff',
-          colorPrimaryBgHover: darkMode ? 'rgba(246, 196, 83, 0.30)' : '#bae0ff',
-          colorPrimaryBorder: darkMode ? 'rgba(246, 196, 83, 0.45)' : '#91caff',
-          colorPrimaryBorderHover: darkMode ? 'rgba(246, 196, 83, 0.60)' : '#69b1ff',
-          controlItemBgActive: darkMode ? 'rgba(246, 196, 83, 0.20)' : 'rgba(22, 119, 255, 0.12)',
-          controlItemBgActiveHover: darkMode ? 'rgba(246, 196, 83, 0.28)' : 'rgba(22, 119, 255, 0.18)',
-          controlOutline: darkMode ? 'rgba(246, 196, 83, 0.50)' : 'rgba(5, 145, 255, 0.24)',
+          colorPrimary: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#f6c453' : '#1677ff'),
+          colorPrimaryHover: isV2Ui ? v2AntPrimaryHoverColor : (darkMode ? '#ffd666' : '#4096ff'),
+          colorPrimaryActive: isV2Ui ? v2AntPrimaryActiveColor : (darkMode ? '#d8a93b' : '#0958d9'),
+          colorInfo: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#f6c453' : '#1677ff'),
+          colorLink: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'),
+          colorLinkHover: isV2Ui ? v2AntPrimaryHoverColor : (darkMode ? '#ffe58f' : '#4096ff'),
+          colorLinkActive: isV2Ui ? v2AntPrimaryActiveColor : (darkMode ? '#d8a93b' : '#0958d9'),
+          colorPrimaryBg: isV2Ui ? v2AntPrimaryBgColor : (darkMode ? 'rgba(246, 196, 83, 0.22)' : '#e6f4ff'),
+          colorPrimaryBgHover: isV2Ui ? v2AntPrimaryBgHoverColor : (darkMode ? 'rgba(246, 196, 83, 0.30)' : '#bae0ff'),
+          colorPrimaryBorder: isV2Ui ? v2AntPrimaryBorderColor : (darkMode ? 'rgba(246, 196, 83, 0.45)' : '#91caff'),
+          colorPrimaryBorderHover: isV2Ui ? v2AntPrimaryBorderHoverColor : (darkMode ? 'rgba(246, 196, 83, 0.60)' : '#69b1ff'),
+          controlItemBgActive: isV2Ui ? v2AntControlActiveBg : (darkMode ? 'rgba(246, 196, 83, 0.20)' : 'rgba(22, 119, 255, 0.12)'),
+          controlItemBgActiveHover: isV2Ui ? v2AntControlActiveHoverBg : (darkMode ? 'rgba(246, 196, 83, 0.28)' : 'rgba(22, 119, 255, 0.18)'),
+          controlOutline: isV2Ui ? v2AntControlOutline : (darkMode ? 'rgba(246, 196, 83, 0.50)' : 'rgba(5, 145, 255, 0.24)'),
       },
       components: {
           Layout: {
@@ -3028,16 +3039,26 @@ function App() {
           },
           Tabs: {
               cardBg: 'transparent',
-              itemActiveColor: darkMode ? '#ffd666' : '#1890ff',
-              itemHoverColor: darkMode ? '#ffe58f' : '#40a9ff',
-              itemSelectedColor: darkMode ? '#ffd666' : '#1677ff',
-              inkBarColor: darkMode ? '#ffd666' : '#1677ff',
+              itemActiveColor: isV2Ui ? v2AntPrimaryHoverColor : (darkMode ? '#ffd666' : '#1890ff'),
+              itemHoverColor: isV2Ui ? v2AntPrimaryHoverColor : (darkMode ? '#ffe58f' : '#40a9ff'),
+              itemSelectedColor: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'),
+              inkBarColor: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'),
           }
       }
   }), [
       darkMode,
       effectiveOpacity,
       isV2Ui,
+      v2AntControlActiveBg,
+      v2AntControlActiveHoverBg,
+      v2AntControlOutline,
+      v2AntPrimaryActiveColor,
+      v2AntPrimaryBgColor,
+      v2AntPrimaryBgHoverColor,
+      v2AntPrimaryBorderColor,
+      v2AntPrimaryBorderHoverColor,
+      v2AntPrimaryColor,
+      v2AntPrimaryHoverColor,
       tokenControlHeight,
       tokenControlHeightLG,
       tokenControlHeightSM,
@@ -3962,7 +3983,7 @@ function App() {
                                 borderRadius: 8,
                                 border: 'none',
                                 background: active
-                                  ? (darkMode ? 'rgba(255,214,102,0.10)' : 'rgba(24,144,255,0.08)')
+                                  ? overlayTheme.selectedBg
                                   : 'transparent',
                                 color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
                                 cursor: 'pointer',
@@ -3978,7 +3999,7 @@ function App() {
                                   width: 3,
                                   borderRadius: 999,
                                   background: active
-                                    ? (darkMode ? '#ffd666' : '#1677ff')
+                                    ? overlayTheme.selectedText
                                     : 'transparent',
                                 }}
                               />
@@ -3994,10 +4015,10 @@ function App() {
                                       fontSize: 15,
                                       flexShrink: 0,
                                       background: active
-                                        ? (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.12)')
+                                        ? overlayTheme.iconBg
                                         : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.05)'),
                                       color: active
-                                        ? (darkMode ? '#ffe58f' : '#1677ff')
+                                        ? overlayTheme.iconColor
                                         : overlayTheme.mutedText,
                                     }}
                                   >
@@ -4026,7 +4047,7 @@ function App() {
                                     alignItems: 'center',
                                     justifyContent: 'center',
                                     background: active
-                                      ? (darkMode ? 'rgba(255,255,255,0.14)' : 'rgba(24,144,255,0.14)')
+                                      ? overlayTheme.selectedBg
                                       : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)'),
                                     color: active ? (darkMode ? '#f8fafc' : '#0f172a') : overlayTheme.mutedText,
                                     fontSize: 10,
@@ -4045,7 +4066,7 @@ function App() {
                     <div style={toolCenterContentPanelStyle}>
                       {activeToolCenterPane ? (
                         <div style={toolCenterDetailPanelStyle}>
-                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, paddingBottom: 10, borderBottom: `1px solid ${overlayTheme.divider}` }}>
+                          <div style={{ paddingBottom: 10, borderBottom: `1px solid ${overlayTheme.divider}` }}>
                             <div style={{ minWidth: 0 }}>
                               <div style={{ fontSize: 16, fontWeight: 700, color: overlayTheme.titleText }}>
                                 {activeToolCenterPaneItem?.title ?? activeToolCenterGroup.title}
@@ -4054,9 +4075,6 @@ function App() {
                                 {activeToolCenterPaneItem?.description ?? activeToolCenterGroup.description}
                               </div>
                             </div>
-                            <Button onClick={closeToolCenterPane}>
-                              {t('common.back_to_previous')}
-                            </Button>
                           </div>
                           <div style={toolCenterDetailBodyStyle}>
                             {renderToolCenterPane()}
@@ -4505,10 +4523,14 @@ function App() {
                                           padding: '12px 12px',
                                           borderRadius: 12,
                                           border: `1px solid ${active
-                                              ? (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)')
+                                              ? (isV2Ui
+                                                  ? v2AntPrimaryBorderColor
+                                                  : (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)'))
                                               : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
                                           background: active
-                                              ? (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)')
+                                              ? (isV2Ui
+                                                  ? `linear-gradient(180deg, ${v2AntPrimaryBgHoverColor} 0%, ${v2AntPrimaryBgColor} 100%)`
+                                                  : (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)'))
                                               : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
                                           color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
                                           cursor: 'pointer',
@@ -4657,10 +4679,14 @@ function App() {
                                                       padding: '14px 14px',
                                                       borderRadius: 14,
                                                       border: `1px solid ${active
-                                                          ? (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)')
+                                                          ? (isV2Ui
+                                                              ? v2AntPrimaryBorderColor
+                                                              : (darkMode ? 'rgba(255,214,102,0.3)' : 'rgba(24,144,255,0.24)'))
                                                           : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
                                                       background: active
-                                                          ? (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)')
+                                                          ? (isV2Ui
+                                                              ? `linear-gradient(180deg, ${v2AntPrimaryBgHoverColor} 0%, ${v2AntPrimaryBgColor} 100%)`
+                                                              : (darkMode ? 'linear-gradient(180deg, rgba(255,214,102,0.12) 0%, rgba(255,214,102,0.06) 100%)' : 'linear-gradient(180deg, rgba(24,144,255,0.10) 0%, rgba(24,144,255,0.05) 100%)'))
                                                           : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.72)'),
                                                       color: active ? (darkMode ? '#f5f7ff' : '#162033') : (darkMode ? 'rgba(255,255,255,0.82)' : '#3f4b5e'),
                                                       cursor: 'pointer',
@@ -4668,7 +4694,7 @@ function App() {
                                               >
                                                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                                                       <span style={{ fontSize: 14, fontWeight: 700 }}>{item.label}</span>
-                                                      {active ? <CheckOutlined style={{ color: darkMode ? '#ffd666' : '#1677ff' }} /> : null}
+                                                      {active ? <CheckOutlined style={{ color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff') }} /> : null}
                                                   </div>
                                                   <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: active ? (darkMode ? 'rgba(255,255,255,0.68)' : 'rgba(22,32,51,0.68)') : utilityMutedTextStyle.color }}>
                                                       {item.description}
@@ -4896,13 +4922,19 @@ function App() {
                                                       padding: '9px 10px',
                                                       borderRadius: 10,
                                                       border: `1px solid ${isFocused
-                                                          ? (darkMode ? 'rgba(255,214,102,0.54)' : 'rgba(24,144,255,0.54)')
+                                                          ? (isV2Ui
+                                                              ? v2AntPrimaryBorderHoverColor
+                                                              : (darkMode ? 'rgba(255,214,102,0.54)' : 'rgba(24,144,255,0.54)'))
                                                           : (darkMode ? 'rgba(255,255,255,0.08)' : 'rgba(16,24,40,0.08)')}`,
                                                       boxShadow: isFocused
-                                                          ? (darkMode ? '0 0 0 2px rgba(255,214,102,0.14)' : '0 0 0 2px rgba(24,144,255,0.12)')
+                                                          ? (isV2Ui
+                                                              ? `0 0 0 2px ${v2AntControlActiveBg}`
+                                                              : (darkMode ? '0 0 0 2px rgba(255,214,102,0.14)' : '0 0 0 2px rgba(24,144,255,0.12)'))
                                                           : 'none',
                                                       background: isFocused
-                                                          ? (darkMode ? 'linear-gradient(90deg, rgba(255,214,102,0.12) 0%, rgba(255,255,255,0.045) 100%)' : 'linear-gradient(90deg, rgba(24,144,255,0.10) 0%, rgba(255,255,255,0.78) 100%)')
+                                                          ? (isV2Ui
+                                                              ? `linear-gradient(90deg, ${v2AntPrimaryBgHoverColor} 0%, rgba(255,255,255,0.045) 100%)`
+                                                              : (darkMode ? 'linear-gradient(90deg, rgba(255,214,102,0.12) 0%, rgba(255,255,255,0.045) 100%)' : 'linear-gradient(90deg, rgba(24,144,255,0.10) 0%, rgba(255,255,255,0.78) 100%)'))
                                                           : checked
                                                           ? (darkMode ? 'rgba(255,255,255,0.045)' : 'rgba(255,255,255,0.62)')
                                                           : (darkMode ? 'rgba(255,255,255,0.02)' : 'rgba(16,24,40,0.025)'),
@@ -4923,10 +4955,10 @@ function App() {
                                                           fontSize: 11,
                                                           fontWeight: 800,
                                                           background: isFocused
-                                                              ? (darkMode ? 'rgba(255,214,102,0.22)' : 'rgba(24,144,255,0.14)')
+                                                              ? (isV2Ui ? v2AntPrimaryBgHoverColor : (darkMode ? 'rgba(255,214,102,0.22)' : 'rgba(24,144,255,0.14)'))
                                                               : (darkMode ? 'rgba(255,255,255,0.06)' : 'rgba(16,24,40,0.05)'),
                                                           color: isFocused
-                                                              ? (darkMode ? '#ffd666' : '#1677ff')
+                                                              ? (isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'))
                                                               : (darkMode ? 'rgba(255,255,255,0.56)' : 'rgba(16,24,40,0.5)'),
                                                       }}>
                                                           {checked && indexInRow >= 0 ? indexInRow + 1 : '-'}
@@ -4946,8 +4978,8 @@ function App() {
                                                                       lineHeight: '16px',
                                                                       padding: '0 6px',
                                                                       borderRadius: 999,
-                                                                      background: darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)',
-                                                                      color: darkMode ? '#ffd666' : '#1677ff',
+                                                                      background: isV2Ui ? v2AntPrimaryBgColor : (darkMode ? 'rgba(255,214,102,0.16)' : 'rgba(24,144,255,0.10)'),
+                                                                      color: isV2Ui ? v2AntPrimaryColor : (darkMode ? '#ffd666' : '#1677ff'),
                                                                   }}>
                                                                       {t('app.theme.tab_display.badge.current')}
                                                                   </span>

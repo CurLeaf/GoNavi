@@ -1,15 +1,5 @@
 import { resolveTextInputSafeBackdropFilter } from './appearance';
 
-/**
- * 是否处于 v2 界面版本。
- * 读取 body[data-ui-version]，由 App.tsx 在切换时设置。
- * 在 SSR / 测试环境（无 document）时安全 fallback 为 false。
- */
-const isV2 = (): boolean => {
-  if (typeof document === 'undefined' || !document.body) return false;
-  return document.body.getAttribute('data-ui-version') === 'v2';
-};
-
 type OverlayWorkbenchTheme = {
   isDark: boolean;
   shellBg: string;
@@ -30,15 +20,19 @@ type OverlayWorkbenchTheme = {
 
 export const buildOverlayWorkbenchTheme = (
   darkMode: boolean,
-  options?: { disableBackdropFilter?: boolean },
+  options?: {
+    disableBackdropFilter?: boolean;
+    uiVersion?: 'legacy' | 'v2';
+  },
 ): OverlayWorkbenchTheme => {
   const shellBackdropFilter = resolveTextInputSafeBackdropFilter(
     darkMode ? 'blur(18px)' : 'none',
     options?.disableBackdropFilter ?? false,
   );
+  const uiVersion = options?.uiVersion ?? 'legacy';
 
   // ─── v2 palette ──────────────────────────────────────────────
-  if (isV2()) {
+  if (uiVersion === 'v2') {
     if (darkMode) {
       return {
         isDark: true,
