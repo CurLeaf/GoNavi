@@ -2013,6 +2013,47 @@ describe("i18n catalog", () => {
     assertSourceDoesNotInlineCatalogValues(aiActionsSource, actionLabelKeys);
   });
 
+  it("keeps QueryEditor SQL snippet picker copy in catalogs instead of source literals", () => {
+    const snippetPickerKeys = [
+      "query_editor.action.insert_sql_snippet",
+      "query_editor.snippet_picker.title",
+      "query_editor.snippet_picker.description",
+      "query_editor.snippet_picker.search_placeholder",
+      "query_editor.snippet_picker.empty",
+      "query_editor.snippet_picker.empty_filtered",
+      "query_editor.snippet_picker.manage",
+      "snippet_settings.tag.builtin",
+    ] as const;
+    const snippetPickerLiteralGuardKeys = [
+      "query_editor.action.insert_sql_snippet",
+      "query_editor.snippet_picker.title",
+      "query_editor.snippet_picker.description",
+      "query_editor.snippet_picker.search_placeholder",
+      "query_editor.snippet_picker.empty",
+      "query_editor.snippet_picker.empty_filtered",
+      "query_editor.snippet_picker.manage",
+    ] as const;
+    const source = readQueryEditorSource();
+
+    for (const language of SUPPORTED_LANGUAGES) {
+      for (const key of snippetPickerKeys) {
+        expect(catalogs[language]).toHaveProperty(key);
+        expect(catalogs[language][key]).toBeTruthy();
+      }
+    }
+
+    for (const key of snippetPickerKeys) {
+      expect(source).toContain(key);
+    }
+
+    expect(source).not.toContain("插入 SQL 片段");
+    expect(source).not.toContain("选择一个已有 SQL 片段并插入到当前光标位置。");
+    expect(source).not.toContain("搜索前缀、名称或内容");
+    expect(source).not.toContain("未找到匹配的 SQL 片段。");
+
+    assertSourceDoesNotInlineCatalogValues(source, snippetPickerLiteralGuardKeys);
+  });
+
   it("keeps QueryEditor AI prompt context in catalogs instead of source literals", () => {
     const aiContextKeys = [
       "query_editor.ai_prompt.default_source",
@@ -2188,6 +2229,7 @@ describe("i18n catalog", () => {
   it("keeps QueryEditor Monaco action labels in catalogs instead of source literals", () => {
     const actionLabelKeys = [
       "app.shortcuts.action.duplicateCurrentLine.label",
+      "query_editor.action.insert_sql_snippet",
       "app.shortcuts.action.runQuery.label",
       "app.shortcuts.action.selectCurrentStatement.label",
       "app.shortcuts.action.saveQuery.label",
@@ -2199,6 +2241,11 @@ describe("i18n catalog", () => {
         source,
         "      objectHoverActionRef.current = editor.addAction({",
         "      editor.onDidChangeCursorPosition?.((event: any) => {",
+      ),
+      sliceBetween(
+        source,
+        "  useEffect(() => {\n      if (insertSqlSnippetActionRef.current) {",
+        "  useEffect(() => {\n      if (runQueryActionRef.current) {",
       ),
       sliceBetween(
         source,

@@ -18,6 +18,8 @@ import QueryEditor, {
   resolveQueryEditorNavigationTarget,
 } from './QueryEditor';
 
+const queryEditorSource = readFileSync(new URL('./QueryEditor.tsx', import.meta.url), 'utf8');
+
 const storeState = vi.hoisted(() => ({
   connections: [
     {
@@ -163,6 +165,23 @@ const autoFetchState = vi.hoisted(() => ({
   visible: false,
 }));
 
+const monacoEditorMockState = vi.hoisted(() => ({
+  deferOnMount: false,
+}));
+
+const defaultEditorContributionResolver = (state: {
+  contentHoverCalls: any[];
+}) => (id: string) => {
+  if (id === 'editor.contrib.contentHover') {
+    return {
+      showContentHover: vi.fn((range: any, mode: any, source: any, focus: any) => {
+        state.contentHoverCalls.push({ range, mode, source, focus });
+      }),
+    };
+  }
+  return null;
+};
+
 const editorState = vi.hoisted(() => {
   const state = {
     value: '',
@@ -243,16 +262,7 @@ const editorState = vi.hoisted(() => {
     }),
     getSelection: vi.fn(() => state.selection),
     getDomNode: vi.fn(() => state.domNode),
-    getContribution: vi.fn((id: string) => {
-      if (id === 'editor.contrib.contentHover') {
-        return {
-          showContentHover: vi.fn((range: any, mode: any, source: any, focus: any) => {
-            state.contentHoverCalls.push({ range, mode, source, focus });
-          }),
-        };
-      }
-      return null;
-    }),
+    getContribution: vi.fn(),
     setSelection: vi.fn((selection: any) => {
       state.selection = selection;
     }),
@@ -335,7 +345,7 @@ vi.mock('@monaco-editor/react', () => ({
     React.useEffect(() => {
       editorState.value = String(defaultValue || '');
       editorState.latestOnChange = onChange;
-      onMount?.(editorState.editor, {
+      const mountEditor = () => onMount?.(editorState.editor, {
         editor: { setTheme: vi.fn() },
         KeyMod: { CtrlCmd: 2048, WinCtrl: 256, Alt: 512, Shift: 1024 },
         KeyCode: { KeyD: 68, KeyE: 69, KeyF: 70, KeyM: 77, KeyQ: 81, KeyS: 83 },
@@ -378,6 +388,11 @@ vi.mock('@monaco-editor/react', () => ({
           }
         },
       });
+      if (monacoEditorMockState.deferOnMount) {
+        const timer = setTimeout(mountEditor, 0);
+        return () => clearTimeout(timer);
+      }
+      mountEditor();
     }, []);
     return <textarea data-editor value={editorState.value} readOnly />;
   },
@@ -781,6 +796,7 @@ describe('QueryEditor external SQL save', () => {
     backendApp.GenerateQueryID.mockResolvedValue('query-1');
     storeState.connections = createDefaultConnections();
     storeState.sqlLogs = [];
+    storeState.sqlSnippets = [];
     storeState.clearSqlLogs.mockReset();
     storeState.connections[0].config.type = 'mysql';
     storeState.connections[0].config.database = 'main';
@@ -813,15 +829,18 @@ describe('QueryEditor external SQL save', () => {
     editorState.editor.updateOptions.mockClear();
     editorState.editor.pushUndoStop.mockClear();
     editorState.editor.addAction.mockClear();
-    editorState.editor.getContribution.mockClear();
+    editorState.editor.getContribution.mockReset();
+    editorState.editor.getContribution.mockImplementation(defaultEditorContributionResolver(editorState));
     storeState.updateQueryTabDraft.mockReset();
     storeSubscribers.clear();
     editorState.editor.layout.mockClear();
+    editorState.editor.trigger.mockClear();
     clearQueryTabDraft('tab-1');
     clearQueryTabDraft('tab-2');
     clearSQLFileTabDraft('tab-1');
     clearSQLFileTabDraft('tab-2');
     setGlobalImeCompositionActive(false);
+    monacoEditorMockState.deferOnMount = false;
   });
 
   afterEach(() => {
@@ -3016,6 +3035,9 @@ describe('QueryEditor external SQL save', () => {
     expect(findEditorAction('gonavi.runQuery')).toMatchObject({
       label: 'GoNavi: Run SQL',
     });
+    expect(findEditorAction('gonavi.insertSqlSnippet')).toMatchObject({
+      label: 'Insert SQL Snippet',
+    });
     expect(findEditorAction('gonavi.selectCurrentStatement')).toMatchObject({
       label: 'GoNavi: Select Current Line and Copy',
     });
@@ -3045,6 +3067,9 @@ describe('QueryEditor external SQL save', () => {
     expect(findEditorAction('gonavi.runQuery')).toMatchObject({
       label: 'GoNavi: 执行 SQL',
     });
+    expect(findEditorAction('gonavi.insertSqlSnippet')).toMatchObject({
+      label: '插入 SQL 片段',
+    });
     expect(findEditorAction('gonavi.selectCurrentStatement')).toMatchObject({
       label: 'GoNavi: 选择当前行并复制',
     });
@@ -3063,6 +3088,7 @@ describe('QueryEditor external SQL save', () => {
 
     expect(findEditorActionLabels('gonavi.queryEditor.showObjectInfo')).toContain('GoNavi: Show Object Info');
     expect(findEditorActionLabels('gonavi.runQuery')).toContain('GoNavi: Run SQL');
+    expect(findEditorActionLabels('gonavi.insertSqlSnippet')).toContain('Insert SQL Snippet');
     expect(findEditorActionLabels('gonavi.selectCurrentStatement')).toContain('GoNavi: Select Current Line and Copy');
     expect(findEditorActionLabels('gonavi.duplicateCurrentLine')).toContain('GoNavi: Duplicate Current Line Below');
     expect(findEditorActionLabels('gonavi.saveQuery')).toContain('GoNavi: Save Query');
@@ -3072,6 +3098,9 @@ describe('QueryEditor external SQL save', () => {
     expect(findEditorAction('gonavi.runQuery')).toMatchObject({
       label: 'GoNavi: Run SQL',
     });
+    expect(findEditorAction('gonavi.insertSqlSnippet')).toMatchObject({
+      label: 'Insert SQL Snippet',
+    });
     expect(findEditorAction('gonavi.selectCurrentStatement')).toMatchObject({
       label: 'GoNavi: Select Current Line and Copy',
     });
@@ -3080,6 +3109,19 @@ describe('QueryEditor external SQL save', () => {
     });
     expect(findEditorAction('gonavi.saveQuery')).toMatchObject({
       label: 'GoNavi: Save Query',
+    });
+  });
+
+  it('registers the SQL snippet context-menu action even when Monaco onMount is deferred', async () => {
+    monacoEditorMockState.deferOnMount = true;
+
+    await act(async () => {
+      create(<QueryEditor tab={createTab()} />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(findEditorAction('gonavi.insertSqlSnippet')).toMatchObject({
+      label: '插入 SQL 片段',
     });
   });
 
@@ -3560,6 +3602,106 @@ describe('QueryEditor external SQL save', () => {
     expect(findEditorActionLabels('ai.generateSQL')).not.toContain('🤖 AI 生成 SQL');
     expect(findEditorActionLabels('ai.explainSQL')).not.toContain('🤖 AI 解释 SQL');
     expect(findEditorActionLabels('ai.optimizeSQL')).not.toContain('🤖 AI 优化 SQL');
+  });
+
+  it('opens the SQL snippet picker from the context menu action and inserts the selected snippet', async () => {
+    storeState.appearance.newQuerySqlTemplate = '';
+    storeState.sqlSnippets = [
+      {
+        id: 'snippet-select-user',
+        prefix: 'selu',
+        name: 'Select User',
+        description: 'Select rows from the user table',
+        body: 'SELECT ${1:id} FROM ${2:user_table}$0;',
+        isBuiltin: false,
+        createdAt: 1,
+      },
+    ];
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    await act(async () => {
+      await findEditorAction('gonavi.insertSqlSnippet').run();
+    });
+
+    expect(renderer.root.findByProps({ 'data-query-editor-snippet-picker': 'true' })).toBeTruthy();
+
+    await act(async () => {
+      renderer.root.findByProps({
+        'data-query-editor-snippet-item': 'snippet-select-user',
+      }).props.onClick();
+    });
+
+    expect(editorState.editor.executeEdits).toHaveBeenCalledWith(
+      'gonavi-insert-sql-snippet',
+      [expect.objectContaining({
+        text: 'SELECT id FROM user_table;',
+      })],
+    );
+    expect(editorState.value).toBe('SELECT id FROM user_table;');
+    expect(renderer.root.findByProps({ 'data-query-editor-snippet-picker': 'true' })).toBeTruthy();
+  });
+
+  it('prefers Monaco snippet controller insertion when the controller is available', async () => {
+    storeState.appearance.newQuerySqlTemplate = '';
+    storeState.sqlSnippets = [
+      {
+        id: 'snippet-alter-table',
+        prefix: 'alt',
+        name: 'ALTER TABLE',
+        description: 'ALTER TABLE add column template',
+        body: 'ALTER TABLE ${1:table_name}\\nADD COLUMN ${2:column_name} VARCHAR(255);$0',
+        isBuiltin: true,
+        createdAt: 1,
+      },
+    ];
+
+    const snippetController = {
+      insert: vi.fn((body: string) => {
+        expect(body).toBe('ALTER TABLE ${1:table_name}\\nADD COLUMN ${2:column_name} VARCHAR(255);$0');
+        editorState.value = 'ALTER TABLE demo_table\nADD COLUMN user_name VARCHAR(255);';
+      }),
+    };
+    editorState.editor.getContribution.mockImplementation((id: string) => {
+      if (id === 'snippetController2') {
+        return snippetController;
+      }
+      return defaultEditorContributionResolver(editorState)(id);
+    });
+
+    let renderer!: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<QueryEditor tab={createTab({ query: '' })} />);
+    });
+
+    await act(async () => {
+      await findEditorAction('gonavi.insertSqlSnippet').run();
+    });
+
+    await act(async () => {
+      renderer.root.findByProps({
+        'data-query-editor-snippet-item': 'snippet-alter-table',
+      }).props.onClick();
+    });
+
+    expect(snippetController.insert).toHaveBeenCalledTimes(1);
+    expect(editorState.editor.trigger).not.toHaveBeenCalledWith(
+      'gonavi.insertSqlSnippet',
+      'editor.action.insertSnippet',
+      expect.anything(),
+    );
+    expect(editorState.editor.executeEdits).not.toHaveBeenCalled();
+    expect(editorState.value).toBe('ALTER TABLE demo_table\nADD COLUMN user_name VARCHAR(255);');
+    expect(renderer.root.findByProps({ 'data-query-editor-snippet-picker': 'true' })).toBeTruthy();
+  });
+
+  it('keeps the SQL snippet picker modal non-mask-closable to avoid immediate close after context-menu click', () => {
+    expect(queryEditorSource).toMatch(
+      /title=\{translate\('query_editor\.snippet_picker\.title'\)\}[\s\S]*?mask=\{false\}[\s\S]*?maskClosable=\{false\}/,
+    );
   });
 
   it('builds localized AI context prefix for QueryEditor prompt injection', async () => {
