@@ -3642,7 +3642,7 @@ describe('QueryEditor external SQL save', () => {
       })],
     );
     expect(editorState.value).toBe('SELECT id FROM user_table;');
-    expect(renderer.root.findByProps({ 'data-query-editor-snippet-picker': 'true' })).toBeTruthy();
+    expect(renderer.root.findAllByProps({ 'data-query-editor-snippet-picker': 'true' })).toHaveLength(0);
   });
 
   it('prefers Monaco snippet controller insertion when the controller is available', async () => {
@@ -3695,7 +3695,7 @@ describe('QueryEditor external SQL save', () => {
     );
     expect(editorState.editor.executeEdits).not.toHaveBeenCalled();
     expect(editorState.value).toBe('ALTER TABLE demo_table\nADD COLUMN user_name VARCHAR(255);');
-    expect(renderer.root.findByProps({ 'data-query-editor-snippet-picker': 'true' })).toBeTruthy();
+    expect(renderer.root.findAllByProps({ 'data-query-editor-snippet-picker': 'true' })).toHaveLength(0);
   });
 
   it('keeps the SQL snippet picker modal non-mask-closable to avoid immediate close after context-menu click', () => {
@@ -8890,6 +8890,24 @@ describe('QueryEditor external SQL save', () => {
     expect(css).toContain('padding-top: 24px;');
     expect(css).toContain('overflow: visible;');
     expect(css).not.toContain('body[data-ui-version="v2"] .gn-v2-query-monaco-stage .monaco-editor .find-widget {');
+  });
+
+  it('raises QueryEditor suggest docs height for SQL snippet completion without widening global Monaco defaults', () => {
+    const appCss = readFileSync(new URL('../App.css', import.meta.url), 'utf8');
+
+    expect(queryEditorSource).toContain('QUERY_EDITOR_SQL_SNIPPET_SUGGEST_DETAIL_MIN_HEIGHT = 260');
+    expect(queryEditorSource).toContain("editor.getContribution?.('editor.contrib.suggestController')");
+    expect(queryEditorSource).toContain('const originalSuggestDetailsLayout = suggestDetailsWidget.layout.bind(suggestDetailsWidget);');
+    expect(queryEditorSource).toContain('suggestDetailsWidget.layout = (width: number, height: number) => {');
+    expect(queryEditorSource).toContain('Math.max(height, QUERY_EDITOR_SQL_SNIPPET_SUGGEST_DETAIL_MIN_HEIGHT)');
+    expect(queryEditorSource).toContain("className={isV2Ui ? 'gn-v2-query-monaco-stage gn-query-monaco-stage' : 'gn-query-monaco-stage'}");
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-details-container {');
+    expect(appCss).toContain('min-height: 260px;');
+    expect(appCss).toContain('.gn-query-monaco-stage .monaco-editor .suggest-details {');
+    expect(appCss).toContain('min-height: 260px;');
+    expect(appCss).not.toContain('.gn-query-monaco-stage .monaco-editor .suggest-widget {');
+    expect(appCss).not.toContain('width: 680px;');
+    expect(appCss).not.toContain('min-width: 560px;');
   });
 
   it('keeps the v2 query editor toolbar grouped and compact', () => {

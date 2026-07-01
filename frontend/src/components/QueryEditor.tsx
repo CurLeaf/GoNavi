@@ -742,6 +742,7 @@ const clearRecord = (record: Record<string, unknown>) => {
         delete record[key];
     });
 };
+const QUERY_EDITOR_SQL_SNIPPET_SUGGEST_DETAIL_MIN_HEIGHT = 260;
 
 const buildSqlSnippetVariableMap = (now: Date): Record<string, string> => {
     const pad = (value: number) => String(value).padStart(2, '0');
@@ -1197,6 +1198,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
           if (typeof nextValue === 'string') {
               applyQueryState(nextValue);
           }
+          handleCloseSqlSnippetPicker();
           editor.focus?.();
           return;
       }
@@ -1246,8 +1248,9 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       if (typeof nextValue === 'string') {
           applyQueryState(nextValue);
       }
+      handleCloseSqlSnippetPicker();
       editor.focus?.();
-  }, [applyQueryState]);
+  }, [applyQueryState, handleCloseSqlSnippetPicker]);
 
   useEffect(() => {
       persistQueryTabDraftSnapshot(draftSnapshotTab, query, {
@@ -2600,6 +2603,17 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
   const handleEditorDidMount: OnMount = (editor, monaco) => {
       editorRef.current = editor;
       monacoRef.current = monaco;
+
+      const suggestController = editor.getContribution?.('editor.contrib.suggestController') as {
+          widget?: { value?: { _details?: { widget?: { layout?: (width: number, height: number) => void } } } };
+      } | null;
+      const suggestDetailsWidget = suggestController?.widget?.value?._details?.widget;
+      if (suggestDetailsWidget?.layout) {
+          const originalSuggestDetailsLayout = suggestDetailsWidget.layout.bind(suggestDetailsWidget);
+          suggestDetailsWidget.layout = (width: number, height: number) => {
+              originalSuggestDetailsLayout(width, Math.max(height, QUERY_EDITOR_SQL_SNIPPET_SUGGEST_DETAIL_MIN_HEIGHT));
+          };
+      }
       lastEditorCursorPositionRef.current = normalizeEditorPosition(editor.getPosition?.());
 
       editor.updateOptions?.({
@@ -3415,6 +3429,8 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   ? fullText.slice(currentStatementRange.start, cursorOffset)
                   : fullText.slice(0, cursorOffset);
               const completionScopeText = currentStatementPrefix || linePrefix;
+              const currentStatementText = currentStatementRange?.text || '';
+              const completionReferenceText = currentStatementText || completionScopeText;
 
               // 0) 三段式 db.table.column 格式：当输入 db.table. 时提示列
               const threePartMatch = linePrefix.match(QUERY_EDITOR_SQL_THREE_PART_COMPLETION_REGEX);
@@ -3552,7 +3568,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
                   }
 
                   // 否则检查是否是表别名或表名，提示列
-                  const aliasMap = buildQueryEditorAliasMap(completionScopeText, sharedCurrentDb || '');
+                  const aliasMap = buildQueryEditorAliasMap(completionReferenceText, sharedCurrentDb || '');
 
                   const tableInfo = aliasMap[qualifier.toLowerCase()];
                   if (tableInfo) {
@@ -3586,7 +3602,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
               tableRegex.lastIndex = 0;
               const foundTables = new Set<string>();
               let match;
-              while ((match = tableRegex.exec(completionScopeText)) !== null) {
+              while ((match = tableRegex.exec(completionReferenceText)) !== null) {
                   const t = normalizeQualifiedName(match[1] || '');
                   if (!t) continue;
                   // 存储完整标识 db.table 或 table
@@ -3685,7 +3701,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
 
               const referencedColumns: CompletionColumnMeta[] = [];
               if (!expectsTableName) {
-                  const aliasMapForReferencedTables = buildQueryEditorAliasMap(completionScopeText, currentDatabase);
+                  const aliasMapForReferencedTables = buildQueryEditorAliasMap(completionReferenceText, currentDatabase);
                   const seenReferencedTables = new Set<string>();
                   for (const tableInfo of Object.values(aliasMapForReferencedTables)) {
                       const key = `${String(tableInfo.dbName || '').toLowerCase()}.${String(tableInfo.tableName || '').toLowerCase()}`;
@@ -6223,7 +6239,7 @@ const QueryEditor: React.FC<{ tab: TabData; isActive?: boolean }> = ({ tab, isAc
       
       <div
         ref={editorStageRef}
-        className={isV2Ui ? 'gn-v2-query-monaco-stage' : undefined}
+        className={isV2Ui ? 'gn-v2-query-monaco-stage gn-query-monaco-stage' : 'gn-query-monaco-stage'}
         style={resolvedQueryEditorStageStyle}
       >
         <div

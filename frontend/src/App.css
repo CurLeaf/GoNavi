@@ -239,6 +239,14 @@ body[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
     background-clip: content-box;
 }
 
+.gn-query-monaco-stage .monaco-editor .suggest-details-container {
+    min-height: 260px;
+}
+
+.gn-query-monaco-stage .monaco-editor .suggest-details {
+    min-height: 260px;
+}
+
 /* Ensure body background matches theme to avoid white flashes, but kept transparent for window composition */
 body {
     transition: color 0.3s;
